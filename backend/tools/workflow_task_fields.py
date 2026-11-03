@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from core.size_rating import SIZE_MEANING, SIZE_SCALE_DESCRIPTION
 from core.skill_sidecar import SIDECAR_FILE
 from core.skill_validation import declares_sidecar, instruction_section, parse_frontmatter
 from core.skills_registry import resolve_effective_skills
@@ -16,6 +17,13 @@ from infra.guidance_git import GitFault, file_version, workspace_repository
 from infra.guidance_history_paths import LOCAL_EDIT_MARK
 from infra.system_package import system_package_dir
 from plans.public import PlanInputError
+
+
+#: Why a workflow run can't be added without one size.
+RUN_SIZE_REQUIRED = (
+    "size is required to start a workflow run: pass one size for the whole run; "
+    f"use unknown when you cannot tell. {SIZE_MEANING} {SIZE_SCALE_DESCRIPTION}."
+)
 
 
 @dataclass(frozen=True)
@@ -111,6 +119,9 @@ def _run(name: str, workflows: dict[str, Workflow], trail: tuple[str, ...]) -> t
             "after": [value.strip() for value in step.get("after") or () if isinstance(value, str)],
             "difficulty": difficulty.get("default") if isinstance(difficulty, dict) else None,
         }
+        hard_if = difficulty.get("hard_if") if isinstance(difficulty, dict) else None
+        if isinstance(hard_if, str) and hard_if.strip():
+            built["hard_if"] = hard_if.strip()
         heading = step.get("instruction")
         if isinstance(heading, str):
             if body is None:
@@ -175,7 +186,11 @@ def creation_run(params: dict[str, Any], workflows: dict[str, Workflow]) -> tupl
 
     reference = params.get("workflow_ref")
     workflow = workflows.get(reference.strip()) if isinstance(reference, str) else None
-    return () if workflow is None else workflow.run
+    if workflow is None or not workflow.run:
+        return ()
+    if params.get("size") is None:
+        raise PlanInputError(RUN_SIZE_REQUIRED)
+    return workflow.run
 
 
 def append_add_notice(result: dict, db, workflows: dict[str, Workflow]) -> None:

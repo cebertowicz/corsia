@@ -62,9 +62,11 @@ def after_close(
     reconciliation, so the task the caller chose is offered its executor's slot
     ahead of any already-active task reconciliation would select.
     """
-    from plans import admission, close_next
+    from plans import admission, close_next, run_end
 
     db = common["db"]
+    if reason == "failed":
+        run_end.fail_run(node_id, common, executor=executor)
     closed = service._node_row(db, node_id)
     slot = close_next.slot_before(db, closed)
     admission.release(node_id, reason, db=db)
@@ -86,6 +88,8 @@ def after_close(
     )
     result = admission.result(node_id, db=db)
     result.update(close_next.next_fields(db, closed, slot, named, acting=executor))
+    if (ended := run_end.summary(db, node_id)) is not None:
+        result["run_summary"] = ended
     return result
 
 
