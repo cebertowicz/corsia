@@ -81,8 +81,6 @@ class _Handoff:
         self.result.set_exception(AppLoopUnavailable(reason))
 
     def start(self) -> None:
-        from ws.ingress import track_background_task
-
         with _LOCK:
             if self.result.done():
                 return
@@ -90,8 +88,9 @@ class _Handoff:
                 self.refuse("application event loop changed before starting")
                 return
             self.task = self.loop.create_task(self.coroutine)
+            # No detached-work observer: ``completed`` hands the task's exception to the awaiting caller,
+            # which reports it, and ``_AWAITED`` keeps the task alive until then.
             self.task.add_done_callback(self.completed)
-            track_background_task(self.task)
 
     def completed(self, task) -> None:
         with _LOCK:

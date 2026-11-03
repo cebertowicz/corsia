@@ -4,6 +4,7 @@ import inspect
 import threading
 
 import pytest
+from loguru import logger
 
 from infra import app_loop
 from infra.db_async import run_in_db
@@ -186,3 +187,22 @@ async def test_same_loop_result_uses_same_joined_contract():
     assert await app_loop.await_on_owner(work(), owner=loop) is loop
     assert app_loop.awaited_count() == 0
     app_loop.clear()
+
+
+@pytest.mark.asyncio
+async def test_failure_reaches_only_the_awaiting_caller_not_the_detached_work_log(owner):
+    """The caller gets the exception; the detached-work observer must not log it a second time at ERROR."""
+    logged: list[str] = []
+    sink = logger.add(lambda message: logged.append(str(message)), level="ERROR")
+
+    async def refuse():
+        raise ValueError("refused for the caller")
+
+    try:
+        with pytest.raises(ValueError, match="refused for the caller"):
+            await app_loop.await_on_owner(refuse(), owner=owner)
+        # Let the owner loop run the task's done callbacks.
+        await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(asyncio.sleep(0), owner))
+    finally:
+        logger.remove(sink)
+    assert logged == []
