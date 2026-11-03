@@ -29,6 +29,7 @@ import sqlite3
 from typing import Literal, get_args
 
 from infra import presence
+from infra.chat_comment_answers import strip_answer_tags
 from infra.thread_update_asks import ask_sql, asks_user_sql
 from infra.presence_time import iso, parse, seen_boundary
 from infra.person_step_state import person_step_state
@@ -192,7 +193,7 @@ def _first_readable_line(content: object) -> str | None:
 def _summary(update: dict, message_content: object) -> str | None:
     """A stored event's sidebar preview; lifecycle text comes only from its snapshot."""
     if update["kind"] == "marked":
-        return _first_readable_line(message_content)
+        return _first_readable_line(strip_answer_tags(message_content))
     title = update["title"]
     if not title:
         return None
