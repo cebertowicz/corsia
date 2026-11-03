@@ -136,9 +136,31 @@ async def test_an_event_is_saved_in_full_before_it_is_deleted(tool, workspace, m
     use(monkeypatch, FakeGws(recorded("calendar_event_delete"), real))
     result = await tool.execute(args=["calendar", "events", "delete"], params={"calendarId": "primary", "eventId": "EV1"})
     [saved] = seen["saved_before_delete"]
-    assert saved.read_text(encoding="utf-8") == event
+    assert json.loads(saved.read_text(encoding="utf-8")) == [json.loads(event)]
     assert saved.name.endswith("Z-event-EV1.json") and saved.name[8] == "T"
     assert result == gws_messages.SAVED_FIRST.format(where=saved.relative_to(workspace))
+
+
+async def test_deleting_a_series_also_saves_its_changed_occurrences(tool, workspace, monkeypatch):
+    series = {"id": "S1", "iCalUID": "S1@google.com", "recurrence": ["RRULE:FREQ=WEEKLY"]}
+    moved = {"id": "S1_20261110T170000Z", "iCalUID": "S1@google.com", "recurringEventId": "S1", "summary": "moved"}
+    pages = {None: {"items": [series], "nextPageToken": "p2"}, "p2": {"items": [moved]}}
+    lists = []
+
+    def real(words):
+        if words[:3] == ["calendar", "events", "get"]:
+            return json.dumps(series)
+        if words[:3] == ["calendar", "events", "list"]:
+            params = json.loads(words[4])
+            lists.append(params)
+            return json.dumps(pages[params.get("pageToken")])
+        return ""
+
+    use(monkeypatch, FakeGws(recorded("calendar_event_delete"), real))
+    await tool.execute(args=["calendar", "events", "delete"], params={"calendarId": "primary", "eventId": "S1"})
+    assert [params["iCalUID"] for params in lists] == ["S1@google.com", "S1@google.com"]
+    [saved] = (workspace / "google-deletions" / "person@example.com").glob("*")
+    assert json.loads(saved.read_text(encoding="utf-8")) == [series, moved]
 
 
 async def test_nothing_is_deleted_when_the_event_cannot_be_saved(tool, workspace, monkeypatch):
@@ -166,8 +188,11 @@ async def test_clearing_a_calendar_saves_every_page_of_events_first(tool, worksp
 
     use(monkeypatch, FakeGws(recorded("calendar_clear"), real))
     result = await tool.execute(args=["calendar", "calendars", "clear"], params={"calendarId": "primary"})
-    assert order == [("list", None), ("list", "p2"), ("clear", 3)]
-    assert result == gws_messages.SAVED_FIRST.format(where="google-deletions/person@example.com")
+    assert order == [("list", None), ("list", "p2"), ("clear", 1)]
+    [saved] = (workspace / "google-deletions" / "person@example.com").glob("*")
+    assert saved.name.endswith("Z-calendar-primary.json")
+    assert json.loads(saved.read_text(encoding="utf-8")) == [{"id": "a"}, {"id": "b"}, {"id": "c"}]
+    assert result == gws_messages.SAVED_FIRST.format(where=saved.relative_to(workspace))
 
 
 async def test_deleting_a_calendar_saves_its_events_first(tool, workspace, monkeypatch):
@@ -183,7 +208,8 @@ async def test_deleting_a_calendar_saves_its_events_first(tool, workspace, monke
     use(monkeypatch, FakeGws(recorded("calendar_delete"), real))
     result = await tool.execute(args=["calendar", "calendars", "delete"], params={"calendarId": "abc@group.calendar.google.com"})
     assert order == ["list", ("delete", 1)]
-    assert result == gws_messages.SAVED_FIRST.format(where="google-deletions/person@example.com")
+    [saved] = (workspace / "google-deletions" / "person@example.com").glob("*")
+    assert result == gws_messages.SAVED_FIRST.format(where=saved.relative_to(workspace))
 
 
 async def test_creating_and_editing_log_nothing(tool, workspace, monkeypatch):

@@ -49,7 +49,7 @@ def _text(done: Completed) -> str:
 class GoogleWorkspaceTool(Tool):
     self_describing_errors = True
 
-    def __init__(self, workspace: Path | None = None) -> None:
+    def __init__(self, workspace: Path) -> None:
         self._workspace = workspace
 
     @property
@@ -82,7 +82,7 @@ class GoogleWorkspaceTool(Tool):
             resolved = await asyncio.to_thread(resolve_path, path, self._workspace, for_write=for_write)
         except PermissionError:
             raise ValueError(gws_messages.PATHS) from None
-        if self._workspace is not None and not resolved.is_relative_to(self._workspace.resolve()):
+        if not resolved.is_relative_to(self._workspace.resolve()):
             raise ValueError(gws_messages.PATHS)
         return str(resolved)
 
@@ -130,14 +130,13 @@ class GoogleWorkspaceTool(Tool):
             params = {**(kwargs.get("params") or {}), "fileId": decision.file_id}
             done = await run(build_args(["drive", "files", "update"], params, {"trashed": True}, None, None))
             return f"{gws_messages.TRASHED}\n{_text(done)}" if done.code == 0 else _text(done)
-        base = self._workspace or Path()
-        folder = log_dir(base, str(account["address"]))
+        folder = log_dir(self._workspace, str(account["address"]))
         if decision.kind == gws_check.DELETE_EVENT:
-            where = (await save_event(run, folder, decision.calendar_id or "", decision.event_id or "")).relative_to(base)
+            saved = await save_event(run, folder, decision.calendar_id or "", decision.event_id or "")
         elif decision.kind == gws_check.SAVE_CALENDAR:
-            await save_calendar(run, folder, decision.calendar_id or "")
-            where = folder.relative_to(base)
+            saved = await save_calendar(run, folder, decision.calendar_id or "")
         else:
             return _text(await run(words)) or "Done."
         done = await run(words)
+        where = saved.relative_to(self._workspace)
         return gws_messages.SAVED_FIRST.format(where=where) if done.code == 0 else _text(done)

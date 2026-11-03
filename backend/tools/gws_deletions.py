@@ -1,8 +1,12 @@
 """The deletion log: what a Calendar event delete, calendar clear or calendar delete removes is saved first.
 
-Google can't restore a deleted event or a cleared calendar. Each event is written in full to
-``<workspace>/google-deletions/<account>/<UTC timestamp>-event-<id>.json`` before the delete
-runs; if anything can't be saved, nothing is deleted. Only deletes are logged.
+Google can't restore a deleted event or a cleared calendar. Before the delete runs, every event it
+removes is written in full, as one JSON list, to
+``<workspace>/google-deletions/<account>/<UTC timestamp>-<event|calendar>-<id>.json``; if anything
+can't be saved, nothing is deleted. Only deletes are logged.
+
+Scale: one gws call per 2,500 events and one file per delete, so clearing a 10,000-event calendar
+is four list calls and one file.
 """
 
 from __future__ import annotations
@@ -34,44 +38,59 @@ def failure_text(done: Completed) -> str:
     return (done.stdout + "\n" + done.stderr).strip()[:1500] or "gws failed."
 
 
-def _write(folder: Path, event_id: str, text: str) -> Path:
+def _write(folder: Path, name: str, events: list[dict]) -> Path:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    path = folder / f"{stamp}-event-{UNSAFE_NAME.sub('_', event_id)}.json"
+    path = folder / f"{stamp}-{UNSAFE_NAME.sub('_', name)}.json"
     try:
         folder.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        path.write_text(json.dumps(events, indent=2), encoding="utf-8")
     except OSError as error:
         raise NotSaved(NOT_SAVED.format(detail=type(error).__name__)) from None
     return path
 
 
-async def save_event(run: Run, folder: Path, calendar_id: str, event_id: str) -> Path:
-    """Read one event in full and save it; raises :class:`NotSaved` when it can't be."""
-    params = json.dumps({"calendarId": calendar_id, "eventId": event_id})
-    done = await run(["calendar", "events", "get", "--params", params])
-    if done.code != 0:
+def _json_object(done: Completed) -> dict:
+    try:
+        value = json.loads(done.stdout) if done.code == 0 else None
+    except ValueError:
+        value = None
+    if not isinstance(value, dict):
         raise NotSaved(NOT_SAVED.format(detail=failure_text(done)))
-    return await asyncio.to_thread(_write, folder, event_id, done.stdout)
+    return value
 
 
-async def save_calendar(run: Run, folder: Path, calendar_id: str) -> list[Path]:
-    """Save every event of a calendar (all pages) before it is cleared."""
-    saved: list[Path] = []
-    token: str | None = None
+async def _list_events(run: Run, params: dict) -> list[dict]:
+    """Every event ``events.list`` returns for ``params``, across all pages."""
+    events: list[dict] = []
+    page_token = None
     while True:
-        params = {"calendarId": calendar_id, "maxResults": PAGE_SIZE}
-        if token:
-            params["pageToken"] = token
-        done = await run(["calendar", "events", "list", "--params", json.dumps(params)])
-        try:
-            page = json.loads(done.stdout) if done.code == 0 else None
-        except ValueError:
-            page = None
-        if not isinstance(page, dict):
-            raise NotSaved(NOT_SAVED.format(detail=failure_text(done)))
-        for event in page.get("items") or []:
-            if isinstance(event, dict) and isinstance(event.get("id"), str):
-                saved.append(await asyncio.to_thread(_write, folder, event["id"], json.dumps(event, indent=2)))
-        token = page.get("nextPageToken")
-        if not isinstance(token, str) or not token:
-            return saved
+        page_params = {**params, "maxResults": PAGE_SIZE}
+        if page_token:
+            page_params["pageToken"] = page_token
+        page = _json_object(await run(["calendar", "events", "list", "--params", json.dumps(page_params)]))
+        events.extend(event for event in page.get("items") or [] if isinstance(event, dict))
+        page_token = page.get("nextPageToken")
+        if not isinstance(page_token, str) or not page_token:
+            return events
+
+
+async def save_event(run: Run, folder: Path, calendar_id: str, event_id: str) -> Path:
+    """Save an event before it is deleted; raises :class:`NotSaved` when it can't be.
+
+    Deleting a recurring series also deletes its changed occurrences, which Google stores as
+    separate events sharing the series' iCalUID, so the series and all of them are saved.
+    """
+    event = _json_object(await run([
+        "calendar", "events", "get", "--params", json.dumps({"calendarId": calendar_id, "eventId": event_id}),
+    ]))
+    events = [event]
+    if event.get("recurrence") and isinstance(event.get("iCalUID"), str):
+        series = await _list_events(run, {"calendarId": calendar_id, "iCalUID": event["iCalUID"]})
+        events += [item for item in series if item.get("id") != event.get("id")]
+    return await asyncio.to_thread(_write, folder, f"event-{event_id}", events)
+
+
+async def save_calendar(run: Run, folder: Path, calendar_id: str) -> Path:
+    """Save every event of a calendar before it is cleared or deleted."""
+    events = await _list_events(run, {"calendarId": calendar_id})
+    return await asyncio.to_thread(_write, folder, f"calendar-{calendar_id}", events)

@@ -114,8 +114,8 @@ def test_a_recorded_preview_parses():
     assert gws_check.parse_preview(text)["method"] == "GET"
 
 
-def test_the_tool_text_is_the_approved_text_and_the_tool_is_counted_not_named():
-    tool = GoogleWorkspaceTool()
+def test_the_tool_text_is_the_approved_text_and_the_tool_is_counted_not_named(tmp_path):
+    tool = GoogleWorkspaceTool(tmp_path)
     assert tool.name == "google_workspace" and tool.description == gws_messages.DESCRIPTION
     assert len(gws_messages.DESCRIPTION.split()) == 225
     assert set(tool.parameters["properties"]) == {"account", "args", "params", "body", "upload", "output"}
