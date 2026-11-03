@@ -41,10 +41,19 @@ class FakeGitHub:
         self.auth_ok = True
         self.workflows(1)
 
+    def rules(self, contexts: list[str] | None, base: str = "main") -> None:
+        """The base branch's merge gate; None leaves the read a 404."""
+        path = f"repos/{REPO}/rules/branches/{base}"
+        if contexts is None:
+            self.bodies.pop(path, None)
+        else:
+            self.bodies[path] = [{"type": "required_status_checks", "parameters": {
+                "required_status_checks": [{"context": c} for c in contexts]}}]
+
     def pr(self, number: int, head: str = H, *, state: str = "open",
            draft: bool = False, mergeable: bool | None = True) -> None:
         self.bodies[f"repos/{REPO}/pulls/{number}"] = {
-            "state": state, "head": {"sha": head}, "draft": draft,
+            "state": state, "head": {"sha": head}, "base": {"ref": "main"}, "draft": draft,
             "mergeable": mergeable, "html_url": f"https://github.com/{REPO}/pull/{number}",
         }
 
@@ -61,7 +70,8 @@ class FakeGitHub:
         self.bodies[f"repos/{REPO}/actions/workflows?per_page=1"] = {"total_count": count}
 
     def reviewer(self, head: str, state: str, *, present: bool = False) -> None:
-        """The head's reviewer statuses; ``present`` adds the reviewed marker."""
+        """The head's reviewer statuses and a merge gate requiring the reviewer."""
+        self.rules(["qa/llm-reviewer-present"])
         statuses = [{"context": "qa/llm-reviewer", "state": state}]
         if present:
             statuses.append({"context": "qa/llm-reviewer-present", "state": "success"})
@@ -114,6 +124,7 @@ def _received(head: str, at: datetime = T0, repo: str = REPO, *, suite: int = 1)
 @pytest.fixture()
 def gh(isolated_db, monkeypatch):
     watch._etags.clear()
+    watch._review_required.clear()
     watch._status.update({"fired_count": 0})
     _received("0" * 40, T0 - timedelta(days=30), suite=0)  # the log has recorded suites for a month
     return FakeGitHub()
@@ -399,21 +410,62 @@ async def test_review_missing_names_a_finished_reviewer_verdict(gh, wakes, parke
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case", ["draft", "conflicting", "reviewed", "reviewer_never_ran"])
+@pytest.mark.parametrize(
+    "case", ["draft", "conflicting", "reviewed", "not_required", "gate_unreadable"],
+)
 async def test_review_missing_is_silent(gh, wakes, parked, monkeypatch, case):
     _webhook()
     _owner(6)
     gh.pr(6, draft=case == "draft", mergeable=False if case == "conflicting" else True)
     gh.runs(H, run("success"))
-    if case == "reviewer_never_ran":  # no qa/llm-reviewer* status: this repo has no reviewer
-        gh.bodies[f"repos/{REPO}/commits/{H}/status"] = {"statuses": [
-            {"context": "vercel", "state": "success"}]}
-    else:
-        gh.reviewer(H, "success" if case == "reviewed" else "pending", present=case == "reviewed")
+    gh.reviewer(H, "success" if case == "reviewed" else "pending", present=case == "reviewed")
+    if case == "not_required":
+        gh.rules(["Backend unit tests"])
+    elif case == "gate_unreadable":
+        gh.rules(None)  # the rules read answers 404
     _received(H)
 
     await _sweep(gh, T0 + timedelta(hours=3), monkeypatch)
     assert wakes.await_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("webhook", [True, False])
+async def test_review_missing_wakes_when_nothing_ever_posted_on_the_head(
+    gh, wakes, parked, monkeypatch, webhook,
+):
+    """E12: the gate requires the reviewer, the trigger was lost so no status was
+    ever posted, and CI finished 46 min ago. The clock needs no webhook.
+    """
+    _webhook(webhook)
+    _owner(14)
+    gh.rules(["qa/llm-reviewer-present"])
+    gh.bodies[f"repos/{REPO}/commits/{H}/status"] = {"statuses": []}
+    gh.pr(14)
+    gh.runs(H, run("success"))
+    if webhook:
+        _received(H)
+
+    await _sweep(gh, T0 + timedelta(minutes=44), monkeypatch)
+    assert wakes.await_count == 0
+    await _sweep(gh, T0 + timedelta(minutes=46), monkeypatch)
+
+    assert _reasons(wakes) == [reasons.REVIEW_MISSING]
+    assert wakes.await_args.args[3]["reviewer_state"] == "pending"  # nothing posted: not finished
+
+
+@pytest.mark.asyncio
+async def test_the_merge_gate_is_read_once_per_repo_and_base_per_sweep(gh, wakes, parked,
+                                                                       monkeypatch):
+    _webhook()
+    for number, head in ((15, H), (16, H2)):
+        _owner(number)
+        gh.pr(number, head)
+        gh.runs(head, run("success"))
+        _received(head)
+
+    await _sweep(gh, T0 + timedelta(minutes=10), monkeypatch)
+    assert gh.reads.count(f"repos/{REPO}/rules/branches/main") == 1
 
 
 @pytest.mark.asyncio
@@ -545,7 +597,7 @@ def test_due_reasons_leave_out_what_already_fired_for_the_head():
 
 
 @pytest.mark.asyncio
-async def test_no_webhook_turns_off_ci_event_and_review_reasons(gh, wakes, parked, monkeypatch):
+async def test_no_webhook_turns_off_the_ci_event_reason_only(gh, wakes, parked, monkeypatch):
     _webhook(False)
     _owner(10)
     gh.pr(10, H2)
@@ -557,8 +609,8 @@ async def test_no_webhook_turns_off_ci_event_and_review_reasons(gh, wakes, parke
     gh.runs(H, run("success"))
     gh.reviewer(H, "pending")
     await _sweep(gh, T0 + timedelta(hours=5), monkeypatch)
-    assert _reasons(wakes) == [reasons.CI_NOT_STARTED]
-    assert wakes.await_args.args[3]["head_sha"] == H2
+    assert _reasons(wakes) == [reasons.REVIEW_MISSING, reasons.CI_NOT_STARTED]
+    assert [c.args[3]["head_sha"] for c in wakes.await_args_list] == [H, H2]
 
 
 # -- Test 8: ended and settled PRs cost one read and never wake --

@@ -56,6 +56,7 @@ class PrView:
     draft: bool
     mergeable: str
     url: str
+    base_ref: str = ""
 
     @property
     def conflicting(self) -> bool:
@@ -89,14 +90,17 @@ class LocalFacts:
     could have been logged with its suite: after the webhook was configured and
     after the log's last pre-column check-suite row. CI finished before it is
     unknown; after it, a missing delivery is lost, even if the log never
-    received a check suite at all. ``reviewer_statuses`` is the head's
-    ``qa/llm-reviewer*`` contexts and their states, read from GitHub once the
-    head is green and reviewable; None means not read yet.
+    received a check suite at all. ``review_required`` is whether the base
+    branch's merge gate requires ``qa/llm-reviewer-present`` (the repo runs the
+    reviewer), and ``reviewer_statuses`` the head's ``qa/llm-reviewer*`` contexts
+    and states; both come from GitHub once the head is green and reviewable,
+    None meaning not read yet.
     """
 
     webhook: bool
     ci_received_at: datetime | None
     log_answers_from: datetime | None
+    review_required: bool | None = None
     reviewer_statuses: dict[str, str] | None = None
 
 
@@ -181,38 +185,47 @@ def _ci_event_lost(ci: CiState, facts: LocalFacts) -> bool:
     )
 
 
-def review_possible(view: PrView, ci: CiState, facts: LocalFacts) -> bool:
-    """The head received its CI trigger and is green and reviewable (not held)."""
+def review_possible(view: PrView, ci: CiState) -> bool:
+    """The head's CI finished green and the head is reviewable (not held)."""
     return (
-        facts.webhook and facts.ci_received_at is not None
-        and ci.conclusion == "success" and not view.draft and not view.conflicting
+        ci.completed_at is not None and ci.conclusion == "success"
+        and not view.draft and not view.conflicting
     )
 
 
 def _review_expected(view: PrView, ci: CiState, facts: LocalFacts) -> bool:
-    """A green, reviewable head the reviewer is expected to review and GitHub does
-    not show reviewed. Until the statuses are read it is expected, so the head
-    does not settle early; a head with no ``qa/llm-reviewer*`` status is in a repo
-    that does not run the reviewer.
+    """A green, reviewable head the merge gate requires reviewed and GitHub does
+    not show reviewed. Until GitHub is read it is expected, so the head does not
+    settle early. A head whose CI event was lost is the CI wake's, not the reviewer's.
     """
-    if not review_possible(view, ci, facts):
+    if not review_possible(view, ci) or facts.review_required is False:
         return False
-    statuses = facts.reviewer_statuses
-    if statuses is None:
+    if _ci_event_lost(ci, facts):
+        return False
+    if facts.review_required is None or facts.reviewer_statuses is None:
         return True
-    return bool(statuses) and statuses.get(STATUS_PRESENCE_CONTEXT) != "success"
+    return facts.reviewer_statuses.get(STATUS_PRESENCE_CONTEXT) != "success"
 
 
 def review_clock_due(
-    view: PrView, ci: CiState, facts: LocalFacts, *, now: datetime,
-    review_from: datetime | None = None,
+    view: PrView, ci: CiState, *, now: datetime, review_from: datetime | None = None,
 ) -> bool:
-    """The review grace has passed, so the head's statuses are worth one read."""
-    received = facts.ci_received_at
-    return (
-        received is not None and review_possible(view, ci, facts)
-        and now - max(received, review_from or received) >= REVIEW_GRACE
-    )
+    """The review grace has passed since CI finished, or since a held head became
+    reviewable if later.
+    """
+    if not review_possible(view, ci) or ci.completed_at is None:
+        return False
+    return now - max(ci.completed_at, review_from or ci.completed_at) >= REVIEW_GRACE
+
+
+def review_required(body: Any) -> bool:
+    """Whether ``GET rules/branches/{ref}`` requires ``qa/llm-reviewer-present``."""
+    for rule in body if isinstance(body, list) else []:
+        if isinstance(rule, dict) and rule.get("type") == "required_status_checks":
+            checks = (rule.get("parameters") or {}).get("required_status_checks") or []
+            if any(c.get("context") == STATUS_PRESENCE_CONTEXT for c in checks):
+                return True
+    return False
 
 
 def reviewer_statuses(body: Any) -> dict[str, str]:
@@ -230,9 +243,9 @@ def due_reasons(
 ) -> list[str]:
     """The reasons overdue now for this head (and CI attempt) not fired yet.
 
-    The reviewer's clock starts when its trigger, the head's last CI event, was
-    recorded, or at ``review_from`` if later: when a held head (draft or
-    conflicting) became reviewable.
+    The reviewer's clock starts when the head's CI finished (``ci.completed_at``,
+    from GitHub's workflow runs), or at ``review_from`` if later: when a held head
+    (draft or conflicting) became reviewable. It needs no webhook.
     """
     due: list[str] = []
     if not ci.started:
@@ -246,8 +259,9 @@ def due_reasons(
         elif ci.conclusion == _CANCELLED and ci_overdue:
             due.append(CI_CANCELLED)
         if (
-            facts.reviewer_statuses is not None and _review_expected(view, ci, facts)
-            and review_clock_due(view, ci, facts, now=now, review_from=review_from)
+            facts.review_required is not None and facts.reviewer_statuses is not None
+            and _review_expected(view, ci, facts)
+            and review_clock_due(view, ci, now=now, review_from=review_from)
         ):
             due.append(REVIEW_MISSING)
     return [reason for reason in due if fired_marker(reason, ci) not in fired]

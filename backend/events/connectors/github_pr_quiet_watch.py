@@ -46,6 +46,8 @@ _status: dict[str, Any] = {
     "state": "starting", "reason": None, "last_run": None, "fired_count": 0, "last_error": None,
 }
 _etags: dict[str, tuple[str, Any]] = {}
+#: (repo, base ref) -> whether its merge gate requires the reviewer; one sweep's reads only.
+_review_required: dict[tuple[str, str], bool] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,10 +165,23 @@ def _local_facts(
     )
 
 
-async def _reviewer_statuses(runner: feed.GhRunner, view: reasons.PrView) -> dict[str, str]:
-    """The head's ``qa/llm-reviewer*`` statuses: the one read that says whether the
-    repo runs the reviewer (any such context) and whether the head is reviewed.
+async def _review_required_for(runner: feed.GhRunner, view: reasons.PrView) -> bool:
+    """Whether the base branch's merge gate requires ``qa/llm-reviewer-present``: the
+    repo runs the reviewer. Read once per (repo, base) per sweep; an unreadable
+    gate, a 404 included, counts as not required.
     """
+    key = (view.repo, view.base_ref)
+    if key not in _review_required:
+        try:
+            body = await _get(runner, f"repos/{view.repo}/rules/branches/{view.base_ref}")
+            _review_required[key] = reasons.review_required(body)
+        except feed.FeedError:
+            _review_required[key] = False
+    return _review_required[key]
+
+
+async def _reviewer_statuses(runner: feed.GhRunner, view: reasons.PrView) -> dict[str, str]:
+    """The head's ``qa/llm-reviewer*`` statuses: ``-present`` success is reviewed."""
     body = await _get(runner, f"repos/{view.repo}/commits/{view.head}/status")
     return reasons.reviewer_statuses(body)
 
@@ -231,6 +246,7 @@ async def sweep_candidate(
     view = reasons.PrView(
         candidate.repo, candidate.number, head, bool(pr.get("draft")),
         reasons.mergeable_label(pr.get("mergeable")), str(pr.get("html_url") or ""),
+        str(((pr.get("base") or {}).get("ref")) or ""),
     )
     now = _now()
     state = await run_in_db(rows.head_state, candidate.external_id, head, now)
@@ -248,8 +264,12 @@ async def sweep_candidate(
     first_seen = reasons.parse_time(state.get("first_seen_at")) or now
     faults: list[str] = []
     review_from = reasons.parse_time(state.get("review_from"))
-    if reasons.REVIEW_MISSING not in fired and reasons.review_possible(view, ci, facts):
-        facts = replace(facts, reviewer_statuses=await _reviewer_statuses(runner, view))
+    if reasons.REVIEW_MISSING not in fired and reasons.review_possible(view, ci):
+        required = await _review_required_for(runner, view)
+        facts = replace(
+            facts, review_required=required,
+            reviewer_statuses=await _reviewer_statuses(runner, view) if required else {},
+        )
     for reason in reasons.due_reasons(
         view, ci, facts, fired=fired, first_seen=first_seen, now=now, review_from=review_from,
     ):
@@ -315,6 +335,7 @@ async def sweep_once(runner: feed.GhRunner) -> None:
         _status.update({"state": "enabled", "reason": None})
         return
 
+    _review_required.clear()
     candidates = await run_in_db(_candidates)
     webhook = await run_in_db(webhook_configured)
     answers_from = await run_in_db(_log_answers_from)
