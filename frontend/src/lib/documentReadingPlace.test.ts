@@ -31,8 +31,9 @@ const numbered = (lines: number, image?: number) =>
  * fills the rest of its `height`. jsdom has no layout, so CodeMirror keeps its estimated line heights and the model lays
  * the text by them: a line is on screen at the scroller's top, less the offset, plus the line's height-map top. A frame
  * runs as a browser runs one: scroll events, animation-frame callbacks (with the microtasks after each), layout (which
- * clamps the offset to the scroll range), resize observations, paint. `painted` is where the reader's line was on screen,
- * in viewport pixels, at each paint.
+ * clamps the offset to the scroll range), resize observations, paint. A page change made in a task before the frame is
+ * laid out before its scroll events, so a clamp it causes is seen as a scroll before the resize observation. `painted` is
+ * where the reader's line was on screen, in viewport pixels, at each paint.
  */
 function pane({ lines = 400, header = 49, height = 600, image }: { lines?: number; header?: number; height?: number; image?: number } = {}) {
 	const frameEl = document.createElement('div');
@@ -88,6 +89,10 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 	laidOut = size();
 	/** Runs one frame; `layout` changes the page (a header growing) after the frame's callbacks, as a CSS transition does. */
 	const frame = async (layout?: () => void) => {
+		if (screen.offset > max()) {
+			screen.offset = max();
+			scrolled = true;
+		}
 		if (scrolled) {
 			scrolled = false;
 			scroller.dispatchEvent(new Event('scroll'));
@@ -157,16 +162,25 @@ describe('keepPlaceWhenEditorMoves', () => {
 	});
 
 	for (const fromEnd of [0, 40, 200]) {
-		it(`holds a reader ${fromEnd} px from the end when the header grows and shrinks, with the browser clamping the offset`, async () => {
-			const page = pane({ header: 157 });
-			const top = await page.readAt(page.max() - fromEnd);
-			await page.frame(() => { page.screen.header -= 108; });
-			await page.frame();
-			await page.frame(() => { page.screen.header += 108; });
-			await page.frame();
-			expect(off(page.painted, top)).toEqual([]);
-			page.stop();
-		});
+		for (const when of ['in a frame', 'in a task']) {
+			it(`holds a reader ${fromEnd} px from the end when the header grows and shrinks ${when}, with the browser clamping the offset`, async () => {
+				const page = pane({ header: 157 });
+				const top = await page.readAt(page.max() - fromEnd);
+				const change = async (px: number) => {
+					if (when === 'in a frame') return page.frame(() => { page.screen.header += px; });
+					page.screen.header += px;
+					await page.frame();
+				};
+				await change(-108);
+				await page.frame();
+				await change(108);
+				await page.frame();
+				await change(-108);
+				await page.frame();
+				expect(off(page.painted, top)).toEqual([]);
+				page.stop();
+			});
+		}
 	}
 
 	it('observes the scroller and its text through one resize observation', () => {
@@ -198,6 +212,22 @@ describe('dispatchKeepingPlace', () => {
 			await page.frame();
 		}
 		expect(page.painted).toHaveLength(30);
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
+	it('lays the place for the frame that paints, not for a notice shown and gone inside the dispatching task', async () => {
+		const page = pane();
+		const top = await page.readAt(2000);
+		// The settling notice is in the header while the write is applied and leaves before the frame: no frame paints it,
+		// and no resize observation reports it. The write leaves the text's height as it was (live typing reveals its text
+		// over later frames), so nothing else is observed either.
+		page.screen.header += 108;
+		page.view.dispatch({ changes: { from: 0, to: 4, insert: 'Lane' } });
+		page.screen.header -= 108;
+		await page.frame();
+		await page.frame();
+		expect(page.painted).toHaveLength(2);
 		expect(off(page.painted, top)).toEqual([]);
 		page.stop();
 	});

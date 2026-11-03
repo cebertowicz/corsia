@@ -46,19 +46,22 @@ export function captureDocumentPlace(view: EditorView, scrollTop?: number): Text
 }
 
 /**
- * Each editor's place to hold, and the offset `applyPlace` last left, so its own scroll is not taken for the reader's. The
- * place is the keeper's own copy: a change moves its line in place, and it stays the same place until something sets another.
+ * Each editor's place to hold, the offset last left by `applyPlace` or by the reader (so its own scroll is not taken for
+ * the reader's, and a cut to the end of the range is known for the browser's), and whether a frame is already asked to
+ * lay the place. The place is the keeper's own copy: a change moves its line in place,
+ * and it stays the same place until something sets another.
  */
 interface Keeper {
 	target: TextDocumentPlace | null;
 	applied: number;
+	frame: boolean;
 }
 
 const keepers = new WeakMap<EditorView, Keeper>();
 
 function keeperOf(view: EditorView): Keeper {
 	let keeper = keepers.get(view);
-	if (!keeper) keepers.set(view, keeper = { target: null, applied: Number.NaN });
+	if (!keeper) keepers.set(view, keeper = { target: null, applied: Number.NaN, frame: false });
 	return keeper;
 }
 
@@ -114,6 +117,20 @@ export function applyPlace(view: EditorView): boolean {
 	return moved;
 }
 
+/**
+ * Lays the place in the next frame, before it paints. A layout read inside the dispatching task can include a notice the
+ * same task takes away again, which no frame paints and no resize observation reports.
+ */
+function applyBeforePaint(view: EditorView): void {
+	const keeper = keeperOf(view);
+	if (keeper.frame) return;
+	keeper.frame = true;
+	requestAnimationFrame(() => {
+		keeper.frame = false;
+		applyPlace(view);
+	});
+}
+
 /** True when a non-user transaction only inserts text at the end of the document, judged by where it changes it. */
 function isRemoteAppend(transaction: Transaction): boolean {
 	if (!transaction.docChanged || transaction.annotation(Transaction.userEvent) !== undefined) return false;
@@ -130,8 +147,8 @@ const SCROLL_INTO_VIEW = (EditorView.scrollIntoView(0) as unknown as { type: Sta
 
 /**
  * Applies the editor's transactions and keeps the reader's place across them. The held line moves with the text the
- * change moves; a change the reader did not make is laid out at once and the place laid again, so the text in view
- * stays where it is while others edit the document. A remote append follows the live edge when the reader is already as
+ * change moves; a change the reader did not make is laid out at once and the place laid again before the next paint, so
+ * the text in view stays where it is while others edit the document. A remote append follows the live edge when the reader is already as
  * near it as chat considers near. A transaction that scrolls (the reader's typing, a jump to a comment) lets CodeMirror
  * scroll, and the place is taken again from where it lands.
  */
@@ -150,8 +167,8 @@ export function dispatchKeepingPlace(transactions: readonly Transaction[], view:
 	if (scrolls) releasePlace(view);
 	else if (followAppend) holdPlace(view, { ...captureDocumentPlace(view), end: true });
 	else if (remoteChange) {
-		// Without a place to hold, the change is still laid out before any other update can follow it.
-		if (!applyPlace(view)) measureNow(view);
+		measureNow(view);
+		applyBeforePaint(view);
 	}
 }
 
@@ -166,7 +183,13 @@ export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
 	keeper.target = captureDocumentPlace(view);
 	keeper.applied = scroller.scrollTop;
 	const onScroll = () => {
-		if (Math.abs(scroller.scrollTop - keeper.applied) >= 1) keeper.target = captureDocumentPlace(view);
+		// The editor grew back past the text below the view and the browser cut the offset to the new end: that scroll is
+		// the browser's, and the resize observation that follows lays the place again.
+		const max = scroller.scrollHeight - scroller.clientHeight;
+		if (keeper.applied > max && scroller.scrollTop >= max - 1) return;
+		if (Math.abs(scroller.scrollTop - keeper.applied) < 1) return;
+		keeper.target = captureDocumentPlace(view);
+		keeper.applied = scroller.scrollTop;
 	};
 	const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => applyPlace(view)) : null;
 	observer?.observe(scroller);
