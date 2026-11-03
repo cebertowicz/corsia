@@ -210,7 +210,7 @@ async def test_failure_reaches_only_the_awaiting_caller_not_the_detached_work_lo
 
 @pytest.mark.asyncio
 async def test_failure_after_the_caller_is_cancelled_is_logged_once(owner):
-    """A cancelled caller joins the task but never reports its failure, so the receipt logs it at ERROR."""
+    """A cancelled caller raises its cancellation, not the task's failure, so it logs that failure once at ERROR."""
     logged: list[str] = []
     sink = logger.add(lambda message: logged.append(str(message)), level="ERROR")
     entered = threading.Event()
@@ -232,3 +232,57 @@ async def test_failure_after_the_caller_is_cancelled_is_logged_once(owner):
         logger.remove(sink)
     assert len(logged) == 1 and "rollback failed while cancelling" in logged[0]
     assert app_loop.awaited_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_failure_finished_before_the_caller_is_cancelled_is_logged_once(owner):
+    """The task fails first and the caller is cancelled before it resumes: no cancel is sent, yet the failure is logged."""
+    logged: list[str] = []
+    sink = logger.add(lambda message: logged.append(str(message)), level="ERROR")
+    entered = threading.Event()
+    release = threading.Event()
+
+    async def work():
+        entered.set()
+        await asyncio.to_thread(release.wait, 5)
+        raise ValueError("failed before the cancel")
+
+    try:
+        task = asyncio.create_task(app_loop.await_on_owner(work(), owner=owner))
+        assert await asyncio.to_thread(entered.wait, 5)
+        (receipt,) = tuple(app_loop._AWAITED)
+        release.set()
+        # Block this loop until the owner settles the receipt, so the cancel lands before the caller resumes.
+        assert isinstance(receipt.result.exception(timeout=5), ValueError)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        logger.remove(sink)
+    assert receipt.cancel_sent is False
+    assert len(logged) == 1 and "failed before the cancel" in logged[0]
+
+
+@pytest.mark.asyncio
+async def test_drain_hands_a_waiting_callers_failure_to_that_caller_only(owner):
+    """The drain cancels the task; a caller still waiting receives its failure, and nothing logs it at ERROR here."""
+    logged: list[str] = []
+    sink = logger.add(lambda message: logged.append(str(message)), level="ERROR")
+    entered = threading.Event()
+
+    async def work():
+        entered.set()
+        try:
+            await asyncio.sleep(5)
+        finally:
+            raise ValueError("rollback failed during drain")
+
+    try:
+        caller = asyncio.create_task(app_loop.await_on_owner(work(), owner=owner))
+        assert await asyncio.to_thread(entered.wait, 5)
+        await asyncio.wrap_future(asyncio.run_coroutine_threadsafe(app_loop.drain_awaited(), owner))
+        with pytest.raises(ValueError, match="rollback failed during drain"):
+            await caller
+    finally:
+        logger.remove(sink)
+    assert logged == []

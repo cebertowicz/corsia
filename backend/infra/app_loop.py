@@ -90,9 +90,8 @@ class _Handoff:
                 self.refuse("application event loop changed before starting")
                 return
             self.task = self.loop.create_task(self.coroutine)
-            # No detached-work observer: ``completed`` hands the task's exception to the awaiting caller,
-            # which reports it, or logs it itself once the caller has stopped waiting; ``_AWAITED`` keeps the
-            # task alive until then.
+            # No detached-work observer: ``completed`` hands the task's exception to its one caller in
+            # ``await_on_owner``, which reports it; ``_AWAITED`` keeps the task alive until then.
             self.task.add_done_callback(self.completed)
 
     def completed(self, task) -> None:
@@ -101,12 +100,6 @@ class _Handoff:
             if task.cancelled():
                 self.result.set_exception(asyncio.CancelledError())
             elif (error := task.exception()) is not None:
-                if self.cancel_sent:
-                    # A cancelled caller or the shutdown drain joins this task but never reports its failure.
-                    logger.opt(exception=error).error(
-                        "Application-loop work failed after its caller stopped waiting (coroutine={})",
-                        getattr(task.get_coro(), "__qualname__", None) or "<unknown>",
-                    )
                 self.result.set_exception(error)
             else:
                 self.result.set_result(task.result())
@@ -164,11 +157,10 @@ async def await_on_owner(coroutine: Coroutine[Any, Any, T], *, owner: asyncio.Ab
                 continue
             except BaseException:
                 break
-        if not future.cancelled():
-            try:
-                future.result()
-            except BaseException:
-                pass
+        error = None if future.cancelled() else future.exception()
+        if error is not None and not isinstance(error, asyncio.CancelledError):
+            # This caller raises its own cancellation instead, so it is the one that records the work's failure.
+            logger.opt(exception=error).error("Application-loop work failed after its caller was cancelled")
         raise cancelled
 
 
