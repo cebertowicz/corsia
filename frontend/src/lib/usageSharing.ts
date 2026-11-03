@@ -5,4 +5,4 @@
  */
 export const USAGE_SHARING_LABEL = 'Share usage counts';
 export const USAGE_SHARING_LINE =
-	'Share usage counts to help improve CORSIA. Counts only, with a random install ID: no name, email or content.';
+	'Helps improve CORSIA. Counts only, with a random install ID: no name, email or content.';
