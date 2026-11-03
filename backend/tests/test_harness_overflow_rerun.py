@@ -103,3 +103,37 @@ def test_any_other_error_still_ends_with_no_rerun(isolated_db) -> None:
 
     assert terminal.successor is None or not isinstance(terminal.successor, ClaimedBatch)
     assert _reruns(db) == []
+
+
+def _rerun_summary(db, turn: str = "t1"):
+    import json
+
+    row = db.execute("SELECT metadata FROM messages WHERE id=?", (overflow_continue_message_id(turn),)).fetchone()
+    return json.loads(row["metadata"]).get("summary")
+
+
+def test_a_rerun_is_named_by_the_person_message_it_runs_again(isolated_db) -> None:
+    db = get_db()
+    _turn(db)
+
+    _refuse(db)
+
+    # Its Retry row, if delivery fails, reads as that message: never the plan-limit line.
+    assert _rerun_summary(db) == "work"
+
+
+def test_a_rerun_of_a_wake_carries_no_summary(isolated_db) -> None:
+    db = get_db()
+    db.execute("INSERT INTO threads (id,user_id,model,created_at,updated_at) VALUES ('thread','user','native/test','t','t')")
+    db.commit()
+    accept_thread_input("thread", role="system", content="A wake", intent="apply_now", message_id="w1",
+                        metadata={"type": "context_event", "event_type": "test.wake", "event_disposition": "wake"},
+                        created_at=_now(), db=db)
+    start_idle_turn("thread", turn_id="t1", boot_epoch="boot", started_at=_now(), db=db)
+    db.execute("UPDATE messages SET delivery_state='delivered' WHERE id='w1'")
+    db.commit()
+
+    _refuse(db)
+
+    assert _reruns(db) == [overflow_continue_message_id("t1")]
+    assert _rerun_summary(db) is None

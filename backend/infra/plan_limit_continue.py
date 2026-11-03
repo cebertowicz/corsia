@@ -69,6 +69,7 @@ def queue_plan_limit_continue(db: sqlite3.Connection, turn_id: str, thread_id: s
 
 def _queue_continue(
     db: sqlite3.Connection, turn_id: str, thread_id: str, *, cause: str, message_id: str | None = None,
+    summary: str | None = CONTINUE_CHIP,
 ) -> None:
     """Queue one system continue input unless real input already restarts the thread.
 
@@ -79,21 +80,23 @@ def _queue_continue(
         return
     from infra.input_admission import accept_thread_input
 
+    metadata = {
+        "type": "context_event",
+        "event_type": cause,
+        "event_disposition": "wake",
+        "sender_kind": "system",
+        "cause": cause,
+        "stopped_turn_id": turn_id,
+    }
+    if summary is not None:
+        metadata["summary"] = summary
     accept_thread_input(
         thread_id,
         role="system",
         content=_CONTENT_BY_CAUSE[cause],
         intent="apply_now",
         message_id=message_id or continue_message_id(turn_id),
-        metadata={
-            "type": "context_event",
-            "event_type": cause,
-            "event_disposition": "wake",
-            "summary": CONTINUE_CHIP,
-            "sender_kind": "system",
-            "cause": cause,
-            "stopped_turn_id": turn_id,
-        },
+        metadata=metadata,
         delivery_options={"native_mode": "event", "attachments": []},
         db=db,
     )
@@ -195,8 +198,33 @@ def queue_overflow_continue(db: sqlite3.Connection, turn_id: str, thread_id: str
         return
     _queue_continue(
         db, turn_id, thread_id, cause=CONTEXT_OVERFLOW_REASON,
-        message_id=overflow_continue_message_id(turn_id),
+        message_id=overflow_continue_message_id(turn_id), summary=_newest_person_line(db, turn_id),
     )
+
+
+def _newest_person_line(db: sqlite3.Connection, turn_id: str) -> str | None:
+    """The re-run's summary: the newest person message the refused Turn took in, else none.
+
+    A re-run that cannot be delivered then reads as that message with its Retry;
+    one with no person message behind it offers no Retry row of its own.
+    """
+    import json
+
+    rows = db.execute(
+        "SELECT content,metadata FROM messages WHERE active_turn_id=? AND role='user' ORDER BY input_order DESC",
+        (turn_id,),
+    ).fetchall()
+    for row in rows:
+        try:
+            metadata = json.loads(row["metadata"] or "{}")
+        except ValueError:
+            metadata = {}
+        if isinstance(metadata, dict) and metadata.get("routed_event"):
+            continue
+        line = next((part.strip() for part in str(row["content"] or "").splitlines() if part.strip()), "")
+        if line:
+            return line
+    return None
 
 
 def queue_terminal_continue(
