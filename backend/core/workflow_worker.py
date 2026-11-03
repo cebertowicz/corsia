@@ -30,6 +30,10 @@ class UnknownProfile(ValueError):
     """The caller named a profile the workflow doesn't define."""
 
 
+class InvalidWorker(ValueError):
+    """The workflow's ``worker`` block fails its install-time shape check."""
+
+
 def _settings_errors(block: Any, label: str, *, profiles_allowed: bool) -> list[str]:
     if not isinstance(block, dict):
         return [f"{label} must be a mapping"]
@@ -64,21 +68,26 @@ def worker_errors(workflow: Mapping[str, Any]) -> list[str]:
 def worker_settings(corsia: Mapping[str, Any] | None, profile: str | None = None) -> dict[str, Any]:
     """The worker settings of a workflow skill's CORSIA data, with ``profile`` laid over the base.
 
-    An unset key is None: the runner's own default applies.
+    An unset key is None: the runner's own default applies. A workflow with no
+    ``worker`` block has every key unset.
 
     Raises:
+        InvalidWorker: the block fails ``worker_errors`` (a file edited after install).
         UnknownProfile: ``profile`` is not one the workflow defines.
     """
-    workflow = corsia.get("workflow") if isinstance(corsia, Mapping) else None
-    block = workflow.get("worker") if isinstance(workflow, Mapping) else None
-    block = block if isinstance(block, Mapping) else {}
+    workflow = (corsia or {}).get("workflow") or {}
+    if not isinstance(workflow, Mapping):
+        raise InvalidWorker("corsia.workflow must be a mapping")
+    errors = worker_errors(workflow)
+    if errors:
+        raise InvalidWorker("; ".join(errors))
+    block = workflow.get("worker") or {}
     settings = {key: block.get(key) for key in SETTINGS}
     if profile is None:
         return settings
-    profiles = block.get("profiles")
-    profiles = profiles if isinstance(profiles, Mapping) else {}
+    profiles = block.get("profiles") or {}
     if profile not in profiles:
         known = ", ".join(sorted(profiles)) or "none"
-        raise UnknownProfile(f"workflow has no worker profile {profile!r}; its profiles: {known}")
-    settings.update({key: value for key, value in profiles[profile].items() if key in SETTINGS})
+        raise UnknownProfile(f"the workflow defines no profile {profile!r}; its profiles: {known}")
+    settings.update(profiles[profile])
     return settings

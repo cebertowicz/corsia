@@ -8,6 +8,8 @@ from typing import Any
 from core.workflow_result import schema_errors
 from core.workflow_worker import worker_errors
 
+#: The keys a shared workflow may carry; install refuses any other.
+WORKFLOW_KEYS = frozenset({"steps", "result", "worker"})
 _WORKFLOW_STEP_KEYS = frozenset(
     {
         "id",

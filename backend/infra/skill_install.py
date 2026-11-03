@@ -20,7 +20,7 @@ from core.skill_sidecar import (
     parse_sidecar,
 )
 from core.skill_validation import parse_frontmatter
-from core.skill_workflow_validation import validate_workflow
+from core.skill_workflow_validation import WORKFLOW_KEYS, validate_workflow
 from infra.guidance_git import SaveResult, save_guidance
 from infra.guidance_messages import saver_author
 from infra.guidance_targets import GuidanceTarget
@@ -87,7 +87,7 @@ def upstream_workflow(name: str, files: Mapping[str, bytes]) -> dict[str, Any]:
     workflow = {"workflow": parsed["workflow"]}
     value = parsed["workflow"]
     unknown = [f"corsia.workflow.{key} is an unknown key" for key in value
-               if key not in {"steps", "result"}] if isinstance(value, dict) else []
+               if key not in WORKFLOW_KEYS] if isinstance(value, dict) else []
     errors = [*unknown, *validate_workflow(workflow, skill_name=name)]
     if errors:
         raise InvalidSidecar("; ".join(errors))

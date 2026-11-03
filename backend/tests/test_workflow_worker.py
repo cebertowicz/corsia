@@ -4,7 +4,8 @@ import pytest
 
 from core.skill_sidecar import parse_sidecar
 from core.skill_workflow_validation import validate_workflow
-from core.workflow_worker import UnknownProfile, worker_settings
+from core.workflow_worker import InvalidWorker, UnknownProfile, worker_settings
+from infra.skill_install import upstream_workflow
 
 SIDECAR = """\
 workflow:
@@ -29,6 +30,11 @@ def test_a_sidecar_worker_block_installs_and_resolves_per_profile():
     assert worker_settings(corsia, "main") == {**base, "min_context_tokens": 1000000}
 
 
+def test_a_shared_workflow_with_a_worker_block_installs():
+    workflow = upstream_workflow("reviewer", {"corsia.yaml": SIDECAR.encode()})
+    assert workflow["workflow"]["worker"]["max_turns"] == 200
+
+
 def test_no_worker_block_leaves_every_setting_to_the_runner():
     unset = dict.fromkeys(("effort", "max_turns", "time_limit_minutes", "min_context_tokens"))
     assert worker_settings({"workflow": {"steps": []}}) == unset
@@ -37,7 +43,7 @@ def test_no_worker_block_leaves_every_setting_to_the_runner():
 
 def test_an_unknown_profile_names_the_known_ones():
     corsia, _errors = parse_sidecar(SIDECAR)
-    with pytest.raises(UnknownProfile, match="no worker profile 'release'; its profiles: main"):
+    with pytest.raises(UnknownProfile, match="defines no profile 'release'; its profiles: main"):
         worker_settings(corsia, "release")
     with pytest.raises(UnknownProfile, match="its profiles: none"):
         worker_settings({"workflow": {}}, "main")
@@ -57,6 +63,17 @@ def test_an_unknown_profile_names_the_known_ones():
 def test_install_refuses_a_bad_shape_by_name(worker, message):
     errors = validate_workflow({"workflow": {"worker": worker, "steps": [{"id": "one"}]}})
     assert len(errors) == 1 and errors[0].startswith(message), errors
+
+
+@pytest.mark.parametrize("corsia", [
+    {"workflow": {"worker": "fast"}},
+    {"workflow": {"worker": {"max_turns": "200"}}},
+    {"workflow": {"worker": {"profiles": {"main": "big"}}}},
+    {"workflow": "review"},
+])
+def test_a_block_edited_after_install_is_refused_not_defaulted(corsia):
+    with pytest.raises(InvalidWorker):
+        worker_settings(corsia, "main")
 
 
 def test_a_worker_only_workflow_is_checked_too():
