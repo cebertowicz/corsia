@@ -130,13 +130,13 @@ async def test_nothing_a_script_sends_widens_the_bound_repository(monkeypatch):
     ({"repo": "o"}, None), ({"repo": ""}, None), ({"repo": 5}, None), ({"repo": ["o/r"]}, None),
     (None, None), ("o/r", None),
 ])
-@pytest.mark.parametrize("origin", ["connector", "platform"])
-def test_the_bound_repository_is_a_recorded_events_repo_fact(facts, repo, origin):
+@pytest.mark.parametrize("origin", ["connector", "platform", "emitter"])
+def test_the_bound_repository_is_a_stored_events_repo_fact(facts, repo, origin):
     assert channel.bound_repository({"type": "x.y", "origin": origin, "facts": facts}) == repo
 
 
-@pytest.mark.parametrize("origin", ["emitter", "agent", None, "Connector"])
-def test_an_event_a_script_or_agent_wrote_binds_no_repository(origin):
+@pytest.mark.parametrize("origin", ["agent", None, "Connector"])
+def test_an_event_an_agent_wrote_binds_no_repository(origin):
     event = {"type": "qa.forged", "facts": {"repo": "other/private"},
              **({"origin": origin} if origin is not None else {})}
     assert channel.bound_repository(event) is None

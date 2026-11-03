@@ -15,6 +15,8 @@ from concurrent.futures import Future
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
+from loguru import logger
+
 _LOOP: asyncio.AbstractEventLoop | None = None
 _LOCK = threading.RLock()
 _AWAITED: set[_Handoff] = set()
@@ -81,8 +83,6 @@ class _Handoff:
         self.result.set_exception(AppLoopUnavailable(reason))
 
     def start(self) -> None:
-        from ws.ingress import track_background_task
-
         with _LOCK:
             if self.result.done():
                 return
@@ -90,8 +90,9 @@ class _Handoff:
                 self.refuse("application event loop changed before starting")
                 return
             self.task = self.loop.create_task(self.coroutine)
+            # No detached-work observer: ``completed`` hands the task's exception to its one caller in
+            # ``await_on_owner``, which reports it; ``_AWAITED`` keeps the task alive until then.
             self.task.add_done_callback(self.completed)
-            track_background_task(self.task)
 
     def completed(self, task) -> None:
         with _LOCK:
@@ -156,11 +157,10 @@ async def await_on_owner(coroutine: Coroutine[Any, Any, T], *, owner: asyncio.Ab
                 continue
             except BaseException:
                 break
-        if not future.cancelled():
-            try:
-                future.result()
-            except BaseException:
-                pass
+        error = None if future.cancelled() else future.exception()
+        if error is not None and not isinstance(error, asyncio.CancelledError):
+            # This caller raises its own cancellation instead, so it is the one that records the work's failure.
+            logger.opt(exception=error).error("Application-loop work failed after its caller was cancelled")
         raise cancelled
 
 

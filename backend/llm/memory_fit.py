@@ -3,8 +3,10 @@
 oMLX refuses a prompt whose prefill would not fit in memory before doing any
 work. The refusal states the limit L, the memory already in use C and the
 KV+SDPA cost K of this prompt of P tokens, so it teaches how many tokens fit:
-``P * (L - C) / K``. C includes whatever else the server is doing at that
-moment, so the fact holds only while the refused Turn recovers: it lives in
+``P * (L - C) / K``. A refusal between prefill chunks instead names the N tokens
+already held when the next chunk would not fit, so N fit. C includes whatever
+else the server is doing at that moment, so the fact holds only while the
+refused Turn recovers: it lives in
 process memory, keyed by (server, model), and ``end_turn`` drops it when that
 Turn ends. ``context_window.resolve_live_window_facts`` caps the runtime window
 with it; settings and catalog surfaces keep the configured one.
@@ -22,12 +24,13 @@ _AMOUNT = r"([\d.]+)\s*(GB|MB|KB)"
 # the scheduler's "(current C + KV+SDPA K) but the prefill limit is L"; the memory
 # monitor's "... but <binding> ceiling is L"; the preflight safety guard's
 # "(current C + KV K + min-chunk transient T) but prefill safety cap is L"; and
-# the chunked-step guard's "pre-chunk guard at N tokens ... prefill safety cap L",
-# which names no current or KV term and so teaches nothing.
+# the chunked-step guard's "pre-chunk guard at P tokens, kv_len=N ... prefill safety
+# cap L", which names no current or KV term but N, the tokens already held.
 _CURRENT = re.compile(r"current\s+" + _AMOUNT, re.IGNORECASE)
 _KV = re.compile(r"\+\s*KV(?:\+SDPA)?\s+" + _AMOUNT, re.IGNORECASE)
 _TRANSIENT = re.compile(r"\+\s*min-chunk transient\s+" + _AMOUNT, re.IGNORECASE)
 _LIMIT = re.compile(r"(?:prefill limit|ceiling|prefill safety cap) is\s+" + _AMOUNT, re.IGNORECASE)
+_HELD = re.compile(r"pre-chunk guard at \d+ tokens, kv_len=(\d+)", re.IGNORECASE)
 
 
 def _bytes(match: re.Match[str]) -> int:
@@ -90,14 +93,23 @@ def record_refusal(
     Outside a Turn nothing would end the observation, so nothing is recorded.
     """
     key = (server_id, model_id)
-    parsed = parse_guard_refusal(error_text)
     turn_id = _current_turn_id()
-    if not all(key) or turn_id is None or parsed is None or prompt_tokens <= 0 or parsed[2] <= 0:
+    fit = _fit_tokens(error_text, prompt_tokens)
+    if not all(key) or turn_id is None or fit is None:
         return
-    limit, current, kv = parsed
-    fit = int(prompt_tokens * (limit - current) / kv) if limit > current else 0
     # Never zero: callers treat a zero window as "no window known".
     _OBSERVATIONS[key] = _Observation(turn_id, max(1, fit))
+
+
+def _fit_tokens(error_text: str, prompt_tokens: int) -> int | None:
+    parsed = parse_guard_refusal(error_text)
+    if parsed is None:
+        held = _HELD.search(error_text)
+        return int(held.group(1)) if held else None
+    limit, current, kv = parsed
+    if prompt_tokens <= 0 or kv <= 0:
+        return None
+    return int(prompt_tokens * (limit - current) / kv) if limit > current else 0
 
 
 def end_turn(turn_id: str) -> None:

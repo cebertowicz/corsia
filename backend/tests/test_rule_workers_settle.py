@@ -336,9 +336,9 @@ async def test_script_consumes_worker_event_on_unowned_artifact(world, monkeypat
                             (kind,)).fetchone()[0] == 0
 
 
-# 6 -- a valid result on a request's artifact reaches that artifact's owner through rule 0.
-@pytest.mark.asyncio
-async def test_a_result_on_an_artifact_reaches_its_owner_through_rule_0(world, monkeypatch):
+async def _result_on_a_prs_artifact(world, monkeypatch, took: bool):
+    """A valid result for a PR's start, with the rule owner's own script taking it or not;
+    the PR's owner and what reached it, as (thread, facts)."""
     from tests.event_routing_helpers import mk_session, pr_payload, register_pr, route
 
     repo = "o/r"
@@ -350,6 +350,8 @@ async def test_a_result_on_an_artifact_reaches_its_owner_through_rule_0(world, m
                         else frozenset())
     pr_owner = mk_session("rw-pr-owner", project_id=world["project"])
     register_pr(repo, 7, pr_owner)
+    if took:
+        await _script_rule(owner_script(world, monkeypatch, "took.sh"), "result")
     created = await atool(OWNER, operation="create", connector="github", event_type="pr.synchronize",
                           action="start_worker", workflow_id="worker-flow", request_identity_fact="sha",
                           match=[{"field": "sha", "op": "present"}])
@@ -365,6 +367,23 @@ async def test_a_result_on_an_artifact_reaches_its_owner_through_rule_0(world, m
     delivered = [(row["thread_id"], json.loads(row["content"].split("Details:\n", 1)[1].split("\n\n")[0]))
                  for row in get_db().execute("SELECT thread_id, content FROM messages "
                                              "WHERE content LIKE '[EVENT: result]%'")]
+    if took:
+        await run_scripts()
+        assert len(world["script_inputs"]) == 1
+    return pr_owner, delivered
+
+
+# 6 -- a valid result on a request's artifact reaches that artifact's owner through rule 0.
+@pytest.mark.asyncio
+async def test_a_result_on_an_artifact_reaches_its_owner_through_rule_0(world, monkeypatch):
+    pr_owner, delivered = await _result_on_a_prs_artifact(world, monkeypatch, took=False)
     assert [thread for thread, _ in delivered] == [pr_owner]
     facts = delivered[0][1]
-    assert facts["requester"] == OWNER and facts["item"] == f"{repo}#7" and facts["valid"] is True
+    assert facts["requester"] == OWNER and facts["item"] == "o/r#7" and facts["valid"] is True
+
+
+# 6b -- the same result, taken by the rule owner's own run_script: the item's owner is not also sent it.
+@pytest.mark.asyncio
+async def test_a_result_its_rule_owners_script_took_does_not_reach_the_items_owner(world, monkeypatch):
+    _pr_owner, delivered = await _result_on_a_prs_artifact(world, monkeypatch, took=True)
+    assert delivered == []
