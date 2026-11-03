@@ -238,6 +238,8 @@
 								<Button variant="primary" onclick={() => (onShell ? void startCorsia('manual') : handOver(true))} loading={starting} bind:el={startActionEl}>Start CORSIA</Button>
 							</div>
 						{/if}
+					{:else if view.mode === 'start_failed' || view.mode === 'failed'}
+						<p class="detail">Open CORSIA on {hostName ?? 'your main computer'}.</p>
 					{:else}
 						<p class="detail">If CORSIA doesn’t come back, open it on {hostName ?? 'your main computer'}.</p>
 					{/if}

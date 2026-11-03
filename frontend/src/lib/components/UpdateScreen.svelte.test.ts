@@ -86,4 +86,10 @@ describe('UpdateScreen remote copy', () => {
 		expect(document.body.textContent).toContain('If CORSIA doesn’t come back, open it on your main computer.');
 		expect(document.body.textContent?.split('main computer').length).toBe(2);
 	});
+
+	it.each(['start_failed', 'failed'] as const)('tells a paired computer to open CORSIA on the main computer once the restart failed (%s)', (mode) => {
+		showRemote({ operationId: 'update-1', mode, step: 'restarting', label: 'Restarting CORSIA', percent: 80, estimated: false, fromVersion: null, toVersion: null, failure: null, serviceDown: true });
+		expect(document.body.textContent).toContain('Open CORSIA on Studio Mac.');
+		expect(document.body.textContent).not.toContain('doesn’t come back');
+	});
 });
