@@ -40,6 +40,9 @@ _HUMAN_ONLY_HOST_ACCESS_SETTINGS = frozenset({
     "host_access_auto_approve",
     "host_access_reviewer_fallback",
 })
+# Settings that send data off this computer are the person's choice, so only a
+# human session may save them.
+_HUMAN_ONLY_SHARING_SETTINGS = frozenset({"live_bulletins", "usage_sharing"})
 _EXACT_REVIEWER_MODELS = ("host_access_reviewer_model", "reviewer_model", "reviewer_fallback_model")
 _BOOLEAN_SETTINGS = ("host_access_auto_approve", "host_access_reviewer_fallback", "usage_sharing")
 
@@ -261,7 +264,7 @@ async def update_settings(body: dict, user: dict = Depends(require_user)):
     if "devices" in body:
         raise HTTPException(400, "Devices must be changed through /api/devices")
 
-    if _HUMAN_ONLY_HOST_ACCESS_SETTINGS.intersection(body) or "live_bulletins" in body:
+    if (_HUMAN_ONLY_HOST_ACCESS_SETTINGS | _HUMAN_ONLY_SHARING_SETTINGS).intersection(body):
         require_human_user(user)
     if any(key in body for key in _EXACT_REVIEWER_MODELS) and not _conductor_sets_reviewer(user, body):
         require_human_user(user)

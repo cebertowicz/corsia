@@ -44,9 +44,14 @@ def test_a_non_boolean_is_refused_and_nothing_is_saved(isolated_db):
     assert get_setting(USAGE_SHARING_KEY) is None
 
 
-def test_a_damaged_saved_value_reads_as_the_default(isolated_db):
-    from infra.settings import USAGE_SHARING_KEY, get_usage_sharing, set_setting
+@pytest.mark.parametrize("raw", ['{"enabled": "off"}', "not json", "[false]"])
+def test_a_damaged_saved_value_reads_as_off(isolated_db, raw):
+    from infra.database import get_db
+    from infra.settings import USAGE_SHARING_KEY, get_usage_sharing
 
-    set_setting(USAGE_SHARING_KEY, {"enabled": "off"})
+    db = get_db()
+    db.execute("INSERT INTO settings (key, value, updated_at) VALUES (?, ?, '2026-11-03T00:00:00Z')",
+               (USAGE_SHARING_KEY, raw))
+    db.commit()
 
-    assert get_usage_sharing() is True
+    assert get_usage_sharing() is False

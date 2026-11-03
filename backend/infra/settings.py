@@ -95,17 +95,29 @@ def _deep_merge(base: dict, override: dict) -> dict:
 #: The person's usage-sharing choice, made in setup's account step or Settings.
 #: It gates only a future upload; local usage recording never reads it.
 USAGE_SHARING_KEY = "usage_sharing"
-
-
-def usage_sharing_default() -> bool:
-    """Sharing is on until the person turns it off: the one rule for the default."""
-    return True
+#: On until the person turns it off. No saved row is the only state that reads as this default.
+USAGE_SHARING_DEFAULT = True
 
 
 def get_usage_sharing(*, db: sqlite3.Connection | None = None) -> bool:
-    """The saved choice, or the default when none is saved."""
-    saved = (get_setting(USAGE_SHARING_KEY, db=db) or {}).get("enabled")
-    return saved if isinstance(saved, bool) else usage_sharing_default()
+    """The saved choice, or the default when none is saved.
+
+    A saved value that can't be read counts as off and is logged, so damage to a
+    person's "off" never reads as consent.
+    """
+    db = db if db is not None else get_db()
+    row = db.execute("SELECT value FROM settings WHERE key = ?", (USAGE_SHARING_KEY,)).fetchone()
+    if row is None:
+        return USAGE_SHARING_DEFAULT
+    try:
+        saved = json.loads(row["value"])
+    except (json.JSONDecodeError, TypeError):
+        saved = None
+    enabled = saved.get("enabled") if isinstance(saved, dict) else None
+    if isinstance(enabled, bool):
+        return enabled
+    log.warning("usage_sharing: saved value is unreadable; treating it as off")
+    return False
 
 
 def save_usage_sharing(enabled: bool, *, db: sqlite3.Connection | None = None) -> None:
