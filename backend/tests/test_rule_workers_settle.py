@@ -370,6 +370,34 @@ async def test_a_result_on_an_artifact_reaches_its_owner_through_rule_0(world, m
     assert facts["requester"] == OWNER and facts["item"] == f"{repo}#7" and facts["valid"] is True
 
 
+# 6b -- the owner's script on a worker.result for a PR gets that PR's repository as its read
+# channel, but only while the project tracks the repository.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tracked, expected", [(True, "o/r"), (False, None)])
+async def test_a_script_on_a_pr_result_gets_the_prs_repository_channel(world, monkeypatch, tracked, expected):
+    from tests.event_routing_helpers import mk_session, pr_payload, register_pr, route
+
+    repo = "o/r"
+    monkeypatch.setattr("events.connectors.github_notifications_feed.tracked_github_repositories",
+                        lambda project_id=None: frozenset({repo}) if tracked and project_id == world["project"]
+                        else frozenset())
+    monkeypatch.setattr("events.connectors.github_notifications_feed.projects_tracking_github_repository",
+                        lambda repository: frozenset({world["project"]}) if tracked and repository == repo
+                        else frozenset())
+    register_pr(repo, 7, mk_session("rw-pr-owner", project_id=world["project"]))
+    await _script_rule(owner_script(world, monkeypatch, "publish.sh"), "result")
+    created = await atool(OWNER, operation="create", connector="github", event_type="pr.synchronize",
+                          action="start_worker", workflow_id="worker-flow", request_identity_fact="sha",
+                          match=[{"field": "sha", "op": "present"}])
+    assert isinstance(created, dict), created
+    with patch("events.delivery.send_thread_input", AsyncMock()):
+        await route("webhook.github.pr_synchronize", pr_payload(repo, 7, action="synchronize"))
+        await settle_all()
+    await run_scripts()
+    assert [event["type"] for event in world["script_inputs"]] == ["worker.result"]
+    assert world["script_repos"] == [expected]
+
+
 # The settled worker's model and cost ride on its event, each only when CORSIA knows it.
 def _worker_thread(db, model: str | None = "claude-code/opus") -> None:
     db.execute("INSERT INTO threads (id,user_id,title,agent_enabled,agent_status,model,created_at,updated_at) "

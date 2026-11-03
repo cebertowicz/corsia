@@ -196,6 +196,7 @@ def owner_script(world, monkeypatch, name: str) -> str:
 
     async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None, trace=(), rule_id=None, github_repo=None):
         world["script_inputs"].append(json.loads(stdin) if stdin is not None else None)
+        world.setdefault("script_repos", []).append(github_repo)
         return ScriptRun(0, b"", b"", False)
 
     monkeypatch.setattr(script_runner, "run_script", fake)
