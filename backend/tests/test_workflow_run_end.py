@@ -80,25 +80,26 @@ async def test_a_failed_required_step_closes_the_rest_of_the_run_with_the_reason
     ]
 
 
-async def test_a_started_step_the_failure_cuts_short_reads_closed_with_the_reason(isolated_db, tmp_path, monkeypatch):
+async def test_a_started_step_the_failure_cuts_short_reads_stopped_with_the_reason(isolated_db, tmp_path, monkeypatch):
     run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, PLAIN)})
     reply = await run.start("ship")
     draft, review, polish = (step["id"] for step in reply["steps"])
     started = await run.update("start", _args(run, review))
     assert not isinstance(started, str), started
 
-    await run.update("fail", _args(run, draft))
+    failed = await run.update("fail", _args(run, draft))
 
     (record,) = _ended(run, reply["node"]["id"])
     assert [(entry["step"], entry["state"], entry["skip_reason"]) for entry in record["steps"]] == [
         ("draft", "failed", None),
-        ("review", "closed", "Closed because required task draft failed."),
+        ("review", "stopped", "Closed because required task draft failed."),
         ("polish", "not_run", None),
     ]
     assert [entry["node_ids"] for entry in record["steps"]] == [[draft], [review], [polish]]
+    assert failed["run_summary"].startswith("Run ship failed: 0 done, 0 skipped, 1 stopped, 1 not run, 1 failed")
 
 
-async def test_a_failed_required_step_closes_nested_steps_and_an_optional_failure_ends_nothing(isolated_db, tmp_path, monkeypatch):
+async def test_a_failed_required_inner_step_fails_the_outer_run_and_an_optional_failure_ends_nothing(isolated_db, tmp_path, monkeypatch):
     run = Run(tmp_path, monkeypatch, NESTED)
     reply = await run.start("outer")
     design, ship = (step["id"] for step in reply["steps"])
@@ -106,11 +107,15 @@ async def test_a_failed_required_step_closes_nested_steps_and_an_optional_failur
     await run.update("fail", _args(run, note))
     assert [_state(run, node) for node in (ship, sketch, note)] == ["pending", "pending", "failed"]
 
-    await run.update("fail", _args(run, sketch))
+    failed = await run.update("fail", _args(run, sketch))
 
-    assert _state(run, ship) == "pending"
+    assert _state(run, ship) == "closed"
     assert [record["outcome"] for record in _ended(run, design)] == ["failed"]
-    assert _ended(run, reply["node"]["id"]) == []
+    (record,) = _ended(run, reply["node"]["id"])
+    assert (record["outcome"], {entry["step"]: entry["state"] for entry in record["steps"]}) == (
+        "failed", {"design": "failed", "ship": "not_run"},
+    )
+    assert failed["run_summary"].startswith("Run outer failed: 0 done, 0 skipped, 1 not run, 1 failed")
 
 
 async def test_a_sent_back_required_step_does_not_end_the_run(isolated_db, tmp_path, monkeypatch):
@@ -232,18 +237,25 @@ async def test_an_outer_failure_records_a_nested_run_it_cut_short_as_not_run(iso
     assert failed["run_summary"].startswith("Run outer failed: 0 done, 0 skipped, 1 not run, 1 failed")
 
 
-async def test_a_failed_nested_run_reads_failed_in_the_outer_record(isolated_db, tmp_path, monkeypatch):
-    run = Run(tmp_path, monkeypatch, NESTED)
+async def test_a_failed_optional_nested_run_reads_failed_in_the_outer_record_and_ends_nothing_else(isolated_db, tmp_path, monkeypatch):
+    optional = {
+        "outer": ("# Outer\n", (
+            "    - {id: design, workflow: inner, check: Design approved, difficulty: {default: standard}}\n"
+            "    - {id: ship, required: true, check: Shipped, difficulty: {default: routine}}\n"
+        )),
+        "inner": NESTED["inner"],
+    }
+    run = Run(tmp_path, monkeypatch, optional)
     reply = await run.start("outer")
     design, ship = (step["id"] for step in reply["steps"])
     sketch, _note = (step["id"] for step in reply["steps"][0]["steps"])
     await run.update("fail", _args(run, sketch))
-    assert _ended(run, reply["node"]["id"]) == []
+    assert _state(run, ship) == "pending" and _ended(run, reply["node"]["id"]) == []
     await _finish(run, ship)
 
     (record,) = _ended(run, reply["node"]["id"])
     assert (record["outcome"], {entry["step"]: entry["state"] for entry in record["steps"]}) == (
-        "failed", {"design": "failed", "ship": "done"},
+        "completed", {"design": "failed", "ship": "done"},
     )
 
 
@@ -404,3 +416,28 @@ async def test_a_required_step_another_path_closes_fails_the_run(isolated_db, tm
     (record,) = _ended(run, phase)
     assert record["outcome"] == "failed"
     assert closed["run_summary"].startswith("Run ship failed: 1 done, 2 skipped")
+
+
+async def test_the_persons_wont_do_on_a_required_step_fails_the_run(isolated_db, tmp_path, monkeypatch):
+    from plans import user_settle
+
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, PLAIN)})
+    reply = await run.start("ship")
+    phase = reply["node"]["id"]
+    draft, review, polish = (step["id"] for step in reply["steps"])
+    await _finish(run, draft)
+    db = get_db()
+    try:
+        user_settle.settle(
+            "close_node", {"node_id": review, "expected_revision": run.revision(review)}, "user",
+            {"db": db, "actor_id": "user", "provenance": "user"},
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    assert _state(run, polish) == "closed"
+    (record,) = _ended(run, phase)
+    assert (record["outcome"], {entry["step"]: entry["state"] for entry in record["steps"]}) == (
+        "failed", {"draft": "done", "review": "closed", "polish": "not_run"},
+    )

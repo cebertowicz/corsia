@@ -20,9 +20,10 @@ RUN_FAILED = "Closed because required task {title} failed."
 RUN_LEFT_OPEN = "The run stays open until these settle, since their workers still have open work: {titles}."
 _PROVENANCE = "plans.workflow_run"
 _DONE = "done"
-#: A step the run's failure closed before anyone started it. A started step it cut short reads ``closed``
-#: with the failure as its reason, so its time and cost are never filed under work not attempted.
+#: A step the run's failure closed before anyone started it.
 _NOT_RUN = "not_run"
+#: A started step the run's failure cut short: never filed under work not attempted, nor under an agent's skip.
+_STOPPED = "stopped"
 
 
 def _run_phase(db, node) -> bool:
@@ -56,8 +57,9 @@ def open_nodes(db, phase_id: str) -> list[str]:
 
 
 def fail_run(node_id: str, common: dict) -> tuple[list[str], list[str]]:
-    """After a required step fails, close the run's other open work with the reason.
+    """After a required step ends not done, close the run's other open work with the reason.
 
+    A run that is itself a required step of an outer run fails that run too.
     Returns the ids closed and the ids whose close was refused. The closes carry
     this module's provenance, which is how the run's record tells a step never
     reached from one an agent chose to skip. Work whose close is refused (a
@@ -96,7 +98,8 @@ def fail_run(node_id: str, common: dict) -> tuple[list[str], list[str]]:
             closed.append(open_id)
             progress = True
     still_open = [open_id for open_id in refused if service._node_row(db, open_id)["state"] not in service._TERMINAL_STATES]
-    return closed, still_open
+    outer_closed, outer_open = fail_run(node["parent_id"], common)
+    return closed + outer_closed, still_open + outer_open
 
 
 def record_if_ended(db, node_id: str, new_state: str) -> None:
@@ -161,7 +164,7 @@ def _steps(db, phase) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     current = [rows[-1] for rows in by_step.values()]
     closed = [row for row in current if row["state"] == service.CLOSED]
     skipped = closure.settled_reasons(db, closed)
-    not_run = _closed_by_failure(db, [row["id"] for row in closed])
+    by_failure = _closed_by_failure(db, [row["id"] for row in closed])
     listed = []
     for step, rows in by_step.items():
         last = rows[-1]
@@ -174,8 +177,8 @@ def _steps(db, phase) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                 state = _DONE if inner["outcome"] == "completed" else "failed"
         else:
             state = _DONE if last["state"] in service._ACCEPTED_STATES else last["state"]
-            if last["id"] in not_run:
-                state = _NOT_RUN
+            if last["id"] in by_failure:
+                state = by_failure[last["id"]]
             elif last["archived_at"] is not None and last["state"] not in service._TERMINAL_STATES:
                 state = service.CLOSED  # archiving an open optional step skips it
         # A step's rounds never overlap (a send-back or follow-up settles a round before the
@@ -185,7 +188,7 @@ def _steps(db, phase) -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "step": step, "state": state, "required": created.get("workflow_required") is True,
             "by": created.get("workflow_by", "agent"), "rounds": len(rows) - 1,
             "node_ids": [str(row["id"]) for row in rows],
-            "skip_reason": skipped.get(last["id"]) if state == service.CLOSED else None,
+            "skip_reason": skipped.get(last["id"]) if state in (service.CLOSED, _STOPPED) else None,
             "execution_seconds": sum(item["execution"]["seconds"] for item in figures),
             "waiting_seconds": sum(item["waiting"]["seconds"] for item in figures),
             "model_cost_usd": _sum(item["model_cost_usd"]["known"] for item in figures),
@@ -201,15 +204,15 @@ def _steps(db, phase) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return listed, totals
 
 
-def _closed_by_failure(db, node_ids: list[str]) -> set[str]:
-    """Of ``node_ids``, the ones a failed required step closed (``fail_run``) before they started."""
+def _closed_by_failure(db, node_ids: list[str]) -> dict[str, str]:
+    """Of ``node_ids``, the ones a failed required step closed (``fail_run``): not run if never started, else stopped."""
     if not node_ids:
-        return set()
+        return {}
     marks = ",".join("?" * len(node_ids))
-    return {str(row["node_id"]) for row in db.execute(
-        "SELECT node_id FROM plan_node_events WHERE event='state_transition' AND new_state=?"
-        f" AND prior_state=? AND provenance=? AND node_id IN ({marks})",
-        (service.CLOSED, "pending", _PROVENANCE, *node_ids),
+    return {str(row["node_id"]): _NOT_RUN if row["prior_state"] == "pending" else _STOPPED for row in db.execute(
+        "SELECT node_id,prior_state FROM plan_node_events WHERE event='state_transition' AND new_state=?"
+        f" AND provenance=? AND node_id IN ({marks})",
+        (service.CLOSED, _PROVENANCE, *node_ids),
     )}
 
 
@@ -257,8 +260,9 @@ def _line(record: dict[str, Any]) -> str:
     hours, rest = divmod(seconds, 3600)
     minutes, secs = divmod(rest, 60)
     elapsed = f"{hours}h {minutes}m" if hours else f"{minutes}m {secs}s" if minutes else f"{secs}s"
+    stopped = f"{count(_STOPPED)} stopped, " if count(_STOPPED) else ""
     return (
         f"Run {record['workflow_ref']} {record['outcome']}: {count(_DONE)} done, "
-        f"{count(service.CLOSED)} skipped, {count(_NOT_RUN)} not run, {count('failed')} failed, {elapsed}, "
+        f"{count(service.CLOSED)} skipped, {stopped}{count(_NOT_RUN)} not run, {count('failed')} failed, {elapsed}, "
         + ("cost unknown" if cost is None or record["cost_unknown_rows"] else f"${cost:.2f}") + "."
     )
