@@ -60,7 +60,7 @@ def mail_with(*files: tuple[str, str, bytes], inline_image: bool = False) -> byt
     msg.set_content("See attached.")
     if inline_image:
         msg.add_alternative('<p>hi <img src="cid:logo"></p>', subtype="html")
-        msg.get_payload()[1].add_related(b"\x89PNG-bytes", "image", "png", cid="<logo>", disposition="inline")
+        list(msg.iter_parts())[1].add_related(b"\x89PNG-bytes", "image", "png", cid="<logo>", disposition="inline")
     for name, mime, data in files:
         maintype, subtype = mime.split("/")
         msg.add_attachment(data, maintype=maintype, subtype=subtype, filename=name)

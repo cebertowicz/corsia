@@ -24,7 +24,7 @@ _ESCAPE = re.compile(rb"\\(.)")
 _BASE64_RATIO = (57, 78)
 
 
-def _leaves(msg: email.message.EmailMessage) -> Iterator[email.message.EmailMessage]:
+def _leaves(msg: email.message.MIMEPart) -> Iterator[email.message.MIMEPart]:
     if msg.is_multipart() and msg.get_content_type() != "message/rfc822":
         for part in msg.iter_parts():
             yield from _leaves(part)
@@ -32,17 +32,17 @@ def _leaves(msg: email.message.EmailMessage) -> Iterator[email.message.EmailMess
         yield msg
 
 
-def _attachment_leaves(msg: email.message.EmailMessage) -> list[email.message.EmailMessage]:
+def _attachment_leaves(msg: email.message.MIMEPart) -> list[email.message.MIMEPart]:
     return [p for p in _leaves(msg) if p.get_filename() or p.get_content_disposition() == "attachment"]
 
 
-def _payload(part: email.message.EmailMessage) -> bytes:
+def _payload(part: email.message.MIMEPart) -> bytes:
     if part.get_content_type() == "message/rfc822":
         return part.get_payload(0).as_bytes()  # type: ignore[union-attr]
     return part.get_payload(decode=True) or b""  # type: ignore[return-value]
 
 
-def listed(msg: email.message.EmailMessage) -> tuple[Attachment, ...]:
+def listed(msg: email.message.MIMEPart) -> tuple[Attachment, ...]:
     """The attachments of a fully fetched message."""
     return tuple(Attachment(p.get_filename() or "", p.get_content_type(), len(_payload(p)), str(index))
                  for index, p in enumerate(_attachment_leaves(msg)))
@@ -93,8 +93,10 @@ def _leaf(part: list, index: int) -> Attachment | None:
     mime = f"{part[0]}/{part[1]}".lower()
     extension = 8 if part[0] and str(part[0]).lower() == "text" else 10 if mime == "message/rfc822" else 7
     disposition = part[extension + 1] if len(part) > extension + 1 else None
-    kind = str(disposition[0]).lower() if isinstance(disposition, list) and disposition else ""
-    sources = (_params(disposition[1] if kind and len(disposition) > 1 else None), _params(part[2]))
+    if not isinstance(disposition, list):
+        disposition = []
+    kind = str(disposition[0]).lower() if disposition else ""
+    sources = (_params(disposition[1] if len(disposition) > 1 else None), _params(part[2]))
     name = next((_decoded(key, params[key]) for params in sources
                  for key in ("FILENAME*", "FILENAME", "NAME*", "NAME") if params.get(key)), "")
     if not name and kind != "attachment":
