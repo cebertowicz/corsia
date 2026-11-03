@@ -68,3 +68,21 @@ def with_attachment_notes(content: str, notes: str) -> str:
     if not notes:
         return content
     return f"{content}\n\n{notes}" if content else notes
+
+
+def store_attachment_notes(batch, notes: str, db=None) -> None:
+    """Keep the note block a provider message carried on the batch's last row.
+
+    Replay appends it to that row's visible content, so the replayed message is
+    the live one without reading the upload registry again.
+    """
+    if not notes:
+        return
+    from infra.database import write_transaction
+
+    with write_transaction(db, scope="store_attachment_notes") as connection:
+        connection.execute(
+            "UPDATE messages SET metadata=json_set(COALESCE(metadata,'{}'),"
+            "'$.attachment_notes',?) WHERE id=?",
+            (notes, batch.items[-1].message_id),
+        )

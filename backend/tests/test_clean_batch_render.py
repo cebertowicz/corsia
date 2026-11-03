@@ -197,3 +197,66 @@ def test_fresh_schema_does_not_create_orphaned_declaration_ledger() -> None:
         ).fetchone() is None
     finally:
         db.close()
+
+
+def test_an_attachment_note_is_stored_with_the_input_and_replays_byte_identical(
+    main_db, tmp_path, monkeypatch,
+) -> None:
+    """The note a provider saw, saved path included, is the note history replays.
+
+    Dispatch stores the projection's own note block on the batch's last row, so
+    replay appends it after the unchanged visible content with the live join and
+    never re-reads the upload registry.
+    """
+    import json
+
+    from core.message_history import db_to_llm_history
+    from infra import config
+    from infra.input_admission import accept_thread_input
+    from infra.input_render import project_claimed_input
+    from core.attachment_notes import store_attachment_notes
+    from infra.input_writes import begin_batch_write
+    from infra.send_broadcast import _PRIVATE_METADATA_KEYS
+    from infra.thread_inputs import start_idle_turn
+    from registry import models
+
+    root = tmp_path.resolve()
+    monkeypatch.setattr(config, "WORKSPACE", root)
+    upload = root / ".threads" / "main-1" / "uploads" / "f1" / "spec.pdf"
+    upload.parent.mkdir(parents=True)
+    upload.write_bytes(b"x")
+    models.register_artifact(
+        integration="upload", type="upload", external_id="f1",
+        parent_thread_id="main-1", path=str(upload),
+    )
+    attachment = {"file_id": "f1", "filename": "spec.pdf", "mime_type": "application/pdf"}
+    monkeypatch.setattr(
+        "core.media_delivery.build_delivery_projection",
+        lambda attachments, **_kwargs: (attachments, SimpleNamespace(digests=())),
+    )
+
+    accept_thread_input(
+        "main-1", role="user", content="read this", intent="apply_now",
+        message_id="with-pdf", delivery_options={"attachments": [attachment]},
+        db=main_db,
+    )
+    main_db.commit()
+    batch = start_idle_turn("main-1", turn_id="turn-pdf", boot_epoch="test",
+                            started_at="t", db=main_db)
+    live = project_claimed_input(
+        main_db, batch, thread_row={"user_id": "steve"}, target=SimpleNamespace(),
+    )
+    store_attachment_notes(batch, live.attachment_notes, db=main_db)
+    begin_batch_write(batch, attempt_id="attempt-pdf", started_at="t", db=main_db)
+    row = dict(main_db.execute("SELECT * FROM messages WHERE id='with-pdf'").fetchone())
+
+    expected = (
+        "[Document attached: spec.pdf, saved at .threads/main-1/uploads/f1/spec.pdf]"
+    )
+    assert live.content == f"read this\n\n{expected}"
+    assert row["content"] == "read this"
+    assert json.loads(row["metadata"])["attachment_notes"] == expected
+    assert "attachment_notes" in _PRIVATE_METADATA_KEYS
+    # Replay must not consult the registry: remove the upload before rebuilding.
+    upload.unlink()
+    assert db_to_llm_history([row]) == [{"role": "user", "content": live.content}]

@@ -38,6 +38,7 @@ class InputProviderProjection:
     attachments: tuple[dict[str, Any], ...]
     media_projection: Any | None
     receipts: tuple[Any, ...]
+    attachment_notes: str = ""
 
 
 @dataclass(slots=True)
@@ -56,6 +57,7 @@ class PreparedBatch:
     refresh_prepared_context: Any
     runtime_truth: dict
     batch: ClaimedBatch | None = None
+    attachment_notes: str = ""
 
 
 def projected_input_tokens(projection: InputProviderProjection, target) -> int:
@@ -222,6 +224,7 @@ def _render_input_projection(
         attachments,
         media_projection,
         batch.items,
+        notes,
     )
 
 
@@ -337,8 +340,7 @@ async def prepare_claimed_batch(
         batch.thread_id, thread_row, target=target,
     )
     if not truth.get("addressable", True):
-        detail = str(truth.get("addressability_error") or "unavailable")
-        raise SendRejected(409, detail)
+        raise SendRejected(409, str(truth.get("addressability_error") or "unavailable"))
     provider, is_subagent = provider_for(str(truth["execution_class"]))
     projection = await _load_input_projection_async(batch, thread_row, target)
     async def preflight(current_truth, current_thread_row):
@@ -389,11 +391,10 @@ async def prepare_claimed_batch(
         target,
         provider,
         is_subagent,
-        projection.content,
-        projection.agent_envelope,
-        list(projection.attachments),
-        projection.media_projection,
+        projection.content, projection.agent_envelope,
+        list(projection.attachments), projection.media_projection,
         _native_prepared_context(provider, result.get("prepared_context")),
         refresh_prepared_context,
         truth,
+        attachment_notes=projection.attachment_notes,
     )

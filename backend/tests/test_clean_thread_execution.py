@@ -1389,7 +1389,7 @@ async def test_archived_after_preflight_never_reaches_provider(
     assert admission.batch is not None
 
     async def prepare(*_args, **_kwargs):
-        return SimpleNamespace(provider="native", batch=None)
+        return SimpleNamespace(provider="native", batch=None, attachment_notes="")
 
     async def dispatch(*_args, **_kwargs):
         pytest.fail("archived input reached provider dispatch")

@@ -7,6 +7,7 @@ import uuid
 
 from core.guidance_manifest import record_dispatch_manifest
 from core.installed_context import persist_prepared_installed_context
+from core.attachment_notes import store_attachment_notes
 from infra.db_async import run_in_db
 from infra.failed_wake_surface import drive_failed_wake_owners
 from infra.input_render import PreparedBatch
@@ -136,10 +137,8 @@ async def _dispatch_prepared(
 
     if after_persist_before_dispatch is not None:
         await after_persist_before_dispatch(prepared.target)
-    await run_in_db(
-        persist_prepared_installed_context,
-        batch.thread_id, prepared.prepared_context,
-    )
+    await run_in_db(persist_prepared_installed_context, batch.thread_id, prepared.prepared_context)
+    await run_in_db(store_attachment_notes, batch, prepared.attachment_notes)
     manifest_id = await run_in_db(record_dispatch_manifest, batch.thread_id, batch.turn_id, prepared)
     if after_manifest_before_dispatch is not None:  # refusing here leaves no provider write
         await after_manifest_before_dispatch(manifest_id)

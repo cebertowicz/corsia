@@ -480,6 +480,7 @@ async def test_claimed_batch_carries_overfull_input_to_the_live_boundary(
         agent_envelope=None,
         attachments=(),
         media_projection=None,
+        attachment_notes="",
     )
 
     async def truth(*_args, **_kwargs):

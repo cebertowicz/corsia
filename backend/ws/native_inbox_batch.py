@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import replace
 
+from core.attachment_notes import store_attachment_notes
 from core.turn_iteration import NativeSafeBoundaryInput
 from infra.db_async import run_in_db
 from infra.input_writes import (
@@ -30,8 +31,10 @@ class _BoundaryWrite:
         self.batch = batch
         self.thread_row = thread_row
         self.attempt_id = str(uuid.uuid4())
+        self.attachment_notes = ""
 
     async def before_write(self) -> None:
+        await run_in_db(store_attachment_notes, self.batch, self.attachment_notes)
         await fence_batch_write(
             self.batch,
             attempt_id=self.attempt_id,
@@ -82,6 +85,7 @@ class _BoundaryWrite:
             )
         finally:
             db.close()
+        self.attachment_notes = rendered.attachment_notes
         content = ContextBuilder(WORKSPACE)._build_user_content(
             rendered.content, rendered.media_projection, model=target.transport_model,
         )

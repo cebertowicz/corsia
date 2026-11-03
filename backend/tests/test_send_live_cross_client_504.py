@@ -156,7 +156,7 @@ async def test_inbound_send_reaches_second_device_not_sender(
             msg_id="m1", now="2026-07-01T00:00:00",
             is_retry=False, is_edited=False,
             send_thread_input_fn=real_send,
-            )
+        )
     elif handler == "codex":
         await message_dispatch.handle_codex_main_message(
             sender, session, "sA", "hello",
