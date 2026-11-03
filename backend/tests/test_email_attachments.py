@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import email
+import email.policy
 import io
 import json
 import os
@@ -338,6 +340,22 @@ def test_the_structure_of_a_large_message_names_filenames_in_every_form():
         ("café.pdf", "application/pdf", 5700, "0"), ("a b.zip", "application/zip", 570, "1"),
         ("", "application/octet-stream", 57, "2"),
     ]
+
+
+def test_the_structure_reads_continued_and_charset_filenames_as_the_full_message_does():
+    reply = (b'1 (UID 9 BODYSTRUCTURE (("TEXT" "PLAIN" ("CHARSET" "utf-8") NIL NIL "7BIT" 12 1 NIL NIL NIL NIL)'
+             b'("APPLICATION" "PDF" NIL NIL NIL "BASE64" 78 NIL'
+             b' ("INLINE" ("FILENAME*0*" "utf-8\'\'R%C3%A9sum" "FILENAME*1*" "%C3%A9.pdf")) NIL NIL)'
+             b'("APPLICATION" "PDF" NIL NIL NIL "BASE64" 78 NIL'
+             b' ("ATTACHMENT" ("FILENAME*" "iso-8859-1\'en\'caf%E9.pdf")) NIL NIL) "MIXED" NIL NIL NIL))')
+    assert [(a.name, a.ref) for a in attachment_parts.from_structure(reply)] == [("Résumé.pdf", "0"), ("café.pdf", "1")]
+    full = email.message_from_bytes(
+        b"Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nhi\r\n"
+        b"--b\r\nContent-Type: application/pdf\r\nContent-Disposition: inline;\r\n"
+        b" filename*0*=utf-8''R%C3%A9sum; filename*1*=%C3%A9.pdf\r\n\r\nA\r\n"
+        b"--b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment;\r\n"
+        b" filename*=iso-8859-1'en'caf%E9.pdf\r\n\r\nB\r\n--b--\r\n", policy=email.policy.default)
+    assert [a.name for a in attachment_parts.listed(full)] == ["Résumé.pdf", "café.pdf"]
 
 
 # -- the tool ----------------------------------------------------------------------------------------

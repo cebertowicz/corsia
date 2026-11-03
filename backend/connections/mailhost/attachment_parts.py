@@ -12,9 +12,9 @@ import email
 import email.header
 import email.message
 import email.policy
+import email.utils
 import re
 from collections.abc import Iterator
-from urllib.parse import unquote
 
 from connections.mail.received_attachments import Attachment
 
@@ -80,13 +80,19 @@ def _params(value: object) -> dict[str, str]:
     return {str(k).upper(): str(v) for k, v in zip(value[::2], value[1::2]) if v is not None}
 
 
-def _decoded(key: str, value: str) -> str:
+def _named(params: dict[str, str], base: str) -> str:
+    """One parameter as ``get_filename()`` reads it: RFC 2231 continuations and charsets, or encoded words."""
+    pairs = [(key.lower(), value) for key, value in params.items() if key == base or key.startswith(base + "*")]
+    if not pairs:
+        return ""
     try:
-        if key.endswith("*"):
-            return unquote(value.split("'", 2)[-1])
-        return str(email.header.make_header(email.header.decode_header(value)))
+        value = next((v for k, v in email.utils.decode_params([("", "")] + pairs)[1:] if k == base.lower()), "")
+        text = email.utils.unquote(email.utils.collapse_rfc2231_value(value))
+        if isinstance(value, tuple):
+            return text
+        return str(email.header.make_header(email.header.decode_header(text)))
     except (LookupError, ValueError, UnicodeError):
-        return value
+        return ""
 
 
 def _leaf(part: list, index: int) -> Attachment | None:
@@ -97,8 +103,8 @@ def _leaf(part: list, index: int) -> Attachment | None:
         disposition = []
     kind = str(disposition[0]).lower() if disposition else ""
     sources = (_params(disposition[1] if len(disposition) > 1 else None), _params(part[2]))
-    name = next((_decoded(key, params[key]) for params in sources
-                 for key in ("FILENAME*", "FILENAME", "NAME*", "NAME") if params.get(key)), "")
+    name = next((found for params in sources for base in ("FILENAME", "NAME")
+                 if (found := _named(params, base))), "")
     if not name and kind != "attachment":
         return None
     size = int(part[6]) if str(part[6]).isdigit() else 0
