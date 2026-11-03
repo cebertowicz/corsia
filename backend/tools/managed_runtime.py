@@ -63,6 +63,8 @@ RUNTIME_PINS: dict[str, dict[str, RuntimePin]] = {
     "gws": {
         "arm64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-aarch64-apple-darwin.tar.gz", "1d2a9ffd5bc9b2c2c4b48630daf082fad13d9e57d741988a2c248eed562f7dac", "tar.gz", "gws"),
         "x86_64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-x86_64-apple-darwin.tar.gz", "51f9bd731404d4bba26c36e2e30dd68c56dccd1f834c01252cb0b14d6a6544b2", "tar.gz", "gws"),
+        "linux-x86_64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-x86_64-unknown-linux-gnu.tar.gz", "de78ecdbd2f1a84cca0063a7ecbc440240fc14b6ebccbb17f4646b792a8c5c1f", "tar.gz", "gws"),
+        "linux-arm64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-aarch64-unknown-linux-gnu.tar.gz", "94490295d9580e1e88574e715a0a162991747d12d62f8c7b8dcc8268b6c1cea0", "tar.gz", "gws"),
     },
 }
 COMMAND_RUNTIME = {"node": "node", "npm": "node", "npx": "node", "uv": "uv", "uvx": "uv", "gh": "gh"}
@@ -129,6 +131,18 @@ def _valid_install(directory: Path, kind: str, arch: str, pin: RuntimePin) -> bo
 def runtime_is_installed(kind: str, *, root: Path | None = None, arch: str | None = None) -> bool:
     selected, pin = _pin(kind, arch)
     return _valid_install(_install_dir(kind, selected, pin, root or runtime_cache_root()), kind, selected, pin)
+
+
+def installed_runtime_path(kind: str, *, root: Path | None = None) -> Path | None:
+    """The verified executable of a pinned runtime for this machine, or None; fetches nothing."""
+    try:
+        arch = macos_arch()
+        selected = f"linux-{arch}" if platform.system() == "Linux" else arch
+        _selected, pin = _pin(kind, selected)
+    except ManagedRuntimeError:
+        return None
+    install = _install_dir(kind, selected, pin, root or runtime_cache_root())
+    return _expected_executable(install, pin) if _valid_install(install, kind, selected, pin) else None
 
 
 def runtime_fetch_plan(command: str, *, path: str | None = None, root: Path | None = None) -> tuple[str, RuntimePin] | None:

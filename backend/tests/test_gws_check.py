@@ -136,9 +136,9 @@ def test_the_tool_text_is_the_approved_text_and_the_tool_is_counted_not_named(tm
     assert index.count('- 1 more for a connected account: tools_load(pack="google_workspace")') == 1
 
 
-def test_gws_is_pinned_with_a_checksum_for_each_mac():
+def test_gws_is_pinned_with_a_checksum_for_each_mac_and_linux_machine():
     pins = RUNTIME_PINS["gws"]
-    assert set(pins) == {"arm64", "x86_64"}
+    assert set(pins) == {"arm64", "x86_64", "linux-arm64", "linux-x86_64"}
     for pin in pins.values():
         assert pin.version == "0.22.5" and "/v0.22.5/" in pin.url and pin.executable == "gws"
         assert re.fullmatch(r"[0-9a-f]{64}", pin.sha256)

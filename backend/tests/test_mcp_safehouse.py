@@ -584,14 +584,14 @@ def test_gws_runs_in_the_agent_workspace_with_private_state_closed(monkeypatch, 
     """gws works in the agent's workspace, so its --output lands there; CORSIA's private state stays closed."""
     _require_safehouse()
     workspace, state = _configure_roots(monkeypatch, tmp_path)
-    from tools import gws_run, managed_runtime
+    from tools import gws_run
 
     agent = workspace / "agents" / "a1"
     agent.mkdir(parents=True)
     keys = state / "keys"
     keys.mkdir()
     (keys / "value").write_text("private-key-canary", encoding="utf-8")
-    monkeypatch.setattr(managed_runtime, "ensure_runtime", lambda name: Path(sys.executable))
+    monkeypatch.setattr(gws_run, "gws_program", lambda: Path(sys.executable))
     monkeypatch.setattr(gws_run, "config_dir", lambda account_id: tmp_path / "gws-config")
     probe = (
         "import pathlib, sys\n"

@@ -268,16 +268,75 @@ def test_the_sign_in_reaches_only_the_environment_never_the_command_line(monkeyp
     assert seen["sign_in"] == SIGN_IN and all(SIGN_IN not in word for word in seen["words"])
 
 
-def test_a_program_that_cannot_be_installed_says_so_without_a_trace(monkeypatch):
+@pytest.fixture
+def no_download(monkeypatch):
     from tools import managed_runtime
 
-    def refuse(kind):
-        raise managed_runtime.ManagedRuntimeDownloadError("download failed: URLError")
+    def refuse(*_args, **_kwargs):
+        pytest.fail("the gws tool must never download")
 
     monkeypatch.setattr(managed_runtime, "ensure_runtime", refuse)
+    monkeypatch.setattr(managed_runtime, "_download", refuse)
+
+
+def _bundle_with_gws(tmp_path):
+    bundle = tmp_path / "CORSIA.app"
+    program = bundle / "Contents" / "Resources" / "libexec" / "gws"
+    program.parent.mkdir(parents=True)
+    program.write_text("#!/bin/sh\n", encoding="utf-8")
+    return bundle, program
+
+
+def test_the_bundled_gws_wins_over_an_installed_pin(monkeypatch, tmp_path, no_download):
+    from infra import platform_paths
+    from tools import managed_runtime
+
+    bundle, program = _bundle_with_gws(tmp_path)
+    monkeypatch.setattr(platform_paths, "app_bundle_root", lambda *_a, **_k: bundle)
+    monkeypatch.setattr(managed_runtime, "installed_runtime_path", lambda kind, **_k: tmp_path / "installed" / "gws")
+    assert gws_run.gws_program() == program
+
+
+def test_an_installed_pin_is_used_when_there_is_no_bundle(monkeypatch, tmp_path, no_download):
+    from infra import platform_paths
+    from tools import managed_runtime
+
+    installed = tmp_path / "installed" / "gws"
+    monkeypatch.setattr(platform_paths, "app_bundle_root", lambda *_a, **_k: None)
+    monkeypatch.setattr(managed_runtime, "installed_runtime_path", lambda kind, **_k: installed if kind == "gws" else None)
+    assert gws_run.gws_program() == installed
+
+
+def test_a_missing_gws_is_not_found_and_nothing_is_fetched(monkeypatch, tmp_path, no_download):
+    from infra import platform_paths
+    from tools import managed_runtime
+
+    monkeypatch.setattr(platform_paths, "app_bundle_root", lambda *_a, **_k: tmp_path / "Empty.app")
+    monkeypatch.setattr(managed_runtime, "installed_runtime_path", lambda kind, **_k: None)
     with pytest.raises(GwsUnavailable) as caught:
         gws_run._launch([], "acct-1", None, None)
-    assert str(caught.value) == gws_messages.NOT_FOUND
+    assert str(caught.value) == gws_messages.NOT_FOUND == (
+        "Google Workspace isn't available right now: CORSIA couldn't find its gws program."
+    )
+
+
+def test_the_installed_lookup_fetches_nothing_and_finds_only_a_verified_pin(monkeypatch, tmp_path, no_download):
+    from tools import managed_runtime
+
+    root = tmp_path / "runtimes"
+    assert managed_runtime.installed_runtime_path("gws", root=root) is None
+    arch = managed_runtime.macos_arch()
+    selected = f"linux-{arch}" if managed_runtime.platform.system() == "Linux" else arch
+    pin = managed_runtime.RUNTIME_PINS["gws"][selected]
+    install = managed_runtime._install_dir("gws", selected, pin, root)
+    install.mkdir(parents=True)
+    (install / "gws").write_text("#!/bin/sh\n", encoding="utf-8")
+    (install / "gws").chmod(0o755)
+    assert managed_runtime.installed_runtime_path("gws", root=root) is None
+    managed_runtime._marker_path(install).write_text(
+        managed_runtime.json.dumps({"kind": "gws", "arch": selected, **managed_runtime.asdict(pin)}), encoding="utf-8",
+    )
+    assert managed_runtime.installed_runtime_path("gws", root=root) == install / "gws"
 
 
 @pytest.fixture

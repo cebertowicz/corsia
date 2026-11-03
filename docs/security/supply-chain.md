@@ -13,8 +13,8 @@ Where CORSIA's code and its dependencies come from, what is pinned or signed, ho
 | Desktop app build | `npm ci` | `desktop/scripts/build-macos-bundle.sh` |
 | Agents' browser | `agent-browser@0.31` from npm, installed globally by the installer | `scripts/install.sh` |
 | Sandbox (macOS) | Agent Safehouse from Homebrew; CORSIA refuses to run shells with a version older than 0.11.1 | `scripts/install.sh`, `backend/tools/shell_guard.py` |
-| Linux runtimes | Downloaded by CORSIA and checked against fixed checksums | `backend/tools/managed_runtime.py` |
-| Google Workspace CLI (macOS) | `gws` 0.22.5, downloaded on first use from the maker's GitHub release and checked against a fixed SHA-256 | `backend/tools/managed_runtime.py` |
+| Linux runtimes | Downloaded by CORSIA (at install time) and checked against fixed checksums | `backend/tools/managed_runtime.py` |
+| Google Workspace CLI | `gws` 0.22.5 from the maker's GitHub release, checked against a fixed SHA-256: bundled in the Mac app at build time, installed by the Linux installer, never downloaded when the tool runs | `desktop/scripts/build-macos-bundle.sh`, `backend/tools/managed_runtime.py` |
 | Homebrew (macOS, if missing) | Homebrew's own installer from its `HEAD` | `scripts/install.sh` |
 
 No automated dependency-update service (Dependabot or Renovate) is configured.

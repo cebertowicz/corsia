@@ -428,6 +428,12 @@ install_python_linux() {
     ln -sfn "$python" "$LINUX_LOCAL_BIN/python3.11"
 }
 
+# gws is reached only through its tool, so it is installed to the runtime cache and not linked onto PATH.
+install_gws_linux() {
+    say "     Installing Google Workspace support…"
+    managed_runtime_linux gws > /dev/null || stop "Google Workspace support wasn’t installed. Run this again."
+}
+
 link_managed_node_linux() {
     local node tool
     say "     Installing Node…"
@@ -566,6 +572,7 @@ linux_ensure_prereqs() {
     check_prereqs
     [ "${#INVISIBLE[@]}" -eq 0 ] || stop "${INVISIBLE[@]}"
     [ "${#NEEDED[@]}" -eq 0 ] || stop "Still not ready: ${NEEDED[*]%%|*}. Install it by hand, then run this again."
+    install_gws_linux
 }
 
 link_corsia_command_linux() {

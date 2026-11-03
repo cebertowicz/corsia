@@ -35,6 +35,13 @@ readonly SAFEHOUSE_URL="https://github.com/eugene1g/agent-safehouse/releases/dow
 readonly SAFEHOUSE_SHA256="dd96f92d77aebf142e0ee33f38754b6dc6c6f7a1245129b715f7deea488e3d78"
 readonly SAFEHOUSE_LICENSE_URL="https://raw.githubusercontent.com/eugene1g/agent-safehouse/v${SAFEHOUSE_VERSION}/LICENSE"
 readonly SAFEHOUSE_LICENSE_SHA256="cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+# The Google Workspace CLI behind the gws tool, in libexec: agents reach it only through that
+# tool, never from a shell PATH. The version and digest must match _GWS_VERSION and the arm64 pin
+# in backend/tools/managed_runtime.py.
+readonly GWS_VERSION="0.22.5"
+readonly GWS_ARCHIVE="google-workspace-cli-aarch64-apple-darwin.tar.gz"
+readonly GWS_URL="https://github.com/googleworkspace/cli/releases/download/v${GWS_VERSION}/${GWS_ARCHIVE}"
+readonly GWS_SHA256="1d2a9ffd5bc9b2c2c4b48630daf082fad13d9e57d741988a2c248eed562f7dac"
 
 skip_dmg=false
 for argument in "$@"; do
@@ -71,6 +78,17 @@ fetch_safehouse() {
   printf 'agent-safehouse %s\n%s\nsha256 %s\n' "$SAFEHOUSE_VERSION" "$SAFEHOUSE_URL" "$SAFEHOUSE_SHA256" > "$BUNDLE_ROOT/licenses/safehouse/SOURCE"
   [ "$("$BUNDLE_ROOT/bin/safehouse" --version | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" = "$SAFEHOUSE_VERSION" ] \
     || fail "bundled safehouse does not report version $SAFEHOUSE_VERSION"
+}
+fetch_gws() {
+  local download="$BUILD_ROOT/downloads/$GWS_ARCHIVE" unpacked="$BUILD_ROOT/gws"
+  fetch_verified "$GWS_URL" "$download" "$GWS_SHA256"
+  mkdir -p "$unpacked" "$BUNDLE_ROOT/libexec" "$BUNDLE_ROOT/licenses/gws"
+  tar -xzf "$download" -C "$unpacked"
+  install -m 0755 "$unpacked/gws" "$BUNDLE_ROOT/libexec/gws"
+  install -m 0644 "$unpacked/LICENSE" "$BUNDLE_ROOT/licenses/gws/LICENSE"
+  printf 'gws %s\n%s\nsha256 %s\n' "$GWS_VERSION" "$GWS_URL" "$GWS_SHA256" > "$BUNDLE_ROOT/licenses/gws/SOURCE"
+  [ "$("$BUNDLE_ROOT/libexec/gws" --version | head -1)" = "gws $GWS_VERSION" ] \
+    || fail "bundled gws does not report version $GWS_VERSION"
 }
 build_git_runtime() {
   local archive="$BUILD_ROOT/downloads/$GIT_ARCHIVE"
@@ -175,6 +193,7 @@ PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 build_git_runtime
 fetch_agent_browser
 fetch_safehouse
+fetch_gws
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
 (
   cd "$ROOT/frontend"

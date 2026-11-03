@@ -65,6 +65,23 @@ def config_dir(account_id: str) -> Path:
     return folder
 
 
+def gws_program() -> Path:
+    """The gws that ships with CORSIA: the app's bundled copy, else the one the installer set up.
+
+    Never downloads anything.
+    """
+    from infra.platform_paths import app_bundle_root
+    from tools.managed_runtime import installed_runtime_path
+
+    bundle = app_bundle_root()
+    bundled = None if bundle is None else bundle / "Contents" / "Resources" / "libexec" / "gws"
+    if bundled is not None and bundled.is_file():
+        return bundled
+    if (installed := installed_runtime_path("gws")) is not None:
+        return installed
+    raise GwsUnavailable(NOT_FOUND)
+
+
 def _launch(words: list[str], account_id: str, token: str | None, workdir: Path | None):
     """The sandboxed launch of gws for ``words``: its parameters and the profile file to delete after.
 
@@ -73,14 +90,10 @@ def _launch(words: list[str], account_id: str, token: str | None, workdir: Path 
     """
     from mcp.client.stdio import get_default_environment
 
-    from tools.managed_runtime import ManagedRuntimeError, ensure_runtime
     from tools.mcp_config import MCPConfigError
     from tools.mcp_local_transport import safehouse_stdio_parameters
 
-    try:
-        program = str(ensure_runtime("gws"))
-    except ManagedRuntimeError:
-        raise GwsUnavailable(NOT_FOUND) from None
+    program = str(gws_program())
     env = {"GOOGLE_WORKSPACE_CLI_CONFIG_DIR": str(config_dir(account_id)), "SSL_CERT_FILE": certifi.where()}
     if token:
         env[TOKEN_ENV] = token
