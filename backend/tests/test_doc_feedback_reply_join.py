@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from doc_feedback_helpers import add_comment, add_person_comment, batches, seed_document, seed_thread
@@ -9,6 +10,7 @@ from doceditor import comment_actions, comments, feedback_batch_edits, feedback_
 from infra.database import get_db, write_transaction
 from plans import holds, service
 from plans.feedback_nodes import create_feedback_node
+from prompts.plan_wakes import INTENT_INPUT_ANSWER_REPLY
 
 
 def _person_reply(db, artifact_id: str, root_id: str, body: str = "Also the second point.") -> dict:
@@ -86,38 +88,60 @@ def test_person_reply_joins_the_open_task_of_its_thread(isolated_db):
         db.close()
 
 
-def test_reply_to_a_task_its_owner_picked_up_gets_its_own_task(isolated_db):
-    """The owner may have read the task already, so the reply is not hidden in its description."""
+def test_person_reply_joins_the_task_its_owner_is_working_and_wakes_the_owner(isolated_db):
+    """The owner may have read the task already, so the reply comes to it as a wake in the same task."""
     db = get_db()
     try:
         seed_thread(db, "owner")
         artifact_id = seed_document(db, "owner")
         root, _ = add_person_comment(db, artifact_id)
         (first,) = _feedback_nodes(db, "owner")
+        attempts = db.execute("SELECT id FROM plan_node_attempts WHERE node_id=?", (first["id"],)).fetchall()
 
-        _person_reply(db, artifact_id, root["id"])
+        reply = _person_reply(db, artifact_id, root["id"])
 
-        nodes = _feedback_nodes(db, "owner")
-        assert len(nodes) == 2 and nodes[1]["id"] != first["id"]
-        assert service.get_node(first["id"], db=db).description == first["description"]
+        assert [node["id"] for node in _feedback_nodes(db, "owner")] == [first["id"]]
+        joined = service.get_node(first["id"], db=db)
+        assert joined.description.startswith(first["description"])
+        assert f"Comment {reply['id']}" in joined.description
+        assert joined.title == first["title"].replace("1 comment on", "2 comments on")
+        # No intent words, so the owner keeps the task it is working.
+        assert joined.requirements_revision == first["requirements_revision"]
+        assert db.execute(
+            "SELECT id FROM plan_node_attempts WHERE node_id=? AND released_at IS NULL", (first["id"],),
+        ).fetchall() == attempts
+        (wake,) = db.execute(
+            "SELECT id,content,metadata FROM messages WHERE thread_id='owner' AND id LIKE 'plan-wake:intent_input:%'",
+        ).fetchall()
+        assert wake["id"] == f"plan-wake:intent_input:{first['id']}:doc_comment:{reply['id']}"
+        assert json.loads(wake["metadata"])["event_type"] == "plan.intent_input"
+        line, payload = wake["content"].split("\n", 1)
+        assert line.endswith(INTENT_INPUT_ANSWER_REPLY.format(comment_id=reply["id"]))
+        facts = json.loads(payload)["intent_input"]
+        assert facts["node_id"] == first["id"] and facts["source_kind"] == "doc_comment"
+        assert facts["words"].startswith(f"Comment {reply['id']}") and "Also the second point." in facts["words"]
+        # The reply is not queued, so no note says it is.
+        assert db.execute(
+            "SELECT COUNT(*) FROM context_change_journal WHERE object_id='owner' AND summary LIKE '%is queued%'",
+        ).fetchone()[0] == 1
     finally:
         db.close()
 
 
-def test_next_reply_joins_the_queued_task_of_the_earlier_reply(isolated_db):
-    """Past a task its owner picked up, the thread's next open task still takes the reply."""
+def test_agent_reply_to_a_task_its_owner_is_working_gets_its_own_task_and_the_next_joins_that(isolated_db):
+    """An agent's reply carries no wake, so it never joins a worked task; past one, the next open task takes it."""
     db = get_db()
     try:
         seed_thread(db, "owner")
+        seed_thread(db, "author", title="Reviewer")
         artifact_id = seed_document(db, "owner")
-        root, _ = add_person_comment(db, artifact_id)
-        _person_reply(db, artifact_id, root["id"])
+        root = _agent_batch(db, artifact_id)
+        _agent_batch(db, artifact_id, parent_id=root["id"])
         first, queued = _feedback_nodes(db, "owner")
 
-        later = _person_reply(db, artifact_id, root["id"], body="And the third.")
+        later = _agent_batch(db, artifact_id, parent_id=root["id"])
 
-        nodes = _feedback_nodes(db, "owner")
-        assert [node["id"] for node in nodes] == [first["id"], queued["id"]]
+        assert [node["id"] for node in _feedback_nodes(db, "owner")] == [first["id"], queued["id"]]
         assert f"Comment {later['id']}" in service.get_node(queued["id"], db=db).description
         assert service.get_node(first["id"], db=db).description == first["description"]
     finally:
