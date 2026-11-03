@@ -278,8 +278,9 @@ async def broadcast_claimed_batch(batch) -> None:
 async def announce_successor_turn(batch) -> None:
     """Announce a successor Turn at its claim, not only once its harness accepts it.
 
-    A Turn claimed by its predecessor's terminal has no sender showing it as
-    working, so it would read as idle while its harness starts. Sent once, at the
+    A Turn claimed with no sender showing it as working (a predecessor's
+    terminal, a restart drain, a lifted hold, a spawn) would read as idle while
+    its harness starts. Sent once, at the
     claim: the batch's later re-publishes (after a Stop or an error) must never
     announce a Turn that has already ended.
     """

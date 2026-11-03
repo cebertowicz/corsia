@@ -28,7 +28,7 @@ _VENDOR_CONTENT = (
 )
 _OVERFLOW_CONTENT = (
     "The provider refused your previous turn because the chat no longer fit its "
-    "context window. CORSIA checkpointed the chat. Continue the work that turn was doing."
+    "context window. Continue the work that turn was doing."
 )
 _CONTENT_BY_CAUSE = {
     PLAN_LIMIT_REASON: _CONTENT,
@@ -218,8 +218,8 @@ def _newest_person_line(db: sqlite3.Connection, turn_id: str) -> str | None:
         try:
             metadata = json.loads(row["metadata"] or "{}")
         except ValueError:
-            metadata = {}
-        if isinstance(metadata, dict) and metadata.get("routed_event"):
+            continue  # unreadable metadata cannot prove a person wrote the row
+        if not isinstance(metadata, dict) or metadata.get("routed_event"):
             continue
         line = next((part.strip() for part in str(row["content"] or "").splitlines() if part.strip()), "")
         if line:

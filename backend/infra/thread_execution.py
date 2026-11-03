@@ -180,7 +180,8 @@ async def execute_claimed_batch(
     """Prepare and hand one claimed FIFO batch; ``announce_claim``: no sender shows it working."""
     del dispatch_content
     await _broadcast_batch(batch)
-    await (announce_successor_turn(batch) if announce_claim else _noop())
+    if announce_claim:
+        await announce_successor_turn(batch)
     evidence = ProviderWriteEvidence()
     try:
         return await _execute_claimed_batch(
