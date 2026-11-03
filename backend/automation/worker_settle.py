@@ -27,6 +27,7 @@ from typing import Any
 
 from loguru import logger
 
+from automation import review_intent
 from core.workflow_result import ResultInvalid, check_result
 from events import rule_runs, worker_starts
 from events.connectors import worker as worker_events
@@ -137,12 +138,12 @@ def ready(db: sqlite3.Connection, decision_ids: set[int] | None = None) -> list[
         check = json.loads(row["run_input"] or "{}")
         outcome, said = verdict(turn, final_message(db, row["worker_thread_id"], turn["id"]),
                                 check.get("schema") or {}, check)
-        settles.append(settlement(row, check, outcome, said))
+        settles.append(settlement(row, check, outcome, said, db))
     return settles
 
 
 def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
-               said: Mapping[str, Any]) -> Settle:
+               said: Mapping[str, Any], db: sqlite3.Connection | None = None) -> Settle:
     """The event one start settles with: the envelope (source, item and version, workflow,
     run, validity, the model its worker was spawned on) around the payload or the reason."""
     kind = worker_events.RESULT if outcome == RETURNED else worker_events.NO_RESULT
@@ -156,6 +157,8 @@ def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
         "artifact_type": row["artifact_type"], "valid": outcome == RETURNED, **said,
         # The start's own record of what it spawned; a start that never spawned has none.
         "model": (check.get("settings") or {}).get("model"),
+        # Without a connection the revision read fails and says so; the stamp is never left out.
+        **(review_intent.stamp(check.get("intent"), db=db) if outcome == RETURNED else {}),
     }
     if context:
         facts.update(source=context["source"], kind=context["kind"], **context["item"],

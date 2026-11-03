@@ -49,6 +49,9 @@ class AccountProvider:
     #: Set when the credential is the account's key entry value as typed, not a JSON bundle: it is
     #: exposed as a one-field bundle under this name (an app password).
     raw_credential_field: str | None = None
+    #: Set when the provider has no credential at all (it reads this Mac): the row is usable while
+    #: connected, nothing is ever written to the key store, and Sign out and Remove stay local.
+    keyless: bool = False
     #: The key-store name prefix of this provider's accounts; None keeps the shared one.
     credential_prefix: str | None = None
     #: Extra fields this provider's list row carries, from ``(account_id, db)``: its own label for the

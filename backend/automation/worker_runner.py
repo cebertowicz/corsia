@@ -46,7 +46,7 @@ from typing import Any
 
 from loguru import logger
 
-from automation import worker_inputs as inputs
+from automation import review_intent, worker_inputs as inputs
 from automation import worker_settings, worker_settle
 from events import rule_runs, worker_starts
 from events.rule_outcomes import NO_RESULT, REFUSED, SKIPPED
@@ -249,7 +249,8 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None)
             "skill": skill, "schema": schema, "root": root, "facts": facts,
             "workflow": f"{skill.name}@{_workflow_version(skill) or 'unversioned'}",
             "staging": inputs.staging_dir(root, facts.get(inputs.STAGING_FACT)),
-            "head": inputs.head_source(project, facts, db)}
+            "head": inputs.head_source(project, facts, db),
+            "intent": review_intent.attach(row, skill, db=db)}
 
 
 async def _enforce_limit(row: Mapping[str, Any]) -> None:
@@ -274,7 +275,7 @@ def _write(found: Mapping[str, Any], decision_id: int, run_input: Mapping[str, A
     if found.get("result_instructions"):
         body += "\n\n" + found["result_instructions"]
     task = inputs.brief(found["workflow"], body,
-                        found["schema"], read_paths, run_input.get("event") or {})
+                        found["schema"], read_paths, run_input.get("event") or {}, found["intent"][0])
     return read_paths, task
 
 
@@ -319,7 +320,8 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
                             "settings": {**found["settings"], "started_at": datetime.now(timezone.utc).isoformat()},
                             "trace": run_input.get("trace") or [], "waited": waited,
                             "item_version": found["facts"].get(inputs.HEAD_SHA_FACT),
-                            "result_context": run_input.get("result_context")})
+                            "result_context": run_input.get("result_context"),
+                            "intent": found["intent"][1]})
 
         async def record(worker: str) -> None:
             await run_in_db(_made, row["id"], worker, check)
