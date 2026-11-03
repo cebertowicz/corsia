@@ -142,7 +142,9 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
         batch_id=str(_value(batch, "id")),
     )
     created = create_feedback_node(db, recipient, batch, items=items)
-    queued_note(db, recipient, batch, items=items)
+    # A reply that joined the task its owner is working woke that owner; it is not queued.
+    if not created.woke:
+        queued_note(db, recipient, batch, items=items)
     return DeliveryResult(
         outcome="node",
         node_id=created.node_id,

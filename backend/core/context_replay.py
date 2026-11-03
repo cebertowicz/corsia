@@ -26,6 +26,8 @@ class ReplaySelection:
     checkpoint_generation_id: str | None = None
     checkpoint_boundary: HistoryBoundary | None = None
     checkpoint_json: str | None = None
+    # A checkpoint tail's tool-result preview size; None is the harness budget.
+    tool_result_budget_tokens: int | None = None
 
 
 def exact_replay(projection: PortableHistoryProjection) -> ReplaySelection:

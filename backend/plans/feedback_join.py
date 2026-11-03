@@ -2,14 +2,17 @@
 
 A comment thread is one conversation, so a batch of replies whose thread already
 has an open task for the same recipient, from the same author, goes into that
-task rather than opening a second one. The task must be one its owner has not
-been handed yet and will pick up as it is, so the reply is in its description
-when the owner first reads it. A task its owner already selected may have been
-read before the reply arrived; a finished task, or one that waits (a hold, an
-armed watch, an unmet dependency), would not show the reply until later. In
-those cases the reply joins a later task of the thread that qualifies, or gets
-its own task as before. The joined task's title is recounted over every item it
-now holds.
+task rather than opening a second one. A task its owner has not been handed yet
+is picked up as it is, so the reply is in its description when the owner first
+reads it. A person's reply also joins a task its owner is working on now; the
+owner may have read that task already, so the caller wakes it with the reply
+(``plans.person_input.joined_reply``); working on it now is the same test
+that picks which tasks that wake reaches (``plans.person_input.running``). A
+finished task, a task that waits (a hold, an armed watch, an unmet
+dependency), or a handed task its owner is not running would not show the
+reply until later; the reply then joins a later task of the thread that
+qualifies, or gets its own task as before. The joined task's title is
+recounted over every item it now holds.
 
 A task can therefore hold several batches. Each batch's ``delivered_node_id``
 is the one record of the task that holds it: settlement reads it to settle a
@@ -19,7 +22,7 @@ resolves to that task instead of joining twice.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
 
 from infra.write_effects import after_commit
 from plans import mutations, node_waits, notifications, service
@@ -42,32 +45,54 @@ _THREAD_TASKS = """
 """
 
 
-def _handed_or_waits(db, node) -> bool:
+class Join(NamedTuple):
+    """The task a batch of replies joins; ``working`` when its owner is already on it."""
+
+    node_id: str
+    working: bool
+
+
+def _handed(db, node_id: str) -> bool:
+    return db.execute("SELECT 1 FROM plan_node_attempts WHERE node_id=? LIMIT 1", (node_id,)).fetchone() is not None
+
+
+def _waits(db, node) -> bool:
     node_id = str(node["id"])
     return bool(
-        db.execute("SELECT 1 FROM plan_node_attempts WHERE node_id=? LIMIT 1", (node_id,)).fetchone()
-        or node_waits.open_holds(db, [node_id], compact=True)
+        node_waits.open_holds(db, [node_id], compact=True)
         or node_waits.armed_watches(db, [node_id], compact=True)
         or node_waits.waits_on_dependency(db, node_id, str(node["state"]))
     )
 
 
-def _thread_task(db, recipient_thread_id: str, batch: Any, root_id: str) -> str | None:
-    """The thread's first open task for this recipient that its owner has not been handed yet."""
+def _being_worked(db, node, batch: Any) -> bool:
+    """A person's reply can reach the owner of this handed task now: the wake's own test finds it running."""
+    from plans import person_input
+
+    return batch_value(batch, "author_kind") == "user" and bool(person_input.running(db, [node]))
+
+
+def _thread_task(db, recipient_thread_id: str, batch: Any, root_id: str) -> Join | None:
+    """The thread's first open task not handed yet, else (for a person's reply) the first one being worked."""
     rows = db.execute(_THREAD_TASKS, (
         batch_value(batch, "artifact_id"), root_id, root_id, recipient_thread_id,
         batch_value(batch, "author_kind"), batch_value(batch, "author_id"), batch_value(batch, "id"),
     )).fetchall()
+    working = None
     for node_id in dict.fromkeys(str(row["delivered_node_id"]) for row in rows):
         node = service._node_row(db, node_id)
-        if node["state"] in _WORKABLE and not _handed_or_waits(db, node):
-            return str(node["id"])
-    return None
+        if node["state"] not in _WORKABLE or _waits(db, node):
+            continue
+        if not _handed(db, node_id):
+            return Join(node_id, False)
+        if working is None and _being_worked(db, node, batch):
+            working = Join(node_id, True)
+    return working
 
 
 def open_thread_task(
     db, recipient_thread_id: str, batch: Any, items: list[dict[str, Any]],
-) -> str | None:
+) -> Join | None:
     """The one open task a batch of replies joins, or None when it needs its own."""
     if not items or any(
         item["kind"] != "comment" or not item.get("parent_id") or item.get("event") == "reopened"

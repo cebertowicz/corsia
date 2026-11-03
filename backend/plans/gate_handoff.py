@@ -29,7 +29,7 @@ _REJECTED = "changes_requested"
 _HANDED = {"A": "spot", "B": "none", "C": "drop"}
 
 OFFER_TITLE = "Hand off the {step} review in {workflow}?"
-OFFER_CONTEXT = "You approved {step} in {workflow} {count} runs in a row with no changes."
+OFFER_CONTEXT = "You approved {step} in {workflow} {count} times in a row with no changes."
 OFFER_TRADEOFF = "Handing it off saves your review time, and any correction on it hands it back to you."
 OFFER_RATIONALE = "Spot checks keep some review of it without asking you every time."
 OFFER_OPTIONS = (
@@ -80,11 +80,9 @@ def derive(db, key: tuple[str, str, str], version: str | None = None) -> GateSta
             items.append((run.answered_at or run.created, 2, "answer", run))
         items.extend((stamp, 3, "correction", run) for stamp in run.corrections)
     for offer in gate_offers(db, key, [run.phase for run in runs]):
-        if offer.state == "invalidated":
-            continue
         items.append((offer.raised, 1, "offer", offer))
-        if offer.answered_at is not None:
-            items.append((offer.answered_at, 1, "offer_answer", offer))
+        if offer.settled_at is not None:
+            items.append((offer.settled_at, 1, "offer_answer", offer))
     state = GateState()
     current: str | None = None
     for _stamp, _order, name, data in sorted(items, key=lambda item: item[:2]):
@@ -94,7 +92,9 @@ def derive(db, key: tuple[str, str, str], version: str | None = None) -> GateSta
             state.open_offer = data.decision_id
         elif name == "offer_answer":
             if state.open_offer == data.decision_id:
-                _apply_answer(state, data.option, data.answered_at)
+                _apply_answer(state, data.option, data.settled_at)
+            elif state.voided_offer == data.decision_id:
+                state.voided_offer = None  # already withdrawn; nothing left to withdraw
         elif name == "correction":
             if state.open_offer is not None:
                 state.voided_offer, state.open_offer = state.open_offer, None
@@ -108,7 +108,9 @@ def derive(db, key: tuple[str, str, str], version: str | None = None) -> GateSta
 
 def _apply_answer(state: GateState, option: str | None, stamp: str) -> None:
     state.open_offer = None
-    # Any answer that is not one of the three handing options, Other included, keeps the review.
+    # Any answer that is not one of the three handing options keeps the review: Other, and an
+    # offer withdrawn unanswered (the person's Won't do, its run closed), so it returns only
+    # after another full streak.
     if option not in _HANDED:
         state.streak = 0
     else:

@@ -193,21 +193,33 @@ class _System:
     kind = "system"
 
 
+def raise_decision(db, decision: dict, bound, provenance: str) -> dict:
+    """Raise a decision to the user: its review node to review_requested, attention, the raised body.
+
+    The one raise sequence, after each caller's own checks: ``decisions.raise_to_user``
+    and ``create_raised`` both end here.
+    """
+    if service._node_row(db, decision["node_id"])["state"] == "pending":
+        service.transition_node(decision["node_id"], "active", actor_id=bound.audit_id, provenance=provenance, db=db)
+    service.transition_node(
+        decision["node_id"], "review_requested", actor_id=bound.audit_id, provenance=provenance, db=db,
+    )
+    attention.raise_attention(decision["artifact_id"], db=db)
+    body = _body_from(decision, state="raised", raised_at=service._now())
+    return _commit(db, decision, body, "decision_raised", bound, provenance)
+
+
 def create_raised(db, plan_id: str, source_node_id: str, content: dict, provenance: str) -> dict:
     """Create one decision already raised to the user, with no author or reviewer step.
 
     Server-internal: only ``plans.decisions.raise_offer`` calls it, so no tool or
     route gives any actor a new permission. The plan owner stays the decision's
     thread, so it renders and delivers its answer as the owner's own decision.
+    It runs inside the caller's plan write, which reports the plans it touched.
     """
     plan = service._plan_row(db, plan_id)
     source = authz.source_node(db, plan["id"], source_node_id)
     created = _create(
         db, plan, source, plan["owner_id"], decision_fields.content(content), _System, provenance,
     )["decision"]
-    if service._node_row(db, created["node_id"])["state"] == "pending":
-        service.transition_node(created["node_id"], "active", actor_id=None, provenance=provenance, db=db)
-    service.transition_node(created["node_id"], "review_requested", actor_id=None, provenance=provenance, db=db)
-    attention.raise_attention(created["artifact_id"], db=db)
-    body = _body_from(created, state="raised", raised_at=service._now())
-    return _commit(db, created, body, "decision_raised", _System, provenance)
+    return raise_decision(db, created, _System, provenance)

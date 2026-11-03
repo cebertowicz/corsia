@@ -18,7 +18,9 @@ readonly OMLX_URL="https://github.com/jundot/omlx/releases/download/v${OMLX_VERS
 # prefix discovery makes helpers and templates follow the executable after CORSIA.app moves.
 readonly GIT_VERSION="2.53.0"
 readonly GIT_ARCHIVE="git-${GIT_VERSION}.tar.xz"
-readonly GIT_URL="https://mirrors.edge.kernel.org/pub/software/scm/git/${GIT_ARCHIVE}"
+# kernel.org's CDN, not mirrors.edge: that name resolves to one regional mirror, which can
+# stop answering for minutes; the CDN serves the same signed tarball from many locations.
+readonly GIT_URL="https://cdn.kernel.org/pub/software/scm/git/${GIT_ARCHIVE}"
 readonly GIT_SHA256="5818bd7d80b061bbbdfec8a433d609dc8818a05991f731ffc4a561e2ca18c653"
 readonly GIT_SOURCE="$BUILD_ROOT/git-${GIT_VERSION}"
 # The browser tool's CLI: the upstream native arm64 build. The version must stay inside

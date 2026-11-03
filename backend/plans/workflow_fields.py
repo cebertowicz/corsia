@@ -144,7 +144,7 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
         if gate_mode == "dropped" and gate_state is not None:
             closure.close_node(
                 node.id, reason=gate_handoff.drop_reason(gate_state), actor_id=None,
-                provenance="plans.workflow_run", db=db,
+                provenance=gate_handoff.PROVENANCE, db=db,
             )
         built[step["id"]] = node
         entry = {"id": node.id, "title": title, "required": step.get("required") is True}

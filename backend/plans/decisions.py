@@ -31,9 +31,10 @@ from plans.decision_writes import (
     _body_from,
     _commit,
     _create,
-    create_raised,
     _perform,
     _touch_plan,
+    create_raised,
+    raise_decision,
 )
 from registry import attention
 
@@ -191,19 +192,7 @@ def raise_to_user(decision_id: str, *, expected_revision, mutation_id, actor,
         authz.require_reviewer(db, plan, source, bound)
         authz.require_revision(decision, expected_revision)
         authz.require_state(decision, ("parent_reviewed",))
-        node = service._node_row(db, decision["node_id"])
-        if node["state"] == "pending":
-            service.transition_node(
-                node["id"], "active", actor_id=bound.audit_id,
-                provenance=provenance, db=db,
-            )
-        service.transition_node(
-            decision["node_id"], "review_requested", actor_id=bound.audit_id,
-            provenance=provenance, db=db,
-        )
-        attention.raise_attention(decision["artifact_id"], db=db)
-        body = _body_from(decision, state="raised", raised_at=service._now())
-        return _commit(db, decision, body, "decision_raised", bound, provenance)
+        return raise_decision(db, decision, bound, provenance)
 
     return _perform(decision_id, "decision_raise", {}, mutation_id=mutation_id,
                     actor=actor, provenance=provenance, db=db, apply=apply)

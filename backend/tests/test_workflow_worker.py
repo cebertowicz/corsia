@@ -59,6 +59,7 @@ def test_an_unknown_profile_names_the_known_ones():
     ({"profiles": ["main"]}, "corsia.workflow.worker.profiles must be a mapping of profile names"),
     ({"profiles": {"main": {"profiles": {}}}}, "corsia.workflow.worker.profiles.main.profiles is an unknown key"),
     ({"profiles": {"main": {"max_turns": -1}}}, "corsia.workflow.worker.profiles.main.max_turns must be a positive"),
+    ({"profiles": {1: {}}}, "corsia.workflow.worker.profiles has a name that is not text: 1"),
 ])
 def test_install_refuses_a_bad_shape_by_name(worker, message):
     errors = validate_workflow({"workflow": {"worker": worker, "steps": [{"id": "one"}]}})

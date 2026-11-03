@@ -369,6 +369,33 @@ async def test_an_other_answer_keeps_the_review_and_restarts_the_count(isolated_
     assert len(_offers()) == 1
 
 
+async def test_a_dismissed_offer_does_not_come_back_at_the_next_clean_run(isolated_db, tmp_path, monkeypatch):
+    """The person's Won't do on the offer withdraws it; it counts as Keep, so it returns only after eight more."""
+    from plans import decision_lifecycle
+
+    run = _make(tmp_path, monkeypatch)
+    for _ in range(8):
+        await _go(run)
+    payload = json.loads(_offers()[-1]["payload_json"])
+    db = get_db()
+    try:
+        decision = decisions.read(payload["decision_id"], db=db)
+        with service._write(db):
+            decision_lifecycle.withdraw_for_review_node(
+                db, decision["node_id"], actor_id="user-1", provenance="api.plans.user_settle",
+            )
+        db.commit()
+        assert decisions.read(payload["decision_id"], db=db)["state"] == "invalidated"
+    finally:
+        db.close()
+    assert _state().kind == "person" and _state().streak == 0 and _state().open_offer is None
+    for _ in range(7):
+        await _go(run)
+    assert len(_offers()) == 1
+    await _go(run)
+    assert len(_offers()) == 2
+
+
 async def test_drop_closes_the_gate_step_at_once_and_the_run_records_the_skip(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
     await _hand_off(run, "C")

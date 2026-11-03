@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 
 OFFER_EVENT = "gate_handoff_offered"
 _ANSWERED_BY_PERSON = "user.ask_cleared"
+#: An offer's decision states that end it: answered, or withdrawn (the person's Won't do, a closed run, an archive).
+_SETTLED = ("answered", "invalidated")
 
 
 @dataclass
@@ -133,11 +135,13 @@ def _corrections(db, phases: list[tuple[str, str]]) -> list[tuple[str, str]]:
 
 @dataclass
 class Offer:
+    """One offer: ``settled_at`` is when the person answered it or it was withdrawn; ``option`` is None when withdrawn."""
+
     raised: str
     decision_id: str
     state: str
     option: str | None = None
-    answered_at: str | None = None
+    settled_at: str | None = None
 
 
 def gate_offers(db, key: tuple[str, str, str], phases: list[str]) -> list[Offer]:
@@ -166,10 +170,10 @@ def gate_offers(db, key: tuple[str, str, str], phases: list[str]) -> list[Offer]
     ):
         if (body := decision_projection._body(row)) is not None:
             bodies[row["external_id"]] = body
-    answered_at = {row["node_id"]: row["created_at"] for row in db.execute(
-        "SELECT node_id,created_at FROM plan_node_events WHERE event='decision_answered'"
+    settled = {row["node_id"]: row["created_at"] for row in db.execute(
+        "SELECT node_id,created_at FROM plan_node_events WHERE event IN ('decision_answered','decision_invalidated')"
         " AND node_id IN (SELECT value FROM json_each(?))",
-        (_ids(body["node_id"] for body in bodies.values() if body["state"] == "answered"),),
+        (_ids(body["node_id"] for body in bodies.values() if body["state"] in _SETTLED),),
     )}
     listed = []
     for stamp, decision in raised:
@@ -177,8 +181,8 @@ def gate_offers(db, key: tuple[str, str, str], phases: list[str]) -> list[Offer]
         if body is None:
             continue
         offer = Offer(stamp, decision, body["state"])
-        if body["state"] == "answered":
+        if body["state"] in _SETTLED:
             offer.option = (body.get("answer") or {}).get("option_id")
-            offer.answered_at = answered_at.get(body["node_id"], stamp)
+            offer.settled_at = settled.get(body["node_id"], stamp)
         listed.append(offer)
     return listed
