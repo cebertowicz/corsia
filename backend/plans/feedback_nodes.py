@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
-from plans import admission, artifact_links, intent_words, review_requests, service
+from plans import admission, artifact_links, feedback_join, intent_words, review_requests, service
 from plans.feedback_items import (
     artifact_name, artifact_row, batch_value, feedback_display, feedback_item_counts, feedback_kind_counts,
     load_feedback_items,
@@ -128,6 +128,13 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
         blocks.append(
             USER_FRAMING if batch_value(batch, "author_kind") == "user" else AGENT_FRAMING
         )
+    blocks.append(item_blocks(batch, items))
+    return "\n\n".join(blocks)
+
+
+def item_blocks(batch: Any, items: list[dict[str, Any]]) -> str:
+    """Render a batch's items as its task description lists them, without the framing."""
+    blocks: list[str] = []
     # One marked-up copy per image, set by delivery on the batch's region comments.
     # It leads, so a handoff cap that cuts the tail never drops it.
     marked = (str(item["marked_image_line"]) for item in items if item.get("marked_image_line"))
@@ -205,7 +212,11 @@ def create_feedback_node(
     *,
     items: list[dict[str, Any]] | None = None,
 ) -> FeedbackNodeResult:
-    """Create one queued recipient-plan task, idempotently keyed by batch id."""
+    """Create one queued recipient-plan task, idempotently keyed by batch id.
+
+    A batch of replies whose comment thread already has an open task joins that
+    task instead (``plans.feedback_join``).
+    """
     batch_id = str(batch_value(batch, "id"))
     artifact_id = str(batch_value(batch, "artifact_id"))
     existing = _existing(db, recipient_thread_id, batch_id)
@@ -220,6 +231,12 @@ def create_feedback_node(
         if batch_value(batch, "author_kind") == "user"
         else ()
     )
+    thread_task = feedback_join.open_thread_task(db, recipient_thread_id, batch, loaded)
+    if thread_task is not None:
+        feedback_join.join(
+            db, thread_task, batch, item_blocks(batch, loaded), words, provenance=PROVENANCE,
+        )
+        return FeedbackNodeResult(thread_task, (), False)
     return _create_linked_node(
         db, recipient_thread_id, artifact_id, batch_id, PROVENANCE,
         title=_title(author, document, loaded), acceptance=_acceptance(loaded),
