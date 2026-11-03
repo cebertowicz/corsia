@@ -172,6 +172,7 @@ def env(tmp_path: Path) -> dict[str, str]:
     (checkout / "backend").mkdir()
     shutil.copytree(REPO / "backend" / "infra", checkout / "backend" / "infra")
     (checkout / "backend" / "tools").mkdir()
+    shutil.copy2(REPO / "backend" / "tools" / "gws_release.py", checkout / "backend" / "tools" / "gws_release.py")
     runtime = checkout / "backend" / "tools" / "managed_runtime.py"
     shutil.copy2(REPO / "backend" / "tools" / "managed_runtime.py", runtime)
     with runtime.open("a") as file:
