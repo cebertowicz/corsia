@@ -435,10 +435,10 @@ def test_unregistered_event_repository_starts_without_channel(world, spawned, mo
     assert not spawned["envs"][0].get("CORSIA_SCRIPT_GITHUB_SOCKET")
 
 
-def test_a_script_cannot_open_a_channel_for_a_repository_its_own_event_names(world, monkeypatch):
-    """Script A emits an event naming another repository; rule B runs a script on it. Neither
-    run gets a channel: B's stored event is A's, an emitter's, and the owner's project does
-    not register the repository its facts name."""
+def test_a_script_cannot_open_a_channel_for_an_unregistered_repository_its_own_event_names(world, monkeypatch):
+    """Script A emits an event naming a repository the run's project does not register; rule B
+    runs a script on it. Neither run gets a channel. (A registered one does: see the test
+    below for an emitter event naming a registered repository.)"""
     from contextlib import asynccontextmanager
 
     from automation import script_sandbox
