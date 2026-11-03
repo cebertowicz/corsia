@@ -16,12 +16,10 @@ from infra.db_async import run_in_db
 from infra.runtime_truth import provider_boundary_snapshot
 from core.checkpoint_native_admission import effective_input_tokens
 from core.checkpoint_fold_blocks import COLD_FOLD_OLD_TOOL_BUDGET_TOKENS, COLD_FOLD_TOOL_REFERENCE_BUDGET_TOKENS
-from core.tool_result_projection import HARNESS_TOOL_RESULT_BUDGET_TOKENS
 
-# Tool-result preview sizes an installed tail tries in turn, the cold fold's own rungs.
-_INSTALLED_TOOL_BUDGETS = (
-    HARNESS_TOOL_RESULT_BUDGET_TOKENS, COLD_FOLD_OLD_TOOL_BUDGET_TOKENS, COLD_FOLD_TOOL_REFERENCE_BUDGET_TOKENS,
-)
+# Tool-result preview sizes an installed tail tries in turn, the cold fold's own rungs;
+# ``None`` first, so the selection as installed renders at the harness budget.
+_INSTALLED_TOOL_BUDGETS = (None, COLD_FOLD_OLD_TOOL_BUDGET_TOKENS, COLD_FOLD_TOOL_REFERENCE_BUDGET_TOKENS)
 
 _effective_input_tokens = effective_input_tokens
 
@@ -208,7 +206,8 @@ async def _render_native_installed(
     # The tail keeps the newest Step, which no fold can cover, so a batch of tool
     # results may only fit as shorter previews; each stays retrievable in full.
     for budget in _INSTALLED_TOOL_BUDGETS:
-        selection = replace(selection, tool_result_budget_tokens=budget)
+        if budget is not None:
+            selection = replace(selection, tool_result_budget_tokens=budget)
         prefix, info = await build_real_send_prefix(
             agent=agent,
             thread_id=thread_id,
