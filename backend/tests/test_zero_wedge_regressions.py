@@ -186,6 +186,44 @@ def test_retry_accepts_vendor_login_stamped_input(isolated_db, monkeypatch, stat
     assert bool(metadata.get("possible_duplicate")) == (state == "ambiguous")
 
 
+def test_a_second_retry_of_one_failed_input_sends_no_second_copy(isolated_db, monkeypatch) -> None:
+    """Pressing Retry twice on the same failed row used to send it twice."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api import thread_messages
+    from infra.database import get_db
+
+    _insert_session("retry-twice")
+    _insert_ambiguous_message("retry-twice", "failed-once")
+    db = get_db()
+    try:
+        # A model-less thread holds the new input without launching a provider.
+        db.execute("UPDATE threads SET model='' WHERE id='retry-twice'")
+        db.execute("UPDATE messages SET delivery_state='failed' WHERE id='failed-once'")
+        db.commit()
+    finally:
+        db.close()
+    monkeypatch.setattr(thread_messages, "authenticate", lambda _token: {"id": "user-1"})
+    app = FastAPI()
+    app.include_router(thread_messages.router)
+    with TestClient(app) as client:
+        first = client.post("/api/threads/retry-twice/messages/failed-once/retry")
+        second = client.post("/api/threads/retry-twice/messages/failed-once/retry")
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert second.json()["revived_message_id"] == first.json()["revived_message_id"]
+    db = get_db()
+    try:
+        copies = db.execute(
+            "SELECT COUNT(*) FROM messages WHERE thread_id='retry-twice' "
+            "AND json_extract(metadata,'$.retried_from_message_id')='failed-once'",
+        ).fetchone()[0]
+    finally:
+        db.close()
+    assert copies == 1
+
+
 def test_retry_drops_the_ended_attempts_turn_and_input_identity() -> None:
     """A retried row must be a new Turn input and a distinct UI message."""
     from api.thread_inbox_actions import _retry_content
