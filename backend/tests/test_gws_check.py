@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from tools import gws_check, gws_messages
+import tools.gws_check as gws_check
+from tools import gws_messages
 from tools.catalog import TOOL_CATALOG, pack_members
 from tools.google_workspace import GoogleWorkspaceTool
 from tools.managed_runtime import RUNTIME_PINS

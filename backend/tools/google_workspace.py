@@ -19,7 +19,8 @@ from connections.connected_accounts import GOOGLE_PROVIDER
 from connections.google import accounts as google_accounts
 from connections.google import client
 from infra.db_async import run_in_db
-from tools import gws_check, gws_messages
+import tools.gws_check as gws_check
+from tools import gws_messages
 from tools.base import Tool
 from tools.filesystem_gate import resolve_path
 from tools.gws_deletions import NotSaved, failure_text, log_dir, save_calendar, save_event

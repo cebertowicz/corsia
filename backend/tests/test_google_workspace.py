@@ -31,7 +31,8 @@ class FakeGws:
     """Stands in for the sandboxed program: answers a preview from a recording, real runs from ``real``."""
 
     def __init__(self, preview: str | None = None, real=None):
-        self.preview, self.real, self.calls = preview, real or {}, []
+        self.preview, self.real = preview, real or {}
+        self.calls: list[tuple[list[str], str | None]] = []
 
     async def __call__(self, words, *, account_id, token, workdir=None):
         self.calls.append((list(words), token))

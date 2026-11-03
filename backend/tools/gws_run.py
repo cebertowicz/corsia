@@ -40,12 +40,12 @@ def build_args(
 ) -> list[str]:
     """The words after ``gws`` for one call; ``upload`` and ``output`` are already workspace paths."""
     built = list(args)
-    for flag, value in (("--params", params), ("--json", body)):
-        if value is not None:
-            built += [flag, json.dumps(value)]
-    for flag, value in (("--upload", upload), ("--output", output)):
-        if value is not None:
-            built += [flag, value]
+    for flag, data in (("--params", params), ("--json", body)):
+        if data is not None:
+            built += [flag, json.dumps(data)]
+    for flag, path in (("--upload", upload), ("--output", output)):
+        if path is not None:
+            built += [flag, path]
     return built
 
 
