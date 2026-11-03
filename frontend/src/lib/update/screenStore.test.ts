@@ -243,6 +243,38 @@ describe('update screen store', () => {
 		expect(get(updateScreenView)).toMatchObject({ estimated: true });
 	});
 
+	it('paired computer: the host is down for a real restart and answers in verifying with no jump', () => {
+		const shell = window as ShellWindow;
+		shell.__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio Mac' };
+		const op = (phase: UpdateOperation['phase']): UpdateOperation => ({ ...inFlight('update-paired'), phase });
+		const seen: number[] = [];
+		const read = (second: number) => {
+			vi.setSystemTime(second * 1_000);
+			tickUpdateScreen(second * 1_000);
+			const view = get(updateScreenView);
+			seen.push(view?.mode === 'done' ? 100 : view?.percent ?? 0);
+		};
+		updateStatus.set(status(op('draining'), 45));
+		for (let second = 0; second <= 8; second += 1) read(second);
+		vi.setSystemTime(9_000);
+		updateStatus.set(status(op('restarting'), 45));
+		read(9);
+		updateUnreachable.set(true);
+		// restart ~14 s, then ~17 s of startup, host answering in verifying
+		for (let second = 10; second <= 41; second += 1) read(second);
+		vi.setSystemTime(42_000);
+		updateUnreachable.set(false);
+		updateStatus.set(status(op('verifying'), 45));
+		for (let second = 42; second <= 45; second += 1) read(second);
+		updateConfirmed.set({ operationId: 'update-paired', version: '2026.10.13' });
+		read(46);
+		expect(seen.at(-1)).toBe(100);
+		// Each reading is a second apart; the largest step the screen is asked to count up, apart from reaching done.
+		const steps = seen.slice(1, -1).map((value, i) => value - seen[i]);
+		expect(Math.max(...steps)).toBeLessThanOrEqual(5);
+		for (let i = 1; i < seen.length; i += 1) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
+	});
+
 	it('counts a remote screen up across the restart and the handoff to real steps, never back and never in a jump', () => {
 		const shell = window as ShellWindow;
 		shell.__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio Mac' };
