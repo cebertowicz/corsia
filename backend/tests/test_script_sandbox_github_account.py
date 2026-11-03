@@ -99,7 +99,12 @@ def run(monkeypatch, tmp_path):
     def go(state: str):
         reads: list[bool] = []
         view = views[state]
-        monkeypatch.setattr(github_agent, "view", lambda db=None: reads.append(True) or view)
+
+        def read(db=None):
+            reads.append(True)
+            return view
+
+        monkeypatch.setattr(github_agent, "view", read)
         result = asyncio.run(script_sandbox.run_script(
             THREAD, None, tmp_path / "s.sh", run_id="r", timeout_seconds=5))
         return {**seen, "reads": len(reads), "result": result, "view": view,
