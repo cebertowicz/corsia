@@ -81,14 +81,45 @@ def test_a_new_skill_with_a_lesson_block_is_refused(tmp_path) -> None:
     assert _reason(_refuse({path: LESSON_SKILL})) == REASON
 
 
-def test_a_changed_lesson_block_is_refused_and_a_body_edit_passes(tmp_path) -> None:
+@pytest.mark.parametrize("change", [
+    ("9ece0e89-3e4d-5e77-b235-d678598db53b", "2b7c4e9e-0f4a-4c55-9d0e-6a1f3b8c2d11"),  # re-identified
+    ("state: trial", "state: watch"),
+    ("reference: turn-1", "reference: turn-2"),
+    ("state: trial\n    owner: thread-1", "state: retired\n    owner: thread-2"),  # retire plus a non-lifecycle edit
+])
+def test_a_changed_lesson_block_is_refused(tmp_path, change: tuple[str, str]) -> None:
     path = _on_disk(tmp_path, "skills/gate/SKILL.md", LESSON_SKILL)
 
-    changed = _refuse({path: LESSON_SKILL.replace("state: trial", "state: watch")})
-    body_edit = _refuse({path: LESSON_SKILL + "- Open the file at the current revision.\n"})
+    edited = LESSON_SKILL.replace(*change)
+    assert invalid_skill_write({path: edited.encode()}) is None
 
-    assert _reason(changed) == REASON
-    assert body_edit is None
+    assert _reason(_refuse({path: edited})) == REASON
+
+
+@pytest.mark.parametrize("change", [
+    ("state: trial", "state: retired"),
+    ("state: trial", "state: promoted\n    destination:\n      path: RESPONSIBILITY.md\n      version: abc123"),
+    ("review_after: '2026-10-22T00:00:00+00:00'", "review_after: '2026-11-22T00:00:00+00:00'"),
+])
+def test_the_owner_can_retire_promote_or_extend_the_same_lesson(tmp_path, change: tuple[str, str]) -> None:
+    path = _on_disk(tmp_path, "skills/gate/SKILL.md", LESSON_SKILL)
+    edited = LESSON_SKILL.replace(*change)
+    assert invalid_skill_write({path: edited.encode()}) is None
+
+    assert _refuse({path: edited}) is None
+
+
+def test_a_retired_lesson_cannot_be_put_back_on_trial_by_editing(tmp_path) -> None:
+    retired = LESSON_SKILL.replace("state: trial", "state: retired")
+    path = _on_disk(tmp_path, "skills/gate/SKILL.md", retired)
+
+    assert _reason(_refuse({path: LESSON_SKILL})) == REASON
+
+
+def test_a_body_edit_to_a_trial_skill_passes(tmp_path) -> None:
+    path = _on_disk(tmp_path, "skills/gate/SKILL.md", LESSON_SKILL)
+
+    assert _refuse({path: LESSON_SKILL + "- Open the file at the current revision.\n"}) is None
 
 
 def test_the_gate_is_on_by_default_and_a_corsia_author_is_an_agent(tmp_path) -> None:
