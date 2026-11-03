@@ -110,11 +110,27 @@ def test_the_persons_own_ssh_command_still_runs(repo):
     assert ran(ssh_calls(), "-i /keys/work git@git.example.com git-receive-pack 'o/r.git'")
 
 
+def test_an_explicit_ssh_command_still_replaces_the_guard(repo):
+    git, ssh_calls = repo
+    git("config", "core.sshCommand", "ssh -i /keys/work")
+
+    git("-c", "core.sshCommand=ssh -i /keys/cli", "push", "other", "HEAD:main",
+        env=github_agent.shell_env(LOCKED), check=False)
+
+    assert ran(ssh_calls(), "-i /keys/cli git@git.example.com git-receive-pack 'o/r.git'")
+
+
 def test_no_account_sets_no_ssh_command():
-    assert "GIT_SSH_COMMAND" not in github_agent.shell_env(AgentAccountView("not_installed", absent=True))
+    env = github_agent.shell_env(AgentAccountView("not_installed", absent=True))
+
+    assert github_agent.SSH_PUSH_GUARD not in env.values()
 
 
-def test_the_guard_is_in_the_names_safehouse_passes():
+@pytest.mark.parametrize("view", [LOCKED, READY], ids=["locked", "ready"])
+def test_the_guard_is_in_the_names_safehouse_passes(view):
     from tools.shell_environment import shell_env_pass_names
 
-    assert "GIT_SSH_COMMAND" in shell_env_pass_names().split(",")
+    env = github_agent.shell_env(view)
+
+    assert github_agent.SSH_PUSH_GUARD in env.values()
+    assert set(env) <= set(shell_env_pass_names().split(","))
