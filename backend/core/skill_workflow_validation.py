@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from core.workflow_result import schema_errors
+from core.workflow_worker import worker_errors
 
 _WORKFLOW_STEP_KEYS = frozenset(
     {
@@ -77,7 +78,7 @@ def validate_workflow(corsia: dict[str, Any], *, skill_name: str | None = None) 
     # A worker's workflow may declare a result and no steps, so the result is checked first.
     errors: list[str] = (
         schema_errors(workflow["result"]) if "result" in workflow else []
-    )
+    ) + worker_errors(workflow)
     steps = workflow.get("steps")
     if steps is None:
         return errors
