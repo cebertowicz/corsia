@@ -159,23 +159,34 @@ def test_a_machine_credential_cannot_change_the_account_or_take_a_session(client
     assert accounts.get_user("pat") is not None and _put(client, session, {"name": "Pat Example"}).status_code == 200
 
 
-@pytest.mark.parametrize("choice", [False, True])
-def test_the_account_step_stores_its_usage_sharing_choice_with_the_account(client, choice):
-    from infra import settings
+@pytest.mark.parametrize("failure", ["marker", "commit"])
+def test_a_failed_account_change_leaves_the_choice_and_the_profile_as_they_were(client, workspace, session, monkeypatch, failure):
+    import sqlite3
+    from contextlib import contextmanager
 
-    settings.save_usage_sharing(not choice)
-    response = client.post("/api/setup/first-account", json={**CREATE, "usage_sharing": choice}, headers=HEADERS)
-    assert response.status_code == 200
-    assert settings.get_usage_sharing() is choice
+    from infra import account_update, settings
 
+    def refuse(*_args, **_kwargs):
+        raise OSError("marker refused")
 
-def test_a_first_account_post_after_setup_made_one_never_changes_the_choice(client, session):
-    from infra import settings
+    real = account_update.write_transaction
 
+    @contextmanager
+    def failing_commit(db, *, scope):
+        with real(db, scope=scope) as connection:
+            yield connection
+            raise sqlite3.OperationalError("disk I/O error")
+
+    before = _profile(workspace)
     settings.save_usage_sharing(True)
-    response = client.post("/api/setup/first-account", json={**CREATE, "username": "other", "usage_sharing": False}, headers=HEADERS)
-    assert response.status_code == 409
+    if failure == "marker":
+        monkeypatch.setattr(account_update.setup_marker, "update_created_file", refuse)
+    else:
+        monkeypatch.setattr(account_update, "write_transaction", failing_commit)
+    response = _put(client, session, {"usage_sharing": False, "name": "Patricia Example"})
+    assert response.status_code == 500 and response.json()["code"] == "setup_failed"
     assert settings.get_usage_sharing() is True
+    assert _profile(workspace) == before
 
 
 def test_back_on_the_account_step_saves_only_a_changed_choice(client, workspace, session):
