@@ -115,6 +115,18 @@ def test_the_check_reads_the_path_on_any_google_host():
     assert gws_check.decide(docs).refusal == gws_messages.DOCS_GUARD
 
 
+@pytest.mark.parametrize("url", [
+    "https://example.com/drive/v3/files",
+    "https://googleapis.com.example.com/drive/v3/files",
+    "https://evilgoogleapis.com/drive/v3/files",
+    "http://www.googleapis.com/drive/v3/files",
+    "https://127.0.0.1/drive/v3/files",
+    "drive/v3/files",
+])
+def test_a_request_to_any_address_but_googles_is_refused(url):
+    assert gws_check.decide({"method": "GET", "url": url}).refusal == gws_messages.NO_PREVIEW
+
+
 def test_the_address_is_unquoted_before_it_is_used():
     request = {"method": "DELETE", "url": "https://www.googleapis.com/calendar/v3/calendars/a%40b.com/events/e%5F1"}
     decision = gws_check.decide(request)
@@ -148,7 +160,7 @@ def test_the_tool_text_is_the_approved_text_and_the_tool_is_counted_not_named(tm
 
 def test_gws_is_pinned_with_a_checksum_for_each_supported_machine():
     pins = RUNTIME_PINS["gws"]
-    assert set(pins) == {"arm64", "linux-arm64", "linux-x86_64"}
+    assert set(pins) == {"arm64", "x86_64", "linux-arm64", "linux-x86_64"}
     for pin in pins.values():
         assert pin.version == "0.22.5" and "/v0.22.5/" in pin.url and pin.executable == "gws"
         assert re.fullmatch(r"[0-9a-f]{64}", pin.sha256)

@@ -62,6 +62,8 @@ RUNTIME_PINS: dict[str, dict[str, RuntimePin]] = {
     },
     "gws": {
         "arm64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-aarch64-apple-darwin.tar.gz", GWS_MAC_ARM64_SHA256, "tar.gz", "gws"),
+        # Intel Macs run from a source checkout only (the app is arm64), so this pin is used by scripts/install.sh alone.
+        "x86_64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-x86_64-apple-darwin.tar.gz", "51f9bd731404d4bba26c36e2e30dd68c56dccd1f834c01252cb0b14d6a6544b2", "tar.gz", "gws"),
         "linux-x86_64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-x86_64-unknown-linux-musl.tar.gz", "4db473dde4b1ab872e4ff35d769b0d4af1f1a6441a605e79d5cf8ada9c87e920", "tar.gz", "gws"),
         "linux-arm64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-aarch64-unknown-linux-musl.tar.gz", "e700fe63524932b10ec2130b47ece90aa850e66005fe52ccfc4cf8767bf9919a", "tar.gz", "gws"),
     },

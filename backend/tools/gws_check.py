@@ -75,6 +75,11 @@ def _refuse(message: str) -> Decision:
     return Decision(refusal=message)
 
 
+def _is_google(host: str) -> bool:
+    """Only Google's API hosts get the account's sign-in; any other address, today's or a future one, is refused."""
+    return host == "googleapis.com" or host.endswith(".googleapis.com")
+
+
 def _is_mail(host: str, path: str) -> bool:
     return host == "gmail.googleapis.com" or path.startswith(("/gmail/", "/upload/gmail/"))
 
@@ -127,6 +132,8 @@ def decide(preview: dict) -> Decision:
     method = preview["method"].upper()
     url = urlparse(preview["url"])
     host, path = (url.hostname or "").lower(), url.path
+    if url.scheme != "https" or not _is_google(host):
+        return _refuse(gws_messages.NO_PREVIEW)
     if _is_mail(host, path):
         return _refuse(gws_messages.MAIL)
     if method == "DELETE":
