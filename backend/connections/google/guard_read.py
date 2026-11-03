@@ -23,7 +23,8 @@ def _message(raw: dict[str, Any]) -> Message:
     return Message(message_id=str(raw["id"]), thread_id=str(raw.get("threadId") or ""),
                    sender=headers.get("from", ""), subject=headers.get("subject", ""),
                    date=datetime.fromtimestamp(int(raw["internalDate"]) / 1000, timezone.utc),
-                   body="", reply_to=headers.get("reply-to", ""),
+                   body="", reply_to=headers.get("reply-to", ""), to=headers.get("to", ""),
+                   own="SENT" in (raw.get("labelIds") or []),
                    unread="UNREAD" in (raw.get("labelIds") or []))
 
 
@@ -67,8 +68,11 @@ async def guard_data(account_id: str, message_id: str, since: datetime | None = 
             raise DraftRefused(f"This message has no sender address, so later mail from them can't be checked. Write a new email to {recipients[0]} instead.")
         raise DraftRefused("The original message has no usable reply address. Send a new email to the correct address instead.")
     cutoff = since.replace(microsecond=0) if since is not None else target.date
-    ids = await _search(account_id, f"from:{address} after:{int(cutoff.timestamp()) - 1}")
-    count = len(set(await _search(account_id, f"from:{address} newer_than:30d"))) if since is None else 0
+    if target.own:  # the account's own mail: nothing to search for or count
+        ids, count = [], 0
+    else:
+        ids = await _search(account_id, f"from:{address} after:{int(cutoff.timestamp()) - 1}")
+        count = len(set(await _search(account_id, f"from:{address} newer_than:30d"))) if since is None else 0
     by_id = {item.message_id: item for item in thread}
     for mid in sorted(set(ids).difference(by_id)):
         raw = await _metadata(account_id, mid)
