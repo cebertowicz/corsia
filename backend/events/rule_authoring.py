@@ -169,7 +169,7 @@ def create(
     mode: Any = None, note: Any = None, scope: Any = None, now: str,
     tracked: frozenset[str] | None = None, script_id: Any = None, workflow_id: Any = None,
     request_identity_fact: Any = None, workflows: Mapping[str, Any] | None = None,
-    kind: Any = None, tool: Any = None, argv_prefix: Any = None, item_type: Any = None,
+    worker_profile: Any = None, kind: Any = None, tool: Any = None, argv_prefix: Any = None, item_type: Any = None,
 ) -> dict[str, Any]:
     """Write one rule within the writer limits, or raise :class:`RuleRefused`.
 
@@ -196,7 +196,8 @@ def create(
         raise RuleRefused("kind is route or observe")
     if kind == observe_rules.OBSERVE:
         strays = dict(event_type=event_type, match=match, action=action, to=to, mode=mode, note=note,
-                      script_id=script_id, workflow_id=workflow_id, request_identity_fact=request_identity_fact)
+                      script_id=script_id, workflow_id=workflow_id, request_identity_fact=request_identity_fact,
+                      worker_profile=worker_profile)
         return observe_rules.create(db, writer=row, scope=own_scope, now=now, tool=tool, argv_prefix=argv_prefix,
                                     item_type=item_type, connector=connector, strays=strays)
     action = rules.DELIVER if action is None else action
@@ -209,13 +210,13 @@ def create(
     _repositories(connector, tests, tracked)
     if action not in (rules.DELIVER, rules.DROP, rules.RUN_SCRIPT, rules.START_WORKER):
         raise RuleRefused("action is deliver, drop, run_script or start_worker")
-    if action != rules.START_WORKER and (workflow_id, request_identity_fact) != (None, None):
-        raise RuleRefused("workflow_id and request_identity_fact go only with action start_worker.")
+    if action != rules.START_WORKER and (workflow_id, request_identity_fact, worker_profile) != (None, None, None):
+        raise RuleRefused("workflow_id, request_identity_fact and worker_profile go only with action start_worker.")
     if action == rules.START_WORKER:
         # Refuses to, mode, note and script_id; the worker is its writer's own, so it stores to: self.
         workflow_id, request_identity_fact = check_worker(
             workflows or {}, workflow_id, request_identity_fact, decl,
-            {"to": to, "mode": mode, "note": note, "script_id": script_id})
+            {"to": to, "mode": mode, "note": note, "script_id": script_id}, worker_profile)
     elif script_id is not None and action != rules.RUN_SCRIPT:
         raise RuleRefused("script_id goes only with action run_script.")
     elif action == rules.RUN_SCRIPT:
@@ -235,10 +236,10 @@ def create(
     db.execute(
         'INSERT INTO event_rules (id, created_at, updated_at, enabled, scope, connector, event_type, '
         '"match", action, "to", mode, note, origin, created_by, authority_ref, script_id, '
-        "workflow_id, request_identity_fact) VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "workflow_id, request_identity_fact, worker_profile) VALUES (?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (rule_id, now, now, own_scope, connector, event_type, json.dumps(tests), action,
          stored_to, mode, note, f"agent:{writer}", writer, authority, script_id,
-         workflow_id, request_identity_fact),
+         workflow_id, request_identity_fact, worker_profile),
     )
     rules.prune_disabled(db, own_scope, now)
     return _shape(rules.from_row(db.execute("SELECT * FROM event_rules WHERE id=?", (rule_id,)).fetchone()))
@@ -299,7 +300,8 @@ def _would(rule: rules.Rule) -> str:
     if rule.action == rules.RUN_SCRIPT:
         return f"run {rules.thread_target(rule.to)}'s script {rule.script_id} with the event"
     if rule.action == rules.START_WORKER:
-        return (f"start one {rule.workflow_id} worker for {rules.thread_target(rule.to)} per "
+        profile = f" ({rule.worker_profile} profile)" if rule.worker_profile else ""
+        return (f"start one {rule.workflow_id} worker{profile} for {rules.thread_target(rule.to)} per "
                 f"{rule.request_identity_fact}")
     who = "the registered owner" if rule.to == rules.REGISTERED_OWNER else rules.thread_target(rule.to)
     return f"{rule.mode} {who}"

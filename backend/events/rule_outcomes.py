@@ -62,6 +62,7 @@ class Rule:
     script_id: str | None = None  # run_script: the writer's script schedule it runs
     workflow_id: str | None = None  # start_worker: the workflow its worker runs
     request_identity_fact: str | None = None  # start_worker: the fact naming one request (R24)
+    worker_profile: str | None = None  # start_worker: the workflow profile its worker runs under
 
 
 @dataclass(frozen=True)

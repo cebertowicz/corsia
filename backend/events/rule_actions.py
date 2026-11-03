@@ -62,11 +62,12 @@ def reachable_workflows(db: sqlite3.Connection, thread_id: str, project_id: str 
 
 def check_worker(
     workflows: Mapping[str, SkillRow], workflow_id: Any, identity_fact: Any,
-    decl: EventTypeDecl, extra: Mapping[str, Any],
+    decl: EventTypeDecl, extra: Mapping[str, Any], worker_profile: Any = None,
 ) -> tuple[str, str]:
     """The workflow a ``start_worker`` rule runs and the fact naming one request: a
     workflow its writer can read that declares a result, and a fact the event declares.
-    ``extra`` are the fields that belong to other actions, all refused."""
+    ``extra`` are the fields that belong to other actions, all refused. A ``worker_profile``
+    must be one the workflow defines."""
     given = sorted(name for name, value in extra.items() if value is not None)
     if given:
         raise RuleRefused(f"A start_worker rule takes no {' or '.join(given)}: the worker is yours, "
@@ -82,6 +83,15 @@ def check_worker(
     if "result" not in (skill.corsia or {}).get("workflow", {}):
         raise RuleRefused(f"Workflow {workflow_id} declares no result; add corsia.workflow.result, "
                           "the schema of the worker's final answer, to its corsia.yaml.")
+    if worker_profile is not None:
+        if not isinstance(worker_profile, str) or not worker_profile:
+            raise RuleRefused("worker_profile is the name of a profile the workflow's worker block defines.")
+        from core.workflow_worker import InvalidWorker, UnknownProfile, worker_settings
+
+        try:
+            worker_settings(skill.corsia, worker_profile)
+        except (UnknownProfile, InvalidWorker) as exc:
+            raise RuleRefused(f"{workflow_id}: {exc}") from exc
     facts = (*decl.identity_facts, *decl.filterable_fields)
     if identity_fact not in facts:
         raise RuleRefused(f"request_identity_fact names the {decl.event_type} fact that tells one "

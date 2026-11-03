@@ -194,6 +194,7 @@ async def _spawn(
             title=kwargs.get("title"),
             model_id=model, account_id=kwargs.get("account_id"),
             confinement=confinement, read_paths=read_paths, rule_start=rule_start,
+            effort=kwargs.get("effort"), max_turns=kwargs.get("max_turns"),
         )
     if confinement == CONFINEMENT_UNTRUSTED and rule_start is None:
         from llm.resolution import resolve_execution_target
@@ -246,6 +247,7 @@ async def _spawn_native_child(
                 "from_title": parent.get("title") or "",
             },
             native_mode="delegation",
+            reasoning_effort=kwargs.get("effort"),
         )
     except Exception as e:
         return f"Error delegating task: {e}"
@@ -336,7 +338,10 @@ async def _spawn_claude_code_child(
     confinement: str = CONFINEMENT_NONE,
     read_paths: list[str] | None = None,
     rule_start: RuleStart | None = None,
+    effort: str | None = None,
+    max_turns: int | None = None,
 ) -> dict[str, Any] | str:
+    """Spawn a Claude Code child."""
     from connections.models import get_connection
     from subagents.cc_confinement import ConfinementRefused, require_readable_dirs
     from infra.subagent_caps import LiveSpawnCapExceeded
@@ -378,6 +383,7 @@ async def _spawn_claude_code_child(
             title=title,
             project_id=project_id, account_id=account_id,
             confinement=confinement, add_dirs=add_dirs, rule_start=rule_start,
+            effort=effort, max_turns=max_turns,
         )
     except LiveSpawnCapExceeded as e:
         if rule_start is not None:
