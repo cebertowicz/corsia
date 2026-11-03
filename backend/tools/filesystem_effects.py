@@ -206,15 +206,19 @@ def open_bound_text(
 
 def write_bound_text(path: Path, content: str) -> None:
     """Create or replace text through a bound parent descriptor."""
+    write_bound_bytes(path, content.encode("utf-8"))
+
+
+def write_bound_bytes(path: Path, data: bytes, *, mode: int = 0o666) -> None:
+    """Create or replace bytes through a bound parent descriptor; ``mode`` applies to a new file."""
     with bound_parent(path, create_parents=True) as parent:
         try:
             fd = parent.open_file(os.O_WRONLY)
         except FileNotFoundError:
-            fd = parent.open_file(os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+            fd = parent.open_file(os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode=mode)
         try:
             _validate_regular_file(fd, path, writable=True)
             os.ftruncate(fd, 0)
-            data = content.encode("utf-8")
             view = memoryview(data)
             while view:
                 written = os.write(fd, view)
