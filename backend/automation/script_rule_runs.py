@@ -17,10 +17,11 @@ from dataclasses import dataclass
 
 from automation import script_schedules as store
 from automation.script_github_channel import bound_repository
+from automation.script_measures import WORKSPACE_SCOPE
 from automation.schedules import Schedule, get
 from events import rule_runs
 from infra.database import write_transaction
-from infra.queries import get_thread, get_thread_project_id, thread_is_available
+from infra.queries import get_thread, thread_is_available
 
 #: The key a rule run holds in the runner's in-flight map, beside the schedule ids.
 KEY_PREFIX = "rule:"
@@ -44,31 +45,31 @@ class RuleRun:
 
 
 def execution_input(schedule: Schedule, run: RuleRun) -> tuple[bytes, str | None]:
-    """Bind the claimed repository, off-lock, to the repositories the rule owner's own
-    project registers now (read from the owner's thread, so a workspace-scope owner binds none).
+    """Bind the claimed repository, off-lock, to the repositories the run's project
+    registers now; a workspace-scoped script has no project and binds none.
 
-    Shipped event producers also receive their output declaration and current
-    staging root in stdin, rather than a copied configuration file. That project, the
-    staging root and the binding all come from the owner's current project, read once.
+    The run's project is the script's ``scope_id``, set from its owner's thread when the
+    script was made: the one source the sandbox's repository policies, the staging root,
+    staging cleanup and measures also read. Shipped event producers also receive their
+    output declaration and current staging root in stdin, rather than a copied
+    configuration file.
     """
     from automation.worker_inputs import owner_root
     from events.connectors import get_manifest
     from infra.database import get_db
 
     repository = None
-    claimed = run.github_repo
-    project_id = get_thread_project_id(schedule.thread_id)
-    if claimed is not None and project_id is not None:
+    if run.github_repo is not None and schedule.scope_id != WORKSPACE_SCOPE:
         resolve = get_manifest("github").project_repositories
-        repositories = resolve(project_id) if resolve is not None else None
+        repositories = resolve(schedule.scope_id) if resolve is not None else None
         if repositories is not None:
-            repository = next((repo for repo in repositories if repo.casefold() == claimed.casefold()), None)
+            repository = next((repo for repo in repositories if repo.casefold() == run.github_repo.casefold()), None)
     event_type = (schedule.payload or {}).get("event_type")
     if event_type is None:
         return run.stdin, repository
     event = json.loads(run.stdin)
-    root = owner_root(schedule.thread_id, project_id, get_db())
-    event["context"] = {"project_id": project_id, "staging_root": str(root / "staging"),
+    root = owner_root(schedule.thread_id, schedule.scope_id, get_db())
+    event["context"] = {"project_id": schedule.scope_id, "staging_root": str(root / "staging"),
                         "event_type": event_type, "github_repo": repository}
     return json.dumps(event, ensure_ascii=False).encode(), repository
 

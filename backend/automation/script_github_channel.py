@@ -2,9 +2,11 @@
 
 A channel opens only for a script run a rule started from a stored connector,
 platform or emitter event whose facts name a repository (``bound_repository``) that
-the rule owner's own project registers when the run starts (``script_rule_runs.
-execution_input``); the claim reads it from the stored run input, so nothing a
-script sends can choose it. Each request is
+the run's project registers when the run starts (``script_rule_runs.
+execution_input``). That registration test is the access limit: a script, the
+owner's or an agent's, can emit an event naming any repository, and only a
+registered one binds. The claim reads it from the stored run input, so nothing a
+running script sends can choose it. Each request is
 vetted by the broker's read policy, then limited to ``repos/<that repo>/...``,
 and goes through the pollers' shared read budget: asked before, told after.
 """
@@ -34,9 +36,9 @@ SOCKET_ENV = "CORSIA_SCRIPT_GITHUB_SOCKET"
 log = logging.getLogger(__name__)
 _REPOSITORY = re.compile(r"^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)$")
 _STATUS_LINE = re.compile(r"^HTTP/\S+\s+(\d{3})")
-#: Event origins whose run may open a channel at all. An agent's own emit never does: an
-#: access rule for this channel, not the repository limit, which ``execution_input`` applies
-#: to every origin.
+#: Event origins whose run may open a channel. An agent's direct emit is left out only
+#: because no rule needs a read from one; it is not an access limit, since an agent's own
+#: script emits as ``emitter``. The limit is the registration test above.
 _REPO_ORIGINS = frozenset({"connector", "platform", "emitter"})
 
 
@@ -46,7 +48,7 @@ def bound_repository(event: Any) -> str | None:
 
     A script may have chosen the repo (an emitter event, or a ``worker.result`` copying it),
     so this is only a candidate: ``execution_input`` keeps it to the registered repositories
-    of the rule owner's project, for every origin."""
+    of the run's project, for every origin."""
     if not isinstance(event, Mapping) or event.get("origin") not in _REPO_ORIGINS:
         return None
     facts = event.get("facts")

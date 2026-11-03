@@ -533,12 +533,15 @@ def test_an_emitter_event_naming_a_registered_repository_opens_a_channel_limited
         channel._bound_request(["repos/o/other/pulls/1"], "o/r")
 
 
-def test_a_workspace_scoped_owner_binds_nothing(world, spawned, monkeypatch):
-    def move():
+def test_a_workspace_scoped_script_binds_nothing(world, spawned, monkeypatch):
+    """A workspace owner's script has no project; the resolver is never asked, even one
+    that would answer for the workspace scope."""
+    def to_workspace():
         _write("UPDATE threads SET project_id=NULL WHERE id=?", OWNER)
+        _write("UPDATE automation_schedules SET scope_id='__workspace__'")
 
-    _emitter_run(world, monkeypatch, "o/r", registered={"project-a": {"o/r"}, None: {"o/r"}},
-                 before_sweep=move)
+    _emitter_run(world, monkeypatch, "o/r", before_sweep=to_workspace,
+                 registered={"project-a": {"o/r"}, "__workspace__": {"o/r"}, None: {"o/r"}})
     assert spawned["channels"] == []
 
 
@@ -548,9 +551,12 @@ def test_removing_the_repository_before_the_claim_leaves_no_channel(world, spawn
     assert spawned["channels"] == []
 
 
-def test_an_owner_that_moved_projects_gets_one_project_for_binding_context_and_staging(world, monkeypatch):
-    """A producer's stdin context, its staging root and its channel binding read the owner's
-    current project, never the project the script was created in."""
+@pytest.mark.parametrize("registered_in, bound", [("project-a", "o/r"), ("project-b", None)])
+def test_an_owner_that_moved_projects_keeps_its_script_s_project_for_every_part_of_the_run(
+        world, monkeypatch, registered_in, bound):
+    """The binding, the stdin context and the staging root all read the script's project, the
+    one the sandbox's repository policies and staging cleanup read; the owner's later move to
+    another project changes none of them."""
     from dataclasses import replace
     from automation import schedules, script_rule_runs, worker_inputs
     from automation.script_rule_runs import RuleRun
@@ -558,7 +564,7 @@ def test_an_owner_that_moved_projects_gets_one_project_for_binding_context_and_s
 
     manifest = connectors.get_manifest("github")
     monkeypatch.setitem(connectors._REGISTRY, "github", replace(
-        manifest, project_repositories=lambda project: frozenset({"o/r"} if project == "project-b" else ())))
+        manifest, project_repositories=lambda project: frozenset({"o/r"} if project == registered_in else ())))
     roots: list[str | None] = []
 
     def owner_root(owner, project_id, _db):
@@ -577,9 +583,9 @@ def test_an_owner_that_moved_projects_gets_one_project_for_binding_context_and_s
     stdin, repository = script_rule_runs.execution_input(
         schedule, RuleRun(1, "rule", json.dumps({"id": "e"}).encode(), (), github_repo="o/r"))
     context = json.loads(stdin)["context"]
-    assert repository == "o/r" and context["github_repo"] == "o/r"
-    assert context["project_id"] == "project-b" and roots == ["project-b"]
-    assert context["staging_root"] == str(world["tmp"] / "project-b" / "staging")
+    assert repository == bound and context["github_repo"] == bound
+    assert context["project_id"] == "project-a" and roots == ["project-a"]
+    assert context["staging_root"] == str(world["tmp"] / "project-a" / "staging")
 
 
 def test_a_scheduled_run_gets_no_repository(world, spawned):
