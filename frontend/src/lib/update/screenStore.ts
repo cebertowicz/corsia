@@ -19,7 +19,7 @@ export interface UpdateScreenView {
 	label: string;
 	/** The real percentage; the screen counts a whole number up to it and the bar follows that number. */
 	percent: number;
-	/** A remote client's time-based guess; the screen adds a line saying progress shows on the main computer. */
+	/** A remote client's time-based guess while the main computer's service is down. */
 	estimated: boolean;
 	fromVersion: string | null;
 	toVersion: string | null;
