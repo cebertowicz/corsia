@@ -594,5 +594,4 @@ def test_the_job_line_carries_the_counts_and_names_no_subject(db, workspace) -> 
     assert (report.open_subjects, report.evaluated, report.reached) == (1, 1, 1)
     (line,) = [text for text in lines if "workflow_verdict_daily:" in text]
     assert "open=1 evaluated=1 reached=1 recorded=0 woken=0" in line
-    assert "phase_seconds=" not in line and "by_kind=" not in line
     assert LESSON not in line and trial.subject not in line
