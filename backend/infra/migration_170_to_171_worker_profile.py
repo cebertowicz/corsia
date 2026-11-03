@@ -2,8 +2,9 @@
 
 ``event_rules.worker_profile`` is nullable text; a rule written before this has none, which reads
 as the workflow's base settings. The table's CHECKs sit after its columns, so ``ALTER TABLE ADD
-COLUMN`` would leave text that differs from a fresh install's: the table is rebuilt from the
-current schema text (as 160 -> 161 did), keeping every row. Idempotent: a table that has the
+COLUMN`` would leave text that differs from a fresh install's: the table is rebuilt from its own
+fixed text, 161's table plus the column, so a later schema edit never moves what this step
+creates (as 160 -> 161 keeps its own copy), keeping every row. Idempotent: a table that has the
 column is left alone.
 """
 
@@ -11,7 +12,13 @@ from __future__ import annotations
 
 import sqlite3
 
-from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL
+from infra.migration_160_to_161_self_caused import _RULES as _RULES_161
+
+_ITEM_TYPE = "        item_type TEXT,\n"
+_RULES = _RULES_161.replace(_ITEM_TYPE, _ITEM_TYPE + (
+    "        -- start_worker: the workflow profile its worker runs under (none: the workflow's base settings).\n"
+    "        worker_profile TEXT CHECK (worker_profile IS NULL OR action = 'start_worker'),\n"), 1)
+assert _RULES != _RULES_161, "161's event_rules text no longer has the item_type line"
 
 _INDEXES = (
     "CREATE INDEX IF NOT EXISTS idx_event_rules_type\n        ON event_rules(connector, event_type, enabled, scope, created_at)",
@@ -24,10 +31,8 @@ def migrate_170_to_171(conn: sqlite3.Connection) -> None:
     """Rebuild ``event_rules`` with the nullable ``worker_profile`` column."""
     if "worker_profile" in {str(row[1]) for row in conn.execute("PRAGMA table_info(event_rules)")}:
         return
-    table = next(part for part in EVENT_RULE_SCHEMA_SQL.split(";")
-                 if "CREATE TABLE IF NOT EXISTS event_rules (" in part)
     conn.execute("ALTER TABLE event_rules RENAME TO event_rules_170")
-    conn.execute(table)
+    conn.execute(_RULES)
     old = {str(row[1]) for row in conn.execute("PRAGMA table_info(event_rules_170)")}
     names = ",".join(f'"{row[1]}"' for row in conn.execute("PRAGMA table_info(event_rules)")
                      if row[1] in old)

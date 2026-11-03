@@ -195,6 +195,26 @@ async def test_an_effort_the_model_does_not_list_is_refused_naming_what_it_takes
 
 
 @pytest.mark.asyncio
+async def test_an_effort_on_a_model_that_reports_no_levels_passes_through(world, spawned, monkeypatch):
+    from automation import worker_runner
+
+    from llm import model_status
+
+    real = model_status.scoped_status_rows
+
+    def no_levels(**scope):
+        return [{**row, "capabilities": {**(row.get("capabilities") or {}), "reasoning_config": None}}
+                for row in real(**scope)]
+
+    monkeypatch.setattr(model_status, "scoped_status_rows", no_levels)
+    _workflow_block(world, "  worker:\n    effort: high\n")
+    await make_rule()
+    await request()
+    assert await worker_runner.drive() == 1
+    assert spawned[0]["effort"] == "high"
+
+
+@pytest.mark.asyncio
 async def test_an_unknown_profile_is_refused_when_the_rule_is_written_and_when_it_starts(world, spawned):
     from automation import worker_runner
 
@@ -277,11 +297,11 @@ async def test_a_worker_past_its_limit_is_stopped_and_settles_no_result_once(wor
     _backdate(rule, 31)
     await worker_runner.drive()
     [(outcome, reason, _identity, _worker)] = starts(rule)
-    assert (outcome, reason) == ("no_result", "ran past its 30-minute limit")
+    assert (outcome, reason) == ("no_result", "the agent ran past its 30-minute limit")
     await worker_runner.drive()
     await settle_all()
     assert [kind for kind, _ in worker_events()] == ["worker.no_result"]
-    assert "ran past its 30-minute limit" in owner_wakes()[0]
+    assert "the agent ran past its 30-minute limit" in owner_wakes()[0]
 
 
 async def _worker_past_its_limit(world) -> str:
@@ -349,7 +369,7 @@ async def test_the_time_limit_stop_goes_through_the_one_system_stop_without_the_
     monkeypatch.setattr(stop_control, "stop_turn_for_cause", spy)
     await worker_runner.drive()
     assert seen == [{"plan_limit": False}]
-    assert starts(rule)[0][:2] == ("no_result", "ran past its 30-minute limit")
+    assert starts(rule)[0][:2] == ("no_result", "the agent ran past its 30-minute limit")
 
 
 @pytest.mark.asyncio

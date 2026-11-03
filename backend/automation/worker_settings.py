@@ -67,10 +67,10 @@ def settings_for(
     if effort:
         config = (status_row.get("capabilities") or {}).get("reasoning_config") or {}
         values = [str(value) for value in config.get("values") or []]
-        if effort not in values:
-            takes = f"takes: {', '.join(values)}" if values else "takes no effort setting"
-            raise inputs.StartRefused(f"refused: this workflow runs at {effort} effort; your model {name} {takes}. "
-                                      "Choose a model that takes it.")
+        # A model that reports no levels passes the value through, as effective_reasoning_effort does.
+        if values and effort not in values:
+            raise inputs.StartRefused(f"refused: this workflow runs at {effort} effort; your model {name} "
+                                      f"takes: {', '.join(values)}. Choose a model that takes it.")
         extra["effort"] = effort
     turns = settings["max_turns"]
     if turns and harness == "claude-code":

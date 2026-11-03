@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Literal
 
 from llm.context_window import WindowFacts, cap_to_memory_fit, resolve_window_facts
@@ -57,6 +57,7 @@ class ExecutionTarget:
             self.context_window, self.discovered_context_window,
             self.context_window_source,
         )
+
 
 def _target_row(model: str, *, db) -> dict | None:
     exact = db.execute("SELECT * FROM models WHERE id = ?", (model,)).fetchone()

@@ -260,7 +260,7 @@ async def _enforce_limit(row: Mapping[str, Any]) -> None:
     limit = worker_settings.past_limit(check)
     if limit is None or not await worker_settings.stop_worker(row["worker_thread_id"]):
         return
-    await _end(row, check, NO_RESULT, f"ran past its {limit}-minute limit")
+    await _end(row, check, NO_RESULT, f"the agent ran past its {limit}-minute limit")
 
 
 def _write(found: Mapping[str, Any], decision_id: int, run_input: Mapping[str, Any]) -> tuple[list[str], str]:
