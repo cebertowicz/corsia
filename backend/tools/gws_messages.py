@@ -40,8 +40,8 @@ ACCOUNT = 'Name the account: one of {addresses}.'
 
 # Results of a delete made recoverable (tools.gws_deletions) and of running gws itself.
 TRASHED = "Moved to the trash, not deleted: Google keeps it for 30 days and the person can restore it."
-SAVED_FIRST = "Done. What was deleted was saved first in {where}."
-NOT_SAVED = "Not deleted: it couldn't be saved first. {detail}"
+SAVED_FIRST = "Done. Any events it could remove were saved first in {where}."
+NOT_SAVED = "Not done: the events it could remove couldn't be saved first. {detail}"
 NOT_FOUND = "Google Workspace isn't available right now: CORSIA couldn't find its gws program."
 BAD_ARGS = 'Error: args must be the words after gws, for example ["drive","files","list"].'
 FAILED = "Error: Couldn't run the Google Workspace command. Try again later."

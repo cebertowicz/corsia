@@ -3,7 +3,8 @@
 gws's ``--dry-run`` prints the one request a command would send (method, address, query
 parameters, body) without sending it. The check reads only Google's method and path from
 that preview, so gws's shortcuts and future commands are covered with nothing built for them.
-The host is not read: Google serves each API under more than one host, and a path names its API.
+The host is checked only to be Google's: HTTPS on googleapis.com or one of its subdomains, Gmail's
+refused. Google serves each API under more than one host, so the path, not the host, names its API.
 """
 
 from __future__ import annotations
