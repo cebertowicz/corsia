@@ -130,3 +130,32 @@ async def test_repeated_cancel_joins_commit_or_proven_rollback(ownership_scope, 
         await asyncio.gather(task, return_exceptions=True)
         await manager.close()
         app_loop.clear()
+
+
+@pytest.mark.asyncio
+async def test_refused_owner_create_reaches_its_caller_and_is_logged_once(ownership_scope, tmp_path, monkeypatch):
+    """An overlapping suggestion is refused to the agent that asked; the owner-loop task adds no second ERROR."""
+    from fastapi import HTTPException
+    from loguru import logger
+
+    manager, entry, _ = await opened(ownership_scope, tmp_path, monkeypatch)
+    app_loop.capture(asyncio.get_running_loop())
+    logged: list[str] = []
+    sink = logger.add(lambda message: logged.append(str(message)), level='ERROR')
+
+    def suggest(identifier):
+        return delegation_docs.create_agent_comment(OWNER_TOKEN, delegation_docs.AgentCommentCreate(
+            body='tighten', as_session_id=ownership_scope['owner'], artifact_id=entry.artifact_id,
+            quote='b', replacement='c', client_id=identifier))
+
+    try:
+        await suggest('first')
+        with pytest.raises(HTTPException) as refused:
+            await suggest('second')
+        await asyncio.sleep(0.05)
+        assert refused.value.status_code == 409 and 'overlaps an open suggestion' in refused.value.detail
+        assert logged == []
+    finally:
+        logger.remove(sink)
+        await manager.close()
+        app_loop.clear()
