@@ -21,6 +21,9 @@ from infra.db_async import run_in_db
 
 log = logging.getLogger(__name__)
 _RECHECK_SECONDS = 300.0
+#: A Turn's end waits on ``check_login``; kept well inside the 35 s live-close bound
+#: (``cc_runtime_state._CLOSE_LIVE_TIMEOUT_S``) that a Stop during that wait runs under.
+_LOGIN_CHECK_SECONDS = 15.0
 #: Keyed by account id.
 _CHECKS: dict[str, asyncio.Task[None]] = {}
 _LAST_STARTED: dict[str, float] = {}
@@ -109,24 +112,48 @@ def _capture(provider: str, account_id: str, *, db=None):
     return capture_discovery_context(provider, account_id=account_id, db=db)
 
 
-async def _check(provider: str, account_id: str) -> None:
+async def check_login(provider: str, account_id: str) -> str:
+    """Run the account's control read now: ``pass`` when its login answered, else ``fail`` or ``error``.
+
+    Neither throttled nor single-flight, and invisible to the scheduled checks'
+    guards, which stay as they are. Bounded by ``_LOGIN_CHECK_SECONDS``.
+    """
+    try:
+        return await asyncio.wait_for(_read(provider, account_id), _LOGIN_CHECK_SECONDS)
+    except asyncio.TimeoutError:
+        log.warning("%s login check timed out for account %s", provider, account_id)
+        return "error"
+    finally:
+        from infra.state.ws import notify_models_changed
+
+        notify_models_changed()
+
+
+async def _read(provider: str, account_id: str) -> str:
     receipt = None
     try:
         context = await run_in_db(_capture, provider, account_id)
         if context is None or context.receipt is None:
-            return  # No current login to read for: the next sign-in schedules its own check.
+            return "fail"  # No current login to read for: the next sign-in schedules its own check.
         receipt = context.receipt
         if provider != "claude-code":
-            await _check_codex(provider, receipt)
-            return
+            return "pass" if await _check_codex(provider, receipt) else "fail"
         binary = await _binary_for(provider)
         if binary is None:
             await _check_failed(provider, receipt, "Harness connection is unavailable")
-        else:
-            await _check_claude(binary, receipt, context=context)
+            return "error"
+        verdict = await _check_claude(binary, receipt, context=context)
+        # Only plan usage read through the login proves it answered; an unknown read proves nothing.
+        return "pass" if verdict["verdict"] in ("allowed", "limited") else "fail"
     except Exception as exc:
         log.warning("%s usage recheck failed for account %s: %s", provider, account_id, exc)
         await _check_failed(provider, receipt, f"{provider} usage read failed: {exc}")
+        return "error"
+
+
+async def _check(provider: str, account_id: str) -> None:
+    try:
+        await _read(provider, account_id)
     finally:
         _CHECKS.pop(account_id, None)
         if account_id in _NEW_LOGIN_PENDING:
@@ -151,8 +178,8 @@ async def _check_failed(provider: str, receipt, error: str) -> None:
     await run_in_db(harness_usage.record_check_failed, error=error, provider=provider, receipt=receipt)
 
 
-async def _check_codex(provider: str, receipt) -> None:
-    """A Codex account's usage is read by its own refresh, in its own home and login."""
+async def _check_codex(provider: str, receipt) -> bool:
+    """A Codex account's usage is read by its own refresh, in its own home and login; whether it read."""
     from connections import harness_models
 
     result = await harness_models.refresh_provider(provider, reason="usage-recheck", account_id=receipt.account_id,
@@ -164,9 +191,10 @@ async def _check_codex(provider: str, receipt) -> None:
         failed, cause = result.status != "ready", result.cause
     if failed and cause != "account_refresh_superseded":
         await _check_failed(provider, receipt, f"{provider} usage read failed: {cause or 'refresh did not finish'}")
+    return not failed
 
 
-async def _check_claude(binary: str, receipt, *, context=None) -> None:
+async def _check_claude(binary: str, receipt, *, context=None) -> dict:
     from connections import claude_usage
     from connections.claude_discovery import _control_responses, run_claude_control
 
@@ -182,4 +210,4 @@ async def _check_claude(binary: str, receipt, *, context=None) -> None:
     )
     response = _control_responses(stdout).get("corsia-usage")
     report = response.get("response") if response and response.get("subtype") == "success" else None
-    await run_in_db(claude_usage.apply_usage_response, report, receipt=receipt)
+    return await run_in_db(claude_usage.apply_usage_response, report, receipt=receipt)

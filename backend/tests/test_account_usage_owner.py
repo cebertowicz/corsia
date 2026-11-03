@@ -1161,6 +1161,47 @@ async def test_indeterminate_claude_recheck_keeps_limit_and_marks_failed(monkeyp
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("response", "error", "expected"), [
+    (_usage_response({"rate_limits_available": True, "rate_limits": {"five_hour": {"utilization": 1}}}), "", "pass"),
+    (_usage_response({"rate_limits_available": True, "rate_limits": {"five_hour": {"utilization": 100}}}), "", "pass"),
+    (_usage_response({"rate_limits_available": True, "rate_limits": {}}), "", "fail"),
+    (None, "", "fail"),
+    (None, "bad", "error"),
+    (None, "timeout", "error"),
+], ids=("allowed", "limited", "unknown-usage", "no-answer", "cli-failed", "cli-timeout"))
+async def test_login_check_says_whether_the_login_answered(monkeypatch, response, error, expected, _checks_clean):
+    _seed("claude-code")
+    monkeypatch.setattr(checks, "_binary_for", lambda _p: asyncio.sleep(0, result="/bin/test"))
+    monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
+    process = _Process(response, error=error)
+    if error == "bad":
+        process.returncode = 1
+    async def spawn(*_args, **_kwargs): return process
+    monkeypatch.setattr(checks.asyncio, "create_subprocess_exec", spawn)
+    assert await checks.check_login("claude-code", default_id("claude-code")) == expected
+
+
+@pytest.mark.asyncio
+async def test_login_check_is_bounded_and_leaves_scheduled_checks_alone(monkeypatch, _checks_clean):
+    started = []
+    async def hang(provider, account_id):
+        started.append(account_id)
+        await asyncio.Event().wait()
+    monkeypatch.setattr(checks, "_read", hang)
+    monkeypatch.setattr(checks, "_LOGIN_CHECK_SECONDS", 0.01)
+    monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
+    assert await checks.check_login("claude-code", "account-1") == "error"
+    assert checks._CHECKS == {} and checks._LAST_STARTED == {}
+    checks._schedule("claude-code", "account-1")
+    await asyncio.sleep(0)
+    assert started == ["account-1", "account-1"]
+    scheduled = list(checks._CHECKS.values())
+    for task in scheduled:
+        task.cancel()
+    await asyncio.gather(*scheduled, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 async def test_scheduler_throttles_and_is_single_flight(monkeypatch, _checks_clean):
     started, release = [], asyncio.Event()
     async def check(provider, account_id):
@@ -1190,6 +1231,7 @@ async def test_a_new_login_during_the_prior_logins_read_is_read_when_it_ends(mon
         if receipt == "prior-login":
             prior_running.set()
             await release.wait()
+        return {"verdict": "allowed"}
     monkeypatch.setattr(checks, "_check_claude", read)
     monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
     submitted = []
