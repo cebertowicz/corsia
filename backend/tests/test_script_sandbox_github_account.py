@@ -22,6 +22,7 @@ _LOCKED_GIT = [
     ("credential.https://github.com.helper", ""),
     ("url.https://github.com/.insteadOf", "git@github.com:"),
     ("url.https://github.com/.insteadOf", "ssh://git@github.com/"),
+    ("url.https://github.com/.pushInsteadOf", "https://github.com/"),
     ("user.name", ""),
     ("user.email", ""),
     ("user.useConfigOnly", "true"),
