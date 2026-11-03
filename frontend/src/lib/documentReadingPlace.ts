@@ -147,8 +147,9 @@ const SCROLL_INTO_VIEW = (EditorView.scrollIntoView(0) as unknown as { type: Sta
 
 /**
  * Applies the editor's transactions and keeps the reader's place across them. The held line moves with the text the
- * change moves; a change the reader did not make is laid out at once and the place laid again before the next paint, so
- * the text in view stays where it is while others edit the document. A remote append follows the live edge when the reader is already as
+ * change moves; a change the reader did not make is laid out and the place laid at once, so the scroll CodeMirror makes
+ * to keep its own anchor is not taken for the reader's, and laid again before the next paint, so the text in view stays
+ * where it is while others edit the document. A remote append follows the live edge when the reader is already as
  * near it as chat considers near. A transaction that scrolls (the reader's typing, a jump to a comment) lets CodeMirror
  * scroll, and the place is taken again from where it lands.
  */
@@ -168,6 +169,7 @@ export function dispatchKeepingPlace(transactions: readonly Transaction[], view:
 	else if (followAppend) holdPlace(view, { ...captureDocumentPlace(view), end: true });
 	else if (remoteChange) {
 		measureNow(view);
+		applyPlace(view);
 		applyBeforePaint(view);
 	}
 }

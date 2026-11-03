@@ -216,6 +216,21 @@ describe('dispatchKeepingPlace', () => {
 		page.stop();
 	});
 
+	it('takes the scroll CodeMirror makes to keep its own anchor through a streamed write as the editor\'s, never the reader\'s', async () => {
+		const page = pane();
+		const top = await page.readAt(2000);
+		for (let piece = 0; piece < 30; piece++) {
+			// CodeMirror moves the offset by the height the write added above its anchor, inside the write's measure; the
+			// browser keeps whole pixels, so it lands a pixel short. Its scroll event fires in the next frame, before paint.
+			page.view.requestMeasure({ read: () => null, write: () => { page.scroller.scrollTop += page.view.defaultLineHeight - 1; } });
+			page.view.dispatch({ changes: { from: 0, insert: `Streamed ${piece}\n` } });
+			await page.frame();
+		}
+		expect(page.painted).toHaveLength(30);
+		expect(off(page.painted, top)).toEqual([]);
+		page.stop();
+	});
+
 	it('lays the place for the frame that paints, not for a notice shown and gone inside the dispatching task', async () => {
 		const page = pane();
 		const top = await page.readAt(2000);
