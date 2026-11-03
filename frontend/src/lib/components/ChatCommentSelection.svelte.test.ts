@@ -25,7 +25,7 @@ it('saves an edited reply before its surface can unmount during the outro', asyn
 	host.remove(); vi.unstubAllGlobals();
 });
 
-async function openTyped(width: number) {
+async function openTyped(width: number, text: string | null = 'typed so far') {
 	vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
 	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
 	vi.stubGlobal('cancelAnimationFrame', () => {});
@@ -39,7 +39,7 @@ async function openTyped(width: number) {
 	await component.edit('reply');
 	flushSync();
 	const field = () => document.querySelector<HTMLTextAreaElement>('textarea');
-	field()!.value = 'typed so far'; field()!.dispatchEvent(new Event('input', { bubbles: true }));
+	if (text !== null) { field()!.value = text; field()!.dispatchEvent(new Event('input', { bubbles: true })); }
 	flushSync();
 	return { host, component, props, field };
 }
@@ -76,5 +76,29 @@ it('keeps typed text when an outside click closes the popover just before a thre
 	props.threadId = 'thread-a';
 	flushSync(); await tick(); flushSync();
 	expect(field()?.value).toBe('typed so far');
+	await unmount(component); host.remove(); vi.unstubAllGlobals();
+});
+
+async function roundTrip(props: { threadId: string }) {
+	props.threadId = 'thread-b';
+	flushSync(); await tick(); flushSync();
+	props.threadId = 'thread-a';
+	flushSync(); await tick(); flushSync();
+}
+
+it('does not reopen an edit popover nobody typed in after an outside click and a thread round trip', async () => {
+	const { host, component, props, field } = await openTyped(1440, null);
+	document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+	flushSync(); await tick();
+	await roundTrip(props);
+	expect(field()).toBeNull();
+	await unmount(component); host.remove(); vi.unstubAllGlobals();
+});
+
+it.each(['Cancel', 'Save'])('does not reopen a popover closed with %s just before a thread switch', async (label) => {
+	const { host, component, props, field } = await openTyped(1440);
+	[...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === label)!.click();
+	await roundTrip(props);
+	expect(field()).toBeNull();
 	await unmount(component); host.remove(); vi.unstubAllGlobals();
 });

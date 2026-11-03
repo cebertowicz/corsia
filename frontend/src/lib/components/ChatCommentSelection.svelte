@@ -59,7 +59,8 @@
 	}
 	function requestClose(keep = false) {
 		if (closing) return;
-		if (keep === true && threadId && typed?.trim() && (draft || editingId)) parked.set(threadId, { draft, editingId, typed });
+		const changed = !!typed?.trim() && typed !== (editing?.note ?? '');
+		if (keep === true && threadId && changed && (draft || editingId)) parked.set(threadId, { draft, editingId, typed });
 		afterClose = close; closing = true;
 	}
 	function closed() { const finish = afterClose; afterClose = null; finish?.(); closing = false; }
@@ -142,7 +143,8 @@
 		const next = threadId;
 		untrack(() => {
 			if (next === shownThread) { close(); return; }
-			if (shownThread && (draft || editingId)) parked.set(shownThread, { draft, editingId, typed });
+			// A popover already closing was dismissed, cancelled or sent; requestClose parked it if it should come back.
+			if (shownThread && !closing && (draft || editingId)) parked.set(shownThread, { draft, editingId, typed });
 			shownThread = next;
 			close();
 			const back = next ? parked.get(next) : undefined;
