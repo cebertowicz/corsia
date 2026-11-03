@@ -26,12 +26,14 @@ _ACTION_FIELDS = ("required_actions", "forbidden_actions", "decisive_action")
 FIELDS = (*_TEXT_FIELDS, "cause", "case", "new_evidence")
 
 #: The placement guide's lines for ``FIELDS``.
-GUIDE = f"""- With a trial, optionally describe its case; leave out what does not apply,
-  and a revision keeps what it leaves out except new_evidence:
-  - case: what_happened, right_call and does_not_apply, one line each. Add
-    actions when the right call is a tool call: the ordered required_actions,
-    any forbidden_actions, and the decisive_action, one of the required ones;
-    each is a tool and the params the call must carry.
+GUIDE = f"""- With a trial, describe its case; leave out any other field that does not
+  apply, and a revision keeps what it leaves out except new_evidence:
+  - case: what_happened, right_call and does_not_apply, one line each. When
+    the right call is a tool call, add actions: the ordered required_actions,
+    the forbidden_actions the wrong call made, and the decisive_action, one of
+    the required ones; each is a tool and only the params that decide it. A
+    re-test gives what_happened alone to a fresh agent, without and with the
+    lesson.
   - cause: why the correction happened, one of {", ".join(CORRECTION_CAUSES)}.
   - target_file and target_section: the existing file and section the rule
     amends; new_target_path instead when the rule needs a new file. A new
@@ -51,6 +53,10 @@ SCHEMA_PROPERTIES: dict[str, Any] = {
     **{key: {"type": ["string", "null"], "enum": [*values, None]} for key, values in _CHOICES.items()},
     "case": {
         "type": ["object", "null"],
+        "description": (
+            "Expected with a trial: what happened, the right call and when it does not apply; "
+            "add actions when the right call is a tool call."
+        ),
         "additionalProperties": False,
         "required": list(_CASE_FIELDS),
         "properties": {
