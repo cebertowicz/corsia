@@ -20,7 +20,7 @@ from automation.script_github_channel import bound_repository
 from automation.schedules import Schedule, get
 from events import rule_runs
 from infra.database import write_transaction
-from infra.queries import get_thread, thread_is_available
+from infra.queries import get_thread, get_thread_project_id, thread_is_available
 
 #: The key a rule run holds in the runner's in-flight map, beside the schedule ids.
 KEY_PREFIX = "rule:"
@@ -29,7 +29,7 @@ KEY_PREFIX = "rule:"
 @dataclass(frozen=True)
 class RuleRun:
     """One claimed rule run: its decision row, the event for stdin, the rule chain, and
-    the repository its stored connector or platform event names, the only one its GitHub
+    the repository its stored connector, platform or emitter event names, the only one its GitHub
     channel reads."""
 
     decision_id: int
@@ -44,7 +44,8 @@ class RuleRun:
 
 
 def execution_input(schedule: Schedule, run: RuleRun) -> tuple[bytes, str | None]:
-    """Bind the claimed repository against the connector's live project scope, off-lock.
+    """Bind the claimed repository, off-lock, to the repositories the rule owner's own
+    project registers now (read from the owner's thread, so a workspace-scope owner binds none).
 
     Shipped event producers also receive their output declaration and current
     staging root in stdin, rather than a copied configuration file.
@@ -54,11 +55,13 @@ def execution_input(schedule: Schedule, run: RuleRun) -> tuple[bytes, str | None
     from infra.database import get_db
 
     repository = None
-    if run.github_repo is not None:
+    claimed = run.github_repo
+    project_id = get_thread_project_id(schedule.thread_id) if claimed is not None else None
+    if claimed is not None and project_id is not None:
         resolve = get_manifest("github").project_repositories
-        repositories = resolve(schedule.scope_id) if resolve is not None else None
+        repositories = resolve(project_id) if resolve is not None else None
         if repositories is not None:
-            repository = next((repo for repo in repositories if repo.casefold() == run.github_repo.casefold()), None)
+            repository = next((repo for repo in repositories if repo.casefold() == claimed.casefold()), None)
     event_type = (schedule.payload or {}).get("event_type")
     if event_type is None:
         return run.stdin, repository
