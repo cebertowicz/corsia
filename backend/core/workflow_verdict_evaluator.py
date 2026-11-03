@@ -3,8 +3,7 @@
 The daily job (``jobs.workflow_verdicts``) reads open workflow versions with ``core.workflow_verdict_read``
 (``read_open_snapshot``, then ``price_snapshot``) and open lesson trials with ``core.lesson_trial_verdicts``,
 computes off the database, then calls :func:`write_verdicts` and :func:`wake_owners` inside the
-``write_transaction`` it holds. Nothing here opens a transaction or reads to aggregate. Neither encoding raises:
-the reached detail and the frozen plan (``FrozenPlan.encoded``) each drop shown-only fields to fit.
+``write_transaction`` it holds. Nothing here opens a transaction or reads to aggregate.
 """
 from __future__ import annotations
 

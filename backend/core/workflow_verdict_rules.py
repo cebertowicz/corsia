@@ -16,7 +16,7 @@ from core.workflow_verdicts import (
 )
 from core.workflow_verdict_looks import LOOK_MULTIPLES, look_confidence, planned_mdc
 from core.workflow_verdict_types import (
-    Definition, Evaluation, FrozenPlan, Snapshot, TwoArms, Verdict, WorkflowHistory, fitted, subject_of,
+    Definition, Evaluation, FrozenPlan, Snapshot, TwoArms, Verdict, WorkflowHistory, subject_of,
 )
 from infra.measure_validation import deciding_refusal
 
@@ -116,9 +116,9 @@ def freeze_plan(history: WorkflowHistory, version: str) -> FrozenPlan:
     seed = int.from_bytes(hashlib.sha256(subject.encode("utf-8")).digest()[:8], "big")
     confidence, confidence_reason = _validated_confidence(history)
     arm = [] if baseline is None else baseline_runs(history, baseline, minimum, window, first_use)
-    return fitted(FrozenPlan(subject, version, baseline, skipped, measures, minimum, refusals, seed,
-                             confidence=confidence, confidence_reason=confidence_reason,
-                             mdc=planned_mdc(measures, arm, minimum, confidence, first_use, fixed=True)))
+    return FrozenPlan(subject, version, baseline, skipped, measures, minimum, refusals, seed,
+                      confidence=confidence, confidence_reason=confidence_reason,
+                      mdc=planned_mdc(measures, arm, minimum, confidence, first_use, fixed=True))
 
 
 def _not_enough(calls: Sequence[MeasureCall], extra: Sequence[str] = ()) -> Verdict | None:

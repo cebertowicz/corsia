@@ -34,7 +34,7 @@ from core.workflow_verdict_rules import (
     Definition, Evaluation, FrozenPlan, Snapshot, TwoArms, WorkflowHistory, assert_evaluator_fields, decide_arms,
     definitions_in_force,
 )
-from core.workflow_verdict_types import fitted, subject_of
+from core.workflow_verdict_types import subject_of
 from core.workflow_verdicts import (
     CORRECTION_FLOOR, COST, DEFAULT_CONFIDENCE, DEFAULT_MINIMUM, KpiRow, PlannedMeasure, Run, parse_ts,
 )
@@ -224,8 +224,8 @@ def freeze_plan(open_trial: OpenTrial, definitions: Sequence[Definition], workfl
     subject = open_trial.subject
     seed = int.from_bytes(hashlib.sha256(subject.encode("utf-8")).digest()[:8], "big")
     # Confidence stays at the default: no CORSIA metadata key for a raised level exists yet to read.
-    return fitted(FrozenPlan(subject, open_trial.sha, WITHOUT, (), measures, minimum, refusals, seed,
-                             mdc=planned_mdc(measures, without, minimum, DEFAULT_CONFIDENCE, now, fixed=False)))
+    return FrozenPlan(subject, open_trial.sha, WITHOUT, (), measures, minimum, refusals, seed,
+                      mdc=planned_mdc(measures, without, minimum, DEFAULT_CONFIDENCE, now, fixed=False))
 
 
 def trial_owner(db: sqlite3.Connection, open_trial: OpenTrial) -> str | None:

@@ -477,26 +477,6 @@ def test_a_declared_spend_kpi_alone_leaves_sent_back_and_restart_deciding(db, wo
     assert roles["escapes"] == "quality" and roles[lessons.SENT_BACK] == roles[lessons.RESTARTED] == "shown"
 
 
-def test_spend_kpis_past_the_plan_record_are_refused_by_name_and_the_rest_still_decide(db, workspace) -> None:
-    trial = trial_at(workspace, db)
-    events = Definition("event", "qg.escape", 1, {"attributes": {"pr": "id"}, "dedupe": ["pr"]},
-                        "2026-09-01T00:00:00Z", False, "/workflows/w/measures.yaml")
-    spec = {"formula": "ratio", "num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "min_n": 1,
-            "better": "lower", "can_decide": True, "coverage": {"of": "qg.escape", "by": "audit"}, "target": 0.1,
-            "review": 0.2, "decides_as": "spend"}
-    names = [f"spend-{n:02d}" for n in range(30)]
-    kpis = [Definition("kpi", name, 1, spec, "2026-09-01T00:00:00Z", False, "/workflows/w/measures.yaml") for name in names]
-
-    plan = lessons.freeze_plan(trial, [events, *kpis], "w", (), NOW)
-
-    kept = [measure.name for measure in plan.measures if measure.name in names]
-    refused = [name for name, _why in plan.refusals]
-    assert kept and refused and kept + sorted(refused) == names  # the last by name are the ones refused
-    assert all(why.endswith("does not fit the 2,000-character plan record") for _name, why in plan.refusals)
-    assert {lessons.SENT_BACK, lessons.RESTARTED, COST} <= {measure.name for measure in plan.measures}
-    assert FrozenPlan.decoded(plan.encoded()).measures == plan.measures
-
-
 # --- the owner -------------------------------------------------------------------------------------------------
 
 def test_a_file_in_a_thread_tray_belongs_to_that_thread(db, workspace) -> None:

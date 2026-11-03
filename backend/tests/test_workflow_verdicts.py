@@ -21,7 +21,7 @@ from core.workflow_verdict_rules import (
     Evaluation, FrozenPlan, Snapshot, TwoArms, WorkflowHistory, baseline_runs, choose_baseline, compute, decide,
     decide_arms, freeze_plan,
 )
-from core.workflow_verdict_types import PLAN_TEXT_LIMIT, split_subject, subject_of
+from core.workflow_verdict_types import split_subject, subject_of
 from core.workflow_verdicts import (
     BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MINUTES, MIXED, CorrectionFact, KpiRow, MeasureCall, PlannedMeasure, Run, measure_call,
     parse_ts,
@@ -735,21 +735,3 @@ def test_calibration_script_simulates_versions_that_changed_nothing_without_a_da
     assert capsys.readouterr().out.startswith("null trials 2: false calls ")
     assert script.main(["--null-trials", "2", "--fixed-baseline"]) == 0
     assert script.null_trial((7, 80, False)) == script.null_trial((7, 80, False))  # seeded, so splittable
-
-
-def test_a_plan_over_the_record_drops_only_shown_fields_and_its_records_are_written() -> None:
-    db = sqlite3.connect(":memory:")
-    db.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
-    source = history(runs("v1", 1, started=40, ended=30), runs("v2", 2))
-    plan = replace(freeze_plan(source, "v2"), skipped=tuple(f"skipped-version-{n}" for n in range(200)))
-    assert len(json.dumps(plan.skipped)) > PLAN_TEXT_LIMIT
-
-    back = FrozenPlan.decoded(plan.encoded())
-
-    assert (back.baseline, back.measures, back.minimum, back.seed, back.policy_version) == (
-        plan.baseline, plan.measures, plan.minimum, plan.seed, plan.policy_version)
-    assert back.skipped == () and back.mdc == {}
-    reached = Evaluation(plan.subject, "owner", plan, decide(source, plan, NOW), True)
-    assert reached.verdict.word in evaluator.STORED and evaluator.write_verdicts(db, [reached]) == 1
-    names = [row[0] for row in db.execute("SELECT event_name FROM outcome_events ORDER BY event_name")]
-    assert names == [evaluator.PLANNED_EVENT, evaluator.REACHED_EVENT]
