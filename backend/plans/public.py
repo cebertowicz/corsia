@@ -128,6 +128,7 @@ from plans.review_evidence import latest as latest_review_evidence
 
 # The thin status a checkpoint freezes (infra/checkpoint_snapshots).
 from plans.close_next_bounds import bounded as bounded_label
+from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES
 from plans.status import cut_rows
 from plans.status_context import render as render_status
 # The status a plan write left owed: drained before a digest (infra/passive_changes)

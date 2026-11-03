@@ -337,7 +337,7 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
         )
     except (ScriptSandboxError, ProcessOwnerError) as exc:
         return _error_report(schedule, f"could not start: {exc}")
-    return build_report(schedule, run, run_id=run_id)
+    return dataclasses.replace(build_report(schedule, run, run_id=run_id), github_locked=run.github_locked)
 
 
 def settle(
@@ -352,7 +352,9 @@ def settle(
         if rule_run is not None:
             # A breach is a reading the script ran and reported, not a failed run.
             failed = None if report.status in ("ok", "breach") else (report.error or report.status)
-            rule_runs.finish(connection, rule_run.decision_id, failed=failed)
+            # The missing login can explain a failure; on a run that worked it is noise.
+            rule_runs.finish(connection, rule_run.decision_id, failed=failed,
+                             note=report.github_locked if failed else None)
         try:
             current = get(schedule.id, db=connection)
         except KeyError:

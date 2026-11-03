@@ -228,7 +228,8 @@ from infra.migration_167_to_168_measure_keys import migrate_167_to_168
 from infra.migration_168_to_169_checkpoint_adopted_tokens import migrate_168_to_169
 from infra.migration_169_to_170_trial_crossover import migrate_169_to_170
 from infra.migration_170_to_171_worker_profile import migrate_170_to_171
-from infra.migration_171_to_172_workflow_ref_index import migrate_171_to_172
+from infra.migration_171_to_172_message_drafts import migrate_171_to_172
+from infra.migration_172_to_173_workflow_ref_index import migrate_172_to_173
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -889,6 +890,7 @@ MIGRATIONS[168] = migrate_168_to_169
 MIGRATIONS[169] = migrate_169_to_170
 MIGRATIONS[170] = migrate_170_to_171
 MIGRATIONS[171] = migrate_171_to_172
+MIGRATIONS[172] = migrate_172_to_173
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

@@ -26,6 +26,7 @@ ToolCategory = Literal[
     "processes",
     "discovery",
     "email",
+    "messages",
     "google_workspace",
     "microsoft",
     "microsoft_mail",

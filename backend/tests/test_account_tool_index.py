@@ -9,9 +9,10 @@ from tools.tool_surface import pack_index
 ACCOUNT_TOOLS = (
     "email_search", "email_read", "email_draft", "email_send", "calendar_list",
     "calendar_draft_invite", "calendar_send_invite", "microsoft_mail_search",
-    "microsoft_calendar_list", "microsoft_files_list",
+    "microsoft_calendar_list", "microsoft_files_list", "messages_chats", "messages_read", "messages_search",
+    "messages_draft", "messages_send",
 )
-SETUP_TOOLS = ("google_connect", "google_status", "microsoft_connect", "microsoft_status", "mail_host_connect")
+SETUP_TOOLS = ("google_connect", "google_status", "microsoft_connect", "microsoft_status", "mail_host_connect", "messages_connect")
 
 
 def render():
@@ -28,7 +29,7 @@ def test_account_tools_are_counted_and_setup_tools_stay_named():
         assert index.count(f"- {name}:") == 1
 
 
-@pytest.mark.parametrize("pack", ["email", "microsoft_mail", "microsoft_calendar", "microsoft_files"])
+@pytest.mark.parametrize("pack", ["email", "messages", "microsoft_mail", "microsoft_calendar", "microsoft_files"])
 def test_each_account_pack_names_its_exact_load_call(pack):
     bound = sum(TOOL_CATALOG[name].account_bound for name in pack_members()[pack])
     assert bound
