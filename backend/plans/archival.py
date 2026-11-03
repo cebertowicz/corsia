@@ -131,6 +131,10 @@ def archive_node(node_id: str, *, actor_id: str | None = None,
             causal_event_id=event_id,
         )
         settle_watches(connection, node_id)
+        from plans import run_end
+
+        # Archiving an open optional step skips it (a required one is refused above).
+        run_end.record_if_ended(connection, node_id, "archived")
         return service._node_from_row(
             connection, service._node_row(connection, node_id),
         )

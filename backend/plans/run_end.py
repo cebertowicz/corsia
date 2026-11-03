@@ -15,7 +15,7 @@ import plans.service as service
 from plans import node_states
 
 EVENT = "workflow_run_ended"
-RUN_FAILED = "run failed: required step {step} failed"
+RUN_FAILED = "Closed because required task {step} failed."
 _PROVENANCE = "plans.workflow_run"
 _DONE = "done"
 #: A step the run's failure closed before anyone reached it; ``closed`` stays an agent's own skip.
@@ -51,33 +51,45 @@ def open_nodes(db, phase_id: str) -> list[str]:
     )]
 
 
-def fail_run(node_id: str, common: dict, *, executor: str | None) -> None:
-    """After a required step fails, close the run's other open work with the reason.
+def fail_run(node_id: str, common: dict) -> list[str]:
+    """After a required step fails, close the run's other open work with the reason; return the ids closed.
 
     The closes carry this module's provenance, which is how the run's record
-    tells a step never reached from one an agent chose to skip.
+    tells a step never reached from one an agent chose to skip. Work whose close
+    is refused (a delegated worker still has open work) stays open: the run ends
+    when its owner settles it. The caller releases and tells each closed node.
     """
-    from plans import boundary_after, closure
+    from plans import closure
     from plans.workflow_fields import creation_payload
 
     db = common["db"]
     node = service._node_row(db, node_id)
     if node["workflow_step"] is None or node["parent_id"] is None:
-        return
+        return []
     if creation_payload(db, node_id).get("workflow_required") is not True:
-        return
+        return []
     if not _run_phase(db, service._node_row(db, node["parent_id"])):
-        return
+        return []
     reason = RUN_FAILED.format(step=node["workflow_step"])
-    while open_ids := open_nodes(db, node["parent_id"]):
-        for open_id in open_ids:
-            if service._node_row(db, open_id)["state"] in service._TERMINAL_STATES:
+    closed: list[str] = []
+    refused: set[str] = set()
+    progress = True
+    while progress:
+        progress = False
+        for open_id in open_nodes(db, node["parent_id"]):
+            if open_id in refused or service._node_row(db, open_id)["state"] in service._TERMINAL_STATES:
                 continue
-            closure.close_node(
-                open_id, reason=reason, actor_id=common["actor_id"],
-                provenance=_PROVENANCE, db=db,
-            )
-            boundary_after.after_transition(open_id, service.CLOSED, common, executor=executor)
+            try:
+                closure.close_node(
+                    open_id, reason=reason, actor_id=common["actor_id"],
+                    provenance=_PROVENANCE, db=db,
+                )
+            except service.PlanError:
+                refused.add(open_id)
+                continue
+            closed.append(open_id)
+            progress = True
+    return closed
 
 
 def record_if_ended(db, node_id: str, new_state: str) -> None:
@@ -109,20 +121,24 @@ def _record(db, phase) -> None:
     """Write the one ``workflow_run_ended`` event of ``phase``; a second call writes nothing."""
     if _ended(db, phase["id"]) is not None:
         return
-    steps = _steps(db, phase)
+    steps, totals = _steps(db, phase)
     failed = any(step["required"] and step["state"] in {"failed", _NOT_RUN} for step in steps)
     service._event(
         db, phase["id"], EVENT, actor_id=None, provenance=_PROVENANCE,
         payload={
             "workflow_ref": phase["workflow_ref"], "workflow_version": phase["workflow_version"],
-            "size": phase["size"], "outcome": "failed" if failed else "completed", "steps": steps,
+            "size": phase["size"], "outcome": "failed" if failed else "completed", "steps": steps, **totals,
         },
     )
 
 
-def _steps(db, phase) -> list[dict[str, Any]]:
-    """Each step of the run in definition order, from the node that is currently the step."""
-    from plans import closure, node_cost
+def _steps(db, phase) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Each step of the run in definition order, and the run's own totals, both from the cost owner.
+
+    Cost and time are the rolled figures of ``node_cost_scoped``: they include plans
+    attached to a step (delegated work) and count wall-clock time once.
+    """
+    from plans import closure, node_cost_scoped
     from plans.workflow_fields import creation_payload
 
     by_step: dict[str, list] = {}
@@ -131,7 +147,8 @@ def _steps(db, phase) -> list[dict[str, Any]]:
         (phase["id"],),
     ):
         by_step.setdefault(row["workflow_step"], []).append(row)
-    own = node_cost.own_many([row["id"] for rows in by_step.values() for row in rows], db=db)
+    wanted = [phase["id"], *(row["id"] for rows in by_step.values() for row in rows)]
+    _own, rolled, _initiatives, _ledger = node_cost_scoped.project([], wanted, (), db=db)
     current = [rows[-1] for rows in by_step.values()]
     closed = [row for row in current if row["state"] == service.CLOSED]
     skipped = closure.settled_reasons(db, closed)
@@ -146,25 +163,32 @@ def _steps(db, phase) -> list[dict[str, Any]]:
                 state = _NOT_RUN
             else:
                 state = _DONE if inner["outcome"] == "completed" else "failed"
-            seconds = sum(item["execution_seconds"] for item in inner["steps"])
-            waiting = sum(item["waiting_seconds"] for item in inner["steps"])
-            cost = _sum(item["model_cost_usd"] for item in inner["steps"])
         else:
             state = _DONE if last["state"] in service._ACCEPTED_STATES else last["state"]
             if last["id"] in not_run:
                 state = _NOT_RUN
-            seconds = sum(own[row["id"]]["execution"]["seconds"] for row in rows)
-            waiting = sum(own[row["id"]]["waiting"]["seconds"] for row in rows)
-            cost = _sum(own[row["id"]]["model_cost_usd"]["known"] for row in rows)
+            elif last["archived_at"] is not None and last["state"] not in service._TERMINAL_STATES:
+                state = service.CLOSED  # archiving an open optional step skips it
+        # A step's rounds never overlap (a send-back or follow-up settles a round before the
+        # next row opens), so their sum is their union.
+        figures = [rolled[row["id"]] for row in rows]
         listed.append({
             "step": step, "state": state, "required": created.get("workflow_required") is True,
             "by": created.get("workflow_by", "agent"), "rounds": len(rows) - 1,
             "skip_reason": skipped.get(last["id"]) if state == service.CLOSED else None,
-            "execution_seconds": seconds, "waiting_seconds": waiting, "model_cost_usd": cost,
+            "execution_seconds": sum(item["execution"]["seconds"] for item in figures),
+            "waiting_seconds": sum(item["waiting"]["seconds"] for item in figures),
+            "model_cost_usd": _sum(item["model_cost_usd"]["known"] for item in figures),
+            "cost_unknown_rows": sum(item["model_cost_usd"]["unknown_rows"] for item in figures),
             "inner_workflow_ref": last["workflow_ref"] if inner is not None else None,
             "inner_workflow_version": last["workflow_version"] if inner is not None else None,
         })
-    return listed
+    own = rolled[phase["id"]]
+    totals = {
+        "execution_seconds": own["execution"]["seconds"], "waiting_seconds": own["waiting"]["seconds"],
+        "model_cost_usd": own["model_cost_usd"]["known"], "cost_unknown_rows": own["model_cost_usd"]["unknown_rows"],
+    }
+    return listed, totals
 
 
 def _closed_by_failure(db, node_ids: list[str]) -> set[str]:
@@ -194,20 +218,23 @@ def summary(db, node_id: str) -> str | None:
     node = service._node_row(db, node_id)
     if node["state"] not in service._TERMINAL_STATES:
         return None
-    since = db.execute(
-        "SELECT MAX(rowid) AS mark FROM plan_node_events WHERE node_id=? AND event='state_transition'",
-        (node_id,),
-    ).fetchone()["mark"]
+    since = None
     line = None
     parent_id = node["parent_id"]
     while parent_id is not None:
         parent = service._node_row(db, parent_id)
-        row = db.execute(
-            "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event=? AND rowid>? LIMIT 1",
-            (parent_id, EVENT, since or 0),
-        ).fetchone()
-        if row is not None:
-            line = _line(json.loads(row["payload_json"]))
+        if parent["kind"] == "phase" and parent["workflow_ref"] is not None:
+            if since is None:
+                since = db.execute(
+                    "SELECT MAX(rowid) AS mark FROM plan_node_events WHERE node_id=? AND event='state_transition'",
+                    (node_id,),
+                ).fetchone()["mark"] or 0
+            row = db.execute(
+                "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event=? AND rowid>? LIMIT 1",
+                (parent_id, EVENT, since),
+            ).fetchone()
+            if row is not None:
+                line = _line(json.loads(row["payload_json"]))
         parent_id = parent["parent_id"]
     return line
 
@@ -215,13 +242,13 @@ def summary(db, node_id: str) -> str | None:
 def _line(record: dict[str, Any]) -> str:
     steps = record["steps"]
     count = lambda state: sum(1 for step in steps if step["state"] == state)  # noqa: E731
-    cost = _sum(step["model_cost_usd"] for step in steps)
-    seconds = sum(step["execution_seconds"] for step in steps)
+    cost = record["model_cost_usd"]
+    seconds = record["execution_seconds"]
     hours, rest = divmod(seconds, 3600)
     minutes, secs = divmod(rest, 60)
     elapsed = f"{hours}h {minutes}m" if hours else f"{minutes}m {secs}s" if minutes else f"{secs}s"
     return (
         f"Run {record['workflow_ref']} {record['outcome']}: {count(_DONE)} done, "
         f"{count(service.CLOSED)} skipped, {count(_NOT_RUN)} not run, {count('failed')} failed, {elapsed}, "
-        + ("cost unknown" if cost is None else f"${cost:.2f}") + "."
+        + ("cost unknown" if cost is None or record["cost_unknown_rows"] else f"${cost:.2f}") + "."
     )

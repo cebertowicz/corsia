@@ -65,11 +65,12 @@ def after_close(
     from plans import admission, close_next, run_end
 
     db = common["db"]
-    if reason == "failed":
-        run_end.fail_run(node_id, common, executor=executor)
+    run_closed = run_end.fail_run(node_id, common) if reason == "failed" else []
     closed = service._node_row(db, node_id)
     slot = close_next.slot_before(db, closed)
     admission.release(node_id, reason, db=db)
+    for sibling in run_closed:
+        admission.release(sibling, "closed", db=db)
     named = None
     if "next_node_id" in params:
         named = close_next.start_named(
@@ -86,6 +87,13 @@ def after_close(
         db, node_id, plan_id=slot.plan_id, executor=slot.executor,
         causing_executor=executor,
     )
+    for sibling in run_closed:
+        row = service._node_row(db, sibling)
+        plan_wake.notify_closed(
+            db, sibling, plan_id=str(row["plan_id"]),
+            executor=admission.resolve_executor(db, row, service._plan_row(db, row["plan_id"])),
+            causing_executor=executor,
+        )
     result = admission.result(node_id, db=db)
     result.update(close_next.next_fields(db, closed, slot, named, acting=executor))
     if (ended := run_end.summary(db, node_id)) is not None:

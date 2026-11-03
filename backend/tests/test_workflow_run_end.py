@@ -5,6 +5,7 @@ import json
 import pytest
 
 from infra.database import get_db
+from llm.api_equivalent import api_equivalent
 from plans import plan_wake, run_end
 from plans.workflow_fields import HARD_IF_NOTICE, STEPS_CREATED
 from tests.event_routing_helpers import mk_session
@@ -67,7 +68,7 @@ async def test_a_failed_required_step_closes_the_rest_of_the_run_with_the_reason
         "SELECT node_id,payload_json FROM plan_node_events WHERE event='state_transition' AND new_state='closed'",
     )
     assert {row["node_id"]: json.loads(row["payload_json"])["reason"] for row in reasons} == {
-        review: "run failed: required step draft failed", polish: "run failed: required step draft failed",
+        review: "Closed because required task draft failed.", polish: "Closed because required task draft failed.",
     }
     assert {node for _recipient, node in told} >= {review, polish}
     assert run.rows("SELECT archived_at IS NOT NULL AS retired FROM threads WHERE id=?", worker) == [{"retired": 1}]
@@ -226,3 +227,138 @@ async def test_a_failed_nested_run_reads_failed_in_the_outer_record(isolated_db,
     assert (record["outcome"], {entry["step"]: entry["state"] for entry in record["steps"]}) == (
         "failed", {"design": "failed", "ship": "done"},
     )
+
+
+MODEL = "claude-code/claude-opus-5-5"
+
+
+def _seed_turn(node_id, start, end, *, thread_id, tokens=None):
+    """A completed Turn of ``thread_id`` on ``node_id`` from minute ``start`` to ``end``, with a priced call of ``tokens`` input tokens."""
+    from datetime import datetime, timedelta, timezone
+
+    def at(minutes):
+        return (datetime(2026, 9, 28, 12, tzinfo=timezone.utc) + timedelta(minutes=minutes)).isoformat()
+
+    db = get_db()
+    try:
+        node = db.execute("SELECT plan_id,commitment_id FROM plan_nodes WHERE id=?", (node_id,)).fetchone()
+        turn_id = f"turn-{node_id}-{start}"
+        db.execute(
+            "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,ended_at,boot_epoch,"
+            "plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,plan_usage_role) "
+            "VALUES (?,?,0,'test-model','completed',?,?,'boot',?,?,?,?,'execution')",
+            (turn_id, thread_id, at(start), at(end), node["plan_id"], node_id, f"attempt-{turn_id}", node["commitment_id"]),
+        )
+        if tokens is not None:
+            db.execute(
+                "INSERT INTO llm_usage (id,thread_id,turn_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,"
+                "cache_read_tokens,total_tokens,plan_id,plan_node_id,plan_attempt_id,plan_commitment_id,"
+                "plan_usage_role,source,created_at) "
+                "VALUES (?,?,?,?,?,0,0,0,?,?,?,?,?,'execution','external_harness:claude-code','t')",
+                (f"usage-{turn_id}", thread_id, turn_id, MODEL, tokens, tokens, node["plan_id"], node_id,
+                 f"attempt-{turn_id}", node["commitment_id"]),
+            )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _settle_worker_task(task):
+    from plans import closure
+
+    db = get_db()
+    try:
+        closure.close_node(task, reason="Worker finished", db=db)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _keep_worker_enabled(worker):
+    db = get_db()
+    try:
+        db.execute("UPDATE threads SET agent_enabled=1 WHERE id=?", (worker,))
+        db.commit()
+    finally:
+        db.close()
+
+
+async def _delegate(run, step):
+    """Attach a worker with a plan of one open task to ``step``; returns (worker, its task)."""
+    from plans import service
+
+    worker = mk_session(f"run-worker-{step}", spawned_by=run.thread_id)
+    db = get_db()
+    try:
+        child = service.ensure_plan("thread", worker, db=db)
+        task = service.add_node(child.id, kind="task", title="Work", acceptance_criteria="Worked", db=db).id
+        db.commit()
+    finally:
+        db.close()
+    attached = await run.update("attach_spawned_thread", _args(run, step, spawned_thread_id=worker))
+    assert not isinstance(attached, str), attached
+    return worker, task
+
+
+async def test_a_run_record_carries_delegated_cost_and_counts_overlapping_steps_once(isolated_db, tmp_path, monkeypatch):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, PLAIN)})
+    reply = await run.start("ship")
+    phase = reply["node"]["id"]
+    draft, review, polish = (step["id"] for step in reply["steps"])
+    worker, task = await _delegate(run, polish)
+    _seed_turn(draft, 0, 60, thread_id=run.thread_id, tokens=1_000_000)
+    _seed_turn(review, 30, 90, thread_id=run.thread_id, tokens=2_000_000)
+    _seed_turn(task, 100, 110, thread_id=worker, tokens=500_000)
+    _settle_worker_task(task)
+    await _finish(run, draft)
+    await _finish(run, review)
+    await run.update("close_node", _args(run, polish, reason="Nothing to polish"))
+
+    (record,) = _ended(run, phase)
+    by_step = {entry["step"]: entry for entry in record["steps"]}
+    price = lambda tokens: api_equivalent(MODEL, tokens, 0, 0, 0)  # noqa: E731
+    assert by_step["polish"]["model_cost_usd"] == pytest.approx(price(500_000))
+    assert (by_step["draft"]["execution_seconds"], by_step["polish"]["execution_seconds"]) == (3600, 600)
+    assert (record["model_cost_usd"], record["cost_unknown_rows"]) == (pytest.approx(price(3_500_000)), 0)
+    assert record["execution_seconds"] == (90 + 10) * 60  # the steps' 60 + 60 + 10 minutes, overlap counted once
+
+
+async def test_archiving_an_open_optional_step_as_the_last_open_work_records_the_run(isolated_db, tmp_path, monkeypatch):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, PLAIN)})
+    reply = await run.start("ship")
+    phase = reply["node"]["id"]
+    draft, review, polish = (step["id"] for step in reply["steps"])
+    await _finish(run, draft)
+    await _finish(run, review)
+    assert _ended(run, phase) == []
+
+    archived = await run.update("archive_node", _args(run, polish))
+    assert not isinstance(archived, str), archived
+
+    (record,) = _ended(run, phase)
+    by_step = {entry["step"]: entry for entry in record["steps"]}
+    assert (by_step["polish"]["state"], by_step["polish"]["skip_reason"]) == ("closed", None)
+    assert record["outcome"] == "completed"
+
+
+async def test_a_sibling_whose_close_is_refused_stays_open_and_the_run_ends_when_it_settles(isolated_db, tmp_path, monkeypatch):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, PLAIN)})
+    reply = await run.start("ship")
+    phase = reply["node"]["id"]
+    draft, review, polish = (step["id"] for step in reply["steps"])
+    worker, task = await _delegate(run, review)
+    _keep_worker_enabled(worker)  # an enabled worker is not retired, so its open work refuses its step's close
+
+    failed = await run.update("fail", _args(run, draft))
+
+    assert not isinstance(failed, str), failed
+    assert [_state(run, node) for node in (draft, review, polish)] == ["failed", "pending", "closed"]
+    assert _ended(run, phase) == []
+    _settle_worker_task(task)
+    await _finish(run, review)
+
+    (record,) = _ended(run, phase)
+    assert record["outcome"] == "failed"
+    assert {entry["step"]: entry["state"] for entry in record["steps"]} == {
+        "draft": "failed", "review": "done", "polish": "not_run",
+    }
