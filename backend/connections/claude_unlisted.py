@@ -13,6 +13,14 @@ is ever substituted:
 2. it still reports the model recorded for it before, ignoring a ``[...]``
    variant suffix (the listing and the runtime disagree on the suffix);
 3. that model is one the CLI still lists.
+
+The ``[1m]`` variant of each listed selector is probed the same way even when
+no catalog row ever had it: a fresh install, or an account signed in after the
+update, has no old row, yet a review of a PR into ``main`` and a workflow that
+needs a larger context still ask for ``<model>[1m]``. Its row is an alias like
+any other, so the picker does not show it. Any ``[1m]`` selector, new or kept
+from an earlier refresh, is also kept only when the CLI reports a window of at
+least 1M tokens for it now: a run named 1M is never a smaller one.
 """
 
 from __future__ import annotations
@@ -26,6 +34,8 @@ log = logging.getLogger(__name__)
 
 ALIAS_KEY = "corsiaUnlistedAliasOf"
 _VARIANT = re.compile(r"\[[^\]]*\]$")
+_EXTENDED_SUFFIX = "[1m]"
+_EXTENDED_WINDOW = 1_000_000
 
 
 def base_identity(identity: str) -> str:
@@ -41,8 +51,9 @@ async def add_accepted_unlisted(
     """Append accepted unlisted selectors to a ``list_models`` payload.
 
     ``prior`` holds ``selector``, ``resolved_identity`` and ``display_name``
-    for each non-placeholder catalog row. An appended entry copies the listed
-    model's capabilities and records which listed selector it aliases.
+    for each non-placeholder catalog row; the ``[1m]`` variant of each listed
+    selector is a candidate too. An appended entry copies the listed model's
+    capabilities and records which listed selector it aliases.
     Returns, and logs, why each probed selector was not kept: a rejection,
     a timeout and a probe fault each keep their own message.
     """
@@ -60,6 +71,7 @@ async def add_accepted_unlisted(
         and row["resolved_identity"]
         and base_identity(row["resolved_identity"]) in listed
     ]
+    candidates += _extended_variants(models, listed_selectors | {row["selector"] for row in candidates})
     errors: dict[str, str] = {}
     if not candidates:
         return errors
@@ -70,7 +82,7 @@ async def add_accepted_unlisted(
         selector = row["selector"]
         if isinstance(usage, BaseException):
             errors[selector] = (
-                f"Claude Code no longer lists {selector}, and probing it failed: "
+                f"Claude Code does not list {selector}, and probing it failed: "
                 f"{type(usage).__name__}: {usage}"
             )
             log.warning("%s", errors[selector])
@@ -78,8 +90,18 @@ async def add_accepted_unlisted(
         reported = str(usage.get("model") or "").strip()
         if base_identity(reported) != base_identity(row["resolved_identity"]):
             errors[selector] = (
-                f"Claude Code no longer lists {selector} and now maps it to "
+                f"Claude Code does not list {selector} and maps it to "
                 f"{reported or 'no model'}, not {row['resolved_identity']}"
+            )
+            log.warning("%s", errors[selector])
+            continue
+        window = usage.get("rawMaxTokens")
+        if selector.endswith(_EXTENDED_SUFFIX) and not (
+            isinstance(window, int) and window >= _EXTENDED_WINDOW
+        ):
+            errors[selector] = (
+                f"Claude Code does not list {selector} and reports a "
+                f"{window or 'missing'}-token window for it, not 1M"
             )
             log.warning("%s", errors[selector])
             continue
@@ -93,3 +115,22 @@ async def add_accepted_unlisted(
             ALIAS_KEY: str(source.get("value") or ""),
         })
     return errors
+
+
+def _extended_variants(models: list[dict[str, Any]], known: set[str]) -> list[dict[str, Any]]:
+    """A ``[1m]`` candidate for each listed selector that names no variant and has none yet."""
+    variants: list[dict[str, Any]] = []
+    for raw in models:
+        selector = str(raw.get("value") or "").strip()
+        resolved = str(raw.get("resolvedModel") or "").strip()
+        if not selector or selector == "default" or not resolved or _VARIANT.search(selector):
+            continue
+        variant = f"{selector}{_EXTENDED_SUFFIX}"
+        if variant in known:
+            continue
+        known.add(variant)
+        name = str(raw.get("displayName") or selector)
+        variants.append({"selector": variant,
+                         "resolved_identity": f"{base_identity(resolved)}{_EXTENDED_SUFFIX}",
+                         "display_name": f"{name} (1M context)"})
+    return variants
