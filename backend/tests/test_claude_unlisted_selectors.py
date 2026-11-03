@@ -110,8 +110,9 @@ async def test_accepted_unlisted_selector_keeps_running_as_an_alias(
         {"opus[1m]": "claude-opus-5-5[1m]", "fable[1m]": "claude-fable-5-1[1m]"},
     )
 
-    # The update-required placeholder names no model the CLI still lists.
-    assert sorted(probed) == ["fable[1m]", "opus[1m]"]
+    # The update-required placeholder names no model the CLI still lists; each
+    # listed selector's own [1m] variant is probed unless an old row has it.
+    assert sorted(probed) == ["claude-fable-5-1[1m]", "fable[1m]", "opus[1m]"]
     rows = _rows(connections_db)
     for selector, alias_of in (("opus[1m]", "opus"), ("fable[1m]", "claude-fable-5-1")):
         row = rows[selector]
@@ -145,8 +146,42 @@ async def test_a_selector_not_kept_says_why(connections_db, monkeypatch, caplog)
         assert row["available"] == 0
         assert json.loads(row["metadata_json"])["availability_reason"] == "not_returned_by_discovery"
     # No reader shows a retired row's probe error; the discovery log keeps it.
-    assert "now maps it to claude-fable-5-1[1m], not claude-opus-5-5[1m]" in caplog.text
+    assert "maps it to claude-fable-5-1[1m], not claude-opus-5-5[1m]" in caplog.text
     assert "RuntimeError: Claude Code rejected selector fable[1m]" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_catalog_keeps_the_1m_variant_as_a_hidden_alias(connections_db, monkeypatch):
+    """No old row is needed: a main-base review and a larger-context workflow find ``opus[1m]``."""
+    from llm.context_window import resolve_live_window_facts
+    from llm.resolution import catalog_row, resolve_harness_selector
+
+    probed = await _refresh(connections_db, monkeypatch, NEW_LIST, {"opus[1m]": "claude-opus-5-5[1m]"})
+
+    assert sorted(probed) == ["claude-fable-5-1[1m]", "opus[1m]"]
+    rows = _rows(connections_db)
+    assert "claude-fable-5-1[1m]" not in rows
+    meta = json.loads(rows["opus[1m]"]["metadata_json"])
+    assert (rows["opus[1m]"]["available"], meta["alias_of"]) == (1, "claude-code/opus")
+    assert meta["resolved_identity"] == "claude-opus-5-5[1m]"
+
+    target = resolve_harness_selector("claude-code", "opus[1m]", db=connections_db)
+    assert (target.catalog_id, target.transport_model) == ("claude-code/opus[1m]", "opus[1m]")
+    # The [1m] row runs at the window the CLI reported, not the default checkpoint cap.
+    row = catalog_row("claude-code/opus[1m]", db=connections_db)
+    assert resolve_live_window_facts(row, db=connections_db).effective == 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_1m_variant_leaves_no_row(connections_db, monkeypatch, caplog):
+    from llm.resolution import ModelUnavailableError, resolve_harness_selector
+
+    await _refresh(connections_db, monkeypatch, NEW_LIST, {})
+
+    assert "opus[1m]" not in _rows(connections_db)
+    assert "Claude Code does not list opus[1m], and probing it failed" in caplog.text
+    with pytest.raises(ModelUnavailableError):
+        resolve_harness_selector("claude-code", "opus[1m]", db=connections_db)
 
 
 @pytest.mark.asyncio
