@@ -42,33 +42,6 @@ def _offer_receipt(db, *, usage_id, manifest_id, lessons, created_at="2026-10-22
     )
 
 
-def test_disabled_verdict_source_is_not_reported_as_an_empty_experiment_list(db):
-    from jobs.learning_report import build_report
-
-    now = "2026-10-22T18:00:00+00:00"
-    _event(db, event_name="measurement.correction", ts=now, project_id="proj", subject_key="message:a",
-           attributes={"source_kind": "message", "label": "correction"})
-    _event(db, event_name="measurement.correction", ts=now, project_id="proj", agent_thread_id="other", subject_key="comment:b",
-           attributes={"source_kind": "doc_comment", "label": "correction"})
-    _event(db, event_name="measurement.verdict.planned", ts=now, project_id="proj", subject_key="trial:a")
-    db.commit()
-
-    report = build_report(db, scope="proj", report_date="2026-10-22")
-
-    assert report == {
-        "scope": "proj", "report_date": "2026-10-22", "report_key": "proj:2026-10-22:daily", "wake": True,
-        "items": {
-            "corrections": {
-                "doc_comment": {"count": 1, "refs": ["comment:b"]},
-                "message": {"count": 1, "refs": ["message:a"]},
-            },
-            "lessons": {"recorded": {"count": 0, "refs": []}, "in_use": None, "confirmed": None, "consolidated": None, "repeated": None},
-            "experiments": {"started": None, "decided": None},
-            "wins": None,
-        },
-    }
-
-
 def test_daily_and_early_reports_validate_unchanged_with_sent_back(db):
     from events.learning_report import validated
     from jobs.learning_report import build_report
@@ -107,11 +80,9 @@ def test_learning_report_delivery_uses_the_real_sync_seam(db, monkeypatch):
     }]
 
 
-def test_enabled_verdict_source_reports_started_trials_and_wakes(db, monkeypatch):
-    from core import workflow_verdict_evaluator
+def test_verdict_source_reports_started_trials_and_wakes(db):
     from jobs.learning_report import build_report
 
-    monkeypatch.setattr(workflow_verdict_evaluator, "VERDICT_WRITES_ENABLED", True)
     _event(db, event_name="measurement.verdict.planned", ts="2026-10-22T18:00:00+00:00",
            project_id="proj", subject_key="trial:enabled")
     db.commit()
@@ -454,6 +425,6 @@ def test_daily_report_is_passive_without_qualifying_facts(db):
     assert report["items"] == {
         "corrections": {},
         "lessons": {"recorded": {"count": 0, "refs": []}, "in_use": None, "confirmed": None, "consolidated": None, "repeated": None},
-        "experiments": {"started": None, "decided": None},
+        "experiments": {"started": {"count": 0, "refs": []}, "decided": {"count": 0, "refs": []}},
         "wins": None,
     }

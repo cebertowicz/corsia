@@ -22,9 +22,6 @@ from infra.queries import thread_available_sql
 from infra.send_types import SendRejected
 from tools.workflow_task_fields import version_short_hash
 
-# Calibration enables this only in a later slice. A code constant keeps production evaluation
-# read-only until an explicit reviewed change.
-VERDICT_WRITES_ENABLED = False
 # Changed again, Collecting and Not enough data are computed on read: a replaced version can return to use.
 STORED = frozenset({"keep", "revert"})
 DETAIL_LIMIT = 2_000  # infra.outcome_event_attributes: measurement.verdict.reached detail
@@ -61,8 +58,6 @@ def write_verdicts(connection: sqlite3.Connection, evaluations: Iterable[Evaluat
 
     Idempotent through each record's dedupe key, so a reached verdict is never replaced (VR-3).
     """
-    if not VERDICT_WRITES_ENABLED:
-        return 0
     now, recorded = datetime.now(timezone.utc).isoformat(), 0
     for evaluation in evaluations:
         plan, verdict = evaluation.plan, evaluation.verdict

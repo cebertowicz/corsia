@@ -190,7 +190,7 @@ async def _run_job_safely() -> None:
             )
     # Follow-up jobs run after the terminal record: their failures cannot change
     # the maintenance disposition already written. The model-free verdict batch shares
-    # the same once-per-day claim and never records or wakes while verdict writes are off.
+    # the same once-per-day claim.
     await _emit_learning_reports_safely()
     await _run_workflow_verdicts_safely()
     await _run_kpi_thresholds_safely(run_date)

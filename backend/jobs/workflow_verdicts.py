@@ -2,7 +2,7 @@
 
 The nightly scheduler owns the once-per-day cadence. This job reads one shared batch of open workflow
 versions (in use, no reached verdict) and one of open lesson trials (delivered, no reached verdict), evaluates both in
-memory, and writes and wakes the owner only when the existing verdict switch is explicitly enabled.
+memory, then records plans and reached verdicts and wakes each owner in one write transaction.
 """
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def run_counts(snapshot: Snapshot) -> dict[str, int]:
 
 
 def run_daily(*, now: datetime | None = None, batch_limit: int = OPEN_BATCH_LIMIT) -> DailyVerdictReport:
-    """Evaluate one bounded open batch of each kind; read-only while verdict writes remain disabled."""
+    """Evaluate one bounded open batch of each kind, record what is new and wake the owners of reached verdicts."""
     started = time.monotonic()
     current = now or datetime.now(timezone.utc)
     db = get_db()
@@ -68,11 +68,9 @@ def run_daily(*, now: datetime | None = None, batch_limit: int = OPEN_BATCH_LIMI
     evaluations = [*compute(priced), *lessons]
     by_word = Counter(item.verdict.word for item in evaluations)
     reached = sum(count for word, count in by_word.items() if word in evaluator.STORED)
-    recorded = woken = 0
-    if evaluator.VERDICT_WRITES_ENABLED:
-        with write_transaction(None, scope="workflow_verdict_daily") as db:
-            recorded = evaluator.write_verdicts(db, evaluations)
-            woken = evaluator.wake_owners(db)
+    with write_transaction(None, scope="workflow_verdict_daily") as db:
+        recorded = evaluator.write_verdicts(db, evaluations)
+        woken = evaluator.wake_owners(db)
     report = DailyVerdictReport(len(snapshot.subjects or ()) + len(lessons), len(evaluations), reached, recorded,
                                 dict(by_word), dict(Counter(item.verdict.reason for item in evaluations)),
                                 run_counts(priced), round(time.monotonic() - started, 1), woken)
