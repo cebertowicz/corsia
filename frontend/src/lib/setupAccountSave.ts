@@ -1,12 +1,16 @@
 import { get } from 'svelte/store';
 import { token } from '$lib/stores/auth';
 import { updateSettings } from '$lib/stores/settings';
+import { SERVER_UNREACHABLE } from '$lib/plainError';
 
 export const USAGE_SHARING_ERROR = 'Couldn’t save your usage sharing choice. Try again.';
 
-/** Writes the choice through the settings route the Settings page uses, with the session already in the token store. */
-export async function saveUsageSharing(next: boolean): Promise<boolean> {
-	return (await updateSettings({ usage_sharing: next })).ok;
+/** Writes the choice through the settings route the Settings page uses, with the session already in the token store; returns the error to show, or null once saved. No answer says so, as Settings does; a server failure keeps this step's line and adds the reference its log entry carries. */
+export async function saveUsageSharing(next: boolean): Promise<string | null> {
+	const result = await updateSettings({ usage_sharing: next });
+	if (result.ok) return null;
+	if (result.error === SERVER_UNREACHABLE) return result.error;
+	return result.reference ? `${USAGE_SHARING_ERROR} Reference: ${result.reference}` : USAGE_SHARING_ERROR;
 }
 
 export type AccountChanges = { name?: string; email?: string; password?: string };

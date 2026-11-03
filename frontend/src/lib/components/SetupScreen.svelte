@@ -35,7 +35,7 @@
 	import { measuredDownloadTime, showLocalOnlyGuidance } from '$lib/setupLocalPresentation';
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
 	import { createSetupWarm, finishSetupWarmHandoff } from '$lib/setupWarm.svelte';
-	import { putSetupAccount, saveUsageSharing, USAGE_SHARING_ERROR, type AccountChanges } from '$lib/setupAccountSave';
+	import { putSetupAccount, saveUsageSharing, type AccountChanges } from '$lib/setupAccountSave';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
@@ -47,7 +47,7 @@
 	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
 	let shell: SetupShell | undefined = $state();
 	let status = $state<Status>({}), statusError = $state(''), reportError = $state('');
-	let name = $state(''), username = $state(''), password = $state(''), confirmation = $state(''), email = $state(''), sharing = $state(true);
+	let name = $state(''), username = $state(''), password = $state(''), confirmation = $state(''), email = $state(''), sharing = $state(false);
 	let folder = $state(''), defaultFolder = $state(''), defaultFolderPath = $state(''), folderApplyPath = $state(''), savedFolder = $state(false), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	// Set once setup itself made the account: Back to the account screen then edits it, and only what differs from these is saved.
@@ -186,7 +186,7 @@
 			const response = await fetch('/api/setup/status');
 			if (response.status === 409) { onExistingAccount(); return; }
 			if (!response.ok) throw new Error('status');
-			status = await response.json(); setFolderState(status); sharing = status.usage_sharing_default ?? true; // off only where the region needs opt-in
+			status = await response.json(); setFolderState(status); sharing = status.usage_sharing_default === true; // the server owns the default (off only where the region needs opt-in); a missing one never reads as a yes
 			if (status.required_username) username = status.required_username;
 			if (status.classifier) classifier.accept(status.classifier);
 			if (status.macos_supported === false) { page = 'hard-stop'; return; }
@@ -256,8 +256,9 @@
 			onAccountCreated(); token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() }); connect();
 			accountKnown = true; savedName = name.trim(); savedEmail = email.trim(); password = ''; confirmation = '';
 			await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
-			if (!(await saveUsageSharing(sharing))) { accountError = USAGE_SHARING_ERROR; return; }
-			savedSharing = sharing; afterAccount();
+			const choice = sharing; const failed = await saveUsageSharing(choice);
+			if (failed) { accountError = failed; return; }
+			savedSharing = choice; afterAccount();
 		} catch { accountError = 'Couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
 	}
@@ -273,8 +274,9 @@
 		accountBusy = true; accountError = '';
 		try {
 			if (sharing !== savedSharing) {
-				if (!(await saveUsageSharing(sharing))) { accountError = USAGE_SHARING_ERROR; return; }
-				savedSharing = sharing;
+				const choice = sharing; const failed = await saveUsageSharing(choice);
+				if (failed) { accountError = failed; return; }
+				savedSharing = choice;
 				if (unchanged) { afterAccount(); return; }
 			}
 			const { response, result } = await putSetupAccount(changes, name.trim());

@@ -3,6 +3,7 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import SetupScreen from './SetupScreen.svelte';
 import { token, user } from '$lib/stores/auth';
+import { SERVER_UNREACHABLE } from '$lib/plainError';
 
 vi.mock('$lib/ws', () => ({ connect: vi.fn() }));
 vi.mock('$lib/linkTargetResolver', () => ({ openExternalUrl: vi.fn(async () => undefined) }));
@@ -14,7 +15,9 @@ const ERROR = 'Couldn’t save your usage sharing choice. Try again.';
 let host: HTMLDivElement;
 let component: ReturnType<typeof mount> | null = null;
 let settingsStatus = 200;
-let sharingDefault: boolean | undefined;
+let sharingDefault: boolean | undefined = true;
+/** Held settings writes wait on this before answering; null answers at once. */
+let holdSettings: Promise<void> | null = null;
 
 async function settle() { await tick(); await new Promise((done) => setTimeout(done)); await tick(); }
 const button = (label: string) => Array.from(host.querySelectorAll('button')).find((item) => item.textContent?.trim() === label);
@@ -37,12 +40,16 @@ const settingsWrites = () => vi.mocked(fetch).mock.calls
 const accountPuts = () => vi.mocked(fetch).mock.calls.filter(([url, init]) => String(url) === '/api/setup/account' && init?.method === 'PUT');
 
 beforeEach(() => {
-	token.set(null); user.set(null); settingsStatus = 200; sharingDefault = undefined;
+	token.set(null); user.set(null); settingsStatus = 200; sharingDefault = true; holdSettings = null;
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
 		const url = String(input); const method = init?.method ?? 'GET';
 		if (url === '/api/setup/status') return json({ apple_silicon: true, macos_supported: true, local_eligible: false, work_folder: '~/CORSIA', usage_sharing_default: sharingDefault });
 		if (url === '/api/setup/first-account') return json({ token: 'session-one', user: { id: 'ada', name: 'Ada Lovelace' } });
-		if (url === '/api/settings' && method === 'PATCH') return json({}, settingsStatus);
+		if (url === '/api/settings' && method === 'PATCH') {
+			if (holdSettings) await holdSettings;
+			// The app's catch-all 500 reply: a generic line and the reference its log entry carries.
+			return settingsStatus === 500 ? json({ detail: 'Something went wrong in CORSIA. Try again.', reference: 'ref-7' }, 500) : json({}, settingsStatus);
+		}
 		if (url.includes('/sources')) return json({ sources: [] });
 		if (url.includes('/models')) return json({ models: [] });
 		return json({});
@@ -88,6 +95,12 @@ describe('usage sharing on the account step', () => {
 		expect(toggle().getAttribute('aria-pressed')).toBe('true');
 	});
 
+	it('starts off when the status carries no default', async () => {
+		sharingDefault = undefined;
+		await openAccount();
+		expect(toggle().getAttribute('aria-pressed')).toBe('false');
+	});
+
 	it('writes true explicitly when it was left on', async () => {
 		await openAccount();
 		button('Continue')?.click(); await settle();
@@ -99,13 +112,39 @@ describe('usage sharing on the account step', () => {
 		toggle().click(); await settle();
 		settingsStatus = 500;
 		button('Continue')?.click(); await settle();
-		expect(host.querySelector('[role="alert"]')?.textContent).toBe(ERROR);
+		expect(host.querySelector('[role="alert"]')?.textContent).toBe(`${ERROR} Reference: ref-7`);
 		expect(host.querySelector('h1')?.textContent).toBe('Your account');
 		settingsStatus = 200;
 		button('Continue')?.click(); await settle();
 		expect(settingsWrites().map((write) => write.body)).toEqual([{ usage_sharing: false }, { usage_sharing: false }]);
 		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
 		expect(accountPuts()).toHaveLength(0);
+	});
+
+	it('names a known cause when the server can’t be reached', async () => {
+		await openAccount();
+		const answer = vi.mocked(fetch).getMockImplementation()!;
+		vi.mocked(fetch).mockImplementation(async (input, init) => {
+			if (String(input) === '/api/settings' && init?.method === 'PATCH') throw new TypeError('Failed to fetch');
+			return answer(input, init);
+		});
+		button('Continue')?.click(); await settle();
+		expect(host.querySelector('[role="alert"]')?.textContent).toBe(SERVER_UNREACHABLE);
+		expect(host.querySelector('h1')?.textContent).toBe('Your account');
+	});
+
+	it('a flip while the write is in flight is not counted as saved', async () => {
+		let release!: () => void;
+		holdSettings = new Promise((done) => { release = done; });
+		await openAccount();
+		button('Continue')?.click(); await settle();
+		toggle().click(); await settle();
+		release(); await settle();
+		expect(settingsWrites().map((write) => write.body)).toEqual([{ usage_sharing: true }]);
+		button('Back')?.click(); await settle();
+		expect(toggle().getAttribute('aria-pressed')).toBe('false');
+		button('Continue')?.click(); await settle();
+		expect(settingsWrites().map((write) => write.body)).toEqual([{ usage_sharing: true }, { usage_sharing: false }]);
 	});
 
 	describe('Back to the account step', () => {
