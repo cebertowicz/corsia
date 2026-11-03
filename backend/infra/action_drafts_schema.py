@@ -11,7 +11,7 @@ ACTION_DRAFTS_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS action_drafts (
         id                TEXT PRIMARY KEY,
         thread_id         TEXT NOT NULL REFERENCES threads(id),
-        kind              TEXT NOT NULL CHECK (kind IN ('email', 'invite')),
+        kind              TEXT NOT NULL CHECK (kind IN ('email', 'invite', 'message')),
         path              TEXT NOT NULL,
         target_json       TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(target_json)),
         state             TEXT NOT NULL DEFAULT 'open'

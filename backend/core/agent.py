@@ -261,6 +261,7 @@ def _register_delegation_tools(agent: CORSIAAgent) -> None:
     agent.tools.register(GitHubAgentAccountTool())
     _register_google_tools(agent)
     register_microsoft_tools(agent)
+    _register_messages_tools(agent)
 
 
 def _register_google_tools(agent: CORSIAAgent) -> None:
@@ -279,6 +280,17 @@ def _register_google_tools(agent: CORSIAAgent) -> None:
     agent.tools.register(CalendarListTool())
     agent.tools.register(CalendarDraftInviteTool())
     agent.tools.register(CalendarSendInviteTool())
+
+
+def _register_messages_tools(agent: CORSIAAgent) -> None:
+    from tools.messages_draft_tools import MessagesDraftTool, MessagesSendTool
+    from tools.messages_tools import MessagesChatsTool, MessagesConnectTool, MessagesReadTool, MessagesSearchTool
+
+    for tool in (
+        MessagesConnectTool(), MessagesChatsTool(), MessagesReadTool(), MessagesSearchTool(),
+        MessagesDraftTool(), MessagesSendTool(),
+    ):
+        agent.tools.register(tool)
 
 
 def _register_document_tools(agent: CORSIAAgent, workspace: Path) -> None:
