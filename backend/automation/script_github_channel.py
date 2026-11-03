@@ -34,7 +34,9 @@ SOCKET_ENV = "CORSIA_SCRIPT_GITHUB_SOCKET"
 log = logging.getLogger(__name__)
 _REPOSITORY = re.compile(r"^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)$")
 _STATUS_LINE = re.compile(r"^HTTP/\S+\s+(\d{3})")
-#: Event origins that may name a repository; an agent's facts never do.
+#: Event origins whose run may open a channel at all. An agent's own emit never does: an
+#: access rule for this channel, not the repository limit, which ``execution_input`` applies
+#: to every origin.
 _REPO_ORIGINS = frozenset({"connector", "platform", "emitter"})
 
 

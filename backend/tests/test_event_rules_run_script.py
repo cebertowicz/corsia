@@ -548,6 +548,40 @@ def test_removing_the_repository_before_the_claim_leaves_no_channel(world, spawn
     assert spawned["channels"] == []
 
 
+def test_an_owner_that_moved_projects_gets_one_project_for_binding_context_and_staging(world, monkeypatch):
+    """A producer's stdin context, its staging root and its channel binding read the owner's
+    current project, never the project the script was created in."""
+    from dataclasses import replace
+    from automation import schedules, script_rule_runs, worker_inputs
+    from automation.script_rule_runs import RuleRun
+    from events import connectors
+
+    manifest = connectors.get_manifest("github")
+    monkeypatch.setitem(connectors._REGISTRY, "github", replace(
+        manifest, project_repositories=lambda project: frozenset({"o/r"} if project == "project-b" else ())))
+    roots: list[str | None] = []
+
+    def owner_root(owner, project_id, _db):
+        roots.append(project_id)
+        return world["tmp"] / str(project_id)
+
+    monkeypatch.setattr(worker_inputs, "owner_root", owner_root)
+    script_id = _script(world, "producer.sh")
+    _write("UPDATE threads SET project_id='project-b' WHERE id=?", OWNER)
+    db = get_db()
+    try:
+        schedule = replace(schedules.get(script_id, db=db), payload={"event_type": "qa.route"})
+    finally:
+        db.close()
+    assert schedule.scope_id == "project-a"
+    stdin, repository = script_rule_runs.execution_input(
+        schedule, RuleRun(1, "rule", json.dumps({"id": "e"}).encode(), (), github_repo="o/r"))
+    context = json.loads(stdin)["context"]
+    assert repository == "o/r" and context["github_repo"] == "o/r"
+    assert context["project_id"] == "project-b" and roots == ["project-b"]
+    assert context["staging_root"] == str(world["tmp"] / "project-b" / "staging")
+
+
 def test_a_scheduled_run_gets_no_repository(world, spawned):
     _script(world, "scheduled.sh", cadence=300)
     _sweep(_START + timedelta(minutes=6))

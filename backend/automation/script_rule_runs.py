@@ -48,7 +48,8 @@ def execution_input(schedule: Schedule, run: RuleRun) -> tuple[bytes, str | None
     project registers now (read from the owner's thread, so a workspace-scope owner binds none).
 
     Shipped event producers also receive their output declaration and current
-    staging root in stdin, rather than a copied configuration file.
+    staging root in stdin, rather than a copied configuration file. That project, the
+    staging root and the binding all come from the owner's current project, read once.
     """
     from automation.worker_inputs import owner_root
     from events.connectors import get_manifest
@@ -56,7 +57,7 @@ def execution_input(schedule: Schedule, run: RuleRun) -> tuple[bytes, str | None
 
     repository = None
     claimed = run.github_repo
-    project_id = get_thread_project_id(schedule.thread_id) if claimed is not None else None
+    project_id = get_thread_project_id(schedule.thread_id)
     if claimed is not None and project_id is not None:
         resolve = get_manifest("github").project_repositories
         repositories = resolve(project_id) if resolve is not None else None
@@ -66,8 +67,8 @@ def execution_input(schedule: Schedule, run: RuleRun) -> tuple[bytes, str | None
     if event_type is None:
         return run.stdin, repository
     event = json.loads(run.stdin)
-    root = owner_root(schedule.thread_id, schedule.scope_id, get_db())
-    event["context"] = {"project_id": schedule.scope_id, "staging_root": str(root / "staging"),
+    root = owner_root(schedule.thread_id, project_id, get_db())
+    event["context"] = {"project_id": project_id, "staging_root": str(root / "staging"),
                         "event_type": event_type, "github_repo": repository}
     return json.dumps(event, ensure_ascii=False).encode(), repository
 
