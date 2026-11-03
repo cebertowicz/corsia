@@ -383,7 +383,7 @@ class StepHandler:
         # the turn boundary instead of dying. Never break turn completion on it.
         await record_turn_end_logged(
             self.thread_id, "plan-liveness arm after turn completion failed",
-            "parent drive after turn completion failed",
+            "parent drive after turn completion failed", turn_id=self.turn_id,
         )
 
     async def _handle_error(self, payload: dict):

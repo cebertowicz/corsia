@@ -452,6 +452,17 @@ def _exact_tail_carry_pin(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _focus_nudge_only_where_marked(request, monkeypatch):
+    """A Turn that ends with nothing sent for the person queues no Focus nudge unless marked.
+
+    The nudge starts a Turn of its own, which tests of other terminal mechanics
+    do not model. Modules marked ``focus_nudge`` cover it on the real seam.
+    """
+    if request.node.get_closest_marker("focus_nudge") is None:
+        monkeypatch.setattr("infra.reply_not_visible_wake._focus_on", lambda _db: False)
+
+
+@pytest.fixture(autouse=True)
 def _no_public_model_catalog(monkeypatch):
     """External discovery reads models.dev; no test reaches the internet for it."""
     monkeypatch.setenv("CORSIA_MODEL_CATALOG_URL", "")
