@@ -53,3 +53,22 @@ async def test_unscreened_message_says_it_was_not_screened(monkeypatch):
     visible = await mail_guard_runtime._visible(SimpleNamespace(fetch_body=fetch_body), "account", target)
     text = mail_guard_runtime.evidence(visible)
     assert UNCHECKED in text and FLAGGED not in text and "Try again later" not in text
+
+
+@pytest.mark.asyncio
+async def test_own_target_is_not_screened(monkeypatch):
+    now = datetime.now(timezone.utc)
+    target = Message("old", "thread", "Me <me@example.test>", "Budget", now - timedelta(days=1), "",
+                     to="pat@example.test", own=True)
+
+    async def data(*args):
+        return target, [target], [], 0
+
+    async def screened(*args):
+        raise AssertionError("own mail must not be screened")
+
+    monkeypatch.setattr(mail_guard_runtime, "screened_message", screened)
+    verdict, shown = await mail_guard_runtime.guarded_reply(SimpleNamespace(guard_data=data),
+                                                            {"id": "account", "address": "me@example.test"},
+                                                            "old", "reply", [])
+    assert shown is target and verdict.recipients == ["pat@example.test"]
