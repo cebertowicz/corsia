@@ -54,6 +54,16 @@ def test_docs_delete_or_replace_needs_the_revision_the_agent_read(name):
     assert gws_check.decide(preview(name)).refusal == gws_messages.DOCS_GUARD
 
 
+@pytest.mark.parametrize("request_type", [
+    "deleteTableRow", "deleteTableColumn", "deletePositionedObject", "deleteHeader", "deleteFooter",
+    "deleteFootnote", "replaceImage", "deleteSomethingGoogleAddsLater",
+])
+def test_every_docs_delete_or_replace_request_needs_the_revision(request_type):
+    request = preview("docs_delete_unguarded")
+    request["body"]["requests"] = [{"insertText": {"text": "x"}}, {request_type: {}}]
+    assert gws_check.decide(request).refusal == gws_messages.DOCS_GUARD
+
+
 def test_a_docs_write_with_an_empty_revision_is_still_unguarded():
     request = preview("docs_delete_guarded")
     request["body"]["writeControl"]["requiredRevisionId"] = ""

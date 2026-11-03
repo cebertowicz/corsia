@@ -15,7 +15,7 @@ DESCRIPTION = (
     'and read a long Doc by exporting it as `text/plain` to `output`. '
     'Read just before you change anything, and change only what was asked. Docs: '
     'read with `suggestionsViewMode: SUGGESTIONS_INLINE`; '
-    "to delete or replace text, send that read's `revisionId` as `writeControl.requiredRevisionId`. "
+    "to delete or replace anything, send that read's `revisionId` as `writeControl.requiredRevisionId`. "
     "If Google says it's stale, someone edited: read again and tell the person what changed. "
     'Where others are editing, use `writeMode: SUGGEST`. Calendar: '
     'use `patch` and send the whole `attendees` list; '
@@ -34,7 +34,7 @@ TRASH = "Emptying the trash isn't available here; Google empties it after 30 day
 CANT_UNDO = "This delete can't be undone, so it isn't available here."
 DOCS_GUARD = (
     'Read the document just before, then send its revisionId as '
-    'writeControl.requiredRevisionId to delete or replace text.'
+    'writeControl.requiredRevisionId to delete or replace anything.'
 )
 ACCOUNT = 'Name the account: one of {addresses}.'
 

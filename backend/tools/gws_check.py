@@ -31,10 +31,9 @@ _REDOABLE_DELETES = (
     re.compile(r"^/calendar/v3/calendars/[^/]+/acl/[^/]+$"),
     re.compile(r"^/calendar/v3/users/me/calendarList/[^/]+$"),
 )
-# A Docs request that removes or rewrites text, which Google can refuse if someone edited since.
-_DESTRUCTIVE_DOCS_REQUESTS = (
-    "deleteContentRange", "replaceAllText", "replaceNamedRangeContent", "deleteTab",
-)
+# A Docs request that removes or rewrites content, today's or a future one, which Google can
+# refuse if someone edited since: its name starts with one of these.
+_DESTRUCTIVE_DOCS_PREFIXES = ("delete", "replace")
 
 
 @dataclass(frozen=True)
@@ -71,13 +70,13 @@ def _is_mail(host: str, path: str) -> bool:
     return host == "www.googleapis.com" and path.startswith(("/gmail/", "/upload/gmail/"))
 
 
-def _guarded_docs_write(preview: dict) -> bool:
-    """True when a Docs batchUpdate deletes or replaces text without the revision the agent read."""
+def _unguarded_docs_delete(preview: dict) -> bool:
+    """True when a Docs batchUpdate deletes or replaces content without the revision the agent read."""
     body = preview.get("body")
     body = body if isinstance(body, dict) else {}
     requests = body.get("requests")
     destructive = isinstance(requests, list) and any(
-        isinstance(request, dict) and any(name in request for name in _DESTRUCTIVE_DOCS_REQUESTS)
+        isinstance(request, dict) and any(name.startswith(_DESTRUCTIVE_DOCS_PREFIXES) for name in request)
         for request in requests
     )
     control = body.get("writeControl")
@@ -113,6 +112,6 @@ def decide(preview: dict) -> Decision:
     if method == "POST" and host == "www.googleapis.com" and (found := _CALENDAR_CLEAR.match(path)):
         return Decision(SAVE_CALENDAR, calendar_id=unquote(found.group(1)))
     if method == "POST" and host == "docs.googleapis.com" and _DOCS_BATCH.match(path):
-        if _guarded_docs_write(preview):
+        if _unguarded_docs_delete(preview):
             return _refuse(gws_messages.DOCS_GUARD)
     return Decision()
