@@ -71,9 +71,6 @@ def counted_suites(suites: Any) -> list[dict[str, Any]]:
     ] if isinstance(suites, list) else []
 
 
-# Check conclusion ranking is shared with quiet PR reasons.
-
-
 def state_of(conclusion: str) -> str:
     """A completed head's ``check_state`` from its ``rank``: green only in ``GREEN``, the set the merge gate counts."""
     return conclusion if conclusion == "action_required" else "green" if conclusion in GREEN else "failing"

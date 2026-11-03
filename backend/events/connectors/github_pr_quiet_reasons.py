@@ -42,12 +42,13 @@ CI_START_GRACE = timedelta(minutes=30)
 CLOCK_SLACK = timedelta(seconds=60)
 
 GREEN = frozenset({"success", "neutral", "skipped"})
-#: Conclusions ranked worst first.
+#: Conclusions ranked worst first; a held head waits for a maintainer first, whatever else failed.
 _RANKED = ("action_required", "timed_out", "startup_failure", "stale", "failure")
 
 
 def rank(conclusions: Any) -> str:
-    """Rank completed checks, treating unknown conclusions as failure."""
+    """The one conclusion for a set of completed checks: the worst in ``_RANKED``; then any other
+    one outside ``GREEN`` (unknown or missing) as ``failure``; then ``cancelled``; else ``success``."""
     values = {str(value or "failure").lower() for value in conclusions}
     for value in _RANKED:
         if value in values:
