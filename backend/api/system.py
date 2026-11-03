@@ -34,14 +34,10 @@ from infra.settings import (
 router = APIRouter(prefix="/api", tags=["system"])
 router.include_router(system_admin_router)
 
-# Host-access review settings change what activates, so only a human session may
-# save them. The reviewer model has its own conductor rule in update_settings.
-_HUMAN_ONLY_HOST_ACCESS_SETTINGS = frozenset({
-    "host_access_auto_approve",
-    "host_access_reviewer_fallback",
-})
-# Settings that send data off this computer are the person's choice, so only a
-# human session may save them.
+# Host-access review settings change what activates, and sharing settings send data off
+# this computer, so only a human session may save either. The reviewer model has its
+# own conductor rule in update_settings.
+_HUMAN_ONLY_HOST_ACCESS_SETTINGS = frozenset({"host_access_auto_approve", "host_access_reviewer_fallback"})
 _HUMAN_ONLY_SHARING_SETTINGS = frozenset({"live_bulletins", "usage_sharing"})
 _EXACT_REVIEWER_MODELS = ("host_access_reviewer_model", "reviewer_model", "reviewer_fallback_model")
 _BOOLEAN_SETTINGS = ("host_access_auto_approve", "host_access_reviewer_fallback", "usage_sharing")

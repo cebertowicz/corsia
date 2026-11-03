@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from infra.database import get_db, write_transaction
 from infra.devices_setting import DEVICE_SETTING_KEY, parse_devices_setting
+from infra.os_region import EU_EEA_REGIONS, os_region
 
 log = logging.getLogger(__name__)
 
@@ -95,8 +96,14 @@ def _deep_merge(base: dict, override: dict) -> dict:
 #: The person's usage-sharing choice, made in setup's account step or Settings.
 #: It gates only a future upload; local usage recording never reads it.
 USAGE_SHARING_KEY = "usage_sharing"
-#: On until the person turns it off. No saved row is the only state that reads as this default.
-USAGE_SHARING_DEFAULT = True
+
+
+def usage_sharing_default() -> bool:
+    """Off when this computer's region is in the EU or EEA, on everywhere else, unknown included.
+
+    Only an install with no saved choice reads it.
+    """
+    return os_region() not in EU_EEA_REGIONS
 
 
 def get_usage_sharing(*, db: sqlite3.Connection | None = None) -> bool:
@@ -108,7 +115,7 @@ def get_usage_sharing(*, db: sqlite3.Connection | None = None) -> bool:
     db = db if db is not None else get_db()
     row = db.execute("SELECT value FROM settings WHERE key = ?", (USAGE_SHARING_KEY,)).fetchone()
     if row is None:
-        return USAGE_SHARING_DEFAULT
+        return usage_sharing_default()
     try:
         saved = json.loads(row["value"])
     except (json.JSONDecodeError, TypeError):
