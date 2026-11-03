@@ -1,8 +1,8 @@
-"""A new top-level agent comment names itself on its ``doc_comment_changed`` frame.
+"""A new top-level agent comment or suggestion names itself on its ``doc_comment_changed`` frame.
 
 A canvas needs the id and the author thread to hold the comment for its presence
-lane before the reload that frame triggers can show it. User comments, replies,
-suggestions and updates carry neither field.
+lane before the reload that frame triggers can show it. User comments, replies
+and updates carry neither field.
 """
 
 from __future__ import annotations
@@ -47,7 +47,21 @@ async def test_an_agent_create_names_the_comment_and_its_author_thread(
 
 
 @pytest.mark.asyncio
-async def test_user_comments_replies_suggestions_and_updates_name_nothing(
+async def test_an_agent_suggestion_names_itself_and_its_author_thread(
+    integration_client, doc, _registrable_roots, sent,  # noqa: F811
+):
+    _owner, artifact_id = await _own(integration_client, doc)
+    reviewer = _mk_thread(integration_client, _OWNER, title="Reviewer")
+    suggestion = await _suggest(reviewer, doc, replacement="Another tail sentence")
+    assert suggestion["replacement"] == "Another tail sentence"
+    assert sent == [{
+        "type": "doc_comment_changed", "artifact_id": artifact_id,
+        "comment_id": suggestion["id"], "author_thread_id": reviewer,
+    }]
+
+
+@pytest.mark.asyncio
+async def test_user_comments_replies_and_updates_name_nothing(
     integration_client, doc, _registrable_roots, sent,  # noqa: F811
 ):
     from tools.documents import DocCommentCreateTool, DocCommentUpdateTool
@@ -70,10 +84,6 @@ async def test_user_comments_replies_suggestions_and_updates_name_nothing(
     ))
     assert reply["comment"]["parent_id"] == root["id"]
     assert sent == [{**plain, "reply_attention_changed": True}]
-
-    del sent[:]
-    await _suggest(reviewer, doc, replacement="Another tail sentence")
-    assert sent == [plain]
 
     del sent[:]
     updated = json.loads(await DocCommentUpdateTool().execute(

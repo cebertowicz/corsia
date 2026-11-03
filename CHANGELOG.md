@@ -8,9 +8,17 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
+- A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.
 - After this update, every chat that runs on your existing Claude Code or Codex account waits until you sign that account in again in CORSIA, automations and reviewers included; if many agents share that account, they all wait until then. Each Claude Code and Codex account now has its own CORSIA sign-in, so signing in or out of `claude` or `codex` in a terminal no longer changes the account CORSIA uses.
+- Agents can now read email attachments in Gmail and in mail accounts connected with a password: an agent reading an email sees its attachments and can save them into its workspace. Agents can now read PDFs, those attachments and any PDF in your workspace: the text page by page, a form's filled-in values, and a page as a picture when its text isn't enough.
+- A comment on selected document text still posts when an agent edits inside that text before you press Comment, and is anchored on what remains; you are asked to select again only when the agent removed all of it.
+- Email and web addresses written as plain text in a document, such as an email draft's From and To lines, no longer disappear when you view it.
+- On a local model that runs short of memory partway through a reply, the context meter now measures the chat against what still fits in memory for the rest of that reply, the same limit CORSIA checks before each call, instead of showing it far emptier than it is.
+- Selecting text in a table cell works across the whole cell: you can drag over any part of it, and its comment button appears when you let go.
 - Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
 - Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.
+- The update screen's percentage now moves in step with the real time each stage takes, from waiting for agents through the restart, instead of sitting near 12% and then racing to 100%.
 - Your About you doc now gets each fact as its own suggestion, so you can accept or reject them one at a time, and its headings are left alone.
 
 ## v0.4.2 — Google sign-in works again, a shorter first chat, and steadier local models

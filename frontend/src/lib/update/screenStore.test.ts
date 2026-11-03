@@ -4,7 +4,7 @@ import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { clearStartupProgress, refreshStartupProgress, startupProgress } from './startupProgress';
 import { countUp, FLOOR_RATE, GAP_RATE } from './percentCountUp';
-import { CREEP_STALE_MS, REMOTE_ESTIMATE_CEILING } from './screenProgress';
+import { CREEP_STALE_MS, remoteCeiling } from './screenProgress';
 import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
 import { loadUpdateStatus, resetUpdateStoreForTests, updateConfirmed, updateStatus, updateUnreachable, type UpdateStatus } from './store';
 import type { UpdateOperation } from './model';
@@ -252,7 +252,7 @@ describe('update screen store', () => {
 		const read = (at: number) => { tickUpdateScreen(at); seen.push(get(updateScreenView)?.mode === 'done' ? 100 : get(updateScreenView)?.percent ?? 0); };
 		updateUnreachable.set(true);
 		for (let at = 1_000; at <= 120_000; at += 1_000) read(at);
-		expect(Math.max(...seen)).toBeLessThanOrEqual(REMOTE_ESTIMATE_CEILING);
+		expect(Math.max(...seen)).toBeLessThanOrEqual(remoteCeiling(0));
 		updateUnreachable.set(false);
 		updateStatus.set(status({ ...inFlight('update-remote'), phase: 'resuming' }, 45));
 		for (let at = 121_000; at <= 131_000; at += 1_000) read(at);

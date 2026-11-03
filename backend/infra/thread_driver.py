@@ -168,11 +168,13 @@ def _terminal_duplicate(
     return TerminalSettlement(result, str(row["thread_id"]))
 
 
-def _end_turn_previews(turn_id: str, outcome: str) -> None:
-    """The backstop for every harness: no streamed edit preview outlives its Turn."""
+def _end_turn_process_state(turn_id: str, outcome: str) -> None:
+    """The backstop for every harness: no streamed edit preview or memory cap outlives its Turn."""
     from doceditor.live_preview import turn_ended
+    from llm.memory_fit import end_turn as end_memory_fit
 
     turn_ended(turn_id, {"completed": "turn_ended", "cancelled": "stopped"}.get(outcome, "failed"))
+    end_memory_fit(turn_id)
 
 
 def finish_turn(
@@ -241,7 +243,7 @@ def finish_turn(
             hold_expired_limit_at_startup=hold_expired_limit_at_startup,
             fail_closed=limits.fail_closed,
         )
-    _end_turn_previews(turn_id, outcome)
+    _end_turn_process_state(turn_id, outcome)
     wakes = () if parent is None else (parent,)
     return TerminalSettlement(
         TerminalResult.APPLIED,

@@ -165,16 +165,20 @@ def _commit_stop_terminal(
         ambiguous_stale_writes(
             connection, turn_id, error="Stop ended the turn after provider dispatch",
         )
+        # A user Stop must not restart the agent on a plan wake, armed or
+        # already queued. Both end here, before the terminal claims a successor,
+        # so no claim (now, or after a restart or admission hold lifts) can run
+        # the queued one. A steer never commits here. A plan-limit pause is not
+        # a user Stop: its wake survives, held by admission.
+        if cause is None:
+            from automation import plan_liveness
+            from infra.queued_input_settlement import cancel_queued_liveness_wakes
+
+            plan_liveness.cancel_plan_wake(sid, db=connection)
+            cancel_queued_liveness_wakes(connection, sid)
         settlement = persist_turn_settlement(turn_id, "cancelled", cause, db=connection)
         if settlement.result is not TurnTerminalResult.APPLIED:
             return _turn_status(user_id, sid, turn_id, db=connection), None
-        # A Stop leaves no successor Turn, so an armed plan wake would restart
-        # the agent the user just stopped. A steer never commits here. A
-        # plan-limit pause is not a user Stop: its wake survives, held by admission.
-        if cause is None:
-            from automation import plan_liveness
-
-            plan_liveness.cancel_plan_wake(sid, db=connection)
         inputs = tuple(str(item["id"]) for item in connection.execute(
             "SELECT id FROM messages WHERE active_turn_id=? ORDER BY input_order",
             (turn_id,),

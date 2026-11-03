@@ -186,6 +186,144 @@ def test_retry_accepts_vendor_login_stamped_input(isolated_db, monkeypatch, stat
     assert bool(metadata.get("possible_duplicate")) == (state == "ambiguous")
 
 
+_RETRY_URL = "/api/threads/retry-twice/messages/failed-once/retry"
+
+
+def _failed_input_app(monkeypatch):
+    from fastapi import FastAPI
+
+    from api import thread_messages
+    from infra.database import get_db
+
+    _insert_session("retry-twice")
+    _insert_ambiguous_message("retry-twice", "failed-once")
+    db = get_db()
+    try:
+        # A model-less thread holds the new input without launching a provider.
+        db.execute("UPDATE threads SET model='' WHERE id='retry-twice'")
+        db.execute("UPDATE messages SET delivery_state='failed' WHERE id='failed-once'")
+        db.commit()
+    finally:
+        db.close()
+    monkeypatch.setattr(thread_messages, "authenticate", lambda _token: {"id": "user-1"})
+    app = FastAPI()
+    app.include_router(thread_messages.router)
+    return app
+
+
+def _stamp_taken_in(message_id: str) -> None:
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE messages SET metadata=json_set(metadata,'$.plan_paused_since',"
+            "'2026-11-02T00:00:00Z') WHERE id=?",
+            (message_id,),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize(
+    ("copy_update", "copy_ended"),
+    [
+        (None, False),
+        # Taken into a Turn: the copy's metadata gains stamps after admission.
+        ("delivery_state='delivered',"
+         "metadata=json_set(metadata,'$.plan_paused_since','2026-11-02T00:00:00Z')", False),
+        ("delivery_state='failed'", True),
+        ("delivery_state='ambiguous'", True),
+        ("delivery_state='cancelled'", True),
+    ],
+)
+def test_a_second_retry_of_one_failed_input_sends_no_second_copy(
+    isolated_db, monkeypatch, copy_update, copy_ended,
+) -> None:
+    """Pressing Retry twice on the same failed row used to send it twice.
+
+    A live copy answers the second press. An ended copy is retried once, as its
+    own Retry would, and a third press answers with that newer copy.
+    """
+    from fastapi.testclient import TestClient
+
+    from infra.database import get_db
+
+    url = _RETRY_URL
+    with TestClient(_failed_input_app(monkeypatch)) as client:
+        first = client.post(url)
+        assert first.status_code == 200, first.text
+        first_copy = first.json()["revived_message_id"]
+        if copy_update is not None:
+            db = get_db()
+            try:
+                db.execute(f"UPDATE messages SET {copy_update} WHERE id=?", (first_copy,))
+                db.commit()
+            finally:
+                db.close()
+        second = client.post(url)
+        third = client.post(url)
+    assert second.status_code == 200, second.text
+    assert third.status_code == 200, third.text
+    second_copy = second.json()["revived_message_id"]
+    assert (second_copy != first_copy) == copy_ended
+    assert third.json()["revived_message_id"] == second_copy
+    db = get_db()
+    try:
+        sources = [
+            row[0] for row in db.execute(
+                "SELECT json_extract(metadata,'$.retried_from_message_id') FROM messages "
+                "WHERE thread_id='retry-twice' "
+                "AND json_extract(metadata,'$.retried_from_message_id') IS NOT NULL "
+                "ORDER BY rowid",
+            )
+        ]
+    finally:
+        db.close()
+    assert sources == (["failed-once", first_copy] if copy_ended else ["failed-once"])
+
+
+def test_a_concurrent_retry_that_loses_to_a_taken_in_copy_answers_with_it(
+    isolated_db, monkeypatch,
+) -> None:
+    """Press B looked before press A's copy existed; a Turn then stamped A's copy.
+
+    Admission's duplicate check sees a different payload. B answers with A's copy
+    instead of a 500, and no second copy is sent.
+    """
+    from fastapi.testclient import TestClient
+
+    from api import thread_inbox_actions
+    from infra.database import get_db
+
+    app = _failed_input_app(monkeypatch)
+    with TestClient(app) as client:
+        first = client.post(_RETRY_URL)
+        assert first.status_code == 200, first.text
+        first_copy = first.json()["revived_message_id"]
+        _stamp_taken_in(first_copy)
+        real_lookup = thread_inbox_actions._latest_attempt
+        looks = iter([lambda _thread_id, message: message])
+        monkeypatch.setattr(
+            thread_inbox_actions,
+            "_latest_attempt",
+            lambda thread_id, message: next(looks, real_lookup)(thread_id, message),
+        )
+        second = client.post(_RETRY_URL)
+    assert second.status_code == 200, second.text
+    assert second.json()["revived_message_id"] == first_copy
+    db = get_db()
+    try:
+        copies = db.execute(
+            "SELECT COUNT(*) FROM messages WHERE thread_id='retry-twice' "
+            "AND json_extract(metadata,'$.retried_from_message_id') IS NOT NULL",
+        ).fetchone()[0]
+    finally:
+        db.close()
+    assert copies == 1
+
+
 def test_retry_drops_the_ended_attempts_turn_and_input_identity() -> None:
     """A retried row must be a new Turn input and a distinct UI message."""
     from api.thread_inbox_actions import _retry_content

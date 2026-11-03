@@ -244,6 +244,7 @@ async def test_person_session_routes_refuse_the_conductor(isolated_db):
                 assert json.loads(result)["status"] in {401, 403}, (method, route.path, result)
     # Handlers that call require_human_user in their body, behind an open path.
     for method, path, body in (("PATCH", "/api/settings", {"live_bulletins": {"enabled": True}}),
+                               ("PATCH", "/api/settings", {"usage_sharing": True}),
                                ("POST", "/api/system/restart", None)):
         result = json.loads(await tool.execute(method, path, body=body, _thread_id=conductor))
         assert result["status"] == 403, (method, path, result)

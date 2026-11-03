@@ -17,6 +17,7 @@ from core.fork_native_tools import (
     input_room,
     measured_input,
     run_tool_calls as _run_tool_calls,
+    yield_to_turn_call,
 )
 from core.fork_pressure import soft_pressure_remaining
 from core.fork_runtime import ForkKind, ForkStepLimitError, ForkStepLimitReached
@@ -81,14 +82,18 @@ def _provider_params(model: str) -> dict[str, Any]:
 def _fit_cold_input(
     request: ProviderForkRequest, tools: list[dict[str, Any]],
 ) -> Any:
-    """Count the tool surface and fit the cold input; blocking, run off the loop."""
+    """Count the tool surface and fit the cold input; blocking, run off the loop.
+
+    The round trip is never less than the loop's first-call reserve: an
+    allowance halved below it fitted input that first call then refused.
+    """
     from core.fork_cold_count import cold_input_tokens
     from core.fork_render import fit_cold_fork_input
 
     return fit_cold_fork_input(
         request,
         provider_surface_tokens=cold_input_tokens(tools, request.target),
-        round_trip_tokens=request.max_output_tokens,
+        round_trip_tokens=max(request.max_output_tokens, FORK_TOOL_ROUND_TRIP_TOKENS),
     )
 
 
@@ -289,6 +294,7 @@ async def invoke_fork(
                     partial_bodies, usage_calls, "i_loop_input_over_bound", _iteration,
                     request, messages, tools, response, measured,
                 )
+            await yield_to_turn_call(request, cancel_event)
             response = await _complete(request, messages, tools, model, provider, cancel_event)
             usage_calls.append(dict(response.usage or {}))
             if request.on_usage is not None:

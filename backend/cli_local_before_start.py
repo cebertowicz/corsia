@@ -61,7 +61,7 @@ def _quiet_logs() -> Path:
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
     path = Path(LOGS_DIR) / LOG_NAME
     logger.remove()
-    logger.add(str(path), level="INFO")
+    logger.add(str(path), level="INFO", diagnose=False)  # frame values can hold keys (infra.log_locals)
     logging.basicConfig(filename=str(path), level=logging.INFO, force=True)
     return path
 

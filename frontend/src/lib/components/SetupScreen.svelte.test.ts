@@ -456,6 +456,16 @@ describe('SetupScreen', () => {
 			await providersStep([{ source: 'omlx', name: 'Local model', state: 'needs_setup', never_local: true } as never]);
 			expect(rowNames()).not.toContain('Local model');
 		});
+
+		it.each([
+			{ host: 'a server that is not macOS', supported: null, extra: [] },
+			{ host: 'a host that never runs one, with a failed local row', supported: true, extra: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', never_local: true, local_state: 'failed' }] },
+		])('keeps the footer off the hidden Local model row on $host', async ({ supported, extra }) => {
+			localEligible = true; macosSupported = supported;
+			await providersStep(extra as never);
+			expect(rowNames()).not.toContain('Local model');
+			expect(host.querySelector('.footer-note')?.textContent).toBe('Set up a subscription or add an API provider to continue.');
+		});
 	});
 
 	it('explains the subscriptions screen: a lede, and under neither-signed-in the subscription and the free-model line this computer can honor', async () => {

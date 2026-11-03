@@ -227,7 +227,7 @@ async def test_same_installed_generation_does_not_adopt_twice() -> None:
     from core.fork_fit import BoundaryDecision
     from core.turn_core import TurnIdentity
 
-    record = SimpleNamespace(id="checkpoint-current", status="installed")
+    record = SimpleNamespace(id="checkpoint-current", status="installed", adopted_input_tokens=None)
 
     async def reject_render(_record):
         raise AssertionError("an already adopted checkpoint must not render again")

@@ -282,22 +282,23 @@ class MarkedImage:
     byte_size: int
 
 
+def write_tray_png(db, png: bytes, *, reader_thread_id: str, label: str) -> MarkedImage:
+    """Save ``png`` into the reader's tray under its content hash, so an earlier result's copy still verifies."""
+    digest = hashlib.sha256(png).hexdigest()
+    target = _working_tray(db, reader_thread_id) / f"{label}-{digest[:16]}.png"
+    _save(png, target)
+    return MarkedImage(target, digest, len(png))
+
+
 def write_marked_image(db, *, image: Path, rows: Iterable[Mapping[str, Any]], reader_thread_id: str,
                        label: str) -> MarkedImage:
-    """Render ``rows``' numbered regions onto ``image`` into the reader's working tray.
-
-    The name carries the content hash, so a copy is never overwritten with other
-    bytes: a tool result that names an earlier copy still verifies.
-    """
+    """Render ``rows``' numbered regions onto ``image`` into the reader's working tray."""
     try:
         png = render_marked_image(image.read_bytes(), marks_for(db, rows))
-        digest = hashlib.sha256(png).hexdigest()
-        target = _working_tray(db, reader_thread_id) / f"{label}-{digest[:16]}.png"
-        _save(png, target)
+        return write_tray_png(db, png, reader_thread_id=reader_thread_id, label=label)
     except RENDER_ERRORS as exc:
         live_events.marked_copy_failed("agent_result", exc)
         raise
-    return MarkedImage(target, digest, len(png))
 
 
 def _save(png: bytes, target: Path) -> None:

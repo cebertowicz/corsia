@@ -57,7 +57,9 @@ async def test_native_refresh_stops_a_call_under_way_once_policy_forbids_its_mod
         db.commit()
     finally:
         db.close()
-    state = SimpleNamespace(fit_ledger=SimpleNamespace(target_catalog_id=CLOUD, effective_window_tokens=32768))
+    state = SimpleNamespace(
+        fit_ledger=SimpleNamespace(target_catalog_id=CLOUD, effective_window_tokens=32768), context_usage={},
+    )
 
     with pytest.raises(ModelUnavailableError) as refused:
         await _refresh_native_window(state, "t-off")

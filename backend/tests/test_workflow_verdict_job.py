@@ -20,7 +20,7 @@ def test_daily_verdict_batch_is_read_only_while_writes_are_disabled(monkeypatch)
     from jobs import workflow_verdicts
 
     db = MagicMock()
-    evaluation = SimpleNamespace(verdict=SimpleNamespace(word="keep", reason="quality_better"))
+    evaluation = SimpleNamespace(subject="workflow:test@v1", verdict=SimpleNamespace(word="keep", reason="quality_better", calls=(), look=1))
     read = MagicMock(return_value=_snapshot())
     priced = MagicMock(return_value=_snapshot())
     write = MagicMock(return_value=1)
@@ -65,7 +65,7 @@ def test_daily_verdict_batch_records_and_wakes_only_when_enabled(monkeypatch) ->
     from jobs import workflow_verdicts
 
     db = MagicMock()
-    evaluation = SimpleNamespace(verdict=SimpleNamespace(word="keep", reason="quality_better"))
+    evaluation = SimpleNamespace(subject="workflow:test@v1", verdict=SimpleNamespace(word="keep", reason="quality_better", calls=(), look=1))
     write = MagicMock(return_value=1)
     wake = MagicMock(return_value=1)
 

@@ -537,3 +537,99 @@ def test_http_route_authenticates_and_refuses_foreign_thread(isolated_db, monkey
     )
     assert narrowed.status_code == 503
     assert "narrow the activity window" in narrowed.json()["detail"]["next"]
+
+
+CLAUDE = "external_harness:claude-code"
+CODEX_ID = "0123456789abcdef01234567"
+
+
+def _seed_seat_usage(path) -> None:
+    _seed(path)
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "INSERT INTO vendor_accounts (id,connection_id,name,created_at,updated_at) "
+            "VALUES ('acct-a','conn','Seat A','t','t')"
+        )
+        db.execute(
+            "UPDATE threads SET lifecycle_state='archived' WHERE id='steve-p2'"
+        )
+        db.executemany(
+            "INSERT INTO llm_usage (id,thread_id,vendor_account_id,model,source,prompt_tokens,"
+            "completion_tokens,cache_creation_tokens,cache_read_tokens,total_tokens,"
+            "created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                ("u1", "steve-p1", "acct-a", "claude-code/x", CLAUDE, 100, 10, 40, 1000, 1150,
+                 "2026-09-22T00:00:00"),
+                # Other project of the same user, archived thread: still counts.
+                ("u2", "steve-p2", "acct-a", "claude-code/x", CLAUDE, 20, 2, 0, 500, 522,
+                 "2026-09-22T12:00:00.5"),
+                # Unattributed subscription traffic, one row per harness.
+                (CODEX_ID, "steve-p1", None, "codex/gpt-6.1-sol", "external_harness:codex",
+                 7, 1, 0, 0, 8, "2026-09-23T00:00:00"),
+                ("u4", "steve-p1", None, "claude-code/y", CLAUDE, 3, 1, 0, 0, 4,
+                 "2026-09-23T01:00:00"),
+                # Unattributed API-key and local traffic is excluded.
+                ("u5", "steve-p1", None, "anthropic/claude", "conversation", 999, 999, 0, 0, 1998,
+                 "2026-09-23T02:00:00"),
+                ("u6", "steve-p1", None, "omlx@x/qwen", "conversation", 999, 999, 0, 0, 1998,
+                 "2026-09-23T02:00:00"),
+                # Another user's usage, even on the same account, is excluded.
+                ("u7", "leksi-p1", "acct-a", "claude-code/x", CLAUDE, 5000, 5000, 0, 0, 10000,
+                 "2026-09-23T03:00:00"),
+                # A total that disagrees with its buckets fails Measurement's contract.
+                ("u9", "steve-p1", "acct-a", "claude-code/x", CLAUDE, 1, 1, 0, 0, 99,
+                 "2026-09-23T04:00:00"),
+                # Window end is exclusive.
+                ("u8", "steve-p1", "acct-a", "claude-code/x", CLAUDE, 9000, 0, 0, 0, 9000,
+                 "2026-09-29T00:00:00"),
+            ],
+        )
+
+
+def test_seat_usage_sums_per_account_scoped_to_user(isolated_db, monkeypatch):
+    from infra import audit_reads
+
+    _seed_seat_usage(isolated_db)
+    monkeypatch.setattr(audit_reads, "DB_PATH", isolated_db)
+    result = audit_reads.read_audit_metric(
+        "steve-p1", "steve", "seat_usage",
+        since="2026-09-22T00:00:00Z", until="2026-09-29T00:00:00Z",
+    )
+    assert result["scope"] == "caller_user"
+    assert result["rows"] == [
+        {"account_id": None, "account_name": None, "harness": "claude-code", "calls": 1,
+         "excluded_calls": 0, "prompt": 3, "completion": 1, "cache_write": 0, "cache_read": 0, "total": 4},
+        {"account_id": None, "account_name": None, "harness": "codex", "calls": 1,
+         "excluded_calls": 0, "prompt": 7, "completion": 1, "cache_write": 0, "cache_read": 0, "total": 8},
+        # u9 fails the contract: counted as a call and excluded, its tokens left out.
+        {"account_id": "acct-a", "account_name": "Seat A", "harness": None, "calls": 3,
+         "excluded_calls": 1, "prompt": 120, "completion": 12, "cache_write": 40, "cache_read": 1500,
+         "total": 1672},
+    ]
+    assert "steve-p" not in json.dumps(result)
+
+
+def test_seat_usage_window_bounds_and_length(isolated_db, monkeypatch):
+    from infra import audit_reads
+
+    _seed_seat_usage(isolated_db)
+    monkeypatch.setattr(audit_reads, "DB_PATH", isolated_db)
+    # Start inclusive (u1 at exactly since), end exclusive (u2 at 12:00:00.5).
+    narrow = audit_reads.read_audit_metric(
+        "steve-p1", "steve", "seat_usage",
+        since="2026-09-22T00:00:00Z", until="2026-09-22T12:00:00Z",
+    )
+    assert [(r["account_id"], r["calls"]) for r in narrow["rows"]] == [("acct-a", 1)]
+    # Seven days exactly is accepted; one second more is refused.
+    audit_reads.read_audit_metric(
+        "steve-p1", "steve", "seat_usage",
+        since="2026-09-22T00:00:00Z", until="2026-09-29T00:00:00Z",
+    )
+    with pytest.raises(audit_reads.AuditReadError) as long_window:
+        audit_reads.read_audit_metric(
+            "steve-p1", "steve", "seat_usage",
+            since="2026-09-22T00:00:00Z", until="2026-09-29T00:00:01Z",
+        )
+    assert long_window.value.category == "invalid_window"
+    with pytest.raises(audit_reads.AuditReadError):
+        audit_reads.read_audit_metric("steve-p1", "steve", "seat_usage")

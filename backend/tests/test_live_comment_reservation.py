@@ -130,11 +130,28 @@ async def test_one_edit_maps_comment_ranges_and_reservations_each_to_its_own_spa
 
 
 @pytest.mark.asyncio
-async def test_edit_inside_the_range_refuses_and_releases(ownership_scope, tmp_path, monkeypatch):
+@pytest.mark.parametrize('edit', [dict(delete=1, insert='X'), dict(insert='XY'), dict(delete=2)])
+async def test_edit_inside_the_range_anchors_on_the_text_now_there(ownership_scope, tmp_path, monkeypatch, edit):
     manager, entry, session = await scenario(ownership_scope, tmp_path, monkeypatch)
     try:
         assert await session.reserve('inside', 4, 10)
-        typing(entry, 6, delete=1, insert='X')
+        typing(entry, 6, **edit)
+        now = reserved_text(entry.live, 'inside')
+        assert now != 'second' and now.startswith('se')
+        response = await submit(entry, 'inside', 'second', 4, 10)
+        assert response.status_code == 200, response.text
+        row = await run_in_db(comments.get_comment, 'inside')
+        assert row['anchor_text'] == now == entry.live.range_text('inside')
+    finally:
+        await finish(manager, session)
+
+
+@pytest.mark.asyncio
+async def test_deleting_the_whole_range_refuses_and_releases(ownership_scope, tmp_path, monkeypatch):
+    manager, entry, session = await scenario(ownership_scope, tmp_path, monkeypatch)
+    try:
+        assert await session.reserve('inside', 4, 10)
+        typing(entry, 4, delete=6)
         response = await submit(entry, 'inside', 'second', 4, 10)
         assert response.status_code == 409 and 'text you selected changed' in response.text
         assert 'inside' not in entry.live.ranges and entry.live.held_span('inside') is None

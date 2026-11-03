@@ -47,7 +47,10 @@ CREATE TABLE IF NOT EXISTS checkpoints (
     -- The creation time of the boundary message this checkpoint's narrative
     -- covers (#3196): the rendered checkpoint dates its own history from it.
     -- NULL on rows installed before this column existed; never backfilled.
-    through_at TEXT
+    through_at TEXT,
+    -- The continuation's size when the Turn first rendered it (written once,
+    -- first adoption wins). NULL: never adopted, or a row from before this column.
+    adopted_input_tokens INTEGER
 );
 CREATE UNIQUE INDEX IF NOT EXISTS checkpoints_one_live
     ON checkpoints(thread_id) WHERE status IN ('running','captured');

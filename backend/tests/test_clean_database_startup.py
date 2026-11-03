@@ -277,24 +277,17 @@ def test_startup_retires_an_unrecognized_legacy_turn_and_still_recovers_others()
         assert db.execute(
             "SELECT status FROM active_turns WHERE id='live-turn'",
         ).fetchone()[0] == "error"
-        # (b) Its stuck input fails visibly -- settle_unwritten_turn_inputs
-        # marks a queued input under an errored Turn 'failed', it is not
-        # silently dropped and not silently redelivered.
-        assert db.execute(
-            "SELECT delivery_state FROM messages WHERE id='legacy-input'",
-        ).fetchone()[0] == "failed"
-        # (c) The thread itself is free again: nothing still occupies its one
-        # active-Turn slot, so it can start a fresh Turn after boot. Before the
-        # migration existed, the legacy row still matched
+        # (b) Its never-written input is not dropped: the restart terminal
+        # returns it to the FIFO and recovery claims it for a successor Turn.
+        # (c) That successor is the thread starting a fresh Turn after boot.
+        # Before the migration existed, the legacy row still matched
         # idx_active_turns_one_active's ('running','waiting_retry') predicate
         # while start_idle_turn's guard only checked 'running', so this insert
         # raised sqlite3.IntegrityError and the thread could never start again.
-        reopened = admit_input(
-            "thread-legacy", role="user", content="new input", intent="apply_now",
-            message_id="new-input", turn_id="legacy-turn-2", boot_epoch="new-boot",
-            admitted_at="t4", db=db,
-        )
-        assert reopened.batch is not None
+        assert tuple(db.execute(
+            "SELECT m.delivery_state,t.status FROM messages m "
+            "JOIN active_turns t ON t.id=m.active_turn_id WHERE m.id='legacy-input'",
+        ).fetchone()) == ("queued", "running")
     finally:
         db.close()
 

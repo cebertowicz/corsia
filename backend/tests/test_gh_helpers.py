@@ -13,16 +13,62 @@ class TestGhTransport:
     def test_run_gh_prepends_executable_and_forwards_process_options(self):
         from reviewer import gh_api
 
+        from connections.github_agent import AgentAccountView
+
         completed = subprocess.CompletedProcess([], 0, "ok", "")
-        with patch("reviewer.gh_api.subprocess.run", return_value=completed) as run:
+        absent = AgentAccountView("not_installed", absent=True)
+        with patch("connections.github_agent.view", return_value=absent), \
+                patch("reviewer.gh_api.subprocess.run", return_value=completed) as run:
             assert gh_api.run_gh(
                 ["api", "rate_limit"], input_text="{}", timeout=12,
             ) is completed
         assert run.call_args.args[0] == ["gh", "api", "rate_limit"]
         assert run.call_args.kwargs == {
             "input": "{}", "capture_output": True, "text": True,
-            "timeout": 12, "check": False,
+            "timeout": 12, "check": False, "env": None,
         }
+
+    def test_run_gh_acts_as_the_agents_account_once_ready(self, monkeypatch):
+        from connections.github_agent import AgentAccountView
+        from reviewer import gh_api
+
+        monkeypatch.setenv("GH_TOKEN", "host-token")
+        monkeypatch.setenv("GH_CONFIG_DIR", "/person/gh")
+        ready = AgentAccountView("ready", home="/agents/gh", binary="/bin/gh", login="bot", user_id=1)
+        completed = subprocess.CompletedProcess([], 0, "ok", "")
+        with patch("connections.github_agent.view", return_value=ready), \
+                patch("reviewer.gh_api.subprocess.run", return_value=completed) as run:
+            gh_api.run_gh(["api", "user"])
+        assert run.call_args.args[0] == ["/bin/gh", "api", "user"]
+        env = run.call_args.kwargs["env"]
+        assert env["GH_CONFIG_DIR"] == "/agents/gh"
+        assert "GH_TOKEN" not in env
+
+    def test_run_gh_is_locked_while_the_account_exists_but_is_not_ready(self):
+        from connections.github_agent import AgentAccountView
+        from connections.github_agent_home import LOCKED_HOME
+        from reviewer import gh_api
+
+        signed_out = AgentAccountView("needs_auth", "signed_out", home="/agents/gh", binary="/bin/gh")
+        completed = subprocess.CompletedProcess([], 1, "", "")
+        with patch("connections.github_agent.view", return_value=signed_out), \
+                patch("reviewer.gh_api.subprocess.run", return_value=completed) as run:
+            gh_api.run_gh(["api", "user"])
+        assert run.call_args.kwargs["env"]["GH_CONFIG_DIR"] == LOCKED_HOME
+
+    def test_run_gh_waits_once_for_a_first_verification(self):
+        from connections.github_agent import AgentAccountView
+        from reviewer import gh_api
+
+        verifying = AgentAccountView("unverified", "verifying", home="/agents/gh", binary="/bin/gh")
+        ready = AgentAccountView("ready", home="/agents/gh", binary="/bin/gh", login="bot", user_id=1)
+        completed = subprocess.CompletedProcess([], 0, "ok", "")
+        with patch("connections.github_agent.view", return_value=verifying), \
+                patch("connections.github_agent.verify_now", return_value=ready) as verify, \
+                patch("reviewer.gh_api.subprocess.run", return_value=completed) as run:
+            gh_api.run_gh(["api", "user"])
+        verify.assert_called_once()
+        assert run.call_args.kwargs["env"]["GH_CONFIG_DIR"] == "/agents/gh"
 
 
 class TestGetCheckRunsForSha:

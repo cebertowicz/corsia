@@ -14,6 +14,7 @@ from app_lifecycle import lifespan
 
 from infra import config  # noqa: F401
 from infra.access_log import install_access_log_redaction
+from infra.log_locals import drop_traceback_locals
 from infra.json_gzip import JsonGZipMiddleware
 from infra.config import FRONTEND_DIR
 from infra.product_events import emit_product_event
@@ -86,6 +87,7 @@ from api.keys import router as keys_router
 logger = logging.getLogger(__name__)
 
 install_access_log_redaction()
+drop_traceback_locals()
 app = FastAPI(title="CORSIA UI", lifespan=lifespan)
 
 app.add_middleware(

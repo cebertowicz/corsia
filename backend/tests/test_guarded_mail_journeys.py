@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from tests.test_google_email import (  # fixtures and existing provider fake
-    GMAIL, THREADED, _draft, _mime, _row, approve, client_file, conductor, google, mail,
+    EMAIL, GMAIL, THREADED, _draft, _mime, _row, approve, client_file, conductor, google, mail,
 )
 from tools import google_email, mail_guard_runtime
 from tools.google_email import EmailDraftTool, EmailSendTool
@@ -339,3 +339,61 @@ async def test_same_second_target_is_not_a_new_arrival(mail, approve):
 @pytest.mark.parametrize('count, shown', [(0, '0 KB'), (100, '1 KB'), (1_048_064, '1.0 MB'), (5 * 1024 * 1024, '5.0 MB')])
 def test_attachment_size_label(count, shown):
     assert google_email._size(count) == shown
+
+
+def _from(message, value, **fields):
+    headers = [h for h in message['payload']['headers'] if h['name'] != 'From'] + [{'name': 'From', 'value': value}]
+    return {**message, **fields, 'payload': {**message['payload'], 'headers': headers}}
+
+
+def _own(to='Friend <friend@mail.example>', sent=True):
+    own = deepcopy(THREADED)
+    own['payload']['headers'].append({'name': 'To', 'value': to})
+    return _from(own, f'Sam <{EMAIL}>', labelIds=['SENT'] if sent else [])
+
+
+@pytest.fixture
+def screen_calls(monkeypatch):
+    calls = []
+
+    async def screen(account_id, message):
+        calls.append(message.message_id)
+        return json.dumps({'screen': {'state': 'clean'}, 'body': 'x'})
+    monkeypatch.setattr(mail_guard_runtime, 'screened_message', screen)
+    return calls
+
+
+async def _document(mail, **fields):
+    saved = await _draft(mail, **{'to': [], 'reply_to_message_id': 'm-100', **fields})
+    return saved, (mail.workspace / saved['path']).read_text()
+
+
+async def test_reply_to_own_sent_mail_is_a_clean_draft(mail, screen_calls):
+    provider_state(mail, [_own(f'Friend <friend@mail.example>, Sam <{EMAIL.upper()}>')])
+    for fields in ({'to': ['friend@mail.example']}, {}):  # asked for the friend, or defaulted
+        document = (await _document(mail, **fields))[1]
+        assert not [n for n in ('requested recipient', 'emails from', 'being replied to', 'quoted below', "isn’t shown") if n in document]
+        assert 'friend@mail.example' in document and EMAIL.upper() not in document and not screen_calls
+
+
+async def test_own_target_still_warns_when_someone_else_wrote_later(mail, screen_calls, clean_screen):
+    provider_state(mail, [_own(), _from(_arrival(newer(), datetime.now(timezone.utc) + timedelta(days=1)), 'Friend <f@mail.example>')])
+    assert 'Another person wrote' in (await _document(mail))[1]
+
+
+async def test_own_target_send_is_not_refused_by_unrelated_own_mail(mail, approve, screen_calls):
+    provider_state(mail, [_own()])
+    saved = (await _document(mail))[0]
+    _backdate(saved, datetime.now(timezone.utc) - timedelta(seconds=10))
+    unrelated = _from(_arrival(newer(), datetime.now(timezone.utc) - timedelta(seconds=2)), f'Sam <{EMAIL}>', threadId='t-other', labelIds=['SENT'])
+    mail.messages[unrelated['id']] = unrelated
+    inner = mail.fake.handler
+    mail.fake.handler = lambda r: (httpx.Response(200, json={'messages': [{'id': unrelated['id']}]})
+                                   if str(r.url).split('?')[0] == f'{GMAIL}/messages' and r.url.params.get('q', '').startswith('from:')
+                                   else inner(r))
+    assert 'Not sent' not in await send(mail, saved) and len(mail.sends) == 1
+
+
+async def test_forged_from_without_sent_label_is_guarded_as_today(mail, screen_calls):
+    provider_state(mail, [_own(sent=False)])
+    assert 'emails from' in (document := (await _document(mail))[1]) and 'quoted below' in document and screen_calls == ['m-100']

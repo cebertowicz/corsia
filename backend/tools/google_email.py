@@ -198,8 +198,9 @@ class EmailDraftTool(Tool):
                 raise DraftRefused(_stop("Draft not saved", verdict.stops))
             to = to or verdict.recipients
             notes.extend(verdict.warnings + verdict.info + verdict.stale)
-            notes.append("The message being replied to:\n" + evidence(original))
-            notes.append(f"The earlier message from {original.sender} will be quoted below the reply.")
+            if not original.own:
+                notes.append("The message being replied to:\n" + evidence(original))
+                notes.append(f"The earlier message from {original.sender} will be quoted below the reply.")
         if not to:
             raise DraftRefused(NEEDS_RECIPIENT)
         if target.get("prefix_reply_subject"):

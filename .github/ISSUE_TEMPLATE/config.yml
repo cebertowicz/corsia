@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/cebertowicz/corsia/security/advisories/new
+    about: Report it privately here. Never put vulnerability details in a public issue.
   - name: Anti-pattern catalog
     url: https://github.com/cebertowicz/corsia/blob/main/docs/standards/llm-anti-patterns.md
     about: Before filing a bug that's actually a known LLM-coding-agent shape, check the catalog.

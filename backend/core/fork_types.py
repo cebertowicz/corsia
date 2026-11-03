@@ -24,6 +24,10 @@ class ForkNotAdmitted(RuntimeError):
     """The caller could not admit one provider invocation right now."""
 
 
+class NothingNewerToFold(ForkNotAdmitted):
+    """No history boundary follows the installed floor, so no fold can start."""
+
+
 @dataclass(frozen=True, slots=True)
 class ColdForkSource:
     """Frozen history and mandatory continuity, before the writer's one fit."""

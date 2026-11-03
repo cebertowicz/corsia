@@ -57,6 +57,8 @@ class ProviderPayload:
     recovery_input_tokens: int | None = None
     # The system prompt and guidance every continuation also carries; never history.
     fixed_tokens: int = 0
+    # The newest installed continuation's size when first adopted; None: unknown.
+    adopted_input_tokens: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +138,12 @@ def evaluate_boundary(payload: ProviderPayload) -> BoundaryDecision:
         # R08: an optional fold cannot relieve pressure when even the smallest
         # continuation it could produce would sit at the launch point itself.
         futile = at_checkpoint_launch_point(minimum + payload.fixed_tokens, payload.context_window)
+        # The newest fold already landed at the launch point under real tail
+        # growth, so another optional one would only chase it back to back.
+        futile = futile or (
+            payload.adopted_input_tokens is not None
+            and at_checkpoint_launch_point(payload.adopted_input_tokens, payload.context_window)
+        )
         if under_pressure and payload.checkpoint_admissible and not active and not futile:
             return BoundaryDecision.PROCEED_AND_FOLD
         return BoundaryDecision.PROCEED

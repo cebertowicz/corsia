@@ -47,7 +47,7 @@ async def guarded_reply(backend: Any, account: dict, target_id: str, body: str,
     verdict = check_reply(target, thread, sender, str(account["address"]), body, requested_to,
                           datetime.now(timezone.utc), count)
     verdict.evidence_ids = [{"message_id": m.message_id, "thread_id": m.thread_id} for m in screened.values()]
-    return verdict, await _visible(backend, account_id, target)
+    return verdict, target if target.own else await _visible(backend, account_id, target)
 
 
 async def new_arrival(backend: Any, account_id: str, target_id: str,

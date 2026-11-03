@@ -214,10 +214,10 @@ async def _native_project_context_usage(monkeypatch):
 async def test_native_unmeasured_terminal_keeps_non_overlapping_project_buckets(
     monkeypatch,
 ):
-    from core.turn_iteration_context import _context_usage_from_latest_call
+    from core.turn_measured_usage import context_usage_from_latest_call
 
     preflight = await _native_project_context_usage(monkeypatch)
-    terminal = _context_usage_from_latest_call(preflight, {})
+    terminal = context_usage_from_latest_call(preflight, {})
     sections = terminal["source_section_tokens"]
 
     assert terminal["token_usage_available"] is False
@@ -228,16 +228,16 @@ async def test_native_unmeasured_terminal_keeps_non_overlapping_project_buckets(
 
 
 def test_native_live_usage_does_not_walk_the_frozen_prompt_snapshot(monkeypatch):
-    from core import turn_iteration_context
+    from core import turn_measured_usage
 
     monkeypatch.setattr(
-        turn_iteration_context,
+        turn_measured_usage,
         "merge_context_usage_with_snapshot",
         lambda *_args, **_kwargs: pytest.fail(
             "live usage must not walk the frozen prompt snapshot"
         ),
     )
-    live = turn_iteration_context._context_usage_from_latest_call(
+    live = turn_measured_usage.context_usage_from_latest_call(
         {
             "model_context_window": 262_000,
             "context_snapshot": {"frozen_prompt_material": {"history": ["large"]}},

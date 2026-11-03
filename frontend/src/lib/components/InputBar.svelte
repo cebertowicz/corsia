@@ -288,7 +288,10 @@
 		resizeInputBar(el, inputAreaEl, (value) => { isMultiLine = value; });
 	}
 
-	onMount(() => watchComposer(() => inputAreaEl, () => boundThreadId, drafts));
+	onMount(() => {
+		const stopWatching = watchComposer(() => inputAreaEl, () => boundThreadId, drafts);
+		return () => { stopWatching(); drafts.leave(); };
+	});
 
 	export function getInputText() { return inputText; }
 	export function getDrafts() { return drafts.threadDrafts; }
