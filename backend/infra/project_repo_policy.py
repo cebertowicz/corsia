@@ -865,19 +865,20 @@ def load_project_repo_policy_snapshot(
     return rows, encoded, hashlib.sha256(hash_payload).hexdigest()
 
 
-def get_project_repo_policies(
-    project_id: str,
-    *,
-    db=None,
-) -> dict[str, RepoPolicy]:
+def get_project_repo_policies(project_id: str, *, db=None) -> dict[str, RepoPolicy]:
     """Return canonical persisted rows without granting unvalidated bindings."""
+    return {p.repo_name: p for p in repo_policies_by_project(db=db, project_id=project_id).get(project_id, [])}
+
+
+def repo_policies_by_project(*, db=None, project_id: str | None = None) -> dict[str, list[RepoPolicy]]:
+    """Canonical persisted rows by project, for one project or, in one read, for all."""
     owns_connection = db is None
     connection = db or get_db()
+    where, params = (" WHERE project_id = ?", (project_id,)) if project_id is not None else ("", ())
     try:
         rows = connection.execute(
-            "SELECT repo_name, repo_path, pinned_branch, protect_base_checkout "
-            "FROM project_repo_policies WHERE project_id = ?",
-            (project_id,),
+            "SELECT project_id, repo_name, repo_path, pinned_branch, protect_base_checkout "
+            "FROM project_repo_policies" + where, params,
         ).fetchall()
     except sqlite3.OperationalError as exc:
         detail = str(exc).lower()
@@ -887,26 +888,6 @@ def get_project_repo_policies(
     finally:
         if owns_connection:
             connection.close()
-    policies = (
-        policy
-        for row in rows
-        if (policy := _policy_from_row(project_id, row)) is not None
-    )
-    return {policy.repo_name: policy for policy in policies}
-
-
-def repo_policies_by_project(*, db) -> dict[str, list[RepoPolicy]]:
-    """Every project's canonical persisted rows in one read, as ``get_project_repo_policies`` returns each."""
-    try:
-        rows = db.execute(
-            "SELECT project_id, repo_name, repo_path, pinned_branch, protect_base_checkout "
-            "FROM project_repo_policies"
-        ).fetchall()
-    except sqlite3.OperationalError as exc:
-        detail = str(exc).lower()
-        if "no such table" not in detail and "no such column" not in detail:
-            raise
-        rows = []
     by_project: dict[str, list[RepoPolicy]] = {}
     for row in rows:
         if (policy := _policy_from_row(row["project_id"], row)) is not None:
