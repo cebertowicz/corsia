@@ -54,12 +54,39 @@ _ACCOUNTS = {
     "person": (AgentAccountView("wrong_account", "person_account", home="/h"),
                "the agents' GitHub sign-in is the person's own GitHub account"),
     "unverified": (AgentAccountView("unverified", "own_login_unknown", home="/h"),
-                   "CORSIA can't yet tell the agents' GitHub account from the person's own"),
+                   "CORSIA can't tell the agents' GitHub account from the person's own until the "
+                   "person signs in to GitHub on this computer"),
     "suspended": (AgentAccountView("needs_auth", "token_rejected", home="/h"),
-                  "the agents' GitHub account needs signing in"),
+                  "GitHub rejected the agents' GitHub account's sign-in; sign it in again"),
     "absent": (AgentAccountView("not_installed", absent=True),
                "there is no agents' GitHub account"),
 }
+
+# Every cause github_agent.view names, with its state there: each reads as its own cause.
+_CAUSES = {
+    "read_failed": ("unverified", "CORSIA couldn't read the agents' GitHub account settings"),
+    "multiple_accounts": ("needs_auth", "more than one agents' GitHub account is set up; remove the extra one"),
+    "github_executable_missing": ("not_installed", "the gh program the agents' GitHub account uses is missing"),
+    "signed_out": ("needs_auth", "the agents' GitHub account is signed out; sign it in again"),
+    "credential_missing": ("needs_auth", "the agents' GitHub account's saved sign-in is missing; sign it in again"),
+    "token_rejected": ("needs_auth", "GitHub rejected the agents' GitHub account's sign-in; sign it in again"),
+    "verify_failed": ("unverified", "CORSIA couldn't reach GitHub to check the agents' GitHub account"),
+    "verifying": ("unverified", "the agents' GitHub account is still being checked"),
+    "own_login_unknown": ("unverified", _ACCOUNTS["unverified"][1]),
+    "person_account": ("wrong_account", _ACCOUNTS["person"][1]),
+}
+
+
+@pytest.mark.parametrize("cause", sorted(_CAUSES))
+def test_each_account_cause_reads_as_itself(cause):
+    state, why = _CAUSES[cause]
+    assert github_lock_reason(AgentAccountView(state, cause, home="/h")) == f"scripts get no GitHub login: {why}"
+    assert len({text for _state, text in _CAUSES.values()}) == len(_CAUSES)
+
+
+def test_only_an_unanswered_account_is_pending():
+    pending = {cause for cause, (state, _why) in _CAUSES.items() if AgentAccountView(state, cause).answer_pending}
+    assert pending == {"verifying", "own_login_unknown"}
 
 
 @pytest.mark.parametrize("state", sorted(_ACCOUNTS))

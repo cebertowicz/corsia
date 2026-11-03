@@ -161,9 +161,10 @@ def test_a_run_with_no_cached_answer_waits_for_the_verification(run):
 
 @pytest.mark.parametrize("state, reason", [
     ("person", "scripts get no GitHub login: the agents' GitHub sign-in is the person's own GitHub account"),
-    ("unverified", "scripts get no GitHub login: CORSIA can't yet tell the agents' GitHub account from the "
-                   "person's own"),
-    ("suspended", "scripts get no GitHub login: the agents' GitHub account needs signing in"),
+    ("unverified", "scripts get no GitHub login: CORSIA can't tell the agents' GitHub account from the "
+                   "person's own until the person signs in to GitHub on this computer"),
+    ("suspended", "scripts get no GitHub login: GitHub rejected the agents' GitHub account's sign-in; "
+                  "sign it in again"),
     ("absent", "scripts get no GitHub login: there is no agents' GitHub account"),
 ])
 def test_every_other_state_runs_the_script_in_the_shells_locked_state(run, state, reason):

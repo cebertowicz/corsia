@@ -85,6 +85,12 @@ class AgentAccountView:
     def ready(self) -> bool:
         return self.state == "ready"
 
+    @property
+    def answer_pending(self) -> bool:
+        """No answer yet: the verification, or the person's own login it is told apart from,
+        is still being read. A caller that must not act locked waits on ``verify_now``."""
+        return self.cause in ("verifying", "own_login_unknown")
+
 
 # key -> result, and key -> in-flight verification. A key is an immutable fact:
 # (account_id, revision, source_home, binary, hosts.yml fingerprint).

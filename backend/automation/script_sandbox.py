@@ -182,17 +182,24 @@ async def _github_client(thread_id: str, run_id: str, rule_id: str | None, repo:
         yield socket_path, client_dir
 
 
-#: Keyed by the account's cause first, then its state.
+#: Keyed by the account's cause first, then its state; each names what is wrong and its fix.
 _NO_LOGIN = {
-    "own_login_unknown": "CORSIA can't yet tell the agents' GitHub account from the person's own",
+    "read_failed": "CORSIA couldn't read the agents' GitHub account settings",
+    "multiple_accounts": "more than one agents' GitHub account is set up; remove the extra one",
+    "github_executable_missing": "the gh program the agents' GitHub account uses is missing",
+    "signed_out": "the agents' GitHub account is signed out; sign it in again",
+    "credential_missing": "the agents' GitHub account's saved sign-in is missing; sign it in again",
+    "token_rejected": "GitHub rejected the agents' GitHub account's sign-in; sign it in again",
+    "verify_failed": "CORSIA couldn't reach GitHub to check the agents' GitHub account",
+    "verifying": "the agents' GitHub account is still being checked",
+    "own_login_unknown": ("CORSIA can't tell the agents' GitHub account from the person's own until the "
+                          "person signs in to GitHub on this computer"),
+    "person_account": "the agents' GitHub sign-in is the person's own GitHub account",
     "not_installed": "the agents' GitHub account isn't set up",
     "needs_auth": "the agents' GitHub account needs signing in",
     "unverified": "the agents' GitHub account isn't verified",
     "wrong_account": "the agents' GitHub sign-in is the person's own GitHub account",
 }
-
-#: The causes ``github_agent.view`` reports while no verification answer is cached yet.
-_UNSETTLED = frozenset({"verifying", "own_login_unknown"})
 
 
 def github_lock_reason(view: AgentAccountView) -> str | None:
@@ -234,7 +241,7 @@ async def _run_with_channel(
     # A rule run is never replayed, so when no answer is cached yet (after a restart, say) it
     # waits, bounded and off the DB pool, for the verification instead of running locked.
     view = await run_in_db(github_agent.view)
-    if view.cause in _UNSETTLED:
+    if view.answer_pending:
         view = await run_off_db(github_agent.verify_now)
     env.update(github_agent.script_env(view))
     env.pop(SOCKET_ENV, None)
