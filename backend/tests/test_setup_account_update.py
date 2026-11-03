@@ -157,3 +157,53 @@ def test_a_machine_credential_cannot_change_the_account_or_take_a_session(client
     assert response.status_code == 403
     assert "Someone Else" not in _profile(workspace)
     assert accounts.get_user("pat") is not None and _put(client, session, {"name": "Pat Example"}).status_code == 200
+
+
+@pytest.mark.parametrize("failure", ["marker", "commit"])
+def test_a_failed_account_change_leaves_the_choice_and_the_profile_as_they_were(client, workspace, session, monkeypatch, failure):
+    import sqlite3
+    from contextlib import contextmanager
+
+    from infra import account_update, settings
+
+    def refuse(*_args, **_kwargs):
+        raise OSError("marker refused")
+
+    real = account_update.write_transaction
+
+    @contextmanager
+    def failing_commit(db, *, scope):
+        with real(db, scope=scope) as connection:
+            yield connection
+            raise sqlite3.OperationalError("disk I/O error")
+
+    before = _profile(workspace)
+    settings.save_usage_sharing(True)
+    if failure == "marker":
+        monkeypatch.setattr(account_update.setup_marker, "update_created_file", refuse)
+    else:
+        monkeypatch.setattr(account_update, "write_transaction", failing_commit)
+    response = _put(client, session, {"usage_sharing": False, "name": "Patricia Example"})
+    assert response.status_code == 500 and response.json()["code"] == "setup_failed"
+    assert settings.get_usage_sharing() is True
+    assert _profile(workspace) == before
+
+
+def test_back_on_the_account_step_saves_only_a_changed_choice(client, workspace, session):
+    from infra import settings
+
+    before = _profile(workspace)
+    settings.save_usage_sharing(True)
+    response = _put(client, session, {"usage_sharing": False})
+    assert response.status_code == 200 and "token" not in response.json()
+    assert settings.get_usage_sharing() is False
+    assert _profile(workspace) == before
+
+
+def test_a_refused_account_change_leaves_the_choice_as_it_was(client, session):
+    from infra import settings
+
+    settings.save_usage_sharing(True)
+    response = _put(client, session, {"usage_sharing": False, "password": "x"})
+    assert response.status_code == 422
+    assert settings.get_usage_sharing() is True

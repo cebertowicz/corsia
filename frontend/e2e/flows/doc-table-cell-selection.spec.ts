@@ -124,4 +124,49 @@ test.describe('@flow:doc-table-cell-selection @surface:documents', () => {
 		await expect(intro).toHaveText('IntroZZ paragraph above the table.');
 		await expect(page.locator('.cm-line').first()).not.toContainText('ZZ');
 	});
+
+	/** A press on `from`, a drag in steps to `to`, and a release at `release` (default `to`). */
+	async function drag(page: Page, from: { x: number; y: number }, to: { x: number; y: number }, release = to) {
+		await page.mouse.move(from.x, from.y);
+		await page.mouse.down();
+		for (let step = 1; step <= 12; step++) await page.mouse.move(from.x + ((to.x - from.x) * step) / 12, from.y + ((to.y - from.y) * step) / 12);
+		if (release !== to) await page.mouse.move(release.x, release.y, { steps: 6 });
+		await page.mouse.up();
+	}
+
+	for (const [name, cellText, text] of [
+		['a whole short cell', 'Short note.', 'Short note.'],
+		['a mid-cell range', 'Plain words in a cell', 'ords in a'],
+		['a wrapped cell from its first word to its last', WRAPPED, WRAPPED],
+		['a range across the wrap of a multi-line cell', WRAPPED, 'so the cell wraps onto several lines at ordinary'],
+	] as const) {
+		test(`a drag selects ${name} in full and the pending comment button shows after release`, async ({ page }) => {
+			test.setTimeout(90_000);
+			await page.setViewportSize({ width: 1440, height: 900 });
+			await openDocument(page);
+			const ends = await textEnds(page, cellText, text);
+			// The ends are character centres; step to the outer edges so the first and last characters are inside the selection.
+			const from = { x: ends.from.x - 3, y: ends.from.y }, to = { x: ends.to.x + 3, y: ends.to.y };
+			await drag(page, from, to);
+			await expect.poll(async () => (await selectionState(page)).text.trim(), { timeout: 5_000 }).toBe(text);
+			expect((await selectionState(page)).inOneCell).toBe(true);
+			await expect(page.locator('.sel-comment')).toBeVisible();
+		});
+	}
+
+	test('a drag released below the table keeps its selection, and a later drag in another cell selects in full', async ({ page }) => {
+		test.setTimeout(90_000);
+		await page.setViewportSize({ width: 1440, height: 900 });
+		await openDocument(page);
+		const { from, to } = await textEnds(page, 'Plain words in a cell', 'Plain words');
+		await drag(page, from, to, { x: to.x, y: 860 });
+		await expect(page.locator('.sel-comment')).toBeVisible();
+		expect((await selectionState(page)).text.trim().length).toBeGreaterThan(0);
+
+		// The drag is over, so a second drag in the other cell selects and reads as the first did.
+		const short = await textEnds(page, 'Short note.', 'Short note.');
+		await drag(page, { x: short.from.x - 3, y: short.from.y }, { x: short.to.x + 3, y: short.to.y });
+		await expect.poll(async () => (await selectionState(page)).text.trim(), { timeout: 5_000 }).toBe('Short note.');
+		await expect(page.locator('.sel-comment')).toBeVisible();
+	});
 });
