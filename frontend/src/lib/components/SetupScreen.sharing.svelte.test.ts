@@ -8,7 +8,7 @@ vi.mock('$lib/ws', () => ({ connect: vi.fn() }));
 vi.mock('$lib/linkTargetResolver', () => ({ openExternalUrl: vi.fn(async () => undefined) }));
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-const LINE = 'Share usage counts to help improve CORSIA. Counts only, with a random install ID: no name, email or content.';
+const LINE = 'Helps improve CORSIA. Counts only, with a random install ID: no name, email or content.';
 const ERROR = 'Couldn’t save your usage sharing choice. Try again.';
 
 let host: HTMLDivElement;
