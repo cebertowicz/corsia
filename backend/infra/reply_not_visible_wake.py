@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from loguru import logger
 
 from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
-from infra.chat_comment_answers import visible_answer_content
+from infra.chat_comment_answers import SHOWN_ANSWERS_FROM, visible_answer_content
 
 EVENT = "turn.reply_not_visible"
 NO_REPLY = "NO_REPLY"
@@ -86,10 +86,11 @@ def _newest_person_input(
     ).fetchone()
 
 
-def _unseen(db: sqlite3.Connection, row: sqlite3.Row) -> str:
-    """The row's words minus the answers it placed in comment threads, which the person sees."""
+def _unseen(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row) -> str:
+    """The row's words minus the answers the page shows in comment threads."""
     placed = [cid for (cid,) in db.execute(
-        "SELECT cid FROM chat_comment_answers WHERE assistant_message_id=?", (row["id"],),
+        f"SELECT a.cid {SHOWN_ANSWERS_FROM} WHERE a.thread_id=? AND a.assistant_message_id=?",
+        (thread_id, row["id"]),
     )]
     return visible_answer_content(str(row["content"]), placed).strip()
 
@@ -102,12 +103,12 @@ def _replied_after(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) 
     ).fetchone() is not None:
         return True
     if db.execute(
-        "SELECT 1 FROM chat_comment_answers WHERE thread_id=? AND user_message_id=? LIMIT 1",
+        f"SELECT 1 {SHOWN_ANSWERS_FROM} WHERE a.thread_id=? AND a.user_message_id=? LIMIT 1",
         (thread_id, person["id"]),
     ).fetchone() is None:
         return False
     hidden = _last_hidden(db, thread_id, person["seq"])
-    return hidden is None or not _unseen(db, hidden)
+    return hidden is None or not _unseen(db, thread_id, hidden)
 
 
 def _turn_status(db: sqlite3.Connection, turn_id: str | None) -> str | None:
@@ -172,7 +173,7 @@ def _queue_nudge(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) ->
     hidden = _last_hidden(db, thread_id, person["seq"])
     text = nudge_text(
         _clock(str(person["created_at"])),
-        (_unseen(db, hidden) or None) if hidden is not None else None,
+        (_unseen(db, thread_id, hidden) or None) if hidden is not None else None,
     )
     try:
         enqueue_event_wake(
