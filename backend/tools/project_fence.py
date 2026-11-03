@@ -100,25 +100,25 @@ class Fence:
 def _drop_nested(roots: list[FencedRoot]) -> tuple[FencedRoot, ...]:
     """Drop a root that sits inside another fenced root at least as strong.
 
-    Only a Local only root covers a Local only one: a lease renders only those, so an
-    ordinary root covering it would leave it open under the lease.
+    A root is dropped only when every form of it, written and resolved, is covered, because
+    Seatbelt checks the resolved path. Only a Local only root covers a Local only one: a lease
+    renders only those, so an ordinary root covering it would leave it open under the lease.
     """
-    # Resolve each root once; the pairwise pass compares text, as ``contains`` does.
-    paths = [str(root.path).casefold() for root in roots]
     forms = [[str(form).casefold() for form in root.forms] for root in roots]
-    kept = []
-    for index, root in enumerate(roots):
-        path = paths[index]
-        inside = any(
+
+    def covered(index: int, root: FencedRoot, path: str) -> bool:
+        return any(
             (path == form or path.startswith(form.rstrip("/") + "/"))
             and (candidate.local_only or not root.local_only)
             and (form != path or other < index or candidate.local_only != root.local_only)
             for other, candidate in enumerate(roots) if other != index
             for form in forms[other]
         )
-        if not inside:
-            kept.append(root)
-    return tuple(kept)
+
+    return tuple(
+        root for index, root in enumerate(roots)
+        if not all(covered(index, root, path) for path in forms[index])
+    )
 
 
 # A project is fenced from the caller when this says so: ``(project id, Local only)``.

@@ -19,7 +19,7 @@ async def refresh_local_app_fences() -> None:
     """Relaunch each running local app, whose Safehouse profile renders the Local only fence at launch."""
     from tools.mcp_runtime import local_app_ids
 
-    for app_id in local_app_ids():
+    for app_id in await local_app_ids():
         await restart_after_saved_write(app_id)
 
 

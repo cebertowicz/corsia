@@ -248,9 +248,14 @@ def connected_app_state(app_id: str) -> dict[str, object]:
     return _app_states.get(app_id, {"state": "disconnected", "state_since": None, "tool_count": 0, "failure_class": None})
 
 
-def local_app_ids() -> list[str]:
-    """The running apps launched as local processes, each under its launch-time Safehouse profile."""
-    return [app_id for app_id, (_name, config) in _app_configs.items() if config.get("command")]
+async def local_app_ids() -> list[str]:
+    """The running apps launched as local processes, each under its launch-time Safehouse profile.
+
+    Read under the runtime lock, so a connect already rendering its profile is counted once it
+    finishes, and any connect queued after this read renders from the current settings.
+    """
+    async with _lock:
+        return [app_id for app_id, (_name, config) in _app_configs.items() if config.get("command")]
 
 
 def register_mcp_tools(registry: ToolRegistry) -> None:
