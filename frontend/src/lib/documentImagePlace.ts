@@ -118,6 +118,22 @@ export function captureDocumentPlace(root: HTMLElement | undefined): TextDocumen
 	return { from, top: coords.top - bounds.top, scrollTop: scroller.scrollTop };
 }
 
+/** Reports the reader's place at most once a frame while the editor scrolls, until the returned stop is called. */
+export function reportDocumentPlaceOnScroll(view: EditorView, report: (place: TextDocumentPlace) => void): () => void {
+	let frame = 0;
+	const capture = () => {
+		frame = 0;
+		const place = captureDocumentPlace(view.dom);
+		if (place) report(place);
+	};
+	const onScroll = () => { if (!frame) frame = requestAnimationFrame(capture); };
+	view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
+	return () => {
+		view.scrollDOM.removeEventListener('scroll', onScroll);
+		if (frame) cancelAnimationFrame(frame);
+	};
+}
+
 /** Where the drawn image widget is, read from the page alone: without an editor to measure through, or after a layout the editor has not measured yet. Text has no anchor then. */
 function widgetReader(root: HTMLElement, scroller: HTMLElement, place: OpenImageRequest | TextDocumentPlace): AnchorTop {
 	const image = 'src' in place ? place : null;

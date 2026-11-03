@@ -27,7 +27,7 @@
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
 	import { attachPreviewFeed, type PreviewFrameSource } from '$lib/stores/livePreviewFeed';
-	import { captureDocumentPlace, type TextDocumentPlace } from '$lib/documentImagePlace';
+	import { reportDocumentPlaceOnScroll, type TextDocumentPlace } from '$lib/documentImagePlace';
 	import { dispatchKeepingPlace, keepPlaceWhenEditorMoves } from '$lib/documentReadingPlace';
 
 	let {
@@ -282,19 +282,7 @@
 		const current = view;
 		const instanceId = tabInstanceId;
 		if (!current || !instanceId) return;
-		let frame = 0;
-		const capture = () => {
-			frame = 0;
-			if (tabInstanceId !== instanceId) return;
-			const place = captureDocumentPlace(current.dom);
-			if (place) onDocumentPlace?.(instanceId, place);
-		};
-		const onScroll = () => { if (!frame) frame = requestAnimationFrame(capture); };
-		current.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
-		return () => {
-			current.scrollDOM.removeEventListener('scroll', onScroll);
-			if (frame) cancelAnimationFrame(frame);
-		};
+		return reportDocumentPlaceOnScroll(current, (place) => { if (tabInstanceId === instanceId) onDocumentPlace?.(instanceId, place); });
 	});
 
 	$effect(() => {
