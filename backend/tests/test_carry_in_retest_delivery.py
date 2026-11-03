@@ -67,13 +67,14 @@ async def test_each_side_dispatches_once_its_recorded_input_matches(c1, monkeypa
 
     prefix = f"eval-c1-{fact.identity[:16]}"
     assert dispatched == [f"turn-{prefix}-b1", f"turn-{prefix}-c1"]
-    payload = json.loads(candidate.block)["trial_lessons"][0]["guidance"]
+    block = candidate.prompt.rsplit("\n\n", 1)[1]
+    payload = json.loads(block)["trial_lessons"][0]["guidance"]
     # The delivery is the plan result's shape, and the two prompts differ only by it.
-    assert json.loads(candidate.block) == {"trial_lessons": [{
+    assert json.loads(block) == {"trial_lessons": [{
         "lesson_id": LESSON_ID, "target": TARGET, "guidance": payload, "notice": NOTICE,
     }]}
-    assert LESSON_BODY in payload and baseline.block is None and "trial_lessons" not in baseline.prompt
-    assert candidate.prompt == baseline.prompt + "\n\n" + candidate.block
+    assert LESSON_BODY in payload and "trial_lessons" not in baseline.prompt
+    assert candidate.prompt == baseline.prompt + "\n\n" + block
 
 
 @pytest.mark.asyncio
@@ -108,16 +109,95 @@ async def test_a_turn_whose_input_does_not_match_its_side_is_refused_before_disp
 
 
 @pytest.mark.asyncio
-async def test_a_baseline_whose_target_text_mentions_the_key_is_still_a_baseline(c1):
-    _write_lesson(c1)
-    _save(c1, "rule v1\n")
+async def test_a_baseline_whose_target_text_has_the_delivery_opener_passes_the_check(c1, monkeypatch):
+    """The check is exact equality with the side's prompt: admission records it verbatim, odd whitespace included."""
+    from infra import carry_in_drain
+
+    text = 'a {\n  "trial_lessons": [ key\r\n\ttab and trailing spaces  \n\n'
+    _write_lesson(c1, text=LESSON_BODY)
+    _save(c1, text)
     await _make_pending(c1)
     fact = _pending_fact()
-    arm = _arm(c1, fact, deliver=False, blob=b'the "trial_lessons": [ key\n')
+    _local(monkeypatch)
+    prompts = _record_prompts(monkeypatch, "c")
 
-    assert '"trial_lessons"' in arm.prompt and arm.carried_by(arm.prompt)
-    assert not arm.carried_by(None)
-    assert not arm.carried_by(_arm(c1, fact, deliver=True).prompt)
+    assert await carry_in_drain.wake(c1.workspace) is True
+
+    assert (_events()[-1]["event"], _events()[-1]["verdict"]) == ("lesson.carry_in.result", "passed")
+    assert all('{\n  "trial_lessons": [' in text for text in _sides(prompts, "b"))
+    baseline = _arm(c1, fact, deliver=False, blob=text.encode())
+    candidate = _arm(c1, fact, deliver=True, blob=text.encode())
+    assert baseline.carried_by(baseline.prompt) and not baseline.carried_by(None)
+    assert not baseline.carried_by(baseline.prompt + "\n") and not baseline.carried_by(candidate.prompt)
+    assert not candidate.carried_by(baseline.prompt)
+
+
+@pytest.mark.asyncio
+async def test_a_trial_lessons_sides_see_the_same_target_revision(c1, monkeypatch):
+    from infra import carry_in_drain
+
+    _save(c1, "rule v0\n")
+    await _make_pending(c1)
+    _write_lesson(c1, text=LESSON_BODY)
+    _save(c1, "rule v1\n")
+    await _make_pending(c1)
+    _local(monkeypatch)
+    prompts = _record_prompts(monkeypatch, "c")
+
+    assert await carry_in_drain.wake(c1.workspace) is True
+
+    assert _events()[-1]["verdict"] == "passed"
+    assert all("rule v1" in text and "rule v0" not in text for text in prompts.values())
+    baseline, candidate = _sides(prompts, "b")[0], _sides(prompts, "c")[0]
+    assert "trial_lessons" not in baseline and candidate.startswith(baseline + "\n\n") and "trial_lessons" in candidate
+
+
+@pytest.mark.asyncio
+async def test_a_non_trial_target_edit_compares_before_with_after_and_delivers_nothing(c1, monkeypatch):
+    from infra import carry_in_drain
+
+    _save(c1, "rule v0\n")
+    await _make_pending(c1)
+    _write_lesson(c1, state="watch", text=LESSON_BODY)
+    _save(c1, "rule v1\n")
+    await _make_pending(c1)
+    _local(monkeypatch)
+    prompts = _record_prompts(monkeypatch, "c")
+
+    assert await carry_in_drain.wake(c1.workspace) is True
+
+    assert _events()[-1]["verdict"] == "passed"
+    assert all("trial_lessons" not in text for text in prompts.values())
+    assert all("rule v0" in text and "rule v1" not in text for text in _sides(prompts, "b"))
+    assert all("rule v1" in text and "rule v0" not in text for text in _sides(prompts, "c"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("target_text", "retired"), [
+    ("# Rules\n\n## Read first\nalready here\n", True),
+    ("# Rules\n\n## Something else\n", False),
+])
+async def test_a_trial_candidate_follows_task_starts_omission_when_the_target_has_the_section(
+    c1, monkeypatch, target_text, retired,
+):
+    from infra import carry_in_drain
+
+    _write_lesson(c1, text=LESSON_BODY, section="Read first")
+    _save(c1, target_text)
+    await _make_pending(c1)
+    _local(monkeypatch)
+    prompts = _record_prompts(monkeypatch, "c")
+
+    assert await carry_in_drain.wake(c1.workspace) is True
+
+    terminal = _events()[-1]
+    if retired:  # task start would deliver nothing, so both sides read the same prompt
+        assert (terminal["event"], terminal["reason"]) == ("lesson.carry_in.retired", "same_input")
+        assert prompts == {}
+    else:
+        assert terminal["verdict"] == "passed"
+        assert all("Trial section for" in text for text in _sides(prompts, "c"))
+        assert all("trial_lessons" not in text for text in _sides(prompts, "b"))
 
 
 @pytest.mark.asyncio
@@ -248,7 +328,7 @@ async def test_an_index_line_trial_names_a_file_a_sample_thread_can_read_under_i
     path = _write_lesson(c1, target=None, text=LESSON_BODY)
     record_committed_save(c1.workspace, [path], _git(["rev-parse", "HEAD"], cwd=c1.workspace).strip())
     await _make_pending(c1)
-    (entry,) = json.loads(_arm(c1, _pending_fact(), deliver=True, blob=None).block)["trial_lessons"]
+    (entry,) = json.loads(_arm(c1, _pending_fact(), deliver=True, blob=None).prompt.rsplit("\n\n", 1)[1])["trial_lessons"]
     assert str(path.resolve()) in entry["guidance"] and entry["target"] == str(path.resolve())
 
     db = get_db()

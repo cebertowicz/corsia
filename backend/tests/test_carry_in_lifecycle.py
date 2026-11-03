@@ -65,7 +65,7 @@ def _lesson_path(c1, name="demo-lesson") -> Path:
 
 def _write_lesson(
     c1, *, actions=ACTIONS, text="Read the rule before closing.", state="trial",
-    name="demo-lesson", lesson_id=LESSON_ID, target=TARGET, commit=True,
+    name="demo-lesson", lesson_id=LESSON_ID, target=TARGET, commit=True, section=None,
 ) -> Path:
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
@@ -81,6 +81,7 @@ def _write_lesson(
         source_refs=[{"kind": "message", "reference": "m1"}],
         case_metadata={
             **({"target_file": target} if target else {}), "case": case,
+            **({"target_section": section} if section else {}),
             **({"destination": {"path": TARGET, "version": "1"}} if state == "promoted" else {}),
         },
     ))
@@ -133,12 +134,12 @@ def _pending_fact():
 def _arm(c1, fact, *, deliver: bool, blob: bytes | None = b"rule v1\n"):
     """One side's prompt and delivery as the drain builds them for this fact's lesson as saved now."""
     from core import carry_in_facts
-    from infra import carry_in_drain
+    from infra import carry_in_arm
     from infra.database import get_db
 
     case = carry_in_facts.eligible_case(get_db(), c1.workspace, fact)
     assert not isinstance(case, str), case
-    return carry_in_drain._arm(fact, case, blob, deliver=deliver)
+    return carry_in_arm.arm(fact, case, blob, deliver=deliver)
 
 
 def _admitting_turn(hooked: list):
@@ -441,8 +442,8 @@ async def test_baseline_must_fail_then_candidate_must_pass(c1, monkeypatch):
     labels = [c[1] for c in calls if c[0] == first.sha]
     assert labels == ["b1", "b2", "c1", "c2"]
     baseline_prompt, candidate_prompt = calls[0][2], calls[2][2]
-    assert "There is no file at `context/demo.md`" in baseline_prompt  # the pre-lesson parent
-    assert "rule v1" in candidate_prompt and "Read first." not in candidate_prompt
+    assert "rule v1" in baseline_prompt and "trial_lessons" not in baseline_prompt  # the same revision, no delivery
+    assert "rule v1" in candidate_prompt and "trial_lessons" in candidate_prompt and "Read first." not in candidate_prompt
     assert calls[-1] == ("deleted", ["eval-c1-b1", "eval-c1-b2", "eval-c1-c1", "eval-c1-c2"], "lesson.carry_in.result")
 
 

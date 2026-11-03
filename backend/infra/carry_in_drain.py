@@ -30,7 +30,7 @@ from core.carry_in_facts import CarryInFact
 from infra import carry_in_capacity as capacity
 from infra.carry_in_arm import (
     Arm as _Arm,
-    arm as _arm,
+    arms as _arms,
     sample_prompt,
     turn_input as _turn_input,
 )
@@ -162,14 +162,16 @@ def _owner(db, thread_id: str) -> dict | None:
     return None if row is None or not row[0] else {"user_id": str(row[0]), "project_id": row[1]}
 
 
-def _blobs(workspace: Path, fact: CarryInFact) -> tuple[bytes | None, bytes] | None:
-    """The target before its commit (None when new) and at it; None when its owner must act.
+def _blobs(workspace: Path, fact: CarryInFact, delivered: bool) -> tuple[bytes | None, bytes] | None:
+    """The target before its commit (None when new, or when ``delivered``: not compared) and at it.
+
+    None when the case's owner must act.
 
     None means the commit holds no such file or a revision over ``MAX_TARGET_BYTES``.
     A Git fault reading the history raises ``GitFault``: that is no fact about the case.
     """
     parent = facts.commit_parent(workspace, fact.target_commit)
-    before = facts.committed_bytes(workspace, parent, fact.target_path) if parent else None
+    before = None if delivered or not parent else facts.committed_bytes(workspace, parent, fact.target_path)
     after = facts.committed_bytes(workspace, fact.target_commit, fact.target_path)
     if after is None or any(len(blob) > MAX_TARGET_BYTES for blob in (before or b"", after)):
         return None
@@ -315,16 +317,14 @@ async def wake(workspace: Path) -> bool:
         "not_mechanically_executable" if case.actions is None else None
     )
     try:
-        blobs = None if reason is not None else await run_off_db(_blobs, workspace, fact)
+        blobs = None if reason is not None else await run_off_db(_blobs, workspace, fact, case.deliver)
     except GitFault as fault:  # the history, not the case, failed: it stays the oldest pending case
         logger.warning("carry-in case {} waits: guidance history unreadable: {}", fact.identity[:16], fault)
         await run_in_db(partial(
             _write, facts.record_waiting, fact, _now(), "history_unavailable", scope="carry_in_waiting",
         ))
         return False
-    arms = None if reason is not None or blobs is None else (
-        _arm(fact, case, blobs[0], deliver=False), _arm(fact, case, blobs[1], deliver=case.deliver),
-    )
+    arms = None if reason is not None or blobs is None else _arms(fact, case, *blobs)
     if arms is not None and arms[0].prompt == arms[1].prompt:
         reason = "same_input"
     if reason is not None or arms is None:

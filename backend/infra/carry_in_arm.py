@@ -1,8 +1,10 @@
 """One carry-in sample side: its prompt and the lesson delivery inside it.
 
-Split from ``infra.carry_in_drain``, which runs the samples. A candidate prompt
-carries the delivery the way task start returns it (``core.lesson_delivery``); a
-baseline prompt carries none, and its Turn's recorded input must say so.
+Split from ``infra.carry_in_drain``, which runs the samples. A re-test changes
+one thing between its sides. A trial lesson's sides see the same target
+revision and differ only in the delivery, which follows task start's omission
+rule; a target edit of any other lesson compares the revision before and after
+with no delivery. A Turn's recorded input must equal its side's prompt.
 """
 
 from __future__ import annotations
@@ -12,13 +14,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from core.carry_in_facts import CarryInFact, EligibleCase
+from core.lesson_files import has_section
 
 if TYPE_CHECKING:
     from core.lesson_delivery import TrialDelivery
-
-
-#: How a delivery block opens; a baseline input never contains it.
-_BLOCK_OPEN = '{\n  "trial_lessons": ['
 
 
 def delivery_block(delivery: TrialDelivery) -> str:
@@ -30,16 +29,13 @@ def delivery_block(delivery: TrialDelivery) -> str:
 
 @dataclass(frozen=True)
 class Arm:
-    """One side's prompt; ``block`` is the lesson delivery inside it, None for a side with none."""
+    """One side's prompt."""
 
     prompt: str
-    block: str | None
 
     def carried_by(self, recorded: str | None) -> bool:
-        """Whether a Turn's recorded input holds exactly this side's delivery."""
-        if recorded is None:
-            return False
-        return self.block in recorded if self.block else _BLOCK_OPEN not in recorded
+        """Whether a Turn's recorded input is exactly this side's prompt."""
+        return recorded == self.prompt
 
 
 def turn_input(db, thread_id: str, turn_id: str) -> str | None:
@@ -76,8 +72,21 @@ def sample_prompt(
 
 def arm(fact: CarryInFact, case: EligibleCase, blob: bytes | None, *, deliver: bool) -> Arm:
     block = delivery_block(case.delivery) if deliver else None
-    prompt = sample_prompt(case.case, fact.target_path, blob, block, show_file=fact.target_path != fact.lesson_path)
-    return Arm(prompt, block)
+    return Arm(sample_prompt(case.case, fact.target_path, blob, block, show_file=fact.target_path != fact.lesson_path))
+
+
+def arms(fact: CarryInFact, case: EligibleCase, before: bytes | None, after: bytes) -> tuple[Arm, Arm]:
+    """The baseline and candidate sides of one re-test; they differ in exactly one thing.
+
+    A trial lesson's candidate carries the delivery unless the target already has its
+    section (task start omits it then, and the equal prompts retire the case); a
+    lesson in any other state compares ``before`` with ``after`` and delivers nothing.
+    """
+    if not case.deliver:
+        return arm(fact, case, before, deliver=False), arm(fact, case, after, deliver=False)
+    section = case.delivery.section
+    present = section is not None and has_section(after.decode("utf-8", errors="replace"), section)
+    return arm(fact, case, after, deliver=False), arm(fact, case, after, deliver=not present)
 
 
 def _longest_backtick_run(text: str) -> int:
