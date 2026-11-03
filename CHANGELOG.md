@@ -11,6 +11,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
 - A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.
 - After this update, every chat that runs on your existing Claude Code or Codex account waits until you sign that account in again in CORSIA, automations and reviewers included; if many agents share that account, they all wait until then. Each Claude Code and Codex account now has its own CORSIA sign-in, so signing in or out of `claude` or `codex` in a terminal no longer changes the account CORSIA uses.
+- Agents can now read email attachments, on Gmail and on other mail hosts: email_read lists each attachment and can save them into the agent's workspace, and a PDF comes with a text file of what it says so any model can read it.
 - Email and web addresses written as plain text in a document, such as an email draft's From and To lines, no longer disappear when you view it.
 - Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
 - Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.

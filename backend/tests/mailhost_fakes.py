@@ -10,6 +10,8 @@ from __future__ import annotations
 import base64
 import contextlib
 import datetime
+import email
+import re
 import shlex
 import socket
 import ssl
@@ -273,12 +275,19 @@ class FakeImap(_LineServer):
             raw = self.messages.get(uid)
             if raw is None:
                 continue
+            if "BODYSTRUCTURE" in items.upper():
+                conn.send(f"* {uid} FETCH (UID {uid} BODYSTRUCTURE {bodystructure(email.message_from_bytes(raw))})")
+                continue
             headers_only = "HEADER.FIELDS" in items
             data = raw.split(b"\r\n\r\n", 1)[0] + b"\r\n\r\n" if headers_only else raw
+            window = re.search(r"<0\.(\d+)>", items)
+            if window and not headers_only:
+                data = data[:int(window.group(1))]
             section = "BODY[HEADER.FIELDS (FROM TO CC DATE SUBJECT)]" if headers_only else "BODY[]<0>"
             flags = " FLAGS (\\Seen)" if "FLAGS" in items.upper() else ""
             arrival = ' INTERNALDATE "01-Jan-2020 00:00:00 +0000"' if "INTERNALDATE" in items.upper() else ""
-            conn.send(f"* {uid} FETCH (UID {uid}{flags}{arrival} {section} {{{len(data)}}}".encode() + b"\r\n" + data + b")")
+            size = f" RFC822.SIZE {len(raw)}" if "RFC822.SIZE" in items.upper() else ""
+            conn.send(f"* {uid} FETCH (UID {uid}{flags}{arrival}{size} {section} {{{len(data)}}}".encode() + b"\r\n" + data + b")")
         conn.send(f"{tag} OK done")
 
 
@@ -424,6 +433,27 @@ class FakeCalDav:
     def close(self) -> None:
         self.server.shutdown()
         self.server.server_close()
+
+
+def _quote(value: object) -> str:
+    return "NIL" if value is None else '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def bodystructure(part) -> str:  # type: ignore[no-untyped-def]
+    """The BODYSTRUCTURE an IMAP server would answer for a parsed message (extension data included)."""
+    if part.is_multipart():
+        return "(" + "".join(bodystructure(p) for p in part.get_payload()) + f' {_quote(part.get_content_subtype().upper())})'
+    maintype, subtype = part.get_content_type().upper().split("/")
+    params = " ".join(f"{_quote(k.upper())} {_quote(v)}" for k, v in part.get_params()[1:])
+    name = part.get_filename()
+    kind = part.get_content_disposition()
+    disposition = f"({_quote(kind.upper())} ({_quote('FILENAME')} {_quote(name)}))" if kind and name else (
+        f"({_quote(kind.upper())} NIL)" if kind else "NIL")
+    encoding = part.get("Content-Transfer-Encoding", "7BIT").upper()
+    extension = f"NIL {disposition} NIL NIL"
+    lines = " 1" if maintype == "TEXT" else ""
+    return (f'({_quote(maintype)} {_quote(subtype)} {"(" + params + ")" if params else "NIL"} {_quote(part.get("Content-ID"))} NIL '
+            f'{_quote(encoding)} {len(part.get_payload())}{lines} {extension})')
 
 
 def message(subject: str, body: str, *, sender: str = "sam@example.com", html: bool = False) -> bytes:
