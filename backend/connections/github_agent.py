@@ -266,50 +266,26 @@ def _git_config(account: AgentAccountView) -> list[tuple[str, str]]:
         ("credential.https://github.com.helper", helper),
         ("url.https://github.com/.insteadOf", "git@github.com:"),
         ("url.https://github.com/.insteadOf", "ssh://git@github.com/"),
-        # Keeps a push to an HTTPS GitHub URL on HTTPS when the person's own insteadOf rewrites
-        # it to SSH: no other push rule matches, so this one is used for pushes.
+        # Keeps a push to an HTTPS GitHub URL on HTTPS when an insteadOf rule rewrites it to SSH:
+        # Git uses a matching push rule before any insteadOf for a push.
         ("url.https://github.com/.pushInsteadOf", "https://github.com/"),
         ("user.name", name),
         ("user.email", email),
         ("user.useConfigOnly", "true"),
-        ("core.sshCommand", SSH_PUSH_GUARD),
     ]
     assert len(entries) == GIT_CONFIG_SLOTS
     return entries
-
-
-# The SSH command Git runs in a shell with an agents' account. A push to GitHub over SSH that
-# the Git or SSH config routes there (a URL rewrite, or a host alias for GitHub) is refused;
-# every other SSH use runs the repository's or global ``core.sshCommand``, or ``ssh``. It is a
-# config entry, not ``GIT_SSH_COMMAND``, so an explicit ``git -c core.sshCommand`` or
-# ``GIT_SSH_COMMAND`` still replaces it, as either replaced the config before. Git starts the
-# command without the repository's location, so with ``--git-dir`` from another folder it reads
-# that folder's config, and Git can't tell a plink-style command's type (``ssh.variant`` sets it).
-# ``ssh -G`` only prints the resolved config, so an alias resolves without connecting.
-SSH_PUSH_GUARD = (
-    'f() { h=; p=; d=; for a; do case $a in github.com|*@github.com|ssh.github.com|*@ssh.github.com) h=1;; '
-    'git-receive-pack*) p=1;; -*) ;; *) [ -n "$p" ] || d=$a;; esac; done; '
-    'if [ -n "$p" ] && [ -z "$h" ] && [ -n "$d" ]; then '
-    'case $(ssh -G "$d" 2>/dev/null | sed -n "s/^hostname //p" | tr A-Z a-z) in '
-    'github.com|ssh.github.com) h=1;; esac; fi; '
-    'if [ -n "$h" ] && [ -n "$p" ]; then echo "CORSIA: agent shells push to GitHub over HTTPS as the '
-    "agents' account, and this push was going over SSH, so it was refused. If the remote URL "
-    'is an SSH host alias for GitHub, push to its https://github.com/ URL instead. If an insteadOf '
-    'or pushInsteadOf rule rewrote it, push without that rule, for example '
-    'GIT_CONFIG_GLOBAL=/dev/null git push for a rule in the global Git config." >&2; exit 128; fi; '
-    'c=$(git config --get core.sshCommand); eval "exec ${c:-ssh} \\"\\$@\\""; }; f'
-)
 
 
 def shell_env(account: AgentAccountView) -> dict[str, str]:
     """An agent shell's GitHub identity: nothing without an account, the bot's once ready, else locked.
 
     Locked means ``gh`` points at an absent home, Git has no credential helper and an
-    empty identity, and SSH remotes go over HTTPS, so a push fails rather than falls
-    back to the person's own login. In every state a GitHub push that the Git or SSH
-    config routes over SSH is refused. That stops the config from silently pushing as
-    the person; it does not stop a command that sets its own SSH command, since the
-    person's SSH agent stays reachable from agent shells.
+    empty identity, and GitHub SSH remotes, and HTTPS ones a Git rewrite turns into SSH,
+    push over HTTPS, so a push fails rather than falls back to the person's own login.
+    SSH itself is untouched, so the person's key still reaches GitHub through an SSH host
+    alias, the person's own ``pushInsteadOf`` to SSH, or a command that sets its own SSH
+    command.
     """
     if account.absent:
         return {}
