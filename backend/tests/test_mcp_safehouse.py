@@ -577,3 +577,30 @@ async def test_local_mcp_safehouse_uvx_launch(monkeypatch, tmp_path):
     assert len(launched) == 1
     assert launched[0].name == "uvx"
     assert launched[0].is_relative_to(runtime_cache_root())
+
+
+@pytest.mark.integration
+def test_gws_runs_in_the_agent_workspace_with_private_state_closed(monkeypatch, tmp_path):
+    """gws works in the agent's workspace, so its --output lands there; CORSIA's private state stays closed."""
+    _require_safehouse()
+    workspace, state = _configure_roots(monkeypatch, tmp_path)
+    from tools import gws_run
+
+    agent = workspace / "agents" / "a1"
+    agent.mkdir(parents=True)
+    keys = state / "keys"
+    keys.mkdir()
+    (keys / "value").write_text("private-key-canary", encoding="utf-8")
+    monkeypatch.setattr(gws_run, "gws_program", lambda: Path(sys.executable))
+    monkeypatch.setattr(gws_run, "config_dir", lambda account_id: tmp_path / "gws-config")
+    probe = (
+        "import pathlib, sys\n"
+        "pathlib.Path('out.txt').write_text('written')\n"
+        "try:\n"
+        "    print(pathlib.Path(sys.argv[1]).read_text())\n"
+        "except OSError as error:\n"
+        "    print('denied', error.errno)\n"
+    )
+    done = gws_run._run(["-c", probe, str(keys / "value")], "acct", None, agent)
+    assert (agent / "out.txt").read_text(encoding="utf-8") == "written"
+    assert "private-key-canary" not in done.stdout and "denied" in done.stdout

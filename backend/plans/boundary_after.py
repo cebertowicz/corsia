@@ -65,7 +65,9 @@ def after_close(
     from plans import admission, close_next, run_end
 
     db = common["db"]
-    run_closed, run_open = run_end.fail_run(node_id, common) if reason == "failed" else ([], [])
+    # A required step can't be skipped, so one that closed (the person's Won't do) fails its run like a failure.
+    ended_not_done = reason in ("failed", service.CLOSED)
+    run_closed, run_open = run_end.fail_run(node_id, common) if ended_not_done else ([], [])
     closed = service._node_row(db, node_id)
     slot = close_next.slot_before(db, closed)
     admission.release(node_id, reason, db=db)

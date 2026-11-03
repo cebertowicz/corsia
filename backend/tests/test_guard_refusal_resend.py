@@ -9,6 +9,7 @@ and is sent once more.
 from __future__ import annotations
 
 import asyncio
+import functools
 import os
 import sys
 from dataclasses import replace
@@ -111,7 +112,8 @@ def _rediscovery(monkeypatch, window=41_681):
 ])
 async def test_wait_until_quiet(monkeypatch, readings, timeout, quiet, reads):
     seen = _seat(monkeypatch, readings)
-    assert await carry_in_capacity.wait_until_quiet(SID, timeout=timeout, interval=0.03) is quiet
+    read = functools.partial(carry_in_capacity.omlx_state, SID)
+    assert await carry_in_capacity.wait_until_quiet(read, timeout=timeout, interval=0.03) is quiet
     assert len(seen) == reads
 
 

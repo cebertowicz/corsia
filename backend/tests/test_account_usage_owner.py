@@ -515,6 +515,9 @@ def test_account_metadata_cannot_read_usage_column(isolated_db):
     [
         (_report({"five_hour": {"utilization": 100, "resets_at": 42}}), "limited"),
         (_report({"five_hour": {"utilization": 99}}), "allowed"),
+        (_report({"five_hour": {"utilization": 15, "status": "rejected"}}), "limited"),
+        (_report({"five_hour": {"utilization": 15, "status": "rejected"},
+                  "extra_usage": {"is_enabled": True, "utilization": 20}}), "allowed"),
         (_report({"five_hour": {"utilization": 100}, "extra_usage": {"is_enabled": True}}), "unknown"),
         (_report({"five_hour": {"utilization": 100}, "extra_usage": {"is_enabled": True, "utilization": 20}}), "allowed"),
         (_report({"five_hour": {"utilization": 100}, "extra_usage": {"is_enabled": True, "utilization": 100}}), "limited"),
@@ -625,6 +628,25 @@ def test_account_window_rejection_limits_the_account(isolated_db):
 
     projection = harness_usage.project_for_model(harness_usage.stored_usage(provider="claude-code", account_id=default_id("claude-code")))
     assert (projection["state"], projection["usable"], projection["reason"]) == ("limited", False, "seven_day_limit")
+
+
+def test_allowed_event_on_one_window_keeps_another_windows_refusal(isolated_db):
+    from connections import harness_usage
+    from connections.models import ConnectionStatus, ConnectionType, upsert_connection
+
+    upsert_connection(type=ConnectionType.CLI, provider="claude-code",
+                      status=ConnectionStatus.AVAILABLE, config={"binary": "/bin/test"})
+    receipt = default_receipt('claude-code')
+    apply_rate_limit_event({"status": "rejected", "rateLimitType": "five_hour", "resetsAt": 4102444800}, receipt=receipt)
+    apply_rate_limit_event({"status": "allowed_warning", "rateLimitType": "seven_day", "utilization": 0.99}, receipt=receipt)
+
+    usage = harness_usage.stored_usage(provider="claude-code", account_id=default_id("claude-code"))
+    projection = harness_usage.project_for_model(usage, model="claude-code/sonnet")
+    assert (projection["usable"], projection["reason"]) == (False, "five_hour_limit")
+
+    apply_rate_limit_event({"status": "allowed", "rateLimitType": "five_hour", "utilization": 0.02}, receipt=receipt)
+    usage = harness_usage.stored_usage(provider="claude-code", account_id=default_id("claude-code"))
+    assert harness_usage.project_for_model(usage, model="claude-code/sonnet")["usable"]
 
 
 def test_rate_limit_event_utilization_is_stored_as_percent(isolated_db):
