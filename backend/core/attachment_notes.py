@@ -12,11 +12,14 @@ image keeps its bare note.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from pathlib import Path
 
 from core.workspace_layout import uploads_root_for_path
 from infra.config import DOCUMENT_MIME_TYPES
+
+log = logging.getLogger(__name__)
 
 
 def _saved_path(file_id: object, thread_id: str, db=None) -> str | None:
@@ -40,8 +43,19 @@ def _saved_path(file_id: object, thread_id: str, db=None) -> str | None:
         if uploads is None or uploads.parent.name != thread_id or not path.is_file():
             return None
         return path.relative_to(uploads.parent.parent.parent).as_posix()
-    except (sqlite3.Error, OSError, ValueError, TypeError):
+    except (sqlite3.Error, OSError, ValueError, TypeError) as error:
+        # Never raise into Turn construction, but an unexpected failure is not a
+        # missing upload: say so, without the path or filename.
+        log.warning(
+            "attachment path lookup failed file_id=%s error=%s",
+            file_id, type(error).__name__,
+        )
         return None
+
+
+def _mime(attachment: dict) -> str:
+    mime = attachment.get("mime_type")
+    return mime if isinstance(mime, str) else ""
 
 
 def attachment_notes(attachments: list | None, thread_id: str, db=None) -> str:
@@ -50,8 +64,7 @@ def attachment_notes(attachments: list | None, thread_id: str, db=None) -> str:
     for attachment in attachments or ():
         if not isinstance(attachment, dict):
             continue
-        mime = attachment.get("mime_type")
-        mime = mime if isinstance(mime, str) else ""
+        mime = _mime(attachment)
         name = attachment.get("filename", "file")
         if mime.startswith("image/"):
             lines.append(f"[Image attached: {name}]")
@@ -61,6 +74,18 @@ def attachment_notes(attachments: list | None, thread_id: str, db=None) -> str:
         where = f", saved at {saved}" if saved else ""
         lines.append(f"[{label} attached: {name}{where}]")
     return "\n".join(lines)
+
+
+async def attachment_notes_async(attachments: list | None, thread_id: str) -> str:
+    """``attachment_notes``, hopping to the DB pool only when a path lookup can happen."""
+    if any(
+        isinstance(item, dict) and not _mime(item).startswith("image/")
+        for item in attachments or ()
+    ):
+        from infra.db_async import run_in_db
+
+        return await run_in_db(attachment_notes, attachments, thread_id)
+    return attachment_notes(attachments, thread_id)
 
 
 def with_attachment_notes(content: str, notes: str) -> str:

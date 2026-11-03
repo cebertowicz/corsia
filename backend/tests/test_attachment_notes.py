@@ -198,3 +198,73 @@ def test_notes_follow_the_input_after_a_blank_line():
     )
     assert with_attachment_notes("", "[File attached: a]") == "[File attached: a]"
     assert with_attachment_notes("plain", "") == "plain"
+
+
+def test_a_registry_error_logs_once_and_still_gives_the_bare_note(
+    isolated_db, monkeypatch, caplog,
+):
+    import logging
+    import sqlite3
+
+    def broken(file_id, db=None):
+        raise sqlite3.OperationalError("database is locked: /secret/spec.pdf")
+
+    monkeypatch.setattr("registry.registration_events.resolve_upload", broken)
+
+    with caplog.at_level(logging.WARNING, logger="core.attachment_notes"):
+        notes = attachment_notes(
+            [{"file_id": "f1", "filename": "spec.pdf", "mime_type": "application/pdf"}],
+            "t1",
+        )
+
+    assert notes == "[Document attached: spec.pdf]"
+    assert [record.getMessage() for record in caplog.records] == [
+        "attachment path lookup failed file_id=f1 error=OperationalError"
+    ]
+
+
+def test_the_expected_no_path_cases_are_not_logged(isolated_db, caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="core.attachment_notes"):
+        attachment_notes(
+            [{"file_id": "never-registered", "filename": "a.pdf",
+              "mime_type": "application/pdf"}],
+            "t1",
+        )
+
+    assert caplog.records == []
+
+
+@pytest.mark.asyncio
+async def test_a_send_without_a_path_to_look_up_never_touches_the_registry(
+    isolated_db, monkeypatch,
+):
+    """Plain text and image-only sends do no registry lookup and no DB hop."""
+    from core.attachment_notes import attachment_notes_async
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("registry consulted")
+
+    monkeypatch.setattr("registry.registration_events.resolve_upload", forbidden)
+    monkeypatch.setattr("infra.db_async.run_in_db", forbidden)
+
+    assert await attachment_notes_async(None, "t1") == ""
+    assert await attachment_notes_async([], "t1") == ""
+    assert await attachment_notes_async(
+        [{"file_id": "f1", "filename": "p.png", "mime_type": "image/png"}], "t1",
+    ) == "[Image attached: p.png]"
+
+
+@pytest.mark.asyncio
+async def test_a_document_attachment_still_looks_its_path_up(
+    isolated_db, tmp_path, monkeypatch,
+):
+    from core.attachment_notes import attachment_notes_async
+
+    _register(tmp_path.resolve(), monkeypatch, "t1", "f1", "spec.pdf")
+
+    assert await attachment_notes_async(
+        [{"file_id": "f1", "filename": "spec.pdf", "mime_type": "application/pdf"}],
+        "t1",
+    ) == "[Document attached: spec.pdf, saved at .threads/t1/uploads/f1/spec.pdf]"

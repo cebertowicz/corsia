@@ -260,3 +260,22 @@ def test_an_attachment_note_is_stored_with_the_input_and_replays_byte_identical(
     # Replay must not consult the registry: remove the upload before rebuilding.
     upload.unlink()
     assert db_to_llm_history([row]) == [{"role": "user", "content": live.content}]
+
+
+async def test_projecting_a_send_without_attachments_never_consults_the_upload_registry(
+    monkeypatch,
+) -> None:
+    from infra.input_render import _load_input_projection_async
+
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError("upload registry consulted")
+
+    monkeypatch.setattr("registry.registration_events.resolve_upload", forbidden)
+    monkeypatch.setattr("infra.db_async.run_in_db", forbidden)
+
+    projection = await _load_input_projection_async(
+        _batch(), {"user_id": "owner"}, SimpleNamespace(),
+    )
+
+    assert projection.attachment_notes == ""
+    assert "attached" not in projection.content

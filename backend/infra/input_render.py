@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any
 
-from core.attachment_notes import attachment_notes, with_attachment_notes
+from core.attachment_notes import attachment_notes, attachment_notes_async, with_attachment_notes
 from core.message_history import AgentEnvelopeRender, render_agent_envelope
 from infra.db_async import run_in_db
 from infra.send_types import SendRejected
@@ -266,7 +266,7 @@ async def _load_input_projection_async(batch, thread_row, target):
     )
     return _render_input_projection(
         batch, attachments=attachments, media_projection=media_projection,
-        notes=await run_in_db(attachment_notes, attachments, batch.thread_id),
+        notes=await attachment_notes_async(attachments, batch.thread_id),
     )
 
 
