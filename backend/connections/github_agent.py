@@ -293,6 +293,19 @@ def shell_env(account: AgentAccountView) -> dict[str, str]:
     return env
 
 
+def backend_gh(account: AgentAccountView) -> tuple[str, dict[str, str] | None]:
+    """How the backend runs ``gh`` for CORSIA's own GitHub writes: executable and environment.
+
+    The host's own ``gh`` and environment (None) when there is no agents' account; as
+    the account once ready; locked like a shell otherwise, so a write fails rather than
+    lands under the person's own login.
+    """
+    if account.absent:
+        return "gh", None
+    home = account.home if account.ready and account.home else LOCKED_HOME
+    return account.binary or "gh", clean_env() | {"GH_CONFIG_DIR": home, "GH_PROMPT_DISABLED": "1"}
+
+
 def sandbox_ro_dirs(account: AgentAccountView) -> list[Path]:
     """The read-only shell grant: the agents' home, only once verified."""
     return [Path(account.home)] if account.ready and account.home else []
