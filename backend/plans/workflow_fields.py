@@ -79,6 +79,11 @@ def rerating(value: Any) -> dict[str, str]:
 STEPS_CREATED = (
     "Created this run's steps. Skip an optional one with close_node and a reason."
 )
+#: Added to the add reply's line when a step of the run carries a hard_if question.
+HARD_IF_NOTICE = (
+    "A step with a hard_if question is rated as the workflow's default: if the answer "
+    "is yes, re-rate that step with edit and difficulty_rerated (level hard, with a reason)."
+)
 #: Why a required step can't be closed or archived as not done.
 REQUIRED_STEP_SKIP = (
     "required workflow step {step} can't be skipped: close it with evidence "
@@ -124,7 +129,7 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
             order_key=None, description=description,
             workflow_ref=nested or phase.workflow_ref,
             workflow_version=step.get("version") if nested else phase.workflow_version,
-            workflow_step=step["id"], difficulty=difficulty, size=UNKNOWN_SIZE,
+            workflow_step=step["id"], difficulty=difficulty, size=UNKNOWN_SIZE if nested is None else phase.size or UNKNOWN_SIZE,
             checkpoint_exception=False, assignee="user" if by == "person" else None, spawn_kind=None,
             watchdog_budget_seconds=None, follow_up_of=None, actor_id=None,
             provenance="plans.workflow_run", node_id=service._id(),
@@ -135,6 +140,8 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
         entry = {"id": node.id, "title": title, "required": step.get("required") is True}
         if by != "agent":
             entry["by"] = by
+        if step.get("hard_if"):
+            entry["hard_if"] = step["hard_if"]
         if nested:
             entry["steps"] = build_run(db, node, step.get("steps") or (), causing_executor=causing_executor)
         listed.append(entry)
@@ -145,6 +152,10 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
                 causing_executor=causing_executor, db=db,
             )
     return listed
+
+
+def _has_hard_if(listed) -> bool:
+    return any("hard_if" in entry or _has_hard_if(entry.get("steps", ())) for entry in listed)
 
 
 def added(db, node, line, steps, *, causing_executor: str | None):
@@ -159,7 +170,7 @@ def added(db, node, line, steps, *, causing_executor: str | None):
         result["rank"] = line
     if listed:
         result["steps"] = listed
-        result["notice"] = STEPS_CREATED
+        result["notice"] = STEPS_CREATED + (" " + HARD_IF_NOTICE if _has_hard_if(listed) else "")
     return result
 
 

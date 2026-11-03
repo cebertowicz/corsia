@@ -15,6 +15,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A comment on selected document text still posts when an agent edits inside that text before you press Comment, and is anchored on what remains; you are asked to select again only when the agent removed all of it.
 - Email and web addresses written as plain text in a document, such as an email draft's From and To lines, no longer disappear when you view it.
 - On a local model that runs short of memory partway through a reply, the context meter now measures the chat against what still fits in memory for the rest of that reply, the same limit CORSIA checks before each call, instead of showing it far emptier than it is.
+- On a paired computer, the update screen no longer tells you to open CORSIA on your main computer during a normal restart; it says so only if the restart takes longer than usual.
 - Selecting text in a table cell works across the whole cell: you can drag over any part of it, and its comment button appears when you let go.
 - Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
 - Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.

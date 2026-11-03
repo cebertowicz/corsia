@@ -62,12 +62,15 @@ def after_close(
     reconciliation, so the task the caller chose is offered its executor's slot
     ahead of any already-active task reconciliation would select.
     """
-    from plans import admission, close_next
+    from plans import admission, close_next, run_end
 
     db = common["db"]
+    run_closed, run_open = run_end.fail_run(node_id, common) if reason == "failed" else ([], [])
     closed = service._node_row(db, node_id)
     slot = close_next.slot_before(db, closed)
     admission.release(node_id, reason, db=db)
+    for sibling in run_closed:
+        admission.release(sibling, "closed", db=db)
     named = None
     if "next_node_id" in params:
         named = close_next.start_named(
@@ -84,8 +87,20 @@ def after_close(
         db, node_id, plan_id=slot.plan_id, executor=slot.executor,
         causing_executor=executor,
     )
+    for sibling in run_closed:
+        row = service._node_row(db, sibling)
+        plan_wake.notify_closed(
+            db, sibling, plan_id=str(row["plan_id"]),
+            executor=admission.resolve_executor(db, row, service._plan_row(db, row["plan_id"])),
+            causing_executor=executor,
+        )
     result = admission.result(node_id, db=db)
     result.update(close_next.next_fields(db, closed, slot, named, acting=executor))
+    if (ended := run_end.summary(db, node_id)) is not None:
+        result["run_summary"] = ended
+    elif run_open:
+        titles = ", ".join(service._node_row(db, open_id)["title"] for open_id in run_open)
+        result["run_summary"] = run_end.RUN_LEFT_OPEN.format(titles=titles)
     return result
 
 

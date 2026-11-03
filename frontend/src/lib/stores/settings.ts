@@ -105,7 +105,7 @@ async function submitSettingsPatch(patch: SettingsPatch): Promise<{ ok: boolean;
 
 export async function loadModelProfile(modelId: string): Promise<ModelProfile | null> {
 	try {
-		const res = await fetch(`${BASE}/api/models/${modelId}/profile`);
+		const res = await fetch(`${BASE}/api/models/${modelId}/profile`, { headers: { Authorization: `Bearer ${get(token) ?? ''}` } });
 		if (res.ok) return await res.json();
 		return null;
 	} catch {
