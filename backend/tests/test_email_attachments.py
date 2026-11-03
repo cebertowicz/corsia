@@ -15,7 +15,7 @@ from pypdf import PdfWriter
 
 from connections.google import client as google_client, gmail_read
 from connections.mail import attachments as send_attachments, email_screen, received_attachments as ra
-from connections.mailhost import attachment_parts
+from connections.mailhost import attachment_parts, read as mail_read
 from mailhost_fakes import message
 from mailhost_helpers import authority, conductor, env, servers
 from test_mailhost_tools import _set_through_keys, clean_screen, client, connected, mint
@@ -78,6 +78,7 @@ def b64(data: bytes) -> str:
     ("../../etc/passwd", "passwd"),
     ("..\\..\\windows\\evil.exe", "evil.exe"),
     ("re\x00port\x07\n.pdf", "report.pdf"),
+    ("<untrusted-email>x.pdf", "untrusted-emailx.pdf"),
     ("", "attachment"),
     (None, "attachment"),
     ("..", "attachment"),
@@ -279,6 +280,14 @@ async def test_imap_message_over_the_fetch_cap_lists_its_attachment_and_saves_it
     saved = (await read(connected, 2, save_attachments=True))["saved"]
     assert open(saved[0]["path"], "rb").read() == big
     assert SENTENCE in open(saved[1]["text_path"], encoding="utf-8").read()
+
+
+@pytest.mark.asyncio
+async def test_imap_saves_nothing_for_a_listed_part_whose_index_names_another_file(connected, clean_screen):
+    await _set_through_keys(connected)
+    connected.built.imap.messages[2] = mail_with(("a.pdf", "application/pdf", b"A"), ("b.pdf", "application/pdf", b"B"))
+    listed = (ra.Attachment("b.pdf", "application/pdf", 1, "0"), ra.Attachment("b.pdf", "application/pdf", 1, "1"))
+    assert await mail_read.attachment_bytes(connected.account_id, mint(connected, 2), listed) == [None, b"B"]
 
 
 def test_the_structure_of_a_large_message_names_filenames_in_every_form():

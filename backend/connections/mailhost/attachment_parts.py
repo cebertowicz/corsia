@@ -48,10 +48,10 @@ def listed(msg: email.message.MIMEPart) -> tuple[Attachment, ...]:
                  for index, p in enumerate(_attachment_leaves(msg)))
 
 
-def contents(raw: bytes) -> list[bytes]:
-    """The bytes of every attachment of a full message, in listing order."""
+def contents(raw: bytes) -> list[tuple[str, bytes]]:
+    """The filename and bytes of every attachment of a full message, in listing order."""
     msg = email.message_from_bytes(raw, policy=email.policy.default)
-    return [_payload(p) for p in _attachment_leaves(msg)]
+    return [(p.get_filename() or "", _payload(p)) for p in _attachment_leaves(msg)]
 
 
 def _parse(text: bytes) -> list:
