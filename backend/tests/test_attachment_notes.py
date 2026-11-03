@@ -75,13 +75,13 @@ def test_recognized_types_still_classify(isolated_db):
     ]
 
 
-def test_a_registered_upload_names_its_path_from_the_workspace_root(
+def test_a_registered_upload_names_its_registered_path(
     isolated_db, tmp_path, monkeypatch
 ):
     root = tmp_path.resolve()
     _insert_session("t1")
-    _register(root, monkeypatch, "t1", "f1", "spec.pdf")
-    _register(root, monkeypatch, "t1", "f2", "blob.bin")
+    first = _register(root, monkeypatch, "t1", "f1", "spec.pdf")
+    second = _register(root, monkeypatch, "t1", "f2", "blob.bin")
 
     notes = attachment_notes(
         [
@@ -93,36 +93,33 @@ def test_a_registered_upload_names_its_path_from_the_workspace_root(
     )
 
     assert notes.splitlines() == [
-        "[Document attached: spec.pdf, saved at .threads/t1/uploads/f1/spec.pdf]",
-        "[File attached: blob.bin, saved at .threads/t1/uploads/f2/blob.bin]",
+        f"[Document attached: spec.pdf, saved at {first}]",
+        f"[File attached: blob.bin, saved at {second}]",
     ]
 
 
-def test_a_project_thread_upload_is_relative_to_its_project_root(
+def test_a_project_thread_upload_names_its_registered_path(
     isolated_db, tmp_path, monkeypatch
 ):
     root = tmp_path.resolve()
     project = _project(root)
     _insert_session("t1", project_id="p1")
-    _register(root, monkeypatch, "t1", "f1", "spec.pdf", scope=project)
+    path = _register(root, monkeypatch, "t1", "f1", "spec.pdf", scope=project)
 
     notes = attachment_notes([_PDF], "t1")
 
-    assert notes == (
-        "[Document attached: spec.pdf, saved at .threads/t1/uploads/f1/spec.pdf]"
-    )
+    assert notes == f"[Document attached: spec.pdf, saved at {path}]"
 
 
-def test_an_upload_outside_the_threads_current_scope_has_no_path(
+def test_a_thread_that_moved_project_still_shows_the_registered_path(
     isolated_db, tmp_path, monkeypatch
 ):
-    """The upload route and image projection refuse it, so the note names no path."""
     root = tmp_path.resolve()
     _project(root)
     _insert_session("t1", project_id="p1")
-    _register(root, monkeypatch, "t1", "f1", "spec.pdf")  # workspace root, not p1's
+    path = _register(root, monkeypatch, "t1", "f1", "spec.pdf")  # workspace root, not p1's
 
-    assert attachment_notes([_PDF], "t1") == "[Document attached: spec.pdf]"
+    assert attachment_notes([_PDF], "t1") == f"[Document attached: spec.pdf, saved at {path}]"
 
 
 @pytest.mark.parametrize("file_id", [None, 7, "", "never-registered"])
@@ -145,12 +142,12 @@ def test_another_threads_upload_has_no_path(isolated_db, tmp_path, monkeypatch):
     assert notes == "[Document attached: other.pdf]"
 
 
-def test_an_upload_of_a_thread_that_no_longer_exists_has_no_path(
+def test_an_upload_of_a_thread_that_no_longer_exists_still_shows_its_path(
     isolated_db, tmp_path, monkeypatch
 ):
-    _register(tmp_path.resolve(), monkeypatch, "t1", "f1", "spec.pdf")
+    path = _register(tmp_path.resolve(), monkeypatch, "t1", "f1", "spec.pdf")
 
-    assert attachment_notes([_PDF], "t1") == "[Document attached: spec.pdf]"
+    assert attachment_notes([_PDF], "t1") == f"[Document attached: spec.pdf, saved at {path}]"
 
 
 def test_an_image_keeps_its_bare_note_even_when_registered(
@@ -226,7 +223,7 @@ async def test_a_send_without_a_path_to_look_up_never_touches_the_registry(
     isolated_db, monkeypatch,
 ):
     """Plain text and image-only sends do no registry lookup and no DB hop."""
-    from core.attachment_notes import attachment_notes_async
+    from core.attachment_notes import member_notes_async
 
     def forbidden(*_args, **_kwargs):
         raise AssertionError("registry consulted")
@@ -234,27 +231,26 @@ async def test_a_send_without_a_path_to_look_up_never_touches_the_registry(
     monkeypatch.setattr("registry.models.resolve_upload", forbidden)
     monkeypatch.setattr("infra.db_async.run_in_db", forbidden)
 
-    assert await attachment_notes_async(None, "t1") == ""
-    assert await attachment_notes_async([], "t1") == ""
-    assert await attachment_notes_async(
-        [{"file_id": "f1", "filename": "p.png", "mime_type": "image/png"}], "t1",
-    ) == "[Image attached: p.png]"
+    assert await member_notes_async([[], []], "t1") == ["", ""]
+    assert await member_notes_async(
+        [[{"file_id": "f1", "filename": "p.png", "mime_type": "image/png"}]], "t1",
+    ) == ["[Image attached: p.png]"]
 
 
 @pytest.mark.asyncio
 async def test_a_document_attachment_still_looks_its_path_up(
     isolated_db, tmp_path, monkeypatch,
 ):
-    from core.attachment_notes import attachment_notes_async
+    from core.attachment_notes import member_notes_async
 
     root = tmp_path.resolve()
     project = _project(root)
     _insert_session("t1", project_id="p1")
-    _register(root, monkeypatch, "t1", "f1", "spec.pdf", scope=project)
+    path = _register(root, monkeypatch, "t1", "f1", "spec.pdf", scope=project)
 
-    assert await attachment_notes_async([_PDF], "t1") == (
-        "[Document attached: spec.pdf, saved at .threads/t1/uploads/f1/spec.pdf]"
-    )
+    assert await member_notes_async([[_PDF]], "t1") == [
+        f"[Document attached: spec.pdf, saved at {path}]"
+    ]
 
 
 @pytest.mark.asyncio
@@ -280,7 +276,7 @@ async def test_a_send_without_attachments_projects_with_no_registry_or_db_hop(mo
 async def test_the_live_note_and_the_replayed_reference_name_the_same_file(
     main_db, monkeypatch, tmp_path,
 ):
-    """One lookup owns the path: the note's relative path is the replay block's absolute one."""
+    """One lookup owns the path: the live note shows the replay block's `path` string."""
     import io
 
     from fastapi import UploadFile
@@ -310,28 +306,80 @@ async def test_the_live_note_and_the_replayed_reference_name_the_same_file(
     live = attachment_notes([uploaded], "main-1", db=main_db)
     replayed = to_native_history(render_portable_history("main-1", db=main_db))[0]["content"]
 
-    relative = live.split("saved at ", 1)[1].rstrip("]")
-    assert not relative.startswith("/")
-    assert str(workspace.resolve() / relative) in replayed
+    shown = live.split("saved at ", 1)[1].rstrip("]")
+    assert shown.startswith(str(workspace.resolve()))
+    assert shown in replayed
 
 
-def test_attachment_notes_never_count_as_agent_send_framing():
-    from core.attachment_notes import envelope_with_notes
-    from core.message_history import render_agent_envelope
+
+def _project_batch(batch, monkeypatch):
+    from infra.input_render import project_claimed_input
+    from tests.test_clean_batch_render import _schema_db
+
+    monkeypatch.setattr(
+        "core.media_delivery.build_delivery_projection",
+        lambda attachments, **_kw: (list(attachments), SimpleNamespace(digests=())),
+    )
+    monkeypatch.setattr(
+        "core.attachment_notes.registered_upload_path",
+        lambda file_id, thread_id, db=None: f"/ws/.threads/{thread_id}/uploads/{file_id}/spec.pdf",
+    )
+    db = _schema_db()
+    try:
+        return project_claimed_input(db, batch, thread_row={"user_id": "owner"}, target=object())
+    finally:
+        db.close()
+
+
+_NOTE = "[Document attached: spec.pdf, saved at /ws/.threads/thread-1/uploads/f1/spec.pdf]"
+
+
+def test_a_members_note_sits_inside_that_members_own_text(monkeypatch):
+    """Only member 1 has a file: its note is before member 1's footer and member 2."""
+    from dataclasses import replace
+
     from core.model_context_sources import agent_send_envelope_source_entry
+    from tests.test_clean_batch_render import _batch
 
-    meta = {"sender_kind": "agent", "from_thread": "peer-1", "from_title": "Peer"}
-    plain = render_agent_envelope("look at this", meta)
-    notes = "[Document attached: spec.pdf, saved at .threads/t1/uploads/f1/spec.pdf]"
-    noted = envelope_with_notes(plain, notes)
+    plain = _batch()
+    batch = replace(plain, items=(
+        replace(plain.items[0], delivery_options={"attachments": [_PDF]}),
+        plain.items[1],
+    ))
+
+    projected = _project_batch(batch, monkeypatch)
+
+    content = projected.content
+    assert content.index("first") < content.index(_NOTE) < content.index("[To reply")
+    assert content.index(_NOTE) < content.index("[2/2]")
+    assert content.count(_NOTE) == 1
+    assert _NOTE in projected.source_content
+    assert _NOTE in projected.agent_envelope.body_content
+    assert projected.source_content == projected.agent_envelope.body_content
 
     def framing(envelope):
         return agent_send_envelope_source_entry(
-            thread_id="t1", harness="native", agent_envelope=envelope,
+            thread_id="thread-1", harness="native", agent_envelope=envelope,
         )
 
-    assert noted.content.endswith(notes)
-    assert noted.body_content.endswith(notes)
-    assert framing(noted).prompt_content == framing(plain).prompt_content
-    assert framing(noted).prompt_tokens_override == framing(plain).prompt_tokens_override
-    assert envelope_with_notes(plain, "") is plain
+    # The note is the person's message, not framing: the framing entry is unchanged.
+    unnoted = _project_batch(plain, monkeypatch)
+    assert framing(projected.agent_envelope).prompt_content == framing(
+        unnoted.agent_envelope
+    ).prompt_content
+    # Nothing that persists or replays the message sees the note.
+    assert projected.receipts == batch.items
+    assert all(_NOTE not in item.content for item in projected.receipts)
+
+
+def test_a_single_members_note_follows_its_text_after_a_blank_line(monkeypatch):
+    from dataclasses import replace
+
+    from tests.test_clean_batch_render import _batch
+
+    one = _batch()
+    batch = replace(one, items=(
+        replace(one.items[1], delivery_options={"attachments": [_PDF]}),
+    ))
+
+    assert _project_batch(batch, monkeypatch).content == f"second\n\n{_NOTE}"

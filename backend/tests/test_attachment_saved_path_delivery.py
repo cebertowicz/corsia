@@ -22,10 +22,14 @@ _BIN = {
     "file_id": "bin-1", "filename": "blob.bin",
     "mime_type": "application/octet-stream",
 }
-_NOTES = (
-    f"[Document attached: spec.pdf, saved at .threads/{_THREAD}/uploads/pdf-1/spec.pdf]\n"
-    f"[File attached: blob.bin, saved at .threads/{_THREAD}/uploads/bin-1/blob.bin]"
-)
+
+
+def _notes(tmp_path) -> str:
+    base = tmp_path / ".threads" / _THREAD / "uploads"
+    return (
+        f"[Document attached: spec.pdf, saved at {base / 'pdf-1' / 'spec.pdf'}]\n"
+        f"[File attached: blob.bin, saved at {base / 'bin-1' / 'blob.bin'}]"
+    )
 
 
 def _register_uploads(tmp_path, monkeypatch):
@@ -100,11 +104,11 @@ async def test_cc_receives_saved_path_note_once(isolated_db, monkeypatch, tmp_pa
     await _send(row)
 
     text = feed.call_args.args[1]
-    assert text.count(_NOTES) == 1
-    assert text.endswith(_NOTES)
+    assert text.count(_notes(tmp_path)) == 1
+    assert text.index(_notes(tmp_path)) < text.rindex("[To reply")
     assert text.count("saved at") == 2
     rendered = feed.call_args.kwargs["prepared_context"].rendered
-    assert rendered.fit_current_input.count(_NOTES) == 1
+    assert rendered.fit_current_input.count(_notes(tmp_path)) == 1
 
 
 @pytest.mark.asyncio
@@ -121,11 +125,11 @@ async def test_codex_receives_saved_path_note_once(isolated_db, monkeypatch, tmp
     await _send(row)
 
     text = feed.call_args.args[1]
-    assert text.count(_NOTES) == 1
-    assert text.endswith(_NOTES)
+    assert text.count(_notes(tmp_path)) == 1
+    assert text.index(_notes(tmp_path)) < text.rindex("[To reply")
     assert text.count("saved at") == 2
     rendered = feed.call_args.kwargs["prepared_context"].rendered
-    assert rendered.fit_current_input.count(_NOTES) == 1
+    assert rendered.fit_current_input.count(_notes(tmp_path)) == 1
 
 
 @pytest.mark.asyncio
@@ -156,7 +160,7 @@ async def test_native_model_input_carries_saved_path_note_once(
 
     await _send(row)
 
-    assert seen[-1].count(_NOTES) == 1
-    assert seen[-1].endswith(_NOTES)
+    assert seen[-1].count(_notes(tmp_path)) == 1
+    assert seen[-1].index(_notes(tmp_path)) < seen[-1].rindex("[To reply")
     ctx_content = delivered.call_args.args[2]
     assert ctx_content.count("saved at") == 2

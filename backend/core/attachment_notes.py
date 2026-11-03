@@ -1,49 +1,22 @@
 """The note a chat attachment leaves in the agent's input, for every harness.
 
-One writer: ``infra.input_render`` appends these lines to the current user input,
-so native, Claude Code and Codex receive the identical text exactly once and
-preflight measures what dispatch sends.
+One writer: ``infra.input_render`` appends each FIFO member's notes to that
+member's own text before it is framed, so native, Claude Code and Codex receive
+the identical text exactly once and preflight measures what dispatch sends.
 
-A document or other file also names where it is saved, relative to the agent's
-working directory (the thread's project root, or the workspace root outside a
-project), so ``read_file`` opens it as written. Pixels travel separately, so an
-image keeps its bare note.
+A document or other file also names where it is saved: the registered path the
+replayed ``[CORSIA artifact references]`` block shows for the same upload, so
+``read_file`` opens it from any working directory. Pixels travel separately, so
+an image keeps its bare note.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
-from pathlib import Path
-from typing import TYPE_CHECKING
 
-from core.workspace_layout import resolve_project_root, resolve_workspace_root
 from history.message_attachments import registered_upload_path
-from infra import config
 from infra.config import DOCUMENT_MIME_TYPES
-
-if TYPE_CHECKING:
-    from core.message_history import AgentEnvelopeRender
-
-
-def _scope_root(thread_id: str, db) -> Path | None:
-    """The thread's working directory: its project root, or the workspace root."""
-    from infra.queries import get_thread
-
-    thread = get_thread(thread_id, db=db)
-    if thread is None:
-        return None
-    if thread["project_id"]:
-        root = resolve_project_root(config.WORKSPACE, thread["project_id"], db=db)
-        return root.resolve(strict=False) if root is not None else None
-    return resolve_workspace_root(config.WORKSPACE)
-
-
-def _relative_to(path: str, scope: Path | None) -> str | None:
-    """``path`` relative to the working directory, or ``None`` when it lies outside it."""
-    resolved = Path(path).resolve(strict=False)
-    if scope is None or not resolved.is_relative_to(scope):
-        return None
-    return resolved.relative_to(scope).as_posix()
 
 
 def _mime(attachment: dict) -> str:
@@ -55,70 +28,86 @@ def _is_file(attachment: object) -> bool:
     return isinstance(attachment, dict) and not _mime(attachment).startswith("image/")
 
 
-def attachment_notes(attachments: list | None, thread_id: str, db=None) -> str:
-    """Return one note line per attachment; tolerant of anything on the wire.
+def _note_lines(attachments: Sequence, thread_id: str, db) -> str:
+    lines: list[str] = []
+    for attachment in attachments:
+        if not isinstance(attachment, dict):
+            continue
+        name = attachment.get("filename", "file")
+        if not _is_file(attachment):
+            lines.append(f"[Image attached: {name}]")
+            continue
+        saved = registered_upload_path(attachment.get("file_id"), thread_id, db=db)
+        where = f", saved at {saved}" if saved else ""
+        label = "Document" if _mime(attachment) in DOCUMENT_MIME_TYPES else "File"
+        lines.append(f"[{label} attached: {name}{where}]")
+    return "\n".join(lines)
+
+
+def member_groups(items: Sequence, attachments: Sequence) -> list[list]:
+    """Split a batch's validated attachments back into their members, in input order.
+
+    ``public_attachments`` maps one to one, so each member owns the next
+    ``len(its attachments)`` entries.
+    """
+    groups, start = [], 0
+    for item in items:
+        size = len(item.delivery_options.get("attachments") or ())
+        groups.append(list(attachments[start:start + size]))
+        start += size
+    return groups
+
+
+def member_notes(groups: Sequence[Sequence], thread_id: str, db=None) -> list[str]:
+    """Return one note block per group of attachments; tolerant of anything on the wire.
 
     A file's saved path is the existing replay owner's lookup
-    (``history.message_attachments.registered_upload_path``), shown relative to
-    the thread's working directory. The thread and its working directory are
-    read once, and only when a file (not an image) is attached. A registry or
-    layout failure raises like any other read while the input renders.
+    (``history.message_attachments.registered_upload_path``), shown as stored;
+    only an unregistered or another thread's upload has none. The DB is opened
+    once, and only when a file (not an image) is attached. A registry failure
+    raises like any other read while the input renders.
     """
-    owned = db is None and any(_is_file(item) for item in attachments or ())
+    owned = db is None and any(_is_file(item) for group in groups for item in group)
     if owned:
         from infra.database import get_db
 
         db = get_db()
     try:
-        scope: Path | None = None
-        scoped = False
-        lines: list[str] = []
-        for attachment in attachments or ():
-            if not isinstance(attachment, dict):
-                continue
-            name = attachment.get("filename", "file")
-            if not _is_file(attachment):
-                lines.append(f"[Image attached: {name}]")
-                continue
-            if not scoped:
-                scope, scoped = _scope_root(thread_id, db), True
-            registered = registered_upload_path(attachment.get("file_id"), thread_id, db=db)
-            saved = _relative_to(registered, scope) if registered else None
-            where = f", saved at {saved}" if saved else ""
-            label = "Document" if _mime(attachment) in DOCUMENT_MIME_TYPES else "File"
-            lines.append(f"[{label} attached: {name}{where}]")
-        return "\n".join(lines)
+        return [_note_lines(group, thread_id, db) for group in groups]
     finally:
         if owned:
             db.close()
 
 
-async def attachment_notes_async(attachments: list | None, thread_id: str) -> str:
-    """``attachment_notes``, hopping to the DB pool only when a path lookup can happen."""
-    if any(_is_file(item) for item in attachments or ()):
+def attachment_notes(attachments: list | None, thread_id: str, db=None) -> str:
+    """One note line per attachment of a single input."""
+    return member_notes([attachments or ()], thread_id, db)[0]
+
+
+async def member_notes_async(groups: Sequence[Sequence], thread_id: str) -> list[str]:
+    """``member_notes``, hopping to the DB pool only when a path lookup can happen."""
+    if any(_is_file(item) for group in groups for item in group):
         from infra.db_async import run_in_db
 
-        return await run_in_db(attachment_notes, attachments, thread_id)
-    return attachment_notes(attachments, thread_id)
+        return await run_in_db(member_notes, groups, thread_id)
+    return member_notes(groups, thread_id)
 
 
 def with_attachment_notes(content: str, notes: str) -> str:
-    """Append the notes to the current user input."""
+    """Append the notes to one input's text."""
     if not notes:
         return content
     return f"{content}\n\n{notes}" if content else notes
 
 
-def envelope_with_notes(envelope: AgentEnvelopeRender, notes: str) -> AgentEnvelopeRender:
-    """Append the notes to the envelope's content and to its body.
+def noted_batch(batch, notes: Sequence[str]):
+    """A rendering-only copy of the batch: each member's notes join its own text.
 
-    The notes are part of the person's message, not CORSIA's framing, so content
-    minus body stays the framing alone.
+    The notes sit before the member's managed footer and numbering, so content,
+    body and source all carry them. Callers keep the claimed batch for anything
+    that persists or replays the person's message.
     """
-    if not notes:
-        return envelope
-    return replace(
-        envelope,
-        content=with_attachment_notes(envelope.content, notes),
-        body_content=with_attachment_notes(envelope.body_content, notes),
-    )
+    return replace(batch, items=tuple(
+        replace(item, content=with_attachment_notes(item.content, note))
+        for item, note in zip(batch.items, notes, strict=True)
+    ))

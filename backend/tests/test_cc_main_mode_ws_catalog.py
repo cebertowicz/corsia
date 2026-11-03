@@ -58,10 +58,9 @@ class TestCCAttachments:
         )
         assert "[1/2]\n[PASSIVE CONTEXT DIGEST]" in sent
         assert sent.endswith(
-            "[2/2]\nlook at this\n"
+            f"[2/2]\nlook at this\n\n[File attached: a.png, saved at {path}]\n"
             '[To reply, call post_update(text="<your reply>")]\n'
-            "If no reply is needed, do not send one.\n\n"
-            "[File attached: a.png, saved at .threads/main-1/uploads/f/a.png]"
+            "If no reply is needed, do not send one."
         )
         row = main_db.execute(
             "SELECT content FROM messages WHERE thread_id='main-1' "
