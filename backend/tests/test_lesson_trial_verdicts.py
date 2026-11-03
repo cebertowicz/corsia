@@ -384,7 +384,6 @@ def test_equal_halves_wait_for_the_next_look_then_revert_after_the_third(db, wor
 
 
 def test_the_plan_is_frozen_once_and_a_later_evaluation_reuses_it(db, workspace, monkeypatch) -> None:
-    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
     trial = trial_at(workspace, db)
     deliver(db, trial, "w", "with", 20)
     deliver(db, trial, "o", "without", 20, flagged=20)
@@ -478,6 +477,26 @@ def test_a_declared_spend_kpi_alone_leaves_sent_back_and_restart_deciding(db, wo
     assert roles["escapes"] == "quality" and roles[lessons.SENT_BACK] == roles[lessons.RESTARTED] == "shown"
 
 
+def test_spend_kpis_past_the_plan_record_are_refused_by_name_and_the_rest_still_decide(db, workspace) -> None:
+    trial = trial_at(workspace, db)
+    events = Definition("event", "qg.escape", 1, {"attributes": {"pr": "id"}, "dedupe": ["pr"]},
+                        "2026-09-01T00:00:00Z", False, "/workflows/w/measures.yaml")
+    spec = {"formula": "ratio", "num": {"event": "qg.escape"}, "den": {"event": "qg.escape"}, "min_n": 1,
+            "better": "lower", "can_decide": True, "coverage": {"of": "qg.escape", "by": "audit"}, "target": 0.1,
+            "review": 0.2, "decides_as": "spend"}
+    names = [f"spend-{n:02d}" for n in range(30)]
+    kpis = [Definition("kpi", name, 1, spec, "2026-09-01T00:00:00Z", False, "/workflows/w/measures.yaml") for name in names]
+
+    plan = lessons.freeze_plan(trial, [events, *kpis], "w", (), NOW)
+
+    kept = [measure.name for measure in plan.measures if measure.name in names]
+    refused = [name for name, _why in plan.refusals]
+    assert kept and refused and kept + sorted(refused) == names  # the last by name are the ones refused
+    assert all(why.endswith("does not fit the 2,000-character plan record") for _name, why in plan.refusals)
+    assert {lessons.SENT_BACK, lessons.RESTARTED, COST} <= {measure.name for measure in plan.measures}
+    assert FrozenPlan.decoded(plan.encoded()).measures == plan.measures
+
+
 # --- the owner -------------------------------------------------------------------------------------------------
 
 def test_a_file_in_a_thread_tray_belongs_to_that_thread(db, workspace) -> None:
@@ -527,18 +546,7 @@ def seed_finished_trial(db, workspace) -> lessons.OpenTrial:
     return trial
 
 
-def test_the_job_records_nothing_while_writes_are_switched_off(db, workspace, monkeypatch) -> None:
-    from jobs import workflow_verdicts
-
-    seed_finished_trial(db, workspace)
-    db.commit()
-    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", False)
-    report = workflow_verdicts.run_daily(now=NOW)
-    assert (report.evaluated, report.reached, report.recorded, report.by_word) == (1, 1, 0, {"keep": 1})
-    assert db.execute("SELECT COUNT(*) FROM outcome_events").fetchone()[0] == 0
-
-
-def test_the_job_records_the_plan_and_verdict_once_and_wakes_the_owner_when_switched_on(db, workspace, monkeypatch) -> None:
+def test_the_job_records_the_plan_and_verdict_once_and_wakes_the_owner(db, workspace, monkeypatch) -> None:
     from events import delivery
     from jobs import workflow_verdicts
 
@@ -552,7 +560,6 @@ def test_the_job_records_the_plan_and_verdict_once_and_wakes_the_owner_when_swit
         db.execute("INSERT INTO messages (id,thread_id,role,content,created_at) VALUES (?,?,'system','',?)",
                    (message_id, args[0], NOW.isoformat()))
 
-    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
     monkeypatch.setattr(delivery, "enqueue_event_wake", wake)
     assert workflow_verdicts.run_daily(now=NOW).recorded == 1
     assert workflow_verdicts.run_daily(now=NOW).recorded == 0
@@ -574,7 +581,6 @@ def test_an_unavailable_owner_keeps_the_verdict_and_skips_the_wake(db, workspace
     def refuse(*_args, **_kwargs):
         raise ValueError("unavailable")
 
-    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
     monkeypatch.setattr(delivery, "enqueue_event_wake", refuse)
     assert workflow_verdicts.run_daily(now=NOW).recorded == 1
     assert db.execute("SELECT COUNT(*) FROM outcome_events WHERE event_name=?", (evaluator.REACHED_EVENT,)).fetchone()[0] == 1
@@ -593,5 +599,5 @@ def test_the_job_line_carries_the_counts_and_names_no_subject(db, workspace) -> 
 
     assert (report.open_subjects, report.evaluated, report.reached) == (1, 1, 1)
     (line,) = [text for text in lines if "workflow_verdict_daily:" in text]
-    assert "open=1 evaluated=1 reached=1 recorded=0 woken=0" in line
+    assert "open=1 evaluated=1 reached=1 recorded=1 woken=0" in line
     assert LESSON not in line and trial.subject not in line

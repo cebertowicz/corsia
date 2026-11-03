@@ -6,12 +6,14 @@ size standard; the rules read these, nothing here decides.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Mapping
 
 from core.workflow_verdicts import DEFAULT_CONFIDENCE, POLICY_VERSION, MeasureCall, PlannedMeasure, Run, parse_ts
 
 PLAN_TEXT_LIMIT = 2_000  # infra.outcome_event_attributes: measurement.verdict.planned plan
+# Plan fields no rule reads, in the order they drop from the record when it is long.
+SHOWN_FIELDS = ("mdc", "skipped", "refusals")
 
 
 def subject_of(kind: str, name: str, version: str) -> str:
@@ -101,22 +103,48 @@ class FrozenPlan:
     mdc: Mapping[str, tuple[float | None, ...]] = field(default_factory=dict)
 
     def encoded(self) -> str:
-        """The plan as the ``measurement.verdict.planned`` text; refusals keep only the KPI names."""
+        """The plan as the ``measurement.verdict.planned`` text; refusals keep only the KPI names.
+
+        Fields no rule reads drop first if long (``SHOWN_FIELDS``), as the reached detail's inputs do; what
+        decides must fit, which :func:`fitted` makes true when a plan is frozen.
+        """
         data = {**asdict(self), "measures": [list(asdict(m).values()) for m in self.measures],
                 "refusals": [name for name, _why in self.refusals]}
-        text = json.dumps(data, sort_keys=True, separators=(",", ":"))
-        if len(text) > PLAN_TEXT_LIMIT:
-            raise ValueError(f"frozen plan for {self.subject} is {len(text)} characters; the record holds {PLAN_TEXT_LIMIT}")
-        return text
+        for dropped in range(len(SHOWN_FIELDS) + 1):
+            kept = {key: value for key, value in data.items() if key not in SHOWN_FIELDS[:dropped]}
+            text = json.dumps(kept, sort_keys=True, separators=(",", ":"))
+            if len(text) <= PLAN_TEXT_LIMIT:
+                return text
+        raise ValueError(f"frozen plan for {self.subject} is {len(text)} characters; the record holds {PLAN_TEXT_LIMIT}")
 
     @classmethod
     def decoded(cls, text: str) -> FrozenPlan:
         data = json.loads(text)
-        return cls(data["subject"], data["version"], data["baseline"], tuple(data["skipped"]),
+        return cls(data["subject"], data["version"], data["baseline"], tuple(data.get("skipped", ())),
                    tuple(PlannedMeasure(*item) for item in data["measures"]), int(data["minimum"]),
-                   tuple((name, "") for name in data["refusals"]), int(data["seed"]), data["policy_version"],
+                   tuple((name, "") for name in data.get("refusals", ())), int(data["seed"]), data["policy_version"],
                    float(data.get("confidence", DEFAULT_CONFIDENCE)), data.get("confidence_reason"),
                    {name: tuple(values) for name, values in data.get("mdc", {}).items()})
+
+
+def fitted(plan: FrozenPlan) -> FrozenPlan:
+    """``plan`` with its last spend KPIs refused, by name order, until its record holds what decides.
+
+    Built-ins and at most two quality KPIs always fit; only an owner's many spend KPIs can outgrow the record.
+    """
+    while True:
+        try:
+            plan.encoded()
+            return plan
+        except ValueError:
+            spend = [measure for measure in plan.measures if measure.source == "kpi" and measure.role == "spend"]
+            if not spend:
+                raise
+            last = spend[-1]
+            why = f"kpi {last.name} does not fit the {PLAN_TEXT_LIMIT:,}-character plan record"
+            plan = replace(plan, measures=tuple(m for m in plan.measures if m is not last),
+                           refusals=(*plan.refusals, (last.name, why)),
+                           mdc={name: values for name, values in plan.mdc.items() if name != last.name})
 
 
 @dataclass(frozen=True)

@@ -21,7 +21,7 @@ from core.workflow_verdict_rules import (
     Evaluation, FrozenPlan, Snapshot, TwoArms, WorkflowHistory, baseline_runs, choose_baseline, compute, decide,
     decide_arms, freeze_plan,
 )
-from core.workflow_verdict_types import split_subject, subject_of
+from core.workflow_verdict_types import PLAN_TEXT_LIMIT, split_subject, subject_of
 from core.workflow_verdicts import (
     BUILTIN_WINDOW_DAYS, CORRECTIONS, COST, MINUTES, MIXED, CorrectionFact, KpiRow, MeasureCall, PlannedMeasure, Run, measure_call,
     parse_ts,
@@ -286,7 +286,6 @@ def test_a_baseline_settling_after_first_use_never_changes_the_frozen_plan() -> 
 
 
 def test_changed_again_is_never_stored_so_a_version_back_in_use_is_still_judged(monkeypatch) -> None:
-    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
     db = sqlite3.connect(":memory:")
     db.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
     during_v1 = [runs("v1", 1, started=40, ended=30), runs("v2", 1, count=4, started=20, ended=15),
@@ -554,7 +553,6 @@ def test_replaced_before_look_1_is_changed_again_with_its_run_count() -> None:
 # --- frozen record and no flip (VR-3) ------------------------------------------------------------------------
 
 def test_reached_verdict_does_not_flip_on_new_data(monkeypatch) -> None:
-    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
     db.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
@@ -591,10 +589,9 @@ def _accepting(wakes: list):
     return wake
 
 
-def test_switched_on_reached_verdict_wakes_its_owner_once(monkeypatch) -> None:
+def test_a_reached_verdict_wakes_its_owner_once(monkeypatch) -> None:
     from events import delivery
 
-    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
     wakes: list = []
     monkeypatch.setattr(delivery, "enqueue_event_wake", _accepting(wakes))
     db = _wake_db(("owner", "active", None))
@@ -633,7 +630,6 @@ def test_a_refused_wake_keeps_every_verdict_and_reaches_the_owner_once_fixed(mon
             raise SendRejected(409, "model's cap can't fit a checkpoint")
         accept(thread_id, *args, **kwargs)
 
-    monkeypatch.setattr(evaluator, "VERDICT_WRITES_ENABLED", True)
     monkeypatch.setattr(delivery, "enqueue_event_wake", refuse)
     db = _wake_db(("capped", "active", None), ("owner", "active", None), ("purged", "purged", None),
                   ("archived", "archived", "user"))
@@ -741,10 +737,19 @@ def test_calibration_script_simulates_versions_that_changed_nothing_without_a_da
     assert script.null_trial((7, 80, False)) == script.null_trial((7, 80, False))  # seeded, so splittable
 
 
-def test_writes_stay_off_by_default() -> None:
+def test_a_plan_over_the_record_drops_only_shown_fields_and_its_records_are_written() -> None:
     db = sqlite3.connect(":memory:")
     db.executescript(OUTCOME_EVENTS_SCHEMA_SQL)
     source = history(runs("v1", 1, started=40, ended=30), runs("v2", 2))
-    evaluation = compute(Snapshot(NOW.isoformat(), (source,)))[-1]
-    assert evaluator.VERDICT_WRITES_ENABLED is False and evaluator.write_verdicts(db, [evaluation]) == 0
-    assert db.execute("SELECT COUNT(*) FROM outcome_events").fetchone()[0] == 0
+    plan = replace(freeze_plan(source, "v2"), skipped=tuple(f"skipped-version-{n}" for n in range(200)))
+    assert len(json.dumps(plan.skipped)) > PLAN_TEXT_LIMIT
+
+    back = FrozenPlan.decoded(plan.encoded())
+
+    assert (back.baseline, back.measures, back.minimum, back.seed, back.policy_version) == (
+        plan.baseline, plan.measures, plan.minimum, plan.seed, plan.policy_version)
+    assert back.skipped == () and back.mdc == {}
+    reached = Evaluation(plan.subject, "owner", plan, decide(source, plan, NOW), True)
+    assert reached.verdict.word in evaluator.STORED and evaluator.write_verdicts(db, [reached]) == 1
+    names = [row[0] for row in db.execute("SELECT event_name FROM outcome_events ORDER BY event_name")]
+    assert names == [evaluator.PLANNED_EVENT, evaluator.REACHED_EVENT]
