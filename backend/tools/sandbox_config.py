@@ -162,8 +162,8 @@ def repo_worktree_branch(
     return worktree, branch if head.startswith(prefix) and branch else None
 
 
-def list_repo_worktrees(repo_root: Path, *, strict: bool = False) -> list[Path]:
-    """List verified linked worktrees beneath the required local directory; ``strict`` raises a listing error."""
+def list_repo_worktrees(repo_root: Path) -> list[Path]:
+    """List verified linked worktrees beneath the required local directory."""
     parent = repo_root.expanduser().resolve(strict=False) / ".worktrees"
     if not parent.is_dir():
         return []
@@ -183,8 +183,6 @@ def list_repo_worktrees(repo_root: Path, *, strict: bool = False) -> list[Path]:
             if repo_worktree_root(entry, repo_root, cache=cache) == resolved:
                 worktrees.append(resolved)
     except OSError:
-        if strict:
-            raise
         return []
     return sorted(worktrees)
 

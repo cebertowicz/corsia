@@ -1,10 +1,12 @@
 """The project roots one agent is fenced from, their Safehouse deny rules and refusal copy.
 
-The set is computed for the calling thread on every call and never cached, so a
-change to a project's Local only switch or an agent's scope takes effect on the
-next tool call. The person's own app session is never fenced: only agent
-identities reach this module. Every lookup that fails fences more, never less, and
-says so in a ``project_fence`` product event.
+An agent's set is computed on every call and never cached, so a change to a
+project's Local only switch or an agent's scope takes effect on its next tool call.
+A local app's set is rendered at launch, so local apps relaunch when a project's
+Local only switch changes; a repo registered later joins a running app's set at its
+next launch, as that app could read the path before. The person's own app session is never fenced: only agent
+identities reach this module. A project row, repo row or caller that can't be read
+fences more, never less, and says so in a ``project_fence`` product event.
 """
 
 from __future__ import annotations
@@ -156,36 +158,6 @@ def _folder_roots(workspace: Path, db, fences: _Fences, rows, cloud_off) -> list
     return roots
 
 
-def _attributed_worktrees(db, repo: Path) -> list[tuple[Path, str | None]] | None:
-    """Each verified worktree of ``repo`` with the project of the thread that made it, or None.
-
-    ``worktree_create`` names a worktree ``<thread id>-<descriptor>``, so the thread
-    is whichever hyphen-delimited prefix of the name is a thread id. None means the
-    worktrees could not be listed.
-    """
-    from tools.sandbox_config import list_repo_worktrees
-
-    try:
-        worktrees = list_repo_worktrees(repo, strict=True)
-    except OSError as exc:
-        _failed_closed("worktrees_unlisted", exc)
-        return None
-    prefixes = {
-        tree: [tree.name[:i] for i, char in enumerate(tree.name) if char == "-"] or [tree.name]
-        for tree in worktrees
-    }
-    wanted = sorted({prefix for options in prefixes.values() for prefix in options})
-    marks = ",".join("?" * len(wanted))
-    owners = {
-        row["id"]: row["project_id"]
-        for row in db.execute(f"SELECT id, project_id FROM threads WHERE id IN ({marks})", wanted)
-    } if wanted else {}
-    return [
-        (tree, next((owners[p] for p in options if p in owners), None))
-        for tree, options in prefixes.items()
-    ]
-
-
 def _registered_paths(db) -> dict[str, list[Path]]:
     """Every registered repo folder by project, valid binding or not, so a bad row still fences."""
     by_project: dict[str, list[Path]] = {}
@@ -198,12 +170,14 @@ def _registered_paths(db) -> dict[str, list[Path]]:
 
 
 def _repo_roots(db, rows, fences: _Fences, cloud_off) -> list[FencedRoot]:
-    """Fenced projects' registered repos: the canonical root, or only their own worktrees when shared.
+    """Fenced projects' registered repos, each as one whole root.
 
-    A linked worktree's ``.git`` points into ``<canonical>/.git/worktrees/``, so a root
-    the caller's reachable projects hold a valid binding to is shared and never fenced:
-    its history and refs are the same repo for both. Only a valid binding shares a root,
-    and any registered path fences one.
+    A repo registered in two projects belongs to both: its worktrees' ``.git`` files
+    point into one history, so folders can't split it. A root that a project the caller
+    reaches holds a valid binding to stays open, unless a fenced Local only project also
+    registers it and the caller reaches it only through projects that aren't: Local only
+    content never reaches such a caller, so the whole repo is fenced, history included.
+    Only a valid binding opens a root; any registered path fences one.
     """
     from infra.project_repo_policy import repo_policies_by_project
 
@@ -211,25 +185,20 @@ def _repo_roots(db, rows, fences: _Fences, cloud_off) -> list[FencedRoot]:
     registered = _registered_paths(db)
     fenced = [row for row in rows if fences(row["id"], row["id"] in cloud_off)]
     fenced_ids = {row["id"] for row in fenced}
-    shared = {
-        canonical(policy.path)
-        for row in rows if row["id"] not in fenced_ids
-        for policy in valid.get(row["id"], [])
-    }
+    # Each root the caller reaches, and whether a Local only project it reaches holds it.
+    reached: dict[Path, bool] = {}
+    for row in rows:
+        if row["id"] not in fenced_ids:
+            for policy in valid.get(row["id"], []):
+                key = canonical(policy.path)
+                reached[key] = reached.get(key, False) or row["id"] in cloud_off
     roots = []
-    attributed: dict[Path, list[tuple[Path, str | None]] | None] = {}
     for row in fenced:
-        project = (row["name"], row["id"] in cloud_off, row["conductor_thread_id"])
+        local_only = row["id"] in cloud_off
         for path in registered.get(row["id"], []):
-            if (key := canonical(path)) not in shared:
-                roots.append(FencedRoot(path, *project))
-                continue
-            if key not in attributed:
-                attributed[key] = _attributed_worktrees(db, path)
-            if (trees := attributed[key]) is None:
-                roots.append(FencedRoot(path / ".worktrees", *project))
-                continue
-            roots.extend(FencedRoot(tree, *project) for tree, owner in trees if owner == row["id"])
+            key = canonical(path)
+            if key not in reached or (local_only and not reached[key]):
+                roots.append(FencedRoot(path, row["name"], local_only, row["conductor_thread_id"]))
     return roots
 
 

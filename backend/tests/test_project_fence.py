@@ -329,29 +329,43 @@ def _register(world, project_id: str, repo: Path) -> None:
     world.db.commit()
 
 
-def test_a_repo_in_two_projects_fences_only_the_other_projects_worktree(world):
+def test_a_repo_in_two_projects_belongs_to_both(world):
     from tools.project_fence import fence_for_thread
 
     repo = world.workspace / "repos" / "shared"
-    alpha_tree, beta_tree = f"{ALPHA_AGENT}-feature", f"{BETA_AGENT}-fix"
-    _git_repo(repo, alpha_tree, beta_tree)
+    _git_repo(repo, f"{ALPHA_AGENT}-feature", f"{BETA_AGENT}-fix", "made-by-hand")
     _register(world, "id-alpha", repo)
     _register(world, "id-beta", repo)
     canonical_root = repo.resolve()
+    for agent in (ALPHA_AGENT, BETA_AGENT):
+        assert not [r for r in fence_for_thread(agent).roots if r.path.resolve().is_relative_to(canonical_root)]
+        assert str(canonical_root) not in _policy(agent).sandbox_rules()
 
-    from_alpha = fence_for_thread(ALPHA_AGENT)
-    assert canonical_root not in {r.path.resolve() for r in from_alpha.roots}
-    assert (canonical_root / ".worktrees" / beta_tree) in {r.path.resolve() for r in from_alpha.roots}
-    assert (canonical_root / ".worktrees" / alpha_tree) not in {r.path.resolve() for r in from_alpha.roots}
-    rules = _policy(ALPHA_AGENT).sandbox_rules()
-    assert _rule(canonical_root) not in rules and _rule(canonical_root / ".git") not in rules
-    assert _rule(canonical_root / ".worktrees" / beta_tree) in rules
-    assert _rule(canonical_root / ".worktrees" / alpha_tree) not in rules
 
-    from_beta = {r.path.resolve() for r in fence_for_thread(BETA_AGENT).roots}
-    assert canonical_root not in from_beta
-    assert canonical_root / ".worktrees" / alpha_tree in from_beta
-    assert canonical_root / ".worktrees" / beta_tree not in from_beta
+def test_a_repo_a_local_only_project_shares_is_fenced_whole_outside_local_only(world):
+    from tools.project_fence import fence_for_local_mcp, fence_for_thread
+
+    repo = world.workspace / "repos" / "shared"
+    _git_repo(repo, f"{ALPHA_AGENT}-feature", "made-by-hand")
+    _register(world, "id-alpha", repo)
+    _register(world, "id-secret", repo)
+    for fence in (fence_for_thread(ALPHA_AGENT), fence_for_thread(CORSIA_AGENT), fence_for_local_mcp()):
+        assert [(r.path, r.local_only) for r in fence.roots if r.path.name == "shared"] == [(repo, True)]
+    # A lease renders only the Local only rules, so this is the set that must hold the repo.
+    assert _forms(repo) <= set(fence_for_thread(ALPHA_AGENT).local_only_rules(sandbox_literal))
+    assert fence_for_thread(ALPHA_AGENT).refusal(repo / ".git" / "HEAD").startswith(f"`{repo / '.git' / 'HEAD'}` is in Local only")
+
+
+def test_a_repo_two_local_only_projects_share_stays_open_to_both(world):
+    from tools.project_fence import fence_for_thread
+
+    world.db.execute("INSERT INTO project_inference_policies(project_id,cloud_models_off) VALUES ('id-beta',1)")
+    repo = world.workspace / "repos" / "shared"
+    _git_repo(repo)
+    _register(world, "id-beta", repo)
+    _register(world, "id-secret", repo)
+    assert not [r for r in fence_for_thread(BETA_AGENT).roots if r.path.name == "shared"]
+    assert [r.path for r in fence_for_thread(ALPHA_AGENT).roots if r.path.name == "shared"] == [repo]
 
 
 def test_a_repo_only_another_project_registers_is_fenced_at_its_canonical_root(world):
@@ -400,25 +414,6 @@ def test_a_malformed_repo_row_still_fences_and_never_shares(world):
     world.db.commit()
     paths = _paths(fence_for_thread(ALPHA_AGENT))
     assert {fenced, unshared} <= paths
-
-
-def test_a_shared_repo_whose_worktrees_cannot_be_listed_fences_all_of_them(world, monkeypatch):
-    from tools import project_fence, sandbox_config
-
-    repo = world.workspace / "repos" / "shared"
-    _git_repo(repo, f"{ALPHA_AGENT}-feature", f"{BETA_AGENT}-fix")
-    _register(world, "id-alpha", repo)
-    _register(world, "id-beta", repo)
-
-    def unlisted(_repo, *, strict=False):
-        raise PermissionError("listing refused")
-
-    events = []
-    monkeypatch.setattr(sandbox_config, "list_repo_worktrees", unlisted)
-    monkeypatch.setattr(project_fence, "_event", lambda action, *_a, **props: events.append((action, props)))
-    paths = _paths(project_fence.fence_for_thread(ALPHA_AGENT))
-    assert repo / ".worktrees" in paths and repo not in paths
-    assert ("failed_closed", {"reason": "worktrees_unlisted"}) in events
 
 
 def test_a_fence_refusal_is_counted(world, monkeypatch):
@@ -483,3 +478,20 @@ async def test_agent_can_register_an_unrelated_repo(world, monkeypatch):
     result = await _register_as_alpha(world, monkeypatch, repo)
     assert result.startswith("Registered repository"), result
     assert _alpha_rows(world) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_local_only_switch_relaunches_local_apps_only(world, monkeypatch):
+    from tools import connected_apps_runtime, mcp_runtime
+
+    restarted = []
+
+    async def restart(app_id):
+        restarted.append(app_id)
+
+    monkeypatch.setattr(mcp_runtime, "_app_configs", {
+        "app-local": ("local", {"command": "node"}), "app-remote": ("remote", {"url": "https://example.test/mcp"}),
+    })
+    monkeypatch.setattr(connected_apps_runtime, "restart_after_saved_write", restart)
+    await connected_apps_runtime.refresh_local_app_fences()
+    assert restarted == ["app-local"]
