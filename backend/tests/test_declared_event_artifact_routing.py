@@ -242,10 +242,11 @@ def test_a_declarers_wake_rule_rides_an_actionable_verdict_as_one_delivery(db, t
 
 
 @pytest.mark.parametrize(("extra", "message"), [
-    ("use: record\n    event_class: actionable", "use: record"),
+    ("use: record\n    event_class: actionable", "event_class needs use: route or both"),
+    ("use: record\n    default_delivery: none", "default_delivery needs use: route or both"),
     ("use: route\n    event_class: urgent", "event_class must be actionable or informational"),
 ])
-def test_event_class_is_refused_on_a_record_type_and_for_an_unknown_value(db, tmp_path, extra, message):
+def test_routing_fields_are_refused_on_a_record_type_and_for_an_unknown_value(db, tmp_path, extra, message):
     folder = tmp_path / ".threads" / DECLARER
     folder.mkdir(parents=True)
     mk_session(DECLARER, project_id="project-a")

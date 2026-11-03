@@ -159,8 +159,9 @@ def _check_event(name: str, spec: dict[str, Any], lines: Lines) -> None:
         raise fail(lines, path + ("default_delivery",), f"event {name} default_delivery must be owner or none.")
     if spec.get("event_class", "informational") not in {"actionable", "informational"}:
         raise fail(lines, path + ("event_class",), f"event {name} event_class must be actionable or informational.")
-    if "event_class" in spec and spec.get("use", "record") == "record":
-        raise fail(lines, path + ("event_class",), f"event {name} is use: record, which is never routed; event_class needs use: route or both.")
+    routing = next((field for field in ("default_delivery", "event_class") if field in spec), None)
+    if routing is not None and spec.get("use", "record") == "record":
+        raise fail(lines, path + (routing,), f"event {name} is use: record, which is never routed; {routing} needs use: route or both.")
     # A routed type's facts reach other agents' wakes, so no person's login; a record stays in the
     # owner's store. num may ride along: rules can't match on it (enforced at rule create).
     if spec.get("use") in ("route", "both"):
