@@ -4,12 +4,14 @@
 settles a claim no running wake owns, reaps finished eval threads, then either
 matches the oldest saved target or advances the oldest pending case.
 It runs only on the one ready local oMLX Native catalog row while ``infra.carry_in_capacity`` proves it idle.
-Before the claim, and before each sample, it first waits for the seat's other
-clients to go quiet, then checks once; a seat still busy leaves that oldest case
-at ``no_ready_local_model`` until the next save or restart. The same check, on
-the claimed model only, runs again just before every sample's provider call;
-failing it ends the claimed case in coverage, never a call. The wait sits
-outside the Turn, so its timeout never counts it.
+Before the claim it waits, up to the prefill-guard bound, for the seat's other
+clients to go quiet, proving idle once per try; a seat still busy leaves that oldest
+case at ``no_ready_local_model`` until the next save or restart. The same proof, on
+the claimed model only, runs again just before every sample's provider call.
+Refused there for a busy seat, the sample reruns on a fresh eval thread once the
+seat is quiet, within the same bound; only a seat that stays busy past it, or an
+unreadable or lost one, ends the claimed case in coverage, never a call. The wait
+sits outside the Turn, so its timeout never counts it.
 Samples are ordinary fresh eval Turns (``eval.endpoint.run_eval_turn``) under
 record-only tool isolation, so they cannot change anything they act on.
 A candidate sample of a ``trial`` lesson carries the lesson the way task start
@@ -186,14 +188,39 @@ async def _sample(
     fact: CarryInFact, owner: dict, model: str, actions: dict, arm: _Arm, label: str,
     created: list[tuple[str, str]],
 ) -> bool:
-    """Run one isolated fresh Turn and score it; raise when it cannot be scored."""
+    """Score one sample, rerunning it while a busy seat goes quiet; raise when it cannot be scored.
+
+    A dispatch-time refusal made no provider call, so the sample waits for quiet
+    (:func:`capacity.ready_idle`, bounded overall by the prefill-guard bound) and reruns on a
+    fresh eval thread. Past the bound, or on a lost or unreadable seat, it ends the case.
+    """
+    from llm.provider_overflow import GUARD_QUIET_TIMEOUT_SECONDS
+
+    clock = asyncio.get_running_loop().time
+    deadline = clock() + GUARD_QUIET_TIMEOUT_SECONDS
+    attempt = 1
+    while True:
+        try:
+            return await _attempt(
+                fact, owner, model, actions, arm, label if attempt == 1 else f"{label}r{attempt}", created,
+            )
+        except _Unavailable:
+            if (left := deadline - clock()) <= 0 or await capacity.ready_idle(model, wait=left) is None:
+                raise
+            attempt += 1
+
+
+async def _attempt(
+    fact: CarryInFact, owner: dict, model: str, actions: dict, arm: _Arm, label: str,
+    created: list[tuple[str, str]],
+) -> bool:
+    """Run one isolated fresh Turn and score it."""
     from core.carry_in_scoring import sample_passes
     from eval.endpoint import open_eval_thread, run_eval_turn
     from eval.tool_allowlist import carry_in_tool_isolation
     from eval.turn_result import read_turn_result
 
     thread_id = f"{EVAL_THREAD_PREFIX}{fact.identity[:16]}-{label}"
-    await capacity.wait_quiet(model)
     try:
         thread_id, row = await open_eval_thread(
             owner["user_id"], model, thread_id=thread_id, title="Skill re-test",
@@ -306,6 +333,7 @@ async def wake(workspace: Path) -> bool:
     """
     from core.turn_core import BOOT_EPOCH
     from infra.guidance_git import GitFault
+    from llm.provider_overflow import GUARD_QUIET_TIMEOUT_SECONDS
 
     await run_in_db(partial(_write, _settle_interrupted, scope="carry_in_interrupted"))
     await _delete_threads(await run_in_db(_read, _stranded_threads))
@@ -338,8 +366,7 @@ async def wake(workspace: Path) -> bool:
             scope="carry_in_retired", reason=reason or "target_unavailable",
         ))
         return True
-    await capacity.wait_quiet()
-    model = await capacity.ready_idle()
+    model = await capacity.ready_idle(wait=GUARD_QUIET_TIMEOUT_SECONDS)
     if model is None:
         await run_in_db(partial(
             _write, facts.record_waiting, fact, _now(), UNAVAILABLE, scope="carry_in_waiting",

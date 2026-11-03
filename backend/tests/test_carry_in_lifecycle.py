@@ -36,13 +36,9 @@ def _git(args: list[str], *, cwd: Path) -> str:
 @pytest.fixture
 def c1(isolated_db, tmp_path, monkeypatch):
     """A git workspace, an owning thread with one trial lesson aimed at ``TARGET``."""
-    from infra import carry_in_capacity, carry_in_drain, config
+    from infra import carry_in_drain, config
     from infra.database import get_db
 
-    async def no_wait(bound=None):  # the bounded wait for a quiet seat has its own tests
-        return None
-
-    monkeypatch.setattr(carry_in_capacity, "wait_quiet", no_wait)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     _git(["init", "--quiet"], cwd=workspace)
@@ -311,7 +307,7 @@ def no_samples(monkeypatch):
 def _local(monkeypatch, value="omlx@srv/model"):
     from infra import carry_in_capacity
 
-    async def ready_idle(bound=None, exclude_thread=None):
+    async def ready_idle(bound=None, exclude_thread=None, wait=0.0):
         return value
 
     monkeypatch.setattr(carry_in_capacity, "ready_idle", ready_idle)
@@ -585,8 +581,8 @@ async def test_each_sample_rechecks_exact_idle_capacity_right_before_its_provide
     fact = _pending_fact()
     checks, dispatched = [], []
 
-    async def ready_idle(bound=None, exclude_thread=None):
-        checks.append((bound, exclude_thread))
+    async def ready_idle(bound=None, exclude_thread=None, wait=0.0):
+        checks.append((bound, exclude_thread, wait > 0))
         return None  # a person started a local Turn after the claim
 
     monkeypatch.setattr(carry_in_capacity, "ready_idle", ready_idle)
@@ -598,7 +594,8 @@ async def test_each_sample_rechecks_exact_idle_capacity_right_before_its_provide
         await carry_in_drain._sample(
             fact, owner, "omlx@srv/m0", ACTIONS, _arm(c1, fact, deliver=True), "c1", [],
         )
-    assert checks == [("omlx@srv/m0", f"eval-c1-{fact.identity[:16]}-c1")]
+    # The dispatch-time check refuses; the one wait that follows finds the row still lost.
+    assert checks == [("omlx@srv/m0", f"eval-c1-{fact.identity[:16]}-c1", False), ("omlx@srv/m0", None, True)]
     assert dispatched == []
 
 
@@ -788,15 +785,16 @@ def _status(active=0, waiting=0, total=7):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(("readings", "idle"), [
-    ([_status(), _status()], True),
-    ([_status(active=1), _status()], False),
-    ([_status(), _status(waiting=1)], False),
-    ([_status(total=7), _status(total=8)], False),  # a request started and finished between reads
-    ([{"status": "ok"}, _status()], False),  # no activity fields: unproven, so not idle
-    ([None, _status()], False),  # unauthenticated or unreachable
+@pytest.mark.parametrize(("readings", "state", "reads"), [
+    ([_status(), _status()], "idle", 2),
+    ([_status(active=1), _status()], "busy", 1),
+    ([_status(), _status(waiting=1)], "busy", 2),
+    ([_status(total=7), _status(total=8)], "busy", 2),  # a request started and finished between reads
+    ([{"status": "ok"}, _status()], "unreadable", 1),  # no activity fields: unproven
+    ([None, _status()], "unreadable", 1),  # unauthenticated or unreachable
+    ([_status(), {"active_requests": 0, "waiting_requests": 0}], "unreadable", 2),  # no total to compare
 ])
-async def test_omlx_idle_needs_two_authenticated_idle_reads_with_no_new_request(monkeypatch, readings, idle):
+async def test_omlx_state_needs_two_authenticated_idle_reads_with_no_new_request(monkeypatch, readings, state, reads):
     from infra import carry_in_capacity
 
     seen = []
@@ -813,13 +811,13 @@ async def test_omlx_idle_needs_two_authenticated_idle_reads_with_no_new_request(
     monkeypatch.setattr(carry_in_capacity, "run_in_db", address)
     monkeypatch.setattr(carry_in_capacity, "IDLE_GAP_SECONDS", 0)
 
-    assert await carry_in_capacity.omlx_idle("srv") is idle
+    assert await carry_in_capacity.omlx_state("srv", reads=2) == state
     assert seen[0] == ("srv", "127.0.0.1", 8210)
-    assert len(seen) == (1 if carry_in_capacity.idle_reading(readings[0]) is None else 2)
+    assert len(seen) == reads
 
 
 @pytest.mark.asyncio
-async def test_omlx_idle_fails_closed_without_a_live_registered_endpoint(monkeypatch):
+async def test_omlx_state_is_unreadable_without_a_live_registered_endpoint(monkeypatch):
     from infra import carry_in_capacity
 
     async def no_address(*_a):
@@ -829,7 +827,7 @@ async def test_omlx_idle_fails_closed_without_a_live_registered_endpoint(monkeyp
     monkeypatch.setattr(
         "llm.providers.omlx_public_probe.probe_registered_status", lambda *a: pytest.fail("probed"),
     )
-    assert await carry_in_capacity.omlx_idle("srv") is False
+    assert await carry_in_capacity.omlx_state("srv", reads=2) == "unreadable"
 
 
 @pytest.mark.asyncio
@@ -841,12 +839,12 @@ async def test_ready_idle_keeps_the_bound_model_and_never_substitutes_another_ro
     async def row(_fn, exclude_thread):
         return ("omlx@srv/other", "srv")
 
-    async def idle(server_id):
+    async def quiet(server_id, **_kwargs):
         probed.append(server_id)
         return True
 
     monkeypatch.setattr(carry_in_capacity, "run_off_db", row)
-    monkeypatch.setattr(carry_in_capacity, "omlx_idle", idle)
+    monkeypatch.setattr(carry_in_capacity, "wait_until_quiet", quiet)
 
     assert await carry_in_capacity.ready_idle("omlx@srv/model") is None
     assert probed == []

@@ -74,6 +74,12 @@ class TrialDelivery:
     section: str | None = None
     omission_reason: str | None = None
 
+    def sha256(self, deliver: bool, target_path: str) -> str:
+        """One hash of what both sides of a re-test receive: the canonical target, this delivery
+        (target, section, step binding, text) and whether the candidate gets it (``trial`` state)."""
+        parts = [target_path, deliver, self.target, self.section, self.payload]
+        return hashlib.sha256(json.dumps(parts, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
 
 def draw(lesson_id: str, behavioral_sha256: str, node_id: str) -> Literal["with", "without"]:
     """Return a deterministic, balanced assignment for one lesson and task."""
