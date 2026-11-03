@@ -180,15 +180,21 @@ export function drainCount(total: number | null | undefined, blocking: number | 
 	return { done: total - Math.min(total, blocking ?? total), total };
 }
 
-/** A remote client cannot see the restart, so its time-based guess stops where the restart's share of what is left ends and never claims a step it has not seen. */
+/**
+ * A remote client cannot see the restart or the startup, so its time-based guess runs over those two phases and stops
+ * where the local screen stands once both are done (each holds short of its share's end). It never claims the version
+ * check or done, which only the host reports; that keeps the last step small instead of carrying the whole rest.
+ */
 export function remoteCeiling(lastSeen: number): number {
 	const left = PHASE_SECONDS.restarting + PHASE_SECONDS.starting + PHASE_SECONDS.verifying;
-	return lastSeen + (CEILING - lastSeen) * (PHASE_SECONDS.restarting / left) * PHASE_HOLD;
+	const afterRestart = lastSeen + (CEILING - lastSeen) * (PHASE_SECONDS.restarting / left) * PHASE_HOLD;
+	const startingShare = PHASE_SECONDS.starting / (PHASE_SECONDS.starting + PHASE_SECONDS.verifying);
+	return afterRestart + (CEILING - afterRestart) * startingShare * PHASE_HOLD;
 }
 
-/** A remote client estimates only from its last confirmed screen value and the usual restart time. */
-export function remoteEstimate(lastSeen: number, elapsedMs: number, usualSeconds: number): number {
-	const usual = Math.max(1, usualSeconds) * 1000;
-	const share = Math.min(1, Math.max(0, elapsedMs / usual));
+/** A remote client estimates only from its last confirmed screen value and the measured restart and startup time. */
+export function remoteEstimate(lastSeen: number, elapsedMs: number): number {
+	const expected = (PHASE_SECONDS.restarting + PHASE_SECONDS.starting) * 1000;
+	const share = Math.min(1, Math.max(0, elapsedMs / expected));
 	return lastSeen + (remoteCeiling(lastSeen) - lastSeen) * share;
 }

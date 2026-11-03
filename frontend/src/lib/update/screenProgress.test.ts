@@ -117,10 +117,25 @@ describe('update screen percentage replays', () => {
 		expect(old.percent).toBeGreaterThanOrEqual(model.percent);
 	});
 
-	it('counts the remote estimate up to the restart share and no further', () => {
-		expect(remoteEstimate(15, 60_000, 30)).toBe(remoteCeiling(15));
-		expect(remoteEstimate(15, 15_000, 30)).toBeGreaterThan(15);
-		expect(remoteEstimate(15, 15_000, 30)).toBeLessThan(remoteCeiling(15));
+	it('holds a paired computer where the local screen stands after the same restart and startup time', () => {
+		for (const from of [0, 9.6, 40]) {
+			const local = new ProgressModel();
+			local.value = from;
+			let at = 0;
+			local.update(at, { step: 'restarting', count: null, alive: true });
+			for (let second = 0; second < PHASE_SECONDS.restarting; second += 1) local.update((at += 1_000), { step: 'restarting', count: null, alive: true });
+			for (let second = 0; second < PHASE_SECONDS.starting; second += 1) local.update((at += 1_000), { step: 'starting', count: null, alive: true });
+			expect(Math.abs(remoteEstimate(from, at) - local.shown)).toBeLessThan(1);
+		}
+	});
+
+	it('counts the remote estimate over the restart and startup and no further', () => {
+		const down = (PHASE_SECONDS.restarting + PHASE_SECONDS.starting) * 1000;
+		expect(remoteEstimate(15, down * 2)).toBe(remoteCeiling(15));
+		expect(remoteEstimate(15, down / 2)).toBeGreaterThan(15);
+		expect(remoteEstimate(15, down / 2)).toBeLessThan(remoteCeiling(15));
 		expect(remoteCeiling(15)).toBeLessThan(99);
+		// what is left for the host-confirmed version check is the small last step the local screen also has
+		expect(99.9 - remoteCeiling(15)).toBeLessThan(12);
 	});
 });

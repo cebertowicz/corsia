@@ -106,7 +106,7 @@ function readSources(now: number, l: Latch, operation: UpdateOperation | null, u
 		if (l.usualSeconds === null) return { input: { step: 'restarting', count: null, alive: false }, longer: false, estimated: false };
 		l.estimateFrom ??= l.model.shown;
 		const elapsed = now - l.downAt;
-		l.model.lift(remoteEstimate(l.estimateFrom, elapsed, l.usualSeconds));
+		l.model.lift(remoteEstimate(l.estimateFrom, elapsed));
 		return { input: { step: 'restarting', count: null, alive: false }, longer: elapsed >= l.usualSeconds * 2_000, estimated: true };
 	}
 	// A still-running old service can report serving as HTTP goes away. Its PID is valid, but it says nothing about

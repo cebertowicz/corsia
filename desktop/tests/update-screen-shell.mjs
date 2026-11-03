@@ -55,7 +55,7 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 function handoff(overrides = {}) {
 	return {
 		v: 1, operationId: 'update-1',
-		model: { value: 52.4, step: 'upgrading', mode: 'migration', lifted: 0, visitedMigration: true, lastAt: NOW },
+		model: { value: 52.4, step: 'upgrading', mode: 'migration', lifted: 0, visitedMigration: true, lastAt: NOW, phase: { from: 40, to: 70, expected: 60, elapsed: 12 } },
 		fromVersion: '2026.10.12', toVersion: '2026.10.13', usualSeconds: 45,
 		downAt: NOW - 70_000, seqChangedAt: NOW - 20_000, lastSeq: 7, lastPid: 4242,
 		failure: null, theme: 'light', route: '/?project=abc',
