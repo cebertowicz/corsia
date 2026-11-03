@@ -128,6 +128,29 @@ def test_person_reply_joins_the_task_its_owner_is_working_and_wakes_the_owner(is
         db.close()
 
 
+def test_person_reply_to_a_task_handed_then_released_gets_its_own_task(isolated_db):
+    """A task its owner picked up and put down is not being worked, so the reply is not folded into it."""
+    from plans import admission
+
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner")
+        root, _ = add_person_comment(db, artifact_id)
+        (first,) = _feedback_nodes(db, "owner")
+        admission.release(first["id"], "set_aside", db=db)
+        db.commit()
+
+        _person_reply(db, artifact_id, root["id"])
+
+        assert len(_feedback_nodes(db, "owner")) == 2
+        assert db.execute(
+            "SELECT COUNT(*) FROM messages WHERE thread_id='owner' AND id LIKE 'plan-wake:intent_input:%'",
+        ).fetchone()[0] == 0
+    finally:
+        db.close()
+
+
 def test_agent_reply_to_a_task_its_owner_is_working_gets_its_own_task_and_the_next_joins_that(isolated_db):
     """An agent's reply carries no wake, so it never joins a worked task; past one, the next open task takes it."""
     db = get_db()

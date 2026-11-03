@@ -6,11 +6,13 @@ task rather than opening a second one. A task its owner has not been handed yet
 is picked up as it is, so the reply is in its description when the owner first
 reads it. A person's reply also joins a task its owner is working on now; the
 owner may have read that task already, so the caller wakes it with the reply
-(``plans.person_input.joined_reply``). A finished task, or one that waits (a
-hold, an armed watch, an unmet dependency) or a worked task in a paused plan
-would not show the reply until later; the reply then joins a later task of the thread that
-qualifies, or gets its own task as before. The joined task's title is recounted
-over every item it now holds.
+(``plans.person_input.joined_reply``); working on it now is the same test
+that picks which tasks that wake reaches (``plans.person_input.running``). A
+finished task, a task that waits (a hold, an armed watch, an unmet
+dependency), or a handed task its owner is not running would not show the
+reply until later; the reply then joins a later task of the thread that
+qualifies, or gets its own task as before. The joined task's title is
+recounted over every item it now holds.
 
 A task can therefore hold several batches. Each batch's ``delivered_node_id``
 is the one record of the task that holds it: settlement reads it to settle a
@@ -64,11 +66,10 @@ def _waits(db, node) -> bool:
 
 
 def _being_worked(db, node, batch: Any) -> bool:
-    """A person's reply can reach the owner of this handed task now: it is active and its plan is not paused."""
-    return (
-        batch_value(batch, "author_kind") == "user" and node["state"] == "active"
-        and service._plan_row(db, node["plan_id"])["state"] == "active"
-    )
+    """A person's reply can reach the owner of this handed task now: the wake's own test finds it running."""
+    from plans import person_input
+
+    return batch_value(batch, "author_kind") == "user" and bool(person_input.running(db, [node]))
 
 
 def _thread_task(db, recipient_thread_id: str, batch: Any, root_id: str) -> Join | None:
