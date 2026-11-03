@@ -255,7 +255,16 @@ async def test_native_ws_persists_broadcasts_and_starts_browser_turn(
     assert rows[0]["content"] == "clean user text"
     assert result.created_at
     metadata = json.loads(rows[0]["metadata"])
-    assert metadata == {"attachments": attachments, "reply_via_post_update": True}
+    # The claimed row keeps the server-resolved note so a replay renders the
+    # same saved path; broadcasts strip it (send_broadcast private keys).
+    assert metadata == {
+        "attachments": attachments,
+        "reply_via_post_update": True,
+        "attachment_notes": (
+            "[Document attached: proof.txt, saved at "
+            ".threads/native-ws/uploads/fid/proof.txt]"
+        ),
+    }
     # The sender already owns the optimistic queued row. Peers receive that
     # durable queued row, then every viewer receives the claimed row and its
     # settled state.
