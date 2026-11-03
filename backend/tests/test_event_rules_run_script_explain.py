@@ -52,26 +52,50 @@ def test_an_archived_creator_holds_a_script_rule_without_queueing(runs):
 
 _ACCOUNTS = {
     "person": (AgentAccountView("wrong_account", "person_account", home="/h"),
-               "the agents' GitHub account is signed in as the person's own login (person_account)"),
+               "the agents' GitHub sign-in is the person's own GitHub account"),
     "unverified": (AgentAccountView("unverified", "own_login_unknown", home="/h"),
-                   "the agents' GitHub account isn't verified (own_login_unknown)"),
+                   "CORSIA can't yet tell the agents' GitHub account from the person's own"),
     "suspended": (AgentAccountView("needs_auth", "token_rejected", home="/h"),
-                  "the agents' GitHub account needs signing in (token_rejected)"),
+                  "the agents' GitHub account needs signing in"),
     "absent": (AgentAccountView("not_installed", absent=True),
-               "there is no agents' GitHub account (not_installed)"),
+               "there is no agents' GitHub account"),
 }
 
 
 @pytest.mark.parametrize("state", sorted(_ACCOUNTS))
-def test_a_script_run_without_a_github_login_says_why(runs, state):
+def test_a_failed_run_without_a_github_login_says_why(runs, state):
     view, why = _ACCOUNTS[state]
-    rule = _rule(_script(runs, "locked.sh"))
-    runs["outputs"]["locked.sh"] = ScriptRun(0, b"", b"", False, github_lock_reason(view))
+    _rule(_script(runs, "locked.sh"))
+    runs["outputs"]["locked.sh"] = ScriptRun(1, b"", b"", False, github_lock_reason(view))
     event_id = _emit()
     _sweep()
 
-    assert _explained(event_id) == [
-        ("ran", f"rule {rule['id']} ran {OWNER}'s script with it: scripts get no GitHub login: {why}")]
+    [(outcome, text)] = _explained(event_id)
+    assert outcome == "failed" and text.endswith(f"; scripts get no GitHub login: {why}")
+
+
+def test_a_run_that_worked_without_a_github_login_adds_no_line(runs):
+    view, _why = _ACCOUNTS["absent"]
+    rule = _rule(_script(runs, "local.sh"))
+    runs["outputs"]["local.sh"] = ScriptRun(0, b"", b"", False, github_lock_reason(view))
+    event_id = _emit()
+    _sweep()
+
+    assert _explained(event_id) == [("ran", f"rule {rule['id']} ran {OWNER}'s script with it")]
+
+
+def test_a_long_failure_and_its_login_note_fit_the_reason_limit(runs):
+    from events.rule_runs import _REASON_LIMIT
+
+    view, why = _ACCOUNTS["absent"]
+    rule = _rule(_script(runs, "long.sh"))
+    runs["outputs"]["long.sh"] = ScriptRun(1, b"", b"x" * 2000, False, github_lock_reason(view))
+    _emit()
+    _sweep()
+
+    [(outcome, reason)] = _outcomes(rule["id"])
+    assert outcome == "failed" and len(reason) <= _REASON_LIMIT
+    assert reason.endswith(f"; scripts get no GitHub login: {why}")
 
 
 def test_a_failed_locked_run_keeps_its_failure_and_names_the_missing_login(runs):

@@ -18,8 +18,6 @@ from tests.test_script_github_channel import spawned  # noqa: F401 - real sandbo
 from tools.event_rules import EventRulesTool
 
 OWNER, OTHER = "run-owner", "run-other"
-# The sandbox path with no agents' account runs locked, and its outcome says so.
-NO_ACCOUNT = "scripts get no GitHub login: there is no agents' GitHub account (not_installed)"
 _START = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 _DECLARATIONS = """schema: corsia.measures/1
@@ -406,7 +404,7 @@ def test_a_rule_run_reads_github_only_for_the_repository_its_stored_event_names(
 
         monkeypatch.setattr(rule_runs, "start", start)
     _sweep()
-    assert _outcomes(rule["id"]) == [("ran", NO_ACCOUNT)]
+    assert _outcomes(rule["id"]) == [("ran", None)]
     assert spawned["channels"] == ([(rule["id"], repo)] if repo else [])
     assert len(spawned["commands"]) == 1
     assert bool(spawned["envs"][0].get("CORSIA_SCRIPT_GITHUB_SOCKET")) is (repo is not None)
@@ -431,7 +429,7 @@ def test_unregistered_event_repository_starts_without_channel(world, spawned, mo
 
     monkeypatch.setattr(rule_runs, "start", start)
     _sweep()
-    assert _outcomes(rule["id"]) == [("ran", NO_ACCOUNT)]
+    assert _outcomes(rule["id"]) == [("ran", None)]
     assert spawned["channels"] == []
     assert len(spawned["commands"]) == 1
     assert not spawned["envs"][0].get("CORSIA_SCRIPT_GITHUB_SOCKET")
@@ -481,7 +479,7 @@ def test_a_script_cannot_open_a_channel_for_an_unregistered_repository_its_own_e
     second = _rule(_script(world, "reader.sh"), event_type="forged")
     _emit()
     _sweep()
-    assert _outcomes(first["id"]) == [("ran", NO_ACCOUNT)] and _outcomes(second["id"]) == [("ran", NO_ACCOUNT)]
+    assert _outcomes(first["id"]) == [("ran", None)] and _outcomes(second["id"]) == [("ran", None)]
     assert ["reader.sh" in command for command in commands] == [False, True]
     assert channels == []
     assert all("CORSIA_SCRIPT_GITHUB_SOCKET" not in env for env in envs)
@@ -509,7 +507,7 @@ def _emitter_run(world, monkeypatch, repo, *, registered, before_sweep=None):
     if before_sweep:
         before_sweep()
     _sweep()
-    assert _outcomes(rule["id"]) == [("ran", NO_ACCOUNT)]
+    assert _outcomes(rule["id"]) == [("ran", None)]
     return rule
 
 

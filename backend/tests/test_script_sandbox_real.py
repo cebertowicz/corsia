@@ -139,7 +139,7 @@ async def test_real_script_with_no_agents_account_runs_in_the_locked_state(sandb
     )
     run = await _run(path)
     assert run.returncode == 0, run.stderr
-    assert run.github_locked == "scripts get no GitHub login: there is no agents' GitHub account (not_installed)"
+    assert run.github_locked == "scripts get no GitHub login: there is no agents' GitHub account"
 
 
 def _account(monkeypatch, state: str, home: Path | None = None) -> None:

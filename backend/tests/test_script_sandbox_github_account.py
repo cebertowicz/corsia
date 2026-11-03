@@ -138,7 +138,8 @@ def test_a_verified_account_gives_the_script_exactly_the_shells_github(run):
     seen = run("ready")
     env = seen["env"]
     assert seen["reads"] == 1
-    assert {name: env[name] for name in BOT_ENV_NAMES} == github_agent.shell_env(seen["view"])
+    assert {name: env[name] for name in BOT_ENV_NAMES} == github_agent.script_env(seen["view"])
+    assert github_agent.script_env(seen["view"]) == github_agent.shell_env(seen["view"])
     assert env["GH_CONFIG_DIR"] == seen["view"].home
     assert dict(_git(env))["credential.https://github.com.helper"] == "!'/opt/agent/gh' auth git-credential"
     assert dict(_git(env))["user.name"] == "agents-bot"
@@ -159,11 +160,11 @@ def test_a_run_with_no_cached_answer_waits_for_the_verification(run):
 
 
 @pytest.mark.parametrize("state, reason", [
-    ("person", "scripts get no GitHub login: the agents' GitHub account is signed in as the person's own "
-               "login (person_account)"),
-    ("unverified", "scripts get no GitHub login: the agents' GitHub account isn't verified (own_login_unknown)"),
-    ("suspended", "scripts get no GitHub login: the agents' GitHub account needs signing in (token_rejected)"),
-    ("absent", "scripts get no GitHub login: there is no agents' GitHub account (not_installed)"),
+    ("person", "scripts get no GitHub login: the agents' GitHub sign-in is the person's own GitHub account"),
+    ("unverified", "scripts get no GitHub login: CORSIA can't yet tell the agents' GitHub account from the "
+                   "person's own"),
+    ("suspended", "scripts get no GitHub login: the agents' GitHub account needs signing in"),
+    ("absent", "scripts get no GitHub login: there is no agents' GitHub account"),
 ])
 def test_every_other_state_runs_the_script_in_the_shells_locked_state(run, state, reason):
     seen = run(state)
