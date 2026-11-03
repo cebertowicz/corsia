@@ -3,6 +3,7 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { activeThreadId, activeToolsByThread, messages } from '$lib/stores/threads';
 import { openAtDivider, threadUpdateCards, visitDividers } from '$lib/stores/threadUpdateCards';
 import { _resetTurnStateForTests } from '$lib/ws/turnState';
+import { _resetCheckpointsForTests, checkpointsByThread } from '$lib/stores/checkpoints';
 import MessageList from './MessageList.svelte';
 
 const THREAD_ID = 'update-card-scroll-session';
@@ -115,6 +116,7 @@ afterEach(() => {
 	visitDividers.set({});
 	messages.set([]);
 	_resetTurnStateForTests();
+	_resetCheckpointsForTests();
 });
 
 describe('update cards preserve scroll intent', () => {
@@ -257,6 +259,46 @@ describe('update cards preserve scroll intent', () => {
 			id: 'm2', thread_id: 'next-thread', role: 'assistant',
 			content: 'the next answer', created_at: '2026-09-29T12:05:00Z',
 		}] as never);
+		flushSync();
+		runFrames();
+
+		expect(writes).toEqual([]);
+	});
+});
+
+describe('a live checkpoint row stays in view', () => {
+	function startCheckpoint(): void {
+		checkpointsByThread.set(new Map([[THREAD_ID, {
+			checkpoints: [{
+				id: 'checkpoint-1', trigger: 'pressure', mode: 'cold', status: 'running',
+				writerModel: 'claude-code/e2e', error: null, startedAt: '2026-11-03T12:00:00Z',
+			}],
+			loading: false,
+			error: null,
+		}]]));
+		flushSync();
+	}
+
+	it('re-pins a pinned transcript when the checkpoint row appears', async () => {
+		renderList();
+		const writes = recordScrollWrites(scroller());
+
+		startCheckpoint();
+		await tick();
+		flushSync();
+		runFrames();
+
+		expect(host.querySelector('[data-checkpoint-status="running"]')).not.toBeNull();
+		expect(writes.at(-1)).toBe(CONTENT);
+	});
+
+	it('leaves a user reading history where they are', async () => {
+		renderList();
+		userScrollsUp(scroller());
+		const writes = recordScrollWrites(scroller());
+
+		startCheckpoint();
+		await tick();
 		flushSync();
 		runFrames();
 

@@ -255,8 +255,42 @@ def test_a_claim_after_an_error_publishes_the_stamped_error_row(isolated_db, mon
 
     asyncio.run(broadcast_claimed_batch(batch))
 
-    order = [m["id"] for p in published for m in (p.get("messages") or [p["message"]])]
+    rows = [p for p in published if p["type"] in ("message_added", "messages_added")]
+    order = [m["id"] for p in rows for m in (p.get("messages") or [p["message"]])]
     assert order.index("err-1") < order.index("wake-1")
-    sent = {m["id"]: m for p in published for m in (p.get("messages") or [p["message"]])}
+    sent = {m["id"]: m for p in rows for m in (p.get("messages") or [p["message"]])}
     assert {"wake-1", "err-1"} <= set(sent)
     assert sent["err-1"]["metadata"]["recovered"] is True
+
+
+def test_a_claim_announces_its_turn_before_the_harness_accepts_it(isolated_db, monkeypatch):
+    """A successor claimed at its predecessor's terminal reads as working at once, not idle until its harness starts."""
+    import asyncio
+
+    import infra.state as state
+    from infra.database import get_db
+    from infra.send_broadcast import broadcast_claimed_batch
+    from infra.thread_driver import admit_input
+
+    published: list[dict] = []
+    monkeypatch.setattr(state, "broadcast_to_thread", lambda _thread, payload, **_kw: published.append(payload))
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO threads (id,user_id,model,created_at,updated_at) "
+            "VALUES ('thread-run','user-1','claude-code/sonnet','t0','t0')"
+        )
+        db.commit()
+        admitted = admit_input(
+            "thread-run", role="system", content="continue", intent="apply_now",
+            message_id="continue-1", metadata={"type": "context_event"}, turn_id="turn-run",
+            boot_epoch="test-boot", admitted_at="t1", db=db,
+        )
+    batch = admitted.batch
+    assert batch is not None
+
+    asyncio.run(broadcast_claimed_batch(batch))
+
+    assert [p["type"] for p in published][-1] == "turn_activity"
+    assert {p["type"] for p in published[:-1]} <= {"message_added", "messages_added"}
+    assert published[-1]["turn_id"] == "turn-run"
+    assert published[-1]["turn_order"] == batch.turn_order
