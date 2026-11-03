@@ -31,6 +31,7 @@ from plans.decision_writes import (
     _body_from,
     _commit,
     _create,
+    create_raised,
     _perform,
     _touch_plan,
 )
@@ -43,7 +44,7 @@ read = decision_projection.read
 
 __all__ = [
     "MUTABLE_STATES", "REVIEW_DOD", "TYPE", "answer", "draft", "invalidate",
-    "parent_review", "raise_to_user", "read", "reorder", "update",
+    "parent_review", "raise_offer", "raise_to_user", "read", "reorder", "update",
 ]
 
 
@@ -96,6 +97,15 @@ def draft(plan_id: str, *, source_node_id, mutation_id: str, actor, provenance,
             drives=drives,
         )
     return notifications.DeferredMutation(result, ())
+
+
+def raise_offer(db, *, plan_id: str, source_node_id: str, content: dict, provenance: str) -> dict:
+    """Raise one decision to the user for CORSIA itself, skipping the author and reviewer steps.
+
+    Server-internal, called only by ``plans.gate_handoff``: no tool or route reaches
+    it, and it grants no actor a permission. The decision records no actor.
+    """
+    return create_raised(db, plan_id, source_node_id, content, provenance)["decision"]
 
 
 def update(decision_id: str, *, expected_revision, mutation_id, actor, provenance,

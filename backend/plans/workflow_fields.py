@@ -99,7 +99,7 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
     writer), so its instruction and check reach the agent the step is handed to.
     A step naming a workflow becomes a child phase built the same way.
     """
-    from plans import dependencies, intent_words, node_creation
+    from plans import closure, dependencies, gate_handoff, intent_words, node_creation
 
     intent_node_id = intent_words.canonical(db, phase.id)["id"]
     built: dict[str, Any] = {}
@@ -111,6 +111,10 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
             raise service.PlanInputError(f"step {step['id']}: {difficulty_rubric()}")
         nested = step.get("workflow")
         by = step.get("by", "agent")
+        gate = step.get("gate") if nested is None else None
+        gate_mode, gate_state = gate_handoff.mode_for(db, phase, step["id"]) if gate == "acceptance" else (None, None)
+        if gate_mode == "agent":
+            by = "reviewer"
         check = step.get("check") or f"Done: {title}"
         description = step.get("instruction")
         if by == "person":
@@ -135,11 +139,19 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
             provenance="plans.workflow_run", node_id=service._id(),
             intent_node_id=intent_node_id, required_step=step.get("required") is True, workflow_by=by,
             person_step=not (by == "person" and step.get("after")),
+            workflow_gate=gate, workflow_gate_mode=gate_mode,
         )
+        if gate_mode == "dropped":
+            closure.close_node(
+                node.id, reason=gate_handoff.drop_reason(gate_state), actor_id=None,
+                provenance="plans.workflow_run", db=db,
+            )
         built[step["id"]] = node
         entry = {"id": node.id, "title": title, "required": step.get("required") is True}
         if by != "agent":
             entry["by"] = by
+        if gate_mode in gate_handoff.GATE_HOW:
+            entry["gate_mode"] = gate_mode
         if step.get("hard_if"):
             entry["hard_if"] = step["hard_if"]
         if nested:
@@ -158,6 +170,18 @@ def _has_hard_if(listed) -> bool:
     return any("hard_if" in entry or _has_hard_if(entry.get("steps", ())) for entry in listed)
 
 
+def _gate_notices(listed) -> list[str]:
+    """One line for each step of the run whose acceptance gate the person handed off."""
+    from plans.gate_handoff import GATE_HOW, GATE_NOTICE
+
+    lines = []
+    for entry in listed:
+        if "gate_mode" in entry:
+            lines.append(GATE_NOTICE.format(step=entry["title"], how=GATE_HOW[entry["gate_mode"]]))
+        lines.extend(_gate_notices(entry.get("steps", ())))
+    return lines
+
+
 def added(db, node, line, steps, *, causing_executor: str | None):
     """The add reply: the node, its rank line, and the run built under a workflow phase."""
     from plans.boundary import node_projection
@@ -170,7 +194,9 @@ def added(db, node, line, steps, *, causing_executor: str | None):
         result["rank"] = line
     if listed:
         result["steps"] = listed
-        result["notice"] = STEPS_CREATED + (" " + HARD_IF_NOTICE if _has_hard_if(listed) else "")
+        result["notice"] = " ".join(
+            [STEPS_CREATED, *([HARD_IF_NOTICE] if _has_hard_if(listed) else []), *_gate_notices(listed)],
+        )
     return result
 
 
@@ -209,6 +235,8 @@ def same_step_fields(db, source) -> dict[str, Any]:
         **{field: source[field] for field in NOT_A_STEP},
         "required_step": created.get("workflow_required") is True,
         "workflow_by": created.get("workflow_by", "agent"),
+        "workflow_gate": created.get("workflow_gate"),
+        "workflow_gate_mode": created.get("workflow_gate_mode"),
     }
 
 
@@ -237,6 +265,14 @@ def refuse_reviewer_self_close(db, node_id: str, operation: str) -> None:
     if operation != "mark_done" and delegation_harvest.harvest_review(db, node) is not None:
         return
     raise service.PlanError(REVIEWER_ROUTE)
+
+
+def refuse_unready_close(db, node_id: str, operation: str) -> None:
+    """Refuse a close the step isn't ready for: a reviewer step without a return, or a rejected gate."""
+    from plans import gate_handoff
+
+    refuse_reviewer_self_close(db, node_id, operation)
+    gate_handoff.refuse_rejected(db, node_id, operation)
 
 
 def refuse_required_skip(db, node_id: str) -> None:

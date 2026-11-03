@@ -20,6 +20,7 @@ _WORKFLOW_STEP_KEYS = frozenset(
         "workflow",
         "instruction",
         "by",
+        "gate",
     }
 )
 _WORKFLOW_DIFFICULTIES = frozenset({"routine", "standard", "hard"})

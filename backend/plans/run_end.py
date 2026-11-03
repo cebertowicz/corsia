@@ -146,7 +146,7 @@ def _steps(db, phase) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     Cost and time are the rolled figures of ``node_cost_scoped``: they include plans
     attached to a step (delegated work) and count wall-clock time once.
     """
-    from plans import closure, node_cost_scoped
+    from plans import closure, gate_handoff, node_cost_scoped
     from plans.workflow_fields import creation_payload
 
     by_step: dict[str, list] = {}
@@ -173,7 +173,7 @@ def _steps(db, phase) -> tuple[list[dict[str, Any]], dict[str, Any]]:
                 state = _DONE if inner["outcome"] == "completed" else "failed"
         else:
             state = _DONE if last["state"] in service._ACCEPTED_STATES else last["state"]
-            if last["id"] in not_run:
+            if last["id"] in not_run and created.get("workflow_gate_mode") != "dropped":
                 state = _NOT_RUN
             elif last["archived_at"] is not None and last["state"] not in service._TERMINAL_STATES:
                 state = service.CLOSED  # archiving an open optional step skips it
@@ -190,6 +190,9 @@ def _steps(db, phase) -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "cost_unknown_rows": sum(item["model_cost_usd"]["unknown_rows"] for item in figures),
             "inner_workflow_ref": last["workflow_ref"] if inner is not None else None,
             "inner_workflow_version": last["workflow_version"] if inner is not None else None,
+            "gate_mode": created.get("workflow_gate_mode"),
+            "gate_answer": gate_handoff.first_answer(db, [row["id"] for row in rows])[0]
+            if created.get("workflow_gate") == "acceptance" else None,
         })
     own = rolled[phase["id"]]
     totals = {

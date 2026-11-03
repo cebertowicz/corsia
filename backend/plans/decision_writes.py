@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import plans.artifact_links as artifact_links
 import plans.decision_authz as authz
+import plans.decision_fields as decision_fields
 import plans.decision_projection as decision_projection
 import plans.intent_words as intent_words
 import plans.notifications as notifications
 import plans.receipts as receipts
 import plans.service as service
-from registry import models
+from registry import attention, models
 
 TYPE = decision_projection.DECISION_TYPE
 REVIEW_DOD = (
@@ -182,3 +183,31 @@ def _create(db, plan, source, author, content, actor, provenance) -> dict:
     _touch_plan(db, plan["id"])
     _reconcile(db, plan["id"], actor, provenance)
     return {"decision": read(decision_id, db=db)}
+
+
+class _System:
+    """The trusted in-process writer: it records no actor and wakes no executor."""
+
+    audit_id = None
+    thread_id = None
+    kind = "system"
+
+
+def create_raised(db, plan_id: str, source_node_id: str, content: dict, provenance: str) -> dict:
+    """Create one decision already raised to the user, with no author or reviewer step.
+
+    Server-internal: only ``plans.decisions.raise_offer`` calls it, so no tool or
+    route gives any actor a new permission. The plan owner stays the decision's
+    thread, so it renders and delivers its answer as the owner's own decision.
+    """
+    plan = service._plan_row(db, plan_id)
+    source = authz.source_node(db, plan["id"], source_node_id)
+    created = _create(
+        db, plan, source, plan["owner_id"], decision_fields.content(content), _System, provenance,
+    )["decision"]
+    if service._node_row(db, created["node_id"])["state"] == "pending":
+        service.transition_node(created["node_id"], "active", actor_id=None, provenance=provenance, db=db)
+    service.transition_node(created["node_id"], "review_requested", actor_id=None, provenance=provenance, db=db)
+    attention.raise_attention(created["artifact_id"], db=db)
+    body = _body_from(created, state="raised", raised_at=service._now())
+    return _commit(db, created, body, "decision_raised", _System, provenance)
