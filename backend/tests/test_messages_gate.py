@@ -33,7 +33,7 @@ def env(deleg_db, workspace, tmp_path, monkeypatch):  # noqa: F811
     monkeypatch.setattr(messages_db, "is_mac", lambda: True)
     monkeypatch.setattr(messages_send, "CONFIRM_SECONDS", 0.2)
     monkeypatch.setattr(messages_send, "POLL_SECONDS", 0.05)
-    create_account(MESSAGES_PROVIDER, "This Mac", reach=ALL, created_by=("person", "steve"), db=deleg_db)
+    create_account(MESSAGES_PROVIDER, "This computer", reach=ALL, created_by=("person", "steve"), db=deleg_db)
     deleg_db.commit()
 
     def osascript(mode: str):

@@ -30,7 +30,7 @@ TOOL_PACKS: dict[str, str] = {
     "automations": "Automations",
     "web": "Web",
     "email": "Email and calendar",
-    "messages": "Messages on this Mac",
+    "messages": "Messages on this computer",
     "microsoft": "Microsoft sign-in",
     "microsoft_mail": "Microsoft mail",
     "microsoft_calendar": "Microsoft calendar",

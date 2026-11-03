@@ -1,14 +1,17 @@
-"""The one Messages row of this Mac: find the one a thread may use, or add it."""
+"""The one Messages row of this computer: find the one a thread may use, add it, or turn it back on."""
 
 from __future__ import annotations
 
 import sqlite3
 
-from connections.connected_accounts import MESSAGES_PROVIDER, create_account_for_thread, visible_accounts
-from infra.database import get_db
+from connections.account_state import emit_lifecycle_event, mark_signed_in, record_audit
+from connections.connected_accounts import (
+    MESSAGES_PROVIDER, ConnectedAccountError, create_account_for_thread, get_account, visible_accounts,
+)
+from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
 
-ADDRESS = "This Mac"
+ADDRESS = "This computer"
 
 
 def _own_db(job, thread_id: str):
@@ -31,17 +34,51 @@ async def usable_for_thread(thread_id: object) -> dict | None:
     return await run_in_db(_own_db, _usable, thread_id) if isinstance(thread_id, str) and thread_id else None
 
 
+def _emit_on(account_id: str) -> None:
+    """The lifecycle events of a row that is on at once: there is no sign-in step to wait for."""
+    emit_lifecycle_event("connect_started", account_id, MESSAGES_PROVIDER)
+    emit_lifecycle_event("connect_succeeded", account_id, MESSAGES_PROVIDER)
+
+
 def _connect(thread_id: str, db: sqlite3.Connection) -> tuple[dict | None, bool]:
-    """``(usable row, created)``: add the row only when this Mac has none, at the adding thread's reach."""
-    if (found := _usable(thread_id, db)) is not None:
-        return found, False
-    if visible_accounts(None, db=db, provider=MESSAGES_PROVIDER):
-        return None, False
-    row = create_account_for_thread(
-        MESSAGES_PROVIDER, ADDRESS, actor_thread_id=thread_id, created_by=("agent", thread_id), db=db,
-    )
+    """``(usable row, created)``: add the row only when this computer has none, at the adding thread's reach.
+
+    The look and the insert share one transaction, so two connects cannot both add a row.
+    """
+    with write_transaction(db, scope="messages_connect") as conn:
+        if (found := _usable(thread_id, conn)) is not None:
+            return found, False
+        if visible_accounts(None, db=conn, provider=MESSAGES_PROVIDER):
+            return None, False
+        row = create_account_for_thread(
+            MESSAGES_PROVIDER, ADDRESS, actor_thread_id=thread_id, created_by=("agent", thread_id), db=conn,
+        )
+        record_audit(str(row["id"]), "connect", ("agent", thread_id), db=conn)
+    _emit_on(str(row["id"]))
     return row, True
+
+
+def _turn_on(account_id: str, actor: tuple[str, str], db: sqlite3.Connection) -> bool:
+    """Turn an existing Messages row back on at its own reach; False when it is not a Messages row."""
+    with write_transaction(db, scope="messages_turn_on") as conn:
+        try:
+            row = get_account(account_id, db=conn)
+        except ConnectedAccountError:
+            return False
+        if row["provider"] != MESSAGES_PROVIDER:
+            return False
+        if row["state"] == "connected":
+            return True
+        mark_signed_in(account_id, address=str(row["address"]), provider_subject=None, actor=actor, db=conn)
+        record_audit(account_id, "sign_in", actor, db=conn)
+    _emit_on(account_id)
+    return True
 
 
 async def connect(thread_id: str) -> tuple[dict | None, bool]:
     return await run_in_db(_own_db, _connect, thread_id)
+
+
+async def turn_on(account_id: str, actor: tuple[str, str]) -> bool:
+    """Settings › Connected apps: Sign in on a signed-out Messages row."""
+    return await run_in_db(_own_db, lambda _id, db: _turn_on(_id, actor, db), account_id)

@@ -364,6 +364,25 @@ describe('ConnectedAppsSettings', () => {
 		expect(signIn?.className).toContain('primary');
 	});
 
+	it('turns a signed-out Messages row back on in place when Sign in answers with no link', async () => {
+		const messages = { ...googleAccount, id: 'messages-row', provider: 'messages' as const, provider_display_name: 'Messages', address: 'This computer', capabilities: ['messages' as const], state: 'signed_out' as const };
+		let on = false;
+		const open = vi.spyOn(window, 'open');
+		const fetch = vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).endsWith('/api/messages/connect') ? { url: '', account_id: 'messages-row' } : { servers: [], accounts: [{ ...messages, state: on ? 'connected' : 'signed_out' }] } }));
+		vi.stubGlobal('fetch', fetch);
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="messages-row"]')).not.toBeNull());
+		(host.querySelector('[data-connected-account-id="messages-row"] button') as HTMLButtonElement).click();
+		flushSync();
+		expect(host.textContent).toContain('Texts');
+		const signIn = [...host.querySelectorAll<HTMLButtonElement>('[data-connected-account-id="messages-row"] button')].find((button) => button.textContent?.trim() === 'Sign in')!;
+		on = true;
+		signIn.click();
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/messages/connect'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ account_id: 'messages-row' }) })));
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="messages-row"]')?.textContent).toContain('Sign out'));
+		expect(open).not.toHaveBeenCalledWith('', '_blank');
+	});
+
 	it('renders Microsoft admin approval, cancellation, refresh and provider failure with the correct next actions', async () => {
 		const admin = { ...googleAccount, id: 'microsoft-admin', provider: 'microsoft' as const, provider_display_name: 'Microsoft', address: 'alex@contoso.example', state: 'needs_sign_in' as const, account_kind: 'work' as const, cause: 'admin_approval_required', client_id: '11111111-1111-4111-8111-111111111111', tenant_id: null, scopes: ['Mail.ReadWrite', 'Mail.Send', 'Calendars.ReadWrite', 'Files.ReadWrite', 'offline_access', 'User.Read'] };
 		const cancelled = { ...admin, id: 'microsoft-cancelled', cause: 'consent_cancelled' };

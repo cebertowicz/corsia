@@ -26,7 +26,7 @@ def test_keyless_row_is_connected_and_writes_no_key_entry(isolated_db) -> None:
     try:
         before = db.execute("SELECT COUNT(*) FROM key_store_entries").fetchone()[0]
         account = create_account(
-            MESSAGES_PROVIDER, "This Mac", reach=ALL, created_by=("person", "steve"), db=db,
+            MESSAGES_PROVIDER, "This computer", reach=ALL, created_by=("person", "steve"), db=db,
         )
         assert account["state"] == "connected"
         assert resolve_credentials(str(account["id"]), db=db) == {}
@@ -45,7 +45,7 @@ def test_where_it_works_reaches_only_chosen_projects(isolated_db) -> None:
         inside = make_session(db, project_id="project-a", prefix="in")
         outside = make_session(db, prefix="out")
         account = create_account_for_thread(
-            MESSAGES_PROVIDER, "This Mac", actor_thread_id=inside, created_by=("agent", inside), db=db,
+            MESSAGES_PROVIDER, "This computer", actor_thread_id=inside, created_by=("agent", inside), db=db,
         )
         assert account_reaches_thread(str(account["id"]), inside, db=db)
         assert not account_reaches_thread(str(account["id"]), outside, db=db)
@@ -58,7 +58,7 @@ def test_where_it_works_reaches_only_chosen_projects(isolated_db) -> None:
 def test_sign_out_and_remove_work_without_a_key_entry(isolated_db) -> None:
     db = get_db()
     try:
-        account = create_account(MESSAGES_PROVIDER, "This Mac", reach=ALL, created_by=("person", "steve"), db=db)
+        account = create_account(MESSAGES_PROVIDER, "This computer", reach=ALL, created_by=("person", "steve"), db=db)
         db.commit()
         before = db.execute("SELECT COUNT(*) FROM key_store_entries").fetchone()[0]
         account_id = str(account["id"])

@@ -1,4 +1,4 @@
-"""Catalog entries for the Messages tools (texts on this Mac)."""
+"""Catalog entries for the Messages tools (texts on this computer)."""
 from __future__ import annotations
 
 from tools.catalog_entry import ToolCatalogEntry
@@ -6,7 +6,7 @@ from tools.catalog_entry import ToolCatalogEntry
 MESSAGES_CATALOG_ENTRIES: dict[str, ToolCatalogEntry] = {
     "messages_connect": ToolCatalogEntry(
         "messages", status="active", authority="conductor-api",
-        summary="Turn on Messages for this Mac and check that CORSIA can read it",
+        summary="Turn on Messages for this computer and check that CORSIA can read it",
         activity="Turning on Messages",
     ),
     **{name: ToolCatalogEntry(
