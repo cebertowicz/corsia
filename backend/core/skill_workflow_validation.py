@@ -57,6 +57,8 @@ def _workflow_step_shape_errors(step: dict[str, Any], label: str) -> list[str]:
         errors.append(f"{label}.by must be one of agent, reviewer, person")
     elif "workflow" in step and step.get("by", "agent") != "agent":
         errors.append(f"{label}.by can't be set on a step that runs a workflow; set by on that workflow's own steps")
+    if "gate" in step and step["gate"] not in ("acceptance", "alignment"):
+        errors.append(f"{label}.gate must be one of acceptance, alignment")
     if "instruction" in step and not _is_heading(step["instruction"]):
         errors.append(f"{label}.instruction must be a SKILL.md heading, such as '## Draft'")
     quality = step.get("quality")

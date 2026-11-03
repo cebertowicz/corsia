@@ -12,9 +12,7 @@ import sqlite3
 
 
 def migrate_170_to_171(conn: sqlite3.Connection) -> None:
-    """Create the partial ``workflow_ref`` index on ``plan_nodes``, once the column exists."""
-    if "workflow_ref" not in {str(row[1]) for row in conn.execute("PRAGMA table_info(plan_nodes)")}:
-        return
+    """Create the partial ``workflow_ref`` index on ``plan_nodes``; the column is there since 52."""
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_plan_nodes_workflow_ref ON plan_nodes(workflow_ref)"
         " WHERE workflow_ref IS NOT NULL"

@@ -114,4 +114,32 @@ def test_no_gate_read_scans_a_table() -> None:
         rows = db.execute("EXPLAIN QUERY PLAN " + sql).fetchall()
         plans.append((sql, [row["detail"] for row in rows]))
     scans = [detail for _sql, details in plans for detail in details if detail.startswith("SCAN")]
-    assert set(scans) <= {"SCAN below", "SCAN CONSTANT ROW"}, scans
+    assert {scan for scan in scans if not scan.startswith("SCAN json_each")} <= {"SCAN below", "SCAN CONSTANT ROW"}, scans
+
+
+def _approved_runs(scale, count: int) -> None:
+    for _ in range(count):
+        _phase, steps = _start_run(scale)
+        holds.clear_write(
+            steps[1]["id"], _hold(scale, steps[1]["id"]), expected_kind="blocked", actor_id=None,
+            provenance="user.ask_cleared", detail={"verdict": "approved"}, db=scale.db,
+        )
+
+
+def _statements(db, key) -> int:
+    seen: list[str] = []
+    db.set_trace_callback(seen.append)
+    gate_handoff.derive(db, key, "v1")
+    db.set_trace_callback(None)
+    return len(seen)
+
+
+def test_reading_a_gate_is_a_fixed_number_of_statements_whatever_its_age() -> None:
+    """10 runs and 30 runs of one gate, each with its one open offer, cost the same statements."""
+    scale = build(0)
+    key = (gate_handoff.project_of(scale.db, scale.plan_id), "gated", "gate")
+    _approved_runs(scale, 10)
+    young = _statements(scale.db, key)
+    _approved_runs(scale, 20)
+    assert gate_handoff.derive(scale.db, key, "v1").open_offer is not None
+    assert _statements(scale.db, key) == young

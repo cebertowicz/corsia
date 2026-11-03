@@ -108,6 +108,18 @@ def raise_offer(db, *, plan_id: str, source_node_id: str, content: dict, provena
     return create_raised(db, plan_id, source_node_id, content, provenance)["decision"]
 
 
+#: Why a handoff offer is withdrawn: a correction broke the record it was offered on.
+OFFER_VOIDED = "A correction handed the review back"
+
+
+def withdraw_offer(db, decision_id: str, *, provenance: str) -> bool:
+    """Withdraw an open offer ``raise_offer`` made; server-internal like it. Returns whether it changed."""
+    row = decision_projection.identity_row(db, decision_id)
+    if row is None:
+        return False
+    return decision_lifecycle._withdraw(db, row, reason=OFFER_VOIDED, actor_id=provenance, provenance=provenance)
+
+
 def update(decision_id: str, *, expected_revision, mutation_id, actor, provenance,
            db, **patch) -> notifications.DeferredMutation:
     """Rewrite decision content, returning it to draft for a fresh review (E5)."""

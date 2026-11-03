@@ -9,7 +9,11 @@ records as ``gate_handoff_offered``); there is no table of counts.
 The rule (how-workflows-work, "Handing off an acceptance gate"): a run counts once,
 by the person's first answer at the gate, and only Approve is clean. After 8 clean
 runs in a row on the current workflow version the person is offered four answers. A
-correction hands the gate back and restarts the count.
+correction hands the gate back, restarts the count and withdraws an open offer.
+
+Reading a gate replays its whole history, so the read is a fixed number of
+statements whatever the gate's age: each one takes every run of the gate at
+once (``json_each`` over the ids), never one statement per run.
 """
 
 from __future__ import annotations
@@ -73,13 +77,18 @@ class _Run:
 
 @dataclass
 class GateState:
-    """Where a gate stands: ``kind`` is person, spot, none or drop."""
+    """Where a gate stands: ``kind`` is person, spot, none or drop.
+
+    ``open_offer`` is the decision id of the offer the person can still answer;
+    ``voided_offer`` is one a correction made void while it was still open.
+    """
 
     kind: str = "person"
     streak: int = 0
     spot_clean: int = 0
-    open_offer: bool = False
-    dropped_on: str | None = None
+    open_offer: str | None = None
+    voided_offer: str | None = None
+    handed_on: str | None = None
 
 
 def project_of(db, plan_id: str) -> str:
@@ -91,10 +100,12 @@ def project_of(db, plan_id: str) -> str:
     return (row["project_id"] or "") if row is not None else ""
 
 
+def _ids(values) -> str:
+    return json.dumps(list(values))
+
+
 def _runs(db, key: tuple[str, str, str]) -> list[_Run]:
     """Each run of the gate in start order, with its first answer and corrections."""
-    from plans.workflow_fields import creation_payload
-
     project, ref, step = key
     rows = db.execute(
         "SELECT p.id AS phase, p.plan_id AS plan, p.workflow_version AS version, p.created_at AS created, s.id AS node"
@@ -105,20 +116,30 @@ def _runs(db, key: tuple[str, str, str]) -> list[_Run]:
         " ORDER BY p.created_at,p.rowid,s.created_at,s.rowid",
         (step, ref, project),
     ).fetchall()
+    created: dict[str, dict] = {}
+    for row in db.execute(
+        "SELECT node_id,payload_json FROM plan_node_events WHERE event='node_created'"
+        " AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at,id",
+        (_ids(row["node"] for row in rows),),
+    ):
+        created.setdefault(row["node_id"], json.loads(row["payload_json"] or "{}"))
     runs: dict[str, _Run] = {}
     for row in rows:
         run = runs.get(row["phase"])
         if run is None:
-            created = creation_payload(db, row["node"])
-            if created.get("workflow_gate") != "acceptance":
+            first = created.get(row["node"], {})
+            if first.get("workflow_gate") != "acceptance":
                 continue
             run = runs[row["phase"]] = _Run(
-                row["phase"], row["plan"], row["version"], row["created"], created.get("workflow_gate_mode", "person"), [],
+                row["phase"], row["plan"], row["version"], row["created"], first.get("workflow_gate_mode", "person"), [],
             )
         run.nodes.append(row["node"])
-    for run in runs.values():
-        run.answer, run.answered_at = first_answer(db, run.nodes)
-        run.corrections = _corrections(db, run.plan, run.phase)
+    run_of = {node: run for run in runs.values() for node in run.nodes}
+    for node, verdict, stamp in _answers(db, list(run_of), "ASC"):
+        if run_of[node].answer is None:
+            run_of[node].answer, run_of[node].answered_at = verdict, stamp
+    for phase, stamp in _corrections(db, [(run.plan, run.phase) for run in runs.values()]):
+        runs[phase].corrections.append(stamp)
     return list(runs.values())
 
 
@@ -127,46 +148,60 @@ def first_answer(db, node_ids: list[str]) -> tuple[str | None, str | None]:
 
     A run with no answer (not asked, or N/A) returns ``(None, None)``: it neither counts nor breaks a streak.
     """
-    for verdict, stamp in _answers(db, node_ids, "ASC"):
+    for _node, verdict, stamp in _answers(db, node_ids, "ASC"):
         return verdict, stamp
     return None, None
 
 
 def latest_verdict(db, node_ids: list[str]) -> str | None:
     """The person's most recent verdict across a step's nodes, or None."""
-    for verdict, _stamp in _answers(db, node_ids, "DESC"):
+    for _node, verdict, _stamp in _answers(db, node_ids, "DESC"):
         return verdict
     return None
 
 
 def _answers(db, node_ids: list[str], order: str):
-    marks = ",".join("?" * len(node_ids))
+    """Each person's verdict on any of ``node_ids``, as (node, verdict, when), in one statement."""
     for row in db.execute(
-        f"SELECT payload_json,created_at FROM plan_node_events WHERE event='hold_cleared' AND provenance=?"
-        f" AND node_id IN ({marks}) ORDER BY created_at {order},rowid {order}",
-        (_ANSWERED_BY_PERSON, *node_ids),
+        "SELECT node_id,payload_json,created_at FROM plan_node_events WHERE event='hold_cleared' AND provenance=?"
+        f" AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at {order},rowid {order}",
+        (_ANSWERED_BY_PERSON, _ids(node_ids)),
     ):
         verdict = (json.loads(row["payload_json"] or "{}").get("detail") or {}).get("verdict")
         if isinstance(verdict, str):
-            yield verdict, row["created_at"]
+            yield row["node_id"], verdict, row["created_at"]
 
 
-def _corrections(db, plan_id: str, phase_id: str) -> list[str]:
-    """When each correction on work under this run's phase was created.
+def _corrections(db, phases: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """Each correction on work under these runs' phases, as (phase, when created).
 
-    A correction is a follow-up of its source, so it is found by ``follow_up_of`` over the phase's subtree.
+    A correction is a follow-up of its source, so it is found by ``follow_up_of`` over each phase's subtree.
     """
-    return [row["created_at"] for row in db.execute(
-        "WITH RECURSIVE below(id) AS (SELECT ? UNION ALL SELECT n.id FROM below CROSS JOIN plan_nodes n ON n.plan_id=? AND n.parent_id=below.id),"
-        " fixes(id) AS (SELECT n.id FROM plan_nodes n WHERE n.follow_up_of IN (SELECT id FROM below))"
-        " SELECT e.created_at FROM plan_node_events e WHERE e.node_id IN (SELECT id FROM fixes)"
-        " AND e.event='correction_created' ORDER BY e.created_at,e.rowid",
-        (phase_id, plan_id),
+    if not phases:
+        return []
+    return [(row["phase"], row["created_at"]) for row in db.execute(
+        "WITH RECURSIVE below(id,plan,phase) AS ("
+        " SELECT json_extract(value,'$[1]'),json_extract(value,'$[0]'),json_extract(value,'$[1]') FROM json_each(?)"
+        " UNION ALL SELECT n.id,below.plan,below.phase FROM below CROSS JOIN plan_nodes n"
+        " ON n.plan_id=below.plan AND n.parent_id=below.id),"
+        " fixes(id,phase) AS (SELECT n.id,below.phase FROM below CROSS JOIN plan_nodes n ON n.follow_up_of=below.id)"
+        " SELECT fixes.phase,e.created_at FROM fixes CROSS JOIN plan_node_events e"
+        " ON e.node_id=fixes.id AND e.event='correction_created' ORDER BY e.created_at,e.rowid",
+        (json.dumps([list(pair) for pair in phases]),),
     )]
 
 
-def _offers(db, key: tuple[str, str, str], phases: list[str]) -> list[tuple[str, str, tuple[str | None, str] | None]]:
-    """Each offer of the gate: when raised, its decision's state, and its answer (option id, answer time).
+@dataclass
+class _Offer:
+    raised: str
+    decision_id: str
+    state: str
+    option: str | None = None
+    answered_at: str | None = None
+
+
+def _offers(db, key: tuple[str, str, str], phases: list[str]) -> list[_Offer]:
+    """Each offer of the gate with its decision's state and answer, in three statements.
 
     An offer is recorded on the run phase it was raised under, so it is read by those phases' ids.
     """
@@ -174,25 +209,38 @@ def _offers(db, key: tuple[str, str, str], phases: list[str]) -> list[tuple[str,
 
     if not phases:
         return []
-    project, ref, step = key
-    marks = ",".join("?" * len(phases))
-    listed = []
+    raised = [
+        (row["created_at"], payload["decision_id"]) for row in db.execute(
+            "SELECT created_at,payload_json FROM plan_node_events WHERE event=?"
+            " AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at,rowid",
+            (OFFER_EVENT, _ids(phases)),
+        ) if (payload := json.loads(row["payload_json"]))["key"] == list(key)
+    ]
+    if not raised:
+        return []
+    bodies = {}
     for row in db.execute(
-        f"SELECT created_at,payload_json FROM plan_node_events WHERE node_id IN ({marks}) AND event=?"
-        " ORDER BY created_at,rowid", (*phases, OFFER_EVENT),
+        "SELECT external_id,metadata FROM artifact_identities WHERE integration='local' AND type=?"
+        " AND state='active' AND external_id IN (SELECT value FROM json_each(?))",
+        (decision_projection.DECISION_TYPE, _ids(decision for _stamp, decision in raised)),
     ):
-        payload = json.loads(row["payload_json"])
-        if payload["key"] != [project, ref, step]:
+        if (body := decision_projection._body(row)) is not None:
+            bodies[row["external_id"]] = body
+    answered_at = {row["node_id"]: row["created_at"] for row in db.execute(
+        "SELECT node_id,created_at FROM plan_node_events WHERE event='decision_answered'"
+        " AND node_id IN (SELECT value FROM json_each(?))",
+        (_ids(body["node_id"] for body in bodies.values() if body["state"] == "answered"),),
+    )}
+    listed = []
+    for stamp, decision in raised:
+        body = bodies.get(decision)
+        if body is None:
             continue
-        decision = decision_projection.read(payload["decision_id"], db=db)
-        answered = None
-        if decision["state"] == "answered":
-            event = db.execute(
-                "SELECT created_at FROM plan_node_events WHERE node_id=? AND event='decision_answered'",
-                (decision["node_id"],),
-            ).fetchone()
-            answered = (decision["answer"].get("option_id"), event["created_at"])
-        listed.append((row["created_at"], decision["state"], answered))
+        offer = _Offer(stamp, decision, body["state"])
+        if body["state"] == "answered":
+            offer.option = (body.get("answer") or {}).get("option_id")
+            offer.answered_at = answered_at.get(body["node_id"], stamp)
+        listed.append(offer)
     return listed
 
 
@@ -205,24 +253,25 @@ def derive(db, key: tuple[str, str, str], version: str | None = None) -> GateSta
         if run.answer is not None:
             items.append((run.answered_at or run.created, 2, "answer", run))
         items.extend((stamp, 3, "correction", run) for stamp in run.corrections)
-    for raised, status, answered in _offers(db, key, [run.phase for run in runs]):
-        items.append((raised, 1, "offer", status))
-        if answered is not None:
-            items.append((answered[1], 1, "offer_answer", answered))
-        elif status == "invalidated":
-            items.append((raised, 1, "offer_void", None))
+    for offer in _offers(db, key, [run.phase for run in runs]):
+        if offer.state == "invalidated":
+            continue
+        items.append((offer.raised, 1, "offer", offer))
+        if offer.answered_at is not None:
+            items.append((offer.answered_at, 1, "offer_answer", offer))
     state = GateState()
     current: str | None = None
     for _stamp, _order, name, data in sorted(items, key=lambda item: item[:2]):
         if name == "start" and data.version != current:
             current, state.streak, state.spot_clean = data.version, 0, 0
         elif name == "offer":
-            state.open_offer = True
-        elif name == "offer_void":
-            state.open_offer = False
+            state.open_offer = data.decision_id
         elif name == "offer_answer":
-            _apply_answer(state, data[0], data[1])
+            if state.open_offer == data.decision_id:
+                _apply_answer(state, data.option, data.answered_at)
         elif name == "correction":
+            if state.open_offer is not None:
+                state.voided_offer, state.open_offer = state.open_offer, None
             _hand_back(state)
         elif name != "start" and data.version == current:
             _apply_run(state, name, data)
@@ -232,13 +281,13 @@ def derive(db, key: tuple[str, str, str], version: str | None = None) -> GateSta
 
 
 def _apply_answer(state: GateState, option: str | None, stamp: str) -> None:
-    state.open_offer = False
+    state.open_offer = None
     # Any answer that is not one of the three handing options, Other included, keeps the review.
     if option not in _HANDED:
         state.streak = 0
     else:
         state.kind, state.streak, state.spot_clean = _HANDED[option], 0, 0
-        state.dropped_on = datetime.fromisoformat(stamp).astimezone().date().isoformat()
+        state.handed_on = datetime.fromisoformat(stamp).astimezone().date().isoformat()
 
 
 def _hand_back(state: GateState) -> None:
@@ -279,7 +328,7 @@ def drawn(phase_id: str, denominator: int) -> bool:
 
 def drop_reason(state: GateState) -> str:
     """The reason a dropped gate's step is closed with."""
-    return DROP_REASON.format(date=state.dropped_on)
+    return DROP_REASON.format(date=state.handed_on)
 
 
 def after_answer(db, node_id: str) -> None:
@@ -300,7 +349,7 @@ def after_answer(db, node_id: str) -> None:
     state = derive(db, key, phase["workflow_version"])
     if state.kind != "person" or state.open_offer or state.streak < CLEAN_TO_OFFER:
         return
-    names = {"step": node["workflow_step"], "workflow": phase["workflow_ref"]}
+    names = {"step": node["title"], "workflow": phase["title"]}
     decision = decisions.raise_offer(
         db, plan_id=phase["plan_id"], source_node_id=phase["id"], provenance=PROVENANCE,
         content={
@@ -314,6 +363,31 @@ def after_answer(db, node_id: str) -> None:
         db, phase["id"], OFFER_EVENT, actor_id=None, provenance=PROVENANCE,
         payload={"key": list(key), "version": phase["workflow_version"], "decision_id": decision["id"]},
     )
+
+
+def after_correction(db, source_node_id: str) -> None:
+    """After a correction on work under a run, withdraw any handoff offer it made void.
+
+    The correction already hands each gate of that run back; an offer still open
+    would let the person hand off a gate whose record just broke.
+    """
+    from plans import decisions
+    from plans.workflow_fields import creation_payload
+
+    for phase in db.execute(
+        "WITH RECURSIVE up(id,parent) AS (SELECT id,parent_id FROM plan_nodes WHERE id=?"
+        " UNION ALL SELECT n.id,n.parent_id FROM up JOIN plan_nodes n ON n.id=up.parent)"
+        " SELECT n.* FROM up JOIN plan_nodes n ON n.id=up.id WHERE n.kind='phase' AND n.workflow_ref IS NOT NULL",
+        (source_node_id,),
+    ).fetchall():
+        steps = {row["workflow_step"] for row in db.execute(
+            "SELECT id,workflow_step FROM plan_nodes WHERE parent_id=? AND workflow_step IS NOT NULL", (phase["id"],),
+        ) if creation_payload(db, row["id"]).get("workflow_gate") == "acceptance"}
+        project = project_of(db, phase["plan_id"])
+        for step in sorted(steps):
+            state = derive(db, (project, phase["workflow_ref"], step), phase["workflow_version"])
+            if state.voided_offer is not None:
+                decisions.withdraw_offer(db, state.voided_offer, provenance=PROVENANCE)
 
 
 def refuse_rejected(db, node_id: str, operation: str) -> None:

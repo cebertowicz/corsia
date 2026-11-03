@@ -292,6 +292,52 @@ async def test_a_correction_hands_the_gate_back(isolated_db, tmp_path, monkeypat
     assert "gate_mode" not in reply["steps"][1]
 
 
+async def test_a_correction_withdraws_an_open_offer(isolated_db, tmp_path, monkeypatch):
+    run = _make(tmp_path, monkeypatch)
+    for _ in range(7):
+        await _go(run)
+    reply, gate = await _go(run)
+    decision_id = json.loads(_offers()[-1]["payload_json"])["decision_id"]
+    work = reply["steps"][0]["id"]
+    await run.update("mark_done", {"node_id": work, "expected_revision": run.revision(work), "evidence": "d", "verification_result": "passed"})
+    await run.update("add_correction", {
+        "node_id": work, "expected_revision": run.revision(work), "title": "Fix", "acceptance_criteria": "Fixed",
+        "affected_nodes": [{"node_id": gate, "expected_revision": run.revision(gate)}],
+    })
+    db = get_db()
+    try:
+        assert decisions.read(decision_id, db=db)["state"] == "invalidated"
+    finally:
+        db.close()
+    state = _state()
+    assert (state.kind, state.streak, state.open_offer, state.voided_offer) == ("person", 0, None, None)
+    for _ in range(8):
+        await _go(run)
+    assert len(_offers()) == 2
+
+
+async def test_the_offer_names_the_step_and_workflow_by_title(isolated_db, tmp_path, monkeypatch):
+    run = _make(tmp_path, monkeypatch)
+    for _ in range(8):
+        reply, gate = await _go(run)
+    (step,) = _run_db("SELECT title FROM plan_nodes WHERE id=?", gate)
+    db = get_db()
+    try:
+        decision = decisions.read(json.loads(_offers()[-1]["payload_json"])["decision_id"], db=db)
+    finally:
+        db.close()
+    assert decision["title"] == gate_handoff.OFFER_TITLE.format(step=step["title"], workflow=reply["node"]["title"])
+
+
+async def test_a_gate_value_must_be_acceptance_or_alignment():
+    from core.skill_workflow_validation import validate_workflow
+
+    steps = [{"id": "a", "gate": "acceptance"}, {"id": "b", "gate": "alignment"}, {"id": "c", "gate": "aceptance"}]
+    assert validate_workflow({"workflow": {"steps": steps}}) == [
+        "corsia.workflow.steps[2] 'c'.gate must be one of acceptance, alignment",
+    ]
+
+
 async def test_a_correction_on_a_run_of_an_older_version_hands_the_gate_back(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
     await _hand_off(run, "B")
@@ -391,7 +437,7 @@ async def test_the_offer_renders_as_the_owners_decision_and_the_person_can_answe
         (card,) = attention_detail.queue(attention_detail.annotate(items, db=db))
         assert card["renderer"] == "decision"
         assert card["detail"]["source"]["thread_id"] == run.thread_id
-        assert card["detail"]["title"] == gate_handoff.OFFER_TITLE.format(step="gate", workflow="gated")
+        assert card["detail"]["title"].startswith("Hand off the ")
         authored = _run_db("SELECT DISTINCT actor_id FROM plan_node_events WHERE event IN ('decision_drafted','decision_raised')")
         assert authored == [{"actor_id": None}]
     finally:
