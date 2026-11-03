@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
-import { dispatchKeepingPlace, restoreDocumentPlace } from './documentImagePlace';
+import { restoreDocumentPlace } from './documentImagePlace';
+import { dispatchKeepingPlace } from './documentReadingPlace';
 import { NEAR_BOTTOM_PX } from './nearBottom';
 
 const SRC = '/api/files/content?path=%2Fws%2Fa.png';
