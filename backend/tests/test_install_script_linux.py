@@ -361,7 +361,7 @@ def test_a_failed_gws_download_warns_and_the_install_finishes(env):
     result = _run(env, STUB_BAD_CHECKSUM="gws")
 
     assert result.returncode == 0, result.stderr
-    assert "Google Workspace support wasn’t installed. Run this again to add it." in result.stdout
+    assert "Couldn’t install Google Workspace support. Run this again." in result.stdout
     assert _calls(env)[-2:] == ["corsia start stdin=terminal-answer", "corsia sources --install-summary stdin=none"]
 
 

@@ -38,6 +38,8 @@ class FakeGws:
         self.calls.append((list(words), token))
         if words[-1] == "--dry-run":
             assert token is None, "the preview must carry no sign-in"
+            if isinstance(self.preview, Completed):
+                return self.preview
             return Completed(0, self.preview, "") if self.preview is not None else Completed(3, "{}", "")
         if isinstance(self.real, (str, Completed)):
             reply = self.real
@@ -80,7 +82,7 @@ async def test_mail_auth_and_unpreviewable_commands_never_reach_google(tool, mon
     fake = use(monkeypatch, FakeGws(recorded("gmail_send_helper")))
     assert await tool.execute(args=["gmail", "+send"]) == gws_messages.MAIL
     assert await tool.execute(args=["auth", "login"]) == gws_messages.NO_PREVIEW
-    fake.preview = None
+    fake.preview = "{}"  # a preview that succeeds but prints no request
     assert await tool.execute(args=["calendar", "+agenda"]) == gws_messages.NO_PREVIEW
     assert fake.real_runs() == []
 

@@ -16,6 +16,7 @@ from tools import gws_messages
 
 RUN = "run"
 TRASH_FILE = "trash_file"
+# Removing an event, outright or through an update: the event (and its series) is saved first.
 DELETE_EVENT = "delete_event"
 # Clearing or deleting a calendar: every event in it is saved first.
 SAVE_CALENDAR = "save_calendar"
@@ -84,6 +85,14 @@ def _unguarded_docs_delete(preview: dict) -> bool:
     return destructive and not (isinstance(revision, str) and revision)
 
 
+def _removes_events(body: object) -> bool:
+    """True when an event update cancels the event or sets its ``recurrence``, which can drop later occurrences.
+
+    A full update (PUT) that sends ``recurrence`` unchanged is saved too: the request can't say what changed.
+    """
+    return isinstance(body, dict) and (body.get("status") == "cancelled" or "recurrence" in body)
+
+
 def _delete(host: str, path: str) -> Decision:
     """A delete runs only where it can be put back; any other delete, today's or a future one, is refused."""
     if host == "www.googleapis.com":
@@ -109,6 +118,9 @@ def decide(preview: dict) -> Decision:
         return _refuse(gws_messages.MAIL)
     if method == "DELETE":
         return _delete(host, path)
+    if method in ("PATCH", "PUT") and host == "www.googleapis.com" and _removes_events(preview.get("body")):
+        if found := _CALENDAR_EVENT.match(path):
+            return Decision(DELETE_EVENT, calendar_id=unquote(found.group(1)), event_id=unquote(found.group(2)))
     if method == "POST" and host == "www.googleapis.com" and (found := _CALENDAR_CLEAR.match(path)):
         return Decision(SAVE_CALENDAR, calendar_id=unquote(found.group(1)))
     if method == "POST" and host == "docs.googleapis.com" and _DOCS_BATCH.match(path):

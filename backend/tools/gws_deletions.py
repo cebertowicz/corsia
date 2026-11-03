@@ -3,7 +3,8 @@
 Google can't restore a deleted event or a cleared calendar. Before the delete runs, every event it
 removes is written in full, as one JSON list, to
 ``<workspace>/google-deletions/<account>/<UTC timestamp>-<event|calendar>-<id>.json``; if anything
-can't be saved, nothing is deleted. Only deletes are logged.
+can't be saved, nothing is deleted. Only removals are logged: deletes, and updates that cancel an
+event or set a series' recurrence.
 
 Scale: one gws call per 2,500 events and one file per delete, so clearing a 10,000-event calendar
 is four list calls and one file.

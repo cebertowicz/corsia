@@ -45,3 +45,7 @@ NOT_SAVED = "Not deleted: it couldn't be saved first. {detail}"
 NOT_FOUND = "Google Workspace isn't available right now: CORSIA couldn't find its gws program."
 BAD_ARGS = 'Error: args must be the words after gws, for example ["drive","files","list"].'
 FAILED = "Error: Couldn't run the Google Workspace command. Try again later."
+CUT = (
+    "\n\n... (output truncated at {cap:,} chars. Narrow it with `fields`, `pageSize` or a cell range, "
+    "or send it to a workspace file with `output`.)"
+)

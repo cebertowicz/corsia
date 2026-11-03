@@ -432,7 +432,7 @@ install_python_linux() {
 # A failed download warns and continues: the rest of CORSIA works without it.
 install_gws_linux() {
     say "     Installing Google Workspace support…"
-    managed_runtime_linux gws > /dev/null || say "     Google Workspace support wasn’t installed. Run this again to add it."
+    managed_runtime_linux gws > /dev/null || say "     Couldn’t install Google Workspace support. Run this again."
 }
 
 link_managed_node_linux() {

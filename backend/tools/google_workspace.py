@@ -18,6 +18,7 @@ from connections.account_resolver import Refusals, resolve
 from connections.connected_accounts import GOOGLE_PROVIDER
 from connections.google import accounts as google_accounts
 from connections.google import client
+from infra.constants import READ_FILE_OUTPUT_CHAR_CAP
 from infra.db_async import run_in_db
 import tools.gws_check as gws_check
 from tools import gws_messages
@@ -43,7 +44,12 @@ def _account(selector: object, thread_id: object) -> dict:
 
 
 def _text(done: Completed) -> str:
-    return done.stdout.strip() if done.code == 0 else f"Error: {failure_text(done)}"
+    if done.code != 0:
+        return f"Error: {failure_text(done)}"
+    out = done.stdout.strip()
+    if len(out) > READ_FILE_OUTPUT_CHAR_CAP:
+        out = out[:READ_FILE_OUTPUT_CHAR_CAP] + gws_messages.CUT.format(cap=READ_FILE_OUTPUT_CHAR_CAP)
+    return out
 
 
 class GoogleWorkspaceTool(Tool):
@@ -118,6 +124,8 @@ class GoogleWorkspaceTool(Tool):
         if args[0] == "schema" or "--help" in args or "-h" in args:
             return _text(await run_gws(words, account_id=account_id, token=None, workdir=self._workspace))
         previewed = await run_gws([*words, "--dry-run"], account_id=account_id, token=None, workdir=self._workspace)
+        if previewed.code != 0:
+            return _text(previewed)
         preview = gws_check.parse_preview(previewed.stdout)
         if preview is None:
             return gws_messages.NO_PREVIEW
