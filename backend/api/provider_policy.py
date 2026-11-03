@@ -83,6 +83,7 @@ async def put_cloud_models_off(
     project_id: str, body: CloudModelsOffWrite, user: dict = Depends(require_user),
 ):
     require_person_for_locality(user, subject="project_cloud_models_off", name=project_id)
+    before = await run_in_db(_call, project_cloud_models_off, project_id)
     try:
         result = await run_in_db(
             _call, set_project_cloud_models_off, project_id, cloud_models_off=body.cloud_models_off,
@@ -91,6 +92,10 @@ async def put_cloud_models_off(
         return _refused(error)
     # Held heads and every catalog reader depend on this switch: resume what it released.
     notify_models_changed()
+    if before != body.cloud_models_off:
+        from tools.connected_apps_runtime import refresh_local_app_fences
+
+        await refresh_local_app_fences()
     emit_product_event(
         "project", "cloud_models_off.changed",
         properties={"project_id": project_id, "cloud_models_off": body.cloud_models_off},

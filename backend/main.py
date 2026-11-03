@@ -96,6 +96,7 @@ from api.doc_reviews import router as doc_reviews_router
 from api.cli_install import router as cli_install_router
 from api.google import router as google_router
 from api.microsoft import router as microsoft_router
+from api.messages import router as messages_router
 from api.keys import router as keys_router
 
 
@@ -191,6 +192,7 @@ app.include_router(system_perf_router)
 app.include_router(keys_router)
 app.include_router(google_router)
 app.include_router(microsoft_router)
+app.include_router(messages_router)
 app.include_router(uploads_router)
 app.include_router(turns_router)
 app.include_router(drain_router)

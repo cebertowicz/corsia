@@ -274,6 +274,9 @@ def _git_config(account: AgentAccountView) -> list[tuple[str, str]]:
         ("credential.https://github.com.helper", helper),
         ("url.https://github.com/.insteadOf", "git@github.com:"),
         ("url.https://github.com/.insteadOf", "ssh://git@github.com/"),
+        # Keeps a push to an HTTPS GitHub URL on HTTPS when an insteadOf rule rewrites it to SSH:
+        # Git uses a matching push rule before any insteadOf for a push.
+        ("url.https://github.com/.pushInsteadOf", "https://github.com/"),
         ("user.name", name),
         ("user.email", email),
         ("user.useConfigOnly", "true"),
@@ -286,8 +289,11 @@ def shell_env(account: AgentAccountView) -> dict[str, str]:
     """An agent shell's GitHub identity: nothing without an account, the bot's once ready, else locked.
 
     Locked means ``gh`` points at an absent home, Git has no credential helper and an
-    empty identity, and SSH remotes go over HTTPS, so a push fails rather than falls
-    back to the person's own login.
+    empty identity, and GitHub SSH remotes, and HTTPS ones a Git rewrite turns into SSH,
+    push over HTTPS, so a push fails rather than falls back to the person's own login.
+    SSH itself is untouched, so the person's key still reaches GitHub through an SSH host
+    alias, the person's own ``pushInsteadOf`` to SSH, or a command that sets its own SSH
+    command.
     """
     return {} if account.absent else _identity_env(account)
 

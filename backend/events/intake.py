@@ -107,14 +107,16 @@ def resolve_event_type(conn, event_type: str) -> tuple[EventTypeDecl, Any | None
         return None
 
 
-def _facts_problem(facts: Any) -> IntakeResult | None:
+def _facts_problem(facts: Any, origin: str) -> IntakeResult | None:
     if not isinstance(facts, dict):
         return _refusal("facts_not_object", "facts must be a JSON object")
     try:
         size = len(json.dumps(facts, separators=(",", ":"), ensure_ascii=False).encode())
     except (TypeError, ValueError):
         return _refusal("bad_fact_kind", "facts must contain JSON values of their declared kinds")
-    if size > _MAX_FACT_BYTES:
+    # A platform event is composed by CORSIA from bounded inputs plus the worker's schema-validated
+    # answer, and refusing one loses a result, so only outside producers meet the size limit.
+    if size > _MAX_FACT_BYTES and origin != "platform":
         return _refusal("too_large", "facts exceed the 64 KB event limit")
     return None
 
@@ -362,7 +364,7 @@ async def admit_event(*, event_type: str, facts: dict, origin: Literal["connecto
     An emitter or agent refusal is retained here, the one owner of that receipt; failing to
     retain it only logs and never changes the result.
     """
-    problem = _facts_problem(facts)
+    problem = _facts_problem(facts, origin)
     result = problem if problem is not None else await asyncio.to_thread(
         _admit_sync, event_type, facts, origin, producer, event_id, stamps, trace, rule_decision_id,
     )
