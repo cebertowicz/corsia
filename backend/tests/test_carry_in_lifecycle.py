@@ -79,7 +79,10 @@ def _write_lesson(
         lesson_id=lesson_id, owner=c1.owner, name=name, description="Use when closing a node.",
         text=text, trial=Trial(kind="hypothesis", review_after="2099-01-01", state=state),
         source_refs=[{"kind": "message", "reference": "m1"}],
-        case_metadata={"target_file": target, "case": case},
+        case_metadata={
+            **({"target_file": target} if target else {}), "case": case,
+            **({"destination": {"path": TARGET, "version": "1"}} if state == "promoted" else {}),
+        },
     ))
     if commit:
         _git(["add", "-A"], cwd=c1.workspace)
@@ -125,6 +128,55 @@ def _pending_fact():
     pending = _events("lesson.carry_in.pending")
     assert len(pending) == 1
     return CarryInFact.from_attributes(pending[0])
+
+
+def _arm(c1, fact, *, deliver: bool, blob: bytes | None = b"rule v1\n"):
+    """One side's prompt and delivery as the drain builds them for this fact's lesson as saved now."""
+    from core import carry_in_facts
+    from infra import carry_in_drain
+    from infra.database import get_db
+
+    case = carry_in_facts.eligible_case(get_db(), c1.workspace, fact)
+    assert not isinstance(case, str), case
+    return carry_in_drain._arm(fact, case, blob, deliver=deliver)
+
+
+def _admitting_turn(hooked: list):
+    """A ``run_eval_turn`` that admits the prompt as the Turn's real input, then runs the hook with the Turn's id."""
+    from eval import endpoint
+
+    async def run_eval_turn(*, thread_id, thread_row, prompt, model, timeout_seconds, after_manifest_before_dispatch):
+        from infra.thread_driver import admit_input
+
+        turn_id = f"turn-{thread_id}"
+        admission = admit_input(
+            thread_id, role="user", content=prompt, intent="apply_now", message_id=f"input-{thread_id}",
+            turn_id=turn_id, boot_epoch="test-boot", admitted_at="t", materialize_passive_digest=False,
+        )
+        assert admission.batch is not None and admission.batch.turn_id == turn_id
+        try:
+            await after_manifest_before_dispatch("m1", turn_id)
+        except Exception as exc:
+            return None, endpoint.EvalTurnFailure("handoff", f"Eval turn errored: {exc}")
+        hooked.append(turn_id)
+        from core.turn_core import commit_turn_terminal
+
+        settled = await commit_turn_terminal(turn_id, "completed", None)
+        if settled.successor is not None:  # the idle Turn a settled Turn starts must not block the thread's delete
+            await commit_turn_terminal(settled.successor.turn_id, "cancelled", None)
+        return turn_id, None
+
+    return run_eval_turn
+
+
+def _receipts() -> list[dict]:
+    from infra.database import get_db
+
+    rows = get_db().execute(
+        "SELECT thread_id, turn_id, node_id, variant, lesson_id, lesson_behavioral_sha256, delivered_sha256, path "
+        "FROM guidance_loads WHERE lesson_id IS NOT NULL ORDER BY created_at, id"
+    ).fetchall()
+    return [dict(row) for row in rows]
 
 
 # --- committed-save recorder ------------------------------------------------
@@ -368,8 +420,8 @@ async def _run_scored(c1, monkeypatch, results):
     _local(monkeypatch)
     calls = []
 
-    async def sample(fact, owner, model, actions, prompt, label, created):
-        calls.append((fact.target_commit, label, prompt))
+    async def sample(fact, owner, model, actions, arm, label, created):
+        calls.append((fact.target_commit, label, arm.prompt))
         created.append((f"eval-c1-{label}", owner["user_id"]))
         outcome = results.pop(0)
         if isinstance(outcome, Exception):
@@ -439,7 +491,7 @@ async def test_one_drain_request_settles_only_the_oldest_runnable_case(c1, monke
     _local(monkeypatch)
     labels = []
 
-    async def sample(fact, owner, model, actions, prompt, label, created):
+    async def sample(fact, owner, model, actions, arm, label, created):
         labels.append((fact.identity, label))
         return label.startswith("c")  # baseline fails, candidate passes: both runnable cases score
 
@@ -481,11 +533,11 @@ async def test_a_request_during_a_wake_earns_exactly_one_more_wake(c1, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_a_manifest_without_the_lesson_version_retires_the_case(c1, monkeypatch):
-    from infra.carry_in_drain import _ManifestMismatch
+async def test_a_turn_whose_input_does_not_match_its_side_retires_the_case(c1, monkeypatch):
+    from infra.carry_in_drain import _DeliveryMismatch
 
-    await _run_scored(c1, monkeypatch, [_ManifestMismatch("no")])
-    assert (_events()[-1]["event"], _events()[-1]["reason"]) == ("lesson.carry_in.retired", "manifest_mismatch")
+    await _run_scored(c1, monkeypatch, [_DeliveryMismatch("no")])
+    assert (_events()[-1]["event"], _events()[-1]["reason"]) == ("lesson.carry_in.retired", "delivery_mismatch")
 
 
 @pytest.mark.asyncio
@@ -504,7 +556,7 @@ async def test_a_sample_is_a_fresh_isolated_child_of_the_owner_checked_before_di
     async def run_eval_turn(*, thread_id, thread_row, prompt, model, timeout_seconds, after_manifest_before_dispatch):
         seen.update(thread=dict(thread_row), model=model, isolated=is_carry_in_record_only("write_file"))
         try:
-            await after_manifest_before_dispatch("absent-manifest")
+            await after_manifest_before_dispatch("absent-manifest", "absent-turn")
         except Exception as exc:
             return None, endpoint.EvalTurnFailure("handoff", f"Eval turn errored: {exc}")
         return "turn-1", None
@@ -513,8 +565,10 @@ async def test_a_sample_is_a_fresh_isolated_child_of_the_owner_checked_before_di
     monkeypatch.setattr(turn_result, "read_turn_result", lambda *_a: pytest.fail("read an unchecked turn"))
     created = []
     owner = {"user_id": "steve", "project_id": None}
-    with pytest.raises(carry_in_drain._ManifestMismatch):
-        await carry_in_drain._sample(fact, owner, "omlx@srv/m0", ACTIONS, "prompt", "b1", created)
+    with pytest.raises(carry_in_drain._DeliveryMismatch):
+        await carry_in_drain._sample(
+            fact, owner, "omlx@srv/m0", ACTIONS, _arm(c1, fact, deliver=False), "b1", created,
+        )
 
     child = f"eval-c1-{fact.identity[:16]}-b1"
     assert created == [(child, "steve")]
@@ -539,24 +593,17 @@ async def test_each_sample_rechecks_exact_idle_capacity_right_before_its_provide
         checks.append((bound, exclude_thread))
         return None  # a person started a local Turn after the claim
 
-    async def run_eval_turn(*, thread_id, thread_row, prompt, model, timeout_seconds, after_manifest_before_dispatch):
-        try:
-            await after_manifest_before_dispatch("m1")
-        except Exception as exc:
-            return None, endpoint.EvalTurnFailure("handoff", f"Eval turn errored: {exc}")
-        dispatched.append(model)
-        return "turn-1", None
-
-    monkeypatch.setattr(carry_in_drain, "_manifest_carries", lambda *_a: True)
     monkeypatch.setattr(carry_in_capacity, "ready_idle", ready_idle)
-    monkeypatch.setattr(endpoint, "run_eval_turn", run_eval_turn)
+    monkeypatch.setattr(endpoint, "run_eval_turn", _admitting_turn(dispatched))
     monkeypatch.setattr(turn_result, "read_turn_result", lambda *_a: pytest.fail("read an undispatched turn"))
     owner = {"user_id": "steve", "project_id": None}
 
     with pytest.raises(carry_in_drain._Unavailable):
-        await carry_in_drain._sample(fact, owner, "omlx@srv/m0", ACTIONS, "prompt", "c1", [])
+        await carry_in_drain._sample(
+            fact, owner, "omlx@srv/m0", ACTIONS, _arm(c1, fact, deliver=True), "c1", [],
+        )
     assert checks == [("omlx@srv/m0", f"eval-c1-{fact.identity[:16]}-c1")]
-    assert dispatched == []
+    assert dispatched == [] and _receipts() == []
 
 
 @pytest.mark.asyncio
@@ -633,7 +680,9 @@ async def test_a_failed_sample_keeps_the_eval_routes_failure_kind_whatever_its_t
 
     monkeypatch.setattr(endpoint, "run_eval_turn", run_eval_turn)
     with pytest.raises(carry_in_drain._SampleFailed) as failed:
-        await carry_in_drain._sample(fact, {"user_id": "steve", "project_id": None}, "omlx@srv/m0", ACTIONS, "p", "b1", [])
+        await carry_in_drain._sample(fact, {"user_id": "steve", "project_id": None}, "omlx@srv/m0", ACTIONS,
+            _arm(c1, fact, deliver=False), "b1", [],
+        )
     assert failed.value.reason == "provider"
 
 
@@ -695,23 +744,6 @@ async def test_capacity_lost_between_samples_ends_the_claimed_case_in_visible_co
         "lesson.carry_in.coverage", "no_ready_local_model", 1,
     )
     assert calls[-1][0] == "deleted" and calls[-1][2] == "lesson.carry_in.coverage"
-
-
-def test_manifest_check_reads_the_skills_index_lessons(isolated_db):
-    from infra.carry_in_drain import _manifest_carries
-    from infra.database import get_db
-
-    db = get_db()
-    entries = [{"source_id": "dynamic:skills-index", "lessons": [{"id": "l1", "behavioral_sha256": "v1"}]}]
-    db.execute(
-        "INSERT INTO context_manifests (id,harness,entries_json,entry_count,created_at) VALUES ('m1','native',?,1,'t')",
-        (json.dumps(entries),),
-    )
-    db.commit()
-
-    assert _manifest_carries(db, "m1", "l1", "v1") is True
-    assert _manifest_carries(db, "m1", "l1", "v2") is False
-    assert _manifest_carries(db, None, "l1", "v1") is False
 
 
 # --- local model selection --------------------------------------------------
@@ -955,8 +987,8 @@ async def test_the_manifest_hook_runs_after_recording_and_can_refuse_dispatch(mo
     monkeypatch.setattr("infra.send_dispatch.dispatch", dispatch)
     monkeypatch.setattr(thread_execution, "_dispatch_context", lambda *a, **k: None)
 
-    async def refuse(manifest_id):
-        order.append(f"hook:{manifest_id}")
+    async def refuse(manifest_id, turn_id):
+        order.append(f"hook:{manifest_id}:{turn_id}")
         raise RuntimeError("missing lesson")
 
     batch = SimpleNamespace(thread_id="t", turn_id="u")
@@ -966,4 +998,4 @@ async def test_the_manifest_hook_runs_after_recording_and_can_refuse_dispatch(mo
             batch, prepared, SimpleNamespace(), attempt_id="a", user=None, ws=None,
             after_persist_before_dispatch=None, after_manifest_before_dispatch=refuse,
         )
-    assert order == ["manifest", "hook:m1"]
+    assert order == ["manifest", "hook:m1:u"]

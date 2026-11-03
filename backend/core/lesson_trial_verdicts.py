@@ -49,7 +49,8 @@ WITH, WITHOUT = "with", "without"
 NO_STEP = "none"
 # Why a task is in neither half, in precedence order: the first cause that matches is the one counted.
 DROP_CAUSES = ("revision", "prior_with", "late_open", "omitted")
-# Open trials: a delivered (lesson, version) with no reached verdict yet. Whether the trial file still says
+# Open trials: a delivered (lesson, version) with no reached verdict yet; a delivery is a receipt of a plan task
+# (a carry-in re-test sample's receipt has a Turn and no task). Whether the trial file still says
 # `trial` at that version is confirmed against the file, so a retired or edited lesson drops out.
 OPEN_TRIALS_SQL = """
     SELECT g.lesson_id, g.lesson_behavioral_sha256 AS sha, MIN(g.created_at) AS first_at,
@@ -57,6 +58,7 @@ OPEN_TRIALS_SQL = """
          AND p.lesson_behavioral_sha256=g.lesson_behavioral_sha256 ORDER BY p.created_at DESC, p.id DESC LIMIT 1) AS path
     FROM guidance_loads g
     WHERE g.lesson_id IS NOT NULL AND g.lesson_behavioral_sha256 IS NOT NULL
+      AND g.node_id IS NOT NULL
       AND NOT EXISTS (
         SELECT 1 FROM outcome_events r WHERE r.event_name=:reached AND r.retracted_at IS NULL
           AND r.subject_key='lesson:'||g.lesson_id||'@'||g.lesson_behavioral_sha256)

@@ -14,7 +14,7 @@ PERIOD_SQL = (
     "g.lesson_behavioral_sha256 AS behavioral_sha256,g.path,g.raw_sha256 "
     "FROM guidance_loads g JOIN threads t ON t.id=g.thread_id "
     "JOIN (SELECT value AS tid FROM json_each(?) LIMIT -1) o ON o.tid=t.id "
-    "WHERE t.user_id=? AND g.variant='with' AND g.lesson_id IS NOT NULL "
+    "WHERE t.user_id=? AND g.variant='with' AND g.lesson_id IS NOT NULL AND g.node_id IS NOT NULL "
     "AND g.lesson_behavioral_sha256 IS NOT NULL AND g.created_at>=? AND g.created_at<?"
 )
 

@@ -9,12 +9,15 @@ same check, on the claimed model only, runs again just before every sample's
 provider call; failing it ends the claimed case in coverage, never a call.
 Samples are ordinary fresh eval Turns (``eval.endpoint.run_eval_turn``) under
 record-only tool isolation, so they cannot change anything they act on.
+A candidate sample of a ``trial`` lesson carries the lesson the way task start
+delivers it (``core.lesson_delivery``); a baseline sample carries none. Just
+before each provider call the Turn's own recorded input must match its side,
+and only then does one ``guidance_loads`` receipt record the arm.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -24,6 +27,14 @@ from loguru import logger
 from core import carry_in_facts as facts
 from core.carry_in_facts import CarryInFact, EligibleCase
 from infra import carry_in_capacity as capacity
+from infra.carry_in_arm import (
+    Arm as _Arm,
+    arm as _arm,
+    drop_receipts as _drop_receipts,
+    insert_receipt as _insert_receipt,
+    sample_prompt,
+    turn_input as _turn_input,
+)
 from infra.db_async import run_in_db, run_off_db
 
 SAMPLES = 3
@@ -37,8 +48,8 @@ _running = False
 _again = False
 
 
-class _ManifestMismatch(RuntimeError):
-    """The fresh Turn's recorded context does not carry the lesson version under test."""
+class _DeliveryMismatch(RuntimeError):
+    """The fresh Turn's recorded input does not match its side: the lesson block is missing or present."""
 
 
 class _Unavailable(RuntimeError):
@@ -143,6 +154,8 @@ async def _delete_threads(threads: list[tuple[str, str]]) -> None:
             status = await delete_owned_thread(thread_id, user_id, [])
             if status != "ok":
                 logger.warning("carry-in eval thread {} not deleted: {}", thread_id, status)
+            else:  # a receipt never outlives the sample thread it describes
+                await run_in_db(partial(_write, _drop_receipts, thread_id, scope="carry_in_receipts"))
         except Exception:
             logger.opt(exception=True).warning("carry-in eval thread {} not deleted", thread_id)
 
@@ -150,20 +163,6 @@ async def _delete_threads(threads: list[tuple[str, str]]) -> None:
 def _owner(db, thread_id: str) -> dict | None:
     row = db.execute("SELECT user_id, project_id FROM threads WHERE id=?", (thread_id,)).fetchone()
     return None if row is None or not row[0] else {"user_id": str(row[0]), "project_id": row[1]}
-
-
-def _manifest_carries(db, manifest_id: str | None, lesson_id: str, version: str) -> bool:
-    from core.guidance_manifest import SKILLS_INDEX_SOURCE_ID
-
-    if not manifest_id:
-        return False
-    row = db.execute("SELECT entries_json FROM context_manifests WHERE id=?", (manifest_id,)).fetchone()
-    if row is None:
-        return False
-    for entry in json.loads(row[0]):
-        if entry.get("source_id") == SKILLS_INDEX_SOURCE_ID:
-            return {"id": lesson_id, "behavioral_sha256": version} in (entry.get("lessons") or [])
-    return False
 
 
 def _blobs(workspace: Path, fact: CarryInFact) -> tuple[bytes | None, bytes] | None:
@@ -180,28 +179,8 @@ def _blobs(workspace: Path, fact: CarryInFact) -> tuple[bytes | None, bytes] | N
     return before, after
 
 
-def sample_prompt(case: dict[str, Any], target_path: str, blob: bytes | None) -> str:
-    """The situation and the exact target revision; never the right call or its actions."""
-    lines = [str(case["what_happened"]).strip(), ""]
-    if blob is None:
-        lines.append(f"There is no file at `{target_path}` yet.")
-    else:
-        text = blob.decode("utf-8", errors="replace")
-        fence = "`" * max(3, _longest_backtick_run(text) + 1)
-        lines += [f"`{target_path}` reads:", fence, text.rstrip("\n"), fence]
-    return "\n".join(lines)
-
-
-def _longest_backtick_run(text: str) -> int:
-    longest = run = 0
-    for char in text:
-        run = run + 1 if char == "`" else 0
-        longest = max(longest, run)
-    return longest
-
-
 async def _sample(
-    fact: CarryInFact, owner: dict, model: str, actions: dict, prompt: str, label: str,
+    fact: CarryInFact, owner: dict, model: str, actions: dict, arm: _Arm, label: str,
     created: list[tuple[str, str]],
 ) -> bool:
     """Run one isolated fresh Turn and score it; raise when it cannot be scored."""
@@ -221,18 +200,26 @@ async def _sample(
     created.append((thread_id, owner["user_id"]))
     refused: list[RuntimeError] = []
 
-    async def before_dispatch(manifest_id: str | None) -> None:
-        """The last step before this sample's provider call: lesson in context, capacity still exact and idle."""
-        if not await run_in_db(_read, _manifest_carries, manifest_id, fact.lesson_id, fact.behavioral_sha256):
-            refused.append(_ManifestMismatch("context manifest does not carry the lesson version under test"))
+    async def before_dispatch(_manifest_id: str | None, turn_id: str) -> None:
+        """The last step before this sample's provider call.
+
+        The Turn's own recorded input must hold exactly this side's delivery and
+        capacity must still be exact and idle; only then is the arm receipted.
+        """
+        recorded = await run_in_db(_read, _turn_input, thread_id, turn_id)
+        if not arm.carried_by(recorded):
+            refused.append(_DeliveryMismatch("the Turn's recorded input does not match its side's lesson delivery"))
         elif await capacity.ready_idle(model, exclude_thread=thread_id) is None:
             refused.append(_Unavailable(f"{model} is not the one ready, idle local model"))
         if refused:
             raise refused[0]
+        await run_in_db(partial(
+            _write, _insert_receipt, thread_id, turn_id, arm, fact, scope="carry_in_receipt",
+        ))
 
     with carry_in_tool_isolation():
         turn_id, failure = await run_eval_turn(
-            thread_id=thread_id, thread_row=row, prompt=prompt, model=model,
+            thread_id=thread_id, thread_row=row, prompt=arm.prompt, model=model,
             timeout_seconds=SAMPLE_TIMEOUT_SECONDS, after_manifest_before_dispatch=before_dispatch,
         )
     if refused:
@@ -247,13 +234,13 @@ async def _sample(
     return sample_passes(actions, result.tool_calls)
 
 
-async def _run_side(fact, owner, model, actions, prompt, side, created, completed) -> int:
+async def _run_side(fact, owner, model, actions, arm, side, created, completed) -> int:
     """Samples of one side until its outcome is decided; returns the pass count."""
     passes = fails = 0
     for index in range(1, SAMPLES + 1):
         if passes >= NEEDED or fails >= NEEDED:
             break
-        passed = await _sample(fact, owner, model, actions, prompt, f"{side}{index}", created)
+        passed = await _sample(fact, owner, model, actions, arm, f"{side}{index}", created)
         completed[0] += 1
         passes, fails = passes + passed, fails + (not passed)
     return passes
@@ -271,7 +258,7 @@ async def _evaluate(
         actions = case.actions
         assert actions is not None
         baseline_passes = await _run_side(
-            fact, owner, model, actions, sample_prompt(case.case, fact.target_path, before),
+            fact, owner, model, actions, _arm(fact, case, before, deliver=False),
             "b", created, completed,
         )
         baseline_failures = completed[0] - baseline_passes
@@ -280,7 +267,7 @@ async def _evaluate(
                         "baseline_failures": baseline_failures, "candidate_passes": 0}
         else:
             candidate_passes = await _run_side(
-                fact, owner, model, actions, sample_prompt(case.case, fact.target_path, after),
+                fact, owner, model, actions, _arm(fact, case, after, deliver=case.deliver),
                 "c", created, completed,
             )
             terminal = {
@@ -288,8 +275,8 @@ async def _evaluate(
                 "verdict": "passed" if candidate_passes >= NEEDED else "failed",
                 "baseline_failures": baseline_failures, "candidate_passes": candidate_passes,
             }
-    except _ManifestMismatch:
-        terminal = {"event": facts.RETIRED, "reason": "manifest_mismatch"}
+    except _DeliveryMismatch:
+        terminal = {"event": facts.RETIRED, "reason": "delivery_mismatch"}
     except _Unavailable as lost:  # claimed identities never re-pend (spec item 6)
         logger.info("carry-in case {} lost local capacity: {}", fact.identity[:16], lost)
         terminal = {"event": facts.COVERAGE, "reason": UNAVAILABLE}
