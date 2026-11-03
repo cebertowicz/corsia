@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { messages } from '$lib/stores/threads';
 	import { clipChatSelection, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
@@ -16,6 +16,11 @@
 	let pick = $state<Pick | null>(null);
 	let draft = $state<Pick | null>(null);
 	let editingId = $state<string | null>(null);
+	// Text typed in the open popover; kept here because the narrow/wide branch remounts the composer.
+	let typed = $state<string | null>(null);
+	// Popovers left unsent by a thread switch or an outside click, in memory like the composer drafts.
+	const parked = new Map<string, { draft: Pick | null; editingId: string | null; typed: string | null }>();
+	let shownThread = untrack(() => threadId);
 	let buttonWidth = $state(0);
 	let narrow = $state(false);
 	const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
@@ -34,7 +39,10 @@
 		return bounds ? Math.max(bounds.left + 8, Math.min(wanted, bounds.right - 8 - buttonWidth)) : wanted;
 	});
 	const anchor = $derived.by(() => {
-		if (draft) return draft.rect;
+		if (draft) {
+			const rect = draft.rect;
+			return () => document.querySelector<HTMLElement>('[data-comment-ids="draft"]')?.getBoundingClientRect() ?? rect;
+		}
 		if (!editing) return null;
 		return () => [...document.querySelectorAll<HTMLElement>('[data-comment-ids]')].find(el => el.dataset.commentIds?.split(',').includes(editing.id))?.getBoundingClientRect()
 			?? bodyOf(document.querySelector(`[data-message-id="${CSS.escape(editing.messageId)}"]`))?.getBoundingClientRect() ?? null;
@@ -44,12 +52,16 @@
 		return row?.querySelector<HTMLElement>('.long-message-body, .bubble-content') ?? null;
 	}
 	function close() {
-		pick = null; draft = null; editingId = null;
+		pick = null; draft = null; editingId = null; typed = null;
 		window.getSelection()?.removeAllRanges();
 		const focus = returnFocus; returnFocus = null;
 		if (focus) void tick().then(() => focus.focus());
 	}
-	function requestClose() { if (!closing) { afterClose = close; closing = true; } }
+	function requestClose(keep = false) {
+		if (closing) return;
+		if (keep === true && threadId && typed?.trim() && (draft || editingId)) parked.set(threadId, { draft, editingId, typed });
+		afterClose = close; closing = true;
+	}
 	function closed() { const finish = afterClose; afterClose = null; finish?.(); closing = false; }
 	function beginReply(message: (typeof $messages)[number], comment: NonNullable<(typeof $messages)[number]['chat_comments']>[number], target: HTMLElement) {
 		if (typeof message.seq !== 'number') return;
@@ -125,7 +137,21 @@
 		void tick().then(() => requestAnimationFrame(() => { queued = false; paint(); }));
 	}
 	$effect(() => { void comments; void editingId; void draft; void $messages; schedule(); });
-	$effect(() => { void threadId; close(); });
+	$effect(() => { if (open) untrack(() => { if (threadId) parked.delete(threadId); }); });
+	$effect(() => {
+		const next = threadId;
+		untrack(() => {
+			if (next === shownThread) { close(); return; }
+			if (shownThread && (draft || editingId)) parked.set(shownThread, { draft, editingId, typed });
+			shownThread = next;
+			close();
+			const back = next ? parked.get(next) : undefined;
+			if (!back) return;
+			parked.delete(next!);
+			closing = false; afterClose = null;
+			draft = back.draft; editingId = back.editingId; typed = back.typed;
+		});
+	});
 	onMount(() => {
 		const update = () => { narrow = window.innerWidth <= 768; };
 		update(); window.addEventListener('resize', update);
@@ -187,13 +213,13 @@
 {#if open}
 	{#key editing?.id ?? draft?.anchor.from_off}
 		{#if narrow}
-			<AdaptiveDrawer ariaLabel={heading} {heading} doneLabel="Close" followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
-				<CommentComposer quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={editing?.note ?? ''} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} onSubmit={submit} onCancel={requestClose} />
+			<AdaptiveDrawer ariaLabel={heading} {heading} doneLabel="Close" followKeyboard open={!closing} onClose={() => requestClose(true)} onClosed={closed}>
+				<CommentComposer quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={typed ?? editing?.note ?? ''} onBody={text => { typed = text; }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} onSubmit={submit} onCancel={() => requestClose()} />
 			</AdaptiveDrawer>
 		{:else}
-			<Popover {anchor} bounds={messageRoot()} placement="bottom" open={!closing} initialFocus="textarea" surfaceRole={null} onClose={requestClose} onClosed={closed}>
+			<Popover {anchor} bounds={messageRoot()} placement="bottom" open={!closing} initialFocus="textarea" surfaceRole={null} onClose={() => requestClose(true)} onClosed={closed}>
 				<div role="dialog" aria-label={heading}>
-					<CommentComposer quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={editing?.note ?? ''} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} onSubmit={submit} onCancel={requestClose} />
+					<CommentComposer quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={typed ?? editing?.note ?? ''} onBody={text => { typed = text; }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} onSubmit={submit} onCancel={() => requestClose()} />
 				</div>
 			</Popover>
 		{/if}
