@@ -35,7 +35,7 @@ MAX_PREFIX = 8
 MAX_ARGUMENT = 100
 RULE_SET_ORIGIN = "rule_set:"
 _ROUTE_ONLY = ("event_type", "match", "action", "to", "mode", "note", "script_id", "workflow_id",
-               "request_identity_fact")
+               "request_identity_fact", "worker_profile")
 
 
 @dataclass(frozen=True)

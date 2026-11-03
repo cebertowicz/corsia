@@ -42,6 +42,7 @@ def _run(operation: str, thread_id: str, project_id: str | None, kwargs: dict[st
                     scope=kwargs.get("scope"), now=now, tracked=tracked,
                     script_id=kwargs.get("script_id"), workflow_id=kwargs.get("workflow_id"),
                     request_identity_fact=kwargs.get("request_identity_fact"), workflows=workflows,
+                    worker_profile=kwargs.get("worker_profile"),
                     kind=kwargs.get("kind"), tool=kwargs.get("tool"), argv_prefix=kwargs.get("argv_prefix"),
                     item_type=kwargs.get("item_type"),
                 )
@@ -179,6 +180,9 @@ class EventRulesTool(Tool):
                            "enum": [rules.DELIVER, rules.DROP, rules.RUN_SCRIPT, rules.START_WORKER]},
                 "workflow_id": {"type": "string",
                                 "description": "create with start_worker: the workflow skill's name"},
+                "worker_profile": {
+                    "type": "string",
+                    "description": "create with start_worker: a profile the workflow's worker block defines"},
                 "request_identity_fact": {
                     "type": "string",
                     "description": "create with start_worker: the event fact naming one request"},

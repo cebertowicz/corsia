@@ -244,14 +244,18 @@ def _thread_owner(sid: str) -> str | None:
         connection.close()
 
 
-async def stop_turn_for_cause(sid: str, turn_id: str) -> StopReceipt:
-    """The system caller of Stop: hold one exact Turn at the plan limit.
+async def stop_turn_for_cause(sid: str, turn_id: str, *, plan_limit: bool = True) -> StopReceipt:
+    """The system caller of Stop: end one exact Turn with no requester.
 
-    It has no requester, so no ownership check: never reach it from a ws or
-    API handler. It shares ``_stop_exact_turn`` with user Stop, so the cancel
-    keeps one writer, lock and deadline, and never interrupts a harness
-    directly. The limited verdict is already committed, so the successor
-    claim in this Stop's terminal holds instead of spending.
+    By default it holds the Turn at the plan limit: the limited verdict is
+    already committed, so the successor claim in this Stop's terminal holds
+    instead of spending. With ``plan_limit=False`` it is a cause-less Stop (a
+    time limit): the Turn's inputs are cancelled and its plan wake cancelled,
+    as a user's Stop does.
+
+    It has no ownership check: never reach it from a ws or API handler. It
+    shares ``_stop_exact_turn`` with user Stop, so the cancel keeps one writer,
+    lock and deadline, and never interrupts a harness directly.
     """
     from subagents.runtime_guard import join_task_through_cancellation
 
@@ -261,7 +265,7 @@ async def stop_turn_for_cause(sid: str, turn_id: str) -> StopReceipt:
     task = asyncio.create_task(_stop_exact_turn(
         {"id": user_id}, sid, state._active_turns.get(sid),
         state._active_llm_tasks.get(sid), turn_id,
-        log=default_logger, cause=PlanLimitStop(),
+        log=default_logger, cause=PlanLimitStop() if plan_limit else None,
     ))
     cancellation = await join_task_through_cancellation(task)
     receipt = task.result()
