@@ -33,6 +33,7 @@ from events import rule_runs, worker_starts
 from events.connectors import worker as worker_events
 from events.rule_outcomes import INVALID, NO_RESULT, REFUSED, RETURNED
 from infra.database import write_transaction
+from infra.github_pr_identity import GITHUB_INTEGRATION
 from infra.db_async import run_in_db
 from infra.product_events import emit_product_event
 
@@ -157,6 +158,8 @@ def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
         "artifact_type": row["artifact_type"], "valid": outcome == RETURNED, **said,
         # The start's own record of what it spawned; a start that never spawned has none.
         "model": (check.get("settings") or {}).get("model"),
+        # The repository a script on this event may read (``script_github_channel``).
+        "repo": _artifact_repository(row),
         # Without a connection the revision read opens its own; the stamp is never left out.
         **(review_intent.stamp(check.get("intent"), db=db) if outcome == RETURNED else {}),
     }
@@ -168,6 +171,16 @@ def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
                   f"worker:{row['id']}:{kind}", clean_facts,
                   tuple(check.get("trace") or ()), bool(check.get("waited")),
                   context["staging_path"] if context else None)
+
+
+def _artifact_repository(row: Mapping[str, Any]) -> str | None:
+    """The ``owner/name`` of the start's GitHub artifact, or None for any other artifact."""
+    from events.connectors.github_pr_notice import parse_pr_external_id
+
+    if row["artifact_integration"] != GITHUB_INTEGRATION or not row["artifact_external_id"]:
+        return None
+    parsed = parse_pr_external_id(str(row["artifact_external_id"]))
+    return parsed[0] if parsed else None
 
 
 async def settle(item: Settle) -> None:

@@ -445,3 +445,20 @@ async def test_a_settled_workers_event_carries_its_spawned_model_through_the_run
     [event] = world["script_inputs"]
     assert event["type"] == f"worker.{kind}"
     assert event["facts"]["model"] == "claude-code/sonnet"  # the owner's model, as spawned
+
+
+# A settled worker's event names its GitHub artifact's repository, so the owner's script on it
+# can be given that repository's read channel; any other artifact names none.
+@pytest.mark.parametrize("integration, external_id, repo", [
+    ("github", "Owner.1/re_po-2#12", "Owner.1/re_po-2"),
+    ("github", "o/r#not-a-number", None),
+    ("gitlab", "o/r#12", None),
+])
+def test_a_settled_workers_event_names_its_github_artifacts_repository(integration, external_id, repo):
+    from automation import worker_settle
+
+    row = {"id": 1, "thread_id": OWNER, "rule_id": "r", "event_id": "e", "request_identity": "i",
+           "connector": "qa", "event_type": "request", "artifact_external_id": external_id,
+           "artifact_integration": integration, "artifact_type": "pull_request"}
+    item = worker_settle.settlement(row, {"workflow": "w@1"}, "no_result", {"reason": "stopped", "repo": "x/y"})
+    assert item.facts.get("repo") == repo

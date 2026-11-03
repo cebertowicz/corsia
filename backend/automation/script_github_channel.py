@@ -1,7 +1,7 @@
 """Run-scoped GitHub broker endpoint for sandboxed scripts.
 
 A channel opens only for a script run a rule started from a stored connector,
-platform or emitter event that names a repository (``bound_repository``) that
+platform or emitter event whose facts name a repository (``bound_repository``) that
 the run's project registers when the run starts (``script_rule_runs.
 execution_input``). That registration test is the access limit: a script, the
 owner's or an agent's, can emit an event naming any repository, and only a
@@ -40,36 +40,23 @@ _STATUS_LINE = re.compile(r"^HTTP/\S+\s+(\d{3})")
 #: because no rule needs a read from one; it is not an access limit, since an agent's own
 #: script emits as ``emitter``. The limit is the registration test above.
 _REPO_ORIGINS = frozenset({"connector", "platform", "emitter"})
-_WORKER_EVENTS = frozenset({"worker.result", "worker.no_result"})
 
 
-def _valid_repository(repo: Any) -> str | None:
+def bound_repository(event: Any) -> str | None:
+    """The ``owner/name`` a stored event's ``repo`` fact names, or None when it names none
+    or an agent wrote the event.
+
+    A script may have chosen the repo (an emitter event, or a ``worker.result`` copying it),
+    so this is only a candidate: ``execution_input`` keeps it to the registered repositories
+    of the run's project, for every origin."""
+    if not isinstance(event, Mapping) or event.get("origin") not in _REPO_ORIGINS:
+        return None
+    facts = event.get("facts")
+    repo = facts.get("repo") if isinstance(facts, Mapping) else None
     match = _REPOSITORY.match(repo) if isinstance(repo, str) else None
     if match is None or any(part in (".", "..") for part in match.groups()):
         return None
     return repo
-
-
-def bound_repository(event: Any) -> str | None:
-    """The ``owner/name`` a stored event names, or None when it names none or an agent
-    wrote the event.
-
-    A platform ``worker.*`` event with no ``repo`` fact names its GitHub artifact's
-    repository (``owner/name#number``). A script may have chosen the repo (an emitter
-    event, or a ``worker.result`` copying it), so this is only a candidate:
-    ``execution_input`` keeps it to the registered repositories of the run's project,
-    for every origin."""
-    if not isinstance(event, Mapping) or event.get("origin") not in _REPO_ORIGINS:
-        return None
-    facts = event.get("facts")
-    if isinstance(facts, Mapping) and "repo" in facts:
-        return _valid_repository(facts["repo"])
-    artifact = event.get("artifact")
-    if (event.get("origin") == "platform" and event.get("type") in _WORKER_EVENTS
-            and isinstance(artifact, Mapping) and artifact.get("integration") == "github"):
-        external_id = artifact.get("external_id")
-        return _valid_repository(external_id.partition("#")[0]) if isinstance(external_id, str) else None
-    return None
 
 
 def _bound_request(args: list[str], repo: str) -> ReadRequest:
