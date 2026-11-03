@@ -113,16 +113,34 @@ def test_parse_counts_the_preflight_safety_transient_as_memory_in_use():
     )
 
 
+# The chunked-step guard, as a local Turn received it on a 32 GiB Mac (#1219 c11 20:10).
+CHUNKED_STEP = (
+    "oMLX prefill memory guard rejected this prompt: Prefill context too large for "
+    "available memory (pre-chunk guard at 288 tokens, kv_len=35576): predicted peak "
+    "would exceed prefill safety cap 20.3GB (93% of metal_cap ceiling 21.8GB). Raise "
+    "kernel iogpu.wired_limit_mb in Terminal (currently caps Metal at 21.33 GB), or "
+    "reduce context length."
+)
+
+
 def test_parse_fails_safe_on_refusals_without_the_memory_terms():
-    # The chunked-step guard names no current or KV term to learn from.
-    assert memory_fit.parse_guard_refusal(
-        "oMLX prefill memory guard rejected this prompt: Prefill context too large for "
-        "available memory (pre-chunk guard at 288 tokens, kv_len=35576): predicted peak "
-        "would exceed prefill safety cap 20.3GB (93% of metal_cap ceiling 21.8GB). Raise "
-        "kernel iogpu.wired_limit_mb in Terminal (currently caps Metal at 21.33 GB), or "
-        "reduce context length."
-    ) is None
+    # The chunked-step guard names no current or KV term; its held tokens are read apart.
+    assert memory_fit.parse_guard_refusal(CHUNKED_STEP) is None
     assert memory_fit.parse_guard_refusal("anything else") is None
+
+
+def test_chunked_step_refusal_caps_the_window_to_the_tokens_it_held():
+    _refuse(40_000, text=CHUNKED_STEP)
+    assert (_live().effective, _live().source) == (35_576, "memory")
+
+
+def test_chunked_step_cap_recovers_like_any_other():
+    _refuse(40_000, text=CHUNKED_STEP)
+    _refuse(33_270, text=PINNED)  # a later refusal in the Turn replaces it
+    assert _live().effective == PINNED_FIT
+    _refuse(40_000, text=CHUNKED_STEP)
+    memory_fit.end_turn("refused")  # and the Turn's end drops it
+    assert _live().source == "provider"
 
 
 def test_no_observation_leaves_the_window_untouched():
