@@ -22,11 +22,14 @@ export interface UploadLimits {
 
 let uploadLimits: UploadLimits | null = null;
 
-/** Fetch and cache the server's upload ceilings for this session. */
-export async function loadUploadLimits(): Promise<UploadLimits | null> {
+/**
+ * Fetch and cache the server's upload ceilings for this session.
+ * The session rides in the Authorization header: the Devices listener refuses an unsigned `/api` read.
+ */
+export async function loadUploadLimits(authToken: string): Promise<UploadLimits | null> {
 	if (uploadLimits) return uploadLimits;
 	try {
-		const res = await fetch('/api/upload/limits');
+		const res = await fetch('/api/upload/limits', { headers: { Authorization: `Bearer ${authToken}` } });
 		if (!res.ok) return null;
 		uploadLimits = (await res.json()) as UploadLimits;
 	} catch {
@@ -55,7 +58,7 @@ export async function uploadInputFile(
 	authToken: string,
 	threadId: string,
 ): Promise<{ attachment: Attachment | null; error: string }> {
-	await loadUploadLimits();
+	await loadUploadLimits(authToken);
 	const limit = limitFor(file);
 	if (limit && file.size > limit.bytes) {
 		return { attachment: null, error: `${file.name} is too large (max ${limit.label})` };
