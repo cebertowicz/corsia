@@ -3,12 +3,13 @@ script that never started never reads as run or failed."""
 from __future__ import annotations
 
 import json
+from typing import get_args
 
 import pytest
 
 from automation import script_schedules
 from automation.script_sandbox import ScriptRun, github_lock_reason
-from connections.github_agent import AgentAccountView
+from connections.github_agent import AgentAccountView, Cause
 from infra.database import get_db
 from tests.test_event_rules_run_script import (  # noqa: F401 - fixtures
     _START, OWNER, _emit, _explained, _outcomes, _rule, _script, _sweep, _tool, _write, runs, world,
@@ -52,40 +53,31 @@ def test_an_archived_creator_holds_a_script_rule_without_queueing(runs):
 
 _ACCOUNTS = {
     "person": (AgentAccountView("wrong_account", "person_account", home="/h"),
-               "the agents' GitHub sign-in is the person's own GitHub account"),
+               "the agents' GitHub sign-in is the person's own GitHub account; sign it out and sign in as "
+               "the agents' own account"),
     "unverified": (AgentAccountView("unverified", "own_login_unknown", home="/h"),
                    "CORSIA can't tell the agents' GitHub account from the person's own until the "
                    "person signs in to GitHub on this computer"),
     "suspended": (AgentAccountView("needs_auth", "token_rejected", home="/h"),
-                  "GitHub rejected the agents' GitHub account's sign-in; sign it in again"),
+                  "GitHub rejected the sign-in for the agents' GitHub account; sign it out and in again"),
     "absent": (AgentAccountView("not_installed", absent=True),
                "there is no agents' GitHub account"),
 }
 
-# Every cause github_agent.view names, with its state there: each reads as its own cause.
-_CAUSES = {
-    "read_failed": ("unverified", "CORSIA couldn't read the agents' GitHub account settings"),
-    "multiple_accounts": ("needs_auth", "more than one agents' GitHub account is set up; remove the extra one"),
-    "github_executable_missing": ("not_installed", "the gh program the agents' GitHub account uses is missing"),
-    "signed_out": ("needs_auth", "the agents' GitHub account is signed out; sign it in again"),
-    "credential_missing": ("needs_auth", "the agents' GitHub account's saved sign-in is missing; sign it in again"),
-    "token_rejected": ("needs_auth", "GitHub rejected the agents' GitHub account's sign-in; sign it in again"),
-    "verify_failed": ("unverified", "CORSIA couldn't reach GitHub to check the agents' GitHub account"),
-    "verifying": ("unverified", "the agents' GitHub account is still being checked"),
-    "own_login_unknown": ("unverified", _ACCOUNTS["unverified"][1]),
-    "person_account": ("wrong_account", _ACCOUNTS["person"][1]),
-}
+
+@pytest.mark.parametrize("cause", get_args(Cause))
+def test_each_account_cause_has_its_own_line(cause):
+    assert github_lock_reason(AgentAccountView("needs_auth", cause)) != github_lock_reason(
+        AgentAccountView("needs_auth"))
 
 
-@pytest.mark.parametrize("cause", sorted(_CAUSES))
-def test_each_account_cause_reads_as_itself(cause):
-    state, why = _CAUSES[cause]
-    assert github_lock_reason(AgentAccountView(state, cause, home="/h")) == f"scripts get no GitHub login: {why}"
-    assert len({text for _state, text in _CAUSES.values()}) == len(_CAUSES)
+def test_no_two_account_causes_share_a_line():
+    lines = {github_lock_reason(AgentAccountView("needs_auth", cause)) for cause in get_args(Cause)}
+    assert len(lines) == len(get_args(Cause))
 
 
 def test_only_an_unanswered_account_is_pending():
-    pending = {cause for cause, (state, _why) in _CAUSES.items() if AgentAccountView(state, cause).answer_pending}
+    pending = {cause for cause in get_args(Cause) if AgentAccountView("unverified", cause).answer_pending}
     assert pending == {"verifying", "own_login_unknown"}
 
 
