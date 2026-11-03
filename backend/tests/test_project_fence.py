@@ -190,6 +190,18 @@ def test_nested_roots_are_dropped():
     assert _drop_nested([inner, outer, twin]) == (outer,)
 
 
+def test_a_root_written_inside_another_but_resolving_outside_it_is_kept(tmp_path):
+    outer_path = tmp_path / "projects" / "a"
+    elsewhere = tmp_path / "repos" / "b"
+    outer_path.mkdir(parents=True)
+    elsewhere.mkdir(parents=True)
+    (outer_path / "link").symlink_to(elsewhere)
+    outer = FencedRoot(outer_path, "a")
+    linked = FencedRoot(outer_path / "link", "b")
+    assert _drop_nested([outer, linked]) == (outer, linked)
+
+
+
 def test_only_a_local_only_root_covers_a_local_only_root():
     ordinary = FencedRoot(Path("/w/repo"), "beta")
     same = FencedRoot(Path("/w/repo"), "secret", local_only=True)
@@ -495,3 +507,27 @@ async def test_a_local_only_switch_relaunches_local_apps_only(world, monkeypatch
     monkeypatch.setattr(connected_apps_runtime, "restart_after_saved_write", restart)
     await connected_apps_runtime.refresh_local_app_fences()
     assert restarted == ["app-local"]
+
+
+@pytest.mark.asyncio
+async def test_a_local_only_switch_relaunches_an_app_that_was_mid_connect(world, monkeypatch):
+    import asyncio
+
+    from tools import connected_apps_runtime, mcp_runtime
+
+    restarted = []
+
+    async def restart(app_id):
+        restarted.append(app_id)
+
+    configs: dict = {}
+    monkeypatch.setattr(mcp_runtime, "_app_configs", configs)
+    monkeypatch.setattr(mcp_runtime, "_lock", asyncio.Lock())
+    monkeypatch.setattr(connected_apps_runtime, "restart_after_saved_write", restart)
+    await mcp_runtime._lock.acquire()
+    refresh = asyncio.ensure_future(connected_apps_runtime.refresh_local_app_fences())
+    await asyncio.sleep(0)
+    configs["app-connecting"] = ("local", {"command": "node"})
+    mcp_runtime._lock.release()
+    await refresh
+    assert restarted == ["app-connecting"]
