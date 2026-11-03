@@ -28,7 +28,10 @@ def repo(tmp_path):
         path.mkdir()
     log = tmp_path / "ssh.log"
     fake = bin_dir / "ssh"
-    fake.write_text('#!/bin/sh\necho "$*" >> "$SSH_LOG"\nexit 1\n')
+    # Answers ``-G`` like OpenSSH: the host alias ``work-gh`` resolves to GitHub, as an SSH config would.
+    fake.write_text('#!/bin/sh\necho "$*" >> "$SSH_LOG"\n'
+                    'if [ "$1" = -G ]; then for h; do :; done; case $h in *work-gh) h=GitHub.com;; esac; '
+                    'echo "hostname ${h#*@}"; exit 0; fi\nexit 1\n')
     fake.chmod(0o755)
     base = {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "HOME": str(home), "SSH_LOG": str(log),
             "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
@@ -41,6 +44,7 @@ def repo(tmp_path):
     git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "x")
     git("remote", "add", "origin", f"{GITHUB}o/r.git")
     git("remote", "add", "other", "git@git.example.com:o/r.git")
+    git("remote", "add", "alias", "git@work-gh:o/r.git")
 
     def ssh_calls():
         return log.read_text().splitlines() if log.exists() else []
@@ -71,6 +75,19 @@ def test_a_github_push_rewritten_to_ssh_is_refused_before_ssh_runs(repo, view):
     assert not [call for call in ssh_calls() if "git-receive-pack" in call]
 
 
+def test_a_push_to_an_ssh_host_alias_for_github_is_refused(repo):
+    git, ssh_calls = repo
+
+    result = git("push", "alias", "HEAD:main", env=github_agent.shell_env(LOCKED), check=False)
+
+    assert "agent shells push to GitHub over HTTPS" in result.stderr
+    assert not [call for call in ssh_calls() if "git-receive-pack" in call]
+
+
+def ran(calls, command):
+    return any(call.endswith(command) for call in calls)
+
+
 def test_ssh_fetches_and_other_hosts_run_as_before(repo):
     git, ssh_calls = repo
     git("config", "--global", "url.git@github.com:.insteadOf", GITHUB)
@@ -80,8 +97,8 @@ def test_ssh_fetches_and_other_hosts_run_as_before(repo):
     git("push", "other", "HEAD:main", env=env, check=False)
 
     calls = ssh_calls()
-    assert "git@github.com git-upload-pack 'o/r.git'" in calls
-    assert "git@git.example.com git-receive-pack 'o/r.git'" in calls
+    assert ran(calls, "git@github.com git-upload-pack 'o/r.git'")
+    assert ran(calls, "git@git.example.com git-receive-pack 'o/r.git'")
 
 
 def test_the_persons_own_ssh_command_still_runs(repo):
@@ -90,7 +107,7 @@ def test_the_persons_own_ssh_command_still_runs(repo):
 
     git("push", "other", "HEAD:main", env=github_agent.shell_env(LOCKED), check=False)
 
-    assert "-i /keys/work git@git.example.com git-receive-pack 'o/r.git'" in ssh_calls()
+    assert ran(ssh_calls(), "-i /keys/work git@git.example.com git-receive-pack 'o/r.git'")
 
 
 def test_no_account_sets_no_ssh_command():

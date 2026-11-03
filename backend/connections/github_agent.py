@@ -278,14 +278,19 @@ def _git_config(account: AgentAccountView) -> list[tuple[str, str]]:
 
 
 # The SSH command Git runs in a shell with an agents' account. A push to GitHub over SSH
-# (which only the person's own URL rewrite can produce here) is refused; every other SSH
-# use runs the person's own ``core.sshCommand``, or ``ssh``, exactly as before.
+# (a URL rewrite or an SSH-config host alias for GitHub, both the person's own) is refused;
+# every other SSH use runs the person's own ``core.sshCommand``, or ``ssh``, exactly as before.
+# ``ssh -G`` only prints the resolved config, so an alias resolves without connecting.
 SSH_PUSH_GUARD = (
-    'f() { h=; p=; for a; do case $a in github.com|*@github.com|ssh.github.com|*@ssh.github.com) h=1;; '
-    'git-receive-pack*) p=1;; esac; done; '
+    'f() { h=; p=; d=; for a; do case $a in github.com|*@github.com|ssh.github.com|*@ssh.github.com) h=1;; '
+    'git-receive-pack*) p=1;; -*) ;; *) [ -n "$p" ] || d=$a;; esac; done; '
+    'if [ -n "$p" ] && [ -z "$h" ] && [ -n "$d" ]; then '
+    'case $(ssh -G "$d" 2>/dev/null | sed -n "s/^hostname //p" | tr A-Z a-z) in '
+    'github.com|ssh.github.com) h=1;; esac; fi; '
     'if [ -n "$h" ] && [ -n "$p" ]; then echo "CORSIA: agent shells push to GitHub over HTTPS as the '
-    "agents' account, and a URL rewrite in your Git config turned this push into SSH, so it was "
-    'refused. Push with the rewrite off, for example: GIT_CONFIG_GLOBAL=/dev/null git push" >&2; exit 128; fi; '
+    "agents' account, and your Git or SSH config turned this push into SSH, so it was "
+    'refused. Push to the https://github.com/ URL with your rewrite off, for example: '
+    'GIT_CONFIG_GLOBAL=/dev/null git push" >&2; exit 128; fi; '
     'c=$(git config --get core.sshCommand); eval "exec ${c:-ssh} \\"\\$@\\""; }; f'
 )
 
