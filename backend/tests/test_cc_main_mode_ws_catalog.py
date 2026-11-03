@@ -6,43 +6,8 @@ import pytest
 
 
 class TestCCAttachments:
-    def test_block_builds_paths_skips_missing(self, tmp_path, monkeypatch):
-        import infra.config as cfg
-        import ws as ws_mod
-        monkeypatch.setattr(cfg, "UPLOADS_DIR", tmp_path)
-        (tmp_path / "steve" / "fid1").mkdir(parents=True)
-        (tmp_path / "steve" / "fid1" / "x.png").write_bytes(b"img")
-        block = ws_mod._cc_attachment_block([
-            {"file_id": "fid1", "filename": "x.png"},
-            {"file_id": "missing", "filename": "y.png"},
-        ], "steve")
-        assert str(tmp_path / "steve" / "fid1" / "x.png") in block
-        assert "y.png" not in block
-
-    def test_block_empty_when_none(self):
-        import ws as ws_mod
-        assert ws_mod._cc_attachment_block([], "steve") == ""
-
-    def test_block_never_projects_typed_image_paths(self, tmp_path, monkeypatch):
-        import infra.config as cfg
-        import ws as ws_mod
-
-        monkeypatch.setattr(cfg, "UPLOADS_DIR", tmp_path)
-        path = tmp_path / "steve" / "fid1" / "x.png"
-        path.parent.mkdir(parents=True)
-        path.write_bytes(b"image")
-
-        block = ws_mod._cc_attachment_block([{
-            "file_id": "fid1",
-            "filename": "x.png",
-            "mime_type": "image/png",
-        }], "steve")
-
-        assert block == ""
-        assert str(path) not in block
-
     @pytest.mark.asyncio
-    async def test_main_handler_feeds_paths_keeps_row_clean(
+    async def test_main_handler_feeds_saved_path_note_keeps_row_clean(
         self, main_db, monkeypatch, tmp_path
     ):
         import infra.config as cfg
@@ -93,7 +58,7 @@ class TestCCAttachments:
         )
         assert "[1/2]\n[PASSIVE CONTEXT DIGEST]" in sent
         assert sent.endswith(
-            "[2/2]\nlook at this\n"
+            f"[2/2]\nlook at this\n\n[File attached: a.png, saved at {path}]\n"
             '[To reply, call post_update(text="<your reply>")]\n'
             "If no reply is needed, do not send one."
         )

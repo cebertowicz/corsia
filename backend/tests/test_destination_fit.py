@@ -284,10 +284,6 @@ async def test_renderer_seam_attaches_exactly_one_ledger(
             "core.turn_context.prepare_native_context_payload",
             AsyncMock(return_value=prepared_native),
         )
-        monkeypatch.setattr(
-            "ws.turn_helpers.build_agent_content",
-            lambda content, _attachments: (content, None),
-        )
     elif provider == "cc":
         destination = SimpleNamespace(
             input_tokens=sum(SECTIONS.values()),

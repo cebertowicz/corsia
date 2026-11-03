@@ -75,7 +75,8 @@ async def test_cc_image_uses_shared_projection_without_path_prompt(
         )
         assert "[1/2]\n[PASSIVE CONTEXT DIGEST]" in args[1]
         assert args[1].endswith(
-            "[2/2]\nunderstand the unique visual fact\n"
+            "[2/2]\nunderstand the unique visual fact\n\n"
+            "[Image attached: fact.png]\n"
             '[To reply, call post_update(text="<your reply>")]\n'
             "If no reply is needed, do not send one."
         )
