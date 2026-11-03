@@ -17,12 +17,14 @@ from tools import gws_messages
 RUN = "run"
 TRASH_FILE = "trash_file"
 DELETE_EVENT = "delete_event"
-CLEAR_CALENDAR = "clear_calendar"
+# Clearing or deleting a calendar: every event in it is saved first.
+SAVE_CALENDAR = "save_calendar"
 
 _DOCS_BATCH = re.compile(r"^/v1/documents/[^/]+:batchUpdate$")
 _DRIVE_FILE = re.compile(r"^/drive/v3/files/([^/]+)$")
 _CALENDAR_EVENT = re.compile(r"^/calendar/v3/calendars/([^/]+)/events/([^/]+)$")
 _CALENDAR_CLEAR = re.compile(r"^/calendar/v3/calendars/([^/]+)/clear$")
+_CALENDAR = re.compile(r"^/calendar/v3/calendars/([^/]+)$")
 # A Docs request that removes or rewrites text, which Google can refuse if someone edited since.
 _DESTRUCTIVE_DOCS_REQUESTS = (
     "deleteContentRange", "replaceAllText", "replaceNamedRangeContent", "deleteTab",
@@ -91,8 +93,10 @@ def decide(preview: dict) -> Decision:
             return Decision(TRASH_FILE, file_id=unquote(found.group(1)))
     if method == "DELETE" and host == "www.googleapis.com" and (found := _CALENDAR_EVENT.match(path)):
         return Decision(DELETE_EVENT, calendar_id=unquote(found.group(1)), event_id=unquote(found.group(2)))
+    if method == "DELETE" and host == "www.googleapis.com" and (found := _CALENDAR.match(path)):
+        return Decision(SAVE_CALENDAR, calendar_id=unquote(found.group(1)))
     if method == "POST" and host == "www.googleapis.com" and (found := _CALENDAR_CLEAR.match(path)):
-        return Decision(CLEAR_CALENDAR, calendar_id=unquote(found.group(1)))
+        return Decision(SAVE_CALENDAR, calendar_id=unquote(found.group(1)))
     if method == "POST" and host == "docs.googleapis.com" and _DOCS_BATCH.match(path):
         if _guarded_docs_write(preview):
             return _refuse(gws_messages.DOCS_GUARD)

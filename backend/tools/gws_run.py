@@ -15,11 +15,13 @@ from typing import NamedTuple
 
 import certifi
 
+from tools.gws_messages import NOT_FOUND
+
 TIMEOUT_SECONDS = 120
 CACHE_NAME = "corsia-gws"
 _TOKEN_SHAPE = re.compile(r"ya29\.[A-Za-z0-9._\-]+")
 TOKEN_ENV = "GOOGLE_WORKSPACE_CLI_TOKEN"
-NOT_FOUND = "Google Workspace isn't available right now: CORSIA couldn't find or install its gws program."
+
 UNSAFE_NAME = re.compile(r"[^A-Za-z0-9@._+-]")
 
 

@@ -64,11 +64,13 @@ def test_a_drive_delete_becomes_a_trash_of_that_file():
     assert (decision.kind, decision.file_id, decision.refusal) == (gws_check.TRASH_FILE, "F1", None)
 
 
-def test_event_delete_and_calendar_clear_name_their_calendar():
+def test_event_delete_and_calendar_clear_or_delete_name_their_calendar():
     deleted = gws_check.decide(preview("calendar_event_delete"))
     assert (deleted.kind, deleted.calendar_id, deleted.event_id) == (gws_check.DELETE_EVENT, "primary", "EV1")
     cleared = gws_check.decide(preview("calendar_clear"))
-    assert (cleared.kind, cleared.calendar_id) == (gws_check.CLEAR_CALENDAR, "primary")
+    assert (cleared.kind, cleared.calendar_id) == (gws_check.SAVE_CALENDAR, "primary")
+    removed = gws_check.decide(preview("calendar_delete"))
+    assert (removed.kind, removed.calendar_id) == (gws_check.SAVE_CALENDAR, "abc@group.calendar.google.com")
 
 
 def test_the_address_is_unquoted_before_it_is_used():

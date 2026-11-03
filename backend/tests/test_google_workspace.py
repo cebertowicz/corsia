@@ -113,7 +113,7 @@ async def test_workspace_paths_are_passed_to_gws_as_absolute_paths(tool, workspa
 async def test_a_drive_delete_runs_as_a_move_to_the_trash(tool, monkeypatch):
     fake = use(monkeypatch, FakeGws(recorded("drive_delete"), {"drive files update": '{"id": "F1"}'}))
     result = await tool.execute(args=["drive", "files", "delete"], params={"fileId": "F1", "supportsAllDrives": True})
-    assert result.startswith(gw.TRASHED)
+    assert result.startswith(gws_messages.TRASHED)
     assert fake.real_runs() == [[
         "drive", "files", "update", "--params", json.dumps({"fileId": "F1", "supportsAllDrives": True}),
         "--json", json.dumps({"trashed": True}),
@@ -137,17 +137,17 @@ async def test_an_event_is_saved_in_full_before_it_is_deleted(tool, workspace, m
     [saved] = seen["saved_before_delete"]
     assert saved.read_text(encoding="utf-8") == event
     assert saved.name.endswith("Z-event-EV1.json") and saved.name[8] == "T"
-    assert result == gw.DELETED_EVENT.format(path=saved.relative_to(workspace))
+    assert result == gws_messages.SAVED_FIRST.format(where=saved.relative_to(workspace))
 
 
 async def test_nothing_is_deleted_when_the_event_cannot_be_saved(tool, workspace, monkeypatch):
     fake = use(monkeypatch, FakeGws(recorded("calendar_event_delete"), Completed(1, "", "not found")))
     result = await tool.execute(args=["calendar", "events", "delete"])
-    assert result.startswith("Not deleted: the event couldn't be read first.")
+    assert result == gws_messages.NOT_SAVED.format(detail="not found")
     assert [words[:3] for words in fake.real_runs()] == [["calendar", "events", "get"]]
     (workspace / "google-deletions").write_text("a file where the folder should be", encoding="utf-8")
     fake.real = lambda words: '{"id": "EV1"}'
-    assert (await tool.execute(args=["calendar", "events", "delete"])).startswith("Not deleted: the event couldn't be saved")
+    assert (await tool.execute(args=["calendar", "events", "delete"])).startswith(gws_messages.NOT_SAVED.format(detail="").strip())
     assert [words[:3] for words in fake.real_runs()].count(["calendar", "events", "delete"]) == 0
 
 
@@ -166,7 +166,23 @@ async def test_clearing_a_calendar_saves_every_page_of_events_first(tool, worksp
     use(monkeypatch, FakeGws(recorded("calendar_clear"), real))
     result = await tool.execute(args=["calendar", "calendars", "clear"], params={"calendarId": "primary"})
     assert order == [("list", None), ("list", "p2"), ("clear", 3)]
-    assert result == gw.CLEARED.format(count=3, folder="google-deletions/person@example.com")
+    assert result == gws_messages.SAVED_FIRST.format(where="google-deletions/person@example.com")
+
+
+async def test_deleting_a_calendar_saves_its_events_first(tool, workspace, monkeypatch):
+    order = []
+
+    def real(words):
+        if words[:3] == ["calendar", "events", "list"]:
+            order.append("list")
+            return json.dumps({"items": [{"id": "a"}]})
+        order.append(("delete", len(list((workspace / "google-deletions" / "person@example.com").glob("*")))))
+        return ""
+
+    use(monkeypatch, FakeGws(recorded("calendar_delete"), real))
+    result = await tool.execute(args=["calendar", "calendars", "delete"], params={"calendarId": "abc@group.calendar.google.com"})
+    assert order == ["list", ("delete", 1)]
+    assert result == gws_messages.SAVED_FIRST.format(where="google-deletions/person@example.com")
 
 
 async def test_creating_and_editing_log_nothing(tool, workspace, monkeypatch):
@@ -186,10 +202,10 @@ async def test_schema_and_help_run_without_a_sign_in(tool, monkeypatch):
 
 async def test_a_missing_gws_is_said_plainly(tool, monkeypatch):
     async def missing(words, **kwargs):
-        raise GwsUnavailable(gws_run.NOT_FOUND)
+        raise GwsUnavailable(gws_messages.NOT_FOUND)
 
     monkeypatch.setattr(gw, "run_gws", missing)
-    assert await tool.execute(args=["drive", "files", "list"]) == gws_run.NOT_FOUND
+    assert await tool.execute(args=["drive", "files", "list"]) == gws_messages.NOT_FOUND
 
 
 def fake_launch(command: list[str]):
@@ -234,7 +250,7 @@ def test_a_program_that_cannot_be_installed_says_so_without_a_trace(monkeypatch)
     monkeypatch.setattr(managed_runtime, "ensure_runtime", refuse)
     with pytest.raises(GwsUnavailable) as caught:
         gws_run._launch([], "acct-1", None, None)
-    assert str(caught.value) == gws_run.NOT_FOUND
+    assert str(caught.value) == gws_messages.NOT_FOUND
 
 
 @pytest.fixture

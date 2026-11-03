@@ -36,3 +36,11 @@ DOCS_GUARD = (
     'writeControl.requiredRevisionId to delete or replace text.'
 )
 ACCOUNT = 'Name the account: one of {addresses}.'
+
+# Results that carry out the approved design's "nothing is lost" and bundling rows.
+TRASHED = "Moved to the trash, not deleted: Google keeps it for 30 days and the person can restore it."
+SAVED_FIRST = "Done. What was deleted was saved first in {where}."
+NOT_SAVED = "Not deleted: it couldn't be saved first. {detail}"
+NOT_FOUND = "Google Workspace isn't available right now: CORSIA couldn't find or install its gws program."
+BAD_ARGS = 'Error: args must be the words after gws, for example ["drive","files","list"].'
+FAILED = "Error: Couldn't run the Google Workspace command. Try again later."

@@ -31,9 +31,6 @@ _NAME_AN_ACCOUNT = gws_messages.ACCOUNT.replace("{addresses}", "{choices}")
 _REFUSALS = Refusals(
     client.NOT_CONNECTED, google_accounts.NONE_AVAILABLE, _NAME_AN_ACCOUNT, _NAME_AN_ACCOUNT,
 )
-TRASHED = "Moved to the trash, not deleted: Google keeps it for 30 days and the person can restore it."
-DELETED_EVENT = "Deleted. The event was saved first as {path}."
-CLEARED = "Cleared. {count} events were saved first in {folder}."
 _PATH_FLAGS = ("--upload", "--output")
 
 
@@ -91,7 +88,7 @@ class GoogleWorkspaceTool(Tool):
     async def execute(self, **kwargs: Any) -> str:
         args = kwargs.get("args")
         if not isinstance(args, list) or not args or not all(isinstance(word, str) for word in args):
-            return "Error: args must be the words after gws, for example [\"drive\",\"files\",\"list\"]."
+            return gws_messages.BAD_ARGS
         if "auth" in args:
             return gws_messages.NO_PREVIEW
         if any(word.startswith(_PATH_FLAGS) for word in args):
@@ -113,7 +110,7 @@ class GoogleWorkspaceTool(Tool):
             return str(error)
         except Exception:
             log.exception("google_workspace failed")
-            return "Error: Couldn't run the Google Workspace command. Try again later."
+            return gws_messages.FAILED
 
     async def _run(self, account: dict, args: list[str], words: list[str], kwargs: dict[str, Any]) -> str:
         account_id = str(account["id"])
@@ -131,15 +128,15 @@ class GoogleWorkspaceTool(Tool):
         if decision.kind == gws_check.TRASH_FILE:
             params = {**(kwargs.get("params") or {}), "fileId": decision.file_id}
             done = await run(build_args(["drive", "files", "update"], params, {"trashed": True}, None, None))
-            return f"{TRASHED}\n{_text(done)}" if done.code == 0 else _text(done)
+            return f"{gws_messages.TRASHED}\n{_text(done)}" if done.code == 0 else _text(done)
         base = self._workspace or Path()
         folder = log_dir(base, str(account["address"]))
         if decision.kind == gws_check.DELETE_EVENT:
-            saved = await save_event(run, folder, decision.calendar_id or "", decision.event_id or "")
-            done = await run(words)
-            return DELETED_EVENT.format(path=saved.relative_to(base)) if done.code == 0 else _text(done)
-        if decision.kind == gws_check.CLEAR_CALENDAR:
-            saved_all = await save_calendar(run, folder, decision.calendar_id or "")
-            done = await run(words)
-            return CLEARED.format(count=len(saved_all), folder=folder.relative_to(base)) if done.code == 0 else _text(done)
-        return _text(await run(words)) or "Done."
+            where = (await save_event(run, folder, decision.calendar_id or "", decision.event_id or "")).relative_to(base)
+        elif decision.kind == gws_check.SAVE_CALENDAR:
+            await save_calendar(run, folder, decision.calendar_id or "")
+            where = folder.relative_to(base)
+        else:
+            return _text(await run(words)) or "Done."
+        done = await run(words)
+        return gws_messages.SAVED_FIRST.format(where=where) if done.code == 0 else _text(done)
