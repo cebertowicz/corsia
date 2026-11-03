@@ -193,8 +193,11 @@ def _existing(db, recipient_thread_id: str, batch_id: str, provenance: str = PRO
 
 
 def settle_feedback_node(db, recipient_thread_id: str, batch_id: str, *, evidence: str) -> None:
-    """Record the evidence and accept a batch's task once, atomically; a finished task stays as it is and a stopped one gets a note."""
-    node_id = _existing(db, recipient_thread_id, batch_id)
+    """Record the evidence and accept a batch's task once, atomically; a finished task stays as it is and a stopped one gets a note.
+
+    The batch's delivered task is the one record of it, so a batch that joined another's task settles that task.
+    """
+    node_id = feedback_join.delivered_task(db, batch_id) or _existing(db, recipient_thread_id, batch_id)
     if node_id is None:
         return
     with transaction(db) as connection:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from doc_feedback_helpers import add_comment, add_person_comment, batches, seed_document, seed_thread
-from doceditor import comment_actions, comments, feedback_batch_edits, feedback_batches
+from doceditor import comment_actions, comments, feedback_batch_edits, feedback_batches, feedback_delivery
 from infra.database import get_db, write_transaction
 from plans import holds, service
 from plans.feedback_nodes import create_feedback_node
@@ -193,6 +193,34 @@ def test_agent_task_holding_a_joined_reply_settles_only_once_the_reply_is_settle
         ).fetchone()["payload_json"]
         assert f"Comment {root['id']}: suggestion accepted by Robin" in evidence
         assert f"Comment {reply['id']}: resolved" in evidence
+    finally:
+        db.close()
+
+
+def test_reply_batch_made_first_but_delivered_last_still_settles_the_task_it_joined(isolated_db, monkeypatch):
+    """The task is found through the batch's delivered task, not through whichever batch is oldest."""
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        seed_thread(db, "author", title="Reviewer")
+        artifact_id = seed_document(db, "owner")
+        root = _agent_batch(db, artifact_id)
+        with monkeypatch.context() as patched:
+            patched.setattr(feedback_delivery, "recipient_problem", lambda *_: "owner_unavailable")
+            early = _agent_batch(db, artifact_id, parent_id=root["id"])
+        (late_batch,) = [row for row in batches(db) if row["state"] == "undelivered"]
+        later = _agent_batch(db, artifact_id, parent_id=root["id"])
+        _, task = _feedback_nodes(db, "owner")
+
+        feedback_batches.retry_batch(db, late_batch["id"])
+
+        assert db.execute(
+            "SELECT delivered_node_id FROM doc_feedback_batches WHERE id=?", (late_batch["id"],),
+        ).fetchone()[0] == task["id"]
+        comments.update(early["id"], {"resolved": True}, db=db)
+        assert service.get_node(task["id"], db=db).state != "accepted"
+        comments.update(later["id"], {"resolved": True}, db=db)
+        assert service.get_node(task["id"], db=db).state == "accepted"
     finally:
         db.close()
 

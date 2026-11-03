@@ -48,7 +48,6 @@ def settle_batches_of(db, comment_id: str) -> None:
         (comment_id,),
     ).fetchall()
     for task in tasks:
-        # Oldest first: the first batch made the task, and the task is found through it.
         batches = db.execute(
             """SELECT id,item_count FROM doc_feedback_batches
                WHERE delivered_node_id=? AND recipient_id=? ORDER BY created_at,id""",
