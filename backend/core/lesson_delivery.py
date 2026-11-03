@@ -118,6 +118,14 @@ def delivery_for_trial(trial, path: Path, data: bytes, binding: StepBinding | No
     )
 
 
+def trial_lesson(trial: TrialDelivery) -> dict[str, str]:
+    """The one entry a plan result's ``trial_lessons`` list carries for a delivered trial."""
+    return {
+        "lesson_id": trial.lesson_id, "target": trial.target,
+        "guidance": trial.payload, "notice": NOTICE,
+    }
+
+
 def _context_paths(db: sqlite3.Connection, thread_id: str) -> set[str]:
     """Files from the latest dispatched manifest, including a completed turn.
 
@@ -269,10 +277,7 @@ def start_trials(
             variant = draw(*key, node_id)
             pending.append((trial, variant))
         if variant == "with":
-            delivered.append({
-                "lesson_id": trial.lesson_id, "target": trial.target,
-                "guidance": trial.payload, "notice": NOTICE,
-            })
+            delivered.append(trial_lesson(trial))
     if not pending:
         return delivered
 

@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.lesson_delivery import TrialDelivery, delivery_for_trial
+
 PENDING = "lesson.carry_in.pending"
 SAVED = "lesson.carry_in.saved"
 SAVED_PROCESSED = "lesson.carry_in.saved_processed"
@@ -34,8 +36,8 @@ TERMINAL_EVENTS = (RESULT, RETIRED, COVERAGE)
 #: Why a pending case left the work list without a scored result; its file owner acts.
 RETIRE_REASONS = (
     "lesson_unreadable", "lesson_retired", "version_changed", "case_changed",
-    "target_moved", "owner_missing", "manifest_mismatch", "not_mechanically_executable",
-    "target_unavailable",
+    "target_moved", "owner_missing", "delivery_mismatch", "not_mechanically_executable",
+    "target_unavailable", "same_input",
 )
 #: Why a claimed case ended without enough completed samples: the eval route's own
 #: failure kinds (``eval.endpoint.EVAL_FAILURES``), a restart, lost capacity, or
@@ -122,10 +124,12 @@ class SavedCommit:
 
 @dataclass(frozen=True)
 class EligibleCase:
-    """A pending fact's case as its lesson file holds it now."""
+    """A pending fact's case as its lesson file holds it now; ``deliver`` only for a ``trial`` lesson."""
 
     case: dict[str, Any]
     actions: dict[str, Any] | None
+    delivery: TrialDelivery
+    deliver: bool
 
 
 def commit_parent(workspace: Path, sha: str) -> str | None:
@@ -150,12 +154,15 @@ def case_sha256(case: dict[str, Any]) -> str:
 
 
 def _read_lesson(path: Path):
+    """The parsed lesson and the exact bytes it was parsed from, or None."""
     from core.lesson_files import read_trial
 
     try:
-        return read_trial(path.read_text(encoding="utf-8"))
+        data = path.read_bytes()
+        trial = read_trial(data.decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
         return None
+    return None if trial is None else (trial, data)
 
 
 def owner_tray(db: sqlite3.Connection, owner: str, trays: dict[str, Path | None] | None = None) -> Path | None:
@@ -196,11 +203,12 @@ def canonical_target(tray: Path, workspace: Path, target: str, resolved_workspac
 
 
 def _lesson_case(db, workspace: Path, lesson_path: str, trays: dict[str, Path | None] | None = None):
-    """``(trial, target rel, case)`` or a retirement reason."""
+    """``(trial, target rel, case, lesson bytes)`` or a retirement reason; no target means the lesson file."""
     path = workspace / lesson_path
-    trial = _read_lesson(path)
-    if trial is None:
+    read = _read_lesson(path)
+    if read is None:
         return "lesson_unreadable"
+    trial, data = read
     if trial.lesson.state not in _ACTIVE_STATES:
         return "lesson_retired"
     tray = owner_tray(db, trial.lesson.owner, trays)
@@ -209,15 +217,17 @@ def _lesson_case(db, workspace: Path, lesson_path: str, trays: dict[str, Path | 
     case = trial.lesson.case_metadata.get("case")
     target = next((trial.lesson.case_metadata[key] for key in _TARGET_KEYS
                    if trial.lesson.case_metadata.get(key)), None)
-    if not isinstance(case, dict) or not target:
+    if not isinstance(case, dict):
         return "case_changed"
+    if not target:
+        return trial, lesson_path, case, data
     try:
         rel = canonical_target(tray, workspace, str(target))
     except (OSError, RuntimeError, ValueError):
         return "target_moved"
     if rel is None:
         return "target_moved"
-    return trial, rel, case
+    return trial, rel, case, data
 
 
 def eligible_case(db: sqlite3.Connection, workspace: Path, fact: CarryInFact) -> EligibleCase | str:
@@ -225,7 +235,7 @@ def eligible_case(db: sqlite3.Connection, workspace: Path, fact: CarryInFact) ->
     found = _lesson_case(db, workspace, fact.lesson_path)
     if isinstance(found, str):
         return found
-    trial, rel, case = found
+    trial, rel, case, data = found
     if trial.lesson.id != fact.lesson_id or trial.lesson.owner != fact.owner_thread_id:
         return "lesson_unreadable"
     if trial.behavioral_sha256 != fact.behavioral_sha256:
@@ -234,23 +244,26 @@ def eligible_case(db: sqlite3.Connection, workspace: Path, fact: CarryInFact) ->
         return "case_changed"
     if rel != fact.target_path:
         return "target_moved"
-    return EligibleCase(case=case, actions=case.get("actions"))
+    return EligibleCase(
+        case=case, actions=case.get("actions"),
+        delivery=delivery_for_trial(trial, workspace / fact.lesson_path, data),
+        deliver=trial.lesson.state == "trial",
+    )
 
 
 def committed_cases(db: sqlite3.Connection, workspace: Path, saved: SavedCommit) -> list[CarryInFact]:
-    """Current eligible cases whose canonical target is one saved target.
+    """Current eligible cases whose target, or whose own lesson file, is the saved target.
 
-    This is deliberately the one parser path: ``_lesson_case`` uses
-    ``lesson_files.read_trial``. Bad lesson files and unresolvable targets are
-    non-matches, never a failure of this saved work item.
+    The one parser path (``_lesson_case``, ``lesson_files.read_trial``): bad lesson
+    files and unresolvable targets are non-matches, never a failure of this item.
     """
     facts = []
     for path in workspace.glob(".threads/*/skills/*/SKILL.md"):
         lesson_path = path.relative_to(workspace).as_posix()
         found = _lesson_case(db, workspace, lesson_path)
-        if isinstance(found, str) or found[1] != saved.target_path:
+        if isinstance(found, str) or saved.target_path not in (found[1], lesson_path):
             continue
-        trial, rel, case = found
+        trial, rel, case, _data = found
         facts.append(CarryInFact(
             lesson_id=trial.lesson.id, behavioral_sha256=trial.behavioral_sha256,
             case_sha256=case_sha256(case), owner_thread_id=trial.lesson.owner,
