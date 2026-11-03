@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass, replace
 from typing import Any
 
+from core.attachment_notes import attachment_notes, with_attachment_notes
 from core.message_history import AgentEnvelopeRender, render_agent_envelope
 from infra.db_async import run_in_db
 from infra.send_types import SendRejected
@@ -202,20 +203,20 @@ def _projection_identity(
 def _render_input_projection(
     batch: ClaimedBatch,
     *,
-    attachments,
-    media_projection,
+    attachments, media_projection, notes: str,
 ) -> InputProviderProjection:
     """Build the provider projection after attachment work has completed."""
     rendered = render_claimed_batch(batch)
     source = render_claimed_batch(batch, frame_agent_inputs=False)
     envelope = _batch_agent_envelope(batch, source, rendered.content)
+    content = with_attachment_notes(envelope.content, notes)
     return InputProviderProjection(
         _projection_identity(
             rendered,
-            content=envelope.content,
+            content=content,
             media_projection=media_projection,
         ),
-        envelope.content,
+        content,
         source.content,
         envelope,
         attachments,
@@ -239,6 +240,7 @@ def project_claimed_input(
     )
     return _render_input_projection(
         batch, attachments=attachments, media_projection=media_projection,
+        notes=attachment_notes(attachments, batch.thread_id, db),
     )
 
 
@@ -261,6 +263,7 @@ async def _load_input_projection_async(batch, thread_row, target):
     )
     return _render_input_projection(
         batch, attachments=attachments, media_projection=media_projection,
+        notes=await run_in_db(attachment_notes, attachments, batch.thread_id),
     )
 
 

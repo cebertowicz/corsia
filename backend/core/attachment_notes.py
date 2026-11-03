@@ -1,0 +1,70 @@
+"""The note a chat attachment leaves in the agent's input, for every harness.
+
+One writer: ``infra.input_render`` appends these lines to the current user input,
+so native, Claude Code and Codex receive the identical text exactly once and
+preflight measures what dispatch sends.
+
+A document or other file also names where it is saved, relative to the agent's
+working directory (the thread's project root, or the workspace root outside a
+project), so ``read_file`` opens it as written. Pixels travel separately, so an
+image keeps its bare note.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+from core.workspace_layout import uploads_root_for_path
+from infra.config import DOCUMENT_MIME_TYPES
+
+
+def _saved_path(file_id: object, thread_id: str, db=None) -> str | None:
+    """Return the registered upload's path under its scope root, or ``None``.
+
+    Never built from the filename: the path comes from the upload registry and
+    must sit in this thread's own uploads root, so a legacy upload, a missing
+    file or another thread's file yields no path.
+    """
+    if not isinstance(file_id, str) or not file_id:
+        return None
+    from registry.registration_events import resolve_upload
+
+    try:
+        artifact = resolve_upload(file_id, db=db)
+        raw = artifact.get("path") if artifact else None
+        if not raw:
+            return None
+        path = Path(raw).resolve(strict=False)
+        uploads = uploads_root_for_path(path)
+        if uploads is None or uploads.parent.name != thread_id or not path.is_file():
+            return None
+        return path.relative_to(uploads.parent.parent.parent).as_posix()
+    except (sqlite3.Error, OSError, ValueError, TypeError):
+        return None
+
+
+def attachment_notes(attachments: list | None, thread_id: str, db=None) -> str:
+    """Return one note line per attachment; tolerant of anything on the wire."""
+    lines: list[str] = []
+    for attachment in attachments or ():
+        if not isinstance(attachment, dict):
+            continue
+        mime = attachment.get("mime_type")
+        mime = mime if isinstance(mime, str) else ""
+        name = attachment.get("filename", "file")
+        if mime.startswith("image/"):
+            lines.append(f"[Image attached: {name}]")
+            continue
+        label = "Document" if mime in DOCUMENT_MIME_TYPES else "File"
+        saved = _saved_path(attachment.get("file_id"), thread_id, db)
+        where = f", saved at {saved}" if saved else ""
+        lines.append(f"[{label} attached: {name}{where}]")
+    return "\n".join(lines)
+
+
+def with_attachment_notes(content: str, notes: str) -> str:
+    """Append the notes to the current user input."""
+    if not notes:
+        return content
+    return f"{content}\n\n{notes}" if content else notes
