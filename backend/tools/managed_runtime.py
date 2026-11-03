@@ -63,8 +63,8 @@ RUNTIME_PINS: dict[str, dict[str, RuntimePin]] = {
     "gws": {
         "arm64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-aarch64-apple-darwin.tar.gz", "1d2a9ffd5bc9b2c2c4b48630daf082fad13d9e57d741988a2c248eed562f7dac", "tar.gz", "gws"),
         "x86_64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-x86_64-apple-darwin.tar.gz", "51f9bd731404d4bba26c36e2e30dd68c56dccd1f834c01252cb0b14d6a6544b2", "tar.gz", "gws"),
-        "linux-x86_64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-x86_64-unknown-linux-gnu.tar.gz", "de78ecdbd2f1a84cca0063a7ecbc440240fc14b6ebccbb17f4646b792a8c5c1f", "tar.gz", "gws"),
-        "linux-arm64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-aarch64-unknown-linux-gnu.tar.gz", "94490295d9580e1e88574e715a0a162991747d12d62f8c7b8dcc8268b6c1cea0", "tar.gz", "gws"),
+        "linux-x86_64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-x86_64-unknown-linux-musl.tar.gz", "4db473dde4b1ab872e4ff35d769b0d4af1f1a6441a605e79d5cf8ada9c87e920", "tar.gz", "gws"),
+        "linux-arm64": RuntimePin(_GWS_VERSION, f"https://github.com/googleworkspace/cli/releases/download/v{_GWS_VERSION}/google-workspace-cli-aarch64-unknown-linux-musl.tar.gz", "e700fe63524932b10ec2130b47ece90aa850e66005fe52ccfc4cf8767bf9919a", "tar.gz", "gws"),
     },
 }
 COMMAND_RUNTIME = {"node": "node", "npm": "node", "npx": "node", "uv": "uv", "uvx": "uv", "gh": "gh"}

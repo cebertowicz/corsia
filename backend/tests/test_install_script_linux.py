@@ -357,6 +357,14 @@ def test_x86_64_downloads_the_x86_64_builds(env):
     assert curls == [f"curl {UV_URL['x86_64']}", f"curl {NODE_URL['x86_64']}", f"curl {GWS_URL['x86_64']}"]
 
 
+def test_a_failed_gws_download_warns_and_the_install_finishes(env):
+    result = _run(env, STUB_BAD_CHECKSUM="gws")
+
+    assert result.returncode == 0, result.stderr
+    assert "Google Workspace support wasn’t installed. Run this again to add it." in result.stdout
+    assert _calls(env)[-2:] == ["corsia start stdin=terminal-answer", "corsia sources --install-summary stdin=none"]
+
+
 def test_a_second_run_changes_nothing_and_never_asks_for_sudo(env):
     assert _run(env).returncode == 0
     Path(env["STUB_LOG"]).write_text("")

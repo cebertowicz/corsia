@@ -429,9 +429,10 @@ install_python_linux() {
 }
 
 # gws is reached only through its tool, so it is installed to the runtime cache and not linked onto PATH.
+# A failed download warns and continues: the rest of CORSIA works without it.
 install_gws_linux() {
     say "     Installing Google Workspace support…"
-    managed_runtime_linux gws > /dev/null || stop "Google Workspace support wasn’t installed. Run this again."
+    managed_runtime_linux gws > /dev/null || say "     Google Workspace support wasn’t installed. Run this again to add it."
 }
 
 link_managed_node_linux() {
