@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from doc_feedback_helpers import add_comment, add_person_comment, seed_document, seed_thread
-from doceditor import feedback_batches
-from infra.database import get_db
+from pathlib import Path
+
+from doc_feedback_helpers import add_comment, add_person_comment, batches, seed_document, seed_thread
+from doceditor import comment_actions, comments, feedback_batch_edits, feedback_batches
+from infra.database import get_db, write_transaction
 from plans import holds, service
 from plans.feedback_nodes import create_feedback_node
 
@@ -151,6 +153,71 @@ def test_reply_to_a_parked_task_gets_its_own_task(isolated_db):
         _person_reply(db, artifact_id, root["id"])
 
         assert len(_feedback_nodes(db, "owner")) == 3
+    finally:
+        db.close()
+
+
+def _agent_batch(db, artifact_id: str, **comment) -> dict:
+    row, _ = add_comment(db, artifact_id, **comment)
+    feedback_batches.close_batch(db, batches(db, state="open")[0]["id"], "quiet")
+    return row
+
+
+def test_agent_task_holding_a_joined_reply_settles_only_once_the_reply_is_settled(isolated_db):
+    """The task holds both batches, so settling the first alone must not close it with the reply unhandled."""
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        seed_thread(db, "author", title="Reviewer")
+        artifact_id = seed_document(db, "owner")
+        _agent_batch(db, artifact_id)
+        root = _agent_batch(db, artifact_id, replacement="New")
+        busy, first = _feedback_nodes(db, "owner")
+        assert db.execute("SELECT 1 FROM plan_node_attempts WHERE node_id=?", (first["id"],)).fetchone() is None
+        reply = _agent_batch(db, artifact_id, parent_id=root["id"])
+        assert [node["id"] for node in _feedback_nodes(db, "owner")] == [busy["id"], first["id"]]
+        assert "left 1 comment and 1 suggestion on" in service.get_node(first["id"], db=db).title
+
+        with write_transaction(db, scope="test_reply_join_settlement") as connection:
+            comment_actions.record_decision(
+                root["id"], decision="accept", decided_by="Robin", decided_by_thread_id=None, db=connection,
+            )
+        assert service.get_node(first["id"], db=db).state != "accepted"
+
+        comments.update(reply["id"], {"resolved": True}, db=db)
+
+        assert service.get_node(first["id"], db=db).state == "accepted"
+        evidence = db.execute(
+            "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event='review_evidence_submitted'",
+            (first["id"],),
+        ).fetchone()["payload_json"]
+        assert f"Comment {root['id']}: suggestion accepted by Robin" in evidence
+        assert f"Comment {reply['id']}: resolved" in evidence
+    finally:
+        db.close()
+
+
+def test_joined_title_still_counts_an_edit_the_first_batch_carried(isolated_db):
+    """Delivery clears the first batch's edit item; the batch's own count still says it held one."""
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        seed_thread(db, "author", title="Reviewer")
+        artifact_id = seed_document(db, "owner")
+        _agent_batch(db, artifact_id)
+        root, _ = add_comment(db, artifact_id)
+        feedback_batch_edits.record_edit(
+            db, artifact_id=artifact_id, recipient_id="owner", author_kind="agent", author_id="author",
+            actor_display="Reviewer", path=Path("/workspace/shared/Design.md"), before=b"old\n", after=b"new\n",
+        )
+        db.commit()
+        feedback_batches.close_batch(db, batches(db, state="open")[0]["id"], "quiet")
+        _, first = _feedback_nodes(db, "owner")
+        assert "edited" in first["title"] and "1 comment" in first["title"]
+
+        _agent_batch(db, artifact_id, parent_id=root["id"])
+
+        assert service.get_node(first["id"], db=db).title == first["title"].replace("1 comment", "2 comments")
     finally:
         db.close()
 

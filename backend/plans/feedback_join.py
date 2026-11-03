@@ -10,18 +10,22 @@ armed watch, an unmet dependency), would not show the reply until later. In
 those cases the reply joins a later task of the thread that qualifies, or gets
 its own task as before. The joined task's title is recounted over every item it
 now holds.
+
+A task can therefore hold several batches. Each batch's ``delivered_node_id``
+is the one record of the task that holds it: settlement reads it to settle a
+task only once every batch in it is settled, and a batch already delivered
+resolves to that task instead of joining twice.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from plans import mutations, node_waits, service
+from infra.write_effects import after_commit
+from plans import mutations, node_waits, notifications, service
 from plans.feedback_items import batch_value, load_feedback_items
 from plans.plan_write import transaction
-from plans.review_requests import _current, _notify
 
-JOINED_EVENT = "feedback_batch_joined"
 # A feedback task is made active at once; until its owner selects it, it is still queued.
 _WORKABLE = ("pending", "active")
 
@@ -55,7 +59,7 @@ def _thread_task(db, recipient_thread_id: str, batch: Any, root_id: str) -> str 
         batch_value(batch, "author_kind"), batch_value(batch, "author_id"), batch_value(batch, "id"),
     )).fetchall()
     for node_id in dict.fromkeys(str(row["delivered_node_id"]) for row in rows):
-        node = service._node_row(db, _current(db, node_id))
+        node = service._node_row(db, node_id)
         if node["state"] in _WORKABLE and not _handed_or_waits(db, node):
             return str(node["id"])
     return None
@@ -77,30 +81,41 @@ def open_thread_task(
     return tasks.pop() if len(tasks) == 1 else None
 
 
+def delivered_task(db, batch_id: str) -> str | None:
+    """The task that already holds a delivered batch, or None."""
+    row = db.execute("SELECT delivered_node_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()
+    return str(row["delivered_node_id"]) if row and row["delivered_node_id"] else None
+
+
 def earlier_items(db, node_id: str, batch: Any) -> list[dict[str, Any]]:
-    """The comment items of the batches already delivered into the task, oldest first."""
+    """The items of the batches already delivered into the task, oldest first.
+
+    Delivery clears a batch's edit item, so a batch whose count exceeds its
+    comments held one, and it counts as one edit.
+    """
     rows = db.execute(
         "SELECT * FROM doc_feedback_batches WHERE delivered_node_id=? AND id<>? ORDER BY created_at,id",
         (node_id, batch_value(batch, "id")),
     ).fetchall()
-    return [item for row in rows for item in load_feedback_items(db, row)]
+    held: list[dict[str, Any]] = []
+    for row in rows:
+        items = load_feedback_items(db, row)
+        held += items + ([{"kind": "edit"}] if int(row["item_count"]) > len(items) else [])
+    return held
 
 
-def join(db, node_id: str, batch: Any, *, title: str, blocks: str, words, provenance: str) -> None:
-    """Add the batch's items to the task, once per batch, through the node's one amend path."""
-    batch_id = str(batch_value(batch, "id"))
+def join(db, node_id: str, *, title: str, blocks: str, words, provenance: str) -> None:
+    """Add a batch's items to the task through the node's one amend path."""
     with transaction(db) as connection:
-        if connection.execute(
-            "SELECT 1 FROM plan_node_events WHERE node_id=? AND event=? "
-            "AND json_extract(payload_json,'$.batch_id')=? LIMIT 1",
-            (node_id, JOINED_EVENT, batch_id),
-        ).fetchone():
-            return
         node = service._node_row(connection, node_id)
         mutations.edit_node(
             node_id, title=title, description=f"{node['description'] or ''}\n\n{blocks}".lstrip(),
             intent_words=list(words) or None, provenance=provenance, db=connection,
         )
-        service._event(connection, node_id, JOINED_EVENT, actor_id=None,
-                       provenance=provenance, payload={"batch_id": batch_id})
-        _notify(connection, node["plan_id"])
+        plan_id = str(node["plan_id"])
+
+        def notify() -> None:
+            """Refresh the plan view once the amend commits."""
+            notifications.notify_after_commit((plan_id,), db=connection)
+
+        after_commit(connection, notify)

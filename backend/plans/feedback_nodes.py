@@ -219,7 +219,7 @@ def create_feedback_node(
     """
     batch_id = str(batch_value(batch, "id"))
     artifact_id = str(batch_value(batch, "artifact_id"))
-    existing = _existing(db, recipient_thread_id, batch_id)
+    existing = feedback_join.delivered_task(db, batch_id) or _existing(db, recipient_thread_id, batch_id)
     if existing is not None:
         return FeedbackNodeResult(existing, (), False)
     loaded = items if items is not None else load_feedback_items(db, batch)
@@ -234,11 +234,8 @@ def create_feedback_node(
     thread_task = feedback_join.open_thread_task(db, recipient_thread_id, batch, loaded)
     if thread_task is not None:
         held = feedback_join.earlier_items(db, thread_task, batch) + loaded
-        # Delivery drops a batch's edit items; the task's acceptance still says it holds an edit.
-        if EDIT_ACCEPTANCE in str(service._node_row(db, thread_task)["acceptance_criteria"]):
-            held.append({"kind": "edit"})
         feedback_join.join(
-            db, thread_task, batch, title=_title(author, document, held),
+            db, thread_task, title=_title(author, document, held),
             blocks=item_blocks(batch, loaded), words=words, provenance=PROVENANCE,
         )
         return FeedbackNodeResult(thread_task, (), False)
