@@ -3,9 +3,10 @@
 A sample runs only on the one ready local oMLX Native catalog row, never a
 substitute, and only while no other local Turn runs and that server's own
 authenticated ``/api/status`` proves it idle under the workspace's local
-admission contract. ``infra.carry_in_drain`` asks before each claim and again
-just before each sample's provider call. ``llm.provider_overflow`` reads the
-same status to resend a prefill-guard refusal once the seat has gone quiet.
+admission contract. ``infra.carry_in_drain`` first waits, bounded, for the seat's
+other clients to go quiet, then asks before each claim and before each sample;
+it asks once more just before that sample's provider call. ``llm.provider_overflow``
+reads the same status to resend a prefill-guard refusal once the seat has gone quiet.
 """
 
 from __future__ import annotations
@@ -116,6 +117,21 @@ async def wait_until_quiet(server_id: str, *, timeout: float, interval: float) -
             if asyncio.get_running_loop().time() + interval > deadline:
                 return False
             await asyncio.sleep(interval)
+
+
+async def wait_quiet(bound: str | None = None) -> None:
+    """Wait, at most the prefill-guard bound, for the seat's other requests to end.
+
+    A brief request from another client on a shared seat would otherwise refuse the
+    one-shot idle check. Only waits; :func:`ready_idle` still decides, and a seat that
+    stays busy, or no ready local row, ends as it would without the wait.
+    """
+    from llm.provider_overflow import GUARD_QUIET_INTERVAL_SECONDS, GUARD_QUIET_TIMEOUT_SECONDS
+
+    local = await run_off_db(_local_row_now, None)
+    if local is None or (bound is not None and local[0] != bound):
+        return
+    await wait_until_quiet(local[1], timeout=GUARD_QUIET_TIMEOUT_SECONDS, interval=GUARD_QUIET_INTERVAL_SECONDS)
 
 
 async def ready_idle(bound: str | None = None, exclude_thread: str | None = None) -> str | None:

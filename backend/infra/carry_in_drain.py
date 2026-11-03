@@ -3,10 +3,13 @@
 ``core.carry_in_facts`` owns the append-only facts this reads. Each wake
 settles a claim no running wake owns, reaps finished eval threads, then either
 matches the oldest saved target or advances the oldest pending case.
-It runs only on the one ready local oMLX Native catalog row while ``infra.carry_in_capacity`` proves it idle; otherwise that oldest case
-shows ``no_ready_local_model`` and waits for the next save or restart. The
-same check, on the claimed model only, runs again just before every sample's
-provider call; failing it ends the claimed case in coverage, never a call.
+It runs only on the one ready local oMLX Native catalog row while ``infra.carry_in_capacity`` proves it idle.
+Before the claim, and before each sample, it first waits for the seat's other
+clients to go quiet, then checks once; a seat still busy leaves that oldest case
+at ``no_ready_local_model`` until the next save or restart. The same check, on
+the claimed model only, runs again just before every sample's provider call;
+failing it ends the claimed case in coverage, never a call. The wait sits
+outside the Turn, so its timeout never counts it.
 Samples are ordinary fresh eval Turns (``eval.endpoint.run_eval_turn``) under
 record-only tool isolation, so they cannot change anything they act on.
 A candidate sample of a ``trial`` lesson carries the lesson the way task start
@@ -189,6 +192,7 @@ async def _sample(
     from eval.turn_result import read_turn_result
 
     thread_id = f"{EVAL_THREAD_PREFIX}{fact.identity[:16]}-{label}"
+    await capacity.wait_quiet(model)
     try:
         thread_id, row = await open_eval_thread(
             owner["user_id"], model, thread_id=thread_id, title="Skill re-test",
@@ -333,6 +337,7 @@ async def wake(workspace: Path) -> bool:
             scope="carry_in_retired", reason=reason or "target_unavailable",
         ))
         return True
+    await capacity.wait_quiet()
     model = await capacity.ready_idle()
     if model is None:
         await run_in_db(partial(

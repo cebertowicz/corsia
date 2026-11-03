@@ -36,9 +36,13 @@ def _git(args: list[str], *, cwd: Path) -> str:
 @pytest.fixture
 def c1(isolated_db, tmp_path, monkeypatch):
     """A git workspace, an owning thread with one trial lesson aimed at ``TARGET``."""
-    from infra import carry_in_drain, config
+    from infra import carry_in_capacity, carry_in_drain, config
     from infra.database import get_db
 
+    async def no_wait(bound=None):  # the bounded wait for a quiet seat has its own tests
+        return None
+
+    monkeypatch.setattr(carry_in_capacity, "wait_quiet", no_wait)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     _git(["init", "--quiet"], cwd=workspace)
