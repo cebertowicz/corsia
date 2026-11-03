@@ -61,13 +61,16 @@ async function openDocument(page: Page, size: { width: number; height: number })
 	return { title, artifactId, ids };
 }
 
-/** Waits until nothing animates and the editor's geometry is steady across frames. */
+/**
+ * Waits until nothing animates toward an end and the editor's geometry is steady across frames. A loop never ends: a comment
+ * wakes its agent, whose working ring may spin the whole time.
+ */
 async function settle(page: Page) {
 	await expect.poll(() => page.locator('.cm-editor').evaluate(async (node) => {
 		const scroller = node.querySelector('.cm-scroller')!;
 		const before = `${scroller.scrollHeight}:${node.getBoundingClientRect().top}`;
 		await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
-		return { running: document.getAnimations().filter((a) => a.playState === 'running').length, steady: before === `${scroller.scrollHeight}:${node.getBoundingClientRect().top}` };
+		return { running: document.getAnimations().filter((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity).length, steady: before === `${scroller.scrollHeight}:${node.getBoundingClientRect().top}` };
 	}), { message: 'setup: the canvas is loaded and still' }).toEqual({ running: 0, steady: true });
 }
 
