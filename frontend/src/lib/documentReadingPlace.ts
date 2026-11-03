@@ -1,66 +1,117 @@
-import { Transaction } from '@codemirror/state';
+import { Transaction, type StateEffectType } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { NEAR_BOTTOM_PX } from '$lib/nearBottom';
 
 /**
- * The reader's place: the line at the top of the editor's view and how far below the scroller's top edge it starts.
- * It is read against the scroller, not the page, so a header that moves the whole editor leaves it as it was; the
- * offset alone is kept to fall back on. The line is found and measured through CodeMirror's height map, the same
- * lookup its own scroll anchor uses, so it is known for text the editor has not drawn yet and agrees with the line
- * CodeMirror holds across a change.
+ * The reader's place: the line at the top of the editor's view and how far below the document pane's top edge that line
+ * starts. The pane holds the header row and the editor, so a notice or the review bar growing in the header moves the
+ * editor and its text but not this edge, and the place still says where the reader had the line on screen. The line is
+ * found and laid through CodeMirror's height map, so it is known for text the editor has not drawn yet.
+ *
+ * `scrollTop` is the offset it was read at; at 0 or less the reader is at the very start, and the place is the start
+ * itself, whatever the header does. `end` marks a reader following text appended to the end; the place is the end.
  */
 export interface TextDocumentPlace {
 	from: number;
 	top: number;
 	scrollTop: number;
+	end?: boolean;
 }
 
-/** How far below the scroller's top edge the line block holding `from` starts. */
+/** The edge places are measured from: the document pane's top, or the scroller's for an editor outside one. */
+function frameTop(view: EditorView): number {
+	return (view.dom.closest<HTMLElement>('.doc') ?? view.scrollDOM).getBoundingClientRect().top;
+}
+
+/** How far below the frame edge the line block holding `from` starts. */
 export function placeTop(view: EditorView, from: number): number {
-	return view.documentTop + view.lineBlockAt(from).top - view.scrollDOM.getBoundingClientRect().top;
+	return view.documentTop + view.lineBlockAt(Math.min(from, view.state.doc.length)).top - frameTop(view);
 }
 
-/** Reads the reader's place: the line at the scroller's top edge. */
-export function captureDocumentPlace(view: EditorView): TextDocumentPlace {
+/** Runs CodeMirror's pending measure now, so its heights are the layout's (its own resize handling waits 50 ms). */
+function measureNow(view: EditorView): void {
+	view.requestMeasure();
+	view.lineBlockAtHeight(0);
+}
+
+/** Reads the reader's place: the line at the scroller's top edge, at the current offset or at `scrollTop`. */
+export function captureDocumentPlace(view: EditorView, scrollTop?: number): TextDocumentPlace {
+	measureNow(view);
 	const scroller = view.scrollDOM;
-	const { from } = view.lineBlockAtHeight(scroller.getBoundingClientRect().top - view.documentTop);
-	return { from, top: placeTop(view, from), scrollTop: scroller.scrollTop };
+	const at = scrollTop ?? scroller.scrollTop;
+	// At another offset the text sits lower by the difference.
+	const shift = scroller.scrollTop - at;
+	const block = view.lineBlockAtHeight(scroller.getBoundingClientRect().top - view.documentTop - shift);
+	return { from: block.from, top: view.documentTop + shift + block.top - frameTop(view), scrollTop: at };
 }
-
-/** Reports the reader's place at most once a frame while the editor scrolls, until the returned stop is called. */
-export function reportDocumentPlaceOnScroll(view: EditorView, report: (place: TextDocumentPlace) => void): () => void {
-	let frame = 0;
-	const capture = () => {
-		frame = 0;
-		report(captureDocumentPlace(view));
-	};
-	const onScroll = () => { if (!frame) frame = requestAnimationFrame(capture); };
-	view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
-	return () => {
-		view.scrollDOM.removeEventListener('scroll', onScroll);
-		if (frame) cancelAnimationFrame(frame);
-	};
-}
-
-/** A restore putting a saved place back (a tab return, an image Back). While one runs it owns the editor's scroll offset. */
-export interface PlaceRestore {
-	/** Runs from the editor's resize observation, after a layout and before it is painted. */
-	layout(): void;
-}
-
-const restores = new WeakMap<EditorView, PlaceRestore>();
 
 /**
- * Hands the editor's scroll offset to a restore until the returned release is called; a newer restore takes it over.
- * Meanwhile nothing else here moves the offset: the restore lays its place against the scroller's top edge, so it
- * already answers for a header that moves the editor, and a second correction of the same move would move the text twice.
+ * Each editor's place to hold, and the offset `applyPlace` last left, so its own scroll is not taken for the reader's. The
+ * place is the keeper's own copy: a change moves its line in place, and it stays the same place until something sets another.
  */
-export function restoreOwnsPlace(view: EditorView, restore: PlaceRestore): () => void {
-	restores.set(view, restore);
-	heldPlaces.delete(view);
-	return () => {
-		if (restores.get(view) === restore) restores.delete(view);
-	};
+interface Keeper {
+	target: TextDocumentPlace | null;
+	applied: number;
+}
+
+const keepers = new WeakMap<EditorView, Keeper>();
+
+function keeperOf(view: EditorView): Keeper {
+	let keeper = keepers.get(view);
+	if (!keeper) keepers.set(view, keeper = { target: null, applied: Number.NaN });
+	return keeper;
+}
+
+/** The place the editor holds now; null while CodeMirror scrolls somewhere on its own. */
+export function heldPlace(view: EditorView): TextDocumentPlace | null {
+	return keepers.get(view)?.target ?? null;
+}
+
+/** Makes `place` the one the editor holds (a tab return, an image Back) and lays it; returns the place held. */
+export function holdPlace(view: EditorView, place: TextDocumentPlace): TextDocumentPlace {
+	const held = keeperOf(view).target = { ...place };
+	applyPlace(view);
+	return held;
+}
+
+/**
+ * Lets CodeMirror scroll on its own (to the caret, or to a comment's text) and takes the reader's place again from where
+ * it leaves them, in a frame registered after its measure. Until then nothing is held, so nothing scrolls back.
+ */
+export function releasePlace(view: EditorView): void {
+	const keeper = keeperOf(view);
+	keeper.target = null;
+	requestAnimationFrame(() => {
+		if (keeper.target === null && view.dom.isConnected) keeper.target = captureDocumentPlace(view);
+	});
+}
+
+/** Passes over a layout the editor is still measuring: each correction of its estimated heights moves the line. */
+const MAX_PASSES = 4;
+
+/**
+ * The one writer of a document's scroll offset. Lays the held place where it belongs: the start at 0, the end at the
+ * end, a line where the height map puts it less its distance from the frame edge. The offset is worked out whole each
+ * time, never added to the one before, so the pixel the browser rounds off one write is not carried into the next.
+ * It is clamped to the scroll range and written only when it is half a pixel or more off. Returns whether it moved.
+ */
+export function applyPlace(view: EditorView): boolean {
+	const keeper = keepers.get(view);
+	const target = keeper?.target;
+	if (!keeper || !target || !view.dom.isConnected) return false;
+	const scroller = view.scrollDOM;
+	let moved = false;
+	for (let pass = 0; pass < MAX_PASSES; pass++) {
+		measureNow(view);
+		const max = scroller.scrollHeight - scroller.clientHeight;
+		const wanted = target.end ? max : target.scrollTop <= 0 ? 0 : scroller.scrollTop + placeTop(view, target.from) - target.top;
+		const next = Math.max(0, Math.min(max, wanted));
+		if (Math.abs(next - scroller.scrollTop) < 0.5) break;
+		scroller.scrollTop = next;
+		moved = true;
+	}
+	keeper.applied = scroller.scrollTop;
+	return moved;
 }
 
 /** True when a non-user transaction only inserts text at the end of the document, judged by where it changes it. */
@@ -74,129 +125,72 @@ function isRemoteAppend(transaction: Transaction): boolean {
 	return append;
 }
 
+/** The effect type behind `EditorView.scrollIntoView`; CodeMirror exports the constructor but not the type it tests with. */
+const SCROLL_INTO_VIEW = (EditorView.scrollIntoView(0) as unknown as { type: StateEffectType<unknown> }).type;
+
 /**
- * Applies the editor's transactions and lays out at once any change the reader did not make, so the text in view stays
- * where it is while others edit the document. A remote append follows the live edge when the reader is already as near
- * it as chat considers near; every other remote edit keeps the current top-line anchor. CodeMirror keeps the line at the
- * top of the view in place across a change, by that change's height, when it next measures. Until then every update takes
- * that line again from the scroll offset it measured last: a remote change followed by any other update before the next
- * frame (a typing lane's state, comment ranges remapped onto the change) makes it hold whichever line the change moved
- * under that offset, and the text in view moves by the change's height. Measuring right after the change keeps
- * CodeMirror's own correction, the one thing that moves the scroller for it. The reader's own edits keep the default
- * timing, so their caret scrolls as it always has.
+ * Applies the editor's transactions and keeps the reader's place across them. The held line moves with the text the
+ * change moves; a change the reader did not make is laid out at once and the place laid again, so the text in view
+ * stays where it is while others edit the document. A remote append follows the live edge when the reader is already as
+ * near it as chat considers near. A transaction that scrolls (the reader's typing, a jump to a comment) lets CodeMirror
+ * scroll, and the place is taken again from where it lands.
  */
 export function dispatchKeepingPlace(transactions: readonly Transaction[], view: EditorView): void {
 	const scroller = view.scrollDOM;
-	// A restore in progress owns the offset; the change is still laid out at once.
-	const restoring = restores.has(view);
-	const followAppend = !restoring && transactions.some(isRemoteAppend)
+	const followAppend = transactions.some(isRemoteAppend)
 		&& scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < NEAR_BOTTOM_PX;
 	const remoteChange = transactions.some((tr) => tr.docChanged && tr.annotation(Transaction.userEvent) === undefined);
-	const place = remoteChange && !followAppend && !restoring ? readingPlace(view) : null;
+	const scrolls = transactions.some((tr) => tr.scrollIntoView || tr.effects.some((effect) => effect.is(SCROLL_INTO_VIEW)));
 	view.update(transactions);
-	if (followAppend) {
-		scroller.scrollTop = scroller.scrollHeight;
-		view.lineBlockAtHeight(0);
-	} else if (remoteChange) {
-		// lineBlockAtHeight reads the layout through readMeasured, which runs the pending measure pass now; lineBlockAt
-		// returns stored heights without measuring.
-		view.lineBlockAtHeight(0);
-		if (place) {
-			holdReadingPlace(view, place, transactions);
-			return;
-		}
+	const keeper = keeperOf(view);
+	if (keeper.target && transactions.some((tr) => tr.docChanged)) {
+		const from = transactions.reduce((pos, tr) => tr.changes.mapPos(pos, 1), keeper.target.from);
+		keeper.target.from = view.state.doc.lineAt(from).from;
 	}
-	if (transactions.some((tr) => tr.docChanged)) heldPlaces.delete(view);
+	if (scrolls) releasePlace(view);
+	else if (followAppend) holdPlace(view, { ...captureDocumentPlace(view), end: true });
+	else if (remoteChange) {
+		// Without a place to hold, the change is still laid out before any other update can follow it.
+		if (!applyPlace(view)) measureNow(view);
+	}
 }
 
 /**
- * Where a run of remote changes is holding each editor's top line. The browser keeps a scroll offset in whole (or device)
- * pixels, so the scroll CodeMirror writes for a change above the view lands up to a pixel short; measured from wherever
- * the last change left it, every change of a streaming write adds its own shortfall and the text creeps down the screen.
- * Holding the line at the place the run started keeps the shortfall under a pixel however long the run is.
- */
-const heldPlaces = new WeakMap<EditorView, TextDocumentPlace>();
-
-function readingPlace(view: EditorView): TextDocumentPlace {
-	const place = captureDocumentPlace(view);
-	const held = heldPlaces.get(view);
-	// The reader has moved since the last change when the held line is not where it was left; their place is the new one.
-	return held && held.from === place.from && Math.abs(held.top - place.top) < 1 ? held : place;
-}
-
-function holdReadingPlace(view: EditorView, place: TextDocumentPlace, transactions: readonly Transaction[]): void {
-	const from = transactions.reduce((pos, tr) => tr.changes.mapPos(pos, 1), place.from);
-	const line = view.state.doc.lineAt(from).from;
-	const drift = placeTop(view, line) - place.top;
-	if (Math.abs(drift) >= 0.5) view.scrollDOM.scrollTop += drift;
-	heldPlaces.set(view, { from: line, top: place.top, scrollTop: view.scrollDOM.scrollTop });
-}
-
-/**
- * The editor's one resize observation, and the one thing here that moves its scroll offset when its layout changes.
- *
- * It keeps the text in view where it is on screen when the editor's box moves: a notice or the review bar growing or
- * shrinking in the document header above it moves the editor's top edge, and with it every line, by that height. The
- * editor's box grows or shrinks by the same height, which is what the observer sees; the scroll offset moves with the
- * edge in the same frame, before it paints. Only the editor's position on the page counts, so scrolling the page itself
- * moves nothing. While a restore owns the offset the observation is the restore's: the text it watches rewrap is
- * observed here too, and the move is left to it.
- *
- * A reader at the very start of the document is left there: the text moves with the header, as the browser's own scroll
- * anchoring leaves it at offset 0. The review bar reads its ask after the editor opens, and holding the text would scroll
- * the title and first lines out of view by the bar's height.
- *
- * Near the end of the document the browser moves the offset itself: an editor that grows past the text left below the
- * view has its offset pulled back to the new end at layout, which holds the text by as much as it pulls. Only the rest
- * of the move is the editor's to make, so the distance to the end is kept as of the last scroll. A scroll that comes
- * after the editor moved and before the observer saw it is that pull-back itself, and leaves the distance as it was.
+ * Holds the reader's place in this editor until the returned stop is called: takes it at first open and from every
+ * scroll of the reader's, and lays it again from the editor's one resize observation, which sees the editor's box move
+ * or grow (a notice or the review bar in the header above it) and its text rewrap, after layout and before paint.
  */
 export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
-	if (typeof ResizeObserver !== 'function') return () => {};
 	const scroller = view.scrollDOM;
-	const pageTop = () => scroller.getBoundingClientRect().top - document.documentElement.getBoundingClientRect().top;
-	const toEnd = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
-	let top = pageTop();
-	let end = toEnd();
+	const keeper = keeperOf(view);
+	keeper.target = captureDocumentPlace(view);
+	keeper.applied = scroller.scrollTop;
 	const onScroll = () => {
-		if (Math.abs(pageTop() - top) < 0.5) end = toEnd();
+		if (Math.abs(scroller.scrollTop - keeper.applied) >= 1) keeper.target = captureDocumentPlace(view);
 	};
-	// A header that eases open moves the edge by a fraction each frame, and the browser keeps whole pixels of each
-	// scroll; the part it dropped is carried into the next move so the frames add up to the edge's whole move.
-	let unscrolled = 0;
-	const observer = new ResizeObserver(() => {
-		const now = pageTop();
-		let moved = now - top + unscrolled;
-		top = now;
-		unscrolled = 0;
-		const restore = restores.get(view);
-		if (restore) {
-			restore.layout();
-			end = toEnd();
-			return;
-		}
-		if (scroller.scrollTop <= 0) {
-			end = toEnd();
-			return;
-		}
-		// The editor grew upward with less text below the view than it grew by: the browser has already scrolled back.
-		if (moved < 0 && toEnd() < 0.5) moved = Math.min(0, moved + Math.max(0, -moved - end));
-		if (Math.abs(moved) < 0.5) {
-			unscrolled = moved;
-			end = toEnd();
-			return;
-		}
-		const before = scroller.scrollTop;
-		scroller.scrollTop = before + moved;
-		unscrolled = Math.abs(moved - (scroller.scrollTop - before)) < 1 ? moved - (scroller.scrollTop - before) : 0;
-		end = toEnd();
-		heldPlaces.delete(view);
-	});
-	observer.observe(scroller);
-	observer.observe(view.contentDOM);
+	const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(() => applyPlace(view)) : null;
+	observer?.observe(scroller);
+	observer?.observe(view.contentDOM);
 	scroller.addEventListener('scroll', onScroll, { passive: true });
 	return () => {
-		observer.disconnect();
+		observer?.disconnect();
 		scroller.removeEventListener('scroll', onScroll);
+		keepers.delete(view);
+	};
+}
+
+/** Reports the place the editor holds at most once a frame while it scrolls, until the returned stop is called. */
+export function reportDocumentPlaceOnScroll(view: EditorView, report: (place: TextDocumentPlace) => void): () => void {
+	let frame = 0;
+	const send = () => {
+		frame = 0;
+		const held = heldPlace(view);
+		report(held ? { ...held } : captureDocumentPlace(view));
+	};
+	const onScroll = () => { if (!frame) frame = requestAnimationFrame(send); };
+	view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
+	return () => {
+		view.scrollDOM.removeEventListener('scroll', onScroll);
+		if (frame) cancelAnimationFrame(frame);
 	};
 }

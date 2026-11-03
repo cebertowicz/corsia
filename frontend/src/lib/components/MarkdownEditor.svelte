@@ -27,7 +27,7 @@
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
 	import { attachPreviewFeed, type PreviewFrameSource } from '$lib/stores/livePreviewFeed';
-	import { dispatchKeepingPlace, keepPlaceWhenEditorMoves, reportDocumentPlaceOnScroll, type TextDocumentPlace } from '$lib/documentReadingPlace';
+	import { captureDocumentPlace, dispatchKeepingPlace, holdPlace, keepPlaceWhenEditorMoves, reportDocumentPlaceOnScroll, type TextDocumentPlace } from '$lib/documentReadingPlace';
 
 	let {
 		value = $bindable(''),
@@ -301,6 +301,8 @@
 				effects: documentComp.reconfigure(binding?.extensions ?? localHistory),
 				changes: { from: 0, to: view.state.doc.length, insert: next },
 			}).state);
+			// Another document is open in this editor: its place is wherever it opened.
+			holdPlace(view, captureDocumentPlace(view));
 		} finally { syncing = false; previous?.destroy(); }
 	});
 
