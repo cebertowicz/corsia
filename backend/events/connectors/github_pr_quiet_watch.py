@@ -158,25 +158,28 @@ def _log_answers_from() -> datetime | None:
 
 def _local_facts(
     ci: reasons.CiState, webhook: bool, log_answers_from: datetime | None,
-) -> reasons.LocalFacts:
+) -> reasons.HeadFacts:
     """The logged CI deliveries for this CI attempt."""
-    return reasons.LocalFacts(
+    return reasons.HeadFacts(
         webhook=webhook, ci_received_at=_ci_received_at(ci), log_answers_from=log_answers_from,
     )
 
 
 async def _review_required_for(runner: feed.GhRunner, view: reasons.PrView) -> bool:
     """Whether the base branch's merge gate requires ``qa/llm-reviewer-present``: the
-    repo runs the reviewer. Read once per (repo, base) per sweep; an unreadable
-    gate, a 404 included, counts as not required.
+    repo runs the reviewer. Read once per (repo, base) per sweep. A 404 (no rules
+    GitHub will show) counts as not required; any other failure is raised, so the
+    head stays unsettled until a sweep can read the gate.
     """
     key = (view.repo, view.base_ref)
     if key not in _review_required:
         try:
             body = await _get(runner, f"repos/{view.repo}/rules/branches/{view.base_ref}")
-            _review_required[key] = reasons.review_required(body)
-        except feed.FeedError:
-            _review_required[key] = False
+        except feed.FeedError as exc:
+            if exc.error_class != "http_404":
+                raise
+            body = None
+        _review_required[key] = reasons.review_required(body)
     return _review_required[key]
 
 

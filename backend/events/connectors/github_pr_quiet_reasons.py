@@ -17,11 +17,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-#: The reviewer's commit-status contexts, as GitHub shows them on a head: the
-#: verdict, and ``-present``, which is ``success`` once the head was reviewed.
-#: A repo that runs the reviewer carries a ``qa/llm-reviewer*`` status on its heads.
-STATUS_CHECK_CONTEXT = "qa/llm-reviewer"
-STATUS_PRESENCE_CONTEXT = "qa/llm-reviewer-present"
+from reviewer.reviewer_categories import STATUS_CHECK_CONTEXT, STATUS_PRESENCE_CONTEXT
+
+#: ``-present`` states that end the reviewer's work on a head: ``success`` once it was
+#: reviewed, ``failure`` once ``qa/override-reviewer`` skipped it (``reviewer_gate``).
+REVIEWER_DONE = frozenset({"success", "failure"})
 
 CI_EVENT_MISSING = "ci_event_missing"
 REVIEW_MISSING = "review_missing"
@@ -81,7 +81,7 @@ class CiState:
 
 
 @dataclass(frozen=True, slots=True)
-class LocalFacts:
+class HeadFacts:
     """What this instance received for the head, and what GitHub says of its reviewer.
 
     ``ci_received_at`` is when the log recorded the last of the head's CI
@@ -176,7 +176,7 @@ def fired_marker(reason: str, ci: CiState) -> str:
     return f"{reason}@{ci.attempt}" if reason in (CI_EVENT_MISSING, CI_CANCELLED) else reason
 
 
-def _ci_event_lost(ci: CiState, facts: LocalFacts) -> bool:
+def _ci_event_lost(ci: CiState, facts: HeadFacts) -> bool:
     """GitHub finished CI for the head, the log can judge it, and holds no delivery."""
     return (
         ci.completed_at is not None and facts.webhook and facts.ci_received_at is None
@@ -193,9 +193,9 @@ def review_possible(view: PrView, ci: CiState) -> bool:
     )
 
 
-def _review_expected(view: PrView, ci: CiState, facts: LocalFacts) -> bool:
+def _review_expected(view: PrView, ci: CiState, facts: HeadFacts) -> bool:
     """A green, reviewable head the merge gate requires reviewed and GitHub does
-    not show reviewed. Until GitHub is read it is expected, so the head does not
+    not show reviewed or override-skipped. Until GitHub is read it is expected, so the head does not
     settle early. A head whose CI event was lost is the CI wake's, not the reviewer's.
     """
     if not review_possible(view, ci) or facts.review_required is False:
@@ -204,7 +204,7 @@ def _review_expected(view: PrView, ci: CiState, facts: LocalFacts) -> bool:
         return False
     if facts.review_required is None or facts.reviewer_statuses is None:
         return True
-    return facts.reviewer_statuses.get(STATUS_PRESENCE_CONTEXT) != "success"
+    return facts.reviewer_statuses.get(STATUS_PRESENCE_CONTEXT) not in REVIEWER_DONE
 
 
 def review_clock_due(
@@ -238,7 +238,7 @@ def reviewer_statuses(body: Any) -> dict[str, str]:
 
 
 def due_reasons(
-    view: PrView, ci: CiState, facts: LocalFacts, *,
+    view: PrView, ci: CiState, facts: HeadFacts, *,
     fired: list[str], first_seen: datetime, now: datetime, review_from: datetime | None = None,
 ) -> list[str]:
     """The reasons overdue now for this head (and CI attempt) not fired yet.
@@ -267,7 +267,7 @@ def due_reasons(
     return [reason for reason in due if fired_marker(reason, ci) not in fired]
 
 
-def settled(view: PrView, ci: CiState, facts: LocalFacts, fired: list[str]) -> bool:
+def settled(view: PrView, ci: CiState, facts: HeadFacts, fired: list[str]) -> bool:
     """Every event expected for this head arrived or was already woken for.
 
     A settled head costs one ``pulls/{n}`` read per sweep until the head, its
