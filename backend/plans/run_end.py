@@ -20,7 +20,8 @@ RUN_FAILED = "Closed because required task {title} failed."
 RUN_LEFT_OPEN = "The run stays open until these settle, since their workers still have open work: {titles}."
 _PROVENANCE = "plans.workflow_run"
 _DONE = "done"
-#: A step the run's failure closed before anyone reached it; ``closed`` stays an agent's own skip.
+#: A step the run's failure closed before anyone started it. A started step it cut short reads ``closed``
+#: with the failure as its reason, so its time and cost are never filed under work not attempted.
 _NOT_RUN = "not_run"
 
 
@@ -183,6 +184,7 @@ def _steps(db, phase) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         listed.append({
             "step": step, "state": state, "required": created.get("workflow_required") is True,
             "by": created.get("workflow_by", "agent"), "rounds": len(rows) - 1,
+            "node_ids": [str(row["id"]) for row in rows],
             "skip_reason": skipped.get(last["id"]) if state == service.CLOSED else None,
             "execution_seconds": sum(item["execution"]["seconds"] for item in figures),
             "waiting_seconds": sum(item["waiting"]["seconds"] for item in figures),
@@ -200,14 +202,14 @@ def _steps(db, phase) -> tuple[list[dict[str, Any]], dict[str, Any]]:
 
 
 def _closed_by_failure(db, node_ids: list[str]) -> set[str]:
-    """Of ``node_ids``, the ones a failed required step closed (``fail_run``)."""
+    """Of ``node_ids``, the ones a failed required step closed (``fail_run``) before they started."""
     if not node_ids:
         return set()
     marks = ",".join("?" * len(node_ids))
     return {str(row["node_id"]) for row in db.execute(
         "SELECT node_id FROM plan_node_events WHERE event='state_transition' AND new_state=?"
-        f" AND provenance=? AND node_id IN ({marks})",
-        (service.CLOSED, _PROVENANCE, *node_ids),
+        f" AND prior_state=? AND provenance=? AND node_id IN ({marks})",
+        (service.CLOSED, "pending", _PROVENANCE, *node_ids),
     )}
 
 

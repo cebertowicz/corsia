@@ -80,6 +80,24 @@ async def test_a_failed_required_step_closes_the_rest_of_the_run_with_the_reason
     ]
 
 
+async def test_a_started_step_the_failure_cuts_short_reads_closed_with_the_reason(isolated_db, tmp_path, monkeypatch):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, PLAIN)})
+    reply = await run.start("ship")
+    draft, review, polish = (step["id"] for step in reply["steps"])
+    started = await run.update("start", _args(run, review))
+    assert not isinstance(started, str), started
+
+    await run.update("fail", _args(run, draft))
+
+    (record,) = _ended(run, reply["node"]["id"])
+    assert [(entry["step"], entry["state"], entry["skip_reason"]) for entry in record["steps"]] == [
+        ("draft", "failed", None),
+        ("review", "closed", "Closed because required task draft failed."),
+        ("polish", "not_run", None),
+    ]
+    assert [entry["node_ids"] for entry in record["steps"]] == [[draft], [review], [polish]]
+
+
 async def test_a_failed_required_step_closes_nested_steps_and_an_optional_failure_ends_nothing(isolated_db, tmp_path, monkeypatch):
     run = Run(tmp_path, monkeypatch, NESTED)
     reply = await run.start("outer")
