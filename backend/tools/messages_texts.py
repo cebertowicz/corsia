@@ -46,9 +46,15 @@ NOT_REACHING = (
     "Messages is already in Settings › Connected apps, but it doesn't reach this project. "
     "The person can change that there."
 )
+#: What Full Disk Access opens, said to the person before they grant it (skill connect-tools).
+FDA_OPENS = (
+    "Before they turn it on, tell them what it opens: every connected app CORSIA runs, and every host command an "
+    "agent runs after review, could then read any of their protected files (Mail, Messages, Photos and others); "
+    "they can switch CORSIA off there again."
+)
 NO_FDA = (
-    "Messages can't be read: macOS hasn't given CORSIA access to your Messages. Ask the person to turn on CORSIA "
-    "in System Settings › Privacy & Security › Full Disk Access, then quit and reopen CORSIA."
+    "Messages can't be read: macOS hasn't given CORSIA access to the person's Messages. Ask the person to turn on "
+    "CORSIA in System Settings › Privacy & Security › Full Disk Access, then quit and reopen CORSIA. " + FDA_OPENS
 )
 NO_HISTORY = "No Messages history is on this computer. Ask the person to open Messages and sign in."
 SCHEMA = (
@@ -60,7 +66,7 @@ READABLE = "Messages is on for this project and CORSIA can read it. {count} chat
 WAITING = (
     "Messages is added in Settings › Connected apps but stays off until the person turns it on. Tell the person: "
     "turn on CORSIA in System Settings › Privacy & Security › Full Disk Access, quit and reopen CORSIA, then "
-    "press Sign in on Messages in Settings › Connected apps."
+    "press Sign in on Messages in Settings › Connected apps. " + FDA_OPENS
 )
 
 # Read results.

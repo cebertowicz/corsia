@@ -115,6 +115,8 @@ async def test_the_connect_tool_tells_the_agent_the_person_turns_it_on(isolated_
         thread = make_session(db, prefix="corsia")
         result = await MessagesConnectTool().execute(_thread_id=thread)
         assert result == texts.WAITING and "Full Disk Access" in result and "Sign in" in result
+        # The person hears what Full Disk Access opens before granting it, on both paths.
+        assert texts.FDA_OPENS in result and "protected files" in messages_route.NO_FDA
         assert await account.usable_for_thread(thread) is None
         assert await MessagesConnectTool().execute(_thread_id=thread) == texts.WAITING
     finally:

@@ -1,4 +1,4 @@
-"""Drafts of outbound actions (email, calendar invites) awaiting the person's reply.
+"""Drafts of outbound actions (email, calendar invites, texts) awaiting the person's reply.
 
 ``recorded_revision`` and ``recorded_at`` are written only by
 ``tools.action_drafts``; the action gate compares the document's current bytes

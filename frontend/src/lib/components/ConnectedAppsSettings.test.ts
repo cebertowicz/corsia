@@ -365,7 +365,7 @@ describe('ConnectedAppsSettings', () => {
 	});
 
 	it('shows an agent-added Messages row as waiting for Sign in and keeps the Full Disk Access step on the row when macOS blocks reading', async () => {
-		const step = 'CORSIA can’t read your Messages. Open System Settings › Privacy & Security › Full Disk Access, turn on CORSIA, quit and reopen CORSIA, then press Sign in again.';
+		const step = 'CORSIA couldn’t read your Messages: macOS hasn’t given it Full Disk Access. Turning that on lets every connected app CORSIA runs, and every command an agent runs on this Mac after review, read any of your protected files (Mail, Messages, Photos and others). To turn it on, open System Settings › Privacy & Security › Full Disk Access, switch on CORSIA, quit and reopen CORSIA, then press Sign in again. To undo it, switch CORSIA off there.';
 		const messages = { ...googleAccount, id: 'messages-row', provider: 'messages' as const, provider_display_name: 'Messages', address: 'This computer', capabilities: ['messages' as const], state: 'needs_sign_in' as const };
 		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).includes('/api/messages/connect')
 			? { ok: false, status: 409, headers: new Headers(), json: async () => ({ detail: step }), text: async () => JSON.stringify({ detail: step }), clone() { return this; } }

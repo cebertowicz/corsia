@@ -103,11 +103,15 @@ def _cut(body: str, limit: int) -> str:
     return body if len(body) <= limit else body[:limit] + texts.MORE_CHARS.format(count=len(body) - limit)
 
 
+def chat_name(name: str | None, identifier: str, people: int, members: str | None = None) -> str:
+    """A group chat with no name is named by its members, never its internal identifier."""
+    return name or (members if people > 1 else None) or identifier
+
+
 def chat_label(name: str | None, identifier: str, people: int, members: str | None = None) -> str:
-    """A group chat with no name is labelled by its members, never its internal identifier."""
-    if people > 1:
-        return f"{name or members or identifier} (group chat, {people} people)"
-    return name or identifier
+    """``chat_name``, with a group chat marked as one."""
+    label = chat_name(name, identifier, people, members)
+    return f"{label} (group chat, {people} people)" if people > 1 else label
 
 
 # The members' numbers and emails, for a group chat that has no name.
@@ -127,7 +131,7 @@ def chats(db: sqlite3.Connection, limit: int) -> str:
     if not rows:
         return texts.NO_CHATS
     lines = (
-        f"{r[0]} | {r[1] or (r[3] if r[4] > 1 else None) or r[2]} | {r[4]} {'person' if r[4] == 1 else 'people'} | {when(r[5])}"
+        f"{r[0]} | {chat_name(r[1], r[2], r[4], r[3])} | {r[4]} {'person' if r[4] == 1 else 'people'} | {when(r[5])}"
         for r in rows
     )
     return "\n".join((texts.DATA_RULE, *lines))

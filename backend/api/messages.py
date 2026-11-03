@@ -23,12 +23,19 @@ BAD_REQUEST = "Couldn’t turn on Messages: the request was incomplete. Reload S
 NOT_FOUND = "Messages isn’t in Connected apps. Reload Settings › Connected apps."
 PERSON_ONLY = "Only the signed-in person can turn Messages on; open Connected apps."
 NO_FDA = (
-    "CORSIA can’t read your Messages. Open System Settings › Privacy & Security › Full Disk Access, "
-    "turn on CORSIA, quit and reopen CORSIA, then press Sign in again."
+    "CORSIA couldn’t read your Messages: macOS hasn’t given it Full Disk Access. Turning that on lets every "
+    "connected app CORSIA runs, and every command an agent runs on this Mac after review, read any of your "
+    "protected files (Mail, Messages, Photos and others). To turn it on, open System Settings › Privacy & "
+    "Security › Full Disk Access, switch on CORSIA, quit and reopen CORSIA, then press Sign in again. To undo "
+    "it, switch CORSIA off there."
 )
-NO_HISTORY = "There are no Messages on this computer. Open Messages and sign in, then press Sign in again."
+NO_HISTORY = (
+    "There’s no Messages history on this computer. Open the Messages app and sign in with your Apple Account, "
+    "then press Sign in again."
+)
 NOT_A_MAC = "Messages is only available on a Mac running CORSIA."
-UNREADABLE = "CORSIA can’t read Messages on this version of macOS. Update CORSIA, then press Sign in again."
+#: The Messages database changed shape (``texts.SCHEMA``); unlike ``texts.UNREADABLE``, waiting won't help.
+NEEDS_UPDATE = "CORSIA couldn’t read Messages on this version of macOS. Update CORSIA, then press Sign in again."
 BUSY = "CORSIA couldn’t read Messages just now. Press Sign in again in a moment."
 FOR_THE_PERSON = {
     texts.NO_FDA: NO_FDA, texts.NO_HISTORY: NO_HISTORY, texts.NOT_A_MAC: NOT_A_MAC, texts.UNREADABLE: BUSY,
@@ -61,7 +68,7 @@ async def connect(request: Request, user: dict = Depends(require_user)) -> dict[
         try:
             await asyncio.to_thread(messages_db.check_readable)
         except messages_db.MessagesError as exc:
-            raise HTTPException(409, FOR_THE_PERSON.get(str(exc), UNREADABLE)) from None
+            raise HTTPException(409, FOR_THE_PERSON.get(str(exc), NEEDS_UPDATE)) from None
     if not await account.turn_on(account_id, audit_actor(user)):
         raise HTTPException(404, NOT_FOUND)
     return {"url": "", "account_id": account_id}
