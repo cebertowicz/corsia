@@ -37,6 +37,7 @@ async function expectNoSidewaysScroll(target: Locator, label: string) {
 const PROSE = '# Inline\n\nThe first line is loose.\n\nThe second line is fine.\n';
 
 for (const [width, height, project] of layouts) {
+	const phone = width <= 1024;
 	test.describe(`inline suggestions at ${width}`, () => {
 		test.beforeEach(async ({ page }, testInfo) => {
 			test.skip(testInfo.project.name !== project, 'Run each layout in its matching browser mode.');
@@ -167,11 +168,17 @@ for (const [width, height, project] of layouts) {
 				{ quote: 'is loose', replacement: 'is tight', body: 'Tighten the first line.' },
 				{ quote: 'is fine', replacement: 'is wordy', body: 'Loosen the second line.' },
 			]);
-			// A caret landing in a suggestion's quote opens no card, so the editor stays focused and takes the edit (#1009).
+			// On a phone a caret landing in a suggestion's quote opens no card, so the editor stays focused and takes the edit (#1009);
+			// at desktop widths it focuses the card beside the quote, and closing that card returns the editor to the caret.
 			await expect(strike(page, loose)).toHaveText('is loose');
 			// The middle of the struck quote, not either edge, so the typed character lands inside it.
 			await strike(page, loose).click();
-			await expect(page.getByRole('dialog')).toHaveCount(0);
+			if (phone) await expect(page.getByRole('dialog')).toHaveCount(0);
+			else {
+				await expect(page.getByRole('dialog')).toBeVisible();
+				await page.keyboard.press('Escape');
+				await expect(page.getByRole('dialog')).toHaveCount(0);
+			}
 			await page.keyboard.type('x');
 			await expect(editor).not.toContainText('The first line is loose.');
 			await expect(strike(page, loose)).toHaveCount(0);
@@ -179,6 +186,8 @@ for (const [width, height, project] of layouts) {
 			// Only that suggestion: the other keeps its marks.
 			await expect(strike(page, fine)).toHaveText('is fine');
 			await expect(insert(page, fine)).toHaveAttribute('data-insert', 'is wordy');
+			// Typing moved the caret within the quote, which at desktop widths focuses the card again: close it, then list the comments.
+			if (!phone) await page.keyboard.press('Escape');
 			await expect(page.getByRole('dialog')).toHaveCount(0);
 			await openComments(page, drawer);
 			await expect(row(loose)).toContainText('Tighten the first line.');
@@ -195,15 +204,24 @@ for (const [width, height, project] of layouts) {
 			await expect(strike(page, loose)).toHaveText('is loose');
 			await page.getByRole('button', { name: 'Close comments', exact: true }).click();
 			await expect(drawer).toHaveCount(0);
-			// A caret reaching the quote opens no card, so the editor keeps the focus and takes the edit: deleting the quote's
-			// first character. The click lands at the line's end, clear of the margin markers on its left, and Home returns the
-			// caret to the line's start.
+			// The click lands at the line's end, clear of the margin markers on its left, and Home returns the caret to the line's start.
 			const line = editor.locator('.cm-line', { hasText: 'The first line is loose.' });
 			await line.click({ position: { x: (await line.boundingBox())!.width - 4, y: 5 } });
 			await page.keyboard.press('Home');
-			// 'The first line ' is 15 characters: the caret stops on the quote's first.
-			for (let step = 0; step < 15; step += 1) await page.keyboard.press('ArrowRight');
-			await expect(page.getByRole('dialog')).toHaveCount(0);
+			const card = page.getByRole('dialog');
+			if (phone) {
+				// A caret reaching the quote opens no card, so the editor keeps the focus and takes the edit: deleting the quote's
+				// first character. 'The first line ' is 15 characters: the caret stops on the quote's first.
+				for (let step = 0; step < 15; step += 1) await page.keyboard.press('ArrowRight');
+				await expect(card).toHaveCount(0);
+			} else {
+				// At desktop widths a caret reaching the quote focuses its card, so the card closes first and the editor, which keeps
+				// its caret at the quote's start, takes the edit.
+				for (let step = 0; step < 18 && !(await card.isVisible()); step += 1) await page.keyboard.press('ArrowRight');
+				await expect(card).toBeVisible();
+				await page.keyboard.press('Escape');
+				await expect(card).toHaveCount(0);
+			}
 			await expect(editor).toBeFocused();
 			await page.keyboard.press('Delete');
 			await expect(editor).not.toContainText('The first line is loose.');
@@ -213,6 +231,8 @@ for (const [width, height, project] of layouts) {
 			// Only that suggestion: the other keeps its marks.
 			await expect(strike(page, fine)).toHaveText('is fine');
 			await expect(insert(page, fine)).toHaveAttribute('data-insert', 'is wordy');
+			// The edit moved the caret within the quote, which at desktop widths focuses the card again: close it, then list the comments.
+			if (!phone) await page.keyboard.press('Escape');
 			await expect(page.getByRole('dialog')).toHaveCount(0);
 			await openComments(page, drawer);
 			await expect(row(loose)).toContainText('Tighten the first line.');
