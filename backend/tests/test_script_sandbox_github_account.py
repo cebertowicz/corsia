@@ -104,7 +104,11 @@ def run(monkeypatch, tmp_path):
             reads.append(True)
             return view
 
-        monkeypatch.setattr(github_agent, "view", read)
+        def cached(db=None):
+            raise AssertionError("a rule run waits for verification; it never reads the cache alone")
+
+        monkeypatch.setattr(github_agent, "verify_now", read)
+        monkeypatch.setattr(github_agent, "view", cached)
         result = asyncio.run(script_sandbox.run_script(
             THREAD, None, tmp_path / "s.sh", run_id="r", timeout_seconds=5))
         return {**seen, "reads": len(reads), "result": result, "view": view,

@@ -155,6 +155,7 @@ def _account(monkeypatch, state: str, home: Path | None = None) -> None:
                                   login="agents-bot", user_id=1),
     }
     monkeypatch.setattr(github_agent, "view", lambda db=None: views[state])
+    monkeypatch.setattr(github_agent, "verify_now", lambda db=None: views[state])
 
 
 @pytest.mark.asyncio

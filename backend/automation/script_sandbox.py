@@ -44,7 +44,8 @@ from tools.shell_envelope import (
     execution_envelope_for_consumed_action,
     prepare_execution_envelope,
 )
-from tools.shell_environment import bind_agent_account, safehouse_subprocess_env
+from infra.db_async import run_in_db
+from tools.shell_environment import safehouse_subprocess_env
 from tools.shell_guard import (
     execution_envelope_profile,
     safehouse_argv,
@@ -225,10 +226,11 @@ async def _run_with_channel(
 ) -> ScriptRun:
     env = safehouse_subprocess_env(thread_id)
     # The one read of the agents' account; the env, the grant and the denies below all use it.
-    view = await bind_agent_account(env)
-    if view.absent:
-        # A shell with no agents' account is left alone; a script still gets the locked state.
-        env.update(github_agent.shell_env(replace(view, absent=False)))
+    # A rule run is never replayed, so it waits (bounded) for a cold verification instead of
+    # running locked the first time after a restart.
+    view = await run_in_db(github_agent.verify_now)
+    # A shell with no agents' account is left alone; a script still gets the locked state.
+    env.update(github_agent.shell_env(replace(view, absent=False) if view.absent else view))
     env.pop(SOCKET_ENV, None)
     if socket_path is not None:
         env[SOCKET_ENV] = str(socket_path)
