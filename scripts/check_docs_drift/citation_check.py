@@ -45,6 +45,8 @@ PATH_CHECK_DOCS = PRIMARY_DOCS + (
     Path("BACKEND.md"),
     Path("FRONTEND.md"),
     Path("SECURITY.md"),
+    Path("docs/measurement.md"),
+    Path("docs/how-it-works/measuring-work.md"),
 )
 
 
