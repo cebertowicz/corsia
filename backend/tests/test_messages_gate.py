@@ -218,10 +218,10 @@ async def test_send_checks_the_reach_and_the_draft_format(env, workspace) -> Non
     assert await MessagesSendTool().execute(_thread_id=THREAD, draft_id=draft["draft_id"], revision=revision) == f"Error: Not sent: {texts.NOT_CONNECTED}"
 
 
-def test_migration_170_to_171_keeps_rows_and_admits_message_drafts() -> None:
+def test_migration_171_to_172_keeps_rows_and_admits_message_drafts() -> None:
     import sqlite3
 
-    from infra.migration_170_to_171_message_drafts import migrate_170_to_171
+    from infra.migration_171_to_172_message_drafts import migrate_171_to_172
 
     db = sqlite3.connect(":memory:")
     db.execute("CREATE TABLE threads (id TEXT PRIMARY KEY)")
@@ -235,7 +235,7 @@ def test_migration_170_to_171_keeps_rows_and_admits_message_drafts() -> None:
     before = [("a", "t", "email", "a.md", '{"x":1}', "sent", "r1", "2026-01-01", "2026-01-01", "2026-01-02", "ext"),
               ("b", "t", "invite", "b.md", "{}", "open", "r2", "2026-01-03", "2026-01-03", None, None)]
     db.executemany("INSERT INTO action_drafts VALUES (?,?,?,?,?,?,?,?,?,?,?)", before)
-    migrate_170_to_171(db)
+    migrate_171_to_172(db)
     assert db.execute("SELECT * FROM action_drafts ORDER BY id").fetchall() == before
     db.execute("INSERT INTO action_drafts (id,thread_id,kind,path,recorded_revision,recorded_at,created_at) "
                "VALUES ('c','t','message','c.md','r3','now','now')")

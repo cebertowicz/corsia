@@ -218,6 +218,18 @@ def _with_lesson(text: str, **fields: Any) -> str:
     return _dump(metadata, parsed.body)
 
 
+def without_case(text: str) -> str:
+    """The same trial without its case: the lesson as a sample that is delivered it may read."""
+    from core.skill_validation import validate_skill_text
+
+    parsed = validate_skill_text(text)
+    metadata = dict(parsed.metadata)
+    corsia = dict(metadata["corsia"])
+    corsia[LESSON_KEY] = {k: v for k, v in corsia[LESSON_KEY].items() if k != "case"}
+    metadata["corsia"] = corsia
+    return _dump(metadata, parsed.body)
+
+
 def with_review_ref(text: str, node_id: str) -> str:
     """The same trial with its review reference written: the activating edit."""
     return _with_lesson(text, review_ref=f"{REVIEW_REF_PREFIX}{node_id}")

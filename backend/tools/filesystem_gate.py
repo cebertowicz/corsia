@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from eval.tool_allowlist import carry_in_hides
+
 
 @dataclass(frozen=True)
 class AuthorizedPath:
@@ -75,6 +77,8 @@ def resolve_path(
     from tools.host_path_policy import ordinary_host_path_denial
 
     confined_reads.check(p, resolved, for_write=for_write)
+    if not for_write and carry_in_hides(resolved, reading=True):
+        raise FileNotFoundError(path)  # absent for this carry-in side
 
     for candidate in dict.fromkeys((p.absolute(), resolved)):
         if denial := ordinary_host_path_denial(

@@ -242,9 +242,15 @@ async def discover_cloud_models(provider: str, api_key: str) -> dict:
         except Exception as exc:
             result["error"] = str(exc)
             return result
+        from llm.live_cost_map import wait_for_refresh
+
+        await wait_for_refresh()
         discovered = _openai_discovered(api_models)
 
     elif provider == "anthropic":
+        from llm.live_cost_map import wait_for_refresh
+
+        await wait_for_refresh()
         try:
             discovered = _anthropic_discovered()
         except Exception as exc:

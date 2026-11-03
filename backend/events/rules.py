@@ -83,6 +83,7 @@ def from_row(row: Mapping[str, Any]) -> Rule:
         action=row["action"], to=row["to"], mode=row["mode"], note=row["note"],
         created_by=row["created_by"], enabled=bool(row["enabled"]), script_id=row["script_id"],
         workflow_id=row["workflow_id"], request_identity_fact=row["request_identity_fact"],
+        worker_profile=row["worker_profile"],
     )
 
 

@@ -30,6 +30,18 @@ def history_git(workspace: Path, *args: str, ok: tuple[int, ...] = (0,)) -> byte
     return _git_bytes(repo, *args, ok=ok)
 
 
+def commit_parent(workspace: Path, sha: str) -> str | None:
+    """The first parent of one recorded guidance commit; None for a root commit."""
+    out = history_git(workspace, "rev-parse", "--verify", "-q", f"{sha}^", ok=(0, 1))
+    return out.decode().strip() or None
+
+
+def committed_bytes(workspace: Path, commit: str, rel: str) -> bytes | None:
+    """One workspace-relative path's exact bytes at a recorded commit; None when it has none."""
+    oid = history_git(workspace, "rev-parse", "--verify", "-q", f"{commit}:{rel}", ok=(0, 1))
+    return history_git(workspace, "cat-file", "blob", oid.decode().strip()) if oid.strip() else None
+
+
 def find_commit(repo: Path, trailer: str, path: Path) -> str | None:
     from infra.guidance_git import _git
 
