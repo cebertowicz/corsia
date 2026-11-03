@@ -82,7 +82,7 @@ def test_a_result_link_counts_and_two_open_nodes_are_several(db):
     assert linked_node_for_artifact(*PR, db=db) == {"status": "several_linked_tasks", "node_id": None}
 
 
-def test_an_unknown_artifact_or_a_failed_read_is_lookup_failed(db, monkeypatch):
+def test_an_unknown_artifact_is_lookup_failed_and_a_failed_read_raises(db, monkeypatch):
     assert linked_node_for_artifact("github", "pull-request", "cebertowicz/corsia#1", db=db) == {
         "status": "lookup_failed", "node_id": None,
     }
@@ -95,4 +95,5 @@ def test_an_unknown_artifact_or_a_failed_read_is_lookup_failed(db, monkeypatch):
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr(registration_events, "routing_registrations", broken)
-    assert linked_node_for_artifact(*PR, db=db) == {"status": "lookup_failed", "node_id": None}
+    with pytest.raises(sqlite3.OperationalError):
+        linked_node_for_artifact(*PR, db=db)

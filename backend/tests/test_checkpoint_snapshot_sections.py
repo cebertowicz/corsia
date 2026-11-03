@@ -170,8 +170,8 @@ def test_install_freezes_artifacts_and_plan_status(snap):
     _plan_with_task()
     db = _db()
     try:
-        # The capture path is the only reader of origin_plan_node_id (#1602
-        # in-lane decision); point doc-a's registration at one plan node.
+        # The capture path reads origin_plan_node_id (#1602); point doc-a's
+        # registration at one plan node.
         db.execute(
             "UPDATE artifact_registrations SET origin_plan_node_id="
             "(SELECT id FROM plan_nodes ORDER BY id LIMIT 1) "
