@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from infra.database import get_db, is_lock_refusal, write_transaction
 from infra.db_async import run_in_db
 from infra.lock_retry import LockRefused, retry_until_committed
+from infra.reply_not_visible_wake import settle_reply_not_visible
 from plans import public
 
 
@@ -56,6 +57,7 @@ def _record_turn_end(
                 try:
                     with write_transaction(db, scope="record_turn_end") as connection:
                         complete(thread_id, effects=pending, db=connection, **outcome)
+                        settle_reply_not_visible(connection, thread_id, outcome, pending)
                         pending.drives.extend(close_for_turn_end(connection, thread_id))
                         own_plans = public.thread_plan_ids(thread_id, db=connection)
                 finally:
