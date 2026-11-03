@@ -17,7 +17,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from reviewer.reviewer_categories import STATUS_CHECK_CONTEXT
+#: The reviewer's commit-status contexts, as GitHub shows them on a head: the
+#: verdict, and ``-present``, which is ``success`` once the head was reviewed.
+#: A repo that runs the reviewer carries a ``qa/llm-reviewer*`` status on its heads.
+STATUS_CHECK_CONTEXT = "qa/llm-reviewer"
+STATUS_PRESENCE_CONTEXT = "qa/llm-reviewer-present"
 
 CI_EVENT_MISSING = "ci_event_missing"
 REVIEW_MISSING = "review_missing"
@@ -77,7 +81,7 @@ class CiState:
 
 @dataclass(frozen=True, slots=True)
 class LocalFacts:
-    """What this instance received for the head, and whether its reviewer runs here.
+    """What this instance received for the head, and what GitHub says of its reviewer.
 
     ``ci_received_at`` is when the log recorded the last of the head's CI
     completions (each run's suite, since its latest attempt started), or None
@@ -85,14 +89,15 @@ class LocalFacts:
     could have been logged with its suite: after the webhook was configured and
     after the log's last pre-column check-suite row. CI finished before it is
     unknown; after it, a missing delivery is lost, even if the log never
-    received a check suite at all.
+    received a check suite at all. ``reviewer_statuses`` is the head's
+    ``qa/llm-reviewer*`` contexts and their states, read from GitHub once the
+    head is green and reviewable; None means not read yet.
     """
 
     webhook: bool
     ci_received_at: datetime | None
     log_answers_from: datetime | None
-    reviewed_sha: str | None
-    reviewer_ran: bool
+    reviewer_statuses: dict[str, str] | None = None
 
 
 def mergeable_label(value: Any) -> str:
@@ -176,15 +181,47 @@ def _ci_event_lost(ci: CiState, facts: LocalFacts) -> bool:
     )
 
 
-def _review_expected(view: PrView, ci: CiState, facts: LocalFacts) -> bool:
-    """The reviewer runs here, received its trigger, and has a green, reviewable
-    head it has not reviewed.
-    """
+def review_possible(view: PrView, ci: CiState, facts: LocalFacts) -> bool:
+    """The head received its CI trigger and is green and reviewable (not held)."""
     return (
-        facts.webhook and facts.reviewer_ran and facts.ci_received_at is not None
+        facts.webhook and facts.ci_received_at is not None
         and ci.conclusion == "success" and not view.draft and not view.conflicting
-        and facts.reviewed_sha != view.head
     )
+
+
+def _review_expected(view: PrView, ci: CiState, facts: LocalFacts) -> bool:
+    """A green, reviewable head the reviewer is expected to review and GitHub does
+    not show reviewed. Until the statuses are read it is expected, so the head
+    does not settle early; a head with no ``qa/llm-reviewer*`` status is in a repo
+    that does not run the reviewer.
+    """
+    if not review_possible(view, ci, facts):
+        return False
+    statuses = facts.reviewer_statuses
+    if statuses is None:
+        return True
+    return bool(statuses) and statuses.get(STATUS_PRESENCE_CONTEXT) != "success"
+
+
+def review_clock_due(
+    view: PrView, ci: CiState, facts: LocalFacts, *, now: datetime,
+    review_from: datetime | None = None,
+) -> bool:
+    """The review grace has passed, so the head's statuses are worth one read."""
+    received = facts.ci_received_at
+    return (
+        received is not None and review_possible(view, ci, facts)
+        and now - max(received, review_from or received) >= REVIEW_GRACE
+    )
+
+
+def reviewer_statuses(body: Any) -> dict[str, str]:
+    """The head's ``qa/llm-reviewer*`` contexts from ``GET commits/{head}/status``."""
+    statuses = body.get("statuses") if isinstance(body, dict) else None
+    return {
+        str(s.get("context")): str(s.get("state")) for s in statuses or []
+        if str(s.get("context")).startswith(STATUS_CHECK_CONTEXT)
+    }
 
 
 def due_reasons(
@@ -208,10 +245,11 @@ def due_reasons(
                 due.append(CI_EVENT_MISSING)
         elif ci.conclusion == _CANCELLED and ci_overdue:
             due.append(CI_CANCELLED)
-        received = facts.ci_received_at
-        if received is not None and _review_expected(view, ci, facts):
-            if now - max(received, review_from or received) >= REVIEW_GRACE:
-                due.append(REVIEW_MISSING)
+        if (
+            facts.reviewer_statuses is not None and _review_expected(view, ci, facts)
+            and review_clock_due(view, ci, facts, now=now, review_from=review_from)
+        ):
+            due.append(REVIEW_MISSING)
     return [reason for reason in due if fired_marker(reason, ci) not in fired]
 
 

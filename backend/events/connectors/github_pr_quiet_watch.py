@@ -21,7 +21,7 @@ import functools
 import logging
 import os
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -32,7 +32,6 @@ from events.connectors import github_pr_quiet_rows as rows
 from events.connectors import github_notifications_feed as feed
 from events.connectors.github_read_budget import budget
 from infra.db_async import run_in_db
-from reviewer.reviewer_categories import STATUS_CHECK_CONTEXT
 
 log = logging.getLogger(__name__)
 
@@ -156,35 +155,20 @@ def _log_answers_from() -> datetime | None:
 
 
 def _local_facts(
-    candidate: Candidate, ci: reasons.CiState, webhook: bool, log_answers_from: datetime | None,
+    ci: reasons.CiState, webhook: bool, log_answers_from: datetime | None,
 ) -> reasons.LocalFacts:
-    """The logged CI deliveries for this CI attempt, the reviewed head, and
-    whether the reviewer runs here.
-    """
-    from events.reviewer_gate_state import get_reviewed_sha, pr_key
-    from infra.database import get_db
-
-    prefix = f"{candidate.repo}#"
-    reviewer_ran = get_db().execute(
-        "SELECT 1 FROM reviewer_gate_state WHERE substr(pr_key, 1, ?) = ? LIMIT 1",
-        (len(prefix), prefix),
-    ).fetchone() is not None
+    """The logged CI deliveries for this CI attempt."""
     return reasons.LocalFacts(
-        webhook=webhook,
-        ci_received_at=_ci_received_at(ci),
-        log_answers_from=log_answers_from,
-        reviewed_sha=get_reviewed_sha(pr_key(candidate.repo, candidate.number)),
-        reviewer_ran=reviewer_ran,
+        webhook=webhook, ci_received_at=_ci_received_at(ci), log_answers_from=log_answers_from,
     )
 
 
-async def _reviewer_state(runner: feed.GhRunner, view: reasons.PrView) -> str | None:
+async def _reviewer_statuses(runner: feed.GhRunner, view: reasons.PrView) -> dict[str, str]:
+    """The head's ``qa/llm-reviewer*`` statuses: the one read that says whether the
+    repo runs the reviewer (any such context) and whether the head is reviewed.
+    """
     body = await _get(runner, f"repos/{view.repo}/commits/{view.head}/status")
-    statuses = body.get("statuses") if isinstance(body, dict) else None
-    return next(
-        (str(s.get("state")) for s in statuses or [] if s.get("context") == STATUS_CHECK_CONTEXT),
-        None,
-    )
+    return reasons.reviewer_statuses(body)
 
 
 async def _repo_runs_actions(runner: feed.GhRunner, repo: str) -> bool:
@@ -259,18 +243,21 @@ async def sweep_candidate(
     ci = reasons.ci_state(await _get(
         runner, f"repos/{candidate.repo}/actions/runs?head_sha={head}&per_page=100",
     ))
-    facts = await run_in_db(_local_facts, candidate, ci, webhook, log_answers_from)
+    facts = await run_in_db(_local_facts, ci, webhook, log_answers_from)
     fired = list(state.get("fired") or [])
     first_seen = reasons.parse_time(state.get("first_seen_at")) or now
     faults: list[str] = []
     review_from = reasons.parse_time(state.get("review_from"))
+    if reasons.REVIEW_MISSING not in fired and reasons.review_possible(view, ci, facts):
+        facts = replace(facts, reviewer_statuses=await _reviewer_statuses(runner, view))
     for reason in reasons.due_reasons(
         view, ci, facts, fired=fired, first_seen=first_seen, now=now, review_from=review_from,
     ):
         if reason == reasons.CI_NOT_STARTED and not await _repo_runs_actions(runner, view.repo):
             continue
         reviewer_state = (
-            await _reviewer_state(runner, view) if reason == reasons.REVIEW_MISSING else None
+            (facts.reviewer_statuses or {}).get(reasons.STATUS_CHECK_CONTEXT)
+            if reason == reasons.REVIEW_MISSING else None
         )
         if not await _wake(candidate, view, ci, reason, now, reviewer_state):
             continue
