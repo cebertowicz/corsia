@@ -39,11 +39,11 @@ def reads(monkeypatch):
     async def read(*_args):
         return GhResponse(200, {}, {"check_suites": [SUITE]}), None
 
-    async def facts(_runner, _repo, _number, base, **_kw):
-        return base
+    async def facts(_runner, _repo, _number, base):
+        return dict(base)
 
     monkeypatch.setattr(poller, "gated_read", read)
-    monkeypatch.setattr(checks.pr_facts, "current_facts", facts)
+    monkeypatch.setattr(checks.pr_facts, "settled_head_facts", facts)
 
 
 def aggregator(sink, gate=None):
@@ -61,6 +61,7 @@ async def stop(agg):
 @pytest.mark.asyncio
 async def test_restart_inside_window_emits_exactly_once(monkeypatch):
     monkeypatch.setenv("CORSIA_TEST_MODE", "0")
+    monkeypatch.setenv(checks.ENABLE_ENV, "1")
     sink, gate = Sink(), asyncio.Event()
     old = aggregator(sink, gate)
     old.observe(payload(), {"number": 7})
@@ -111,6 +112,20 @@ async def test_dropped_head_is_cleared(monkeypatch):
     agg.observe(payload(), None)
     await asyncio.gather(*agg._tasks.values())
     assert await pending.pending() == []
+
+
+@pytest.mark.asyncio
+async def test_pr_read_error_is_logged_not_raised(monkeypatch, caplog):
+    async def facts_down(*_args):
+        raise RuntimeError("pr read down")
+    monkeypatch.setattr(checks.pr_facts, "settled_head_facts", facts_down)
+    agg = aggregator(Sink())
+    agg.observe(payload(), {"number": 7})
+    task = agg._tasks[("o/r", "abc")]
+    await asyncio.gather(task)
+    assert task.exception() is None
+    assert "could not admit settled head o/r@abc" in caplog.text
+    assert agg._tasks == {} and await pending.pending() == []
 
 
 @pytest.mark.asyncio

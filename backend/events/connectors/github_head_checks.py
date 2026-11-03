@@ -162,9 +162,13 @@ class HeadCheckAggregator:
                 facts["head_branch"] = branch
             if pr_number is not None:
                 facts["pr_number"] = pr_number
-            facts = await pr_facts.settled_head_facts(self.runner, repo, pr_number, facts)
-            result = await self.sink.admit_event(event_type="github.head.checks_completed", facts=facts,
-                origin="connector", producer="github", event_id=_event_id(repo, head_sha, latest))
+            try:
+                facts = await pr_facts.settled_head_facts(self.runner, repo, pr_number, facts)
+                result = await self.sink.admit_event(event_type="github.head.checks_completed", facts=facts,
+                    origin="connector", producer="github", event_id=_event_id(repo, head_sha, latest))
+            except Exception:
+                log.warning("github-head-checks: could not admit settled head %s@%s", *key, exc_info=True)
+                return
             if result.refusal is not None:
                 log.info("github-head-checks: intake refused %s@%s code=%s", *key, result.refusal.code)
         except asyncio.CancelledError:
