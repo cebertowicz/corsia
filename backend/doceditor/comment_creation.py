@@ -62,8 +62,8 @@ def browser_anchor(live, identifier: str | None) -> Anchor:
     """The span this comment's own capture reserved, anchored on the text the live document holds there now."""
     span = live.held_span(identifier)
     quote = _text_at(live.text, *span) if span is not None else None
-    context = anchor_context(live.text, *span, quote) if quote else None
-    if context is None:
+    context = anchor_context(live.text, *span, quote) if span is not None and quote else None
+    if span is None or not quote or context is None:
         live.release(identifier)
         raise CommentSelectionChanged("The text you selected changed or was removed. Select it again; your draft is kept.")
     return Anchor(quote, *span, *context)
