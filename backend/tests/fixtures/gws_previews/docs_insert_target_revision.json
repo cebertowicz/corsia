@@ -1,0 +1,22 @@
+{
+  "body": {
+    "requests": [
+      {
+        "insertText": {
+          "location": {
+            "index": 1
+          },
+          "text": "hi"
+        }
+      }
+    ],
+    "writeControl": {
+      "targetRevisionId": "rev1"
+    }
+  },
+  "dry_run": true,
+  "is_multipart_upload": false,
+  "method": "POST",
+  "query_params": [],
+  "url": "https://docs.googleapis.com/v1/documents/D1:batchUpdate"
+}
