@@ -33,7 +33,7 @@ def declared_event(db: sqlite3.Connection, connector: str, event_type: str) -> t
     if entry is None:
         return None
     return EventTypeDecl(event_type, (), tuple(entry.declared),
-                         default_delivery=entry.default_delivery), entry
+                         default_delivery=entry.default_delivery, event_class=entry.event_class), entry
 
 
 def match_problem(entry: DeclaredEvent, event_type: str, tests: list[Mapping[str, Any]]) -> str | None:

@@ -200,7 +200,7 @@ def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str,
         EventEnvelope(
             event_id="", type=suffix, connector=namespace, facts=facts, relationships=(),
             artifact_ref=artifact_ref, provenance={"source": namespace, "ingested_at": _now(), "rule_trace": []},
-            event_class="informational", ownerless_ok=False, origin=origin,
+            event_class=entry.event_class, ownerless_ok=False, origin=origin,
         ),
         None,
         owner,

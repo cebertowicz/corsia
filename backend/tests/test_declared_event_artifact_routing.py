@@ -23,13 +23,14 @@ DECLARER, PR_OWNER = "qg-declarer", "owner"
 FACTS = {"verdict": "clean"}
 
 
-def _declare(db, tmp_path: Path, *, default_delivery: str | None = None):
+def _declare(db, tmp_path: Path, *, default_delivery: str | None = None, event_class: str | None = None):
     REGISTRY.reset()
     mk_session(DECLARER, project_id="project-a")
     mk_session(PR_OWNER, project_id="project-a")
     text = ("schema: corsia.measures/1\nnamespace: reviewer\nevents:\n  reviewer.verdict:\n"
             "    attributes: {verdict: id}\n    dedupe: [verdict]\n    use: route\n"
-            + (f"    default_delivery: {default_delivery}\n" if default_delivery else ""))
+            + (f"    default_delivery: {default_delivery}\n" if default_delivery else "")
+            + (f"    event_class: {event_class}\n" if event_class else ""))
     folder = tmp_path / ".threads" / DECLARER
     folder.mkdir(parents=True)
     (folder / "measures.yaml").write_text(text)
@@ -200,3 +201,56 @@ def test_an_added_delivery_to_a_third_thread_ends_its_dotted_watch(db, tmp_path)
     assert _armed(db, node.id) == 1
     assert _emit(schedule, decision).accepted
     assert _digested(db, "third") == 1 and _armed(db, node.id) == 0
+
+
+def _owner_with_watch(db):
+    register_pr(REPO, 7, PR_OWNER)
+    _plan, node = _watching_verdict(db, PlanActor(PR_OWNER, "user-1", "project-a"), external_id=pr_external_id(REPO, 7))
+    return node
+
+
+def _delivery_rows(db, thread: str) -> int:
+    return db.execute("SELECT COUNT(*) FROM event_route_decisions WHERE event_id='verdict-1' AND thread_id=?",
+                      (thread,)).fetchone()[0]
+
+
+def test_an_actionable_declared_verdict_wakes_the_owner_once_with_no_rule(db, tmp_path):
+    schedule = _declare(db, tmp_path, event_class="actionable")
+    node = _owner_with_watch(db)
+
+    assert _emit(schedule, _running_rule_run(db, schedule)).accepted
+    assert (_woken(db, PR_OWNER), _digested(db, PR_OWNER), _woken(db, DECLARER)) == (1, 0, 0)
+    assert _armed(db, node.id) == 0  # rule 0 writes no rule row; the one wake message is the delivery
+
+
+def test_an_informational_declared_verdict_only_digests(db, tmp_path):
+    schedule = _declare(db, tmp_path, event_class="informational")
+    _owner_with_watch(db)
+
+    assert _emit(schedule, _running_rule_run(db, schedule)).accepted
+    assert (_woken(db, PR_OWNER), _digested(db, PR_OWNER)) == (0, 1)
+
+
+def test_a_declarers_wake_rule_rides_an_actionable_verdict_as_one_delivery(db, tmp_path):
+    schedule = _declare(db, tmp_path, event_class="actionable")
+    _owner_with_watch(db)
+    _deliver_rule(db, "qg-wake", writer=DECLARER, to="registered_owner", mode="wake")
+
+    assert _emit(schedule, _running_rule_run(db, schedule)).accepted
+    assert (_woken(db, PR_OWNER), _digested(db, PR_OWNER)) == (1, 0)
+    assert _delivery_rows(db, PR_OWNER) == 1
+
+
+@pytest.mark.parametrize(("extra", "message"), [
+    ("use: record\n    event_class: actionable", "use: record"),
+    ("use: route\n    event_class: urgent", "event_class must be actionable or informational"),
+])
+def test_event_class_is_refused_on_a_record_type_and_for_an_unknown_value(db, tmp_path, extra, message):
+    folder = tmp_path / ".threads" / DECLARER
+    folder.mkdir(parents=True)
+    mk_session(DECLARER, project_id="project-a")
+    text = ("schema: corsia.measures/1\nnamespace: reviewer\nevents:\n  reviewer.verdict:\n"
+            f"    attributes: {{verdict: id}}\n    dedupe: [verdict]\n    {extra}\n")
+    (folder / "measures.yaml").write_text(text)
+    with pytest.raises(ValueError, match=message):
+        sync(db, owner_thread_id=DECLARER, path=str(folder / "measures.yaml"), text=text)
