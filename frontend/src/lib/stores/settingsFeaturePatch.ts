@@ -8,6 +8,7 @@ export type SettingsPatch = {
 	host_access_reviewer_model?: string | null;
 	host_access_auto_approve?: boolean;
 	host_access_reviewer_fallback?: boolean;
+	usage_sharing?: boolean;
 	live_bulletins?: { enabled: boolean };
 	features?: FeatureSettings;
 };

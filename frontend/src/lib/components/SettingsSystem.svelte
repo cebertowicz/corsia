@@ -10,6 +10,7 @@
 	import SettingsUpdate from './SettingsUpdate.svelte';
 	import { updateInFlight } from '$lib/update/store';
 	import HostAccessReviewSetting from './HostAccessReviewSetting.svelte';
+	import UsageSharingSetting from './UsageSharingSetting.svelte';
 	import SettingsGroup from './SettingsGroup.svelte';
 	import SettingsRow from './SettingsRow.svelte';
 	import SettingsDevices from './SettingsDevices.svelte';
@@ -169,6 +170,7 @@
 </SettingsGroup>
 
 <SettingsGroup label="Account">
+	<UsageSharingSetting onError={(message) => settingsError = message} />
 	<SettingsRow name="Sign out" sub="Clears your token and returns to the login screen on this server." wrap>
 		{#snippet actions()}
 			{#if accountConfirm !== 'logout'}
