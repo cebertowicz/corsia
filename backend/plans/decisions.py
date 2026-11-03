@@ -118,7 +118,7 @@ def withdraw_offer(db, decision_id: str, *, provenance: str) -> bool:
     row = decision_projection.identity_row(db, decision_id)
     if row is None:
         return False
-    return decision_lifecycle._withdraw(db, row, reason=OFFER_VOIDED, actor_id=provenance, provenance=provenance)
+    return decision_lifecycle._withdraw(db, row, reason=OFFER_VOIDED, actor_id=None, provenance=provenance)
 
 
 def update(decision_id: str, *, expected_revision, mutation_id, actor, provenance,

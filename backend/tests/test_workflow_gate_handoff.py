@@ -309,6 +309,7 @@ async def test_a_correction_withdraws_an_open_offer(isolated_db, tmp_path, monke
         assert decisions.read(decision_id, db=db)["state"] == "invalidated"
     finally:
         db.close()
+    assert _run_db("SELECT DISTINCT actor_id FROM plan_node_events WHERE event='decision_invalidated'") == [{"actor_id": None}]
     state = _state()
     assert (state.kind, state.streak, state.open_offer, state.voided_offer) == ("person", 0, None, None)
     for _ in range(8):
@@ -332,9 +333,13 @@ async def test_the_offer_names_the_step_and_workflow_by_title(isolated_db, tmp_p
 async def test_a_gate_value_must_be_acceptance_or_alignment():
     from core.skill_workflow_validation import validate_workflow
 
-    steps = [{"id": "a", "gate": "acceptance"}, {"id": "b", "gate": "alignment"}, {"id": "c", "gate": "aceptance"}]
+    steps = [
+        {"id": "a", "gate": "acceptance"}, {"id": "b", "gate": "alignment"}, {"id": "c", "gate": "aceptance"},
+        {"id": "d", "gate": "acceptance", "workflow": "other"},
+    ]
     assert validate_workflow({"workflow": {"steps": steps}}) == [
         "corsia.workflow.steps[2] 'c'.gate must be one of acceptance, alignment",
+        "corsia.workflow.steps[3] 'd'.gate can't be set on a step that runs a workflow; set gate on that workflow's own steps",
     ]
 
 
