@@ -315,3 +315,56 @@ async def test_the_native_boundary_sizes_at_the_cap_and_settles_on_the_configure
     finally:
         db.close()
     assert (await _native_boundary("t-mem", "next", monkeypatch)).configured_window is None
+
+
+@pytest.mark.asyncio
+async def test_the_meter_reads_the_window_the_fit_check_uses(isolated_db, monkeypatch):
+    """Inside a refused Turn the meter's window is the memory fit, then the configured one again."""
+    from dataclasses import dataclass
+
+    from core import turn_iteration_context as iteration_context
+    from core.turn_measured_usage import context_usage_from_latest_call
+    from infra.database import get_db
+    from tests.unavailable_model_support import seed_model
+
+    @dataclass(frozen=True)
+    class Ledger:
+        target_catalog_id: str
+        effective_window_tokens: int
+        input_identity: str = "i"
+
+    seed_model(SELECTOR)  # configured window 32,768
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO threads (id,user_id,model,created_at,updated_at)"
+            " VALUES ('t-meter','user-1',?,'t0','t0')", (SELECTOR,),
+        )
+        db.commit()
+    finally:
+        db.close()
+    monkeypatch.setattr(iteration_context, "refit_provider_payload", lambda ledger, *_a, **_k: ledger)
+    snapshot = {"harness_model_facts": {"harness": "native", "model": SELECTOR,
+                                        "model_context_window": 32_768}}
+
+    async def meter(turn_id: str) -> tuple[int, dict]:
+        state = SimpleNamespace(
+            fit_ledger=Ledger(SELECTOR, 32_768), messages=[], tool_definitions=[],
+            fit_current_input="go",
+            context_usage={"model_context_window": 32_768, "context_snapshot": snapshot},
+        )
+        with _turn(turn_id):
+            await iteration_context._refresh_native_window(state, "t-meter")
+        usage = context_usage_from_latest_call(state.context_usage, {"prompt_tokens": 24_000})
+        return state.fit_ledger.effective_window_tokens, usage
+
+    _refuse(33_270, turn_id="refused", text=PINNED)
+    checked, usage = await meter("refused")
+    assert checked == PINNED_FIT
+    assert usage["model_context_window"] == PINNED_FIT
+    assert usage["utilization"] == round(24_000 / PINNED_FIT, 3)
+
+    memory_fit.end_turn("refused")
+    checked, usage = await meter("next")
+    assert checked == usage["model_context_window"] == 32_768
+    assert "provider_reported_model_context_window" not in usage
