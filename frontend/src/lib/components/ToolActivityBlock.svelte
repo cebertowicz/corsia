@@ -287,6 +287,9 @@
 	.ta-rows.capped::before { display: none; }
 	.ta-rows.capped .ta-row-wrap { position: relative; }
 	.ta-rows.capped .ta-row-wrap::before { top: 0; bottom: 0; }
+	/* The box's own rail stops short of its first and last row by the box's padding; so do the ends of the row stretches. */
+	.ta-rows.capped .ta-row-wrap:first-child::before { top: var(--space-1); }
+	.ta-rows.capped .ta-row-wrap:last-child::before { bottom: var(--space-1); }
 	.ta-row-wrap { display: flex; flex-direction: column; }
 	.ta-row {
 		display: flex; align-items: center; gap: 8px;

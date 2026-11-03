@@ -14,7 +14,7 @@ import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedF
 interface Sample { top: number | null; t: number; live: boolean }
 type Win = Window & { __eachPaintedFrame?: EachPaintedFrame; __samples?: Sample[]; __done?: boolean };
 
-/** The text under a reader at the live edge may only follow new text upward, while the turn is live and when it ends; any drop beyond rounding is the regression. */
+/** The text under a reader at the live edge may only follow new text upward while the turn is live; any drop beyond rounding is the regression. */
 const LIVE_DROP_PX = 2;
 
 const LINE = 'The reader keeps their place while the agent works and the reply keeps arriving below. ';
@@ -60,6 +60,22 @@ function moves(samples: Sample[]): { by: number; at: number; liveBefore: boolean
 		}
 	}
 	return out;
+}
+
+/**
+ * What the turn's end does to the reader at the live edge: the room the live row held is given back as a glide, so the
+ * text moves down over several painted frames and settles at once. A one-frame jump (84 to 98 px before the glide) or a
+ * move that lingers fails. The size of a glide's first step depends on the frame timing, so only the frame count is read.
+ */
+const GLIDE_MIN_FRAMES = 3;
+const GLIDE_BIG_PX = 40;
+const GLIDE_SETTLE_MS = 700;
+function expectEndGlide(samples: Sample[]): void {
+	const endAt = samples.findIndex((sample, i) => i > 0 && samples[i - 1].live && !sample.live);
+	const down = moves(samples).filter((move) => !move.liveAfter && move.by > 0);
+	const total = down.reduce((sum, move) => sum + move.by, 0);
+	if (total > GLIDE_BIG_PX) expect(down.length, 'the transcript dropped back in a jump when the turn ended').toBeGreaterThanOrEqual(GLIDE_MIN_FRAMES);
+	if (endAt > 0) expect(down.filter((move) => move.at - samples[endAt].t > GLIDE_SETTLE_MS), 'the end of the turn kept moving the text').toEqual([]);
 }
 
 test.afterEach(async ({ request }) => {
@@ -115,15 +131,15 @@ for (const reading of ['scrolled up mid-transcript', 'pinned at the live edge', 
 		if (reading === 'scrolled up mid-transcript') expect(seen, 'the text under the reader moved while the turn worked').toEqual([]);
 		else {
 			expect(seen.filter((move) => move.liveBefore && move.liveAfter && move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader at the live edge while the turn worked').toEqual([]);
-			expect(seen.filter((move) => move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader at the live edge when the turn ended').toEqual([]);
+			expectEndGlide(samples);
 		}
 	});
 }
 
 /**
- * Where a turn ends, and after a step of many tool calls, the reader at the live edge is not moved either: the live
- * row's tool list scrolls inside the height the reasoning box has, and what the live row loses when it goes is held as
- * blank space under the transcript until the person sends again.
+ * Where a turn ends, and after a step of many tool calls, the reader at the live edge is not dropped back either: the
+ * live row's tool list scrolls inside the height the reasoning box has, the room the live row loses while it works is
+ * held, and the turn's end gives it back as a glide (expectEndGlide).
  */
 const LIST_CAP_PX = 150;
 const widths = [{ name: '1440', width: 1440, height: 900 }, { name: '393 touch', width: 393, height: 852 }] as const;
@@ -147,15 +163,17 @@ async function openEndThread(page: Page, request: Parameters<typeof createSessio
 	return title;
 }
 
-/** The blank space the floor holds: how far the floor marker's edge sits below where the content actually ends. */
+/** The room the live row is holding: the min-height its holders carry beyond what their content needs. Zero once the turn's glide is done. */
 function readHeld(): number {
-	const marker = document.querySelector<HTMLElement>('.tail-hold');
-	const end = document.querySelector<HTMLElement>('.tail-end');
-	if (!marker || !end || marker.offsetHeight === 0) return 0;
-	const list = marker.parentElement!;
-	return Math.max(0, Math.round(marker.offsetTop + marker.offsetHeight - (end.offsetTop + parseFloat(getComputedStyle(list).paddingBottom))));
+	return Math.round([...document.querySelectorAll<HTMLElement>('.live-slot, .live-hold')].reduce((sum, node) => {
+		const held = parseFloat(getComputedStyle(node).minHeight) || 0;
+		const content = node.firstElementChild?.getBoundingClientRect().height ?? 0;
+		return sum + Math.max(0, held - content);
+	}, 0));
 }
 const heldSpace = (page: Page) => page.evaluate(readHeld);
+/** The height the live row's content has now: the most room it can ever have to give back. */
+const liveHeight = (page: Page) => page.evaluate(() => Math.round(Math.max(0, ...[...document.querySelectorAll<HTMLElement>('.live-slot, .live-hold')].map((node) => node.firstElementChild?.getBoundingClientRect().height ?? 0))));
 
 for (const size of widths) {
 	for (const ending of ['a short reply', 'Stop'] as const) {
@@ -181,7 +199,7 @@ for (const size of widths) {
 			else await releaseMockGate(request, gate);
 			const samples = await sampling;
 			expect(samples.filter((sample) => sample.top !== null).length, 'the sampled text stayed on the page').toBeGreaterThan(samples.length / 2);
-			expect(moves(samples).filter((move) => move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader at the live edge when the turn ended').toEqual([]);
+			expectEndGlide(samples);
 		});
 	}
 
@@ -203,46 +221,22 @@ for (const size of widths) {
 		const sampling = sampleAnchor(page, 200, 6000);
 		let tallest = 0;
 		let heldMost = 0;
+		let liveMost = 0;
 		const started = Date.now();
 		while (Date.now() - started < 5000) {
 			const read = {
 				list: await page.evaluate(() => document.querySelector<HTMLElement>('.ta-rows')?.getBoundingClientRect().height ?? 0),
 				held: await heldSpace(page),
+				live: await liveHeight(page),
 			};
 			tallest = Math.max(tallest, read.list);
 			heldMost = Math.max(heldMost, read.held);
+			liveMost = Math.max(liveMost, read.live);
 		}
 		expect(tallest, 'the live tool list ran past the height the reasoning box has').toBeLessThanOrEqual(LIST_CAP_PX + 10);
-		expect(heldMost, 'the held space is taller than the live row can lose').toBeLessThanOrEqual(LIST_CAP_PX + 60);
+		expect(heldMost, 'the held room is taller than the live row ever was').toBeLessThanOrEqual(liveMost);
 		expect(moves(await sampling).filter((move) => move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader at the live edge').toEqual([]);
 		await releaseMockGate(request, gate);
-	});
-
-	test(`@surface:chat-live-scroll the held space carries into the next send without moving the reader (${size.name})`, async ({ page, request }, testInfo) => {
-		test.setTimeout(150_000);
-		test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop project drives the viewport');
-		await openEndThread(page, request, size);
-		const gate = `hold-next-${Date.now()}`;
-		const many = Array.from({ length: 30 }, (_, index) => ({ id: `next-${index}-${gate}`, name: 'list_dir', arguments: JSON.stringify({ path: '.' }) }));
-		await seedMockResponses(request, [
-			{ reasoning_content: 'Checking several places at once. '.repeat(20), delay_ms: 500, finish_reason: 'tool_calls', tool_calls: many },
-			{ content: 'Done.', response_gate: gate, finish_reason: 'stop' },
-		]);
-		await sendChatMessage(page, 'first live turn');
-		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-		await page.waitForTimeout(3500);
-		await releaseMockGate(request, gate);
-		await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0, { timeout: 30_000 });
-		await page.waitForTimeout(800);
-		expect(await heldSpace(page), 'the space the live row lost is held after the turn ends').toBeGreaterThan(50);
-		await seedMockResponses(request, [
-			{ reasoning_content: 'Next. '.repeat(20), delay_ms: 400, finish_reason: 'tool_calls', tool_calls: [{ id: `next-one-${gate}`, name: 'list_dir', arguments: JSON.stringify({ path: '.' }) }] },
-			{ content: `Again. ${LINE.repeat(6)}`, finish_reason: 'stop' },
-		]);
-		const sampling = sampleAnchor(page, 200, 3500);
-		await sendChatMessage(page, 'second turn');
-		const seen = moves(await sampling);
-		expect(seen.filter((move) => move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader when the next send began').toEqual([]);
 	});
 
 	test(`@surface:chat-live-scroll expanding and collapsing a step after the turn ends leaves no more blank space (${size.name})`, async ({ page, request }, testInfo) => {
@@ -262,7 +256,7 @@ for (const size of widths) {
 		await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0, { timeout: 30_000 });
 		await page.waitForTimeout(800);
 		const afterTurn = await heldSpace(page);
-		expect(afterTurn, 'the space the live row lost is held after the turn ends').toBeGreaterThan(50);
+		expect(afterTurn, 'the room the live row held is given back when the turn ends').toBe(0);
 		const summary = page.locator('.messages .ta-summary').last();
 		await summary.click();
 		await page.waitForTimeout(500);
@@ -312,7 +306,7 @@ for (const size of widths) {
 			await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0, { timeout: 30_000 });
 			await page.waitForTimeout(800);
 			const heldBefore = await heldSpace(page);
-			expect(heldBefore, 'the space the live row lost is held after the turn ends').toBeGreaterThan(30);
+			expect(heldBefore, 'the room the live row held is given back when the turn ends').toBe(0);
 			await page.locator('.messages').evaluate((el) => { el.scrollTop = 0; });
 			await expect.poll(() => olderAsked, { message: 'reaching the top asks for older history' }).toBe(true);
 			const sampling = sampleAnchor(page, 200, 2500);
@@ -331,7 +325,7 @@ for (const size of widths) {
 		}
 	});
 
-	test(`@surface:chat-live-scroll jump to latest ignores the held space (${size.name})`, async ({ page, request }, testInfo) => {
+	test(`@surface:chat-live-scroll jump to latest lands on the last message, during and after a turn (${size.name})`, async ({ page, request }, testInfo) => {
 		test.setTimeout(150_000);
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop project drives the viewport');
 		await openEndThread(page, request, size);
@@ -346,9 +340,8 @@ for (const size of widths) {
 		await page.waitForTimeout(3500);
 		const list = page.locator('.messages');
 		const jump = page.getByRole('button', { name: 'Scroll to bottom' });
-		/** Px of content below the view, measured to where the content ends, not to the held space. */
-		const belowView = async () => (await list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight)) - (await heldSpace(page));
-		expect(await heldSpace(page), 'the held space is armed mid-turn').toBeGreaterThan(50);
+		/** Px of content below the view. */
+		const belowView = () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
 		// Mid-turn: scroll up, tap the control, and keep reading as the reply arrives and the turn ends.
 		await list.evaluate((el) => { el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - 700); });
 		await expect(jump, 'the control shows once the reader is scrolled up').toBeVisible();
@@ -358,14 +351,13 @@ for (const size of widths) {
 		expect(await belowView(), 'the tap lands with the latest content in view').toBeLessThanOrEqual(2);
 		const sampling = sampleAnchor(page, 200, 3000);
 		await releaseMockGate(request, gate);
-		expect(moves(await sampling).filter((move) => move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader after the tap').toEqual([]);
+		const tapped = await sampling;
+		expect(moves(tapped).filter((move) => move.liveBefore && move.liveAfter && move.by > LIVE_DROP_PX), 'the transcript dropped back under a reader after the tap').toEqual([]);
+		expectEndGlide(tapped);
 		await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0, { timeout: 30_000 });
 		await page.waitForTimeout(800);
-		expect(await heldSpace(page), 'the space the live row lost is still held').toBeGreaterThan(50);
-		// After the turn: a reader whose view ends at the last message sees no control; scrolled up, the tap lands as on a thread with no held space.
-		const held = await heldSpace(page);
-		await list.evaluate((el, floor) => { el.scrollTop = el.scrollHeight - floor - el.clientHeight; }, held);
-		await expect(jump, 'no control while the reader is at the last message with only the held space below').toHaveCount(0);
+		expect(await heldSpace(page), 'the room the live row held is given back when the turn ends').toBe(0);
+		// After the turn: scrolled up, the tap lands with the last message at the bottom of the view.
 		await list.evaluate((el) => { el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - 700); });
 		await expect(jump).toBeVisible();
 		await jump.click();
@@ -373,7 +365,7 @@ for (const size of widths) {
 		expect(Math.abs(await belowView()), 'the tap after the turn lands with the last message at the bottom of the view').toBeLessThanOrEqual(2);
 	});
 
-	test(`@surface:chat-live-scroll leaving the thread releases the held space (${size.name})`, async ({ page, request }, testInfo) => {
+	test(`@surface:chat-live-scroll leaving the thread and coming back leaves nothing held (${size.name})`, async ({ page, request }, testInfo) => {
 		test.setTimeout(150_000);
 		test.skip(testInfo.project.name !== 'chromium-desktop', 'desktop project drives the viewport');
 		const other = `live-other-${Date.now()}`;
@@ -390,13 +382,13 @@ for (const size of widths) {
 		await releaseMockGate(request, gate);
 		await expect(page.getByRole('button', { name: 'Stop turn' })).toHaveCount(0, { timeout: 30_000 });
 		await page.waitForTimeout(800);
-		expect(await heldSpace(page), 'the space the live row lost is held after the turn ends').toBeGreaterThan(50);
+		expect(await heldSpace(page), 'the room the live row held is given back when the turn ends').toBe(0);
 		for (const next of [other, title]) {
 			if (size.width < 700) { await page.waitForTimeout(600); await page.getByRole('button', { name: 'Toggle sidebar' }).click(); }
 			await page.getByText(next, { exact: true }).first().click();
 			await page.waitForTimeout(800);
 		}
-		expect(await heldSpace(page), 'the held space stayed after the person left and came back').toBe(0);
+		expect(await heldSpace(page), 'room was held after the person left and came back').toBe(0);
 		const gap = await page.locator('.messages').evaluate((el) => Math.round(el.scrollHeight - el.clientHeight - el.scrollTop));
 		expect(gap, 'the chat is at its end after coming back').toBeLessThanOrEqual(1);
 	});

@@ -5,17 +5,21 @@
 	import { turnStates } from '$lib/ws/turnState';
 	import { renderMarkdown } from '$lib/markdown';
 	import { autoScroll } from '$lib/actions/autoScroll';
+	import { holdHeight } from '$lib/actions/holdHeight';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 
 	let {
 		threadId = undefined,
 		expandedTools,
 		onToggleToolBlock,
+		holds = true,
 	}: {
 		/** The thread whose live turn this shows; defaults to the active thread. */
 		threadId?: string | null;
 		expandedTools: Set<string>;
 		onToggleToolBlock: (id: string) => void;
+		/** False when a parent that outlives the turn already holds the room (see TranscriptContent). */
+		holds?: boolean;
 	} = $props();
 
 	const boundThreadId = $derived(threadId ?? $activeThreadId);
@@ -54,6 +58,8 @@
 	);
 </script>
 
+<div class="live-slot" use:holdHeight={{ hold: isStreaming && holds, ratchet: !streamContent }}>
+<div class="live-content">
 {#if showLiveTools}
 	<div class="message assistant tool-activity">
 		<div class="assistant-msg">
@@ -108,8 +114,11 @@
 		</div>
 	</div>
 {/if}
+</div>
+</div>
 
 <style>
+	.live-slot, .live-content { display: flow-root; }
 	.message { max-width: 760px; margin: 0 auto 20px; overflow-x: hidden; }
 	.message.assistant { animation: fadeInUp var(--dur-spring) ease; }
 	@keyframes fadeInUp {

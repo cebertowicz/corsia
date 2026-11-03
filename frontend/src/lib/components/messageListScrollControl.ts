@@ -1,11 +1,5 @@
 import { tick } from 'svelte';
 import { NEAR_BOTTOM_PX } from '$lib/nearBottom';
-import { contentEnd, followTop } from '$lib/actions/holdTail';
-
-/** The scrollTop that leaves `offset` px of content below the view, measured to where the content ends (not the floor). */
-function bottomTop(el: HTMLElement, offset: number): number {
-	return Math.max(0, contentEnd(el) - el.clientHeight - offset);
-}
 
 /** Keeps transcript scrolling separate from the component's rendering and landing state. */
 export class MessageListScrollControl {
@@ -30,7 +24,7 @@ export class MessageListScrollControl {
 	syncNearBottom(): void {
 		const el = this.element();
 		if (!el) return;
-		this.setNearBottom(contentEnd(el) - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX);
+		this.setNearBottom(el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX);
 	}
 
 	beginProgrammaticScroll(write: () => void): void {
@@ -57,24 +51,23 @@ export class MessageListScrollControl {
 	writeBottom(): void {
 		this.beginProgrammaticScroll(() => {
 			const el = this.element();
-			if (!el) return;
-			// Never back up: a live edge that got shorter leaves the blank floor below, and the text stays put.
-			el.scrollTop = Math.max(el.scrollTop, followTop(el));
+			if (el) el.scrollTop = el.scrollHeight;
 		});
 	}
 
 	captureBottomOffset(): void {
 		const el = this.element();
 		if (!el) return;
-		// Signed: blank space held below the content, in view, is a place to come back to as well.
-		this.#savedBottomOffset = contentEnd(el) - el.scrollTop - el.clientHeight;
+		this.#savedBottomOffset = Math.max(0, el.scrollHeight - el.scrollTop - el.clientHeight);
 	}
 
 	restoreBottomOffset(): void {
 		this.beginProgrammaticScroll(() => {
 			const el = this.element();
 			if (!el) return;
-			el.scrollTop = followTop(el, this.#savedBottomOffset);
+			el.scrollTop = this.#savedBottomOffset === 0
+				? el.scrollHeight
+				: Math.max(0, el.scrollHeight - el.clientHeight - this.#savedBottomOffset);
 		});
 	}
 

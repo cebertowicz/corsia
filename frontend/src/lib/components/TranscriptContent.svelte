@@ -14,7 +14,8 @@
 	import { threadPlanStates } from '$lib/stores/threadPlanStates';
 	import { coreSettings } from '$lib/stores/settings';
 	import { chatReplyJump } from '$lib/stores/chatReplyJump';
-	import { activeToolsByThread, messages } from '$lib/stores/threads';
+	import { activeToolsByThread, messages, streamContentByThread } from '$lib/stores/threads';
+	import { holdHeight } from '$lib/actions/holdHeight';
 	import { INITIAL_TURN_STATE, turnStates } from '$lib/ws/turnState';
 	import { threadLiveStep, UNKNOWN_STEP } from './plans/planLiveStep';
 	import { createLiveLine } from './plans/liveLine.svelte';
@@ -79,6 +80,8 @@
 
 	const uid = $props.id();
 	const boundThreadId = $derived(threadId ?? null);
+	let holder = $state<HTMLElement | undefined>();
+	const streamingReply = $derived(Boolean(boundThreadId && $streamContentByThread.get(boundThreadId)));
 	const boundTurn = $derived(boundThreadId ? $turnStates.get(boundThreadId) ?? INITIAL_TURN_STATE : null);
 	const pausePresentation = $derived(attachPlanLimitPauses(entries, pauses, boundThreadId && boundTurn
 		? { threadId: boundThreadId, phase: boundTurn.phase, turnId: boundTurn.turnId } : undefined));
@@ -126,6 +129,16 @@
 	const livePreviewFromDescendant = $derived(liveRollup?.previewFromDescendant ?? false);
 	const liveRunIndex = $derived(renderedEntries.findIndex((entry) => entry.kind === 'fold' && entry.live));
 	const hasLiveFold = $derived(liveRunIndex !== -1);
+	/** The turn's messages and its state change in different updates: the holder lets go with whichever ends the live block first. */
+	let sawLiveFold = $state(false);
+	$effect(() => { sawLiveFold = renderedStreaming && (sawLiveFold || hasLiveFold); });
+	const holding = $derived(renderedStreaming && (hasLiveFold || !sawLiveFold));
+	/** Where the content ended before the DOM changes that release the holder, read in the pre effect below. */
+	let endBefore = 0;
+	$effect.pre(() => {
+		void holding;
+		endBefore = holder?.offsetTop ?? 0;
+	});
 	// The live line restarts after each shown item: its segment is the item before the open run.
 	const liveSegment = $derived(hasLiveFold
 		? runTokens(renderedEntries, liveRunIndex, historyComplete).find((token) => token.startsWith('after:')) ?? 'after:'
@@ -292,9 +305,11 @@
 	{/if}
 {/each}
 
-{#if renderedStreaming && !hasLiveFold}
-	<LiveToolActivity {threadId} {expandedTools} onToggleToolBlock={onToggleToolBlock} />
-{:else if wait && !(focusMode && waitRunId !== null)}
+<!-- Outlives the live row and the open block, so the room they held can glide away when the turn ends (holdHeight). -->
+<div class="live-hold" bind:this={holder} use:holdHeight={{ hold: holding, ratchet: !streamingReply, before: endBefore }}>
+	<div class="live-content">{#if renderedStreaming && !hasLiveFold}<LiveToolActivity {threadId} {expandedTools} onToggleToolBlock={onToggleToolBlock} holds={false} />{/if}</div>
+</div>
+{#if wait && !(renderedStreaming && !hasLiveFold) && !(focusMode && waitRunId !== null)}
 	{#if focusMode}
 		<!-- No run to open: a static capsule, no toggle or chevron, keeping the label link. -->
 		<section class="wait-standalone" data-work-block><WaitCapsule face={wait} threadId={boundThreadId} /></section>
@@ -304,6 +319,7 @@
 {/if}
 
 <style>
+	.live-hold, .live-content { display: flow-root; }
 	.wait-standalone { display: flex; max-width: var(--transcript-max-width); margin: 0 auto 14px; min-width: 0; }
 	.message {
 		max-width: var(--transcript-max-width);
