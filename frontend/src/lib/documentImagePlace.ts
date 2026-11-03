@@ -148,10 +148,11 @@ export async function restoreDocumentPlace(
 		if (!back) {
 			if (view && !('src' in place)) {
 				// The editor holds the text that was at the top when its measure pass began: an offset written inside the pass is
-				// pushed back by that text's corrected height. Its own scroll target moves that hold to the saved line, and
-				// reading its layout runs the pass now, before the frame paints; the measured placement then checks it.
-				view.dispatch({ effects: EditorView.scrollIntoView(Math.min(place.from, view.state.doc.length), { y: 'start', yMargin: place.top }) });
-				view.lineBlockAt(0);
+				// pushed back by that text's corrected height. Laying the saved line at its place by the editor's estimated heights
+				// before the pass makes it the line the editor holds; the measured placement then corrects the estimate. The
+				// editor's own scroll target would lay the line's first character instead, which sits below the line's top, so it
+				// lands the line a few pixels off the place the measured placement holds and the two undo each other.
+				scroller.scrollTop += placeTop(view, Math.min(place.from, view.state.doc.length)) - place.top;
 				await placeInMeasure(view, scroller, anchorTop, place.top, true, options.signal);
 			} else scroller.scrollTop = place.scrollTop;
 			if (options.signal?.aborted) return;

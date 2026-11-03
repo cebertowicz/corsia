@@ -222,18 +222,18 @@ describe('restoreDocumentPlace', () => {
 		await pending;
 	});
 
-	it('hands a returning text line to the editor as its scroll target and reveals the tab once the measure finds it there', async () => {
+	it('lays a returning text line by the line\'s top, not its first character, and reveals the tab once the measure finds it there', async () => {
 		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
 		const readAt: number[] = [];
-		const target = vi.spyOn(EditorView, 'scrollIntoView');
 		const found = vi.spyOn(EditorView, 'findFromDOM').mockReturnValue({
 			state: { doc: { length: 1000 } },
 			viewport: { from: 0, to: 0 },
 			scrollDOM: scroller,
 			get documentTop() { return -scroller.scrollTop; },
 			lineBlockAt: () => ({ top: 490 }),
-			// The editor lays its scroll target from the line as it draws it, inside its own measure pass.
-			dispatch: () => { scroller.scrollTop = 390; },
+			// The editor's scroll target lays the line's first character at the margin, and the character sits 3 px below the
+			// line's top: the line would land 3 px above the place the measured placement holds.
+			dispatch: () => { scroller.scrollTop = 393; },
 			requestMeasure: ({ read, write }: { read: () => number; write: (top: number) => void }) => {
 				queueMicrotask(() => { readAt.push(scroller.scrollTop); write(read()); });
 			},
@@ -243,9 +243,7 @@ describe('restoreDocumentPlace', () => {
 			mode: 'tab-return',
 			onPlaced: () => placedAt.push(scroller.scrollTop),
 		});
-		// The saved offset was never used, and no offset was written over the editor's own placement: every measured pass
-		// found the line already where it was.
-		expect(target).toHaveBeenCalledWith(80, { y: 'start', yMargin: 100 });
+		// The saved offset was never used, and every measured pass found the line's top already where it was.
 		expect(new Set(readAt)).toEqual(new Set([390]));
 		expect(placedAt).toEqual([390]);
 		expect(scroller.scrollTop).toBe(390);
@@ -268,7 +266,8 @@ describe('restoreDocumentPlace', () => {
 		});
 		const placed = vi.fn();
 		await restoreDocumentPlace(root, { from: 80, top: 100, scrollTop: 2000 }, { mode: 'tab-return', signal: controller.signal, onPlaced: placed });
-		expect(scroller.scrollTop).toBe(0);
+		// Only the placement laid before the pass, by the editor's estimated heights; nothing inside it.
+		expect(scroller.scrollTop).toBe(390);
 		expect(passes).toBe(1);
 		expect(placed).not.toHaveBeenCalled();
 	});
