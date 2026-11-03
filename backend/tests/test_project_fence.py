@@ -141,7 +141,7 @@ def test_resolved_form_is_emitted_only_when_it_differs(world):
     rules = _policy(ALPHA_AGENT).sandbox_rules().splitlines()
     beta = world.workspace / "projects" / "beta"
     assert rules.count(_rule(beta)) == 1
-    assert (rules.count(_rule(beta.resolve())) == 1) is (beta.resolve() != beta)
+    assert rules.count(_rule(beta.resolve())) == 1
     real = world.workspace / "elsewhere"
     real.mkdir()
     (world.workspace / "projects" / "linked").symlink_to(real, target_is_directory=True)
