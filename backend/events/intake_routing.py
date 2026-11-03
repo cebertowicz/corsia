@@ -9,10 +9,7 @@ from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope
 from events.platform import DIGESTED, WOKE, PlatformDelivery, resolve_watches, rule_event
 from events.resolve import Target, resolve_targets
-
-
-UNOWNED = "declared_unowned"
-HELD = "no registered owner"
+from events.rule_zero import UNOWNED
 
 
 def declarer_targets(owner: str, envelope: EventEnvelope, conn) -> list[Target]:
@@ -35,18 +32,19 @@ def artifact_targets(owner: str, envelope: EventEnvelope, conn) -> list[Target]:
     """Routing for a declared type a rule's run emitted on its artifact: that artifact's
     registered owner, as for any event on it. An artifact with no owner (an outside
     contributor's PR) delivers it to no one: the declarer stays the scope its rule set's
-    own rules fire in, and ``UNOWNED`` marks the target so intake holds its delivery."""
+    own rules fire in; its routing state names no owner, so a ``registered_owner`` rule reaches
+    no one, and ``UNOWNED`` marks the target so rule 0 holds its delivery."""
     routed = resolve_targets(envelope, db=conn)
     if not any(target.no_owner for target in routed):
         return routed
-    return [replace(target, resolution=UNOWNED) for target in declarer_targets(owner, envelope, conn)]
+    return [replace(target, resolution=UNOWNED, routing_state={}) for target in declarer_targets(owner, envelope, conn)]
 
 
 def resolve_delivered_watches(
     conn: sqlite3.Connection, envelope: EventEnvelope, deliveries: Iterable[PlatformDelivery],
 ) -> None:
     """End each recipient's watch on this event once it reached them (Plans owns the settlement)."""
-    event = rule_event(envelope, f"{envelope.connector}.{envelope.type}")
+    event = rule_event(envelope)
     for delivery in deliveries:
         if delivery.thread_id is not None and delivery.outcome in (WOKE, DIGESTED):
             resolve_watches(conn, event, delivery.thread_id)

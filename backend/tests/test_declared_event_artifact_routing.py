@@ -141,3 +141,62 @@ def test_default_delivery_must_be_owner_or_none(db, tmp_path):
     (folder / "measures.yaml").write_text(text)
     with pytest.raises(ValueError, match="default_delivery must be owner or none"):
         sync(db, owner_thread_id=DECLARER, path=str(folder / "measures.yaml"), text=text)
+
+
+def _deliver_rule(db, rule_id: str, *, writer: str, to: str, mode: str) -> None:
+    db.execute(
+        'INSERT INTO event_rules (id,created_at,updated_at,scope,connector,event_type,"match",action,"to",mode,'
+        'origin,created_by,authority_ref) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        (rule_id, "t", "t", "project:project-a", "reviewer", "verdict", "[]", "deliver", to, mode,
+         f"agent:{writer}", writer, "self"),
+    )
+    db.commit()
+
+
+def _woken(db, thread: str) -> int:
+    return db.execute("SELECT COUNT(*) FROM messages WHERE thread_id=? AND content LIKE '[EVENT: verdict]%'",
+                      (thread,)).fetchone()[0]
+
+
+def test_a_wake_rule_the_owner_wrote_wakes_it_once_and_ends_its_watch(db, tmp_path):
+    schedule = _declare(db, tmp_path)
+    register_pr(REPO, 7, PR_OWNER)
+    _plan, node = _watching_verdict(db, PlanActor(PR_OWNER, "user-1", "project-a"), external_id=pr_external_id(REPO, 7))
+    _deliver_rule(db, "owner-wake", writer=PR_OWNER, to="registered_owner", mode="wake")
+    decision = _running_rule_run(db, schedule)
+
+    assert _emit(schedule, decision).accepted
+    assert (_woken(db, PR_OWNER), _digested(db, PR_OWNER), _woken(db, DECLARER)) == (1, 0, 0)
+    assert db.execute("SELECT COUNT(*) FROM event_route_decisions WHERE event_id='verdict-1' AND thread_id=?",
+                      (PR_OWNER,)).fetchone()[0] == 1
+    assert _armed(db, node.id) == 0
+
+
+def test_an_outside_pr_has_no_owner_even_for_the_wake_rule(db, tmp_path):
+    schedule = _declare(db, tmp_path)
+    _deliver_rule(db, "qg-wake", writer=DECLARER, to="registered_owner", mode="wake")
+    decision = _running_rule_run(db, schedule)
+
+    assert _emit(schedule, decision).accepted
+    assert [(_woken(db, t), _digested(db, t)) for t in (PR_OWNER, DECLARER)] == [(0, 0), (0, 0)]
+    assert db.execute("SELECT COUNT(*) FROM dead_letter_events").fetchone()[0] == 0
+    assert db.execute("SELECT outcome FROM event_intake_records WHERE event_id='verdict-1'").fetchone()[0] == "accepted"
+    # The rule resolves to nobody and says so; it is not the declarer's.
+    assert [tuple(r) for r in db.execute(
+        "SELECT thread_id, outcome, reason FROM event_route_decisions WHERE rule_id='qg-wake'",
+    )] == [(None, "dead_lettered", "no registered owner")]
+
+
+def test_an_added_delivery_to_a_third_thread_ends_its_dotted_watch(db, tmp_path):
+    schedule = _declare(db, tmp_path)
+    mk_session("third", project_id="project-a")
+    register_pr(REPO, 7, "third")
+    _plan, node = _watching_verdict(db, PlanActor("third", "user-1", "project-a"), external_id=pr_external_id(REPO, 7))
+    db.execute("UPDATE artifact_registrations SET parent_thread_id=? WHERE parent_thread_id='third'", (PR_OWNER,))
+    db.commit()
+    _deliver_rule(db, "third-digest", writer="third", to="thread:third", mode="digest")
+    decision = _running_rule_run(db, schedule)
+
+    assert _armed(db, node.id) == 1
+    assert _emit(schedule, decision).accepted
+    assert _digested(db, "third") == 1 and _armed(db, node.id) == 0

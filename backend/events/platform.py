@@ -171,13 +171,12 @@ def _deliver_target(
     return PlatformDelivery(event_id, thread, DIGESTED)
 
 
-def rule_event(
-    envelope: EventEnvelope, watch_event: str | None = None, *, ends_artifact: bool = False,
-) -> rules.RuleEvent:
+def rule_event(envelope: EventEnvelope, watch_event: str | None = None, *, ends_artifact: bool = False) -> rules.RuleEvent:
     """The envelope as rules see it; ``watch_event`` is the name watches use for it."""
     return rules.RuleEvent(
         envelope.event_id, envelope.connector or "", envelope.type,
-        watch_event or envelope.type, envelope.facts, envelope.artifact_ref, ends_artifact,
+        watch_event or (f"{envelope.connector}.{envelope.type}" if envelope.origin in ("emitter", "agent")
+                        else envelope.type), envelope.facts, envelope.artifact_ref, ends_artifact,
         trace=tuple(envelope.provenance.get("rule_trace") or ()), requester=_requester(envelope),
         origin=envelope.origin,
     )

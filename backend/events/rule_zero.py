@@ -21,6 +21,7 @@ from events.resolve import Target
 from events.rule_outcomes import RuleEvent, RulePlan
 
 HELD = "rule 0 is off for this event; its rules deliver it"
+UNOWNED = "declared_unowned"  # a declared type's target on an artifact nobody is registered to
 
 
 def off(db: sqlite3.Connection, decl: EventTypeDecl, event: RuleEvent) -> bool:
@@ -34,9 +35,9 @@ def hold(
     pairs: Sequence[tuple[Target, str | None]],
 ) -> list[tuple[Target, str | None]]:
     """``pairs`` (routed target, the caller's filter reason) with each rule 0 delivery held
-    when rule 0 is off, except one a rule rides."""
-    if not off(db, decl, event):
-        return list(pairs)
+    when rule 0 is off or the artifact has no registered owner, except one a rule rides."""
+    quiet = off(db, decl, event)
     rides = plan.rides if plan is not None else {}
-    return [(target, reason or (None if target.thread in rides else HELD))
+    return [(target, reason or (HELD if (quiet or target.resolution == UNOWNED)
+                                and target.thread not in rides else None))
             for target, reason in pairs]

@@ -329,9 +329,10 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
             if refused is not None:
                 return refused
         # Only the emit tool knows its sender; a CLI emit names a session, which a hook or script may also claim.
-        target_filter = lambda target, _db: (
-            intake_routing.HELD if target.resolution == intake_routing.UNOWNED
-            else rules.OWN_EMIT if origin == "agent" and target.thread == producer else None)
+        target_filter = None
+        if origin == "agent":
+            target_filter = lambda target, _db: (
+                rules.OWN_EMIT if target.thread == producer else None)
         deliveries, plan = deliver_envelope_sync(
             envelope, resolved.declaration,
             _routing(owner, envelope),
