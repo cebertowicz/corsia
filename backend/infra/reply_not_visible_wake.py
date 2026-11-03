@@ -25,6 +25,11 @@ from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
 EVENT = "turn.reply_not_visible"
 NO_REPLY = "NO_REPLY"
 
+#: Newest FIFO inputs searched for the person's message, as ``post_update_reminder``
+#: does: every Turn end reads this window through the input-order index, never the
+#: whole thread. A message further back has had that many Turn ends to be nudged.
+_INPUT_WINDOW = 100
+
 _HUMAN = (
     f"role='user' AND json_valid(metadata) "
     f"AND json_extract(metadata,'$.{REPLY_VIA_POST_UPDATE_KEY}')=1 "
@@ -66,36 +71,29 @@ def _focus_on(db: sqlite3.Connection) -> bool:
     return (get_setting("features", db=db) or {}).get("focus_mode", True) is not False
 
 
-def _owed_message(db: sqlite3.Connection, thread_id: str) -> sqlite3.Row | None:
-    """The person's newest taken-in message when no reply for them follows it."""
-    person = db.execute(
-        f"SELECT id, seq, created_at, active_turn_id FROM messages WHERE thread_id=? "
-        f"AND seq IS NOT NULL AND delivery_state='delivered' AND {_HUMAN} "
+def _newest_person_input(
+    db: sqlite3.Connection, thread_id: str, delivery_state: str,
+) -> sqlite3.Row | None:
+    return db.execute(
+        "SELECT id, seq, created_at, active_turn_id FROM ("
+        "SELECT id, seq, created_at, active_turn_id, role, metadata, delivery_state "
+        "FROM messages WHERE thread_id=? AND input_order IS NOT NULL "
+        f"ORDER BY input_order DESC LIMIT ?) WHERE delivery_state=? AND {_HUMAN} "
         "ORDER BY seq DESC LIMIT 1",
-        (thread_id,),
+        (thread_id, _INPUT_WINDOW, delivery_state),
     ).fetchone()
-    if person is None or db.execute(
+
+
+def _replied_after(db: sqlite3.Connection, thread_id: str, seq: int) -> bool:
+    return db.execute(
         f"SELECT 1 FROM messages WHERE thread_id=? AND seq>? AND {_FOR_USER} LIMIT 1",
-        (thread_id, person["seq"]),
-    ).fetchone() is not None:
-        return None
-    return person
+        (thread_id, seq),
+    ).fetchone() is not None
 
 
 def _turn_status(db: sqlite3.Connection, turn_id: str | None) -> str | None:
     row = db.execute("SELECT status FROM active_turns WHERE id=?", (turn_id,)).fetchone()
     return None if row is None else str(row["status"])
-
-
-def _ending_turn(db: sqlite3.Connection, thread_id: str, outcome: dict) -> str | None:
-    """The Turn this end records: named by the harness, else the thread's newest."""
-    if outcome.get("turn_id"):
-        return str(outcome["turn_id"])
-    row = db.execute(
-        "SELECT id FROM active_turns WHERE thread_id=? ORDER BY turn_order DESC LIMIT 1",
-        (thread_id,),
-    ).fetchone()
-    return None if row is None else str(row["id"])
 
 
 def _last_hidden(db: sqlite3.Connection, thread_id: str, after_seq: int) -> sqlite3.Row | None:
@@ -134,18 +132,18 @@ def _show_hidden_words(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row)
 
 
 def _settle_nudged_turn(
-    db: sqlite3.Connection, thread_id: str, person: sqlite3.Row, ending_turn: str | None,
+    db: sqlite3.Connection, thread_id: str, person: sqlite3.Row, nudge: sqlite3.Row,
 ) -> None:
     """At the nudged Turn's end: NO_REPLY stays hidden; any other last words show."""
-    nudge = db.execute(
-        "SELECT seq, active_turn_id FROM messages WHERE id=? AND delivery_state='delivered'",
-        (_nudge_id(str(person["id"])),),
-    ).fetchone()
-    if nudge is None or nudge["active_turn_id"] is None or nudge["active_turn_id"] != ending_turn:
+    if _replied_after(db, thread_id, person["seq"]):
+        logger.info("focus.nudge_settled thread={} result=sent", thread_id)
         return
     hidden = _last_hidden(db, thread_id, nudge["seq"])
-    if hidden is not None and str(hidden["content"]).strip() != NO_REPLY:
-        _show_hidden_words(db, thread_id, hidden)
+    if hidden is None or str(hidden["content"]).strip() == NO_REPLY:
+        logger.info("focus.nudge_settled thread={} result=no_reply", thread_id)
+        return
+    _show_hidden_words(db, thread_id, hidden)
+    logger.info("focus.nudge_settled thread={} result=shown", thread_id)
 
 
 def _queue_nudge(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) -> bool:
@@ -168,29 +166,36 @@ def _queue_nudge(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) ->
     except (ValueError, SendRejected) as error:
         logger.warning("reply-not-visible nudge skipped for {}: {}", thread_id, error)
         return False
+    logger.info("focus.nudge_queued thread={}", thread_id)
     return True
 
 
 def _settle(db: sqlite3.Connection, thread_id: str, outcome: dict) -> bool:
     """Apply both rules; True when a nudge was queued."""
-    if not _focus_on(db):
+    ending_turn = outcome.get("turn_id")
+    if not ending_turn or not _focus_on(db):
         return False
-    person = _owed_message(db, thread_id)
-    if person is None:
+    person = _newest_person_input(db, thread_id, "delivered")
+    if person is None or person["seq"] is None:
         return False
-    _settle_nudged_turn(db, thread_id, person, _ending_turn(db, thread_id, outcome))
-    if outcome.get("outcome", "completed") != "completed" or _owed_message(db, thread_id) is None:
+    nudge = db.execute(
+        "SELECT seq, active_turn_id, delivery_state FROM messages WHERE id=?",
+        (_nudge_id(str(person["id"])),),
+    ).fetchone()
+    if nudge is not None:  # Once per message; its own Turn's end settles it.
+        if nudge["delivery_state"] == "delivered" and nudge["active_turn_id"] == ending_turn:
+            _settle_nudged_turn(db, thread_id, person, nudge)
         return False
-    if _turn_status(db, person["active_turn_id"]) == "cancelled":
+    if outcome.get("outcome", "completed") != "completed":
+        return False
+    status = _turn_status(db, person["active_turn_id"])
+    if status == "cancelled":
         return False  # The person stopped the Turn their message started.
-    if db.execute(
-        "SELECT 1 FROM messages WHERE id=?", (_nudge_id(str(person["id"])),),
-    ).fetchone() is not None:
-        return False  # Once per message.
-    if db.execute(
-        f"SELECT 1 FROM messages WHERE thread_id=? AND delivery_state='queued' AND {_HUMAN} LIMIT 1",
-        (thread_id,),
-    ).fetchone() is not None:
+    if status == "running" and person["active_turn_id"] != ending_turn:
+        return False  # A later Turn is answering it; that Turn's end decides.
+    if _replied_after(db, thread_id, person["seq"]):
+        return False
+    if _newest_person_input(db, thread_id, "queued") is not None:
         return False  # Their next message starts the next Turn anyway.
     return _queue_nudge(db, thread_id, person)
 

@@ -263,6 +263,24 @@ async def test_a_queued_person_message_holds_the_nudge(db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_later_turn_already_answering_holds_the_nudge(db) -> None:
+    from infra.thread_driver import finish_turn
+
+    # An external harness records its end after the terminal, when a successor
+    # may already have taken in the person's next message.
+    _take_in(db)
+    _say(db, "Hi")
+    finish_turn("t1", outcome="completed", ended_at=_AT, successor_turn_id=None,
+                boot_epoch="boot-1", db=db)
+    db.commit()
+    _take_in(db, turn="t2", message="m2")
+
+    await record_turn_end(on_thread_turn_complete, _THREAD, outcome="completed", turn_id="t1")
+
+    assert _nudges(db) == []
+
+
+@pytest.mark.asyncio
 async def test_the_nudged_turns_hidden_words_become_its_reply(db) -> None:
     _take_in(db)
     _say(db, "Portland: EST or PST?")
@@ -343,7 +361,7 @@ async def test_a_failure_in_the_nudge_never_loses_the_turn_end(db, monkeypatch) 
     def boom(*_args, **_kwargs):
         raise RuntimeError("bad row")
 
-    monkeypatch.setattr(wake, "_owed_message", boom)
+    monkeypatch.setattr(wake, "_newest_person_input", boom)
     _take_in(db)
 
     effects = await _end(db)

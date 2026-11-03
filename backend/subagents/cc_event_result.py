@@ -226,10 +226,10 @@ async def _finish_result_postprocessing(
         })
 
 
-async def _record_plan_completion(ctx: CCEventContext) -> TurnEndEffects:
+async def _record_plan_completion(ctx: CCEventContext, *, turn_id: str) -> TurnEndEffects:
     """Commit and prepare plan effects through the canonical terminal owner."""
 
-    return await record_external_turn_end(ctx.child_id)
+    return await record_external_turn_end(ctx.child_id, turn_id=turn_id)
 
 
 async def _record_plan_error(
@@ -344,7 +344,7 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
                     turn_id=identity.turn_id,
                 )
             else:
-                effects = await _record_plan_completion(ctx)
+                effects = await _record_plan_completion(ctx, turn_id=identity.turn_id)
     finally:
         if ctx.live.turn_terminal is not None:
             ctx.live.turn_terminal.set()

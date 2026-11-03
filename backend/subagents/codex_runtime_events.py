@@ -549,9 +549,8 @@ async def _on_result(ctx, ev: dict) -> None:
             usage=ev.get("usage"),
         )
         if meta_r.get("stop_reason") != "interrupted":
-            failure = dict(outcome="error", error=ev.get("result") or "Codex turn failed",
-                           turn_id=identity.turn_id) if is_error else {}
-            effects = await record_external_turn_end(ctx.thread_id, **failure)
+            failure = dict(outcome="error", error=ev.get("result") or "Codex turn failed") if is_error else {}
+            effects = await record_external_turn_end(ctx.thread_id, turn_id=identity.turn_id, **failure)
     finally:
         await deliver_turn_end_after(
             effects, lambda: release_and_drive_terminal(ctx, settlement))
