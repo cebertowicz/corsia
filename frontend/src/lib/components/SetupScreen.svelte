@@ -35,6 +35,7 @@
 	import { measuredDownloadTime, showLocalOnlyGuidance } from '$lib/setupLocalPresentation';
 	import { ACCOUNT_LEDE, WELCOME_TITLE } from '$lib/setupWelcome';
 	import { createSetupWarm, finishSetupWarmHandoff } from '$lib/setupWarm.svelte';
+	import { putSetupAccount, saveUsageSharing, USAGE_SHARING_ERROR, type AccountChanges } from '$lib/setupAccountSave';
 	interface Props { onExistingAccount: () => void; onAccountCreated: () => void; onFinished: () => void; startConnect?: boolean; onLeaveConnect?: () => void; resume?: boolean }
 	const { onExistingAccount, onAccountCreated, onFinished, startConnect = false, onLeaveConnect, resume = false }: Props = $props();
 	type Page = 'checking' | 'welcome' | 'account' | 'subscriptions' | 'models' | 'hard-stop' | 'error' | 'connect';
@@ -46,11 +47,11 @@
 	let page = $state<Page>(untrack(() => startConnect) ? 'connect' : 'checking');
 	let shell: SetupShell | undefined = $state();
 	let status = $state<Status>({}), statusError = $state(''), reportError = $state('');
-	let name = $state(''), username = $state(''), password = $state(''), confirmation = $state(''), email = $state('');
+	let name = $state(''), username = $state(''), password = $state(''), confirmation = $state(''), email = $state(''), sharing = $state(true);
 	let folder = $state(''), defaultFolder = $state(''), defaultFolderPath = $state(''), folderApplyPath = $state(''), savedFolder = $state(false), folderChanged = $state(false), folderChanging = $state(false), folderNotice = $state<FolderNotice>(null);
 	let accountBusy = $state(false), accountError = $state(''), accountExists = $state(false), confirmationError = $state('');
 	// Set once setup itself made the account: Back to the account screen then edits it, and only what differs from these is saved.
-	let accountKnown = $state(false), savedName = '', savedEmail = '';
+	let accountKnown = $state(false), savedName = '', savedEmail = '', savedSharing: boolean | null = null; // null: the choice is not saved yet
 	let sources = $state<ModelSource[]>([]), catalog = $state<SetupModel[]>([]), sourceError = $state(''), sourceRetry = $state<{ error: string; vendors: string[] } | null>(null);
 	let localStartError = $state<'other' | ''>(''), localStartReference = $state(''), startFix = $state<string | undefined>(), localBusy = $state(false);
 	// The pre-start (pick, then start) is under way, so the local row shows progress instead of a Download button.
@@ -253,32 +254,30 @@
 				return;
 			}
 			onAccountCreated(); token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() }); connect();
-			password = ''; confirmation = '';
-			accountKnown = true; savedName = name.trim(); savedEmail = email.trim();
+			accountKnown = true; savedName = name.trim(); savedEmail = email.trim(); password = ''; confirmation = '';
 			await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
-			afterAccount();
+			if (!(await saveUsageSharing(sharing))) { accountError = USAGE_SHARING_ERROR; return; }
+			savedSharing = sharing; afterAccount();
 		} catch { accountError = 'Couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
 	}
 	/** Back on the account screen: writes only the fields that differ from what setup saved, and nothing at all when none do. */
 	async function updateAccount() {
 		if (accountBusy) return;
-		const changes: { name?: string; email?: string; password?: string } = {};
+		const changes: AccountChanges = {};
 		if (name.trim() !== savedName) changes.name = name.trim();
 		if (email.trim() !== savedEmail) changes.email = email.trim();
 		if (password) changes.password = password;
-		if (Object.keys(changes).length === 0) { afterAccount(); return; }
+		const unchanged = Object.keys(changes).length === 0;
+		if (unchanged && sharing === savedSharing) { afterAccount(); return; }
 		accountBusy = true; accountError = '';
 		try {
-			const send = () => fetch('/api/setup/account', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${get(token)}` }, body: JSON.stringify(changes) });
-			let response = await send();
-			let result = await response.json().catch(() => null);
-			// An email has nowhere to go until the profile exists, and the name on screen is what builds it.
-			if (response.status === 422 && result?.code === 'profile_missing' && changes.name === undefined) {
-				changes.name = name.trim();
-				response = await send();
-				result = await response.json().catch(() => null);
+			if (sharing !== savedSharing) {
+				if (!(await saveUsageSharing(sharing))) { accountError = USAGE_SHARING_ERROR; return; }
+				savedSharing = sharing;
+				if (unchanged) { afterAccount(); return; }
 			}
+			const { response, result } = await putSetupAccount(changes, name.trim());
 			// Setup finished elsewhere: the account step is over, and trying again would only loop.
 			if (response.status === 409) { onFinished(); return; }
 			if (!response.ok) {
@@ -380,7 +379,7 @@
 		<p class="settled" data-testid="setup-account-made">{accountName ? `Your account is set up as ${accountName}.` : 'Your account is set up.'}</p>
 		<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
 	{:else if page === 'account'}
-		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email {usernameError} {confirmationError} requiredUsername={status.required_username} {editing} {accountError} onSubmit={submitAccount} onValidateConfirmation={() => confirmationError = passwordConfirmationError(password, confirmation)} />
+		<SetupAccountForm bind:name bind:username bind:password bind:confirmation bind:email bind:sharing {usernameError} {confirmationError} requiredUsername={status.required_username} {editing} {accountError} onSubmit={submitAccount} onValidateConfirmation={() => confirmationError = passwordConfirmationError(password, confirmation)} />
 		<!-- Creating the account scaffolds the work folder, so after it the folder is read back, not offered. -->
 		{#if editing}<p class="settled" data-testid="setup-folder-made">CORSIA keeps your work in {folder}.</p>
 		{:else}<SetupWorkFolder bind:folder {defaultFolder} {defaultFolderPath} bind:applyPath={folderApplyPath} {savedFolder} bind:changed={folderChanged} bind:changing={folderChanging} bind:notice={folderNotice} />{/if}
