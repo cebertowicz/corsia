@@ -11,7 +11,7 @@ from events.connectors import github_repo_activity as poller
 from events.connectors import github_rules
 from events.connectors.github import MANIFEST
 from events.connectors.github_notifications_feed import GhResponse
-from events.connectors.github_pr_quiet_reasons import mergeable_label
+from events.connectors.github_pr_quiet_reasons import mergeable_label, rank
 from events.envelope import normalize
 from infra.database import get_db
 from reviewer import gh_helpers
@@ -103,7 +103,7 @@ def test_check_state_has_one_precedence_over_suites_and_newest_runs(found, runs,
     ([], "success", "green"),
 ])
 def test_one_ranking_gives_both_conclusion_and_check_state(conclusions, ranked, state):
-    assert facts.rank(conclusions) == ranked and facts.state_of(ranked) == state
+    assert rank(conclusions) == ranked and facts.state_of(ranked) == state
 
 
 def test_check_state_selects_the_run_the_reviewer_gate_selects():
@@ -287,7 +287,7 @@ async def test_a_held_head_reads_action_required_on_every_event_kind(reads, foun
     if kind == "open_pr":
         got = await facts.head_facts(None, "o/r", 7, sent())
     else:
-        settled = {"repo": "o/r", "head_sha": "h1", "conclusion": facts.rank(s["conclusion"] for s in found)}
+        settled = {"repo": "o/r", "head_sha": "h1", "conclusion": rank(s["conclusion"] for s in found)}
         got = await facts.head_facts(None, "o/r", 7, settled)
         assert got["conclusion"] == "action_required"
     assert got["check_state"] == "action_required"
@@ -372,6 +372,18 @@ AUTHOR = {"field": "author_origin", "op": "eq", "value": "outside"}
 def test_a_rule_naming_a_fact_the_read_supplies_is_what_asks_for_the_read(isolated_db, match, enabled, event, asked):
     _rule(event if event == "pr.merged" or event == "head.checks_completed" else "pr.synchronize", match, enabled)
     assert rule_reads.type_rules("github", event, facts.read_facts(event))[2] is asked
+
+
+@pytest.mark.parametrize("event, field, expected", [
+    ("pr_comment.created", "author_login", False),
+    ("pr_comment.created", "draft", True),
+    ("pr_comment.created", "check_state", True),
+    ("review.submitted", "draft", False),
+    ("review.submitted", "check_state", True),
+])
+def test_reply_rule_gate(isolated_db, event, field, expected):
+    _rule(event, [{"field": field, "op": "present"}])
+    assert rule_reads.type_rules("github", event, facts.read_facts(event))[2] is expected
 
 
 def test_a_type_with_no_rule_asks_for_no_read(isolated_db):

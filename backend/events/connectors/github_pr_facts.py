@@ -27,9 +27,9 @@ from collections.abc import Mapping
 from typing import Any
 
 from events import rule_reads
-from events.connectors.github_content_facts import author_origin
+from events.connectors.github_content_facts import REPLY_TYPES, author_origin
 from events.connectors.github_label_events import label_names
-from events.connectors.github_pr_quiet_reasons import GREEN, mergeable_label
+from events.connectors.github_pr_quiet_reasons import GREEN, mergeable_label, rank
 from reviewer.gh_helpers import newest_check_runs
 
 log = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ READ_FACTS = ("current_head", "check_state", "mergeable")
 #: A settled head's read also supplies the PR's own facts: nothing else on that event has them.
 HEAD_FACTS = ("author_origin", "draft", "labels", *READ_FACTS)
 #: Open-PR event types whose facts are completed by a read; a terminal event keeps what its payload holds.
-READ_TYPES = frozenset({"pr.opened", "pr.synchronize", "pr.ready_for_review", "pr.labeled", "pr.unlabeled"})
+READ_TYPES = frozenset({"pr.opened", "pr.synchronize", "pr.ready_for_review", "pr.labeled", "pr.unlabeled"}) | REPLY_TYPES
 HEAD_TYPE = "head.checks_completed"
 UNREADABLE = "unreadable"
 
@@ -71,20 +71,7 @@ def counted_suites(suites: Any) -> list[dict[str, Any]]:
     ] if isinstance(suites, list) else []
 
 
-#: Conclusions ranked worst first; a held head waits for a maintainer first, whatever else failed.
-_RANKED = ("action_required", "timed_out", "startup_failure", "stale", "failure")
-
-
-def rank(conclusions: Any) -> str:
-    """The one conclusion for a set of completed checks: the worst in ``_RANKED``; then any other
-    one outside ``GREEN`` (unknown or missing) as ``failure``; then ``cancelled``; else ``success``."""
-    values = {str(value or "failure").lower() for value in conclusions}
-    for value in _RANKED:
-        if value in values:
-            return value
-    if values - GREEN - {"cancelled"}:
-        return "failure"
-    return "cancelled" if "cancelled" in values else "success"
+# Check conclusion ranking is shared with quiet PR reasons.
 
 
 def state_of(conclusion: str) -> str:
@@ -112,7 +99,8 @@ def check_state(suites: list[Any], runs: list[Any]) -> str:
 
 def read_facts(event_type: str) -> tuple[str, ...]:
     """The facts a read supplies for one event type; none for a type that is never read."""
-    return READ_FACTS if event_type in READ_TYPES else HEAD_FACTS if event_type == HEAD_TYPE else ()
+    return ((*PAYLOAD_FACTS, *READ_FACTS) if event_type == "pr_comment.created" else
+            READ_FACTS if event_type in READ_TYPES else HEAD_FACTS if event_type == HEAD_TYPE else ())
 
 
 async def _read(runner: Any, repo: str, path: str) -> Any:
@@ -158,15 +146,19 @@ async def _check_state(runner: Any, repo: str, sha: Any) -> str:
         page += 1
 
 
-async def head_facts(runner: Any, repo: str, number: int | None, facts: Mapping[str, Any]) -> dict[str, Any]:
+async def head_facts(
+    runner: Any, repo: str, number: int | None, facts: Mapping[str, Any], event_type: str = "",
+) -> dict[str, Any]:
     """An event's ``facts`` completed with ``check_state`` of its own head and the PR's ``current_head``
     and ``mergeable``, and, on a settled head's, the PR's own facts (``HEAD_FACTS``); a PR event's
     payload facts stay.
 
     The own head is ``head_sha`` (a settled head) or ``sha`` (a PR event's payload head); no
     read changes it. A settled head's ``check_state`` is ``state_of`` its ``conclusion``, so its
-    checks are not read again. When the PR read fails, ``current_head`` is absent and
-    ``check_state`` is ``unreadable``.
+    checks are not read again. On checks events, labels, draft, mergeable, author_origin
+    and current_head describe the PR's live state at the read, not the settled head. A reply
+    has no head of its own: its check_state describes current_head. When the PR read fails,
+    ``current_head`` is absent and ``check_state`` is ``unreadable``.
     """
     out = dict(facts)
     if number is not None:
@@ -177,6 +169,8 @@ async def head_facts(runner: Any, repo: str, number: int | None, facts: Mapping[
         if live_head := _text(_object(body.get("head")).get("sha")):
             out["current_head"] = live_head
         out["mergeable"] = mergeable_label(body.get("mergeable"))
+        if event_type == "pr_comment.created":
+            out.update(pull_facts(body))
         if "head_sha" in out:
             out.update({name: value for name, value in pull_facts(body).items() if name in HEAD_FACTS})
             if login := _text(_object(body.get("user")).get("login")):
@@ -184,7 +178,7 @@ async def head_facts(runner: Any, repo: str, number: int | None, facts: Mapping[
     if isinstance(conclusion := out.get("conclusion"), str):
         out["check_state"] = state_of(conclusion)
     else:
-        out["check_state"] = await _check_state(runner, repo, out.get("head_sha") or out.get("sha"))
+        out["check_state"] = await _check_state(runner, repo, out.get("current_head") if event_type in REPLY_TYPES else out.get("head_sha") or out.get("sha"))
     return out
 
 
@@ -213,5 +207,5 @@ async def enriched(envelope: Any, runner: Any = None) -> Any:
     repo, number = envelope.facts.get("repo"), envelope.facts.get("pr_number")
     if not isinstance(repo, str):
         return envelope
-    facts = await head_facts(runner, repo, number if isinstance(number, int) else None, envelope.facts)
+    facts = await head_facts(runner, repo, number if isinstance(number, int) else None, envelope.facts, envelope.type)
     return dataclasses.replace(envelope, facts=facts)

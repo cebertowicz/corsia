@@ -6,7 +6,7 @@ origin ``connector``), and ``event_id`` comes from the head's check suites, neve
 from a delivery.  Its reads pass the repo-activity poller's budget and backoff
 gate, and the admission hook stays off unless explicitly enabled. A suite held for
 approval (no runs, ``action_required``) is a settled head too. The head's
-``conclusion`` is ``github_pr_facts.rank`` of its suites, the one ranking its
+``conclusion`` is ``github_pr_quiet_reasons.rank`` of its suites, the one ranking its
 ``check_state`` also comes from.
 """
 from __future__ import annotations
@@ -22,6 +22,7 @@ from typing import Any, Literal, Protocol
 from events.connectors import github_notifications_feed as feed
 from events.connectors import github_pr_facts as pr_facts
 from events.connectors import github_repo_activity as poller
+from events.connectors.github_pr_quiet_reasons import rank
 
 log = logging.getLogger(__name__)
 DEBOUNCE_SECONDS = 30
@@ -140,7 +141,7 @@ class HeadCheckAggregator:
                 log.info("github-head-checks: head %s@%s incomplete suites=%s", *key, incomplete)
                 return
             branch, pr_number = self._facts.get(key, (None, None))
-            facts: dict[str, Any] = {"repo": repo, "head_sha": head_sha, "conclusion": pr_facts.rank(suite.get("conclusion") for suite in latest)}
+            facts: dict[str, Any] = {"repo": repo, "head_sha": head_sha, "conclusion": rank(suite.get("conclusion") for suite in latest)}
             if branch is not None:
                 facts["head_branch"] = branch
             if pr_number is not None:
