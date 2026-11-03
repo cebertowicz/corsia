@@ -127,7 +127,7 @@ class ReadFileTool(Tool):
             if media is not None:
                 return _ReadOutcome(media)
             size = file_stat.st_size
-            if size > self._MAX_READ_BYTES:
+            if size > self._MAX_READ_BYTES and not pdf_read.starts_as_pdf(handle):  # a large scan still opens
                 size_mb = size / (1024 * 1024)
                 return _ReadOutcome(f"Error: File too large ({size_mb:.0f}MB). Max readable size is {self._MAX_READ_BYTES // (1024*1024)}MB. Use offset/limit for partial reads, or a different tool.")
             data = handle.read()

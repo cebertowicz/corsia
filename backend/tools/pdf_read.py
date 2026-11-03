@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import ctypes
 import io
-import logging
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -19,8 +18,6 @@ from pathlib import Path
 from typing import Any
 
 from infra.db_async import run_in_db
-
-log = logging.getLogger(__name__)
 
 HEADER = b"%PDF-"
 PAGE_LONG_EDGE = 1568
@@ -60,9 +57,20 @@ def is_pdf(data: bytes) -> bool:
     return data.startswith(HEADER)
 
 
+def starts_as_pdf(handle: Any) -> bool:
+    """Whether an open file is a PDF, read from its header; the file is left at its start.
+
+    A PDF's read is bounded by its text window, not its size, so read_file's size cap skips it.
+    """
+    head = handle.read(len(HEADER))
+    handle.seek(0)
+    return is_pdf(head)
+
+
 @contextmanager
 def _opened(data: bytes) -> Iterator[Any]:
-    """The document with its form layer ready, closed afterwards; PDFium's own refusals become messages."""
+    """The document with its form layer ready, closed afterwards; PDFium's own refusals, on opening or on
+    any later page, become messages. Anything else is a fault here, not in the file, so it is not caught."""
     import pypdfium2 as pdfium
     import pypdfium2.raw as raw
 
@@ -73,6 +81,8 @@ def _opened(data: bytes) -> Iterator[Any]:
     try:
         pdf.init_forms()
         yield pdf
+    except pdfium.PdfiumError as exc:
+        raise PdfRefused(DAMAGED) from exc
     finally:
         pdf.close()
 
@@ -216,9 +226,6 @@ async def read_pdf(
         text, png = await asyncio.to_thread(draw_page, data, page)
     except PdfRefused as refused:
         return str(refused)
-    except Exception:  # noqa: BLE001 - a hostile or broken file must not fail the turn
-        log.exception("PDF read failed")
-        return DAMAGED
     try:
         marked = await run_in_db(_save_png, thread_id, png, f"{path.stem[:60]}-page-{page}")
     except (OSError, ValueError) as exc:

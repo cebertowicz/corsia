@@ -199,6 +199,35 @@ async def test_a_locked_pdf_and_a_damaged_pdf_get_their_own_messages(workspace, 
 
 
 @pytest.mark.asyncio
+async def test_pdfium_failing_on_a_later_page_reads_as_damaged(workspace, thread, monkeypatch):
+    import pypdfium2 as pdfium
+
+    def broken(page):
+        raise pdfium.PdfiumError("Failed to load page.")
+
+    monkeypatch.setattr(pdf_read, "_text", broken)
+    assert await read(workspace, text_pdf("a"), "bad.pdf") == "This PDF is damaged or unreadable."
+    assert await read(workspace, text_pdf("a"), "bad.pdf", page=1) == "This PDF is damaged or unreadable."
+
+
+@pytest.mark.asyncio
+async def test_a_fault_outside_pdfium_is_not_blamed_on_the_file(workspace, thread, monkeypatch):
+    def fault(*_args):
+        raise RuntimeError("fault in CORSIA")
+
+    monkeypatch.setattr(pdf_read, "read_text", fault)
+    with pytest.raises(RuntimeError, match="fault in CORSIA"):
+        await read(workspace, text_pdf("a"))
+
+
+@pytest.mark.asyncio
+async def test_a_pdf_over_the_read_size_cap_still_opens_but_other_files_do_not(workspace, thread, monkeypatch):
+    monkeypatch.setattr(ReadFileTool, "_MAX_READ_BYTES", 64)
+    assert body(await read(workspace, text_pdf("alpha"), "scan.pdf"))[:3] == ["1 page", "--- Page 1 ---", "alpha"]
+    assert str(await read(workspace, b"x" * 100, "big.txt")).startswith("Error: File too large")
+
+
+@pytest.mark.asyncio
 async def test_a_file_that_is_not_a_pdf_reads_as_before_and_ignores_page(workspace, thread):
     text = "alpha\nbeta\n"
     assert await read(workspace, text.encode(), "a.txt") == "     1\talpha\n     2\tbeta"
