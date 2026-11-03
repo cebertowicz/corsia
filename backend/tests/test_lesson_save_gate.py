@@ -15,6 +15,7 @@ import pytest
 from infra.skill_save_validation import REFUSED, INVALID_SKILL_REASON, invalid_skill_write, refused_save
 
 AGENT = "Lane <thread-1@agents.corsia.local>"
+OTHER_AGENT = "Other lane <thread-2@agents.corsia.local>"
 PERSON = "Person <person@users.corsia.local>"
 CORSIA = "CORSIA <corsia@localhost>"
 REASON = "lesson-outside-placement"
@@ -107,6 +108,13 @@ def test_the_owner_can_retire_promote_or_extend_the_same_lesson(tmp_path, change
     assert invalid_skill_write({path: edited.encode()}) is None
 
     assert _refuse({path: edited}) is None
+
+
+@pytest.mark.parametrize("author", [OTHER_AGENT, CORSIA, None])
+def test_only_the_lesson_owner_can_retire_it_by_editing(tmp_path, author: str | None) -> None:
+    path = _on_disk(tmp_path, "skills/gate/SKILL.md", LESSON_SKILL)
+
+    assert _reason(_refuse({path: LESSON_SKILL.replace("state: trial", "state: retired")}, author=author)) == REASON
 
 
 def test_a_retired_lesson_cannot_be_put_back_on_trial_by_editing(tmp_path) -> None:
