@@ -23,7 +23,7 @@ REQUESTER_FACT = "requester"
 _FACTS = (
     REQUESTER_FACT, "rule_id", "request_event", "request_identity", "workflow", "source",
     "item", "item_version", "artifact_integration", "artifact_type", "valid", "result",
-    "reason", "detail", "kind", "injection_signs", "model", "cost_usd",
+    "reason", "detail", "kind", "injection_signs", "model",
 )
 
 

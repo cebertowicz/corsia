@@ -417,7 +417,7 @@ async def test_a_script_on_a_pr_result_gets_the_prs_repository_channel(world, mo
     assert world["script_repos"] == [expected]
 
 
-# The settled worker's model and cost ride on its event, each only when CORSIA knows it.
+# The settled worker's model rides on its event, only when CORSIA knows it.
 def _worker_thread(db, model: str | None = "claude-code/opus") -> None:
     db.execute("INSERT INTO threads (id,user_id,title,agent_enabled,agent_status,model,created_at,updated_at) "
                "VALUES ('w1','steve','w',0,'idle',?,'t','t')", (model,))
@@ -444,102 +444,40 @@ def usage_db(isolated_db):
         db.close()
 
 
-def test_a_workers_model_and_cost_come_from_its_ledger(usage_db):
-    from automation import worker_usage
+def test_a_workers_model_comes_from_its_ledger(usage_db):
+    from automation import worker_model
 
     _worker_thread(usage_db)
     _call(usage_db, "c1", "claude-code/opus", manifest="m")
     _call(usage_db, "c2", "claude-code/opus", manifest="m")
-    known = worker_usage.facts(usage_db, "w1")
-    assert known["model"] == "claude-code/claude-opus-5-5" and known["cost_usd"] > 0
-    _call(usage_db, "c3", "claude-code/opus", prompt=2_000_000, manifest="m")
-    assert worker_usage.facts(usage_db, "w1")["cost_usd"] == pytest.approx(known["cost_usd"] * 2)
+    assert worker_model.facts(usage_db, "w1") == {"model": "claude-code/claude-opus-5-5"}
 
 
-def test_a_workers_unknown_model_or_cost_is_left_out(usage_db):
-    from automation import worker_usage
+def test_a_workers_unknown_model_is_left_out(usage_db):
+    from automation import worker_model
 
     _worker_thread(usage_db)
-    assert worker_usage.facts(usage_db, "w1") == {}  # launched as an alias, no call yet: neither is known
+    assert worker_model.facts(usage_db, "w1") == {}  # launched as an alias, no call yet: not known
     usage_db.execute("UPDATE threads SET model='claude-code/claude-opus-5-5' WHERE id='w1'")
-    assert worker_usage.facts(usage_db, "w1") == {"model": "claude-code/claude-opus-5-5"}  # the form a call reports
+    assert worker_model.facts(usage_db, "w1") == {"model": "claude-code/claude-opus-5-5"}  # the form a call reports
     _call(usage_db, "c1", "claude-code/opus", manifest="m")
-    _call(usage_db, "c2", "codex/no-such-model")  # a call Measurement cannot price: no partial sum
-    known = worker_usage.facts(usage_db, "w1")
-    assert "cost_usd" not in known and "model" not in known  # two identities: neither is the model
-    assert worker_usage.facts(usage_db, "nobody") == {}
-
-
-def test_a_local_call_adds_no_dollars_to_a_workers_api_cost(usage_db):
-    from automation import worker_usage
-
-    _worker_thread(usage_db)
-    _call(usage_db, "c1", "claude-code/opus", manifest="m")
-    api_only = worker_usage.facts(usage_db, "w1")["cost_usd"]
-    _call(usage_db, "c2", "omlx@local/qwen")
-    assert worker_usage.facts(usage_db, "w1")["cost_usd"] == pytest.approx(api_only)
-
-
-def test_a_worker_with_a_measurement_still_owed_has_no_cost(usage_db):
-    from automation import worker_usage
-
-    _worker_thread(usage_db)
-    _call(usage_db, "c1", "claude-code/opus", manifest="m")
-    usage_db.execute(
-        "INSERT INTO active_turns(id,thread_id,execution_epoch,model,status,started_at,boot_epoch,"
-        "usage_receipts_json) VALUES ('t1','w1',0,'claude-code/opus','completed','now','boot',?)",
-        (json.dumps({"receipt-1": {"binding": {}}}),))
-    assert "cost_usd" not in worker_usage.facts(usage_db, "w1")
-    usage_db.execute("UPDATE active_turns SET usage_receipts_json='{}' WHERE id='t1'")
-    assert worker_usage.facts(usage_db, "w1")["cost_usd"] > 0
-
-
-def test_a_call_projected_between_the_reads_leaves_the_cost_out(usage_db, monkeypatch):
-    from automation import worker_usage
-    from infra.turn_usage_receipts import project_turn_usage_receipt, store_turn_usage_receipt
-    from tests.plan_execution_helpers import open_turn
-
-    _worker_thread(usage_db)
-    _call(usage_db, "c1", "claude-code/opus", manifest="m")
-    open_turn(usage_db, "w1", "t-race")
-    stored = store_turn_usage_receipt(
-        usage_db, thread_id="w1", turn_id="t-race", usage_key="provider-call:2", model="claude-code/claude-opus-5-5",
-        measured={"prompt_tokens": 1_000_000, "completion_tokens": 0, "cache_creation_tokens": 0,
-                  "cache_read_tokens": 0, "total_tokens": 1_000_000},
-        ttft_ms=None, source="external_harness:claude-code", now_iso="2026-10-02T00:00:01Z",
-    )
-    assert stored is not None
-    usage_db.commit()
-    done: list[bool] = []
-
-    def after(read):  # the projection commits right after whichever read runs first
-        def wrapped(*args, **kwargs):
-            result = read(*args, **kwargs)
-            if not done:
-                done.append(True)
-                assert project_turn_usage_receipt(usage_db, "t-race", stored[0]) is not None
-            return result
-        return wrapped
-
-    monkeypatch.setattr(worker_usage, "thread_owes_measurements", after(worker_usage.thread_owes_measurements))
-    monkeypatch.setattr(worker_usage, "IdentityResolver", after(worker_usage.IdentityResolver))
-    assert done == [] and "cost_usd" not in worker_usage.facts(usage_db, "w1")
-    assert done == [True] and worker_usage.facts(usage_db, "w1")["cost_usd"] > 0
+    _call(usage_db, "c2", "codex/no-such-model")
+    assert worker_model.facts(usage_db, "w1") == {}  # two identities: neither is the model
+    assert worker_model.facts(usage_db, "nobody") == {}
 
 
 @pytest.mark.parametrize("outcome, kind", [("returned", "worker.result"), ("no_result", "worker.no_result")])
-def test_model_and_cost_reach_both_worker_events(outcome, kind, monkeypatch):
+def test_the_model_reaches_both_worker_events(outcome, kind, monkeypatch):
     from automation import worker_settle
 
     row = {"id": 1, "thread_id": OWNER, "rule_id": "r", "event_id": "e", "request_identity": "i",
            "connector": "qa", "event_type": "request", "artifact_external_id": "o/r#1",
            "artifact_integration": "github", "artifact_type": "pull_request"}
-    for known in ({"model": "claude-code/claude-opus-4-8", "cost_usd": 0.25}, {}):
+    for known in ({"model": "claude-code/claude-opus-4-8"}, {}):
         said = {"result": "{}"} if outcome == "returned" else {"reason": "stopped"}
         item = worker_settle.settlement(row, {"workflow": "w@1"}, outcome, {**known, **said})
         assert item.event_type == kind
-        assert {k: item.facts.get(k) for k in ("model", "cost_usd")} == {
-            k: known.get(k) for k in ("model", "cost_usd")}
+        assert item.facts.get("model") == known.get("model")
         assert ("model" in item.facts) == bool(known)
 
 
@@ -555,19 +493,4 @@ async def test_a_settled_workers_event_carries_its_model_through_the_runtime(wor
     [event] = world["script_inputs"]
     assert event["type"] == f"worker.{kind}"
     assert event["facts"]["model"].startswith("claude-code/")
-    assert "cost_usd" not in event["facts"]  # the fake claude records no priced call
-
-
-@pytest.mark.asyncio
-async def test_a_known_cost_is_a_fact_the_event_carries(world, monkeypatch):
-    from automation import worker_usage
-
-    monkeypatch.setattr(worker_usage, "facts", lambda db, worker: {"model": "m/x", "cost_usd": 0.25})
-    world["reply"].write_text(fenced({"findings": []}))
-    await _script_rule(owner_script(world, monkeypatch, "cost.sh"), "result")
-    await make_rule()
-    await request()
-    await settle_all()
-    await run_scripts()
-    [event] = world["script_inputs"]
-    assert event["facts"]["model"] == "m/x" and event["facts"]["cost_usd"] == 0.25
+    assert "cost_usd" not in event["facts"]  # cost has one owner, plans/usage_cost.py, not this event yet
