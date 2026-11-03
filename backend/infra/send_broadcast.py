@@ -267,15 +267,23 @@ async def broadcast_claimed_batch(batch) -> None:
     """Publish every row in one claimed FIFO batch through the canonical shape.
 
     Recovered rows were stamped before this batch's inputs, so they go first
-    to keep the published rows in seq order. The Turn is announced here, at its
-    claim, not only once its harness accepts it: a successor claimed by its
-    predecessor's terminal would otherwise read as idle while its harness starts.
+    to keep the published rows in seq order.
     """
-    from core.turn_activity import turn_activity_frame
-    import infra.state as state
-
     await broadcast_message_rows(
         batch.thread_id,
         (*batch.recovered_message_ids, *(item.message_id for item in batch.items)),
     )
+
+
+async def announce_successor_turn(batch) -> None:
+    """Announce a successor Turn at its claim, not only once its harness accepts it.
+
+    A Turn claimed by its predecessor's terminal has no sender showing it as
+    working, so it would read as idle while its harness starts. Sent once, at the
+    claim: the batch's later re-publishes (after a Stop or an error) must never
+    announce a Turn that has already ended.
+    """
+    from core.turn_activity import turn_activity_frame
+    import infra.state as state
+
     state.broadcast_to_thread(batch.thread_id, await turn_activity_frame(batch.thread_id, batch.identity))

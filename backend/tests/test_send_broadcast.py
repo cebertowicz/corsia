@@ -263,13 +263,13 @@ def test_a_claim_after_an_error_publishes_the_stamped_error_row(isolated_db, mon
     assert sent["err-1"]["metadata"]["recovered"] is True
 
 
-def test_a_claim_announces_its_turn_before_the_harness_accepts_it(isolated_db, monkeypatch):
-    """A successor claimed at its predecessor's terminal reads as working at once, not idle until its harness starts."""
+def test_a_successor_is_announced_once_and_a_republish_never_announces(isolated_db, monkeypatch):
+    """A successor reads as working at its claim; the batch's re-publish after a Stop never re-announces an ended Turn."""
     import asyncio
 
     import infra.state as state
     from infra.database import get_db
-    from infra.send_broadcast import broadcast_claimed_batch
+    from infra.send_broadcast import announce_successor_turn, broadcast_claimed_batch
     from infra.thread_driver import admit_input
 
     published: list[dict] = []
@@ -289,8 +289,10 @@ def test_a_claim_announces_its_turn_before_the_harness_accepts_it(isolated_db, m
     assert batch is not None
 
     asyncio.run(broadcast_claimed_batch(batch))
+    assert published and {p["type"] for p in published} <= {"message_added", "messages_added"}
 
-    assert [p["type"] for p in published][-1] == "turn_activity"
-    assert {p["type"] for p in published[:-1]} <= {"message_added", "messages_added"}
-    assert published[-1]["turn_id"] == "turn-run"
-    assert published[-1]["turn_order"] == batch.turn_order
+    published.clear()
+    asyncio.run(announce_successor_turn(batch))
+    assert [p["type"] for p in published] == ["turn_activity"]
+    assert published[0]["turn_id"] == "turn-run"
+    assert published[0]["turn_order"] == batch.turn_order

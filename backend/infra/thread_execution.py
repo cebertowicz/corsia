@@ -13,7 +13,7 @@ from infra.input_render import PreparedBatch
 from infra.input_writes import ProviderWriteEvidence, dispatch_fenced_batch, settle_batch_write
 from infra.plan_dispatch_events import report_terminal_unknown
 from infra.queries import message_transcript_seq
-from infra.send_broadcast import broadcast_claimed_batch, broadcast_newest_error
+from infra.send_broadcast import announce_successor_turn, broadcast_claimed_batch, broadcast_newest_error
 from infra.send_types import InboxQueuedInput, InputReceipt, SendResult
 from infra.thread_input_types import ClaimedBatch, batch_option
 from infra.time import utc_now_iso
@@ -176,10 +176,17 @@ async def execute_claimed_batch(
     dispatch_content: str | None = None,
     after_persist_before_dispatch=None,
     after_manifest_before_dispatch=None,
+    announce_claim: bool = False,
 ) -> SendResult | InboxQueuedInput:
-    """Prepare and hand one claimed FIFO batch to its exact provider."""
+    """Prepare and hand one claimed FIFO batch to its exact provider.
+
+    ``announce_claim`` marks a Turn with no sender to show it working (one
+    claimed by a terminal, a restart or a lifted hold): it is announced once, here.
+    """
     del dispatch_content
     await _broadcast_batch(batch)
+    if announce_claim:
+        await announce_successor_turn(batch)
     evidence = ProviderWriteEvidence()
     try:
         return await _execute_claimed_batch(
@@ -304,6 +311,7 @@ async def drive_claimed_batch(
         thread_row=thread_row,
         target=resolved,
         user={"id": str(thread_row.get("user_id") or "")},
+        announce_claim=True,
     )
 
 
