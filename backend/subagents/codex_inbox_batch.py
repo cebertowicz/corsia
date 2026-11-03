@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import uuid
 
-from core.attachment_notes import store_attachment_notes
 from infra.db_async import run_in_db
 from infra.input_render import prepare_live_input, projected_input_tokens
 from infra.input_writes import (
@@ -83,11 +82,11 @@ async def _steer_claimed(batch: ClaimedBatch, live, thread_row: dict, target) ->
         nonlocal write_observed
         write_observed = True
 
-    await run_in_db(store_attachment_notes, batch, rendered.attachment_notes)
     await fence_batch_write(
         batch,
         attempt_id=attempt_id,
         started_at=utc_now_iso(),
+        attachment_notes=rendered.attachment_notes,
     )
     _begin_event_buffer(live)
     try:

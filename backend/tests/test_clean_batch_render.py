@@ -214,7 +214,6 @@ def test_an_attachment_note_is_stored_with_the_input_and_replays_byte_identical(
     from infra import config
     from infra.input_admission import accept_thread_input
     from infra.input_render import project_claimed_input
-    from core.attachment_notes import store_attachment_notes
     from infra.input_writes import begin_batch_write
     from infra.send_broadcast import _PRIVATE_METADATA_KEYS
     from infra.thread_inputs import start_idle_turn
@@ -246,8 +245,10 @@ def test_an_attachment_note_is_stored_with_the_input_and_replays_byte_identical(
     live = project_claimed_input(
         main_db, batch, thread_row={"user_id": "steve"}, target=SimpleNamespace(),
     )
-    store_attachment_notes(batch, live.attachment_notes, db=main_db)
-    begin_batch_write(batch, attempt_id="attempt-pdf", started_at="t", db=main_db)
+    begin_batch_write(
+        batch, attempt_id="attempt-pdf", started_at="t",
+        attachment_notes=live.attachment_notes, db=main_db,
+    )
     row = dict(main_db.execute("SELECT * FROM messages WHERE id='with-pdf'").fetchone())
 
     expected = (
@@ -260,6 +261,45 @@ def test_an_attachment_note_is_stored_with_the_input_and_replays_byte_identical(
     # Replay must not consult the registry: remove the upload before rebuilding.
     upload.unlink()
     assert db_to_llm_history([row]) == [{"role": "user", "content": live.content}]
+
+
+def test_a_released_batch_never_leaves_its_attachment_note_on_a_row_the_next_batch_claims(
+    main_db,
+) -> None:
+    """Fence [A,B], release it unwritten, claim [A,B,C]: replay shows the note once, on C."""
+    from core.message_history import db_to_llm_history
+    from infra.input_admission import accept_thread_input
+    from infra.input_writes import begin_batch_write, release_batch_after_proved_no_write
+    from infra.thread_inputs import start_idle_turn
+
+    def send(message_id: str) -> None:
+        accept_thread_input(
+            "main-1", role="user", content=message_id, intent="apply_now",
+            message_id=message_id, db=main_db,
+        )
+        main_db.commit()
+
+    def rows():
+        return [dict(r) for r in main_db.execute(
+            "SELECT * FROM messages WHERE id IN ('A','B','C') ORDER BY input_order"
+        )]
+
+    send("A")
+    send("B")
+    first = start_idle_turn("main-1", turn_id="t1", boot_epoch="test", started_at="t", db=main_db)
+    assert [i.message_id for i in first.items] == ["A", "B"]
+    begin_batch_write(first, attempt_id="a1", started_at="t", attachment_notes="[note A+B]", db=main_db)
+    release_batch_after_proved_no_write(first, attempt_id="a1", error=None, db=main_db)
+    main_db.execute("UPDATE active_turns SET status='completed' WHERE id='t1'")
+    main_db.commit()
+    send("C")
+    second = start_idle_turn("main-1", turn_id="t2", boot_epoch="test", started_at="t", db=main_db)
+    assert [i.message_id for i in second.items] == ["A", "B", "C"]
+    begin_batch_write(second, attempt_id="a2", started_at="t", attachment_notes="[note A+B+C]", db=main_db)
+
+    replay = [m["content"] for m in db_to_llm_history(rows())]
+    assert replay == ["A", "B", "C\n\n[note A+B+C]"]
+    assert "[note A+B]" not in "".join(replay)
 
 
 async def test_projecting_a_send_without_attachments_never_consults_the_upload_registry(

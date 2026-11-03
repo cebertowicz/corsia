@@ -7,6 +7,7 @@ import sqlite3
 from typing import Awaitable, Callable, TypeVar
 from infra.provider_write_evidence import ProviderWriteEvidence
 
+from core.attachment_notes import commit_attachment_notes
 from core.checkpoint_types import CheckpointUnavailable
 from core.stop_causes import PlanLimitStop
 from infra.checkpoint_refusal_settlement import settle_checkpoint_refusal
@@ -37,9 +38,10 @@ def begin_batch_write(
     *,
     attempt_id: str,
     started_at: str,
+    attachment_notes: str = "",
     db: sqlite3.Connection | None = None,
 ) -> None:
-    """Fence the exact claimed batch before provider dispatch."""
+    """Fence the exact claimed batch before provider dispatch, committing its attachment note with it."""
     if not attempt_id or not started_at:
         raise ValueError("a provider write requires attempt identity and time")
     with write_transaction(db, scope="begin_batch_write") as connection:
@@ -63,19 +65,13 @@ def begin_batch_write(
                 "WHERE id=? AND thread_id=? AND active_turn_id=? "
                 "AND delivery_revision=? AND delivery_state='queued' "
                 "AND (delivery_attempt_id IS NULL OR write_outcome='proved_no_write')",
-                (
-                    attempt_id,
-                    started_at,
-                    item.message_id,
-                    batch.thread_id,
-                    batch.turn_id,
-                    item.revision,
-                ),
+                (attempt_id, started_at, item.message_id, batch.thread_id, batch.turn_id, item.revision),
             )
             if updated.rowcount != 1:
                 raise RuntimeError(
                     f"input write claim changed before dispatch: {item.message_id}"
                 )
+        commit_attachment_notes(connection, batch, attachment_notes)
 
 
 def lift_batch_fence(
@@ -101,11 +97,14 @@ async def fence_batch_write(
     *,
     attempt_id: str,
     started_at: str,
+    attachment_notes: str = "",
     db: sqlite3.Connection | None = None,
 ) -> None:
     """Begin a provider write; a cancelled begin leaves the pre-begin state."""
     try:
-        await _write(begin_batch_write, batch, attempt_id=attempt_id, started_at=started_at, db=db)
+        await _write(
+            begin_batch_write, batch, attempt_id=attempt_id, started_at=started_at,
+            attachment_notes=attachment_notes, db=db)
     except asyncio.CancelledError:
         # run_in_db joins the begin before reporting cancellation, so it may
         # have committed. No provider bytes left: lift the fence so the Turn's
@@ -151,9 +150,7 @@ def release_batch_after_proved_no_write(
     db: sqlite3.Connection | None = None,
 ) -> None:
     """Return a fenced batch after the adapter proved zero provider bytes."""
-    with write_transaction(
-        db, scope="release_batch_after_proved_no_write",
-    ) as connection:
+    with write_transaction(db, scope="release_batch_after_proved_no_write") as connection:
         for item in batch.items:
             updated = connection.execute(
                 f"UPDATE messages SET metadata={without_login_sql()},active_turn_id=NULL,delivery_attempt_id=NULL,"
@@ -372,10 +369,13 @@ async def dispatch_fenced_batch(
     attempt_id: str,
     started_at: str,
     evidence: ProviderWriteEvidence | None = None,
+    attachment_notes: str = "",
     db: sqlite3.Connection | None = None,
 ) -> T:
     """Fence, dispatch outside storage, and settle only adapter evidence."""
-    await fence_batch_write(batch, attempt_id=attempt_id, started_at=started_at, db=db)
+    await fence_batch_write(
+        batch, attempt_id=attempt_id, started_at=started_at, attachment_notes=attachment_notes, db=db,
+    )
     evidence = evidence or ProviderWriteEvidence()
     try:
         result = await dispatcher(evidence)

@@ -5,7 +5,6 @@ from __future__ import annotations
 import uuid
 from dataclasses import replace
 
-from core.attachment_notes import store_attachment_notes
 from core.turn_iteration import NativeSafeBoundaryInput
 from infra.db_async import run_in_db
 from infra.input_writes import (
@@ -34,11 +33,11 @@ class _BoundaryWrite:
         self.attachment_notes = ""
 
     async def before_write(self) -> None:
-        await run_in_db(store_attachment_notes, self.batch, self.attachment_notes)
         await fence_batch_write(
             self.batch,
             attempt_id=self.attempt_id,
             started_at=utc_now_iso(),
+            attachment_notes=self.attachment_notes,
         )
         if any(
             bool(item.delivery_options.get("touch_session_on_insert"))

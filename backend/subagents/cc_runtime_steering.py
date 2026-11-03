@@ -6,7 +6,6 @@ import asyncio
 import logging
 import uuid
 
-from core.attachment_notes import store_attachment_notes
 from infra.db_async import run_in_db
 from infra.input_render import prepare_live_input, projected_input_tokens
 from infra.input_writes import (
@@ -61,11 +60,11 @@ async def _feed_claimed(batch: ClaimedBatch, live, thread_row: dict, target) -> 
     batch, rendered = prepared
     attempt_id = str(uuid.uuid4())
     try:
-        await run_in_db(store_attachment_notes, batch, rendered.attachment_notes)
         await fence_batch_write(
             batch,
             attempt_id=attempt_id,
             started_at=utc_now_iso(),
+            attachment_notes=rendered.attachment_notes,
         )
     except BaseException:
         await _release_after_failure(batch)

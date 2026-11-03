@@ -95,19 +95,24 @@ def with_attachment_notes(content: str, notes: str) -> str:
     return f"{content}\n\n{notes}" if content else notes
 
 
-def store_attachment_notes(batch, notes: str, db=None) -> None:
+def commit_attachment_notes(connection, batch, notes: str) -> None:
     """Keep the note block a provider message carried on the batch's last row.
 
-    Replay appends it to that row's visible content, so the replayed message is
-    the live one without reading the upload registry again.
+    Runs inside the write fence's transaction: every row first drops any note an
+    earlier, released attempt left, then the last row takes this batch's. Replay
+    appends it to that row's visible content, so the replayed message is the
+    live one without reading the upload registry again.
     """
-    if not notes:
-        return
-    from infra.database import write_transaction
-
-    with write_transaction(db, scope="store_attachment_notes") as connection:
+    ids = [item.message_id for item in batch.items]
+    marks = ",".join("?" * len(ids))
+    connection.execute(
+        "UPDATE messages SET metadata=json_remove(metadata,'$.attachment_notes') "
+        f"WHERE id IN ({marks}) AND json_extract(metadata,'$.attachment_notes') IS NOT NULL",
+        ids,
+    )
+    if notes:
         connection.execute(
             "UPDATE messages SET metadata=json_set(COALESCE(metadata,'{}'),"
             "'$.attachment_notes',?) WHERE id=?",
-            (notes, batch.items[-1].message_id),
+            (notes, ids[-1]),
         )
