@@ -4,7 +4,7 @@ import { shellInfo } from '$lib/remoteShell';
 import { toasts } from '$lib/stores/toast';
 import { failureCopy, failureFromOperation, failureFromVerdict, type FailureCopy } from './failureCopy';
 import { isFailedOperation, isInFlight, isResolvedFailure, type UpdateFailureCode, type UpdateOperation } from './model';
-import { CREEP_STALE_MS, drainCount, NO_PROCESS_WINDOW_MS, ProgressModel, remoteEstimate, STEP_LABEL, TAKING_LONGER_MS, type ProgressInput, type StepId } from './screenProgress';
+import { CREEP_STALE_MS, drainCount, NO_PROCESS_WINDOW_MS, PHASE_SECONDS, ProgressModel, remoteEstimate, STEP_LABEL, TAKING_LONGER_MS, type ProgressInput, type StepId } from './screenProgress';
 import { markOutcomeSeen } from './outcome';
 import type { ScreenHandoff } from './shellHandoff';
 import { startupProgress, type StartupProgress } from './startupProgress';
@@ -31,6 +31,9 @@ export interface UpdateScreenView {
 
 /** After the new version is confirmed the screen stays this long at 100%, then leaves. */
 export const EXIT_HOLD_MS = 1_000;
+/** A paired computer with no usual time allows twice the longest expected outage (a restart with a data upgrade), as it allows twice a known usual time. */
+export const NO_HISTORY_LONGER_MS = 2_000 * (PHASE_SECONDS.restarting + PHASE_SECONDS.backing_up + PHASE_SECONDS.upgrading
+	+ PHASE_SECONDS.checking_data + PHASE_SECONDS.starting);
 export const updateScreenView = writable<UpdateScreenView | null>(null);
 export const updateScreenVisible = derived(updateScreenView, (view) => view !== null);
 
@@ -103,8 +106,7 @@ function readSources(now: number, l: Latch, operation: UpdateOperation | null, u
 	l.downAt ??= now;
 	if (readError) return { input: { step: 'restarting', count: null, alive: false }, longer: false, estimated: false };
 	if (shellInfo()?.mode !== 'local') {
-		// With no usual time to compare against, a paired computer falls back to the same window a local one uses with no startup record.
-		if (l.usualSeconds === null) return { input: { step: 'restarting', count: null, alive: false }, longer: now - l.downAt >= NO_PROCESS_WINDOW_MS, estimated: false };
+		if (l.usualSeconds === null) return { input: { step: 'restarting', count: null, alive: false }, longer: now - l.downAt >= NO_HISTORY_LONGER_MS, estimated: false };
 		l.estimateFrom ??= l.model.shown;
 		const elapsed = now - l.downAt;
 		l.model.lift(remoteEstimate(l.estimateFrom, elapsed));
