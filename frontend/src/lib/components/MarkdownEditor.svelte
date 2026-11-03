@@ -27,7 +27,7 @@
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
 	import { attachPreviewFeed, type PreviewFrameSource } from '$lib/stores/livePreviewFeed';
-	import { captureDocumentPlace, dispatchKeepingPlace, type TextDocumentPlace } from '$lib/documentImagePlace';
+	import { captureDocumentPlace, dispatchKeepingPlace, keepPlaceWhenEditorMoves, type TextDocumentPlace } from '$lib/documentImagePlace';
 
 	let {
 		value = $bindable(''),
@@ -265,8 +265,9 @@
 			]
 		});
 		view = v;
+		const stopKeepingPlace = keepPlaceWhenEditorMoves(v);
 		onLayout?.();
-		return () => { v.destroy(); binding?.destroy(); };
+		return () => { stopKeepingPlace(); v.destroy(); binding?.destroy(); };
 	});
 
 	$effect(() => {

@@ -133,15 +133,78 @@ export function dispatchKeepingPlace(transactions: readonly Transaction[], view:
 	const followAppend = transactions.some(isRemoteAppend)
 		&& scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < NEAR_BOTTOM_PX;
 	const remoteChange = transactions.some((tr) => tr.docChanged && tr.annotation(Transaction.userEvent) === undefined);
+	const place = remoteChange && !followAppend ? readingPlace(view) : null;
 	view.update(transactions);
 	if (followAppend) {
+		heldPlaces.delete(view);
 		scroller.scrollTop = scroller.scrollHeight;
 		view.lineBlockAtHeight(0);
-	} else if (remoteChange) {
+	} else if (place) {
 		// lineBlockAtHeight reads the layout through readMeasured, which runs the pending measure pass now; lineBlockAt
 		// returns stored heights without measuring.
 		view.lineBlockAtHeight(0);
-	}
+		holdReadingPlace(view, place, transactions);
+	} else if (transactions.some((tr) => tr.docChanged)) heldPlaces.delete(view);
+}
+
+/** The line at the top of the reader's view, and where it is on screen, in fractional pixels. */
+interface ReadingPlace { from: number; top: number }
+
+/**
+ * Where a run of remote changes is holding each editor's top line. The browser keeps a scroll offset in whole (or device)
+ * pixels, so the scroll CodeMirror writes for a change above the view lands up to a pixel short; measured from wherever
+ * the last change left it, every change of a streaming write adds its own shortfall and the text creeps down the screen.
+ * Holding the line at the place the run started keeps the shortfall under a pixel however long the run is.
+ */
+const heldPlaces = new WeakMap<EditorView, ReadingPlace>();
+
+function readingPlace(view: EditorView): ReadingPlace {
+	const block = view.lineBlockAtHeight(view.scrollDOM.getBoundingClientRect().top - view.documentTop);
+	const top = view.documentTop + block.top;
+	const held = heldPlaces.get(view);
+	// The reader has moved since the last change when the held line is not where it was left; their place is the new one.
+	return held && held.from === block.from && Math.abs(held.top - top) < 1 ? held : { from: block.from, top };
+}
+
+function holdReadingPlace(view: EditorView, place: ReadingPlace, transactions: readonly Transaction[]): void {
+	const from = transactions.reduce((pos, tr) => tr.changes.mapPos(pos, 1), place.from);
+	const line = view.state.doc.lineAt(from).from;
+	const drift = view.documentTop + view.lineBlockAt(line).top - place.top;
+	if (Math.abs(drift) >= 0.5) view.scrollDOM.scrollTop += drift;
+	heldPlaces.set(view, { from: line, top: place.top });
+}
+
+/**
+ * Keeps the text in view where it is on screen when the editor's box moves: a notice or the review bar growing or
+ * shrinking in the document header above it moves the editor's top edge, and with it every line, by that height. The
+ * editor's box grows or shrinks by the same height, which is what the observer sees; the scroll offset moves with the
+ * edge in the same frame, before it paints. Only the editor's position on the page counts, so scrolling the page itself
+ * moves nothing.
+ */
+export function keepPlaceWhenEditorMoves(view: EditorView): () => void {
+	if (typeof ResizeObserver !== 'function') return () => {};
+	const scroller = view.scrollDOM;
+	const pageTop = () => scroller.getBoundingClientRect().top - document.documentElement.getBoundingClientRect().top;
+	let top = pageTop();
+	// A header that eases open moves the edge by a fraction each frame, and the browser keeps whole pixels of each
+	// scroll; the part it dropped is carried into the next move so the frames add up to the edge's whole move.
+	let unscrolled = 0;
+	const observer = new ResizeObserver(() => {
+		const now = pageTop();
+		const moved = now - top + unscrolled;
+		top = now;
+		unscrolled = 0;
+		if (Math.abs(moved) < 0.5) {
+			unscrolled = moved;
+			return;
+		}
+		const before = scroller.scrollTop;
+		scroller.scrollTop = before + moved;
+		unscrolled = Math.abs(moved - (scroller.scrollTop - before)) < 1 ? moved - (scroller.scrollTop - before) : 0;
+		heldPlaces.delete(view);
+	});
+	observer.observe(scroller);
+	return () => observer.disconnect();
 }
 
 /** Reads the first visible CodeMirror line as an anchor before its tab leaves the screen. */

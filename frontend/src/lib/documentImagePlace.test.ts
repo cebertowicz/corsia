@@ -301,7 +301,8 @@ describe('dispatchKeepingPlace', () => {
 		view.dispatch({ changes: { from: end - 1, insert: '\n' } });
 		view.dispatch({ changes: { from: 0, insert: 'zero\n' } });
 		view.dispatch({ changes: { from: view.state.doc.length - 2, to: view.state.doc.length } });
-		expect(writes).toEqual([]);
+		// Holding the reader's top line may write a small correction; following would write the end (scrollHeight).
+		expect(writes).not.toContain(1000);
 		view.destroy();
 	});
 
