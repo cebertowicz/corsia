@@ -245,7 +245,7 @@ async def _attempt(
         if refused:
             raise refused[0]
 
-    with carry_in_tool_isolation():
+    with carry_in_tool_isolation(arm.unseen):
         turn_id, failure = await run_eval_turn(
             thread_id=thread_id, thread_row=row, prompt=arm.prompt, model=model,
             timeout_seconds=SAMPLE_TIMEOUT_SECONDS, after_manifest_before_dispatch=before_dispatch,
