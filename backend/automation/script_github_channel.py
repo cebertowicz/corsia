@@ -36,23 +36,36 @@ _REPOSITORY = re.compile(r"^([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)$")
 _STATUS_LINE = re.compile(r"^HTTP/\S+\s+(\d{3})")
 #: Event origins that may name a repository; an agent's facts never do.
 _REPO_ORIGINS = frozenset({"connector", "platform", "emitter"})
+_WORKER_EVENTS = frozenset({"worker.result", "worker.no_result"})
+
+
+def _valid_repository(repo: Any) -> str | None:
+    match = _REPOSITORY.match(repo) if isinstance(repo, str) else None
+    if match is None or any(part in (".", "..") for part in match.groups()):
+        return None
+    return repo
 
 
 def bound_repository(event: Any) -> str | None:
     """The ``owner/name`` a stored event's ``repo`` fact names, or None when it names none
     or an agent wrote the event.
 
-    A script may have chosen the repo (an emitter event, or a ``worker.result`` copying it),
-    so this is only a candidate: ``execution_input`` keeps it to the registered repositories
-    of the rule owner's project, for every origin."""
+    A platform ``worker.*`` event with no ``repo`` fact names its GitHub artifact's
+    repository (``owner/name#number``). A script may have chosen the repo (an emitter
+    event, or a ``worker.result`` copying it), so this is only a candidate:
+    ``execution_input`` keeps it to the registered repositories of the rule owner's
+    project, for every origin."""
     if not isinstance(event, Mapping) or event.get("origin") not in _REPO_ORIGINS:
         return None
     facts = event.get("facts")
-    repo = facts.get("repo") if isinstance(facts, Mapping) else None
-    match = _REPOSITORY.match(repo) if isinstance(repo, str) else None
-    if match is None or any(part in (".", "..") for part in match.groups()):
-        return None
-    return repo
+    if isinstance(facts, Mapping) and "repo" in facts:
+        return _valid_repository(facts["repo"])
+    artifact = event.get("artifact")
+    if (event.get("origin") == "platform" and event.get("type") in _WORKER_EVENTS
+            and isinstance(artifact, Mapping) and artifact.get("integration") == "github"):
+        external_id = artifact.get("external_id")
+        return _valid_repository(external_id.partition("#")[0]) if isinstance(external_id, str) else None
+    return None
 
 
 def _bound_request(args: list[str], repo: str) -> ReadRequest:

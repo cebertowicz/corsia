@@ -27,6 +27,7 @@ from typing import Any
 
 from loguru import logger
 
+from automation import worker_usage
 from core.workflow_result import ResultInvalid, check_result
 from events import worker_starts
 from events.connectors import worker as worker_events
@@ -135,7 +136,7 @@ def ready(db: sqlite3.Connection, decision_ids: set[int] | None = None) -> list[
         check = json.loads(row["run_input"] or "{}")
         outcome, said = verdict(turn, final_message(db, row["worker_thread_id"], turn["id"]),
                                 check.get("schema") or {}, check)
-        settles.append(settlement(row, check, outcome, said))
+        settles.append(settlement(row, check, outcome, {**worker_usage.facts(db, row["worker_thread_id"]), **said}))
     return settles
 
 

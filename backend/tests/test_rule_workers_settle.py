@@ -368,3 +368,100 @@ async def test_a_result_on_an_artifact_reaches_its_owner_through_rule_0(world, m
     assert [thread for thread, _ in delivered] == [pr_owner]
     facts = delivered[0][1]
     assert facts["requester"] == OWNER and facts["item"] == f"{repo}#7" and facts["valid"] is True
+
+
+# The settled worker's model and cost ride on its event, each only when CORSIA knows it.
+def _worker_thread(db, model: str | None = "claude-code/opus") -> None:
+    db.execute("INSERT INTO threads (id,user_id,title,agent_enabled,agent_status,model,created_at,updated_at) "
+               "VALUES ('w1','steve','w',0,'idle',?,'t','t')", (model,))
+
+
+def _call(db, call_id: str, model: str, *, prompt: int = 1_000_000, manifest: str | None = None) -> None:
+    db.execute("INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,"
+               "cache_read_tokens,total_tokens,source,created_at,context_manifest_id) VALUES "
+               "(?,'w1',?,?,0,0,0,?,'external_harness:claude-code','2026-10-02T00:00:00Z',?)",
+               (call_id, model, prompt, prompt, manifest))
+
+
+@pytest.fixture
+def usage_db(isolated_db):
+    from infra.database import get_db
+    from model_identity_fixtures import seed_identity_catalog, seed_manifest
+
+    db = get_db()
+    seed_identity_catalog(db)
+    seed_manifest(db, "m", "claude-code", "claude-opus-5-5", "catalog")
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def test_a_workers_model_and_cost_come_from_its_ledger(usage_db):
+    from automation import worker_usage
+
+    _worker_thread(usage_db)
+    _call(usage_db, "c1", "claude-code/opus", manifest="m")
+    _call(usage_db, "c2", "claude-code/opus", manifest="m")
+    known = worker_usage.facts(usage_db, "w1")
+    assert known["model"] == "claude-code/claude-opus-5-5" and known["cost_usd"] > 0
+    _call(usage_db, "c3", "claude-code/opus", prompt=2_000_000, manifest="m")
+    assert worker_usage.facts(usage_db, "w1")["cost_usd"] == pytest.approx(known["cost_usd"] * 2)
+
+
+def test_a_workers_unknown_model_or_cost_is_left_out(usage_db):
+    from automation import worker_usage
+
+    _worker_thread(usage_db)
+    assert worker_usage.facts(usage_db, "w1") == {"model": "claude-code/opus"}  # launched, no call yet: no cost
+    _call(usage_db, "c1", "claude-code/opus", manifest="m")
+    _call(usage_db, "c2", "codex/no-such-model")  # a call Measurement cannot price: no partial sum
+    known = worker_usage.facts(usage_db, "w1")
+    assert "cost_usd" not in known and "model" not in known  # two identities: neither is the model
+    assert worker_usage.facts(usage_db, "nobody") == {}
+
+
+@pytest.mark.parametrize("outcome, kind", [("returned", "worker.result"), ("no_result", "worker.no_result")])
+def test_model_and_cost_reach_both_worker_events(outcome, kind, monkeypatch):
+    from automation import worker_settle
+
+    row = {"id": 1, "thread_id": OWNER, "rule_id": "r", "event_id": "e", "request_identity": "i",
+           "connector": "qa", "event_type": "request", "artifact_external_id": "o/r#1",
+           "artifact_integration": "github", "artifact_type": "pull_request"}
+    for known in ({"model": "claude-code/claude-opus-4-8", "cost_usd": 0.25}, {}):
+        said = {"result": "{}"} if outcome == "returned" else {"reason": "stopped"}
+        item = worker_settle.settlement(row, {"workflow": "w@1"}, outcome, {**known, **said})
+        assert item.event_type == kind
+        assert {k: item.facts.get(k) for k in ("model", "cost_usd")} == {
+            k: known.get(k) for k in ("model", "cost_usd")}
+        assert ("model" in item.facts) == bool(known)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind, reply", [("result", fenced({"findings": []})), ("no_result", "no json here")])
+async def test_a_settled_workers_event_carries_its_model_through_the_runtime(world, monkeypatch, kind, reply):
+    world["reply"].write_text(reply)
+    await _script_rule(owner_script(world, monkeypatch, "model.sh"), kind)
+    await make_rule()
+    await request()
+    await settle_all()
+    await run_scripts()
+    [event] = world["script_inputs"]
+    assert event["type"] == f"worker.{kind}"
+    assert event["facts"]["model"].startswith("claude-code/")
+    assert "cost_usd" not in event["facts"]  # the fake claude records no priced call
+
+
+@pytest.mark.asyncio
+async def test_a_known_cost_is_a_fact_the_event_carries(world, monkeypatch):
+    from automation import worker_usage
+
+    monkeypatch.setattr(worker_usage, "facts", lambda db, worker: {"model": "m/x", "cost_usd": 0.25})
+    world["reply"].write_text(fenced({"findings": []}))
+    await _script_rule(owner_script(world, monkeypatch, "cost.sh"), "result")
+    await make_rule()
+    await request()
+    await settle_all()
+    await run_scripts()
+    [event] = world["script_inputs"]
+    assert event["facts"]["model"] == "m/x" and event["facts"]["cost_usd"] == 0.25

@@ -350,3 +350,30 @@ def test_a_channel_that_cannot_open_says_why(spawned, monkeypatch):
         asyncio.run(script_sandbox.run_script(THREAD, None, spawned["script"], run_id="r",
                                               timeout_seconds=5, github_repo="o/r"))
     assert spawned["envs"] == []
+
+
+def _worker_event(kind, artifact, *, origin="platform", facts=None):
+    return {"type": kind, "origin": origin, "facts": facts or {"item": "o/r#12"}, "artifact": artifact}
+
+
+@pytest.mark.parametrize("kind", ["worker.result", "worker.no_result"])
+def test_a_worker_event_on_a_github_artifact_binds_that_artifacts_repository(kind):
+    artifact = {"integration": "github", "type": "pull_request", "external_id": "Owner.1/re_po-2#12"}
+    assert channel.bound_repository(_worker_event(kind, artifact)) == "Owner.1/re_po-2"
+
+
+@pytest.mark.parametrize("event", [
+    _worker_event("worker.result", {"integration": "gitlab", "type": "pull_request", "external_id": "o/r#12"}),
+    _worker_event("worker.result", {"integration": "github", "type": "pull_request", "external_id": "../r#12"}),
+    _worker_event("worker.result", {"integration": "github", "type": "pull_request", "external_id": 12}),
+    _worker_event("worker.result", None),
+    # Only a platform worker.* event derives it: not another event, nor an emitter's.
+    _worker_event("qa.request", {"integration": "github", "type": "pull_request", "external_id": "o/r#12"}),
+    _worker_event("worker.result", {"integration": "github", "type": "pull_request", "external_id": "o/r#12"},
+                  origin="emitter"),
+    # A repo fact present is the only source, even when it is not a repository.
+    _worker_event("worker.result", {"integration": "github", "type": "pull_request", "external_id": "o/r#12"},
+                  facts={"repo": "o"}),
+])
+def test_a_worker_event_binds_no_repository_without_a_github_artifact_it_may_use(event):
+    assert channel.bound_repository(event) is None
