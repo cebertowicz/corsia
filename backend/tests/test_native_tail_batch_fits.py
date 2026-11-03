@@ -36,10 +36,10 @@ def _seed_batch_turn(thread: str) -> str:
             "turn_id": "turn-1", "tool_call_id": "c1", "assistant_step_id": f"{thread}-s1",
             "name": "read_file"}),
         ("s2", "assistant", "", {"turn_id": "turn-1", "reasoning": REASONING, "llm_tool_calls": calls}),
-        *[(f"b{index}", "tool", _text(name, size), {
-            "turn_id": "turn-1", "tool_call_id": f"b{index}", "assistant_step_id": f"{thread}-s2",
-            "name": "read_file"}) for index in range(BATCH)],
     ]
+    rows.extend((f"b{index}", "tool", _text(name, size), {
+        "turn_id": "turn-1", "tool_call_id": f"b{index}", "assistant_step_id": f"{thread}-s2",
+        "name": "read_file"}) for index in range(BATCH))
     db = get_db()
     db.execute(
         "INSERT INTO threads (id,user_id,model,created_at,updated_at) VALUES (?,'u',?,'t','t')",
