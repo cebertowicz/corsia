@@ -51,7 +51,12 @@ def test_person_reply_joins_the_open_task_of_its_thread(isolated_db):
         nodes = _feedback_nodes(db, "owner")
         assert [node["id"] for node in nodes][1:] == [first["id"]]
         joined = service.get_node(first["id"], db=db)
-        assert joined.title == first["title"]
+        assert "1 comment on" in first["title"]
+        assert joined.title == first["title"].replace("1 comment on", "2 comments on")
+        assert joined.requirements_revision == first["requirements_revision"] + 1
+        assert db.execute(
+            "SELECT 1 FROM plan_node_events WHERE node_id=? AND event='node_restated'", (first["id"],),
+        ).fetchone() is not None
         assert f"Comment {reply['id']}" in joined.description
         assert "Feedback: Also the second point." in joined.description
         assert joined.description.startswith(first["description"])
@@ -92,6 +97,26 @@ def test_reply_to_a_task_its_owner_picked_up_gets_its_own_task(isolated_db):
 
         nodes = _feedback_nodes(db, "owner")
         assert len(nodes) == 2 and nodes[1]["id"] != first["id"]
+        assert service.get_node(first["id"], db=db).description == first["description"]
+    finally:
+        db.close()
+
+
+def test_next_reply_joins_the_queued_task_of_the_earlier_reply(isolated_db):
+    """Past a task its owner picked up, the thread's next open task still takes the reply."""
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner")
+        root, _ = add_person_comment(db, artifact_id)
+        _person_reply(db, artifact_id, root["id"])
+        first, queued = _feedback_nodes(db, "owner")
+
+        later = _person_reply(db, artifact_id, root["id"], body="And the third.")
+
+        nodes = _feedback_nodes(db, "owner")
+        assert [node["id"] for node in nodes] == [first["id"], queued["id"]]
+        assert f"Comment {later['id']}" in service.get_node(queued["id"], db=db).description
         assert service.get_node(first["id"], db=db).description == first["description"]
     finally:
         db.close()

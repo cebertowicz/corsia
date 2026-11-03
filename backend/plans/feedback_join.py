@@ -7,15 +7,17 @@ been handed yet and will pick up as it is, so the reply is in its description
 when the owner first reads it. A task its owner already selected may have been
 read before the reply arrived; a finished task, or one that waits (a hold, an
 armed watch, an unmet dependency), would not show the reply until later. In
-those cases the reply gets its own task as before.
+those cases the reply joins a later task of the thread that qualifies, or gets
+its own task as before. The joined task's title is recounted over every item it
+now holds.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from plans import intent_words, node_waits, service
-from plans.feedback_items import batch_value
+from plans import mutations, node_waits, service
+from plans.feedback_items import batch_value, load_feedback_items
 from plans.plan_write import transaction
 from plans.review_requests import _current, _notify
 
@@ -47,18 +49,15 @@ def _handed_or_waits(db, node) -> bool:
 
 
 def _thread_task(db, recipient_thread_id: str, batch: Any, root_id: str) -> str | None:
-    """The thread's first open task for this recipient, if its owner has not been handed it yet."""
+    """The thread's first open task for this recipient that its owner has not been handed yet."""
     rows = db.execute(_THREAD_TASKS, (
         batch_value(batch, "artifact_id"), root_id, root_id, recipient_thread_id,
         batch_value(batch, "author_kind"), batch_value(batch, "author_id"), batch_value(batch, "id"),
     )).fetchall()
     for node_id in dict.fromkeys(str(row["delivered_node_id"]) for row in rows):
         node = service._node_row(db, _current(db, node_id))
-        if node["state"] in service._TERMINAL_STATES:
-            continue
-        if node["state"] not in _WORKABLE or _handed_or_waits(db, node):
-            return None
-        return str(node["id"])
+        if node["state"] in _WORKABLE and not _handed_or_waits(db, node):
+            return str(node["id"])
     return None
 
 
@@ -78,8 +77,17 @@ def open_thread_task(
     return tasks.pop() if len(tasks) == 1 else None
 
 
-def join(db, node_id: str, batch: Any, blocks: str, words, *, provenance: str) -> None:
-    """Add the batch's items to the task's description and words, once per batch."""
+def earlier_items(db, node_id: str, batch: Any) -> list[dict[str, Any]]:
+    """The comment items of the batches already delivered into the task, oldest first."""
+    rows = db.execute(
+        "SELECT * FROM doc_feedback_batches WHERE delivered_node_id=? AND id<>? ORDER BY created_at,id",
+        (node_id, batch_value(batch, "id")),
+    ).fetchall()
+    return [item for row in rows for item in load_feedback_items(db, row)]
+
+
+def join(db, node_id: str, batch: Any, *, title: str, blocks: str, words, provenance: str) -> None:
+    """Add the batch's items to the task, once per batch, through the node's one amend path."""
     batch_id = str(batch_value(batch, "id"))
     with transaction(db) as connection:
         if connection.execute(
@@ -89,8 +97,10 @@ def join(db, node_id: str, batch: Any, blocks: str, words, *, provenance: str) -
         ).fetchone():
             return
         node = service._node_row(connection, node_id)
-        service.touch_node(connection, node_id, description=f"{node['description'] or ''}\n\n{blocks}".lstrip())
-        intent_words.append(connection, node_id, words, revision=node["requirements_revision"])
+        mutations.edit_node(
+            node_id, title=title, description=f"{node['description'] or ''}\n\n{blocks}".lstrip(),
+            intent_words=list(words) or None, provenance=provenance, db=connection,
+        )
         service._event(connection, node_id, JOINED_EVENT, actor_id=None,
                        provenance=provenance, payload={"batch_id": batch_id})
         _notify(connection, node["plan_id"])
