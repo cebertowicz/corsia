@@ -120,10 +120,12 @@ async def wait_until_quiet(server_id: str, *, timeout: float, interval: float) -
 
 
 async def wait_quiet(bound: str | None = None) -> None:
-    """Wait, at most the prefill-guard bound, for the seat's other requests to end.
+    """Wait, at most the prefill-guard bound, until the seat passes :func:`omlx_idle`.
 
     A brief request from another client on a shared seat would otherwise refuse the
-    one-shot idle check. Only waits; :func:`ready_idle` still decides, and a seat that
+    one-shot idle check. It tries the very rule :func:`ready_idle` applies (two reads,
+    totals unchanged), so a seat that looks quiet for one reading but is bursty is not
+    admitted early. Only waits; :func:`ready_idle` still decides, and a seat that
     stays busy, or no ready local row, ends as it would without the wait.
     """
     from llm.provider_overflow import GUARD_QUIET_INTERVAL_SECONDS, GUARD_QUIET_TIMEOUT_SECONDS
@@ -131,7 +133,11 @@ async def wait_quiet(bound: str | None = None) -> None:
     local = await run_off_db(_local_row_now, None)
     if local is None or (bound is not None and local[0] != bound):
         return
-    await wait_until_quiet(local[1], timeout=GUARD_QUIET_TIMEOUT_SECONDS, interval=GUARD_QUIET_INTERVAL_SECONDS)
+    deadline = asyncio.get_running_loop().time() + GUARD_QUIET_TIMEOUT_SECONDS
+    while not await omlx_idle(local[1]):
+        if asyncio.get_running_loop().time() + GUARD_QUIET_INTERVAL_SECONDS > deadline:
+            return
+        await asyncio.sleep(GUARD_QUIET_INTERVAL_SECONDS)
 
 
 async def ready_idle(bound: str | None = None, exclude_thread: str | None = None) -> str | None:

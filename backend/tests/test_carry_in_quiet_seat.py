@@ -111,26 +111,66 @@ async def test_a_seat_busy_throughout_a_sample_ends_the_claim_as_before(c1, monk
     assert seat.log[-2:] == [("wait", MODEL), ("check", MODEL)]
 
 
-@pytest.mark.asyncio
-async def test_wait_quiet_waits_on_the_bound_models_server_for_the_guard_bound(monkeypatch):
+def _status_seat(monkeypatch, readings):
+    """The one local row, and a status feed that serves ``readings`` in order, then repeats the last."""
     from infra import carry_in_capacity
     from llm import provider_overflow
 
-    waits = []
+    seen = []
 
     async def row(_fn, exclude_thread):
         return (MODEL, "srv")
 
-    async def until_quiet(server_id, *, timeout, interval):
-        waits.append((server_id, timeout, interval))
-        return False
+    async def probe(_client, _server_id, _host, _port):
+        seen.append(readings[min(len(seen), len(readings) - 1)])
+        return ("srv", None, seen[-1])
 
     monkeypatch.setattr(carry_in_capacity, "run_off_db", row)
-    monkeypatch.setattr(carry_in_capacity, "wait_until_quiet", until_quiet)
+    monkeypatch.setattr(carry_in_capacity, "_status_address", lambda _server_id: ("127.0.0.1", 1))
+    monkeypatch.setattr("llm.providers.omlx_public_probe.probe_registered_status", probe)
+    monkeypatch.setattr(carry_in_capacity, "IDLE_GAP_SECONDS", 0)
+    monkeypatch.setattr(provider_overflow, "GUARD_QUIET_INTERVAL_SECONDS", 0.01)
+    return seen
 
-    await carry_in_capacity.wait_quiet("omlx@srv/other")  # never waits for a row it will not use
-    assert waits == []
+
+def _reading(active=0, waiting=0, total=5):
+    return {"active_requests": active, "waiting_requests": waiting, "total_requests": total}
+
+
+@pytest.mark.asyncio
+async def test_wait_quiet_keeps_waiting_past_a_quiet_reading_until_the_two_read_idle_rule_passes(monkeypatch):
+    from infra import carry_in_capacity
+
+    # quiet, busy: the first try fails on its second read; quiet, quiet: the second try passes.
+    seen = _status_seat(monkeypatch, [_reading(), _reading(active=1), _reading(), _reading()])
     await carry_in_capacity.wait_quiet(MODEL)
+    assert len(seen) == 4
+
+
+@pytest.mark.asyncio
+async def test_wait_quiet_treats_a_neighbours_new_request_between_two_quiet_reads_as_busy(monkeypatch):
+    from infra import carry_in_capacity
+
+    seen = _status_seat(monkeypatch, [_reading(total=5), _reading(total=6), _reading(total=6), _reading(total=6)])
     await carry_in_capacity.wait_quiet()
-    expected = ("srv", provider_overflow.GUARD_QUIET_TIMEOUT_SECONDS, provider_overflow.GUARD_QUIET_INTERVAL_SECONDS)
-    assert waits == [expected, expected]
+    assert len(seen) == 4
+
+
+@pytest.mark.asyncio
+async def test_wait_quiet_returns_at_the_timeout_on_a_seat_that_stays_busy(monkeypatch):
+    from infra import carry_in_capacity
+    from llm import provider_overflow
+
+    seen = _status_seat(monkeypatch, [_reading(active=1)])
+    monkeypatch.setattr(provider_overflow, "GUARD_QUIET_TIMEOUT_SECONDS", 0.05)
+    await carry_in_capacity.wait_quiet(MODEL)
+    assert len(seen) >= 2
+
+
+@pytest.mark.asyncio
+async def test_wait_quiet_never_waits_for_a_row_it_will_not_use(monkeypatch):
+    from infra import carry_in_capacity
+
+    seen = _status_seat(monkeypatch, [_reading(active=1)])
+    await carry_in_capacity.wait_quiet("omlx@srv/other")
+    assert seen == []

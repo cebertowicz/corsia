@@ -38,6 +38,7 @@ from infra.carry_in_arm import (
     turn_input as _turn_input,
 )
 from infra.db_async import run_in_db, run_off_db
+from infra.guidance_history_paths import commit_parent, committed_bytes
 
 SAMPLES = 3
 NEEDED = 2
@@ -173,9 +174,9 @@ def _blobs(workspace: Path, fact: CarryInFact, delivered: bool) -> tuple[bytes |
     None means the commit holds no such file or a revision over ``MAX_TARGET_BYTES``.
     A Git fault reading the history raises ``GitFault``: that is no fact about the case.
     """
-    parent = facts.commit_parent(workspace, fact.target_commit)
-    before = None if delivered or not parent else facts.committed_bytes(workspace, parent, fact.target_path)
-    after = facts.committed_bytes(workspace, fact.target_commit, fact.target_path)
+    parent = commit_parent(workspace, fact.target_commit)
+    before = None if delivered or not parent else committed_bytes(workspace, parent, fact.target_path)
+    after = committed_bytes(workspace, fact.target_commit, fact.target_path)
     if after is None or any(len(blob) > MAX_TARGET_BYTES for blob in (before or b"", after)):
         return None
     return before, after

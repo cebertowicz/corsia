@@ -69,7 +69,8 @@ def _lesson_path(c1, name="demo-lesson") -> Path:
 
 def _write_lesson(
     c1, *, actions=ACTIONS, text="Read the rule before closing.", state="trial",
-    name="demo-lesson", lesson_id=LESSON_ID, target=TARGET, commit=True, section=None,
+    name="demo-lesson", lesson_id=LESSON_ID, target=TARGET, commit=True, section="Read first",
+    review_after="2099-01-01",
 ) -> Path:
     from core.lesson_files import render_trial
     from core.lesson_trials import Trial
@@ -81,11 +82,11 @@ def _write_lesson(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_trial(
         lesson_id=lesson_id, owner=c1.owner, name=name, description="Use when closing a node.",
-        text=text, trial=Trial(kind="hypothesis", review_after="2099-01-01", state=state),
+        text=text, trial=Trial(kind="hypothesis", review_after=review_after, state=state),
         source_refs=[{"kind": "message", "reference": "m1"}],
         case_metadata={
             **({"target_file": target} if target else {}), "case": case,
-            **({"target_section": section} if section else {}),
+            **({"target_section": section} if section is not None else {}),
             **({"destination": {"path": TARGET, "version": "1"}} if state == "promoted" else {}),
         },
     ))
@@ -603,26 +604,26 @@ async def test_each_sample_rechecks_exact_idle_capacity_right_before_its_provide
 
 @pytest.mark.asyncio
 async def test_a_git_fault_reading_the_target_waits_instead_of_retiring_the_case(c1, monkeypatch, no_samples):
-    from core import carry_in_facts
     from infra import carry_in_capacity
+    from infra import carry_in_drain
     from infra.carry_in_drain import wake
     from infra.guidance_git import GitFault
 
     _write_lesson(c1)
     _save(c1, "rule v1\n")
     await _make_pending(c1)
-    committed_bytes = carry_in_facts.committed_bytes
+    committed_bytes = carry_in_drain.committed_bytes
 
     def fault(*_args):
         raise GitFault("cat-file: object store unreadable")
 
-    monkeypatch.setattr(carry_in_facts, "committed_bytes", fault)
+    monkeypatch.setattr(carry_in_drain, "committed_bytes", fault)
     monkeypatch.setattr(carry_in_capacity, "ready_idle", lambda *a, **k: pytest.fail("selected a model"))
     assert await wake(c1.workspace) is False
     assert [(e["event"], e.get("reason")) for e in _events()][-1] == ("lesson.carry_in.waiting", "history_unavailable")
     assert _events("lesson.carry_in.retired") == []
 
-    monkeypatch.setattr(carry_in_facts, "committed_bytes", committed_bytes)
+    monkeypatch.setattr(carry_in_drain, "committed_bytes", committed_bytes)
     _local(monkeypatch, None)
     await wake(c1.workspace)  # the history is back: the same case advances
     assert _events()[-1]["reason"] == "no_ready_local_model"

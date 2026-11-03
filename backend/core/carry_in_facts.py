@@ -21,7 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from core.lesson_delivery import TrialDelivery, delivery_for_trial
+from core.lesson_delivery import OMIT_MISSING_SECTION, TrialDelivery, delivery_for_trial, target_omission
+from core.workflow_step_binding import declared_binding
 
 PENDING = "lesson.carry_in.pending"
 SAVED = "lesson.carry_in.saved"
@@ -37,7 +38,7 @@ TERMINAL_EVENTS = (RESULT, RETIRED, COVERAGE)
 RETIRE_REASONS = (
     "lesson_unreadable", "lesson_retired", "version_changed", "case_changed",
     "target_moved", "owner_missing", "delivery_mismatch", "not_mechanically_executable",
-    "target_unavailable", "same_input",
+    "target_unavailable", "same_input", OMIT_MISSING_SECTION,
 )
 #: Why a claimed case ended without enough completed samples: the eval route's own
 #: failure kinds (``eval.endpoint.EVAL_FAILURES``), a restart, lost capacity, or
@@ -130,22 +131,6 @@ class EligibleCase:
     actions: dict[str, Any] | None
     delivery: TrialDelivery
     deliver: bool
-
-
-def commit_parent(workspace: Path, sha: str) -> str | None:
-    """The first parent of one recorded guidance commit; None for a root commit."""
-    from infra.guidance_history_paths import history_git
-
-    out = history_git(workspace, "rev-parse", "--verify", "-q", f"{sha}^", ok=(0, 1))
-    return out.decode().strip() or None
-
-
-def committed_bytes(workspace: Path, commit: str, rel: str) -> bytes | None:
-    """One workspace-relative path's exact bytes at a recorded commit; None when it has none."""
-    from infra.guidance_history_paths import history_git
-
-    oid = history_git(workspace, "rev-parse", "--verify", "-q", f"{commit}:{rel}", ok=(0, 1))
-    return history_git(workspace, "cat-file", "blob", oid.decode().strip()) if oid.strip() else None
 
 
 def case_sha256(case: dict[str, Any]) -> str:
@@ -244,11 +229,11 @@ def eligible_case(db: sqlite3.Connection, workspace: Path, fact: CarryInFact) ->
         return "case_changed"
     if rel != fact.target_path:
         return "target_moved"
-    return EligibleCase(
-        case=case, actions=case.get("actions"),
-        delivery=delivery_for_trial(trial, workspace / fact.lesson_path, data),
-        deliver=trial.lesson.state == "trial",
-    )
+    delivery = delivery_for_trial(trial, workspace / fact.lesson_path, data, declared_binding(trial, {})[0])
+    deliver = trial.lesson.state == "trial"
+    if deliver and (reason := target_omission(delivery)):  # task start would never deliver it
+        return reason
+    return EligibleCase(case=case, actions=case.get("actions"), delivery=delivery, deliver=deliver)
 
 
 def committed_cases(db: sqlite3.Connection, workspace: Path, saved: SavedCommit) -> list[CarryInFact]:
@@ -264,12 +249,26 @@ def committed_cases(db: sqlite3.Connection, workspace: Path, saved: SavedCommit)
         if isinstance(found, str) or saved.target_path not in (found[1], lesson_path):
             continue
         trial, rel, case, _data = found
-        facts.append(CarryInFact(
+        fact = CarryInFact(
             lesson_id=trial.lesson.id, behavioral_sha256=trial.behavioral_sha256,
             case_sha256=case_sha256(case), owner_thread_id=trial.lesson.owner,
             lesson_path=lesson_path, target_path=rel, target_commit=saved.commit,
-        ))
+        )
+        if saved.target_path == lesson_path and has_case(db, fact):
+            continue  # a new commit of the lesson file alone changes neither its behavior nor its case
+        facts.append(fact)
     return facts
+
+
+def has_case(db: sqlite3.Connection, fact: CarryInFact) -> bool:
+    """Whether a pending fact already exists for this lesson version and case, at any target commit."""
+    return db.execute(
+        """SELECT 1 FROM outcome_events WHERE event_name=? AND retracted_at IS NULL
+             AND json_extract(attributes, '$.lesson_id')=?
+             AND json_extract(attributes, '$.behavioral_sha256')=?
+             AND json_extract(attributes, '$.case_sha256')=? LIMIT 1""",
+        (PENDING, fact.lesson_id, fact.behavioral_sha256, fact.case_sha256),
+    ).fetchone() is not None
 
 
 def record_committed_save(workspace: Path, paths: list[Path], commit: str) -> None:
