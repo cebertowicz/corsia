@@ -55,12 +55,13 @@ def classify_external_launch(
 
 
 def external_agent_sandbox_rules(
-    generated_profile: Path, safehouse_paths: list[Path]
+    generated_profile: Path, safehouse_paths: list[Path], thread_id: str | None = None
 ) -> str:
-    """Render canonical hard-floor rules for an external child envelope."""
+    """Render canonical hard-floor and caller-fence rules for an external child envelope."""
     from tools.host_path_policy import current_protected_host_path_policy
 
     return current_protected_host_path_policy(
         generated_profile=generated_profile,
         safehouse_paths=safehouse_paths,
+        thread_id=thread_id,
     ).sandbox_rules()

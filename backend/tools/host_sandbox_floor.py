@@ -18,6 +18,19 @@ def stored_credential_roots(state_root: Path, home: Path) -> tuple[Path, ...]:
     return (state_root / "keys", state_root / "browser-profile", canonical(api_token_folder(home)))
 
 
+def skip_credential_roots(root: Path, skip_directory: Callable[[Path], bool]) -> Callable[[Path], bool]:
+    """Extend ``skip_directory`` to refuse the live credential roots beneath ``root``; fails closed."""
+    from infra.config import STATE_ROOT
+
+    base = canonical(root)
+    pruned = {
+        canonical(path).relative_to(base)
+        for path in stored_credential_roots(canonical(STATE_ROOT), canonical(Path.home()))
+        if canonical(path).is_relative_to(base) and canonical(path) != base
+    }
+    return lambda relative: relative in pruned or skip_directory(relative)
+
+
 def credential_ancestor_pins(credential_roots: Iterable[Path], home: Path) -> tuple[Path, ...]:
     """Every folder above a credential root: a lease may write anywhere, so all stay in place.
 

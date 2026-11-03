@@ -1051,7 +1051,7 @@ def _terminal_boundary_profile(
     path_policy = current_protected_host_path_policy(
         generated_profile=generated_profile,
         safehouse_paths=safehouse_paths,
-        granted_roots=granted_roots,
+        granted_roots=granted_roots, thread_id=thread_id,
     )
     lines = [
         ";; CORSIA LEASE INVARIANTS" if leased
@@ -1071,7 +1071,7 @@ def _terminal_boundary_profile(
             ]
         )
         if external_agent:
-            lines.append(external_agent_sandbox_rules(generated_profile, safehouse_paths))
+            lines.append(external_agent_sandbox_rules(generated_profile, safehouse_paths, thread_id))
     else:
         lines += [path_policy.sandbox_rules(), _NO_CLIPBOARD, unix_socket_sandbox_rules(thread_id)]
         # While the agents' account is in use, the user's own gh credentials are out of reach.

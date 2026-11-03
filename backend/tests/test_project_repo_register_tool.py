@@ -418,3 +418,21 @@ async def test_registry_runs_non_git_refusal_before_the_transition(registry_env,
     assert result.startswith("Error:")
     assert "not a Git repository" in result, result
     assert "Repository policy transition" not in result
+
+
+@pytest.mark.asyncio
+async def test_register_refuses_a_repo_in_the_callers_fence_and_registers_nothing(wired, monkeypatch) -> None:
+    """The fence is checked before the shared procedure, so a fenced repo never becomes shared."""
+    from tools import project_fence
+
+    repo = wired["tmp"] / "external" / "app"
+    _git_repo(repo)
+    fence = project_fence.Fence((project_fence.FencedRoot(repo, "other", False),))
+    monkeypatch.setattr(project_fence, "fence_for_thread", lambda _thread_id: fence)
+
+    result = await ProjectRepoRegisterTool().execute(
+        repo_path=str(repo), _thread_id="thread-1", _thread_project_id="p1",
+    )
+
+    assert result.startswith("Error: `") and "is in project `other`, outside your scope." in result
+    assert wired["db"].execute("SELECT COUNT(*) FROM project_repo_policies").fetchone()[0] == 0

@@ -21,7 +21,7 @@ from typing import IO
 from uuid import uuid4
 
 from core.workspace_scaffolding import atomic_rename_noreplace_at
-from tools.host_path_policy import skip_credential_roots
+from tools.host_sandbox_floor import skip_credential_roots
 
 
 class FilesystemBindingError(PermissionError):

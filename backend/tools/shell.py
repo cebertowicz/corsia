@@ -457,7 +457,7 @@ class BashTool(Tool):
                 if not repo_guidance and not chained_guidance:
                     output_parts.append(
                         "\n"
-                        + denial_guidance_prefix(combined_output)
+                        + await run_in_db(lambda: denial_guidance_prefix(combined_output, thread_id))
                         + protected_scope_denial(
                             ("the sandbox may restrict access to the path" if linux else
                              "this command was blocked by the protected-mode sandbox"),

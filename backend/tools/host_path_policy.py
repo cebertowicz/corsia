@@ -12,7 +12,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-from collections.abc import Callable
 from typing import Iterable
 
 from tools.host_path_resolution import (
@@ -23,6 +22,7 @@ from tools.host_path_resolution import (
 )
 from tools.host_sandbox_floor import hard_floor_rules, stored_credential_roots
 from tools.launch_agent_plists import corsia_plist_deny_rule, is_corsia_plist
+from tools.project_fence import Fence, fence_for_thread
 from tools.protected_path_rules import ancestor_pins
 from tools.sandbox_git import sandbox_literal
 from tools.workspace_git_paths import is_workspace_git_control, workspace_git_paths, workspace_git_rules
@@ -51,6 +51,7 @@ class ProtectedHostPathPolicy:
     write_roots: tuple[Path, ...] = ()
     workspace: Path | None = None
     granted_roots: tuple[Path, ...] = ()
+    fence: Fence = Fence()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "home", canonical(self.home))
@@ -250,15 +251,17 @@ class ProtectedHostPathPolicy:
     def denial_guidance_for_paths(self, paths: Iterable[Path]) -> str | None:
         """Name the first denied protected path from an already-parsed path list."""
         for path in paths:
+            if message := self.fence.refusal(path):
+                return message
             message = self.ordinary_denial(path, for_write=False) or self.denial(path, for_write=True)
             if message:
                 return f"{path} — {message}"
         return None
 
     def hard_floor_sandbox_rules(self) -> str:
-        """Render permanent credential and browser boundaries, including under a lease."""
+        """Render what holds under a lease: credentials, browser, the caller's Local only fence, workspace Git."""
         floor = hard_floor_rules(self.credential_roots, self.home, sandbox_literal)
-        return "\n".join([floor, *workspace_git_rules(workspace_git_paths(self.workspace))])
+        return "\n".join([floor, *self.fence.local_only_rules(sandbox_literal), *workspace_git_rules(workspace_git_paths(self.workspace))])
 
     def sandbox_rules(self) -> str:
         """Render protected Seatbelt rules from the protected path inventory."""
@@ -316,7 +319,7 @@ class ProtectedHostPathPolicy:
                 ),
             ]
         )
-        return "\n".join(lines)
+        return "\n".join([*lines, *self.fence.ordinary_rules(sandbox_literal)])
 
 
 def current_protected_host_path_policy(
@@ -325,8 +328,9 @@ def current_protected_host_path_policy(
     safehouse_paths: Iterable[Path] = (),
     write_roots: Iterable[Path] = (),
     granted_roots: Iterable[Path] = (),
+    thread_id: str | None = None,
 ) -> ProtectedHostPathPolicy:
-    """Build the live policy without caching mutable environment paths."""
+    """Build the live policy, with the caller's fenced project roots, without caching."""
     from infra.config import STATE_ROOT, WORKSPACE
 
     from tools.managed_runtime import application_cache_root
@@ -343,6 +347,7 @@ def current_protected_host_path_policy(
         write_roots=(application_cache_root(), *write_roots),
         workspace=WORKSPACE,
         granted_roots=tuple(granted_roots),
+        fence=fence_for_thread(thread_id),
     )
 
 
@@ -378,23 +383,12 @@ def path_review_classification(
     ), None
 
 
-def denial_guidance_for_output(text: str) -> str | None:
+def denial_guidance_for_output(text: str, thread_id: str | None = None) -> str | None:
     """Explain a sandbox refusal found in ``text`` against the live policy."""
-    return current_protected_host_path_policy().denial_guidance_for_output(text)
+    return current_protected_host_path_policy(thread_id=thread_id).denial_guidance_for_output(text)
 
 
-def denial_guidance_prefix(text: str) -> str:
+def denial_guidance_prefix(text: str, thread_id: str | None = None) -> str:
     """Return that explanation as a block ready to prepend, or empty."""
-    guidance = denial_guidance_for_output(text)
+    guidance = denial_guidance_for_output(text, thread_id)
     return f"{guidance}\n" if guidance else ""
-
-
-def skip_credential_roots(root: Path, skip_directory: Callable[[Path], bool]) -> Callable[[Path], bool]:
-    """Extend ``skip_directory`` to refuse credential roots beneath ``root``; fails closed."""
-    base = canonical(root)
-    pruned = {
-        canonical(path).relative_to(base)
-        for path in current_protected_host_path_policy().credential_roots
-        if canonical(path).is_relative_to(base) and canonical(path) != base
-    }
-    return lambda relative: relative in pruned or skip_directory(relative)
