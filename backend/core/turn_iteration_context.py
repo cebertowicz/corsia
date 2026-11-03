@@ -160,7 +160,13 @@ async def _refresh_native_window(state, thread_id: str) -> int | None:
             model=target.expected_reported_model or target.transport_model,
         )
         state.context_usage["model_context_window"] = target.context_window
-    return target.configured_context_window if target.context_window_source == "memory" else None
+    if target.context_window_source != "memory":
+        state.context_usage.pop("provider_reported_model_context_window", None)
+        return None
+    # The memory fit is physical runtime evidence: the meter caps the snapshot's
+    # selected window with it, so it reads against the window this check uses.
+    state.context_usage["provider_reported_model_context_window"] = target.context_window
+    return target.configured_context_window
 
 
 def _minimum_native_input(ledger) -> int:
