@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from plans import gate_handoff, holds, node_creation, service, workflow_fields
+from plans import gate_handoff, gate_handoff_record, holds, node_creation, service, workflow_fields
 from tests.plan_scale_fixture import build
 from tests.test_plan_open_tree_scale import SAMPLE_EVERY, SIZES, STEP_TOLERANCE, measure
 
@@ -137,7 +137,7 @@ def _statements(db, key) -> int:
 def test_reading_a_gate_is_a_fixed_number_of_statements_whatever_its_age() -> None:
     """10 runs and 30 runs of one gate, each with its one open offer, cost the same statements."""
     scale = build(0)
-    key = (gate_handoff.project_of(scale.db, scale.plan_id), "gated", "gate")
+    key = (gate_handoff_record.project_of(scale.db, scale.plan_id), "gated", "gate")
     _approved_runs(scale, 10)
     young = _statements(scale.db, key)
     _approved_runs(scale, 20)

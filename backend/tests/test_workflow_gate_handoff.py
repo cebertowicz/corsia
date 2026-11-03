@@ -9,7 +9,7 @@ from datetime import datetime
 import pytest
 
 from infra.database import get_db
-from plans import decision_fields, decisions, gate_handoff, holds, service
+from plans import decision_fields, decisions, gate_handoff, gate_handoff_record, holds, service
 from plans.boundary import PlanActor
 from plans.gate_handoff import GATE_HOW, GATE_NOTICE, GATE_REJECTED, SPOT_DENOMINATORS
 from tests.test_workflow_runs import Run, SHIP_BODY
@@ -169,7 +169,7 @@ async def test_only_the_first_answer_counts(isolated_db, tmp_path, monkeypatch):
     assert _state().streak == 0
     db = get_db()
     try:
-        assert gate_handoff.first_answer(db, [gate])[0] == "changes_requested"
+        assert gate_handoff_record.first_answer(db, [gate])[0] == "changes_requested"
     finally:
         db.close()
 
