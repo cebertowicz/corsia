@@ -74,6 +74,12 @@ class TrialDelivery:
     section: str | None = None
     omission_reason: str | None = None
 
+    def sha256(self, deliver: bool, target_path: str) -> str:
+        """One hash of what both sides of a re-test receive: the canonical target, this delivery
+        (target, section, step binding, text) and whether the candidate gets it (``trial`` state)."""
+        parts = [target_path, deliver, self.target, self.section, self.payload]
+        return hashlib.sha256(json.dumps(parts, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
 
 def draw(lesson_id: str, behavioral_sha256: str, node_id: str) -> Literal["with", "without"]:
     """Return a deterministic, balanced assignment for one lesson and task."""
@@ -142,6 +148,21 @@ def _context_paths(db: sqlite3.Connection, thread_id: str) -> set[str]:
     return set() if row is None else set(manifest_paths(db, row[0]))
 
 
+def target_omission(trial: TrialDelivery, text: str | None = None) -> str | None:
+    """Why the target's text keeps this trial from being delivered, or None.
+
+    The one owner of that decision for task start and the carry-in re-test:
+    ``missing_section`` when the trial has no target or an empty section, and
+    ``section_exists`` when ``text`` (the target as the reader sees it; None skips
+    this check) already has the section an in-context body would add.
+    """
+    if not trial.target or (trial.section is not None and not trial.section):
+        return OMIT_MISSING_SECTION
+    if trial.section is not None and text is not None and has_section(text, trial.section):
+        return OMIT_SECTION_EXISTS
+    return None
+
+
 def _body_omission(trial: TrialDelivery, context: set[str]) -> str | None:
     """Why an in-context body cannot go to this thread now, or None when it can."""
     from infra.config import WORKSPACE
@@ -156,9 +177,7 @@ def _body_omission(trial: TrialDelivery, context: set[str]) -> str | None:
         text = resolve_path(target, workspace=Path(WORKSPACE)).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return OMIT_TARGET_UNREADABLE
-    if has_section(text, str(trial.section)):
-        return OMIT_SECTION_EXISTS
-    return None
+    return target_omission(trial, text)
 
 
 def _resolve(db: sqlite3.Connection, thread_id: str, node_id: str | None = None) -> tuple[list[TrialDelivery], list[TrialDelivery]]:
@@ -194,8 +213,8 @@ def _resolve(db: sqlite3.Connection, thread_id: str, node_id: str | None = None)
         if reason is not None:
             omitted[key] = replace(trial, omission_reason=reason)
             continue
-        if not trial.target or (trial.section is not None and not trial.section):
-            omitted[key] = replace(trial, omission_reason=OMIT_MISSING_SECTION)
+        if (reason := target_omission(trial)) is not None:
+            omitted[key] = replace(trial, omission_reason=reason)
             continue
         if trial.section is not None:
             context = _context_paths(db, thread_id) if context is None else context

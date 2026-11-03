@@ -352,3 +352,118 @@ async def test_an_index_line_trial_names_a_file_a_sample_thread_can_read_under_i
         state._current_turn_identity.reset(turn_token)
         state._current_thread_id.reset(thread_token)
     assert LESSON_BODY in result and "record_only" not in result
+
+
+@pytest.mark.asyncio
+async def test_a_trial_with_an_empty_target_section_retires_with_task_starts_reason_before_any_claim(c1, monkeypatch):
+    from infra import carry_in_drain
+
+    _write_lesson(c1, text=LESSON_BODY, section="")
+    _save(c1, "# Rules\n")
+    await _make_pending(c1)
+    _local(monkeypatch)
+    prompts = _record_prompts(monkeypatch, "c")
+
+    assert await carry_in_drain.wake(c1.workspace) is True
+
+    assert [e["event"] for e in _events()][-1] == "lesson.carry_in.retired"
+    assert _events()[-1]["reason"] == "missing_section"
+    assert _events("lesson.carry_in.claimed") == [] and prompts == {}
+
+
+@pytest.mark.asyncio
+async def test_a_step_bound_trials_candidate_carries_the_step_addition_not_the_index_line(c1, monkeypatch):
+    from core import carry_in_facts
+    from core.workflow_step_binding import StepBinding
+    from infra import carry_in_drain
+
+    _write_lesson(c1, text=LESSON_BODY, section="Draft")
+    _save(c1, "# Ship\n\n## Draft\nWrite it.\n")
+    await _make_pending(c1)
+    asked = []
+
+    def declared_binding(trial, skills):
+        asked.append((trial.lesson.id, skills))
+        return StepBinding("ship", frozenset({"draft"})), True
+
+    monkeypatch.setattr(carry_in_facts, "declared_binding", declared_binding)
+    _local(monkeypatch)
+    prompts = _record_prompts(monkeypatch, "c")
+
+    assert await carry_in_drain.wake(c1.workspace) is True
+
+    assert asked and asked[0][0] == LESSON_ID
+    assert _events()[-1]["verdict"] == "passed"  # a bound trial is never section-checked, as at task start
+    candidates = _sides(prompts, "c")
+    assert candidates and all("addition to this step's instruction" in text and LESSON_BODY in text for text in candidates)
+    assert all("Trial section for" not in text for text in candidates)
+    assert all("trial_lessons" not in text for text in _sides(prompts, "b"))
+
+
+def _commit_lesson_file(c1, **kwargs):
+    from core.carry_in_facts import record_committed_save
+
+    path = _write_lesson(c1, **kwargs)
+    record_committed_save(c1.workspace, [path], _git(["rev-parse", "HEAD"], cwd=c1.workspace).strip())
+
+
+@pytest.mark.parametrize(("first", "changed", "new_case"), [
+    ({}, {"review_after": "2099-02-02"}, False),  # metadata only: nothing either side receives changes
+    ({}, {"text": LESSON_BODY + " Changed."}, True),  # a new behavioral hash
+    ({"section": ""}, {"section": "Read first"}, True),  # a trial retired as missing_section, its section now set
+    ({}, {"section": "Check first"}, True),  # the section it adds
+    ({"state": "watch"}, {"state": "trial"}, True),  # candidate now receives the delivery
+    ({}, {"target": "docs/OTHER.md"}, True),  # the target file
+])
+@pytest.mark.asyncio
+async def test_a_later_commit_of_the_lesson_file_starts_a_case_whenever_either_side_would_receive_something_new(
+    c1, first, changed, new_case,
+):
+    _commit_lesson_file(c1, **{"text": LESSON_BODY, **first})
+    await _make_pending(c1)
+
+    _commit_lesson_file(c1, **{"text": LESSON_BODY, **first, **changed})
+    await _make_pending(c1)
+
+    pending = _events("lesson.carry_in.pending")
+    assert len(pending) == (2 if new_case else 1)
+    assert len({event["delivery_sha256"] for event in pending}) == len(pending)
+    assert len(_events("lesson.carry_in.saved_processed")) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_step_binding_change_in_the_lesson_files_commit_starts_a_case(c1, monkeypatch):
+    from core import carry_in_facts
+    from core.workflow_step_binding import StepBinding
+
+    bound = []
+    monkeypatch.setattr(
+        carry_in_facts, "declared_binding",
+        lambda trial, skills: (StepBinding("ship", frozenset({"draft"})), True) if bound else (None, False),
+    )
+    _commit_lesson_file(c1, text=LESSON_BODY)
+    await _make_pending(c1)
+    bound.append(True)
+    _commit_lesson_file(c1, text=LESSON_BODY, review_after="2099-02-02")
+    await _make_pending(c1)
+
+    assert len(_events("lesson.carry_in.pending")) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_pending_fact_written_before_the_delivery_hash_never_matches(c1):
+    from core import carry_in_facts
+    from infra.database import get_db
+
+    _commit_lesson_file(c1, text=LESSON_BODY)
+    await _make_pending(c1)
+    db = get_db()
+    db.execute(
+        "UPDATE outcome_events SET attributes=json_remove(attributes, '$.delivery_sha256') WHERE event_name=?",
+        (carry_in_facts.PENDING,),
+    )
+    db.commit()
+    _commit_lesson_file(c1, text=LESSON_BODY, review_after="2099-02-02")
+    await _make_pending(c1)
+
+    assert len(_events("lesson.carry_in.pending")) == 2
