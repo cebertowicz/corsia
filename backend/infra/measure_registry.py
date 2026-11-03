@@ -85,6 +85,7 @@ class DeclaredEvent:
     keep_days: int
     use: str = "record"
     since: dict[str, Any] | None = None
+    default_delivery: str = "owner"  # "none": rule 0 adds no owner target; only rules deliver it
 
 
 @dataclass(frozen=True)
@@ -172,6 +173,7 @@ def _declared(owner: str, spec: dict[str, Any]) -> DeclaredEvent:
     return DeclaredEvent(
         owner, {**_attribute_specs(attributes), **_STAMPED_SPECS},
         tuple(spec["dedupe"]), attributes, keep_days(spec), spec.get("use", "record"), spec.get("since"),
+        spec.get("default_delivery", "owner"),
     )
 
 

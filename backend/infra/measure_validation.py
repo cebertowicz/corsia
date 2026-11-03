@@ -126,8 +126,8 @@ def _event_items(data: dict[str, Any], namespace: str, lines: Lines) -> list[Ite
         path = ("events", name)
         if not isinstance(name, str) or not name.startswith(namespace + "."):
             raise fail(lines, path, f"event {name} is outside namespace {namespace}; declare only {namespace}.* events.")
-        if not isinstance(spec, dict) or set(spec) - {"attributes", "dedupe", "corroborate", "keep_days", "use", "since"}:
-            raise fail(lines, path, f"event {name} has an unknown field; use attributes, dedupe, corroborate, keep_days, use or since.")
+        if not isinstance(spec, dict) or set(spec) - {"attributes", "dedupe", "corroborate", "keep_days", "use", "since", "default_delivery"}:
+            raise fail(lines, path, f"event {name} has an unknown field; use attributes, dedupe, corroborate, keep_days, use, since or default_delivery.")
         _check_event(name, spec, lines)
         items.append(("event", name, spec))
     return items
@@ -155,6 +155,8 @@ def _check_event(name: str, spec: dict[str, Any], lines: Lines) -> None:
         raise fail(lines, path + ("keep_days",), f"event {name} {exc}; the default is {KEEP_DAYS_DEFAULT}.") from None
     if spec.get("use", "record") not in {"record", "route", "both"}:
         raise fail(lines, path + ("use",), f"event {name} use must be record, route or both.")
+    if spec.get("default_delivery", "owner") not in {"owner", "none"}:
+        raise fail(lines, path + ("default_delivery",), f"event {name} default_delivery must be owner or none.")
     # A routed type's facts reach other agents' wakes, so no person's login; a record stays in the
     # owner's store. num may ride along: rules can't match on it (enforced at rule create).
     if spec.get("use") in ("route", "both"):
