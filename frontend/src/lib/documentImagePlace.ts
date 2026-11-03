@@ -1,13 +1,9 @@
 import { tick } from 'svelte';
 import { EditorView } from '@codemirror/view';
 import type { OpenImageRequest } from '$lib/cm/markdown-image';
+import { placeTop, restoreOwnsPlace, type TextDocumentPlace } from '$lib/documentReadingPlace';
 
-/** A document position and its viewport distance, stable across CodeMirror re-measurement. */
-export interface TextDocumentPlace {
-	from: number;
-	top: number;
-	scrollTop: number;
-}
+export type { TextDocumentPlace };
 
 export interface RestoreDocumentPlaceOptions {
 	/** A tab return applies its saved place before visibility; an image Back holds it on every frame while the pane width eases. */
@@ -82,55 +78,22 @@ function placeInMeasure(view: EditorView, scroller: HTMLElement, anchorTop: Anch
 }
 
 /**
- * Reads where the anchor sits inside a measure pass. The image is its drawn widget; text is its line's coordinates.
- * Either one the editor has not drawn stands in by the height it estimates from the drawn text; an image whose
- * markdown is among the drawn text but has no widget there has moved, and is not found.
+ * Reads where the anchor sits inside a measure pass. The image is its drawn widget; text is its line in the editor's
+ * height map, the lookup its place was captured with. An image the editor has not drawn stands in by the height it
+ * estimates from the drawn text; an image whose markdown is among the drawn text but has no widget there has moved,
+ * and is not found.
  */
 function anchorReader(root: HTMLElement, scroller: HTMLElement, view: EditorView, place: OpenImageRequest | TextDocumentPlace): AnchorTop {
 	const from = Math.min(place.from, view.state.doc.length);
 	const image = 'src' in place ? place : null;
 	return () => {
-		const box = scroller.getBoundingClientRect();
 		if (image) {
 			const widget = [...root.querySelectorAll<HTMLElement>('.cm-md-image')]
 				.find((el) => el.dataset.from === String(image.from) && el.dataset.src === image.src);
-			if (widget) return widget.getBoundingClientRect().top - box.top;
+			if (widget) return widget.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
 			if (from >= view.viewport.from && from <= view.viewport.to) return null;
-		} else {
-			const coords = view.coordsAtPos(from, 1);
-			if (coords) return coords.top - box.top;
 		}
-		return view.documentTop + view.lineBlockAt(from).top - box.top;
-	};
-}
-
-/** Reads the first visible CodeMirror line as an anchor before its tab leaves the screen. */
-export function captureDocumentPlace(root: HTMLElement | undefined): TextDocumentPlace | null {
-	const scroller = root?.querySelector<HTMLElement>('.cm-scroller');
-	if (!scroller) return null;
-	const view = EditorView.findFromDOM(scroller);
-	const bounds = scroller.getBoundingClientRect();
-	const position = view?.posAtCoords({ x: bounds.left + 1, y: bounds.top + 1 });
-	if (!view || position == null) return null;
-	const from = view.state.doc.lineAt(position).from;
-	const coords = view.coordsAtPos(from, 1);
-	if (!coords) return null;
-	return { from, top: coords.top - bounds.top, scrollTop: scroller.scrollTop };
-}
-
-/** Reports the reader's place at most once a frame while the editor scrolls, until the returned stop is called. */
-export function reportDocumentPlaceOnScroll(view: EditorView, report: (place: TextDocumentPlace) => void): () => void {
-	let frame = 0;
-	const capture = () => {
-		frame = 0;
-		const place = captureDocumentPlace(view.dom);
-		if (place) report(place);
-	};
-	const onScroll = () => { if (!frame) frame = requestAnimationFrame(capture); };
-	view.scrollDOM.addEventListener('scroll', onScroll, { passive: true });
-	return () => {
-		view.scrollDOM.removeEventListener('scroll', onScroll);
-		if (frame) cancelAnimationFrame(frame);
+		return placeTop(view, from);
 	};
 }
 
@@ -164,36 +127,37 @@ export async function restoreDocumentPlace(
 	const view = EditorView.findFromDOM(scroller);
 	const anchorTop = view ? anchorReader(root, scroller, view, place) : widgetReader(root, scroller, place);
 	const back = options.mode !== 'tab-return';
-	if (!back) {
-		if (view && !('src' in place)) {
-			// The editor holds the text that was at the top when its measure pass began: an offset written inside the pass is
-			// pushed back by that text's corrected height. Its own scroll target moves that hold to the saved line, and
-			// reading its layout runs the pass now, before the frame paints; the measured placement then checks it.
-			view.dispatch({ effects: EditorView.scrollIntoView(Math.min(place.from, view.state.doc.length), { y: 'start', yMargin: place.top }) });
-			view.lineBlockAt(0);
-			await placeInMeasure(view, scroller, anchorTop, place.top, true, options.signal);
-		} else scroller.scrollTop = place.scrollTop;
-		if (options.signal?.aborted) return;
-		options.onPlaced?.();
-	} else if (!view) scroller.scrollTop = place.scrollTop;
 	let touched = false;
 	const onInput = () => { touched = true; };
-	for (const type of USER_INPUT) scroller.addEventListener(type, onInput, { capture: true, passive: true });
-	// A narrowing pane rewraps the text after the animation frame has placed it. A resize observation runs after that
-	// layout and before its paint, so the drawn image is moved there by the layout the frame will show. The editor's own
-	// heights are a frame behind then, so only a drawn widget is read; the next frame's pass measures the rest.
+	// A narrowing pane rewraps the text after the animation frame has placed it. The editor's resize observation runs after
+	// that layout and before its paint, so the drawn image is moved there by the layout the frame will show. The editor's
+	// own heights are a frame behind then, so only a drawn widget is read; the next frame's pass measures the rest. From
+	// here until it ends, the restore owns the editor's offset: a header that moves the editor meanwhile is answered by
+	// laying the place against the scroller's top, never corrected a second time.
 	let resized = false;
 	const drawnTop = widgetReader(root, scroller, place);
-	const resize = view && typeof ResizeObserver === 'function'
-		? new ResizeObserver(() => {
+	const release = view && restoreOwnsPlace(view, {
+		layout: () => {
 			if (touched || options.signal?.aborted) return;
 			resized = true;
 			const current = drawnTop();
 			if (current !== null && Math.abs(current - place.top) >= ANCHOR_TOLERANCE) scroller.scrollTop += current - place.top;
-		})
-		: null;
-	if (view) for (const el of [scroller, view.contentDOM]) resize?.observe(el);
+		},
+	});
 	try {
+		if (!back) {
+			if (view && !('src' in place)) {
+				// The editor holds the text that was at the top when its measure pass began: an offset written inside the pass is
+				// pushed back by that text's corrected height. Its own scroll target moves that hold to the saved line, and
+				// reading its layout runs the pass now, before the frame paints; the measured placement then checks it.
+				view.dispatch({ effects: EditorView.scrollIntoView(Math.min(place.from, view.state.doc.length), { y: 'start', yMargin: place.top }) });
+				view.lineBlockAt(0);
+				await placeInMeasure(view, scroller, anchorTop, place.top, true, options.signal);
+			} else scroller.scrollTop = place.scrollTop;
+			if (options.signal?.aborted) return;
+			options.onPlaced?.();
+		} else if (!view) scroller.scrollTop = place.scrollTop;
+		for (const type of USER_INPUT) scroller.addEventListener(type, onInput, { capture: true, passive: true });
 		let width = root.getBoundingClientRect().width;
 		let steady = 0;
 		let held = 0;
@@ -222,7 +186,7 @@ export async function restoreDocumentPlace(
 			resized = false;
 		}
 	} finally {
-		resize?.disconnect();
+		release?.();
 		for (const type of USER_INPUT) scroller.removeEventListener(type, onInput, { capture: true });
 	}
 }

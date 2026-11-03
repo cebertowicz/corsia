@@ -27,8 +27,7 @@
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
 	import { attachPreviewFeed, type PreviewFrameSource } from '$lib/stores/livePreviewFeed';
-	import { reportDocumentPlaceOnScroll, type TextDocumentPlace } from '$lib/documentImagePlace';
-	import { dispatchKeepingPlace, keepPlaceWhenEditorMoves } from '$lib/documentReadingPlace';
+	import { dispatchKeepingPlace, keepPlaceWhenEditorMoves, reportDocumentPlaceOnScroll, type TextDocumentPlace } from '$lib/documentReadingPlace';
 
 	let {
 		value = $bindable(''),

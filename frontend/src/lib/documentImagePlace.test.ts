@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import { restoreDocumentPlace } from './documentImagePlace';
-import { dispatchKeepingPlace } from './documentReadingPlace';
+import { captureDocumentPlace, dispatchKeepingPlace, keepPlaceWhenEditorMoves, placeTop } from './documentReadingPlace';
 import { NEAR_BOTTOM_PX } from './nearBottom';
 
 const SRC = '/api/files/content?path=%2Fws%2Fa.png';
@@ -32,6 +32,8 @@ function editor(scroller: HTMLElement, extra: Record<string, unknown> = {}) {
 	return vi.spyOn(EditorView, 'findFromDOM').mockReturnValue({
 		state: { doc: { length: 1000 } },
 		viewport: { from: 0, to: 0 },
+		scrollDOM: scroller,
+		contentDOM: document.createElement('div'),
 		get documentTop() { return -scroller.scrollTop; },
 		lineBlockAt: () => ({ top: 0 }),
 		requestMeasure: ({ read, write }: { read: () => number; write: (top: number) => void }) => {
@@ -79,7 +81,7 @@ describe('restoreDocumentPlace', () => {
 
 	it('holds the first visible text line while CodeMirror re-measures after a tab returns', async () => {
 		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
-		editor(scroller, { coordsAtPos: () => ({ top: 490 - scroller.scrollTop }) });
+		editor(scroller, { lineBlockAt: () => ({ top: 490 }) });
 
 		await restoreDocumentPlace(root, { from: 80, top: 100, scrollTop: 300 });
 
@@ -106,18 +108,20 @@ describe('restoreDocumentPlace', () => {
 		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
 		const widget = root.querySelector<HTMLElement>('[data-from="40"]')!;
 		editor(scroller);
+		const observe = vi.fn();
+		let observed: (() => void) | null = null;
+		vi.stubGlobal('ResizeObserver', class {
+			constructor(callback: () => void) { observed = callback; }
+			observe = observe;
+			disconnect() { observed = null; }
+		});
+		const stopKeeping = keepPlaceWhenEditorMoves(EditorView.findFromDOM(scroller)!);
 		// The canvas narrows by 90 px a frame for six frames; the rewrap that follows each step, laid out after the
 		// frame's animation callbacks, pushes the image 30 px further down.
 		let width = 900;
 		let rewrap = 0;
 		vi.spyOn(root, 'getBoundingClientRect').mockImplementation(() => ({ width }) as DOMRect);
 		vi.spyOn(widget, 'getBoundingClientRect').mockImplementation(() => ({ top: 124 + rewrap - (scroller.scrollTop - 300) }) as DOMRect);
-		let observed: (() => void) | null = null;
-		vi.stubGlobal('ResizeObserver', class {
-			constructor(callback: () => void) { observed = callback; }
-			observe() {}
-			disconnect() { observed = null; }
-		});
 		let queued: FrameRequestCallback[] = [];
 		const painted: number[] = [];
 		let frame = 0;
@@ -145,6 +149,64 @@ describe('restoreDocumentPlace', () => {
 		expect(painted.length).toBeGreaterThan(6);
 		expect(painted.filter((top) => top !== 100)).toEqual([]);
 		expect(scroller.scrollTop).toBe(504);
+		// The rewrap is seen through the editor's one observation of its scroller and text.
+		expect(observe.mock.calls.map(([el]) => el)).toEqual([scroller, EditorView.findFromDOM(scroller)!.contentDOM]);
+		stopKeeping();
+	});
+
+	it('lets a restore answer for a header that moves the editor, so the move is never corrected twice', async () => {
+		const scroller = root.querySelector<HTMLElement>('.cm-scroller')!;
+		const widget = root.querySelector<HTMLElement>('[data-from="40"]')!;
+		// A notice opens in the header above the editor while Back is still holding the image: the editor's box moves down
+		// by 40 px and every line with it. The image keeps its distance from the editor's top edge, which is where Back puts
+		// it, so there is nothing left to correct.
+		let header = 0;
+		let offset = 0;
+		const writes: number[] = [];
+		Object.defineProperty(scroller, 'scrollTop', { configurable: true, get: () => offset, set: (value: number) => { offset = value; writes.push(value); } });
+		vi.spyOn(scroller, 'getBoundingClientRect').mockImplementation(() => ({ top: header }) as DOMRect);
+		vi.spyOn(widget, 'getBoundingClientRect').mockImplementation(() => ({ top: header + 400 - offset }) as DOMRect);
+		const observers: { callback: () => void; targets: Element[] }[] = [];
+		vi.stubGlobal('ResizeObserver', class {
+			targets: Element[] = [];
+			constructor(public callback: () => void) { observers.push(this); }
+			observe(el: Element) { this.targets.push(el); }
+			disconnect() { observers.splice(observers.indexOf(this), 1); }
+		});
+		editor(scroller, { get documentTop() { return header - offset; } });
+		const stopKeeping = keepPlaceWhenEditorMoves(EditorView.findFromDOM(scroller)!);
+		let queued: FrameRequestCallback[] = [];
+		const painted: number[] = [];
+		let observingScroller = 0;
+		let frame = 0;
+		const runFrame = async () => {
+			const callbacks = queued;
+			queued = [];
+			for (const callback of callbacks) callback(0);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			// Layout, then resize observations in the order they were made, then paint.
+			if (frame++ === 2) {
+				header = 40;
+				observingScroller = observers.filter((observer) => observer.targets.includes(scroller)).length;
+				for (const observer of [...observers]) observer.callback();
+			}
+			painted.push(widget.getBoundingClientRect().top - scroller.getBoundingClientRect().top);
+			if (queued.length) setTimeout(runFrame, 0);
+		};
+		vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+			if (!queued.length) setTimeout(runFrame, 0);
+			queued.push(callback);
+			return 0;
+		});
+
+		await restoreDocumentPlace(root, { ...image, top: 100 });
+
+		expect(frame).toBeGreaterThan(3);
+		expect(observingScroller).toBe(1);
+		expect(painted.filter((top) => top !== 100)).toEqual([]);
+		// Back's own placement is the one write; the header's move is never written at all.
+		expect(writes).toEqual([300]);
+		stopKeeping();
 	});
 
 	it('applies a tab return place without waiting for the pane width to settle', async () => {
@@ -167,9 +229,9 @@ describe('restoreDocumentPlace', () => {
 		const found = vi.spyOn(EditorView, 'findFromDOM').mockReturnValue({
 			state: { doc: { length: 1000 } },
 			viewport: { from: 0, to: 0 },
+			scrollDOM: scroller,
 			get documentTop() { return -scroller.scrollTop; },
-			lineBlockAt: () => ({ top: 400 }),
-			coordsAtPos: () => (scroller.scrollTop < 200 ? null : { top: 490 - scroller.scrollTop }),
+			lineBlockAt: () => ({ top: 490 }),
 			// The editor lays its scroll target from the line as it draws it, inside its own measure pass.
 			dispatch: () => { scroller.scrollTop = 390; },
 			requestMeasure: ({ read, write }: { read: () => number; write: (top: number) => void }) => {
@@ -195,7 +257,7 @@ describe('restoreDocumentPlace', () => {
 		const controller = new AbortController();
 		let passes = 0;
 		editor(scroller, {
-			coordsAtPos: () => ({ top: 490 - scroller.scrollTop }),
+			lineBlockAt: () => ({ top: 490 }),
 			dispatch: () => {},
 			// A newer restore starts while this one's pass is pending.
 			requestMeasure: ({ read, write }: { read: () => number; write: (top: number) => void }) => {
@@ -269,7 +331,10 @@ describe('dispatchKeepingPlace', () => {
 		view.destroy();
 	});
 
-	/** An editor whose scroller reports a 1000px document in a 400px view, `fromEnd` px above its end; records scroll writes. */
+	/**
+	 * An editor whose scroller reports a 1000px document in a 400px view, `fromEnd` px above its end, and whose text moves
+	 * up the screen as far as it is scrolled; records scroll writes.
+	 */
 	function reading(fromEnd: number, doc = 'one\ntwo\nthree\n\n') {
 		const view = new EditorView({ doc, parent: root, dispatchTransactions: dispatchKeepingPlace });
 		const writes: number[] = [];
@@ -279,8 +344,12 @@ describe('dispatchKeepingPlace', () => {
 			clientHeight: { configurable: true, get: () => 400 },
 			scrollTop: { configurable: true, get: () => top, set: (value: number) => { top = value; writes.push(value); } },
 		});
+		vi.spyOn(view.contentDOM, 'getBoundingClientRect').mockImplementation(() => ({ top: -top }) as DOMRect);
 		return { view, writes };
 	}
+
+	/** Enough distinct lines to fill the reported 1000px. */
+	const LONG = Array.from({ length: 100 }, (_, i) => `line ${i}`).join('\n');
 
 	it('follows text another writer appends when the reader is within the near-bottom distance of the end', () => {
 		const { view, writes } = reading(NEAR_BOTTOM_PX - 1);
@@ -290,20 +359,30 @@ describe('dispatchKeepingPlace', () => {
 	});
 
 	it('keeps the place of a reader at or beyond the near-bottom distance when text is appended', () => {
-		const { view, writes } = reading(NEAR_BOTTOM_PX);
+		const { view, writes } = reading(NEAR_BOTTOM_PX, LONG);
 		view.dispatch({ changes: { from: view.state.doc.length, insert: 'four\n' } });
 		expect(writes).toEqual([]);
 		view.destroy();
 	});
 
-	it('does not follow a near-bottom reader for remote edits that are not appends', () => {
-		const { view, writes } = reading(10);
-		const end = view.state.doc.length;
-		view.dispatch({ changes: { from: end - 1, insert: '\n' } });
-		view.dispatch({ changes: { from: 0, insert: 'zero\n' } });
-		view.dispatch({ changes: { from: view.state.doc.length - 2, to: view.state.doc.length } });
-		// Holding the reader's top line may write a small correction; following would write the end (scrollHeight).
-		expect(writes).not.toContain(1000);
+	it('holds a near-bottom reader in place, never following, for remote edits that are not appends', () => {
+		const { view } = reading(10, LONG);
+		const place = captureDocumentPlace(view);
+		const text = view.state.doc.lineAt(place.from).text;
+		/** How far below the scroller's top edge the line the reader had at the top starts now. */
+		const readerLine = () => {
+			const at = view.state.doc.toString().split('\n').indexOf(text);
+			return placeTop(view, view.state.doc.line(at + 1).from);
+		};
+		expect(text).toMatch(/^line \d+$/);
+		for (const change of [
+			(end: number) => ({ from: end - 1, insert: '\n' }),
+			() => ({ from: 0, insert: 'zero\n' }),
+			(end: number) => ({ from: end - 2, to: end }),
+		]) {
+			view.dispatch({ changes: change(view.state.doc.length) });
+			expect(readerLine()).toBeCloseTo(place.top, 0);
+		}
 		view.destroy();
 	});
 
