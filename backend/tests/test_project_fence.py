@@ -342,3 +342,58 @@ def test_a_shared_repo_is_fenced_whole_from_a_workspace_agent_and_a_repo_inside_
     paths = _paths(fence_for_thread(WORKSPACE_AGENT))
     assert shared in paths and inside not in paths
     assert not [p for p in paths if ".worktrees" in p.parts]
+
+
+async def _register_as_alpha(world, monkeypatch, repo: Path) -> str:
+    from tools.project_repo_register import ProjectRepoRegisterTool
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: world.workspace))
+    return await ProjectRepoRegisterTool().execute(
+        repo_path=str(repo), _thread_id=ALPHA_AGENT, _thread_project_id="id-alpha",
+    )
+
+
+def _alpha_rows(world) -> int:
+    return world.db.execute("SELECT COUNT(*) FROM project_repo_policies WHERE project_id = 'id-alpha'").fetchone()[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("owner", "copy"), [
+    ("beta", "is in project `beta`, outside your scope."),
+    ("secret", "is in Local only project `secret`, outside your scope."),
+])
+async def test_agent_cannot_register_another_projects_repo(world, monkeypatch, owner, copy):
+    repo = world.workspace / "repos" / owner
+    _git_repo(repo)
+    _register(world, f"id-{owner}", repo)
+    result = await _register_as_alpha(world, monkeypatch, repo)
+    assert result.startswith("Error: `") and copy in result
+    assert _alpha_rows(world) == 0
+
+
+@pytest.mark.asyncio
+async def test_agent_cannot_register_a_repo_inside_another_projects_folder(world, monkeypatch):
+    repo = world.workspace / "projects" / "beta" / "source" / "app"
+    _git_repo(repo)
+    result = await _register_as_alpha(world, monkeypatch, repo)
+    assert "is in project `beta`, outside your scope." in result
+    assert _alpha_rows(world) == 0
+
+
+@pytest.mark.asyncio
+async def test_registering_a_repo_the_caller_already_shares_is_not_refused_by_the_fence(world, monkeypatch):
+    repo = world.workspace / "repos" / "shared"
+    _git_repo(repo)
+    _register(world, "id-alpha", repo)
+    _register(world, "id-beta", repo)
+    result = await _register_as_alpha(world, monkeypatch, repo)
+    assert "outside your scope" not in result
+
+
+@pytest.mark.asyncio
+async def test_agent_can_register_an_unrelated_repo(world, monkeypatch):
+    repo = world.workspace / "repos" / "unrelated"
+    _git_repo(repo)
+    result = await _register_as_alpha(world, monkeypatch, repo)
+    assert result.startswith("Registered repository"), result
+    assert _alpha_rows(world) == 1
