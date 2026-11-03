@@ -133,6 +133,23 @@ def test_each_new_model_is_probed_once_and_the_answer_lands_on_the_row(
     assert len(calls) == 2
 
 
+def test_a_model_the_user_turned_off_is_never_probed(isolated_db, monkeypatch) -> None:
+    # On a local server a probe makes it load the model, which can evict the
+    # one the person is using; a model they turned off is never called.
+    _seed(isolated_db, "kept", "turned-off")
+    with closing(sqlite3.connect(str(isolated_db))) as db:
+        db.execute(
+            "UPDATE models SET enabled = 0 WHERE litellm_model = ?",
+            (f"external@{_SID}/turned-off",),
+        )
+        db.commit()
+    calls = _answers(monkeypatch, {"kept": _said("green")})
+
+    assert asyncio.run(eii.detect_image_input(_SID)) == 1
+    assert [c["model"] for c in calls] == ["openai/kept"]
+    assert _row(isolated_db, "turned-off")[1] == {}
+
+
 def test_rediscovery_keeps_the_detected_answer(isolated_db, monkeypatch) -> None:
     _seed(isolated_db, "deepseek-v4.1-flash")
     _answers(monkeypatch, {"deepseek-v4.1-flash": _said("green")})

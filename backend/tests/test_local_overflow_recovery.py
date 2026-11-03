@@ -1,6 +1,6 @@
-"""A prompt the Mac cannot prefill goes back to the boundary once, then ends handled.
+"""A prompt the Mac cannot prefill goes back to the boundary; a retry refused again ends handled.
 
-Covers the Turn half of the local-overflow recovery: the loop's one retry after a
+Covers the Turn half of the local-overflow recovery: the loop's one retry per
 provider size refusal, and the futile optional fold with its system-prompt floor.
 """
 
@@ -94,6 +94,26 @@ async def test_overflow_twice_in_one_turn_ends_as_before(monkeypatch):
     assert "Retry the send" in str(error)
     assert frames.count("error") == 1
     assert boundaries == [40_000, 28_672]
+
+
+@pytest.mark.asyncio
+async def test_an_overflow_after_the_retry_made_progress_gets_its_own_checkpoint_and_retry(monkeypatch):
+    # A Turn that keeps working grows again; each refusal after a successful step folds and retries.
+    async def tool_phase(*_args, **_kwargs):
+        return False
+
+    monkeypatch.setattr(turn_iteration, "_run_tool_phase", tool_phase)
+    step = LLMResponse("", tool_calls=[SimpleNamespace(id="c1", name="read_file", arguments={})])
+    adopted: list[object] = []
+    frames, boundaries, error, state = await _run(
+        monkeypatch, [OVERFLOW, step, OVERFLOW, ANSWER],
+        windows=[40_000, 28_672, 28_672, 28_672], adopted=adopted,
+    )
+
+    assert error is None
+    assert adopted == [CHECKPOINTED, CHECKPOINTED]
+    assert "error" not in frames and frames[-1] == "turn_complete"
+    assert state.iteration == 4
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 
 from automation import script_schedules as store
 from automation.script_github_channel import bound_repository
+from automation.script_measures import WORKSPACE_SCOPE
 from automation.schedules import Schedule, get
 from events import rule_runs
 from infra.database import write_transaction
@@ -29,7 +30,7 @@ KEY_PREFIX = "rule:"
 @dataclass(frozen=True)
 class RuleRun:
     """One claimed rule run: its decision row, the event for stdin, the rule chain, and
-    the repository its stored connector or platform event names, the only one its GitHub
+    the repository its stored connector, platform or emitter event names, the only one its GitHub
     channel reads."""
 
     decision_id: int
@@ -44,17 +45,21 @@ class RuleRun:
 
 
 def execution_input(schedule: Schedule, run: RuleRun) -> tuple[bytes, str | None]:
-    """Bind the claimed repository against the connector's live project scope, off-lock.
+    """Bind the claimed repository, off-lock, to the repositories the run's project
+    registers now; a workspace-scoped script has no project and binds none.
 
-    Shipped event producers also receive their output declaration and current
-    staging root in stdin, rather than a copied configuration file.
+    The run's project is the script's ``scope_id``, set from its owner's thread when the
+    script was made: the one source the sandbox's repository policies, the staging root,
+    staging cleanup and measures also read. Shipped event producers also receive their
+    output declaration and current staging root in stdin, rather than a copied
+    configuration file.
     """
     from automation.worker_inputs import owner_root
     from events.connectors import get_manifest
     from infra.database import get_db
 
     repository = None
-    if run.github_repo is not None:
+    if run.github_repo is not None and schedule.scope_id != WORKSPACE_SCOPE:
         resolve = get_manifest("github").project_repositories
         repositories = resolve(schedule.scope_id) if resolve is not None else None
         if repositories is not None:

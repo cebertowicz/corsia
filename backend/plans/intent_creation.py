@@ -4,14 +4,14 @@ from __future__ import annotations
 from plans import intent_words, service
 
 
-def prepare(db, plan_id: str, params: dict, *, workflow_version: str | None, operation: str, actor):
-    """Validate one add/insert request before it can create a node."""
+def prepare(db, plan_id: str, params: dict, *, workflow_version: str | None, operation: str, actor, run: bool = False):
+    """Validate one add/insert request before it can create a node; ``run`` marks a workflow run's phase."""
     from plans import boundary_fields as fields
 
     inherited = intent_words.inherited_node_id(db, plan_id)
     created = fields.node_fields(
         params, workflow_version=workflow_version, include_before=operation == "insert",
-        intent_required=inherited is None,
+        intent_required=inherited is None, run=run,
     )
     requested_words = created.pop("intent_words", None)
     acting = actor.thread_id if actor.kind == "thread" else None

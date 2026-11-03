@@ -205,6 +205,51 @@ def _answer(content):
 
 
 @pytest.mark.asyncio
+async def test_chunked_step_refusal_lets_a_retry_below_what_it_held_answer(monkeypatch):
+    """The c11 20:10 shape: a call over 35,576 tokens is refused between chunks, resent, refused again.
+
+    The second refusal ends the call as a handled overflow. The window it leaves is
+    the 35,576 tokens oMLX held, not the configured 41,681, so a retry sized to it
+    answers on a seat that still refuses anything over what it held.
+    """
+    import llm.base as llm_base
+    from llm.context_window import WindowFacts, cap_to_memory_fit
+    from llm.provider_overflow import _payload_tokens
+
+    held, model = 35_576, f"openai/{MODEL}"
+    _seat(monkeypatch, [_status()])
+    monkeypatch.setattr("llm.provider_overflow.GUARD_QUIET_INTERVAL_SECONDS", 0, raising=False)
+    _rediscovery(monkeypatch)
+    sent: list[int] = []
+
+    async def acompletion(**kwargs):
+        sent.append(_payload_tokens(model, kwargs["messages"], None))
+        if sent[-1] > held:
+            raise Exception(CHUNKED_STEP)
+        return _answer("answered")
+
+    monkeypatch.setattr(llm_base, "acompletion", acompletion)
+    per_word = _payload_tokens(model, [{"role": "user", "content": "word " * 10_000}], None) / 10_000
+
+    async def call(tokens: int):
+        messages = [{"role": "user", "content": "word " * int(tokens / per_word)}]
+        return await llm_base._completion_with_retries(
+            {"model": model, "messages": messages}, model=model, use_streaming=False,
+            on_reasoning_chunk=None, on_content_chunk=None, on_tool_call_chunk=None,
+            on_response_started=None, retry_transient_errors=True, omlx_server_id=SID,
+        )
+
+    refused = await call(38_000)
+    assert refused.error_kind == "provider_context_overflow"
+    assert len(sent) == 2 and min(sent) > held
+    window = cap_to_memory_fit(WindowFacts(41_681, 41_681), {"litellm_model": f"omlx@{SID}/{MODEL}"}).effective
+    assert window == held
+    retry = await call(window - 500)
+    assert retry.content == "answered"
+    assert sent[-1] <= held
+
+
+@pytest.mark.asyncio
 async def test_resent_turn_call_keeps_a_local_fork_gated_until_it_answers(monkeypatch):
     """Composed with the fork gate (#1962) on one local seat.
 

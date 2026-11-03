@@ -70,7 +70,7 @@ def _load_history(
         destination_provider=provider,
         destination_effective_model=effective_model,
         tool_result_budget_tokens=(
-            HARNESS_TOOL_RESULT_BUDGET_TOKENS
+            replay_selection.tool_result_budget_tokens or HARNESS_TOOL_RESULT_BUDGET_TOKENS
             if replay_selection.mode == "checkpoint_tail"
             else None
         ),

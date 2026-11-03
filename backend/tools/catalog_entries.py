@@ -287,6 +287,11 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Send a saved invite draft after the person says to send it; attendees get emails",
         activity="Sending invite",
     ),
+    "google_workspace": _Entry(
+        "google_workspace", status="active", authority="conductor-api", account_bound=True,
+        summary="Run one Google Workspace CLI (gws) command on a connected Google account: Docs, Sheets, Drive and Calendar",
+        activity="Using Google Workspace",
+    ),
     "plan_read": _Entry(
         "plans", status="substrate", authority="plan-read", core=True,
         activity="Reading plan",

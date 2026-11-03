@@ -38,6 +38,7 @@
 		saveError,
 		pendingSel,
 		commentSheetOpen = false,
+		commentsAsSheet = false,
 		onStartComment,
 		tabInstanceId = null,
 		onDocumentPlace,
@@ -66,6 +67,8 @@
 		pendingSel: PendingSelection | null;
 		/** Routed from createCommentSheet; its closing scrim remains modal until the outro ends. */
 		commentSheetOpen?: boolean;
+		/** Cards open as the phone sheet (the pane-drawer width): a caret in a suggestion is editing and opens none. */
+		commentsAsSheet?: boolean;
 		onStartComment: () => void;
 		tabInstanceId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
@@ -101,7 +104,7 @@
 		</div>
 	{:else}
 		<div class="ed-wrap">
-			<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+			<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {commentsAsSheet} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 			{#if saveError}
 				<div class="save-error" role="alert">{saveError}</div>
 			{/if}
