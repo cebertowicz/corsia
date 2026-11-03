@@ -10,6 +10,11 @@ A rule-started run whose stored event names a repository also gets a GitHub
 read channel for that repository (``script_github_channel``) and the
 ``corsia github read`` client; every other run gets neither. The person's
 ``gh`` homes stay hidden from every run.
+
+Each run reads the agents' GitHub account once. Verified, the script gets
+exactly what an agent shell gets: that account's ``gh`` and Git identity and its
+home read-only. In every other state, no account at all included, it gets the
+shell's locked state, and the run records why it had no GitHub login.
 """
 
 from __future__ import annotations
@@ -23,6 +28,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from automation.script_github_channel import SOCKET_ENV, github_channel
+from connections import github_agent
+from connections.github_agent import AgentAccountView
 from connections.github_agent_home import default_home
 from events.trace_env import TRACE_ENV
 from events.trace_env import encode as encode_trace
@@ -37,7 +44,7 @@ from tools.shell_envelope import (
     execution_envelope_for_consumed_action,
     prepare_execution_envelope,
 )
-from tools.shell_environment import safehouse_subprocess_env
+from tools.shell_environment import bind_agent_account, safehouse_subprocess_env
 from tools.shell_guard import (
     execution_envelope_profile,
     safehouse_argv,
@@ -68,6 +75,8 @@ class ScriptRun:
     stdout: bytes
     stderr: bytes
     timed_out: bool
+    #: Why the run had no GitHub login, in plain words; None when it ran as the agents' account.
+    github_locked: str | None = None
 
     @property
     def over_cap(self) -> bool:
@@ -172,18 +181,42 @@ async def _github_client(thread_id: str, run_id: str, rule_id: str | None, repo:
         yield socket_path, client_dir
 
 
-def _script_gh_homes() -> set[Path]:
+_NO_LOGIN = {
+    "not_installed": "the agents' GitHub account isn't set up",
+    "needs_auth": "the agents' GitHub account needs signing in",
+    "unverified": "the agents' GitHub account isn't verified",
+    "wrong_account": "the agents' GitHub account is signed in as the person's own login",
+}
+
+
+def github_lock_reason(view: AgentAccountView) -> str | None:
+    """Why a run gets no GitHub login, with the account's named cause; None once verified."""
+    if view.ready:
+        return None
+    why = ("there is no agents' GitHub account" if view.absent
+           else _NO_LOGIN.get(view.state, "the agents' GitHub account isn't ready"))
+    return f"scripts get no GitHub login: {why} ({view.cause or view.state})"
+
+
+def _script_gh_homes(view: AgentAccountView) -> set[Path]:
+    """The ``gh`` homes a run may not touch: the person's always, the agents' unless verified."""
     paths = {default_home(), Path.home() / ".config" / "gh"}
     if os.environ.get("XDG_CONFIG_HOME"):
         paths.add(Path(os.environ["XDG_CONFIG_HOME"]) / "gh")
+    if view.home and not view.ready:
+        paths.add(Path(view.home))
     return {path.resolve(strict=False) for path in paths}
 
 
-def _script_profile(*args, **kwargs) -> str:
-    profile = execution_envelope_profile(*args, **kwargs)
-    for path in _script_gh_homes():
-        profile += f'(deny file-read* file-write* (subpath "{sandbox_literal(path)}"))\n'
-    return profile
+def _script_profile(view: AgentAccountView):
+    hidden = _script_gh_homes(view)
+
+    def build(*args, **kwargs) -> str:
+        profile = execution_envelope_profile(*args, **kwargs)
+        for path in hidden:
+            profile += f'(deny file-read* file-write* (subpath "{sandbox_literal(path)}"))\n'
+        return profile
+    return build
 
 
 async def _run_with_channel(
@@ -191,6 +224,11 @@ async def _run_with_channel(
     stdin: Path | None, trace: tuple[str, ...], socket_path: Path | None, client_dir: Path | None,
 ) -> ScriptRun:
     env = safehouse_subprocess_env(thread_id)
+    # The one read of the agents' account; the env, the grant and the denies below all use it.
+    view = await bind_agent_account(env)
+    if view.absent:
+        # A shell with no agents' account is left alone; a script still gets the locked state.
+        env.update(github_agent.shell_env(replace(view, absent=False)))
     env.pop(SOCKET_ENV, None)
     if socket_path is not None:
         env[SOCKET_ENV] = str(socket_path)
@@ -213,12 +251,12 @@ async def _run_with_channel(
         raise ScriptSandboxError(denial)
     envelope = execution_envelope_for_consumed_action(
         None, leased=False, thread_id=thread_id, grant_policies=grant_policies,
-        policies=policies, agent_account=None, env=env,
-        build_profile=_script_profile, build_argv=safehouse_argv,
+        policies=policies, agent_account=view, env=env,
+        build_profile=_script_profile(view), build_argv=safehouse_argv,
     )
     if envelope is not None and not envelope.profile_required:
         envelope = replace(envelope, argv_options={**envelope.argv_options,
-                                                  "extra_hidden_roots": _script_gh_homes()})
+                                                  "extra_hidden_roots": _script_gh_homes(view)})
     profile_path, argv = await prepare_execution_envelope(
         script_command(script, stdin, client_dir=client_dir), cwd, envelope,
     )
@@ -235,4 +273,5 @@ async def _run_with_channel(
     await shell_sandbox.recheck_after(owned)
     return ScriptRun(
         owned.returncode, owned.stdout, owned.stderr, bool(owned.timed_out),
+        github_lock_reason(view),
     )

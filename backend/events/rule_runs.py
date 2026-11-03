@@ -109,13 +109,19 @@ def start(db: sqlite3.Connection, decision_id: int) -> dict[str, Any] | None:
 
 
 def finish(db: sqlite3.Connection, decision_id: int, *, failed: str | None = None,
-           skipped: str | None = None) -> None:
-    """Settle one queued or running run: ran, failed (the reason says why) or skipped."""
+           skipped: str | None = None, note: str | None = None) -> None:
+    """Settle one queued or running run: ran, failed (the reason says why) or skipped.
+
+    ``note`` is a fact about the run itself, such as a login it lacked; it follows any
+    reason and is never cut."""
     outcome, reason = (SKIPPED, skipped) if skipped else (FAILED, failed) if failed else (RAN, None)
+    reason = reason[:_REASON_LIMIT] if reason else None
+    if note:
+        reason = f"{reason}; {note}" if reason else note
     db.execute(
         "UPDATE event_route_decisions SET outcome=?, reason=?, run_input=NULL "
         "WHERE id=? AND outcome IN (?, ?)",
-        (outcome, reason[:_REASON_LIMIT] if reason else None, decision_id, QUEUED, RUNNING),
+        (outcome, reason, decision_id, QUEUED, RUNNING),
     )
 
 

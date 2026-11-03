@@ -129,13 +129,85 @@ async def test_real_script_reads_a_rule_runs_event_on_stdin_and_the_input_is_rem
 
 
 @pytest.mark.asyncio
-async def test_real_script_receives_no_agent_account_environment(sandbox) -> None:
+async def test_real_script_with_no_agents_account_runs_in_the_locked_state(sandbox) -> None:
+    from connections.github_agent_home import LOCKED_HOME
+
     path = _script(
         sandbox,
-        "no-credentials.sh",
-        'test -z "$GH_CONFIG_DIR" && test -z "$GIT_CONFIG_COUNT"\n',
+        "locked.sh",
+        f'test "$GH_CONFIG_DIR" = {shlex.quote(LOCKED_HOME)} && test "$GIT_CONFIG_COUNT" = 7\n',
     )
     run = await _run(path)
+    assert run.returncode == 0, run.stderr
+    assert run.github_locked == "scripts get no GitHub login: there is no agents' GitHub account (not_installed)"
+
+
+def _account(monkeypatch, state: str, home: Path | None = None) -> None:
+    """Serve one fake agents' account view: absent, the person's own login, or verified."""
+    from connections import github_agent
+    from connections.github_agent import AgentAccountView
+
+    views = {
+        "absent": AgentAccountView("not_installed", absent=True),
+        "person": AgentAccountView("wrong_account", "person_account", account_id="a",
+                                   home=str(home) if home else None, binary="gh"),
+        "ready": AgentAccountView("ready", account_id="a", home=str(home) if home else None, binary="gh",
+                                  login="agents-bot", user_id=1),
+    }
+    monkeypatch.setattr(github_agent, "view", lambda db=None: views[state])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["absent", "person"])
+async def test_locked_script_gh_api_fails_even_with_a_token_in_the_owners_env(sandbox, monkeypatch, state):
+    _account(monkeypatch, state, Path(os.environ["HOME"]) / "agent-gh")
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+        monkeypatch.setenv(name, "synthetic-canary")
+    path = _script(sandbox, "gh-api.sh",
+                   "command -v gh >/dev/null || exit 99\n"
+                   "GH_PROMPT_DISABLED=1 gh api user && exit 1\nexit 0\n")
+    run = await _run(path, timeout=60)
+    assert run.returncode != 99, "gh is not installed where the script runs, so this proves nothing"
+    assert run.returncode == 0, run.stderr
+    assert run.github_locked is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["absent", "person"])
+async def test_locked_script_git_gets_no_credential_and_no_ssh_route(sandbox, monkeypatch, state):
+    """The person's global helper is cleared, and an SSH agent holding a key can't push to GitHub."""
+    home = Path(os.environ["HOME"])
+    _account(monkeypatch, state, home / "agent-gh")
+    (home / ".gitconfig").write_text(
+        '[credential]\n\thelper = "!f() { echo username=person; echo password=synthetic-canary; }; f"\n')
+    agent_dir = home / ".ssh" / "agent"
+    agent_dir.mkdir(parents=True)
+    key = home / "throwaway-key"
+    subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key)], check=True)
+    socket_path = agent_dir / "s.corsia-test"
+    started = subprocess.run(["ssh-agent", "-a", str(socket_path)], check=True, capture_output=True, text=True)
+    agent_pid = next(part.split("=", 1)[1].rstrip(";") for part in started.stdout.split()
+                     if part.startswith("SSH_AGENT_PID="))
+    try:
+        subprocess.run(["ssh-add", "-q", str(key)], check=True, env={**os.environ, "SSH_AUTH_SOCK": str(socket_path)})
+        monkeypatch.setenv("SSH_AUTH_SOCK", str(socket_path))
+        repo = sandbox / "repo"
+        probe = (
+            # Control: the person's global helper is visible, so clearing it below is what stops it.
+            "git config --global --get-all credential.helper | grep -q synthetic-canary || exit 7\n"
+            'printf "protocol=https\\nhost=github.com\\n\\n" | GIT_TERMINAL_PROMPT=0 git credential fill '
+            "2>/dev/null | grep -q synthetic-canary && exit 1\n"
+            'test "$(git ls-remote --get-url git@github.com:o/r.git)" = https://github.com/o/r.git || exit 2\n'
+            'test "$(git ls-remote --get-url ssh://git@github.com/o/r.git)" = https://github.com/o/r.git || exit 3\n'
+            f"git init -q {shlex.quote(str(repo))} && cd {shlex.quote(str(repo))} || exit 4\n"
+            "GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@example.invalid GIT_COMMITTER_NAME=t "
+            "GIT_COMMITTER_EMAIL=t@example.invalid git commit -q --allow-empty -m t || exit 5\n"
+            "GIT_TERMINAL_PROMPT=0 git push -q git@github.com:corsia-invalid/none.git HEAD:refs/heads/never && exit 6\n"
+            "exit 0\n"
+        )
+        run = await _run(_script(sandbox, "git-locked.sh", probe), timeout=60)
+    finally:
+        subprocess.run(["kill", agent_pid], check=False)
     assert run.returncode == 0, run.stderr
 
 
@@ -204,11 +276,9 @@ async def test_script_cli_reads_broker(sandbox, monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("github_repo", [None, "o/r"])
-@pytest.mark.parametrize("account_present", [False, True])
-async def test_script_cannot_read_person_gh_or_token_variables(sandbox, monkeypatch, account_present,
-                                                               github_repo):
-    from connections import github_agent
-    from connections.github_agent import AgentAccountView
+@pytest.mark.parametrize("state", ["absent", "person", "ready"])
+async def test_script_cannot_read_person_gh_or_token_variables(sandbox, monkeypatch, state, github_repo):
+    """The person's gh home is hidden in every state; the agents' home is readable only once verified."""
     from tools import sandbox_config
 
     home = Path(os.environ["HOME"])
@@ -217,17 +287,24 @@ async def test_script_cannot_read_person_gh_or_token_variables(sandbox, monkeypa
     gh = home / ".config" / "gh"
     gh.mkdir(parents=True)
     (gh / "hosts.yml").write_text("synthetic-canary")
-    for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"):
+    for name in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GIT_ASKPASS"):
         monkeypatch.setenv(name, "synthetic-canary")
     agent_home = home / "agent-gh"
     agent_home.mkdir()
-    monkeypatch.setattr(github_agent, "view", lambda: AgentAccountView(
-        "ready" if account_present else "not_installed", absent=not account_present,
-        home=str(agent_home) if account_present else None))
+    (agent_home / "hosts.yml").write_text("synthetic-agent")
+    _account(monkeypatch, state, agent_home)
+    agent_hosts = shlex.quote(str(agent_home / "hosts.yml"))
+    # The home sits inside a granted folder, so only the run's own deny can hide it.
+    agent_probe = {
+        "ready": (f'test "$GH_CONFIG_DIR" = {shlex.quote(str(agent_home))} || exit 4\n'
+                  f'cat {agent_hosts} >/dev/null || exit 5\n'),
+        "person": f'if cat {agent_hosts} >/dev/null 2>&1; then exit 6; fi\n',
+        "absent": "",  # no agents' account, so no home of its own to hide
+    }[state]
     probe = (f'cat {shlex.quote(str(home / "readable-control"))} >/dev/null || exit 3\n'
-             'for name in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN; do '
+             'for name in GH_TOKEN GITHUB_TOKEN GH_ENTERPRISE_TOKEN GITHUB_ENTERPRISE_TOKEN GIT_ASKPASS; do '
              'test -z "${!name}" || exit 1; done\n'
-             f'if cat {shlex.quote(str(gh / "hosts.yml"))} >/dev/null 2>&1; then exit 2; fi\n')
+             f'if cat {shlex.quote(str(gh / "hosts.yml"))} >/dev/null 2>&1; then exit 2; fi\n' + agent_probe)
     path = _script(sandbox, "canaries.sh", probe)
     run = await run_script(THREAD_ID, None, path, run_id="canaries", timeout_seconds=20,
                            github_repo=github_repo)
