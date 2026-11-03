@@ -12,7 +12,9 @@ from doceditor.document_scope import revision as document_revision
 from infra.database import get_db
 from tests.messages_fixtures import fake_osascript, make_chat_db
 from tests.test_action_gate import THREAD, _admit, _bind, workspace  # noqa: F401
-from tools import action_gate, messages_db, messages_send, messages_texts as texts
+import tools.messages_send as messages_send
+import tools.messages_texts as texts
+from tools import action_gate, messages_db
 from tools.action_drafts import create_draft
 from tools.messages_draft_tools import MessagesDraftTool, MessagesSendTool
 

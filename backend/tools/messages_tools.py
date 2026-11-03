@@ -14,7 +14,8 @@ from typing import Any
 
 from connections.messages import account
 from infra.db_async import run_in_db
-from tools import messages_db, messages_texts as texts
+import tools.messages_texts as texts
+from tools import messages_db
 from tools.base import Tool
 from tools.corsia_api import ApiCallError, conductor_user
 

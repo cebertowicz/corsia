@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import re
 
-from tools import messages_db, messages_texts as texts
+import tools.messages_texts as texts
+from tools import messages_db
 
 OSASCRIPT = "/usr/bin/osascript"
 CONFIRM_SECONDS = 5.0

@@ -13,7 +13,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from tools import messages_texts as texts
+import tools.messages_texts as texts
 
 #: Seconds between 1970-01-01 and 2001-01-01, the epoch of Messages dates (stored in nanoseconds).
 APPLE_EPOCH = 978307200
@@ -156,7 +156,7 @@ def chat_by_id(db: sqlite3.Connection, chat_id: object) -> dict | None:
     row = db.execute(
         "SELECT c.ROWID, c.guid, COALESCE(NULLIF(c.display_name,''), c.chat_identifier), c.service_name, "
         "(SELECT COUNT(*) FROM chat_handle_join h WHERE h.chat_id=c.ROWID) FROM chat c WHERE c.ROWID=?",
-        (int(chat_id) if str(chat_id).isdigit() else -1,),
+        (int(str(chat_id)) if str(chat_id).isdigit() else -1,),
     ).fetchone()
     if row is None:
         return None

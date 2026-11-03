@@ -14,7 +14,9 @@ from typing import Any
 
 from connections.messages import account
 from infra.db_async import run_in_db
-from tools import messages_db, messages_send, messages_texts as texts
+import tools.messages_send as messages_send
+import tools.messages_texts as texts
+from tools import messages_db
 from tools.action_delivery import deliver_claimed
 from tools.action_drafts import DraftError
 from tools.action_gate import Approved, check_action

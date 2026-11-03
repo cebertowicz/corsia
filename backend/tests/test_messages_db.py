@@ -8,7 +8,8 @@ import pytest
 
 from connections.messages import account
 from tests.messages_fixtures import make_chat_db, typedstream
-from tools import messages_db, messages_texts as texts
+import tools.messages_texts as texts
+from tools import messages_db
 from tools.messages_tools import (
     MessagesChatsTool, MessagesConnectTool, MessagesReadTool, MessagesSearchTool, limit_of,
 )

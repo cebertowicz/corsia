@@ -89,7 +89,8 @@ async def test_connect_adds_one_row_at_the_adding_scope_and_never_a_second(isola
 
 
 async def test_only_the_corsia_thread_can_call_messages_connect(isolated_db, monkeypatch) -> None:
-    from tools import messages_db, messages_texts
+    import tools.messages_texts as messages_texts
+    from tools import messages_db
     from tools.messages_tools import MessagesConnectTool
 
     monkeypatch.setattr(messages_db, "is_mac", lambda: True)
