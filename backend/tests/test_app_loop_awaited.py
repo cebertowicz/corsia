@@ -206,3 +206,29 @@ async def test_failure_reaches_only_the_awaiting_caller_not_the_detached_work_lo
     finally:
         logger.remove(sink)
     assert logged == []
+
+
+@pytest.mark.asyncio
+async def test_failure_after_the_caller_is_cancelled_is_logged_once(owner):
+    """A cancelled caller joins the task but never reports its failure, so the receipt logs it at ERROR."""
+    logged: list[str] = []
+    sink = logger.add(lambda message: logged.append(str(message)), level="ERROR")
+    entered = threading.Event()
+
+    async def work():
+        entered.set()
+        try:
+            await asyncio.sleep(5)
+        finally:
+            raise ValueError("rollback failed while cancelling")
+
+    try:
+        task = asyncio.create_task(app_loop.await_on_owner(work(), owner=owner))
+        assert await asyncio.to_thread(entered.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        logger.remove(sink)
+    assert len(logged) == 1 and "rollback failed while cancelling" in logged[0]
+    assert app_loop.awaited_count() == 0

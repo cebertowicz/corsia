@@ -15,6 +15,8 @@ from concurrent.futures import Future
 from collections.abc import Coroutine
 from typing import Any, TypeVar
 
+from loguru import logger
+
 _LOOP: asyncio.AbstractEventLoop | None = None
 _LOCK = threading.RLock()
 _AWAITED: set[_Handoff] = set()
@@ -89,7 +91,8 @@ class _Handoff:
                 return
             self.task = self.loop.create_task(self.coroutine)
             # No detached-work observer: ``completed`` hands the task's exception to the awaiting caller,
-            # which reports it, and ``_AWAITED`` keeps the task alive until then.
+            # which reports it, or logs it itself once the caller has stopped waiting; ``_AWAITED`` keeps the
+            # task alive until then.
             self.task.add_done_callback(self.completed)
 
     def completed(self, task) -> None:
@@ -98,6 +101,12 @@ class _Handoff:
             if task.cancelled():
                 self.result.set_exception(asyncio.CancelledError())
             elif (error := task.exception()) is not None:
+                if self.cancel_sent:
+                    # A cancelled caller or the shutdown drain joins this task but never reports its failure.
+                    logger.opt(exception=error).error(
+                        "Application-loop work failed after its caller stopped waiting (coroutine={})",
+                        getattr(task.get_coro(), "__qualname__", None) or "<unknown>",
+                    )
                 self.result.set_exception(error)
             else:
                 self.result.set_result(task.result())
