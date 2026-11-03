@@ -26,7 +26,7 @@ def test_keyless_row_is_connected_and_writes_no_key_entry(isolated_db) -> None:
     try:
         before = db.execute("SELECT COUNT(*) FROM key_store_entries").fetchone()[0]
         account = create_account(
-            MESSAGES_PROVIDER, "This computer", reach=ALL, created_by=("person", "steve"), db=db,
+            MESSAGES_PROVIDER, "This computer", reach=ALL, created_by=("person", "person-1"), db=db,
         )
         assert account["state"] == "connected"
         assert resolve_credentials(str(account["id"]), db=db) == {}
@@ -58,14 +58,14 @@ def test_where_it_works_reaches_only_chosen_projects(isolated_db) -> None:
 def test_sign_out_and_remove_work_without_a_key_entry(isolated_db) -> None:
     db = get_db()
     try:
-        account = create_account(MESSAGES_PROVIDER, "This computer", reach=ALL, created_by=("person", "steve"), db=db)
+        account = create_account(MESSAGES_PROVIDER, "This computer", reach=ALL, created_by=("person", "person-1"), db=db)
         db.commit()
         before = db.execute("SELECT COUNT(*) FROM key_store_entries").fetchone()[0]
         account_id = str(account["id"])
-        result = asyncio.run(sign_out_account(account_id, actor=("person", "steve")))
+        result = asyncio.run(sign_out_account(account_id, actor=("person", "person-1")))
         assert result["state"] == "signed_out" and result["revocation"] == "manual_only"
         assert get_account(account_id, db=db)["state"] == "signed_out"
-        assert asyncio.run(remove_account(account_id, actor=("person", "steve")))["removed"] is True
+        assert asyncio.run(remove_account(account_id, actor=("person", "person-1")))["removed"] is True
         assert db.execute("SELECT 1 FROM connected_accounts WHERE id=?", (account_id,)).fetchone() is None
         assert db.execute("SELECT COUNT(*) FROM key_store_entries").fetchone()[0] == before
     finally:

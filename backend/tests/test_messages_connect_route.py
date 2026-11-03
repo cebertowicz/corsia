@@ -16,16 +16,18 @@ from infra.database import get_db
 from tests.registry_helpers import make_session
 
 ALL = {"mode": "all", "project_ids": [], "outside_projects": False}
-PERSON = {"id": "steve", "token_kind": "session"}
+PERSON = {"id": "person-1", "token_kind": "session"}
 
 
 @pytest.fixture
 def events(monkeypatch) -> list[tuple[str, str, str]]:
     seen: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(
-        account_state, "emit_product_event",
-        lambda category, action, **kw: seen.append((category, action, kw["properties"]["provider"])) or True,
-    )
+
+    def emit(category: str, action: str, **kw) -> bool:
+        seen.append((category, action, kw["properties"]["provider"]))
+        return True
+
+    monkeypatch.setattr(account_state, "emit_product_event", emit)
     return seen
 
 
@@ -89,15 +91,15 @@ async def test_agent_connect_writes_a_connect_audit_and_lifecycle_events(isolate
 async def test_settings_sign_in_turns_a_signed_out_row_back_on_at_its_reach(isolated_db, events) -> None:
     db = get_db()
     try:
-        row = create_account(MESSAGES_PROVIDER, account.ADDRESS, reach=ALL, created_by=("person", "steve"), db=db)
+        row = create_account(MESSAGES_PROVIDER, account.ADDRESS, reach=ALL, created_by=("person", "person-1"), db=db)
         db.commit()
         account_id = str(row["id"])
-        await sign_out_account(account_id, actor=("person", "steve"))
+        await sign_out_account(account_id, actor=("person", "person-1"))
         assert get_account(account_id, db=db)["state"] == "signed_out"
         assert await _post(PERSON, {"account_id": account_id}) == {"url": "", "account_id": account_id}
         turned_on = get_account(account_id, db=db)
         assert turned_on["state"] == "connected" and turned_on["reach"] == row["reach"]
-        assert _audit(db, account_id)[-1] == ("person", "steve", "sign_in")
+        assert _audit(db, account_id)[-1] == ("person", "person-1", "sign_in")
         assert events[-2:] == [("connected_account", "connect_started", "messages"),
                                ("connected_account", "connect_succeeded", "messages")]
     finally:
@@ -107,10 +109,11 @@ async def test_settings_sign_in_turns_a_signed_out_row_back_on_at_its_reach(isol
 async def test_settings_sign_in_refuses_other_rows_unknown_ids_and_agents(isolated_db) -> None:
     db = get_db()
     try:
-        row = create_account(MESSAGES_PROVIDER, account.ADDRESS, reach=ALL, created_by=("person", "steve"), db=db)
+        row = create_account(MESSAGES_PROVIDER, account.ADDRESS, reach=ALL, created_by=("person", "person-1"), db=db)
         other = create_account("google", "g@example.test", reach=ALL, created_by=("system", "test"), db=db)
         db.commit()
-        for bad in ({"account_id": str(other["id"])}, {"account_id": "missing"}, {}, []):
+        bad_bodies: tuple[object, ...] = ({"account_id": str(other["id"])}, {"account_id": "missing"}, {}, [])
+        for bad in bad_bodies:
             with pytest.raises(HTTPException) as refused:
                 await _post(PERSON, bad)
             assert refused.value.status_code == 404 and refused.value.detail == messages_route.NOT_FOUND
