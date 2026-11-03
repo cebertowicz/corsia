@@ -65,7 +65,7 @@ def after_close(
     from plans import admission, close_next, run_end
 
     db = common["db"]
-    run_closed = run_end.fail_run(node_id, common) if reason == "failed" else []
+    run_closed, run_open = run_end.fail_run(node_id, common) if reason == "failed" else ([], [])
     closed = service._node_row(db, node_id)
     slot = close_next.slot_before(db, closed)
     admission.release(node_id, reason, db=db)
@@ -98,6 +98,9 @@ def after_close(
     result.update(close_next.next_fields(db, closed, slot, named, acting=executor))
     if (ended := run_end.summary(db, node_id)) is not None:
         result["run_summary"] = ended
+    elif run_open:
+        titles = ", ".join(service._node_row(db, open_id)["title"] for open_id in run_open)
+        result["run_summary"] = run_end.RUN_LEFT_OPEN.format(titles=titles)
     return result
 
 

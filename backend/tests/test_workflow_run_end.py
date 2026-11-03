@@ -9,8 +9,8 @@ from llm.api_equivalent import api_equivalent
 from plans import plan_wake, run_end
 from plans.workflow_fields import HARD_IF_NOTICE, STEPS_CREATED
 from tests.event_routing_helpers import mk_session
+from plans.size_fields import TASK_SIZE_REQUIRED
 from tests.test_workflow_runs import Run, SHIP_BODY
-from tools.workflow_task_fields import RUN_SIZE_REQUIRED
 
 pytestmark = pytest.mark.asyncio
 
@@ -115,7 +115,7 @@ async def test_a_run_is_sized_once_and_hard_if_reaches_the_start_reply(isolated_
     refused = await run.update("add", {
         "kind": "phase", "title": "Run ship", "acceptance_criteria": "Recorded", "workflow_ref": "ship",
     })
-    assert refused == f"Error: invalid request, fix and resend - {RUN_SIZE_REQUIRED}"
+    assert refused == f"Error: invalid request, fix and resend - {TASK_SIZE_REQUIRED}"
     assert run.node_count() == 0
 
     reply = await run.start("ship")
@@ -354,6 +354,7 @@ async def test_a_sibling_whose_close_is_refused_stays_open_and_the_run_ends_when
     assert not isinstance(failed, str), failed
     assert [_state(run, node) for node in (draft, review, polish)] == ["failed", "pending", "closed"]
     assert _ended(run, phase) == []
+    assert failed["run_summary"] == run_end.RUN_LEFT_OPEN.format(titles="review")
     _settle_worker_task(task)
     await _finish(run, review)
 
@@ -362,3 +363,26 @@ async def test_a_sibling_whose_close_is_refused_stays_open_and_the_run_ends_when
     assert {entry["step"]: entry["state"] for entry in record["steps"]} == {
         "draft": "failed", "review": "done", "polish": "not_run",
     }
+
+
+async def test_a_required_step_another_path_closes_fails_the_run(isolated_db, tmp_path, monkeypatch):
+    # A retired worker's step or the person's Won't do closes a required step without failing it.
+    from plans import closure
+    from plans.worker_retirement import CANCELLED
+
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, PLAIN)})
+    reply = await run.start("ship")
+    phase = reply["node"]["id"]
+    draft, review, polish = (step["id"] for step in reply["steps"])
+    await _finish(run, draft)
+    db = get_db()
+    try:
+        closure.close_node(review, reason="Not wanted any more", provenance=CANCELLED, db=db)
+        db.commit()
+    finally:
+        db.close()
+    closed = await run.update("close_node", _args(run, polish, reason="Nothing to polish"))
+
+    (record,) = _ended(run, phase)
+    assert record["outcome"] == "failed"
+    assert closed["run_summary"].startswith("Run ship failed: 1 done, 2 skipped")

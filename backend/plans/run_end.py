@@ -15,7 +15,9 @@ import plans.service as service
 from plans import node_states
 
 EVENT = "workflow_run_ended"
-RUN_FAILED = "Closed because required task {step} failed."
+RUN_FAILED = "Closed because required task {title} failed."
+#: Why the reply to a failed required step says the run is still open.
+RUN_LEFT_OPEN = "The run stays open until these settle, since their workers still have open work: {titles}."
 _PROVENANCE = "plans.workflow_run"
 _DONE = "done"
 #: A step the run's failure closed before anyone reached it; ``closed`` stays an agent's own skip.
@@ -34,15 +36,16 @@ def _run_phase(db, node) -> bool:
 def open_nodes(db, phase_id: str) -> list[str]:
     """Open work beneath a run's phase, deepest first.
 
-    A nested run's phase and a container whose children are in work have no work
-    of their own: they read as their leaves, the same rule the fold uses.
+    The walk is the in-work walk of ``user_settle``; a nested run's phase and a
+    container whose children are in work have no work of their own: they read
+    as their leaves, the same rule the fold uses.
     """
     return [str(row["id"]) for row in db.execute(
         "WITH RECURSIVE below(id,depth) AS ("
         " SELECT n.id,1 FROM plan_nodes n WHERE n.parent_id=?"
-        f" AND {node_states.unarchived_sql('n')}"
+        f" AND {node_states.in_work_sql('n')}"
         " UNION ALL SELECT n.id,below.depth+1 FROM plan_nodes n JOIN below ON n.parent_id=below.id"
-        f" WHERE {node_states.unarchived_sql('n')})"
+        f" WHERE {node_states.in_work_sql('n')})"
         " SELECT n.id FROM below JOIN plan_nodes n ON n.id=below.id"
         f" WHERE {node_states.open_sql('n')}"
         " AND NOT (n.kind='phase' AND n.workflow_step IS NOT NULL)"
@@ -51,13 +54,15 @@ def open_nodes(db, phase_id: str) -> list[str]:
     )]
 
 
-def fail_run(node_id: str, common: dict) -> list[str]:
-    """After a required step fails, close the run's other open work with the reason; return the ids closed.
+def fail_run(node_id: str, common: dict) -> tuple[list[str], list[str]]:
+    """After a required step fails, close the run's other open work with the reason.
 
-    The closes carry this module's provenance, which is how the run's record
-    tells a step never reached from one an agent chose to skip. Work whose close
-    is refused (a delegated worker still has open work) stays open: the run ends
-    when its owner settles it. The caller releases and tells each closed node.
+    Returns the ids closed and the ids whose close was refused. The closes carry
+    this module's provenance, which is how the run's record tells a step never
+    reached from one an agent chose to skip. Work whose close is refused (a
+    delegated worker still has open work) stays open: the run ends when its
+    owner settles it, and the reply says so (``RUN_LEFT_OPEN``). The caller
+    releases and tells each closed node.
     """
     from plans import closure
     from plans.workflow_fields import creation_payload
@@ -65,12 +70,12 @@ def fail_run(node_id: str, common: dict) -> list[str]:
     db = common["db"]
     node = service._node_row(db, node_id)
     if node["workflow_step"] is None or node["parent_id"] is None:
-        return []
+        return [], []
     if creation_payload(db, node_id).get("workflow_required") is not True:
-        return []
+        return [], []
     if not _run_phase(db, service._node_row(db, node["parent_id"])):
-        return []
-    reason = RUN_FAILED.format(step=node["workflow_step"])
+        return [], []
+    reason = RUN_FAILED.format(title=node["title"])
     closed: list[str] = []
     refused: set[str] = set()
     progress = True
@@ -89,7 +94,8 @@ def fail_run(node_id: str, common: dict) -> list[str]:
                 continue
             closed.append(open_id)
             progress = True
-    return closed
+    still_open = [open_id for open_id in refused if service._node_row(db, open_id)["state"] not in service._TERMINAL_STATES]
+    return closed, still_open
 
 
 def record_if_ended(db, node_id: str, new_state: str) -> None:
@@ -122,7 +128,9 @@ def _record(db, phase) -> None:
     if _ended(db, phase["id"]) is not None:
         return
     steps, totals = _steps(db, phase)
-    failed = any(step["required"] and step["state"] in {"failed", _NOT_RUN} for step in steps)
+    # Any path may close a required step (a run's failure, a retired worker, the person's Won't do):
+    # a run completes only when every required step was done.
+    failed = any(step["required"] and step["state"] != _DONE for step in steps)
     service._event(
         db, phase["id"], EVENT, actor_id=None, provenance=_PROVENANCE,
         payload={
