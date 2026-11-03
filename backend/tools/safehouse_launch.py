@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 import os
 from pathlib import Path
 
@@ -66,10 +67,12 @@ def mcp_private_state_profile(
     """Render the allow-default profile from the shared protected-path inventory."""
     # Temporary floor block until a reviewed host-access path for MCP exists (#154).
     from tools.host_path_policy import current_protected_host_path_policy
+    from tools.project_fence import fence_for_local_mcp
 
-    policy = current_protected_host_path_policy(
-        generated_profile=profile_path,
-        safehouse_paths=(safehouse_path,),
+    # A server has no caller: every Local only project is fenced and no ordinary one.
+    policy = replace(
+        current_protected_host_path_policy(generated_profile=profile_path, safehouse_paths=(safehouse_path,)),
+        fence=fence_for_local_mcp(),
     )
 
     def sbpl_path(path: Path) -> str:
