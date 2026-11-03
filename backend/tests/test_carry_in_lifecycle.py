@@ -581,11 +581,11 @@ async def test_each_sample_rechecks_exact_idle_capacity_right_before_its_provide
     fact = _pending_fact()
     checks, dispatched = [], []
 
-    async def ready_idle(bound=None, exclude_thread=None, wait=0.0):
-        checks.append((bound, exclude_thread, wait > 0))
-        return None  # a person started a local Turn after the claim
+    async def row(_fn, exclude_thread):
+        checks.append(exclude_thread)
+        return (None, False)  # the ready local row was lost after the claim: lasting, never waited out
 
-    monkeypatch.setattr(carry_in_capacity, "ready_idle", ready_idle)
+    monkeypatch.setattr(carry_in_capacity, "run_off_db", row)
     monkeypatch.setattr(endpoint, "run_eval_turn", _admitting_turn(dispatched))
     monkeypatch.setattr(turn_result, "read_turn_result", lambda *_a: pytest.fail("read an undispatched turn"))
     owner = {"user_id": "steve", "project_id": None}
@@ -594,8 +594,10 @@ async def test_each_sample_rechecks_exact_idle_capacity_right_before_its_provide
         await carry_in_drain._sample(
             fact, owner, "omlx@srv/m0", ACTIONS, _arm(c1, fact, deliver=True), "c1", [],
         )
-    # The dispatch-time check refuses; the one wait that follows finds the row still lost.
-    assert checks == [("omlx@srv/m0", f"eval-c1-{fact.identity[:16]}-c1", False), ("omlx@srv/m0", None, True)]
+    # The dispatch-time check (excluding the sample's own thread) refuses; the one wait that follows
+    # finds the row still lost and ends at once. A local Turn, by contrast, is waited out
+    # (test_carry_in_quiet_seat).
+    assert checks == [f"eval-c1-{fact.identity[:16]}-c1", None]
     assert dispatched == []
 
 
@@ -837,14 +839,14 @@ async def test_ready_idle_keeps_the_bound_model_and_never_substitutes_another_ro
     probed = []
 
     async def row(_fn, exclude_thread):
-        return ("omlx@srv/other", "srv")
+        return (("omlx@srv/other", "srv"), False)
 
-    async def quiet(server_id, **_kwargs):
+    async def state(server_id, **_kwargs):
         probed.append(server_id)
-        return True
+        return "idle"
 
     monkeypatch.setattr(carry_in_capacity, "run_off_db", row)
-    monkeypatch.setattr(carry_in_capacity, "wait_until_quiet", quiet)
+    monkeypatch.setattr(carry_in_capacity, "omlx_state", state)
 
     assert await carry_in_capacity.ready_idle("omlx@srv/model") is None
     assert probed == []

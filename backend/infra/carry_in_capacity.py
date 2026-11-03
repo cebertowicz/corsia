@@ -12,6 +12,7 @@ resends a prefill-guard refusal through the same :func:`wait_until_quiet`.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 
 from infra.db_async import run_in_db, run_off_db
 
@@ -19,8 +20,8 @@ IDLE_GAP_SECONDS = 10.0  # the workspace local-admission contract's two-read spa
 STATUS_TIMEOUT_SECONDS = 2.0
 
 
-def local_row(db, exclude_thread: str | None = None) -> tuple[str, str] | None:
-    """``(model, server_id)`` of the one ready local oMLX Native row while no other local Turn runs."""
+def _ready_row() -> tuple[str, str, set[str]] | None:
+    """``(model, server_id, names)`` of the one ready local oMLX Native row: a lasting answer, or None."""
     from llm.locality import row_server_id
     from llm.model_status import get_model_status_rows
     from llm.resolution import resolve_execution_target
@@ -35,19 +36,31 @@ def local_row(db, exclude_thread: str | None = None) -> tuple[str, str] | None:
     if not (target.harness == "native" and target.provider == "omlx" and target.available):
         return None
     names = {str(rows[0].get("id") or ""), str(rows[0]["litellm_model"]), target.catalog_id}
+    return str(rows[0]["litellm_model"]), server_id, names
+
+
+def _turn_running(db, names: set[str], exclude_thread: str | None) -> bool:
+    """Whether another local Turn runs now: a transient answer."""
     marks = ",".join("?" for _ in names)
-    busy = db.execute(
+    return db.execute(
         f"SELECT 1 FROM active_turns WHERE status IN ('running','waiting_retry') "
         f"AND (model IN ({marks}) OR model LIKE 'omlx@%') AND thread_id IS NOT ? LIMIT 1",
         (*names, exclude_thread),
-    ).fetchone()
-    return None if busy else (str(rows[0]["litellm_model"]), server_id)
+    ).fetchone() is not None
 
 
-def _local_row_now(exclude_thread: str | None) -> tuple[str, str] | None:
+def local_row(db, exclude_thread: str | None = None) -> tuple[str, str] | None:
+    """``(model, server_id)`` of the one ready local oMLX Native row while no other local Turn runs."""
+    row = _ready_row()
+    return None if row is None or _turn_running(db, row[2], exclude_thread) else row[:2]
+
+
+def _local_state(exclude_thread: str | None) -> tuple[tuple[str, str] | None, bool]:
+    """``(row, running)``: the ready local row (None when there is not exactly one) and whether another local Turn runs."""
     from infra.database import get_db
 
-    return local_row(get_db(), exclude_thread)
+    row = _ready_row()
+    return (None, False) if row is None else (row[:2], _turn_running(get_db(), row[2], exclude_thread))
 
 
 def _status_address(server_id: str) -> tuple[str, int] | None:
@@ -95,15 +108,16 @@ async def omlx_state(server_id: str, *, reads: int = 1) -> str:
     return IDLE if len(set(totals)) == 1 else BUSY
 
 
-async def wait_until_quiet(server_id: str, *, timeout: float, interval: float, reads: int = 1) -> bool:
-    """The one wait for a quiet seat: retry :func:`omlx_state` every ``interval`` until ``idle``.
+async def wait_until_quiet(read: Callable[[], Awaitable[str]], *, timeout: float, interval: float) -> bool:
+    """The one wait for a quiet seat: retry ``read`` (an :func:`omlx_state`-shaped probe) every ``interval`` until ``idle``.
 
-    True once idle; False when ``timeout`` passes first (``timeout`` 0 is one try) or the status
-    is ``unreadable``, which returns at once. A prefill-guard resend waits out memory already
-    held and needs one reading; admitting new work needs two (``reads=2``, :func:`ready_idle`).
+    True once idle; False when ``timeout`` passes first (``timeout`` 0 is one try) or a try reads
+    ``unreadable``, which returns at once: there is nothing to wait for. A prefill-guard resend
+    waits out memory already held with one status reading; admitting new work needs two and the
+    local-Turn check on every try (:func:`ready_idle`).
     """
     deadline = asyncio.get_running_loop().time() + timeout
-    while (state := await omlx_state(server_id, reads=reads)) != IDLE:
+    while (state := await read()) != IDLE:
         if state == UNREADABLE or asyncio.get_running_loop().time() + interval > deadline:
             return False
         await asyncio.sleep(interval)
@@ -113,13 +127,25 @@ async def wait_until_quiet(server_id: str, *, timeout: float, interval: float, r
 async def ready_idle(bound: str | None = None, exclude_thread: str | None = None, wait: float = 0.0) -> str | None:
     """The one ready local oMLX Native model, proved idle by two reads; ``bound`` when given, never another row.
 
-    ``wait`` seconds is how long a busy seat may take to go quiet (one proof per try, not a
-    wait followed by another check); None when it does not, or its status is unreadable.
+    ``wait`` seconds is how long a busy seat or another local Turn may take to clear; each try (one
+    proof, not a wait followed by another check) re-reads the row, the local Turns and the status.
+    None when it does not clear, when there is no single ready row or it is not ``bound``, or when
+    the status is unreadable.
     """
     from llm.provider_overflow import GUARD_QUIET_INTERVAL_SECONDS
 
-    local = await run_off_db(_local_row_now, exclude_thread)
-    if local is None or (bound is not None and local[0] != bound):
-        return None
-    quiet = await wait_until_quiet(local[1], timeout=wait, interval=GUARD_QUIET_INTERVAL_SECONDS, reads=2)
-    return local[0] if quiet else None
+    model: list[str] = []
+
+    async def read() -> str:
+        """One try: a lost or other row ends the wait, a running local Turn is busy, else two status reads."""
+        row, running = await run_off_db(_local_state, exclude_thread)
+        if row is None or (bound is not None and row[0] != bound):
+            return UNREADABLE
+        if running:
+            return BUSY
+        state = await omlx_state(row[1], reads=2)
+        model[:] = [row[0]] if state == IDLE else []
+        return state
+
+    quiet = await wait_until_quiet(read, timeout=wait, interval=GUARD_QUIET_INTERVAL_SECONDS)
+    return model[0] if quiet else None

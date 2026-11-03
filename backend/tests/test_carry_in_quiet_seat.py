@@ -19,15 +19,24 @@ MODEL = "omlx@srv/model"
 OWNER = {"user_id": "steve", "project_id": None}
 
 
-def _status_seat(monkeypatch, readings, *, timeout=None):
-    """The one local row, and a status feed that serves ``readings`` in order, then repeats the last."""
+class _Feed(list):
+    """The status readings served so far; ``turns`` holds each local-Turn check's excluded thread."""
+
+    turns: list
+
+
+def _status_seat(monkeypatch, readings, *, timeout=None, running=(False,)):
+    """The one local row, whether another local Turn runs on each check (``running``), and a status
+    feed that serves ``readings`` in order. Each script repeats its last entry."""
     from infra import carry_in_capacity
     from llm import provider_overflow
 
-    seen = []
+    seen = _Feed()
+    seen.turns = []
 
     async def row(_fn, exclude_thread):
-        return (MODEL, "srv")
+        seen.turns.append(exclude_thread)
+        return ((MODEL, "srv"), running[min(len(seen.turns) - 1, len(running) - 1)])
 
     async def probe(_client, _server_id, _host, _port):
         seen.append(readings[min(len(seen), len(readings) - 1)])
@@ -97,6 +106,34 @@ async def test_ready_idle_returns_at_once_when_the_status_is_unreadable(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_ready_idle_waits_out_a_local_turn_without_reading_the_status_while_it_runs(monkeypatch):
+    from infra import carry_in_capacity
+
+    seen = _status_seat(monkeypatch, [QUIET], running=[True, True, False])
+    assert await carry_in_capacity.ready_idle(MODEL, exclude_thread="own", wait=5.0) == MODEL
+    assert seen.turns == ["own"] * 3 and len(seen) == 2  # the two-read proof ran once, after the Turn ended
+
+
+@pytest.mark.asyncio
+async def test_ready_idle_rechecks_the_local_turns_after_a_busy_status(monkeypatch):
+    from infra import carry_in_capacity
+
+    # The status is busy on try one; a local Turn starts before try two and ends before try three.
+    seen = _status_seat(monkeypatch, [BUSY, QUIET], running=[False, True, False])
+    assert await carry_in_capacity.ready_idle(MODEL, wait=5.0) == MODEL
+    assert len(seen.turns) == 3 and len(seen) == 3
+
+
+@pytest.mark.asyncio
+async def test_ready_idle_returns_at_the_bound_on_a_local_turn_that_keeps_running(monkeypatch):
+    from infra import carry_in_capacity
+
+    seen = _status_seat(monkeypatch, [QUIET], running=[True])
+    assert await carry_in_capacity.ready_idle(MODEL, wait=0.05) is None
+    assert len(seen.turns) >= 2 and len(seen) == 0
+
+
+@pytest.mark.asyncio
 async def test_ready_idle_never_waits_for_a_row_it_will_not_use(monkeypatch):
     from infra import carry_in_capacity
 
@@ -122,6 +159,25 @@ async def test_a_busy_seat_that_goes_quiet_lets_the_claim_run(c1, monkeypatch):
     assert len(seen) == 3  # busy, then one two-read proof; no second check after the wait
     assert models and set(models) == {MODEL}
     assert (_events()[-1]["event"], _events()[-1]["verdict"]) == ("lesson.carry_in.result", "passed")
+
+
+@pytest.mark.asyncio
+async def test_a_local_turn_that_starts_during_the_claim_wait_is_not_claimed_over(c1, monkeypatch):
+    from infra import carry_in_drain
+
+    await _pending(c1)
+    # Try one: the seat is busy. Try two: a local Turn started. Try three: it runs still. Try four: both clear.
+    seen = _status_seat(monkeypatch, [BUSY, QUIET], running=[False, True, True, False])
+    at_sample = []
+
+    async def sample(fact, owner, model, actions, arm, label, created):
+        at_sample.append(len(seen.turns))
+        return label[0] == "c"
+
+    monkeypatch.setattr(carry_in_drain, "_sample", sample)
+    assert await carry_in_drain.wake(c1.workspace) is True
+    assert len(seen.turns) == 4 and set(at_sample) == {4}  # no sample while the local Turn ran
+    assert len(seen) == 3  # one busy read, then one two-read proof
 
 
 @pytest.mark.asyncio
@@ -170,6 +226,45 @@ async def test_a_busy_reading_at_dispatch_reruns_the_sample_once_the_seat_goes_q
     assert passed is True and len(seen) == 6
     assert dispatched == [f"turn-{prefix}-b1r2"]  # the refused thread never reached the provider
     assert [thread for thread, _user in created] == [f"{prefix}-b1", f"{prefix}-b1r2"]
+
+
+@pytest.mark.asyncio
+async def test_a_local_turn_at_dispatch_that_ends_in_time_reruns_the_sample_once(c1, monkeypatch):
+    from eval import endpoint, turn_result
+    from infra import carry_in_drain
+
+    fact = await _pending(c1)
+    prefix = f"eval-c1-{fact.identity[:16]}"
+    # Dispatch check: a local Turn runs. The wait: it has ended. The rerun's dispatch check: none runs.
+    seen = _status_seat(monkeypatch, [QUIET], running=[True, False, False])
+    dispatched: list = []
+    monkeypatch.setattr(endpoint, "run_eval_turn", _admitting_turn(dispatched))
+    monkeypatch.setattr(turn_result, "read_turn_result", _read_turn_result("b"))
+    created: list = []
+
+    passed = await carry_in_drain._sample(fact, OWNER, MODEL, ACTIONS, _arm(c1, fact, deliver=False), "b1", created)
+
+    assert passed is True
+    assert dispatched == [f"turn-{prefix}-b1r2"]  # the refused thread never reached the provider
+    assert [thread for thread, _user in created] == [f"{prefix}-b1", f"{prefix}-b1r2"]
+    assert seen.turns == [f"{prefix}-b1", None, f"{prefix}-b1r2"]
+    assert len(seen) == 4  # a two-read proof for the wait and one for the rerun; none while the Turn ran
+
+
+@pytest.mark.asyncio
+async def test_a_local_turn_still_running_past_the_bound_ends_the_sample_without_a_call(c1, monkeypatch):
+    from eval import endpoint, turn_result
+    from infra import carry_in_drain
+
+    fact = await _pending(c1)
+    seen = _status_seat(monkeypatch, [QUIET], timeout=0.05, running=[True])
+    dispatched: list = []
+    monkeypatch.setattr(endpoint, "run_eval_turn", _admitting_turn(dispatched))
+    monkeypatch.setattr(turn_result, "read_turn_result", lambda *_a: pytest.fail("read an undispatched turn"))
+
+    with pytest.raises(carry_in_drain._Unavailable):
+        await carry_in_drain._sample(fact, OWNER, MODEL, ACTIONS, _arm(c1, fact, deliver=False), "b1", [])
+    assert dispatched == [] and len(seen) == 0 and len(seen.turns) >= 2
 
 
 @pytest.mark.asyncio
