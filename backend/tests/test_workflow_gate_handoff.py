@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from infra.database import get_db
-from plans import decisions, gate_handoff, holds, service
+from plans import decision_fields, decisions, gate_handoff, holds, service
 from plans.boundary import PlanActor
 from plans.gate_handoff import GATE_HOW, GATE_NOTICE, GATE_REJECTED, SPOT_DENOMINATORS
 from tests.test_workflow_runs import Run, SHIP_BODY
@@ -100,6 +100,22 @@ def _answer_offer(option: str) -> None:
             decision["id"], option_id=option, expected_revision=decision["revision"], mutation_id=f"offer-{option}-{decision['revision']}",
             actor=PlanActor(None, "user-1", None, kind="user"), provenance="api.plans.decision", db=db,
         )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _correct(work: str) -> None:
+    """A correction as ``add_correction`` makes one: a follow-up of its source, with the creation event."""
+    from plans import followups
+
+    db = get_db()
+    try:
+        correction = followups.add_follow_up(
+            work, title="Fix", acceptance_criteria="Fixed", inherit_commitment=True, db=db,
+        )
+        service._event(db, correction.id, "correction_created", actor_id=None, provenance="plans.correction",
+                       payload={"source_node_id": work})
         db.commit()
     finally:
         db.close()
@@ -271,18 +287,41 @@ async def test_a_correction_hands_the_gate_back(isolated_db, tmp_path, monkeypat
     await _hand_off(run, "B")
     reply, _gate = await _go(run, None)
     work = reply["steps"][0]["id"]
-    db = get_db()
-    try:
-        plan = service._node_row(db, work)["plan_id"]
-        correction = service.add_node(plan, kind="task", title="Fix", acceptance_criteria="Fixed", db=db)
-        service._event(db, correction.id, "correction_created", actor_id=None, provenance="plans.correction",
-                       payload={"source_node_id": work})
-        db.commit()
-    finally:
-        db.close()
+    _correct(work)
     assert _state().kind == "person"
     reply, _gate = await _go(run, None)
     assert "gate_mode" not in reply["steps"][1]
+
+
+async def test_a_correction_on_a_run_of_an_older_version_hands_the_gate_back(isolated_db, tmp_path, monkeypatch):
+    run = _make(tmp_path, monkeypatch)
+    await _hand_off(run, "B")
+    reply, _gate = await _go(run, None)
+    _bump("v2")
+    await _go(run, None)
+    assert _state().kind == "none"
+    _correct(reply["steps"][0]["id"])
+    assert _state().kind == "person"
+
+
+async def test_an_other_answer_keeps_the_review_and_restarts_the_count(isolated_db, tmp_path, monkeypatch):
+    run = _make(tmp_path, monkeypatch)
+    for _ in range(8):
+        await _go(run)
+    payload = json.loads(_offers()[-1]["payload_json"])
+    db = get_db()
+    try:
+        decision = decisions.read(payload["decision_id"], db=db)
+        decisions.answer(
+            decision["id"], option_id=decision_fields.OTHER_OPTION_ID, other_text="not yet", expected_revision=decision["revision"], mutation_id="offer-other",
+            actor=PlanActor(None, "user-1", None, kind="user"), provenance="api.plans.decision", db=db,
+        )
+        db.commit()
+    finally:
+        db.close()
+    assert _state().kind == "person" and _state().streak == 0
+    await _go(run)
+    assert len(_offers()) == 1
 
 
 async def test_drop_closes_the_gate_step_at_once_and_the_run_records_the_skip(isolated_db, tmp_path, monkeypatch):

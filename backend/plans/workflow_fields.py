@@ -141,7 +141,7 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
             person_step=not (by == "person" and step.get("after")),
             workflow_gate=gate, workflow_gate_mode=gate_mode,
         )
-        if gate_mode == "dropped":
+        if gate_mode == "dropped" and gate_state is not None:
             closure.close_node(
                 node.id, reason=gate_handoff.drop_reason(gate_state), actor_id=None,
                 provenance="plans.workflow_run", db=db,

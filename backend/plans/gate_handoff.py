@@ -32,7 +32,6 @@ _ANSWERED_BY_PERSON = "user.ask_cleared"
 _REJECTED = "changes_requested"
 #: The offer's option ids, in the order the person reads them, and what each hands the gate.
 _HANDED = {"A": "spot", "B": "none", "C": "drop"}
-_KEEP = "D"
 _PACIFIC = ZoneInfo("America/Los_Angeles")
 
 OFFER_TITLE = "Hand off the {step} review in {workflow}?"
@@ -64,6 +63,7 @@ def _clean(verdict: str | None) -> bool:
 @dataclass
 class _Run:
     phase: str
+    plan: str
     version: str | None
     created: str
     mode: str
@@ -99,10 +99,10 @@ def _runs(db, key: tuple[str, str, str]) -> list[_Run]:
 
     project, ref, step = key
     rows = db.execute(
-        "SELECT p.id AS phase, p.workflow_version AS version, p.created_at AS created, s.id AS node"
+        "SELECT p.id AS phase, p.plan_id AS plan, p.workflow_version AS version, p.created_at AS created, s.id AS node"
         " FROM plan_nodes p JOIN plans pl ON pl.id=p.plan_id AND pl.owner_kind='thread'"
         " LEFT JOIN threads t ON t.id=pl.owner_id"
-        " JOIN plan_nodes s ON s.parent_id=p.id AND s.workflow_step=?"
+        " JOIN plan_nodes s ON s.plan_id=p.plan_id AND s.parent_id=p.id AND s.workflow_step=?"
         " WHERE p.kind='phase' AND p.workflow_ref=? AND COALESCE(t.project_id,'')=?"
         " ORDER BY p.created_at,p.rowid,s.created_at,s.rowid",
         (step, ref, project),
@@ -115,12 +115,12 @@ def _runs(db, key: tuple[str, str, str]) -> list[_Run]:
             if created.get("workflow_gate") != "acceptance":
                 continue
             run = runs[row["phase"]] = _Run(
-                row["phase"], row["version"], row["created"], created.get("workflow_gate_mode", "person"), [],
+                row["phase"], row["plan"], row["version"], row["created"], created.get("workflow_gate_mode", "person"), [],
             )
         run.nodes.append(row["node"])
     for run in runs.values():
         run.answer, run.answered_at = first_answer(db, run.nodes)
-        run.corrections = _corrections(db, run.phase)
+        run.corrections = _corrections(db, run.plan, run.phase)
     return list(runs.values())
 
 
@@ -153,29 +153,38 @@ def _answers(db, node_ids: list[str], order: str):
             yield verdict, row["created_at"]
 
 
-def _corrections(db, phase_id: str) -> list[str]:
-    """When each correction on work under this run's phase was created."""
+def _corrections(db, plan_id: str, phase_id: str) -> list[str]:
+    """When each correction on work under this run's phase was created.
+
+    A correction is a follow-up of its source, so it is found by ``follow_up_of`` over the phase's subtree.
+    """
     return [row["created_at"] for row in db.execute(
-        "WITH RECURSIVE below(id) AS (SELECT ? UNION ALL SELECT n.id FROM plan_nodes n JOIN below ON n.parent_id=below.id)"
-        " SELECT created_at FROM plan_node_events WHERE event='correction_created'"
-        " AND json_extract(payload_json,'$.source_node_id') IN (SELECT id FROM below) ORDER BY created_at,rowid",
-        (phase_id,),
+        "WITH RECURSIVE below(id) AS (SELECT ? UNION ALL SELECT n.id FROM below CROSS JOIN plan_nodes n ON n.plan_id=? AND n.parent_id=below.id),"
+        " fixes(id) AS (SELECT n.id FROM plan_nodes n WHERE n.follow_up_of IN (SELECT id FROM below))"
+        " SELECT e.created_at FROM plan_node_events e WHERE e.node_id IN (SELECT id FROM fixes)"
+        " AND e.event='correction_created' ORDER BY e.created_at,e.rowid",
+        (phase_id, plan_id),
     )]
 
 
-def _offers(db, key: tuple[str, str, str]) -> list[tuple[str, str, tuple[str | None, str] | None]]:
-    """Each offer of the gate: when raised, its decision's state, and its answer (option id, answer time)."""
+def _offers(db, key: tuple[str, str, str], phases: list[str]) -> list[tuple[str, str, tuple[str | None, str] | None]]:
+    """Each offer of the gate: when raised, its decision's state, and its answer (option id, answer time).
+
+    An offer is recorded on the run phase it was raised under, so it is read by those phases' ids.
+    """
     from plans import decision_projection
 
+    if not phases:
+        return []
     project, ref, step = key
+    marks = ",".join("?" * len(phases))
     listed = []
     for row in db.execute(
-        "SELECT created_at,payload_json FROM plan_node_events WHERE event=?"
-        " AND json_extract(payload_json,'$.key[1]')=? AND json_extract(payload_json,'$.key[2]')=?"
-        " ORDER BY created_at,rowid", (OFFER_EVENT, ref, step),
+        f"SELECT created_at,payload_json FROM plan_node_events WHERE node_id IN ({marks}) AND event=?"
+        " ORDER BY created_at,rowid", (*phases, OFFER_EVENT),
     ):
         payload = json.loads(row["payload_json"])
-        if payload["key"][0] != project:
+        if payload["key"] != [project, ref, step]:
             continue
         decision = decision_projection.read(payload["decision_id"], db=db)
         answered = None
@@ -192,17 +201,18 @@ def _offers(db, key: tuple[str, str, str]) -> list[tuple[str, str, tuple[str | N
 def derive(db, key: tuple[str, str, str], version: str | None = None) -> GateState:
     """The gate's state, replayed from its events in time order, as of ``version`` when given."""
     items: list[tuple[str, int, str, Any]] = []
-    for run in _runs(db, key):
+    runs = _runs(db, key)
+    for run in runs:
         items.append((run.created, 0, "start", run))
         if run.answer is not None:
             items.append((run.answered_at or run.created, 2, "answer", run))
         items.extend((stamp, 3, "correction", run) for stamp in run.corrections)
-    for raised, status, answered in _offers(db, key):
+    for raised, status, answered in _offers(db, key, [run.phase for run in runs]):
         items.append((raised, 1, "offer", status))
         if answered is not None:
             items.append((answered[1], 1, "offer_answer", answered))
         elif status == "invalidated":
-            items.append((raised, 1, "offer_answer", (None, raised)))
+            items.append((raised, 1, "offer_void", None))
     state = GateState()
     current: str | None = None
     for _stamp, _order, name, data in sorted(items, key=lambda item: item[:2]):
@@ -210,8 +220,12 @@ def derive(db, key: tuple[str, str, str], version: str | None = None) -> GateSta
             current, state.streak, state.spot_clean = data.version, 0, 0
         elif name == "offer":
             state.open_offer = True
+        elif name == "offer_void":
+            state.open_offer = False
         elif name == "offer_answer":
             _apply_answer(state, data[0], data[1])
+        elif name == "correction":
+            _hand_back(state)
         elif name != "start" and data.version == current:
             _apply_run(state, name, data)
     if version != current and current is not None:
@@ -221,9 +235,10 @@ def derive(db, key: tuple[str, str, str], version: str | None = None) -> GateSta
 
 def _apply_answer(state: GateState, option: str | None, stamp: str) -> None:
     state.open_offer = False
-    if option == _KEEP:
+    # Any answer that is not one of the three handing options, Other included, keeps the review.
+    if option not in _HANDED:
         state.streak = 0
-    elif option in _HANDED:
+    else:
         state.kind, state.streak, state.spot_clean = _HANDED[option], 0, 0
         state.dropped_on = datetime.fromisoformat(stamp).astimezone(_PACIFIC).date().isoformat()
 
@@ -233,9 +248,7 @@ def _hand_back(state: GateState) -> None:
 
 
 def _apply_run(state: GateState, name: str, run: _Run) -> None:
-    if name == "correction":
-        _hand_back(state)
-    elif run.mode == "spot":
+    if run.mode == "spot":
         if _clean(run.answer):
             state.spot_clean += 1
         else:
