@@ -460,7 +460,9 @@ def test_a_workers_unknown_model_or_cost_is_left_out(usage_db):
     from automation import worker_usage
 
     _worker_thread(usage_db)
-    assert worker_usage.facts(usage_db, "w1") == {"model": "claude-code/opus"}  # launched, no call yet: no cost
+    assert worker_usage.facts(usage_db, "w1") == {}  # launched as an alias, no call yet: neither is known
+    usage_db.execute("UPDATE threads SET model='claude-code/claude-opus-5-5' WHERE id='w1'")
+    assert worker_usage.facts(usage_db, "w1") == {"model": "claude-code/claude-opus-5-5"}  # the form a call reports
     _call(usage_db, "c1", "claude-code/opus", manifest="m")
     _call(usage_db, "c2", "codex/no-such-model")  # a call Measurement cannot price: no partial sum
     known = worker_usage.facts(usage_db, "w1")
@@ -490,6 +492,39 @@ def test_a_worker_with_a_measurement_still_owed_has_no_cost(usage_db):
     assert "cost_usd" not in worker_usage.facts(usage_db, "w1")
     usage_db.execute("UPDATE active_turns SET usage_receipts_json='{}' WHERE id='t1'")
     assert worker_usage.facts(usage_db, "w1")["cost_usd"] > 0
+
+
+def test_a_call_projected_between_the_reads_leaves_the_cost_out(usage_db, monkeypatch):
+    from automation import worker_usage
+    from infra.turn_usage_receipts import project_turn_usage_receipt, store_turn_usage_receipt
+    from tests.plan_execution_helpers import open_turn
+
+    _worker_thread(usage_db)
+    _call(usage_db, "c1", "claude-code/opus", manifest="m")
+    open_turn(usage_db, "w1", "t-race")
+    stored = store_turn_usage_receipt(
+        usage_db, thread_id="w1", turn_id="t-race", usage_key="provider-call:2", model="claude-code/claude-opus-5-5",
+        measured={"prompt_tokens": 1_000_000, "completion_tokens": 0, "cache_creation_tokens": 0,
+                  "cache_read_tokens": 0, "total_tokens": 1_000_000},
+        ttft_ms=None, source="external_harness:claude-code", now_iso="2026-10-02T00:00:01Z",
+    )
+    assert stored is not None
+    usage_db.commit()
+    done: list[bool] = []
+
+    def after(read):  # the projection commits right after whichever read runs first
+        def wrapped(*args, **kwargs):
+            result = read(*args, **kwargs)
+            if not done:
+                done.append(True)
+                assert project_turn_usage_receipt(usage_db, "t-race", stored[0]) is not None
+            return result
+        return wrapped
+
+    monkeypatch.setattr(worker_usage, "thread_owes_measurements", after(worker_usage.thread_owes_measurements))
+    monkeypatch.setattr(worker_usage, "IdentityResolver", after(worker_usage.IdentityResolver))
+    assert done == [] and "cost_usd" not in worker_usage.facts(usage_db, "w1")
+    assert done == [True] and worker_usage.facts(usage_db, "w1")["cost_usd"] > 0
 
 
 @pytest.mark.parametrize("outcome, kind", [("returned", "worker.result"), ("no_result", "worker.no_result")])
