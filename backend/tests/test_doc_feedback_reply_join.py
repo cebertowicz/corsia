@@ -28,18 +28,28 @@ def _feedback_nodes(db, thread_id: str) -> list:
     ).fetchall()
 
 
+def _queued_thread(db) -> tuple[str, dict, object]:
+    """A document whose owner is busy with one comment's task while a second comment's task waits."""
+    seed_thread(db, "owner")
+    artifact_id = seed_document(db, "owner")
+    add_person_comment(db, artifact_id)
+    root, _ = add_person_comment(db, artifact_id)
+    busy, first = _feedback_nodes(db, "owner")
+    selected = "SELECT 1 FROM plan_node_attempts WHERE node_id=?"
+    assert db.execute(selected, (busy["id"],)).fetchone() is not None
+    assert db.execute(selected, (first["id"],)).fetchone() is None
+    return artifact_id, root, first
+
+
 def test_person_reply_joins_the_open_task_of_its_thread(isolated_db):
     db = get_db()
     try:
-        seed_thread(db, "owner")
-        artifact_id = seed_document(db, "owner")
-        root, _ = add_person_comment(db, artifact_id)
-        (first,) = _feedback_nodes(db, "owner")
+        artifact_id, root, first = _queued_thread(db)
 
         reply = _person_reply(db, artifact_id, root["id"])
 
         nodes = _feedback_nodes(db, "owner")
-        assert [node["id"] for node in nodes] == [first["id"]]
+        assert [node["id"] for node in nodes][1:] == [first["id"]]
         joined = service.get_node(first["id"], db=db)
         assert joined.title == first["title"]
         assert f"Comment {reply['id']}" in joined.description
@@ -69,20 +79,35 @@ def test_person_reply_joins_the_open_task_of_its_thread(isolated_db):
         db.close()
 
 
-def test_reply_after_the_task_finished_gets_its_own_task(isolated_db):
+def test_reply_to_a_task_its_owner_picked_up_gets_its_own_task(isolated_db):
+    """The owner may have read the task already, so the reply is not hidden in its description."""
     db = get_db()
     try:
         seed_thread(db, "owner")
         artifact_id = seed_document(db, "owner")
         root, _ = add_person_comment(db, artifact_id)
         (first,) = _feedback_nodes(db, "owner")
+
+        _person_reply(db, artifact_id, root["id"])
+
+        nodes = _feedback_nodes(db, "owner")
+        assert len(nodes) == 2 and nodes[1]["id"] != first["id"]
+        assert service.get_node(first["id"], db=db).description == first["description"]
+    finally:
+        db.close()
+
+
+def test_reply_after_the_task_finished_gets_its_own_task(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, root, first = _queued_thread(db)
         service.transition_node(first["id"], "closed", actor_id=None, provenance="test", db=db)
         db.commit()
 
         _person_reply(db, artifact_id, root["id"])
 
         nodes = _feedback_nodes(db, "owner")
-        assert len(nodes) == 2 and nodes[1]["id"] != first["id"]
+        assert len(nodes) == 3 and nodes[2]["id"] != first["id"]
     finally:
         db.close()
 
@@ -91,10 +116,7 @@ def test_reply_to_a_parked_task_gets_its_own_task(isolated_db):
     """A parked task would not see the reply until its own wake, so the reply is not hidden in it."""
     db = get_db()
     try:
-        seed_thread(db, "owner")
-        artifact_id = seed_document(db, "owner")
-        root, _ = add_person_comment(db, artifact_id)
-        (first,) = _feedback_nodes(db, "owner")
+        artifact_id, root, first = _queued_thread(db)
         holds.pause(
             first["id"], "test", expected_revision=first["revision"], actor_id="owner",
             provenance="test", db=db,
@@ -103,7 +125,7 @@ def test_reply_to_a_parked_task_gets_its_own_task(isolated_db):
 
         _person_reply(db, artifact_id, root["id"])
 
-        assert len(_feedback_nodes(db, "owner")) == 2
+        assert len(_feedback_nodes(db, "owner")) == 3
     finally:
         db.close()
 
