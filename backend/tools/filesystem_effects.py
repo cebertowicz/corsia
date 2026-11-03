@@ -204,11 +204,6 @@ def open_bound_text(
                 os.close(fd)
 
 
-def write_bound_text(path: Path, content: str) -> None:
-    """Create or replace text through a bound parent descriptor."""
-    write_bound_bytes(path, content.encode("utf-8"))
-
-
 def write_bound_bytes(path: Path, data: bytes, *, mode: int = 0o666) -> None:
     """Create or replace bytes through a bound parent descriptor; ``mode`` applies to a new file."""
     with bound_parent(path, create_parents=True) as parent:

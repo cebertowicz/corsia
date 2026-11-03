@@ -104,7 +104,7 @@ def managed_write(
     from infra.config import WORKSPACE
     from registry.durable_writes import write_text
     from registry.registration_writer import origin_from_tool_context
-    from tools.filesystem_effects import write_bound_text
+    from tools.filesystem_effects import write_bound_bytes
 
     thread_id = kwargs.get("_thread_id")
     decision = write_text(
@@ -125,7 +125,7 @@ def managed_write(
             handle.truncate()
             handle.flush()
         else:
-            write_bound_text(path, text)
+            write_bound_bytes(path, text.encode("utf-8"))
         reported = (decision, before)
     result = complete_file_write(path, success, thread_id=thread_id, workspace=WORKSPACE) if thread_id else success
     if reported is not None:
