@@ -417,73 +417,25 @@ async def test_a_script_on_a_pr_result_gets_the_prs_repository_channel(world, mo
     assert world["script_repos"] == [expected]
 
 
-# The settled worker's model rides on its event, only when CORSIA knows it.
-def _worker_thread(db, model: str | None = "claude-code/opus") -> None:
-    db.execute("INSERT INTO threads (id,user_id,title,agent_enabled,agent_status,model,created_at,updated_at) "
-               "VALUES ('w1','steve','w',0,'idle',?,'t','t')", (model,))
-
-
-def _call(db, call_id: str, model: str, *, prompt: int = 1_000_000, manifest: str | None = None) -> None:
-    db.execute("INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,"
-               "cache_read_tokens,total_tokens,source,created_at,context_manifest_id) VALUES "
-               "(?,'w1',?,?,0,0,0,?,'external_harness:claude-code','2026-10-02T00:00:00Z',?)",
-               (call_id, model, prompt, prompt, manifest))
-
-
-@pytest.fixture
-def usage_db(isolated_db):
-    from infra.database import get_db
-    from model_identity_fixtures import seed_identity_catalog, seed_manifest
-
-    db = get_db()
-    seed_identity_catalog(db)
-    seed_manifest(db, "m", "claude-code", "claude-opus-5-5", "catalog")
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-def test_a_workers_model_comes_from_its_ledger(usage_db):
-    from automation import worker_model
-
-    _worker_thread(usage_db)
-    _call(usage_db, "c1", "claude-code/opus", manifest="m")
-    _call(usage_db, "c2", "claude-code/opus", manifest="m")
-    assert worker_model.facts(usage_db, "w1") == {"model": "claude-code/claude-opus-5-5"}
-
-
-def test_a_workers_unknown_model_is_left_out(usage_db):
-    from automation import worker_model
-
-    _worker_thread(usage_db)
-    assert worker_model.facts(usage_db, "w1") == {}  # launched as an alias, no call yet: not known
-    usage_db.execute("UPDATE threads SET model='claude-code/claude-opus-5-5' WHERE id='w1'")
-    assert worker_model.facts(usage_db, "w1") == {"model": "claude-code/claude-opus-5-5"}  # the form a call reports
-    _call(usage_db, "c1", "claude-code/opus", manifest="m")
-    _call(usage_db, "c2", "codex/no-such-model")
-    assert worker_model.facts(usage_db, "w1") == {}  # two identities: neither is the model
-    assert worker_model.facts(usage_db, "nobody") == {}
-
-
+# The settled worker's model is the one its start spawned, from the start's own record.
 @pytest.mark.parametrize("outcome, kind", [("returned", "worker.result"), ("no_result", "worker.no_result")])
-def test_the_model_reaches_both_worker_events(outcome, kind, monkeypatch):
+def test_the_spawned_model_reaches_both_worker_events(outcome, kind):
     from automation import worker_settle
 
     row = {"id": 1, "thread_id": OWNER, "rule_id": "r", "event_id": "e", "request_identity": "i",
            "connector": "qa", "event_type": "request", "artifact_external_id": "o/r#1",
            "artifact_integration": "github", "artifact_type": "pull_request"}
-    for known in ({"model": "claude-code/claude-opus-4-8"}, {}):
-        said = {"result": "{}"} if outcome == "returned" else {"reason": "stopped"}
-        item = worker_settle.settlement(row, {"workflow": "w@1"}, outcome, {**known, **said})
-        assert item.event_type == kind
-        assert item.facts.get("model") == known.get("model")
-        assert ("model" in item.facts) == bool(known)
+    said = {"result": "{}"} if outcome == "returned" else {"reason": "stopped"}
+    spawned = {"workflow": "w@1", "settings": {"model": "claude-code/opus[1m]"}}
+    item = worker_settle.settlement(row, spawned, outcome, {**said, "model": "forged"})
+    assert item.event_type == kind and item.facts["model"] == "claude-code/opus[1m]"
+    never_spawned = worker_settle.settlement(row, {"workflow": "w@1"}, outcome, said)
+    assert "model" not in never_spawned.facts
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind, reply", [("result", fenced({"findings": []})), ("no_result", "no json here")])
-async def test_a_settled_workers_event_carries_its_model_through_the_runtime(world, monkeypatch, kind, reply):
+async def test_a_settled_workers_event_carries_its_spawned_model_through_the_runtime(world, monkeypatch, kind, reply):
     world["reply"].write_text(reply)
     await _script_rule(owner_script(world, monkeypatch, "model.sh"), kind)
     await make_rule()
@@ -492,5 +444,4 @@ async def test_a_settled_workers_event_carries_its_model_through_the_runtime(wor
     await run_scripts()
     [event] = world["script_inputs"]
     assert event["type"] == f"worker.{kind}"
-    assert event["facts"]["model"].startswith("claude-code/")
-    assert "cost_usd" not in event["facts"]  # cost has one owner, plans/usage_cost.py, not this event yet
+    assert event["facts"]["model"] == "claude-code/sonnet"  # the owner's model, as spawned

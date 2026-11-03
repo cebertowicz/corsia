@@ -27,7 +27,6 @@ from typing import Any
 
 from loguru import logger
 
-from automation import worker_model
 from core.workflow_result import ResultInvalid, check_result
 from events import rule_runs, worker_starts
 from events.connectors import worker as worker_events
@@ -138,14 +137,14 @@ def ready(db: sqlite3.Connection, decision_ids: set[int] | None = None) -> list[
         check = json.loads(row["run_input"] or "{}")
         outcome, said = verdict(turn, final_message(db, row["worker_thread_id"], turn["id"]),
                                 check.get("schema") or {}, check)
-        settles.append(settlement(row, check, outcome, {**worker_model.facts(db, row["worker_thread_id"]), **said}))
+        settles.append(settlement(row, check, outcome, said))
     return settles
 
 
 def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
                said: Mapping[str, Any]) -> Settle:
     """The event one start settles with: the envelope (source, item and version, workflow,
-    run, validity) around the payload or the reason."""
+    run, validity, the model its worker was spawned on) around the payload or the reason."""
     kind = worker_events.RESULT if outcome == RETURNED else worker_events.NO_RESULT
     context = check.get("result_context")
     facts = {
@@ -155,6 +154,8 @@ def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
         "source": f"{row['connector']}.{row['event_type']}", "item": row["artifact_external_id"],
         "item_version": check.get("item_version"), "artifact_integration": row["artifact_integration"],
         "artifact_type": row["artifact_type"], "valid": outcome == RETURNED, **said,
+        # The start's own record of what it spawned; a start that never spawned has none.
+        "model": (check.get("settings") or {}).get("model"),
     }
     if context:
         facts.update(source=context["source"], kind=context["kind"], **context["item"],

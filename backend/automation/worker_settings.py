@@ -57,7 +57,7 @@ def settings_for(
             "which that workflow does not have. Change the rule's profile or add it to the workflow.") from exc
     except InvalidWorker as exc:
         raise inputs.StartRefused(
-            f"refused: the worker settings in the {skill.name} workflow are not valid. "
+            f"refused: the worker settings in the {skill.name} workflow are not valid ({exc}). "
             "Fix them in the workflow.") from exc
     extra: dict[str, Any] = {}
     larger = larger_context_model(settings["min_context_tokens"], model_row, harness, name, scope, db)

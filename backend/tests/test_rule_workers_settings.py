@@ -304,6 +304,29 @@ async def test_a_worker_past_its_limit_is_stopped_and_settles_no_result_once(wor
     assert "the agent ran past its 30-minute limit" in owner_wakes()[0]
 
 
+@pytest.mark.asyncio
+async def test_a_worker_settled_by_its_time_limit_names_the_model_it_was_spawned_on(world, monkeypatch):
+    import events.intake as intake
+    from automation import worker_runner
+
+    admitted, real = [], intake.admit_event
+
+    async def capture(**kwargs):
+        admitted.append(kwargs)
+        return await real(**kwargs)
+
+    monkeypatch.setattr(intake, "admit_event", capture)
+    world["reply"].write_text("HANG")
+    _workflow_block(world, "  worker:\n    time_limit_minutes: 30\n")
+    rule = await make_rule()
+    await request()
+    await worker_runner.drive()
+    _backdate(rule, 31)
+    await worker_runner.drive()
+    [event] = [kwargs for kwargs in admitted if kwargs["event_type"] == "worker.no_result"]
+    assert event["facts"]["model"] == "claude-code/sonnet"
+
+
 async def _worker_past_its_limit(world) -> str:
     """A rule whose worker is running (it never answers) and is 31 minutes into a 30-minute limit."""
     from automation import worker_runner
