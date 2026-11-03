@@ -8,11 +8,14 @@ identities reach this module.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from tools.host_path_resolution import canonical, contains
+
+log = logging.getLogger(__name__)
 
 _ORDINARY_COPY = (
     "`{path}` is in project `{name}`, outside your scope. "
@@ -63,24 +66,38 @@ class Fence:
     def refusal(self, path: Path) -> str | None:
         """The approved refusal naming a fenced project path, or None."""
         candidate = canonical(path)
-        for root in self.roots:
-            if root.project is None or not any(contains(form, candidate) for form in root.forms):
-                continue
-            if not root.local_only:
-                return _ORDINARY_COPY.format(path=path, name=root.project)
-            who = f" (`{root.conductor}`)" if root.conductor else ""
-            return _LOCAL_ONLY_COPY.format(path=path, name=root.project, conductor=who)
-        return None
+        matches = [
+            root for root in self.roots
+            if root.project is not None and any(contains(form, candidate) for form in root.forms)
+        ]
+        # A Local only root inside an ordinary one still holds under a lease, so its copy wins.
+        root = next((root for root in matches if root.local_only), matches[0] if matches else None)
+        if root is None:
+            return None
+        if not root.local_only:
+            return _ORDINARY_COPY.format(path=path, name=root.project)
+        who = f" (`{root.conductor}`)" if root.conductor else ""
+        return _LOCAL_ONLY_COPY.format(path=path, name=root.project, conductor=who)
 
 
 def _drop_nested(roots: list[FencedRoot]) -> tuple[FencedRoot, ...]:
-    """Drop a root that sits inside another fenced root."""
+    """Drop a root that sits inside another fenced root at least as strong.
+
+    Only a Local only root covers a Local only one: a lease renders only those, so an
+    ordinary root covering it would leave it open under the lease.
+    """
+    # Resolve each root once; the pairwise pass compares text, as ``contains`` does.
+    paths = [str(root.path).casefold() for root in roots]
+    forms = [[str(form).casefold() for form in root.forms] for root in roots]
     kept = []
     for index, root in enumerate(roots):
+        path = paths[index]
         inside = any(
-            contains(form, root.path) and (form != root.path or other < index)
+            (path == form or path.startswith(form.rstrip("/") + "/"))
+            and (candidate.local_only or not root.local_only)
+            and (form != path or other < index or candidate.local_only != root.local_only)
             for other, candidate in enumerate(roots) if other != index
-            for form in candidate.forms
+            for form in forms[other]
         )
         if not inside:
             kept.append(root)
@@ -92,22 +109,30 @@ _Fences = Callable[[str | None, bool], bool]
 
 
 def _folder_roots(workspace: Path, db, fences: _Fences, rows, cloud_off) -> list[FencedRoot]:
-    """Every folder on disk under ``projects/``, listed rather than registered, that the caller is fenced from."""
+    """Every folder on disk under ``projects/``, listed rather than registered, that the caller is fenced from.
+
+    Fails closed: while a Local only project's folder does not resolve, any folder no
+    project claims may be it, so each is fenced as Local only.
+    """
     from core.project_context import resolve_project_row_paths
 
     by_root = {}
+    lost_local_only = False
     for row in rows:
         try:
             _name, root = resolve_project_row_paths(workspace, project_name=row["name"], raw_path=row["path"])
         except (ValueError, OSError):
-            continue
+            root = None
         if root is not None:
             by_root[canonical(root)] = row
+        elif row["id"] in cloud_off:
+            log.warning("Local only project %s has no resolvable folder; fencing unclaimed folders as Local only", row["id"])
+            lost_local_only = True
     projects_root = workspace / "projects"
     roots = []
     for child in sorted(projects_root.iterdir()) if projects_root.is_dir() else ():
         row = by_root.get(canonical(child))
-        local_only = row is not None and row["id"] in cloud_off
+        local_only = row["id"] in cloud_off if row is not None else lost_local_only
         if child.is_dir() and fences(row["id"] if row else None, local_only):
             roots.append(FencedRoot(
                 child, row["name"] if row else child.name, local_only,
@@ -147,26 +172,30 @@ def _repo_roots(db, rows, fences: _Fences, cloud_off) -> list[FencedRoot]:
     A linked worktree's ``.git`` points into ``<canonical>/.git/worktrees/``, so a root a
     project the caller may reach also registers is never fenced.
     """
-    from infra.project_repo_policy import get_project_repo_policies
+    from infra.project_repo_policy import repo_policies_by_project
 
+    by_project = repo_policies_by_project(db=db)
     fenced: dict = {}
     shared: set[Path] = set()
     for row in rows:
-        policies = get_project_repo_policies(row["id"], db=db).values()
+        policies = by_project.get(row["id"], [])
         if fences(row["id"], row["id"] in cloud_off):
             fenced[row["id"]] = (row, policies)
         else:
             shared.update(canonical(policy.path) for policy in policies)
     roots = []
+    attributed: dict[Path, list[tuple[Path, str | None]]] = {}
     for project_id, (row, policies) in fenced.items():
         local_only = project_id in cloud_off
         for policy in policies:
-            if canonical(policy.path) not in shared:
+            if (key := canonical(policy.path)) not in shared:
                 roots.append(FencedRoot(policy.path, row["name"], local_only, row["conductor_thread_id"]))
                 continue
+            if key not in attributed:
+                attributed[key] = _attributed_worktrees(db, policy.path)
             roots.extend(
                 FencedRoot(tree, row["name"], local_only, row["conductor_thread_id"])
-                for tree, owner in _attributed_worktrees(db, policy.path) if owner == project_id
+                for tree, owner in attributed[key] if owner == project_id
             )
     return roots
 

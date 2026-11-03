@@ -895,6 +895,25 @@ def get_project_repo_policies(
     return {policy.repo_name: policy for policy in policies}
 
 
+def repo_policies_by_project(*, db) -> dict[str, list[RepoPolicy]]:
+    """Every project's canonical persisted rows in one read, as ``get_project_repo_policies`` returns each."""
+    try:
+        rows = db.execute(
+            "SELECT project_id, repo_name, repo_path, pinned_branch, protect_base_checkout "
+            "FROM project_repo_policies"
+        ).fetchall()
+    except sqlite3.OperationalError as exc:
+        detail = str(exc).lower()
+        if "no such table" not in detail and "no such column" not in detail:
+            raise
+        rows = []
+    by_project: dict[str, list[RepoPolicy]] = {}
+    for row in rows:
+        if (policy := _policy_from_row(row["project_id"], row)) is not None:
+            by_project.setdefault(row["project_id"], []).append(policy)
+    return by_project
+
+
 def prepare_repo_policy(
     project_id: str, repo_name: str, repo_path: Path, *,
     pinned_branch: str | None, protect_base_checkout: bool,

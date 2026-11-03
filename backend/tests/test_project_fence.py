@@ -184,6 +184,38 @@ def test_nested_roots_are_dropped():
     assert _drop_nested([inner, outer, twin]) == (outer,)
 
 
+def test_only_a_local_only_root_covers_a_local_only_root():
+    ordinary = FencedRoot(Path("/w/repo"), "beta")
+    same = FencedRoot(Path("/w/repo"), "secret", local_only=True)
+    inside = FencedRoot(Path("/w/repo/deep"), "secret", local_only=True)
+    assert _drop_nested([ordinary, same]) == (same,)
+    assert _drop_nested([ordinary, inside]) == (ordinary, inside)
+    assert _drop_nested([same, FencedRoot(Path("/w/repo/deep"), "beta")]) == (same,)
+
+
+def test_a_repo_an_ordinary_and_a_local_only_project_share_stays_closed_under_a_lease(world):
+    repo = world.workspace / "repos" / "both"
+    _git_repo(repo)
+    _register(world, "id-beta", repo)
+    _register(world, "id-secret", repo)
+    policy = _policy(ALPHA_AGENT)
+    assert _forms(repo) <= set(policy.hard_floor_sandbox_rules().splitlines())
+    assert "is in Local only project `secret`" in policy.denial_guidance_for_paths([repo / "x"])
+
+
+def test_a_local_only_project_whose_path_does_not_resolve_stays_fenced(world):
+    from tools.project_fence import fence_for_thread
+
+    secret = world.workspace / "projects" / "secret"
+    real = world.workspace / "elsewhere-secret"
+    secret.rename(real)
+    secret.symlink_to(real, target_is_directory=True)
+    world.db.execute("UPDATE projects SET path = 'projects/secret' WHERE id = 'id-secret'")
+    world.db.commit()
+    assert [r.local_only for r in fence_for_thread(CORSIA_AGENT).roots if r.path == secret] == [True]
+    assert _rule(real.resolve()) in _policy(ALPHA_AGENT).hard_floor_sandbox_rules()
+
+
 def test_ordinary_project_refusal_copy(world):
     path = world.workspace / "projects" / "beta" / "notes.md"
     message = _policy(ALPHA_AGENT).denial_guidance_for_paths([path])
