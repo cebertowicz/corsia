@@ -123,6 +123,7 @@ async def _start_process(prepared: PreparedCCSpawn) -> None:
         claude_dir=prepared.resolved_claude_dir,
         model=prepared.cc_alias,
         effort=request.effort,
+        extra_args=["--max-turns", str(request.max_turns)] if request.max_turns else None,
         on_event=on_event,
         on_exit=on_exit,
         corsia_thread_id=prepared.child_id,
@@ -213,6 +214,7 @@ async def spawn(
     confinement: str = CONFINEMENT_NONE,
     add_dirs: tuple[str, ...] = (),
     rule_start: RuleStart | None = None,
+    max_turns: int | None = None,
     db=None,
 ) -> str:
     """Spawn one Claude Code subagent child thread.
@@ -227,7 +229,7 @@ async def spawn(
     request = CCSpawnRequest(
         parent_thread_id, task, binary, target, working_dir, effort, title,
         project_id, claude_dir, broadcast, account_id,
-        confinement=confinement, add_dirs=add_dirs,
+        confinement=confinement, add_dirs=add_dirs, max_turns=max_turns,
     )
     prepared = await prepare_spawn(request, get_db())
     try:

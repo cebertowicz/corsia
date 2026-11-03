@@ -194,6 +194,8 @@ async def _spawn(
             title=kwargs.get("title"),
             model_id=model, account_id=kwargs.get("account_id"),
             confinement=confinement, read_paths=read_paths, rule_start=rule_start,
+            effort=kwargs.get("effort"), max_turns=kwargs.get("max_turns"),
+            window_suffix=kwargs.get("window_suffix"),
         )
     if confinement == CONFINEMENT_UNTRUSTED and rule_start is None:
         from llm.resolution import resolve_execution_target
@@ -246,6 +248,7 @@ async def _spawn_native_child(
                 "from_title": parent.get("title") or "",
             },
             native_mode="delegation",
+            reasoning_effort=kwargs.get("effort"),
         )
     except Exception as e:
         return f"Error delegating task: {e}"
@@ -336,7 +339,15 @@ async def _spawn_claude_code_child(
     confinement: str = CONFINEMENT_NONE,
     read_paths: list[str] | None = None,
     rule_start: RuleStart | None = None,
+    effort: str | None = None,
+    max_turns: int | None = None,
+    window_suffix: str | None = None,
 ) -> dict[str, Any] | str:
+    """Spawn a Claude Code child. A rule worker's ``window_suffix`` (``[1m]``) asks for the
+    larger-context variant of the same model: it is added to the transport selector, which
+    has no catalog row of its own."""
+    from dataclasses import replace
+
     from connections.models import get_connection
     from subagents.cc_confinement import ConfinementRefused, require_readable_dirs
     from infra.subagent_caps import LiveSpawnCapExceeded
@@ -361,6 +372,9 @@ async def _spawn_claude_code_child(
             "Error: Claude Code delegation blocked: "
             f"{target.catalog_id} is unavailable ({target.availability_reason})"
         )
+    if window_suffix:
+        target = replace(target, transport_model=f"{target.transport_model}{window_suffix}",
+                         context_window=target.discovered_context_window or target.context_window)
     working_dir, project_id = resolve_spawn_working_dir(parent_thread_id)
     add_dirs: tuple[str, ...] = ()
     if confinement != CONFINEMENT_NONE:
@@ -378,6 +392,7 @@ async def _spawn_claude_code_child(
             title=title,
             project_id=project_id, account_id=account_id,
             confinement=confinement, add_dirs=add_dirs, rule_start=rule_start,
+            effort=effort, max_turns=max_turns,
         )
     except LiveSpawnCapExceeded as e:
         if rule_start is not None:

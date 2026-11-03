@@ -62,6 +62,7 @@ _FAKE = textwrap.dedent(
     import sys, json
     def emit(o):
         sys.stdout.write(json.dumps(o) + "\\n"); sys.stdout.flush()
+    open({reply!r} + ".argv", "w").write(json.dumps(sys.argv))
     emit({{"type":"system","subtype":"init","session_id":"fake","model":"m","tools":[],"mcp_servers":[],"cwd":"."}})
     for line in sys.stdin:
         if not line.strip():
