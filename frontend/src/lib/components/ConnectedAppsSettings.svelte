@@ -137,10 +137,12 @@
 	}
 	async function startSignIn(account: ConnectedAccount): Promise<void> {
 		actionId = account.id; errorId = account.id; actionError = '';
-		const page = signInHere ? window.open('', '_blank') : null;
+		// Messages has no page to open; its Sign in only checks access and answers with no link.
+		const page = signInHere && account.provider !== 'messages' ? window.open('', '_blank') : null;
 		try {
 			const started = await startAccountSignIn(account);
-			if (page) { page.opener = null; page.location.href = started.url; }
+			if (!started.url) { page?.close(); await refresh(); }
+			else if (page) { page.opener = null; page.location.href = started.url; }
 			else window.location.assign(started.url);
 		} catch (cause) {
 			page?.close();
@@ -183,7 +185,7 @@
 		catch (cause) { actionError = cause instanceof Error ? cause.message : `Couldn't change this ${account.provider_display_name} account. Try again.`; }
 		finally { confirmingRemove = null; actionId = null; }
 	}
-	function capabilityLabels(account: ConnectedAccount): string { return account.capabilities.map((capability) => ({ mail: 'Email', calendar: 'Calendar', files: 'Files' }[capability])).join(', '); }
+	function capabilityLabels(account: ConnectedAccount): string { return account.capabilities.map((capability) => ({ mail: 'Email', calendar: 'Calendar', files: 'Files', messages: 'Texts' }[capability])).join(', '); }
 
 	function clearLinkedFocus(): void { linkedRowId = null; }
 	/** Retry and Edit server's Save close the row and its pressed button with it: focus goes to that row's header. */

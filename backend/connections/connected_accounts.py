@@ -20,15 +20,17 @@ from connections.app_lifecycle_support import _assert_selected_projects_exist
 from connections.app_reach import AppReach, AppReachError, normalize_reach, reach_reaches_thread
 from connections.google.provider import GOOGLE
 from connections.mailhost.provider import MAILHOST
+from connections.messages.provider import MESSAGES
 from connections.microsoft.provider import MICROSOFT
 from infra import key_store
 from infra.database import write_transaction
 from infra.time import utc_now_iso
 
-PROVIDERS: dict[str, AccountProvider] = {provider.name: provider for provider in (GOOGLE, MICROSOFT, MAILHOST)}
+PROVIDERS: dict[str, AccountProvider] = {provider.name: provider for provider in (GOOGLE, MICROSOFT, MAILHOST, MESSAGES)}
 GOOGLE_PROVIDER = GOOGLE.name
 MICROSOFT_PROVIDER = MICROSOFT.name
 MAILHOST_PROVIDER = MAILHOST.name
+MESSAGES_PROVIDER = MESSAGES.name
 ACCOUNT_STATES = frozenset(("connected", "needs_sign_in", "signed_out"))
 #: Account-only reach mode: the designated CORSIA agent alone. Only the legacy migration writes it.
 ONLY_CORSIA = "corsia"
@@ -289,6 +291,8 @@ def _stored_bundle(account_id: str, *, db: sqlite3.Connection) -> tuple[AccountP
     if found is None:
         return None
     spec, key = found
+    if spec.keyless:
+        return spec, {}
     stored = key_store.resolve_names([key], db=db).get(key)
     if spec.raw_credential_field is not None:
         return (spec, {spec.raw_credential_field: stored}) if stored else None
@@ -305,6 +309,8 @@ def _write_bundle(account_id: str, bundle: dict[str, object], *, db: sqlite3.Con
         if found is None:
             raise ConnectedAccountError("connected account not found")
         raw = found[0].raw_credential_field
+        if found[0].keyless:
+            return
         if raw is None:
             key_store.set_managed_value(found[1], json.dumps(bundle, separators=(",", ":")), db=conn)
         elif bundle.get(raw):

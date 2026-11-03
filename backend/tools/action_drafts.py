@@ -1,4 +1,4 @@
-"""Drafts of outbound actions (email, calendar invites): create, re-record, claim, mark sent.
+"""Drafts of outbound actions (email, calendar invites, texts): create, re-record, claim, mark sent.
 
 The draft's text is a workspace document the person can open. This module records
 the revision (sha256 of the document's bytes) and server time of each save made
@@ -17,7 +17,7 @@ from doceditor.document_scope import revision as document_revision
 from infra.database import write_transaction
 from infra.time import utc_now_iso
 
-KINDS = ("email", "invite")
+KINDS = ("email", "invite", "message")
 
 
 class DraftError(ValueError):

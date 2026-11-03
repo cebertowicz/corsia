@@ -64,13 +64,13 @@ export function isOnlyCorsia(reach: AccountReach): boolean {
 export interface ConnectedAccount {
 	kind: 'account';
 	id: string;
-	provider: 'google' | 'microsoft' | 'mailhost';
+	provider: 'google' | 'microsoft' | 'mailhost' | 'messages';
 	/** The server-owned provider label for row and action copy. */
 	provider_display_name: string;
 	/** Display only: the address can change at the provider. */
 	address: string;
 	/** Stable ids; the screen words them: `mail` is Email, `calendar` Calendar, `files` Files. */
-	capabilities: ('mail' | 'calendar' | 'files')[];
+	capabilities: ('mail' | 'calendar' | 'files' | 'messages')[];
 	/** Server-owned configured permission names, safe to display in the Microsoft IT message. */
 	scopes?: string[];
 	state: AccountState;
@@ -194,7 +194,7 @@ export async function loadConnectedAppsRows(): Promise<{ rows: ConnectedAppsRow[
 	return { rows: [...accounts, ...apps], signInHere: result.sign_in_here ?? false };
 }
 
-/** Starts the matching provider's sign-in for this account; the answer holds the link to open. */
+/** Starts the matching provider's sign-in for this account; the answer holds the link to open, or an empty `url` when the row was turned back on with nothing to open (Messages). */
 export function startAccountSignIn(account: Pick<ConnectedAccount, 'id' | 'provider' | 'provider_display_name'>): Promise<{ url: string; account_id: string }> {
 	return response(`/api/${account.provider}/connect`, {
 		method: 'POST',
