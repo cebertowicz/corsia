@@ -35,7 +35,8 @@ def settle_terminal(
 
     A rejection fails the submission but hands the same worker its revision
     in the same write, so it passes ``settles_worker=False`` and the worker
-    is left be; every other terminal verdict settles the worker too.
+    is left be; every other terminal verdict settles the worker too, and may
+    end the workflow run it belongs to (``plans.run_end``).
     """
     from plans import admission_attempts, user_ask
     from plans.decision_lifecycle import withdraw_for_closed_source
@@ -63,6 +64,9 @@ def settle_terminal(
     )
     if settles_worker:
         retire_settled_worker(connection, node_id, actor_id=actor_id)
+        from plans import run_end
+
+        run_end.record_if_ended(connection, node_id, new_state)
 
 
 def retire_settled_worker(

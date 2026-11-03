@@ -4,10 +4,12 @@ from __future__ import annotations
 from plans import intent_words, service
 
 
-def prepare(db, plan_id: str, params: dict, *, workflow_version: str | None, operation: str, actor):
-    """Validate one add/insert request before it can create a node."""
+def prepare(db, plan_id: str, params: dict, *, workflow_version: str | None, operation: str, actor, run: bool = False):
+    """Validate one add/insert request before it can create a node; ``run`` marks a workflow run's phase."""
     from plans import boundary_fields as fields
 
+    if run:
+        fields.require_task_size(params.get("size"))  # a run is sized once, on its phase
     inherited = intent_words.inherited_node_id(db, plan_id)
     created = fields.node_fields(
         params, workflow_version=workflow_version, include_before=operation == "insert",
