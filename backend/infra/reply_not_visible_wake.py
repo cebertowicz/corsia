@@ -1,8 +1,8 @@
 """The one Focus nudge a person's message gets when a Turn ends with nothing they can see.
 
 Focus shows an agent's words only when it sends them with ``post_update``. When
-a Turn ends while the person's newest message has no such reply after it, the
-agent is woken once, for that message, with the text below; it answers with
+a Turn ends while the person's newest message has no such reply after it, nor an
+answer shown in one of its comment threads, the agent is woken once, for that message, with the text below; it answers with
 ``post_update`` or with exactly ``NO_REPLY``. If the woken Turn does neither,
 its last words become the reply (``for_user``), so the person still sees them.
 
@@ -84,10 +84,13 @@ def _newest_person_input(
     ).fetchone()
 
 
-def _replied_after(db: sqlite3.Connection, thread_id: str, seq: int) -> bool:
+def _replied_after(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) -> bool:
+    """A reply after the message, or an answer shown in one of its comment threads."""
     return db.execute(
-        f"SELECT 1 FROM messages WHERE thread_id=? AND seq>? AND {_FOR_USER} LIMIT 1",
-        (thread_id, seq),
+        f"SELECT 1 FROM messages WHERE thread_id=? AND seq>? AND {_FOR_USER} "
+        "UNION ALL SELECT 1 FROM chat_comment_answers WHERE thread_id=? AND user_message_id=? "
+        "LIMIT 1",
+        (thread_id, person["seq"], thread_id, person["id"]),
     ).fetchone() is not None
 
 
@@ -135,7 +138,7 @@ def _settle_nudged_turn(
     db: sqlite3.Connection, thread_id: str, person: sqlite3.Row, nudge: sqlite3.Row,
 ) -> None:
     """At the nudged Turn's end: NO_REPLY stays hidden; any other last words show."""
-    if _replied_after(db, thread_id, person["seq"]):
+    if _replied_after(db, thread_id, person):
         logger.info("focus.nudge_settled thread={} result=sent", thread_id)
         return
     hidden = _last_hidden(db, thread_id, nudge["seq"])
@@ -193,7 +196,7 @@ def _settle(db: sqlite3.Connection, thread_id: str, outcome: dict) -> bool:
         return False  # The person stopped the Turn their message started.
     if status == "running" and person["active_turn_id"] != ending_turn:
         return False  # A later Turn is answering it; that Turn's end decides.
-    if _replied_after(db, thread_id, person["seq"]):
+    if _replied_after(db, thread_id, person):
         return False
     if _newest_person_input(db, thread_id, "queued") is not None:
         return False  # Their next message starts the next Turn anyway.

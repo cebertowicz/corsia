@@ -368,3 +368,24 @@ async def test_a_failure_in_the_nudge_never_loses_the_turn_end(db, monkeypatch) 
 
     assert _nudges(db) == []
     assert effects is not None
+
+
+@pytest.mark.asyncio
+async def test_answers_shown_in_the_messages_comment_threads_are_a_visible_reply(db) -> None:
+    # A comments-only send answered in tags shows in its threads; nudging would show it twice.
+    target = _say(db, "Earlier agent message", turn="t0", for_user=True)
+    _take_in(db)
+    (order,) = db.execute("SELECT input_order FROM messages WHERE id='m1'").fetchone()
+    cid = f"c{order}.1"
+    db.execute("UPDATE messages SET content='', metadata=json_set(metadata,'$.reply_context',json(?)) "
+               "WHERE id='m1'", (json.dumps({"comments": [{"cid": cid}]}),))
+    db.execute("INSERT INTO chat_comments(thread_id,target_message_id,user_message_id,cid,created_at) "
+               "VALUES (?,?,?,?,?)", (_THREAD, target, "m1", cid, _AT))
+    db.commit()
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
+    assert db.execute("SELECT count(*) FROM chat_comment_answers WHERE user_message_id='m1'").fetchone()[0] == 1
+
+    effects = await _end(db)
+
+    assert _nudges(db) == []
+    assert _THREAD not in effects.drives
