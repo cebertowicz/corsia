@@ -256,9 +256,8 @@
 			onAccountCreated(); token.set(result.token); user.set(result.user ?? { id: result.user_id, name: name.trim() }); connect();
 			accountKnown = true; savedName = name.trim(); savedEmail = email.trim(); password = ''; confirmation = '';
 			await Promise.all([refreshSources(), classifier.read(), loadProviders()]);
-			const choice = sharing; const failed = await saveUsageSharing(choice);
-			if (failed) { accountError = failed; return; }
-			savedSharing = choice; afterAccount();
+			const choice = sharing, failed = await saveUsageSharing(choice);
+			if (failed) { accountError = failed; return; } savedSharing = choice; afterAccount();
 		} catch { accountError = 'Couldn’t create your account. Try again.'; }
 		finally { accountBusy = false; }
 	}
@@ -274,9 +273,8 @@
 		accountBusy = true; accountError = '';
 		try {
 			if (sharing !== savedSharing) {
-				const choice = sharing; const failed = await saveUsageSharing(choice);
-				if (failed) { accountError = failed; return; }
-				savedSharing = choice;
+				const choice = sharing, failed = await saveUsageSharing(choice);
+				if (failed) { accountError = failed; return; } savedSharing = choice;
 				if (unchanged) { afterAccount(); return; }
 			}
 			const { response, result } = await putSetupAccount(changes, name.trim());
