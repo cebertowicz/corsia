@@ -20,7 +20,7 @@ from tools.file_write_completion import (
     save_guided_write_and_announce,
 )
 from tools.filesystem_gate import _resolve_path_for_action
-from tools import pdf_read
+import tools.pdf_read as pdf_read
 from doceditor.live_tools import record_read_base, write_live
 
 _WRITE_SUCCESS = re.compile(

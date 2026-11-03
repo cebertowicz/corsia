@@ -10,7 +10,7 @@ from PIL import Image
 from doc_feedback_helpers import MODEL, seed_thread
 from infra.database import get_db
 from pdf_fixtures import LOCKED_PDF, Page, build, text_pdf
-from tools import pdf_read
+import tools.pdf_read as pdf_read
 from tools.filesystem_rw import ReadFileTool
 
 THREAD = "reader"
