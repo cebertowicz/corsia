@@ -124,7 +124,7 @@ class HeadCheckAggregator:
         self._tasks[key] = asyncio.create_task(self._settle(key, persist=False), name=f"github-head:{repo}:{head_sha}")
 
     async def _settle(self, key: tuple[str, str], persist: bool = True) -> None:
-        cancelled = False
+        keep = False  # cancelled, or settled but not admitted: the kept key re-arms at the next start
         try:
             repo, head_sha = key
             if persist:
@@ -168,17 +168,18 @@ class HeadCheckAggregator:
                     origin="connector", producer="github", event_id=_event_id(repo, head_sha, latest))
             except Exception:
                 log.warning("github-head-checks: could not admit settled head %s@%s", *key, exc_info=True)
+                keep = True
                 return
             if result.refusal is not None:
                 log.info("github-head-checks: intake refused %s@%s code=%s", *key, result.refusal.code)
         except asyncio.CancelledError:
-            cancelled = True  # a newer suite or a shutdown: the kept key stays for the next owner
+            keep = True  # a newer suite or a shutdown
             raise
         finally:
             if self._tasks.get(key) is asyncio.current_task():
                 self._tasks.pop(key, None)
                 self._facts.pop(key, None)
-                if not cancelled:
+                if not keep:
                     try:
                         await pending.forget(*key)
                     except Exception:

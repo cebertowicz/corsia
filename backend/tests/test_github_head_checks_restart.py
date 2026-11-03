@@ -125,7 +125,9 @@ async def test_pr_read_error_is_logged_not_raised(monkeypatch, caplog):
     await asyncio.gather(task)
     assert task.exception() is None
     assert "could not admit settled head o/r@abc" in caplog.text
-    assert agg._tasks == {} and await pending.pending() == []
+    # The key stays, so the next start re-arms the head instead of losing it.
+    assert agg._tasks == {} and [e["head_sha"] for e in await pending.pending()] == ["abc"]
+    await pending.forget("o/r", "abc")
 
 
 @pytest.mark.asyncio
