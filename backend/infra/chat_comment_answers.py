@@ -38,6 +38,13 @@ def visible_answer_content(text: str, placed_cids: list[str]) -> str:
     return result.strip()
 
 
+def strip_answer_tags(text: str | None) -> str | None:
+    """Drop the comment tags that open answer sections, keeping their text."""
+    if not text:
+        return text
+    return _TAGGED.sub(lambda match: match.group(0)[:match.start(1) - match.start(0)], text)
+
+
 def has_comment_cid(metadata: str | None, cid: str) -> bool:
     try:
         value = json.loads(metadata or "{}")

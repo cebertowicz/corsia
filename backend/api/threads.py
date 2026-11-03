@@ -14,6 +14,7 @@ from infra.time import utc_now_iso
 from fastapi import APIRouter, HTTPException
 
 from infra.auth import authenticate
+from infra.chat_comment_answers import strip_answer_tags
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_read
 from infra.packed_rows import fetch_all
@@ -73,6 +74,7 @@ async def list_threads(token: str, archived: int = 0):
             coordination = []
             for row in rows:
                 item = project_thread(reader, row)
+                item['last_message'] = strip_answer_tags(item['last_message'])
                 item['archived'] = 1 if thread_is_explicitly_archived(row) else 0
                 if row['id'] in conductor_ids:
                     item['coordination'] = 'corsia' if row['id'] == agent_id else 'conductor'
