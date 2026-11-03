@@ -49,12 +49,6 @@ def _turn_running(db, names: set[str], exclude_thread: str | None) -> bool:
     ).fetchone() is not None
 
 
-def local_row(db, exclude_thread: str | None = None) -> tuple[str, str] | None:
-    """``(model, server_id)`` of the one ready local oMLX Native row while no other local Turn runs."""
-    row = _ready_row()
-    return None if row is None or _turn_running(db, row[2], exclude_thread) else row[:2]
-
-
 def _local_state(exclude_thread: str | None) -> tuple[tuple[str, str] | None, bool]:
     """``(row, running)``: the ready local row (None when there is not exactly one) and whether another local Turn runs."""
     from infra.database import get_db

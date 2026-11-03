@@ -752,7 +752,7 @@ def _rows(*statuses):
 
 
 def test_local_selection_needs_exactly_one_ready_native_row_and_no_other_local_turn(isolated_db, monkeypatch):
-    from infra.carry_in_capacity import local_row
+    from infra.carry_in_capacity import _local_state
     from infra.database import get_db
 
     target = SimpleNamespace(harness="native", provider="omlx", available=True, catalog_id="m0")
@@ -760,11 +760,11 @@ def test_local_selection_needs_exactly_one_ready_native_row_and_no_other_local_t
     db = get_db()
 
     monkeypatch.setattr("llm.model_status.get_model_status_rows", lambda: _rows("ready", "ready"))
-    assert local_row(db) is None
+    assert _local_state(None) == (None, False)
     monkeypatch.setattr("llm.model_status.get_model_status_rows", lambda: _rows("available"))
-    assert local_row(db) is None
+    assert _local_state(None) == (None, False)
     monkeypatch.setattr("llm.model_status.get_model_status_rows", lambda: _rows("ready"))
-    assert local_row(db) == ("omlx@srv/m0", "srv")
+    assert _local_state(None) == (("omlx@srv/m0", "srv"), False)
 
     owner = make_session(db, prefix="busy")
     db.execute(
@@ -773,13 +773,13 @@ def test_local_selection_needs_exactly_one_ready_native_row_and_no_other_local_t
         (owner,),
     )
     db.commit()
-    assert local_row(db) is None
-    assert local_row(db, exclude_thread=owner) == ("omlx@srv/m0", "srv")  # a sample's own Turn
+    assert _local_state(None) == (("omlx@srv/m0", "srv"), True)
+    assert _local_state(owner) == (("omlx@srv/m0", "srv"), False)  # a sample's own Turn
 
     target.harness = "codex"
     db.execute("DELETE FROM active_turns")
     db.commit()
-    assert local_row(db) is None
+    assert _local_state(None) == (None, False)
 
 
 def _status(active=0, waiting=0, total=7):
