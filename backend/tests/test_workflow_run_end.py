@@ -71,8 +71,12 @@ async def test_a_failed_required_step_closes_the_rest_of_the_run_with_the_reason
     }
     assert {node for _recipient, node in told} >= {review, polish}
     assert run.rows("SELECT archived_at IS NOT NULL AS retired FROM threads WHERE id=?", worker) == [{"retired": 1}]
-    assert failed["run_summary"].startswith("Run ship failed: 0 done, 2 skipped, 1 failed")
-    assert [record["outcome"] for record in _ended(run, reply["node"]["id"])] == ["failed"]
+    assert failed["run_summary"].startswith("Run ship failed: 0 done, 0 skipped, 2 not run, 1 failed")
+    (record,) = _ended(run, reply["node"]["id"])
+    assert record["outcome"] == "failed"
+    assert [(entry["step"], entry["state"], entry["skip_reason"]) for entry in record["steps"]] == [
+        ("draft", "failed", None), ("review", "not_run", None), ("polish", "not_run", None),
+    ]
 
 
 async def test_a_failed_required_step_closes_nested_steps_and_an_optional_failure_ends_nothing(isolated_db, tmp_path, monkeypatch):
@@ -135,7 +139,7 @@ async def test_the_last_close_records_the_run_once_and_the_closing_reply_says_so
     assert _ended(run, phase) == []
     last = await _finish(run, review)
 
-    assert last["run_summary"].startswith("Run ship completed: 2 done, 1 skipped, 0 failed")
+    assert last["run_summary"].startswith("Run ship completed: 2 done, 1 skipped, 0 not run, 0 failed")
     (record,) = _ended(run, phase)
     assert (record["workflow_ref"], record["size"], record["outcome"]) == ("ship", "M", "completed")
     by_step = {entry["step"]: entry for entry in record["steps"]}
@@ -163,7 +167,7 @@ async def test_an_accepted_last_step_records_the_run(isolated_db, tmp_path, monk
     await run.update("request_review", _args(run, draft, evidence="drafted"))
     accepted = await run.update("accept", _args(run, draft, verification_result="passed"))
 
-    assert accepted["run_summary"].startswith("Run ship completed: 1 done, 0 skipped, 0 failed")
+    assert accepted["run_summary"].startswith("Run ship completed: 1 done, 0 skipped, 0 not run, 0 failed")
     assert [record["outcome"] for record in _ended(run, reply["node"]["id"])] == ["completed"]
 
 
@@ -186,6 +190,27 @@ async def test_a_nested_run_records_itself_and_the_outer_record_reads_its_outcom
     nested = {entry["step"]: entry for entry in record["steps"]}["design"]
     assert (nested["state"], nested["inner_workflow_ref"]) == ("done", "inner")
     assert last["run_summary"].startswith("Run outer completed: 2 done")
+
+
+async def test_an_outer_failure_records_a_nested_run_it_cut_short_as_not_run(isolated_db, tmp_path, monkeypatch):
+    outer = {
+        "outer": ("# Outer\n", (
+            "    - {id: brief, required: true, check: Brief exists, difficulty: {default: routine}}\n"
+            "    - {id: design, workflow: inner, required: true, check: Design approved, difficulty: {default: standard}}\n"
+        )),
+        "inner": NESTED["inner"],
+    }
+    run = Run(tmp_path, monkeypatch, outer)
+    reply = await run.start("outer")
+    brief, design = (step["id"] for step in reply["steps"])
+
+    failed = await run.update("fail", _args(run, brief))
+
+    (inner,) = _ended(run, design)
+    assert {entry["state"] for entry in inner["steps"]} == {"not_run"}
+    (record,) = _ended(run, reply["node"]["id"])
+    assert {entry["step"]: entry["state"] for entry in record["steps"]} == {"brief": "failed", "design": "not_run"}
+    assert failed["run_summary"].startswith("Run outer failed: 0 done, 0 skipped, 1 not run, 1 failed")
 
 
 async def test_a_failed_nested_run_reads_failed_in_the_outer_record(isolated_db, tmp_path, monkeypatch):
