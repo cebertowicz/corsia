@@ -175,18 +175,12 @@ async def execute_claimed_batch(
     ws=None,
     dispatch_content: str | None = None,
     after_persist_before_dispatch=None,
-    after_manifest_before_dispatch=None,
-    announce_claim: bool = False,
+    after_manifest_before_dispatch=None, announce_claim: bool = False,
 ) -> SendResult | InboxQueuedInput:
-    """Prepare and hand one claimed FIFO batch to its exact provider.
-
-    ``announce_claim`` marks a Turn with no sender to show it working (one
-    claimed by a terminal, a restart or a lifted hold): it is announced once, here.
-    """
+    """Prepare and hand one claimed FIFO batch; ``announce_claim``: no sender shows it working."""
     del dispatch_content
     await _broadcast_batch(batch)
-    if announce_claim:
-        await announce_successor_turn(batch)
+    await (announce_successor_turn(batch) if announce_claim else _noop())
     evidence = ProviderWriteEvidence()
     try:
         return await _execute_claimed_batch(
@@ -307,11 +301,8 @@ async def drive_claimed_batch(
     if isinstance(resolved, InboxQueuedInput):
         return resolved
     return await execute_claimed_batch(
-        batch,
-        thread_row=thread_row,
-        target=resolved,
-        user={"id": str(thread_row.get("user_id") or "")},
-        announce_claim=True,
+        batch, thread_row=thread_row, target=resolved,
+        user={"id": str(thread_row.get("user_id") or "")}, announce_claim=True,
     )
 
 
