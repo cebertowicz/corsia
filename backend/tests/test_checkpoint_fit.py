@@ -287,11 +287,12 @@ def test_native_projects_arguments_only_for_checkpoint_tail(
         thread_id="thread-1",
         turn_model="native/test",
         fresh_context=False,
-        replay_selection=SimpleNamespace(mode=mode, tail=object()),
+        replay_selection=SimpleNamespace(mode=mode, tail=object(), tool_result_budget_tokens=None),
     )
 
     expected = HARNESS_TOOL_RESULT_BUDGET_TOKENS if mode == "checkpoint_tail" else None
     assert captured["tool_argument_budget_tokens"] == expected
+    assert captured["tool_result_budget_tokens"] == expected
 
 
 @pytest.mark.parametrize("mode", ("exact", "checkpoint_tail"))
