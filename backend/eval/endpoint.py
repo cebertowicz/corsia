@@ -206,15 +206,30 @@ async def run_eval_turn(
         return None, EvalTurnFailure("handoff", f"Eval turn errored: {_failure_detail(exc)}")
     if isinstance(send_result, InboxQueuedInput) or send_result.turn_task is None:
         return None, EvalTurnFailure("handoff", "Eval turn was not handed to a Native runtime")
-    try:
-        await asyncio.wait_for(send_result.turn_task, timeout=timeout_seconds)
-    except asyncio.TimeoutError:
-        return None, EvalTurnFailure("timeout", f"Eval turn timed out after {timeout_seconds}s")
-    except Exception as exc:
-        return None, EvalTurnFailure("provider", f"Eval turn errored: {_failure_detail(exc)}")
+    failure = await _await_turn(send_result.turn_task, timeout_seconds)
+    if failure is not None:
+        return None, failure
     if not send_result.turn_id:
         return None, EvalTurnFailure("handoff", "Eval turn completed without a Turn identity")
     return send_result.turn_id, None
+
+
+async def _await_turn(turn_task, timeout_seconds: float) -> EvalTurnFailure | None:
+    """Wait for the Turn; a failure when it errored or its own deadline cancelled it.
+
+    The deadline cancels the Turn, which handles the cancel and ends normally, so no
+    TimeoutError reaches here: ask the deadline itself whether it fired.
+    """
+    deadline = asyncio.timeout(timeout_seconds)
+    try:
+        async with deadline:
+            await turn_task
+    except Exception as exc:
+        if not deadline.expired():
+            return EvalTurnFailure("provider", f"Eval turn errored: {_failure_detail(exc)}")
+    if deadline.expired():
+        return EvalTurnFailure("timeout", f"Eval turn timed out after {timeout_seconds}s")
+    return None
 
 
 def _failure_detail(error: BaseException) -> str:
