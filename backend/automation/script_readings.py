@@ -66,6 +66,8 @@ class RunReport:
     # (workflow_ref, workflow_version) the runner resolved before settling; None when the
     # schedule names no workflow or its owner no longer owns it.
     workflow_stamp: tuple[str, str | None] | None = None
+    # Why the run had no GitHub login (``ScriptRun.github_locked``); a rule run's explain shows it.
+    github_locked: str | None = None
 
 
 def classify(series: store.Series, value: float) -> str:
