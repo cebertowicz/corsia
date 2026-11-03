@@ -111,7 +111,7 @@ With the local setup, no: it listens only on this machine. A server setup, or an
 No. More than one account can exist, but their agents run as the same user in the same workspace and can read each other's files and conversations. One install per person. See [Accounts and access](accounts-and-access.md#more-than-one-account).
 
 **29. How do I report a vulnerability?**
-Read [`SECURITY.md`](../../SECURITY.md) first.
+Privately, through GitHub's [private report form](https://github.com/cebertowicz/corsia/security/advisories/new), never in a public issue. [`SECURITY.md`](../../SECURITY.md) says what to include.
 
 **30. Has this had a security audit?**
 No. Nobody outside the project has audited or tested it.
