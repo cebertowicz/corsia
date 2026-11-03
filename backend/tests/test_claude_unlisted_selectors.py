@@ -64,8 +64,8 @@ def _rows(db) -> dict[str, dict]:
     return {row["provider_model_id"]: row for row in project_stored_rows(stored, db=db)}
 
 
-async def _refresh(db, monkeypatch, listing, accepted: dict[str, str]):
-    """Run one discovery; ``accepted`` maps selector -> model the CLI reports."""
+async def _refresh(db, monkeypatch, listing, accepted: dict[str, str], window: int = 1_000_000):
+    """Run one discovery; ``accepted`` maps selector -> model the CLI reports, at ``window``."""
     import connections.harness_models as harness_models
 
     probed: list[str] = []
@@ -79,8 +79,7 @@ async def _refresh(db, monkeypatch, listing, accepted: dict[str, str]):
         probed.append(selector)
         if selector not in accepted:
             raise RuntimeError(f"Claude Code rejected selector {selector}")
-        return {"model": accepted[selector], "maxTokens": 1_000_000,
-                "rawMaxTokens": 1_000_000}
+        return {"model": accepted[selector], "maxTokens": window, "rawMaxTokens": window}
 
     async def _version(_binary, env=None):
         return "2.1.283"
@@ -180,6 +179,19 @@ async def test_a_rejected_1m_variant_leaves_no_row(connections_db, monkeypatch, 
 
     assert "opus[1m]" not in _rows(connections_db)
     assert "Claude Code does not list opus[1m], and probing it failed" in caplog.text
+    with pytest.raises(ModelUnavailableError):
+        resolve_harness_selector("claude-code", "opus[1m]", db=connections_db)
+
+
+@pytest.mark.asyncio
+async def test_a_1m_variant_the_cli_runs_smaller_leaves_no_row(connections_db, monkeypatch, caplog):
+    """The CLI accepts ``opus[1m]`` but reports the plain model at 200k: a main-base review refuses."""
+    from llm.resolution import ModelUnavailableError, resolve_harness_selector
+
+    await _refresh(connections_db, monkeypatch, NEW_LIST, {"opus[1m]": "claude-opus-5-5"}, window=200_000)
+
+    assert "opus[1m]" not in _rows(connections_db)
+    assert "reports a 200000-token window for it, not 1M" in caplog.text
     with pytest.raises(ModelUnavailableError):
         resolve_harness_selector("claude-code", "opus[1m]", db=connections_db)
 
