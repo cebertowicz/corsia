@@ -266,6 +266,9 @@ def _git_config(account: AgentAccountView) -> list[tuple[str, str]]:
         ("credential.https://github.com.helper", helper),
         ("url.https://github.com/.insteadOf", "git@github.com:"),
         ("url.https://github.com/.insteadOf", "ssh://git@github.com/"),
+        # Keeps a push to an HTTPS GitHub URL on HTTPS when the person's own insteadOf rewrites
+        # it to SSH: no other push rule matches, so this one is used for pushes.
+        ("url.https://github.com/.pushInsteadOf", "https://github.com/"),
         ("user.name", name),
         ("user.email", email),
         ("user.useConfigOnly", "true"),
@@ -274,18 +277,31 @@ def _git_config(account: AgentAccountView) -> list[tuple[str, str]]:
     return entries
 
 
+# The SSH command Git runs in a shell with an agents' account. A push to GitHub over SSH
+# (which only the person's own URL rewrite can produce here) is refused; every other SSH
+# use runs the person's own ``core.sshCommand``, or ``ssh``, exactly as before.
+SSH_PUSH_GUARD = (
+    'f() { h=; p=; for a; do case $a in github.com|*@github.com|ssh.github.com|*@ssh.github.com) h=1;; '
+    'git-receive-pack*) p=1;; esac; done; '
+    'if [ -n "$h" ] && [ -n "$p" ]; then echo "CORSIA: agent shells push to GitHub over HTTPS as the '
+    "agents' account, and a URL rewrite in your Git config turned this push into SSH, so it was "
+    'refused. Push with the rewrite off, for example: GIT_CONFIG_GLOBAL=/dev/null git push" >&2; exit 128; fi; '
+    'c=$(git config --get core.sshCommand); eval "exec ${c:-ssh} \\"\\$@\\""; }; f'
+)
+
+
 def shell_env(account: AgentAccountView) -> dict[str, str]:
     """An agent shell's GitHub identity: nothing without an account, the bot's once ready, else locked.
 
     Locked means ``gh`` points at an absent home, Git has no credential helper and an
     empty identity, and SSH remotes go over HTTPS, so a push fails rather than falls
-    back to the person's own login.
+    back to the person's own login. In every state a GitHub push over SSH is refused.
     """
     if account.absent:
         return {}
     entries = _git_config(account)
     env = {"GH_CONFIG_DIR": account.home if account.ready and account.home else LOCKED_HOME,
-           "GIT_CONFIG_COUNT": str(len(entries))}
+           "GIT_CONFIG_COUNT": str(len(entries)), "GIT_SSH_COMMAND": SSH_PUSH_GUARD}
     for index, (key, value) in enumerate(entries):
         env[f"GIT_CONFIG_KEY_{index}"] = key
         env[f"GIT_CONFIG_VALUE_{index}"] = value

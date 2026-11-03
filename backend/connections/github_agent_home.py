@@ -19,9 +19,9 @@ TOKEN_NAMES = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERP
 HOST_IDENTITY_PREFIXES = ("GIT_AUTHOR_", "GIT_COMMITTER_", "GIT_CONFIG_KEY_", "GIT_CONFIG_VALUE_")
 HOST_IDENTITY_NAMES = frozenset({"GH_CONFIG_DIR", "GH_HOST", "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS"})
 # Git configuration an agent shell gets while the agents' account exists, in this order.
-GIT_CONFIG_SLOTS = 7
+GIT_CONFIG_SLOTS = 8
 # Every name an agent shell's GitHub identity uses; Safehouse passes only listed names.
-BOT_ENV_NAMES = ("GH_CONFIG_DIR", "GIT_CONFIG_COUNT",
+BOT_ENV_NAMES = ("GH_CONFIG_DIR", "GIT_CONFIG_COUNT", "GIT_SSH_COMMAND",
                  *(f"GIT_CONFIG_{part}_{index}" for index in range(GIT_CONFIG_SLOTS) for part in ("KEY", "VALUE")))
 # Where a locked shell's ``gh`` looks: absent and unwritable, so every ``gh`` command fails.
 LOCKED_HOME = "/var/empty/corsia-gh-agent-locked"
