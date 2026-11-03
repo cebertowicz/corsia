@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
 from pathlib import Path
 
 
@@ -85,16 +84,3 @@ def denied_paths_in(text: str) -> tuple[Path, ...]:
         if candidate.startswith("/"):
             found.append(Path(candidate))
     return tuple(dict.fromkeys(found))
-
-
-def skip_credential_roots(root: Path, skip_directory: Callable[[Path], bool]) -> Callable[[Path], bool]:
-    """Extend ``skip_directory`` to refuse credential roots beneath ``root``; fails closed."""
-    from tools.host_path_policy import current_protected_host_path_policy
-
-    base = canonical(root)
-    pruned = {
-        canonical(path).relative_to(base)
-        for path in current_protected_host_path_policy().credential_roots
-        if canonical(path).is_relative_to(base) and canonical(path) != base
-    }
-    return lambda relative: relative in pruned or skip_directory(relative)

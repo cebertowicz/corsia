@@ -105,11 +105,17 @@ def test_cloud_corsia_agent_is_fenced_from_local_only_projects_and_local_one_fro
     assert fence_for_thread(CORSIA_AGENT).roots == ()
 
 
-def test_no_caller_or_unknown_thread_is_unfenced(world):
-    from tools.project_fence import fence_for_thread
+def test_no_caller_is_unfenced_and_an_unknown_thread_is_fenced_from_every_project(world, monkeypatch):
+    from tools import project_fence
 
-    assert fence_for_thread(None).roots == ()
-    assert fence_for_thread(str(uuid.uuid4())).roots == ()
+    events = []
+    monkeypatch.setattr(project_fence, "_event", lambda action, *_a, **props: events.append((action, props)))
+    assert project_fence.fence_for_thread(None).roots == ()
+    projects = world.workspace / "projects"
+    assert _paths(project_fence.fence_for_thread(str(uuid.uuid4()))) == {
+        projects / "alpha", projects / "beta", projects / "secret", projects / "legacy",
+    }
+    assert events == [("failed_closed", {"reason": "caller_unknown"})]
 
 
 def test_fence_follows_the_switch_on_the_next_call(world):
@@ -289,7 +295,7 @@ def test_safehouse_protected_shell_cannot_read_or_write_a_fenced_project(world, 
 
     control = run(f"/bin/cat {own / 'own.txt'} && /usr/bin/touch {own / 'made.txt'}")
     if control.returncode != 0:
-        pytest.skip(f"the own-project control could not run under Safehouse: {control.stderr.strip()[:300]}")
+        (pytest.fail if required else pytest.skip)(f"the own-project control could not run under Safehouse: {control.stderr.strip()[:300]}")
     assert control.stdout == "own-marker" and (own / "made.txt").exists()
 
     read = run(f"/bin/cat {fenced / 'other.txt'}")
@@ -374,6 +380,54 @@ def test_a_shared_repo_is_fenced_whole_from_a_workspace_agent_and_a_repo_inside_
     paths = _paths(fence_for_thread(WORKSPACE_AGENT))
     assert shared in paths and inside not in paths
     assert not [p for p in paths if ".worktrees" in p.parts]
+
+
+def test_a_malformed_repo_row_still_fences_and_never_shares(world):
+    from tools.project_fence import fence_for_thread
+
+    fenced, unshared = world.workspace / "repos" / "bad-beta", world.workspace / "repos" / "bad-alpha"
+    _git_repo(fenced)
+    _git_repo(unshared, f"{BETA_AGENT}-fix")
+    _register(world, "id-beta", fenced)
+    _register(world, "id-beta", unshared)
+    _register(world, "id-alpha", unshared)
+    # A path that isn't in canonical form makes either row an invalid binding.
+    world.db.execute("UPDATE project_repo_policies SET repo_path = repo_path || '/' WHERE repo_path = ?", (str(fenced),))
+    world.db.execute(
+        "UPDATE project_repo_policies SET repo_path = repo_path || '/' WHERE project_id = 'id-alpha' AND repo_path = ?",
+        (str(unshared),),
+    )
+    world.db.commit()
+    paths = _paths(fence_for_thread(ALPHA_AGENT))
+    assert {fenced, unshared} <= paths
+
+
+def test_a_shared_repo_whose_worktrees_cannot_be_listed_fences_all_of_them(world, monkeypatch):
+    from tools import project_fence, sandbox_config
+
+    repo = world.workspace / "repos" / "shared"
+    _git_repo(repo, f"{ALPHA_AGENT}-feature", f"{BETA_AGENT}-fix")
+    _register(world, "id-alpha", repo)
+    _register(world, "id-beta", repo)
+
+    def unlisted(_repo, *, strict=False):
+        raise PermissionError("listing refused")
+
+    events = []
+    monkeypatch.setattr(sandbox_config, "list_repo_worktrees", unlisted)
+    monkeypatch.setattr(project_fence, "_event", lambda action, *_a, **props: events.append((action, props)))
+    paths = _paths(project_fence.fence_for_thread(ALPHA_AGENT))
+    assert repo / ".worktrees" in paths and repo not in paths
+    assert ("failed_closed", {"reason": "worktrees_unlisted"}) in events
+
+
+def test_a_fence_refusal_is_counted(world, monkeypatch):
+    from tools import project_fence
+
+    events = []
+    monkeypatch.setattr(project_fence, "_event", lambda action, caller, **props: events.append((action, caller, props)))
+    _policy(ALPHA_AGENT).denial_guidance_for_paths([world.workspace / "projects" / "secret" / "notes.md"])
+    assert events == [("refused", ALPHA_AGENT, {"local_only": True})]
 
 
 async def _register_as_alpha(world, monkeypatch, repo: Path) -> str:

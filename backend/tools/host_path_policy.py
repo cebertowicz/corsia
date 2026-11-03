@@ -259,7 +259,7 @@ class ProtectedHostPathPolicy:
         return None
 
     def hard_floor_sandbox_rules(self) -> str:
-        """Render permanent credential and browser boundaries, including under a lease."""
+        """Render what holds under a lease: credentials, browser, the caller's Local only fence, workspace Git."""
         floor = hard_floor_rules(self.credential_roots, self.home, sandbox_literal)
         return "\n".join([floor, *self.fence.local_only_rules(sandbox_literal), *workspace_git_rules(workspace_git_paths(self.workspace))])
 

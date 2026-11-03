@@ -3,12 +3,14 @@
 The set is computed for the calling thread on every call and never cached, so a
 change to a project's Local only switch or an agent's scope takes effect on the
 next tool call. The person's own app session is never fenced: only agent
-identities reach this module.
+identities reach this module. Every lookup that fails fences more, never less, and
+says so in a ``project_fence`` product event.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +18,17 @@ from pathlib import Path
 from tools.host_path_resolution import canonical, contains
 
 log = logging.getLogger(__name__)
+
+
+def _event(action: str, thread_id: str | None = None, **properties) -> None:
+    from infra.product_events import emit_product_event
+
+    emit_product_event("project_fence", action, thread_id=thread_id, properties=properties)
+
+
+def _failed_closed(reason: str, subject: object) -> None:
+    log.warning("Project fence failed closed (%s): %s", reason, subject)
+    _event("failed_closed", reason=reason)
 
 _ORDINARY_COPY = (
     "`{path}` is in project `{name}`, outside your scope. "
@@ -47,6 +60,7 @@ class Fence:
     """The fenced roots of one caller."""
 
     roots: tuple[FencedRoot, ...] = ()
+    caller: str | None = None
 
     def _rules(self, local_only: bool, quote: Callable[[Path], str]) -> list[str]:
         return [
@@ -74,6 +88,7 @@ class Fence:
         root = next((root for root in matches if root.local_only), matches[0] if matches else None)
         if root is None:
             return None
+        _event("refused", self.caller, local_only=root.local_only)
         if not root.local_only:
             return _ORDINARY_COPY.format(path=path, name=root.project)
         who = f" (`{root.conductor}`)" if root.conductor else ""
@@ -126,7 +141,7 @@ def _folder_roots(workspace: Path, db, fences: _Fences, rows, cloud_off) -> list
         if root is not None:
             by_root[canonical(root)] = row
         elif row["id"] in cloud_off:
-            log.warning("Local only project %s has no resolvable folder; fencing unclaimed folders as Local only", row["id"])
+            _failed_closed("local_only_folder_unresolved", row["id"])
             lost_local_only = True
     projects_root = workspace / "projects"
     roots = []
@@ -141,15 +156,20 @@ def _folder_roots(workspace: Path, db, fences: _Fences, rows, cloud_off) -> list
     return roots
 
 
-def _attributed_worktrees(db, repo: Path) -> list[tuple[Path, str | None]]:
-    """Each verified worktree of ``repo`` with the project of the thread that made it.
+def _attributed_worktrees(db, repo: Path) -> list[tuple[Path, str | None]] | None:
+    """Each verified worktree of ``repo`` with the project of the thread that made it, or None.
 
     ``worktree_create`` names a worktree ``<thread id>-<descriptor>``, so the thread
-    is whichever hyphen-delimited prefix of the name is a thread id.
+    is whichever hyphen-delimited prefix of the name is a thread id. None means the
+    worktrees could not be listed.
     """
     from tools.sandbox_config import list_repo_worktrees
 
-    worktrees = list_repo_worktrees(repo)
+    try:
+        worktrees = list_repo_worktrees(repo, strict=True)
+    except OSError as exc:
+        _failed_closed("worktrees_unlisted", exc)
+        return None
     prefixes = {
         tree: [tree.name[:i] for i, char in enumerate(tree.name) if char == "-"] or [tree.name]
         for tree in worktrees
@@ -166,37 +186,50 @@ def _attributed_worktrees(db, repo: Path) -> list[tuple[Path, str | None]]:
     ]
 
 
+def _registered_paths(db) -> dict[str, list[Path]]:
+    """Every registered repo folder by project, valid binding or not, so a bad row still fences."""
+    by_project: dict[str, list[Path]] = {}
+    for row in db.execute("SELECT project_id, repo_path FROM project_repo_policies"):
+        if isinstance(path := row["repo_path"], str) and Path(path).is_absolute():
+            by_project.setdefault(row["project_id"], []).append(Path(os.path.normpath(path)))
+        else:
+            _failed_closed("repo_path_unreadable", row["project_id"])
+    return by_project
+
+
 def _repo_roots(db, rows, fences: _Fences, cloud_off) -> list[FencedRoot]:
     """Fenced projects' registered repos: the canonical root, or only their own worktrees when shared.
 
-    A linked worktree's ``.git`` points into ``<canonical>/.git/worktrees/``, so a root a
-    project the caller may reach also registers is never fenced.
+    A linked worktree's ``.git`` points into ``<canonical>/.git/worktrees/``, so a root
+    the caller's reachable projects hold a valid binding to is shared and never fenced:
+    its history and refs are the same repo for both. Only a valid binding shares a root,
+    and any registered path fences one.
     """
     from infra.project_repo_policy import repo_policies_by_project
 
-    by_project = repo_policies_by_project(db=db)
-    fenced: dict = {}
-    shared: set[Path] = set()
-    for row in rows:
-        policies = by_project.get(row["id"], [])
-        if fences(row["id"], row["id"] in cloud_off):
-            fenced[row["id"]] = (row, policies)
-        else:
-            shared.update(canonical(policy.path) for policy in policies)
+    valid = repo_policies_by_project(db=db)
+    registered = _registered_paths(db)
+    fenced = [row for row in rows if fences(row["id"], row["id"] in cloud_off)]
+    fenced_ids = {row["id"] for row in fenced}
+    shared = {
+        canonical(policy.path)
+        for row in rows if row["id"] not in fenced_ids
+        for policy in valid.get(row["id"], [])
+    }
     roots = []
-    attributed: dict[Path, list[tuple[Path, str | None]]] = {}
-    for project_id, (row, policies) in fenced.items():
-        local_only = project_id in cloud_off
-        for policy in policies:
-            if (key := canonical(policy.path)) not in shared:
-                roots.append(FencedRoot(policy.path, row["name"], local_only, row["conductor_thread_id"]))
+    attributed: dict[Path, list[tuple[Path, str | None]] | None] = {}
+    for row in fenced:
+        project = (row["name"], row["id"] in cloud_off, row["conductor_thread_id"])
+        for path in registered.get(row["id"], []):
+            if (key := canonical(path)) not in shared:
+                roots.append(FencedRoot(path, *project))
                 continue
             if key not in attributed:
-                attributed[key] = _attributed_worktrees(db, policy.path)
-            roots.extend(
-                FencedRoot(tree, row["name"], local_only, row["conductor_thread_id"])
-                for tree, owner in attributed[key] if owner == project_id
-            )
+                attributed[key] = _attributed_worktrees(db, path)
+            if (trees := attributed[key]) is None:
+                roots.append(FencedRoot(path / ".worktrees", *project))
+                continue
+            roots.extend(FencedRoot(tree, *project) for tree, owner in trees if owner == row["id"])
     return roots
 
 
@@ -210,7 +243,11 @@ def _project_roots(workspace: Path, db, fences: _Fences) -> list[FencedRoot]:
 
 
 def fence_for_thread(thread_id: str | None, *, db=None) -> Fence:
-    """Compute the caller's fenced roots from the live workspace and database."""
+    """Compute the caller's fenced roots from the live workspace and database.
+
+    No thread is the person's own session. A thread id with no row is fenced from
+    every project, as a workspace agent is.
+    """
     if not thread_id:
         return Fence()
     from infra.config import WORKSPACE
@@ -221,11 +258,12 @@ def fence_for_thread(thread_id: str | None, *, db=None) -> Fence:
     workspace = Path(WORKSPACE)
     thread = db.execute("SELECT project_id, local_only FROM threads WHERE id = ?", (thread_id,)).fetchone()
     if thread is None:
-        return Fence()
+        _failed_closed("caller_unknown", thread_id)
+        return Fence(_drop_nested(_project_roots(workspace, db, lambda _id, _local_only: True)), thread_id)
     corsia_agent = get_corsia_agent(db=db)
     if thread_id == corsia_agent:
         roots = [] if thread["local_only"] else _project_roots(workspace, db, lambda _id, local_only: local_only)
-        return Fence(_drop_nested(roots))
+        return Fence(_drop_nested(roots), thread_id)
     own = thread["project_id"]
     roots = _project_roots(workspace, db, lambda project_id, _local_only: project_id != own or own is None)
     if own:
@@ -234,7 +272,7 @@ def fence_for_thread(thread_id: str | None, *, db=None) -> Fence:
             (corsia_agent, thread_id),
         )
         roots.extend(FencedRoot(workspace / ".threads" / row["id"]) for row in agents)
-    return Fence(_drop_nested(roots))
+    return Fence(_drop_nested(roots), thread_id)
 
 
 def fence_for_local_mcp(*, db=None) -> Fence:
