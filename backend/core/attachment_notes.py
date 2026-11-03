@@ -12,45 +12,55 @@ image keeps its bare note.
 
 from __future__ import annotations
 
-import logging
-import sqlite3
 from pathlib import Path
 
-from core.workspace_layout import uploads_root_for_path
+from core.workspace_layout import (
+    resolve_project_root,
+    resolve_thread_uploads_root,
+    resolve_workspace_root,
+)
+from infra import config
 from infra.config import DOCUMENT_MIME_TYPES
 
-log = logging.getLogger(__name__)
 
+def _saved_path(attachment: dict, thread_id: str, db=None) -> str | None:
+    """Return the registered upload's path under the thread's scope root, or ``None``.
 
-def _saved_path(file_id: object, thread_id: str, db=None) -> str | None:
-    """Return the registered upload's path under its scope root, or ``None``.
-
-    Never built from the filename: the path comes from the upload registry and
-    must sit in this thread's own uploads root, so a legacy upload, a missing
-    file or another thread's file yields no path.
+    The upload route's and image projection's rule: the registry names this
+    thread as the upload's parent, and the file sits in this thread's uploads
+    root under its current scope. A legacy, missing, renamed or other thread's
+    upload yields no path; a registry or layout failure raises like any other
+    read while the input renders.
     """
+    file_id = attachment.get("file_id")
     if not isinstance(file_id, str) or not file_id:
         return None
+    from infra.queries import get_thread
     from registry.registration_events import resolve_upload
 
-    try:
-        artifact = resolve_upload(file_id, db=db)
-        raw = artifact.get("path") if artifact else None
-        if not raw:
-            return None
-        path = Path(raw).resolve(strict=False)
-        uploads = uploads_root_for_path(path)
-        if uploads is None or uploads.parent.name != thread_id or not path.is_file():
-            return None
-        return path.relative_to(uploads.parent.parent.parent).as_posix()
-    except (sqlite3.Error, OSError, ValueError, TypeError) as error:
-        # Never raise into Turn construction, but an unexpected failure is not a
-        # missing upload: say so, without the path or filename.
-        log.warning(
-            "attachment path lookup failed file_id=%s error=%s",
-            file_id, type(error).__name__,
-        )
+    artifact = resolve_upload(file_id, db=db)
+    if not artifact or artifact.get("parent_thread_id") != thread_id or not artifact.get("path"):
         return None
+    thread = get_thread(thread_id, db=db)
+    if thread is None:
+        return None
+    scope = (
+        resolve_project_root(config.WORKSPACE, thread["project_id"], db=db)
+        if thread["project_id"]
+        else resolve_workspace_root(config.WORKSPACE)
+    )
+    if scope is None:
+        return None
+    scope = scope.resolve(strict=False)
+    uploads = resolve_thread_uploads_root(scope, thread_id).resolve(strict=False)
+    path = Path(artifact["path"]).resolve(strict=False)
+    if (
+        path.name != attachment.get("filename")
+        or not path.is_relative_to(uploads)
+        or not path.is_file()
+    ):
+        return None
+    return path.relative_to(scope).as_posix()
 
 
 def _mime(attachment: dict) -> str:
@@ -70,7 +80,7 @@ def attachment_notes(attachments: list | None, thread_id: str, db=None) -> str:
             lines.append(f"[Image attached: {name}]")
             continue
         label = "Document" if mime in DOCUMENT_MIME_TYPES else "File"
-        saved = _saved_path(attachment.get("file_id"), thread_id, db)
+        saved = _saved_path(attachment, thread_id, db)
         where = f", saved at {saved}" if saved else ""
         lines.append(f"[{label} attached: {name}{where}]")
     return "\n".join(lines)

@@ -16,6 +16,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from core.attachment_notes import attachment_notes, with_attachment_notes  # noqa: E402
+from shared_send_fixtures import _insert_session  # noqa: E402
 
 
 def _register(tmp_path, monkeypatch, thread_id, file_id, name, *, scope=None):
@@ -32,6 +33,26 @@ def _register(tmp_path, monkeypatch, thread_id, file_id, name, *, scope=None):
         parent_thread_id=thread_id, path=str(path),
     )
     return path
+
+
+def _project(root, project_id="p1", name="demo"):
+    from infra.database import get_db
+
+    folder = root / "projects" / name
+    folder.mkdir(parents=True)
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO projects (id, name, created_at, updated_at) VALUES (?, ?, 't', 't')",
+            (project_id, name),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return folder
+
+
+_PDF = {"file_id": "f1", "filename": "spec.pdf", "mime_type": "application/pdf"}
 
 
 def test_recognized_types_still_classify(isolated_db):
@@ -57,12 +78,13 @@ def test_a_registered_upload_names_its_path_from_the_workspace_root(
     isolated_db, tmp_path, monkeypatch
 ):
     root = tmp_path.resolve()
+    _insert_session("t1")
     _register(root, monkeypatch, "t1", "f1", "spec.pdf")
     _register(root, monkeypatch, "t1", "f2", "blob.bin")
 
     notes = attachment_notes(
         [
-            {"file_id": "f1", "filename": "spec.pdf", "mime_type": "application/pdf"},
+            _PDF,
             {"file_id": "f2", "filename": "blob.bin",
              "mime_type": "application/octet-stream"},
         ],
@@ -79,26 +101,32 @@ def test_a_project_thread_upload_is_relative_to_its_project_root(
     isolated_db, tmp_path, monkeypatch
 ):
     root = tmp_path.resolve()
-    project = root / "projects" / "demo"
-    project.mkdir(parents=True)
+    project = _project(root)
+    _insert_session("t1", project_id="p1")
     _register(root, monkeypatch, "t1", "f1", "spec.pdf", scope=project)
 
-    notes = attachment_notes(
-        [{"file_id": "f1", "filename": "spec.pdf", "mime_type": "application/pdf"}],
-        "t1",
-    )
+    notes = attachment_notes([_PDF], "t1")
 
     assert notes == (
         "[Document attached: spec.pdf, saved at .threads/t1/uploads/f1/spec.pdf]"
     )
 
 
+def test_an_upload_outside_the_threads_current_scope_has_no_path(
+    isolated_db, tmp_path, monkeypatch
+):
+    """The upload route and image projection refuse it, so the note names no path."""
+    root = tmp_path.resolve()
+    _project(root)
+    _insert_session("t1", project_id="p1")
+    _register(root, monkeypatch, "t1", "f1", "spec.pdf")  # workspace root, not p1's
+
+    assert attachment_notes([_PDF], "t1") == "[Document attached: spec.pdf]"
+
+
 @pytest.mark.parametrize("file_id", [None, 7, "", "never-registered"])
 def test_an_unregistered_upload_keeps_the_note_without_a_path(isolated_db, file_id):
-    notes = attachment_notes(
-        [{"file_id": file_id, "filename": "spec.pdf", "mime_type": "application/pdf"}],
-        "t1",
-    )
+    notes = attachment_notes([{**_PDF, "file_id": file_id}], "t1")
 
     assert notes == "[Document attached: spec.pdf]"
 
@@ -110,6 +138,7 @@ def test_a_legacy_upload_outside_the_thread_tree_has_no_path(
     from registry import models
 
     monkeypatch.setattr(config, "WORKSPACE", tmp_path)
+    _insert_session("t1")
     legacy = tmp_path.resolve() / "uploads" / "steve" / "f1" / "spec.pdf"
     legacy.parent.mkdir(parents=True)
     legacy.write_bytes(b"x")
@@ -118,26 +147,25 @@ def test_a_legacy_upload_outside_the_thread_tree_has_no_path(
         parent_thread_id="t1", path=str(legacy),
     )
 
-    notes = attachment_notes(
-        [{"file_id": "f1", "filename": "spec.pdf", "mime_type": "application/pdf"}],
-        "t1",
-    )
-
-    assert notes == "[Document attached: spec.pdf]"
+    assert attachment_notes([_PDF], "t1") == "[Document attached: spec.pdf]"
 
 
-def test_a_missing_file_or_another_threads_upload_has_no_path(
+def test_a_missing_renamed_or_another_threads_upload_has_no_path(
     isolated_db, tmp_path, monkeypatch
 ):
     root = tmp_path.resolve()
+    _insert_session("t1")
+    _insert_session("t2")
     gone = _register(root, monkeypatch, "t1", "f1", "spec.pdf")
     gone.unlink()
     _register(root, monkeypatch, "t2", "f2", "other.pdf")
+    _register(root, monkeypatch, "t1", "f3", "real.pdf")
 
     notes = attachment_notes(
         [
-            {"file_id": "f1", "filename": "spec.pdf", "mime_type": "application/pdf"},
+            _PDF,
             {"file_id": "f2", "filename": "other.pdf", "mime_type": "application/pdf"},
+            {"file_id": "f3", "filename": "claimed.pdf", "mime_type": "application/pdf"},
         ],
         "t1",
     )
@@ -145,12 +173,22 @@ def test_a_missing_file_or_another_threads_upload_has_no_path(
     assert notes.splitlines() == [
         "[Document attached: spec.pdf]",
         "[Document attached: other.pdf]",
+        "[Document attached: claimed.pdf]",
     ]
+
+
+def test_an_upload_of_a_thread_that_no_longer_exists_has_no_path(
+    isolated_db, tmp_path, monkeypatch
+):
+    _register(tmp_path.resolve(), monkeypatch, "t1", "f1", "spec.pdf")
+
+    assert attachment_notes([_PDF], "t1") == "[Document attached: spec.pdf]"
 
 
 def test_an_image_keeps_its_bare_note_even_when_registered(
     isolated_db, tmp_path, monkeypatch
 ):
+    _insert_session("t1")
     _register(tmp_path.resolve(), monkeypatch, "t1", "f1", "photo.png")
 
     notes = attachment_notes(
@@ -200,40 +238,19 @@ def test_notes_follow_the_input_after_a_blank_line():
     assert with_attachment_notes("plain", "") == "plain"
 
 
-def test_a_registry_error_logs_once_and_still_gives_the_bare_note(
-    isolated_db, monkeypatch, caplog,
+def test_a_registry_error_fails_the_render_instead_of_dropping_the_path(
+    isolated_db, monkeypatch,
 ):
-    import logging
+    """A failed lookup is not a missing upload: it raises like any other render read."""
     import sqlite3
 
     def broken(file_id, db=None):
-        raise sqlite3.OperationalError("database is locked: /secret/spec.pdf")
+        raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr("registry.registration_events.resolve_upload", broken)
 
-    with caplog.at_level(logging.WARNING, logger="core.attachment_notes"):
-        notes = attachment_notes(
-            [{"file_id": "f1", "filename": "spec.pdf", "mime_type": "application/pdf"}],
-            "t1",
-        )
-
-    assert notes == "[Document attached: spec.pdf]"
-    assert [record.getMessage() for record in caplog.records] == [
-        "attachment path lookup failed file_id=f1 error=OperationalError"
-    ]
-
-
-def test_the_expected_no_path_cases_are_not_logged(isolated_db, caplog):
-    import logging
-
-    with caplog.at_level(logging.WARNING, logger="core.attachment_notes"):
-        attachment_notes(
-            [{"file_id": "never-registered", "filename": "a.pdf",
-              "mime_type": "application/pdf"}],
-            "t1",
-        )
-
-    assert caplog.records == []
+    with pytest.raises(sqlite3.OperationalError):
+        attachment_notes([_PDF], "t1")
 
 
 @pytest.mark.asyncio
@@ -262,9 +279,11 @@ async def test_a_document_attachment_still_looks_its_path_up(
 ):
     from core.attachment_notes import attachment_notes_async
 
-    _register(tmp_path.resolve(), monkeypatch, "t1", "f1", "spec.pdf")
+    root = tmp_path.resolve()
+    project = _project(root)
+    _insert_session("t1", project_id="p1")
+    _register(root, monkeypatch, "t1", "f1", "spec.pdf", scope=project)
 
-    assert await attachment_notes_async(
-        [{"file_id": "f1", "filename": "spec.pdf", "mime_type": "application/pdf"}],
-        "t1",
-    ) == "[Document attached: spec.pdf, saved at .threads/t1/uploads/f1/spec.pdf]"
+    assert await attachment_notes_async([_PDF], "t1") == (
+        "[Document attached: spec.pdf, saved at .threads/t1/uploads/f1/spec.pdf]"
+    )
