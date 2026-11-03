@@ -199,7 +199,7 @@ def queue_overflow_continue(db: sqlite3.Connection, turn_id: str, thread_id: str
         return
     _queue_continue(
         db, turn_id, thread_id, cause=CONTEXT_OVERFLOW_REASON,
-        message_id=overflow_continue_message_id(turn_id), summary=_newest_person_line(db, turn_id),
+        message_id=overflow_continue_message_id(turn_id), summary=None,
     )
 
 
@@ -253,31 +253,6 @@ def unanswered_overflow_notices(message_ids: tuple[str, ...]) -> list[tuple[str,
         if row is not None:
             found.append((str(row["thread_id"]), notice_id))
     return found
-
-
-def _newest_person_line(db: sqlite3.Connection, turn_id: str) -> str | None:
-    """The re-run's summary: the newest person message the refused Turn took in, else none.
-
-    A re-run that cannot be delivered then reads as that message with its Retry;
-    one with no person message behind it offers no Retry row of its own.
-    """
-    import json
-
-    rows = db.execute(
-        "SELECT content,metadata FROM messages WHERE active_turn_id=? AND role='user' ORDER BY input_order DESC",
-        (turn_id,),
-    ).fetchall()
-    for row in rows:
-        try:
-            metadata = json.loads(row["metadata"] or "{}")
-        except ValueError:
-            continue  # unreadable metadata cannot prove a person wrote the row
-        if not isinstance(metadata, dict) or metadata.get("routed_event"):
-            continue
-        line = next((part.strip() for part in str(row["content"] or "").splitlines() if part.strip()), "")
-        if line:
-            return line
-    return None
 
 
 def queue_terminal_continue(

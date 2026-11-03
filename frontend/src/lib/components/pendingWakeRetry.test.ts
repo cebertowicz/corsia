@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { needsWakeRetry, wakeSummary } from './pendingWakeRetry';
+import { needsWakeRetry } from './pendingWakeRetry';
 import type { TranscriptMessage } from './messageListModel';
 
 function rerun(metadata: Record<string, unknown>): TranscriptMessage {
@@ -11,13 +11,8 @@ function rerun(metadata: Record<string, unknown>): TranscriptMessage {
 }
 
 describe('a re-run that could not be delivered', () => {
-	it('is named by the person message it runs again', () => {
-		const msg = rerun({ summary: 'Make me a plan for the migration.' });
-		expect(needsWakeRetry(msg)).toBe(true);
-		expect(wakeSummary(msg)).toBe('Make me a plan for the migration.');
-	});
-
-	it('offers no Retry row when no person message stands behind it, so its own text never shows', () => {
+	it('offers no Retry row, so its own text never shows: the refused Turn’s notice stands alone', () => {
 		expect(needsWakeRetry(rerun({}))).toBe(false);
+		expect(needsWakeRetry(rerun({ summary: 'Make me a plan for the migration.' }))).toBe(false);
 	});
 });

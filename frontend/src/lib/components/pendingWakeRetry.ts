@@ -6,13 +6,13 @@ import { isNeverDrawn } from './transcriptRowKinds';
  * A wake that needs a Retry: delivery failed, is uncertain, or is parked on a
  * CORSIA defect. The one home of this condition: EventChip offers its Retry under
  * it, and Focus keeps this context update out of the blocks because the pending
- * area is where its Retry lives. A never-drawn wake offers one only with a summary
- * to name it by, so its own text is never shown.
+ * area is where its Retry lives. A never-drawn wake offers none: its own text is
+ * never shown, and the server writes the notice its failure leaves.
  */
 export function needsWakeRetry(msg: TranscriptMessage): boolean {
 	return msg.role === 'system'
 		&& msg.metadata?.event_disposition === 'wake'
-		&& !(isNeverDrawn(msg) && !msg.metadata?.summary)
+		&& !isNeverDrawn(msg)
 		&& (msg.delivery_state === 'failed' || msg.delivery_state === 'ambiguous'
 			|| (msg.delivery_state === 'queued' && isParkedOnOurDefect(msg)));
 }

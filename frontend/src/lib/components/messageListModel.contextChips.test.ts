@@ -333,7 +333,7 @@ describe('the re-run of a Turn refused for size is for the agent only', () => {
 			created_at: '2026-11-03T11:00:00',
 			metadata: {
 				type: 'context_event', event_type: 'context_overflow.continue', event_disposition: 'wake',
-				cause: 'context_overflow.continue', summary: 'Go on.', sender_kind: 'system', stopped_turn_id: 't1',
+				cause: 'context_overflow.continue', sender_kind: 'system', stopped_turn_id: 't1',
 			},
 		};
 	}

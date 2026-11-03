@@ -112,14 +112,14 @@ def _rerun_summary(db, turn: str = "t1"):
     return json.loads(row["metadata"]).get("summary")
 
 
-def test_a_rerun_is_named_by_the_person_message_it_runs_again(isolated_db) -> None:
+def test_a_rerun_carries_no_summary_so_it_offers_no_retry_row(isolated_db) -> None:
     db = get_db()
     _turn(db)
 
     _refuse(db)
 
-    # Its Retry row, if delivery fails, reads as that message: never the plan-limit line.
-    assert _rerun_summary(db) == "work"
+    # A re-run that fails shows the refused Turn's notice alone, never a Retry row.
+    assert _rerun_summary(db) is None
 
 
 def _fail_rerun_write(db, rerun: ClaimedBatch) -> tuple[str, ...]:
@@ -180,7 +180,7 @@ def test_the_held_back_notice_is_published_live_once(isolated_db, monkeypatch) -
     assert published == [("thread", ("overflow-unanswered:t1",))]
 
 
-def test_a_rerun_of_a_wake_carries_no_summary(isolated_db) -> None:
+def test_a_turn_a_wake_started_reruns_the_same_way(isolated_db) -> None:
     db = get_db()
     db.execute("INSERT INTO threads (id,user_id,model,created_at,updated_at) VALUES ('thread','user','native/test','t','t')")
     db.commit()
