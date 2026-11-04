@@ -22,6 +22,9 @@ Two axes stay separate:
 
 Inbound user turns, delegated messages, and routed events converge on shared
 send and dispatch services before entering the selected execution provider.
+`infra/reply_not_visible_wake.py` owns the Focus reply nudge and its terminal
+fallback. It anchors on the newest person input, or the first-run event before
+any person input, using the same persisted nudge and settlement path for both.
 
 ## Code map
 
@@ -537,6 +540,13 @@ status/log/list/stop tools, stall detection, and exactly four wake outcomes
 (`stalled`, `completed`, `failed`, `interrupted_by_restart`) are owned by
 `host_access/managed_lifecycle.py`, `automation/managed_process_events.py`,
 `automation/managed_process_recovery.py`, and `infra/managed_process_store.py`.
+
+Known limitation: a child that leaves its process group (for example with
+`start_new_session`) is found only by the inherited
+`CORSIA_PROCESS_OWNER_MARKER` environment variable. macOS can hide the
+environment of a same-user process, as it does for some hardened third-party
+binaries such as Tart, and the marker scan skips a process it cannot read. Such
+a detached child outlives its foreground call and any host lease, unowned.
 
 Explicit thread deletion remains coordinated by `api/thread_deletion.py` and
 uses `core/thread_family.py` as the canonical family writer. The process owner
