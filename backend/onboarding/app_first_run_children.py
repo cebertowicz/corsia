@@ -9,6 +9,7 @@ import sqlite3
 
 
 def seed_ask(plan_id: str, *, db: sqlite3.Connection) -> None:
+    from onboarding.app_first_run import step_reference_line
     from plans import public
 
     phase = db.execute(
@@ -19,6 +20,6 @@ def seed_ask(plan_id: str, *, db: sqlite3.Connection) -> None:
         public.add_node(
             plan_id, kind="task", parent_id=phase["id"], title="Name the apps you work in",
             acceptance_criteria="you named the apps where you work, or chose not now",
-            workflow_ref="first-run-app", workflow_step="3:ask", difficulty="routine",
+            description=step_reference_line(3), workflow_ref="first-run-app", workflow_step="3:ask", difficulty="routine",
             provenance="onboarding.app_first_run", db=db,
         )

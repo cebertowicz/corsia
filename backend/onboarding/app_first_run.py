@@ -12,6 +12,27 @@ from onboarding.setup_strings import AGENT_IMPORT
 # The import decision is identified by its rendered title, so it is read from the one string source.
 IMPORT_DECISION_TITLE = AGENT_IMPORT["title"]
 
+# Each step's text is its own reference, so a checkpoint that drops an earlier read cannot lose it.
+_STEP_REFERENCES = {
+    1: "first-run-app-1-subscription.md",
+    2: "first-run-app-2-import.md",
+    3: "first-run-app-3-apps.md",
+    4: "first-run-app-4-web-search.md",
+    5: "first-run-app-5-about-you.md",
+    6: "first-run-app-6-email-calendar.md",
+    7: "first-run-app-7-community.md",
+    8: "first-run-app-8-files.md",
+    9: "first-run-app-9-hand-over.md",
+}
+
+
+def step_reference_line(step_number: int) -> str:
+    """Return the seeded node description that points the agent at its step's reference."""
+    return (
+        "When you start this step, read skill `conductor-bootstrap`'s "
+        f"`references/{_STEP_REFERENCES[step_number]}`, even if you read it earlier."
+    )
+
 
 class SetupOwnerError(Exception):
     """The signed-in person does not own the still-held app setup."""
@@ -243,6 +264,7 @@ def _seed_descriptors(
             kind="phase" if step["step_number"] == 3 else "task",
             title=step["title"],
             acceptance_criteria=step["acceptance_criteria"],
+            description=step_reference_line(step["step_number"]),
             workflow_ref="first-run-app",
             workflow_step=workflow_step,
             difficulty="routine",

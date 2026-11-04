@@ -683,3 +683,29 @@ def test_each_missing_paid_subscription_is_its_own_named_step():
         ("Add your Claude subscription", "claude_code"),
         ("Add your ChatGPT subscription", "codex"),
     ]
+
+
+def test_each_seeded_step_names_its_own_reference_and_the_file_exists(fresh_install, app_seed_facts):
+    import re
+    from pathlib import Path
+
+    from infra import accounts
+    from infra.database import write_transaction
+    from onboarding.app_first_run import cache_completed_facts
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    with write_transaction(None, scope="step_references") as db:
+        cache_completed_facts(conductor_id, "newcomer", _completed_app_facts(), db=db)
+    rows = _rows(
+        "SELECT workflow_step, description FROM plan_nodes WHERE workflow_ref='first-run-app' "
+        "AND archived_at IS NULL"
+    )
+    assert {row["workflow_step"] for row in rows} >= {"3:common", "3:ask", "7:common", "9:common"}
+    references = Path(__file__).resolve().parents[1] / "prompts/system/v1/skills/conductor-bootstrap/references"
+    for row in rows:
+        step_number = row["workflow_step"].split(":")[0]
+        match = re.search(r"`references/(first-run-app-(\d)-[a-z-]+\.md)`", row["description"] or "")
+        assert match, row
+        assert match.group(2) == step_number, row
+        assert (references / match.group(1)).is_file(), row
