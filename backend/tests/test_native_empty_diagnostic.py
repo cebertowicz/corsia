@@ -156,6 +156,7 @@ async def test_reply_cut_off_before_any_narrative_fails_naming_the_output_cap(mo
 
     assert str(raised.value).startswith(f"{FORK_CONTEXT_TRUNCATED}: path=iv_output_cap iteration=0 ")
     assert "finish_reason=length" in str(raised.value)
+    assert not isinstance(raised.value, ForkInputExhausted)  # output ran out, not input: no cold retry
 
 
 @pytest.mark.asyncio

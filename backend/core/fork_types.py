@@ -88,6 +88,10 @@ class WarmForkUnusable(ProviderForkRejected):
 
 
 class ForkInputExhausted(ProviderForkRejected):
-    """The provider refused the fork's grown input for size before it wrote any narrative."""
+    """The fork's grown input ran out of room before it wrote any narrative.
+
+    Either CORSIA's own bound stopped the next call or the provider refused it
+    for size; a reply that ran out of output is not this.
+    """
 
     reason = "fork_input_exhausted"
