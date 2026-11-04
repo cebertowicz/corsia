@@ -330,7 +330,7 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
     ingress_event["_corsia_terminal_settlement"] = settlement
     _clear_terminal_live_state(ctx)
     marker_id, created_at = None, ""
-    if not await rerun_owns_notice(ctx, identity.turn_id, metadata):
+    if not await rerun_owns_notice(ctx, identity.turn_id, error):
         marker_id, created_at = await _insert_result_marker(ctx, content, metadata)
     context_message_id = ctx.live.last_assistant_message_id or marker_id
     payload_body = {"type": "turn_complete", "thread_id": ctx.child_id}

@@ -1,11 +1,13 @@
-"""The one continue input a limit-stopped or size-refused Turn leaves behind.
+"""The one continue input a Turn's terminal cause leaves behind.
 
-Three causes share it: CORSIA's own plan-limit Stop (#2477 amendment 12), a
-vendor's usage-limit refusal, and a harness provider refusing the Turn for size.
-Written inside the terminal transaction, before the successor claim, so the
-claim rolls it to a usable account or the held scope keeps it queued until the
-limit is lifted; a size refusal's successor starts in a fresh session whose
-boundary folds what no longer fits.
+Four causes share it: CORSIA's own plan-limit Stop (#2477 amendment 12), a
+vendor's usage-limit refusal, and two re-runs: a harness provider refusing the
+Turn for size, and Claude Code reporting its login failed while it still
+answers. Written inside the terminal transaction, before the successor claim,
+so the claim rolls it to a usable account or the held scope keeps it queued
+until the limit is lifted; a size refusal's successor starts in a fresh session
+whose boundary folds what no longer fits. A re-run answers for its Turn, so the
+Turn's failure notice is written only if the re-run fails before it runs.
 """
 
 from __future__ import annotations
@@ -44,8 +46,11 @@ _CONTENT_BY_CAUSE = {
 
 
 _CONTINUE_ID_PREFIX = "overage-continue:"
-_OVERFLOW_ID_PREFIX = "overflow-continue:"
-_LOGIN_RACE_ID_PREFIX = "login-race-continue:"
+#: The re-run input's id prefix by cause.
+_RERUN_ID_PREFIX = {
+    CONTEXT_OVERFLOW_REASON: "overflow-continue:",
+    CLAUDE_LOGIN_RACE_REASON: "login-race-continue:",
+}
 _UNANSWERED_ID_PREFIX = "overflow-unanswered:"
 
 
@@ -54,9 +59,17 @@ def continue_message_id(turn_id: str) -> str:
     return f"{_CONTINUE_ID_PREFIX}{turn_id}"
 
 
-def overflow_continue_message_id(turn_id: str) -> str:
-    """Stable id of the one continue input written for a size-refused turn."""
-    return f"{_OVERFLOW_ID_PREFIX}{turn_id}"
+def rerun_message_id(cause: str, turn_id: str) -> str:
+    """Stable id of the one re-run input written for a Turn that ended on ``cause``."""
+    return f"{_RERUN_ID_PREFIX[cause]}{turn_id}"
+
+
+def _rerun_of(message_id: str) -> tuple[str, str] | None:
+    """``(cause, re-run Turn id)`` of a re-run input id, else None."""
+    for cause, prefix in _RERUN_ID_PREFIX.items():
+        if message_id.startswith(prefix):
+            return cause, message_id[len(prefix):]
+    return None
 
 
 def _turn_starting_input_queued(db: sqlite3.Connection, thread_id: str) -> bool:
@@ -182,58 +195,61 @@ def queue_limit_refusal_continue(db: sqlite3.Connection, turn_id: str, thread_id
     _queue_continue(db, turn_id, thread_id, cause=VENDOR_LIMIT_REFUSAL_REASON, summary=CONTINUE_CHIP)
 
 
-def overflow_rerun_queued(turn_id: str, *, db: sqlite3.Connection | None = None) -> bool:
-    """True when the size-refused Turn left its re-run: its notice then waits on that run."""
+def rerun_queued(turn_id: str, *, db: sqlite3.Connection | None = None) -> bool:
+    """True when the Turn left its re-run: its notice then waits on that run."""
     from infra.database import get_db
 
-    connection = db or get_db()
-    return connection.execute(
-        "SELECT 1 FROM messages WHERE id=?", (overflow_continue_message_id(turn_id),),
+    ids = tuple(rerun_message_id(cause, turn_id) for cause in _RERUN_ID_PREFIX)
+    return (db or get_db()).execute(
+        f"SELECT 1 FROM messages WHERE id IN ({','.join('?' * len(ids))})", ids,
     ).fetchone() is not None
 
 
-def queue_overflow_continue(db: sqlite3.Connection, turn_id: str, thread_id: str) -> None:
-    """Queue the one re-run of a Turn its provider refused for size; never for a re-run.
+def queue_rerun(db: sqlite3.Connection, turn_id: str, thread_id: str, cause: str) -> None:
+    """Queue the one re-run of a Turn that ended on ``cause``; never for a Turn that is itself a re-run.
 
-    A re-run the provider refuses again ends visibly: the fold did not make room,
-    so another run would only repeat the refusal.
+    A re-run that fails again ends visibly: another run would only repeat it.
     """
+    patterns = tuple(f"{prefix}%" for prefix in _RERUN_ID_PREFIX.values())
     rerun = db.execute(
-        "SELECT 1 FROM messages WHERE active_turn_id=? AND id LIKE ?",
-        (turn_id, f"{_OVERFLOW_ID_PREFIX}%"),
-    ).fetchone()
-    if rerun is not None:
-        return
-    _queue_continue(
-        db, turn_id, thread_id, cause=CONTEXT_OVERFLOW_REASON,
-        message_id=overflow_continue_message_id(turn_id), summary=None,
-    )
-
-
-def queue_login_race_continue(db: sqlite3.Connection, turn_id: str, thread_id: str) -> None:
-    """Queue one login-race re-run, never for a Turn that is itself a re-run."""
-    rerun = db.execute(
-        "SELECT 1 FROM messages WHERE active_turn_id=? AND id LIKE ?",
-        (turn_id, f"{_LOGIN_RACE_ID_PREFIX}%"),
+        "SELECT 1 FROM messages WHERE active_turn_id=? AND ("
+        + " OR ".join("id LIKE ?" for _ in patterns) + ")",
+        (turn_id, *patterns),
     ).fetchone()
     if rerun is None:
         _queue_continue(
-            db, turn_id, thread_id, cause=CLAUDE_LOGIN_RACE_REASON,
-            message_id=f"{_LOGIN_RACE_ID_PREFIX}{turn_id}", summary=None,
+            db, turn_id, thread_id, cause=cause,
+            message_id=rerun_message_id(cause, turn_id), summary=None,
         )
 
 
-def record_unanswered_overflow(db: sqlite3.Connection, message_id: str) -> None:
-    """Write the size-refused Turn's notice once its re-run input ended failed.
+def _held_notice_metadata(cause: str, model: str | None, error: str) -> dict:
+    """The metadata the Turn's own failure notice would have carried."""
+    from llm.error_cause import cause_fields, cause_kind
 
-    The refused Turn wrote no notice because its re-run would answer; a re-run
+    if cause == CONTEXT_OVERFLOW_REASON:
+        return {
+            "type": "llm_error", "model": model,
+            "cause": "context_window_exceeded", "cause_kind": cause_kind("context_window_exceeded"),
+        }
+    return {
+        "cc": True, "type": "cc_error", "event_type": "harness.error", "harness": "claude-code",
+        **cause_fields("claude-code", None, error, model=model, login_answered=True),
+    }
+
+
+def record_unanswered_rerun(db: sqlite3.Connection, message_id: str) -> None:
+    """Write the re-run Turn's notice once its re-run input ended failed.
+
+    The failed Turn wrote no notice because its re-run would answer; a re-run
     refused before it ran answers nothing, so the notice the Turn held back is
     written now, in the settlement's transaction. The continue input itself
     stays undrawn.
     """
-    if not message_id.startswith(_OVERFLOW_ID_PREFIX):
+    rerun = _rerun_of(message_id)
+    if rerun is None:
         return
-    turn_id = message_id[len(_OVERFLOW_ID_PREFIX):]
+    cause, turn_id = rerun
     notice_id = f"{_UNANSWERED_ID_PREFIX}{turn_id}"
     if db.execute("SELECT 1 FROM messages WHERE id=?", (notice_id,)).fetchone():
         return
@@ -244,31 +260,28 @@ def record_unanswered_overflow(db: sqlite3.Connection, message_id: str) -> None:
         # Raising here would undo the settlement and leave the input queued.
         from loguru import logger
 
-        logger.error("size-refused turn {} has no recorded error; no notice written", turn_id)
+        logger.error("re-run turn {} has no recorded error; no notice written", turn_id)
         return
     from infra.queries import insert_message
     from infra.turn_errors import insert_turn_error
-    from llm.error_cause import cause_kind
 
-    metadata = {
-        "type": "llm_error", "model": turn["model"],
-        "cause": "context_window_exceeded", "cause_kind": cause_kind("context_window_exceeded"),
-    }
     insert_turn_error(
-        insert_message, str(turn["thread_id"]), str(turn["error"]), metadata,
+        insert_message, str(turn["thread_id"]), str(turn["error"]),
+        _held_notice_metadata(cause, turn["model"], str(turn["error"])),
         turn_id=turn_id, msg_id=notice_id, db=db,
     )
 
 
-def unanswered_overflow_notices(message_ids: tuple[str, ...]) -> list[tuple[str, str]]:
+def unanswered_rerun_notices(message_ids: tuple[str, ...]) -> list[tuple[str, str]]:
     """(thread, notice) for each failed re-run in ``message_ids`` whose notice was written."""
     from infra.database import get_db
 
     found: list[tuple[str, str]] = []
     for message_id in message_ids:
-        if not message_id.startswith(_OVERFLOW_ID_PREFIX):
+        rerun = _rerun_of(message_id)
+        if rerun is None:
             continue
-        notice_id = f"{_UNANSWERED_ID_PREFIX}{message_id[len(_OVERFLOW_ID_PREFIX):]}"
+        notice_id = f"{_UNANSWERED_ID_PREFIX}{rerun[1]}"
         row = get_db().execute("SELECT thread_id FROM messages WHERE id=?", (notice_id,)).fetchone()
         if row is not None:
             found.append((str(row["thread_id"]), notice_id))
@@ -284,7 +297,5 @@ def queue_terminal_continue(
         queue_plan_limit_continue(db, turn_id, thread_id)
     elif outcome == "error" and limit_recorded:
         queue_limit_refusal_continue(db, turn_id, thread_id)
-    elif outcome == "error" and isinstance(error, ContextOverflowEnd):
-        queue_overflow_continue(db, turn_id, thread_id)
-    elif outcome == "error" and isinstance(error, ClaudeLoginRaceEnd):
-        queue_login_race_continue(db, turn_id, thread_id)
+    elif outcome == "error" and isinstance(error, (ContextOverflowEnd, ClaudeLoginRaceEnd)):
+        queue_rerun(db, turn_id, thread_id, error.cause)

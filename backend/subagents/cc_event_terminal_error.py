@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from core.stop_causes import ClaudeLoginRaceEnd, ContextOverflowEnd
 from infra.db_async import run_in_db_unless_owned
-from infra.plan_limit_continue import overflow_rerun_queued
+from infra.plan_limit_continue import rerun_queued
 from subagents.cc_event_context import CCEventContext
 from subagents.turn_account_error import login_race_answered
 
@@ -31,8 +31,8 @@ def terminal_error(
     return text
 
 
-async def rerun_owns_notice(ctx: CCEventContext, turn_id: str, metadata: dict) -> bool:
-    """A size refusal with its re-run queued writes no notice; the re-run answers instead."""
-    if metadata.get("cause") != "context_window_exceeded":
+async def rerun_owns_notice(ctx: CCEventContext, turn_id: str, error: object) -> bool:
+    """A Turn with its re-run queued writes no notice; the re-run answers instead."""
+    if not isinstance(error, (ContextOverflowEnd, ClaudeLoginRaceEnd)):
         return False
-    return await run_in_db_unless_owned(ctx.db, overflow_rerun_queued, turn_id, db=ctx.db)
+    return await run_in_db_unless_owned(ctx.db, rerun_queued, turn_id, db=ctx.db)

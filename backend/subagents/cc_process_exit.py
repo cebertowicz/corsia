@@ -12,6 +12,7 @@ from core.turn_core import (
     TurnTerminalResult,
     drive_turn_settlement,
 )
+from infra.plan_limit_continue import rerun_queued
 from infra.queries import insert_message
 from subagents.cc_event_context import commit_cc_terminal
 from subagents.cc_runtime_errors import surface_exit_error
@@ -120,8 +121,7 @@ async def _settle_process_exit(
                 and login_race_answered(detail, verdict))
         terminal = await claim_terminal(
             live, "error", ClaudeLoginRaceEnd(str(error)) if race else error,
-            db=db, identity=identity,
-            defer_drive=defer_drive,
+            db=db, identity=identity, defer_drive=defer_drive,
         )
         result = terminal.result if isinstance(terminal, TerminalSettlement) else terminal
         resolved = result in {
@@ -154,11 +154,12 @@ async def _publish_process_exit(
     if verdict is _UNCHECKED:
         verdict = None if live.tool_boundary_marker_id else await claude_login_verdict(identity.turn_id, detail, db=db)
     account = await sign_out_on_verdict(verdict, db=db, include_account=True)
-    marker_id = live.tool_boundary_marker_id or surface_exit_error(
+    held = login_race_answered(detail, verdict) and rerun_queued(identity.turn_id, db=db)  # the re-run answers
+    marker_id = live.tool_boundary_marker_id or (None if held else surface_exit_error(
         child_thread_id, code, detail, broadcast, db, None,
         insert_message_fn=insert_message, logger=log,
         account=account, login_answered=login_answered(verdict),
-    )
+    ))
     payload = {
         "type": "turn_complete", "thread_id": child_thread_id,
         **identity.frame_fields(),
@@ -210,8 +211,7 @@ async def finish_process_exit(
         verdict = None if live.tool_boundary_marker_id else await claude_login_verdict(identity.turn_id, detail, db=db)
     terminal, resolved, complete = await _settle_process_exit(
         child_thread_id, live, identity, pending, detail, broadcast, db,
-        verdict=verdict, replaying=replaying,
-        defer_drive=defer_drive,
+        verdict=verdict, replaying=replaying, defer_drive=defer_drive,
     )
     if complete and resolved:
         try:

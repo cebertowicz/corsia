@@ -20,7 +20,7 @@ from core.turn_core import (
     commit_turn_terminal,
 )
 from infra.db_async import run_in_db
-from infra.plan_limit_continue import overflow_rerun_queued
+from infra.plan_limit_continue import rerun_queued
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_message_rows, broadcast_stored_message
 from llm.error_cause import codex_failure_meta
@@ -583,7 +583,7 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
             "turn_id": identity.turn_id,
         }
         # A size refusal with its re-run queued writes no notice; the re-run answers instead.
-        queued = overflow and await run_in_db(overflow_rerun_queued, identity.turn_id)
+        queued = overflow and await run_in_db(rerun_queued, identity.turn_id)
         marker_id = None if queued else await record_terminal_marker(
             ctx.thread_id, content=f"⚠️ {msg}", metadata=meta_f, bcast=ctx.bcast,
             label="failure", best_effort_announcement=True)

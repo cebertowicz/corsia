@@ -12,7 +12,7 @@ from infra.thread_input_types import ClaimedBatch
 from subagents.cc_event_terminal_error import terminal_error
 from subagents.cc_process_exit import finish_process_exit
 from subagents.cc_runtime_state import _Live
-from test_harness_overflow_rerun import _now, _turn
+from test_harness_overflow_rerun import _fail_rerun_write, _now, _turn
 
 ERROR = 'Failed to authenticate. OAuth session expired and could not be refreshed'
 CONTENT = ('Your previous turn ended when Claude Code briefly reported its login as failed; '
@@ -33,6 +33,14 @@ def _finish(db, turn='t1', error=None, outcome='error'):
 
 def _continues(db):
     return db.execute("SELECT id,role,content,metadata FROM messages WHERE id LIKE ?", (PREFIX + '%',)).fetchall()
+
+
+def _error_notices(db, thread='thread'):
+    """Visible failure rows: the result marker, the process-exit notice or the held-back notice."""
+    return [tuple(row) for row in db.execute(
+        "SELECT id,json_extract(metadata,'$.type'),json_extract(metadata,'$.cause_kind') FROM messages "
+        "WHERE thread_id=? AND role!='user' AND id NOT LIKE ? AND (json_extract(metadata,'$.is_error') "
+        "OR json_extract(metadata,'$.type') IN ('cc_error','llm_error'))", (thread, PREFIX + '%'))]
 
 
 def test_answered_result_queues_exactly_one_system_continue(isolated_db):
@@ -82,6 +90,7 @@ async def test_result_event_checks_login_and_queues_continue(isolated_db, monkey
     await on_event({'kind': 'result', 'is_error': True, 'result': ERROR})
     check.assert_awaited_once()
     assert [row['id'] for row in _continues(db)] == [PREFIX + 't1']
+    assert _error_notices(db) == []  # the re-run answers; no failure notice for this Turn
 
 
 @pytest.mark.asyncio
@@ -121,6 +130,26 @@ def test_failed_rerun_has_no_third_run(isolated_db):
     assert [row['id'] for row in _continues(db)] == [PREFIX + 't1']
 
 
+def test_rerun_refused_before_it_runs_writes_the_held_back_notice(isolated_db):
+    db = get_db()
+    _turn(db)
+    rerun = _finish(db, error=_error()).successor
+    assert _error_notices(db) == []
+    assert PREFIX + 't1' in _fail_rerun_write(db, rerun)
+    assert _error_notices(db) == [('overflow-unanswered:t1', 'cc_error', 'unknown')]
+
+
+def test_login_race_rerun_refused_for_size_is_not_rerun_again(isolated_db):
+    from core.stop_causes import ContextOverflowEnd
+
+    db = get_db()
+    _turn(db)
+    rerun = _finish(db, error=_error()).successor
+    terminal = _finish(db, rerun.turn_id, error=ContextOverflowEnd('Prompt is too long'))
+    assert not isinstance(terminal.successor, ClaimedBatch)
+    assert not db.execute("SELECT 1 FROM messages WHERE id LIKE 'overflow-continue:%'").fetchone()
+
+
 def test_cancelled_turn_queues_nothing(isolated_db):
     db = get_db()
     _turn(db)
@@ -157,6 +186,7 @@ async def test_natural_exit_checks_once_and_queues_continue(isolated_db, monkeyp
         assert result
         check.assert_awaited_once()
         assert [row['id'] for row in _continues(db)] == [PREFIX + 't1']
+        assert _error_notices(db) == []  # the re-run answers; no failure notice for this Turn
     finally:
         _LIVE.pop('thread', None)
 
