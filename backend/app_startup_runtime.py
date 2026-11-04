@@ -37,6 +37,7 @@ RUNTIME_LOOP_TASKS: tuple[tuple[str, str], ...] = (
     ("cc idle retirement", "_cc_idle_retirement_task"),
     ("github notifications", "_github_notifications_task"),
     ("github head checks re-arm", "_head_checks_rearm_task"),
+    ("github agents notifications", "_github_notifications_agents_task"),
     ("mail poller", "_mail_poller_task"),
     ("library refresh", "_library_refresh_task"),
     ("pr quiet watch", "_pr_quiet_watch_task"),
@@ -224,6 +225,7 @@ async def _start_runtime_services() -> None:
     state._presence_sweep_task = asyncio.create_task(presence_sweep_loop())
     state._cc_idle_retirement_task = asyncio.create_task(idle_retirement_loop())
     state._github_notifications_task = asyncio.create_task(notifications_poll_loop())
+    state._github_notifications_agents_task = asyncio.create_task(notifications_poll_loop(agents=True))
     from events.connectors.github_head_checks import rearm_pending_heads
 
     state._head_checks_rearm_task = asyncio.create_task(rearm_pending_heads())

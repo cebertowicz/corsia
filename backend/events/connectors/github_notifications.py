@@ -1,7 +1,8 @@
 """GitHub notifications poller: comments reach agents without a public webhook.
 
-A backend loop reads the user's notifications feed through the instance's
-``gh`` login, turns each new PR or issue comment into a webhook-shaped
+Backend loops read the person's notifications feed and, when connected, the
+agents' account's feed: comments on agents' PRs notify their account. Each turns
+new PR or issue comments into a webhook-shaped
 payload, and hands it to ``admit_github_delivery_async``, the admission path
 ``POST /webhooks/github`` uses. Object-level dedupe in the delivery log means
 an instance with both a webhook and this poller admits each comment once.
@@ -40,7 +41,7 @@ from typing import Any
 
 from connections.github_read_request import AUTH_PROBE, SIGNED_OUT
 from events.connectors import github_notifications_feed as feed
-from events.connectors.github_read_budget import person_budget
+from events.connectors.github_read_budget import budget, person_budget
 import infra.webhook_delivery_log as webhook_delivery_log
 
 log = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ DISABLE_ENV = "CORSIA_GITHUB_NOTIFICATIONS_DISABLE"
 #: disable switch.
 TEST_ENABLE_ENV = "CORSIA_GITHUB_NOTIFICATIONS_TEST_ENABLE"
 CURSOR_SETTING = "github_notifications_cursor"
+AGENTS_CURSOR_SETTING = "github_notifications_agents_cursor"
 #: GitHub's floor for this feed (``X-Poll-Interval``, verified 60 s).
 MIN_INTERVAL_S = 60
 JITTER_S = 10.0
@@ -67,6 +69,8 @@ _status: dict[str, Any] = {
     "skipped_threads": 0,
     "dropped_notifications": 0,
 }
+
+_agents_status: dict[str, Any] = dict(_status)
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,19 +99,20 @@ def _parse_time(value: Any) -> datetime | None:
         return None
 
 
-def poller_status() -> dict[str, Any]:
-    """The poller's state, reason, last success, last error and skipped-thread count,
-    and the read budget of the person's own login, which the feed reads as (``read_budget``)."""
+def poller_status(*, agents: bool = False) -> dict[str, Any]:
+    """The selected feed's state, last success, error, counts and read budget."""
+    status = _agents_status if agents else _status
     return {
-        **_status, "last_error": dict(_status["last_error"] or {}) or None,
-        "read_budget": person_budget.status(),
+        **status, "last_error": dict(status["last_error"] or {}) or None,
+        "read_budget": (budget if agents else person_budget).status(),
     }
 
 
-def _set_state(state: str, reason: str | None = None) -> None:
-    if (_status["state"], _status["reason"]) == (state, reason):
+def _set_state(state: str, reason: str | None = None, *, agents: bool = False) -> None:
+    status = _agents_status if agents else _status
+    if (status["state"], status["reason"]) == (state, reason):
         return
-    _status["state"], _status["reason"] = state, reason
+    status["state"], status["reason"] = state, reason
     if state == "enabled":
         log.info("github-notifications: enabled")
     elif state == "disabled":
@@ -144,23 +149,23 @@ def disabled_reason(runner: feed.GhRunner) -> str | None:
     return "gh_error"
 
 
-def load_cursor() -> Cursor:
+def load_cursor(setting: str = CURSOR_SETTING) -> Cursor:
     """Read the durable cursor; the first run starts it, and its floor, at now."""
     from infra.settings import get_setting, set_setting
 
-    stored = get_setting(CURSOR_SETTING) or {}
+    stored = get_setting(setting) or {}
     floor, cursor = _parse_time(stored.get("floor")), _parse_time(stored.get("cursor"))
     if floor is not None and cursor is not None:
         return Cursor(floor, cursor, stored.get("last_modified"))
     now = _now()
-    set_setting(CURSOR_SETTING, {"floor": feed.iso(now), "cursor": feed.iso(now)})
+    set_setting(setting, {"floor": feed.iso(now), "cursor": feed.iso(now)})
     return Cursor(now, now, None)
 
 
-def _save_cursor(cursor: Cursor) -> None:
+def _save_cursor(cursor: Cursor, setting: str = CURSOR_SETTING) -> None:
     from infra.settings import set_setting
 
-    set_setting(CURSOR_SETTING, {
+    set_setting(setting, {
         "floor": feed.iso(cursor.floor),
         "cursor": feed.iso(cursor.cursor),
         "last_modified": cursor.last_modified,
@@ -196,6 +201,7 @@ async def _admit(event_type: str, payload: dict[str, Any]) -> bool:
 
 async def _poll_thread(
     runner: feed.GhRunner, thread: dict[str, Any], since: datetime, cursor: datetime,
+    *, agents: bool = False,
 ) -> tuple[datetime | None, str | None]:
     """Read and admit one thread; return (cursor hold, degraded reason)."""
     try:
@@ -207,7 +213,7 @@ async def _poll_thread(
     except feed.FeedError as exc:
         subject = (thread.get("subject") or {}).get("url")
         if exc.error_class in PERMANENT_THREAD_ERRORS:
-            _status["skipped_threads"] += 1
+            (_agents_status if agents else _status)["skipped_threads"] += 1
             log.warning("github-notifications: skipping %s (%s)", subject, exc.error_class)
             return None, None
         log.warning("github-notifications: holding for %s (%s)", subject, exc.error_class)
@@ -220,71 +226,92 @@ async def _poll_thread(
     return (min(holds), "admission_failed") if holds else (None, None)
 
 
-async def poll_once(runner: feed.GhRunner) -> CycleResult:
+async def poll_once(runner: feed.GhRunner, *, agents: bool = False) -> CycleResult:
     """Run one cycle; return GitHub's requested interval and any degradation."""
     from infra.db_async import run_in_db
 
-    cursor = await run_in_db(load_cursor)
+    setting = AGENTS_CURSOR_SETTING if agents else CURSOR_SETTING
+    status = _agents_status if agents else _status
+    cursor = await run_in_db(load_cursor, setting)
     since = max(cursor.floor, cursor.cursor - LOOKBACK)
     page = await asyncio.to_thread(feed.list_notifications, runner, since, cursor.last_modified)
     interval = max(MIN_INTERVAL_S, page.poll_interval_s or MIN_INTERVAL_S)
     if page.not_modified:
         return CycleResult(interval)
-    _status["dropped_notifications"] += page.dropped_untracked
+    status["dropped_notifications"] += page.dropped_untracked
     holds: list[datetime] = [cursor.cursor] if page.truncated else []
     degraded = "truncated" if page.truncated else None
     for thread in page.threads:
-        hold, reason = await _poll_thread(runner, thread, since, cursor.cursor)
+        hold, reason = await _poll_thread(runner, thread, since, cursor.cursor, agents=agents)
         if hold is not None:
             holds.append(hold)
             degraded = degraded or reason
     next_cursor = min([page.server_time or _now(), *holds])
     last_modified = None if holds else page.last_modified
-    await run_in_db(_save_cursor, Cursor(cursor.floor, next_cursor, last_modified))
+    await run_in_db(_save_cursor, Cursor(cursor.floor, next_cursor, last_modified), setting)
     return CycleResult(interval, degraded)
 
 
-async def run_cycle(runner: feed.GhRunner, failures: int = 0) -> tuple[int | None, int]:
+async def run_cycle(runner: feed.GhRunner, failures: int = 0, *, agents: bool = False) -> tuple[int | None, int]:
     """Check enablement and poll once; return (sleep seconds or None to stop, failures)."""
-    reason = await asyncio.to_thread(disabled_reason, runner)
+    status = _agents_status if agents else _status
+    # Static switches take precedence without probing either account.
+    reason: str | None
+    if os.environ.get("CORSIA_TEST_MODE") == "1" and os.environ.get(TEST_ENABLE_ENV) != "1":
+        reason = "test_mode"
+    elif os.environ.get(DISABLE_ENV) == "1":
+        reason = "config_off"
+    elif agents:
+        from connections import github_agent
+
+        try:
+            reason = "no_agents_account" if (await asyncio.to_thread(github_agent.view)).absent else None
+        except Exception as exc:  # noqa: BLE001 — keep account lookup failures visible and retryable
+            log.exception("github-notifications: agents' account lookup failed")
+            return _record_failure(type(exc).__name__, failures, agents=True)
+        if reason is None:
+            reason = await asyncio.to_thread(disabled_reason, runner)
+    else:
+        reason = await asyncio.to_thread(disabled_reason, runner)
     if reason is not None:
-        _set_state("disabled", reason)
+        _set_state("disabled", reason, agents=agents)
         return (None if reason in _STATIC_REASONS else RECHECK_S), 0
     try:
-        result = await poll_once(runner)
+        result = await poll_once(runner, agents=agents)
     except feed.GhSignedOut:
-        _set_state("disabled", "gh_signed_out")
+        _set_state("disabled", "gh_signed_out", agents=agents)
         return RECHECK_S, 0
     except feed.FeedError as exc:
-        return _record_failure(exc.error_class, failures)
+        return _record_failure(exc.error_class, failures, agents=agents)
     except Exception as exc:  # noqa: BLE001 — a failing poller is visible, never silent
         log.exception("github-notifications: cycle failed")
-        return _record_failure(type(exc).__name__, failures)
+        return _record_failure(type(exc).__name__, failures, agents=agents)
     if result.degraded is not None:
-        _status["last_error"] = {"class": result.degraded, "at": feed.iso(_now())}
-        _set_state("degraded", result.degraded)
+        status["last_error"] = {"class": result.degraded, "at": feed.iso(_now())}
+        _set_state("degraded", result.degraded, agents=agents)
         return result.interval, 0
-    _status["last_success_at"] = feed.iso(_now())
-    _set_state("enabled")
+    status["last_success_at"] = feed.iso(_now())
+    _set_state("enabled", agents=agents)
     return result.interval, 0
 
 
-def _record_failure(error_class: str, failures: int) -> tuple[int, int]:
-    _status["last_error"] = {"class": error_class, "at": feed.iso(_now())}
-    _set_state("failing", error_class)
+def _record_failure(error_class: str, failures: int, *, agents: bool = False) -> tuple[int, int]:
+    status = _agents_status if agents else _status
+    status["last_error"] = {"class": error_class, "at": feed.iso(_now())}
+    _set_state("failing", error_class, agents=agents)
     failures += 1
     return min(MIN_INTERVAL_S * 2 ** min(failures, 4), MAX_BACKOFF_S), failures
 
 
-async def notifications_poll_loop(runner: feed.GhRunner | None = None) -> None:
+async def notifications_poll_loop(runner: feed.GhRunner | None = None, *, agents: bool = False) -> None:
     """Poll until shut down, or until a static reason turns the poller off."""
     if runner is None:
-        from connections.github_broker import person_broker
+        from connections.github_broker import default_broker, person_broker
 
-        runner = person_broker()  # the feed is the person's own, never the agents' account's
+        runner = default_broker() if agents else person_broker()
     failures = 0
     while True:
-        delay, failures = await run_cycle(runner, failures)
+        delay, failures = await run_cycle(runner, failures, agents=agents)
         if delay is None:
             return
         await asyncio.sleep(delay + random.uniform(0, JITTER_S))

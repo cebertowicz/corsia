@@ -12,6 +12,7 @@ def live_poller_statuses() -> dict:
 
     return {
         "github_notifications": poller_status(),
+        "github_notifications_agents": poller_status(agents=True),
         "github_repo_activity": repo_activity_poller_status(),
         "mail_poller": mail_poller_status(),
         "pr_quiet_watch": quiet_watch_status(),
