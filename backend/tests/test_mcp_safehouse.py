@@ -572,6 +572,9 @@ async def test_local_mcp_safehouse_uvx_launch(monkeypatch, tmp_path):
         "command": "uvx",
         "args": ["--from", str(package), "mcp-floor-uvx"],
         "env": {"PATH": str(tmp_path / "no-host-uvx")},
+        # The connect window covers uvx fetching setuptools from PyPI and building the package;
+        # on a busy CI runner that has run past the 10 s default. This test proves the launch, not its speed.
+        "connect_timeout": 120,
     })
     assert await registry.get("mcp_uvx_manage_child").execute()
     assert len(launched) == 1
