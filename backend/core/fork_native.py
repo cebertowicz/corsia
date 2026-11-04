@@ -297,7 +297,8 @@ async def invoke_fork(
             await yield_to_turn_call(request, cancel_event)
             response = await _complete(request, messages, tools, model, provider, cancel_event)
             usage_calls.append(dict(response.usage or {}))
-            if request.on_usage is not None:
+            # A failed call (truncated stream, unreachable model) never got its usage chunk.
+            if request.on_usage is not None and (usage_calls[-1] or response.finish_reason != "error"):
                 await request.on_usage(str(_iteration), model, usage_calls[-1])
             if response.finish_reason == "error":
                 if (response.error_kind == "provider_context_overflow"
