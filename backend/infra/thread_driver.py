@@ -226,8 +226,7 @@ def finish_turn(
             connection, turn_id, outcome=outcome, error=error,
         )
         parent = _parent_completion(connection, turn_id, thread_id) if outcome == "completed" else None
-        if outcome == "cancelled":
-            _show_reply_on_nudge_stop(connection, thread_id, turn_id)
+        _show_reply_on_nudge_stop(connection, thread_id, turn_id, outcome)
         queue_terminal_continue(
             connection, turn_id, thread_id, outcome=outcome, error=error,
             limit_recorded=isinstance(limits.limit, Recorded))
@@ -259,8 +258,10 @@ def finish_turn(
     )
 
 
-def _show_reply_on_nudge_stop(connection, thread_id: str, turn_id: str) -> None:
+def _show_reply_on_nudge_stop(connection, thread_id: str, turn_id: str, outcome: str) -> None:
     """A stopped nudged Turn still shows the reply it was woken about."""
+    if outcome != "cancelled":
+        return
     from infra.reply_not_visible_wake import show_reply_on_nudge_stop
 
     show_reply_on_nudge_stop(connection, thread_id, turn_id)
