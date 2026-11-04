@@ -11,7 +11,8 @@ schema library:
   and may set ``additionalProperties: false``;
 - ``array`` has ``items`` (one node) and may declare ``maxItems``;
 - ``string`` may declare ``maxLength``, ``enum`` and ``unknown``, an enum value a string outside the enum
-  becomes instead of failing;
+  becomes instead of failing, and ``truncate: true``, which cuts a value over ``maxLength`` to
+  that length, ending in ``…``, instead of failing;
 - ``integer`` and ``number`` may have ``coerce: true``, which reads a numeric string.
 
 :func:`schema_errors` checks a declaration, for the skill validator; :func:`check_result`
@@ -30,7 +31,7 @@ _TYPES = {"object", "array", "string", "integer", "number", "boolean"}
 _KEYS = {
     "object": {"properties", "required", "additionalProperties"},
     "array": {"items", "maxItems"},
-    "string": {"enum", "unknown", "maxLength"},
+    "string": {"enum", "unknown", "maxLength", "truncate"},
     "integer": {"coerce"},
     "number": {"coerce"},
     "boolean": set(),
@@ -80,6 +81,10 @@ def schema_errors(schema: Any, path: str = "corsia.workflow.result", depth: int 
             errors.append(f"{path}.enum must be a list of strings")
         elif "unknown" in schema and schema["unknown"] not in (enum or []):
             errors.append(f"{path}.unknown must be one of its enum")
+        if "truncate" in schema and not isinstance(schema["truncate"], bool):
+            errors.append(f"{path}.truncate must be true or false")
+        elif schema.get("truncate") and not schema.get("maxLength"):
+            errors.append(f"{path}.truncate needs a maxLength of at least 1")
     elif "coerce" in schema and not isinstance(schema["coerce"], bool):
         errors.append(f"{path}.coerce must be true or false")
     limit_key = {"array": "maxItems", "string": "maxLength"}.get(kind)
@@ -123,6 +128,8 @@ def conform(value: Any, schema: dict[str, Any], path: str = "result") -> Any:
         if not isinstance(value, str):
             raise ResultInvalid(f"{path} must be a string")
         if "maxLength" in schema and len(value) > schema["maxLength"]:
+            if schema.get("truncate"):
+                return value[:schema["maxLength"] - 1] + "…"
             raise ResultInvalid(f"{path} must have at most {schema['maxLength']} characters")
         enum = schema.get("enum")
         if enum and value not in enum:

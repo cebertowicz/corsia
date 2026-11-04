@@ -19,11 +19,11 @@ workflow:
           next:
             type: string
             enum: [reproduce, label_and_route, answer_from_docs, apply_change, ask_for_detail, close_with_reason, no_action]
-          summary: {type: string, maxLength: 300}
+          summary: {type: string, maxLength: 300, truncate: true}
           findings:
             type: array
             maxItems: 10
-            items: {type: string, maxLength: 200}
+            items: {type: string, maxLength: 200, truncate: true}
           refs:
             type: array
             maxItems: 8

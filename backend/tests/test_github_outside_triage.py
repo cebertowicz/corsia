@@ -180,6 +180,49 @@ async def test_invalid_enum_is_final_and_cleanup_after_failed_start(triage):
     assert any(a['event_type'] == 'worker.no_result' and a['facts']['reason'] == 'invalid' for a in triage['state']['admitted'])
 
 
+def _triage_reply(triage, **payload):
+    triage['reply'].write_text(fenced({'payload': {'next': 'reproduce', 'summary': 'A report', 'findings': [], 'refs': [], **payload}, 'injection_signs': []}))
+
+
+@pytest.mark.asyncio
+async def test_over_limit_summary_and_finding_are_cut_not_invalid(triage):
+    _triage_reply(triage, summary='s' * 400, findings=['f' * 250, 'short'])
+    await route('issue_comment', 'created')
+    await run_scripts()
+    await settle_all()
+    assert starts(triage['key'] + '_triage_start')[0][0] == 'returned'
+    result = next(a['facts'] for a in triage['state']['admitted'] if a['event_type'] == 'worker.result')
+    payload = json.loads(result['result'])
+    assert payload['summary'] == 's' * 299 + '…' and len(payload['summary']) == 300
+    assert payload['findings'] == ['f' * 199 + '…', 'short']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('payload', [{'refs': ['r' * 81]}, {'findings': ['f'] * 11}])
+async def test_over_limit_ref_and_eleventh_finding_stay_final_invalid(triage, payload):
+    _triage_reply(triage, **payload)
+    await route('issue_comment', 'created')
+    await run_scripts()
+    await settle_all()
+    assert starts(triage['key'] + '_triage_start')[0][:2] == ('invalid', 'invalid')
+    assert not any(a['event_type'] == 'worker.result' for a in triage['state']['admitted'])
+
+
+def test_only_triage_summary_and_findings_truncate(triage):
+    from events.connectors.github_screen.workflow import workflow
+
+    def marked(node, path='result'):
+        found = [path] if isinstance(node, dict) and node.get('truncate') else []
+        for key, child in (node.items() if isinstance(node, dict) else []):
+            if isinstance(child, dict):
+                found += marked(child, f'{path}.{key}')
+        return found
+
+    assert marked(workflow(triage['project'], 'github-outside-triage').corsia['workflow']['result']) == [
+        'result.properties.payload.properties.summary', 'result.properties.payload.properties.findings.items']
+    assert marked(workflow(triage['project'], 'github-pr-screen').corsia['workflow']['result']) == []
+
+
 @pytest.mark.asyncio
 async def test_issue_owner_gets_worker_result_not_raw_event(triage):
     from infra.database import get_db
