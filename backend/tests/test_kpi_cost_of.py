@@ -15,15 +15,16 @@ from tests.test_measurement_api import _seed_thread
 
 OPUS = "claude-opus-5-5"
 UNLISTED = "not-a-listed-model"
+LOCAL = "omlx@server/a-local-model"
 
 
 def usage(db, usage_id: str, thread: str, model: str = "claude-code/opus", *, prompt: int = 1_000_000,
-          manifest: str | None = "m") -> None:
+          manifest: str | None = "m", source: str = "external_harness:claude-code") -> None:
     """One plan-less usage row, as a rule-started worker writes it."""
     db.execute("INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,"
                "cache_read_tokens,total_tokens,source,created_at,context_manifest_id) VALUES (?,?,?,?,0,0,0,?,"
-               "'external_harness:claude-code','2026-01-02T00:00:00Z',?)",
-               (usage_id, thread, model, prompt, prompt, manifest))
+               "?,'2026-01-02T00:00:00Z',?)",
+               (usage_id, thread, model, prompt, prompt, source, manifest))
 
 
 @pytest.fixture
@@ -31,7 +32,7 @@ def ledger(isolated_db):
     from infra.database import get_db
 
     db = get_db()
-    for thread, user in (("w1", "steve"), ("w2", "steve"), ("w3", "steve"), ("w4", "steve"), ("theirs", "someone")):
+    for thread, user in (("w1", "steve"), ("w2", "steve"), ("w3", "steve"), ("w4", "steve"), ("w5", "steve"), ("theirs", "someone")):
         _seed_thread(db, thread, user_id=user)
     seed_identity_catalog(db)
     seed_manifest(db, "m", "claude-code", OPUS, "catalog")
@@ -41,6 +42,7 @@ def ledger(isolated_db):
     usage(db, "u3", "w3", UNLISTED, manifest=None)
     usage(db, "u3b", "w3")
     usage(db, "ut", "theirs")
+    usage(db, "u5", "w5", LOCAL, manifest=None, source="conversation")
     db.commit()
     try:
         yield db
@@ -58,6 +60,10 @@ def test_one_unpriced_row_makes_the_thread_unknown_not_zero(ledger) -> None:
     assert thread_costs(ledger, "steve", ["w3"]) == {"w3": None}
 
 
+def test_a_local_only_thread_costs_zero_not_unknown(ledger) -> None:
+    assert thread_costs(ledger, "steve", ["w5"]) == {"w5": 0.0}
+
+
 def test_a_thread_with_no_usage_or_another_users_thread_is_absent(ledger) -> None:
     assert thread_costs(ledger, "steve", ["w4", "theirs", "missing"]) == {}
     assert thread_costs(ledger, "steve", []) == {}
@@ -68,7 +74,7 @@ def test_every_thread_is_read_in_one_query(ledger) -> None:
     ledger.set_trace_callback(queries.append)
     thread_costs(ledger, "steve", ["w1", "w2", "w3", "w4"])
     ledger.set_trace_callback(None)
-    assert sum("FROM llm_usage" in query for query in queries) == 1
+    assert sum("FROM llm_usage" in query and "LIMIT 0" not in query for query in queries) == 1  # LIMIT 0 only prepares
 
 
 def _ratio(num: dict) -> dict:
