@@ -18,6 +18,7 @@ import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from loguru import logger
 
@@ -96,7 +97,7 @@ def _unseen(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row) -> str:
 
 
 def _replied_after(
-    db: sqlite3.Connection, thread_id: str, person: sqlite3.Row | dict[str, object],
+    db: sqlite3.Connection, thread_id: str, person: sqlite3.Row | dict[str, Any],
 ) -> bool:
     """A reply after the message, or answers in its comment threads with no other last words."""
     if db.execute(
