@@ -15,6 +15,7 @@ _HELD_REPLIES_174 = (
         user_id TEXT NOT NULL,
         sender_thread_id TEXT NOT NULL,
         recipient_thread_id TEXT NOT NULL,
+        recipient_title TEXT,
         text TEXT NOT NULL CHECK (state IN ('sent', 'declined', 'not_sent') OR length(trim(text)) > 0),
         via TEXT NOT NULL CHECK (via IN ('tool', 'api')),
         plan_node_id TEXT,

@@ -113,10 +113,10 @@ def visible_name(sender_thread_id: str, *, db: Any) -> str:
     return (row["title"] if row is not None else None) or "Untitled chat"
 
 
-def recipient_name(recipient_thread_id: str, *, db: Any) -> str:
-    """The recipient as the person reads it."""
-    row = db.execute("SELECT title FROM threads WHERE id=?", (recipient_thread_id,)).fetchone()
-    return held_replies.recipient_label(row["title"] if row is not None else None)
+def recipient_name(held: dict[str, Any], *, db: Any) -> str:
+    """The recipient as the person reads it: its current name, or the one it had at the hold once it is gone."""
+    row = db.execute("SELECT title FROM threads WHERE id=?", (held["recipient_thread_id"],)).fetchone()
+    return held_replies.recipient_label(row["title"] if row is not None else held.get("recipient_title"))
 
 
 def notify_changed(user_id: str, sender_thread_id: str, visible_thread_id: str | None = None) -> None:
@@ -157,7 +157,7 @@ async def note_asker(held: dict[str, Any], kind: str) -> None:
             try:
                 return (
                     visible_name(held["sender_thread_id"], db=db),
-                    recipient_name(held["recipient_thread_id"], db=db),
+                    recipient_name(held, db=db),
                 )
             finally:
                 db.close()
@@ -216,7 +216,7 @@ async def hold_response(held: dict[str, Any]) -> dict[str, Any]:
     def recipient() -> str:
         db = get_db()
         try:
-            return recipient_name(held["recipient_thread_id"], db=db)
+            return recipient_name(held, db=db)
         finally:
             db.close()
 

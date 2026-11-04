@@ -328,12 +328,19 @@ async def test_a_missing_recipient_is_not_sent_and_a_failed_delivery_returns_to_
     assert _rows(deleg_db, "state", "error_ref") == [("held", ref)]
     assert "Approve once to try again" in _rows(deleg_db, "error")[0][0]
 
+    from plans import held_attention
+
     deleg_db.execute("DELETE FROM threads WHERE id='asker'")
     deleg_db.commit()
+    # The deleted recipient is still named by the title it had at the hold.
+    assert [i["recipient_label"] for i in held_attention.pending(deleg_db, "u-test")] == ["the Researcher agent"]
     gone = _post(held_client, failed["held_reply_id"], "approve")
 
     assert gone.json()["state"] == "not_sent"
     assert _rows(deleg_db, "state") == [("not_sent",)]
+    line = "Couldn’t send the reply because the Researcher agent no longer exists."
+    assert gone.json()["line"] == line
+    assert (seen["told"][-1][1], seen["told"][-1][3]) == ("held_reply.not_sent", line)
 
 
 @pytest.mark.asyncio

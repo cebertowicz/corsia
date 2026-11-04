@@ -47,9 +47,14 @@ def hold(
             ).fetchone()
             if existing is not None:
                 return {**dict(existing), "duplicate": True}
+        recipient = connection.execute(
+            "SELECT title FROM threads WHERE id=?", (recipient_thread_id,),
+        ).fetchone()
         row = {
             "id": str(uuid.uuid4()), "user_id": user_id, "sender_thread_id": sender_thread_id,
-            "recipient_thread_id": recipient_thread_id, "text": text, "via": via,
+            "recipient_thread_id": recipient_thread_id,
+            "recipient_title": recipient["title"] if recipient is not None else None,
+            "text": text, "via": via,
             "plan_node_id": plan_node_id,
             "idempotency_key": key, "state": HELD, "error": None,
             "created_at": utc_now_iso(), "decided_at": None,

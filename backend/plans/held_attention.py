@@ -23,7 +23,7 @@ def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> 
     from api.provider_meta import PROVIDER_META
 
     rows = db.execute(
-        "SELECT h.id, h.sender_thread_id, h.recipient_thread_id, h.error, h.error_ref, h.created_at"
+        "SELECT h.id, h.sender_thread_id, h.recipient_thread_id, h.recipient_title, h.error, h.error_ref, h.created_at"
         + (", h.text" if with_text else "")
         + " FROM held_replies h JOIN threads s ON s.id=h.sender_thread_id "
         "WHERE h.user_id=? AND h.state=? AND s.purged_at IS NULL ORDER BY h.created_at, h.id",
@@ -75,7 +75,7 @@ def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> 
             "visible_title": shown["title"] or "Untitled thread",
             "project_id": shown["project_id"],
             "project_label": shown["project_name"],
-            "recipient_label": held_replies.recipient_label(recipient["title"] if recipient else None),
+            "recipient_label": held_replies.recipient_label(recipient["title"] if recipient else row["recipient_title"]),
             "provider_label": PROVIDER_META.get(vendor, {}).get("label", provider) if provider else "a cloud provider",
             **({"text": str(row["text"])} if with_text else {}),
             "error": row["error"],

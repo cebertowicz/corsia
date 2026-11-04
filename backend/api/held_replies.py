@@ -50,7 +50,7 @@ def _load(held_id: str, user_id: str) -> tuple[dict | None, dict | None, dict | 
             held,
             delegation._current_thread_context(held["sender_thread_id"]),
             None if recipient is None else dict(recipient),
-            recipient_name(held["recipient_thread_id"], db=db),
+            recipient_name(held, db=db),
         )
     finally:
         db.close()

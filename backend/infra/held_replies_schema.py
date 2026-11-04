@@ -1,7 +1,7 @@
 """Held replies: a Local only agent's message stored until the person decides.
 
 ``infra.held_replies`` reads and writes the rows. ``text`` is the exact bytes that will be
-delivered on approval. A row is ``held`` until the person decides; ``approved`` leaves the
+delivered on approval; ``recipient_title`` keeps the recipient's name for when its chat is gone. A row is ``held`` until the person decides; ``approved`` leaves the
 person's queue while delivery runs; ``sent``, ``declined`` and ``not_sent`` are final. There is no
 expiry column: a held reply waits for the person.
 """
@@ -14,6 +14,7 @@ HELD_REPLIES_SCHEMA_SQL = """
         user_id TEXT NOT NULL,
         sender_thread_id TEXT NOT NULL,
         recipient_thread_id TEXT NOT NULL,
+        recipient_title TEXT,
         text TEXT NOT NULL CHECK (state IN ('sent', 'declined', 'not_sent') OR length(trim(text)) > 0),
         via TEXT NOT NULL CHECK (via IN ('tool', 'api')),
         plan_node_id TEXT,
