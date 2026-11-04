@@ -154,7 +154,7 @@ RECORD = {"node_id": "n1", "linked_node": "n0", "requirements_revision": 3, "int
 def _settled_facts(db, record, said=None):
     row = {"thread_id": "owner", "rule_id": "r", "event_id": "e", "request_identity": "pr@a", "id": 1,
            "connector": "qa", "event_type": "request", "artifact_external_id": PR[2],
-           "artifact_integration": PR[0], "artifact_type": PR[1]}
+           "artifact_integration": PR[0], "artifact_type": PR[1], "worker_thread_id": "w"}
     check = {"workflow": "review@1", "intent": record}
     return worker_settle.settlement(row, check, RETURNED, said or {"result": "{}"}, db).facts
 
@@ -236,7 +236,7 @@ def test_a_result_settled_without_a_connection_reads_the_revision_on_its_own(db)
     db.commit()
     row = {"thread_id": "owner", "rule_id": "r", "event_id": "e", "request_identity": "pr@a", "id": 1,
            "connector": "qa", "event_type": "request", "artifact_external_id": PR[2],
-           "artifact_integration": PR[0], "artifact_type": PR[1]}
+           "artifact_integration": PR[0], "artifact_type": PR[1], "worker_thread_id": "w"}
     facts = worker_settle.settlement(row, {"workflow": "review@1", "intent": record}, RETURNED,
                                      {"result": "{}"}).facts
     assert facts["intent_node"] == task.id

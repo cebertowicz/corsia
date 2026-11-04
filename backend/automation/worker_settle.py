@@ -158,6 +158,8 @@ def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
         "artifact_type": row["artifact_type"], "valid": outcome == RETURNED, **said,
         # The start's own record of what it spawned; a start that never spawned has none.
         "model": (check.get("settings") or {}).get("model"),
+        # The worker it ran, so a reader can price the run by its thread; a refused start has none.
+        "worker_thread": row["worker_thread_id"],
         # The repository a script on this event may read (``script_github_channel``).
         "repo": _artifact_repository(row),
         # Without a connection the revision read opens its own; the stamp is never left out.
