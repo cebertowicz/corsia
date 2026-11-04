@@ -44,12 +44,14 @@ const ACME = account('acme', 'Acme (Team) · sam@example.com');
 const THIRD = account('third', 'Studio · sam@studio.example.com');
 const ACCOUNTS = [PERSONAL, ACME, THIRD];
 const back = (iso: string) => resetLabel(iso, true, now);
+/** The scope's policy as read, rollover off: the move is the person's to make. */
+const OFF = { accounts: ACCOUNTS, policy: { rollover: false, order: [] } };
 
 describe('limitHeldLine with accounts: another account is ready', () => {
 	const bound = limitedEntry('personal', FIRST, { selected: true });
 
 	it('names the limited account and offers one move to the ready one', () => {
-		const line = limitHeldLine(model([bound, readyEntry('acme')]), now, { accounts: ACCOUNTS });
+		const line = limitHeldLine(model([bound, readyEntry('acme')]), now, OFF);
 		expect(back(FIRST)).not.toBe('');
 		expect(line).toEqual({
 			text: `Personal Max · sam@example.com is at its limit · back ${back(FIRST)}`,
@@ -60,21 +62,36 @@ describe('limitHeldLine with accounts: another account is ready', () => {
 
 	it('picks the first ready account in the picker order, not a second ordering', () => {
 		const row = model([bound, readyEntry('acme'), readyEntry('third')]);
-		expect(limitHeldLine(row, now, { accounts: ACCOUNTS })?.action?.accountId).toBe('acme');
-		// Rollover on: the policy's order wins, exactly as the picker rows are ordered.
+		expect(limitHeldLine(row, now, OFF)?.action?.accountId).toBe('acme');
+		const policy = { rollover: false, order: ['third', 'personal', 'acme'] };
+		expect(limitHeldLine(row, now, { accounts: ACCOUNTS, policy })?.action?.accountId).toBe('acme');
+	});
+
+	it('offers no move before the policy is read, since rollover may be on', () => {
+		expect(limitHeldLine(model([bound, readyEntry('acme')]), now, { accounts: ACCOUNTS })).toEqual({
+			text: `Personal Max · sam@example.com is at its limit · back ${back(FIRST)}`,
+			planLimit: false,
+		});
+	});
+
+	it('with rollover on, names the limited account and asks for no move: the backend makes it', () => {
+		const row = model([bound, readyEntry('acme'), readyEntry('third')]);
 		const policy = { rollover: true, order: ['third', 'personal', 'acme'] };
-		expect(limitHeldLine(row, now, { accounts: ACCOUNTS, policy })?.action?.accountId).toBe('third');
+		expect(limitHeldLine(row, now, { accounts: ACCOUNTS, policy })).toEqual({
+			text: `Personal Max · sam@example.com is at its limit · back ${back(FIRST)}`,
+			planLimit: false,
+		});
 	});
 
 	it('skips an account the catalog does not mark ready', () => {
 		const row = model([bound, signedOutEntry('acme'), readyEntry('third')]);
-		expect(limitHeldLine(row, now, { accounts: ACCOUNTS })?.action)
+		expect(limitHeldLine(row, now, OFF)?.action)
 			.toEqual({ accountId: 'third', label: 'Continue on Studio · sam@studio.example.com' });
 	});
 
 	it('reads the picker tail when the reset time is unknown, and still offers the move', () => {
 		const row = model([limitedEntry('personal', null, { selected: true }), readyEntry('acme')]);
-		const line = limitHeldLine(row, now, { accounts: ACCOUNTS });
+		const line = limitHeldLine(row, now, OFF);
 		expect(line?.text).toBe('Personal Max · sam@example.com is at its limit · reset time unknown');
 		expect(line?.action?.accountId).toBe('acme');
 	});

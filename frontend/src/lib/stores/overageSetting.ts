@@ -74,11 +74,12 @@ function accountLine(model: Model, now: Date, context: HeldLineAccounts | undefi
 	const ready = new Set(entries.filter((entry) => !entry.selected && entry.status === 'ready').map((entry) => entry.account_id));
 	const next = rows.find((row) => ready.has(row.account.id));
 	if (!limited || !next) return null;
-	return {
-		text: `${limited.account.label.text} is at its limit · ${backTail(resetOf(bound), 'back', now)}`,
-		planLimit: false,
-		action: { accountId: next.account.id, label: `Continue on ${next.account.label.text}` },
-	};
+	const text = `${limited.account.label.text} is at its limit · ${backTail(resetOf(bound), 'back', now)}`;
+	// Rollover on: the move is the backend's, once the ready account's usage reads allowed (the thread then
+	// rolls and this line clears), so the line keeps the picker's way out rather than asking for the move.
+	// Until the policy is read, rollover may be on, so the move is not offered either.
+	if (!context.policy || context.policy.rollover) return { text, planLimit: false };
+	return { text, planLimit: false, action: { accountId: next.account.id, label: `Continue on ${next.account.label.text}` } };
 }
 
 /**
