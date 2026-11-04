@@ -97,7 +97,7 @@ def schedule_account_check(provider: str, account_id: str, *, new_login: bool = 
     try:
         app_loop.submit(_start())
     except app_loop.AppLoopUnavailable:
-        log.warning("%s usage read not scheduled after sign-in: no live event loop", provider)
+        log.warning("%s usage read for account %s not scheduled: no live event loop", provider, account_id)
 
 
 def _schedule(provider: str, account_id: str) -> None:
