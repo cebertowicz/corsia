@@ -145,6 +145,30 @@ describe("held reply in the dock", () => {
     expect(host.querySelector(".dock-bar")).toBeNull();
   });
 
+  it.each([
+    ["Approve once", true], ["Decline", true],
+    ["Approve once", false], ["Decline", false],
+  ])("keeps the closing drawer through %s with next item %s", async (action, hasNext) => {
+    body = hasNext ? queueBody(heldReplyItem(), 2, [heldReplyItem(), decisionItem()]) : queueBody(heldReplyItem(), 1);
+    decide = () => new Promise(() => {});
+    await openDock();
+    const drawer = host.querySelector(".drawer-motion") as HTMLElement;
+    expect(drawer).toBeTruthy();
+    const outroStarted = vi.fn();
+    drawer.addEventListener("outrostart", outroStarted);
+    button(action)!.click();
+    await tick();
+    flushSync();
+    expect(outroStarted).toHaveBeenCalledOnce();
+    expect(decisions()).toHaveLength(1);
+    expect(host.querySelector(".dock-receipt")).toBeTruthy();
+    expect(host.querySelector(".drawer-motion")).toBe(drawer);
+    expect(host.querySelector(".dock-bar") !== null).toBe(hasNext);
+    drawer.dispatchEvent(new Event("outroend"));
+    await settle();
+    expect(host.querySelector(".drawer-motion")).toBeNull();
+  });
+
   it.each(["Approve once", "Decline"])("returns focus to the dock after %s", async (action) => {
     body = queueBody(heldReplyItem(), 2, [heldReplyItem(), decisionItem()]);
     decide = () => new Promise(() => {});

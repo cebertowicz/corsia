@@ -45,7 +45,7 @@
 		visibleQueue,
 	} from '$lib/stores/attentionDock.svelte';
 	import { answerNotice, answers } from '$lib/stores/attentionAnswerState';
-	import type { AttentionDestination, DecisionDetail, ExternalReviewDetail, HeldReplyDetail } from '$lib/api/attentionQueue';
+	import type { AttentionDestination, AttentionQueueItem, DecisionDetail, ExternalReviewDetail, HeldReplyDetail } from '$lib/api/attentionQueue';
 
 	let {
 		writesDisabled = false,
@@ -88,7 +88,13 @@
 	const showChip = $derived(
 		!!current && !suppressed && $expandedId === current.external_id,
 	);
-
+	// Retain only the visual being dismissed; queue and receipt state continue immediately.
+	let closingHeld = $state<{ item: AttentionQueueItem; position: number; count: number } | null>(null);
+	const drawerItem = $derived(closingHeld?.item ?? current);
+	function beginHeldClose() {
+		if (current) closingHeld = { item: current, position, count: dockQueue.count };
+		void close(true);
+	}
 	/** Focus returns to the exact control that opened the chip. */
 	async function close(heldDecision = false) {
 		collapse();
@@ -243,7 +249,7 @@
 	>
 		<CommentReplyChipRow onOpenDocument={onOpenDestination} />
 		{#if current}
-		<section data-attention-dock role="region" aria-label={regionLabel}>
+		<section data-attention-dock aria-label={regionLabel}>
 		<p class="sr-only" aria-live="polite">{regionLabel}</p>
 		{#if !showChip}
 			<div class="dock-row">
@@ -270,27 +276,7 @@
 			</button>
 			</div>
 		{/if}
-		{#if current.renderer === 'decision' || current.renderer === 'held-reply'}
-			{#key current.external_id}
-				<AdaptiveDrawer
-					ariaLabel={`${current.renderer === 'held-reply' ? 'Held reply' : 'Decision'} — ${label(current)}`}
-					contextLabel={current.renderer === 'held-reply' ? heldMeta(current.detail as HeldReplyDetail, position, dockQueue.count) : decisionMeta(current.detail as DecisionDetail)}
-					opaque
-					flushBottom
-					open={showChip}
-					onClose={() => void close()}
-				>
-					<!-- No chrome heading: the decision's own header already carries a
-					     "Decision · chat · project" eyebrow and the decision title. -->
-
-					{#if current.renderer === 'held-reply'}
-						<HeldReplyBody held={current.detail as HeldReplyDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} onDecision={() => void close(true)} />
-					{:else}
-						<DecisionChip decision={current.detail as DecisionDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} {heldQueued} />
-					{/if}
-				</AdaptiveDrawer>
-			{/key}
-		{:else if showChip}
+		{#if current.renderer === 'external-review' && showChip}
 			{#key current.external_id}
 				<ExternalReviewRow
 					review={current.detail as ExternalReviewDetail}
@@ -313,6 +299,26 @@
 		</section>
 		{/if}
 	</div>
+{/if}
+
+{#if drawerItem && (drawerItem.renderer === 'decision' || drawerItem.renderer === 'held-reply')}
+	{#key drawerItem.external_id}
+		<AdaptiveDrawer
+			ariaLabel={`${drawerItem.renderer === 'held-reply' ? 'Held reply' : 'Decision'} — ${label(drawerItem)}`}
+			contextLabel={drawerItem.renderer === 'held-reply' ? heldMeta(drawerItem.detail as HeldReplyDetail, closingHeld?.position ?? position, closingHeld?.count ?? dockQueue.count) : decisionMeta(drawerItem.detail as DecisionDetail)}
+			opaque
+			flushBottom
+			open={!closingHeld && showChip}
+			onClose={() => void close()}
+			onClosed={() => { closingHeld = null; }}
+		>
+			{#if drawerItem.renderer === 'held-reply'}
+				<HeldReplyBody held={drawerItem.detail as HeldReplyDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} onDecision={beginHeldClose} />
+			{:else}
+				<DecisionChip decision={drawerItem.detail as DecisionDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} {heldQueued} />
+			{/if}
+		</AdaptiveDrawer>
+	{/key}
 {/if}
 
 <style>

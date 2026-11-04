@@ -374,16 +374,22 @@ async def test_decision_refreshes_visible_parent_chat(deleg_db, held_client, see
     assert events[-1]["thread_ids"] == ["worker", "sender-self"]
 
 
-def test_external_provider_uses_catalog_name(deleg_db, held_client):
+@pytest.mark.parametrize(("provider", "harness", "expected"), [
+    ("external", "native", "external"),
+    ("claude-code", "claude-code", "Anthropic"),
+    ("codex", "codex", "OpenAI"),
+])
+def test_provider_label_uses_vendor_or_catalog_name(deleg_db, held_client, provider, harness, expected):
     from infra import held_replies
     from plans.held_attention import pending
 
-    selector = "external@server/model"
-    deleg_db.execute("UPDATE models SET provider='external',litellm_model=? WHERE id=?", (selector, CLOUD))
+    selector = f"{provider}@server/model"
+    deleg_db.execute("UPDATE models SET provider=?,harness=?,litellm_model=? WHERE id=?",
+                     (provider, harness, selector, CLOUD))
     deleg_db.execute("UPDATE threads SET model=? WHERE id='asker'", (selector,))
     held_replies.hold(user_id="u-test", sender_thread_id="sender-self", recipient_thread_id="asker",
                       text="answer", via="tool", db=deleg_db)
-    assert pending(deleg_db, "u-test")[0]["provider_label"] == "external"
+    assert pending(deleg_db, "u-test")[0]["provider_label"] == expected
 
 
 @pytest.mark.asyncio

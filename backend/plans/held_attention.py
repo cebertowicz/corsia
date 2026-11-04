@@ -19,6 +19,9 @@ HELD_REPLY_RENDERER = "held-reply"
 
 def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> list[dict[str, Any]]:
     """Every held reply waiting on this person, oldest first, with the names a person reads."""
+    # Import lazily: api initialization imports plans.public via measurement.
+    from api.provider_meta import PROVIDER_META
+
     rows = db.execute(
         "SELECT h.id, h.sender_thread_id, h.recipient_thread_id, h.error, h.created_at"
         + (", h.text" if with_text else "")
@@ -48,12 +51,13 @@ def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> 
         str(row["id"]): row for row in db.execute(
             "SELECT t.id, t.title, (SELECT m.provider FROM models m "
             "WHERE m.id=COALESCE(t.pending_model,t.model) OR m.litellm_model=COALESCE(t.pending_model,t.model) "
-            "LIMIT 1) AS provider FROM threads t "
+            "LIMIT 1) AS provider, (SELECT m.harness FROM models m "
+            "WHERE m.id=COALESCE(t.pending_model,t.model) OR m.litellm_model=COALESCE(t.pending_model,t.model) "
+            "LIMIT 1) AS harness FROM threads t "
             f"WHERE t.id IN ({','.join('?' for _ in recipient_ids)})",
             recipient_ids,
         )
     }
-    from api.provider_meta import PROVIDER_META
     out = []
     for row in rows:
         sender = str(row["sender_thread_id"])
@@ -61,6 +65,9 @@ def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> 
         if shown is None:
             continue
         recipient = recipients.get(str(row["recipient_thread_id"]))
+        provider = str(recipient["provider"] or "") if recipient else ""
+        harness = str(recipient["harness"] or "") if recipient else ""
+        vendor = {"claude-code": "anthropic", "codex": "openai"}.get(harness, provider)
         out.append({
             "id": str(row["id"]),
             "sender_thread_id": sender,
@@ -69,8 +76,7 @@ def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> 
             "project_id": shown["project_id"],
             "project_label": shown["project_name"],
             "recipient_label": held_replies.recipient_label(recipient["title"] if recipient else None),
-            "provider_label": (PROVIDER_META.get(recipient["provider"], {}).get("label", recipient["provider"])
-                               if recipient and recipient["provider"] else "a cloud provider"),
+            "provider_label": PROVIDER_META.get(vendor, {}).get("label", provider) if provider else "a cloud provider",
             **({"text": str(row["text"])} if with_text else {}),
             "error": row["error"],
             "created_at": str(row["created_at"]),

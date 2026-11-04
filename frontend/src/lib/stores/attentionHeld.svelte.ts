@@ -29,13 +29,14 @@ export async function decideHeld(held: HeldReplyDetail, verb: HeldVerb, onStarte
   const at = items.findIndex((item) => item.external_id === id);
   const follower = at >= 0 ? items[at + 1] : undefined;
   showNotice(null);
+  // Let the dock retain this drawer before the immediate queue update removes its item.
+  onStarted?.();
   setAnswer(id, {
     state: "sending",
     line: verb === "approve" ? approvedLine(held.recipient) : declinedLine(held.recipient),
   });
   expandedId.set(null);
   activeId.set(follower ? follower.external_id : null);
-  onStarted?.();
 
   const outcome = await decideHeldReply(bearer, id, verb);
   if (generation !== identityEpoch()) return;
