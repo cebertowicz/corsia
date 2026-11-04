@@ -583,20 +583,30 @@ async def test_claude_host_review_disables_retries_and_terminal_title(
         return _ClaudeProcess(envelope)
 
     monkeypatch.setattr(isolated_structured.asyncio, "create_subprocess_exec", spawn)
+    from loguru import logger
 
-    result = await isolated_structured._invoke_claude_code_structured(
-        _target("claude-code"),
-        isolated_structured.IsolatedStructuredRequest(
-            system_prompt="fixed policy",
-            user_prompt="{}",
-            output_schema={"type": "object"},
-            max_output_tokens=100,
-        ),
-        binary="claude",
-        clean_env=lambda: {"PATH": "/bin"},
-    )
+    lines: list[str] = []
+    sink = logger.add(lambda message: lines.append(str(message)), level="INFO", format="{message}")
+    try:
+        result = await isolated_structured._invoke_claude_code_structured(
+            _target("claude-code"),
+            isolated_structured.IsolatedStructuredRequest(
+                system_prompt="fixed policy",
+                user_prompt="{}",
+                output_schema={"type": "object"},
+                max_output_tokens=100,
+            ),
+            binary="claude",
+            clean_env=lambda: {"PATH": "/bin"},
+        )
+    finally:
+        logger.remove(sink)
 
     assert result == {"verdict": "allow"}
+    from vendor_account_fixtures import default_id
+
+    assert [line for line in lines if line.startswith("Claude control process started")] == [
+        f"Claude control process started: account={default_id('claude-code')} operation=structured\n"]
     argv, kwargs = spawned[0]
     schema_arg = argv[argv.index("--json-schema") + 1]
     assert json.loads(schema_arg) == {
