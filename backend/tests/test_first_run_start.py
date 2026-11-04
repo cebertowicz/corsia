@@ -19,11 +19,11 @@ def test_first_step_explains_unfinished_signin_and_points_to_actual_card_action(
     text = first_run_wake.first_app_step(facts(
         sources_missing={"codex": "needs_auth"}, pays_for=["codex"],
     ))
-    assert "1. **Add your Claude or ChatGPT subscription" in text
+    assert "**Add your Claude or ChatGPT subscription" in text
     assert "Setup's sign-in to [Claude Code | Codex] didn't finish." in text
     assert "[Settings › Providers](/settings/providers), press Sign in on its card" in text
     assert "POST /api/vendor-accounts/{id}/signin" not in text
-    assert "2. **Bring over" not in text
+    assert "**Bring over" not in text
 
 
 def test_first_step_distinguishes_a_failed_signin_from_an_unsigned_source():
@@ -43,25 +43,44 @@ def test_first_step_distinguishes_a_failed_signin_from_an_unsigned_source():
 
 def test_import_with_consent_is_first_but_missing_consent_skips_it():
     base = facts(agents_found=["hermes"], bound_model={"model": "test-local"})
-    assert "3. **Where your work lives" in first_run_wake.first_app_step(base)
+    assert "**Where your work lives" in first_run_wake.first_app_step(base)
     base["setup"]["setup_decisions"] = [{"title": "Read what your other tools know?"}]
     text = first_run_wake.first_app_step(base)
-    assert "2. **Bring over what your other tools know" in text
-    assert "3. **Where your work lives" not in text
+    assert "**Bring over what your other tools know" in text
+    assert "**Where your work lives" not in text
 
 
 def test_connected_apps_start_web_search_with_the_question_inline():
     text = first_run_wake.first_app_step(facts(connected_app_count=2))
-    assert "4. **Web search" in text
+    assert "**Web search" in text
     assert "Do you already have a Brave Search API account?" in text
     assert "## 2. Open the right page" not in text
 
 
 def test_search_already_ready_asks_lookup_consent_as_first_question():
     text = first_run_wake.first_app_step(facts(connected_app_count=2, web_search_ready=True))
-    assert "5. **About you" in text
+    assert "**About you" in text
     assert "Your name and anything I search for are sent to web search engines. Want me to?" in text
     assert "## B. Search" not in text
+
+
+def test_handoff_excludes_silent_checks():
+    # Exercise the hand-off independently of the conditions for preceding steps.
+    from unittest.mock import patch
+    with patch("onboarding.app_first_run.applicable_steps", return_value=[]):
+        text = first_run_wake.first_app_step(facts())
+    assert text.startswith("After the last step")
+    assert "Silently," not in text
+
+
+def test_every_step_file_opens_with_the_title_and_reread_line_first_app_step_drops():
+    from infra.system_package import system_resource_source
+    from onboarding.first_run_instructions import SKILL_DIR, STEP_REFERENCES
+
+    for number, name in STEP_REFERENCES.items():
+        title, reread, _ = system_resource_source(f"{SKILL_DIR}/references/{name}").read_text(encoding="utf-8").split("\n\n", 2)
+        assert title.startswith(f"# First run, app path, step {number}: ")
+        assert reread.startswith("Read this file when you start this step")
 
 
 @pytest.mark.asyncio
@@ -75,8 +94,8 @@ async def test_completed_setup_silently_skips_import_when_no_eligible_tool_remai
 
     wake = await first_run_wake.render_for("test-local", "app", thread_id="test-conductor")
 
-    assert "3. **Where your work lives" in wake
-    assert "2. **Bring over what your other tools know" not in wake
+    assert "**Where your work lives" in wake
+    assert "**Bring over what your other tools know" not in wake
     assert '"setup_decisions": []' in wake
     assert "skip that step silently" in wake
 
@@ -95,7 +114,7 @@ async def test_completed_setup_reuses_snapshot_but_builds_provider_specific_impo
     wake = await first_run_wake.render_for("test-local", "app", thread_id="test-conductor")
 
     read.assert_not_awaited()
-    assert "2. **Bring over what your other tools know" in wake
+    assert "**Bring over what your other tools know" in wake
     assert "Bring over what your other tools know" in wake
     assert snapshot["setup"]["setup_decisions"] == []  # keep committed snapshot immutable
     assert "Never write the opening or create the setup plan" in wake

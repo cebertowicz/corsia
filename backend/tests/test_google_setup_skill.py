@@ -27,7 +27,8 @@ def test_first_run_keeps_mcp_import_and_maps_the_first_step_options():
         assert f"`{status}`" in result_lines or f'"{status}"' in result_lines
     assert "`Approve them in [Settings › Connected apps](/settings/connected-apps).`" in result_lines
     assert "Raise the decision whose `task_title` is this task." in first_run
-    assert "CORSIA builds every setup decision: raise per **Raising a decision**; never write or reword one." in first_run
+    assert "CORSIA builds every setup decision: raise per `references/raising-a-decision.md`; never write or reword one." in first_run
+    assert "Raising a decision is three calls on `plan_decision`" in (FIRST_RUN.parent / "raising-a-decision.md").read_text(encoding="utf-8")
     assert "Point me to a folder, or describe your work in a sentence or two." in first_run
     assert "You can see those numbers on the Measurement dashboard." in first_run.split("## Wrap-up", 1)[1]
 
@@ -109,15 +110,14 @@ def test_person_browser_guidance_keeps_the_other_first_run_steps_in_the_shared_b
 
 def test_email_and_calendar_use_google_connect_with_own_project_as_backup():
     """First-run Google connection uses one Allow; the hand-off still offers no agent."""
-    app = FIRST_RUN_APP.read_text(encoding="utf-8")
-    email = app.split("6. **Email and calendar.**", 1)[1].split("7. **Learning", 1)[0]
+    email = (FIRST_RUN.parent / "first-run-app-6-email-calendar.md").read_text(encoding="utf-8")
     assert "call `google_status`, then `google_connect`" in email
     assert "one Allow with no Google Cloud project" in email
     assert "Use skill `google-setup` only when the person says Google blocked the sign-in" in email
     assert "An expired link gets a new link; a Cancel or \"not now\" is a decline, not a refusal." in email
     assert "when they ask for their own Google Cloud project" in email
-    assert "it creates no agent" in app
-    hand_off = app.split("## Hand over to your agents", 1)[1]
+    assert "it creates no agent" in email
+    hand_off = (FIRST_RUN.parent / "first-run-app-9-hand-over.md").read_text(encoding="utf-8")
     assert "Setup offers no agent" in hand_off
     assert "only when they ask you to take that work off them (skill `time-to-agent`)" in hand_off
 

@@ -437,7 +437,7 @@ async def test_uncached_first_pick_reconciles_current_facts_before_rendering(fre
 
     wake = await first_run_wake.render_for("test/model", "app", thread_id=conductor_id)
 
-    assert "4. **Web search" in wake
+    assert "**Web search" in wake
     live = _rows(
         "SELECT workflow_step FROM plan_nodes WHERE workflow_ref='first-run-app' "
         "AND archived_at IS NULL ORDER BY workflow_step"
@@ -490,8 +490,8 @@ async def test_cached_pick_archives_a_discovered_import_when_its_card_is_absent(
 
     wake = await first_run_wake.render_for("test/model", "app", thread_id=conductor_id)
 
-    assert "2. **Bring over what your other tools know" not in wake
-    assert "3. **Where your work lives" in wake
+    assert "**Bring over what your other tools know" not in wake
+    assert "**Where your work lives" in wake
     assert _rows(
         "SELECT archived_at FROM plan_nodes WHERE workflow_ref='first-run-app' AND workflow_step='2:common'"
     )[0]["archived_at"] is not None
@@ -534,7 +534,7 @@ async def test_cached_pick_with_unchanged_facts_has_no_public_plan_mutations(
     wake = await first_run_wake.render_for("test/model", "app", thread_id=conductor_id)
 
     [after] = _rows("SELECT revision FROM plans WHERE owner_id=?", conductor_id)
-    assert "2. **Bring over what your other tools know" in wake
+    assert "**Bring over what your other tools know" in wake
     assert mutations == []
     assert after["revision"] == before["revision"]
 
@@ -561,7 +561,7 @@ async def test_cached_pick_with_an_import_card_keeps_import_open_and_first(
 
     wake = await first_run_wake.render_for("test/model", "app", thread_id=conductor_id)
 
-    assert "2. **Bring over what your other tools know" in wake
+    assert "**Bring over what your other tools know" in wake
     assert _rows(
         "SELECT title FROM plan_nodes WHERE workflow_ref='first-run-app' AND archived_at IS NULL "
         "ORDER BY order_key LIMIT 1"
@@ -683,3 +683,67 @@ def test_each_missing_paid_subscription_is_its_own_named_step():
         ("Add your Claude subscription", "claude_code"),
         ("Add your ChatGPT subscription", "codex"),
     ]
+
+
+def test_each_seeded_step_names_its_own_reference_and_the_file_exists(fresh_install, app_seed_facts):
+    import re
+    from pathlib import Path
+
+    from infra import accounts
+    from infra.database import write_transaction
+    from onboarding.app_first_run import cache_completed_facts
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    with write_transaction(None, scope="step_references") as db:
+        cache_completed_facts(conductor_id, "newcomer", _completed_app_facts(), db=db)
+    rows = _rows(
+        "SELECT workflow_step, description FROM plan_nodes WHERE workflow_ref='first-run-app' "
+        "AND archived_at IS NULL"
+    )
+    assert {row["workflow_step"] for row in rows} >= {"3:common", "3:ask", "7:common", "9:common"}
+    references = Path(__file__).resolve().parents[1] / "prompts/system/v1/skills/conductor-bootstrap/references"
+    for row in rows:
+        step_number = row["workflow_step"].split(":")[0]
+        match = re.search(r"`references/(first-run-app-(\d)-[a-z-]+\.md)`", row["description"] or "")
+        assert match, row
+        assert match.group(2) == step_number, row
+        assert (references / match.group(1)).is_file(), row
+
+
+def test_migration_gives_open_steps_seeded_before_references_their_line(fresh_install, app_seed_facts):
+    from infra import accounts
+    from infra.database import write_transaction
+    from infra.migration_173_to_174_first_run_step_references import migrate_173_to_174
+    from onboarding.app_first_run import cache_completed_facts
+    from onboarding.first_run_instructions import step_reference_line
+    from tests.plan_writer_authorizer import raw_plan_seed
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    with write_transaction(None, scope="pre_reference_plan") as db:
+        cache_completed_facts(conductor_id, "newcomer", _completed_app_facts(), db=db)
+        # A plan seeded before step references: no descriptions; one step already settled.
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET description=NULL WHERE workflow_ref='first-run-app'")
+            db.execute(
+                "UPDATE plan_nodes SET state='closed' WHERE workflow_ref='first-run-app' "
+                "AND workflow_step='7:common'"
+            )
+    before = {row["id"]: row for row in _rows("SELECT * FROM plan_nodes WHERE workflow_ref='first-run-app'")}
+
+    with write_transaction(None, scope="migrate_173_to_174") as db:
+        migrate_173_to_174(db)
+        migrate_173_to_174(db)
+
+    after = _rows("SELECT * FROM plan_nodes WHERE workflow_ref='first-run-app'")
+    assert {row["workflow_step"] for row in after} >= {"3:common", "3:ask", "9:common"}
+    assert [row["workflow_step"] for row in after if row["state"] == "closed"] == ["7:common"]
+    for row in after:
+        if row["state"] == "closed":
+            assert row["description"] is None, row
+            assert row["revision"] == before[row["id"]]["revision"], row
+        else:
+            number = int(row["workflow_step"].split(":")[0])
+            assert row["description"] == step_reference_line(number), row
+            assert row["revision"] == before[row["id"]]["revision"] + 1, row

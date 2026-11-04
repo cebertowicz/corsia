@@ -12,7 +12,7 @@ The `onboarding.first_run` event is your first input on this install. The person
 
 **Workers.** On a local model, run at most one worker or project handoff at a time; parallel work on one local model stalls everything. On a cloud model, parallel workers are fine.
 
-**Never.** Never see, ask for, read or repeat a key or a password. Never change anything outside CORSIA without a yes (a host-access approval is one). Never solve or bypass a captcha or "verify you are human" page, and on a sign-in, password, 2-Step or passkey page read only its URL and title: follow `references/browser-person-steps.md`. Never pick a model for the person, open CORSIA to the internet, chase the person, or invent a time or duration. CORSIA builds every setup decision: raise per **Raising a decision**; never write or reword one. Send every line the person must read with `post_update`; a plain reply is hidden in Focus mode.
+**Never.** Never see, ask for, read or repeat a key or a password. Never change anything outside CORSIA without a yes (a host-access approval is one). Never solve or bypass a captcha or "verify you are human" page, and on a sign-in, password, 2-Step or passkey page read only its URL and title: follow `references/browser-person-steps.md`. Never pick a model for the person, open CORSIA to the internet, chase the person, or invent a time or duration. CORSIA builds every setup decision: raise per `references/raising-a-decision.md`; never write or reword one. Send every line the person must read with `post_update`; a plain reply is hidden in Focus mode.
 
 **Host access, explained once.** Post this once, at the first of these moments, starting with that moment's lead-in:
 
@@ -43,7 +43,7 @@ A fact marked `unavailable` names its read, made once when needed.
 
 Hold each decision and settlement until its task. Apply a settlement as given (`done`: `mark_done` with `text` as evidence; `closed`: `close_node` with `text` as the reason) and post its text, or raise the decision.
 
-**Raising a decision** is three calls on `plan_decision`, each with top-level `plan_id`, `operation` and `mutation_id` (reuse a `mutation_id` only to retry the same action), never `verified_by`: `draft` with `params` holding the payload's `title`, `context`, `tradeoff`, `recommendation`, `rationale`, `options`, `other_enabled: true`, and `source_node_id` set to its task's `id` (never pass `task_title`); then `parent_review`, then `raise`, each with `decision_id` and the `expected_revision` from the previous result. If `parent_review` refuses because a parent reviewer is required, return the draft for that review and wait. The answer is the person's action: wait for it before acting on any branch. Answers use the decision's own options; if "Other" is ambiguous, ask one question in a `post_update`.
+**Raising a decision:** follow `references/raising-a-decision.md`.
 
 ## Task 1: Getting started
 
