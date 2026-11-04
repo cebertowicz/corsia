@@ -82,12 +82,20 @@ def _clean(value: object) -> str | None:
     return " ".join(value.split()) or None
 
 
+def _situation(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    return "\n".join(line.rstrip() for line in value.splitlines()).strip("\n") or None
+
+
 def _json_value(value: object) -> bool:
     if value is None or isinstance(value, (str, int, float, bool)):
         return True
     if isinstance(value, list):
         return all(_json_value(item) for item in value)
     if isinstance(value, dict):
+        if set(value) == {"$contains"}:
+            return isinstance(value["$contains"], str) and bool(value["$contains"])
         return all(isinstance(key, str) and _json_value(item) for key, item in value.items())
     return False
 
@@ -123,6 +131,7 @@ def _case(value: object) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) - {*_CASE_FIELDS, "actions"}:
         raise ValueError("case may name only what_happened, right_call, does_not_apply and actions")
     case: dict[str, Any] = {key: _clean(value.get(key)) for key in _CASE_FIELDS}
+    case["what_happened"] = _situation(value.get("what_happened"))
     if not all(case.values()):
         raise ValueError("case must name what_happened, right_call and does_not_apply")
     if "actions" in value:

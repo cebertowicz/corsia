@@ -66,7 +66,7 @@ def _register_continuity_tool(agent: CORSIAAgent) -> None:
     """Expose the one continuity editor on native and harness registries."""
     from tools.continuity import ContinuityEditTool
 
-    agent.tools.register(ContinuityEditTool())
+    agent.tools.register(ContinuityEditTool(agent.tools))
 
 
 def _register_tool_surface(agent: CORSIAAgent) -> None:
