@@ -17,10 +17,11 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-#: The oMLX release CORSIA reads the recommender from. The desktop bundle ships
-#: exactly this release (``desktop/scripts/build-macos-bundle.sh``), and a managed
-#: oMLX older than it has no recommender; a test fails if the two disagree.
-OMLX_PIN = "0.7.1rc1"
+#: The oldest oMLX release whose recommender CORSIA reads, the one the test
+#: recording comes from; an oMLX older than it has no recommender. The bundle
+#: ships ``omlx_release.OMLX_VERSION``, which must be this release or newer.
+#: 0.7.3's ``admin/model_recommender.py`` is byte-identical to this release's.
+OMLX_RECOMMENDER_MIN = "0.7.1rc1"
 
 GIB = 1024**3
 # RAM is compared in GiB because Apple sells memory in binary units: a Mac sold
@@ -114,11 +115,11 @@ def memory_allows_local(ram_bytes: int) -> bool:
 
 
 def omlx_has_recommender(version: str | None) -> bool:
-    """Whether an installed oMLX version serves the recommender (``OMLX_PIN`` or newer)."""
+    """Whether an installed oMLX version serves the recommender (``OMLX_RECOMMENDER_MIN`` or newer)."""
     from packaging.version import InvalidVersion, Version
 
     try:
-        return version is not None and Version(version) >= Version(OMLX_PIN)
+        return version is not None and Version(version) >= Version(OMLX_RECOMMENDER_MIN)
     except InvalidVersion:
         return False
 
