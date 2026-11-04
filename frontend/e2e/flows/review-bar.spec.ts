@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { loginByUrl } from '../support/corsia';
+import { raiseAsk } from '../support/reviewAsk';
 import { expectSenders, headerSend, leaveUnsent } from '../support/heldComments';
 import { journey, type Case, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled } from '../support/reviewFixtures';
 
@@ -39,30 +40,6 @@ function addPersonStep(threadId: string, artifactId: string): void {
 		'mutate(plan.id, "add", params, actor=PlanActor(thread, user, None, turn_id=turn_id), provenance="e2e.person_step", mutation_id=uuid.uuid4().hex, db=db)',
 		'db.commit()',
 	].join('\n'), threadId, artifactId], {
-		cwd: backendDir, encoding: 'utf8',
-		env: { ...process.env, CORSIA_TEST_MODE: '1', CORSIA_STATE_DIR: state, CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE ?? '' },
-	});
-}
-
-function raiseAsk(threadId: string, artifactId: string, reason: string): void {
-	const state = process.env.CORSIA_E2E_STATE_DIR;
-	if (process.env.CORSIA_E2E_MOCK !== '1' || !state) throw new Error('The ask fixture requires isolated E2E mock state');
-	execFileSync(python(), ['-c', [
-		'import sys, uuid',
-		'from infra.database import get_db',
-		'from plans import service',
-		'from plans.boundary import PlanActor, mutate',
-		'thread, artifact, reason = sys.argv[1:]',
-		'db = get_db()',
-		'user = db.execute("SELECT user_id FROM threads WHERE id=?", (thread,)).fetchone()["user_id"]',
-		'plan = service.ensure_plan("thread", thread, db=db)',
-		'node = service.add_node(plan.id, kind="task", title="Review the proposal", acceptance_criteria="Reviewed", db=db)',
-		'db.commit()',
-		'mutate(plan.id, "block_node", {"node_id": node.id, "reason_key": "review", "reason": reason, "owner_kind": "user", "owner_id": None,',
-		'  "ask_artifact_id": artifact, "expected_revision": service._node_row(db, node.id)["revision"]},',
-		'  actor=PlanActor(thread, user, None), provenance="e2e.review_bar", mutation_id=uuid.uuid4().hex, db=db)',
-		'db.commit()',
-	].join('\n'), threadId, artifactId, reason], {
 		cwd: backendDir, encoding: 'utf8',
 		env: { ...process.env, CORSIA_TEST_MODE: '1', CORSIA_STATE_DIR: state, CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE ?? '' },
 	});

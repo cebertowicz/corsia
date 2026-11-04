@@ -65,7 +65,8 @@ async function visiblePlace(scroller: ReturnType<Page['locator']>): Promise<Visi
 		return {
 			scrollTop: el.scrollTop,
 			line: line?.textContent?.trim() ?? '',
-			top: line ? line.getBoundingClientRect().top - box.top : null,
+			// Where the reader sees it: on screen, not inside the scroller, which a header above it moves.
+			top: line ? line.getBoundingClientRect().top : null,
 		};
 	});
 }
@@ -103,7 +104,7 @@ async function armReturnSampler(page: Page): Promise<void> {
 						elapsedMs: performance.now() - startedAt,
 						scrollTop: scroller?.scrollTop ?? 0,
 						line: visibleLine?.textContent?.trim() ?? '',
-						top: visibleLine && box ? visibleLine.getBoundingClientRect().top - box.top : null,
+						top: visibleLine ? visibleLine.getBoundingClientRect().top : null,
 						editor: Boolean(scroller),
 						scrollerVisible: Boolean(box && style && style.visibility !== 'hidden' && style.display !== 'none'),
 						commentText: document.querySelector<HTMLElement>('.comment-status')?.textContent?.trim() ?? '',
@@ -315,7 +316,9 @@ const BACK_SAMPLE_MS = 1_200;
 type ImageFrame = {
 	elapsedMs: number;
 	scrollerVisible: boolean;
+	/** Where the image is on screen. */
 	imageTop: number | null;
+	headerHeight: number | null;
 	overlay: boolean;
 	overlayImage: boolean;
 	leafWidth: number | null;
@@ -326,14 +329,29 @@ type ImageFrame = {
 	selectedTabs: string[];
 };
 
-/** Like the tab-return sampler, for a document image: records every frame painted after the next click. */
-async function armImageSampler(page: Page, durationMs: number): Promise<void> {
+/**
+ * Like the tab-return sampler, for a document image: records every frame painted after the next click. With
+ * `noticeAtFrame`, the settling notice opens in the document's header in that frame after the click, as the editor lays
+ * the place back.
+ */
+async function armImageSampler(page: Page, durationMs: number, noticeAtFrame = 0): Promise<void> {
 	await installPaintedFrames(page);
-	await page.evaluate((durationMs) => {
+	await page.evaluate(({ durationMs, noticeAtFrame }) => {
 		const target = window as Window & { __imageSamples?: Promise<ImageFrame[]> };
 		target.__imageSamples = undefined;
 		const arm = () => {
 			document.removeEventListener('click', arm, true);
+			if (noticeAtFrame) {
+				let frame = 0;
+				const open = () => {
+					if (++frame < noticeAtFrame) return void requestAnimationFrame(open);
+					const notice = document.createElement('div');
+					notice.className = 'live-block';
+					notice.textContent = 'This write is still settling. The file may already have changed; saving on the server is not confirmed.';
+					document.querySelector('.document-header')?.append(notice);
+				};
+				requestAnimationFrame(open);
+			}
 			target.__imageSamples = new Promise<ImageFrame[]>((resolve) => {
 				const frames: ImageFrame[] = [];
 				const startedAt = performance.now();
@@ -350,7 +368,8 @@ async function armImageSampler(page: Page, durationMs: number): Promise<void> {
 					return {
 						elapsedMs: performance.now() - startedAt,
 						scrollerVisible: Boolean(box && style && style.visibility !== 'hidden' && style.display !== 'none' && box.height > 0),
-						imageTop: widget && box ? widget.getBoundingClientRect().top - box.top : null,
+						imageTop: widget ? widget.getBoundingClientRect().top : null,
+						headerHeight: document.querySelector('.document-header')?.getBoundingClientRect().height ?? null,
 						overlay: Boolean(overlay),
 						overlayImage: Boolean(overlay?.querySelector('img')),
 						leafWidth: leaf?.width ?? null,
@@ -370,7 +389,7 @@ async function armImageSampler(page: Page, durationMs: number): Promise<void> {
 			});
 		};
 		document.addEventListener('click', arm, true);
-	}, durationMs);
+	}, { durationMs, noticeAtFrame });
 }
 
 async function imageSamples(page: Page): Promise<ImageFrame[]> {
@@ -470,8 +489,7 @@ for (const width of [1440, 393]) {
 					return false;
 				}).toBe(true);
 				await expect.poll(() => docImage.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBe(1600);
-				const imageTop = () => page.locator('.cm-md-image').first().evaluate((el) =>
-					el.getBoundingClientRect().top - el.closest('.cm-scroller')!.getBoundingClientRect().top);
+				const imageTop = () => page.locator('.cm-md-image').first().evaluate((el) => el.getBoundingClientRect().top);
 				await page.locator('.cm-md-image').first().evaluate((el, place) => {
 					const owner = el.closest<HTMLElement>('.cm-scroller')!;
 					owner.scrollTop += el.getBoundingClientRect().top - owner.getBoundingClientRect().top - place;
@@ -539,6 +557,17 @@ for (const width of [1440, 393]) {
 				const backAfterReturn = await imageSamples(page);
 				report.backAfterReturn = backAfterReturn;
 				expectBackInPlace(backAfterReturn, reopenedTop);
+
+				// The settling notice opens above the document in Back's second frame: the image still holds still on screen.
+				const noticeTop = await openImage();
+				report.noticeTop = noticeTop;
+				await armImageSampler(page, BACK_SAMPLE_MS, 2);
+				await back.click();
+				const backUnderNotice = await imageSamples(page);
+				report.backUnderNotice = backUnderNotice;
+				const headers = backUnderNotice.map((frame) => frame.headerHeight ?? 0);
+				expect(Math.max(...headers) - Math.min(...headers), `header heights: ${JSON.stringify(headers)}`).toBeGreaterThanOrEqual(20);
+				expectBackInPlace(backUnderNotice, noticeTop);
 			} finally {
 				fs.writeFileSync(testInfo.outputPath(`tab-image-place-${width}.json`), JSON.stringify(report));
 				fs.rmSync(dir, { recursive: true, force: true });
