@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -196,6 +196,7 @@ async def prepare_route_ordered(
 ) -> PreparedRoute:
     """Join the exact DB unit and recover committed effects before leaving its gate."""
     from events import router
+    from events.connectors import github_pr_facts as pr_facts
     from events.connectors.github_rules import rule_scope
     from infra.db_async import run_in_db
     from subagents.runtime_guard import join_task_through_cancellation
@@ -203,6 +204,9 @@ async def prepare_route_ordered(
     # Like the check suite's pull request, read before the gate: the projects
     # tracking the repository run git, which must never hold every webhook's turn.
     scope = await asyncio.to_thread(rule_scope, internal_event, payload, selected_pr)
+    # Read before the gate too: a rule that names the PR's live head or checks asked for it.
+    if scope.reads_head:
+        scope = replace(scope, envelope=await pr_facts.enriched(scope.envelope))
     async with _preparation_gate():
         unit = _Preparation()
         preparation = asyncio.create_task(run_in_db(

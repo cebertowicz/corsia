@@ -6,6 +6,7 @@ import asyncio
 from typing import Any
 
 from core.fork_types import (
+    ForkInputExhausted,
     ProviderForkRejected,
     ProviderForkResult,
 )
@@ -60,8 +61,9 @@ class CodexForkCapture:
             self.diagnostic = FORK_CONTEXT_TRUNCATED if truncated else detail
             self.terminal.set_result(None)
         else:  # No narrative: fail named, never as an empty success.
-            self.terminal.set_exception(ProviderForkRejected(
-                f"{FORK_CONTEXT_TRUNCATED}: {detail}" if truncated else detail))
+            self.terminal.set_exception(
+                ForkInputExhausted(f"{FORK_CONTEXT_TRUNCATED}: {detail}") if truncated
+                else ProviderForkRejected(detail))
 
     def truncate(self) -> None:
         """Finish capture through the existing degraded-completion outcome."""

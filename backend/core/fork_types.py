@@ -85,3 +85,13 @@ class WarmForkUnusable(ProviderForkRejected):
     def __init__(self, *args: object, reason: str = "warm_fork_over_window") -> None:
         super().__init__(*args)
         self.reason = reason
+
+
+class ForkInputExhausted(ProviderForkRejected):
+    """The fork's grown input ran out of room before it wrote any narrative.
+
+    Either CORSIA's own bound stopped the next call or the provider refused it
+    for size; a reply that ran out of output is not this.
+    """
+
+    reason = "fork_input_exhausted"

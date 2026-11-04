@@ -22,7 +22,7 @@ from infra.turn_usage_remainder import pending_measurement_counts
 USAGE_TOKENS = "SUM(total_tokens) AS tokens,SUM(total_tokens IS NULL) AS unknown_tokens"
 
 
-def usage_dollars(connection, ids: Mapping[str, Collection[str]]) -> dict[str, dict[str, dict]]:
+def usage_dollars(connection, ids: Mapping[str, Collection[str]], *, include_turns: bool = False) -> dict[str, dict[str, dict]]:
     """Each id's ``model_cost_usd``: Measurement's API-equivalent price of its ``llm_usage`` rows.
 
     ``ids`` maps a ledger column (``plan_node_id``, ``plan_commitment_id``) to the ids it names;
@@ -32,17 +32,26 @@ def usage_dollars(connection, ids: Mapping[str, Collection[str]]) -> dict[str, d
     no API price (a local model: ``not_api_priced``) adds no dollars and is not unknown; a row
     Measurement cannot price (no list price, refused by admission, an unproven context tier,
     an unpublished cache rate) counts in ``unknown_rows``. ``known`` is None when none of the
-    id's rows has a price.
+    id's rows has a price; ``records`` counts all of its rows, so None with ``records`` above 0
+    and nothing unknown is a priced-nothing id (all local), and ``records`` 0 is an id with no usage.
+    When ``include_turns`` is true each amount also includes the set of measured turn IDs, gathered
+    in the same read; this increases grouping granularity and is used only by thread cost evaluation.
     """
     wanted = {column: sorted({str(value) for value in values}) for column, values in ids.items() if values}
     dollars: dict[str, dict[str, dict]] = {
-        column: {value: {"known": None, "unknown_rows": 0} for value in wanted.get(column, ())} for column in ids
+        column: {value: {"known": None, "unknown_rows": 0, "records": 0} for value in wanted.get(column, ())} for column in ids
     }
     if not wanted:
         return dollars
     # Each id list is one JSON parameter, so no list is chunked and no row is read twice.
+    keys = {column: f"u.{column}" for column in wanted}
+    if include_turns:
+        keys["turn_id"] = "u.turn_id"
+        for amounts in dollars.values():
+            for amount in amounts.values():
+                amount["turns"] = set()
     rows = [dict(row) for row in fetch_all(connection, grouped_usage_sql(
-        {column: f"u.{column}" for column in wanted},
+        keys,
         "llm_usage u WHERE " + " OR ".join(
             f"u.{column} IN (SELECT value FROM json_each(?))" for column in wanted
         ),
@@ -58,6 +67,9 @@ def usage_dollars(connection, ids: Mapping[str, Collection[str]]) -> dict[str, d
             if str(row[column]) not in listed:
                 continue
             amount = dollars[column][str(row[column])]
+            amount["records"] += int(row["records"])
+            if include_turns and row["turn_id"] is not None:
+                amount["turns"].add(row["turn_id"])
             if row["outcome"] == "priced":
                 amount["known"] = (amount["known"] or 0) + row["dollars"]
             elif row["outcome"] != "not_api_priced":
@@ -115,10 +127,12 @@ def own_usage(
     )
     if dollars is None:
         dollars = usage_dollars(connection, {"plan_node_id": node_ids})["plan_node_id"]
+    # The node figure keeps its two published fields; ``records`` is for ``usage_dollars``' other readers.
+    priced = {str(row["plan_node_id"]): amount(dollars, str(row["plan_node_id"])) for row in rows}
     return {
         str(row["plan_node_id"]): {
             "tokens": {"known": row["tokens"], "unknown_rows": row["unknown_tokens"]},
-            "model_cost_usd": amount(dollars, str(row["plan_node_id"])),
+            "model_cost_usd": {key: priced[str(row["plan_node_id"])][key] for key in ("known", "unknown_rows")},
         }
         for row in rows
     }
