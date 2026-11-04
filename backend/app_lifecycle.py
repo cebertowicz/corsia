@@ -86,6 +86,9 @@ async def _startup_network_discovery() -> None:
             f"network discovery startup: probed {len(servers)} server(s), "
             f"{online_count} online, discovery complete"
         )
+        from llm.local_output_cap import clear_old_output_cap
+
+        await clear_old_output_cap()
     except Exception as exc:
         logger.warning(f"network discovery startup failed: {exc}")
 
