@@ -14,6 +14,8 @@ exit, not clean     restart it (bounded)        that restart is cancelled and   
                                                 a new one begins
 exit, code 0        logged, not restarted       -                                no restart
                     (an exit with no readable status is treated as unexpected)
+exit, code 0 after  restarted, bound reset      -                                no restart
+oMLX's own Restart  (its dashboard asked)
 stop (the person,   exit watch dropped, never   restart cancelled and awaited;   -
 CORSIA, Quit)       restarted                   what it spawned is then stopped
 stop fails          stop flag cleared: a later  -                                -
@@ -38,6 +40,7 @@ import time
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from infra.product_events import emit_product_event
@@ -47,6 +50,8 @@ log = logging.getLogger("llm.providers.omlx.restart")
 
 MAX_RESTARTS = 3
 RESTART_WINDOW_S = 600.0
+# What oMLX logs when its own Restart is pressed, before it exits 0 for its supervisor to respawn it.
+RESTART_REQUESTED = "Server restart requested (supervisor=corsia)"
 
 
 @dataclass
@@ -118,6 +123,15 @@ def restarting(lives: dict[str, Life]) -> set[str]:
     return {server_id for server_id, life in lives.items() if life.restart}
 
 
+def restart_logged_from_now(runtime_dir: Path, server_id: str) -> Callable[[], bool]:
+    """Whether the server's log gains oMLX's restart line after this call: an earlier process's never counts.
+
+    CORSIA launches oMLX with ``OMLX_SUPERVISED=corsia``, so oMLX's own Restart logs that line and exits 0.
+    """
+    offset = process.log_size(runtime_dir, server_id)
+    return lambda: process.logged_since(runtime_dir, server_id, offset, RESTART_REQUESTED)
+
+
 def emit(server_id: str, action: str, **properties: Any) -> None:
     emit_product_event("model_server", action, properties={"provider": "omlx", "server_id": server_id, **properties})
 
@@ -125,9 +139,9 @@ def emit(server_id: str, action: str, **properties: Any) -> None:
 def on_exit(
     server_id: str, life: Life, pid: int,
     start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
-    observed: tuple[str, bool] | None = None,
+    observed: tuple[str, bool] | None = None, restart_requested: Callable[[], bool] = lambda: False,
 ) -> None:
-    """Restart the server unless the exit was asked for or was a clean exit 0."""
+    """Restart the server unless CORSIA stopped it, or it exited 0 without oMLX's own Restart asking."""
     from llm.server_observation import forget_loaded_on_exit
 
     life.unwatch = None
@@ -136,10 +150,15 @@ def on_exit(
     if life.stopping:
         log.info("oMLX %s (pid %s) stopped as asked; not restarting", server_id, pid)
         return
-    if clean:
+    if clean and not restart_requested():
         log.info("oMLX %s (pid %s) exited with code 0 without being asked; not restarting", server_id, pid)
         return
-    emit(server_id, "exit.unexpected", status=status, loaded_models=len(loaded))
+    if clean:  # a person's restart, like a person's start, resets the bound
+        status = "restart requested in oMLX"
+        life.restarts.clear()
+        emit(server_id, "restart.requested", loaded_models=len(loaded))
+    else:
+        emit(server_id, "exit.unexpected", status=status, loaded_models=len(loaded))
     if life.restart:  # it exited again while a restart was running
         life.restart.cancel()
     task = asyncio.get_running_loop().create_task(_restart(server_id, life, status, loaded, start, tail_log))
@@ -164,7 +183,7 @@ async def _restart(
 
     while life.restarts and time.monotonic() - life.restarts[0] > RESTART_WINDOW_S:
         life.restarts.popleft()
-    log.warning("oMLX server %s exited unexpectedly: %s; %d restarts in the last 10 minutes",
+    log.warning("oMLX server %s exited (%s); %d restarts in the last 10 minutes",
                 server_id, status, len(life.restarts))
     while len(life.restarts) < MAX_RESTARTS:
         life.restarts.append(time.monotonic())

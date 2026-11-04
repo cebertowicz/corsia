@@ -243,6 +243,24 @@ def build_argv(
     return argv
 
 
+def log_size(runtime_dir: Path, server_id: str) -> int:
+    try:
+        return log_path(runtime_dir, server_id).stat().st_size
+    except OSError:
+        return 0
+
+
+def logged_since(runtime_dir: Path, server_id: str, offset: int, text: str) -> bool:
+    """Whether ``text`` is in the last 64 KiB this server's log gained after byte ``offset``."""
+    try:
+        with log_path(runtime_dir, server_id).open("rb") as file:
+            size = file.seek(0, os.SEEK_END)
+            file.seek(max(offset, size - 64 * 1024))
+            return text.encode() in file.read()
+    except OSError:
+        return False
+
+
 def tail_log(runtime_dir: Path, server_id: str, lines: int = 20) -> str:
     path = log_path(runtime_dir, server_id)
     if not path.exists():

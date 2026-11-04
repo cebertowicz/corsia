@@ -169,6 +169,7 @@ def _spawn_process(argv: list[str], log_path) -> subprocess.Popen | dict[str, An
         log_fh = log_path.open("ab", buffering=0)
         return subprocess.Popen(
             argv,
+            env={**os.environ, "OMLX_SUPERVISED": "corsia"},  # enables oMLX's own Restart; see omlx_restart
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
@@ -227,7 +228,8 @@ def _duration(seconds: float) -> str:
 
 def watch(server_id: str, pid: int) -> None:
     life = _life.setdefault(server_id, restart.Life())
-    life.watch(pid, lambda status: restart.on_exit(server_id, life, pid, start_server, _tail_log, status))
+    asked = restart.restart_logged_from_now(RUNTIME_DIR, server_id)
+    life.watch(pid, lambda status: restart.on_exit(server_id, life, pid, start_server, _tail_log, status, asked))
 
 
 def stop_watching() -> None:  # the backend is shutting down: an oMLX exit from here on is not a crash

@@ -190,6 +190,43 @@ async def test_a_clean_exit_the_person_did_not_ask_for_is_logged_not_restarted(e
     assert "exited with code 0 without being asked; not restarting" in caplog.text
 
 
+async def test_a_clean_exit_after_omlx_own_restart_respawns_and_reloads(events, monkeypatch, no_reload):
+    import llm.network_discovery as discovery
+
+    monkeypatch.setitem(discovery._LOADED_BY_SERVER, SID, {"model"})
+    start, calls = recording_start()
+    life = sup._life.setdefault(SID, restart.Life())
+    life.restarts.extend([time.monotonic()] * restart.MAX_RESTARTS)  # a person's restart is not a crash
+    restart.on_exit(SID, life, GONE_PID, start, lambda _sid: "", ("exit code 0", True), lambda: True)
+    await settle()
+    assert calls == [{"server_id": SID}]
+    assert actions(events) == ["restart.requested", "restart.attempted", "restart.completed"]
+    assert no_reload == [(SID, ["model"])]
+
+
+def test_only_a_restart_line_logged_after_the_watch_began_counts(tmp_path, monkeypatch):
+    watched: list = []
+    asked: list[bool] = []
+    monkeypatch.setattr(omlx_process, "watch_exit", lambda _pid, on_exit: watched.append(on_exit) or (lambda: None))
+    monkeypatch.setattr(restart, "on_exit", lambda *args: asked.append(args[-1]()))
+    log = omlx_process.log_path(tmp_path, SID)
+    log.write_text(f"earlier process: {restart.RESTART_REQUESTED}\n")
+    sup.watch(SID, 4242)
+    watched[0](("exit code 0", True))
+    with log.open("a") as file:
+        file.write(f"oMLX - WARNING - {restart.RESTART_REQUESTED}\n")
+    watched[0](("exit code 0", True))
+    assert asked == [False, True]
+
+
+def test_corsia_launches_omlx_as_its_supervisor(tmp_path, monkeypatch):
+    seen: dict = {}
+    monkeypatch.setattr(sup.subprocess, "Popen", lambda argv, **kwargs: seen.update(kwargs) or object())
+    sup._spawn_process(["omlx", "serve"], tmp_path / "omlx.log")
+    assert seen["env"]["OMLX_SUPERVISED"] == "corsia"
+    assert seen["env"]["PATH"] == os.environ["PATH"]
+
+
 async def test_an_exit_after_an_announced_stop_is_not_a_crash(events):
     start, calls = recording_start()
     sup._life.setdefault(SID, restart.Life()).announce_stop()
