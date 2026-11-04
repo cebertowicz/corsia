@@ -398,6 +398,20 @@ async def test_a_stopped_nudged_turn_keeps_its_own_words_hidden(db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_stopped_nudged_turn_that_answered_no_reply_shows_nothing(db) -> None:
+    _take_in(db)
+    answer = _say(db, "Which devices do you use?")
+    await _end(db)
+    _take_nudge(db, "t2")
+    own = _say(db, "NO_REPLY", turn="t2")
+
+    await _stop(db, "t2")
+
+    assert not _for_user(db, answer)
+    assert not _for_user(db, own)
+
+
+@pytest.mark.asyncio
 async def test_stopping_a_turn_no_nudge_woke_shows_nothing(db) -> None:
     _take_in(db)
     answer = _say(db, "Working on it")

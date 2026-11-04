@@ -197,16 +197,25 @@ def _settle_nudged_turn(
     logger.info("focus.nudge_settled thread={} result=shown", thread_id)
 
 
+def _nudge_of(db: sqlite3.Connection, person: sqlite3.Row) -> sqlite3.Row | None:
+    return db.execute(
+        "SELECT seq, active_turn_id, delivery_state FROM messages WHERE id=?",
+        (_nudge_id(str(person["id"])),),
+    ).fetchone()
+
+
+def _woke(nudge: sqlite3.Row, turn_id: str) -> bool:
+    """``turn_id`` is the Turn this nudge woke."""
+    return nudge["delivery_state"] == "delivered" and nudge["active_turn_id"] == turn_id
+
+
 def _nudged_by(db: sqlite3.Connection, thread_id: str, turn_id: str):
     """(person, nudge) when ``turn_id`` is the Turn the newest message's nudge woke."""
     person = _newest_person_input(db, thread_id, "delivered")
     if person is None or person["seq"] is None:
         return None
-    nudge = db.execute(
-        "SELECT seq, active_turn_id, delivery_state FROM messages WHERE id=?",
-        (_nudge_id(str(person["id"])),),
-    ).fetchone()
-    if nudge is None or nudge["delivery_state"] != "delivered" or nudge["active_turn_id"] != turn_id:
+    nudge = _nudge_of(db, person)
+    if nudge is None or not _woke(nudge, turn_id):
         return None
     return person, nudge
 
@@ -243,12 +252,9 @@ def _settle(db: sqlite3.Connection, thread_id: str, outcome: dict) -> bool:
     person = _newest_person_input(db, thread_id, "delivered")
     if person is None or person["seq"] is None:
         return False
-    nudge = db.execute(
-        "SELECT seq, active_turn_id, delivery_state FROM messages WHERE id=?",
-        (_nudge_id(str(person["id"])),),
-    ).fetchone()
+    nudge = _nudge_of(db, person)
     if nudge is not None:  # Once per message; its own Turn's end settles it.
-        if nudge["delivery_state"] == "delivered" and nudge["active_turn_id"] == ending_turn:
+        if _woke(nudge, ending_turn):
             _settle_nudged_turn(db, thread_id, person, nudge)
         return False
     if outcome.get("outcome", "completed") != "completed":
@@ -291,8 +297,9 @@ def show_reply_on_nudge_stop(db: sqlite3.Connection, thread_id: str, turn_id: st
     """A nudged Turn that is stopped (the person's Stop, shutdown, a plan limit) still
     shows the words it was woken about.
 
-    The stopped Turn's own words stay as they are. Runs in
-    its own savepoint inside ``finish_turn``, as ``settle_reply_not_visible`` does.
+    The stopped Turn's own words stay as they are; a NO_REPLY among them keeps the
+    earlier words hidden too. Runs in its own savepoint inside ``finish_turn``, as
+    ``settle_reply_not_visible`` does.
     """
     from infra.database import is_lock_refusal, write_transaction
 
@@ -300,6 +307,9 @@ def show_reply_on_nudge_stop(db: sqlite3.Connection, thread_id: str, turn_id: st
         with write_transaction(db, scope="reply_not_visible_stop") as connection:
             nudged = _nudged_by(connection, thread_id, turn_id) if _focus_on(connection) else None
             if nudged is None or _replied_after(connection, thread_id, nudged[0]):
+                return
+            own = _last_hidden(connection, thread_id, nudged[1]["seq"])
+            if own is not None and str(own["content"]).strip() == NO_REPLY:
                 return
             hidden = _woken_about(connection, thread_id, *nudged)
             if hidden is None or str(hidden["content"]).strip() == NO_REPLY:
