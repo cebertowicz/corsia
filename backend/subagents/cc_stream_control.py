@@ -64,6 +64,12 @@ def start_terminal_driver(session, settlement) -> asyncio.Task:
     """Drive one returned terminal settlement after its stream callback exits."""
     from core.turn_core import drive_turn_settlement
 
+    if session is None:
+        from ws.ingress import track_background_task
+
+        task = asyncio.create_task(drive_turn_settlement(settlement))
+        track_background_task(task)
+        return task
     return retain_terminal_driver(session, drive_turn_settlement(settlement))
 
 
