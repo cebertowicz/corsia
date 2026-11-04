@@ -16,6 +16,7 @@ import httpx
 from infra.config import RUNTIME_DIR
 from infra.db_async import run_in_db
 from llm.network_endpoints import lan_base, models_probe_url
+from llm.omlx_release import OMLX_VERSION
 from llm.providers import omlx_process as process
 from llm.providers import omlx_restart as restart
 from llm.providers.omlx_endpoints import _resolve_endpoint as _resolve_endpoint_via_freshness
@@ -70,8 +71,13 @@ def _read_pid(server_id: str, *, host: str | None = None, port: int | None = Non
     return process.read_pid(RUNTIME_DIR, server_id, legacy_port_owner_pid=owner)
 
 
-def _write_pid(server_id: str, pid: int) -> None:
-    process.write_pid(RUNTIME_DIR, server_id, pid)
+def _write_pid(server_id: str, pid: int, *, omlx_version: str | None = None) -> None:
+    process.write_pid(RUNTIME_DIR, server_id, pid, omlx_version=omlx_version)
+
+
+def recorded_version(server_id: str) -> str | None:
+    """The oMLX build this server was spawned with, as recorded by this supervisor."""
+    return process.recorded_omlx_version(RUNTIME_DIR, server_id)
 
 
 def _clear_pid(server_id: str) -> None:
@@ -285,7 +291,7 @@ async def start_server(cfg: dict) -> dict[str, Any]:
         return spawned
     proc = spawned
 
-    _write_pid(sid, proc.pid)
+    _write_pid(sid, proc.pid, omlx_version=OMLX_VERSION if managed else None)
     log.info("start_server: spawned omlx pid=%s for server_id=%s on %s:%s",
              proc.pid, sid, host, port)
 

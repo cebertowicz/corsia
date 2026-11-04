@@ -65,15 +65,28 @@ def read_pid(runtime_dir: Path, server_id: str, *, legacy_port_owner_pid: PortOw
     return None
 
 
-def write_pid(runtime_dir: Path, server_id: str, pid: int) -> None:
-    """Bind the supervisor's spawn record to this process's creation time."""
+def write_pid(runtime_dir: Path, server_id: str, pid: int, *, omlx_version: str | None = None) -> None:
+    """Bind the supervisor's spawn record to this process's creation time and, for a managed server, its build."""
     try:
         created = psutil.Process(pid).create_time()
     except psutil.Error:
         clear_pid(runtime_dir, server_id)
         return
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    pid_path(runtime_dir, server_id).write_text(json.dumps({"pid": pid, "create_time": created}))
+    record = {"pid": pid, "create_time": created}
+    if omlx_version is not None:
+        record["omlx"] = omlx_version
+    pid_path(runtime_dir, server_id).write_text(json.dumps(record))
+
+
+def recorded_omlx_version(runtime_dir: Path, server_id: str) -> str | None:
+    """The build recorded when this server was spawned; None when the record is older than that field or gone."""
+    try:
+        record = json.loads(pid_path(runtime_dir, server_id).read_text())
+    except (OSError, ValueError):
+        return None
+    version = record.get("omlx") if isinstance(record, dict) else None
+    return version if isinstance(version, str) else None
 
 
 def clear_pid(runtime_dir: Path, server_id: str) -> None:

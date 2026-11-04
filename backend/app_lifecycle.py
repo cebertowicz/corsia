@@ -86,6 +86,9 @@ async def _startup_network_discovery() -> None:
             f"network discovery startup: probed {len(servers)} server(s), "
             f"{online_count} online, discovery complete"
         )
+        from llm.providers.omlx_upgrade import upgrade_managed_omlx
+
+        asyncio.create_task(upgrade_managed_omlx())  # may wait for the seat to be idle; never blocks startup
     except Exception as exc:
         logger.warning(f"network discovery startup failed: {exc}")
 
