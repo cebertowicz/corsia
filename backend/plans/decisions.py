@@ -110,7 +110,7 @@ def raise_offer(db, *, plan_id: str, source_node_id: str, content: dict, provena
 
 
 #: Why a handoff offer is withdrawn: a correction broke the record it was offered on.
-OFFER_VOIDED = "You corrected its work, so the review is back with you"
+OFFER_VOIDED = "You corrected this work, so you keep reviewing it"
 
 
 def withdraw_offer(db, decision_id: str, *, provenance: str) -> bool:

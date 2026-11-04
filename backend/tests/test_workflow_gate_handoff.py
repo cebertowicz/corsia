@@ -460,6 +460,24 @@ async def test_reject_blocks_closing_until_a_later_answer(isolated_db, tmp_path,
     assert not isinstance(await run.update("mark_done", args), str)
 
 
+async def test_the_persons_own_close_of_a_rejected_gate_is_not_refused(isolated_db, tmp_path, monkeypatch):
+    from plans import boundary
+
+    run = _make(tmp_path, monkeypatch)
+    _reply, gate = await _go(run, "changes_requested")
+    db = get_db()
+    try:
+        boundary.mutate(
+            run.plan_id, "mark_done",
+            {"node_id": gate, "expected_revision": run.revision(gate), "evidence": "d", "verification_result": "passed"},
+            actor=PlanActor(None, "user-1", None, kind="user"), provenance="api.plans", mutation_id="person-close", db=db,
+        )
+        db.commit()
+    finally:
+        db.close()
+    assert run.rows("SELECT state FROM plan_nodes WHERE id=?", gate) == [{"state": "accepted"}]
+
+
 async def test_no_answer_at_all_does_not_block_closing(isolated_db, tmp_path, monkeypatch):
     run = _make(tmp_path, monkeypatch)
     _reply, gate = await _go(run, None)
