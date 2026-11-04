@@ -98,14 +98,14 @@ async def _finish_approval(user: dict, held: dict, sender: dict | None, recipien
         await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.NOT_SENT)
         await notify_hold_changed(held)
         await tell_sender(held, held_replies.NOT_SENT, recipient=name)
-        return {"ok": True, "state": held_replies.NOT_SENT, "line": gone_line(name)}
+        return {"ok": True, "state": held_replies.NOT_SENT, "reason": "recipient_gone", "line": gone_line(name)}
     try:
         target = await run_in_db(fetch_send_target, held["recipient_thread_id"], user["id"], sender.get("project_id"))
         if target is None:
             await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.NOT_SENT)
             await notify_hold_changed(held)
             await tell_sender(held, held_replies.NOT_SENT, recipient=name)
-            return {"ok": True, "state": held_replies.NOT_SENT, "line": gone_line(name)}
+            return {"ok": True, "state": held_replies.NOT_SENT, "reason": "recipient_gone", "line": gone_line(name)}
         scope_error = native_send_scope_error(
             current=sender, target_payload=target, from_thread_id=held["sender_thread_id"],
             target_thread_id=held["recipient_thread_id"], requested_scope_id=None,
@@ -116,7 +116,7 @@ async def _finish_approval(user: dict, held: dict, sender: dict | None, recipien
             await notify_hold_changed(held)
             await tell_sender(held, SCOPE_NOT_SENT, recipient=name)
             await note_asker(held, SCOPE_NOT_SENT)
-            return {"ok": True, "state": held_replies.NOT_SENT, "line": scope_line(name)}
+            return {"ok": True, "state": held_replies.NOT_SENT, "reason": "scope", "line": scope_line(name)}
         sent = await _deliver(held, sender, target["thread_row"])
     except HTTPException as exc:
         sent = f"Error: {exc.detail}"

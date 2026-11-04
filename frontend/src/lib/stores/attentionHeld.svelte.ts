@@ -6,8 +6,7 @@
 import { get } from "svelte/store";
 import type { HeldReplyDetail } from "$lib/api/attentionQueue";
 import { decideHeldReply, type HeldVerb } from "$lib/api/heldReplies";
-import { token } from "$lib/stores/auth";
-import { handleWsError } from "$lib/ws/handlersConnection";
+import { clearExpiredSession, token } from "$lib/stores/auth";
 import { activeId, expandedId, goneReply, identityEpoch, queue, reload, visibleQueue } from "./attentionDock.svelte";
 import { rollBack } from "./attentionAnswer.svelte";
 import { answers, setAnswer, showNotice } from "./attentionAnswerState";
@@ -22,7 +21,7 @@ export async function decideHeld(held: HeldReplyDetail, verb: HeldVerb, onStarte
   if (get(answers)[id]?.state === "sending") return;
   const bearer = get(token);
   if (!bearer) {
-    handleWsError({ message: "Invalid or expired session" });
+    clearExpiredSession();
     return;
   }
   const generation = identityEpoch();
@@ -42,7 +41,7 @@ export async function decideHeld(held: HeldReplyDetail, verb: HeldVerb, onStarte
   const outcome = await decideHeldReply(bearer, id, verb);
   if (generation !== identityEpoch()) return;
   if (outcome.status === "unauthorized") {
-    handleWsError({ message: "Invalid or expired session" });
+    clearExpiredSession();
     return;
   }
   if (outcome.status === "error") {
@@ -60,7 +59,7 @@ export async function decideHeld(held: HeldReplyDetail, verb: HeldVerb, onStarte
   if (outcome.status === "declined") showNotice(declinedLine(held.recipient));
   else if (outcome.status === "not_sent") {
     const item = items.find((entry) => entry.external_id === id);
-    if (item && outcome.line.endsWith(" no longer exists.")) {
+    if (item && outcome.reason === "recipient_gone") {
       goneReply.set({ item, line: outcome.line });
     } else showNotice(outcome.line);
   }

@@ -343,6 +343,7 @@ async def test_a_missing_recipient_is_not_sent_and_a_failed_delivery_returns_to_
     gone = _post(held_client, failed["held_reply_id"], "approve")
 
     assert gone.json()["state"] == "not_sent"
+    assert gone.json()["reason"] == "recipient_gone"
     assert _rows(deleg_db, "state") == [("not_sent",)]
     line = "Couldn’t send the reply because the Researcher agent no longer exists."
     assert gone.json()["line"] == line
@@ -618,6 +619,18 @@ async def test_recovered_approval_deduplicates_an_admitted_delivery(deleg_db, he
 
 
 @pytest.mark.asyncio
+async def test_missing_send_target_has_recipient_gone_reason(deleg_db, held_client, seen, monkeypatch):
+    from api import held_replies as held_api
+
+    held = await _send_by_tool()
+    monkeypatch.setattr(held_api, "fetch_send_target", lambda *_args: None)
+    result = _post(held_client, held["held_reply_id"], "approve")
+    assert result.json()["state"] == "not_sent"
+    assert result.json()["reason"] == "recipient_gone"
+    assert seen["delivered"] == []
+
+
+@pytest.mark.asyncio
 async def test_moved_recipient_is_not_sent(deleg_db, held_client, seen):
     held = await _send_by_tool()
     deleg_db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('other','Other','t','t')")
@@ -625,6 +638,7 @@ async def test_moved_recipient_is_not_sent(deleg_db, held_client, seen):
     deleg_db.commit()
     result = _post(held_client, held["held_reply_id"], "approve")
     assert result.json()["state"] == "not_sent"
+    assert result.json()["reason"] == "scope"
     assert "is no longer reachable" in result.json()["line"]
     assert _rows(deleg_db, "state") == [("not_sent",)]
     assert seen["delivered"] == []

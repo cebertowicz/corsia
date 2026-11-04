@@ -14,6 +14,12 @@ export const token = writable<string | null>(
 export const user = writable<User | null>(null);
 export const isAuthenticated = derived(user, $u => $u !== null);
 
+/** Clear the browser identity after its session is no longer valid. */
+export function clearExpiredSession(): void {
+	token.set(null);
+	user.set(null);
+}
+
 token.subscribe(t => {
 	if (!t) coordinationThreads.set([]);
 	if (typeof localStorage !== 'undefined') {

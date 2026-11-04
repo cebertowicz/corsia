@@ -4,8 +4,8 @@ export type HeldVerb = 'approve' | 'decline';
 
 export type HeldOutcome =
 	| { status: 'sent' | 'declined' }
-	/** Approved, but the recipient no longer exists: the server's line says so. */
-	| { status: 'not_sent'; line: string }
+	/** Approved, but delivery was impossible; the reason identifies the recovery. */
+	| { status: 'not_sent'; line: string; reason: 'recipient_gone' | 'scope' | undefined }
 	/** Another page decided it first, or it is gone: nothing was sent by this call. */
 	| { status: 'settled' }
 	| { status: 'unauthorized' }
@@ -28,7 +28,7 @@ export async function decideHeldReply(bearer: string, id: string, verb: HeldVerb
 		const body = (await res.json().catch(() => ({}))) as { detail?: unknown; reference?: unknown };
 		return { status: 'error', line: typeof body.detail === 'string' ? body.detail : null, reference: typeof body.reference === 'string' ? body.reference : undefined };
 	}
-	const body = (await res.json()) as { state?: string; line?: string };
-	if (body.state === 'not_sent') return { status: 'not_sent', line: body.line ?? '' };
+	const body = (await res.json()) as { state?: string; line?: string; reason?: 'recipient_gone' | 'scope' };
+	if (body.state === 'not_sent') return { status: 'not_sent', line: body.line ?? '', reason: body.reason };
 	return { status: verb === 'approve' ? 'sent' : 'declined' };
 }

@@ -9,7 +9,7 @@ import { __reset } from "$lib/stores/attentionDock.svelte";
 import { answerNotice } from "$lib/stores/attentionAnswerState";
 import { token, user } from "$lib/stores/auth";
 import { connectionState } from "$lib/stores/connection";
-import { emit } from "$lib/ws/events";
+import { emit, on } from "$lib/ws/events";
 import { get } from "svelte/store";
 import type { AttentionQueue } from "$lib/api/attentionQueue";
 import { decisionItem, heldReplyItem, queueBody } from "./fixtures/attentionQueue";
@@ -206,7 +206,7 @@ describe("held reply in the dock", () => {
 
   it("shows a terminal drawer when the recipient no longer exists", async () => {
     const line = "Couldn’t send the reply because the Researcher agent no longer exists.";
-    decide = () => ({ status: 200, payload: { ok: true, state: "not_sent", line } });
+    decide = () => ({ status: 200, payload: { ok: true, state: "not_sent", reason: "recipient_gone", line } });
     await openDock();
     button("Approve once")!.click();
     body = queueBody(null, 0);
@@ -221,7 +221,20 @@ describe("held reply in the dock", () => {
     expect(host.querySelector("h3.problem")).toBeNull();
   });
 
+  it("keeps the notice when sending is refused by scope", async () => {
+    const line = "Couldn’t send the reply because the Researcher agent is no longer reachable from this chat.";
+    decide = () => ({ status: 200, payload: { ok: true, state: "not_sent", reason: "scope", line } });
+    await openDock();
+    button("Approve once")!.click();
+    body = queueBody(null, 0);
+    await settle();
+    expect(get(answerNotice)).toBe(line);
+    expect(host.querySelector("h3.problem")).toBeNull();
+  });
+
   it.each(["Approve once", "Decline"])("returns to sign-in when %s gets a 401", async (action) => {
+    const wsError = vi.fn();
+    const offError = on("error", wsError);
     user.set({ id: "u-test", name: "Test" });
     decide = () => ({ status: 401 });
     await openDock();
@@ -229,6 +242,8 @@ describe("held reply in the dock", () => {
     await settle();
     expect(get(token)).toBeNull();
     expect(get(user)).toBeNull();
+    expect(wsError).not.toHaveBeenCalled();
+    offError();
   });
 
   it("returns the reply, reopened, with the server's error line when delivery fails, and Approve once retries", async () => {
