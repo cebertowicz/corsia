@@ -11,6 +11,7 @@ from tools.catalog_mailhost_entries import MAILHOST_CATALOG_ENTRIES
 from tools.catalog_measurement_entries import MEASUREMENT_CATALOG_ENTRIES
 from tools.catalog_messages_entries import MESSAGES_CATALOG_ENTRIES
 from tools.catalog_microsoft_entries import MICROSOFT_CATALOG_ENTRIES
+from tools.workspace_git import WORKSPACE_GIT_CATALOG_ENTRIES
 
 _Entry = ToolCatalogEntry
 
@@ -146,6 +147,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Register a Git repository with this project",
         activity="Registering repository",
     ),
+    **WORKSPACE_GIT_CATALOG_ENTRIES,
     "conversation_set_project": _Entry(
         "projects", status="substrate", authority="project-scope",
         summary="Attach this conversation to a project, or detach it",
