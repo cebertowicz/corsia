@@ -36,7 +36,7 @@ def _broker(monkeypatch, respond):
         calls.append(args)
         return respond(args)
 
-    monkeypatch.setattr(channel, "default_broker", lambda: GithubReadBroker(inner, lambda: budget))
+    monkeypatch.setattr(channel, "default_broker", lambda: GithubReadBroker(inner, budget))
     return calls
 
 

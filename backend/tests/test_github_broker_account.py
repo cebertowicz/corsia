@@ -191,15 +191,9 @@ def budget_status():
     return budget.status(), person_budget.status()
 
 
-@pytest.mark.parametrize("account, agents", [
-    (AgentAccountView(state="ready", binary="/agent/gh", home="/agent/home"), True),
-    (AgentAccountView(state="needs_auth", cause="signed_out", binary="/agent/gh", home="/agent/home"), True),
-    (AgentAccountView(state="not_installed", absent=True), False),
-])
-def test_each_broker_names_the_budget_of_the_account_it_reads_as(monkeypatch, account, agents):
+def test_each_broker_carries_its_own_budget_without_looking_up_the_account(monkeypatch):
     from events.connectors.github_read_budget import budget, person_budget
 
-    monkeypatch.setattr(github_agent, "view", lambda: account)
-    assert account.absent is not agents
-    assert default_broker().read_budget is (budget if agents else person_budget)
+    monkeypatch.setattr(github_agent, "view", lambda: pytest.fail("a budget lookup read the account"))
+    assert default_broker().read_budget is budget
     assert person_broker().read_budget is person_budget

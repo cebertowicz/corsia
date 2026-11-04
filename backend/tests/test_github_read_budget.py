@@ -257,13 +257,12 @@ def test_status_shows_the_budget(_budget_env):
 
 def test_a_limit_on_one_account_never_stops_the_other_accounts_reads(_budget_env, monkeypatch):
     from connections import github_agent
-    from connections.github_agent import AgentAccountView
     from events.connectors.github_notifications import poller_status
     from events.connectors.github_pr_quiet_watch import quiet_watch_status
     from events.connectors.github_read_budget import person_budget
 
     monkeypatch.setattr(person_budget, "_clock", lambda: _budget_env["now"])
-    monkeypatch.setattr(github_agent, "view", lambda: AgentAccountView(state="ready"))
+    monkeypatch.setattr(github_agent, "view", lambda: pytest.fail("a status read looked up the account"))
     _sweep_read(Runner(200, x_ratelimit_limit="60", x_ratelimit_remaining="0",
                        x_ratelimit_reset=str(int(RESET))), "o/r")  # the agents' account is spent
     person = Runner(as_person=True, x_ratelimit_remaining="4999", x_ratelimit_reset=str(int(RESET)))
