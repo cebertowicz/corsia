@@ -779,7 +779,7 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         migrate_168_to_169(db)
         # 170 -> 171 rebuilds event_rules with a nullable worker_profile column; 169 -> 170 is data only.
         from infra.migration_170_to_171_worker_profile import migrate_170_to_171
-        # 171 -> 173 only widens action_drafts.kind to admit texts.
+        # 171 -> 172 only widens action_drafts.kind to admit texts.
         from infra.migration_171_to_172_message_drafts import migrate_171_to_172
         migrate_170_to_171(db)
         migrate_171_to_172(db)

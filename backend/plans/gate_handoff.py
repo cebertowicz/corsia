@@ -30,7 +30,7 @@ _HANDED = {"A": "spot", "B": "none", "C": "drop"}
 
 OFFER_TITLE = "Hand the {step} review in {workflow} to an agent?"
 OFFER_CONTEXT = "You approved {step} in {workflow} {count} times in a row with no changes."
-OFFER_TRADEOFF = "Handing it off saves your review time, and any correction on it hands it back to you."
+OFFER_TRADEOFF = "Handing it off saves your review time. If you later correct its work, the review comes back to you."
 OFFER_RATIONALE = "Spot checks keep some review of it without asking you every time."
 OFFER_OPTIONS = (
     "Hand it off, with spot checks",
