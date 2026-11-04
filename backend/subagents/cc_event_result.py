@@ -93,7 +93,11 @@ def _result_metadata(
         metadata["is_error"] = True
         if not ev.get("stop_reason"):
             metadata["stop_reason"] = "interrupted"
-    if is_error and (cause := auth_failure_kind("claude-code", ev.get("result"))):
+    from subagents.turn_account_error import login_answered
+
+    # A login that answered its check after the expired-login text is not expired.
+    answered = login_answered(ev.get("_corsia_login_verdict"))
+    if is_error and not answered and (cause := auth_failure_kind("claude-code", ev.get("result"))):
         metadata["cause"] = cause
     if tool_boundary._is_context_limit_result(ev):
         cc_trust.distrust(ctx.live)
@@ -104,6 +108,7 @@ def _result_metadata(
     if is_error and metadata.get("stop_reason") != "interrupted":
         metadata.update(cause_fields(
             "claude-code", metadata.get("cause"), ev.get("result"), None, ctx.live.model,
+            login_answered=answered,
         ))
     return is_error, metadata
 
@@ -280,9 +285,7 @@ async def _handle_result_error(
     from subagents.turn_account_error import sign_out_on_verdict
 
     # on_event checked the login before taking event_lock, so a Stop or steer never waits on the CLI.
-    if await sign_out_on_verdict(ev.get("_corsia_login_verdict"), db=ctx.db) is None:
-        # The login still answers, so the row shows the CLI's own text, not the sign-in-expired line.
-        metadata.pop("cause", None)
+    await sign_out_on_verdict(ev.get("_corsia_login_verdict"), db=ctx.db)
     if is_empty_text_block_rejection(ev.get("result")):
         await _retire_poisoned_session(ctx, metadata)
 

@@ -25,7 +25,7 @@ _RECHECK_SECONDS = 300.0
 #: (``cc_runtime_state._CLOSE_LIVE_TIMEOUT_S``) that a Stop during that wait runs under.
 _LOGIN_CHECK_SECONDS = 15.0
 #: Keyed by account id.
-_CHECKS: dict[str, asyncio.Task[None]] = {}
+_CHECKS: dict[str, asyncio.Task[str]] = {}
 _LAST_STARTED: dict[str, float] = {}
 #: Accounts signed in while a read for the prior login was running; read again once it ends.
 _NEW_LOGIN_PENDING: set[str] = set()
@@ -74,9 +74,10 @@ async def schedule_limited_usage_rechecks() -> None:
 def schedule_account_check(provider: str, account_id: str, *, new_login: bool = False) -> None:
     """Request the account's canonical bounded control read from any thread.
 
-    The account-wide five-minute throttle and single-flight guard apply to every
-    control read, except that a new login's first read is never throttled by the
-    prior login's: its stored readings were just marked stale.
+    The account-wide single-flight guard applies to every control read, and the
+    five-minute throttle to every scheduled one, except that a new login's first
+    read is never throttled by the prior login's: its stored readings were just
+    marked stale. ``check_login`` joins the single flight but skips the throttle.
     """
     import infra.app_loop as app_loop
 
@@ -113,20 +114,21 @@ def _capture(provider: str, account_id: str, *, db=None):
 
 
 async def check_login(provider: str, account_id: str) -> str:
-    """Run the account's control read now: ``pass`` when its login answered, else ``fail`` or ``error``.
+    """The account's control read: ``pass`` when its login answered, else ``fail`` or ``error``.
 
-    Neither throttled nor single-flight, and invisible to the scheduled checks'
-    guards, which stay as they are. Bounded by ``_LOGIN_CHECK_SECONDS``.
+    Joins the read already running for the account, or starts one now past the
+    five-minute throttle, so every caller shares one control process per login.
+    Waits at most ``_LOGIN_CHECK_SECONDS``; a read still running then finishes on its own.
     """
+    task = _CHECKS.get(account_id)
+    if task is None or task.done():
+        _LAST_STARTED[account_id] = time.monotonic()
+        task = _CHECKS[account_id] = asyncio.create_task(_check(provider, account_id))
     try:
-        return await asyncio.wait_for(_read(provider, account_id), _LOGIN_CHECK_SECONDS)
+        return await asyncio.wait_for(asyncio.shield(task), _LOGIN_CHECK_SECONDS)
     except asyncio.TimeoutError:
         log.warning("%s login check timed out for account %s", provider, account_id)
         return "error"
-    finally:
-        from infra.state.ws import notify_models_changed
-
-        notify_models_changed()
 
 
 async def _read(provider: str, account_id: str) -> str:
@@ -151,9 +153,9 @@ async def _read(provider: str, account_id: str) -> str:
         return "error"
 
 
-async def _check(provider: str, account_id: str) -> None:
+async def _check(provider: str, account_id: str) -> str:
     try:
-        await _read(provider, account_id)
+        return await _read(provider, account_id)
     finally:
         _CHECKS.pop(account_id, None)
         if account_id in _NEW_LOGIN_PENDING:

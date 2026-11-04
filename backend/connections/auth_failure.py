@@ -1,4 +1,8 @@
-"""Classify provider errors that conclusively require a new sign-in."""
+"""Classify provider errors that report an expired sign-in.
+
+Claude Code can print its expired-login text while the login still works, so a
+Turn's sign-out first checks that login once (``turn_account_error``).
+"""
 from __future__ import annotations
 
 SIGN_IN_EXPIRED = "sign_in_expired"

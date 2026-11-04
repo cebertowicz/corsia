@@ -1181,24 +1181,40 @@ async def test_login_check_says_whether_the_login_answered(monkeypatch, response
     assert await checks.check_login("claude-code", default_id("claude-code")) == expected
 
 
-@pytest.mark.asyncio
-async def test_login_check_is_bounded_and_leaves_scheduled_checks_alone(monkeypatch, _checks_clean):
-    started = []
-    async def hang(provider, account_id):
+def _parked_read(monkeypatch):
+    """Replace the control read with one that waits for ``release``; returns (started, release)."""
+    started, release = [], asyncio.Event()
+    async def read(provider, account_id):
         started.append(account_id)
-        await asyncio.Event().wait()
-    monkeypatch.setattr(checks, "_read", hang)
-    monkeypatch.setattr(checks, "_LOGIN_CHECK_SECONDS", 0.01)
+        await release.wait()
+        return "pass"
+    monkeypatch.setattr(checks, "_read", read)
     monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
-    assert await checks.check_login("claude-code", "account-1") == "error"
-    assert checks._CHECKS == {} and checks._LAST_STARTED == {}
+    return started, release
+
+
+@pytest.mark.asyncio
+async def test_login_checks_join_the_running_read(monkeypatch, _checks_clean):
+    """One login gets one control process: login checks join the scheduled read already running."""
+    started, release = _parked_read(monkeypatch)
     checks._schedule("claude-code", "account-1")
+    waiting = [asyncio.create_task(checks.check_login("claude-code", "account-1")) for _ in range(2)]
     await asyncio.sleep(0)
-    assert started == ["account-1", "account-1"]
-    scheduled = list(checks._CHECKS.values())
-    for task in scheduled:
-        task.cancel()
-    await asyncio.gather(*scheduled, return_exceptions=True)
+    release.set()
+    assert await asyncio.gather(*waiting) == ["pass", "pass"]
+    assert started == ["account-1"]
+
+
+@pytest.mark.asyncio
+async def test_login_check_is_bounded_and_its_read_stays_single_flight(monkeypatch, _checks_clean):
+    started, release = _parked_read(monkeypatch)
+    monkeypatch.setattr(checks, "_LOGIN_CHECK_SECONDS", 0.01)
+    assert await checks.check_login("claude-code", "account-1") == "error"
+    read = checks._CHECKS["account-1"]
+    checks._schedule("claude-code", "account-1")
+    release.set()
+    assert await read == "pass"
+    assert started == ["account-1"] and checks._CHECKS == {}
 
 
 @pytest.mark.asyncio
