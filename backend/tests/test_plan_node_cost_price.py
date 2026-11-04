@@ -91,7 +91,7 @@ def test_local_rows_add_no_dollars_and_are_not_unknown(db):
 
     assert _own(db, plan, node)["model_cost_usd"] == {"known": 0, "unknown_rows": 0}
     assert usage_cost.usage_dollars(db, {"plan_node_id": [node.id]})["plan_node_id"] == {
-        node.id: {"known": None, "unknown_rows": 0},
+        node.id: {"known": None, "unknown_rows": 0, "records": 1},
     }
 
 
@@ -117,7 +117,7 @@ def test_an_external_row_without_a_listing_has_no_api_price_as_in_measurement(db
     _row(db, node, "u-external", "external@unlisted/model", source="conversation")
 
     assert usage_cost.usage_dollars(db, {"plan_node_id": [node.id]})["plan_node_id"] == {
-        node.id: {"known": None, "unknown_rows": 0},
+        node.id: {"known": None, "unknown_rows": 0, "records": 1},
     }
 
 
