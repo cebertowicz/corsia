@@ -273,3 +273,18 @@ async def broadcast_claimed_batch(batch) -> None:
         batch.thread_id,
         (*batch.recovered_message_ids, *(item.message_id for item in batch.items)),
     )
+
+
+async def announce_successor_turn(batch) -> None:
+    """Announce a successor Turn at its claim, not only once its harness accepts it.
+
+    A Turn claimed with no sender showing it as working (a predecessor's
+    terminal, a restart drain, a lifted hold, a spawn) would read as idle while
+    its harness starts. Sent once, at the
+    claim: the batch's later re-publishes (after a Stop or an error) must never
+    announce a Turn that has already ended.
+    """
+    from core.turn_activity import turn_activity_frame
+    import infra.state as state
+
+    state.broadcast_to_thread(batch.thread_id, await turn_activity_frame(batch.thread_id, batch.identity))

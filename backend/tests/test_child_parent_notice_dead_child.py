@@ -88,6 +88,31 @@ def test_f1_ordinary_error_never_suggests_a_model_switch(db):
     assert "reset" not in content.lower()
 
 
+def test_f1_size_refusal_with_its_rerun_queued_never_wakes_the_parent(db):
+    """A size refusal whose one re-run is already queued is not a failure the parent must act on."""
+    from infra.plan_limit_continue import overflow_continue_message_id
+
+    delegated(db)
+    db.execute(
+        """INSERT INTO messages (id,thread_id,seq,role,content,created_at)
+           VALUES (?,'worker',
+                   (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE thread_id='worker'),
+                   'system','continue','2000-01-01T00:00:01')""",
+        (overflow_continue_message_id("turn-1"),),
+    )
+
+    delegation_child_lifecycle.notify_turn_error(
+        db, "worker", turn_id="turn-1", error="Prompt is too long",
+    )
+    assert wakes(db) == []
+
+    # Without its re-run (a refused re-run ends visibly) the parent still hears.
+    delegation_child_lifecycle.notify_turn_error(
+        db, "worker", turn_id="turn-2", error="Prompt is too long",
+    )
+    assert [str(row["id"]).split(":")[1] for row in wakes(db)] == ["child_turn_errored"]
+
+
 def test_f1_repeated_refusals_with_nothing_changed_are_one_episode(db):
     """Liveness retries a refused worker; its parent hears the episode once."""
     delegated(db)

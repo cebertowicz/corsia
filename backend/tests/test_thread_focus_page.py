@@ -190,6 +190,18 @@ class TestStubsAndCounts:
         assert (stub["count"], stub["weight"], stub["kinds"]) == (2, 2, ["steps"])
         assert "starting context" not in json.dumps(page)
 
+    def test_an_overflow_continue_is_neither_counted_in_a_run_nor_sent(self):
+        conn = _db()
+        t = _Thread(conn)
+        first = t.add("u")
+        t.add("c", meta={"event_type": "context_overflow.continue"}, content="Continue the work")
+        said = t.add("s", "T2")
+        conn.commit()
+        page = page_focus(conn, _SID, 10, None)
+        assert [m["id"] for m in page["messages"]] == [first, said]
+        assert page["runs"] == []
+        assert "Continue the work" not in json.dumps(page)
+
     def test_a_run_of_only_a_seed_yields_no_stub(self):
         conn = _db()
         t = _Thread(conn)
