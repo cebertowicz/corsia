@@ -29,6 +29,7 @@
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import ExternalReviewRow from './ExternalReviewRow.svelte';
 	import { actionWord, decisionMeta, heldMeta, label, recordingLine, regionLabel as getRegionLabel } from './dockPresentation';
+	import { watchDockActivity } from './dockActivity';
 	import {
 		collapse,
 		EMPTY,
@@ -91,10 +92,12 @@
 	// Retain only the visual being dismissed; queue and receipt state continue immediately.
 	let closingHeld = $state<{ item: AttentionQueueItem; position: number; count: number } | null>(null);
 	const drawerItem = $derived(closingHeld?.item ?? current);
+
 	function beginHeldClose() {
 		if (current) closingHeld = { item: current, position, count: dockQueue.count };
 		void close(true);
 	}
+
 	/** Focus returns to the exact control that opened the chip. */
 	async function close(heldDecision = false) {
 		collapse();
@@ -190,17 +193,7 @@
 		const offReplies = subscribeReplyAttention(() => { void reload(); });
 		// Typing, pasting or sending ends in a re-judge once the window has passed,
 		// so a hold on a draft is released when the draft is sent or cleared.
-		let idleTimer: ReturnType<typeof setTimeout> | undefined;
-		const noteActivity = () => {
-			lastKeydown = Date.now();
-			clearTimeout(idleTimer);
-			idleTimer = setTimeout(() => { busyTick += 1; }, TYPING_IDLE_MS);
-		};
-		const rejudge = () => { setTimeout(() => { busyTick += 1; }, 0); };
-		document.addEventListener('keydown', noteActivity, true);
-		document.addEventListener('input', noteActivity, true);
-		document.addEventListener('focusin', rejudge);
-		document.addEventListener('focusout', rejudge);
+		const offActivity = watchDockActivity(TYPING_IDLE_MS, () => { lastKeydown = Date.now(); }, () => { busyTick += 1; });
 		let wasConnected = false;
 		const offConnection = connectionState.subscribe((state) => {
 			const connected = state === 'connected';
@@ -217,11 +210,7 @@
 			if (value) void reload();
 		});
 		return () => {
-			clearTimeout(idleTimer);
-			document.removeEventListener('keydown', noteActivity, true);
-			document.removeEventListener('input', noteActivity, true);
-			document.removeEventListener('focusin', rejudge);
-			document.removeEventListener('focusout', rejudge);
+			offActivity();
 			forgetAutoOpen();
 			offNudge?.();
 			offHeld?.();
@@ -312,6 +301,9 @@
 			onClose={() => void close()}
 			onClosed={() => { closingHeld = null; }}
 		>
+			<!-- No chrome heading: the decision's own header already carries a
+			     "Decision · chat · project" eyebrow and the decision title. -->
+
 			{#if drawerItem.renderer === 'held-reply'}
 				<HeldReplyBody held={drawerItem.detail as HeldReplyDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} onDecision={beginHeldClose} />
 			{:else}
