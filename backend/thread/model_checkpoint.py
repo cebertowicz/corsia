@@ -138,10 +138,15 @@ async def prepare_source_checkpoint(
             require_loaded_model,
         )
 
-        provider = await run_in_db(
-            make_provider_params,
-            context.source_target.transport_model,
-        )
+        try:
+            provider = await run_in_db(
+                make_provider_params,
+                context.source_target.transport_model,
+            )
+        except ValueError:
+            # A server with no reachable endpoint (stopped, reloading) can't
+            # author a warm fold; the switch goes on with a cold one.
+            return warm_capture_refused(request.thread_id, "native", "source_unreachable")
         try:
             await require_loaded_model(
                 provider.get("api_base"),

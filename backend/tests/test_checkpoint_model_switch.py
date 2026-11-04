@@ -399,6 +399,45 @@ async def test_unavailable_native_omlx_source_skips_warm_capture(
     assert calls == ["http://omlx.test/v1/models/status"]
 
 
+@pytest.mark.asyncio
+async def test_unreachable_native_omlx_source_skips_warm_capture(monkeypatch) -> None:
+    """A source server with no reachable endpoint (stopped or reloading) yields
+    None, so the switch goes on with a target-cold fold instead of failing."""
+    from unittest.mock import AsyncMock
+
+    from infra.model_switch_types import SwitchRequest
+    from thread import model_checkpoint
+
+    request = SwitchRequest(
+        "switch-1", "thread-1", "omlx@ns/Fortissimo", "claude-code/sonnet",
+        1, 2, 0, "user", "user-1", "model_switch", "current",
+        "2026-11-03T00:00:00+00:00", 0,
+    )
+    context = SimpleNamespace(
+        source_target=SimpleNamespace(
+            harness="native", provider="omlx", transport_model="omlx@ns/Fortissimo",
+        ),
+        boundary=object(),
+        source_binary=None,
+        reasoning_effort=None,
+    )
+    monkeypatch.setattr(
+        model_checkpoint, "read_switch_checkpoint_context", lambda _request: context,
+    )
+
+    def unreachable(_model):
+        raise ValueError("oMLX server has no reachable endpoint: ns")
+
+    monkeypatch.setattr("llm.capabilities.make_provider_params", unreachable)
+    capture = AsyncMock(return_value=None)
+    monkeypatch.setattr("core.fork_render.capture_warm_fork_source", capture)
+
+    result = await model_checkpoint.prepare_source_checkpoint(request, "checkpoint-1")
+
+    assert result is None
+    capture.assert_not_awaited()
+
+
 def test_target_cold_preserves_unavailable_source_model(monkeypatch) -> None:
     """Cold audit identity remains exact when the old provider is unavailable."""
     from infra.model_switch_types import SwitchRequest
