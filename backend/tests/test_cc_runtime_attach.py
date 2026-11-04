@@ -1935,7 +1935,7 @@ class TestContextUsage:
 
         with patch("subagents.cc_event_result.insert_message", return_value="msg-id") as insert, \
                 patch("subagents.cc_event_result.claim_terminal", new=claim), \
-                patch("subagents.cc_event_result.overflow_rerun_queued", return_value=queued):
+                patch("subagents.cc_event_terminal_error.overflow_rerun_queued", return_value=queued):
             on_event = _make_on_event(live, "cc-sid", lambda sid, m: None, db=None)
             await on_event({"kind": "result", "is_error": True, "result": "Prompt is too long",
                             "stop_reason": "error"})
