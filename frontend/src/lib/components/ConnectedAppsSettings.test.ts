@@ -373,6 +373,8 @@ describe('ConnectedAppsSettings', () => {
 		component = mount(ConnectedAppsSettings, { target: host });
 		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="messages-row"]')).not.toBeNull());
 		expect(host.textContent).toContain('Needs you to sign in');
+		// An address with no "@" closes as itself, with no stray domain mark.
+		expect(host.querySelector('[data-connected-account-id="messages-row"] .account-closed-name')?.textContent).toBe('Messages —This computer');
 		(host.querySelector('[data-connected-account-id="messages-row"] button') as HTMLButtonElement).click();
 		flushSync();
 		const signIn = [...host.querySelectorAll<HTMLButtonElement>('[data-connected-account-id="messages-row"] button')].find((button) => button.textContent?.trim() === 'Sign in')!;
@@ -781,6 +783,14 @@ describe('WhereItWorks', () => {
 		await vi.waitFor(() => expect(onSaved).toHaveBeenCalled());
 		const call = fetch.mock.calls.find(([input]) => String(input).includes('/reach'));
 		expect(JSON.parse(String(call?.[1]?.body)).reach).toEqual({ mode: 'all', project_ids: [], outside_projects: false });
+	});
+
+	it('names a non-Google account by its own provider', async () => {
+		const messages = { ...googleAccount, id: 'messages-row', provider: 'messages' as const, provider_display_name: 'Messages', address: 'This computer', capabilities: ['messages' as const], kind: 'account' as const };
+		component = mount(WhereItWorks, { target: host, props: { app: messages, onClose: vi.fn(), onSaved: vi.fn() } });
+		await settle();
+		expect(document.body.textContent).toContain('Where Messages — This computer works');
+		expect(document.body.textContent).not.toContain('Google');
 	});
 
 	it('saves an account reach through its account endpoint without an app revision', async () => {

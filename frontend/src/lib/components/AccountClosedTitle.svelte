@@ -79,7 +79,7 @@
 	}
 </script>
 
-<span class="account-closed-name" use:fit={{ account, peers }}>{#if !addressOnly}<span class="account-provider">{account.provider_display_name} —</span>{/if}<span class="account-local-prefix">{shownPrefix}</span><span class="account-local-suffix">{shownSuffix}</span><span class="account-domain">@{parts?.domain}</span></span>
+<span class="account-closed-name" use:fit={{ account, peers }}>{#if !addressOnly}<span class="account-provider">{account.provider_display_name} —</span>{/if}<span class="account-local-prefix">{shownPrefix}</span><span class="account-local-suffix">{shownSuffix}</span>{#if parts}<span class="account-domain">@{parts.domain}</span>{/if}</span>
 
 <style>
 	.account-closed-name { display: flex; min-width: 0; overflow: hidden; white-space: nowrap; font-size: var(--text-subhead); color: var(--text-primary); }

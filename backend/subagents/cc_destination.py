@@ -36,6 +36,7 @@ from subagents.cc_runtime_helpers import (
 )
 from subagents.cc_runtime_state import _LIVE, _Live
 from subagents.cc_sessions import cc_session_path
+from subagents.vendor_write_admission import session_login_stale
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,7 +125,8 @@ def _provider_resume_destination(
     default_working_dir = _main_working_dir(row["project_id"], db)
     live = _LIVE.get(session_id)
     if live is not None and (live.provider_context_untrusted
-                             or not _proc_is_alive(live.session)):
+                             or not _proc_is_alive(live.session)
+                             or session_login_stale(live.session, db=db)):
         live = None
     if live is not None and native_stale_working_dir(
         getattr(live.session, "working_dir", None), default_working_dir,

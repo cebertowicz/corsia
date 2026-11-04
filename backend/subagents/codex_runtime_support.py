@@ -337,6 +337,16 @@ async def terminate_app_session(thread_id: str) -> bool:
     return True
 
 
+async def retire_stale_login_session(thread_id: str) -> None:
+    """Terminate a stored session admitted on a login that is no longer current: its writes are always refused."""
+    from subagents.vendor_write_admission import session_login_stale
+
+    session = _APP_SESSIONS.get(thread_id)
+    if session is None or not await run_in_db(session_login_stale, session, db=None):
+        return
+    await terminate_app_session(thread_id)
+
+
 def _stable_hash(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, default=str).encode("utf-8")
