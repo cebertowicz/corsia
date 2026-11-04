@@ -149,8 +149,8 @@ async def _publish_process_exit(
     verdict = None if live.tool_boundary_marker_id else await claude_login_verdict(identity.turn_id, detail, db=db)
     account = await sign_out_on_verdict(verdict, db=db, include_account=True)
     marker_id = live.tool_boundary_marker_id or surface_exit_error(
-        child_thread_id, code, detail, broadcast, db, None,
-        insert_message_fn=insert_message, logger=log,
+        child_thread_id, code, detail, broadcast, db, identity,
+        insert_message_fn=insert_message, logger=log, emit_terminal=False,
         account=account, login_answered=login_answered(verdict),
     )
     payload = {

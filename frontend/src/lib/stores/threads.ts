@@ -70,6 +70,7 @@ export interface Message {
 	delivery_revision?: number;
 	active_turn_id?: string | null;
 	write_outcome?: 'accepted' | 'proved_no_write' | 'ambiguous' | null;
+	_clientErrorTurnId?: string; // Turn whose error frame made this client-only row.
 	delivering_reason?: string | null;
 	delivery_blocked_since?: string | null;
 	next_attempt_at?: string | null;
