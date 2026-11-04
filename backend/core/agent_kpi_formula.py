@@ -43,15 +43,37 @@ def prepare(spec: Mapping[str, Any], facts: Sequence[Event]) -> dict[str, list[E
     return {name: select(operand, facts) for name, operand in operands.items()}
 
 
-def _count(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown):
+def _add(values: Sequence[Any]) -> tuple[Any, int]:
+    """The sum of the known values (None when none is known), and how many are unknown."""
+    missing = sum(value is None for value in values)
+    return (sum(value for value in values if value is not None) if missing < len(values) else None), missing
+
+
+def cost_ids(spec: Mapping[str, Any], selected: Mapping[str, Sequence[Event]]) -> set[str]:
+    """The thread ids a KPI's ``cost_of`` operand names, for the caller to price once per request."""
+    num = spec.get("num")
+    key = num.get("cost_of") if isinstance(num, Mapping) else None
+    return {ident for row in selected.get("num", ()) if key and (ident := attribute(row, key))}
+
+
+def _cost(num_spec, numerator, costs) -> tuple[Any, int]:
+    """Each event's thread cost; an event without its attribute, or whose thread isn't priced, is unknown."""
+    return _add([costs.get(ident) if (ident := attribute(row, num_spec["cost_of"])) else None
+                 for row in numerator])
+
+
+def _count(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown, costs):
     num_builtin = builtins.get(spec["num"].get('builtin'))
     value = num_builtin.value if num_builtin else len(numerator)
+    if "cost_of" in spec["num"]:
+        value, missing = _cost(spec["num"], numerator, costs)
+        unknown += missing
     if coverage:
         n = coverage["n"]
     return value, n, unknown
 
 
-def _ratio(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown):
+def _ratio(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown, costs):
     num_spec = spec["num"]
     num_builtin = builtins.get(num_spec.get('builtin'))
     den_spec = spec["den"]
@@ -63,14 +85,15 @@ def _ratio(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown)
         unknown += den_builtin.unknown
     total = num_builtin.value if num_builtin else float(len(numerator))
     if "sum" in num_spec:
-        values = [attribute(row, num_spec["sum"]) for row in numerator]
-        num_unknown = sum(value is None for value in values)
-        unknown += num_unknown
-        total = sum(value for value in values if value is not None) if num_unknown < len(values) else None
+        total, missing = _add([attribute(row, num_spec["sum"]) for row in numerator])
+        unknown += missing
+    if "cost_of" in num_spec:
+        total, missing = _cost(num_spec, numerator, costs)
+        unknown += missing
     return (total / divisor if divisor and total is not None else None), n, unknown
 
 
-def _rate_per_run(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown):
+def _rate_per_run(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown, costs):
     num_builtin = builtins.get(spec["num"].get('builtin'))
     run_builtin = builtins.get('runs')
     n = run_builtin.value if run_builtin else 0
@@ -80,13 +103,13 @@ def _rate_per_run(spec, numerator, selected, builtins, in_bucket, coverage, n, u
     return (total / n if n and total is not None else None), n, unknown
 
 
-def _share(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown):
+def _share(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown, costs):
     num_spec = spec["num"]
     values = num_spec["values"]
     return (sum(attribute(row, num_spec["attr"]) in values for row in numerator) / n if n else None), n, unknown
 
 
-def _percentile(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown):
+def _percentile(spec, numerator, selected, builtins, in_bucket, coverage, n, unknown, costs):
     num_spec = spec["num"]
     values = sorted(attribute(row, num_spec["attr"]) for row in numerator if attribute(row, num_spec["attr"]) is not None)
     unknown = n - len(values)
@@ -106,6 +129,25 @@ def _has(spec: Mapping[str, Any], field: str) -> bool:
     return isinstance(owner, Mapping) and key in owner and (key not in ("num", "den") or isinstance(owner[key], Mapping))
 
 
+def _cost_of_problem(spec: Mapping[str, Any]) -> str | None:
+    """Why a ``cost_of`` operand can't be computed where it sits, or None."""
+    coverage = spec.get("coverage")
+    places = {"num": spec.get("num"), "den": spec.get("den")}
+    places.update({f"coverage.{key}": coverage.get(key) for key in ("of", "labelled")} if isinstance(coverage, Mapping) else {})
+    for place, operand in places.items():
+        if not isinstance(operand, Mapping) or "cost_of" not in operand:
+            continue
+        if place != "num":
+            return f"cost_of is allowed only on num, not {place}; move it to num or remove it"
+        if spec.get("formula") not in ("ratio", "count"):
+            return "cost_of needs formula ratio or count; change the formula or remove cost_of"
+        if "sum" in operand or "builtin" in operand:
+            return "cost_of can't be combined with sum or builtin; keep one of them"
+        if not isinstance(operand["cost_of"], str) or not operand["cost_of"]:
+            return "cost_of needs the name of the event attribute that holds a thread id"
+    return None
+
+
 def unfit(spec: Mapping[str, Any]) -> str | None:
     """Why evaluate cannot compute this KPI, or None."""
     formula = spec.get("formula")
@@ -116,7 +158,7 @@ def unfit(spec: Mapping[str, Any]) -> str | None:
     missing = [field for field in ("num", "min_n", *_FORMULAS[formula][1]) if not _has(spec, field)]
     if missing:
         return f"formula {formula} needs {', '.join(missing)}; add {'it' if len(missing) == 1 else 'them'}"
-    return None
+    return _cost_of_problem(spec)
 
 
 def _not_tracked(reason: str) -> dict[str, Any]:
@@ -126,8 +168,12 @@ def _not_tracked(reason: str) -> dict[str, Any]:
 
 def evaluate(spec: Mapping[str, Any], facts: Sequence[Event], start: datetime, end: datetime,
              version: str | None = None, builtins: Mapping[str, Any] | None = None,
-             selected: Mapping[str, Sequence[Event]] | None = None) -> dict[str, Any]:
-    """Compute one KPI in a period and optional version; None selects all versions."""
+             selected: Mapping[str, Sequence[Event]] | None = None,
+             thread_costs: Mapping[str, float | None] | None = None) -> dict[str, Any]:
+    """Compute one KPI in a period and optional version; None selects all versions.
+
+    ``thread_costs`` maps a thread id to its priced cost (None: unpriced), for a ``cost_of`` operand.
+    """
     problem = unfit(spec)
     if problem:
         return _not_tracked(f"{problem} in the measures file, then run measure_sync")
@@ -148,7 +194,8 @@ def evaluate(spec: Mapping[str, Any], facts: Sequence[Event], start: datetime, e
     n = num_builtin.n if num_builtin else len(numerator)
     unknown = num_builtin.unknown if num_builtin else 0
     value, n, unknown = _FORMULAS[formula][0](spec, numerator, selected, builtins,
-                                           lambda rows: _in_bucket(rows, start, end, version), coverage, n, unknown)
+                                           lambda rows: _in_bucket(rows, start, end, version), coverage, n, unknown,
+                                           thread_costs or {})
     label, label_mix = _labels(numerator)
     if num_builtin:
         label, label_mix = 'Observed', {'Observed': num_builtin.n}
