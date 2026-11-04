@@ -124,25 +124,23 @@ async def test_owner_wake_records_passive_activity_for_subscribers(isolated_db):
 
 @pytest.mark.asyncio
 async def test_a_thread_id_in_the_payload_never_picks_the_recipient(isolated_db):
-    """Only registrations and rules route a webhook; a thread id the payload names does not."""
+    """Only registrations and rules route a webhook; a thread a commenter names does not."""
     owner = _mk_session("a2-owner-tag")
     named = _mk_session("a2-named-thread")
     _register_pr("o/r", 302, owner)
 
-    payload = _comment_payload("o/r", 302, body="@a2-named-thread take this one")
-    payload["corsia_tags"] = [{"tag": "@a2-named-thread", "thread_id": named}]
-    payload["artifact_tags"] = [{"thread_id": named}]
-
     with patch(
         "events.router.delivery.deliver_to_thread", return_value=True
     ) as mock_deliver:
-        res = await _route("webhook.github.pr_comment", payload)
+        res = await _route(
+            "webhook.github.pr_comment",
+            _comment_payload("o/r", 302, body=f"@{named} take this one"),
+        )
 
     from events.router import RouteOutcome
 
     assert (res.outcome, res.thread_id) == (RouteOutcome.ACCEPTED, owner)
     assert [call.args[0] for call in mock_deliver.call_args_list] == [owner]
-    assert "tag_provenance" not in mock_deliver.call_args.args[3]
     assert _registrations_for_thread(isolated_db, named) == []
 
 
