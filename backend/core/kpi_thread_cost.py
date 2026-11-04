@@ -5,7 +5,7 @@ import json
 import sqlite3
 from typing import Iterable
 
-from plans.usage_cost import usage_dollars
+from plans.public import usage_dollars
 
 
 def thread_costs(db: sqlite3.Connection, user_id: str, thread_ids: Iterable[str]) -> dict[str, float | None]:
