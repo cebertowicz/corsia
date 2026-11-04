@@ -30,6 +30,7 @@ from events.identity import (
 from events.connectors.github_artifacts import pr_artifact_in_result
 from events.connectors.github_label_events import IDENTITY, change_event
 from events.connectors.github_ownership import declaration_facts
+from events.connectors.github_pr_facts import HEAD_FACTS, PAYLOAD_FACTS, READ_FACTS, pull_facts
 from events.connectors.github_observe_rules import GITHUB_OBSERVE_RULES
 from events.connectors.github_content_facts import content_facts, content_kind, repository_name
 from events.connectors.github_receiver import GITHUB_RECEIVER
@@ -156,7 +157,7 @@ def _extract_facts(raw: dict[str, Any], resolved: Mapping[str, Any] | None = Non
             "pr_number": pr.get("number"), "action": raw.get("action"),
             "merged": pr.get("merged"),
             "branch": (pr.get("base") or {}).get("ref"),
-            "sha": (pr.get("head") or {}).get("sha"), "author": user.get("login"),
+            "sha": (pr.get("head") or {}).get("sha"), "author": user.get("login"), **pull_facts(pr),
         })
     kind = "pull_request" if pr else "issues" if raw.get("issue") else None
     change = change_event(kind, raw) if kind else None
@@ -258,13 +259,13 @@ def _repository_projects(repository: str) -> frozenset[str] | None:
         return None
 
 
-_PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author", "author_origin", "item_version")
-# A label change adds the one name changed, the item's names after it, who did it and when.
-_PR_LABEL_FILTERABLE = (*_PR_FILTERABLE, "label", "labels", "actor", "at")
+_PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author", "author_origin", "item_version", *PAYLOAD_FACTS)
+# READ_FACTS are read only when a rule tests one. A label change adds the name changed, who did it and when.
+_PR_LABEL_FILTERABLE = (*_PR_FILTERABLE, *READ_FACTS, "label", "actor", "at")
 _ISSUE_FILTERABLE = ("repo", "issue_number", "label", "labels", "actor", "at",
                      "minutes_since_opened", "state_reason", "author", "author_origin", "item_version")
 _CONTENT_FILTERABLE = ("repo", "author", "author_origin", "item_version")
-_HEAD_CHECKS_FILTERABLE = ("repo", "head_sha", "head_branch", "pr_number", "conclusion")
+_HEAD_CHECKS_FILTERABLE = ("repo", "head_sha", "head_branch", "pr_number", "conclusion", *HEAD_FACTS)
 _CHECK_FILTERABLE = ("repo", "branch", "head_sha", "check_suite_id", "conclusion")
 
 MANIFEST = register(ConnectorManifest(
@@ -273,16 +274,16 @@ MANIFEST = register(ConnectorManifest(
     version="1",
     event_types={
         "pr.opened": EventTypeDecl(
-            "pr.opened", ("repo", "pr_number", "action"), _PR_FILTERABLE,
+            "pr.opened", ("repo", "pr_number", "action"), (*_PR_FILTERABLE, *READ_FACTS),
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
             event_class="actionable", routed_event=GITHUB_ROUTED_EVENTS["pr.opened"]),
         "pr.synchronize": EventTypeDecl(
-            "pr.synchronize", ("repo", "pr_number", "action", "sha"), _PR_FILTERABLE,
+            "pr.synchronize", ("repo", "pr_number", "action", "sha"), (*_PR_FILTERABLE, *READ_FACTS),
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
             event_class="actionable", routed_event=GITHUB_ROUTED_EVENTS["pr.synchronize"]),
         "pr.ready_for_review": EventTypeDecl(
             "pr.ready_for_review", ("repo", "pr_number", "action", "sha"),
-            _PR_FILTERABLE, artifact_type=PR_TYPE,
+            (*_PR_FILTERABLE, *READ_FACTS), artifact_type=PR_TYPE,
             artifact_integration=GITHUB_INTEGRATION, event_class="informational",
             routed_event=GITHUB_ROUTED_EVENTS["pr.ready_for_review"]),
         "pr.labeled": EventTypeDecl(
