@@ -13,6 +13,7 @@ export type AnswerState =
       state: "failed";
       kind: "rejected" | "stale" | "unauthorized" | "error";
       message: string;
+      reference?: string;
     };
 
 export const answers = writable<Record<string, AnswerState>>({});

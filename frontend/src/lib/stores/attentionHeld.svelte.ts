@@ -46,7 +46,7 @@ export async function decideHeld(held: HeldReplyDetail, verb: HeldVerb, onStarte
   }
   if (outcome.status === "error") {
     // The server keeps the reply held, with its own line when it has one; Approve once tries again.
-    rollBack(id, "error", outcome.line ?? failedLine(held.recipient));
+    rollBack(id, "error", outcome.line ?? failedLine(held.recipient), outcome.ref);
     await reload();
     return;
   }

@@ -125,6 +125,40 @@ async def test_person_session_can_approve(held_client, deleg_db, seen, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_cancelled_decline_finishes_notifying_sender_and_asker(held_client, deleg_db, seen, monkeypatch):
+    import asyncio
+    from api import held_replies as held_api
+
+    held = await _send_by_tool()
+    claimed, release, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original_claim, original_note = held_api._claim, held_api.note_asker
+
+    async def claim(*args):
+        result = await original_claim(*args)
+        claimed.set()
+        await release.wait()
+        return result
+
+    async def note(*args):
+        await original_note(*args)
+        finished.set()
+
+    monkeypatch.setattr(held_api, "_claim", claim)
+    monkeypatch.setattr(held_api, "note_asker", note)
+    request = asyncio.create_task(held_api.decline(held["held_reply_id"], held_api.DecisionBody(token=_TOKEN)))
+    await asyncio.wait_for(claimed.wait(), 2)
+    request.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request
+    release.set()
+    await asyncio.wait_for(finished.wait(), 2)
+    assert _rows(deleg_db, "state") == [("declined",)]
+    assert [event for _t, event, _s, _c in seen["told"]] == ["held_reply.declined"]
+    rows = deleg_db.execute("SELECT metadata FROM messages WHERE thread_id='asker'").fetchall()
+    assert any(json.loads(row[0] or "{}").get("event_type") == "held_reply.declined" for row in rows)
+
+
+@pytest.mark.asyncio
 async def test_decline_delivers_nothing_and_tells_the_sender(held_client, deleg_db, seen):
     held = await _send_by_tool("the answer")
 
@@ -169,6 +203,8 @@ async def test_api_hold_uses_api_delivery_attribution(deleg_db, held_client, mon
 @pytest.mark.asyncio
 async def test_delivery_refusal_is_retryable_and_logged(deleg_db, held_client, seen, monkeypatch):
     from api import held_replies as held_api
+    from infra.failure_reference import REFERENCE
+    from plans.held_attention import queue_rows
     from tools import delegate_send
 
     async def refused(*_args, **_kwargs):
@@ -182,7 +218,11 @@ async def test_delivery_refusal_is_retryable_and_logged(deleg_db, held_client, s
     assert result.status_code == 502
     assert result.json()["detail"] == "Couldn’t send the reply to the Researcher agent because of an unexpected error. Approve once to try again."
     assert _rows(deleg_db, "state", "text") == [("held", "the answer")]
-    assert any(held["held_reply_id"] in args and "Error: target rejected this send" in args for args in warnings)
+    ref = result.json()["ref"]
+    assert REFERENCE.fullmatch(ref)
+    assert _rows(deleg_db, "error_ref") == [(ref,)]
+    assert queue_rows(deleg_db, "u-test")[0]["detail"]["error_ref"] == ref
+    assert any(held["held_reply_id"] in args and "Error: target rejected this send" in args and ref in args for args in warnings)
 
 
 @pytest.mark.asyncio
@@ -226,9 +266,13 @@ async def test_the_asker_sees_a_note_then_a_receipt_and_is_not_sent_the_reply_ea
 async def test_a_missing_recipient_is_not_sent_and_a_failed_delivery_returns_to_held(
     deleg_db, held_client, seen, monkeypatch,
 ):
+    from api import held_replies as held_api
+    from infra.failure_reference import REFERENCE
     from tools import delegate_send
 
     failed = await _send_by_tool("first")
+    errors = []
+    monkeypatch.setattr(held_api.logger, "exception", lambda *args: errors.append(args))
 
     async def broken(*_args, **_kwargs):
         raise RuntimeError("provider down")
@@ -237,7 +281,10 @@ async def test_a_missing_recipient_is_not_sent_and_a_failed_delivery_returns_to_
     refused = _post(held_client, failed["held_reply_id"], "approve")
 
     assert refused.status_code == 502
-    assert _rows(deleg_db, "state") == [("held",)]
+    ref = refused.json()["ref"]
+    assert REFERENCE.fullmatch(ref)
+    assert any(failed["held_reply_id"] in args and ref in args and str(args[-1]) == "provider down" for args in errors)
+    assert _rows(deleg_db, "state", "error_ref") == [("held", ref)]
     assert "Approve once to try again" in _rows(deleg_db, "error")[0][0]
 
     deleg_db.execute("DELETE FROM threads WHERE id='asker'")

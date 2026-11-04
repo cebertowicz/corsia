@@ -10,7 +10,7 @@ export type HeldOutcome =
 	| { status: 'settled' }
 	| { status: 'unauthorized' }
 	/** Delivery failed; the server keeps the reply held and names the failure when it can. */
-	| { status: 'error'; line: string | null };
+	| { status: 'error'; line: string | null; ref?: string };
 
 export async function decideHeldReply(bearer: string, id: string, verb: HeldVerb): Promise<HeldOutcome> {
 	let res: Response;
@@ -26,8 +26,8 @@ export async function decideHeldReply(bearer: string, id: string, verb: HeldVerb
 	if (res.status === 401) return { status: 'unauthorized' };
 	if (res.status === 404 || res.status === 409) return { status: 'settled' };
 	if (!res.ok) {
-		const body = (await res.json().catch(() => ({}))) as { detail?: unknown };
-		return { status: 'error', line: typeof body.detail === 'string' ? body.detail : null };
+		const body = (await res.json().catch(() => ({}))) as { detail?: unknown; ref?: unknown };
+		return { status: 'error', line: typeof body.detail === 'string' ? body.detail : null, ref: typeof body.ref === 'string' ? body.ref : undefined };
 	}
 	const body = (await res.json()) as { state?: string; line?: string };
 	if (body.state === 'not_sent') return { status: 'not_sent', line: body.line ?? '' };

@@ -215,11 +215,12 @@ describe("held reply in the dock", () => {
 
   it("returns the reply, reopened, with the server's error line when delivery fails, and Approve once retries", async () => {
     const line = "Couldn’t send the reply to the Researcher agent because of an unexpected error. Approve once to try again.";
-    decide = () => ({ status: 502, payload: { detail: line } });
+    decide = () => ({ status: 502, payload: { detail: line, ref: "K7QM2X" } });
     await openDock();
     button("Approve once")!.click();
     await settle();
     expect(host.querySelector(".problem")?.textContent).toBe(line);
+    expect(host.querySelector(".reference")?.textContent).toBe("Reference: K7QM2X");
     expect(button("Approve once")!.disabled).toBe(false);
     decide = () => ({ status: 200, payload: { ok: true, state: "sent" } });
     button("Approve once")!.click();
@@ -231,9 +232,11 @@ describe("held reply in the dock", () => {
   });
 
   it("shows a stored error above the text", async () => {
-    body = queueBody(heldReplyItem({ error: "Stored failure line." }), 1);
+    const line = "Couldn’t send the reply to the Researcher agent because of an unexpected error. Approve once to try again.";
+    body = queueBody(heldReplyItem({ error: line, error_ref: "K7QM2X" }), 1);
     await openDock();
-    expect(host.querySelector(".problem")?.textContent).toBe("Stored failure line.");
+    expect(host.querySelector(".problem")?.textContent).toBe(line);
+    expect(host.querySelector(".reference")?.textContent).toBe("Reference: K7QM2X");
   });
 
   it("drops a reply another page already decided, with no error", async () => {

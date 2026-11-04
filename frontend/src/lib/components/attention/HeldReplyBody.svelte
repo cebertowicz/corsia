@@ -8,6 +8,7 @@
 	 * a failed write returns the reply here with its reason.
 	 */
 	import Button from '$lib/components/ui/Button.svelte';
+	import ErrorReference from '$lib/components/ui/ErrorReference.svelte';
 	import type { HeldReplyDetail } from '$lib/api/attentionQueue';
 	import { answers } from '$lib/stores/attentionAnswerState';
 	import { decideHeld } from '$lib/stores/attentionHeld.svelte';
@@ -33,6 +34,7 @@
 	});
 	const locked = $derived(writesDisabled || failure?.kind === 'unauthorized');
 	const problem = $derived(failure?.message ?? held.error);
+	const reference = $derived(failure ? failure.reference : held.error_ref);
 
 	let well = $state<HTMLElement | undefined>();
 	let lines = $state(0);
@@ -65,6 +67,7 @@
 	<div class="held-body">
 		{#if problem}
 			<p class="problem" role="alert">{problem}</p>
+			{#if reference}<ErrorReference {reference} />{/if}
 		{/if}
 		<p class="explain">Approving sends the exact text below to that cloud provider.</p>
 		<div class="well-frame" class:faded={overflowing && !atEnd}>

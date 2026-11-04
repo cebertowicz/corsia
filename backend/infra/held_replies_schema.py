@@ -21,6 +21,7 @@ HELD_REPLIES_SCHEMA_SQL = """
         state TEXT NOT NULL DEFAULT 'held'
             CHECK (state IN ('held', 'approved', 'sent', 'declined', 'not_sent')),
         error TEXT,
+        error_ref TEXT,
         created_at TEXT NOT NULL,
         decided_at TEXT
     );

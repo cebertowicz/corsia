@@ -23,7 +23,7 @@ def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> 
     from api.provider_meta import PROVIDER_META
 
     rows = db.execute(
-        "SELECT h.id, h.sender_thread_id, h.recipient_thread_id, h.error, h.created_at"
+        "SELECT h.id, h.sender_thread_id, h.recipient_thread_id, h.error, h.error_ref, h.created_at"
         + (", h.text" if with_text else "")
         + " FROM held_replies h JOIN threads s ON s.id=h.sender_thread_id "
         "WHERE h.user_id=? AND h.state=? AND s.purged_at IS NULL ORDER BY h.created_at, h.id",
@@ -79,6 +79,7 @@ def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> 
             "provider_label": PROVIDER_META.get(vendor, {}).get("label", provider) if provider else "a cloud provider",
             **({"text": str(row["text"])} if with_text else {}),
             "error": row["error"],
+            "error_ref": row["error_ref"],
             "created_at": str(row["created_at"]),
         })
     return out
@@ -104,6 +105,7 @@ def queue_rows(db: sqlite3.Connection, user_id: str) -> list[dict[str, Any]]:
                 "recipient": item["recipient_label"],
                 "provider": item["provider_label"],
                 "error": item["error"],
+                "error_ref": item["error_ref"],
                 "raised_at": item["created_at"],
                 "source": {
                     "thread_id": item["visible_thread_id"],

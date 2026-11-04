@@ -61,6 +61,7 @@ export interface HeldReplyDetail {
 	provider: string;
 	/** Why the last Approve once did not send, when it did not. */
 	error: string | null;
+	error_ref?: string | null;
 	raised_at: string | null;
 	source: AttentionSource;
 }

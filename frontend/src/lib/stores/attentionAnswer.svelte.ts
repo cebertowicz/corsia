@@ -118,8 +118,9 @@ export function rollBack(
   decisionId: string,
   kind: Extract<AnswerState, { state: "failed" }>["kind"],
   message: string,
+  reference?: string,
 ): void {
-  setAnswer(decisionId, { state: "failed", kind, message });
+  setAnswer(decisionId, { state: "failed", kind, message, reference });
   activeId.set(decisionId);
   expandedId.set(decisionId);
 }

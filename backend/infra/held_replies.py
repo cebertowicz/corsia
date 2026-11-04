@@ -75,21 +75,21 @@ def recover_interrupted() -> None:
 
     with write_transaction(None, scope="recover_held_replies") as connection:
         connection.execute(
-            "UPDATE held_replies SET state=?, error=?, decided_at=NULL WHERE state=?",
+            "UPDATE held_replies SET state=?, error=?, error_ref=NULL, decided_at=NULL WHERE state=?",
             (HELD, RESTART_ERROR, APPROVED),
         )
 
 
 def settle(
-    held_id: str, *, expect: str, state: str, error: str | None = None,
+    held_id: str, *, expect: str, state: str, error: str | None = None, error_ref: str | None = None,
     db: sqlite3.Connection | None = None,
 ) -> bool:
     """Move one row from ``expect`` to ``state``; False when another decision got there first."""
     with write_transaction(db, scope="settle_held_reply") as connection:
         moved = connection.execute(
-            "UPDATE held_replies SET state=?, error=?, "
+            "UPDATE held_replies SET state=?, error=?, error_ref=?, "
             "text=CASE WHEN ? IN ('sent','declined','not_sent') THEN '' ELSE text END, "
             "decided_at=CASE WHEN ?='held' THEN NULL ELSE ? END WHERE id=? AND state=?",
-            (state, error, state, state, utc_now_iso(), held_id, expect),
+            (state, error, error_ref, state, state, utc_now_iso(), held_id, expect),
         )
     return moved.rowcount == 1
