@@ -538,6 +538,13 @@ status/log/list/stop tools, stall detection, and exactly four wake outcomes
 `host_access/managed_lifecycle.py`, `automation/managed_process_events.py`,
 `automation/managed_process_recovery.py`, and `infra/managed_process_store.py`.
 
+Known limitation: a child that leaves its process group (for example with
+`start_new_session`) is found only by the inherited
+`CORSIA_PROCESS_OWNER_MARKER` environment variable. macOS can hide the
+environment of a same-user process, as it does for some hardened third-party
+binaries such as Tart, and the marker scan skips a process it cannot read. Such
+a detached child outlives its foreground call and any host lease, unowned.
+
 Explicit thread deletion remains coordinated by `api/thread_deletion.py` and
 uses `core/thread_family.py` as the canonical family writer. The process owner
 first closes family admission, proves every captured group terminal, and joins
