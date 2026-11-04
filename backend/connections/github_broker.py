@@ -4,8 +4,10 @@ Requests are vetted and rebuilt and the host is pinned. Refusals, errors, argv,
 stderr and the auth probe's text are scrubbed. A read's response is GitHub's
 data, passed through as the webhook path receives it: GitHub never echoes the
 credential. ``gh`` follows redirects; its credential stays on the configured
-host, as the real-gh redirect test verifies. Each broker carries its own read
-budget (``read_budget``), fixed when it is made; the caller asks and feeds it.
+host, as the real-gh redirect test verifies. Each broker carries the read
+budget (``read_budget``) of the login it reads as; the caller asks and feeds it.
+The default broker learns that login as each read picks its account, so it never
+looks the account up to answer a budget question.
 """
 
 from __future__ import annotations
@@ -45,22 +47,12 @@ def _run_host_gh(args: list[str], *, timeout: float) -> subprocess.CompletedProc
     )
 
 
-def _run_gh(args: list[str], *, timeout: float) -> subprocess.CompletedProcess:
-    """Run the vetted read as the agents' GitHub account when there is one, as the host's ``gh`` otherwise."""
-    from connections import github_agent
-
-    account = github_agent.view()
-    if account.cause == "verifying":  # first read after a restart: wait for the answer once
-        account = github_agent.verify_now()
-    binary, env = github_agent.backend_gh(account)
-    return subprocess.run(
-        [binary, *args], capture_output=True, text=True, timeout=timeout, check=False,
-        env={**(os.environ if env is None else env), "GH_HOST": GH_HOST},
-    )
-
-
 class GithubReadBroker:
-    """Vet request shape before passing reads to ``gh``."""
+    """Vet request shape before passing reads to ``gh``.
+
+    ``inner`` runs each vetted read and spends ``read_budget``. Without an ``inner``, reads
+    run as the agents' GitHub account when there is one and as the host's ``gh`` otherwise.
+    """
 
     def __init__(
         self, inner: Callable[..., subprocess.CompletedProcess] | None = None,
@@ -68,8 +60,20 @@ class GithubReadBroker:
     ) -> None:
         from events.connectors.github_read_budget import budget
 
-        self._inner = inner or _run_gh
+        self._inner = inner or self._run_as_account
         self.read_budget = read_budget or budget
+
+    def _run_as_account(self, args: list[str], *, timeout: float) -> subprocess.CompletedProcess:
+        from connections import github_agent
+        from events.connectors.github_read_budget import budget, person_budget
+
+        binary, env, account = github_agent.backend_gh_now()
+        # With no agents' account the host's gh login is the person's: its reads spend the person's budget.
+        self.read_budget = person_budget if account.absent else budget
+        return subprocess.run(
+            [binary, *args], capture_output=True, text=True, timeout=timeout, check=False,
+            env={**(os.environ if env is None else env), "GH_HOST": GH_HOST},
+        )
 
     def __call__(
         self, args: list[str], *, input_text: str | None = None, timeout: float = 30.0,

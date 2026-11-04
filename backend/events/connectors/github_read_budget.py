@@ -1,11 +1,12 @@
 """One GitHub read budget per account, rebuilt from response headers.
 
-GitHub's limit belongs to the account a read runs as, so each reader keeps its
-own: ``budget`` for the default broker (the agents' GitHub account, or the
-host's ``gh`` login while there is none) and ``person_budget`` for the person's
-own ``gh`` login (``budget_of`` picks a reader's). Every response rewrites the
-numbers, so when the agents' account is added or removed the default budget
-holds the old account's figures only until its next response. The event pollers
+GitHub's limit belongs to the account a read runs as, so each login keeps its
+own: ``budget`` for the agents' GitHub account (and the locked reads made while
+it is not ready) and ``person_budget`` for the person's own ``gh`` login, which
+the default broker also spends while there is no agents' account. A reader
+carries the budget of the login it last read as (``budget_of`` picks it); the
+default broker switches budget at the read after the agents' account is added
+or removed, so that one read is asked against the old budget. The event pollers
 read through ``github_notifications_feed.gh_get``; script reads use
 ``automation.script_github_channel``. Both ask before each call and feed
 response headers here. A limit one account sees backs off only that account's

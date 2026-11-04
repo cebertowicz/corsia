@@ -9,7 +9,12 @@ import pytest
 from connections import github_agent
 from connections.github_agent import AgentAccountView
 from connections.github_agent_home import LOCKED_HOME
-from connections.github_broker import _run_gh, default_broker, person_broker
+from connections.github_broker import GithubReadBroker, default_broker, person_broker
+
+
+def _run_gh(args, *, timeout):
+    """One read the way the default broker runs it."""
+    return GithubReadBroker()._run_as_account(args, timeout=timeout)
 
 
 @pytest.fixture
@@ -191,9 +196,55 @@ def budget_status():
     return budget.status(), person_budget.status()
 
 
-def test_each_broker_carries_its_own_budget_without_looking_up_the_account(monkeypatch):
+def test_a_budget_question_never_looks_up_the_account(monkeypatch):
+    from connections import github_broker
     from events.connectors.github_read_budget import budget, person_budget
 
+    monkeypatch.setattr(github_broker, "_default", None)
     monkeypatch.setattr(github_agent, "view", lambda: pytest.fail("a budget lookup read the account"))
     assert default_broker().read_budget is budget
     assert person_broker().read_budget is person_budget
+
+
+def test_with_no_agents_account_both_brokers_read_as_one_login_and_share_its_budget(monkeypatch):
+    from connections import github_broker
+    from events.connectors.github_notifications_feed import FeedError, gh_get
+    from events.connectors.github_read_budget import budget, person_budget
+
+    calls = []
+
+    def told_to_wait(argv, **_kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, "HTTP/2.0 403 X\r\nretry-after: 120\r\n\r\n{}", "")
+
+    monkeypatch.setattr(subprocess, "run", told_to_wait)
+    monkeypatch.setattr(github_agent, "view", lambda: AgentAccountView(state="not_installed", absent=True))
+    monkeypatch.setattr(github_broker, "_default", None)
+    monkeypatch.setattr(github_broker, "_person", None)
+    budget.clear()
+    person_budget.clear()
+    try:
+        with pytest.raises(FeedError):
+            gh_get(default_broker(), "repos/o/r/pulls")
+        assert default_broker().read_budget is person_budget
+        with pytest.raises(FeedError) as caught:
+            gh_get(person_broker(), "notifications")
+        assert caught.value.error_class == "rate_limited"
+        assert [argv[0] for argv in calls] == ["gh"], "the person's feed called GitHub after its login was told to wait"
+        assert budget.status() == {}
+    finally:
+        budget.clear()
+        person_budget.clear()
+
+
+def test_once_the_agents_account_exists_the_default_broker_spends_its_budget(monkeypatch, ran):
+    from events.connectors.github_read_budget import budget, person_budget
+
+    broker = GithubReadBroker()
+    monkeypatch.setattr(github_agent, "view", lambda: AgentAccountView(state="not_installed", absent=True))
+    broker._run_as_account(["api", "user"], timeout=5)
+    assert broker.read_budget is person_budget
+    monkeypatch.setattr(github_agent, "view", lambda: AgentAccountView(
+        state="needs_auth", cause="signed_out", binary="/agent/gh", home="/agent/home"))
+    broker._run_as_account(["api", "user"], timeout=5)
+    assert broker.read_budget is budget  # locked reads never spend the person's budget

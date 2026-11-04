@@ -157,8 +157,7 @@ def gh_get(
     ``low_priority`` read also stays out of the budget's reserve. The budget
     also decides what counts as a rate limit.
     """
-    budget = budget_of(runner)
-    if budget.blocked_until(low_priority=low_priority) is not None:
+    if budget_of(runner).blocked_until(low_priority=low_priority) is not None:
         raise FeedError("rate_limited", "shared read budget")
     args = ["api", "--method", "GET", "-i"]
     for name, value in (headers or {}).items():
@@ -174,7 +173,8 @@ def gh_get(
     response = _parse(result.stdout or "")
     if response is None:
         raise FeedError("gh_error", (result.stderr or "")[:200])
-    rate_limited = budget.record(response.status, response.headers, response.body)
+    # Told after: the read may have just learned which login it ran as.
+    rate_limited = budget_of(runner).record(response.status, response.headers, response.body)
     if response.status == 401:
         raise GhSignedOut()
     if rate_limited:

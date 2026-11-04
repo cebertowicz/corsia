@@ -98,8 +98,7 @@ def _json(text: str) -> Any:
 def _read(request: ReadRequest, context: str) -> dict[str, Any]:
     """One budgeted broker read; the client gets the output it asked for, unchanged."""
     broker = default_broker()
-    budget = broker.read_budget
-    until = budget.blocked_until(low_priority=True)
+    until = broker.read_budget.blocked_until(low_priority=True)
     if until is not None:
         log.info("script github read deferred by the read budget %s", context)
         resumes = datetime.fromtimestamp(until, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -114,7 +113,7 @@ def _read(request: ReadRequest, context: str) -> dict[str, Any]:
                     result.returncode, context, str(result.stderr or "")[:200])
     else:
         status, headers, body = split
-        budget.record(status, headers, _json(stdout[body:]))
+        broker.read_budget.record(status, headers, _json(stdout[body:]))  # the read's login, maybe just learned
         if not request.include:
             stdout = stdout[body:]
     return {"code": result.returncode, "stdout": stdout, "stderr": str(result.stderr or "")}

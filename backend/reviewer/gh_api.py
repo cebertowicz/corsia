@@ -19,10 +19,7 @@ def run_gh(
     """
     from connections import github_agent
 
-    account = github_agent.view()
-    if account.cause == "verifying":  # first read after a restart: wait for the answer once
-        account = github_agent.verify_now()
-    binary, env = github_agent.backend_gh(account)
+    binary, env, _account = github_agent.backend_gh_now()
     return subprocess.run(
         [binary, *args], input=input_text, capture_output=True, text=True,
         timeout=timeout, check=False, env=env,
