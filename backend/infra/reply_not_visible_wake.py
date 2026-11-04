@@ -1,4 +1,4 @@
-"""The one Focus nudge a person's message gets when a Turn ends with nothing they can see.
+"""The one Focus nudge for an unanswered person message or first-run wake.
 
 Focus shows an agent's words only when it sends them with ``post_update``. When
 a Turn ends while the person's newest message has no such reply after it, and its
@@ -9,6 +9,7 @@ its last words become the reply (``for_user``), so the person still sees them; a
 woken Turn that leaves no words of its own (it errored first) shows the words it
 was woken about instead.
 
+Before any person message, the delivered first-run event can anchor the same rule.
 Both run inside the terminal write (``automation.turn_end_effects``). A person's
 Stop records no Turn end, so it never nudges; an error before any nudge is the
 unanswered-input wake's. Stopping the woken Turn still shows the words it was
@@ -59,6 +60,16 @@ def nudge_text(hhmm: str, hidden: str | None) -> str:
     )
 
 
+def _first_run_nudge_text(hidden: str | None) -> str:
+    seen = f' Your last words, which they did not see: "{hidden}"' if hidden else ""
+    return (
+        "No reply is visible to the user after setup started." + seen +
+        " If you intended to send a visible response, please use post_update now. "
+        "If no reply was necessary or expected, DO NOT SEND AN UPDATE. "
+        f"Instead, answer with exactly {NO_REPLY} and nothing else."
+    )
+
+
 def _clock(created_at: str) -> str:
     """H:MM on the host's clock, 12-hour with no AM/PM."""
     moment = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
@@ -87,6 +98,20 @@ def _newest_person_input(
         f"ORDER BY input_order DESC LIMIT ?) WHERE delivery_state=? AND {_HUMAN} "
         "ORDER BY seq DESC LIMIT 1",
         (thread_id, _INPUT_WINDOW, delivery_state),
+    ).fetchone()
+
+
+def _anchor(db: sqlite3.Connection, thread_id: str, delivery_state: str) -> sqlite3.Row | None:
+    person = _newest_person_input(db, thread_id, delivery_state)
+    if person is not None or delivery_state != "delivered":
+        return person
+    from infra.onboarding_events import FIRST_RUN_EVENT, first_run_message_id
+
+    return db.execute(
+        "SELECT id, seq, created_at, active_turn_id FROM messages "
+        "WHERE id=? AND thread_id=? AND role='system' AND delivery_state=? "
+        "AND json_valid(metadata) AND json_extract(metadata,'$.event_type')=?",
+        (first_run_message_id(thread_id), thread_id, delivery_state, FIRST_RUN_EVENT),
     ).fetchone()
 
 
@@ -211,7 +236,7 @@ def _woke(nudge: sqlite3.Row, turn_id: str) -> bool:
 
 def _nudged_by(db: sqlite3.Connection, thread_id: str, turn_id: str):
     """(person, nudge) when ``turn_id`` is the Turn the newest message's nudge woke."""
-    person = _newest_person_input(db, thread_id, "delivered")
+    person = _anchor(db, thread_id, "delivered")
     if person is None or person["seq"] is None:
         return None
     nudge = _nudge_of(db, person)
@@ -225,9 +250,12 @@ def _queue_nudge(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) ->
     from infra.send_types import SendRejected
 
     hidden = _last_hidden(db, thread_id, person["seq"])
-    text = nudge_text(
-        _clock(str(person["created_at"])),
-        (_unseen(db, thread_id, hidden) or None) if hidden is not None else None,
+    from infra.onboarding_events import first_run_message_id
+
+    words = (_unseen(db, thread_id, hidden) or None) if hidden is not None else None
+    text = (
+        _first_run_nudge_text(words) if person["id"] == first_run_message_id(thread_id)
+        else nudge_text(_clock(str(person["created_at"])), words)
     )
     try:
         enqueue_event_wake(
@@ -249,7 +277,7 @@ def _settle(db: sqlite3.Connection, thread_id: str, outcome: dict) -> bool:
     ending_turn = outcome.get("turn_id")
     if not ending_turn or not _focus_on(db):
         return False
-    person = _newest_person_input(db, thread_id, "delivered")
+    person = _anchor(db, thread_id, "delivered")
     if person is None or person["seq"] is None:
         return False
     nudge = _nudge_of(db, person)
@@ -274,7 +302,7 @@ def _settle(db: sqlite3.Connection, thread_id: str, outcome: dict) -> bool:
 def settle_reply_not_visible(
     db: sqlite3.Connection, thread_id: str, outcome: dict, pending,
 ) -> None:
-    """Show a nudged Turn's hidden words, or nudge once for a message nothing visible answered.
+    """Show a nudged Turn's hidden words, or nudge once for an unanswered input.
 
     Runs in its own savepoint: a failure here is logged and undone, never the
     Turn end's, except a lock refusal, which the caller retries whole.

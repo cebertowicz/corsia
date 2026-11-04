@@ -22,6 +22,9 @@ Two axes stay separate:
 
 Inbound user turns, delegated messages, and routed events converge on shared
 send and dispatch services before entering the selected execution provider.
+`infra/reply_not_visible_wake.py` owns the Focus reply nudge and its terminal
+fallback. It anchors on the newest person input, or the first-run event before
+any person input, using the same persisted nudge and settlement path for both.
 
 ## Code map
 
