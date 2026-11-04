@@ -29,7 +29,6 @@ describe('held reply receipts', () => {
 		['held_reply.sent', 'Sent'],
 		['held_reply.declined', 'Declined'],
 		['held_reply.not_sent', 'Not sent'],
-		['held_reply.queued', 'Queued'],
 	])('%s reads %s', (eventType, word) => {
 		const el = render(EventChip, {
 			id: 'r1', role: 'system', content: 'agent text',

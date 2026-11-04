@@ -54,9 +54,8 @@ _ASKER_TEXT = {
     held_replies.SENT: "{agent}'s reply was sent.",
     held_replies.DECLINED: (
         "The person declined to share {agent}'s reply, so you will not receive it; do not ask "
-        "again unless the person asks you to, and continue without it."
+        "again unless the person asks you to; continue without it, or tell the person if you can't."
     ),
-    "queued": "{recipient} can't run until a local model is ready. {agent}'s message is queued.",
 }
 
 # The lines the person reads in a transcript, the receipt slot and the drawer.
@@ -64,7 +63,6 @@ _LINE = {
     "waiting": "{agent}'s reply is waiting for approval.",
     held_replies.SENT: "{agent}'s reply was sent.",
     held_replies.DECLINED: "{agent}'s reply was not sent.",
-    "queued": "{recipient} can't run until a local model is ready. {agent}'s message is queued.",
 }
 
 
@@ -121,9 +119,7 @@ def _insert_asker_row(held: dict[str, Any], kind: str, *, recipient: str, agent:
         "held_reply_id": held["id"],
     }
     if not note:
-        metadata["event_type"] = RECEIPT_PREFIX + ("queued" if kind == "queued" else (
-            "sent" if kind == held_replies.SENT else "declined"
-        ))
+        metadata["event_type"] = RECEIPT_PREFIX + kind
     with write_transaction(None, scope="held_reply_asker_row") as db:
         if db.execute(
             "SELECT 1 FROM threads WHERE id=?", (held["recipient_thread_id"],),

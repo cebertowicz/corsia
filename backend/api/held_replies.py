@@ -100,7 +100,8 @@ async def approve(held_id: str, body: DecisionBody) -> dict[str, Any]:
     await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.SENT)
     notify_changed(user["id"], held["sender_thread_id"])
     await tell_sender(held, held_replies.SENT, recipient=name)
-    await note_asker(held, "queued" if sent.get("held") else held_replies.SENT)
+    # Delivered as any send is: a recipient held on its account limit shows that hold itself.
+    await note_asker(held, held_replies.SENT)
     return {"ok": True, "state": held_replies.SENT}
 
 

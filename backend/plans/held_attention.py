@@ -106,9 +106,15 @@ def queue_rows(db: sqlite3.Connection, user_id: str) -> list[dict[str, Any]]:
     ]
 
 
-def count(db: sqlite3.Connection, user_id: str) -> int:
-    """How many held replies wait on this person: Activity's share of the awaiting count."""
-    return len(pending(db, user_id))
+def count(db: sqlite3.Connection, user_id: str, *, project_id: str | None = None) -> int:
+    """How many held replies wait on this person: Activity's share of the awaiting count.
+
+    With ``project_id``, only those shown on a chat in that project, as a project's Activity counts.
+    """
+    items = pending(db, user_id)
+    if project_id is None:
+        return len(items)
+    return sum(1 for item in items if item["project_id"] == project_id)
 
 
 def items_by_thread(db: sqlite3.Connection, user_id: str) -> dict[str, list[dict[str, Any]]]:

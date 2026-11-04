@@ -178,3 +178,23 @@ def test_the_activity_token_moves_when_a_reply_is_held_and_the_plan_count_does_n
     assert after["revision_token"] != before["revision_token"]
     assert after["attention"]["awaiting_count"] == before["attention"]["awaiting_count"] + 1
     assert _envelope_thread(db, "root")["attention"]["awaiting_count"] == 0
+
+
+def test_a_held_reply_counts_in_its_own_projects_activity_and_no_other(db):
+    import infra.held_replies as held_replies
+    from plans import activity_projection
+
+    def awaiting(project_id: str) -> int:
+        return activity_projection.read_project(project_id, actor=_human(), db=db)["attention"][
+            "awaiting_count"
+        ]
+
+    before = {project_id: awaiting(project_id) for project_id in ("project-1", "project-2")}
+
+    held_replies.hold(
+        user_id="user-1", sender_thread_id="child", recipient_thread_id="root",
+        text="reply text", via="tool", db=db,
+    )
+
+    assert awaiting("project-1") == before["project-1"] + 1
+    assert awaiting("project-2") == before["project-2"]
