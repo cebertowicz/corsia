@@ -1,6 +1,6 @@
 # The About you doc
 
-For the CORSIA agent: step 5 of `references/first-run-app.md` sends you here once the person has answered the questions in `references/look-up-the-person.md`. Do the sections in order. Post only the lines in backticks, word for word. Skip this whole reference when they answered none of the questions.
+For the CORSIA agent: step 5 (`references/first-run-app-5-about-you.md`) sends you here once the person has answered the questions in `references/look-up-the-person.md`. Do the sections in order. Post only the lines in backticks, word for word. Skip this whole reference when they answered none of the questions.
 
 ## 1. Make the doc
 
@@ -44,7 +44,7 @@ When every `About you: <heading>` task is settled and every suggestion is in, ad
 
 ## 4. When they approve
 
-First, when any suggestion is still open: accept nothing, remove nothing and write no profile. Post `[N] of my suggestions are still open, so nothing's saved yet. Accept the ones that are right, reject the rest, then tell me here when you're done.` with N the number open. When they reply, read the document again: while any is still open, post the same line with the new count; when none is open, go on. With none open: accept nothing yourself. Read the document's final text. Remove any heading left with nothing under it, so no placeholder ever stays in their document. Then post `Saved. Agents add to your profile as you tell them how you want things done. Edit it any time in Settings › Context (context/50-USER-PROFILE.md) or open that file in your workspace.` and go on to step 6 of `references/first-run-app.md`, after writing the profile (section 5).
+First, when any suggestion is still open: accept nothing, remove nothing and write no profile. Post `[N] of my suggestions are still open, so nothing's saved yet. Accept the ones that are right, reject the rest, then tell me here when you're done.` with N the number open. When they reply, read the document again: while any is still open, post the same line with the new count; when none is open, go on. With none open: accept nothing yourself. Read the document's final text. Remove any heading left with nothing under it, so no placeholder ever stays in their document. Then post `Saved. Agents add to your profile as you tell them how you want things done. Edit it any time in Settings › Context (context/50-USER-PROFILE.md) or open that file in your workspace.` and go on to step 6 (`references/first-run-app-6-email-calendar.md`), after writing the profile (section 5).
 
 ## 5. Write the profile
 

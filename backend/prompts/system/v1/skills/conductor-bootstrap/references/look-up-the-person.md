@@ -1,6 +1,6 @@
 # Looking up the person, then asking what's left
 
-For the CORSIA agent: step 5 of `references/first-run-app.md`. Follow in order. Post only the lines in backticks, word for word. Never show how sure you are.
+For the CORSIA agent: step 5 (`references/first-run-app-5-about-you.md`). Follow in order. Post only the lines in backticks, word for word. Never show how sure you are.
 
 ## Before anything: ask when search was already set up
 
@@ -86,7 +86,7 @@ Do this quietly after they answer question 2, and say nothing about it here.
 
 1. Compare their words with what the import already read under the person's consent (its apps, skills and projects) and what step 3 connected (`GET /api/mcp/servers`); never make a new read of `GET /api/mcp/sources` or of another tool's settings here: a repository, a project, a folder or a tracker that matches what they are working toward.
 2. Keep what matches and its source (where it came from). Keep nothing that only shares a common word.
-3. Hold it for the hand-off in `references/first-run-app.md`: one match is named there, several are named up to three, none means the fallback line.
+3. Hold it for the hand-off in `references/first-run-app-9-hand-over.md`: one match is named there, several are named up to three, none means the fallback line.
 
 ## Worked examples
 
