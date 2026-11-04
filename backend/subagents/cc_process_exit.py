@@ -149,7 +149,7 @@ async def _publish_process_exit(
     detail: str,
     broadcast: Broadcast,
     db,
-    verdict,
+    verdict=_UNCHECKED,
 ) -> None:
     if verdict is _UNCHECKED:
         verdict = None if live.tool_boundary_marker_id else await claude_login_verdict(identity.turn_id, detail, db=db)
