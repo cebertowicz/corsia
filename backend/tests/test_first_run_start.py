@@ -73,6 +73,16 @@ def test_handoff_excludes_silent_checks():
     assert "Silently," not in text
 
 
+def test_every_step_file_opens_with_the_title_and_reread_line_first_app_step_drops():
+    from infra.system_package import system_resource_source
+    from onboarding.first_run_instructions import SKILL_DIR, STEP_REFERENCES
+
+    for number, name in STEP_REFERENCES.items():
+        title, reread, _ = system_resource_source(f"{SKILL_DIR}/references/{name}").read_text(encoding="utf-8").split("\n\n", 2)
+        assert title.startswith(f"# First run, app path, step {number}: ")
+        assert reread.startswith("Read this file when you start this step")
+
+
 @pytest.mark.asyncio
 async def test_completed_setup_silently_skips_import_when_no_eligible_tool_remains(monkeypatch):
     from onboarding import app_first_run, setup_decisions
