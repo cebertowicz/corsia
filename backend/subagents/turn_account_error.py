@@ -59,6 +59,13 @@ async def claude_login_verdict(turn_id: str | None, detail: str | None, *, db=No
     return receipt, await check_login("claude-code", receipt) == "pass"
 
 
+def login_race_answered(detail: str | BaseException | None, verdict) -> bool:
+    """Only the CLI OAuth refresh error with an answering login can be re-run."""
+    from connections.auth_failure import claude_oauth_refresh_failure
+
+    return login_answered(verdict) and claude_oauth_refresh_failure(detail)
+
+
 def login_answered(verdict) -> bool:
     """Whether a ``claude_login_verdict`` found the Turn's login still answering."""
     return verdict is not None and verdict[1]
