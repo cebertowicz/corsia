@@ -56,7 +56,7 @@ _ACCOUNTS = {
                "the agents' GitHub sign-in is the person's own GitHub account; sign it out and sign in as "
                "the agents' own account"),
     "unverified": (AgentAccountView("unverified", "own_login_unknown", home="/h"),
-                   "CORSIA doesn't know the person's own GitHub login yet, so it can't tell the agents' "
+                   "CORSIA doesn't know the person's own GitHub login, so it can't tell the agents' "
                    "account from it; it checks again on a later run, and if the person isn't signed in "
                    "to GitHub CLI on this computer, they need to sign in"),
     "suspended": (AgentAccountView("needs_auth", "token_rejected", home="/h"),

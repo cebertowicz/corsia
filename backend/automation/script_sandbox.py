@@ -195,7 +195,7 @@ _NO_LOGIN: dict[Cause, str] = {
     "verify_failed": ("CORSIA couldn’t confirm the agents' GitHub account with GitHub and checks again "
                       "when a script next runs"),
     "verifying": "CORSIA is still checking the agents' GitHub account; a later run uses the answer",
-    "own_login_unknown": ("CORSIA doesn't know the person's own GitHub login yet, so it can't tell the agents' "
+    "own_login_unknown": ("CORSIA doesn't know the person's own GitHub login, so it can't tell the agents' "
                           "account from it; it checks again on a later run, and if the person isn't signed in "
                           "to GitHub CLI on this computer, they need to sign in"),
     "person_account": ("the agents' GitHub sign-in is the person's own GitHub account; sign it out and sign "
