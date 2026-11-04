@@ -214,6 +214,7 @@ The build downloads its own Rust, Python and resources, and needs room for the b
 |---|---|
 | `corsia start` / `stop` / `restart` / `status` / `logs` | Run and inspect the backend |
 | `corsia sources` / `sources recheck` | Show each model source with a fix for anything missing |
+| `corsia import <folder>` / `import <folder> --apply` | Show, then bring over, an earlier CORSIA's projects, skills and shared documents |
 | `corsia setup local` / `setup server` | Switch between this-computer-only and an always-on server |
 | `corsia service install` / `uninstall` | Run as a launchd service |
 | `corsia user …` / `corsia token …` | Manage accounts and API tokens |

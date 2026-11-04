@@ -291,6 +291,10 @@ def _add_runtime_commands(sub: argparse._SubParsersAction) -> None:
 
     build_account_parser(sub)
 
+    from cli_import import build_parser as build_import_parser
+
+    build_import_parser(sub)
+
     from cli_artifacts import build_parser as build_artifact_parser
 
     build_artifact_parser(sub)
