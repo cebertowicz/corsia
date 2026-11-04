@@ -53,7 +53,7 @@ async def test_added_claude_failure_signs_out_only_its_account_before_returning(
     from connections.vendor_accounts import get_account
 
     db = claude.db
-    turn_on_other(claude)
+    receipt = turn_on_other(claude)
     before_default = get_account(claude.first, db=db)
     before_source = get_connection('claude-code', db=db)
     vendor_status = AsyncMock(return_value=(True, {}, None))
@@ -64,7 +64,7 @@ async def test_added_claude_failure_signs_out_only_its_account_before_returning(
     assert get_account(claude.first, db=db) == before_default
     assert get_connection('claude-code', db=db) == before_source
     vendor_status.assert_not_awaited()
-    check.assert_awaited_once_with('claude-code', claude.other)
+    check.assert_awaited_once_with('claude-code', receipt)
 
 
 @pytest.mark.asyncio
@@ -81,7 +81,7 @@ async def test_login_that_still_answers_stays_signed_in(claude, monkeypatch):
     assert get_account(claude.other, db=db) == before
     assert before['state'] == 'signed_in'
     assert read_turn_receipt('claude-turn', db=db) == receipt
-    check.assert_awaited_once_with('claude-code', claude.other)
+    check.assert_awaited_once_with('claude-code', receipt)
 
 
 @pytest.mark.asyncio

@@ -56,7 +56,7 @@ async def claude_login_verdict(turn_id: str | None, detail: str | None, *, db=No
     receipt = await run_in_db_unless_owned(db, _turn_login, turn_id, "claude-code", db=db)
     if receipt is None:
         return None
-    return receipt, await check_login("claude-code", receipt.account_id) == "pass"
+    return receipt, await check_login("claude-code", receipt) == "pass"
 
 
 def login_answered(verdict) -> bool:

@@ -1,10 +1,12 @@
 """Usage-only recovery checks for CLI harness accounts.
 
-The model picker triggers these checks only when it opens. A Claude account is
+The model picker triggers these checks when it opens, and a Turn that ends on
+the expired-login text awaits one through ``check_login``. A Claude account is
 checked through its own usage-only control read, with no catalog discovery or
 model turn, in its captured source home. A Codex account is read by its own
 account refresh, in its own home and login. Each account has one in-memory check
-at a time and no more than one start per five minutes.
+at a time; scheduled checks start no more than once per five minutes, and a
+login check skips that throttle.
 """
 
 from __future__ import annotations
@@ -21,11 +23,13 @@ from infra.db_async import run_in_db
 
 log = logging.getLogger(__name__)
 _RECHECK_SECONDS = 300.0
-#: A Turn's end waits on ``check_login``; kept well inside the 35 s live-close bound
+#: A Turn's end waits on ``check_login``: past the control read's own 30 s bound
+#: (``claude_discovery.run_claude_control``), so a slow read answers rather than
+#: times out, and inside the 35 s live-close bound
 #: (``cc_runtime_state._CLOSE_LIVE_TIMEOUT_S``) that a Stop during that wait runs under.
-_LOGIN_CHECK_SECONDS = 15.0
-#: Keyed by account id.
-_CHECKS: dict[str, asyncio.Task[str]] = {}
+_LOGIN_CHECK_SECONDS = 32.0
+#: Keyed by account id; each read answers ``(verdict, the login it read)``.
+_CHECKS: dict[str, asyncio.Task[tuple[str, object]]] = {}
 _LAST_STARTED: dict[str, float] = {}
 #: Accounts signed in while a read for the prior login was running; read again once it ends.
 _NEW_LOGIN_PENDING: set[str] = set()
@@ -113,47 +117,57 @@ def _capture(provider: str, account_id: str, *, db=None):
     return capture_discovery_context(provider, account_id=account_id, db=db)
 
 
-async def check_login(provider: str, account_id: str) -> str:
-    """The account's control read: ``pass`` when its login answered, else ``fail`` or ``error``.
+async def check_login(provider: str, receipt) -> str:
+    """The control read of the login ``receipt`` names: ``pass`` when it answered, else ``fail`` or ``error``.
 
     Joins the read already running for the account, or starts one now past the
     five-minute throttle, so every caller shares one control process per login.
-    Waits at most ``_LOGIN_CHECK_SECONDS``; a read still running then finishes on its own.
+    A read of another login says nothing about this one, so the next read is
+    joined or started; when that one reads another login too, the receipt's
+    login was replaced or signed out, and the answer is ``fail``.
+    Waits at most ``_LOGIN_CHECK_SECONDS`` in all; a read still running then finishes on its own.
     """
-    task = _CHECKS.get(account_id)
-    if task is None or task.done():
-        _LAST_STARTED[account_id] = time.monotonic()
-        task = _CHECKS[account_id] = asyncio.create_task(_check(provider, account_id))
+    account_id = receipt.account_id
     try:
-        return await asyncio.wait_for(asyncio.shield(task), _LOGIN_CHECK_SECONDS)
-    except asyncio.TimeoutError:
+        async with asyncio.timeout(_LOGIN_CHECK_SECONDS):
+            for _attempt in range(2):
+                task = _CHECKS.get(account_id)
+                if task is None or task.done():
+                    _LAST_STARTED[account_id] = time.monotonic()
+                    task = _CHECKS[account_id] = asyncio.create_task(_check(provider, account_id))
+                verdict, read_for = await asyncio.shield(task)
+                if read_for == receipt:
+                    return verdict
+            return "fail"
+    except TimeoutError:
         log.warning("%s login check timed out for account %s", provider, account_id)
         return "error"
 
 
-async def _read(provider: str, account_id: str) -> str:
+async def _read(provider: str, account_id: str) -> tuple[str, object]:
+    """``(verdict, the login receipt it read)``; the receipt is None when no login was read."""
     receipt = None
     try:
         context = await run_in_db(_capture, provider, account_id)
         if context is None or context.receipt is None:
-            return "fail"  # No current login to read for: the next sign-in schedules its own check.
+            return "fail", None  # No current login to read for: the next sign-in schedules its own check.
         receipt = context.receipt
         if provider != "claude-code":
-            return "pass" if await _check_codex(provider, receipt) else "fail"
+            return ("pass" if await _check_codex(provider, receipt) else "fail"), receipt
         binary = await _binary_for(provider)
         if binary is None:
             await _check_failed(provider, receipt, "Harness connection is unavailable")
-            return "error"
+            return "error", receipt
         verdict = await _check_claude(binary, receipt, context=context)
         # Only plan usage read through the login proves it answered; an unknown read proves nothing.
-        return "pass" if verdict["verdict"] in ("allowed", "limited") else "fail"
+        return ("pass" if verdict["verdict"] in ("allowed", "limited") else "fail"), receipt
     except Exception as exc:
         log.warning("%s usage recheck failed for account %s: %s", provider, account_id, exc)
         await _check_failed(provider, receipt, f"{provider} usage read failed: {exc}")
-        return "error"
+        return "error", receipt
 
 
-async def _check(provider: str, account_id: str) -> str:
+async def _check(provider: str, account_id: str) -> tuple[str, object]:
     try:
         return await _read(provider, account_id)
     finally:
