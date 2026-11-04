@@ -181,6 +181,21 @@ async def test_a_sweep_during_a_load_does_not_hide_the_loaded_model(monkeypatch,
     assert network_discovery.get_loaded_model_ids(SID) == {"model"}
 
 
+async def test_an_unreadable_log_says_the_restart_intent_is_unknown_and_leaves_the_seat_down(events, caplog):
+    start, calls = recording_start()
+    life = sup._life.setdefault(SID, restart.Life())
+    with caplog.at_level(logging.WARNING, logger=restart.log.name):
+        restart.on_exit(SID, life, GONE_PID, start, lambda _sid: "", ("exit code 0", True), lambda: None)
+        await settle()
+    assert calls == []
+    assert actions(events) == ["exit.intent_unknown"]
+    assert "could not be read" in caplog.text and "is not restarted" in caplog.text
+
+
+def test_an_unreadable_log_is_unknown_and_not_a_no(tmp_path):
+    assert omlx_process.logged_since(tmp_path, SID, 0, "anything at all") is None
+
+
 async def test_a_clean_exit_the_person_did_not_ask_for_is_logged_not_restarted(events, caplog, monkeypatch):
     start, calls = recording_start()
     with caplog.at_level(logging.INFO, logger=restart.log.name):

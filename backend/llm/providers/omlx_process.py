@@ -250,15 +250,15 @@ def log_size(runtime_dir: Path, server_id: str) -> int:
         return 0
 
 
-def logged_since(runtime_dir: Path, server_id: str, offset: int, text: str) -> bool:
-    """Whether ``text`` is in the last 64 KiB this server's log gained after byte ``offset``."""
+def logged_since(runtime_dir: Path, server_id: str, offset: int, text: str) -> bool | None:
+    """Whether ``text`` is in the last 64 KiB this server's log gained after byte ``offset``; None when the log can't be read."""
     try:
         with log_path(runtime_dir, server_id).open("rb") as file:
             size = file.seek(0, os.SEEK_END)
             file.seek(max(offset, size - 64 * 1024))
             return text.encode() in file.read()
     except OSError:
-        return False
+        return None
 
 
 def tail_log(runtime_dir: Path, server_id: str, lines: int = 20) -> str:

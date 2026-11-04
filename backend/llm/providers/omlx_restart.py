@@ -16,6 +16,8 @@ exit, code 0        logged, not restarted       -                               
                     (an exit with no readable status is treated as unexpected)
 exit, code 0 after  restarted, bound reset      -                                no restart
 oMLX's own Restart  (its dashboard asked)
+exit, code 0 with   logged and emitted as unknown, -
+the log unreadable  not restarted
 stop (the person,   exit watch dropped, never   restart cancelled and awaited;   -
 CORSIA, Quit)       restarted                   what it spawned is then stopped
 stop fails          stop flag cleared: a later  -                                -
@@ -123,9 +125,10 @@ def restarting(lives: dict[str, Life]) -> set[str]:
     return {server_id for server_id, life in lives.items() if life.restart}
 
 
-def restart_logged_from_now(runtime_dir: Path, server_id: str) -> Callable[[], bool]:
+def restart_logged_from_now(runtime_dir: Path, server_id: str) -> Callable[[], bool | None]:
     """Whether the server's log gains oMLX's restart line after this call: an earlier process's never counts.
 
+    None when the log can't be read, which is not an answer: the caller says so rather than calling it a plain exit.
     CORSIA launches oMLX with ``OMLX_SUPERVISED=corsia``, so oMLX's own Restart logs that line and exits 0.
     """
     offset = process.log_size(runtime_dir, server_id)
@@ -139,7 +142,7 @@ def emit(server_id: str, action: str, **properties: Any) -> None:
 def on_exit(
     server_id: str, life: Life, pid: int,
     start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
-    observed: tuple[str, bool] | None = None, restart_requested: Callable[[], bool] = lambda: False,
+    observed: tuple[str, bool] | None = None, restart_requested: Callable[[], bool | None] = lambda: False,
 ) -> None:
     """Restart the server unless CORSIA stopped it, or it exited 0 without oMLX's own Restart asking."""
     from llm.server_observation import forget_loaded_on_exit
@@ -150,11 +153,17 @@ def on_exit(
     if life.stopping:
         log.info("oMLX %s (pid %s) stopped as asked; not restarting", server_id, pid)
         return
-    if clean and not restart_requested():
-        log.info("oMLX %s (pid %s) exited with code 0 without being asked; not restarting", server_id, pid)
-        return
-    if clean:  # a person's restart, like a person's start, resets the bound
-        status = "restart requested in oMLX"
+    if clean:
+        asked = restart_requested()
+        if asked is None:  # the log is unreadable, so the seat stays down and the reason is said out loud
+            log.warning("oMLX %s (pid %s) exited with code 0 and its log could not be read; "
+                      "whether oMLX's own Restart asked for it is unknown, so it is not restarted", server_id, pid)
+            emit(server_id, "exit.intent_unknown")
+            return
+        if not asked:
+            log.info("oMLX %s (pid %s) exited with code 0 without being asked; not restarting", server_id, pid)
+            return
+        status = "restart requested in oMLX"  # a person's restart, like a person's start, resets the bound
         life.restarts.clear()
         emit(server_id, "restart.requested", loaded_models=len(loaded))
     else:
