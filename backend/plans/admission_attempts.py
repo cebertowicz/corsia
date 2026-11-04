@@ -10,6 +10,14 @@ import plans.service as service
 
 logger = logging.getLogger(__name__)
 
+HANDED_UNSELECTED = "handed_unselected"
+
+
+def real_selection_sql(alias: str = "") -> str:
+    """SQL predicate for attempts that represent an actual selection."""
+    prefix = f"{alias}." if alias else ""
+    return f"({prefix}release_reason IS NULL OR {prefix}release_reason != '{HANDED_UNSELECTED}')"
+
 
 def open_attempt(db, node_id: str):
     """Return the node's one open attempt row, or None."""
@@ -17,18 +25,22 @@ def open_attempt(db, node_id: str):
 
 
 def open_attempts(node_ids, *, db, compact: bool = False) -> dict:
-    """Unreleased attempts; compact callers select only the validity identity."""
+    """Unreleased attempts with selection rank; compact callers get only validity identity."""
     from plans import node_waits
 
     ids = list(node_ids)
     if not ids:
         return {}
-    columns = "id,node_id,executor_thread_id,requirements_revision" if compact else "*"
+    columns = (
+        "a.id,a.node_id,a.executor_thread_id,a.requirements_revision" if compact else
+        f"a.*,(SELECT COUNT(*) FROM plan_node_attempts s WHERE s.node_id=a.node_id "
+        f"AND s.attempt_ordinal<=a.attempt_ordinal AND {real_selection_sql('s')}) AS selection_ordinal"
+    )
     return {
         str(row["node_id"]): row
         for row in db.execute(
-            f"""SELECT {columns} FROM plan_node_attempts
-                WHERE node_id IN (SELECT value FROM json_each(?)) AND released_at IS NULL""",
+            f"""SELECT {columns} FROM plan_node_attempts a
+                WHERE a.node_id IN (SELECT value FROM json_each(?)) AND a.released_at IS NULL""",
             (node_waits.encoded_ids(ids),),
         )
     }
@@ -56,10 +68,10 @@ def executor_start(db, node_id: str) -> tuple[str, str] | None:
     if executor is None:
         return None
     first = db.execute(
-        """SELECT selected_at, MIN(julianday(selected_at)),
+        f"""SELECT selected_at, MIN(julianday(selected_at)),
                   COUNT(*) - COUNT(julianday(selected_at)) AS unreadable
              FROM plan_node_attempts
-            WHERE node_id=? AND executor_thread_id=?""",
+            WHERE node_id=? AND executor_thread_id=? AND {real_selection_sql()}""",
         (node_id, executor),
     ).fetchone()
     if first["unreadable"]:
@@ -91,7 +103,7 @@ def latest_accepted_starts(db) -> dict[str, str]:
               FROM plan_node_attempts AS a
               JOIN plan_nodes AS n ON n.id=a.node_id
               JOIN plans AS p ON p.id=n.plan_id
-             WHERE n.state IN ({marks})""",
+             WHERE n.state IN ({marks}) AND {real_selection_sql('a')}""",
         accepted,
     ).fetchall()
     first: dict[tuple[str, str], tuple[float, str]] = {}
@@ -263,6 +275,21 @@ def insert(db, node, executor: str, *, actor_id: str | None, provenance: str):
     return db.execute(
         "SELECT * FROM plan_node_attempts WHERE id=?", (attempt_id,),
     ).fetchone()
+
+
+def insert_delegated_if_missing(db, node, executor: str, *, actor_id: str | None, provenance: str) -> None:
+    """Record a released hand-off attempt only when the node has never had one."""
+    now = service._now()
+    db.execute(
+        """INSERT INTO plan_node_attempts
+           (id,plan_id,node_id,executor_thread_id,requirements_revision,
+            attempt_ordinal,selected_by_actor_id,provenance,selected_at,released_at,release_reason)
+           SELECT ?,?,?,?,?,1,?,?,?,?,? WHERE NOT EXISTS
+               (SELECT 1 FROM plan_node_attempts WHERE node_id=?)""",
+        (uuid.uuid4().hex, node["plan_id"], node["id"], executor,
+         node["requirements_revision"], actor_id, service._required_text(provenance, "provenance"),
+         now, now, HANDED_UNSELECTED, node["id"]),
+    )
 
 
 def bind_turn(db, node, attempt, executor: str) -> None:

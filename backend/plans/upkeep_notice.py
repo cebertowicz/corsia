@@ -19,7 +19,7 @@ Plans tools themselves carry no notice: that agent is already working its plan.
 from __future__ import annotations
 
 from plans import (
-    admission, admission_projection, node_order, node_states, selection_validity, service,
+    admission, admission_attempts, admission_projection, node_order, node_states, selection_validity, service,
 )
 from prompts import plan_tools as text
 
@@ -118,9 +118,10 @@ def _named(rows: list) -> list[tuple[str, str]]:
 def _held_task(db, plan, thread_id: str) -> tuple[str, str] | None:
     """Return the title and hold of the task this executor last set aside, if still held."""
     row = db.execute(
-        """SELECT a.node_id FROM plan_node_attempts a
+        f"""SELECT a.node_id FROM plan_node_attempts a
            JOIN plan_nodes n ON n.id=a.node_id
            WHERE a.plan_id=? AND a.executor_thread_id=? AND a.released_at IS NOT NULL
+             AND {admission_attempts.real_selection_sql('a')}
              AND n.state='active' AND n.archived_at IS NULL
            ORDER BY a.released_at DESC LIMIT 1""",
         (plan["id"], thread_id),

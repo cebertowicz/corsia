@@ -12,7 +12,7 @@ from datetime import datetime
 
 from infra.packed_rows import fetch_all
 from plans import (
-    closure, commitment_cost, node_cost, node_cost_scoped, node_states, review_evidence,
+    admission_attempts, closure, commitment_cost, node_cost, node_cost_scoped, node_states, review_evidence,
 )
 from plans.commitment_cost import FAILED_RELEASES
 
@@ -142,9 +142,10 @@ def detail(
 _ATTEMPTS_SQL = """WITH ordered AS (
       SELECT *,
              ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY selected_at DESC,id DESC) AS history_rank,
-             COUNT(*) OVER (PARTITION BY node_id) AS history_count
+             COUNT(*) OVER (PARTITION BY node_id) AS history_count,
+             ROW_NUMBER() OVER (PARTITION BY node_id ORDER BY attempt_ordinal) AS selection_ordinal
       FROM plan_node_attempts
-      WHERE {where}
+      WHERE {where} AND {real_selection}
     ), ranked AS (
       SELECT *,
              SUM(history_rank>1 AND release_reason IN ({failure_marks})) OVER (PARTITION BY node_id)
@@ -165,7 +166,7 @@ def attempts(
 ) -> tuple[dict[str, list[dict]], dict[str, dict[str, int]]]:
     """Return each node's latest ``limit`` attempts and its whole-history counts.
 
-    The counts are ``attempt_count``, every attempt, and ``friction_count``, the
+    The counts are ``attempt_count``, every selection, and ``friction_count``, the
     retries a failed try forced. A retry takes one of two shapes, and both
     count: an attempt released for a failure reason
     (``commitment_cost.FAILED_RELEASES``) that a later attempt followed, and a
@@ -185,7 +186,8 @@ def attempts(
         where, params = scope("plan_id", "node_id", plan_ids, chunk)
         rows.extend(fetch_all(
             db,
-            _ATTEMPTS_SQL.format(where=where, failure_marks=failure_marks),
+            _ATTEMPTS_SQL.format(where=where, failure_marks=failure_marks,
+                                 real_selection=admission_attempts.real_selection_sql()),
             (*params, *failures, limit),
         ))
     historical_ids = {str(row["executor_thread_id"]) for row in rows}
@@ -204,7 +206,7 @@ def attempts(
         indexed[str(row["node_id"])].append(
             {
                 "id": row["id"],
-                "ordinal": row["attempt_ordinal"],
+                "ordinal": row["selection_ordinal"],
                 "executor": {
                     "thread_id": executor_id,
                     "label": labels.get(executor_id, "Unavailable executor"),

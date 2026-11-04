@@ -9,7 +9,7 @@ from typing import Any
 
 from infra.packed_rows import fetch_all
 from infra.turn_usage_remainder import pending_measurement_counts
-from plans import service, usage_cost
+from plans import admission_attempts, service, usage_cost
 from plans.node_cost import settle_known, sum_known
 
 #: The release reasons that mean a try ended in failure. The one definition of
@@ -50,6 +50,7 @@ def _rows_by(rows, field: str) -> dict[str, list]:
 
 
 def _attempt_summary(rows) -> dict[str, int]:
+    rows = [row for row in rows if row["is_selection"]]
     terminal_failures = {
         max(
             (row for row in rows if row["node_id"] == node_id),
@@ -133,6 +134,7 @@ def _load(
     )
     attempts = fetch_all(
         db, f"""SELECT a.*,n.state AS node_state,n.commitment_id,p.parent_plan_id,
+                   {admission_attempts.real_selection_sql('a')} AS is_selection,
                    EXISTS (
                      SELECT 1 FROM plan_node_events e
                      WHERE e.node_id=a.node_id AND e.event='correction_created'

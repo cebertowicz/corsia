@@ -278,7 +278,7 @@ def _selection(attempt, live_executors: set[str], in_flight: dict) -> dict | Non
     executor = str(attempt["executor_thread_id"])
     return {
         "attempt_id": attempt["id"],
-        "attempt_ordinal": attempt["attempt_ordinal"],
+        "attempt_ordinal": attempt["selection_ordinal"],
         "executor_thread_id": executor,
         "requirements_revision": attempt["requirements_revision"],
         "turn_active": executor in live_executors,

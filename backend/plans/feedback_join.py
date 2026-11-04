@@ -53,7 +53,12 @@ class Join(NamedTuple):
 
 
 def _handed(db, node_id: str) -> bool:
-    return db.execute("SELECT 1 FROM plan_node_attempts WHERE node_id=? LIMIT 1", (node_id,)).fetchone() is not None
+    from plans import admission_attempts
+
+    return db.execute(
+        f"SELECT 1 FROM plan_node_attempts WHERE node_id=? AND {admission_attempts.real_selection_sql()} LIMIT 1",
+        (node_id,),
+    ).fetchone() is not None
 
 
 def _waits(db, node) -> bool:

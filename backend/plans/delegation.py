@@ -235,6 +235,11 @@ def attach_spawned_thread(
             db=connection,
         )
         _release_delegated_selection(connection, node, actor_id, provenance)
+        from plans import admission_attempts
+
+        admission_attempts.insert_delegated_if_missing(
+            connection, node, _expected_parent(plan), actor_id=actor_id, provenance=provenance,
+        )
         _attachment_event(
             connection, node_id, spawned_thread_id, child_plan.id,
             actor_id=actor_id, provenance=provenance,
