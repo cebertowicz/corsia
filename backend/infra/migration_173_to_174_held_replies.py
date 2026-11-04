@@ -18,8 +18,6 @@ _HELD_REPLIES_174 = (
         text TEXT NOT NULL CHECK (state IN ('sent', 'declined', 'not_sent') OR length(trim(text)) > 0),
         via TEXT NOT NULL CHECK (via IN ('tool', 'api')),
         plan_node_id TEXT,
-        intent TEXT NOT NULL DEFAULT 'progress' CHECK (intent IN ('progress', 'completion')),
-        child_turn_id TEXT,
         idempotency_key TEXT,
         state TEXT NOT NULL DEFAULT 'held'
             CHECK (state IN ('held', 'approved', 'sent', 'declined', 'not_sent')),

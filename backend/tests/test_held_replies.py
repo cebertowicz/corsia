@@ -2,7 +2,7 @@
 
 The text stored at the hold is the text delivered on approval; decline delivers nothing; a retry
 with the same key returns the first hold; no setting releases a hold; a worker's final result is
-held too; and a worker can't start inside a Local only project its parent is not in.
+unheld; and a worker can't start inside a Local only project its parent is not in.
 """
 
 from __future__ import annotations
@@ -167,22 +167,22 @@ async def test_api_hold_uses_api_delivery_attribution(deleg_db, held_client, mon
 
 
 @pytest.mark.asyncio
-async def test_known_delivery_refusal_is_terminal(deleg_db, held_client, seen, monkeypatch):
+async def test_delivery_refusal_is_retryable_and_logged(deleg_db, held_client, seen, monkeypatch):
+    from api import held_replies as held_api
     from tools import delegate_send
 
     async def refused(*_args, **_kwargs):
         return "Error: target rejected this send"
 
     held = await _send_by_tool()
+    warnings = []
+    monkeypatch.setattr(held_api.logger, "warning", lambda *args: warnings.append(args))
     monkeypatch.setattr(delegate_send, "_send", refused)
     result = _post(held_client, held["held_reply_id"], "approve")
-    assert result.json()["state"] == "not_sent"
-    assert "couldn’t accept" in result.json()["line"]
-    assert _rows(deleg_db, "state", "text") == [("not_sent", "")]
-    assert seen["told"][-1][1] == "held_reply.not_sent"
-    assert "could not be sent" in deleg_db.execute(
-        "SELECT content FROM messages WHERE thread_id='asker' AND role='system' ORDER BY rowid DESC LIMIT 1"
-    ).fetchone()[0]
+    assert result.status_code == 502
+    assert result.json()["detail"] == "Couldn’t send the reply to the Researcher agent because of an unexpected error. Approve once to try again."
+    assert _rows(deleg_db, "state", "text") == [("held", "the answer")]
+    assert any(held["held_reply_id"] in args and "Error: target rejected this send" in args for args in warnings)
 
 
 @pytest.mark.asyncio
@@ -249,7 +249,7 @@ async def test_a_missing_recipient_is_not_sent_and_a_failed_delivery_returns_to_
 
 
 @pytest.mark.asyncio
-async def test_explicit_and_automatic_completion_share_one_hold(deleg_db, held_client, monkeypatch):
+async def test_explicit_and_automatic_completion_delivers_without_hold(deleg_db, held_client, monkeypatch):
     from infra import send_service
     from infra.send_types import SendResult
     from infra.thread_driver import _parent_completion
@@ -266,17 +266,18 @@ async def test_explicit_and_automatic_completion_share_one_hold(deleg_db, held_c
     first = json.loads(await DelegateSendTool().execute(
         "asker", "final result", intent="completion", _thread_id="sender-self",
     ))
-    assert first["status"] == "held"
+    assert first.get("status") != "held"
+    assert _rows(deleg_db, "id") == []
+    assert deleg_db.execute(
+        "SELECT count(*) FROM messages WHERE thread_id='asker' AND json_extract(metadata,'$.completion')=1"
+    ).fetchone()[0] == 1
     deleg_db.execute(
         "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,delivery_state,seq) "
         "VALUES ('answer','sender-self','assistant','final result',?,'t3','delivered',2)",
         (json.dumps({"turn_id": "child-turn"}),),
     )
     assert _parent_completion(deleg_db, "child-turn", "sender-self") is None
-    assert len(_rows(deleg_db, "id")) == 1
-    assert deleg_db.execute("SELECT count(*) FROM messages WHERE thread_id='asker' AND role='user'").fetchone()[0] == 0
-    deleg_db.commit()
-    assert _post(held_client, first["held_reply_id"], "approve").json()["state"] == "sent"
+    assert _rows(deleg_db, "id") == []
     assert deleg_db.execute(
         "SELECT count(*) FROM messages WHERE thread_id='asker' AND json_extract(metadata,'$.completion')=1"
     ).fetchone()[0] == 1
@@ -507,15 +508,15 @@ async def test_moved_recipient_is_not_sent(deleg_db, held_client, seen):
     deleg_db.commit()
     result = _post(held_client, held["held_reply_id"], "approve")
     assert result.json()["state"] == "not_sent"
-    assert "isn’t reachable" in result.json()["line"]
+    assert "is no longer reachable" in result.json()["line"]
     assert _rows(deleg_db, "state") == [("not_sent",)]
     assert seen["delivered"] == []
-    assert "isn't in a scope" in seen["told"][-1][2]
+    assert "is no longer in a scope" in seen["told"][-1][2]
     from infra.held_replies import get
     from infra.held_reply_messages import hold_response
     retry = await hold_response(get(held["held_reply_id"], "u-test", db=deleg_db))
     assert retry["status"] == "not_sent"
-    assert "isn't in a scope" in retry["message"]
+    assert "is no longer in a scope" in retry["message"]
     rows = deleg_db.execute("SELECT content FROM messages WHERE thread_id='asker' AND role='system' ORDER BY rowid").fetchall()
     assert "could not be sent" in rows[-1][0]
 

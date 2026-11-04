@@ -34,7 +34,6 @@ def recipient_label(title: str | None) -> str:
 def hold(
     *, user_id: str, sender_thread_id: str, recipient_thread_id: str, text: str, via: str,
     plan_node_id: str | None = None, idempotency_key: str | None = None,
-    intent: str = "progress", child_turn_id: str | None = None,
     db: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     """Store one message for the person's decision; a retry with the same key returns the first row."""
@@ -51,7 +50,7 @@ def hold(
         row = {
             "id": str(uuid.uuid4()), "user_id": user_id, "sender_thread_id": sender_thread_id,
             "recipient_thread_id": recipient_thread_id, "text": text, "via": via,
-            "plan_node_id": plan_node_id, "intent": intent, "child_turn_id": child_turn_id,
+            "plan_node_id": plan_node_id,
             "idempotency_key": key, "state": HELD, "error": None,
             "created_at": utc_now_iso(), "decided_at": None,
         }
@@ -60,21 +59,6 @@ def hold(
             tuple(row.values()),
         )
     return {**row, "duplicate": False}
-
-
-def hold_completion_if_needed(
-    db: sqlite3.Connection, *, child_id: str, parent_id: str, turn_id: str, text: str,
-) -> dict[str, Any] | None:
-    """Hold a child's final result for the person when sending it to its parent needs consent."""
-    from infra.local_only import send_needs_hold
-
-    child = db.execute("SELECT * FROM threads WHERE id=?", (child_id,)).fetchone()
-    parent = db.execute("SELECT * FROM threads WHERE id=?", (parent_id,)).fetchone()
-    if child is None or parent is None or not send_needs_hold(dict(child), dict(parent), db=db):
-        return None
-    return hold(user_id=child["user_id"], sender_thread_id=child_id, recipient_thread_id=parent_id,
-                text=text, via="tool", intent="completion", child_turn_id=turn_id,
-                idempotency_key=f"parent-completion:{turn_id}", db=db)
 
 
 def get(held_id: str, user_id: str, *, db: sqlite3.Connection) -> dict[str, Any] | None:

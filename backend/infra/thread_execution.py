@@ -15,7 +15,6 @@ from infra.plan_dispatch_events import report_terminal_unknown
 from infra.queries import message_transcript_seq
 from infra.send_broadcast import announce_successor_turn, broadcast_claimed_batch, broadcast_newest_error
 from infra.send_types import InboxQueuedInput, InputReceipt, SendResult
-from infra.thread_boundary_request import request_active_boundary as _request_active_boundary
 from infra.thread_input_types import ClaimedBatch, batch_option
 from infra.time import utc_now_iso
 from infra.turn_admission_driver import drive_turn_admission
@@ -352,16 +351,30 @@ async def drive_idle_thread(
     return None
 
 
+async def _request_active_boundary(thread_id: str) -> None:
+    from infra.database import get_db
+    from infra.send_service import request_safe_boundary
+    from llm.resolution import resolve_execution_target
+
+    connection = get_db()
+    try:
+        row = connection.execute(
+            "SELECT model FROM active_turns WHERE thread_id=? AND status='running'",
+            (thread_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    if row is None:
+        return
+    target = await run_in_db(resolve_execution_target, str(row["model"]))
+    await request_safe_boundary(thread_id, target.harness)
+
+
 async def drive_terminal_settlement(settlement) -> None:
     """Drive every task made runnable by one committed terminal transition."""
     from infra.connection_limit_drive import record_probe_outcome
     record_probe_outcome(settlement.thread_id, settlement.probe_outcome)
     await report_terminal_unknown(settlement)
-    if settlement.held_to_announce:
-        from infra.held_reply_messages import announce_hold
-
-        for held in settlement.held_to_announce:
-            await announce_hold(held)
     if settlement.idle_checkpoint is not None:
         from thread.idle_checkpoint import arm_idle_checkpoint
 

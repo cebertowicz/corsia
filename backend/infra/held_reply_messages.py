@@ -29,8 +29,6 @@ RESTART_ERROR = (
     "Approve once to finish; it won’t be sent twice."
 )
 SCOPE_NOT_SENT = "scope_not_sent"
-SEND_NOT_SENT = "send_not_sent"
-TASK_NOT_SENT = "task_not_sent"
 
 
 def held_text(recipient: str) -> str:
@@ -48,15 +46,13 @@ _SENDER_TEXT = {
         "send a reworded version unless the person asks you to."
     ),
     held_replies.NOT_SENT: (
-        "Your reply to {recipient} was not sent because {recipient} isn't available, so do not "
+        "Your reply to {recipient} was not sent because {recipient} no longer exists, so do not "
         "retry; tell the person if the question still needs an answer."
     ),
     SCOPE_NOT_SENT: (
-        "Your reply to {recipient} was not sent because {recipient} isn't in a scope you "
+        "Your reply to {recipient} was not sent because {recipient} is no longer in a scope you "
         "can send to, so do not retry; tell the person if the question still needs an answer."
     ),
-    SEND_NOT_SENT: "Your reply to {recipient} was not sent because the recipient could not accept it; do not retry; tell the person if the question still needs an answer.",
-    TASK_NOT_SENT: "Your reply to {recipient} was not sent because the task could not be handed over; do not retry; tell the person if the question still needs an answer.",
 }
 
 _ASKER_TEXT = {
@@ -66,8 +62,6 @@ _ASKER_TEXT = {
     ),
     held_replies.SENT: "{agent}'s reply was sent.",
     SCOPE_NOT_SENT: "{agent}'s reply could not be sent, so you will not receive it; continue without it, or tell the person if you can't.",
-    SEND_NOT_SENT: "{agent}'s reply could not be sent, so you will not receive it; continue without it, or tell the person if you can't.",
-    TASK_NOT_SENT: "{agent}'s reply could not be sent, so you will not receive it; continue without it, or tell the person if you can't.",
     held_replies.DECLINED: (
         "The person declined to share {agent}'s reply, so you will not receive it; do not ask "
         "again unless the person asks you to; continue without it, or tell the person if you can't."
@@ -80,8 +74,6 @@ _LINE = {
     held_replies.SENT: "{agent}'s reply was sent.",
     held_replies.DECLINED: "{agent}'s reply was not sent.",
     SCOPE_NOT_SENT: "{agent}'s reply was not sent.",
-    SEND_NOT_SENT: "{agent}'s reply was not sent.",
-    TASK_NOT_SENT: "{agent}'s reply was not sent.",
 }
 
 
@@ -93,25 +85,17 @@ def sender_line(outcome: str, recipient: str) -> str:
         return gone_line(recipient)
     if outcome == SCOPE_NOT_SENT:
         return scope_line(recipient)
-    if outcome in (SEND_NOT_SENT, TASK_NOT_SENT):
-        return refusal_line(outcome, recipient)
     return f"The reply to {recipient} was not sent."
 
 
 def gone_line(recipient: str) -> str:
     """The line for a recipient that no longer exists."""
-    return f"Couldn’t send the reply because {recipient} isn’t available."
+    return f"Couldn’t send the reply because {recipient} no longer exists."
 
 
 def scope_line(recipient: str) -> str:
     """The line for a recipient no longer reachable from the sender's scope."""
-    return f"Couldn’t send the reply because {recipient} isn’t reachable from this chat."
-
-
-def refusal_line(reason: str, recipient: str) -> str:
-    if reason == TASK_NOT_SENT:
-        return f"Couldn’t send the reply because the task for {recipient} couldn’t be handed over."
-    return f"Couldn’t send the reply because {recipient} couldn’t accept it."
+    return f"Couldn’t send the reply because {recipient} is no longer reachable from this chat."
 
 
 def error_line(recipient: str) -> str:
@@ -153,7 +137,7 @@ def _insert_asker_row(held: dict[str, Any], kind: str, *, recipient: str, agent:
         "held_reply_id": held["id"],
     }
     if not note:
-        metadata["event_type"] = RECEIPT_PREFIX + (held_replies.NOT_SENT if kind in (SCOPE_NOT_SENT, SEND_NOT_SENT, TASK_NOT_SENT) else kind)
+        metadata["event_type"] = RECEIPT_PREFIX + (held_replies.NOT_SENT if kind == SCOPE_NOT_SENT else kind)
     with write_transaction(None, scope="held_reply_asker_row") as db:
         if db.execute(
             "SELECT 1 FROM threads WHERE id=?", (held["recipient_thread_id"],),
@@ -193,7 +177,7 @@ async def tell_sender(held: dict[str, Any], outcome: str, *, recipient: str) -> 
     try:
         delivered = await deliver_to_thread(
             held["sender_thread_id"],
-            RECEIPT_PREFIX + (held_replies.NOT_SENT if outcome in (SCOPE_NOT_SENT, SEND_NOT_SENT, TASK_NOT_SENT) else outcome),
+            RECEIPT_PREFIX + (held_replies.NOT_SENT if outcome == SCOPE_NOT_SENT else outcome),
             _SENDER_TEXT[outcome].format(recipient=recipient),
             None,
             delivery_id=f"held-reply:{held['id']}:{outcome}",
@@ -238,7 +222,7 @@ async def hold_response(held: dict[str, Any]) -> dict[str, Any]:
 
     name = await run_in_db(recipient)
     state = held["state"]
-    outcome = held.get("error") if state == held_replies.NOT_SENT and held.get("error") in (SCOPE_NOT_SENT, SEND_NOT_SENT, TASK_NOT_SENT) else state
+    outcome = held.get("error") if state == held_replies.NOT_SENT and held.get("error") == SCOPE_NOT_SENT else state
     message = _SENDER_TEXT[outcome].format(recipient=name) if outcome in _SENDER_TEXT else held_text(name)
     return {
         "ok": True,

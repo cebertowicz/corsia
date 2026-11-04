@@ -238,7 +238,7 @@
 	>
 		<CommentReplyChipRow onOpenDocument={onOpenDestination} />
 		{#if current}
-		<section data-attention-dock aria-label={regionLabel}>
+		<section data-attention-dock role="region" aria-label={regionLabel}>
 		<p class="sr-only" aria-live="polite">{regionLabel}</p>
 		{#if !showChip}
 			<div class="dock-row">

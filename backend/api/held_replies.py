@@ -22,8 +22,8 @@ from infra.auth import authenticate, is_person_session
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.held_reply_messages import (
-    SCOPE_NOT_SENT, SEND_NOT_SENT, TASK_NOT_SENT, error_line, gone_line, note_asker,
-    notify_hold_changed, recipient_name, refusal_line, scope_line, tell_sender,
+    SCOPE_NOT_SENT, error_line, gone_line, note_asker,
+    notify_hold_changed, recipient_name, scope_line, tell_sender,
 )
 from infra.queries import get_thread_for_user
 from plans import public
@@ -124,18 +124,13 @@ async def _finish_approval(user: dict, held: dict, sender: dict | None, recipien
         sent = f"Error: {exc.detail}"
     except Exception:
         logger.exception("held reply {}: delivery failed", held_id)
+        sent = "Error: delivery failed"
+    if isinstance(sent, str):
+        logger.warning("held reply {}: delivery refused: {}", held_id, sent)
         line = error_line(name)
         await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.HELD, line)
         await notify_hold_changed(held)
         raise HTTPException(502, line)
-    if isinstance(sent, str):
-        logger.warning("held reply {}: delivery refused: {}", held_id, sent)
-        reason = TASK_NOT_SENT if sent.startswith("Error: invalid request") else SEND_NOT_SENT
-        await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.NOT_SENT, reason)
-        await notify_hold_changed(held)
-        await tell_sender(held, reason, recipient=name)
-        await note_asker(held, reason)
-        return {"ok": True, "state": held_replies.NOT_SENT, "line": refusal_line(reason, name)}
     await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.SENT)
     await notify_hold_changed(held)
     await tell_sender(held, held_replies.SENT, recipient=name)
@@ -146,13 +141,6 @@ async def _finish_approval(user: dict, held: dict, sender: dict | None, recipien
 
 async def _deliver(held: dict, sender: dict, recipient: dict) -> dict[str, Any] | str:
     """Run the send the sender would have run, on the stored bytes."""
-    if held["intent"] == "completion":
-        import json
-
-        result = await delegation._admit_completion(
-            held["sender_thread_id"], held["recipient_thread_id"], held["child_turn_id"], held["text"],
-        )
-        return result if result.startswith("Error:") else json.loads(result)
     kwargs = {"idempotency_key": held["idempotency_key"] or f"held-reply:{held['id']}"}
     if held["via"] == "api":
         from api.delegation import _delegated_target, deliver_send

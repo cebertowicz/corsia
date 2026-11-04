@@ -97,7 +97,6 @@ def _parent_completion(
     db: sqlite3.Connection,
     turn_id: str,
     child_id: str,
-    held_to_announce: list[dict] | None = None,
 ) -> str | None:
     parent = db.execute(
         "SELECT spawned_by FROM threads WHERE id=?",
@@ -130,13 +129,6 @@ def _parent_completion(
     if answer is None:
         return None
     content = f"{PARENT_COMPLETION_HEADING}\n\n{answer['content']}"
-    from infra.held_replies import hold_completion_if_needed
-
-    held = hold_completion_if_needed(db, child_id=child_id, parent_id=str(parent), turn_id=turn_id, text=content)
-    if held is not None:
-        if not held["duplicate"] and held_to_announce is not None:
-            held_to_announce.append(held)
-        return None
     from infra.passive_changes import materialize_pending_digest
 
     materialize_pending_digest(db, str(parent))
@@ -232,8 +224,7 @@ def finish_turn(
         failed_message_ids = settle_unwritten_turn_inputs(
             connection, turn_id, outcome=outcome, error=error,
         )
-        held_to_announce: list[dict] = []
-        parent = _parent_completion(connection, turn_id, thread_id, held_to_announce) if outcome == "completed" else None
+        parent = _parent_completion(connection, turn_id, thread_id) if outcome == "completed" else None
         _show_reply_on_nudge_stop(connection, thread_id, turn_id, outcome)
         queue_terminal_continue(
             connection, turn_id, thread_id, outcome=outcome, error=error,
@@ -251,18 +242,18 @@ def finish_turn(
             fail_closed=limits.fail_closed, lift_account=lift_account,
         )
     _end_turn_process_state(turn_id, outcome)
+    wakes = () if parent is None else (parent,)
     return TerminalSettlement(
         TerminalResult.APPLIED,
         thread_id,
         successor,
-        () if parent is None else (parent,),
+        wakes,
         switch_transition,
         switch_request,
         unknown_dispatches,
         idle,
         failed_message_ids,
         "limited" if isinstance(limits.limit, Recorded) else outcome,
-        tuple(held_to_announce),
     )
 
 

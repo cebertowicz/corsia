@@ -119,20 +119,9 @@ class DelegateSendTool(Tool):
         )
 
         if intent == "completion":
-            refusal = await delegation._completion_refusal(from_thread_id, child_turn_id)
-            if refusal:
-                return refusal
-            if await delegation.run_in_db(send_needs_hold, current, target):
-                held = await delegation.run_in_db(partial(
-                    held_replies.hold, user_id=current["user_id"], sender_thread_id=from_thread_id,
-                    recipient_thread_id=thread_id, text=message.strip(), via="tool",
-                    intent="completion", child_turn_id=child_turn_id,
-                    idempotency_key=f"parent-completion:{child_turn_id}",
-                ))
-                if not held["duplicate"]:
-                    await announce_hold(held)
-                return delegation._json(await hold_response(held))
-            return await delegation._admit_completion(from_thread_id, thread_id, child_turn_id, message.strip())
+            return await delegation._send_explicit_completion(
+                from_thread_id, thread_id, child_turn_id, message.strip(),
+            )
         from plans import public
 
         requested = kwargs.get("plan_node_id")
