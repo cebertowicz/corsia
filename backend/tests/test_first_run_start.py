@@ -73,16 +73,6 @@ def test_handoff_excludes_silent_checks():
     assert "Silently," not in text
 
 
-@pytest.mark.parametrize("count", [0, 2])
-def test_first_step_requires_exactly_one_reference(tmp_path, monkeypatch, count):
-    from infra import system_package
-    for index in range(count):
-        (tmp_path / f"first-run-app-3-{index}.md").write_text("placeholder")
-    monkeypatch.setattr(system_package, "system_resource_source", lambda _path: tmp_path / "first-run-app.md")
-    with pytest.raises(ValueError, match="step 3"):
-        first_run_wake.first_app_step(facts())
-
-
 @pytest.mark.asyncio
 async def test_completed_setup_silently_skips_import_when_no_eligible_tool_remains(monkeypatch):
     from onboarding import app_first_run, setup_decisions

@@ -15,6 +15,18 @@ SKILL_PROJECTION = ".corsia/" + SKILL_DIR
 FIRST_RUN_REFERENCE = f"{SKILL_DIR}/references/first-run.md"
 APP_REFERENCE = f"{SKILL_DIR}/references/first-run-app.md"
 APP_START_REFERENCE = f"{SKILL_DIR}/references/first-run-start.md"
+# Each step's text is its own reference, so a checkpoint that drops an earlier read cannot lose it.
+STEP_REFERENCES = {
+    1: "first-run-app-1-subscription.md",
+    2: "first-run-app-2-import.md",
+    3: "first-run-app-3-apps.md",
+    4: "first-run-app-4-web-search.md",
+    5: "first-run-app-5-about-you.md",
+    6: "first-run-app-6-email-calendar.md",
+    7: "first-run-app-7-community.md",
+    8: "first-run-app-8-files.md",
+    9: "first-run-app-9-hand-over.md",
+}
 #: A ``references/`` name, after an optional "skill `name` › `" or "skill `name`'s `" owner.
 _REFERENCE = re.compile(r"(skill `([\w-]+)`(?: ›|'s) `)?(?<![\w./-])(references/[\w.-]+\.md)")
 
@@ -67,6 +79,14 @@ def anchored(text: str) -> str:
     return _REFERENCE.sub(full, text)
 
 
+def step_reference_line(step_number: int) -> str:
+    """Return the seeded node description that points the agent at its step's reference."""
+    return (
+        "When you start this step, read skill `conductor-bootstrap`'s "
+        f"`references/{STEP_REFERENCES[step_number]}`, even if you read it earlier."
+    )
+
+
 def first_app_step(facts: dict[str, Any]) -> str:
     """Inline only the first applicable numbered section; keep later steps on demand."""
     from infra.system_package import system_resource_source
@@ -74,11 +94,7 @@ def first_app_step(facts: dict[str, Any]) -> str:
 
     steps = applicable_steps(facts)
     number = steps[0]["step_number"] if steps else 9
-    references = system_resource_source(APP_REFERENCE).parent
-    matches = list(references.glob(f"first-run-app-{number}-*.md"))
-    if len(matches) != 1:
-        raise ValueError(f"Expected exactly one first-run app reference for step {number}")
-    reference = matches[0].read_text(encoding="utf-8")
+    reference = system_resource_source(f"{SKILL_DIR}/references/{STEP_REFERENCES[number]}").read_text(encoding="utf-8")
     if number == 9:
         return reference[reference.index("After the last step"):].strip()
     section = reference.split("\n\n", 2)[2].strip()

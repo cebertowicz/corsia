@@ -9,7 +9,7 @@ import sqlite3
 
 
 def seed_ask(plan_id: str, *, db: sqlite3.Connection) -> None:
-    from onboarding.app_first_run import step_reference_line
+    from onboarding.first_run_instructions import step_reference_line
     from plans import public
 
     phase = db.execute(
