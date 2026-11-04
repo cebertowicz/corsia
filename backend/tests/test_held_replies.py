@@ -20,9 +20,12 @@ CLOUD = "anthropic/claude-3-5-sonnet"
 @pytest.fixture
 def held_client(client, deleg_db, monkeypatch):
     """The delegation client plus the decision routes, a local-only sender and a cloud-bound asker."""
+    import main
+    from starlette.exceptions import HTTPException as StarletteHTTPException
     from api import held_replies as held_api
     from infra import local_only
 
+    client.app.add_exception_handler(StarletteHTTPException, main._emit_http_error_api)
     monkeypatch.setattr(held_api, "authenticate", lambda t: {"id": "u-test", "token_kind": "session"} if t == _TOKEN else None)
     client.app.include_router(held_api.router)
     deleg_db.execute("UPDATE threads SET local_only=1 WHERE id='sender-self'")
@@ -201,6 +204,44 @@ async def test_api_hold_uses_api_delivery_attribution(deleg_db, held_client, mon
 
 
 @pytest.mark.asyncio
+async def test_real_app_delivery_failure_shares_one_reference(deleg_db, held_client, seen, monkeypatch, caplog):
+    import logging
+    import main
+    from api import held_replies as held_api
+    from infra import failure_reference
+    from tools import delegate_send
+
+    held = await _send_by_tool()
+    minted = []
+    events = []
+
+    def mint():
+        minted.append("K7QM2X")
+        return minted[-1]
+
+    async def refused(*_args, **_kwargs):
+        return "Error: target rejected this send"
+
+    monkeypatch.setattr(held_api, "new_error_reference", mint)
+    monkeypatch.setattr(failure_reference, "new_error_reference", mint)
+    monkeypatch.setattr(delegate_send, "_send", refused)
+    monkeypatch.setattr(main, "emit_product_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    caplog.set_level(logging.ERROR, logger=main.logger.name)
+    app_client = TestClient(main.app, raise_server_exceptions=False)
+    try:
+        result = _post(app_client, held["held_reply_id"], "approve")
+    finally:
+        app_client.close()
+
+    assert result.status_code == 502
+    assert result.json()["reference"] == "K7QM2X"
+    assert _rows(deleg_db, "error_ref") == [("K7QM2X",)]
+    assert minted == ["K7QM2X"]
+    assert "API error reference=K7QM2X" in caplog.text
+    assert any(args == ("error", "api") and kwargs["properties"]["reference"] == "K7QM2X" for args, kwargs in events)
+
+
+@pytest.mark.asyncio
 async def test_delivery_refusal_is_retryable_and_logged(deleg_db, held_client, seen, monkeypatch):
     from api import held_replies as held_api
     from infra.failure_reference import REFERENCE
@@ -218,7 +259,7 @@ async def test_delivery_refusal_is_retryable_and_logged(deleg_db, held_client, s
     assert result.status_code == 502
     assert result.json()["detail"] == "Couldn’t send the reply to the Researcher agent because of an unexpected error. Approve once to try again."
     assert _rows(deleg_db, "state", "text") == [("held", "the answer")]
-    ref = result.json()["ref"]
+    ref = result.json()["reference"]
     assert REFERENCE.fullmatch(ref)
     assert _rows(deleg_db, "error_ref") == [(ref,)]
     assert queue_rows(deleg_db, "u-test")[0]["detail"]["error_ref"] == ref
@@ -281,7 +322,7 @@ async def test_a_missing_recipient_is_not_sent_and_a_failed_delivery_returns_to_
     refused = _post(held_client, failed["held_reply_id"], "approve")
 
     assert refused.status_code == 502
-    ref = refused.json()["ref"]
+    ref = refused.json()["reference"]
     assert REFERENCE.fullmatch(ref)
     assert any(failed["held_reply_id"] in args and ref in args and str(args[-1]) == "provider down" for args in errors)
     assert _rows(deleg_db, "state", "error_ref") == [("held", ref)]

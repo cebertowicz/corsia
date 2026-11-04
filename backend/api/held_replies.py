@@ -14,7 +14,6 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel
 
@@ -22,7 +21,7 @@ import infra.held_replies as held_replies
 from infra.auth import authenticate, is_person_session
 from infra.database import get_db
 from infra.db_async import run_in_db
-from infra.failure_reference import new_error_reference
+from infra.failure_reference import ReferencedHTTPException, new_error_reference
 from infra.held_reply_messages import (
     SCOPE_NOT_SENT, error_line, gone_line, note_asker,
     notify_hold_changed, recipient_name, scope_line, tell_sender,
@@ -90,17 +89,17 @@ async def _claim_and_decline(held_id: str, body: DecisionBody) -> dict[str, Any]
 
 
 @router.post("/{held_id}/approve")
-async def approve(held_id: str, body: DecisionBody) -> Any:
+async def approve(held_id: str, body: DecisionBody) -> dict[str, Any]:
     """Deliver the stored text as its sender would have, then tell the sender and the asker."""
     return await asyncio.shield(_claim_and_approve(held_id, body))
 
 
-async def _claim_and_approve(held_id: str, body: DecisionBody) -> Any:
+async def _claim_and_approve(held_id: str, body: DecisionBody) -> dict[str, Any]:
     user, held, sender, recipient, name = await _claim(body, held_id, held_replies.APPROVED)
     return await _finish_approval(user, held, sender, recipient, name)
 
 
-async def _finish_approval(user: dict, held: dict, sender: dict | None, recipient: dict | None, name: str) -> Any:
+async def _finish_approval(user: dict, held: dict, sender: dict | None, recipient: dict | None, name: str) -> dict[str, Any]:
     held_id = held["id"]
     error_ref = None
     if recipient is None or sender is None:
@@ -139,7 +138,7 @@ async def _finish_approval(user: dict, held: dict, sender: dict | None, recipien
         line = error_line(name)
         await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.HELD, line, error_ref)
         await notify_hold_changed(held)
-        return JSONResponse(status_code=502, content={"detail": line, "ref": error_ref})
+        raise ReferencedHTTPException(502, line, error_ref)
     await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.SENT)
     await notify_hold_changed(held)
     await tell_sender(held, held_replies.SENT, recipient=name)

@@ -215,7 +215,7 @@ describe("held reply in the dock", () => {
 
   it("returns the reply, reopened, with the server's error line when delivery fails, and Approve once retries", async () => {
     const line = "Couldn’t send the reply to the Researcher agent because of an unexpected error. Approve once to try again.";
-    decide = () => ({ status: 502, payload: { detail: line, ref: "K7QM2X" } });
+    decide = () => ({ status: 502, payload: { detail: line, reference: "K7QM2X" } });
     await openDock();
     button("Approve once")!.click();
     await settle();
