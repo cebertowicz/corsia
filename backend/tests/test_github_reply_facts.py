@@ -36,10 +36,10 @@ def envelope(kind, body="BODY_CANARY"):
 def test_reply_facts_and_no_body(kind):
     event = envelope(kind)
     facts = event.facts
-    assert (facts["author_login"], facts["pr_author_login"], facts["pr_author_origin"], facts["pr_number"]) == ("reply-author", "pr-author", "outside", 7)
+    assert (facts["author"], facts["pr_author_login"], facts["pr_author_origin"], facts["pr_number"]) == ("reply-author", "pr-author", "outside", 7)
     assert facts["review_id" if kind == "review" else "comment_id"] == 11
     assert "BODY_CANARY" not in json.dumps(asdict(event))
-    assert "sha" not in facts
+    assert "sha" not in facts and "author_login" not in facts
     if kind == "line":
         assert (facts["path"], facts["commit_id"], facts["in_reply_to_id"]) == ("a.py", "c1", 5)
     if kind == "review":
@@ -80,3 +80,13 @@ async def test_read_uses_live_head_and_one_source_for_each_type(monkeypatch, kin
     assert any("/commits/live/" in path for path in paths)
     assert got["base_sha"] == ("payload-base" if kind == "review" else "read-base")
     assert got["pr_author_login"] == "pr-author"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["issue", "line", "review"])
+async def test_failed_pull_read_is_unreadable(monkeypatch, kind):
+    async def read(*_args):
+        return None, None
+    monkeypatch.setattr(poller, "gated_read", read)
+    got = (await pr_facts.enriched(envelope(kind), object())).facts
+    assert got["check_state"] == "unreadable" and "current_head" not in got

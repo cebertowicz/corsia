@@ -375,7 +375,7 @@ def test_a_rule_naming_a_fact_the_read_supplies_is_what_asks_for_the_read(isolat
 
 
 @pytest.mark.parametrize("event, field, expected", [
-    ("pr_comment.created", "author_login", False),
+    ("pr_comment.created", "author", False),
     ("pr_comment.created", "draft", True),
     ("pr_comment.created", "check_state", True),
     ("review.submitted", "draft", False),

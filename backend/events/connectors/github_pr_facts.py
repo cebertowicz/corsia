@@ -1,6 +1,7 @@
 """The current pull-request facts a GitHub review event can carry.
 
-A webhook's ``pull_request`` object supplies ``base_sha``, ``draft`` and ``labels``.
+PR and review webhooks supply ``base_sha``, ``draft`` and ``labels`` from their
+``pull_request`` object; PR comments read them because their payload shapes differ.
 Three more are only ever read: ``current_head``, the PR's live head, so the recipient of
 a rule's delivery or script finds a stale event by comparing it with the event's own head
 (``sha`` on a PR event, ``head_sha`` on a checks event; a rule test compares a fact only
@@ -27,14 +28,14 @@ from collections.abc import Mapping
 from typing import Any
 
 from events import rule_reads
-from events.connectors.github_content_facts import REPLY_TYPES, author_origin
+from events.connectors.github_content_facts import COMMENT_READ_TYPE, REPLY_TYPES, author_origin
 from events.connectors.github_label_events import label_names
 from events.connectors.github_pr_quiet_reasons import GREEN, mergeable_label, rank
 from reviewer.gh_helpers import newest_check_runs
 
 log = logging.getLogger(__name__)
 
-#: Facts a PR event's payload holds; the read never changes them.
+#: PR facts from payloads except for comment events, which read them.
 PAYLOAD_FACTS = ("base_sha", "draft", "labels")
 #: Facts only a read supplies, on every event type that is read.
 READ_FACTS = ("current_head", "check_state", "mergeable")
@@ -96,7 +97,7 @@ def check_state(suites: list[Any], runs: list[Any]) -> str:
 
 def read_facts(event_type: str) -> tuple[str, ...]:
     """The facts a read supplies for one event type; none for a type that is never read."""
-    return ((*PAYLOAD_FACTS, *READ_FACTS) if event_type == "pr_comment.created" else
+    return ((*PAYLOAD_FACTS, *READ_FACTS) if event_type == COMMENT_READ_TYPE else
             READ_FACTS if event_type in READ_TYPES else HEAD_FACTS if event_type == HEAD_TYPE else ())
 
 
@@ -166,7 +167,7 @@ async def head_facts(
         if live_head := _text(_object(body.get("head")).get("sha")):
             out["current_head"] = live_head
         out["mergeable"] = mergeable_label(body.get("mergeable"))
-        if event_type == "pr_comment.created":
+        if event_type == COMMENT_READ_TYPE:
             out.update(pull_facts(body))
         if "head_sha" in out:
             out.update({name: value for name, value in pull_facts(body).items() if name in HEAD_FACTS})

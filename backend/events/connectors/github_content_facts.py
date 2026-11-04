@@ -74,8 +74,9 @@ def content_facts(raw: dict[str, Any]) -> dict[str, Any]:
     return facts
 
 
-REPLY_TYPES = frozenset({"pr_comment.created", "review.submitted"})
-REPLY_FILTERABLE = ("repo", "item_version", "author", "author_origin", "author_login", "author_association",
+COMMENT_READ_TYPE = "pr_comment.created"
+REPLY_TYPES = frozenset({COMMENT_READ_TYPE, "review.submitted"})
+REPLY_FILTERABLE = ("repo", "item_version", "author", "author_origin", "author_association",
                     "pr_number", "pr_author_login", "pr_author_origin", "has_reviewer_marker", "comment_id",
                     "review_id", "path", "commit_id", "in_reply_to_id", "state", "release_sha")
 _RELEASE = re.compile(r"review: release ([0-9a-fA-F]{7,40})")
@@ -94,8 +95,9 @@ def reply_envelope_facts(raw: dict[str, Any], facts: dict[str, Any], content: di
     kind = content_kind(raw)
     if kind in REPLY_TYPES:
         facts.update(reply_facts(raw))
+        facts.pop("author_login", None)
         facts.pop("sha", None)
-        if kind == "pr_comment.created":
+        if kind == COMMENT_READ_TYPE:
             for name in payload_facts:
                 facts.pop(name, None)
 
@@ -109,13 +111,22 @@ def reply_facts(raw: dict[str, Any]) -> dict[str, Any]:
     parent = pr or (issue if issue and issue.get("pull_request") else None)
     if item is None or parent is None or raw.get("action") not in ("created", "submitted"):
         return {}
-    body = item.get("body") if isinstance(item.get("body"), str) else ""
+    facts = reply_item_facts(item, parent, review=review is not None)
+    if owner := facts.get("pr_author_login"):
+        facts["pr_author_origin"] = author_origin(owner)
+    return facts
+
+
+def reply_item_facts(item: dict[str, Any], parent: dict[str, Any], *, review: bool) -> dict[str, Any]:
+    """Typed facts shared by reply events and outcome drafts; no body is retained."""
+    raw_body = item.get("body")
+    body = raw_body if isinstance(raw_body, str) else ""
     owner = _login(parent)
     release = None if review else _RELEASE.fullmatch(body.split("\n", 1)[0].strip())
     facts: dict[str, Any] = {
         "author_login": _login(item), "author_association": item.get("author_association"),
         "pr_number": parent.get("number"), "pr_author_login": owner,
-        "pr_author_origin": author_origin(owner) if owner else None,
+        # Origin depends on the event environment, not the stored outcome.
         "has_reviewer_marker": has_reviewer_marker(body),
         "review_id" if review else "comment_id": item.get("id"),
         "commit_id": item.get("commit_id"), "path": item.get("path"),
