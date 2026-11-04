@@ -106,6 +106,9 @@ def add(
     from core.self_caught_corrections import record_self_caught_correction
 
     record_self_caught_correction(db, event_id)
+    from plans import gate_handoff
+
+    gate_handoff.after_correction(db, node_id)
     for row in affected:
         dependencies.add_dependency(
             row["id"],

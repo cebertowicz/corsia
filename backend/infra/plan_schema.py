@@ -107,6 +107,8 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
         ON plan_nodes(plan_id, parent_id, order_key);
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_follow_up
         ON plan_nodes(follow_up_of);
+    CREATE INDEX IF NOT EXISTS idx_plan_nodes_workflow_ref
+        ON plan_nodes(workflow_ref) WHERE workflow_ref IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_commitment
         ON plan_nodes(commitment_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_intent_node ON plan_nodes(intent_node_id);

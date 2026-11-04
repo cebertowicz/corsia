@@ -44,12 +44,14 @@ def _db():
 
 def _error(
     db, message_id: str, kind: str, *, recovered: bool = False, turn_id: str = "turn-1",
+    created_at: str | None = None,
 ) -> dict:
     metadata: dict[str, object] = {"type": kind}
     if recovered:
         metadata["recovered"] = True
     insert_turn_error(
         insert_message, "t", "boom", metadata, turn_id=turn_id, msg_id=message_id, db=db,
+        created_at=created_at,
     )
     return {"id": message_id, "metadata": metadata}
 
@@ -180,18 +182,18 @@ def test_projection_is_identical_for_history_and_live_rows():
         assert history[0]["metadata"]["next_step"] == live.metadata["next_step"] == "held"
 
 
-def test_next_step_is_recovered_or_failed_and_older_errors_are_not_held():
+def test_next_step_is_recovered_held_or_answered_and_older_errors_are_not_held():
     with closing(_db()) as db:
         _turn(db, "turn-1")
-        _turn(db, "turn-2")
+        _turn(db, "turn-2", started_at="2000-01-02T00:00:00")
         recovered = _error(db, "recovered", "tool_bridge_unavailable", recovered=True)
-        old = _error(db, "old", "cc_error")
+        old = _error(db, "old", "cc_error", created_at="2000-01-01T00:00:01")
         newest = _error(db, "new", "tool_boundary_violation", turn_id="turn-2")
         _queued_input(db)
 
         apply_error_next_steps(db, "t", [old, newest, recovered])
 
-        assert old["metadata"]["next_step"] == "failed"
+        assert old["metadata"]["next_step"] == "answered"
         assert newest["metadata"]["next_step"] == "held"
         assert recovered["metadata"]["next_step"] == "recovered"
 
@@ -246,19 +248,19 @@ def test_held_applies_only_to_the_error_of_the_latest_failed_turn():
 
 @pytest.mark.asyncio
 async def test_an_error_answered_by_a_new_message_never_reads_held_later(tmp_path, monkeypatch):
-    """The person retried by sending a message: the error stays unrecovered, never held."""
+    """The person retried by sending a message: the error stays unrecovered, reads answered, never held."""
     import infra.send_broadcast as send_broadcast
     import infra.state as state
 
     path = tmp_path / "answered.db"
     with closing(_db()) as db, closing(sqlite3.connect(path)) as target:
         _turn(db, "turn-1")
-        error = _error(db, "error", "llm_error")
-        _turn(db, "turn-2", status="completed")
-        _turn(db, "turn-3", status="running")
+        error = _error(db, "error", "llm_error", created_at="2000-01-01T00:00:01")
+        _turn(db, "turn-2", status="completed", started_at="2000-01-02T00:00:00")
+        _turn(db, "turn-3", status="running", started_at="2000-01-02T00:00:01")
         _queued_input(db)
         apply_error_next_steps(db, "t", [error])
-        assert error["metadata"]["next_step"] == "failed"
+        assert error["metadata"]["next_step"] == "answered"
         db.commit()
         db.backup(target)
 

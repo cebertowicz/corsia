@@ -1,6 +1,6 @@
-"""Schema 172 -> 173: the held-reply table.
+"""Schema 173 -> 174: the held-reply table.
 
-A new table only, so no row moves. The DDL below is a copy of schema 173's table, not an import of
+A new table only, so no row moves. The DDL below is a copy of schema 174's table, not an import of
 the live constant, so this step keeps producing the shape it was written for.
 """
 
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 
-_HELD_REPLIES_173 = (
+_HELD_REPLIES_174 = (
     """
     CREATE TABLE IF NOT EXISTS held_replies (
         id TEXT PRIMARY KEY,
@@ -38,7 +38,7 @@ _HELD_REPLIES_173 = (
 )
 
 
-def migrate_172_to_173(conn: sqlite3.Connection) -> None:
+def migrate_173_to_174(conn: sqlite3.Connection) -> None:
     """Create ``held_replies`` and its indexes."""
-    for statement in _HELD_REPLIES_173:
+    for statement in _HELD_REPLIES_174:
         conn.execute(statement)

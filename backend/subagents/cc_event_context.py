@@ -85,7 +85,7 @@ async def commit_cc_terminal(
 async def claim_terminal(
     identity: TurnIdentity,
     outcome: str,
-    error: str | None = None,
+    error: str | BaseException | None = None,
 ) -> TerminalSettlement:
     """Settle one result through the canonical terminal owner."""
     return await commit_cc_terminal(identity.turn_id, outcome, error)
