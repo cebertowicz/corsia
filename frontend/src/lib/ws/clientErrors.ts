@@ -1,7 +1,5 @@
 import { messages, type Message } from '../stores/threads';
-
-// Persisted error kinds shown as system notices.
-const PERSISTED_ERROR_TYPES = new Set(['llm_error', 'cc_error', 'tool_boundary_violation', 'tool_bridge_unavailable']);
+import { isErrorSystemType } from '../components/transcriptRowKinds';
 
 /** The Turn ids that already have a saved (sequenced) error row in `rows`. */
 function persistedErrorTurns(rows: Message[]): Map<string, Set<string>> {
@@ -10,7 +8,7 @@ function persistedErrorTurns(rows: Message[]): Map<string, Set<string>> {
 		const turnId = row.metadata?.turn_id;
 		if (
 			row.role === 'system' && typeof row.seq === 'number' && typeof turnId === 'string'
-			&& PERSISTED_ERROR_TYPES.has(String(row.metadata?.type ?? ''))
+			&& isErrorSystemType(String(row.metadata?.type ?? ''))
 		) {
 			const threadTurns = turns.get(row.thread_id) ?? new Set<string>();
 			threadTurns.add(turnId);

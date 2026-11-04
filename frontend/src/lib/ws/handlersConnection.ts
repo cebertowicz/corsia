@@ -26,7 +26,7 @@ import {
 	handleTurnError,
 } from './handlersTurns';
 import { recoverPendingInputs } from './pendingRecovery';
-import { settleClientErrors } from './clientErrors';
+import { dropClientErrorsBefore, settleClientErrors } from './clientErrors';
 import { restoreAuthTurns, type TurnIdentity } from './turnState';
 
 // `isCurrentOwner` is the delivering socket's ownership check. The body below
@@ -69,6 +69,7 @@ export function handleAuthOk(
 	const transitions = restoreAuthTurns(activeTurns);
 	for (const [threadId, transition] of transitions) {
 		if (transition.lifecycle === 'successor' && transition.previousIdentity) {
+			dropClientErrorsBefore(threadId, transition.next.turnId);
 			cancelThreadTypewriters(threadId, transition.previousIdentity);
 			clearThreadBuffers(threadId);
 		} else if (transition.terminalApplied) {

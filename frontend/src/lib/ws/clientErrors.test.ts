@@ -1,9 +1,9 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { get } from 'svelte/store';
 import { activeThreadId, messages, type Message } from '../stores/threads';
 import { mergeFetchedHistoryRows } from '../messageHistory';
 import { handleMessage } from './handlers';
-import { handleWsError } from './handlersConnection';
+import { handleAuthOk, handleWsError } from './handlersConnection';
 import { handleTurnActivity } from './handlersTurns';
 import { _resetTurnStateForTests } from './turnState';
 import { settledClientErrors } from './clientErrors';
@@ -47,6 +47,12 @@ describe('Turn error notices', () => {
   start('one', 1); handleWsError(error); const client = get(messages)[0]; start('two', 2);
   expect(get(messages)).toEqual([]);
   expect(settledClientErrors.has(client)).toBe(false);
+ });
+ it('removes the previous Turn notice when reconnect restores its successor', () => {
+  start('one', 1); handleWsError(error);
+  expect(get(messages)).toHaveLength(1);
+  handleAuthOk({ user: null, active_turns: [{ thread_id: 'thread', turn_id: 'two', turn_order: 2 }] }, vi.fn());
+  expect(get(messages)).toEqual([]);
  });
  it.each([
   { thread_id: 'thread', message: 'uncorrelated' },
