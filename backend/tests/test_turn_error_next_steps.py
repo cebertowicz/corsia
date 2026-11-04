@@ -180,3 +180,36 @@ def test_a_claim_republishes_the_error_it_made_stale(isolated_db):
 
         assert batch is not None and batch.error_message_ids == ("error",)
         assert read_input_broadcast_row("error", db=db).metadata["next_step"] == "answered"
+
+
+def _message(db, message_id: str, role: str, seq: int, *, turn_id=None, **metadata) -> None:
+    db.execute(
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,seq,active_turn_id) "
+        "VALUES (?,'t',?,'x',?,'2000-01-01T00:00:00',?,?)",
+        (message_id, role, json.dumps(metadata), seq, turn_id),
+    )
+
+
+@pytest.mark.parametrize(
+    ("nudged", "shown", "queued", "expected"),
+    [
+        (True, True, False, "answered"),
+        (True, False, False, "failed"),
+        (False, True, False, "failed"),
+        (True, True, True, "held"),
+    ],
+)
+def test_a_failed_nudge_turn_reads_answered_once_the_persons_reply_shows(
+    nudged, shown, queued, expected,
+):
+    with closing(_db()) as db:
+        _turn(db, "turn-1", started_at="2000-01-01T00:00:00")
+        row = _row(db, "error")
+        _message(db, "person", "user", 10)
+        _message(db, "earlier", "assistant", 11, for_user=shown)
+        metadata = {"kind": "reply_not_visible", "person_message_id": "person"} if nudged else {}
+        _message(db, "nudge", "user", 12, turn_id="turn-1", **metadata)
+        if queued:
+            _queued_input(db)
+
+        assert _step(db, row) == expected

@@ -15,7 +15,9 @@ generator, and readers accept it through that module's `REFERENCE`. `next_step` 
   started since the row was written (a row with no Turn, such as a shutdown
   marker, included), so nothing has answered it.
 * `answered`: `L` is the row's own Turn and ended without an error, or a Turn
-  started after the row was written (the person sent a message, or stopped it).
+  started after the row was written (the person sent a message, or stopped it),
+  or `L` was a Focus nudge's Turn and the message it was woken about now shows a
+  reply: a retry would re-run a nudge the person never saw.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from loguru import logger
 
 from infra.failure_reference import new_error_reference
 from infra.focus_rows import ERROR_SYSTEM_TYPES
+from infra.reply_not_visible_wake import nudge_reply_shown
 
 # The thread's latest Turn: one index seek, so a thread whose latest Turn did
 # not fail never reads its messages.
@@ -105,16 +108,20 @@ def apply_error_next_steps(db, thread_id: str, messages: list[dict]) -> None:
         (thread_id,),
     ).fetchone() is not None
 
+    # A nudge's Turn that failed after the person's reply showed leaves nothing to retry.
+    shown = turn is not None and turn[1] == "error" and nudge_reply_shown(db, thread_id, turn[0])
     for row in error_rows:
         metadata = row["metadata"]
-        step = _next_step(db, row, turn, held=queued and str(row.get("id")) == held_id)
+        step = _next_step(
+            db, row, turn, held=queued and str(row.get("id")) == held_id, nudge_answered=shown,
+        )
         if step is None:
             metadata.pop("next_step", None)
         else:
             metadata["next_step"] = step
 
 
-def _next_step(db, row: dict, turn, *, held: bool) -> str | None:
+def _next_step(db, row: dict, turn, *, held: bool, nudge_answered: bool) -> str | None:
     metadata = row["metadata"]
     if metadata.get("recovered") is True:
         return "recovered"
@@ -125,7 +132,7 @@ def _next_step(db, row: dict, turn, *, held: bool) -> str | None:
         if status in ("running", "waiting_retry"):
             return None
         if status == "error":
-            return "held" if held else "failed"
+            return "held" if held else "answered" if nudge_answered else "failed"
         return "answered"
     created_at = row.get("created_at")
     if created_at is None:
