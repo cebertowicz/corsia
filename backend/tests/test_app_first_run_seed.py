@@ -437,7 +437,7 @@ async def test_uncached_first_pick_reconciles_current_facts_before_rendering(fre
 
     wake = await first_run_wake.render_for("test/model", "app", thread_id=conductor_id)
 
-    assert "4. **Web search" in wake
+    assert "**Web search" in wake
     live = _rows(
         "SELECT workflow_step FROM plan_nodes WHERE workflow_ref='first-run-app' "
         "AND archived_at IS NULL ORDER BY workflow_step"
@@ -490,8 +490,8 @@ async def test_cached_pick_archives_a_discovered_import_when_its_card_is_absent(
 
     wake = await first_run_wake.render_for("test/model", "app", thread_id=conductor_id)
 
-    assert "2. **Bring over what your other tools know" not in wake
-    assert "3. **Where your work lives" in wake
+    assert "**Bring over what your other tools know" not in wake
+    assert "**Where your work lives" in wake
     assert _rows(
         "SELECT archived_at FROM plan_nodes WHERE workflow_ref='first-run-app' AND workflow_step='2:common'"
     )[0]["archived_at"] is not None
@@ -534,7 +534,7 @@ async def test_cached_pick_with_unchanged_facts_has_no_public_plan_mutations(
     wake = await first_run_wake.render_for("test/model", "app", thread_id=conductor_id)
 
     [after] = _rows("SELECT revision FROM plans WHERE owner_id=?", conductor_id)
-    assert "2. **Bring over what your other tools know" in wake
+    assert "**Bring over what your other tools know" in wake
     assert mutations == []
     assert after["revision"] == before["revision"]
 
@@ -561,7 +561,7 @@ async def test_cached_pick_with_an_import_card_keeps_import_open_and_first(
 
     wake = await first_run_wake.render_for("test/model", "app", thread_id=conductor_id)
 
-    assert "2. **Bring over what your other tools know" in wake
+    assert "**Bring over what your other tools know" in wake
     assert _rows(
         "SELECT title FROM plan_nodes WHERE workflow_ref='first-run-app' AND archived_at IS NULL "
         "ORDER BY order_key LIMIT 1"

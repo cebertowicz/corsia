@@ -74,16 +74,17 @@ def first_app_step(facts: dict[str, Any]) -> str:
 
     steps = applicable_steps(facts)
     number = steps[0]["step_number"] if steps else 9
-    reference = system_resource_source(APP_REFERENCE).read_text(encoding="utf-8")
+    references = system_resource_source(APP_REFERENCE).parent
+    matches = list(references.glob(f"first-run-app-{number}-*.md"))
+    if len(matches) != 1:
+        raise ValueError(f"Expected exactly one first-run app reference for step {number}")
+    reference = matches[0].read_text(encoding="utf-8")
     if number == 9:
-        return reference[reference.index("## Hand over to your agents"):].strip()
-    match = re.search(rf"(?ms)^{number}\. \*\*.*?(?=^\d+\. \*\*|^Silently,|\Z)", reference)
-    if match is None:
-        raise ValueError(f"The first-run app reference has no step {number}")
-    section = match.group().strip()
+        return reference[reference.index("After the last step"):].strip()
+    section = reference.split("\n\n", 2)[2].strip()
     if number == 3:
         # The first question needs no helper/connection instructions until answered.
-        section = section.split("   - **Quick**", 1)[0].strip()
+        section = section.split("- **Quick**", 1)[0].strip()
     elif number == 4:
         web = system_resource_source(f"{SKILL_DIR}/references/web-search.md").read_text(encoding="utf-8")
         section += "\n\n" + web.split("## 1. Explain, then ask", 1)[1].split("## 2.", 1)[0].strip()

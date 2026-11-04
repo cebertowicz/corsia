@@ -276,8 +276,11 @@ def test_first_run_routes_the_app_path_to_its_own_reference():
 
 def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
-    steps = app.split("## The steps, in this order", 1)[1].split("## Hand over to your agents", 1)[0]
-    titles = re.findall(r"^\d\. \*\*([^*]+)\*\*", steps, flags=re.MULTILINE)
+    steps = "\n".join(_step(number) for number in range(1, 9))
+    titles = [re.match(r"([^*]+)\*\*", _step(number)).group(1) for number in range(1, 9)]
+    index = app.split("## The steps, in this order", 1)[1]
+    listed = re.findall(r"^\d+\..*`references/(first-run-app-\d+-[\w-]+\.md)`", index, re.MULTILINE)
+    assert listed == [next(FIRST_RUN_APP.parent.glob(f"first-run-app-{number}-*.md")).name for number in range(1, 10)]
 
     assert app.index("first-run-opening.md") < app.index("## The steps")
     opening = (FIRST_RUN_APP.parent / "first-run-opening.md").read_text()
@@ -291,10 +294,11 @@ def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
         "Your files, and when agents ask first",
     ]
     assert "skill `connect-tools`" in steps
-    work_step = steps.split("3. **Where your work lives,**", 1)[1].split("4. **", 1)[0]
+    work_step = _step(3)
     assert not re.search(r"\bsteps? \d", work_step)
-    assert app.split("## Hand over to your agents", 1)[1].strip().startswith("After the last step that applies, post one line")
-    assert "post exactly `" + HANDOFF + "`" in app
+    handoff = _step(9).split("After the last step", 1)[1]
+    assert handoff.startswith(" that applies, post one line")
+    assert "post exactly `" + HANDOFF + "`" in handoff
     assert "then `google_connect`" in steps
     assert "Use skill `google-setup` only when the person says Google blocked the sign-in" in steps
     assert "Never write the opening or create the setup plan" in app
@@ -303,8 +307,10 @@ def test_app_path_uses_server_opening_and_plan_then_steps_and_handoff():
 
 
 def _step(number: int) -> str:
-    steps = FIRST_RUN_APP.read_text(encoding="utf-8").split("## The steps, in this order", 1)[1]
-    return re.split(rf"^{number}\. \*\*", steps, maxsplit=1, flags=re.MULTILINE)[1].split(f"\n{number + 1}. **", 1)[0]
+    matches = list(FIRST_RUN_APP.parent.glob(f"first-run-app-{number}-*.md"))
+    assert len(matches) == 1
+    text = matches[0].read_text(encoding="utf-8").split("\n\n", 2)[2]
+    return text.removeprefix("**")
 
 
 def test_where_your_work_lives_rechecks_connected_apps_after_import():
@@ -441,7 +447,7 @@ def test_files_step_is_short_lists_and_says_auto_approve_is_on_and_where_to_turn
     posted = step.split("Only when `local_eligible` is true", 1)[0]
 
     assert "**Agents ask you before they:**" in step and "Asks you first" not in step
-    assert "- send or post as you\n   > - spend money\n   >\n   > **Auto-approve is on:**" in step
+    assert "- send or post as you\n> - spend money\n>\n> **Auto-approve is on:**" in step
     assert "**Auto-approve is on:** a reviewer model checks each request to use files outside your work folder, and most start without asking you." in step
     assert "To approve each one yourself, turn it off in [Settings › System](/settings/system#host-access-review)." in step
     assert "Access covers one chat" not in step and "still asks you" not in step
@@ -480,9 +486,8 @@ def test_web_search_that_already_works_posts_nothing_before_the_lookup_question(
 
 
 def test_hand_off_names_a_match_for_question_2_and_keeps_the_fallback_line():
-    app = FIRST_RUN_APP.read_text(encoding="utf-8")
     ref = (FIRST_RUN_APP.parent / "look-up-the-person.md").read_text(encoding="utf-8")
-    hand_off = app.split("## Hand over to your agents", 1)[1]
+    hand_off = _step(9).split("After the last step", 1)[1]
 
     assert ("`That's everything. You said you're working toward [their words], and I can see [X] in [where]. "
             "Want me to get up to speed on it? And what would you get done with a free afternoon at your computer: "
@@ -610,7 +615,7 @@ def test_the_look_up_reads_and_writes_the_zone_and_name_in_the_workspace_profile
 def test_the_user_profile_fact_is_described_as_read_from_the_workspace_profile():
     app = FIRST_RUN_APP.read_text(encoding="utf-8")
     assert "read from the workspace `context/50-USER-PROFILE.md`" in app
-    assert "`user_profile`'s `name` and `full_name`" in app
+    assert "`user_profile`'s `name` and `full_name`" in _step(5)
 
 
 def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggestions_only():
@@ -706,15 +711,14 @@ def test_a_key_saved_in_this_chat_is_not_asked_about_again_and_without_search_th
 
 
 def test_app_path_recheck_does_not_report_a_downloading_local_model_as_failed():
-    app = FIRST_RUN_APP.read_text(encoding="utf-8")
+    app = _step(9)
     assert "`model_sources` `recheck: true`" in app
     # The flight alone publishes its live state to every local-model consumer.
     assert "`local_state` is `starting` or `downloading` is still setting up, not failed: say nothing about it" in app
 
 
 def test_app_path_email_step_records_the_email_app_where_the_microsoft_fact_reads_it():
-    app = FIRST_RUN_APP.read_text(encoding="utf-8")
-    email = app.split("6. **Email and calendar.**", 1)[1].split("7. **Learning", 1)[0]
+    email = _step(6)
     for branch in ("**Gmail or Google:**", "**Outlook:**", "**Both:** Gmail first", "**Something else:**"):
         assert branch in email
     assert "`context/50-USER-PROFILE.md`, `- **Email app:** <Outlook | Other> — <what they said>`" in email

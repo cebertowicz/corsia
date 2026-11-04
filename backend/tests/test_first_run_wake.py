@@ -319,8 +319,8 @@ class TestAppPath:
         assert first_run_wake.APP_INLINE_SUMMARY in wake
         assert "app instructions" in wake
         assert "## Your first step" in wake
-        assert "3. **Where your work lives" in wake
-        assert "4. **Web search" not in wake
+        assert "**Where your work lives" in wake
+        assert "**Web search.** Skipped with no line about search" not in wake
         assert "## The opening" not in wake
         assert set(app_facts) == first_run_wake.APP_FACT_KEYS
         assert not any(key in wake for key in ("mcp_sources", "your_model", "model_sources", "host_access_reviewer"))
@@ -616,16 +616,19 @@ class TestAppPath:
         local_offer = system_package.system_resource_source(
             "skills/conductor-bootstrap/references/local-model-offer.md",
         ).read_text(encoding="utf-8")
+        subscription = system_package.system_resource_source(
+            "skills/conductor-bootstrap/references/first-run-app-1-subscription.md",
+        ).read_text(encoding="utf-8")
 
         assert "if a local model is connected, make no offer" in local_offer
         assert "download lands in the person's oMLX" not in local_offer
-        assert "a tool `pays_for` doesn't list is never offered or mentioned" in reference
-        assert "You said you pay for [Claude | ChatGPT]." in reference
-        assert "Setup couldn't install [Claude Code | Codex]: [what went wrong, in plain words]." in reference
-        assert "Setup's sign-in to [Claude Code | Codex] didn't finish." in reference
-        assert "[Settings › Providers](/settings/providers), press Sign in on its card" in reference
-        assert "Never initiate or cancel the vendor sign-in yourself" in reference
-        assert "POST /api/vendor-accounts/{id}/signin" not in reference
+        assert "a tool `pays_for` doesn't list is never offered or mentioned" in subscription
+        assert "You said you pay for [Claude | ChatGPT]." in subscription
+        assert "Setup couldn't install [Claude Code | Codex]: [what went wrong, in plain words]." in subscription
+        assert "Setup's sign-in to [Claude Code | Codex] didn't finish." in subscription
+        assert "[Settings › Providers](/settings/providers), press Sign in on its card" in subscription
+        assert "Never initiate or cancel the vendor sign-in yourself" in subscription
+        assert "POST /api/vendor-accounts/{id}/signin" not in reference + subscription
         assert "Never read the local download yourself." in reference
         assert "Post the news first, as its own message, word for word as below; it never asks anything." in reference
         assert "when your question is still unanswered, end your turn: that question stays open" in reference

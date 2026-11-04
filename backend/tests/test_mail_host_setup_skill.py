@@ -11,7 +11,8 @@ from tools.catalog_mailhost_entries import MAILHOST_CATALOG_ENTRIES
 
 SKILLS = Path(__file__).resolve().parents[1] / "prompts/system/v1/skills"
 SKILL = (SKILLS / "mail-host-setup/SKILL.md").read_text(encoding="utf-8")
-FIRST_RUN_APP = (SKILLS / "conductor-bootstrap/references/first-run-app.md").read_text(encoding="utf-8")
+FIRST_RUN_APP = "\n".join(path.read_text(encoding="utf-8") for path in sorted((SKILLS / "conductor-bootstrap/references").glob("first-run-app*.md")))
+EMAIL_STEP = (SKILLS / "conductor-bootstrap/references/first-run-app-6-email-calendar.md").read_text(encoding="utf-8")
 
 
 def test_the_skill_is_named_and_never_handles_a_password() -> None:
@@ -64,7 +65,7 @@ def test_every_tool_the_skill_names_exists_and_is_loaded_through_the_pack_it_liv
 
 
 def test_first_run_hands_something_else_to_the_skill_after_the_profile_line_is_written() -> None:
-    email = FIRST_RUN_APP.split("6. **Email and calendar.**", 1)[1].split("7. **Learning", 1)[0]
+    email = EMAIL_STEP
     assert "- **Something else:** follow skill `mail-host-setup` from its step 1." in email
     assert email.index("`- **Email app:**") < email.index("**Something else:**")
     assert "no ready way to connect that email" not in FIRST_RUN_APP

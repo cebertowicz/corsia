@@ -166,10 +166,10 @@
       "sha256": "b15cde5158f78245bba8f8939cf500f08830522a4bcd5aa7334b5cd82045418b"
     },
     {
-      "bytes": 7093,
+      "bytes": 7076,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/agent-import.md",
-      "sha256": "ef1da5b369cdf521bc45552c9fc8ee652290bf25cc2739809a073e5721fd02ca"
+      "sha256": "d7f37c451754b9cbb58cdcc994f770d40739d6512815e6e4de678d26db7e2c3c"
     },
     {
       "bytes": 3008,
@@ -178,10 +178,64 @@
       "sha256": "f2fc271a1ac1a601674dd8e7710c0644bc2b3a8b31929918fc84d4d3e8cccf9c"
     },
     {
-      "bytes": 27727,
+      "bytes": 3015,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-run-app-1-subscription.md",
+      "sha256": "7c9e5dae7d448d1065b6f7d250bea30c3f91d4ce6def057a4d82ea84246a82c8"
+    },
+    {
+      "bytes": 1207,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-run-app-2-import.md",
+      "sha256": "b68c7d7a1063ec7ef3147ffff45838b19d8b80bd3b6e090d964570298af2ecf6"
+    },
+    {
+      "bytes": 6162,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-run-app-3-apps.md",
+      "sha256": "b2a8edce0cbe038f71b8f25266b72663fa25e932e592d20ed9fd27c9d9a35e22"
+    },
+    {
+      "bytes": 914,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-run-app-4-web-search.md",
+      "sha256": "6fa7eed892eb4b383a65f479287a7819cb4631afece8bb4d92e1c3adf6e93cb7"
+    },
+    {
+      "bytes": 1202,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-run-app-5-about-you.md",
+      "sha256": "5980c176e5a0605a6b3a721c79ee8c41865c4487704b8b1c3f06bdb989bac25e"
+    },
+    {
+      "bytes": 4206,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-run-app-6-email-calendar.md",
+      "sha256": "d9ff1cc87c024fdee33f0e3c885e604711e3215a91fd9c84b0e4fbdde0917a31"
+    },
+    {
+      "bytes": 2873,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-run-app-7-community.md",
+      "sha256": "b4ad14716a2974b3d6e50431723b25f2b880b47d068b5c1e32ce0248a212dd2a"
+    },
+    {
+      "bytes": 2492,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-run-app-8-files.md",
+      "sha256": "5a10f3ca40584640b7b4af62db3d464ef53af89df77c44350daec267a1ad7d23"
+    },
+    {
+      "bytes": 2237,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/first-run-app-9-hand-over.md",
+      "sha256": "a695fedd456afc6f6eb6126856714a061fbe05878f9bc30378db5d7e458888b7"
+    },
+    {
+      "bytes": 6098,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-app.md",
-      "sha256": "a0087c3e7511b0b4cb6f58bc189f87a0256f21df775b521e6d15c3bc265ef3d6"
+      "sha256": "4a5b136be81eb84ace06b4897edbf94084bdbcbabb0abcc785f977ba89602536"
     },
     {
       "bytes": 1259,
@@ -190,16 +244,16 @@
       "sha256": "3821de3143974960866610b92190200445ec587f03745ebf530fc1a84ad6a69c"
     },
     {
-      "bytes": 1366,
+      "bytes": 1455,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run-start.md",
-      "sha256": "5390c727704a7c73f755e813fd583eb7473da73918e242cfc10d9cd9ab08bf24"
+      "sha256": "0d2b59d327cf7e79829492dc11ea3fd1311f3b6397d5d382e12cb56eb47a1137"
     },
     {
-      "bytes": 17899,
+      "bytes": 17170,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/first-run.md",
-      "sha256": "09f70f31c887bb4c6bdae3158e416a73278a2f6fc503c1b3c4fe371e2765a439"
+      "sha256": "0230509ca284b1c1e03301593b1561d0f73829c50e4ae5c5a138f25aca1a7b16"
     },
     {
       "bytes": 991,
@@ -224,6 +278,12 @@
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/project-import.md",
       "sha256": "8b6f2c7ae15ae1c60d688880d0aa079fa1b83356ecca9e642d4645d2a5bf8aaa"
+    },
+    {
+      "bytes": 832,
+      "kind": "skill",
+      "path": "skills/conductor-bootstrap/references/raising-a-decision.md",
+      "sha256": "a3e0964c2299f0dce1c6f6c2cff8f7d2e9345936f84a940c95fe013aad36427b"
     },
     {
       "bytes": 13679,
