@@ -341,6 +341,17 @@ def backend_gh(account: AgentAccountView) -> tuple[str, dict[str, str] | None]:
     return account.binary or "gh", clean_env() | {"GH_CONFIG_DIR": home, "GH_PROMPT_DISABLED": "1"}
 
 
+def backend_gh_now() -> tuple[str, dict[str, str] | None, AgentAccountView]:
+    """``backend_gh`` for the account as it is now, with that account: every backend read and write runs ``gh`` this way.
+
+    The first call after a restart finds the account still verifying and waits once for the answer.
+    """
+    account = view()
+    if account.cause == "verifying":
+        account = verify_now()
+    return (*backend_gh(account), account)
+
+
 def sandbox_ro_dirs(account: AgentAccountView) -> list[Path]:
     """The read-only shell grant: the agents' home, only once verified."""
     return [Path(account.home)] if account.ready and account.home else []

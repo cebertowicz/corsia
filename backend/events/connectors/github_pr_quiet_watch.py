@@ -30,7 +30,7 @@ from events import delivery
 from events.connectors import github_pr_quiet_reasons as reasons
 from events.connectors import github_pr_quiet_rows as rows
 from events.connectors import github_notifications_feed as feed
-from events.connectors.github_read_budget import budget
+from events.connectors.github_read_budget import budget_of
 from infra.db_async import run_in_db
 
 log = logging.getLogger(__name__)
@@ -61,12 +61,15 @@ class Candidate:
 
 
 def quiet_watch_status() -> dict[str, Any]:
-    """State, reason, last completed sweep, wakes accepted, and the last error class.
+    """State, reason, last completed sweep, wakes accepted, the last error class, and
+    the read budget of the account its reads run as (``read_budget``).
 
     ``fired_count`` counts wakes the owner's FIFO accepted, not wakes delivered
     to a Turn; a later admission failure is reported by the wake's settlement.
     """
-    return dict(_status)  # the shared read budget is shown with the notifications poller
+    from connections.github_broker import default_broker
+
+    return {**_status, "read_budget": default_broker().read_budget.status()}
 
 
 def _now() -> datetime:
@@ -329,12 +332,12 @@ def _report_ingress(affected: list[str], now: datetime) -> None:
 async def sweep_once(runner: feed.GhRunner) -> None:
     """Evaluate every candidate once; one PR's failure never stops the others.
 
-    While the shared read budget keeps the sweep out of its reserve the sweep
-    is skipped, not failed: the budget's own status says why.
+    While its account's read budget keeps the sweep out of the reserve the
+    sweep is skipped, not failed: the budget's own status says why.
     """
     from events.connectors.github_pr_notice import webhook_configured
 
-    if budget.sweep_paused():
+    if budget_of(runner).sweep_paused():
         _status.update({"state": "enabled", "reason": None})
         return
 

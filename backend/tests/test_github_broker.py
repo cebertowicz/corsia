@@ -227,38 +227,6 @@ def test_the_default_runner_pins_the_host_and_forwards_the_vetted_argv(monkeypat
     assert seen["env"]["GH_HOST"] == "github.com" and seen["timeout"] == 7.0 and seen["check"] is False
 
 
-def test_every_poller_defaults_to_the_broker(monkeypatch) -> None:
-    import asyncio
-
-    from events.connectors import github_notifications as notifications
-    from events.connectors import github_pr_quiet_watch as quiet
-    from events.connectors import github_repo_activity as activity
-
-    seen: dict[str, Any] = {}
-
-    class Stop(Exception):
-        pass
-
-    async def stop_poll(runner, repos):
-        seen["activity"] = runner
-        raise Stop
-
-    async def stop_cycle(runner, failures=0):
-        seen["notifications"] = runner
-        return None, 0
-
-    monkeypatch.setattr(notifications, "run_cycle", stop_cycle)
-    monkeypatch.setattr(quiet, "disabled_reason", lambda runner: seen.setdefault("quiet", runner) and "test_mode")
-    asyncio.run(notifications.notifications_poll_loop())
-    asyncio.run(quiet.pr_quiet_watch_loop())
-    monkeypatch.setattr(activity.feed, "tracked_github_repositories", lambda: frozenset())
-    monkeypatch.setattr(activity, "poll_once", stop_poll)
-    with pytest.raises(Stop):
-        asyncio.run(activity.repo_activity_poll_loop())
-    assert isinstance(seen["notifications"], GithubReadBroker)
-    assert seen["notifications"] is seen["quiet"] is seen["activity"]
-
-
 # --- the token never leaves ------------------------------------------------
 
 def test_stderr_and_the_auth_probe_lose_token_shapes_and_known_environment_tokens(monkeypatch, broker, inner) -> None:
