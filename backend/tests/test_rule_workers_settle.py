@@ -424,13 +424,30 @@ def test_the_spawned_model_reaches_both_worker_events(outcome, kind):
 
     row = {"id": 1, "thread_id": OWNER, "rule_id": "r", "event_id": "e", "request_identity": "i",
            "connector": "qa", "event_type": "request", "artifact_external_id": "o/r#1",
-           "artifact_integration": "github", "artifact_type": "pull_request"}
+           "artifact_integration": "github", "artifact_type": "pull_request", "worker_thread_id": None}
     said = {"result": "{}"} if outcome == "returned" else {"reason": "stopped"}
     spawned = {"workflow": "w@1", "settings": {"model": "claude-code/opus[1m]"}}
     item = worker_settle.settlement(row, spawned, outcome, {**said, "model": "forged"})
     assert item.event_type == kind and item.facts["model"] == "claude-code/opus[1m]"
     never_spawned = worker_settle.settlement(row, {"workflow": "w@1"}, outcome, said)
     assert "model" not in never_spawned.facts
+
+
+# The settled worker's thread rides both events, so a reader can price the run by it.
+@pytest.mark.parametrize("outcome, kind", [("returned", "worker.result"), ("no_result", "worker.no_result")])
+def test_the_worker_thread_reaches_both_worker_events(outcome, kind):
+    from automation import worker_settle
+    from events.connectors import get_manifest
+
+    row = {"id": 1, "thread_id": OWNER, "rule_id": "r", "event_id": "e", "request_identity": "i",
+           "connector": "qa", "event_type": "request", "artifact_external_id": "o/r#1",
+           "artifact_integration": "github", "artifact_type": "pull_request", "worker_thread_id": "w1"}
+    said = {"result": "{}"} if outcome == "returned" else {"reason": "stopped"}
+    item = worker_settle.settlement(row, {"workflow": "w@1"}, outcome, {**said, "worker_thread": "forged"})
+    assert item.event_type == kind and item.facts["worker_thread"] == "w1"
+    assert get_manifest("worker").extract_facts({"run_id": "1", **item.facts})["worker_thread"] == "w1"
+    refused = worker_settle.settlement({**row, "worker_thread_id": None}, {"workflow": "w@1"}, outcome, said)
+    assert "worker_thread" not in refused.facts
 
 
 @pytest.mark.asyncio
@@ -445,6 +462,11 @@ async def test_a_settled_workers_event_carries_its_spawned_model_through_the_run
     [event] = world["script_inputs"]
     assert event["type"] == f"worker.{kind}"
     assert event["facts"]["model"] == "claude-code/sonnet"  # the owner's model, as spawned
+    from infra.database import get_db
+
+    [worker] = get_db().execute("SELECT worker_thread_id FROM event_route_decisions WHERE id=?",
+                                (int(event["facts"]["run_id"]),)).fetchone()
+    assert worker and event["facts"]["worker_thread"] == worker
 
 
 # A settled worker's event names its GitHub artifact's repository, so the owner's script on it
@@ -459,6 +481,6 @@ def test_a_settled_workers_event_names_its_github_artifacts_repository(integrati
 
     row = {"id": 1, "thread_id": OWNER, "rule_id": "r", "event_id": "e", "request_identity": "i",
            "connector": "qa", "event_type": "request", "artifact_external_id": external_id,
-           "artifact_integration": integration, "artifact_type": "pull_request"}
+           "artifact_integration": integration, "artifact_type": "pull_request", "worker_thread_id": None}
     item = worker_settle.settlement(row, {"workflow": "w@1"}, "no_result", {"reason": "stopped", "repo": "x/y"})
     assert item.facts.get("repo") == repo

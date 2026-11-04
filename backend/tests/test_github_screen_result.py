@@ -89,7 +89,7 @@ def test_screen_envelope_keeps_identity_and_unknown_signs():
     row = {"id": 4, "thread_id": "owner", "rule_id": "rule", "event_id": "event",
            "request_identity": "request", "connector": "screen", "event_type": "staged",
            "artifact_external_id": "o/r#1", "artifact_integration": "github",
-           "artifact_type": "pull-request", "workflow_id": "github-pr-screen",
+           "artifact_type": "pull-request", "workflow_id": "github-pr-screen", "worker_thread_id": "w",
            "origin": f"rule_set:github@{get_manifest('github').version}"}
     check = {"result_context": _context({"repo": "o/r", "pr_number": 1,
                                           "item_version": "a" * 40, "staging_path": "screen-a"})}
