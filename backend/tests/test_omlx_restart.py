@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 from collections import deque
+from pathlib import Path
 
 import pytest
 
@@ -194,6 +195,28 @@ async def test_an_unreadable_log_says_the_restart_intent_is_unknown_and_leaves_t
 
 def test_an_unreadable_log_is_unknown_and_not_a_no(tmp_path):
     assert omlx_process.logged_since(tmp_path, SID, 0, "anything at all") is None
+
+
+def test_an_unknown_start_offset_never_accepts_a_previous_process_restart(tmp_path, monkeypatch):
+    log = omlx_process.log_path(tmp_path, SID)
+    log.write_text(restart.RESTART_REQUESTED + "\n")
+    original_stat = Path.stat
+
+    def denied_stat(path, *args, **kwargs):
+        if path == log:
+            raise PermissionError("cannot read initial log size")
+        return original_stat(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "stat", denied_stat)
+        asked = restart.restart_logged_from_now(tmp_path, SID)
+    assert asked() is None
+
+
+def test_a_log_created_after_the_watch_can_request_restart(tmp_path):
+    asked = restart.restart_logged_from_now(tmp_path, SID)
+    omlx_process.log_path(tmp_path, SID).write_text(restart.RESTART_REQUESTED + "\n")
+    assert asked() is True
 
 
 async def test_a_clean_exit_the_person_did_not_ask_for_is_logged_not_restarted(events, caplog, monkeypatch):

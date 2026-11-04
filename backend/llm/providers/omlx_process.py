@@ -243,15 +243,19 @@ def build_argv(
     return argv
 
 
-def log_size(runtime_dir: Path, server_id: str) -> int:
+def log_size(runtime_dir: Path, server_id: str) -> int | None:
     try:
         return log_path(runtime_dir, server_id).stat().st_size
-    except OSError:
+    except FileNotFoundError:
         return 0
+    except OSError:
+        return None
 
 
-def logged_since(runtime_dir: Path, server_id: str, offset: int, text: str) -> bool | None:
-    """Whether ``text`` is in the last 64 KiB this server's log gained after byte ``offset``; None when the log can't be read."""
+def logged_since(runtime_dir: Path, server_id: str, offset: int | None, text: str) -> bool | None:
+    """Whether ``text`` was logged after ``offset``; None if the offset or log is unreadable."""
+    if offset is None:
+        return None
     try:
         with log_path(runtime_dir, server_id).open("rb") as file:
             size = file.seek(0, os.SEEK_END)
