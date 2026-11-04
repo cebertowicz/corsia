@@ -904,7 +904,6 @@ async def test_ready_idle_keeps_the_bound_model_and_never_substitutes_another_ro
 @pytest.mark.asyncio
 async def test_legacy_empty_decisive_action_retires_before_sampling(c1, monkeypatch):
     from infra import carry_in_drain, state
-    from subagents.harness_tool_bridge import build_tool_registry
 
     action = {"tool": "read_file", "params": {}}
     _write_lesson(c1, actions={"required_actions": [action], "forbidden_actions": [], "decisive_action": action})
@@ -912,13 +911,10 @@ async def test_legacy_empty_decisive_action_retires_before_sampling(c1, monkeypa
     assert await carry_in_drain.wake(c1.workspace)  # create pending fact
     monkeypatch.setattr(carry_in_drain.capacity, "ready_idle", lambda **_: pytest.fail("sample admitted"))
     monkeypatch.setattr(state, "_agent", None)
-    assert not await carry_in_drain.wake(c1.workspace)
-    assert _events("lesson.carry_in.waiting")[-1]["reason"] == "schema_lookup_unavailable"
-    assert not _events("lesson.carry_in.retired") and not _events("lesson.carry_in.result")
-    monkeypatch.setattr(state, "_agent", SimpleNamespace(tools=build_tool_registry()))
     assert await carry_in_drain.wake(c1.workspace)
+    assert state._agent is not None
     assert _events("lesson.carry_in.retired")[-1]["reason"] == "decisive_unparameterized"
-    assert not _events("lesson.carry_in.result")
+    assert not _events("lesson.carry_in.waiting") and not _events("lesson.carry_in.result")
 
 
 @pytest.mark.parametrize(("actual", "expected"), [
