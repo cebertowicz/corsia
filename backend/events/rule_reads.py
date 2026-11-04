@@ -59,16 +59,21 @@ def self_rules(db: sqlite3.Connection, connector: str, event_type: str) -> list[
                       (connector, event_type)).fetchall()
 
 
-def type_rules(connector: str, event_type: str) -> tuple[bool, bool]:
-    """Whether any rule for one type is enabled, and any self-rule, in any project:
-    one read, two probes of the ``(connector, event_type, enabled, ...)`` index."""
+def type_rules(connector: str, event_type: str, read_facts: Iterable[str] = ()) -> tuple[bool, bool, bool]:
+    """Whether any rule for one type is enabled, any self-rule, and any rule whose ``match``
+    names a fact in ``read_facts``, in any project: one read, three probes. A rule is
+    never evaluated here: a name is enough to know a connector must fetch that fact."""
+    names = tuple(read_facts)
     db = get_db()
     try:
-        row = db.execute(f"SELECT EXISTS(SELECT 1 {_TYPE_RULES}), EXISTS(SELECT 1 {_SELF_RULES})",
-                         (connector, event_type) * 2).fetchone()
+        row = db.execute(
+            f"SELECT EXISTS(SELECT 1 {_TYPE_RULES}), EXISTS(SELECT 1 {_SELF_RULES}), "
+            f"EXISTS(SELECT 1 {_TYPE_RULES} AND EXISTS (SELECT 1 FROM json_each(\"match\") "
+            f"WHERE json_extract(value, '$.field') IN ({','.join('?' * len(names))})))",
+            (connector, event_type) * 3 + names).fetchone()
     finally:
         db.close()
-    return bool(row[0]), bool(row[1])
+    return bool(row[0]), bool(row[1]), bool(row[2])
 
 
 def unrouted_projects(

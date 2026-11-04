@@ -41,7 +41,7 @@ CI_START_GRACE = timedelta(minutes=30)
 #: the ``ci_cancelled`` wake that prompts a rerun comes 10 min after the cancel.
 CLOCK_SLACK = timedelta(seconds=60)
 
-_GREEN = frozenset({"success", "neutral", "skipped"})
+GREEN = frozenset({"success", "neutral", "skipped"})
 _CANCELLED = "cancelled"
 _REVIEWER_TERMINAL = frozenset({"success", "failure", "error"})
 
@@ -151,7 +151,7 @@ def ci_state(body: Any) -> CiState:
     if None in times or None in starts or not all(isinstance(s, int) for s in suite_ids):
         return CiState(started=True)
     conclusions = {str(run.get("conclusion")) for run in latest}
-    failed = sorted(c for c in conclusions if c not in _GREEN and c != _CANCELLED)
+    failed = sorted(c for c in conclusions if c not in GREEN and c != _CANCELLED)
     conclusion = failed[0] if failed else _CANCELLED if _CANCELLED in conclusions else "success"
     cancelled = tuple(
         (str(run.get("name") or "workflow"), int(run.get("id") or 0))

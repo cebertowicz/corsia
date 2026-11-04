@@ -14,6 +14,7 @@ from core.fork_native_tools import InputRoom, input_fits, input_room
 from core.fork_types import (
     FORK_CONTEXT_TRUNCATED,
     FORK_TOOL_ROUND_TRIP_TOKENS,
+    ForkInputExhausted,
     ProviderForkRejected,
 )
 from llm.router import LLMResponse, ToolCallRequest
@@ -61,7 +62,7 @@ async def _run(monkeypatch, replies, *, loop_fits=True, tool_fits=True, seen=Non
 
 @pytest.mark.asyncio
 async def test_empty_fold_fails_naming_loop_input_over_bound(monkeypatch):
-    with pytest.raises(ProviderForkRejected) as raised:
+    with pytest.raises(ForkInputExhausted) as raised:
         await _run(monkeypatch, [_tool_reply()], loop_fits=[True, False])
 
     request = _request(None)
@@ -76,7 +77,7 @@ async def test_empty_fold_fails_naming_provider_context_limit(monkeypatch):
     overflow = LLMResponse(
         content=None, finish_reason="error", error_kind="provider_context_overflow",
     )
-    with pytest.raises(ProviderForkRejected) as raised:
+    with pytest.raises(ForkInputExhausted) as raised:
         await _run(monkeypatch, [overflow])
 
     assert "path=ii_provider_context_limit iteration=0 " in str(raised.value)
@@ -85,7 +86,7 @@ async def test_empty_fold_fails_naming_provider_context_limit(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_empty_fold_fails_naming_tool_results_over_bound(monkeypatch):
-    with pytest.raises(ProviderForkRejected) as raised:
+    with pytest.raises(ForkInputExhausted) as raised:
         await _run(monkeypatch, [_tool_reply()], tool_fits=False)
 
     assert "path=iii_tool_results_over_bound iteration=0 " in str(raised.value)
@@ -155,6 +156,7 @@ async def test_reply_cut_off_before_any_narrative_fails_naming_the_output_cap(mo
 
     assert str(raised.value).startswith(f"{FORK_CONTEXT_TRUNCATED}: path=iv_output_cap iteration=0 ")
     assert "finish_reason=length" in str(raised.value)
+    assert not isinstance(raised.value, ForkInputExhausted)  # output ran out, not input: no cold retry
 
 
 @pytest.mark.asyncio

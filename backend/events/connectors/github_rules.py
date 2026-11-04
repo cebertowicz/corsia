@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from events import rule_reads, rules
+from events.connectors import github_pr_facts as pr_facts
 from events.connectors.github import CHECK_SUITE_PR, MANIFEST
 from events.envelope import EventEnvelope, normalize
 from events.github_mapper import ends_artifact
@@ -65,12 +66,14 @@ class RuleScope:
     ``any_rule``: some rule for its type is enabled, in any project; without one,
     nothing else is read. ``repository_projects``: the projects tracking its
     repository, which scope rules when routing gives it no thread (``None``: the
-    lookup failed).
+    lookup failed). ``reads_head``: a rule for its type names a fact read from GitHub
+    (``current_head``, ``check_state``), so the envelope is completed before the gate.
     """
 
     any_rule: bool = True
     repository_projects: frozenset[str] | None = frozenset()
     envelope: EventEnvelope | None = None
+    reads_head: bool = False
 
 
 def rule_scope(
@@ -85,7 +88,8 @@ def rule_scope(
     if event_type is None:
         return RuleScope(any_rule=False)
     try:
-        any_rule, self_rule = rule_reads.type_rules(MANIFEST.connector, event_type)
+        any_rule, self_rule, reads_head = rule_reads.type_rules(
+            MANIFEST.connector, event_type, pr_facts.read_facts(event_type))
     except Exception:
         # Rules only add: a failed read costs this webhook its rules, never its routing.
         logger.exception("event rules: no rule evaluated {}: rule read failed", internal_event)
@@ -98,10 +102,10 @@ def rule_scope(
         logger.warning("event rules: no rule evaluated {}: {}", internal_event, exc)
         return RuleScope(any_rule=False)
     if not self_rule:
-        return RuleScope(any_rule=any_rule, envelope=envelope)
+        return RuleScope(any_rule=any_rule, envelope=envelope, reads_head=reads_head)
     facts = envelope.facts if envelope else {}
     return RuleScope(repository_projects=rule_reads.unrouted_projects(
-        MANIFEST.connector, event_type, facts, self_rule=True), envelope=envelope)
+        MANIFEST.connector, event_type, facts, self_rule=True), envelope=envelope, reads_head=reads_head)
 
 
 def apply_routed_rules(
