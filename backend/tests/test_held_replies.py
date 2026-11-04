@@ -275,3 +275,120 @@ def test_the_dock_row_and_chats_list_item_come_from_the_same_pending_rows(deleg_
     assert row["detail"]["title"] == "Send Sender Thread's reply to the Researcher agent on Anthropic?"
     assert list(chats) == ["sender-self"]
     assert chats["sender-self"][0]["kind"] == "hold"
+    assert "text" not in held_attention.pending(deleg_db, "u-test", with_text=False)[0]
+    assert held_attention.pending(deleg_db, "u-test")[0]["text"] == "from the worker"
+
+
+@pytest.mark.asyncio
+async def test_recovery_returns_interrupted_approval_to_held(deleg_db, held_client, seen):
+    from infra import held_replies
+    from infra.held_reply_messages import RESTART_ERROR
+
+    held = await _send_by_tool()
+    held_replies.settle(held["held_reply_id"], expect="held", state="approved")
+    held_replies.recover_interrupted()
+    assert _rows(deleg_db, "state", "error") == [("held", RESTART_ERROR)]
+    assert _post(held_client, held["held_reply_id"], "approve").json()["state"] == "sent"
+
+
+@pytest.mark.asyncio
+async def test_approval_finishes_after_request_is_cancelled(deleg_db, held_client, seen, monkeypatch):
+    import asyncio
+    from api import held_replies as held_api
+
+    held = await _send_by_tool()
+    started, release, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original_note = held_api.note_asker
+
+    async def deliver(*_args):
+        started.set()
+        await release.wait()
+        return {"ok": True}
+
+    async def note(*args):
+        await original_note(*args)
+        finished.set()
+
+    monkeypatch.setattr(held_api, "_deliver", deliver)
+    monkeypatch.setattr(held_api, "note_asker", note)
+    request = asyncio.create_task(held_api.approve(held["held_reply_id"], held_api.DecisionBody(token=_TOKEN)))
+    await asyncio.wait_for(started.wait(), 2)
+    request.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request
+    release.set()
+    await asyncio.wait_for(finished.wait(), 2)
+    assert _rows(deleg_db, "state") == [("sent",)]
+
+
+@pytest.mark.asyncio
+async def test_recovered_approval_deduplicates_an_admitted_delivery(deleg_db, held_client, monkeypatch):
+    from api import held_replies as held_api
+    from events import delivery
+    from infra import held_replies, send_service
+    from infra.send_types import SendResult
+    from tools import delegate_send
+
+    async def no_plan(*_args, **_kwargs):
+        return None
+
+    async def delivered(*_args, **_kwargs):
+        return SendResult(driver="test")
+
+    async def told(*_args, **_kwargs):
+        return True
+
+    monkeypatch.setattr(delegate_send, "_prepare_plan_task", no_plan)
+    monkeypatch.setattr(send_service, "_deliver_admission", delivered)
+    monkeypatch.setattr(delivery, "deliver_to_thread", told)
+    held = await _send_by_tool()
+    held_id = held["held_reply_id"]
+    row, sender, recipient, _name = held_api._load(held_id, "u-test")
+    assert held_replies.settle(held_id, expect="held", state="approved")
+    assert isinstance(await held_api._deliver(row, sender, recipient), dict)
+    held_replies.recover_interrupted()
+    assert _post(held_client, held_id, "approve").json()["state"] == "sent"
+    rows = deleg_db.execute(
+        "SELECT id FROM messages WHERE thread_id='asker' AND role='user' AND content='the answer'",
+    ).fetchall()
+    assert len(rows) == 1
+
+
+@pytest.mark.asyncio
+async def test_moved_recipient_is_not_sent(deleg_db, held_client, seen):
+    held = await _send_by_tool()
+    deleg_db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('other','Other','t','t')")
+    deleg_db.execute("UPDATE threads SET project_id='other' WHERE id='asker'")
+    deleg_db.commit()
+    result = _post(held_client, held["held_reply_id"], "approve")
+    assert result.json()["state"] == "not_sent"
+    assert "no longer reachable" in result.json()["line"]
+    assert _rows(deleg_db, "state") == [("not_sent",)]
+    assert seen["delivered"] == []
+    assert "no longer in a scope" in seen["told"][-1][2]
+    from infra.held_replies import get
+    from infra.held_reply_messages import hold_response
+    retry = await hold_response(get(held["held_reply_id"], "u-test", db=deleg_db))
+    assert retry["status"] == "not_sent"
+    assert "no longer in a scope" in retry["message"]
+    rows = deleg_db.execute("SELECT content FROM messages WHERE thread_id='asker' AND role='system' ORDER BY rowid").fetchall()
+    assert "could not be sent" in rows[-1][0]
+
+
+@pytest.mark.asyncio
+async def test_sender_delivery_false_is_logged(monkeypatch):
+    from events import delivery
+    from infra.held_reply_messages import tell_sender
+    from loguru import logger
+
+    async def refused(*_args, **_kwargs):
+        return False
+
+    messages = []
+    sink = logger.add(lambda message: messages.append(str(message)), level="WARNING")
+    monkeypatch.setattr(delivery, "deliver_to_thread", refused)
+    try:
+        assert await tell_sender({"id": "hold-1", "sender_thread_id": "sender"}, "sent", recipient="R") is False
+    finally:
+        logger.remove(sink)
+    assert any("hold-1" in message and "sent" in message for message in messages)

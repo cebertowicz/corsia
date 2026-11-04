@@ -17,10 +17,12 @@ from plans.attention_detail import HELD_REPLY_PRIORITY
 HELD_REPLY_RENDERER = "held-reply"
 
 
-def pending(db: sqlite3.Connection, user_id: str) -> list[dict[str, Any]]:
+def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> list[dict[str, Any]]:
     """Every held reply waiting on this person, oldest first, with the names a person reads."""
     rows = db.execute(
-        "SELECT h.* FROM held_replies h JOIN threads s ON s.id=h.sender_thread_id "
+        "SELECT h.id, h.sender_thread_id, h.recipient_thread_id, h.error, h.created_at"
+        + (", h.text" if with_text else "")
+        + " FROM held_replies h JOIN threads s ON s.id=h.sender_thread_id "
         "WHERE h.user_id=? AND h.state=? AND s.purged_at IS NULL ORDER BY h.created_at, h.id",
         (user_id, held_replies.HELD),
     ).fetchall()
@@ -65,7 +67,7 @@ def pending(db: sqlite3.Connection, user_id: str) -> list[dict[str, Any]]:
             "project_label": shown["project_name"],
             "recipient_label": held_replies.recipient_label(recipient["title"] if recipient else None),
             "provider_label": held_replies.provider_label(recipient["model"] if recipient else None),
-            "text": str(row["text"]),
+            **({"text": str(row["text"])} if with_text else {}),
             "error": row["error"],
             "created_at": str(row["created_at"]),
         })
@@ -111,7 +113,7 @@ def count(db: sqlite3.Connection, user_id: str, *, project_id: str | None = None
 
     With ``project_id``, only those shown on a chat in that project, as a project's Activity counts.
     """
-    items = pending(db, user_id)
+    items = pending(db, user_id, with_text=False)
     if project_id is None:
         return len(items)
     return sum(1 for item in items if item["project_id"] == project_id)
@@ -120,7 +122,7 @@ def count(db: sqlite3.Connection, user_id: str, *, project_id: str | None = None
 def items_by_thread(db: sqlite3.Connection, user_id: str) -> dict[str, list[dict[str, Any]]]:
     """The chats list's ``hold`` items, grouped on each reply's visible chat."""
     grouped: dict[str, list[dict[str, Any]]] = {}
-    for item in pending(db, user_id):
+    for item in pending(db, user_id, with_text=False):
         grouped.setdefault(item["visible_thread_id"], []).append({
             "kind": "hold",
             "title": f"Approve reply to {item['recipient_label']}",

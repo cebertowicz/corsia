@@ -24,6 +24,11 @@ from infra.send_broadcast import broadcast_message_rows
 
 NOTE_TYPE = "held_reply_note"
 RECEIPT_PREFIX = "held_reply."
+RESTART_ERROR = (
+    "Couldn’t confirm the reply was sent because CORSIA restarted. "
+    "Approve once to finish; it won’t be sent twice."
+)
+SCOPE_NOT_SENT = "scope_not_sent"
 
 
 def held_text(recipient: str) -> str:
@@ -44,6 +49,10 @@ _SENDER_TEXT = {
         "Your reply to {recipient} was not sent because {recipient} no longer exists, so do not "
         "retry; tell the person if the question still needs an answer."
     ),
+    SCOPE_NOT_SENT: (
+        "Your reply to {recipient} was not sent because {recipient} is no longer in a scope you "
+        "can send to, so do not retry; tell the person if the question still needs an answer."
+    ),
 }
 
 _ASKER_TEXT = {
@@ -52,6 +61,7 @@ _ASKER_TEXT = {
         "here if the person approves it."
     ),
     held_replies.SENT: "{agent}'s reply was sent.",
+    SCOPE_NOT_SENT: "{agent}'s reply could not be sent, so you will not receive it; continue without it, or tell the person if you can't.",
     held_replies.DECLINED: (
         "The person declined to share {agent}'s reply, so you will not receive it; do not ask "
         "again unless the person asks you to; continue without it, or tell the person if you can't."
@@ -63,6 +73,7 @@ _LINE = {
     "waiting": "{agent}'s reply is waiting for approval.",
     held_replies.SENT: "{agent}'s reply was sent.",
     held_replies.DECLINED: "{agent}'s reply was not sent.",
+    SCOPE_NOT_SENT: "{agent}'s reply was not sent.",
 }
 
 
@@ -72,12 +83,19 @@ def sender_line(outcome: str, recipient: str) -> str:
         return f"The reply to {recipient} was sent."
     if outcome == held_replies.NOT_SENT:
         return gone_line(recipient)
+    if outcome == SCOPE_NOT_SENT:
+        return scope_line(recipient)
     return f"The reply to {recipient} was not sent."
 
 
 def gone_line(recipient: str) -> str:
     """The line for a recipient that no longer exists."""
     return f"Couldn’t send the reply because {recipient} no longer exists."
+
+
+def scope_line(recipient: str) -> str:
+    """The line for a recipient no longer reachable from the sender's scope."""
+    return f"Couldn’t send the reply because {recipient} is no longer reachable from this chat."
 
 
 def error_line(recipient: str) -> str:
@@ -119,7 +137,7 @@ def _insert_asker_row(held: dict[str, Any], kind: str, *, recipient: str, agent:
         "held_reply_id": held["id"],
     }
     if not note:
-        metadata["event_type"] = RECEIPT_PREFIX + kind
+        metadata["event_type"] = RECEIPT_PREFIX + (held_replies.NOT_SENT if kind == SCOPE_NOT_SENT else kind)
     with write_transaction(None, scope="held_reply_asker_row") as db:
         if db.execute(
             "SELECT 1 FROM threads WHERE id=?", (held["recipient_thread_id"],),
@@ -152,21 +170,25 @@ async def note_asker(held: dict[str, Any], kind: str) -> None:
         logger.exception("held reply {}: asker row {} failed", held["id"], kind)
 
 
-async def tell_sender(held: dict[str, Any], outcome: str, *, recipient: str) -> None:
+async def tell_sender(held: dict[str, Any], outcome: str, *, recipient: str) -> bool:
     """Deliver the outcome to the sending agent as a later message; best-effort once settled."""
     from events.delivery import deliver_to_thread
 
     try:
-        await deliver_to_thread(
+        delivered = await deliver_to_thread(
             held["sender_thread_id"],
-            RECEIPT_PREFIX + outcome,
+            RECEIPT_PREFIX + (held_replies.NOT_SENT if outcome == SCOPE_NOT_SENT else outcome),
             _SENDER_TEXT[outcome].format(recipient=recipient),
             None,
             delivery_id=f"held-reply:{held['id']}:{outcome}",
             chip=sender_line(outcome, recipient),
         )
+        if not delivered:
+            logger.warning("held reply {}: telling the sender {} failed", held["id"], outcome)
+        return delivered
     except Exception:
         logger.exception("held reply {}: telling the sender {} failed", held["id"], outcome)
+        return False
 
 
 async def announce_hold(held: dict[str, Any]) -> None:
@@ -195,10 +217,11 @@ async def hold_response(held: dict[str, Any]) -> dict[str, Any]:
 
     name = await run_in_db(recipient)
     state = held["state"]
-    message = _SENDER_TEXT[state].format(recipient=name) if state in _SENDER_TEXT else held_text(name)
+    outcome = SCOPE_NOT_SENT if state == held_replies.NOT_SENT and held.get("error") == SCOPE_NOT_SENT else state
+    message = _SENDER_TEXT[outcome].format(recipient=name) if outcome in _SENDER_TEXT else held_text(name)
     return {
         "ok": True,
-        "status": state if state in _SENDER_TEXT else "held",
+        "status": state if outcome in _SENDER_TEXT else "held",
         "held_reply_id": held["id"],
         "message": message,
     }

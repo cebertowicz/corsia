@@ -145,6 +145,47 @@ describe("held reply in the dock", () => {
     expect(host.querySelector(".dock-bar")).toBeNull();
   });
 
+  it.each(["Approve once", "Decline"])("returns focus to the dock after %s", async (action) => {
+    body = queueBody(heldReplyItem(), 2, [heldReplyItem(), decisionItem()]);
+    decide = () => new Promise(() => {});
+    await openDock();
+    button(action)!.focus();
+    button(action)!.click();
+    await settle();
+    expect(document.activeElement).toBe(host.querySelector(".dock-bar"));
+  });
+
+  it.each(["Approve once", "Decline"])("returns focus to the composer after the last held reply: %s", async (action) => {
+    const composer = document.createElement("div");
+    composer.setAttribute("role", "textbox");
+    composer.setAttribute("aria-label", "Message CORSIA");
+    composer.tabIndex = 0;
+    host.append(composer);
+    decide = () => new Promise(() => {});
+    await openDock();
+    button(action)!.focus();
+    button(action)!.click();
+    await settle();
+    expect(document.activeElement).toBe(composer);
+  });
+
+  it.fails("known gap: a last plan decision should return focus to the composer", async () => {
+    const composer = document.createElement("div");
+    composer.setAttribute("role", "textbox");
+    composer.setAttribute("aria-label", "Message CORSIA");
+    composer.tabIndex = 0;
+    host.append(composer);
+    body = queueBody(decisionItem(), 1);
+    decide = () => new Promise(() => {});
+    await openDock();
+    (host.querySelector(".option-button") as HTMLButtonElement).click();
+    await settle();
+    button("Answer")!.focus();
+    button("Answer")!.click();
+    await settle();
+    expect(document.activeElement).toBe(composer);
+  });
+
   it("declines: posts decline, and the dock says the reply was not sent", async () => {
     decide = () => ({ status: 200, payload: { ok: true, state: "declined" } });
     await openDock();

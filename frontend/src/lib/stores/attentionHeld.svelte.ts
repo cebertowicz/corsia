@@ -16,7 +16,7 @@ const approvedLine = (recipient: string) => `The reply to ${recipient} is approv
 export const failedLine = (recipient: string) =>
   `Couldn’t send the reply to ${recipient} because of an unexpected error. Approve once to try again.`;
 
-export async function decideHeld(held: HeldReplyDetail, verb: HeldVerb): Promise<void> {
+export async function decideHeld(held: HeldReplyDetail, verb: HeldVerb, onStarted?: () => void): Promise<void> {
   const id = held.id;
   if (get(answers)[id]?.state === "sending") return;
   const bearer = get(token);
@@ -35,6 +35,7 @@ export async function decideHeld(held: HeldReplyDetail, verb: HeldVerb): Promise
   });
   expandedId.set(null);
   activeId.set(follower ? follower.external_id : null);
+  onStarted?.();
 
   const outcome = await decideHeldReply(bearer, id, verb);
   if (generation !== identityEpoch()) return;

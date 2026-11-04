@@ -10,6 +10,7 @@ unexpectedly the row goes back to ``held`` with an error line, and Approve tries
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -21,11 +22,13 @@ from infra.auth import authenticate
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.held_reply_messages import (
-    error_line, gone_line, note_asker, notify_changed, recipient_name, tell_sender,
+    SCOPE_NOT_SENT, error_line, gone_line, note_asker, notify_changed, recipient_name,
+    scope_line, tell_sender,
 )
 from infra.queries import get_thread_for_user
 from plans import public
 from tools import delegate_send, delegation
+from tools.delegation_send_context import fetch_send_target, native_send_scope_error
 
 router = APIRouter(prefix="/api/held-replies", tags=["held-replies"])
 
@@ -82,13 +85,35 @@ async def decline(held_id: str, body: DecisionBody) -> dict[str, Any]:
 async def approve(held_id: str, body: DecisionBody) -> dict[str, Any]:
     """Deliver the stored text as its sender would have, then tell the sender and the asker."""
     user, held, sender, recipient, name = await _claim(body, held_id, held_replies.APPROVED)
+    return await asyncio.shield(_finish_approval(user, held, sender, recipient, name))
+
+
+async def _finish_approval(user: dict, held: dict, sender: dict | None, recipient: dict | None, name: str) -> dict[str, Any]:
+    held_id = held["id"]
     if recipient is None or sender is None:
         await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.NOT_SENT)
         notify_changed(user["id"], held["sender_thread_id"])
         await tell_sender(held, held_replies.NOT_SENT, recipient=name)
         return {"ok": True, "state": held_replies.NOT_SENT, "line": gone_line(name)}
     try:
-        sent = await _deliver(held, sender, recipient)
+        target = await run_in_db(fetch_send_target, held["recipient_thread_id"], user["id"], sender.get("project_id"))
+        if target is None:
+            await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.NOT_SENT)
+            notify_changed(user["id"], held["sender_thread_id"])
+            await tell_sender(held, held_replies.NOT_SENT, recipient=name)
+            return {"ok": True, "state": held_replies.NOT_SENT, "line": gone_line(name)}
+        scope_error = native_send_scope_error(
+            current=sender, target_payload=target, from_thread_id=held["sender_thread_id"],
+            target_thread_id=held["recipient_thread_id"], requested_scope_id=None,
+            backend_bound=held["via"] == "tool",
+        )
+        if scope_error:
+            await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.NOT_SENT, SCOPE_NOT_SENT)
+            notify_changed(user["id"], held["sender_thread_id"])
+            await tell_sender(held, SCOPE_NOT_SENT, recipient=name)
+            await note_asker(held, SCOPE_NOT_SENT)
+            return {"ok": True, "state": held_replies.NOT_SENT, "line": scope_line(name)}
+        sent = await _deliver(held, sender, target["thread_row"])
     except Exception:
         logger.exception("held reply {}: delivery failed", held_id)
         sent = "Error: delivery failed"
@@ -107,7 +132,7 @@ async def approve(held_id: str, body: DecisionBody) -> dict[str, Any]:
 
 async def _deliver(held: dict, sender: dict, recipient: dict) -> dict[str, Any] | str:
     """Run the send the sender would have run, on the stored bytes."""
-    kwargs = {"idempotency_key": held["idempotency_key"]}
+    kwargs = {"idempotency_key": held["idempotency_key"] or f"held-reply:{held['id']}"}
     step = None
     requested = held["plan_node_id"]
     if held["via"] == "tool":

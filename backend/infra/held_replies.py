@@ -77,6 +77,17 @@ def get(held_id: str, user_id: str, *, db: sqlite3.Connection) -> dict[str, Any]
     return None if row is None else dict(row)
 
 
+def recover_interrupted() -> None:
+    """Return approvals interrupted by a restart to the person's attention."""
+    from infra.held_reply_messages import RESTART_ERROR
+
+    with write_transaction(None, scope="recover_held_replies") as connection:
+        connection.execute(
+            "UPDATE held_replies SET state=?, error=?, decided_at=NULL WHERE state=?",
+            (HELD, RESTART_ERROR, APPROVED),
+        )
+
+
 def settle(
     held_id: str, *, expect: str, state: str, error: str | None = None,
     db: sqlite3.Connection | None = None,

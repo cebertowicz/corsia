@@ -90,10 +90,11 @@
 	);
 
 	/** Focus returns to the exact control that opened the chip. */
-	async function close() {
+	async function close(heldDecision = false) {
 		collapse();
 		await Promise.resolve();
-		const back = priorFocus?.isConnected ? priorFocus : openTrigger;
+		const back = priorFocus?.isConnected ? priorFocus : openTrigger?.isConnected ? openTrigger
+			: heldDecision ? document.querySelector<HTMLElement>('[role="textbox"][aria-label="Message CORSIA"]') : null;
 		priorFocus = null;
 		back?.focus();
 	}
@@ -277,13 +278,13 @@
 					opaque
 					flushBottom
 					open={showChip}
-					onClose={close}
+					onClose={() => void close()}
 				>
 					<!-- No chrome heading: the decision's own header already carries a
 					     "Decision · chat · project" eyebrow and the decision title. -->
 
 					{#if current.renderer === 'held-reply'}
-						<HeldReplyBody held={current.detail as HeldReplyDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} />
+						<HeldReplyBody held={current.detail as HeldReplyDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} onDecision={() => void close(true)} />
 					{:else}
 						<DecisionChip decision={current.detail as DecisionDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} {heldQueued} />
 					{/if}
@@ -293,7 +294,7 @@
 			{#key current.external_id}
 				<ExternalReviewRow
 					review={current.detail as ExternalReviewDetail}
-					onClose={close}
+					onClose={() => void close()}
 					onSkip={canSkip ? skip : undefined}
 					{onOpenDestination}
 				/>
