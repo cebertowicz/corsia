@@ -76,6 +76,23 @@ def _ensure_project_exists(db, project_id: str | None) -> None:
         raise ValueError(f"Project not found: {project_id}")
 
 
+def _refuse_outside_local_only_project(db, spawned_by: str | None, project_id: str | None) -> None:
+    """A worker may start in a Local only project only under a parent that is in that project.
+
+    Otherwise its report back to the outside parent would reach a cloud-bound thread unheld.
+    Chats carry no ``spawned_by`` and are not refused: their sends are held instead.
+    """
+    from llm.locality import project_cloud_models_off
+
+    if not spawned_by or not project_id or not project_cloud_models_off(project_id, db=db):
+        return
+    parent = db.execute("SELECT project_id FROM threads WHERE id = ?", (spawned_by,)).fetchone()
+    if parent is not None and (parent["project_id"] or None) != project_id:
+        raise SpawnVisibilityRejected(
+            "project_id: a worker can't start inside a Local only project its parent is not in"
+        )
+
+
 def create_fresh_thread(
     *,
     user_id: str,
@@ -103,6 +120,7 @@ def create_fresh_thread(
     now = created_at or _now()
     with write_transaction(db, scope="create_fresh_thread") as _db:
         _ensure_project_exists(_db, project_id)
+        _refuse_outside_local_only_project(_db, spawned_by, project_id)
         # Any Local-only parent or creating agent makes the new thread Local only.
         local_only = inherited_local_only((spawned_by, parent_thread_id, actor_thread_id), db=_db)
         require_local_only_model(

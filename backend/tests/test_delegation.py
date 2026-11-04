@@ -289,12 +289,11 @@ class TestDelegationSendConfirmation:
             "/api/delegation/threads/cloud-target/send", params={"token": _TOKEN},
             json={"message": "test", "from_thread_id": "sender-self"},
         )
-        assert response.status_code == (409 if cloud_off else 200)
+        assert response.status_code == 200
+        assert (response.json().get("status") == "held") is cloud_off
         assert delivered == ([] if cloud_off else [True])
-        if cloud_off:
-            assert "local_only_send_needs_confirm" in response.json()["detail"]
 
-    def test_local_only_sender_requires_confirmation_before_rest_delivery(
+    def test_local_only_sender_holds_a_cloud_bound_message_before_rest_delivery(
         self,
         client,
         deleg_db,
@@ -324,28 +323,25 @@ class TestDelegationSendConfirmation:
             lambda selector, **_kwargs: selector == "anthropic/claude-3-5-sonnet",
         )
         monkeypatch.setattr(delegation_api, "send_thread_input", deliver)
+        body = {
+            "message": "private material",
+            "from_thread_id": "sender-self",
+            "idempotency_key": "retry-key",
+        }
 
-        refused = client.post(
-            "/api/delegation/threads/cloud-target/send",
-            params={"token": _TOKEN},
-            json={"message": "private material", "from_thread_id": "sender-self"},
+        first = client.post(
+            "/api/delegation/threads/cloud-target/send", params={"token": _TOKEN}, json=body,
         )
-        assert refused.status_code == 409
-        assert "local_only_send_needs_confirm" in refused.json()["detail"]
+        again = client.post(
+            "/api/delegation/threads/cloud-target/send", params={"token": _TOKEN}, json=body,
+        )
+
+        assert first.status_code == 200
+        assert first.json()["status"] == "held"
+        assert again.json()["held_reply_id"] == first.json()["held_reply_id"]
         assert delivered == []
-
-        confirmed = client.post(
-            "/api/delegation/threads/cloud-target/send",
-            params={"token": _TOKEN},
-            json={
-                "message": "safe summary",
-                "from_thread_id": "sender-self",
-                "no_sensitive_content": True,
-            },
-        )
-
-        assert confirmed.status_code == 200
-        assert delivered == ["delivered"]
+        rows = deleg_db.execute("SELECT text, via, state FROM held_replies").fetchall()
+        assert [tuple(row) for row in rows] == [("private material", "api", "held")]
 
 
 class TestThreadStatus:

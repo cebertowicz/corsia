@@ -70,6 +70,12 @@ function applyNudge(message: PlansChangedMessage) {
 function startAmbient() {
 	if (ambientStop) return;
 	const offNudge = on('plans_changed', (message: PlansChangedMessage) => applyNudge(message));
+	// A held reply is not a plan change, but Activity counts it among what waits on the person.
+	const offHeld = on('held_reply_changed', () => {
+		for (const rec of [...observers.values()]) {
+			if (rec.key.kind === 'activity-workspace' || rec.key.kind === 'activity-project') void refresh(rec.key);
+		}
+	});
 	let wasConnected = get(connectionState) === 'connected';
 	const offConnection = connectionState.subscribe((state) => {
 		const connected = state === 'connected';
@@ -85,6 +91,7 @@ function startAmbient() {
 	});
 	ambientStop = () => {
 		offNudge();
+		offHeld();
 		offConnection();
 		offToken();
 	};

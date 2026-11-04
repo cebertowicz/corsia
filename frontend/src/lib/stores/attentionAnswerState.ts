@@ -7,7 +7,8 @@ import { writable } from "svelte/store";
  * draft and its retry key stay in `drafts`, so a retry carries the same key.
  */
 export type AnswerState =
-  | { state: "sending" }
+  /** `line` replaces "Answer recorded" in the dock's receipt slot while the write is in flight. */
+  | { state: "sending"; line?: string }
   | {
       state: "failed";
       kind: "rejected" | "stale" | "unauthorized" | "error";

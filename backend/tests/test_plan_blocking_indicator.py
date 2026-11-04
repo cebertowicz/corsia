@@ -161,3 +161,20 @@ def test_the_revision_token_still_moves_when_the_awaiting_count_changes(db):
     raise_decision(db, "child", "child")
 
     assert _envelope_thread(db, "root")["revision_token"] != before
+
+
+def test_the_activity_token_moves_when_a_reply_is_held_and_the_plan_count_does_not(db):
+    import infra.held_replies as held_replies
+    from plans import activity_projection
+
+    before = activity_projection.read_workspace(actor=_human(), db=db)
+
+    held_replies.hold(
+        user_id="user-1", sender_thread_id="child", recipient_thread_id="root",
+        text="reply text", via="tool", db=db,
+    )
+    after = activity_projection.read_workspace(actor=_human(), db=db)
+
+    assert after["revision_token"] != before["revision_token"]
+    assert after["attention"]["awaiting_count"] == before["attention"]["awaiting_count"] + 1
+    assert _envelope_thread(db, "root")["attention"]["awaiting_count"] == 0

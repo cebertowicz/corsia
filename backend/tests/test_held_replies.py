@@ -1,0 +1,277 @@
+"""A held reply: a Local only agent's message to a cloud-bound thread waits for the person.
+
+The text stored at the hold is the text delivered on approval; decline delivers nothing; a retry
+with the same key returns the first hold; no setting releases a hold; a worker's final result is
+not held; and a worker can't start inside a Local only project its parent is not in.
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+from fastapi.testclient import TestClient
+
+from delegation_fixtures import _TOKEN, client, deleg_db, insert_thread  # noqa: F401
+
+CLOUD = "anthropic/claude-3-5-sonnet"
+
+
+@pytest.fixture
+def held_client(client, deleg_db, monkeypatch):
+    """The delegation client plus the decision routes, a local-only sender and a cloud-bound asker."""
+    from api import held_replies as held_api
+    from infra import local_only
+
+    monkeypatch.setattr(held_api, "authenticate", lambda t: {"id": "u-test"} if t == _TOKEN else None)
+    client.app.include_router(held_api.router)
+    deleg_db.execute("UPDATE threads SET local_only=1 WHERE id='sender-self'")
+    insert_thread(deleg_db, "asker", model=CLOUD, title="Researcher")
+    monkeypatch.setattr(local_only, "_is_cloud", lambda selector, **_kwargs: selector == CLOUD)
+    return client
+
+
+@pytest.fixture
+def seen(monkeypatch):
+    """What the sender is told and what is delivered, in order."""
+    from events import delivery
+    from tools import delegate_send
+
+    log: dict[str, list] = {"delivered": [], "told": []}
+
+    async def deliver(_thread_id, _target, text, *_args, **_kwargs):
+        log["delivered"].append(text)
+        return {"ok": True, "driver": "turn"}
+
+    async def told(thread_id, event, summary, _details=None, **kwargs):
+        log["told"].append((thread_id, event, summary, kwargs.get("chip")))
+        return True
+
+    async def no_plan(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(delegate_send, "_send", deliver)
+    monkeypatch.setattr(delegate_send, "_prepare_plan_task", no_plan)
+    monkeypatch.setattr(delegate_send, "native_send_scope_error", lambda **_kwargs: None)
+    monkeypatch.setattr(delivery, "deliver_to_thread", told)
+    return log
+
+
+async def _send_by_tool(message: str = "the answer", **kwargs) -> dict:
+    from tools.delegate_send import DelegateSendTool
+
+    result = await DelegateSendTool().execute("asker", message, _thread_id="sender-self", **kwargs)
+    return json.loads(result)
+
+
+def _post(held_client, held_id: str, action: str):
+    return held_client.post(f"/api/held-replies/{held_id}/{action}", json={"token": _TOKEN})
+
+
+def _rows(db, *columns: str) -> list[tuple]:
+    return [tuple(r) for r in db.execute(f"SELECT {', '.join(columns)} FROM held_replies").fetchall()]
+
+
+@pytest.mark.asyncio
+async def test_the_tool_holds_and_approval_delivers_the_stored_text_once(held_client, deleg_db, seen):
+    held = await _send_by_tool("the answer", idempotency_key="k1")
+
+    assert held["status"] == "held"
+    assert seen["delivered"] == []
+    assert _rows(deleg_db, "text", "state") == [("the answer", "held")]
+
+    approved = _post(held_client, held["held_reply_id"], "approve")
+
+    assert approved.status_code == 200
+    assert approved.json()["state"] == "sent"
+    assert seen["delivered"] == ["the answer"]
+    assert _rows(deleg_db, "state") == [("sent",)]
+    assert [(event, chip) for _t, event, _s, chip in seen["told"]] == [
+        ("held_reply.sent", "The reply to the Researcher agent was sent."),
+    ]
+    assert _post(held_client, held["held_reply_id"], "approve").status_code == 409
+    assert seen["delivered"] == ["the answer"]
+
+
+@pytest.mark.asyncio
+async def test_decline_delivers_nothing_and_tells_the_sender(held_client, deleg_db, seen):
+    held = await _send_by_tool("the answer")
+
+    declined = _post(held_client, held["held_reply_id"], "decline")
+
+    assert declined.status_code == 200
+    assert seen["delivered"] == []
+    assert _rows(deleg_db, "state") == [("declined",)]
+    assert [event for _t, event, _s, _c in seen["told"]] == ["held_reply.declined"]
+    assert _post(held_client, held["held_reply_id"], "approve").status_code == 409
+    assert seen["delivered"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_retry_with_the_same_key_returns_the_existing_hold(deleg_db, held_client, seen):
+    first = await _send_by_tool("the answer", idempotency_key="same")
+    again = await _send_by_tool("the answer", idempotency_key="same")
+
+    assert again["held_reply_id"] == first["held_reply_id"]
+    assert len(_rows(deleg_db, "id")) == 1
+
+
+@pytest.mark.asyncio
+async def test_auto_approve_does_not_release_a_hold(deleg_db, held_client, seen):
+    from infra import settings
+
+    settings.save_setting_merge(
+        "agents", {"defaults": {"host_access_auto_approve": True}}, db=deleg_db,
+    )
+    assert settings.get_host_access_auto_approve() is True
+
+    held = await _send_by_tool("the answer")
+
+    assert held["status"] == "held"
+    assert seen["delivered"] == []
+    assert _rows(deleg_db, "state") == [("held",)]
+
+
+@pytest.mark.asyncio
+async def test_the_asker_sees_a_note_then_a_receipt_and_is_not_sent_the_reply_early(
+    deleg_db, held_client, seen,
+):
+    held = await _send_by_tool("the answer")
+    notes = deleg_db.execute(
+        "SELECT metadata FROM messages WHERE thread_id='asker' AND role='system'",
+    ).fetchall()
+    assert [json.loads(n["metadata"])["type"] for n in notes] == ["held_reply_note"]
+
+    _post(held_client, held["held_reply_id"], "approve")
+    kinds = [
+        json.loads(n["metadata"]).get("event_type") or json.loads(n["metadata"])["type"]
+        for n in deleg_db.execute(
+            "SELECT metadata FROM messages WHERE thread_id='asker' AND role='system' ORDER BY rowid",
+        )
+    ]
+
+    assert kinds == ["held_reply_note", "held_reply.sent"]
+
+
+@pytest.mark.asyncio
+async def test_a_missing_recipient_is_not_sent_and_a_failed_delivery_returns_to_held(
+    deleg_db, held_client, seen, monkeypatch,
+):
+    from tools import delegate_send
+
+    failed = await _send_by_tool("first")
+
+    async def broken(*_args, **_kwargs):
+        return "Error: provider down"
+
+    monkeypatch.setattr(delegate_send, "_send", broken)
+    refused = _post(held_client, failed["held_reply_id"], "approve")
+
+    assert refused.status_code == 502
+    assert _rows(deleg_db, "state") == [("held",)]
+    assert "Approve once to try again" in _rows(deleg_db, "error")[0][0]
+
+    deleg_db.execute("DELETE FROM threads WHERE id='asker'")
+    deleg_db.commit()
+    gone = _post(held_client, failed["held_reply_id"], "approve")
+
+    assert gone.json()["state"] == "not_sent"
+    assert _rows(deleg_db, "state") == [("not_sent",)]
+
+
+@pytest.mark.asyncio
+async def test_a_workers_final_result_to_a_cloud_parent_is_not_held(deleg_db, held_client, seen, monkeypatch):
+    from tools import delegate_send, delegation
+
+    seen_completion = []
+
+    async def completion(from_thread_id, thread_id, _turn, message):
+        seen_completion.append((from_thread_id, thread_id, message))
+        return delegation._json({"ok": True})
+
+    monkeypatch.setattr(delegation, "_send_explicit_completion", completion)
+
+    result = await delegate_send.DelegateSendTool().execute(
+        "asker", "final result", intent="completion", _thread_id="sender-self",
+    )
+
+    assert json.loads(result) == {"ok": True}
+    assert seen_completion == [("sender-self", "asker", "final result")]
+    assert _rows(deleg_db, "id") == []
+
+
+def test_the_hold_names_a_worker_by_its_visible_parent(deleg_db, held_client):
+    from infra.held_reply_messages import visible_name
+
+    insert_thread(deleg_db, "worker", spawned_by="sender-self", model=CLOUD, title="Worker 7")
+
+    assert visible_name("worker", db=deleg_db) == "Sender Thread"
+
+
+def test_a_worker_cannot_start_inside_a_local_only_project_its_parent_is_not_in(
+    deleg_db, held_client,
+):
+    deleg_db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('wall','Wall','t','t')")
+    deleg_db.execute(
+        "INSERT INTO project_inference_policies(project_id,cloud_models_off) VALUES ('wall',1)",
+    )
+    deleg_db.commit()
+
+    outside = held_client.post(
+        "/api/delegation/threads", params={"token": _TOKEN},
+        json={"model": "omlx@local/qwen", "thread_kind": "subagent", "project_id": "wall",
+              "spawned_by": "sender-self"},
+    )
+    chat = held_client.post(
+        "/api/delegation/threads", params={"token": _TOKEN},
+        json={"model": "omlx@local/qwen", "project_id": "wall", "from_thread_id": "sender-self"},
+    )
+
+    assert outside.status_code == 403
+    assert "Local only project" in outside.json()["detail"]
+    assert chat.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_the_create_tool_refuses_the_same_worker_and_allows_one_inside_the_project(
+    deleg_db, held_client, monkeypatch,
+):
+    from tools import delegation
+    from tools.delegation import DelegateCreateThreadTool
+
+    monkeypatch.setattr(delegation, "eligible_delegation_model", lambda model, **_kwargs: (model, None))
+
+    deleg_db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('wall','Wall','t','t')")
+    deleg_db.execute(
+        "INSERT INTO project_inference_policies(project_id,cloud_models_off) VALUES ('wall',1)",
+    )
+    insert_thread(deleg_db, "insider", model="omlx@local/qwen", project_id="wall")
+    tool = DelegateCreateThreadTool()
+    spec = {"model": "omlx@local/qwen", "thread_kind": "subagent", "project_id": "wall"}
+
+    refused = await tool.execute(**spec, _thread_id="sender-self")
+    allowed = await tool.execute(**spec, _thread_id="insider")
+
+    assert refused.startswith("Error creating delegated thread:")
+    assert "Local only project" in refused
+    assert json.loads(allowed)["ok"] is True
+
+
+def test_the_dock_row_and_chats_list_item_come_from_the_same_pending_rows(deleg_db, held_client):
+    from plans import held_attention
+
+    insert_thread(deleg_db, "worker", spawned_by="sender-self", model="omlx@local/qwen", title="Hidden worker")
+    import infra.held_replies as held_replies
+
+    held_replies.hold(
+        user_id="u-test", sender_thread_id="worker", recipient_thread_id="asker",
+        text="from the worker", via="tool", db=deleg_db,
+    )
+
+    [row] = held_attention.queue_rows(deleg_db, "u-test")
+    chats = held_attention.items_by_thread(deleg_db, "u-test")
+
+    assert row["detail"]["source"]["thread_id"] == "sender-self"
+    assert row["detail"]["title"] == "Send Sender Thread's reply to the Researcher agent on Anthropic?"
+    assert list(chats) == ["sender-self"]
+    assert chats["sender-self"][0]["kind"] == "hold"

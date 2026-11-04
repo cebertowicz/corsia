@@ -25,9 +25,10 @@
 	import { forgetAutoOpen, holdsDraft, judgeAutoOpen, noteLoad } from '$lib/stores/attentionAutoOpen';
 	import { activeThreadId, messages } from '$lib/stores/threads';
 	import DecisionChip from './DecisionChip.svelte';
+	import HeldReplyBody from './HeldReplyBody.svelte';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import ExternalReviewRow from './ExternalReviewRow.svelte';
-	import { label, decisionMeta, regionLabel as getRegionLabel } from './dockPresentation';
+	import { actionWord, decisionMeta, heldMeta, label, recordingLine, regionLabel as getRegionLabel } from './dockPresentation';
 	import {
 		collapse,
 		EMPTY,
@@ -44,7 +45,7 @@
 		visibleQueue,
 	} from '$lib/stores/attentionDock.svelte';
 	import { answerNotice, answers } from '$lib/stores/attentionAnswerState';
-	import type { AttentionDestination, DecisionDetail, ExternalReviewDetail } from '$lib/api/attentionQueue';
+	import type { AttentionDestination, DecisionDetail, ExternalReviewDetail, HeldReplyDetail } from '$lib/api/attentionQueue';
 
 	let {
 		writesDisabled = false,
@@ -78,10 +79,9 @@
 	const effectiveWritesDisabled = $derived(
 		writesDisabled || $stale || $connectionState !== 'connected',
 	);
-	/** Answers shown as recorded whose write is still in flight. */
-	const recording = $derived(
-		Object.values($answers).some((answer) => answer.state === 'sending'),
-	);
+	/** The receipt line for an answer shown as recorded whose write is still in flight. */
+	const recording = $derived(recordingLine($answers));
+	const heldQueued = $derived(dockQueue.items.some((item) => item.renderer === 'held-reply'));
 	const failed = $derived(
 		current ? ($answers[current.external_id]?.state === 'failed') : false,
 	);
@@ -179,6 +179,7 @@
 		// Reuses the existing invalidation signal rather than inventing one; a
 		// missed nudge is recovered on reconnect.
 		const offNudge = on('plans_changed', () => { void reload(); });
+		const offHeld = on('held_reply_changed', () => { void reload(); });
 		const offReplies = subscribeReplyAttention(() => { void reload(); });
 		// Typing, pasting or sending ends in a re-judge once the window has passed,
 		// so a hold on a draft is released when the draft is sent or cleared.
@@ -216,6 +217,7 @@
 			document.removeEventListener('focusout', rejudge);
 			forgetAutoOpen();
 			offNudge?.();
+			offHeld?.();
 			offReplies();
 			offConnection();
 			offToken();
@@ -228,7 +230,7 @@
 {#if recording}
 	<!-- The answer is already out of the queue; this is its receipt until the
 	     write confirms, and a failed write returns the decision with its reason. -->
-	<p class="dock-receipt" role="status">Answer recorded</p>
+	<p class="dock-receipt" role="status">{recording}</p>
 {:else if $answerNotice}
 	<!-- The question left the queue before this answer reached it. -->
 	<p class="dock-receipt" role="status">{$answerNotice}</p>
@@ -261,17 +263,17 @@
 					<span class="dock-count">{position} of {dockQueue.count}</span>
 				{/if}
 				<span class="dock-action">
-					{failed ? 'Not saved — Retry' : current.renderer === 'decision' ? 'Answer' : 'Review'}
+					{actionWord(current, failed)}
 				</span>
 				<svg class="dock-chevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
 			</button>
 			</div>
 		{/if}
-		{#if current.renderer === 'decision'}
+		{#if current.renderer === 'decision' || current.renderer === 'held-reply'}
 			{#key current.external_id}
 				<AdaptiveDrawer
-					ariaLabel={`Decision — ${label(current)}`}
-					contextLabel={decisionMeta(current.detail as DecisionDetail)}
+					ariaLabel={`${current.renderer === 'held-reply' ? 'Held reply' : 'Decision'} — ${label(current)}`}
+					contextLabel={current.renderer === 'held-reply' ? heldMeta(current.detail as HeldReplyDetail, position, dockQueue.count) : decisionMeta(current.detail as DecisionDetail)}
 					opaque
 					flushBottom
 					open={showChip}
@@ -280,11 +282,11 @@
 					<!-- No chrome heading: the decision's own header already carries a
 					     "Decision · chat · project" eyebrow and the decision title. -->
 
-					<DecisionChip
-						decision={current.detail as DecisionDetail}
-						writesDisabled={effectiveWritesDisabled}
-						onSkip={canSkip ? skip : undefined}
-					/>
+					{#if current.renderer === 'held-reply'}
+						<HeldReplyBody held={current.detail as HeldReplyDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} />
+					{:else}
+						<DecisionChip decision={current.detail as DecisionDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} {heldQueued} />
+					{/if}
 				</AdaptiveDrawer>
 			{/key}
 		{:else if showChip}
@@ -301,7 +303,7 @@
 			<!-- Deferred, not hidden: say why, and keep the control focusable so a
 			     keyboard or screen-reader user is not silently skipped past it. -->
 			<p class="dock-deferred" id={deferredId}>
-				Answer this after the host-access request above.
+				{current.renderer === 'held-reply' ? 'Review' : 'Answer'} this after the host-access request above.
 			</p>
 		{/if}
 		{#if $stale}
