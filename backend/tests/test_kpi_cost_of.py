@@ -19,12 +19,17 @@ LOCAL = "omlx@server/a-local-model"
 
 
 def usage(db, usage_id: str, thread: str, model: str = "claude-code/opus", *, prompt: int = 1_000_000,
-          manifest: str | None = "m", source: str = "external_harness:claude-code") -> None:
+          manifest: str | None = "m", source: str = "external_harness:claude-code", turn: str | None = None) -> None:
     """One plan-less usage row, as a rule-started worker writes it."""
     db.execute("INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,"
-               "cache_read_tokens,total_tokens,source,created_at,context_manifest_id) VALUES (?,?,?,?,0,0,0,?,"
-               "?,'2026-01-02T00:00:00Z',?)",
-               (usage_id, thread, model, prompt, prompt, source, manifest))
+               "cache_read_tokens,total_tokens,source,created_at,context_manifest_id,turn_id) VALUES (?,?,?,?,0,0,0,?,"
+               "?,'2026-01-02T00:00:00Z',?,?)",
+               (usage_id, thread, model, prompt, prompt, source, manifest, turn))
+
+
+def open_turn(db, turn_id: str, thread: str, status: str = "completed") -> None:
+    db.execute("INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,boot_epoch) "
+               "VALUES (?,?,0,'test/model',?,'2026-01-02T00:00:00Z','test')", (turn_id, thread, status))
 
 
 @pytest.fixture
@@ -70,6 +75,7 @@ def test_a_thread_with_no_usage_or_another_users_thread_is_absent(ledger) -> Non
 
 
 def test_every_thread_is_read_in_one_query(ledger) -> None:
+    open_turn(ledger, "settled", "w1")
     queries: list[str] = []
     ledger.set_trace_callback(queries.append)
     thread_costs(ledger, "steve", ["w1", "w2", "w3", "w4"])
