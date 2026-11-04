@@ -24,6 +24,7 @@ from core.fork_pressure import soft_pressure_remaining
 from core.fork_runtime import ForkKind, ForkStepLimitError, ForkStepLimitReached
 from core.fork_failures import ForkCredentialsUnavailable
 from core.fork_types import (
+    ForkInputExhausted,
     ProviderForkRejected,
     WarmForkUnusable,
     ProviderForkRequest,
@@ -197,7 +198,9 @@ async def _truncated_result(
             "\n".join(bodies), {"calls": usage_calls}, FORK_CONTEXT_TRUNCATED,
         )
     room = await asyncio.to_thread(input_room, request, messages, tools, 0, measured)
-    raise ProviderForkRejected(
+    # A reply cut off at its output cap ran out of output, not input: no cold route is shown to help.
+    refusal = ProviderForkRejected if path == "iv_output_cap" else ForkInputExhausted
+    raise refusal(
         f"{FORK_CONTEXT_TRUNCATED}: path={path} iteration={iteration} "
         f"counted={room.counted} bound={room.bound} unusable={room.unusable} "
         f"finish_reason={getattr(response, 'finish_reason', None)} "
