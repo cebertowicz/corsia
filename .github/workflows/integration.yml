@@ -41,9 +41,10 @@ jobs:
     # macOS: the L3 contract suite runs agent shells under Seatbelt
     # (sandbox-exec) and requires Safehouse, neither of which exists on Linux.
     runs-on: macos-15
-    # Green runs take 8 to 15 minutes depending on the runner (p90 13 min,
-    # 2026-10-27); a slow runner finished all tests at 13.3 min and was still
-    # cancelled at 15, so the cap is a hang guard with room for that hardware.
+    # Green jobs took 11 to 19 minutes on 2026-11-04 (median 15; p90 13 on
+    # 2026-10-27). The cap is a hang guard: on a slow runner a few heavy tests
+    # run two to three times longer and reach it, so find them with the
+    # --durations report below before moving the cap.
     timeout-minutes: 25
 
     env:
@@ -147,6 +148,7 @@ jobs:
           ../.venv/bin/python -m pytest -m "integration" \
             --ignore=tests/test_host_access_reviewer_live_inference.py \
             --tb=short -q -rs \
+            --durations=25 \
             -x
 
   live-reviewer:
