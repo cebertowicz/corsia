@@ -58,7 +58,7 @@ def attach(row: Mapping[str, Any], skill: Any, *, db: sqlite3.Connection) -> tup
         "quotes": [word["quote"] for word in intent["intent_words"]]}
 
 
-def stamp(record: Mapping[str, Any] | None, *, db: sqlite3.Connection) -> dict[str, Any]:
+def stamp(record: Mapping[str, Any] | None, *, db: sqlite3.Connection | None) -> dict[str, Any]:
     """The ``worker.result`` facts that say which intent the run had and its revision now.
     All but the fresh revision come from the claim's record, never from the worker's answer;
     ``intent_text`` is what publish checks its words against."""

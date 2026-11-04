@@ -387,3 +387,78 @@ async def test_a_result_on_an_artifact_reaches_its_owner_through_rule_0(world, m
 async def test_a_result_its_rule_owners_script_took_does_not_reach_the_items_owner(world, monkeypatch):
     _pr_owner, delivered = await _result_on_a_prs_artifact(world, monkeypatch, took=True)
     assert delivered == []
+
+
+# 6c -- the owner's script on a worker.result for a PR gets that PR's repository as its read
+# channel, but only while the project tracks the repository.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tracked, expected", [(True, "o/r"), (False, None)])
+async def test_a_script_on_a_pr_result_gets_the_prs_repository_channel(world, monkeypatch, tracked, expected):
+    from tests.event_routing_helpers import mk_session, pr_payload, register_pr, route
+
+    repo = "o/r"
+    monkeypatch.setattr("events.connectors.github_notifications_feed.tracked_github_repositories",
+                        lambda project_id=None: frozenset({repo}) if tracked and project_id == world["project"]
+                        else frozenset())
+    monkeypatch.setattr("events.connectors.github_notifications_feed.projects_tracking_github_repository",
+                        lambda repository: frozenset({world["project"]}) if tracked and repository == repo
+                        else frozenset())
+    register_pr(repo, 7, mk_session("rw-pr-owner", project_id=world["project"]))
+    await _script_rule(owner_script(world, monkeypatch, "publish.sh"), "result")
+    created = await atool(OWNER, operation="create", connector="github", event_type="pr.synchronize",
+                          action="start_worker", workflow_id="worker-flow", request_identity_fact="sha",
+                          match=[{"field": "sha", "op": "present"}])
+    assert isinstance(created, dict), created
+    with patch("events.delivery.send_thread_input", AsyncMock()):
+        await route("webhook.github.pr_synchronize", pr_payload(repo, 7, action="synchronize"))
+        await settle_all()
+    await run_scripts()
+    assert [event["type"] for event in world["script_inputs"]] == ["worker.result"]
+    assert world["script_repos"] == [expected]
+
+
+# The settled worker's model is the one its start spawned, from the start's own record.
+@pytest.mark.parametrize("outcome, kind", [("returned", "worker.result"), ("no_result", "worker.no_result")])
+def test_the_spawned_model_reaches_both_worker_events(outcome, kind):
+    from automation import worker_settle
+
+    row = {"id": 1, "thread_id": OWNER, "rule_id": "r", "event_id": "e", "request_identity": "i",
+           "connector": "qa", "event_type": "request", "artifact_external_id": "o/r#1",
+           "artifact_integration": "github", "artifact_type": "pull_request"}
+    said = {"result": "{}"} if outcome == "returned" else {"reason": "stopped"}
+    spawned = {"workflow": "w@1", "settings": {"model": "claude-code/opus[1m]"}}
+    item = worker_settle.settlement(row, spawned, outcome, {**said, "model": "forged"})
+    assert item.event_type == kind and item.facts["model"] == "claude-code/opus[1m]"
+    never_spawned = worker_settle.settlement(row, {"workflow": "w@1"}, outcome, said)
+    assert "model" not in never_spawned.facts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind, reply", [("result", fenced({"findings": []})), ("no_result", "no json here")])
+async def test_a_settled_workers_event_carries_its_spawned_model_through_the_runtime(world, monkeypatch, kind, reply):
+    world["reply"].write_text(reply)
+    await _script_rule(owner_script(world, monkeypatch, "model.sh"), kind)
+    await make_rule()
+    await request()
+    await settle_all()
+    await run_scripts()
+    [event] = world["script_inputs"]
+    assert event["type"] == f"worker.{kind}"
+    assert event["facts"]["model"] == "claude-code/sonnet"  # the owner's model, as spawned
+
+
+# A settled worker's event names its GitHub artifact's repository, so the owner's script on it
+# can be given that repository's read channel; any other artifact names none.
+@pytest.mark.parametrize("integration, external_id, repo", [
+    ("github", "Owner.1/re_po-2#12", "Owner.1/re_po-2"),
+    ("github", "o/r#not-a-number", None),
+    ("gitlab", "o/r#12", None),
+])
+def test_a_settled_workers_event_names_its_github_artifacts_repository(integration, external_id, repo):
+    from automation import worker_settle
+
+    row = {"id": 1, "thread_id": OWNER, "rule_id": "r", "event_id": "e", "request_identity": "i",
+           "connector": "qa", "event_type": "request", "artifact_external_id": external_id,
+           "artifact_integration": integration, "artifact_type": "pull_request"}
+    item = worker_settle.settlement(row, {"workflow": "w@1"}, "no_result", {"reason": "stopped", "repo": "x/y"})
+    assert item.facts.get("repo") == repo

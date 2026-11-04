@@ -350,3 +350,4 @@ def test_a_channel_that_cannot_open_says_why(spawned, monkeypatch):
         asyncio.run(script_sandbox.run_script(THREAD, None, spawned["script"], run_id="r",
                                               timeout_seconds=5, github_repo="o/r"))
     assert spawned["envs"] == []
+
