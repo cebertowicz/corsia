@@ -28,7 +28,7 @@ from infra.db_async import run_in_db
 from parent_review import disposition as D
 from parent_review.profiles import ProfileExecutionError, run_review_profile
 from doceditor import reply_attention, review_bar
-from plans import held_attention, public
+from plans import public
 from registry import artifact_record as AR
 from registry import attention
 
@@ -169,7 +169,7 @@ def _queue_for(user_id: str, *, db=None) -> list[dict]:
         annotated = public.annotate_attention(
             _authorized_raised(None, user_id, db=_db), db=_db,
         )
-        ordered = public.attention_queue([*annotated, *held_attention.queue_rows(_db, user_id)])
+        ordered = public.attention_queue([*annotated, *public.held_reply_queue_rows(_db, user_id)])
         counted = public.activity_counted_plan_ids(
             {row["detail"]["plan_id"] for row in ordered if row["renderer"] == "decision"},
             actor=public.PlanActor(None, user_id, None, kind="user"), db=_db,
