@@ -38,6 +38,7 @@
 		activeId,
 		focusRequest,
 		focusTarget,
+		goneReply,
 		queue,
 		reload,
 		shownItem,
@@ -91,7 +92,7 @@
 	);
 	// Retain only the visual being dismissed; queue and receipt state continue immediately.
 	let closingHeld = $state<{ item: AttentionQueueItem; position: number; count: number } | null>(null);
-	const drawerItem = $derived(closingHeld?.item ?? current);
+	const drawerItem = $derived($goneReply?.item ?? closingHeld?.item ?? current);
 
 	function beginHeldClose() {
 		if (current) closingHeld = { item: current, position, count: dockQueue.count };
@@ -100,6 +101,7 @@
 
 	/** Focus returns to the exact control that opened the chip. */
 	async function close(heldDecision = false) {
+		goneReply.set(null);
 		collapse();
 		await Promise.resolve();
 		const back = priorFocus?.isConnected ? priorFocus : openTrigger?.isConnected ? openTrigger
@@ -297,7 +299,7 @@
 			contextLabel={drawerItem.renderer === 'held-reply' ? heldMeta(drawerItem.detail as HeldReplyDetail, closingHeld?.position ?? position, closingHeld?.count ?? dockQueue.count) : decisionMeta(drawerItem.detail as DecisionDetail)}
 			opaque
 			flushBottom
-			open={!closingHeld && showChip}
+			open={!!$goneReply || (!closingHeld && showChip)}
 			onClose={() => void close()}
 			onClosed={() => { closingHeld = null; }}
 		>
@@ -305,7 +307,7 @@
 			     "Decision · chat · project" eyebrow and the decision title. -->
 
 			{#if drawerItem.renderer === 'held-reply'}
-				<HeldReplyBody held={drawerItem.detail as HeldReplyDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} onDecision={beginHeldClose} />
+				<HeldReplyBody held={drawerItem.detail as HeldReplyDetail} writesDisabled={effectiveWritesDisabled} goneLine={$goneReply?.line} onSkip={canSkip && !$goneReply ? skip : undefined} onDecision={beginHeldClose} />
 			{:else}
 				<DecisionChip decision={drawerItem.detail as DecisionDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} {heldQueued} />
 			{/if}

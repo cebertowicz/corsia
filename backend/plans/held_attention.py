@@ -10,8 +10,10 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from core.media_fit import IMAGE_LIMIT_PROVIDER_BY_HARNESS
 from core.thread_identity import root_visible_thread_ids
 import infra.held_replies as held_replies
+from infra.held_reply_messages import UNTITLED_CHAT
 from plans.attention_detail import HELD_REPLY_PRIORITY
 
 HELD_REPLY_RENDERER = "held-reply"
@@ -49,11 +51,10 @@ def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> 
     recipient_ids = sorted({str(row["recipient_thread_id"]) for row in rows})
     recipients = {
         str(row["id"]): row for row in db.execute(
-            "SELECT t.id, t.title, (SELECT m.provider FROM models m "
-            "WHERE m.id=COALESCE(t.pending_model,t.model) OR m.litellm_model=COALESCE(t.pending_model,t.model) "
-            "LIMIT 1) AS provider, (SELECT m.harness FROM models m "
-            "WHERE m.id=COALESCE(t.pending_model,t.model) OR m.litellm_model=COALESCE(t.pending_model,t.model) "
-            "LIMIT 1) AS harness FROM threads t "
+            "SELECT t.id, t.title, m.provider, m.harness FROM threads t "
+            "LEFT JOIN models m ON m.id=(SELECT m2.id FROM models m2 "
+            "WHERE m2.id=COALESCE(t.pending_model,t.model) OR m2.litellm_model=COALESCE(t.pending_model,t.model) "
+            "ORDER BY m2.id LIMIT 1) "
             f"WHERE t.id IN ({','.join('?' for _ in recipient_ids)})",
             recipient_ids,
         )
@@ -67,12 +68,12 @@ def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> 
         recipient = recipients.get(str(row["recipient_thread_id"]))
         provider = str(recipient["provider"] or "") if recipient else ""
         harness = str(recipient["harness"] or "") if recipient else ""
-        vendor = {"claude-code": "anthropic", "codex": "openai"}.get(harness, provider)
+        vendor = IMAGE_LIMIT_PROVIDER_BY_HARNESS.get(harness, provider)
         out.append({
             "id": str(row["id"]),
             "sender_thread_id": sender,
             "visible_thread_id": str(shown["id"]),
-            "visible_title": shown["title"] or "Untitled thread",
+            "visible_title": shown["title"] or UNTITLED_CHAT,
             "project_id": shown["project_id"],
             "project_label": shown["project_name"],
             "recipient_label": held_replies.recipient_label(recipient["title"] if recipient else row["recipient_title"]),

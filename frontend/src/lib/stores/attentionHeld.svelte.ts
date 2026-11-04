@@ -7,7 +7,8 @@ import { get } from "svelte/store";
 import type { HeldReplyDetail } from "$lib/api/attentionQueue";
 import { decideHeldReply, type HeldVerb } from "$lib/api/heldReplies";
 import { token } from "$lib/stores/auth";
-import { activeId, expandedId, identityEpoch, queue, reload, visibleQueue } from "./attentionDock.svelte";
+import { handleWsError } from "$lib/ws/handlersConnection";
+import { activeId, expandedId, goneReply, identityEpoch, queue, reload, visibleQueue } from "./attentionDock.svelte";
 import { rollBack } from "./attentionAnswer.svelte";
 import { answers, setAnswer, showNotice } from "./attentionAnswerState";
 
@@ -21,7 +22,7 @@ export async function decideHeld(held: HeldReplyDetail, verb: HeldVerb, onStarte
   if (get(answers)[id]?.state === "sending") return;
   const bearer = get(token);
   if (!bearer) {
-    rollBack(id, "unauthorized", "This reply isn’t available — sign in and try again.");
+    handleWsError({ message: "Invalid or expired session" });
     return;
   }
   const generation = identityEpoch();
@@ -41,7 +42,7 @@ export async function decideHeld(held: HeldReplyDetail, verb: HeldVerb, onStarte
   const outcome = await decideHeldReply(bearer, id, verb);
   if (generation !== identityEpoch()) return;
   if (outcome.status === "unauthorized") {
-    rollBack(id, "unauthorized", "This reply isn’t available — sign in and try again.");
+    handleWsError({ message: "Invalid or expired session" });
     return;
   }
   if (outcome.status === "error") {
@@ -57,6 +58,11 @@ export async function decideHeld(held: HeldReplyDetail, verb: HeldVerb, onStarte
   setAnswer(id, null);
   // The sender's receipt lands in its chat; until then the dock says what happened to the reply.
   if (outcome.status === "declined") showNotice(declinedLine(held.recipient));
-  else if (outcome.status === "not_sent") showNotice(outcome.line);
+  else if (outcome.status === "not_sent") {
+    const item = items.find((entry) => entry.external_id === id);
+    if (item && outcome.line.endsWith(" no longer exists.")) {
+      goneReply.set({ item, line: outcome.line });
+    } else showNotice(outcome.line);
+  }
   await reload();
 }

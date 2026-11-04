@@ -13,12 +13,11 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
-from pydantic import BaseModel
 
 import infra.held_replies as held_replies
-from infra.auth import authenticate, is_person_session
+from infra.auth import require_human_user, require_user_header_only
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.failure_reference import ReferencedHTTPException, new_error_reference
@@ -32,10 +31,6 @@ from tools import delegate_send, delegation
 from tools.delegation_send_context import fetch_send_target, native_send_scope_error
 
 router = APIRouter(prefix="/api/held-replies", tags=["held-replies"])
-
-
-class DecisionBody(BaseModel):
-    token: str
 
 
 def _load(held_id: str, user_id: str) -> tuple[dict | None, dict | None, dict | None, str]:
@@ -60,12 +55,7 @@ def _settle(held_id: str, expect: str, state: str, error: str | None = None, err
     return held_replies.settle(held_id, expect=expect, state=state, error=error, error_ref=error_ref)
 
 
-async def _claim(body: DecisionBody, held_id: str, state: str):
-    user = authenticate(body.token)
-    if user is None:
-        raise HTTPException(401, "invalid token")
-    if not is_person_session(user):
-        raise HTTPException(403, "This change needs the signed-in person: open CORSIA and make it there.")
+async def _claim(user: dict, held_id: str, state: str):
     held, sender, recipient, name = await run_in_db(_load, held_id, user["id"])
     if held is None:
         raise HTTPException(404, "Held reply not found")
@@ -75,13 +65,14 @@ async def _claim(body: DecisionBody, held_id: str, state: str):
 
 
 @router.post("/{held_id}/decline")
-async def decline(held_id: str, body: DecisionBody) -> dict[str, Any]:
+async def decline(held_id: str, user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
     """Deliver nothing; the sender and the asker are told it was not sent."""
-    return await asyncio.shield(_claim_and_decline(held_id, body))
+    require_human_user(user)
+    return await asyncio.shield(_claim_and_decline(held_id, user))
 
 
-async def _claim_and_decline(held_id: str, body: DecisionBody) -> dict[str, Any]:
-    _user, held, _sender, _recipient, name = await _claim(body, held_id, held_replies.DECLINED)
+async def _claim_and_decline(held_id: str, user: dict) -> dict[str, Any]:
+    _user, held, _sender, _recipient, name = await _claim(user, held_id, held_replies.DECLINED)
     await notify_hold_changed(held)
     await tell_sender(held, held_replies.DECLINED, recipient=name)
     await note_asker(held, held_replies.DECLINED)
@@ -89,13 +80,14 @@ async def _claim_and_decline(held_id: str, body: DecisionBody) -> dict[str, Any]
 
 
 @router.post("/{held_id}/approve")
-async def approve(held_id: str, body: DecisionBody) -> dict[str, Any]:
+async def approve(held_id: str, user: dict = Depends(require_user_header_only)) -> dict[str, Any]:
     """Deliver the stored text as its sender would have, then tell the sender and the asker."""
-    return await asyncio.shield(_claim_and_approve(held_id, body))
+    require_human_user(user)
+    return await asyncio.shield(_claim_and_approve(held_id, user))
 
 
-async def _claim_and_approve(held_id: str, body: DecisionBody) -> dict[str, Any]:
-    user, held, sender, recipient, name = await _claim(body, held_id, held_replies.APPROVED)
+async def _claim_and_approve(held_id: str, user: dict) -> dict[str, Any]:
+    user, held, sender, recipient, name = await _claim(user, held_id, held_replies.APPROVED)
     return await _finish_approval(user, held, sender, recipient, name)
 
 

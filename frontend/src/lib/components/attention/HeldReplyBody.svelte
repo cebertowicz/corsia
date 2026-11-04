@@ -18,6 +18,7 @@
 		writesDisabled = false,
 		onSkip,
 		onDecision,
+		goneLine,
 	}: {
 		held: HeldReplyDetail;
 		/** True while the surface is offline or showing last-known data. */
@@ -25,6 +26,7 @@
 		/** Present only when another item waits: move on, keeping this one open. */
 		onSkip?: () => void;
 		onDecision?: () => void;
+		goneLine?: string;
 	} = $props();
 
 	const headingId = $derived(`held-${held.id}`);
@@ -62,8 +64,9 @@
 
 <section class="held-reply" aria-labelledby={headingId}>
 	<header>
-		<h3 id={headingId} tabindex="-1" data-drawer-autofocus>{held.title}</h3>
+		<h3 id={headingId} tabindex="-1" data-drawer-autofocus class:problem={!!goneLine}>{goneLine ?? held.title}</h3>
 	</header>
+	{#if !goneLine}
 	<div class="held-body">
 		{#if problem}
 			<p class="problem" role="alert">{problem}</p>
@@ -89,6 +92,7 @@
 			<Button variant="primary" size="sm" disabled={locked} onclick={() => void decideHeld(held, 'approve', onDecision)}>Approve once</Button>
 		</div>
 	</div>
+	{/if}
 </section>
 
 <style>

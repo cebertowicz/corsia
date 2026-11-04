@@ -26,7 +26,8 @@ def held_client(client, deleg_db, monkeypatch):
     from infra import local_only
 
     client.app.add_exception_handler(StarletteHTTPException, main._emit_http_error_api)
-    monkeypatch.setattr(held_api, "authenticate", lambda t: {"id": "u-test", "token_kind": "session"} if t == _TOKEN else None)
+    from infra.accounts import token_digest
+    deleg_db.execute("UPDATE auth_tokens SET kind='session' WHERE token_hash=?", (token_digest(_TOKEN),))
     client.app.include_router(held_api.router)
     deleg_db.execute("UPDATE threads SET local_only=1 WHERE id='sender-self'")
     insert_thread(deleg_db, "asker", model=CLOUD, title="Researcher")
@@ -68,7 +69,7 @@ async def _send_by_tool(message: str = "the answer", **kwargs) -> dict:
 
 
 def _post(held_client, held_id: str, action: str):
-    return held_client.post(f"/api/held-replies/{held_id}/{action}", json={"token": _TOKEN})
+    return held_client.post(f"/api/held-replies/{held_id}/{action}", headers={"Authorization": f"Bearer {_TOKEN}"})
 
 
 def _rows(db, *columns: str) -> list[tuple]:
@@ -98,16 +99,24 @@ async def test_the_tool_holds_and_approval_delivers_the_stored_text_once(held_cl
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action", ["approve", "decline"])
+async def test_decision_rejects_body_and_query_credentials(held_client, deleg_db, seen, action):
+    held = await _send_by_tool()
+    url = f"/api/held-replies/{held['held_reply_id']}/{action}"
+    assert held_client.post(url, json={"token": _TOKEN}).status_code == 401
+    assert held_client.post(url, params={"token": _TOKEN}).status_code == 401
+    assert _rows(deleg_db, "state") == [("held",)]
+    assert seen["delivered"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["approve", "decline"])
 @pytest.mark.parametrize("token_kind", ["api", "service"])
 async def test_machine_credentials_cannot_decide(held_client, deleg_db, seen, monkeypatch, action, token_kind):
-    from api import held_replies as held_api
     from infra.accounts import issue_token
-    from infra.auth import authenticate
 
     held = await _send_by_tool()
     credential, _ = issue_token("u-test", kind=token_kind, db=deleg_db)
-    monkeypatch.setattr(held_api, "authenticate", authenticate)
-    response = held_client.post(f"/api/held-replies/{held['held_reply_id']}/{action}", json={"token": credential})
+    response = held_client.post(f"/api/held-replies/{held['held_reply_id']}/{action}", headers={"Authorization": f"Bearer {credential}"})
     assert response.status_code == 403
     assert _rows(deleg_db, "state") == [("held",)]
     assert seen["delivered"] == []
@@ -115,14 +124,11 @@ async def test_machine_credentials_cannot_decide(held_client, deleg_db, seen, mo
 
 @pytest.mark.asyncio
 async def test_person_session_can_approve(held_client, deleg_db, seen, monkeypatch):
-    from api import held_replies as held_api
     from infra.accounts import issue_token
-    from infra.auth import authenticate
 
     held = await _send_by_tool()
     credential, _ = issue_token("u-test", kind="session", db=deleg_db)
-    monkeypatch.setattr(held_api, "authenticate", authenticate)
-    response = held_client.post(f"/api/held-replies/{held['held_reply_id']}/approve", json={"token": credential})
+    response = held_client.post(f"/api/held-replies/{held['held_reply_id']}/approve", headers={"Authorization": f"Bearer {credential}"})
     assert response.status_code == 200
     assert response.json()["state"] == "sent"
 
@@ -148,7 +154,7 @@ async def test_cancelled_decline_finishes_notifying_sender_and_asker(held_client
 
     monkeypatch.setattr(held_api, "_claim", claim)
     monkeypatch.setattr(held_api, "note_asker", note)
-    request = asyncio.create_task(held_api.decline(held["held_reply_id"], held_api.DecisionBody(token=_TOKEN)))
+    request = asyncio.create_task(held_api.decline(held["held_reply_id"], {"id": "u-test", "token_kind": "session"}))
     await asyncio.wait_for(claimed.wait(), 2)
     request.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -488,6 +494,22 @@ def test_provider_label_uses_vendor_or_catalog_name(deleg_db, held_client, provi
     assert pending(deleg_db, "u-test")[0]["provider_label"] == expected
 
 
+def test_duplicate_selector_uses_one_ordered_model_and_untitled_chat(deleg_db, held_client):
+    from infra import held_replies
+    from plans.held_attention import pending
+
+    selector = "shared/model"
+    deleg_db.execute("UPDATE models SET litellm_model=?, provider='external', harness='native' WHERE id=?", (selector, CLOUD))
+    deleg_db.execute("UPDATE models SET litellm_model=?, provider='codex', harness='codex' WHERE id=?", (selector, "anthropic/claude-3-5-opus"))
+    deleg_db.execute("UPDATE threads SET model=? WHERE id='asker'", (selector,))
+    deleg_db.execute("UPDATE threads SET title='' WHERE id='sender-self'")
+    held_replies.hold(user_id="u-test", sender_thread_id="sender-self", recipient_thread_id="asker",
+                      text="answer", via="tool", db=deleg_db)
+    [item] = pending(deleg_db, "u-test")
+    assert item["provider_label"] == "OpenAI"
+    assert item["visible_title"] == "Untitled chat"
+
+
 @pytest.mark.asyncio
 async def test_recovery_returns_interrupted_approval_to_held(deleg_db, held_client, seen):
     from infra import held_replies
@@ -520,7 +542,7 @@ async def test_approval_finishes_after_request_is_cancelled(deleg_db, held_clien
 
     monkeypatch.setattr(held_api, "_deliver", deliver)
     monkeypatch.setattr(held_api, "note_asker", note)
-    request = asyncio.create_task(held_api.approve(held["held_reply_id"], held_api.DecisionBody(token=_TOKEN)))
+    request = asyncio.create_task(held_api.approve(held["held_reply_id"], {"id": "u-test", "token_kind": "session"}))
     await asyncio.wait_for(started.wait(), 2)
     request.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -552,7 +574,7 @@ async def test_cancellation_during_claim_still_finishes(deleg_db, held_client, s
 
     monkeypatch.setattr(held_api, "_claim", claim)
     monkeypatch.setattr(held_api, "_finish_approval", finish)
-    request = asyncio.create_task(held_api.approve(held["held_reply_id"], held_api.DecisionBody(token=_TOKEN)))
+    request = asyncio.create_task(held_api.approve(held["held_reply_id"], {"id": "u-test", "token_kind": "session"}))
     await asyncio.wait_for(claimed.wait(), 2)
     request.cancel()
     with pytest.raises(asyncio.CancelledError):

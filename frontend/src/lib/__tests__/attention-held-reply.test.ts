@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AttentionDock from "$lib/components/attention/AttentionDock.svelte";
 import { __reset } from "$lib/stores/attentionDock.svelte";
 import { answerNotice } from "$lib/stores/attentionAnswerState";
-import { token } from "$lib/stores/auth";
+import { token, user } from "$lib/stores/auth";
 import { connectionState } from "$lib/stores/connection";
 import { emit } from "$lib/ws/events";
 import { get } from "svelte/store";
@@ -51,10 +51,10 @@ async function openDock() {
   await settle();
 }
 
-function decisions(): Array<{ url: string; body: unknown }> {
+function decisions(): Array<{ url: string; authorization: string | null; body: BodyInit | null | undefined }> {
   return calls
     .filter((call) => call.url.includes("/api/held-replies/"))
-    .map((call) => ({ url: call.url, body: JSON.parse(call.init!.body as string) }));
+    .map((call) => ({ url: call.url, authorization: new Headers(call.init?.headers).get("Authorization"), body: call.init?.body }));
 }
 
 beforeEach(() => {
@@ -134,7 +134,7 @@ describe("held reply in the dock", () => {
     await openDock();
     button("Approve once")!.click();
     await settle();
-    expect(decisions()).toEqual([{ url: "/api/held-replies/held-1/approve", body: { token: "test-bearer" } }]);
+    expect(decisions()).toEqual([{ url: "/api/held-replies/held-1/approve", authorization: "Bearer test-bearer", body: undefined }]);
     expect(host.querySelector(".dock-receipt")?.textContent).toBe(
       "The reply to the Researcher agent is approved and not yet sent.",
     );
@@ -204,13 +204,31 @@ describe("held reply in the dock", () => {
     expect(get(answerNotice)).toBe("The reply to the Researcher agent was not sent.");
   });
 
-  it("says why when the recipient no longer exists, and the reply leaves", async () => {
-    decide = () => ({ status: 200, payload: { ok: true, state: "not_sent", line: "Couldn’t send the reply because the Researcher agent isn’t available." } });
+  it("shows a terminal drawer when the recipient no longer exists", async () => {
+    const line = "Couldn’t send the reply because the Researcher agent no longer exists.";
+    decide = () => ({ status: 200, payload: { ok: true, state: "not_sent", line } });
     await openDock();
     button("Approve once")!.click();
     body = queueBody(null, 0);
     await settle();
-    expect(get(answerNotice)).toBe("Couldn’t send the reply because the Researcher agent isn’t available.");
+    expect(host.querySelector("h3.problem")?.textContent).toBe(line);
+    expect(button("Approve once")).toBeUndefined();
+    expect(button("Decline")).toBeUndefined();
+    expect(button("Done")).toBeTruthy();
+    expect(get(answerNotice)).toBeNull();
+    button("Done")!.click();
+    await settle();
+    expect(host.querySelector("h3.problem")).toBeNull();
+  });
+
+  it.each(["Approve once", "Decline"])("returns to sign-in when %s gets a 401", async (action) => {
+    user.set({ id: "u-test", name: "Test" });
+    decide = () => ({ status: 401 });
+    await openDock();
+    button(action)!.click();
+    await settle();
+    expect(get(token)).toBeNull();
+    expect(get(user)).toBeNull();
   });
 
   it("returns the reply, reopened, with the server's error line when delivery fails, and Approve once retries", async () => {

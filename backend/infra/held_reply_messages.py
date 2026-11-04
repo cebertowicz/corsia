@@ -22,6 +22,7 @@ from infra.db_async import run_in_db
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_message_rows
 
+UNTITLED_CHAT = "Untitled chat"
 NOTE_TYPE = "held_reply_note"
 RECEIPT_PREFIX = "held_reply."
 RESTART_ERROR = (
@@ -110,7 +111,7 @@ def visible_name(sender_thread_id: str, *, db: Any) -> str:
     """The name a person knows the sender by: its nearest visible chat, which for a worker is its parent."""
     root = root_visible_thread_ids([sender_thread_id], db=db).get(sender_thread_id) or sender_thread_id
     row = db.execute("SELECT title FROM threads WHERE id=?", (root,)).fetchone()
-    return (row["title"] if row is not None else None) or "Untitled chat"
+    return (row["title"] if row is not None else None) or UNTITLED_CHAT
 
 
 def recipient_name(held: dict[str, Any], *, db: Any) -> str:
