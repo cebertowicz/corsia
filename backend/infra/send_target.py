@@ -171,7 +171,8 @@ def model_admission(model: str, *, db=None, thread_id: str | None = None) -> Tar
         return "fail"
 
 
-def lifted_hold_ids(rows, model: str, *, db, thread_id: str | None = None) -> frozenset[str]:
+def lifted_hold_ids(rows, model: str, *, db, thread_id: str | None = None,
+                    lift_account: bool = True) -> frozenset[str]:
     """Ids among ``rows`` that the idle claim should release and take.
 
     Hold and release use ``classify_target_admission`` through the same model
@@ -186,7 +187,7 @@ def lifted_hold_ids(rows, model: str, *, db, thread_id: str | None = None) -> fr
 
     # Idle callers have already admitted the current durable account choice.
     account_held = frozenset(str(row['id']) for row in rows
-                            if row['write_outcome'] == 'proved_no_write'
+                            if lift_account and row['write_outcome'] == 'proved_no_write'
                             and row['delivery_error'] in ACCOUNT_HOLD_REASONS)
     return account_held | (
         held if held and model_admission(model, db=db, thread_id=thread_id) != 'wait' else frozenset()

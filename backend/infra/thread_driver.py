@@ -177,12 +177,8 @@ def _end_turn_process_state(turn_id: str, outcome: str) -> None:
 
 
 def finish_turn(
-    turn_id: str,
-    *,
-    outcome: str,
-    ended_at: str,
-    successor_turn_id: str,
-    boot_epoch: str,
+    turn_id: str, *, outcome: str, ended_at: str,
+    successor_turn_id: str, boot_epoch: str,
     error: str | BaseException | None = None,
     db: sqlite3.Connection | None = None,
     mark_idle_checkpoint: bool = True,
@@ -196,6 +192,9 @@ def finish_turn(
     """
     if outcome not in {"completed", "cancelled", "error"}:
         raise ValueError(f"invalid Turn terminal outcome: {outcome}")
+    from connections.account_policy import AccountAdmissionError
+
+    lift_account = not (outcome == "error" and isinstance(error, AccountAdmissionError))
     with usage_settlement(db) as usage, write_transaction(db, scope="finish_turn") as connection:
         row = connection.execute(
             "SELECT thread_id,status FROM active_turns WHERE id=?", (turn_id,),
@@ -240,7 +239,7 @@ def finish_turn(
             boot_epoch=boot_epoch,
             mark_idle_checkpoint=mark_idle_checkpoint,
             hold_expired_limit_at_startup=hold_expired_limit_at_startup,
-            fail_closed=limits.fail_closed,
+            fail_closed=limits.fail_closed, lift_account=lift_account,
         )
     _end_turn_process_state(turn_id, outcome)
     wakes = () if parent is None else (parent,)
@@ -279,6 +278,7 @@ def _claim_after_terminal(
     mark_idle_checkpoint: bool,
     hold_expired_limit_at_startup: bool,
     fail_closed: str | None = None,
+    lift_account: bool = True,
 ):
     """Claim switch/successor work and derive its idle-marker consequence.
 
@@ -317,6 +317,7 @@ def _claim_after_terminal(
                 started_at=ended_at,
                 db=connection,
                 hold_expired_limit_at_startup=hold_expired_limit_at_startup,
+                lift_account=lift_account,
             )
     idle = _write_idle_marker(connection, idle_marker_due(
         connection, turn_id, outcome=outcome,
