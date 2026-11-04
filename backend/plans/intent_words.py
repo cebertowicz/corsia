@@ -248,11 +248,12 @@ def document_comment_words(items: Iterable[dict[str, Any]]) -> list[dict[str, st
     ]
 
 
-def document_comment_intent(items: Iterable[dict[str, Any]]) -> str:
-    """Make one bounded task reading from loaded person document comments."""
-    comments = [str(item["body"]) for item in items if item["kind"] == "comment" and str(item["body"]).strip()]
+def document_comment_intent(items: Iterable[dict[str, Any]], document: str) -> str:
+    """Name the work the person's document comments ask for; their words are the origin quotes."""
+    count = len(document_comment_words(items))
     return validate_intent(bounded_text(
-        "User document feedback: " + "\n".join(comments), MAX_INTENT_BYTES,
+        f"Answer the person's {count} comment{'s' if count != 1 else ''} on {document}",
+        MAX_INTENT_BYTES,
     ))
 
 
