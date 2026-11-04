@@ -27,6 +27,7 @@ NON_TRANSCRIPT_TOOLS = {
     "microsoft_mail_search": "External mailbox, not the CORSIA message store; no account used by this test.",
     "microsoft_mail_read": "External mailbox, not the CORSIA message store; no account used by this test.",
     "continuity_edit": "Own-thread mutation/review only; cannot read another thread by message id.",
+    "workspace_commit": "Workspace Git mutation; `message` is the commit message, not a message id.",
 }
 
 # These readers have mutually exclusive selectors or an opaque content digest.
