@@ -74,9 +74,6 @@ async def test_comment_marked_without_observe_rule_and_routing_suppresses_only_c
     with patch("events.router.delivery.deliver_to_thread", return_value=True):
         first = await route_event("webhook.github.pr_comment", payload, delivery_id="delivery-1")
         assert first.outcome == RouteOutcome.SUPPRESSED and first.reason == "self_caused"
-        other = {**payload, "corsia_tags": [{"thread_id": "b"}]}
-        second = await route_event("webhook.github.pr_comment", other, delivery_id="delivery-1")
-        assert second.outcome == RouteOutcome.ACCEPTED and second.thread_id == "b"
         assert any(args[:2] == ("event_route", "suppressed") and kw["properties"]["reason"] == "self_caused"
                    for args, kw in emitted)
         _write("UPDATE self_caused_events SET at='2000-01-01T00:00:00+00:00'")

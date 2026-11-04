@@ -15,6 +15,8 @@ import json
 import logging
 from typing import Any
 
+from loguru import logger
+
 from connections import claude_usage
 from connections.claude_context_probe import read_context_usage
 from connections.claude_control_turns import converse
@@ -63,6 +65,8 @@ async def run_claude_control(
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         env=env,
     )
+    # Stdlib INFO never reaches service.log; this line dates each control process on a login.
+    logger.info("Claude control process started: account={} operation={}", context.account_id, operation)
     try:
         async with killed_on_exit(process):
             if in_turn:

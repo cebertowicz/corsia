@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 def _account(tmp_path):
     """Control sessions run inside an account's home: there is no ambient one."""
-    return SimpleNamespace(source_home=str(tmp_path / "account-home"))
+    return SimpleNamespace(account_id="acct-1", source_home=str(tmp_path / "account-home"))
 
 
 async def _wait_for_path(path: Path) -> None:
@@ -108,6 +108,24 @@ async def test_control_reader_drains_stderr_and_preserves_nonzero_error(tmp_path
     nonzero = _control_harness(tmp_path, "nonzero", "printf 'synthetic failure' >&2; exit 3")
     with pytest.raises(RuntimeError, match="Claude Code get_usage failed: synthetic failure"):
         await claude_discovery.run_claude_control(nonzero, _usage_frame(), operation="get_usage", context=_account(tmp_path))
+
+
+@pytest.mark.asyncio
+async def test_control_spawn_logs_account_and_operation_only(tmp_path):
+    from loguru import logger
+
+    from connections import claude_discovery
+
+    lines: list[str] = []
+    sink = logger.add(lambda message: lines.append(str(message)), level="INFO", format="{message}")
+    try:
+        binary = _control_harness(tmp_path, "logged", "printf ''")
+        await claude_discovery.run_claude_control(binary, _usage_frame(), operation="get_usage", context=_account(tmp_path))
+    finally:
+        logger.remove(sink)
+
+    started = [line for line in lines if line.startswith("Claude control process started")]
+    assert started == ["Claude control process started: account=acct-1 operation=get_usage\n"]
 
 
 @pytest.mark.asyncio
