@@ -56,6 +56,12 @@ async def _flush_pending_reasoning(
     ctx.live.reasoning_provider_message_id = None
 
 
+def result_is_error(ev: dict) -> bool:
+    """Whether a CLI result ends its Turn in error."""
+    # An exhausted ``--max-turns`` is an error turn whatever ``is_error`` says: it returned no answer.
+    return bool(ev.get("is_error")) or ev.get("subtype") == "error_max_turns"
+
+
 def _result_metadata(
     ctx: CCEventContext,
     ev: dict,
@@ -63,8 +69,7 @@ def _result_metadata(
     identity: TurnIdentity,
     apply_now_interrupt_owns_result: bool,
 ) -> tuple[bool, dict]:
-    # An exhausted ``--max-turns`` is an error turn whatever ``is_error`` says: it returned no answer.
-    is_error = bool(ev.get("is_error")) or ev.get("subtype") == "error_max_turns"
+    is_error = result_is_error(ev)
     metadata: dict = {
         "cc": True,
         "type": "result",
@@ -88,7 +93,11 @@ def _result_metadata(
         metadata["is_error"] = True
         if not ev.get("stop_reason"):
             metadata["stop_reason"] = "interrupted"
-    if is_error and (cause := auth_failure_kind("claude-code", ev.get("result"))):
+    from subagents.turn_account_error import login_answered
+
+    # A login that answered its check after the expired-login text is not expired.
+    answered = login_answered(ev.get("_corsia_login_verdict"))
+    if is_error and not answered and (cause := auth_failure_kind("claude-code", ev.get("result"))):
         metadata["cause"] = cause
     if tool_boundary._is_context_limit_result(ev):
         cc_trust.distrust(ctx.live)
@@ -99,6 +108,7 @@ def _result_metadata(
     if is_error and metadata.get("stop_reason") != "interrupted":
         metadata.update(cause_fields(
             "claude-code", metadata.get("cause"), ev.get("result"), None, ctx.live.model,
+            login_answered=answered,
         ))
     return is_error, metadata
 
@@ -272,9 +282,10 @@ async def _handle_result_error(
 ) -> None:
     if not is_error:
         return
-    from subagents.turn_account_error import claude_turn_signed_out
+    from subagents.turn_account_error import sign_out_on_verdict
 
-    await claude_turn_signed_out(metadata.get("turn_id"), ev.get("result"), db=ctx.db)
+    # on_event checked the login before taking event_lock, so a Stop or steer never waits on the CLI.
+    await sign_out_on_verdict(ev.get("_corsia_login_verdict"), db=ctx.db)
     if is_empty_text_block_rejection(ev.get("result")):
         await _retire_poisoned_session(ctx, metadata)
 

@@ -15,7 +15,7 @@ from core.turn_core import (
 from infra.queries import insert_message
 from subagents.cc_event_context import commit_cc_terminal
 from subagents.cc_runtime_errors import surface_exit_error
-from subagents.turn_account_error import claude_turn_signed_out
+from subagents.turn_account_error import claude_login_verdict, login_answered, sign_out_on_verdict
 from subagents.cc_event_context_usage import consume_and_attach_terminal_context_usage
 from subagents.cc_event_tool_settlement import settle_missing_tool_results
 from subagents.cc_runtime_helpers import _default_broadcast
@@ -146,13 +146,12 @@ async def _publish_process_exit(
     broadcast: Broadcast,
     db,
 ) -> None:
-    account = not live.tool_boundary_marker_id and await claude_turn_signed_out(
-        identity.turn_id, detail, db=db, include_account=True,
-    )
+    verdict = None if live.tool_boundary_marker_id else await claude_login_verdict(identity.turn_id, detail, db=db)
+    account = await sign_out_on_verdict(verdict, db=db, include_account=True)
     marker_id = live.tool_boundary_marker_id or surface_exit_error(
         child_thread_id, code, detail, broadcast, db, None,
         insert_message_fn=insert_message, logger=log,
-        account=account,
+        account=account, login_answered=login_answered(verdict),
     )
     payload = {
         "type": "turn_complete", "thread_id": child_thread_id,
