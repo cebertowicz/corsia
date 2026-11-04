@@ -18,6 +18,7 @@ import json
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from loguru import logger
 
@@ -95,7 +96,9 @@ def _unseen(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row) -> str:
     return visible_answer_content(str(row["content"]), placed).strip()
 
 
-def _replied_after(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) -> bool:
+def _replied_after(
+    db: sqlite3.Connection, thread_id: str, person: sqlite3.Row | dict[str, Any],
+) -> bool:
     """A reply after the message, or answers in its comment threads with no other last words."""
     if db.execute(
         f"SELECT 1 FROM messages WHERE thread_id=? AND seq>? AND {_FOR_USER} LIMIT 1",
@@ -109,6 +112,22 @@ def _replied_after(db: sqlite3.Connection, thread_id: str, person: sqlite3.Row) 
         return False
     hidden = _last_hidden(db, thread_id, person["seq"])
     return hidden is None or not _unseen(db, thread_id, hidden)
+
+
+def nudge_reply_shown(db: sqlite3.Connection, thread_id: str, turn_id: str) -> bool:
+    """True when ``turn_id`` ran a nudge and the message it was about now shows a reply."""
+    nudge = db.execute(
+        "SELECT json_extract(metadata,'$.person_message_id') FROM messages "
+        "WHERE active_turn_id=? AND thread_id=? AND json_valid(metadata) "
+        "AND json_extract(metadata,'$.kind')='reply_not_visible' LIMIT 1",
+        (turn_id, thread_id),
+    ).fetchone()
+    if nudge is None or nudge[0] is None:
+        return False
+    person = db.execute("SELECT id, seq FROM messages WHERE id=?", (nudge[0],)).fetchone()
+    if person is None or person[1] is None:
+        return False
+    return _replied_after(db, thread_id, {"id": person[0], "seq": person[1]})
 
 
 def _turn_status(db: sqlite3.Connection, turn_id: str | None) -> str | None:

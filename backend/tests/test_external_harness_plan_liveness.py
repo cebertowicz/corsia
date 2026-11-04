@@ -433,7 +433,7 @@ async def test_native_llm_error_frame_matches_history_projection(isolated_db, mo
 
     assert frame["turn_id"] == history[0]["metadata"]["turn_id"]
     assert frame["reference"] == history[0]["metadata"]["reference"]
-    assert frame["next_step"] == history[0]["metadata"]["next_step"]
+    assert "next_step" not in frame  # the Turn still runs; settlement re-publishes the real value
 
 
 @pytest.mark.asyncio

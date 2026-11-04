@@ -251,7 +251,7 @@ def test_a_claim_after_an_error_publishes_the_stamped_error_row(isolated_db, mon
             boot_epoch="test-boot", admitted_at="t1", db=db,
         )
     batch = admitted.batch
-    assert batch is not None and batch.recovered_message_ids == ("err-1",)
+    assert batch is not None and batch.error_message_ids == ("err-1",)
 
     asyncio.run(broadcast_claimed_batch(batch))
 
