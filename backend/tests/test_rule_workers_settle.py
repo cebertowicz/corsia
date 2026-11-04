@@ -469,6 +469,35 @@ async def test_a_settled_workers_event_carries_its_spawned_model_through_the_run
     assert worker and event["facts"]["worker_thread"] == worker
 
 
+# A start refused after its worker was made (the spawn's later send failed) still names that
+# worker and the model it was spawned on; the claimed row predates both.
+@pytest.mark.asyncio
+async def test_a_start_refused_after_its_worker_was_made_names_that_worker(world, monkeypatch):
+    from automation import worker_runner
+    from events import intake
+    from tools import delegate_task
+
+    real, admitted = intake.admit_event, []
+
+    async def recorded(**kwargs):
+        admitted.append(kwargs)
+        return await real(**kwargs)
+
+    async def spawn(_parent, _owner, _task, _kwargs, rule_start=None):
+        await rule_start("worker-x")
+        return "Error: the first input could not be sent"
+
+    monkeypatch.setattr(intake, "admit_event", recorded)
+    monkeypatch.setattr(delegate_task, "_spawn", spawn)
+    rule = await make_rule()
+    await request()
+    assert await worker_runner.drive() == 0
+    [(outcome, reason, _identity, _worker)] = starts(rule)
+    assert (outcome, reason) == ("refused", "the start failed (delegation error)")
+    [facts] = [item["facts"] for item in admitted if item["event_type"] == "worker.no_result"]
+    assert facts["worker_thread"] == "worker-x" and facts["model"] == "claude-code/sonnet"
+
+
 # A settled worker's event names its GitHub artifact's repository, so the owner's script on it
 # can be given that repository's read channel; any other artifact names none.
 @pytest.mark.parametrize("integration, external_id, repo", [

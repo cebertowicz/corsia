@@ -288,6 +288,7 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
     from events.connector_workflows import resolve_shipped_workflow
 
     waited = row["id"] <= _state["waited"]
+    made: dict[str, str] = {}
     try:
         origin = dict(row).get("origin")
         shipped = resolve_shipped_workflow(origin, row["workflow_id"])
@@ -325,13 +326,14 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
 
         async def record(worker: str) -> None:
             await run_in_db(_made, row["id"], worker, check)
+            made.update(worker=worker, check=check)
 
         started = await _spawn(row["thread_id"], found["owner"], task, {
             "model": found["model"], "confinement": CONFINEMENT_UNTRUSTED,
             "read_paths": read_paths, "title": found["skill"].name, **found["spawn_extra"],
         }, rule_start=record)
     except inputs.StartRefused as exc:
-        return await _refuse(row, run_input, str(exc), waited)
+        return await _refuse(row, run_input, str(exc), waited, made)
     except LiveSpawnCapExceeded:
         # Another spawn took the slot after the claim: back to the queue at its place.
         _state["waited"] = max(_state["waited"], row["id"])
@@ -339,10 +341,10 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
         return 0
     except Exception:  # noqa: BLE001 - a start that fails is told to its owner, not lost
         logger.exception("worker start {} failed", row["id"])  # the exception stays in the log
-        return await _refuse(row, run_input, _FAILED, waited)
+        return await _refuse(row, run_input, _FAILED, waited, made)
     if isinstance(started, str):
         logger.warning("worker start {} was refused: {}", row["id"], started)
-        return await _refuse(row, run_input, _SPAWN_FAILED, waited)
+        return await _refuse(row, run_input, _SPAWN_FAILED, waited, made)
     return 1
 
 
@@ -358,7 +360,11 @@ def _requeue(owner: str, decision_id: int) -> None:
 
 
 async def _refuse(row: Mapping[str, Any], run_input: Mapping[str, Any], reason: str,
-                  waited: bool) -> int:
+                  waited: bool, made: Mapping[str, str]) -> int:
+    """End a refused start. One refused after its worker was ``made`` reports that worker
+    and its check, as the start's own row does; the claimed ``row`` predates both."""
+    if made:
+        row, run_input = {**dict(row), "worker_thread_id": made["worker"]}, json.loads(made["check"])
     await _end(row, {**run_input, "waited": waited}, REFUSED, reason)
     return 0
 
