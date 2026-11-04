@@ -1,12 +1,15 @@
 """The current pull-request facts a GitHub review event can carry.
 
 A webhook's ``pull_request`` object supplies ``base_sha``, ``draft`` and ``labels``.
-Three more are only ever read: ``current_head``, the PR's live head, so a rule finds a
-stale event by comparing it with the event's own head (``sha`` on a PR event,
-``head_sha`` on a checks event); ``check_state``, the state of that own head; and
-``mergeable``, which GitHub computes after it sends ``opened`` and ``synchronize``, so
-those payloads almost always hold ``null``. A settled head has no payload, so its read
-also supplies the PR's ``draft``, ``labels`` and author origin (``HEAD_FACTS``).
+Three more are only ever read: ``current_head``, the PR's live head, so the recipient of
+a rule's delivery or script finds a stale event by comparing it with the event's own head
+(``sha`` on a PR event, ``head_sha`` on a checks event; a rule test compares a fact only
+with a value, so a rule names a read fact to have it read); ``check_state``, the state
+of that own head; and ``mergeable``, which GitHub computes after it sends ``opened`` and
+``synchronize``, so those payloads almost always hold ``null``. A settled head has no
+payload, so its read also supplies the PR's ``draft``, ``labels`` and author origin
+(``HEAD_FACTS``). One ranking (``rank``) orders check conclusions everywhere: a settled
+head's ``conclusion`` is it, and every ``check_state`` is ``state_of`` it.
 A read happens when an enabled rule of the event's type names a fact the read supplies
 (``read_facts``), whichever rule it is and whatever else it tests. The pull request is
 read once; the head's check suites once and its check runs page by page. Every read
@@ -68,23 +71,40 @@ def counted_suites(suites: Any) -> list[dict[str, Any]]:
     ] if isinstance(suites, list) else []
 
 
+#: Conclusions ranked worst first; a held head waits for a maintainer first, whatever else failed.
+_RANKED = ("action_required", "timed_out", "startup_failure", "stale", "failure")
+
+
+def rank(conclusions: Any) -> str:
+    """The one conclusion for a set of completed checks: the worst in ``_RANKED``; then any other
+    one outside ``GREEN`` (unknown or missing) as ``failure``; then ``cancelled``; else ``success``."""
+    values = {str(value or "failure").lower() for value in conclusions}
+    for value in _RANKED:
+        if value in values:
+            return value
+    if values - GREEN - {"cancelled"}:
+        return "failure"
+    return "cancelled" if "cancelled" in values else "success"
+
+
+def state_of(conclusion: str) -> str:
+    """A completed head's ``check_state`` from its ``rank``: green only in ``GREEN``, the set the merge gate counts."""
+    return conclusion if conclusion == "action_required" else "green" if conclusion in GREEN else "failing"
+
+
 def check_state(suites: list[Any], runs: list[Any]) -> str:
     """The head's one state from its check suites and its newest run per check name.
 
     A held suite has no runs, so only the suites show it. Only check suites and runs
     are read, never commit statuses, so the reviewer's ``qa/llm-reviewer*`` statuses
-    never count. A completed suite or run is green only with a conclusion in ``GREEN``,
-    the set the merge gate counts; any other, an unknown, missing or ``cancelled`` one
-    included, is failing.
+    never count. A head with a non-green conclusion is decided by ``rank``; otherwise
+    one still running, or with no runs, is pending.
     """
     newest = newest_check_runs([run for run in runs if isinstance(run, dict)])
     items = [*counted_suites(suites), *newest]
-    conclusions = {str(item.get("conclusion") or "").lower() for item in items if item.get("status") == "completed"}
-    # A head waiting for a maintainer waits for them first, whatever else failed.
-    if "action_required" in conclusions:
-        return "action_required"
-    if conclusions - GREEN:
-        return "failing"
+    state = state_of(rank(item.get("conclusion") for item in items if item.get("status") == "completed"))
+    if state != "green":
+        return state
     if not newest or any(item.get("status") != "completed" for item in items):
         return "pending"
     return "green"
@@ -111,8 +131,8 @@ async def _pull(runner: Any, repo: str, number: int) -> Mapping[str, Any] | None
     return body if isinstance(body, Mapping) else None
 
 
-async def _check_state(runner: Any, repo: str, sha: Any, suites: list[Any] | None) -> str:
-    """``sha``'s check state from its suites (read here unless given) and every page of its runs.
+async def _check_state(runner: Any, repo: str, sha: Any) -> str:
+    """``sha``'s check state from its suites and every page of its runs.
 
     A failed suites read is ``unreadable``. Runs are read until ``total_count``: a failed or
     empty page before then, or no ``total_count``, is ``unreadable``; so is a page the read
@@ -120,10 +140,9 @@ async def _check_state(runner: Any, repo: str, sha: Any, suites: list[Any] | Non
     """
     if not isinstance(sha, str) or not sha:
         return UNREADABLE
-    if suites is None:
-        suites = _object(await _read(runner, repo, f"repos/{repo}/commits/{sha}/check-suites")).get("check_suites")
-        if not isinstance(suites, list):
-            return UNREADABLE
+    suites = _object(await _read(runner, repo, f"repos/{repo}/commits/{sha}/check-suites")).get("check_suites")
+    if not isinstance(suites, list):
+        return UNREADABLE
     runs: list[Any] = []
     page = 1
     while True:
@@ -139,16 +158,15 @@ async def _check_state(runner: Any, repo: str, sha: Any, suites: list[Any] | Non
         page += 1
 
 
-async def head_facts(
-    runner: Any, repo: str, number: int | None, facts: Mapping[str, Any], suites: list[Any] | None = None,
-) -> dict[str, Any]:
+async def head_facts(runner: Any, repo: str, number: int | None, facts: Mapping[str, Any]) -> dict[str, Any]:
     """An event's ``facts`` completed with ``check_state`` of its own head and the PR's ``current_head``
     and ``mergeable``, and, on a settled head's, the PR's own facts (``HEAD_FACTS``); a PR event's
     payload facts stay.
 
     The own head is ``head_sha`` (a settled head) or ``sha`` (a PR event's payload head); no
-    read changes it. ``suites`` are the head's check suites when the caller has already read
-    them. When the PR read fails, ``current_head`` is absent and ``check_state`` is ``unreadable``.
+    read changes it. A settled head's ``check_state`` is ``state_of`` its ``conclusion``, so its
+    checks are not read again. When the PR read fails, ``current_head`` is absent and
+    ``check_state`` is ``unreadable``.
     """
     out = dict(facts)
     if number is not None:
@@ -163,23 +181,26 @@ async def head_facts(
             out.update({name: value for name, value in pull_facts(body).items() if name in HEAD_FACTS})
             if login := _text(_object(body.get("user")).get("login")):
                 out["author_origin"] = author_origin(login)
-    out["check_state"] = await _check_state(runner, repo, out.get("head_sha") or out.get("sha"), suites)
+    if isinstance(conclusion := out.get("conclusion"), str):
+        out["check_state"] = state_of(conclusion)
+    else:
+        out["check_state"] = await _check_state(runner, repo, out.get("head_sha") or out.get("sha"))
     return out
 
 
-async def settled_head_facts(
-    runner: Any, repo: str, number: int | None, facts: Mapping[str, Any], suites: list[Any],
-) -> dict[str, Any]:
+async def settled_head_facts(runner: Any, repo: str, number: int | None, facts: Mapping[str, Any]) -> dict[str, Any]:
     """A settled head's ``facts``, completed when an enabled rule names a fact the read supplies.
 
     A failed rule read reads anyway: no rule is ever evaluated without a fact it names.
     """
+    from events.connectors.github import MANIFEST  # github.py imports this module
+
     try:
-        named = (await asyncio.to_thread(rule_reads.type_rules, "github", HEAD_TYPE, HEAD_FACTS))[2]
+        named = (await asyncio.to_thread(rule_reads.type_rules, MANIFEST.connector, HEAD_TYPE, HEAD_FACTS))[2]
     except Exception:
         log.warning("github-pr-facts: rule read failed for %s; reading anyway", repo, exc_info=True)
         named = True
-    return await head_facts(runner, repo, number, facts, suites) if named else dict(facts)
+    return await head_facts(runner, repo, number, facts) if named else dict(facts)
 
 
 async def enriched(envelope: Any, runner: Any = None) -> Any:

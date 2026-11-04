@@ -323,10 +323,10 @@ async def test_a_held_suite_arrives_as_action_required_whatever_else_failed(isol
         return GhResponse(200, {}, {"total_count": len(runs), "check_runs": runs}), None
 
     facts = (await _settled(monkeypatch, read))["facts"]
-    # Both rank the held suite first, so conclusion and check_state never disagree about a held head.
+    # check_state is state_of the head's one ranked conclusion, so the two can't disagree.
     assert facts["check_state"] == "action_required" and facts["conclusion"] == "action_required"
     assert facts["pr_number"] == 7 and facts["mergeable"] == "UNKNOWN" and facts["head_sha"] == "abc"
-    assert facts["current_head"] == "abc" and len(paths) == 3  # suites once, PR, runs; suites not re-read
+    assert facts["current_head"] == "abc" and len(paths) == 2  # suites once, then the PR; no runs read
 
 
 @pytest.mark.asyncio
@@ -348,7 +348,7 @@ async def test_a_head_whose_pull_request_moved_on_is_still_named_by_its_settled_
     event = await _settled(monkeypatch, read)
     assert event["facts"]["head_sha"] == "abc" and event["facts"]["conclusion"] == "failure"
     assert event["facts"]["current_head"] == "new" and event["facts"]["check_state"] == "failing"
-    assert paths[-1] == "repos/o/r/commits/abc/check-runs?per_page=100&page=1"
+    assert paths == ["repos/o/r/commits/abc/check-suites", "repos/o/r/pulls/7"]
     assert event["event_id"] == checks._event_id("o/r", "abc", failed.body["check_suites"])
 
 

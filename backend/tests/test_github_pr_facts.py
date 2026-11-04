@@ -93,6 +93,19 @@ def test_check_state_has_one_precedence_over_suites_and_newest_runs(found, runs,
     assert facts.check_state(found, runs) == state
 
 
+@pytest.mark.parametrize("conclusions, ranked, state", [
+    (["success", "skipped", "neutral"], "success", "green"),
+    (["timed_out", "action_required", "failure"], "action_required", "action_required"),
+    (["failure", "timed_out"], "timed_out", "failing"),
+    (["success", "cancelled"], "cancelled", "failing"),
+    (["cancelled", "something_new"], "failure", "failing"),  # unknown is never success
+    (["success", None], "failure", "failing"),
+    ([], "success", "green"),
+])
+def test_one_ranking_gives_both_conclusion_and_check_state(conclusions, ranked, state):
+    assert facts.rank(conclusions) == ranked and facts.state_of(ranked) == state
+
+
 def test_check_state_selects_the_run_the_reviewer_gate_selects():
     older = run("a", conclusion="failure", started="2026-01-01T00:00:00Z", completed="2026-01-01T00:09:00Z", id=1)
     newer = run("a", conclusion="success", started="2026-01-01T00:05:00Z", completed="2026-01-01T00:07:00Z", id=2)
@@ -232,10 +245,12 @@ async def test_an_attempted_read_always_sets_check_state(monkeypatch, failure):
     monkeypatch.setattr(poller, "gated_read", read)
     for kind, got in (
         ("open", await facts.head_facts(None, "o/r", 7, sent())),
-        ("checks", await facts.head_facts(None, "o/r", 7, {"repo": "o/r", "head_sha": "h1"}, [suite()])),
+        ("checks", await facts.head_facts(None, "o/r", 7, {"repo": "o/r", "head_sha": "h1", "conclusion": "success"})),
     ):
-        assert got["check_state"] == "unreadable", kind
-        if failure not in ("pull_request", "refused", "raises"):
+        pull_failed = failure in ("pull_request", "refused", "raises")
+        # A settled head reads no checks: only a failed PR read leaves its state unreadable.
+        assert got["check_state"] == ("green" if kind == "checks" and not pull_failed else "unreadable"), kind
+        if not pull_failed:
             assert got["current_head"] == "h1", kind
 
 
@@ -243,8 +258,8 @@ async def test_an_attempted_read_always_sets_check_state(monkeypatch, failure):
 @pytest.mark.parametrize("own, origin", [(True, "inside"), (False, "outside")])
 async def test_a_head_checks_event_learns_whose_pull_request_it_is(reads, monkeypatch, own, origin):
     monkeypatch.setattr(content, "is_own", lambda login: own and login == "someone")
-    reads({"/pulls/7": pull(), "/check-runs": page()})
-    got = await facts.head_facts(None, "o/r", 7, {"repo": "o/r", "head_sha": "h1"}, [suite()])
+    reads({"/pulls/7": pull()})
+    got = await facts.head_facts(None, "o/r", 7, {"repo": "o/r", "head_sha": "h1", "conclusion": "success"})
     assert got["author_origin"] == origin
 
 
@@ -253,14 +268,14 @@ async def test_a_head_checks_event_keeps_its_settled_head_when_the_pull_request_
     reader = reads({"/pulls/7": pull(mergeable=True, head={"sha": "Y"}),
                     "/commits/X/check-runs": page(run("ci", conclusion="failure")),
                     "/commits/Y/check-runs": page(run("ci"))})
-    settled = {"repo": "o/r", "head_sha": "X"}
-    got = await facts.head_facts(None, "o/r", 7, settled, [suite("failure")])
+    settled = {"repo": "o/r", "head_sha": "X", "conclusion": "failure"}
+    got = await facts.head_facts(None, "o/r", 7, settled)
     assert got["head_sha"] == "X" and got["current_head"] == "Y"
-    assert got["check_state"] == "failing"  # about X
+    assert got["check_state"] == "failing"  # about X: state_of its conclusion
     # The read refreshes only draft, mergeable and labels; the base stays the payload's.
     assert got["mergeable"] == "MERGEABLE" and got["labels"] == ["a", "b"] and "base_sha" not in got
-    # The aggregator passes the suites it read, so only the PR and X's runs are read here.
-    assert reader.paths == ["repos/o/r/pulls/7", f"repos/o/r/commits/X/{CHECKS}1"]
+    # The head's checks were read by the aggregator, so only the PR is read here.
+    assert reader.paths == ["repos/o/r/pulls/7"]
 
 
 @pytest.mark.asyncio
@@ -272,7 +287,9 @@ async def test_a_held_head_reads_action_required_on_every_event_kind(reads, foun
     if kind == "open_pr":
         got = await facts.head_facts(None, "o/r", 7, sent())
     else:
-        got = await facts.head_facts(None, "o/r", 7, {"repo": "o/r", "head_sha": "h1"}, found)
+        settled = {"repo": "o/r", "head_sha": "h1", "conclusion": facts.rank(s["conclusion"] for s in found)}
+        got = await facts.head_facts(None, "o/r", 7, settled)
+        assert got["conclusion"] == "action_required"
     assert got["check_state"] == "action_required"
 
 

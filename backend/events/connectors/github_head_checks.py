@@ -5,8 +5,9 @@ router dependency: the injected sink is the generic event intake (``admit_event`
 origin ``connector``), and ``event_id`` comes from the head's check suites, never
 from a delivery.  Its reads pass the repo-activity poller's budget and backoff
 gate, and the admission hook stays off unless explicitly enabled. A suite held for
-approval (no runs, ``action_required``) is a settled head too, and its conclusion
-ranks first, as in ``github_pr_facts.check_state``.
+approval (no runs, ``action_required``) is a settled head too. The head's
+``conclusion`` is ``github_pr_facts.rank`` of its suites, the one ranking its
+``check_state`` also comes from.
 """
 from __future__ import annotations
 
@@ -80,18 +81,6 @@ def _current_suites(body: Any) -> list[dict[str, Any]]:
     return [suite for suite in _object(body).get("check_suites", []) if isinstance(suite, dict)]
 
 
-def _conclusion(suites: list[dict[str, Any]]) -> str:
-    """The head's ranked suite conclusion; a held suite comes first, whatever else ended."""
-    values = [str(suite.get("conclusion") or "failure") for suite in suites]
-    failures = ("action_required", "timed_out", "startup_failure", "stale", "failure")
-    for value in failures:
-        if value in values:
-            return value
-    if "cancelled" in values:
-        return "cancelled"
-    return "success"
-
-
 def _event_id(repo: str, head_sha: str, suites: list[dict[str, Any]]) -> str:
     pairs = sorted((str(suite.get("id")), str(suite.get("updated_at") or "")) for suite in suites)
     encoded = json.dumps([repo, head_sha, pairs], separators=(",", ":"), sort_keys=True)
@@ -151,12 +140,12 @@ class HeadCheckAggregator:
                 log.info("github-head-checks: head %s@%s incomplete suites=%s", *key, incomplete)
                 return
             branch, pr_number = self._facts.get(key, (None, None))
-            facts: dict[str, Any] = {"repo": repo, "head_sha": head_sha, "conclusion": _conclusion(latest)}
+            facts: dict[str, Any] = {"repo": repo, "head_sha": head_sha, "conclusion": pr_facts.rank(suite.get("conclusion") for suite in latest)}
             if branch is not None:
                 facts["head_branch"] = branch
             if pr_number is not None:
                 facts["pr_number"] = pr_number
-            facts = await pr_facts.settled_head_facts(self.runner, repo, pr_number, facts, latest)
+            facts = await pr_facts.settled_head_facts(self.runner, repo, pr_number, facts)
             result = await self.sink.admit_event(event_type="github.head.checks_completed", facts=facts,
                 origin="connector", producer="github", event_id=_event_id(repo, head_sha, latest))
             if result.refusal is not None:
