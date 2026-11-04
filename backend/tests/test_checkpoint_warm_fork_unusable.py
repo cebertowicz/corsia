@@ -88,6 +88,75 @@ async def test_unusable_warm_fork_runs_cold_once_on_the_same_row(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_warm_fork_refused_for_size_before_any_narrative_runs_cold_once(monkeypatch):
+    """A warm fold the provider refuses mid-loop with nothing written folds cold, not fails."""
+    from core import checkpoint_cold_fallback as fallback
+    from core.fork_types import ForkInputExhausted
+
+    async def fake_run_in_db(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(fallback, "run_in_db", fake_run_in_db)
+    calls = []
+
+    async def invoke(request, _cancel):
+        calls.append(request)
+        if request.warm_source is not None:
+            raise ForkInputExhausted("checkpoint_context_truncated: path=ii_provider_context_limit")
+        return ProviderForkResult("cold body", None)
+
+    result = await fallback.invoke_with_cold_correction(
+        _warm_request("native", cold_builder=_cold_admission), asyncio.Event(), invoke,
+    )
+    assert result.raw_body == "cold body"
+    assert [call.warm_source is None for call in calls] == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_cold_fork_refused_for_size_stays_terminal(monkeypatch):
+    """The corrected cold fork has no further correction: one extra dispatch, never a loop."""
+    from core import checkpoint_cold_fallback as fallback
+    from core.fork_types import ForkInputExhausted
+
+    async def fake_run_in_db(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(fallback, "run_in_db", fake_run_in_db)
+    calls = []
+
+    async def invoke(request, _cancel):
+        calls.append(request)
+        raise ForkInputExhausted("checkpoint_context_truncated: path=ii_provider_context_limit")
+
+    with pytest.raises(ForkInputExhausted):
+        await fallback.invoke_with_cold_correction(
+            _warm_request("native", cold_builder=_cold_admission), asyncio.Event(), invoke,
+        )
+    assert len(calls) == 2
+
+
+def test_cc_and_codex_type_a_size_refusal_with_no_narrative():
+    import json
+
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
+    from core.fork_cc_result import result as cc_result
+    from core.fork_codex_result import CodexForkCapture
+    from core.fork_types import ForkInputExhausted
+
+    refusal = {"type": "result", "is_error": True, "result": "Prompt is too long"}
+    with pytest.raises(ForkInputExhausted):
+        cc_result(json.dumps(refusal).encode(), truncated=False, kind=CHECKPOINT_KIND)
+
+    async def codex() -> None:
+        capture = CodexForkCapture(kind=CHECKPOINT_KIND)
+        capture.truncate()
+        await capture.terminal
+
+    with pytest.raises(ForkInputExhausted):
+        asyncio.run(codex())
+
+
+@pytest.mark.asyncio
 async def test_native_warm_fork_correction_uses_canonical_refusal_log(monkeypatch):
     from core import checkpoint_cold_fallback as fallback
     from loguru import logger

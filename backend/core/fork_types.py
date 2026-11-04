@@ -85,3 +85,9 @@ class WarmForkUnusable(ProviderForkRejected):
     def __init__(self, *args: object, reason: str = "warm_fork_over_window") -> None:
         super().__init__(*args)
         self.reason = reason
+
+
+class ForkInputExhausted(ProviderForkRejected):
+    """The provider refused the fork's grown input for size before it wrote any narrative."""
+
+    reason = "fork_input_exhausted"

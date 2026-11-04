@@ -2,9 +2,11 @@
 
 Admission picks warm whenever a warm source exists, because only the provider
 can report what the live handle actually holds. When the adapter proves at
-invoke time that the fork cannot hold its own input, the operation has produced
-nothing and paid nothing, so choosing the cold path is the same operation
-finding its only usable route -- not a retry of a refused call.
+invoke time that the fork cannot hold its own input, or the provider refuses
+its grown input for size before it wrote any narrative, the operation has
+produced nothing to install, so choosing the cold path is the same operation
+finding its only usable route -- not a retry of a refused call. Calls the warm
+fork already paid for stay recorded against this checkpoint.
 
 This correction applies to pressure checkpoints only. Manual admission may
 start cold when no warm source exists, while idle remains warm-only by contract
@@ -19,7 +21,7 @@ from dataclasses import replace
 from core.fork_capture import warm_capture_refused
 
 from core.checkpoint_types import CheckpointProviderForkRequest
-from core.fork_types import WarmForkUnusable
+from core.fork_types import ForkInputExhausted, WarmForkUnusable
 from infra.checkpoints import adopt_cold
 from infra.db_async import run_in_db
 
@@ -67,7 +69,7 @@ async def invoke_with_cold_correction(request, cancel_event, invoke):
     """Run one pressure invocation, correcting an unusable warm fork to cold."""
     try:
         return await invoke(request, cancel_event)
-    except WarmForkUnusable as refusal:
+    except (WarmForkUnusable, ForkInputExhausted) as refusal:
         if not cold_correction_available(request):
             raise
         reason = refusal.reason
