@@ -128,9 +128,9 @@ def conform(value: Any, schema: dict[str, Any], path: str = "result") -> Any:
         if not isinstance(value, str):
             raise ResultInvalid(f"{path} must be a string")
         if "maxLength" in schema and len(value) > schema["maxLength"]:
-            if schema.get("truncate"):
-                return value[:schema["maxLength"] - 1] + "…"
-            raise ResultInvalid(f"{path} must have at most {schema['maxLength']} characters")
+            if not schema.get("truncate"):
+                raise ResultInvalid(f"{path} must have at most {schema['maxLength']} characters")
+            value = value[:schema["maxLength"] - 1] + "…"
         enum = schema.get("enum")
         if enum and value not in enum:
             if "unknown" not in schema:

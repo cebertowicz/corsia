@@ -47,6 +47,14 @@ def test_truncate_cuts_only_an_over_limit_string_to_its_limit():
         conform(7, schema)
 
 
+def test_a_cut_value_still_meets_its_enum():
+    schema = {"type": "string", "enum": ["ok"], "maxLength": 5, "truncate": True}
+    assert schema_errors(schema) == []
+    with pytest.raises(ResultInvalid):
+        conform("abcdefgh", schema)
+    assert conform("abcdefgh", {**schema, "unknown": "ok"}) == "ok"
+
+
 @pytest.mark.parametrize("schema", [{"type": "string", "maxLength": 5, "truncate": "yes"},
                                     {"type": "string", "truncate": True},
                                     {"type": "string", "maxLength": 0, "truncate": True},
