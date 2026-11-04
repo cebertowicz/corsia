@@ -2,11 +2,12 @@
 
 Admission picks warm whenever a warm source exists, because only the provider
 can report what the live handle actually holds. When the adapter proves at
-invoke time that the fork cannot hold its own input, or the provider refuses
-its grown input for size before it wrote any narrative, the operation has
-produced nothing to install, so choosing the cold path is the same operation
-finding its only usable route -- not a retry of a refused call. Calls the warm
-fork already paid for stay recorded against this checkpoint.
+invoke time that the fork cannot hold its own input, or its grown input runs
+out of room before it wrote any narrative, the warm attempt has nothing to
+install. The row then makes one cold attempt on a fitted input. That attempt
+starts clean: ``adopt_cold`` discards whatever the warm fork staged, and its
+calls are recorded under their own keys beside the warm calls already paid
+for. A cold attempt that fails ends the row; nothing chains.
 
 This correction applies to pressure checkpoints only. Manual admission may
 start cold when no warm source exists, while idle remains warm-only by contract
@@ -17,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+
 
 from core.fork_capture import warm_capture_refused
 
@@ -57,12 +59,22 @@ async def build_cold_request(
     await run_in_db(adopt_cold, request.fork_id)
     warm_capture_refused(request.thread_id, request.target.harness, reason)
     # The usage callback is already frozen against this checkpoint id; keep the
-    # single-owner binding rather than rebinding a second one.
-    return replace(cold, on_usage=request.on_usage, same_model_cold=None,
+    # single-owner binding, keyed apart so cold call N never meets warm call N.
+    return replace(cold, on_usage=_cold_keyed(request.on_usage), same_model_cold=None,
                    vendor_account_id=request.vendor_account_id,
                    vendor_account_bound=request.vendor_account_bound,
                    vendor_account_receipt=request.vendor_account_receipt,
                    vendor_launch=request.vendor_launch)
+
+
+def _cold_keyed(on_usage):
+    if on_usage is None:
+        return None
+
+    async def cold_on_usage(call_key, *args):
+        return await on_usage(f"cold:{call_key}", *args)
+
+    return cold_on_usage
 
 
 async def invoke_with_cold_correction(request, cancel_event, invoke):
@@ -73,6 +85,9 @@ async def invoke_with_cold_correction(request, cancel_event, invoke):
         if not cold_correction_available(request):
             raise
         reason = refusal.reason
+        if isinstance(refusal, ForkInputExhausted):
+            # Its text (path, counted, bound) diagnoses the warm count; keep it.
+            reason = f"{reason}: {refusal}"
     if cancel_event.is_set():
         raise asyncio.CancelledError
     cold = await build_cold_request(request, reason)
