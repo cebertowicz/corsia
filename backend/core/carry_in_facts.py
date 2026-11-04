@@ -39,7 +39,7 @@ TERMINAL_EVENTS = (RESULT, RETIRED, COVERAGE)
 RETIRE_REASONS = (
     "lesson_unreadable", "lesson_retired", "version_changed", "case_changed",
     "target_moved", "owner_missing", "delivery_mismatch", "not_mechanically_executable",
-    "target_unavailable", "same_input", OMIT_MISSING_SECTION,
+    "target_unavailable", "same_input", "decisive_unparameterized", OMIT_MISSING_SECTION,
 )
 #: Why a claimed case ended without enough completed samples: the eval route's own
 #: failure kinds (``eval.endpoint.EVAL_FAILURES``), a restart, lost capacity, or
@@ -48,7 +48,7 @@ COVERAGE_REASONS = (
     "admission", "handoff", "provider", "timeout", "interrupted", "no_ready_local_model", "error",
 )
 #: Why the oldest case is still pending; it stays the oldest and runs on a later wake.
-WAITING_REASONS = ("no_ready_local_model", "history_unavailable")
+WAITING_REASONS = ("no_ready_local_model", "history_unavailable", "schema_lookup_unavailable")
 VERDICTS = ("passed", "failed", "not_discriminating")
 _TARGET_KEYS = ("target_file", "new_target_path")
 _ACTIVE_STATES = ("watch", "trial", "promoted")
