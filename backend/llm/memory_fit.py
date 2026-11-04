@@ -20,7 +20,7 @@ from typing import Any, Mapping, NamedTuple
 _UNITS = {"GB": 2 ** 30, "MB": 2 ** 20, "KB": 2 ** 10}
 _AMOUNT = r"([\d.]+)\s*(GB|MB|KB)"
 
-# oMLX 0.7.1rc1 refuses in four wordings, all "prefill memory guard rejected":
+# oMLX 0.7.1rc1 through 0.7.3 refuses in four wordings, all "prefill memory guard rejected":
 # the scheduler's "(current C + KV+SDPA K) but the prefill limit is L"; the memory
 # monitor's "... but <binding> ceiling is L"; the preflight safety guard's
 # "(current C + KV K + min-chunk transient T) but prefill safety cap is L"; and

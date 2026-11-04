@@ -62,10 +62,11 @@ def test_every_oMLX_pin_site_names_the_same_release():
     assert 'source "$ROOT/backend/llm/omlx_release.py"' in script
     assert 'readonly OMLX_VERSION OMLX_SHA256' in script
     assert 'fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"' in script
-    assert local_setup_executable.OMLX_VERSION == omlx_release.OMLX_VERSION == local_model.OMLX_PIN
+    assert local_setup_executable.OMLX_VERSION == omlx_release.OMLX_VERSION
     assert local_setup_executable.OMLX_SHA256 == omlx_release.OMLX_SHA256
-    assert FIXTURE["tag"] == f"v{local_model.OMLX_PIN}"
-    assert local_model.omlx_has_recommender(local_model.OMLX_PIN)
+    assert FIXTURE["tag"] == f"v{local_model.OMLX_RECOMMENDER_MIN}"
+    assert local_model.omlx_has_recommender(local_model.OMLX_RECOMMENDER_MIN)
+    assert local_model.omlx_has_recommender(omlx_release.OMLX_VERSION)
     assert not local_model.omlx_has_recommender("0.7.0") and not local_model.omlx_has_recommender(None)
 
 
