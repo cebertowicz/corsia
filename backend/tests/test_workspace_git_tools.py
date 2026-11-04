@@ -63,6 +63,17 @@ def test_both_reject_forbidden_paths(repo, path):
         workspace_git._history("thread", path, 5)
 
 
+@pytest.mark.asyncio
+async def test_tools_refuse_decomposed_fenced_root(repo):
+    path = "projects/Cafe\u0301/secret.txt"
+    commit = await workspace_git.WorkspaceCommitTool().execute(
+        _thread_id="thread", paths=[path], message="change"
+    )
+    history = await workspace_git.WorkspaceHistoryTool().execute(_thread_id="thread", path=path)
+    assert "outside your scope" in commit
+    assert "outside your scope" in history
+
+
 def test_history_rejects_fenced_folder_and_ancestor(repo, monkeypatch):
     nested = repo / "projects/own/restricted"
     fence = Fence((FencedRoot(nested, "restricted"),), "thread")

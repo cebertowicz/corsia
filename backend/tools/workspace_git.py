@@ -11,6 +11,7 @@ from typing import Any
 
 from tools.base import Tool
 from tools.catalog_entry import ToolCatalogEntry
+from tools.host_path_resolution import contains
 
 
 WORKSPACE_GIT_CATALOG_ENTRIES = {
@@ -25,12 +26,8 @@ WORKSPACE_GIT_CATALOG_ENTRIES = {
 }
 
 
-def _normal(path: str) -> str:
-    return unicodedata.normalize("NFC", path).casefold().rstrip("/")
-
-
-def _contains(parent: str, child: str) -> bool:
-    return child == parent or child.startswith(parent + "/")
+def _normal_name(name: str) -> str:
+    return unicodedata.normalize("NFC", name).casefold()
 
 
 def _check_path(repo: Path, path: str, fence, projects: set[str], *, history: bool) -> str:
@@ -39,18 +36,17 @@ def _check_path(repo: Path, path: str, fence, projects: set[str], *, history: bo
     parts = path.split("/")
     if any(part in ("", ".", "..") for part in parts):
         raise ValueError("Path must be a canonical workspace-relative path.")
-    candidate = _normal(str(repo / path))
-    projects_root = _normal(str(repo / "projects"))
-    if (history and _contains(candidate, projects_root)) or (
-        _normal(parts[0]) == "projects" and len(parts) > 1 and _normal(parts[1]) not in projects
+    candidate = repo / path
+    projects_root = repo / "projects"
+    if (history and contains(candidate, projects_root)) or (
+        _normal_name(parts[0]) == "projects" and len(parts) > 1 and _normal_name(parts[1]) not in projects
     ):
         raise ValueError("Path is not in a current project.")
     for root in fence.roots:
         for form in root.forms:
-            fenced = _normal(str(form))
-            if _contains(fenced, candidate) or (history and _contains(candidate, fenced)):
+            if contains(form, candidate) or (history and contains(candidate, form)):
                 raise ValueError(fence.refusal(form) or "Path is outside your scope.")
-    if not history and any(_normal(part) == ".git" for part in parts):
+    if not history and any(_normal_name(part) == ".git" for part in parts):
         raise ValueError("Path must not contain a .git component.")
     return path
 
@@ -62,7 +58,7 @@ def _current_projects(repo: Path, db) -> set[str]:
     for row in db.execute("SELECT name, path FROM projects"):
         _, root = resolve_project_row_paths(repo, project_name=row["name"], raw_path=row["path"])
         if root is not None and root.parent == repo / "projects":
-            result.add(_normal(root.name))
+            result.add(_normal_name(root.name))
     return result
 
 
@@ -154,14 +150,14 @@ class WorkspaceCommitTool(Tool):
         return {"type": "object", "properties": {"paths": {"type": "array", "items": {"type": "string"}, "minItems": 1}, "message": {"type": "string"}}, "required": ["paths", "message"]}
 
     async def execute(self, **kwargs: Any) -> str:
-        from infra.db_async import run_in_db
+        from infra.db_async import run_off_db
         from infra.guidance_git import GitFault
 
         thread_id, paths, message = kwargs.get("_thread_id"), kwargs.get("paths"), kwargs.get("message")
         if not isinstance(thread_id, str) or not thread_id or not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths) or not isinstance(message, str) or not message.strip():
             return "Error: provide a current thread, paths, and a non-empty message."
         try:
-            return await run_in_db(lambda: _commit(thread_id, paths, message))
+            return await run_off_db(lambda: _commit(thread_id, paths, message))
         except (ValueError, OSError, GitFault) as exc:
             return f"Error: {exc}"
 
@@ -180,13 +176,13 @@ class WorkspaceHistoryTool(Tool):
         return {"type": "object", "properties": {"path": {"type": "string"}, "count": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5}}, "required": ["path"]}
 
     async def execute(self, **kwargs: Any) -> str:
-        from infra.db_async import run_in_db
+        from infra.db_async import run_off_db
         from infra.guidance_git import GitFault
 
         thread_id, path, count = kwargs.get("_thread_id"), kwargs.get("path"), kwargs.get("count", 5)
         if not isinstance(thread_id, str) or not thread_id or not isinstance(path, str) or type(count) is not int or not 1 <= count <= 20:
             return "Error: provide a current thread, a path, and count from 1 to 20."
         try:
-            return await run_in_db(lambda: _history(thread_id, path, count))
+            return await run_off_db(lambda: _history(thread_id, path, count))
         except (ValueError, OSError, GitFault) as exc:
             return f"Error: {exc}"
