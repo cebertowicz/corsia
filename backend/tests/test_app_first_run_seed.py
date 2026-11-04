@@ -709,3 +709,41 @@ def test_each_seeded_step_names_its_own_reference_and_the_file_exists(fresh_inst
         assert match, row
         assert match.group(2) == step_number, row
         assert (references / match.group(1)).is_file(), row
+
+
+def test_migration_gives_open_steps_seeded_before_references_their_line(fresh_install, app_seed_facts):
+    from infra import accounts
+    from infra.database import write_transaction
+    from infra.migration_173_to_174_first_run_step_references import migrate_173_to_174
+    from onboarding.app_first_run import cache_completed_facts
+    from onboarding.first_run_instructions import step_reference_line
+    from tests.plan_writer_authorizer import raw_plan_seed
+
+    accounts.create_first_account("newcomer", PASSWORD, first_run_path="app")
+    conductor_id = _conductor_id()
+    with write_transaction(None, scope="pre_reference_plan") as db:
+        cache_completed_facts(conductor_id, "newcomer", _completed_app_facts(), db=db)
+        # A plan seeded before step references: no descriptions; one step already settled.
+        with raw_plan_seed(db):
+            db.execute("UPDATE plan_nodes SET description=NULL WHERE workflow_ref='first-run-app'")
+            db.execute(
+                "UPDATE plan_nodes SET state='closed' WHERE workflow_ref='first-run-app' "
+                "AND workflow_step='7:common'"
+            )
+    before = {row["id"]: row for row in _rows("SELECT * FROM plan_nodes WHERE workflow_ref='first-run-app'")}
+
+    with write_transaction(None, scope="migrate_173_to_174") as db:
+        migrate_173_to_174(db)
+        migrate_173_to_174(db)
+
+    after = _rows("SELECT * FROM plan_nodes WHERE workflow_ref='first-run-app'")
+    assert {row["workflow_step"] for row in after} >= {"3:common", "3:ask", "9:common"}
+    assert [row["workflow_step"] for row in after if row["state"] == "closed"] == ["7:common"]
+    for row in after:
+        if row["state"] == "closed":
+            assert row["description"] is None, row
+            assert row["revision"] == before[row["id"]]["revision"], row
+        else:
+            number = int(row["workflow_step"].split(":")[0])
+            assert row["description"] == step_reference_line(number), row
+            assert row["revision"] == before[row["id"]]["revision"] + 1, row
