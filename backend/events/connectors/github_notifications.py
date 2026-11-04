@@ -40,7 +40,7 @@ from typing import Any
 
 from connections.github_read_request import AUTH_PROBE, SIGNED_OUT
 from events.connectors import github_notifications_feed as feed
-from events.connectors.github_read_budget import budget
+from events.connectors.github_read_budget import person_budget
 import infra.webhook_delivery_log as webhook_delivery_log
 
 log = logging.getLogger(__name__)
@@ -97,10 +97,10 @@ def _parse_time(value: Any) -> datetime | None:
 
 def poller_status() -> dict[str, Any]:
     """The poller's state, reason, last success, last error and skipped-thread count,
-    and the read budget both GitHub pollers share (``read_budget``)."""
+    and the read budget of the person's own login, which the feed reads as (``read_budget``)."""
     return {
         **_status, "last_error": dict(_status["last_error"] or {}) or None,
-        "read_budget": budget.status(),
+        "read_budget": person_budget.status(),
     }
 
 

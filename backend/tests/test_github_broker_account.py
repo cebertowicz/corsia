@@ -74,7 +74,8 @@ def test_every_poller_defaults_to_its_broker(monkeypatch) -> None:
     monkeypatch.setattr(activity, "poll_once", stop_poll)
     with pytest.raises(Stop):
         asyncio.run(activity.repo_activity_poll_loop())
-    assert seen["quiet"] is seen["activity"] is default_broker()  # the person's feed reads as the person
+    assert seen["quiet"] is seen["activity"] is default_broker()
+    # the person's feed reads as the person
     assert seen["notifications"] is person_broker() and seen["notifications"] is not default_broker()
 
 
@@ -98,12 +99,11 @@ def test_the_notifications_feed_is_read_as_the_person_never_the_agents_account(m
 
 
 # --- each default_broker() reader, when the agents' account exists but is not ready ---------
-# A locked gh has no credential, so `gh api` goes out anonymously: a private repository
-# answers 404 (what this records) and the auth probe fails. Each reader reports that as it
-# reports any failed read.
+# A locked gh has no credential, and gh refuses `api` and `auth status` without one before
+# any request (exit 4, as real gh 2.x does with an empty config folder): GitHub is never
+# called, so no budget learns anything. Each reader reports it as it reports any failed read.
 
-ANONYMOUS_404 = ("HTTP/2.0 404 Not Found\r\nX-Ratelimit-Limit: 60\r\nX-Ratelimit-Remaining: 59\r\n"
-                 "X-Ratelimit-Resource: core\r\n\r\n" '{"message":"Not Found","status":"404"}')
+NO_LOGIN = "To get started with GitHub CLI, please run:  gh auth login\n"
 
 
 @pytest.fixture
@@ -116,9 +116,7 @@ def locked(monkeypatch):
     def fake(argv, **kwargs):
         runs.append(argv)
         assert kwargs["env"]["GH_CONFIG_DIR"] == LOCKED_HOME and "GH_TOKEN" not in kwargs["env"]
-        if argv[1:3] == ["auth", "status"]:
-            return subprocess.CompletedProcess(argv, 1, "", "X Failed to log in to github.com\n")
-        return subprocess.CompletedProcess(argv, 1, ANONYMOUS_404, "gh: Not Found (HTTP 404)\n")
+        return subprocess.CompletedProcess(argv, 4, "", NO_LOGIN)
 
     monkeypatch.setenv("GH_TOKEN", "person-credential-value")
     monkeypatch.setattr(github_agent, "view", lambda: AgentAccountView(
@@ -132,7 +130,7 @@ def locked(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_the_repo_activity_poller_reads_locked_and_reports_degraded(monkeypatch, locked):
+async def test_the_repo_activity_poller_is_refused_locked_and_reports_degraded(monkeypatch, locked):
     from datetime import UTC, datetime
 
     from events.connectors import github_repo_activity as poller
@@ -141,8 +139,9 @@ async def test_the_repo_activity_poller_reads_locked_and_reports_degraded(monkey
                                             "degraded": None})
     state = {"reads": [], "issues_cursor": "held"}
     assert await poller._get(default_broker(), "repos/o/r/pulls", state, datetime.now(UTC)) is None
-    assert state["issues_cursor"] == "held" and poller.poller_status()["degraded"] == "http_404"
+    assert state["issues_cursor"] == "held" and poller.poller_status()["degraded"] == "gh_error"
     assert locked and all(argv[0] == "/agent/gh" for argv in locked)
+    assert budget_status() == ({}, {})
 
 
 @pytest.mark.asyncio
@@ -162,14 +161,13 @@ async def test_the_pr_quiet_watch_probes_locked_and_reports_signed_out(monkeypat
     assert locked and all(argv[0] == "/agent/gh" for argv in locked)
 
 
-def test_the_script_github_channel_reads_locked_and_hands_the_client_the_failure(locked):
+def test_the_script_github_channel_is_refused_locked_and_hands_the_client_the_failure(locked):
     import json
 
     from automation import script_github_channel as channel
 
     got = channel._respond(json.dumps(["repos/o/r/pulls/1"]).encode(), repo="o/r", context="run=x")
-    assert got["code"] == 1 and got["stdout"] == '{"message":"Not Found","status":"404"}'
-    assert got["stderr"] == "gh: Not Found (HTTP 404)\n"
+    assert got["code"] == 4 and got["stdout"] == "" and got["stderr"] == NO_LOGIN
     assert [argv[0] for argv in locked] == ["/agent/gh"]
 
 
@@ -185,3 +183,23 @@ def test_a_verifying_account_waits_once_for_its_answer(monkeypatch, ran, verifie
     _run_gh(["api", "user"], timeout=5)
     assert calls == [1]
     assert ran["argv"][0] == "/agent/gh" and ran["env"]["GH_CONFIG_DIR"] == home
+
+
+def budget_status():
+    from events.connectors.github_read_budget import budget, person_budget
+
+    return budget.status(), person_budget.status()
+
+
+@pytest.mark.parametrize("account, agents", [
+    (AgentAccountView(state="ready", binary="/agent/gh", home="/agent/home"), True),
+    (AgentAccountView(state="needs_auth", cause="signed_out", binary="/agent/gh", home="/agent/home"), True),
+    (AgentAccountView(state="not_installed", absent=True), False),
+])
+def test_each_broker_names_the_budget_of_the_account_it_reads_as(monkeypatch, account, agents):
+    from events.connectors.github_read_budget import budget, person_budget
+
+    monkeypatch.setattr(github_agent, "view", lambda: account)
+    assert account.absent is not agents
+    assert default_broker().read_budget is (budget if agents else person_budget)
+    assert person_broker().read_budget is person_budget

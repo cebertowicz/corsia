@@ -4,7 +4,7 @@ Every emitted item is a webhook-shaped delivery through GitHub admission.  The
 issue-event reader is shared by normal polling and startup catch-up so both use
 the same bounded cursor traversal and never replay historic labels.  A repo's
 first poll only seeds its cursor, heads and closed markers.  Every read passes
-the hourly cap and the shared read budget, as a low-priority read.  The poller
+the hourly cap and its account's read budget, as a low-priority read.  The poller
 is a fallback, with one rule for every
 read: an item whose own time is at or before the repo's last real webhook
 delivery is assumed delivered by it and is not admitted.  Saved state still

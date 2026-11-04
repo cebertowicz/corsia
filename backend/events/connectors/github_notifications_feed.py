@@ -20,7 +20,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
 from connections.github_read_request import GithubReadRefused
-from events.connectors.github_read_budget import budget
+from events.connectors.github_read_budget import budget_of
 
 GhRunner = Callable[..., subprocess.CompletedProcess]
 log = logging.getLogger(__name__)
@@ -152,10 +152,12 @@ def gh_get(
 ) -> GhResponse:
     """Run one GET through ``gh``; raise ``FeedError`` unless it is 2xx or 304.
 
-    The shared read budget is asked first: while core is exhausted, or under a
-    Retry-After, GitHub is not called. A ``low_priority`` read also stays out
-    of the budget's reserve. The budget also decides what counts as a rate limit.
+    The read budget of the account ``runner`` reads as is asked first: while
+    core is exhausted, or under a Retry-After, GitHub is not called. A
+    ``low_priority`` read also stays out of the budget's reserve. The budget
+    also decides what counts as a rate limit.
     """
+    budget = budget_of(runner)
     if budget.blocked_until(low_priority=low_priority) is not None:
         raise FeedError("rate_limited", "shared read budget")
     args = ["api", "--method", "GET", "-i"]

@@ -8,7 +8,8 @@ owner's or an agent's, can emit an event naming any repository, and only a
 registered one binds. The claim reads it from the stored run input, so nothing a
 running script sends can choose it. Each request is
 vetted by the broker's read policy, then limited to ``repos/<that repo>/...``,
-and goes through the pollers' shared read budget: asked before, told after.
+and goes through the read budget of the account the broker reads as: asked
+before, told after.
 """
 
 from __future__ import annotations
@@ -28,7 +29,6 @@ from typing import Any
 
 from connections.github_broker import GithubReadRefused, default_broker
 from connections.github_read_request import ReadRequest, parse_gh_args
-from events.connectors.github_read_budget import budget
 from host_access.credential_sanitizer import sanitize_credential_text
 from tools.unix_socket_policy import corsia_temp_root_for_bind
 
@@ -97,14 +97,16 @@ def _json(text: str) -> Any:
 
 def _read(request: ReadRequest, context: str) -> dict[str, Any]:
     """One budgeted broker read; the client gets the output it asked for, unchanged."""
+    broker = default_broker()
+    budget = broker.read_budget
     until = budget.blocked_until(low_priority=True)
     if until is not None:
-        log.info("script github read deferred by the shared read budget %s", context)
+        log.info("script github read deferred by the read budget %s", context)
         resumes = datetime.fromtimestamp(until, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         return {"code": 1, "stdout": "",
                 "stderr": f"GitHub reads are paused by the shared rate-limit budget until {resumes}\n"}
     # Headers are always read so that the budget learns from every response.
-    result = default_broker()(replace(request, include=True).argv())
+    result = broker(replace(request, include=True).argv())
     stdout = str(result.stdout or "")
     split = _split_response(stdout)
     if split is None:

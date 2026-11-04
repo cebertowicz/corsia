@@ -4,8 +4,8 @@ Requests are vetted and rebuilt and the host is pinned. Refusals, errors, argv,
 stderr and the auth probe's text are scrubbed. A read's response is GitHub's
 data, passed through as the webhook path receives it: GitHub never echoes the
 credential. ``gh`` follows redirects; its credential stays on the configured
-host, as the real-gh redirect test verifies. The caller owns the shared read
-budget.
+host, as the real-gh redirect test verifies. Each broker names the read budget
+of the account it reads as (``read_budget``); the caller asks and feeds it.
 """
 
 from __future__ import annotations
@@ -13,13 +13,16 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from connections.github_agent_home import TOKEN_NAMES
 from connections.github_read_request import (
     AUTH_PROBE, GH_HOST, SINGLE_ACCOUNT_PROBE, UNSUPPORTED_FLAG, GithubReadRefused, parse_gh_args,
 )
 from host_access.credential_sanitizer import REDACTION_MARKER, sanitize_credential_text
+
+if TYPE_CHECKING:
+    from events.connectors.github_read_budget import ReadBudget
 
 __all__ = ["GithubReadBroker", "GithubReadRefused", "default_broker", "person_broker"]
 log = logging.getLogger(__name__)
@@ -59,8 +62,17 @@ def _run_gh(args: list[str], *, timeout: float) -> subprocess.CompletedProcess:
 class GithubReadBroker:
     """Vet request shape before passing reads to ``gh``."""
 
-    def __init__(self, inner: Callable[..., subprocess.CompletedProcess] | None = None) -> None:
+    def __init__(
+        self, inner: Callable[..., subprocess.CompletedProcess] | None = None,
+        account_budget: Callable[[], ReadBudget] | None = None,
+    ) -> None:
         self._inner = inner or _run_gh
+        self._account_budget = account_budget or _default_budget
+
+    @property
+    def read_budget(self) -> ReadBudget:
+        """The read budget of the account this broker's next read runs as."""
+        return self._account_budget()
 
     def __call__(
         self, args: list[str], *, input_text: str | None = None, timeout: float = 30.0,
@@ -94,6 +106,20 @@ class GithubReadBroker:
         return parse_gh_args(args).argv()
 
 
+def _default_budget() -> ReadBudget:
+    """The agents' account's budget; the person's while there is no agents' account and reads run as them."""
+    from connections import github_agent
+    from events.connectors.github_read_budget import budget, person_budget
+
+    return person_budget if github_agent.view().absent else budget
+
+
+def _person_budget() -> ReadBudget:
+    from events.connectors.github_read_budget import person_budget
+
+    return person_budget
+
+
 _default: GithubReadBroker | None = None
 _person: GithubReadBroker | None = None
 
@@ -110,5 +136,5 @@ def person_broker() -> GithubReadBroker:
     """The broker for a read of the person's own account, such as their notifications feed."""
     global _person
     if _person is None:
-        _person = GithubReadBroker(_run_host_gh)
+        _person = GithubReadBroker(_run_host_gh, _person_budget)
     return _person
