@@ -13,7 +13,8 @@ from __future__ import annotations
 import sqlite3
 
 from core.stop_causes import (
-    CONTEXT_OVERFLOW_REASON, PLAN_LIMIT_REASON, VENDOR_LIMIT_REFUSAL_REASON, ContextOverflowEnd, PlanLimitStop,
+    CLAUDE_LOGIN_RACE_REASON, CONTEXT_OVERFLOW_REASON, PLAN_LIMIT_REASON, VENDOR_LIMIT_REFUSAL_REASON,
+    ClaudeLoginRaceEnd, ContextOverflowEnd, PlanLimitStop,
 )
 
 #: The transcript chip line for the continue input (approved copy).
@@ -30,15 +31,21 @@ _OVERFLOW_CONTENT = (
     "The provider refused your previous turn because the chat no longer fit its "
     "context window. Continue the work that turn was doing."
 )
+_LOGIN_RACE_CONTENT = (
+    "Your previous turn ended when Claude Code briefly reported its login as failed; "
+    "the login still works. Continue the work that turn was doing."
+)
 _CONTENT_BY_CAUSE = {
     PLAN_LIMIT_REASON: _CONTENT,
     VENDOR_LIMIT_REFUSAL_REASON: _VENDOR_CONTENT,
     CONTEXT_OVERFLOW_REASON: _OVERFLOW_CONTENT,
+    CLAUDE_LOGIN_RACE_REASON: _LOGIN_RACE_CONTENT,
 }
 
 
 _CONTINUE_ID_PREFIX = "overage-continue:"
 _OVERFLOW_ID_PREFIX = "overflow-continue:"
+_LOGIN_RACE_ID_PREFIX = "login-race-continue:"
 _UNANSWERED_ID_PREFIX = "overflow-unanswered:"
 
 
@@ -203,6 +210,19 @@ def queue_overflow_continue(db: sqlite3.Connection, turn_id: str, thread_id: str
     )
 
 
+def queue_login_race_continue(db: sqlite3.Connection, turn_id: str, thread_id: str) -> None:
+    """Queue one login-race re-run, never for a Turn that is itself a re-run."""
+    rerun = db.execute(
+        "SELECT 1 FROM messages WHERE active_turn_id=? AND id LIKE ?",
+        (turn_id, f"{_LOGIN_RACE_ID_PREFIX}%"),
+    ).fetchone()
+    if rerun is None:
+        _queue_continue(
+            db, turn_id, thread_id, cause=CLAUDE_LOGIN_RACE_REASON,
+            message_id=f"{_LOGIN_RACE_ID_PREFIX}{turn_id}", summary=None,
+        )
+
+
 def record_unanswered_overflow(db: sqlite3.Connection, message_id: str) -> None:
     """Write the size-refused Turn's notice once its re-run input ended failed.
 
@@ -266,3 +286,5 @@ def queue_terminal_continue(
         queue_limit_refusal_continue(db, turn_id, thread_id)
     elif outcome == "error" and isinstance(error, ContextOverflowEnd):
         queue_overflow_continue(db, turn_id, thread_id)
+    elif outcome == "error" and isinstance(error, ClaudeLoginRaceEnd):
+        queue_login_race_continue(db, turn_id, thread_id)

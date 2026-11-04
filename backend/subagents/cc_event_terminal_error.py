@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from core.stop_causes import ContextOverflowEnd
+from core.stop_causes import ClaudeLoginRaceEnd, ContextOverflowEnd
 from infra.db_async import run_in_db_unless_owned
 from infra.plan_limit_continue import overflow_rerun_queued
 from subagents.cc_event_context import CCEventContext
+from subagents.turn_account_error import login_race_answered
 
 
 def turn_error(ev: dict) -> str:
@@ -15,12 +16,19 @@ def turn_error(ev: dict) -> str:
     return ev.get("result") or "Claude Code turn failed"
 
 
-def terminal_error(ev: dict, metadata: dict, outcome: str) -> str | ContextOverflowEnd | None:
-    """The terminal error; a size refusal is typed so the Turn leaves its one re-run."""
+def terminal_error(
+    ev: dict, metadata: dict, outcome: str, *, stop_requested: bool = False,
+) -> str | BaseException | None:
+    """Carry a verified transient login failure or size refusal to terminal settlement."""
     if outcome != "error":
         return None
     text = turn_error(ev)
-    return ContextOverflowEnd(text) if metadata.get("cause") == "context_window_exceeded" else text
+    if metadata.get("cause") == "context_window_exceeded":
+        return ContextOverflowEnd(text)
+    if (not stop_requested and metadata.get("stop_reason") != "interrupted"
+            and login_race_answered(text, ev.get("_corsia_login_verdict"))):
+        return ClaudeLoginRaceEnd(text)
+    return text
 
 
 async def rerun_owns_notice(ctx: CCEventContext, turn_id: str, metadata: dict) -> bool:
