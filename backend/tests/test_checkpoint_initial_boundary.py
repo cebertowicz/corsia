@@ -300,8 +300,11 @@ async def test_codex_stop_owned_boundary_failure_preserves_cancel_owner(
     async def reject(*_args, **_kwargs):
         raise AssertionError("Stop-owned Turn was rewritten as an error")
 
+    async def reusable(_id):
+        return session
+
     monkeypatch.setattr(codex_runtime, "_new_app_server_live", lambda *_a, **_k: live)
-    monkeypatch.setattr(codex_runtime, "_reusable_app_session", lambda _id: session)
+    monkeypatch.setattr(codex_runtime, "_reusable_app_session", reusable)
     monkeypatch.setattr(codex_runtime, "_resolve_app_server_tools", lambda *_a, **_k: (object(), ()))
     monkeypatch.setattr(codex_runtime, "_start_live_turn", start)
     monkeypatch.setattr(codex_runtime, "_configure_spec_app_server_input", configure)

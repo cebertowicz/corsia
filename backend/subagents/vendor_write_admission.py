@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from connections.account_policy import AccountAdmissionError, chosen_account_id, require_claim, require_launch
-from connections.account_receipts import account_receipt
+from connections.account_receipts import account_receipt, receipt_is_current
 from connections.account_runtime import homes_for, is_operation_session, session_homes
 from connections.vendor_accounts import get_account, resolve_account_id
 from infra.database import get_db
@@ -20,6 +20,12 @@ def session_receipt(session):
     """The login a session was admitted on; an unadmitted session names none."""
     bound = getattr(session, 'vendor_account_bound', False) is True
     return getattr(session, 'vendor_account_receipt', None) if bound else None
+
+
+def session_login_stale(session, *, db) -> bool:
+    """Whether a session was admitted on a login that is no longer current: it can never write again."""
+    receipt = session_receipt(session)
+    return receipt is not None and not receipt_is_current(receipt, db=db)
 
 
 def prepare_session_launch(session, provider: str) -> None:
