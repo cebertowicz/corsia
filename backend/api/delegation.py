@@ -293,20 +293,33 @@ async def send_turn(thread_id: str, token: str, body: dict):
         raise HTTPException(404, "Thread not found")
     thread_row = target_payload["thread_row"]
 
-    target_project_id = thread_row["project_id"] or None
+    check_send_scope(thread_id, sender, target_payload, body.get("target_scope_id"))
+
+    if await run_in_db(send_needs_hold, sender, thread_row):
+        return await _hold_send(user["id"], from_thread_id, thread_id, message, body)
+
+    return await deliver_send(thread_id, target_payload, message, user, sender, agent_meta,
+                              body.get("idempotency_key"), body.get("target_scope_id"))
+
+
+def check_send_scope(thread_id: str, sender: dict, target_payload: dict, requested_scope: str | None) -> None:
+    """Reject an API send that cannot reach its target scope."""
     scope_check = validate_send_target_scope(
-        source_project_id=sender["project_id"],
-        target_project_id=target_project_id,
-        target_thread_id=thread_id,
-        requested_target_scope_id=body.get("target_scope_id"),
+        source_project_id=sender.get("project_id") or None,
+        target_project_id=target_payload["thread_row"].get("project_id") or None,
+        target_thread_id=thread_id, requested_target_scope_id=requested_scope,
         target_authority=target_payload["target_authority"],
     )
     if not scope_check["ok"]:
         raise HTTPException(409, scope_check["detail"])
 
-    if await run_in_db(send_needs_hold, sender, thread_row):
-        return await _hold_send(user["id"], from_thread_id, thread_id, message, body)
 
+async def deliver_send(thread_id: str, target_payload: dict, message: str, user: dict,
+                       sender: dict, agent_meta: dict, idempotency_key: str | None,
+                       requested_scope: str | None = None) -> dict:
+    """Validate and admit an API send with its original attribution and receipt effects."""
+    check_send_scope(thread_id, sender, target_payload, requested_scope)
+    thread_row = target_payload["thread_row"]
     try:
         result = await send_thread_input(
             thread_id,
@@ -314,7 +327,7 @@ async def send_turn(thread_id: str, token: str, body: dict):
             message,
             user=user,
             metadata=agent_meta,
-            idempotency_key=body.get("idempotency_key"),
+            idempotency_key=idempotency_key,
             native_mode="delegation",
             accepted_effects={
                 "send_ref": {

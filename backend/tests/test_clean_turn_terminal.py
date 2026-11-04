@@ -386,6 +386,37 @@ def test_child_completion_is_one_ordinary_parent_fifo_input() -> None:
         db.close()
 
 
+def test_local_child_final_result_is_held_in_terminal_transaction(monkeypatch) -> None:
+    from infra import local_only
+    from infra.thread_driver import finish_turn
+
+    monkeypatch.setattr(local_only, "_is_cloud", lambda *_args, **_kwargs: True)
+    db = _db()
+    try:
+        _session(db, "parent")
+        _session(db, "child", parent_id="parent")
+        db.execute("UPDATE threads SET local_only=1 WHERE id='child'")
+        db.commit()
+        _running_turn(db, "child", "child-turn")
+        db.execute(
+            "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,delivery_state,seq) "
+            "VALUES ('answer','child','assistant','done',?,'t3','delivered',2)",
+            (json.dumps({"turn_id": "child-turn"}),),
+        )
+        db.execute("UPDATE threads SET next_message_seq=3 WHERE id='child'")
+        result = finish_turn("child-turn", outcome="completed", ended_at="t4",
+                             successor_turn_id="child-next", boot_epoch="boot-1", db=db)
+        row = db.execute("SELECT * FROM held_replies").fetchone()
+        assert (row["state"], row["intent"], row["child_turn_id"], row["idempotency_key"]) == (
+            "held", "completion", "child-turn", "parent-completion:child-turn",
+        )
+        assert result.held_to_announce[0]["id"] == row["id"]
+        assert not result.wake_thread_ids
+        assert db.execute("SELECT count(*) FROM messages WHERE thread_id='parent'").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
 def test_attached_main_completion_does_not_notify_linked_parent() -> None:
     """A visible attached thread is not a subagent completion source."""
     from infra.thread_driver import finish_turn

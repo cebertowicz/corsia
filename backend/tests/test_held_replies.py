@@ -2,7 +2,7 @@
 
 The text stored at the hold is the text delivered on approval; decline delivers nothing; a retry
 with the same key returns the first hold; no setting releases a hold; a worker's final result is
-not held; and a worker can't start inside a Local only project its parent is not in.
+held too; and a worker can't start inside a Local only project its parent is not in.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ def held_client(client, deleg_db, monkeypatch):
     from api import held_replies as held_api
     from infra import local_only
 
-    monkeypatch.setattr(held_api, "authenticate", lambda t: {"id": "u-test"} if t == _TOKEN else None)
+    monkeypatch.setattr(held_api, "authenticate", lambda t: {"id": "u-test", "token_kind": "session"} if t == _TOKEN else None)
     client.app.include_router(held_api.router)
     deleg_db.execute("UPDATE threads SET local_only=1 WHERE id='sender-self'")
     insert_thread(deleg_db, "asker", model=CLOUD, title="Researcher")
@@ -85,12 +85,43 @@ async def test_the_tool_holds_and_approval_delivers_the_stored_text_once(held_cl
     assert approved.status_code == 200
     assert approved.json()["state"] == "sent"
     assert seen["delivered"] == ["the answer"]
-    assert _rows(deleg_db, "state") == [("sent",)]
+    assert _rows(deleg_db, "state", "text") == [("sent", "")]
     assert [(event, chip) for _t, event, _s, chip in seen["told"]] == [
         ("held_reply.sent", "The reply to the Researcher agent was sent."),
     ]
     assert _post(held_client, held["held_reply_id"], "approve").status_code == 409
     assert seen["delivered"] == ["the answer"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["approve", "decline"])
+@pytest.mark.parametrize("token_kind", ["api", "service"])
+async def test_machine_credentials_cannot_decide(held_client, deleg_db, seen, monkeypatch, action, token_kind):
+    from api import held_replies as held_api
+    from infra.accounts import issue_token
+    from infra.auth import authenticate
+
+    held = await _send_by_tool()
+    credential, _ = issue_token("u-test", kind=token_kind, db=deleg_db)
+    monkeypatch.setattr(held_api, "authenticate", authenticate)
+    response = held_client.post(f"/api/held-replies/{held['held_reply_id']}/{action}", json={"token": credential})
+    assert response.status_code == 403
+    assert _rows(deleg_db, "state") == [("held",)]
+    assert seen["delivered"] == []
+
+
+@pytest.mark.asyncio
+async def test_person_session_can_approve(held_client, deleg_db, seen, monkeypatch):
+    from api import held_replies as held_api
+    from infra.accounts import issue_token
+    from infra.auth import authenticate
+
+    held = await _send_by_tool()
+    credential, _ = issue_token("u-test", kind="session", db=deleg_db)
+    monkeypatch.setattr(held_api, "authenticate", authenticate)
+    response = held_client.post(f"/api/held-replies/{held['held_reply_id']}/approve", json={"token": credential})
+    assert response.status_code == 200
+    assert response.json()["state"] == "sent"
 
 
 @pytest.mark.asyncio
@@ -114,6 +145,44 @@ async def test_a_retry_with_the_same_key_returns_the_existing_hold(deleg_db, hel
 
     assert again["held_reply_id"] == first["held_reply_id"]
     assert len(_rows(deleg_db, "id")) == 1
+
+
+@pytest.mark.asyncio
+async def test_api_hold_uses_api_delivery_attribution(deleg_db, held_client, monkeypatch):
+    from infra import held_replies, send_service
+    from infra.send_types import SendResult
+
+    async def delivered(*_args, **_kwargs):
+        return SendResult(driver="test")
+
+    monkeypatch.setattr(send_service, "_deliver_admission", delivered)
+    held = held_replies.hold(user_id="u-test", sender_thread_id="sender-self", recipient_thread_id="asker",
+                             text="api answer", via="api", db=deleg_db)
+    assert _post(held_client, held["id"], "approve").json()["state"] == "sent"
+    row = deleg_db.execute("SELECT metadata FROM messages WHERE thread_id='asker' AND content='api answer'").fetchone()
+    metadata = json.loads(row["metadata"])
+    assert metadata["from_thread"] == "sender-self"
+    assert metadata["from_title"] == "Sender Thread"
+    assert metadata["scope"] == "workspace"
+
+
+@pytest.mark.asyncio
+async def test_known_delivery_refusal_is_terminal(deleg_db, held_client, seen, monkeypatch):
+    from tools import delegate_send
+
+    async def refused(*_args, **_kwargs):
+        return "Error: target rejected this send"
+
+    held = await _send_by_tool()
+    monkeypatch.setattr(delegate_send, "_send", refused)
+    result = _post(held_client, held["held_reply_id"], "approve")
+    assert result.json()["state"] == "not_sent"
+    assert "couldn’t accept" in result.json()["line"]
+    assert _rows(deleg_db, "state", "text") == [("not_sent", "")]
+    assert seen["told"][-1][1] == "held_reply.not_sent"
+    assert "could not be sent" in deleg_db.execute(
+        "SELECT content FROM messages WHERE thread_id='asker' AND role='system' ORDER BY rowid DESC LIMIT 1"
+    ).fetchone()[0]
 
 
 @pytest.mark.asyncio
@@ -162,7 +231,7 @@ async def test_a_missing_recipient_is_not_sent_and_a_failed_delivery_returns_to_
     failed = await _send_by_tool("first")
 
     async def broken(*_args, **_kwargs):
-        return "Error: provider down"
+        raise RuntimeError("provider down")
 
     monkeypatch.setattr(delegate_send, "_send", broken)
     refused = _post(held_client, failed["held_reply_id"], "approve")
@@ -180,24 +249,37 @@ async def test_a_missing_recipient_is_not_sent_and_a_failed_delivery_returns_to_
 
 
 @pytest.mark.asyncio
-async def test_a_workers_final_result_to_a_cloud_parent_is_not_held(deleg_db, held_client, seen, monkeypatch):
-    from tools import delegate_send, delegation
+async def test_explicit_and_automatic_completion_share_one_hold(deleg_db, held_client, monkeypatch):
+    from infra import send_service
+    from infra.send_types import SendResult
+    from infra.thread_driver import _parent_completion
+    from test_clean_turn_terminal import _running_turn
+    from tools.delegate_send import DelegateSendTool
 
-    seen_completion = []
+    async def delivered(*_args, **_kwargs):
+        return SendResult(driver="test")
 
-    async def completion(from_thread_id, thread_id, _turn, message):
-        seen_completion.append((from_thread_id, thread_id, message))
-        return delegation._json({"ok": True})
-
-    monkeypatch.setattr(delegation, "_send_explicit_completion", completion)
-
-    result = await delegate_send.DelegateSendTool().execute(
+    monkeypatch.setattr(send_service, "_deliver_admission", delivered)
+    deleg_db.execute("UPDATE threads SET spawned_by='asker', parent_thread_id='asker' WHERE id='sender-self'")
+    deleg_db.commit()
+    _running_turn(deleg_db, "sender-self", "child-turn")
+    first = json.loads(await DelegateSendTool().execute(
         "asker", "final result", intent="completion", _thread_id="sender-self",
+    ))
+    assert first["status"] == "held"
+    deleg_db.execute(
+        "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,delivery_state,seq) "
+        "VALUES ('answer','sender-self','assistant','final result',?,'t3','delivered',2)",
+        (json.dumps({"turn_id": "child-turn"}),),
     )
-
-    assert json.loads(result) == {"ok": True}
-    assert seen_completion == [("sender-self", "asker", "final result")]
-    assert _rows(deleg_db, "id") == []
+    assert _parent_completion(deleg_db, "child-turn", "sender-self") is None
+    assert len(_rows(deleg_db, "id")) == 1
+    assert deleg_db.execute("SELECT count(*) FROM messages WHERE thread_id='asker' AND role='user'").fetchone()[0] == 0
+    deleg_db.commit()
+    assert _post(held_client, first["held_reply_id"], "approve").json()["state"] == "sent"
+    assert deleg_db.execute(
+        "SELECT count(*) FROM messages WHERE thread_id='asker' AND json_extract(metadata,'$.completion')=1"
+    ).fetchone()[0] == 1
 
 
 def test_the_hold_names_a_worker_by_its_visible_parent(deleg_db, held_client):
@@ -280,6 +362,31 @@ def test_the_dock_row_and_chats_list_item_come_from_the_same_pending_rows(deleg_
 
 
 @pytest.mark.asyncio
+async def test_decision_refreshes_visible_parent_chat(deleg_db, held_client, seen, monkeypatch):
+    from infra import held_replies, state
+
+    insert_thread(deleg_db, "worker", spawned_by="sender-self", model="omlx@local/qwen", local_only=1)
+    held = held_replies.hold(user_id="u-test", sender_thread_id="worker", recipient_thread_id="asker",
+                             text="answer", via="tool", db=deleg_db)
+    events = []
+    monkeypatch.setattr(state, "broadcast_to_user", lambda _user, event: events.append(event))
+    assert _post(held_client, held["id"], "decline").json()["state"] == "declined"
+    assert events[-1]["thread_ids"] == ["worker", "sender-self"]
+
+
+def test_external_provider_uses_catalog_name(deleg_db, held_client):
+    from infra import held_replies
+    from plans.held_attention import pending
+
+    selector = "external@server/model"
+    deleg_db.execute("UPDATE models SET provider='external',litellm_model=? WHERE id=?", (selector, CLOUD))
+    deleg_db.execute("UPDATE threads SET model=? WHERE id='asker'", (selector,))
+    held_replies.hold(user_id="u-test", sender_thread_id="sender-self", recipient_thread_id="asker",
+                      text="answer", via="tool", db=deleg_db)
+    assert pending(deleg_db, "u-test")[0]["provider_label"] == "external"
+
+
+@pytest.mark.asyncio
 async def test_recovery_returns_interrupted_approval_to_held(deleg_db, held_client, seen):
     from infra import held_replies
     from infra.held_reply_messages import RESTART_ERROR
@@ -318,7 +425,39 @@ async def test_approval_finishes_after_request_is_cancelled(deleg_db, held_clien
         await request
     release.set()
     await asyncio.wait_for(finished.wait(), 2)
-    assert _rows(deleg_db, "state") == [("sent",)]
+    assert _rows(deleg_db, "state", "text") == [("sent", "")]
+
+
+@pytest.mark.asyncio
+async def test_cancellation_during_claim_still_finishes(deleg_db, held_client, seen, monkeypatch):
+    import asyncio
+    from api import held_replies as held_api
+
+    held = await _send_by_tool()
+    claimed, release, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    original_claim, original_finish = held_api._claim, held_api._finish_approval
+
+    async def claim(*args):
+        result = await original_claim(*args)
+        claimed.set()
+        await release.wait()
+        return result
+
+    async def finish(*args):
+        result = await original_finish(*args)
+        finished.set()
+        return result
+
+    monkeypatch.setattr(held_api, "_claim", claim)
+    monkeypatch.setattr(held_api, "_finish_approval", finish)
+    request = asyncio.create_task(held_api.approve(held["held_reply_id"], held_api.DecisionBody(token=_TOKEN)))
+    await asyncio.wait_for(claimed.wait(), 2)
+    request.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request
+    release.set()
+    await asyncio.wait_for(finished.wait(), 2)
+    assert _rows(deleg_db, "state", "text") == [("sent", "")]
 
 
 @pytest.mark.asyncio
@@ -362,15 +501,15 @@ async def test_moved_recipient_is_not_sent(deleg_db, held_client, seen):
     deleg_db.commit()
     result = _post(held_client, held["held_reply_id"], "approve")
     assert result.json()["state"] == "not_sent"
-    assert "no longer reachable" in result.json()["line"]
+    assert "isn’t reachable" in result.json()["line"]
     assert _rows(deleg_db, "state") == [("not_sent",)]
     assert seen["delivered"] == []
-    assert "no longer in a scope" in seen["told"][-1][2]
+    assert "isn't in a scope" in seen["told"][-1][2]
     from infra.held_replies import get
     from infra.held_reply_messages import hold_response
     retry = await hold_response(get(held["held_reply_id"], "u-test", db=deleg_db))
     assert retry["status"] == "not_sent"
-    assert "no longer in a scope" in retry["message"]
+    assert "isn't in a scope" in retry["message"]
     rows = deleg_db.execute("SELECT content FROM messages WHERE thread_id='asker' AND role='system' ORDER BY rowid").fetchall()
     assert "could not be sent" in rows[-1][0]
 

@@ -46,11 +46,14 @@ def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> 
     recipient_ids = sorted({str(row["recipient_thread_id"]) for row in rows})
     recipients = {
         str(row["id"]): row for row in db.execute(
-            "SELECT id, title, COALESCE(pending_model, model) AS model FROM threads "
-            f"WHERE id IN ({','.join('?' for _ in recipient_ids)})",
+            "SELECT t.id, t.title, (SELECT m.provider FROM models m "
+            "WHERE m.id=COALESCE(t.pending_model,t.model) OR m.litellm_model=COALESCE(t.pending_model,t.model) "
+            "LIMIT 1) AS provider FROM threads t "
+            f"WHERE t.id IN ({','.join('?' for _ in recipient_ids)})",
             recipient_ids,
         )
     }
+    from api.provider_meta import PROVIDER_META
     out = []
     for row in rows:
         sender = str(row["sender_thread_id"])
@@ -66,7 +69,8 @@ def pending(db: sqlite3.Connection, user_id: str, *, with_text: bool = True) -> 
             "project_id": shown["project_id"],
             "project_label": shown["project_name"],
             "recipient_label": held_replies.recipient_label(recipient["title"] if recipient else None),
-            "provider_label": held_replies.provider_label(recipient["model"] if recipient else None),
+            "provider_label": (PROVIDER_META.get(recipient["provider"], {}).get("label", recipient["provider"])
+                               if recipient and recipient["provider"] else "a cloud provider"),
             **({"text": str(row["text"])} if with_text else {}),
             "error": row["error"],
             "created_at": str(row["created_at"]),

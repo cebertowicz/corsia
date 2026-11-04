@@ -2,6 +2,23 @@
 
 from __future__ import annotations
 
+from infra.db_async import run_in_db
+
+
+async def completion_refusal(child_thread_id: str, child_turn_id: str | None) -> str | None:
+    """Refuse an invalid explicit completion before asking for consent."""
+    if not child_turn_id:
+        return (
+            "Error: completion intent is valid only from a delegated child to "
+            "its registered parent during an active turn"
+        )
+    from plans.public import has_open_structured_attachment, plan_is_empty
+    from tools.completion_refusals import PLANLESS, STEPS
+
+    if await run_in_db(has_open_structured_attachment, child_thread_id):
+        return PLANLESS if await run_in_db(plan_is_empty, child_thread_id) else STEPS
+    return None
+
 
 def resolve_child_turn_for_parent(
     child_thread_id: str,

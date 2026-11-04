@@ -18,12 +18,12 @@ from loguru import logger
 from pydantic import BaseModel
 
 import infra.held_replies as held_replies
-from infra.auth import authenticate
+from infra.auth import authenticate, is_person_session
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.held_reply_messages import (
-    SCOPE_NOT_SENT, error_line, gone_line, note_asker, notify_changed, recipient_name,
-    scope_line, tell_sender,
+    SCOPE_NOT_SENT, SEND_NOT_SENT, TASK_NOT_SENT, error_line, gone_line, note_asker,
+    notify_hold_changed, recipient_name, refusal_line, scope_line, tell_sender,
 )
 from infra.queries import get_thread_for_user
 from plans import public
@@ -63,6 +63,8 @@ async def _claim(body: DecisionBody, held_id: str, state: str):
     user = authenticate(body.token)
     if user is None:
         raise HTTPException(401, "invalid token")
+    if not is_person_session(user):
+        raise HTTPException(403, "This change needs the signed-in person: open CORSIA and make it there.")
     held, sender, recipient, name = await run_in_db(_load, held_id, user["id"])
     if held is None:
         raise HTTPException(404, "Held reply not found")
@@ -75,7 +77,7 @@ async def _claim(body: DecisionBody, held_id: str, state: str):
 async def decline(held_id: str, body: DecisionBody) -> dict[str, Any]:
     """Deliver nothing; the sender and the asker are told it was not sent."""
     user, held, _sender, _recipient, name = await _claim(body, held_id, held_replies.DECLINED)
-    notify_changed(user["id"], held["sender_thread_id"])
+    await notify_hold_changed(held)
     await tell_sender(held, held_replies.DECLINED, recipient=name)
     await note_asker(held, held_replies.DECLINED)
     return {"ok": True, "state": held_replies.DECLINED}
@@ -84,22 +86,26 @@ async def decline(held_id: str, body: DecisionBody) -> dict[str, Any]:
 @router.post("/{held_id}/approve")
 async def approve(held_id: str, body: DecisionBody) -> dict[str, Any]:
     """Deliver the stored text as its sender would have, then tell the sender and the asker."""
+    return await asyncio.shield(_claim_and_approve(held_id, body))
+
+
+async def _claim_and_approve(held_id: str, body: DecisionBody) -> dict[str, Any]:
     user, held, sender, recipient, name = await _claim(body, held_id, held_replies.APPROVED)
-    return await asyncio.shield(_finish_approval(user, held, sender, recipient, name))
+    return await _finish_approval(user, held, sender, recipient, name)
 
 
 async def _finish_approval(user: dict, held: dict, sender: dict | None, recipient: dict | None, name: str) -> dict[str, Any]:
     held_id = held["id"]
     if recipient is None or sender is None:
         await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.NOT_SENT)
-        notify_changed(user["id"], held["sender_thread_id"])
+        await notify_hold_changed(held)
         await tell_sender(held, held_replies.NOT_SENT, recipient=name)
         return {"ok": True, "state": held_replies.NOT_SENT, "line": gone_line(name)}
     try:
         target = await run_in_db(fetch_send_target, held["recipient_thread_id"], user["id"], sender.get("project_id"))
         if target is None:
             await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.NOT_SENT)
-            notify_changed(user["id"], held["sender_thread_id"])
+            await notify_hold_changed(held)
             await tell_sender(held, held_replies.NOT_SENT, recipient=name)
             return {"ok": True, "state": held_replies.NOT_SENT, "line": gone_line(name)}
         scope_error = native_send_scope_error(
@@ -109,21 +115,29 @@ async def _finish_approval(user: dict, held: dict, sender: dict | None, recipien
         )
         if scope_error:
             await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.NOT_SENT, SCOPE_NOT_SENT)
-            notify_changed(user["id"], held["sender_thread_id"])
+            await notify_hold_changed(held)
             await tell_sender(held, SCOPE_NOT_SENT, recipient=name)
             await note_asker(held, SCOPE_NOT_SENT)
             return {"ok": True, "state": held_replies.NOT_SENT, "line": scope_line(name)}
         sent = await _deliver(held, sender, target["thread_row"])
+    except HTTPException as exc:
+        sent = f"Error: {exc.detail}"
     except Exception:
         logger.exception("held reply {}: delivery failed", held_id)
-        sent = "Error: delivery failed"
-    if isinstance(sent, str):
         line = error_line(name)
         await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.HELD, line)
-        notify_changed(user["id"], held["sender_thread_id"])
+        await notify_hold_changed(held)
         raise HTTPException(502, line)
+    if isinstance(sent, str):
+        logger.warning("held reply {}: delivery refused: {}", held_id, sent)
+        reason = TASK_NOT_SENT if sent.startswith("Error: invalid request") else SEND_NOT_SENT
+        await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.NOT_SENT, reason)
+        await notify_hold_changed(held)
+        await tell_sender(held, reason, recipient=name)
+        await note_asker(held, reason)
+        return {"ok": True, "state": held_replies.NOT_SENT, "line": refusal_line(reason, name)}
     await run_in_db(_settle, held_id, held_replies.APPROVED, held_replies.SENT)
-    notify_changed(user["id"], held["sender_thread_id"])
+    await notify_hold_changed(held)
     await tell_sender(held, held_replies.SENT, recipient=name)
     # Delivered as any send is: a recipient held on its account limit shows that hold itself.
     await note_asker(held, held_replies.SENT)
@@ -132,7 +146,24 @@ async def _finish_approval(user: dict, held: dict, sender: dict | None, recipien
 
 async def _deliver(held: dict, sender: dict, recipient: dict) -> dict[str, Any] | str:
     """Run the send the sender would have run, on the stored bytes."""
+    if held["intent"] == "completion":
+        import json
+
+        result = await delegation._admit_completion(
+            held["sender_thread_id"], held["recipient_thread_id"], held["child_turn_id"], held["text"],
+        )
+        return result if result.startswith("Error:") else json.loads(result)
     kwargs = {"idempotency_key": held["idempotency_key"] or f"held-reply:{held['id']}"}
+    if held["via"] == "api":
+        from api.delegation import _delegated_target, deliver_send
+
+        target = await run_in_db(_delegated_target, held["recipient_thread_id"], held["user_id"])
+        if target is None:
+            return "Error: recipient is unavailable"
+        metadata = {"sender_kind": "agent", "from_thread": held["sender_thread_id"],
+                    "from_title": sender.get("title") or "", "scope": sender.get("project_id") or "workspace"}
+        return await deliver_send(held["recipient_thread_id"], target, held["text"],
+                                  {"id": held["user_id"]}, sender, metadata, kwargs["idempotency_key"])
     step = None
     requested = held["plan_node_id"]
     if held["via"] == "tool":

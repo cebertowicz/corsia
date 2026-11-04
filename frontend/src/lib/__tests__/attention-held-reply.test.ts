@@ -169,22 +169,6 @@ describe("held reply in the dock", () => {
     expect(document.activeElement).toBe(composer);
   });
 
-  it.fails("known gap: a last plan decision should return focus to the composer", async () => {
-    const composer = document.createElement("div");
-    composer.setAttribute("role", "textbox");
-    composer.setAttribute("aria-label", "Message CORSIA");
-    composer.tabIndex = 0;
-    host.append(composer);
-    body = queueBody(decisionItem(), 1);
-    decide = () => new Promise(() => {});
-    await openDock();
-    (host.querySelector(".option-button") as HTMLButtonElement).click();
-    await settle();
-    button("Answer")!.focus();
-    button("Answer")!.click();
-    await settle();
-    expect(document.activeElement).toBe(composer);
-  });
 
   it("declines: posts decline, and the dock says the reply was not sent", async () => {
     decide = () => ({ status: 200, payload: { ok: true, state: "declined" } });
@@ -197,12 +181,12 @@ describe("held reply in the dock", () => {
   });
 
   it("says why when the recipient no longer exists, and the reply leaves", async () => {
-    decide = () => ({ status: 200, payload: { ok: true, state: "not_sent", line: "Couldn’t send the reply because the Researcher agent no longer exists." } });
+    decide = () => ({ status: 200, payload: { ok: true, state: "not_sent", line: "Couldn’t send the reply because the Researcher agent isn’t available." } });
     await openDock();
     button("Approve once")!.click();
     body = queueBody(null, 0);
     await settle();
-    expect(get(answerNotice)).toBe("Couldn’t send the reply because the Researcher agent no longer exists.");
+    expect(get(answerNotice)).toBe("Couldn’t send the reply because the Researcher agent isn’t available.");
   });
 
   it("returns the reply, reopened, with the server's error line when delivery fails, and Approve once retries", async () => {

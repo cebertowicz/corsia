@@ -30,19 +30,11 @@ def recipient_label(title: str | None) -> str:
     return f"the {name} agent"
 
 
-def provider_label(model: str | None) -> str:
-    """The provider a cloud model belongs to, as a person names it."""
-    selector = (model or "").strip()
-    if selector.startswith("claude-code/") or selector.startswith("anthropic/"):
-        return "Anthropic"
-    if selector.startswith("codex/") or selector.startswith("openai/"):
-        return "OpenAI"
-    return selector.split("/", 1)[0].capitalize() if "/" in selector else "a cloud provider"
-
 
 def hold(
     *, user_id: str, sender_thread_id: str, recipient_thread_id: str, text: str, via: str,
     plan_node_id: str | None = None, idempotency_key: str | None = None,
+    intent: str = "progress", child_turn_id: str | None = None,
     db: sqlite3.Connection | None = None,
 ) -> dict[str, Any]:
     """Store one message for the person's decision; a retry with the same key returns the first row."""
@@ -59,7 +51,8 @@ def hold(
         row = {
             "id": str(uuid.uuid4()), "user_id": user_id, "sender_thread_id": sender_thread_id,
             "recipient_thread_id": recipient_thread_id, "text": text, "via": via,
-            "plan_node_id": plan_node_id, "idempotency_key": key, "state": HELD, "error": None,
+            "plan_node_id": plan_node_id, "intent": intent, "child_turn_id": child_turn_id,
+            "idempotency_key": key, "state": HELD, "error": None,
             "created_at": utc_now_iso(), "decided_at": None,
         }
         connection.execute(
@@ -96,7 +89,8 @@ def settle(
     with write_transaction(db, scope="settle_held_reply") as connection:
         moved = connection.execute(
             "UPDATE held_replies SET state=?, error=?, "
+            "text=CASE WHEN ? IN ('sent','declined','not_sent') THEN '' ELSE text END, "
             "decided_at=CASE WHEN ?='held' THEN NULL ELSE ? END WHERE id=? AND state=?",
-            (state, error, state, utc_now_iso(), held_id, expect),
+            (state, error, state, state, utc_now_iso(), held_id, expect),
         )
     return moved.rowcount == 1

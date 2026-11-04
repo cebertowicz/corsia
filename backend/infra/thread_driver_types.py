@@ -32,6 +32,7 @@ class TerminalSettlement:
     idle_checkpoint: IdleCheckpointDue | None = None
     failed_message_ids: tuple[str, ...] = ()
     probe_outcome: str | None = None
+    held_to_announce: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

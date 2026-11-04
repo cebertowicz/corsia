@@ -40,7 +40,7 @@ export async function decideHeld(held: HeldReplyDetail, verb: HeldVerb, onStarte
   const outcome = await decideHeldReply(bearer, id, verb);
   if (generation !== identityEpoch()) return;
   if (outcome.status === "unauthorized") {
-    rollBack(id, "unauthorized", "This reply isn’t available.");
+    rollBack(id, "unauthorized", "This reply isn’t available — sign in and try again.");
     return;
   }
   if (outcome.status === "error") {
