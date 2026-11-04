@@ -41,8 +41,17 @@ async def test_native_reports_paid_call_before_tool_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("usage_body, observed_calls", [({}, 0), ({"total_tokens": 40}, 1)])
-async def test_native_failed_call_reports_usage_only_when_measured(monkeypatch, usage_body, observed_calls):
+@pytest.mark.parametrize("error_kind, usage_body, observed_calls", [
+    ("provider_stream_truncated", {}, 1),
+    ("provider_server_unreachable", {}, 0),
+    ("provider_model_not_loaded", {}, 0),
+    ("provider_server_unreachable", {"total_tokens": 40}, 1),
+])
+async def test_native_failed_call_skips_usage_only_when_never_sent(
+    monkeypatch, error_kind, usage_body, observed_calls,
+):
+    """A call that reached the provider records usage, unknown or not; only a
+    call refused before it connected has nothing to record."""
     from core import fork_native as native
     from llm.router import LLMResponse
     from test_checkpoint_provider_adapters import _request, _source
@@ -53,7 +62,10 @@ async def test_native_failed_call_reports_usage_only_when_measured(monkeypatch, 
         observed.append(measured)
 
     async def completion(**_kwargs):
-        return LLMResponse(content="stream truncated", usage=usage_body, finish_reason="error")
+        return LLMResponse(
+            content="stream truncated", usage=usage_body, finish_reason="error",
+            error_kind=error_kind,
+        )
 
     async def agent():
         return SimpleNamespace(max_iterations=2, tools=SimpleNamespace(execute=None))

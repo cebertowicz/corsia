@@ -133,11 +133,17 @@ async def prepare_source_checkpoint(
         and context.source_target.provider == "omlx"
     ):
         from llm.capabilities import make_provider_params
+        from llm.locality import row_server_id
+        from llm.network_endpoints import freshness_guard
         from llm.providers.omlx_lifecycle import (
             OmlxLoadedStateError,
             require_loaded_model,
         )
 
+        # A probe missed by one sweep is stale, not down: refresh it first.
+        await freshness_guard(
+            row_server_id({"litellm_model": context.source_target.transport_model}) or ""
+        )
         try:
             provider = await run_in_db(
                 make_provider_params,
