@@ -88,7 +88,7 @@ def read_input_broadcast_row(
             if not isinstance(metadata, dict):
                 metadata = {}
         apply_error_next_steps(
-            connection, str(row["thread_id"]), [{"id": str(row["id"]), "metadata": metadata}],
+            connection, str(row["thread_id"]), [{"id": str(row["id"]), "created_at": row["created_at"], "metadata": metadata}],
         )
         return InputBroadcastRow(
             str(row["id"]),
@@ -266,10 +266,10 @@ async def broadcast_newest_error(thread_id: str) -> None:
 async def broadcast_claimed_batch(batch) -> None:
     """Publish every row in one claimed FIFO batch through the canonical shape.
 
-    Recovered rows were stamped before this batch's inputs, so they go first
-    to keep the published rows in seq order.
+    Error rows this claim moved past were written before this batch's inputs,
+    so they go first to keep the published rows in seq order.
     """
     await broadcast_message_rows(
         batch.thread_id,
-        (*batch.recovered_message_ids, *(item.message_id for item in batch.items)),
+        (*batch.error_message_ids, *(item.message_id for item in batch.items)),
     )

@@ -392,8 +392,8 @@ async def drive_terminal_settlement(settlement) -> None:
     if settlement.successor is not None:
         await drive_turn_admission(settlement.successor)
     elif settlement.probe_outcome in ("error", "limited") and settlement.thread_id:
-        # The live error frame was sent while the Turn still ran ('failed');
-        # an input left queued behind it now makes it 'held'.
+        # The live error frame was sent while the Turn still ran, with no next_step;
+        # this is the re-publish that carries the real one ('held' with an input queued).
         await broadcast_newest_error(settlement.thread_id)
     for thread_id in settlement.wake_thread_ids:
         await drive_thread(thread_id)

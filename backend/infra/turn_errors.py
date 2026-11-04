@@ -1,14 +1,21 @@
 """References and next-step projections for turn-ending errors.
 
 The reference comes from `infra.failure_reference.new_error_reference`, the one
-generator, and readers accept it through that module's `REFERENCE`. `next_step` is never stored:
+generator, and readers accept it through that module's `REFERENCE`. `next_step` is never stored.
+`needs_reference` picks the rows (the error kinds and a failed provider `result`);
+`L` is the thread's latest Turn. A row has:
 
 * `recovered`: `error_recovery` stamped the row when the agent moved past it.
-* `held`: the row ended the thread's latest Turn, that Turn failed, no Turn has
-  started since, and an input is queued. Retry would duplicate that input; why it
-  waits (a model, account or locality hold, or nothing) is the hold's own surface.
-* `failed`: anything else, including an error the person already answered with a
-  new message (a later Turn exists, so the error is no longer the latest outcome).
+* no key: the row's own Turn is `L` and is still in flight (running or waiting to
+  retry), so its outcome is not known yet.
+* `held`: the row ended `L`, `L` failed, and an input is queued. Retry would
+  duplicate that input; why it waits (a model, account or locality hold, or
+  nothing) is the hold's own surface.
+* `failed`: the row ended `L`, `L` failed and nothing is queued; or no Turn has
+  started since the row was written (a row with no Turn, such as a shutdown
+  marker, included), so nothing has answered it.
+* `answered`: `L` is the row's own Turn and ended without an error, or a Turn
+  started after the row was written (the person sent a message, or stopped it).
 """
 
 from __future__ import annotations
@@ -34,7 +41,9 @@ _LAST_TURN_ERROR_SQL = (
     "SELECT id, json_extract(metadata, '$.turn_id') AS turn_id FROM messages "
     "WHERE thread_id=? AND created_at >= substr(?, 1, 19) AND role='system' "
     "AND seq IS NOT NULL AND json_valid(metadata) "
-    "AND json_extract(metadata, '$.type') IN ({placeholders}) "
+    "AND (json_extract(metadata, '$.type') IN ({placeholders}) "
+    "OR (json_extract(metadata, '$.type')='result' AND json_type(metadata, '$.is_error')='true' "
+    "AND COALESCE(json_extract(metadata, '$.stop_reason'), '') != 'interrupted')) "
     "ORDER BY created_at DESC LIMIT 1"
 )
 
@@ -83,13 +92,13 @@ def apply_error_next_steps(db, thread_id: str, messages: list[dict]) -> None:
     """Add transient retry guidance to projected terminal-error rows in place."""
     error_rows = [
         row for row in messages
-        if isinstance(row.get("metadata"), dict)
-        and row["metadata"].get("type") in ERROR_SYSTEM_TYPES
+        if isinstance(row.get("metadata"), dict) and needs_reference(row["metadata"])
     ]
     if not error_rows:
         return
 
-    held_id = last_turn_error_id(db, thread_id)
+    turn = db.execute(_LATEST_TURN_SQL, (thread_id,)).fetchone()
+    held_id = _held_error_id(db, thread_id, turn)
     queued = held_id is not None and db.execute(
         "SELECT 1 FROM messages WHERE thread_id=? AND input_order IS NOT NULL "
         "AND delivery_state='queued' LIMIT 1",
@@ -98,17 +107,42 @@ def apply_error_next_steps(db, thread_id: str, messages: list[dict]) -> None:
 
     for row in error_rows:
         metadata = row["metadata"]
-        if metadata.get("recovered") is True:
-            metadata["next_step"] = "recovered"
-        elif str(row.get("id")) == held_id and queued:
-            metadata["next_step"] = "held"
+        step = _next_step(db, row, turn, held=queued and str(row.get("id")) == held_id)
+        if step is None:
+            metadata.pop("next_step", None)
         else:
-            metadata["next_step"] = "failed"
+            metadata["next_step"] = step
+
+
+def _next_step(db, row: dict, turn, *, held: bool) -> str | None:
+    metadata = row["metadata"]
+    if metadata.get("recovered") is True:
+        return "recovered"
+    if turn is None:
+        return "failed"
+    turn_id, status, started_at = turn[0], turn[1], turn[2]
+    if metadata.get("turn_id") == turn_id:
+        if status in ("running", "waiting_retry"):
+            return None
+        if status == "error":
+            return "held" if held else "failed"
+        return "answered"
+    created_at = row.get("created_at")
+    if created_at is None:
+        found = db.execute("SELECT created_at FROM messages WHERE id=?", (row.get("id"),)).fetchone()
+        created_at = found[0] if found else None
+    # To the second, as _LAST_TURN_ERROR_SQL compares: naive and '+00:00' stamps stay comparable.
+    if created_at is not None and str(started_at)[:19] >= str(created_at)[:19]:
+        return "answered"
+    return "failed"
 
 
 def last_turn_error_id(db, thread_id: str) -> str | None:
     """The error that ended the thread's latest, failed Turn; the only row 'held' can apply to."""
-    turn = db.execute(_LATEST_TURN_SQL, (thread_id,)).fetchone()
+    return _held_error_id(db, thread_id, db.execute(_LATEST_TURN_SQL, (thread_id,)).fetchone())
+
+
+def _held_error_id(db, thread_id: str, turn) -> str | None:
     if turn is None or turn[1] != "error":
         return None
     placeholders = ",".join("?" for _ in ERROR_SYSTEM_TYPES)

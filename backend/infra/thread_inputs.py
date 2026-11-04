@@ -16,6 +16,7 @@ from infra.queries import thread_unavailable_reason
 from infra.queued_input_settlement import still_claimable
 from infra.send_types import SendRejected
 from infra.thread_input_rows import starts_turn
+from infra.turn_errors import last_turn_error_id
 from infra.vendor_turn_binding import admitted_model_state, turn_account_id
 from infra.thread_input_types import (
     ClaimedBatch,
@@ -53,7 +54,7 @@ def _batch(
         target_model=model,
         items=tuple(_claimed_item(row, stamps or {}) for row in rows),
         vendor_receipt=receipt,
-        recovered_message_ids=recovered,
+        error_message_ids=recovered,
     )
 
 
@@ -320,6 +321,7 @@ def start_idle_turn(
                         return None
                 invalidate_idle_checkpoint_markers(connection, thread_id, reason=IdleCheckpointReason.SUPERSEDED_BY_TURN)
                 rows = _clear_taken_lifted(connection, thread_id, epoch, model, rows, lifted)
+                held_error_id = last_turn_error_id(connection, thread_id)  # stale once the Turn row lands
                 inserted = connection.execute(
                     """INSERT INTO active_turns
                        (id,thread_id,execution_epoch,model,status,started_at,boot_epoch,
@@ -337,7 +339,7 @@ def start_idle_turn(
                     raise RuntimeError("Turn insert did not return its order")
                 turn_order = int(inserted.lastrowid)
                 schedule_thread_after_commit(thread_id, db=connection)  # Turn start is no plan write
-                stamps, receipt, recovered = _assign_turn(connection, thread_id, turn_id, rows, initial=True)
+                stamps, receipt, recovered = _assign_turn(connection, thread_id, turn_id, rows, initial=True, held_error_id=held_error_id)
         except _RolloverHeld:
             return connection_limit_gate(thread_id, model, probe=connection_limit_probe, hold_expired_at_startup=hold_expired_limit_at_startup, db=connection)[1]
     return _batch(thread_id, turn_id, turn_order, epoch, model, rows, stamps, receipt, recovered)

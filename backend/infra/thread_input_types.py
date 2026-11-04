@@ -46,8 +46,8 @@ class ClaimedBatch:
     target_model: str
     items: tuple[ClaimedInput, ...]
     vendor_receipt: ReceiptFence | None = field(default=None, repr=False)
-    #: Error rows this claim stamped `recovered`; published with the batch.
-    recovered_message_ids: tuple[str, ...] = ()
+    #: Error rows this claim moved past (stamped `recovered`, or held just before it); published with the batch.
+    error_message_ids: tuple[str, ...] = ()
 
     @property
     def identity(self) -> TurnIdentity:
