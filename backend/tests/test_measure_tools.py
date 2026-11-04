@@ -19,7 +19,7 @@ from infra.config import WORKSPACE
 from infra.measure_registry import REGISTRY
 from tools.automations import AutomationListTool, AutomationScheduleTool
 from tests.skill_sidecar_helpers import POINTER
-from tools import workflow_task_fields
+from tools import workflow_owners, workflow_task_fields
 from tools.measures import MeasureStatusTool, MeasureSyncTool
 
 AGENT = "agent-tool-qg"
@@ -45,10 +45,9 @@ def agent(isolated_db, monkeypatch):
     (skill / "SKILL.md").write_text(f"---\nname: llm-pr-review\ndescription: Review a PR.\n{POINTER}---\n# Review\n")
     (skill / "corsia.yaml").write_text("workflow:\n  steps:\n    - {id: review, title: Review it, required: true, check: reviewed}\n")
     (skill / "measures.yaml").write_text(FIXTURE.read_text())
-    monkeypatch.setattr(
-        workflow_task_fields, "resolve_effective_skills",
-        lambda **_kwargs: SkillResolution(scan_scope(root, "thread", AGENT), [], []),
-    )
+    resolve = lambda **_kwargs: SkillResolution(scan_scope(root, "thread", AGENT), [], [])  # noqa: E731
+    monkeypatch.setattr(workflow_task_fields, "resolve_effective_skills", resolve)
+    monkeypatch.setattr(workflow_owners, "resolve_effective_skills", resolve)
     script = root / "measure.py"
     script.write_text("print('x')")
     yield skill / "measures.yaml", script
@@ -72,6 +71,19 @@ async def test_measure_sync_loads_the_file_and_automation_schedule_then_accepts_
         _thread_id=AGENT, kind="script", script_path=str(script), cadence_seconds=300, workflow="llm-pr-review",
     ))["schedule"]
     assert created["payload"]["workflow"] == "llm-pr-review" and created["scope_id"] == "project-tool"
+
+
+@pytest.mark.asyncio
+async def test_worker_workflow_syncs_and_can_own_a_script_schedule(agent) -> None:
+    measures, script = agent
+    (measures.parent / "corsia.yaml").write_text(
+        "workflow:\n  worker: {effort: high}\n  result: {type: object, properties: {finding: {type: string}}}\n"
+    )
+    assert ok(await MeasureSyncTool().execute(_thread_id=AGENT, path=str(measures)))["namespace"] == "qa"
+    created = ok(await AutomationScheduleTool().execute(
+        _thread_id=AGENT, kind="script", script_path=str(script), cadence_seconds=300, workflow="llm-pr-review",
+    ))["schedule"]
+    assert created["payload"]["workflow"] == "llm-pr-review"
 
 
 @pytest.mark.asyncio
