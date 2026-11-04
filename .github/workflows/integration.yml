@@ -41,11 +41,12 @@ jobs:
     # macOS: the L3 contract suite runs agent shells under Seatbelt
     # (sandbox-exec) and requires Safehouse, neither of which exists on Linux.
     runs-on: macos-15
-    # Green jobs took 11 to 19 minutes on 2026-11-04 (median 15; p90 13 on
-    # 2026-10-27). The cap is a hang guard: on a slow runner a few heavy tests
-    # run two to three times longer and reach it, so find them with the
-    # --durations report below before moving the cap.
-    timeout-minutes: 25
+    # A hang guard sized to slow runners. On 2026-11-04 most green jobs took 11
+    # to 19 minutes (median 15), but on slow runners the tests alone took up to
+    # 23.5 minutes after about 5 minutes of setup, and passing runs were
+    # cancelled at the old 25-minute cap. The --durations report below names the
+    # heaviest tests.
+    timeout-minutes: 35
 
     env:
       # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
