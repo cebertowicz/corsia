@@ -109,8 +109,9 @@ def raise_offer(db, *, plan_id: str, source_node_id: str, content: dict, provena
     return create_raised(db, plan_id, source_node_id, content, provenance)["decision"]
 
 
-#: Why a handoff offer is withdrawn: a correction broke the record it was offered on.
-OFFER_VOIDED = "You corrected this work, so you keep reviewing it"
+#: Why a handoff offer is withdrawn: a correction broke the record it was offered on. The person or
+#: the agent may have made it, so the reason names neither.
+OFFER_VOIDED = "This work was corrected, so you keep reviewing it"
 
 
 def withdraw_offer(db, decision_id: str, *, provenance: str) -> bool:

@@ -2,8 +2,9 @@
 
 The nudge is queued in the terminal write, once per person message, only for a
 completed Turn with Focus on. At the nudged Turn's end its last words become the
-reply unless they are exactly NO_REPLY. A Stop records no Turn end, and a Turn
-the person stopped never earns a nudge later.
+reply unless they are exactly NO_REPLY; a nudged Turn that leaves no words of its
+own (it errored, or was stopped) shows the words it was woken about. A Stop
+records no Turn end, and a Turn the person stopped never earns a nudge later.
 """
 
 from __future__ import annotations
@@ -339,6 +340,85 @@ async def test_a_nudged_turn_that_errors_still_shows_its_words(db) -> None:
     await _end(db, turn="t2", outcome="error", error="provider exploded")
 
     assert _for_user(db, hidden)
+
+
+async def _stop(db, turn: str) -> None:
+    from infra.thread_driver import finish_turn
+
+    # A Stop settles the Turn and records no Turn end.
+    finish_turn(turn, outcome="cancelled", ended_at=_AT, successor_turn_id=None,
+                boot_epoch="boot-1", db=db)
+    db.commit()
+
+
+async def _errors(db, turn: str) -> None:
+    await _end(db, turn=turn, outcome="error", error="provider stream truncated")
+
+
+@pytest.mark.parametrize("ending", [_errors, _stop], ids=["errors", "is_stopped"])
+@pytest.mark.asyncio
+async def test_a_nudged_turn_with_no_words_of_its_own_shows_the_words_it_was_woken_about(
+    db, ending,
+) -> None:
+    _take_in(db)
+    answer = _say(db, "Which devices do you use?")
+    await _end(db)
+    _take_nudge(db, "t2")
+
+    await ending(db, "t2")
+
+    assert _for_user(db, answer)
+
+
+@pytest.mark.parametrize("ending", [_errors, _stop], ids=["errors", "is_stopped"])
+@pytest.mark.asyncio
+async def test_a_no_reply_it_was_woken_about_stays_hidden(db, ending) -> None:
+    _take_in(db)
+    answer = _say(db, "NO_REPLY")
+    await _end(db)
+    _take_nudge(db, "t2")
+
+    await ending(db, "t2")
+
+    assert not _for_user(db, answer)
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_nudged_turn_keeps_its_own_words_hidden(db) -> None:
+    _take_in(db)
+    answer = _say(db, "Which devices do you use?")
+    await _end(db)
+    _take_nudge(db, "t2")
+    partial = _say(db, "Let me", turn="t2")
+
+    await _stop(db, "t2")
+
+    assert _for_user(db, answer)
+    assert not _for_user(db, partial)
+
+
+@pytest.mark.asyncio
+async def test_a_stopped_nudged_turn_that_answered_no_reply_shows_nothing(db) -> None:
+    _take_in(db)
+    answer = _say(db, "Which devices do you use?")
+    await _end(db)
+    _take_nudge(db, "t2")
+    own = _say(db, "NO_REPLY", turn="t2")
+
+    await _stop(db, "t2")
+
+    assert not _for_user(db, answer)
+    assert not _for_user(db, own)
+
+
+@pytest.mark.asyncio
+async def test_stopping_a_turn_no_nudge_woke_shows_nothing(db) -> None:
+    _take_in(db)
+    answer = _say(db, "Working on it")
+
+    await _stop(db, "t1")
+
+    assert not _for_user(db, answer)
 
 
 @pytest.mark.asyncio

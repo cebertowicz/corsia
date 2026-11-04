@@ -130,16 +130,10 @@ def _parent_completion(
     if answer is None:
         return None
     content = f"{PARENT_COMPLETION_HEADING}\n\n{answer['content']}"
-    from infra.local_only import send_needs_hold
+    from infra.held_replies import hold_completion_if_needed
 
-    child = db.execute("SELECT * FROM threads WHERE id=?", (child_id,)).fetchone()
-    parent_row = db.execute("SELECT * FROM threads WHERE id=?", (str(parent),)).fetchone()
-    if child is not None and parent_row is not None and send_needs_hold(dict(child), dict(parent_row), db=db):
-        from infra.held_replies import hold
-
-        held = hold(user_id=child["user_id"], sender_thread_id=child_id, recipient_thread_id=str(parent),
-                    text=content, via="tool", intent="completion", child_turn_id=turn_id,
-                    idempotency_key=f"parent-completion:{turn_id}", db=db)
+    held = hold_completion_if_needed(db, child_id=child_id, parent_id=str(parent), turn_id=turn_id, text=content)
+    if held is not None:
         if not held["duplicate"] and held_to_announce is not None:
             held_to_announce.append(held)
         return None
@@ -191,12 +185,8 @@ def _end_turn_process_state(turn_id: str, outcome: str) -> None:
 
 
 def finish_turn(
-    turn_id: str,
-    *,
-    outcome: str,
-    ended_at: str,
-    successor_turn_id: str,
-    boot_epoch: str,
+    turn_id: str, *, outcome: str, ended_at: str,
+    successor_turn_id: str, boot_epoch: str,
     error: str | BaseException | None = None,
     db: sqlite3.Connection | None = None,
     mark_idle_checkpoint: bool = True,
@@ -210,6 +200,9 @@ def finish_turn(
     """
     if outcome not in {"completed", "cancelled", "error"}:
         raise ValueError(f"invalid Turn terminal outcome: {outcome}")
+    from connections.account_policy import AccountAdmissionError
+
+    lift_account = not (outcome == "error" and isinstance(error, AccountAdmissionError))
     with usage_settlement(db) as usage, write_transaction(db, scope="finish_turn") as connection:
         row = connection.execute(
             "SELECT thread_id,status FROM active_turns WHERE id=?", (turn_id,),
@@ -241,6 +234,7 @@ def finish_turn(
         )
         held_to_announce: list[dict] = []
         parent = _parent_completion(connection, turn_id, thread_id, held_to_announce) if outcome == "completed" else None
+        _show_reply_on_nudge_stop(connection, thread_id, turn_id, outcome)
         queue_terminal_continue(
             connection, turn_id, thread_id, outcome=outcome, error=error,
             limit_recorded=isinstance(limits.limit, Recorded))
@@ -254,7 +248,7 @@ def finish_turn(
             boot_epoch=boot_epoch,
             mark_idle_checkpoint=mark_idle_checkpoint,
             hold_expired_limit_at_startup=hold_expired_limit_at_startup,
-            fail_closed=limits.fail_closed,
+            fail_closed=limits.fail_closed, lift_account=lift_account,
         )
     _end_turn_process_state(turn_id, outcome)
     return TerminalSettlement(
@@ -272,6 +266,15 @@ def finish_turn(
     )
 
 
+def _show_reply_on_nudge_stop(connection, thread_id: str, turn_id: str, outcome: str) -> None:
+    """A stopped nudged Turn still shows the reply it was woken about."""
+    if outcome != "cancelled":
+        return
+    from infra.reply_not_visible_wake import show_reply_on_nudge_stop
+
+    show_reply_on_nudge_stop(connection, thread_id, turn_id)
+
+
 def _claim_after_terminal(
     connection: sqlite3.Connection,
     *,
@@ -284,6 +287,7 @@ def _claim_after_terminal(
     mark_idle_checkpoint: bool,
     hold_expired_limit_at_startup: bool,
     fail_closed: str | None = None,
+    lift_account: bool = True,
 ):
     """Claim switch/successor work and derive its idle-marker consequence.
 
@@ -322,6 +326,7 @@ def _claim_after_terminal(
                 started_at=ended_at,
                 db=connection,
                 hold_expired_limit_at_startup=hold_expired_limit_at_startup,
+                lift_account=lift_account,
             )
     idle = _write_idle_marker(connection, idle_marker_due(
         connection, turn_id, outcome=outcome,

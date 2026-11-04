@@ -745,7 +745,7 @@ async def _finish_failed_app_server_spawn(
     _discard_delivery_event_barrier(live)
     terminal = None
     if terminalize:
-        detail = _UNVERIFIED_INPUT_DELIVERY_DETAIL if live.input_delivery_unproven else str(exc)
+        detail = _UNVERIFIED_INPUT_DELIVERY_DETAIL if live.input_delivery_unproven else turn_core.terminal_error_detail(exc)
         try:
             terminal = await _end_owned_turn(
                 thread_id, live, live.corsia_turn, outcome,

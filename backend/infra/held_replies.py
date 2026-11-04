@@ -62,6 +62,21 @@ def hold(
     return {**row, "duplicate": False}
 
 
+def hold_completion_if_needed(
+    db: sqlite3.Connection, *, child_id: str, parent_id: str, turn_id: str, text: str,
+) -> dict[str, Any] | None:
+    """Hold a child's final result for the person when sending it to its parent needs consent."""
+    from infra.local_only import send_needs_hold
+
+    child = db.execute("SELECT * FROM threads WHERE id=?", (child_id,)).fetchone()
+    parent = db.execute("SELECT * FROM threads WHERE id=?", (parent_id,)).fetchone()
+    if child is None or parent is None or not send_needs_hold(dict(child), dict(parent), db=db):
+        return None
+    return hold(user_id=child["user_id"], sender_thread_id=child_id, recipient_thread_id=parent_id,
+                text=text, via="tool", intent="completion", child_turn_id=turn_id,
+                idempotency_key=f"parent-completion:{turn_id}", db=db)
+
+
 def get(held_id: str, user_id: str, *, db: sqlite3.Connection) -> dict[str, Any] | None:
     """One of the user's held replies, in any state."""
     row = db.execute(
