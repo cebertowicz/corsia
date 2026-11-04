@@ -319,20 +319,16 @@ def seed_initial(conductor_id: str, user_id: str, *, db: sqlite3.Connection) -> 
     )
 
 
-def _first_run_message_id(conductor_id: str) -> str:
-    from infra.onboarding_events import first_run_message_id
-
-    return first_run_message_id(conductor_id)
-
-
 def cache_completed_facts(
     conductor_id: str, user_id: str, facts: Mapping[str, Any], *, db: sqlite3.Connection,
 ) -> None:
     """Reconcile final setup rows and cache their shared snapshot on the held wake."""
+    from infra.onboarding_events import first_run_message_id
+
     _seed_descriptors(conductor_id, user_id, applicable_steps(facts), db=db, reconcile=True)
     row = db.execute(
         "SELECT metadata FROM messages WHERE id=? AND thread_id=? AND delivery_state='queued'",
-        (_first_run_message_id(conductor_id), conductor_id),
+        (first_run_message_id(conductor_id), conductor_id),
     ).fetchone()
     if row is None:
         raise ValueError("first-run wake is unavailable for completed app setup")
@@ -345,7 +341,7 @@ def cache_completed_facts(
     metadata["app_setup_facts"] = dict(facts)
     db.execute(
         "UPDATE messages SET metadata=? WHERE id=? AND thread_id=?",
-        (json.dumps(metadata), _first_run_message_id(conductor_id), conductor_id),
+        (json.dumps(metadata), first_run_message_id(conductor_id), conductor_id),
     )
 
 
@@ -373,12 +369,13 @@ def read_cached_app_facts(
 ) -> dict[str, Any] | None:
     """Return the completion snapshot cached on this thread's held first-run wake."""
     from infra.database import get_db
+    from infra.onboarding_events import first_run_message_id
 
     connection = db or get_db()
     try:
         row = connection.execute(
             "SELECT metadata FROM messages WHERE id=? AND thread_id=?",
-            (_first_run_message_id(thread_id), thread_id),
+            (first_run_message_id(thread_id), thread_id),
         ).fetchone()
         if row is None:
             return None
