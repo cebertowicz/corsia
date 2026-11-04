@@ -3,12 +3,13 @@ script that never started never reads as run or failed."""
 from __future__ import annotations
 
 import json
+from typing import get_args
 
 import pytest
 
 from automation import script_schedules
 from automation.script_sandbox import ScriptRun, github_lock_reason
-from connections.github_agent import AgentAccountView
+from connections.github_agent import AgentAccountView, Cause
 from infra.database import get_db
 from tests.test_event_rules_run_script import (  # noqa: F401 - fixtures
     _START, OWNER, _emit, _explained, _outcomes, _rule, _script, _sweep, _tool, _write, runs, world,
@@ -52,14 +53,33 @@ def test_an_archived_creator_holds_a_script_rule_without_queueing(runs):
 
 _ACCOUNTS = {
     "person": (AgentAccountView("wrong_account", "person_account", home="/h"),
-               "the agents' GitHub sign-in is the person's own GitHub account"),
+               "the agents' GitHub sign-in is the person's own GitHub account; sign it out and sign in as "
+               "the agents' own account"),
     "unverified": (AgentAccountView("unverified", "own_login_unknown", home="/h"),
-                   "CORSIA can't yet tell the agents' GitHub account from the person's own"),
+                   "CORSIA doesn't know the person's own GitHub login yet, so it can't tell the agents' "
+                   "account from it; it checks again on a later run, and if the person isn't signed in "
+                   "to GitHub CLI on this computer, they need to sign in"),
     "suspended": (AgentAccountView("needs_auth", "token_rejected", home="/h"),
-                  "the agents' GitHub account needs signing in"),
+                  "GitHub rejected the sign-in for the agents' GitHub account; sign it out and in again"),
     "absent": (AgentAccountView("not_installed", absent=True),
                "there is no agents' GitHub account"),
 }
+
+
+@pytest.mark.parametrize("cause", get_args(Cause))
+def test_each_account_cause_has_its_own_line(cause):
+    assert github_lock_reason(AgentAccountView("needs_auth", cause)) != github_lock_reason(
+        AgentAccountView("needs_auth"))
+
+
+def test_no_two_account_causes_share_a_line():
+    lines = {github_lock_reason(AgentAccountView("needs_auth", cause)) for cause in get_args(Cause)}
+    assert len(lines) == len(get_args(Cause))
+
+
+def test_only_an_unanswered_verification_is_pending():
+    pending = {cause for cause in get_args(Cause) if AgentAccountView("unverified", cause).answer_pending}
+    assert pending == {"verifying"}
 
 
 @pytest.mark.parametrize("state", sorted(_ACCOUNTS))

@@ -125,6 +125,11 @@ def _ready_view():
     return github_agent.verify_now()
 
 
+def _read_only_grants(argv) -> list[str]:
+    # One flag carries every read-only grant, ':'-joined; a host may add its own (a runtimes cache).
+    return next(part for part in argv if part.startswith("--add-dirs-ro=")).split("=", 1)[1].split(":")
+
+
 def _set_person(login: str | None) -> None:
     from connections.models import get_connection, upsert_connection
 
@@ -410,7 +415,7 @@ def test_shell_login_cannot_write_home_ro_grant(agent, tmp_path, monkeypatch):
     monkeypatch.setattr(shell_guard, "get_allowed_dirs_ro", lambda policies=None: [])
     argv = shell_guard.safehouse_argv("true", tmp_path, tmp_path / "p.sb", agent_account=view)
     home = str(Path(view.home).resolve())
-    assert f"--add-dirs-ro={home}" in argv
+    assert home in _read_only_grants(argv)
     assert not any(part.startswith("--add-dirs=") and home in part for part in argv)
 
 
@@ -598,7 +603,7 @@ def test_spawn_env_grant_and_deny_from_one_view(agent, tmp_path, monkeypatch):
     argv = shell_guard.safehouse_argv("true", tmp_path, tmp_path / "p.sb", agent_account=view)
     rules = shell_guard._terminal_boundary_profile(tmp_path / "p.sb", tmp_path, leased=False, agent_account=view)
     env = github_agent.shell_env(view)
-    assert f"--add-dirs-ro={Path(view.home).resolve()}" in argv
+    assert str(Path(view.home).resolve()) in _read_only_grants(argv)
     assert f'(deny file-read* file-write* (subpath "{agent.user_home.resolve()}"))' in rules
     assert env["GH_CONFIG_DIR"] == view.home
     pairs = {env[f"GIT_CONFIG_KEY_{i}"]: env[f"GIT_CONFIG_VALUE_{i}"] for i in range(int(env["GIT_CONFIG_COUNT"]))}

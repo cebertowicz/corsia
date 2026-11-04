@@ -24,6 +24,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import wait as wait_for
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal
 
 from connections import agent_binary_from_config
 from connections.github_agent_home import (
@@ -46,6 +47,13 @@ FRESH_SECONDS = 15 * 60.0
 # A failed or due verification starts again no sooner than this.
 RETRY_SECONDS = 60.0
 VERIFY_SECONDS = 10.0
+
+#: Every cause a view can name; readers that word causes cover all of these.
+Cause = Literal[
+    "read_failed", "multiple_accounts", "github_executable_missing", "signed_out",
+    "credential_missing", "token_not_in_home", "token_rejected", "verify_failed", "verifying",
+    "own_login_unknown", "person_account",
+]
 _ROWS = """SELECT a.id, a.source_home, a.state, a.revision, c.config
            FROM vendor_accounts a JOIN connections c ON c.id=a.connection_id
            WHERE c.provider=? AND a.state!='removed' AND a.source_home IS NOT NULL"""
@@ -62,7 +70,7 @@ class Verified:
 @dataclass(frozen=True)
 class Failed:
     definite: bool
-    cause: str
+    cause: Cause
     at: float
 
 
@@ -73,7 +81,7 @@ class AgentAccountView:
     A rule-started script is locked even then (``script_env``)."""
 
     state: str  # not_installed | needs_auth | unverified | wrong_account | ready
-    cause: str | None = None
+    cause: Cause | None = None
     absent: bool = False
     account_id: str | None = None
     home: str | None = None
@@ -84,6 +92,14 @@ class AgentAccountView:
     @property
     def ready(self) -> bool:
         return self.state == "ready"
+
+    @property
+    def answer_pending(self) -> bool:
+        """No verification answer yet; a caller that must not act locked waits on ``verify_now``.
+
+        ``own_login_unknown`` is not pending: the person's login comes from a background probe
+        that ``verify_now`` does not wait for, so waiting cannot settle it."""
+        return self.cause == "verifying"
 
 
 # key -> result, and key -> in-flight verification. A key is an immutable fact:

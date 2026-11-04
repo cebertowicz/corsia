@@ -29,7 +29,7 @@ from pathlib import Path
 
 from automation.script_github_channel import SOCKET_ENV, github_channel
 from connections import github_agent
-from connections.github_agent import AgentAccountView
+from connections.github_agent import AgentAccountView, Cause
 from connections.github_agent_home import default_home
 from events.trace_env import TRACE_ENV
 from events.trace_env import encode as encode_trace
@@ -182,26 +182,37 @@ async def _github_client(thread_id: str, run_id: str, rule_id: str | None, repo:
         yield socket_path, client_dir
 
 
-#: Keyed by the account's cause first, then its state.
-_NO_LOGIN = {
-    "own_login_unknown": "CORSIA can't yet tell the agents' GitHub account from the person's own",
-    "not_installed": "the agents' GitHub account isn't set up",
-    "needs_auth": "the agents' GitHub account needs signing in",
-    "unverified": "the agents' GitHub account isn't verified",
-    "wrong_account": "the agents' GitHub sign-in is the person's own GitHub account",
+#: One line per account cause: what is wrong, and who fixes it or what CORSIA does next.
+_NO_LOGIN: dict[Cause, str] = {
+    "read_failed": "CORSIA couldn’t read the agents' GitHub account settings and reads them again on the next run",
+    "multiple_accounts": "there are several agents' GitHub accounts; the person needs to remove all but one",
+    "github_executable_missing": "GitHub CLI for the agents' GitHub account is missing; install it again",
+    "signed_out": "the agents' GitHub account is signed out; sign it in again",
+    "credential_missing": "the saved sign-in for the agents' GitHub account is missing; sign it out and in again",
+    "token_not_in_home": ("the sign-in for the agents' GitHub account isn't saved in the account's own settings; "
+                          "sign it out and in again"),
+    "token_rejected": "GitHub rejected the sign-in for the agents' GitHub account; sign it out and in again",
+    "verify_failed": ("CORSIA couldn’t confirm the agents' GitHub account with GitHub and checks again "
+                      "when a script next runs"),
+    "verifying": "CORSIA is still checking the agents' GitHub account; a later run uses the answer",
+    "own_login_unknown": ("CORSIA doesn't know the person's own GitHub login yet, so it can't tell the agents' "
+                          "account from it; it checks again on a later run, and if the person isn't signed in "
+                          "to GitHub CLI on this computer, they need to sign in"),
+    "person_account": ("the agents' GitHub sign-in is the person's own GitHub account; sign it out and sign "
+                       "in as the agents' own account"),
 }
-
-#: The causes ``github_agent.view`` reports while no verification answer is cached yet.
-_UNSETTLED = frozenset({"verifying", "own_login_unknown"})
+_NOT_READY = "the agents' GitHub account isn't ready"
 
 
 def github_lock_reason(view: AgentAccountView) -> str | None:
     """Why a run gets no GitHub login; None once verified."""
     if view.ready:
         return None
-    why = ("there is no agents' GitHub account" if view.absent
-           else _NO_LOGIN.get(view.cause or "") or _NO_LOGIN.get(view.state, "the agents' GitHub account isn't ready"))
-    return f"scripts get no GitHub login: {why}"
+    if view.absent:
+        why: str | None = "there is no agents' GitHub account"
+    else:
+        why = _NO_LOGIN.get(view.cause) if view.cause else None
+    return f"scripts get no GitHub login: {why or _NOT_READY}"
 
 
 def _script_gh_homes(view: AgentAccountView) -> set[Path]:
@@ -234,7 +245,7 @@ async def _run_with_channel(
     # A rule run is never replayed, so when no answer is cached yet (after a restart, say) it
     # waits, bounded and off the DB pool, for the verification instead of running locked.
     view = await run_in_db(github_agent.view)
-    if view.cause in _UNSETTLED:
+    if view.answer_pending:
         view = await run_off_db(github_agent.verify_now)
     env.update(github_agent.script_env(view))
     env.pop(SOCKET_ENV, None)
