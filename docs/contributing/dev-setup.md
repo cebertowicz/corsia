@@ -31,10 +31,12 @@ The following example keeps the development workspace and application state in `
 
 ```bash
 mkdir -p ~/corsia-dev-data/workspace ~/corsia-dev-data/state
-export CORSIA_WORKSPACE=~/corsia-dev-data/workspace CORSIA_STATE_DIR=~/corsia-dev-data/state
+export CORSIA_WORKSPACE=~/corsia-dev-data/workspace CORSIA_STATE_DIR=~/corsia-dev-data/state BACKEND_PORT=43871
 cd backend
 ../.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 43871
 ```
+
+`BACKEND_PORT` must match `--port`. The backend uses it to address itself, so agent tool calls and sign-in callbacks reach this backend and not the default port, 1956, where your everyday CORSIA may be running.
 
 Leave the backend running. In another terminal, from the checkout's `frontend` directory, start the frontend and point its proxy at that backend:
 
