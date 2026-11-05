@@ -127,6 +127,8 @@ from plans.operator_projection import (
 from plans.pane_views import delete_thread as delete_pane_view
 from plans.review_evidence import latest as latest_review_evidence
 
+# The ``selected.how`` values meaning a plan operation started the task (core/lesson_delivery).
+from plans.close_next import _CRITERIA_HOWS as TASK_STARTED_HOWS
 # The thin status a checkpoint freezes (infra/checkpoint_snapshots).
 from plans.close_next_bounds import bounded as bounded_label
 from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES
