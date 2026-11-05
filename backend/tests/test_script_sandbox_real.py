@@ -349,7 +349,9 @@ async def test_authenticated_script_gh_uses_private_forwarder(sandbox, monkeypat
 
     async def upstream(request):
         seen.append(request.headers.get("authorization"))
-        return httpx.Response(200, json={"login": "fake"})
+        # A stream, as from the network: a content= body arrives pre-read and refuses aiter_raw.
+        return httpx.Response(200, headers={"content-type": "application/json"},
+                              stream=httpx.ByteStream(b'{"login":"fake"}'))
 
     original = script_sandbox.github_proxy
 
