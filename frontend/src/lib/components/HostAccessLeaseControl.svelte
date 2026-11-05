@@ -398,7 +398,7 @@
 		{#if currentPending}
 			<HostAccessPendingTrigger
 				request={currentPending}
-				{stale}
+				{stale} deciding={decidingLeaseId === currentPending.id}
 				open={pendingOpen}
 				bind:element={pendingTriggerEl}
 				onclick={openPendingDrawer}

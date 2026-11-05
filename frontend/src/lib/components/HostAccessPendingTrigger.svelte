@@ -7,12 +7,15 @@
 	let {
 		request,
 		stale,
+		deciding = false,
 		open,
 		onclick,
 		element = $bindable(null),
 	}: {
 		request: HostAccessItem;
 		stale: boolean;
+		/** This request's decision is in flight; a closed drawer must still show it. */
+		deciding?: boolean;
 		open: boolean;
 		onclick: () => void;
 		/** The button, so the control can return focus to it when the drawer closes. */
@@ -26,13 +29,14 @@
 	aria-label={pendingLabel(request)}
 	aria-haspopup="dialog"
 	aria-expanded={open}
+	aria-busy={request.kind === 'script' && deciding}
 	bind:this={element}
 	{onclick}
 >
 	{#if request.kind === 'script'}
 		<span class="eyebrow sentence">Script approval</span>
 		<span class="pending-owner">{request.script_name}</span>
-		<span class="pending-status" class:stale>{stale ? 'Not current' : 'Needs approval'}</span>
+		<span class="pending-status" class:stale class:deciding>{stale ? 'Not current' : deciding ? 'Saving…' : 'Needs approval'}</span>
 	{:else}
 		<span class="eyebrow">Temporary host access</span>
 		<span class="pending-owner">{owner(request)}</span>
@@ -96,6 +100,7 @@
 		font-weight: var(--fw-medium);
 	}
 	.pending-status.stale { color: var(--red-text); }
+	.pending-status.deciding { color: var(--text-secondary); }
 	.pending-action {
 		flex: none;
 		color: var(--amber);

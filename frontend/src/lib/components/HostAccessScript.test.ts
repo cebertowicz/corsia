@@ -121,3 +121,26 @@ it('shows a script chip status as text, not a pill', async () => {
 	await unmount(component);
 	target.remove();
 });
+
+it('keeps a submitted script decision visible on the closed chip', async () => {
+	const request: HostAccessScript = {
+		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
+		application_hash: 'a'.repeat(64), decision_capability: 'capability',
+		script_name: 'task.py', script_path: '/workspace/task.py',
+		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
+		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
+		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+	};
+	const target = document.createElement('div');
+	document.body.appendChild(target);
+	const component = mount(HostAccessPendingTrigger, { target, props: {
+		request, stale: false, deciding: true, open: false, onclick: vi.fn(),
+	} });
+	flushSync();
+	const button = target.querySelector('button')!;
+	expect(button.textContent).toContain('Saving…');
+	expect(button.textContent).not.toContain('Needs approval');
+	expect(button.getAttribute('aria-busy')).toBe('true');
+	await unmount(component);
+	target.remove();
+});
