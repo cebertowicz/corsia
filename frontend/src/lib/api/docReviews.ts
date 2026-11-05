@@ -17,10 +17,12 @@ export interface DocumentReview {
 	comment_count: number;
 	reason?: string | null;
 }
-export interface DocumentReviewer {
+export interface TaggableAgent {
 	id: string;
 	name: string;
 	responsibility: string;
+}
+export interface DocumentReviewer extends TaggableAgent {
 	requested: boolean;
 	unavailable_reason: string | null;
 	unavailable_text: string | null;
@@ -28,6 +30,7 @@ export interface DocumentReviewer {
 export interface DocumentReviews {
 	reviews: DocumentReview[];
 	reviewers?: DocumentReviewer[];
+	taggable_agents?: TaggableAgent[];
 	reviewers_error?: 'roster_error';
 }
 function headers() { return { Authorization: `Bearer ${get(token) ?? ''}`, 'Content-Type': 'application/json' }; }

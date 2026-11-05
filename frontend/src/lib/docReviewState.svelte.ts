@@ -1,6 +1,6 @@
 import {
 	fetchDocumentReviews, requestDocumentReview, cancelDocumentReview, reviewFailure,
-	type DocumentReview, type DocumentReviewer,
+	type DocumentReview, type DocumentReviewer, type TaggableAgent,
 } from '$lib/api/docReviews';
 
 export const andList = (list: string[]) => list.length < 3 ? list.join(' and ') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`;
@@ -14,6 +14,7 @@ export function createDocumentReviewState() {
 	let loadSequence = 0;
 	let requests = $state<DocumentReview[]>([]);
 	let reviewers = $state<DocumentReviewer[]>([]);
+	let taggableAgents = $state<TaggableAgent[]>([]);
 	let loadState = $state<'loading' | 'ready' | 'error'>('loading');
 	let rosterError = $state(false);
 	let selected = $state<DocumentReviewer[]>([]);
@@ -32,7 +33,7 @@ export function createDocumentReviewState() {
 	function setTarget(id: string | null, thread: string | null, key: string | null) {
 		if (id === artifactId && thread === threadId && key === targetKey) return false;
 		artifactId = id; threadId = thread; targetKey = key; generation += 1; loadSequence += 1;
-		requests = []; reviewers = []; loadState = 'loading'; rosterError = false;
+		requests = []; reviewers = []; taggableAgents = []; loadState = 'loading'; rosterError = false;
 		selected = []; lastSent = []; note = ''; sending = false; refusal = ''; failures = {}; cancelPending = []; cancelErrors = {}; attempts = new Map();
 		return true;
 	}
@@ -46,6 +47,7 @@ export function createDocumentReviewState() {
 			requests = response.reviews;
 			rosterError = response.reviewers_error === 'roster_error';
 			reviewers = response.reviewers ?? [];
+			taggableAgents = response.taggable_agents ?? [];
 			loadState = 'ready';
 		} catch {
 			if (current(id, thread, stamp) && sequence === loadSequence) loadState = 'error';
@@ -113,7 +115,7 @@ export function createDocumentReviewState() {
 		} finally { if (current(artifact, thread, stamp)) cancelPending = cancelPending.filter((request) => request !== id); }
 	}
 	return {
-		get requests() { return requests; }, get reviewers() { return reviewers; },
+		get requests() { return requests; }, get reviewers() { return reviewers; }, get taggableAgents() { return taggableAgents; },
 		get loadState() { return loadState; }, get rosterError() { return rosterError; },
 		get selected() { return selected; }, get lastSent() { return lastSent; },
 		get note() { return note; }, set note(value: string) { note = value; },

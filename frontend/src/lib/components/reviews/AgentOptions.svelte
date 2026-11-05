@@ -1,9 +1,9 @@
-<script lang="ts">
+<script lang="ts" generics="T extends TaggableAgent">
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { Button } from '$lib/components/ui';
 	import { agentColor } from '$lib/docPresence';
-	import type { DocumentReviewer } from '$lib/api/docReviews';
-	let { id, label, matches, active, choose, status = 'ready', retry }: { id: string; label: string; matches: DocumentReviewer[]; active: number; choose: (reviewer: DocumentReviewer) => void; status?: 'loading' | 'error' | 'empty' | 'ready'; retry?: () => Promise<void> } = $props();
+	import type { TaggableAgent } from '$lib/api/docReviews';
+	let { id, label, matches, active, choose, status = 'ready', retry }: { id: string; label: string; matches: T[]; active: number; choose: (reviewer: T) => void; status?: 'loading' | 'error' | 'empty' | 'ready'; retry?: () => Promise<void> } = $props();
 </script>
 <div {id} role="listbox" tabindex="-1" aria-label={label} class="options">
 	{#each matches as reviewer, index (reviewer.id)}

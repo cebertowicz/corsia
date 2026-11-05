@@ -38,8 +38,8 @@ describe('comment mentions', () => {
   expect(host.querySelector('[role=listbox]')?.textContent).toContain(copy); expect(host.textContent).not.toContain('No matching agents.');
   expect(field.hasAttribute('aria-activedescendant')).toBe(false);
  });
- it('offers requested and unavailable agents and retries roster errors',()=>{
-  const retry=vi.fn(async()=>{}); const all=[{...agents[0],requested:true},{...agents[1],unavailable_reason:'busy'}];
+ it('offers the taggable roster including CORSIA and the document owner, and retries roster errors',()=>{
+  const retry=vi.fn(async()=>{}); const all=[agent('corsia','CORSIA'), agent('owner','Document Owner')];
   host=document.createElement('div'); document.body.append(host); component=mount(MentionPickerHarness,{target:host,props:{agents:all}}); flushSync();
   const field=host.querySelector('textarea')!; field.value='@'; field.setSelectionRange(1,1); field.dispatchEvent(new Event('input',{bubbles:true})); flushSync(); expect(host.querySelectorAll('[role=option]')).toHaveLength(2);
   unmount(component); component=undefined; host.replaceChildren(); component=mount(MentionPickerHarness,{target:host,props:{agents:all,status:'error',retry}}); flushSync();

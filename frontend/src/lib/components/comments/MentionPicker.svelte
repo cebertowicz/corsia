@@ -10,7 +10,7 @@
 	import { createMentionSelection } from './mentionSelection';
 	export function taggedAgentIds(text: string) { return selectedTags.ids(text); }
 	export function occurrences(text: string) { return selectedTags.occurrences(text); }
-	import type { DocumentReviewer } from '$lib/api/docReviews';
+	import type { TaggableAgent } from '$lib/api/docReviews';
 	let { input, selectedTags = createMentionSelection() }: { input: HTMLTextAreaElement | undefined; selectedTags?: ReturnType<typeof createMentionSelection> } = $props();
 	const available = hasMentionRoster();
 	const roster = useMentionRoster();
@@ -25,8 +25,8 @@
 		return get(prefersReducedMotion) ? { duration: 0 } : clipFade(node);
 	}
 	let chosen: { start: number; text: string } | null = null;
-	const matches = $derived(roster.loadState !== 'ready' || roster.rosterError ? [] : roster.reviewers.filter((agent) => agent.name.toLowerCase().includes((query ?? lastQuery).toLowerCase())));
-	const status = $derived(roster.loadState === 'loading' ? 'loading' : roster.loadState === 'error' || roster.rosterError ? 'error' : !roster.reviewers.length ? 'empty' : 'ready');
+	const matches = $derived(roster.loadState !== 'ready' || roster.rosterError ? [] : roster.taggableAgents.filter((agent) => agent.name.toLowerCase().includes((query ?? lastQuery).toLowerCase())));
+	const status = $derived(roster.loadState === 'loading' ? 'loading' : roster.loadState === 'error' || roster.rosterError ? 'error' : !roster.taggableAgents.length ? 'empty' : 'ready');
 	function refresh() {
 		if (input) selectedTags.update(input.value);
 		if (!available || !input || input.selectionStart !== input.selectionEnd) { query = null; return; }
@@ -36,7 +36,7 @@
 		if (chosen && start === chosen.start && before.slice(start).startsWith(chosen.text)) { query = null; return; }
 		lastQuery = match[1]; query = match[1]; active = 0;
 	}
-	async function choose(agent: DocumentReviewer) {
+	async function choose(agent: TaggableAgent) {
 		if (!input || query === null) return;
 		const end = input.selectionStart, next = `${input.value.slice(0, start)}@${agent.name} ${input.value.slice(end)}`;
 		const pos = start + agent.name.length + 2; chosen = { start, text: `@${agent.name} ` };
