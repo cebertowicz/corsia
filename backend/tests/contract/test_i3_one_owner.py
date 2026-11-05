@@ -78,6 +78,9 @@ _MESSAGE_DELIVERY_COLUMNS = re.compile(
     r"active_turn_id|delivery_attempt_id|write_started_at|write_outcome",
 )
 _INTERPOLATION_CONTEXT_CHARS = 600
+# No statement spans a function definition, so the window stops at the next one
+# rather than reading a neighbouring function's columns as this write's.
+_NEXT_DEF = re.compile(r"\n[ \t]*(?:async[ \t]+)?def[ \t]")
 
 
 def _owned_write(statement_window: str, table: str) -> bool:
@@ -96,6 +99,9 @@ def test_owned_state_has_only_enrolled_transition_writers() -> None:
         rel = str(path.relative_to(BACKEND_ROOT))
         for match in _WRITE_RE.finditer(source):
             window = source[match.start():match.start() + 500]
+            next_def = _NEXT_DEF.search(window)
+            if next_def is not None:
+                window = window[:next_def.start()]
             if not _owned_write(window, match.group(1)):
                 continue
             found.add(rel)
