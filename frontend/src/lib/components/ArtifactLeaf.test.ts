@@ -70,10 +70,13 @@ vi.mock('$lib/stores/docComments', async () => ({
 	onCommentsReloaded: () => () => {},
 }));
 
-vi.mock('$lib/documentImagePlace', async (importOriginal) => ({
-	...await importOriginal<typeof import('$lib/documentImagePlace')>(),
-	restoreDocumentPlace: mocks.restoreDocumentPlace,
-}));
+vi.mock('$lib/documentImagePlace', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('$lib/documentImagePlace')>();
+	return {
+		...actual,
+		documentRestorer: (root: () => HTMLElement | undefined) => actual.documentRestorer(root, mocks.restoreDocumentPlace),
+	};
+});
 
 import ArtifactLeaf from './ArtifactLeaf.svelte';
 import { documentOpenCapability } from '$lib/artifactDocumentOpenCapability';

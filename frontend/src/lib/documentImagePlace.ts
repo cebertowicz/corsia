@@ -15,7 +15,7 @@ export interface RestoreDocumentPlaceOptions {
 }
 
 /** Cancel an older restore before starting a new one, and run its completion only if current. */
-export function documentRestorer(root: () => HTMLElement | undefined) {
+export function documentRestorer(root: () => HTMLElement | undefined, restore = restoreDocumentPlace) {
 	let current: AbortController | null = null;
 	return {
 		abort() { current?.abort(); },
@@ -23,7 +23,7 @@ export function documentRestorer(root: () => HTMLElement | undefined) {
 			current?.abort();
 			const controller = new AbortController();
 			current = controller;
-			void restoreDocumentPlace(root(), place, { ...options, signal: controller.signal }).finally(() => {
+			void restore(root(), place, { ...options, signal: controller.signal }).finally(() => {
 				if (current === controller) { current = null; then?.(); }
 			});
 		},
