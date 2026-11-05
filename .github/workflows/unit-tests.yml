@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  UNIT_TEST_RELEVANCE_PATTERNS: '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/unit-tests\.yml$|^\.github/actions/relevance/action\.yml$'
+  UNIT_TEST_RELEVANCE_PATTERNS: '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/|^\.github/actions/relevance/action\.yml$'
 
 jobs:
   relevance:
