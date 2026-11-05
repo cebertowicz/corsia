@@ -483,9 +483,11 @@ the transition.
 
 ## Context and skills
 
-CORSIA composes context every turn:
+CORSIA composes context for each turn. Static sources and the responsibility map
+are retained until the next install boundary; other turn-specific context can change:
 
-- system context from the workspace `context/` directory;
+- packaged System context;
+- workspace context from the workspace `context/` directory;
 - project context from the project `context/` directory;
 - Agent and Conductor context selected from `context/roles/<role>/` at those
   existing scopes, with Conductors composing Agent context before their additive layer;
@@ -496,6 +498,8 @@ CORSIA composes context every turn:
 
 The directories are the normal source of truth for boot files. Provider-native
 boot files are thin connectors, not parallel context authorities.
+
+Checked against the code at 7a8c55d84.
 
 ### Trial lessons
 
@@ -518,13 +522,12 @@ table and no second registry.
   scheduled for the review date. It takes no executor slot before that date.
   The owner retires, promotes, extends, or revises the trial; nothing does so
   automatically.
-- **Index membership.** `backend/core/lesson_index.py` decides, once per
-  skills-index install, which trials are offered: the file is in its owner's
-  own skills, says `trial`, its date is ahead, its owner holds an open review
-  of that exact version, no ordinary skill has its name, and the lesson index
-  budget has room. Anything else is listed as omitted with its reason. The
-  installed index records the offered lessons; the per-turn manifest keeps only
-  each lesson's id and behavioral hash.
+- **Task-start delivery.** `backend/core/lesson_index.py` checks trial eligibility,
+  including ownership, state, review date, review version and skill-name conflicts.
+  Trials do not enter the installed skills index. At task start,
+  `backend/core/lesson_delivery.py` assigns eligible trials to a with or without
+  group and returns applicable guidance to the with group. Count and token caps
+  can leave a trial out of both groups; receipts record the result.
 - **Evidence report.** `backend/core/lesson_report.py` projects existing review
   history, validated current files, installed boundaries, per-call manifests,
   and canonical read results. The deferred `lesson_report` tool and Measurement
@@ -534,15 +537,15 @@ table and no second registry.
   identity may establish a body read; ambiguous or missing lineage stays unknown.
   Current files and packaged System availability do not establish delivery;
   unresolved project roots, System projection and role-skill coverage are named.
-- **Context accounting.** `backend/infra/lesson_usage_attribution.py` annotates
-  the selected frozen Skills inventory through a usage-level estimate sibling.
-  It changes no installed bytes or hashes. Descriptor estimates remain part of
-  Skills; body reads remain history. The Context sheet and Measurement Learning
-  detail use existing document and review navigation.
-- **Limits.** The index is frozen at install, so a new, changed, or expired
-  trial takes effect at the next install and never in a running conversation.
-  Offers and supported reads do not establish opportunity, application or benefit.
+- **Context accounting.** `backend/infra/lesson_usage_attribution.py` can
+  project descriptor estimates from a retained Skills snapshot without changing
+  its bytes or hashes. Current trials are delivered at task start rather than
+  included in that snapshot.
+- **Limits.** A trial is delivered at task start, not in the installed index.
+  Delivery and supported reads do not establish application or benefit.
   Incomplete historical populations and per-version costs remain unavailable.
+
+Checked against the code at 7a8c55d84.
 
 ## Managed background processes
 

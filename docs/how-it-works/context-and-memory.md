@@ -29,7 +29,7 @@ Context sources are collected in this order (`backend/core/dynamic_context_regis
 6. The skills index
 7. The roster of other agents, appended separately and retained when its installed snapshot applies
 
-The guidance manifest records the sources a turn was started with and their versions where known (`backend/core/guidance_manifest.py`). Recording never blocks a turn; a failure is stored as a status on the turn.
+The guidance manifest records the sources a turn was started with and their versions where known (`backend/core/guidance_manifest.py`). Recording never blocks a turn; the system attempts to record a failure as a status on the turn.
 
 ### Installed context stays fixed
 
@@ -51,7 +51,7 @@ Idle checkpoint:
 
 At a boundary the system decides to proceed, proceed and checkpoint, wait, adopt an existing checkpoint and proceed, or fail visibly (`backend/core/fork_fit.py`). A checkpoint costs a real model call.
 
-Checkpoints are retained. An agent can search them, or read one exactly, with `get_checkpoints` and search its message history with `search_history` (`backend/tools/query_checkpoints.py`, `backend/memory/checkpoint_search.py`).
+Checkpoints are retained. An agent can search checkpoints and message history with `search_history`, then read a checkpoint exactly with `get_checkpoints` (`backend/tools/query_search.py`, `backend/tools/query_checkpoints.py`, `backend/memory/checkpoint_search.py`).
 
 ### Knowledge base
 
@@ -63,7 +63,7 @@ A correction can become a lesson placed where the right audience will see it: a 
 
 ### Skills
 
-A skill is a folder with a `SKILL.md`. The skills index in context lists them with descriptions; the agent loads one when its description matches the task. Resolution across scopes is described in [Scopes](scopes.md). Reviewed skills can also be installed from a shared library; see [The skill library](../skill-library.md).
+A skill is a folder with a `SKILL.md`. The skills index in context lists skills with descriptions; beyond the full-index limit, it lists additional skills by name only. The agent loads a skill when its description or name matches the task. Resolution across scopes is described in [Scopes](scopes.md). Reviewed skills can also be installed from a shared library; see [The skill library](../skill-library.md).
 
 ## What can go wrong
 
@@ -85,3 +85,5 @@ A skill is a folder with a `SKILL.md`. The skills index in context lists them wi
 | Checkpoint and history search | `backend/memory/checkpoint_search.py`, `backend/tools/query_checkpoints.py` |
 | Knowledge base | `backend/memory/knowledge_base.py`, `backend/tools/knowledge.py` |
 | Skills | `backend/core/skills_registry.py`, `backend/core/skill_resolution.py` |
+
+Checked against the code at 7a8c55d84.

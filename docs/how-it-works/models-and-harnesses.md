@@ -81,3 +81,5 @@ When an account reaches a usage limit, or a project's policy no longer permits i
 | oMLX supervision | `backend/llm/providers/omlx_supervisor.py` |
 | Model switching | `backend/thread/model_row.py`, `backend/thread/model_state.py` |
 | Account rollover | `backend/connections/account_rollover.py` |
+
+Checked against the code at 7a8c55d84.
