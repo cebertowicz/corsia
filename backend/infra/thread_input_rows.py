@@ -5,6 +5,12 @@ from __future__ import annotations
 import json
 import sqlite3
 
+# An unclaimed input or one claimed by a running Turn can still be read.
+LIVE_CLAIM = (
+    "(m.active_turn_id IS NULL OR EXISTS (SELECT 1 FROM active_turns t "
+    "WHERE t.id=m.active_turn_id AND t.status='running'))"
+)
+
 
 def starts_turn(row: sqlite3.Row) -> bool:
     """Return false only for a passive context event waiting for activity."""
@@ -38,8 +44,7 @@ def liveness_wake_queued(db: sqlite3.Connection, thread_id: str) -> bool:
         "SELECT 1 FROM messages m WHERE m.thread_id=? AND m.delivery_state='queued' "
         "AND m.input_order IS NOT NULL AND m.write_started_at IS NULL "
         "AND json_extract(m.metadata,'$.event_type')='plan.liveness_wake' "
-        "AND (m.active_turn_id IS NULL OR EXISTS (SELECT 1 FROM active_turns t "
-        "WHERE t.id=m.active_turn_id AND t.status='running')) LIMIT 1",
+        f"AND {LIVE_CLAIM} LIMIT 1",
         (thread_id,),
     ).fetchone() is not None
 

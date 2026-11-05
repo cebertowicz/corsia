@@ -15,6 +15,7 @@ import uuid
 from loguru import logger
 
 from core.message_history import NON_HUMAN_MARKERS
+from infra.thread_input_rows import LIVE_CLAIM
 
 EVENT = "system.turn.unanswered_input"
 # The wake's texts live only here.
@@ -74,9 +75,11 @@ def _unanswered_input(db: sqlite3.Connection, thread_id: str, turn_id: str) -> b
 
 
 def _person_input_queued(db: sqlite3.Connection, thread_id: str) -> bool:
-    """Whether a person's queued input, claimed or not, will start a Turn that sees the message."""
+    """Whether a person's queued input will start a Turn that sees the message."""
     return any(_is_person(row["metadata"]) for row in db.execute(
-        "SELECT metadata FROM messages WHERE thread_id=? AND role='user' AND delivery_state='queued'",
+        "SELECT m.metadata FROM messages m WHERE m.thread_id=? AND m.role='user' "
+        "AND m.delivery_state='queued' AND m.input_order IS NOT NULL "
+        f"AND {LIVE_CLAIM}",
         (thread_id,),
     ))
 
@@ -107,7 +110,8 @@ def queue_unanswered_input_wake(
     resumes it; a plan backoff wake does not, since it neither fires soon nor
     names the person's message. A person's queued input replaces it too: its
     Turn answers with the message in history, and recovery may already have
-    claimed it, so the wake would be a second Turn after it.
+    claimed it, so the wake would be a second Turn after it. If that Turn fails
+    before writing, the input shows failed with Retry and is not re-woken here.
     """
     turn_id = outcome.get("turn_id")
     if outcome.get("outcome") != "error" or not turn_id:

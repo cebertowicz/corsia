@@ -269,6 +269,24 @@ async def test_an_agents_queued_input_does_not_replace_the_wake(db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_queued_input_claimed_by_an_ended_turn_does_not_replace_the_wake(db) -> None:
+    """An orphaned claim starts no Turn, so the person's message would go unanswered."""
+    _take_in(db)
+    _queue(db)
+    db.execute(
+        "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,ended_at,boot_epoch) "
+        "VALUES ('t-gone',?,0,'oMLX/qwen','error','t0','t1','boot-1')", (_THREAD,),
+    )
+    db.execute("UPDATE messages SET active_turn_id='t-gone' WHERE id='m2'")
+    db.commit()
+
+    effects = await _end(db)
+
+    assert len(_wakes(db)) == 1
+    assert effects.drives.count(_THREAD) == 1
+
+
+@pytest.mark.asyncio
 async def test_a_turn_a_restart_registration_resumes_queues_nothing(db) -> None:
     """The restart's own recovery wake resumes the Turn; a second instruction would double it."""
     from infra.thread_recovery import RESTART_TURN_ERROR
