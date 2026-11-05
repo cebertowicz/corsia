@@ -2,7 +2,7 @@
 
 import sqlite3
 
-from infra.migration_176_to_177_comment_recipients import migrate_176_to_177
+from infra.migration_177_to_178_comment_recipients import migrate_177_to_178
 
 
 def test_migration_adds_comment_recipient_tables():
@@ -10,7 +10,7 @@ def test_migration_adds_comment_recipient_tables():
     db.execute("CREATE TABLE doc_comments(id TEXT PRIMARY KEY, body TEXT)")
     db.execute("CREATE TABLE threads(id TEXT PRIMARY KEY)")
     db.execute("INSERT INTO doc_comments VALUES ('comment', 'kept')")
-    migrate_176_to_177(db)
+    migrate_177_to_178(db)
     db.execute("INSERT INTO doc_comment_tags VALUES ('comment', 'agent', 'Agent')")
     db.execute("INSERT INTO doc_comment_recipient_state(root_id, agent_id) VALUES ('comment', 'agent')")
     assert db.execute("SELECT body FROM doc_comments").fetchone() == ("kept",)

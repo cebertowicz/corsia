@@ -12,7 +12,7 @@ vi.mock('$lib/api/docs', () => ({
 
 import { prepareCommentArrival, revealCommentArrival } from './docCommentArrivals';
 import {
-	docComments, commentLoads, fromServer, hasNewReplies, loadComments, flushPositions, markThreadViewed, remapComments, addComment, addReply,
+	docComments, commentLoads, fromServer, hasUnread, loadComments, flushPositions, markThreadViewed, remapComments, addComment, addReply,
 } from './docComments';
 import { canvasCommentHighlights } from '$lib/docCanvasComments';
 import { addRegionComment, moveRegion } from './imageRegionComments';
@@ -181,7 +181,7 @@ describe('thread reply attention', () => {
 		await markThreadViewed('artifact', 'a', 'a2');
 		const [a, b] = get(docComments).artifact;
 		expect(a.newReplyIds).toEqual([]);
-		expect(hasNewReplies(a)).toBe(false);
+		expect(hasUnread(a)).toBe(false);
 		expect(Object.keys(a)).not.toContain('replyWaiting');
 		expect(waiting()).toEqual([['a', false], ['b', true]]);
 		expect(b.newReplyIds).toEqual(['b1']);

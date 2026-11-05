@@ -7,7 +7,7 @@ import { fromServer, type CommentAuthor, type DocComment } from './docCommentPro
 import { heldIds, withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
 
-export { fromServer, hasNewReplies, regionFromServer } from './docCommentProjection';
+export { fromServer, hasUnread, regionFromServer } from './docCommentProjection';
 export type { CommentAuthor, CommentReply, DocComment } from './docCommentProjection';
 
 function findById(rows: ServerComment[], id: string): ServerComment | null {
@@ -36,6 +36,8 @@ export async function postReconciled(
 
 
 export const docComments = writable<Record<string, DocComment[]>>({});
+/** Threads brought into view by an explicit unread navigation. */
+export const arrivedDocComments = writable<Set<string>>(new Set());
 /** `owner` is the document owner's name from the last load; null when it has no owner thread, so a re-open reaches nobody. */
 export type CommentLoad = { state: 'loading' | 'ready' | 'error'; error?: string; owner?: string | null };
 export const commentLoads = writable<Record<string, CommentLoad>>({});
@@ -182,7 +184,7 @@ export async function markThreadViewed(artifactId: string, rootId: string, seenR
 	docComments.update((all) => ({
 		...all,
 		[artifactId]: (all[artifactId] ?? []).map((comment) => (
-			comment.id === result.root_id ? { ...comment, newReplyIds: result.new_reply_ids } : comment
+			comment.id === result.root_id ? { ...comment, newComment: false, newReplyIds: result.new_reply_ids } : comment
 		)),
 	}));
 }

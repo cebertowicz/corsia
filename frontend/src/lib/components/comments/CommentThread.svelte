@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { fade, slide } from 'svelte/transition';
 	import { tick } from 'svelte';
 	import { get } from 'svelte/store';
@@ -14,6 +15,7 @@
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { agentColor } from '$lib/docPresence';
 	import CommentMeta from './CommentMeta.svelte';
+	import NewMarker from './NewMarker.svelte';
 	import CommentPlacementLine from './CommentPlacementLine.svelte';
 	import ReplyField from './ReplyField.svelte';
 	import { createMentionSelection, type MentionOccurrence } from './mentionSelection';
@@ -21,6 +23,9 @@
 	import CommentMarkdownBody from './CommentMarkdownBody.svelte';
 	import CommentReplyList from './CommentReplyList.svelte';
 	import { createReplyVisibility } from './replyVisibility';
+	import { createThreadOpen } from './threadOpen';
+	import { observeArrivedThread } from './arrivedThread.svelte';
+	import { arrivedDocComments } from '$lib/stores/docComments';
 
 	let { comment, header, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
 		comment: CommentThreadData;
@@ -84,7 +89,8 @@
 	const suggestionDiff = $derived(isSuggestion ? lineDiff(comment.insertAfter ? '' : comment.anchor, comment.replacement!) : null);
 	let replyPosting = $state(false);
 	let decisionBusy = $state<'accept' | 'reject' | null>(null);
-	let resolvedOpen = $state(false);
+	let resolvedOpen = $state(untrack(() => !viewEachUnread && (!!comment.newComment || !!comment.newReplyIds?.length)));
+	$effect(() => { if (!viewEachUnread && (comment.newComment || comment.newReplyIds?.length)) resolvedOpen = true; });
 	let el = $state<HTMLElement>();
 	let previousAck: boolean | undefined;
 	let agreePlayback: MentionPlayback | undefined;
@@ -126,8 +132,7 @@
 		for (const id of comment.newReplyIds ?? []) seenForCollapse.add(id);
 		return new Set(seenForCollapse);
 	});
-	// A reply becomes read only after a short uninterrupted visible dwell. Until then the server projection remains
-	// the sole source for its New marker, comment pill, and attention-dock item.
+	// Chat answers retain their visible dwell; document threads stamp when the person opens the card.
 	const VIEWED_DWELL_MS = 1_500;
 	const dwellTimers = new Map<string, number>();
 	const dwelled = new Set<string>();
@@ -145,7 +150,7 @@
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
 	// One reply's own observer calls this with that reply's id, so nothing carries over from another element.
 	function stamp(replyId: string) {
-		if (!onViewed || document.visibilityState !== 'visible' || !comment.newReplyIds?.length) return;
+		if (!onViewed || document.visibilityState !== 'visible' || (!comment.newComment && !comment.newReplyIds?.length)) return;
 		if (viewEachUnread) {
 			if (stampedReplies.has(replyId)) return;
 			stampedReplies.add(replyId);
@@ -155,13 +160,16 @@
 			});
 			return;
 		}
-		const position = comment.replies.findIndex((r) => r.id === replyId);
-		if (position < 0 || position <= comment.replies.findIndex((r) => r.id === lastStamped)) return;
+		const replyIndex = comment.replies.findIndex((r) => r.id === replyId);
+		if (replyId !== comment.id && replyIndex < 0) return;
+		const position = replyId === comment.id ? 0 : replyIndex + 1;
+		const lastPosition = lastStamped === comment.id ? 0 : comment.replies.findIndex((r) => r.id === lastStamped) + 1;
+		if (lastStamped !== null && position <= lastPosition) return;
 		const previous = lastStamped;
 		lastStamped = replyId;
 		onViewed?.(comment.id, replyId).catch((err) => {
 			console.warn('Could not record the viewed reply', err);
-			// A failed stamp leaves the marker; the next visibility change observes again and retries it.
+			// A failed stamp leaves the marker; the next opening retries it.
 			if (lastStamped === replyId) lastStamped = previous;
 		});
 	}
@@ -196,13 +204,10 @@
 	$effect(() => {
 		observeTick;
 		newestReply;
-		replyVisibility.sync(el, !!onViewed, JSON.parse(unreadKey));
+		replyVisibility.sync(el, !!onViewed && viewEachUnread, JSON.parse(unreadKey));
 	});
-	$effect(() => () => replyVisibility.clear());
-	function onVisibilityChange() {
-		if (document.visibilityState === 'visible') { replyVisibility.clear(); observeTick++; }
-		else cancelDwell();
-	}
+	const { openThread, openFromFocus } = createThreadOpen(() => comment, () => viewEachUnread, stamp);
+	const onVisibilityChange = observeArrivedThread(() => el, () => comment.id, () => !viewEachUnread && !!onViewed, () => $arrivedDocComments.has(comment.id), openThread, () => { observeTick++; }, () => replyVisibility.clear(), cancelDwell);
 
 	async function postReply() {
 		const t = replyText.trim();
@@ -225,6 +230,7 @@
 	}
 	async function decide(decision: 'accept' | 'reject') {
 		if (readOnly || decisionBusy || (decision === 'accept' && comment.orphaned)) return;
+		openThread();
 		decisionBusy = decision;
 		try {
 			await onDecision?.(comment.id, decision);
@@ -241,12 +247,14 @@
 		<svg class="ct-{mark}" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d={mark === 'check' ? 'M20 6L9 17l-5-5' : 'M18 6L6 18M6 6l12 12'} /></svg>
 		{#if comment.regionNumber != null && !isSuggestion}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 		<span class="ct-res-text">{label}</span>
+		{#if comment.newComment}<NewMarker />{/if}
 		<svg class="ct-chev" class:open={resolvedOpen} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6" /></svg>
 	</button>
 {/snippet}
 
 {#if isSuggestion && comment.decision}
-	<div class="ct resolved" class:drawerCard class:focused bind:this={el} role="region" aria-label="{comment.decision} suggestion by {author.name}">
+	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+	<div class="ct resolved" class:drawerCard class:focused bind:this={el} role="region" aria-label="{comment.decision} suggestion by {author.name}" onclick={openThread} onfocusin={openFromFocus}>
 		{@render header?.()}
 		{@render resolvedHead(comment.decision === 'accepted' ? 'check' : 'cross', `Suggested by ${author.name} · ${comment.decision === 'accepted' ? 'Accepted' : 'Rejected'} by ${comment.decidedBy ?? 'you'}`)}
 		{#if resolvedOpen}
@@ -258,7 +266,8 @@
 		{/if}
 	</div>
 {:else if comment.resolved && !kept && !leaving}
-	<div class="ct resolved" class:drawerCard class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}" in:fade={{ duration: 150 }}>
+	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
+	<div class="ct resolved" class:drawerCard class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}" in:fade={{ duration: 150 }} onclick={openThread} onfocusin={openFromFocus}>
 		{@render header?.()}
 		{@render resolvedHead('check', `Resolved · ${comment.replies.length + 1} message${comment.replies.length ? 's' : ''}`)}
 		{#if resolvedOpen}
@@ -275,21 +284,22 @@
 	</div>
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<div class="ct" class:flat class:focused class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned} bind:this={el} role="region" aria-label="Comment by {author.name}" onclick={onFocus ? pressCard : undefined}>
+	<div class="ct" class:flat class:focused class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned} bind:this={el} role="region" aria-label="Comment by {author.name}" onclick={(event) => { openThread(); if (onFocus) pressCard(event); }} onfocusin={openFromFocus}>
 		{@render header?.()}
 		<div class="ct-head">
 			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
 			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 			<Avatar name={author.name} color={avatarColor} hidden />
 			<CommentMeta {author} at={comment.at} createdAt={comment.createdAt} />
+			{#if comment.newComment}<NewMarker />{/if}
 			{#if comment.replies.length}
 				<span class="ct-reply-count">{comment.replies.length} {comment.replies.length === 1 ? 'reply' : 'replies'}</span>
 			{/if}
 			{#if !isSuggestion && !comment.resolved}
-				<button class="ct-act ack" transition:clipFade={{ axis: 'x' }} class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree" title="Agree">
+				<button class="ct-act ack" transition:clipFade={{ axis: 'x' }} class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); openThread(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree" title="Agree">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><path d="M7 11l4-7a2 2 0 0 1 3 2l-1 5h5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 16.8 21H7" /></svg>
 				</button>
-				<button class="ct-act resolve" transition:clipFade={{ axis: 'x' }} disabled={readOnly} onclick={(e) => { e.stopPropagation(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread">
+				<button class="ct-act resolve" transition:clipFade={{ axis: 'x' }} disabled={readOnly} onclick={(e) => { e.stopPropagation(); openThread(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
 				</button>
 			{/if}

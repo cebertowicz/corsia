@@ -120,7 +120,7 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			const ids = await seedDense(page, request, seeded);
 			await page.reload();
 			await showImage(page, seeded.sessionTitle);
-			await expect(pill(page)).toHaveAttribute('aria-label', /^13 open threads(, |$)/);
+			await expect(pill(page)).toHaveAttribute('aria-label', /^13 threads(, |$)/);
 			await rest(page);
 			await expectEveryTagReachable(page, 12);
 			await shoot(page, testInfo, '1440-15-dense-rest', true);
@@ -345,7 +345,7 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 			await page.reload();
 			await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await showImage(page, seeded.sessionTitle);
-			await expect(pill(page)).toHaveAttribute('aria-label', /^13 open threads(, |$)/);
+			await expect(pill(page)).toHaveAttribute('aria-label', /^13 threads(, |$)/);
 			await expectEveryTagReachable(page, 12);
 			await shoot(page, testInfo, '393-06-dense-rest', true);
 			// The disc, since at this size a close neighbour's disc may sit over the hidden name beside it.

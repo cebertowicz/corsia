@@ -178,18 +178,30 @@ def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
     }
 
 
-def new_reply_rows(user_id: str, artifact_id: str | None, *, include_author_thread: bool = False) -> tuple[str, tuple]:
-    """The one definition of a new reply: the FROM/JOIN/WHERE every read of it shares.
+def _eligible_top_level(alias: str) -> str:
+    """SQL predicate for an eligible unread top-level comment; alias is an internal SQL identifier."""
+    return f"""{alias}.parent_id IS NULL AND {alias}.author_kind='agent'
+               AND {alias}.replacement IS NULL AND {alias}.review=0
+               AND EXISTS (SELECT 1 FROM doc_comments person
+                           WHERE person.artifact_id={alias}.artifact_id AND person.author_kind='user'
+                             AND person.created_at<{alias}.created_at)"""
 
-    A reply is new for a user when someone else wrote it, in an open root the
-    user touched (wrote it or replied in it), and it is newer than the user's
-    seen stamp on that root: by time, then by reply id.
+
+def may_change_unread_attention(author_kind: str, parent_id: str | None, replacement: str | None, review: bool) -> bool:
+    """Coarse reload hint: deliberately omits the earlier person-comment condition."""
+    return author_kind == 'agent' and bool(parent_id or (replacement is None and not review))
+
+
+def unread_comment_rows(user_id: str, artifact_id: str | None, *, include_author_thread: bool = False) -> tuple[str, tuple]:
+    """The one definition of unread rows for replies and eligible top-level comments.
+
+    Both use the same per-thread watermark, ordered by creation time and id.
     """
     # A document read binds both sides to its artifact so idx_doc_comments_artifact bounds the scan to that document.
     scoped = artifact_id is not None
-    sql = f"""FROM doc_comments reply
-           {"JOIN threads thread ON thread.id=reply.author_thread_id" if include_author_thread else ""}
-           JOIN doc_comments root ON root.id=reply.parent_id
+    sql = f"""FROM doc_comments item
+           {"JOIN threads thread ON thread.id=item.author_thread_id" if include_author_thread else ""}
+           JOIN doc_comments root ON root.id=COALESCE(item.parent_id, item.id)
            LEFT JOIN (
                SELECT DISTINCT parent_id FROM doc_comments
                WHERE author_kind='user' AND parent_id IS NOT NULL
@@ -197,50 +209,53 @@ def new_reply_rows(user_id: str, artifact_id: str | None, *, include_author_thre
            ) touched ON touched.parent_id=root.id
            LEFT JOIN doc_comment_thread_views thread_view
              ON thread_view.user_id=? AND thread_view.root_id=root.id
-           WHERE reply.author_kind<>'user' AND root.resolved=0
-             {"AND reply.artifact_id=? AND root.artifact_id=?" if scoped else ""}
-             AND (root.author_kind='user' OR touched.parent_id IS NOT NULL)
+           WHERE item.author_kind<>'user'
+             {"AND item.artifact_id=? AND root.artifact_id=?" if scoped else ""}
+             AND ((item.parent_id IS NOT NULL AND (root.author_kind='user' OR touched.parent_id IS NOT NULL))
+                  OR ({_eligible_top_level('item')}))
              AND (
-                 reply.created_at>COALESCE(thread_view.seen_at, '')
+                 item.created_at>COALESCE(thread_view.seen_at, '')
                  OR (
                      thread_view.seen_at IS NOT NULL
-                     AND reply.created_at=thread_view.seen_at
-                     AND reply.id>thread_view.seen_reply_id
+                     AND item.created_at=thread_view.seen_at
+                     AND item.id>thread_view.seen_reply_id
                  )
              )"""
     return sql, ((artifact_id, user_id, artifact_id, artifact_id) if scoped else (user_id,))
 
 
-def _new_replies(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
-    """One document's new replies as (root id, reply id) in thread order, one row per reply."""
-    sql, params = new_reply_rows(user_id, artifact_id)
+def _unread_items(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
+    """One document's unread items as (root id, item id), ordered by time and id."""
+    sql, params = unread_comment_rows(user_id, artifact_id)
     rows = db.execute(
-        f"SELECT root.id AS root_id, reply.id AS reply_id {sql} ORDER BY reply.created_at, reply.id",
+        f"SELECT root.id AS root_id, item.id AS item_id {sql} ORDER BY item.created_at, item.id",
         params,
     ).fetchall()
-    return [(str(row["root_id"]), str(row["reply_id"])) for row in rows]
+    return [(str(row["root_id"]), str(row["item_id"])) for row in rows]
 
 
-def reply_waiting_ids(db, user_id: str) -> set[str]:
-    """Return documents containing a thread with a new reply: one row per document, not per reply."""
-    sql, params = new_reply_rows(user_id, None)
+def unread_item_ids(db, user_id: str) -> set[str]:
+    """Return document IDs with unread replies or eligible top-level comments."""
+    sql, params = unread_comment_rows(user_id, None)
     rows = db.execute(f"SELECT DISTINCT root.artifact_id AS artifact_id {sql}", params).fetchall()
     return {str(row["artifact_id"]) for row in rows}
 
 
 def annotate_thread_attention(db, user_id: str, artifact_id: str, threads: list[dict]) -> None:
-    """Attach each thread's new reply ids to the comment-list projection."""
+    """Attach unread reply IDs and the separate top-level comment flag to each thread."""
     new_by_root: dict[str, list[str]] = {}
-    for root_id, reply_id in _new_replies(db, user_id, artifact_id):
-        new_by_root.setdefault(root_id, []).append(reply_id)
+    for root_id, item_id in _unread_items(db, user_id, artifact_id):
+        new_by_root.setdefault(root_id, []).append(item_id)
     for thread in threads:
-        thread["new_reply_ids"] = new_by_root.get(thread["id"], [])
+        unread = new_by_root.get(thread["id"], [])
+        thread["new_comment"] = thread["id"] in unread
+        thread["new_reply_ids"] = [item for item in unread if item != thread["id"]]
 
 
 def mark_thread_viewed(
-    db, user_id: str, artifact_id: str, root_id: str, seen_reply_id: str,
+    db, user_id: str, artifact_id: str, root_id: str, seen_item_id: str,
 ) -> list[str]:
-    """Persist the newest rendered reply for one root, never moving its stamp back.
+    """Persist the newest rendered item for one root, never moving its stamp back.
 
     Returns the root's new reply ids that remain after the stamp.
     """
@@ -250,11 +265,12 @@ def mark_thread_viewed(
     ).fetchone()
     if root is None:
         raise ValueError("root_not_found")
-    reply = db.execute(
-        "SELECT id,created_at FROM doc_comments WHERE id=? AND parent_id=?",
-        (seen_reply_id, root_id),
+    item = db.execute(
+        f"""SELECT item.id,item.created_at FROM doc_comments item
+           WHERE item.id=? AND (item.parent_id=? OR (item.id=? AND {_eligible_top_level('item')}))""",
+        (seen_item_id, root_id, root_id),
     ).fetchone()
-    if reply is None:
+    if item is None:
         raise ValueError("reply_not_found")
     db.execute(
         """INSERT INTO doc_comment_thread_views(user_id,root_id,seen_at,seen_reply_id)
@@ -264,14 +280,15 @@ def mark_thread_viewed(
            WHERE excluded.seen_at>doc_comment_thread_views.seen_at
               OR (excluded.seen_at=doc_comment_thread_views.seen_at
                   AND excluded.seen_reply_id>doc_comment_thread_views.seen_reply_id)""",
-        (user_id, root_id, reply["created_at"], reply["id"]),
+        (user_id, root_id, item["created_at"], item["id"]),
     )
-    return [reply_id for waiting_root, reply_id in _new_replies(db, user_id, artifact_id) if waiting_root == root_id]
+    return [item_id for waiting_root, item_id in _unread_items(db, user_id, artifact_id)
+            if waiting_root == root_id and item_id != root_id]
 
 
 def annotate_pane(pane: dict, user_id: str, *, db) -> dict:
     """Add the passive reply marker to every artifact row in a pane payload."""
-    waiting = reply_waiting_ids(db, user_id)
+    waiting = unread_item_ids(db, user_id)
 
     def visit(nodes: list[dict]) -> None:
         for node in nodes:

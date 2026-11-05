@@ -23,6 +23,7 @@ export type CommentThreadData = {
 	replies: CommentReplyData[];
 	/** Replies by others newer than this viewer's seen stamp: the server's answer, held once in the store. */
 	newReplyIds?: string[];
+	newComment?: boolean;
 	/** Live documents only (4.2): a row never `drawn` shows its placement on the card. */
 	placement?: 'placed' | 'placing' | 'not_placed';
 	drawn?: boolean;

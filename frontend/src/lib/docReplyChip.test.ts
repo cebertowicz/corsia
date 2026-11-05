@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { nextUnreadThread, unreadReplyCount } from './docReplyChip';
+import { nextUnreadThread, unreadCommentCount } from './docReplyChip';
 import type { DocComment } from '$lib/stores/docComments';
 
 const thread = (id: string, newReplyIds: string[] = []): DocComment => ({ id, anchor: '', author: 'you', text: '', at: '', resolved: false, replies: [], newReplyIds });
 
-describe('unreadReplyCount', () => {
+describe('unreadCommentCount', () => {
 	it('counts replies, not threads, as the chat chip does', () => {
-		expect(unreadReplyCount([thread('a', ['r1', 'r2']), thread('b'), thread('c', ['r3'])])).toBe(3);
+		expect(unreadCommentCount([thread('a', ['r1', 'r2']), thread('b'), thread('c', ['r3'])])).toBe(3);
 	});
 
 	it('is zero when nothing is waiting, and for a thread with no stamp at all', () => {
-		expect(unreadReplyCount([thread('a'), { ...thread('b'), newReplyIds: undefined }])).toBe(0);
-		expect(unreadReplyCount([])).toBe(0);
+		expect(unreadCommentCount([thread('a'), { ...thread('b'), newReplyIds: undefined }])).toBe(0);
+		expect(unreadCommentCount([])).toBe(0);
 	});
 });
 

@@ -68,13 +68,13 @@ describe('document review toolbar and popover', () => {
 	it('requires artifactId without hiding the comment control', async () => {
 		render({ commentCount: 2 }); await settle(); expect(button('Request review')).toBeTruthy();
 		component.$set({ artifactId: null }); flushSync();
-		expect(maybeButton('Request review')).toBeUndefined(); expect(button('2 open threads')).toBeTruthy();
+		expect(maybeButton('Request review')).toBeUndefined(); expect(button('2 threads')).toBeTruthy();
 	});
 	it('shows only the Request review button when nobody is reviewing, and one control style across the row', async () => {
 		render({ commentCount: 1, stale: true }); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
 		const names = [...document.body.querySelectorAll<HTMLElement>('.document-tools button')].map(nameOf);
-		expect(names).toEqual(['File changed · Reload', '1 open thread', 'Deliver comments immediately', 'Request review']);
+		expect(names).toEqual(['File changed · Reload', '1 thread', 'Deliver comments immediately', 'Request review']);
 		// The delivery switch is a Toggle, not a text tool: every other control shares the one style.
 		expect([...document.body.querySelectorAll('.document-tools button:not(.tg)')].every((item) => item.classList.contains('doc-tool'))).toBe(true);
 	});
@@ -207,7 +207,7 @@ describe('document review toolbar and popover', () => {
 		button('Cancel request to Quality Gate').click(); await settle();
 		expect(document.body.querySelector('.reviewer-group')).toBeNull();
 		key(document.activeElement as HTMLElement ?? document.body, 'Escape'); await settle();
-		expect(document.activeElement).toBe(button('1 open thread'));
+		expect(document.activeElement).toBe(button('1 thread'));
 	});
 	it('collapses a long group to three avatars and a +N', async () => {
 		rows = Array.from({ length: 5 }, (_, index) => row(`review-${index}`, { reviewer_thread_id: `r${index}`, reviewer_name: `Reviewer ${index}` }));

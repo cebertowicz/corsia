@@ -18,7 +18,8 @@
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 	import { loadComments, type DocComment } from '$lib/stores/docComments';
-	import { clickedOpener, drawerFooterHeight, drawerKeys, onSheetMoved, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
+	import { retainUnreadList } from '$lib/docUnreadList.svelte';
+	import { byCommentNumber, clickedOpener, drawerFooterHeight, drawerKeys, onSheetMoved, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
 	import { trackOverlaySheet } from '$lib/cm/visible-region';
 	import { createCellLabels, type WidgetLabelReader } from '$lib/docCommentLabels';
 	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
@@ -112,6 +113,7 @@
 	let replySelections = $state<Record<string, [number, number]>>({});
 	// A thread someone else resolves while a reply to it is being typed stays in the Open list, as a resolved card, until that reply is sent or cleared.
 	const held = keptThreads({ comments: () => comments, drafts: () => replyDrafts, leavesOnRelease: () => filter === 'open', reduced: () => get(prefersReducedMotion), crossfaded: () => get(prefersReducedMotion) && sheetDrawer && surfaceState?.kind === 'list' });
+	const unreadListed = retainUnreadList(() => surfaceState?.kind === 'list', () => comments);
 	const column = $derived(bounds?.closest<HTMLElement>('.leaf-body') ?? bounds);
 	const openCount = $derived(comments.filter((comment) => !comment.resolved).length);
 	// Open counts threads that are open: the resolved card kept for an unsent reply says why it is still listed, and the document's chip agrees.
@@ -140,14 +142,13 @@
 	const shouldShowReply = $derived(!isImage && narrow && focusedId !== null);
 	const picks = $derived(image?.picks ?? 0);
 	let navigationNotice = $state('');
-	const byNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
 	// What is shown follows `sheet.state`: the surface's own state, or the one a closing sheet still shows through its outro.
 	const displayed = $derived.by(() => {
 		const showing = sheet.state;
 		if (showing?.kind === 'thread') return comments.filter((comment) => showing.ids ? showing.ids.includes(comment.id) : comment.id === showing.id);
-		const shown = comments.filter((comment) => filter === 'all' || (filter === 'resolved' ? comment.resolved : !comment.resolved || held.kept(comment) || held.leaving.has(comment.id)));
+		const shown = comments.filter((comment) => filter === 'all' || (filter === 'resolved' ? comment.resolved : !comment.resolved || held.kept(comment) || held.leaving.has(comment.id) || unreadListed.has(comment)));
 		// An image's comments read in number order, like its tags.
-		return image ? [...shown].sort(byNumber) : shown;
+		return image ? [...shown].sort(byCommentNumber) : shown;
 	});
 	const followed = $derived(surfaceState?.kind === 'thread' ? comments.find((item) => item.id === surfaceState.id) : undefined);
 	// A card that follows its text closes once its comment is deleted: there is nothing left to show.

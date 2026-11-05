@@ -38,8 +38,9 @@ export interface DocComment {
 	insertAfter?: boolean;
 	decision?: 'accepted' | 'rejected' | null;
 	decidedBy?: string | null;
-	/** Replies by others newer than this viewer's seen stamp. The only copy of reply attention; read it through `hasNewReplies`. */
+	/** Unread reply IDs; `newComment` separately marks an unread top-level comment. */
 	newReplyIds?: string[];
+	newComment?: boolean;
 	replies: CommentReply[];
 	/** Live documents only (4.2); `drawn` once browser-made positions place it. */
 	placement?: Placement;
@@ -58,9 +59,9 @@ export interface DocComment {
 	imageSrc?: string | null;
 }
 
-/** Whether a thread has a reply this viewer has not seen: the one reading of `newReplyIds`. */
-export function hasNewReplies(comment: Pick<DocComment, 'newReplyIds'>): boolean {
-	return (comment.newReplyIds?.length ?? 0) > 0;
+/** Whether a thread contains an unread top-level comment or reply. */
+export function hasUnread(comment: Pick<DocComment, 'newReplyIds' | 'newComment'>): boolean {
+	return !!comment.newComment || (comment.newReplyIds?.length ?? 0) > 0;
 }
 
 export function fromServer(r: ServerComment): DocComment {
@@ -86,6 +87,7 @@ export function fromServer(r: ServerComment): DocComment {
 		decision: r.decision,
 		decidedBy: r.decided_by,
 		newReplyIds: r.new_reply_ids ?? [],
+		newComment: !!r.new_comment,
 		replies: (r.replies ?? []).map((x) => ({ id: x.id, author: x.author, authorKind: x.author_kind, text: x.body, taggedAgents: x.tagged_agents ?? [], mentions: x.tagged_agent_mentions ?? [], at: relLabel(x.created_at), createdAt: x.created_at })),
 		...regionFromServer(r)
 	};
