@@ -7,7 +7,7 @@ from typing import Any
 
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
 from core.corrections_recording import SOURCE_KIND_DOC_COMMENT
-from plans import admission, artifact_links, feedback_join, intent_words, person_input, review_requests, service
+from plans import admission, artifact_links, feedback_join, intent_creation, person_input, review_requests, service
 from plans.feedback_items import (
     artifact_name, artifact_row, batch_value, feedback_display, feedback_item_counts, feedback_kind_counts,
     load_feedback_items,
@@ -223,9 +223,9 @@ def create_feedback_node(
     """Create one queued recipient-plan task, idempotently keyed by batch id.
 
     A batch of replies whose comment thread already has an open task joins that
-    task instead (``plans.feedback_join``). Joining a task its owner is working
-    adds no intent words, so the owner keeps its selection, and wakes the owner
-    with the reply instead.
+    task instead (``plans.feedback_join``). When its owner is working on that
+    task, the owner keeps its selection and receives a wake with the reply;
+    otherwise the person's new comments restate the task's intent.
     """
     batch_id = str(batch_value(batch, "id"))
     artifact_id = str(batch_value(batch, "artifact_id"))
@@ -236,18 +236,15 @@ def create_feedback_node(
     if not loaded:
         raise EmptyFeedbackBatchError(f"feedback batch {batch_id} has no renderable items")
     author, document = feedback_display(db, batch, loaded)
-    words = (
-        intent_words.document_comment_words(loaded)
-        if batch_value(batch, "author_kind") == "user"
-        else ()
-    )
     joined = feedback_join.open_thread_task(db, recipient_thread_id, batch, loaded)
     if joined is not None:
         held = feedback_join.earlier_items(db, joined.node_id, batch) + loaded
         blocks = item_blocks(batch, loaded)
+        restate = not joined.working and _person_comments(batch, loaded)
         feedback_join.join(
-            db, joined.node_id, title=_title(author, document, held),
-            blocks=blocks, words=() if joined.working else words, provenance=PROVENANCE,
+            db, joined.node_id, title=_title(author, document, held), blocks=blocks,
+            intent=_document_comment_intent(_person_comments(batch, held), document) if restate else None,
+            provenance=PROVENANCE,
         )
         woke = joined.working and person_input.joined_reply(
             db, joined.node_id,
@@ -256,24 +253,38 @@ def create_feedback_node(
             [str(item["id"]) for item in loaded],
         ) is not None
         return FeedbackNodeResult(joined.node_id, (), False, woke)
+    count = _person_comments(batch, loaded)
     return _create_linked_node(
         db, recipient_thread_id, artifact_id, batch_id, PROVENANCE,
         title=_title(author, document, loaded), acceptance=_acceptance(loaded),
         description=_description(batch, loaded),
-        intent=intent_words.document_comment_intent(loaded, document) if words else None, words=words,
+        intent=_document_comment_intent(count, document) if count else None,
     )
 
 
+def _person_comments(batch, items) -> int:
+    """How many non-blank comments the person wrote among ``items``; none in an agent's batch."""
+    if batch_value(batch, "author_kind") != "user":
+        return 0
+    return sum(
+        1 for item in items
+        if item["kind"] == "comment" and item.get("author_kind", "user") == "user" and str(item["body"]).strip()
+    )
+
+
+def _document_comment_intent(count: int, document: str) -> str:
+    text = f"Answer the person's {count} comment{'s' if count != 1 else ''} on {document}"
+    return intent_creation.validate_intent(text.encode()[:intent_creation.MAX_INTENT_BYTES].decode(errors="ignore"))
+
+
 def _create_linked_node(db, recipient_thread_id, artifact_id, source_id, provenance,
-                        *, title, acceptance, description, intent=None, intent_node_id=None,
-                        words=()) -> FeedbackNodeResult:
+                        *, title, acceptance, description, intent=None, intent_node_id=None) -> FeedbackNodeResult:
     plan = service.ensure_plan("thread", recipient_thread_id, db=db)
     node = service.add_node(
         plan.id, kind="task", title=title, acceptance_criteria=acceptance,
         description=description, intent=intent, intent_node_id=intent_node_id,
         actor_id=None, provenance=provenance, db=db,
     )
-    intent_words.append(db, node.id, words, revision=node.requirements_revision)
     service.transition_node(
         node.id, "active", actor_id=None, provenance=provenance, db=db,
     )
@@ -314,4 +325,4 @@ def _requesting_intent(db, request) -> str | None:
     requesting_node_id = request["requesting_node_id"]
     if not requesting_node_id:
         return None
-    return str(intent_words.canonical(db, str(requesting_node_id))["id"])
+    return str(intent_creation.canonical(db, str(requesting_node_id))["id"])

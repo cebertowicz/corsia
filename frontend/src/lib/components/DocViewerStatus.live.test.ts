@@ -46,7 +46,7 @@ it('reports a successfully persisted disconnected copy and same-store reconnecti
 it('names live unplaced comments once on the document status pill', () => {
 	setup(); render({ orphanedCount: 2 });
 	const pill = host.querySelector('.comment-status')!;
-	expect(pill.getAttribute('aria-label')).toBe("0 open threads, 2 comments couldn't be placed");
+	expect(pill.getAttribute('aria-label')).toBe("0 threads, 2 comments couldn't be placed");
 });
 
 it('shows the approved settling row and offers reading and copying without a second write', async () => {

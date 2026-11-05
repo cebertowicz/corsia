@@ -107,20 +107,20 @@ describe('ImageCommentLightbox', () => {
 	it('reads the image\'s comments, counts them on the pill and numbers their tags on the image', async () => {
 		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
 		expect(mocks.fetchComments).toHaveBeenCalledWith('art-img');
-		expect(pill()!.getAttribute('aria-label')).toBe('2 open threads');
+		expect(pill()!.getAttribute('aria-label')).toBe('2 threads');
 		// The tags sit inside the zoomed frame, so they pan and zoom with the image.
 		const tags = [...host.querySelectorAll<HTMLElement>('.frame [data-region-tag]')];
 		expect(tags.map((tag) => tag.dataset.regionTag)).toEqual(['1', '3']);
 	});
 
-	it('counts open threads on the pill, as the document\'s pill does: resolved ones are not counted', async () => {
+	it('counts all threads on the image pill, including resolved ones', async () => {
 		mocks.fetchComments.mockResolvedValue({
 			comments: [row('first', 1, 0.1), row('second', 3, 0.6), { ...row('done', 2, 0.4), resolved: true }],
 			feedback: { owner_label: null, undelivered_batches: [] },
 		});
 		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
-		expect(pill()!.getAttribute('aria-label')).toBe('2 open threads');
-		expect(pill()!.querySelector('.count')!.textContent).toBe('2');
+		expect(pill()!.getAttribute('aria-label')).toBe('3 threads');
+		expect(pill()!.querySelector('.count')!.textContent).toBe('3');
 		expect(pill()!.querySelector('.count-unit')!.textContent).toBe('threads');
 		// Nothing waits to be sent, so no dot.
 		expect(pill()!.querySelector('.unsent-dot')).toBeNull();
@@ -399,7 +399,7 @@ describe('ImageCommentLightbox', () => {
 	it('keeps the count and the tags but offers no Comment button when read-only', async () => {
 		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img', readOnly: true });
 		expect(commentButton()).toBeNull();
-		expect(pill()!.getAttribute('aria-label')).toBe('2 open threads');
+		expect(pill()!.getAttribute('aria-label')).toBe('2 threads');
 		expect(host.querySelectorAll('[data-region-tag]')).toHaveLength(2);
 	});
 
@@ -434,7 +434,7 @@ describe('ImageCommentLightbox', () => {
 		it('shows only the comments on this image, with the way back to the document', async () => {
 			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', docName: 'notes.md', onBack: vi.fn(), inDocument: inDocument() });
 			expect(mocks.fetchComments).toHaveBeenCalledWith('art-doc');
-			expect(pill()!.getAttribute('aria-label')).toBe('2 open threads');
+			expect(pill()!.getAttribute('aria-label')).toBe('2 threads');
 			expect(host.querySelectorAll('[data-region-tag]')).toHaveLength(2);
 			expect(host.querySelector('button[aria-label="Back to notes.md"]')).not.toBeNull();
 		});

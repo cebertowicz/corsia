@@ -1,5 +1,9 @@
 import { get } from 'svelte/store';
 import { prefersReducedMotion } from '$lib/stores/viewport';
+import type { DocComment } from '$lib/stores/docCommentProjection';
+
+/** Image comments follow their tag numbers. */
+export const byCommentNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
 
 export const COMMENT_FILTERS = [['open', 'Open'], ['resolved', 'Resolved'], ['all', 'All']] as const;
 

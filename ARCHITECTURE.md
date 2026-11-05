@@ -36,6 +36,7 @@ any person input, using the same persisted nudge and settlement path for both.
 | External execution | `backend/subagents/` | Claude Code and Codex runtime adapters and continuity |
 | Review lifecycle | `backend/reviewer/` | GitHub reviewer inputs, PRD mapping, verdict/projection handling |
 | Coordination | `backend/events/`, `backend/registry/` | normalized events, artifact identity, owner routing |
+| Documents | `backend/doceditor/` | live document editing, comments and suggested changes, and agent feedback delivery |
 | Agent tools | `backend/tools/` | filesystem, shell, browser, document, and CORSIA-native tools |
 | Runtime infrastructure | `backend/infra/` | configuration, database, state, persistence helpers, recovery |
 | Memory and jobs | `backend/memory/`, `backend/jobs/` | summaries, knowledge, scheduled maintenance |

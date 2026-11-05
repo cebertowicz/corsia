@@ -89,7 +89,7 @@ def _add(db, plan_id: str, actor: PlanActor, **params):
     return mutate(
         plan_id, "add", {"kind": "task", "title": "Refresh lane context",
         "acceptance_criteria": "Current", "size": "unknown", "intent": intent,
-        "intent_words": [{"quote": intent, "role": "authority"}], **params}, actor=replace(actor, turn_id=turn_id),
+        **params}, actor=replace(actor, turn_id=turn_id),
         provenance="test.conductor_add", mutation_id=uuid.uuid4().hex, db=db,
     ).result["node"]
 

@@ -36,7 +36,7 @@ function addPersonStep(threadId: string, artifactId: string): void {
 		'accept_thread_input(thread, role="user", content=intent, intent="apply_now", message_id=message_id, db=db)',
 		'db.execute("UPDATE messages SET active_turn_id=? WHERE id=?", (turn_id, message_id))',
 		'plan = service.ensure_plan("thread", thread, db=db)',
-		'params = {"kind": "task", "title": "Set up the workspace", "acceptance_criteria": "It is ready.", "size": "unknown", "assignee": "user", "description": "Follow the document. Already tried: I opened the instructions.", "instructions_artifact_id": artifact, "intent": intent, "intent_words": [{"quote": intent, "role": "authority"}]}',
+		'params = {"kind": "task", "title": "Set up the workspace", "acceptance_criteria": "It is ready.", "size": "unknown", "assignee": "user", "description": "Follow the document. Already tried: I opened the instructions.", "instructions_artifact_id": artifact, "intent": intent}',
 		'mutate(plan.id, "add", params, actor=PlanActor(thread, user, None, turn_id=turn_id), provenance="e2e.person_step", mutation_id=uuid.uuid4().hex, db=db)',
 		'db.commit()',
 	].join('\n'), threadId, artifactId], {
@@ -386,8 +386,8 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await comment(request, doc, 'Ring two should wait.', 2);
 	await comment(request, doc, 'Add a rollback line.', 5);
 	await open(page, doc, mode, theme);
-	// The pill names its threads, then any unsent messages: "2 open threads, 2 messages not sent yet".
-	await page.getByRole('button', { name: /^2 open threads\b/ }).click();
+	// The pill names its threads, then any unsent messages: "2 threads, 2 messages not sent yet".
+	await page.getByRole('button', { name: /^2 threads\b/ }).click();
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer).toBeVisible();
 	const close = drawer.getByRole('button', { name: 'Close comments', exact: true });
@@ -559,7 +559,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	if (output && mode === 'phone') await page.screenshot({ path: path.join(output, `reviewbar-held-send-393-${theme}.png`), scale: 'css' });
 
 	// The drawer lists the threads and ends with the last card: no footer, no second Send.
-	await page.getByRole('button', { name: /^6 open threads, 6 messages not sent yet$/ }).click();
+	await page.getByRole('button', { name: /^6 threads, 6 messages not sent yet$/ }).click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	await expect(drawer).toBeVisible();
 	await expect(drawer.locator('[data-drawer-unsent]')).toHaveCount(0);
@@ -738,7 +738,7 @@ for (const theme of ['light', 'dark'] as const) {
 		await expect.poll(() => header.evaluate((el) => getComputedStyle(el).paddingInlineEnd), 'overlay inset').not.toBe('0px');
 
 		const tools = page.locator('.document-tools');
-		const pill = tools.getByRole('button', { name: /^0 open threads\b/ });
+		const pill = tools.getByRole('button', { name: /^0 threads\b/ });
 		const requestReview = tools.getByRole('button', { name: 'Request review', exact: true });
 		const approve = bar(page).getByRole('button', { name: 'Approve', exact: true });
 		const requestChanges = bar(page).getByRole('button', { name: 'Reject', exact: true });

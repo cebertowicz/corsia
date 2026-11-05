@@ -72,10 +72,7 @@ def plan_update(db, plan_id: str, operation: str, params: dict, *, actor=ACTOR) 
             owner, role="user", content=intent, intent="apply_now", message_id=message_id, db=db,
         )
         db.execute("UPDATE messages SET active_turn_id=? WHERE id=?", (turn_id, message_id))
-        params = {
-            **params, "intent": intent,
-            "intent_words": [{"quote": intent, "role": "authority"}],
-        }
+        params = {**params, "intent": intent}
         actor = replace(actor, turn_id=turn_id)
     params = with_actionable_user_ask(db, plan_id, operation, params, actor)
     return mutate(

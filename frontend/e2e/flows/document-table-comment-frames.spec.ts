@@ -56,7 +56,7 @@ async function openDocument(page: Page, size: { width: number; height: number },
 	if (size.width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	await expect(page.locator('.cm-content')).toBeVisible();
-	await expect(page.getByRole('button', { name: /^2 open threads\b/ })).toBeEnabled();
+	await expect(page.getByRole('button', { name: /^2 threads\b/ })).toBeEnabled();
 	await settle(page);
 	return { title, artifactId, ids };
 }
@@ -113,7 +113,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 	test('an empty table cell can start and keep a comment after reload', async ({ page }, testInfo) => {
 		test.setTimeout(90_000);
 		const { title, ids } = await openDocument(page, { width: 1440, height: 900 });
-		await page.getByRole('button', { name: /^2 open threads\b/ }).click();
+		await page.getByRole('button', { name: /^2 threads\b/ }).click();
 		const comments = page.locator('[data-doc-comments-drawer]');
 		await comments.locator(`[data-comment-id="${ids.table}"]`).locator('[data-comment-jump]').click();
 		await comments.getByRole('button', { name: 'Close comments' }).click();
@@ -128,7 +128,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		await loginByUrl(page, { waitForComposer: false });
 		await page.getByText(title, { exact: true }).first().click();
 		await expect(page.locator('.cm-content')).toBeVisible();
-		await page.getByRole('button', { name: /^3 open threads\b/ }).click();
+		await page.getByRole('button', { name: /^3 threads\b/ }).click();
 		await expect(page.getByText('Empty-cell comment.', { exact: true })).toBeVisible();
 		await expect(page.getByText('Couldn’t find its place', { exact: true })).toHaveCount(0);
 		await evidence(page, testInfo, 'empty-cell-after-reload');
@@ -157,7 +157,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 	test('navigating to a table row and a prose comment lands inside the editor, and saving on visible text does not scroll', async ({ page }, testInfo) => {
 		test.setTimeout(90_000);
 		const { ids } = await openDocument(page, { width: 2400, height: 900 });
-		await page.getByRole('button', { name: /^2 open threads\b/ }).click();
+		await page.getByRole('button', { name: /^2 threads\b/ }).click();
 		const side = page.locator('[data-doc-comments-drawer]');
 		await expect(side).toBeVisible();
 		await expect(page.locator('[data-adaptive-drawer]'), 'the list is the side-by-side drawer, not a sheet').toHaveCount(0);

@@ -23,7 +23,7 @@ from doceditor.feedback_batch_delivery import claim_and_deliver
 from doceditor.feedback_state import (
     USER_AUTHOR_ID,
     annotate_pane,
-    reply_waiting_ids,
+    unread_item_ids,
     RETRY_LANES,
     held_counts_for_thread,
     open_counts_for_document,

@@ -52,6 +52,10 @@ def _excluded(db: sqlite3.Connection, thread_id: str, turn_id: str, error: str) 
             or is_provider_usage_or_quota_limit(error))
 
 
+def _is_person(metadata: str | None) -> bool:
+    return not any(json.loads(metadata or "{}").get(key) for key in NON_HUMAN_MARKERS)
+
+
 def _unanswered_input(db: sqlite3.Connection, thread_id: str, turn_id: str) -> bool:
     """Whether the Turn took in a person's input that no assistant reply after it answered."""
     rows = db.execute(
@@ -59,10 +63,7 @@ def _unanswered_input(db: sqlite3.Connection, thread_id: str, turn_id: str) -> b
         "AND delivery_state='delivered' AND seq IS NOT NULL",
         (turn_id,),
     ).fetchall()
-    seqs = [
-        row["seq"] for row in rows
-        if not any(json.loads(row["metadata"] or "{}").get(key) for key in NON_HUMAN_MARKERS)
-    ]
+    seqs = [row["seq"] for row in rows if _is_person(row["metadata"])]
     if not seqs:
         return False
     return db.execute(
@@ -70,6 +71,14 @@ def _unanswered_input(db: sqlite3.Connection, thread_id: str, turn_id: str) -> b
         "AND TRIM(COALESCE(content,''))<>'' AND json_extract(metadata,'$.turn_id')=? LIMIT 1",
         (thread_id, max(seqs), turn_id),
     ).fetchone() is None
+
+
+def _person_input_queued(db: sqlite3.Connection, thread_id: str) -> bool:
+    """Whether a person's queued input, claimed or not, will start a Turn that sees the message."""
+    return any(_is_person(row["metadata"]) for row in db.execute(
+        "SELECT metadata FROM messages WHERE thread_id=? AND role='user' AND delivery_state='queued'",
+        (thread_id,),
+    ))
 
 
 def _took_in_wake(db: sqlite3.Connection, turn_id: str) -> bool:
@@ -96,7 +105,9 @@ def queue_unanswered_input_wake(
     A provider-reset liveness wake replaces it (the provider can't serve the
     thread yet), and so does a restart registration for the Turn, whose own wake
     resumes it; a plan backoff wake does not, since it neither fires soon nor
-    names the person's message.
+    names the person's message. A person's queued input replaces it too: its
+    Turn answers with the message in history, and recovery may already have
+    claimed it, so the wake would be a second Turn after it.
     """
     turn_id = outcome.get("turn_id")
     if outcome.get("outcome") != "error" or not turn_id:
@@ -108,6 +119,7 @@ def queue_unanswered_input_wake(
         or _excluded(db, thread_id, turn_id, str(outcome.get("error") or ""))
         or _took_in_wake(db, turn_id)
         or _restart_resumes(db, thread_id, turn_id)
+        or _person_input_queued(db, thread_id)
     ):
         return
     from events.delivery import enqueue_event_wake
