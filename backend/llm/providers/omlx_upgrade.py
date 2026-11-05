@@ -19,6 +19,15 @@ log = logging.getLogger("llm.providers.omlx.upgrade")
 QUIET_INTERVAL_S = 60.0
 
 
+async def recorded_version(server_id: str) -> str | None:
+    """Read the running build from the supervisor's authoritative spawn record."""
+    from infra.config import RUNTIME_DIR
+    from infra.db_async import run_in_db
+    from llm.providers.omlx_process import recorded_omlx_version
+
+    return await run_in_db(recorded_omlx_version, RUNTIME_DIR, server_id)
+
+
 async def upgrade_managed_omlx() -> dict[str, Any] | None:
     """Consider only CORSIA's online managed server after startup discovery has adopted it."""
     from infra.db_async import run_in_db
@@ -80,7 +89,6 @@ async def _replace(
     from infra.carry_in_capacity import BUSY, IDLE
     from llm.local_keep_loaded import reload_after_restart
     from llm.providers.omlx_lifecycle import read_loaded
-    from llm.providers.omlx_supervisor import recorded_version
 
     # schedule() closed admission synchronously. Drain provider scopes, never
     # whole Turns (which may need another call), then prove idle inside that boundary.

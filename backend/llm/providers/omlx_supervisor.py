@@ -72,14 +72,9 @@ def _write_pid(server_id: str, pid: int, *, omlx_version: str | None = None) -> 
     process.write_pid(RUNTIME_DIR, server_id, pid, omlx_version=omlx_version)
 
 
-async def recorded_version(server_id: str) -> str | None:
-    """Read the running build from the supervisor's authoritative spawn record."""
-    return await run_in_db(process.recorded_omlx_version, RUNTIME_DIR, server_id)
-
-
 async def upgrade_server(server_id: str) -> dict[str, Any] | None:
     """Upgrade only a process this supervisor adopted, using its existing lifecycle."""
-    from llm.providers.omlx_upgrade import restart_when_idle
+    from llm.providers.omlx_upgrade import recorded_version, restart_when_idle
 
     version = await recorded_version(server_id)
     return await restart_when_idle(server_id, _life.get(server_id), version, OMLX_VERSION, _stop_server, start_server, _tail_log)
