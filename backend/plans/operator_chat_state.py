@@ -23,6 +23,8 @@ THREAD_STATE_LIMIT = 200
 # plan that is only waiting is not moving (stuck plans R9).
 _CHAT_WORD = {"active": "moving", "review_parent_agent": "moving", "paused": "paused"}
 _OWED_STATES = frozenset({"needs_input", "blocked_on_you"})
+#: Attention items that are plan nodes; access requests and held replies are not.
+_PLAN_ITEM_KINDS = frozenset({"hold", "review", "decision", "failed"})
 
 
 def chat_state(
@@ -127,12 +129,7 @@ def _access_requests(thread_ids: list[str], *, actor: PlanActor, db) -> dict[str
 
 
 def _plan_attention_items(presented: dict, *, db) -> list[dict]:
-    """Every actionable plan ask, using the chat list's existing attention shape.
-
-    Read outside the plan tree, an item reads as its node's reader title: a
-    workflow step names its run. A decision's review node already carries the
-    decision's own question as its title.
-    """
+    """Every actionable plan ask, using the chat list's existing attention shape."""
     items = []
     work = node_states.work_ids(presented["nodes"])
     for node in presented["nodes"]:
@@ -148,10 +145,22 @@ def _plan_attention_items(presented: dict, *, db) -> list[dict]:
         else:
             kind = "decision" if review["kind"] == "human_decision" else "review"
         items.append({"kind": kind, "title": node["title"], "node_id": node["id"]})
+    return items
+
+
+def _name_runs(states: dict[str, dict], *, db) -> None:
+    """Give every plan item, failed ones included, its reader title in one read.
+
+    Read outside the plan tree, a workflow step names its run. A decision's
+    review node already carries the decision's own question as its title.
+    """
+    items = [
+        item for row in states.values() for item in row["attention_items"]
+        if item["kind"] in _PLAN_ITEM_KINDS
+    ]
     readers = workflow_fields.reader_titles(db, [item["node_id"] for item in items])
     for item in items:
         item["title"] = readers.get(item["node_id"], item["title"])
-    return items
 
 
 def _live_visible_thread_ids(ids: list[str], *, actor: PlanActor, db) -> list[str]:
@@ -274,6 +283,7 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
                 and plan_row["has_finished"]
             ),
         }
+    _name_runs(states, db=db)
     _add_planless_rows(states, access_by_thread, seen)
     for thread_id, row in states.items():
         row["latest_update"] = latest_updates.get(thread_id)

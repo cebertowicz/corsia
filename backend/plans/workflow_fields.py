@@ -219,15 +219,18 @@ def reader_titles(db, node_ids) -> dict[str, str]:
 
     A workflow step keeps its workflow's stage title (Problem brief, Direction
     agreed), which names no subject once it leaves the tree, so it reads as
-    ``<run> — <step>``. Every other node reads as its own title; an unknown id
-    is absent.
+    ``<run> — <step>``. The run is the step's original obligation
+    (``commitment_id``), not its parent: a nested run's steps and a step's
+    revision or follow-up moved out from under a settled run keep it. Every
+    other node reads as its own title; an unknown id is absent.
     """
     ids = list(dict.fromkeys(str(node_id) for node_id in node_ids))
     if not ids:
         return {}
     rows = db.execute(
-        f"""SELECT n.id, n.title, CASE WHEN n.workflow_step IS NOT NULL THEN r.title END AS run_title
-              FROM plan_nodes n LEFT JOIN plan_nodes r ON r.id = n.parent_id
+        f"""SELECT n.id, n.title,
+                   CASE WHEN n.workflow_step IS NOT NULL AND n.commitment_id <> n.id THEN r.title END AS run_title
+              FROM plan_nodes n LEFT JOIN plan_nodes r ON r.id = n.commitment_id
              WHERE n.id IN ({','.join('?' * len(ids))})""",
         ids,
     ).fetchall()
