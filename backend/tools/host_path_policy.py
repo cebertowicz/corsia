@@ -15,6 +15,7 @@ import shutil
 import sys
 from typing import Iterable
 
+from tools.host_path_classification import path_review_classification as path_review_classification
 from tools.host_path_resolution import (
     canonical,
     contains,
@@ -366,9 +367,6 @@ def ordinary_host_path_denial(
         path,
         for_write=for_write,
     )
-
-
-from tools.host_path_classification import path_review_classification
 
 
 def denial_guidance_for_output(text: str, thread_id: str | None = None, cwd: Path | None = None) -> str | None:

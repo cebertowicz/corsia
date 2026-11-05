@@ -85,6 +85,8 @@ class Fence:
 
     def matching_root(self, path: Path) -> FencedRoot | None:
         """Return the strongest fenced root containing either form of a path."""
+        if not self.roots:
+            return None
         candidates = (Path(os.path.abspath(path.expanduser())), canonical(path))
         matches = [
             root for root in self.roots

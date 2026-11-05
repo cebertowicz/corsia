@@ -37,6 +37,7 @@ class SearchFence:
             fenced for fenced in fence.roots
             if not any(_contains(form, search) for form in fenced.forms for search in search_forms)
         )
+        self.pruned = False
         self.has_exclusions = any(
             _contains(search, form) for fenced in self.roots
             for form in fenced.forms for search in search_forms
@@ -44,14 +45,18 @@ class SearchFence:
 
     def excludes(self, path: Path) -> bool:
         """Refuse paths in an excluded root, in written or resolved form."""
-        return any(
-            _contains(form, candidate) for fenced in self.roots
-            for form in fenced.forms for candidate in _forms(path)
-        )
+        excluded = project_fence.Fence(self.roots, self.thread_id).matching_root(path) is not None
+        self.pruned |= excluded
+        return excluded
 
     def notice(self, result: str) -> str:
-        """Append the approved notice when a root lies below this search."""
-        return f"{result}\n{NOTICE}" if self.has_exclusions else result
+        """Append the approved notice when a fenced path was excluded."""
+        if not (self.has_exclusions or self.pruned):
+            return result
+        from host_access.credential_sanitizer import CredentialSafeText
+
+        text = f"{result}\n{NOTICE}"
+        return CredentialSafeText(text) if isinstance(result, CredentialSafeText) else text
 
     def ripgrep_globs(self, root: Path) -> list[str]:
         """Find physical spellings of excluded directories without entering them."""

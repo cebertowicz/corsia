@@ -18,10 +18,12 @@ import asyncio
 from dataclasses import dataclass
 from functools import partial
 import itertools
+import os
 from pathlib import Path
 import re
 
 from core.workspace_layout import THREADS_DIR, thread_tray_owners
+from host_access.credential_sanitizer import CredentialSafeText
 from tools.filesystem_effects import expanded_globs
 from tools.grep_content import SEPARATOR, GrepLine, SourceLines, read_source, render
 from tools.search_scope import (
@@ -93,7 +95,7 @@ async def search_ripgrep(
             _render_content, pattern, search_dir, search.output, max_results, scope,
             output_cap, header,
         )
-    rendered = _render(pattern, search_dir, search.output, max_results, scope, output_cap)
+    rendered = _render(pattern, search_dir, search.output, max_results, scope, output_cap, output_mode)
     return f"{header}{rendered}"
 
 
@@ -104,22 +106,26 @@ def _render(
     max_results: int,
     scope: SearchScope,
     output_cap: int,
+    output_mode: str,
 ) -> str:
     """Grep's text for ripgrep's files or count output: kept lines, limited,
     root-relative and capped."""
-    lines = _kept_lines(output.strip(), scope)
+    lines = _kept_lines(output, scope, output_mode)
     if not lines:
         return f"No matches for pattern '{pattern}'"
     lines = lines[:max_results]
     prefix = f"{search_dir}/"
-    rendered = "\n".join(line.replace(prefix, "") for line in lines)
+    if output_mode == "count" and search_dir.is_file():
+        rendered = "\n".join(line.rpartition(":")[2] for line in lines)
+    else:
+        rendered = "\n".join(line.replace(prefix, "") for line in lines)
     if len(rendered) > output_cap:
         rendered = (
             rendered[:output_cap]
             + f"\n\n... (output truncated at {output_cap:,} chars. Narrow your search "
             "with glob filters or use 'files' mode.)"
         )
-    return rendered
+    return _display(rendered)
 
 
 async def _run(command: list[str], *, cwd: Path | None = None) -> _Ripgrep:
@@ -140,7 +146,7 @@ async def _run(command: list[str], *, cwd: Path | None = None) -> _Ripgrep:
         if process.returncode is None:
             process.kill()
             await process.wait()
-    output = stdout.decode("utf-8", errors="replace")
+    output = os.fsdecode(stdout)
     if process.returncode in (0, 1):
         return _Ripgrep(output)
     error = stderr.decode("utf-8", errors="replace").strip()
@@ -188,9 +194,9 @@ def _thread_folder(search_dir: Path, listed: Path) -> Path | None:
 
 def _mode_arguments(output_mode: str, case_insensitive: bool, context: int) -> list[str]:
     if output_mode == "files":
-        arguments = ["--files-with-matches"]
+        arguments = ["--null", "--files-with-matches"]
     elif output_mode == "count":
-        arguments = ["--count"]
+        arguments = ["--null", "--count", "--with-filename"]
     else:
         arguments = ["--null", "--line-number", "--with-filename", *(["-C", str(context)] if context > 0 else [])]
     return [*arguments, *(["-i"] if case_insensitive else [])]
@@ -260,7 +266,7 @@ def _render_content(
             safe.extend(None for _line in lines)
         else:
             safe.extend(source.substitute(Path(path).suffix, partial(read_source, Path(path)), lines))
-    return render([line for _path, line in parsed], safe, output_cap, header)
+    return _display(render([line for _path, line in parsed], safe, output_cap, header))
 
 
 def _content_lines(
@@ -276,26 +282,24 @@ def _content_lines(
     prefix = f"{search_dir}/"
     direct_file = search_dir.is_file()
     parsed: list[tuple[str | None, GrepLine]] = []
-    for line in output.split("\n"):
-        path, nul, rest = line.partition("\0")
-        match = _CONTENT_RE.match(rest)
-        if line == "--":
+    for path, rest in _records(output, scope, "content"):
+        if path is None:
             parsed.append((None, SEPARATOR))
-        elif nul and match is not None:
-            if not keep_path(Path(path), scope.current_thread_id, scope.all_threads):
-                continue
-            separator = match.group("separator")
-            number = match.group("number")
-            line_prefix = (
-                f"{number}{separator}"
-                if direct_file
-                else f"{path.removeprefix(prefix)}{separator}{number}{separator}"
-            )
-            parsed.append((path, GrepLine(
-                line_prefix, rest[match.end():], int(number),
-            )))
-        elif line:
-            parsed.append((None, GrepLine("", line)))
+            continue
+        match = _CONTENT_RE.match(rest)
+        if match is None:
+            _mark_pruned(scope)
+            continue
+        separator = match.group("separator")
+        number = match.group("number")
+        line_prefix = (
+            f"{number}{separator}"
+            if direct_file
+            else f"{path.removeprefix(prefix)}{separator}{number}{separator}"
+        )
+        parsed.append((path, GrepLine(
+            line_prefix, rest[match.end():], int(number),
+        )))
     return parsed if any(line is not SEPARATOR for _path, line in parsed) else []
 
 
@@ -314,23 +318,49 @@ def _first_matches(
     return kept
 
 
-def _kept_lines(output: str, scope: SearchScope) -> list[str]:
-    """Output lines outside other threads' folders; empty when no match line remains.
+def _mark_pruned(scope: SearchScope) -> None:
+    if scope.fence:
+        scope.fence.pruned = True
 
-    The globs and roots already exclude those folders; this keeps out a result that
-    reached one anyway. The path before the first ':' carries the thread segments,
-    and ``--`` context separators carry no path.
-    """
-    lines = [
-        line
-        for line in output.split("\n")
-        if line
-        and (
-            line.startswith("--")
-            or keep_path(Path(line.split(":", 1)[0]), scope.current_thread_id, scope.all_threads)
-        )
-    ]
-    return lines if any(line != "--" for line in lines) else []
+
+def _records(output: str, scope: SearchScope, mode: str):
+    """Parse the complete NUL-delimited path before its record, failing closed."""
+    while output:
+        if mode == "content" and output.startswith("--\n"):
+            output = output[3:]
+            yield None, ""
+            continue
+        path, delimiter, output = output.partition("\0")
+        if not delimiter or not path:
+            _mark_pruned(scope)
+            return
+        rest = ""
+        if mode != "files":
+            rest, newline, output = output.partition("\n")
+            if not newline or (mode == "count" and not rest.isdecimal()):
+                _mark_pruned(scope)
+                return
+        try:
+            candidate = Path(path)
+            allowed = keep_path(candidate, scope.current_thread_id, scope.all_threads)
+            if scope.fence and scope.fence.excludes(candidate):
+                allowed = False
+        except Exception:
+            _mark_pruned(scope)
+            continue
+        if allowed:
+            yield path, rest
+
+
+def _display(text: str) -> str:
+    displayed = text.encode("utf-8", errors="backslashreplace").decode("utf-8")
+    return CredentialSafeText(displayed) if isinstance(text, CredentialSafeText) else displayed
+
+
+def _kept_lines(output: str, scope: SearchScope, mode: str) -> list[str]:
+    """Render only records whose complete path passed the scope checks."""
+    return [path + (f":{rest}" if mode == "count" else "")
+            for path, rest in _records(output, scope, mode) if path is not None]
 
 
 def _glob_arguments(globs: list[str]) -> list[str]:

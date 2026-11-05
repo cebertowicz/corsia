@@ -149,6 +149,195 @@ async def test_unicode_case_and_symlink_fence(fenced_workspace, monkeypatch, too
         assert "secret.txt" not in result
 
 
+@pytest.mark.parametrize("mode", ["files", "content", "count"])
+async def test_stale_ripgrep_exclusions_do_not_disclose(fenced_workspace, monkeypatch, mode):
+    from tools import grep
+    from tools.search_fence import SearchFence
+
+    if not grep._RG_AVAILABLE:
+        pytest.skip("ripgrep unavailable")
+    ws, private = fenced_workspace
+    (private / "secret.txt").write_text("private-needle")
+    monkeypatch.setattr(SearchFence, "ripgrep_globs", lambda self, root: [])
+    result = await GrepTool(workspace=ws).execute("needle", output_mode=mode, _thread_id="caller")
+    assert "visible.txt" in result
+    assert "secret.txt" not in result
+    assert "private-needle" not in result
+    assert NOTICE in result
+
+
+async def test_glob_reports_symlink_to_outside_fence(tmp_path, monkeypatch):
+    from tools import project_fence, sandbox_config
+
+    ws = tmp_path / "workspace"
+    private = tmp_path / "private"
+    ws.mkdir()
+    private.mkdir()
+    (private / "secret.txt").write_text("secret")
+    (ws / "link").symlink_to(private, target_is_directory=True)
+    monkeypatch.setattr(project_fence, "fence_for_thread", lambda thread_id: Fence((FencedRoot(private, "private"),), thread_id))
+    monkeypatch.setattr(sandbox_config, "is_path_allowed", lambda *args, **kwargs: True)
+    result = await GlobTool(workspace=ws).execute("link/*.txt", _thread_id="caller")
+    assert "secret.txt" not in result
+    assert NOTICE in result
+
+
+async def test_recursive_glob_omits_file_link_into_fence(fenced_workspace, monkeypatch):
+    from tools import glob_walk
+
+    ws, private = fenced_workspace
+    (ws / "link.txt").symlink_to(private / "secret.txt")
+    monkeypatch.setattr(glob_walk, "_RECURSIVE_TAIL_SELECTS_FILES", True)
+    result = await GlobTool(workspace=ws).execute("**", _thread_id="caller")
+    assert "visible.txt" in result
+    assert "link.txt" not in result
+    assert NOTICE in result
+
+
+async def test_ripgrep_ignores_external_fenced_symlink_without_notice(tmp_path, monkeypatch):
+    from tools import grep, project_fence, sandbox_config
+
+    if not grep._RG_AVAILABLE:
+        pytest.skip("ripgrep unavailable")
+    ws = tmp_path / "alpha"
+    private = tmp_path / "beta"
+    ws.mkdir()
+    private.mkdir()
+    (ws / "visible.txt").write_text("needle")
+    (private / "secret.txt").write_text("needle")
+    (ws / "link").symlink_to(private, target_is_directory=True)
+    monkeypatch.setattr(project_fence, "fence_for_thread", lambda thread_id: Fence((FencedRoot(private, "beta"),), thread_id))
+    monkeypatch.setattr(sandbox_config, "is_path_allowed", lambda *args, **kwargs: True)
+    result = await GrepTool(workspace=ws).execute("needle", _thread_id="caller")
+    assert "visible.txt" in result and "secret.txt" not in result
+    assert NOTICE not in result
+    result = await GrepTool(workspace=ws).execute("needle", path=str(ws / "link"), _thread_id="caller")
+    assert "outside your scope" in result and "secret.txt" not in result
+
+
+@pytest.mark.parametrize("mode", ["files", "content", "count"])
+async def test_ripgrep_delimited_names_are_filtered(tmp_path, monkeypatch, mode):
+    from tools import grep, project_fence, sandbox_config
+    from tools.search_fence import SearchFence
+
+    if not grep._RG_AVAILABLE:
+        pytest.skip("ripgrep unavailable")
+    ws = tmp_path / "workspace"
+    private = ws / "Beta:notes"
+    private.mkdir(parents=True)
+    (private / "secret\nname.txt").write_text("private-needle\n")
+    (ws / "visible.txt").write_text("needle\n")
+    monkeypatch.setattr(project_fence, "fence_for_thread", lambda thread_id: Fence((FencedRoot(private),), thread_id))
+    monkeypatch.setattr(sandbox_config, "is_path_allowed", lambda *args, **kwargs: True)
+    monkeypatch.setattr(SearchFence, "ripgrep_globs", lambda self, root: [])
+    result = await GrepTool(workspace=ws).execute("needle", output_mode=mode, _thread_id="caller")
+    assert "secret" not in result and "private-needle" not in result
+    assert NOTICE in result
+    expected = {"files": "visible.txt", "count": "visible.txt:1", "content": "visible.txt:1:needle"}
+    assert expected[mode] in result
+
+
+async def test_ripgrep_count_for_a_single_file_is_unchanged(fenced_workspace):
+    from tools import grep
+
+    if not grep._RG_AVAILABLE:
+        pytest.skip("ripgrep unavailable")
+    ws, _ = fenced_workspace
+    result = await GrepTool(workspace=ws).execute("needle", path=str(ws / "public" / "visible.txt"), output_mode="count", _thread_id="caller")
+    assert result == "1"
+
+
+@pytest.mark.parametrize("mode", ["files", "content", "count"])
+def test_non_utf8_ripgrep_records_are_filtered(monkeypatch, mode):
+    import os
+    from tools import project_fence
+    from tools.grep_ripgrep import _render, _render_content
+    from tools.search_fence import SearchFence
+    from tools.search_scope import SearchScope
+
+    root = Path("/search")
+    private = Path(os.fsdecode(b"/search/b\xffeta"))
+    monkeypatch.setattr(project_fence, "fence_for_thread", lambda thread_id: Fence((FencedRoot(private),), thread_id))
+    fence = SearchFence(root, "caller")
+    scope = SearchScope("caller", False, fence=fence)
+    suffix = {"files": b"", "count": b"1\n", "content": b"1:private-needle\n"}[mode]
+    output = os.fsdecode(b"/search/b\xffeta/secret\nname.txt\0" + suffix)
+    if mode == "content":
+        result = _render_content("needle", root, output, 50, scope, 1000, "")
+    else:
+        result = _render("needle", root, output, 50, scope, 1000, mode)
+    result = fence.notice(result)
+    assert "secret" not in result and "private-needle" not in result
+    assert NOTICE in result
+
+
+@pytest.mark.parametrize("mode", ["files", "content", "count"])
+def test_allowed_non_utf8_name_is_transport_safe(monkeypatch, mode):
+    import os
+    from tools import project_fence
+    from tools.grep_ripgrep import _render, _render_content
+    from tools.search_fence import SearchFence
+    from tools.search_scope import SearchScope
+
+    root = Path("/search")
+    monkeypatch.setattr(project_fence, "fence_for_thread", lambda thread_id: Fence())
+    scope = SearchScope("caller", False, fence=SearchFence(root, "caller"))
+    suffix = {"files": b"", "count": b"1\n", "content": b"1:needle\n"}[mode]
+    output = os.fsdecode(b"/search/visible\xff.txt\0" + suffix)
+    if mode == "content":
+        result = _render_content("needle", root, output, 50, scope, 1000, "")
+    else:
+        result = _render("needle", root, output, 50, scope, 1000, mode)
+    assert r"visible\udcff.txt" in result
+    result.encode("utf-8")
+
+
+@pytest.mark.parametrize("mode", ["files", "content", "count"])
+def test_unparseable_ripgrep_record_is_not_emitted(monkeypatch, mode):
+    from tools import project_fence
+    from tools.grep_ripgrep import _render, _render_content
+    from tools.search_fence import SearchFence
+    from tools.search_scope import SearchScope
+
+    root = Path("/search")
+    monkeypatch.setattr(project_fence, "fence_for_thread", lambda thread_id: Fence())
+    fence = SearchFence(root, "caller")
+    scope = SearchScope("caller", False, fence=fence)
+    if mode == "content":
+        result = _render_content("needle", root, "unparseable-secret", 50, scope, 1000, "")
+    else:
+        result = _render("needle", root, "unparseable-secret", 50, scope, 1000, mode)
+    assert "unparseable-secret" not in result
+    assert NOTICE in fence.notice(result)
+
+
+@pytest.mark.parametrize("mode", ["files", "content", "count"])
+async def test_non_utf8_real_directory_is_filtered(tmp_path, monkeypatch, mode):
+    import os
+    from tools import grep, project_fence, sandbox_config
+    from tools.search_fence import SearchFence
+
+    if not grep._RG_AVAILABLE:
+        pytest.skip("ripgrep unavailable")
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    raw = os.fsencode(ws) + b"/b\xffeta"
+    try:
+        os.mkdir(raw)
+    except OSError:
+        pytest.skip("filesystem refuses non-UTF-8 directory names")
+    private = Path(os.fsdecode(raw))
+    (private / "secret.txt").write_text("private-needle")
+    (ws / "visible.txt").write_text("needle")
+    monkeypatch.setattr(project_fence, "fence_for_thread", lambda thread_id: Fence((FencedRoot(private),), thread_id))
+    monkeypatch.setattr(sandbox_config, "is_path_allowed", lambda *args, **kwargs: True)
+    monkeypatch.setattr(SearchFence, "ripgrep_globs", lambda self, root: [])
+    result = await GrepTool(workspace=ws).execute("needle", output_mode=mode, _thread_id="caller")
+    assert "visible.txt" in result
+    assert "secret" not in result and "private-needle" not in result
+    assert NOTICE in result
+
+
 async def test_ripgrep_prunes_before_entering_and_keeps_gitignore(fenced_workspace):
     import subprocess
     from tools.search_fence import SearchFence

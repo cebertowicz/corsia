@@ -77,12 +77,12 @@ def resolve_path(
     import tools.confined_reads as confined_reads
     from tools.host_path_policy import ordinary_host_path_denial
 
-    confined_reads.check(p, resolved, for_write=for_write)
     if thread_id:
         from tools.project_fence import fence_for_thread
 
         if refusal := fence_for_thread(thread_id).refusal(p):
             raise PermissionError(refusal)
+    confined_reads.check(p, resolved, for_write=for_write)
     if not for_write and carry_in_hides(resolved, reading=True):
         raise FileNotFoundError(path)  # absent for this carry-in side
 

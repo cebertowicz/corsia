@@ -98,6 +98,27 @@ async def test_local_only_refusal_does_not_consume_permit(tmp_path, monkeypatch,
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tool_type", TOOLS)
+async def test_open_agent_keeps_file_access(tmp_path, monkeypatch, tool_type):
+    from tools.filesystem_gate import _resolve_path_for_action
+
+    root = tmp_path / "project"
+    root.mkdir()
+    target = root if tool_type is ListDirTool else root / "file.txt"
+    if tool_type is not ListDirTool:
+        target.write_text("original")
+    monkeypatch.setattr("tools.sandbox_config.is_path_allowed", lambda *args, **kwargs: True)
+    monkeypatch.setattr("tools.project_fence.fence_for_thread", lambda thread_id: Fence())
+    tool = tool_type(workspace=tmp_path)
+    result = await _resolve_path_for_action(tool=tool, tool_name=tool.name,
+        params=_params(tool_type, target), path=str(target), workspace=tmp_path,
+        allowed_dir=None, thread_id="corsia", project_id=None,
+        for_write=tool_type in (WriteFileTool, EditFileTool, MultiEditTool))
+    assert result.resolved == target.resolve()
+    assert not result.reviewed
+
+
+@pytest.mark.asyncio
 async def test_no_lease_returns_project_refusal(tmp_path, monkeypatch):
     from tools import host_access_gate as gate
 
@@ -164,6 +185,91 @@ async def test_lease_admission_respects_project_fence(tmp_path, monkeypatch, loc
             assert "original" in await tool.execute(**params, _thread_id="caller")
             assert "permit already consumed" in await tool.execute(**params, _thread_id="caller")
         assert len(consumed) == 2
+
+
+def test_confined_child_launch_checks_child_fence(tmp_path, monkeypatch):
+    from subagents.cc_confinement import ConfinementRefused, require_readable_dirs
+
+    root = tmp_path / "private"
+    root.mkdir()
+    monkeypatch.setattr("tools.sandbox_config.is_path_allowed", lambda *args, **kwargs: True)
+    monkeypatch.setattr("tools.project_fence._event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tools.project_fence.fence_for_thread", lambda thread_id: Fence((FencedRoot(root, "private"),), thread_id))
+    with pytest.raises(ConfinementRefused, match="outside your scope"):
+        require_readable_dirs([str(root)], None, "child")
+
+
+def test_attachment_paths_obey_calling_thread_fence(tmp_path, monkeypatch):
+    from connections.mail import attachments
+    from connections.mail.email_document import DraftRefused
+    from email.message import EmailMessage
+
+    root = tmp_path / "project"
+    root.mkdir()
+    (root / "file.txt").write_text("original")
+    monkeypatch.setattr(attachments, "working_root", lambda thread_id: tmp_path)
+    monkeypatch.setattr("tools.sandbox_config.is_path_allowed", lambda *args, **kwargs: True)
+    monkeypatch.setattr("tools.project_fence._event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tools.project_fence.fence_for_thread", lambda thread_id: Fence((FencedRoot(root, "private"),), thread_id))
+    with pytest.raises(DraftRefused, match="missing or unreadable"):
+        attachments.inspect("caller", ["project/file.txt"], 100)
+    with pytest.raises(DraftRefused, match="missing or unreadable"):
+        attachments.add("caller", EmailMessage(), [{"path": "project/file.txt", "size": 8}])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tool_type", TOOLS)
+@pytest.mark.parametrize("root_kind", ["ordinary", "unnamed", "local_after_review"])
+async def test_each_tool_reviewed_permit_respects_fence(tmp_path, monkeypatch, tool_type, root_kind):
+    from tools import host_access_gate as gate
+    from tools.filesystem_gate import _resolve_path_for_action
+
+    root = tmp_path / "private"
+    root.mkdir()
+    target = root if tool_type is ListDirTool else root / "file.txt"
+    if tool_type is not ListDirTool:
+        target.write_text("original")
+    name = None if root_kind == "unnamed" else "private"
+    state = {"local": False}
+    def caller_fence(thread_id):
+        return Fence((FencedRoot(root, name, state["local"]),), thread_id)
+    monkeypatch.setattr("tools.project_fence._event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("tools.project_fence.fence_for_thread", caller_fence)
+    monkeypatch.setattr("tools.host_path_policy.fence_for_thread", caller_fence)
+    monkeypatch.setattr(gate, "is_path_allowed", lambda *args, **kwargs: True)
+    monkeypatch.setattr(gate, "check_repo_write_path", lambda *args, **kwargs: None)
+    lease = {"id": "lease", "revision": 1, "application_hash": "a" * 64, "state": "active"}
+    calls = []
+    async def review(_lease_id, **kwargs):
+        return {"lease": lease, "review": {"lease_id": "lease", "lease_revision": 1,
+            "thread_id": "caller", "tool_name": kwargs["tool_name"], "action_hash": kwargs["action_hash"],
+            "verdict": "allow", "permit_id": "permit", "permit_expires_at": "2030-01-01T00:00:00+00:00"}}
+    async def consume(*args, **kwargs):
+        calls.append(1)
+        if len(calls) > 1:
+            raise gate.HostAccessBlocked("permit already consumed")
+    monkeypatch.setattr(gate, "_resolve_active_lease", AsyncMock(return_value=lease))
+    monkeypatch.setattr(gate, "_review_host_action", review)
+    monkeypatch.setattr(gate, "_consume_host_action_permit", consume)
+    tool = tool_type(workspace=tmp_path)
+    params = _params(tool_type, target)
+    authorization = await gate.authorize_host_action(thread_id="caller", project_id=None,
+        tool=tool, tool_name=tool.name, params=params)
+    async def resolve():
+        return await _resolve_path_for_action(tool=tool, tool_name=tool.name, params=params,
+            path=str(target), workspace=tmp_path, allowed_dir=None, thread_id="caller",
+            project_id=None, for_write=tool_type in (WriteFileTool, EditFileTool, MultiEditTool))
+    with gate.host_action_permit_scope(authorization):
+        if root_kind == "local_after_review":
+            state["local"] = True
+            with pytest.raises(PermissionError, match="Local only"):
+                await resolve()
+            assert not calls
+            state["local"] = False
+        result = await resolve()
+        assert result.reviewed and result.resolved == target.resolve()
+        with pytest.raises(gate.HostAccessBlocked, match="already consumed"):
+            await resolve()
 
 
 @pytest.mark.asyncio

@@ -13,7 +13,10 @@ def working_root(tmp_path, monkeypatch):
     root = tmp_path / "working"
     root.mkdir()
     monkeypatch.setattr(attachments, "working_root", lambda thread_id: root)
-    monkeypatch.setattr(attachments, "resolve_path", lambda value, root: (root / value).resolve())
+    def resolve(value, root, *, thread_id):
+        assert thread_id == "thread"
+        return (root / value).resolve()
+    monkeypatch.setattr(attachments, "resolve_path", resolve)
     return root
 
 

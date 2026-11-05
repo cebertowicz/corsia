@@ -44,6 +44,41 @@ def _add_right_stripped(
     safe.extend(None if text is None else text.rstrip() for text in faithful)
 
 
+def _render_reviewed(pattern, output_mode, max_results, counts, results, safe, output_cap):
+    if output_mode == "files":
+        if not counts:
+            return f"No matches for pattern '{pattern}'"
+        return "\n".join(sorted(counts)[:max_results])
+    if output_mode == "count":
+        if not counts:
+            return f"No matches for pattern '{pattern}'"
+        return "\n".join(
+            f"{path}:{count}"
+            for path, count in sorted(counts.items())[:max_results]
+        )
+    if not results:
+        return f"No matches for pattern '{pattern}'"
+    return render(results, safe, output_cap)
+
+
+def _python_counts(files, search_dir, regex, max_results):
+    counts = {}
+    for fpath, resolved_path in sorted(files):
+        try:
+            if resolved_path.stat().st_size > _MAX_SEARCH_FILE_BYTES:
+                continue
+            content = resolved_path.read_text(encoding="utf-8", errors="ignore")
+            c = len(regex.findall(content))
+            if c > 0:
+                rel = str(fpath.relative_to(search_dir))
+                counts[rel] = c
+        except (PermissionError, OSError):
+            continue
+    return "\n".join(
+        f"{f}:{c}" for f, c in sorted(counts.items())[:max_results]
+    )
+
+
 class GrepTool(Tool):
     """Search file contents using regex patterns."""
 
@@ -78,24 +113,9 @@ class GrepTool(Tool):
         **kwargs: Any,
     ) -> str:
         try:
-            authorized = await _resolve_path_for_action(
-                tool=self,
-                tool_name=self.name,
-                params={
-                    "pattern": pattern,
-                    "path": path or ".",
-                    "glob": glob,
-                    "output_mode": output_mode,
-                    "case_insensitive": case_insensitive,
-                    "context": context,
-                    "max_results": max_results,
-                    "all_threads": all_threads,
-                },
-                path=path or ".",
-                workspace=self._workspace,
-                allowed_dir=self._allowed_dir,
-                thread_id=kwargs.get("_thread_id"),
-                project_id=kwargs.get("_thread_project_id"),
+            authorized = await self._authorize(
+                pattern, path, glob, output_mode, case_insensitive, context,
+                max_results, all_threads, kwargs,
             )
         except PermissionError as exc:
             return f"Error: {exc}"
@@ -143,35 +163,55 @@ class GrepTool(Tool):
                 self.OUTPUT_CHAR_CAP,
             )
             return fence.notice(result)
-        else:
-            # The fallback taken when ripgrep is absent. It walks the tree in
-            # pure Python, and on 2026-08-15 it froze production twice — a
-            # recursive glob running ON the asyncio event loop, so the server
-            # could not answer health, the UI, or any other thread until it
-            # finished. py-spy caught it mid-freeze:
-            #
-            #     select_recursive_step (glob.py:513)
-            #     _iter_python_files (tools/grep.py:535)
-            #     _search_python (tools/grep.py:452)
-            #     ...
-            #     run (asyncio/runners.py:118)     <- the loop itself
-            #
-            # Installing ripgrep only makes this path rarer. One agent's search
-            # must never be able to stop the platform.
-            result = await asyncio.to_thread(
-                self._search_python,
-                pattern,
-                search_dir,
-                glob,
-                output_mode,
-                case_insensitive,
-                context,
-                max_results,
-                current_thread_id,
-                all_threads,
-                fence,
-            )
-            return fence.notice(result)
+        # The fallback taken when ripgrep is absent. It walks the tree in
+        # pure Python, and on 2026-08-15 it froze production twice — a
+        # recursive glob running ON the asyncio event loop, so the server
+        # could not answer health, the UI, or any other thread until it
+        # finished. py-spy caught it mid-freeze:
+        #
+        #     select_recursive_step (glob.py:513)
+        #     _iter_python_files (tools/grep.py:535)
+        #     _search_python (tools/grep.py:452)
+        #     ...
+        #     run (asyncio/runners.py:118)     <- the loop itself
+        #
+        # Installing ripgrep only makes this path rarer. One agent's search
+        # must never be able to stop the platform.
+        result = await asyncio.to_thread(
+            self._search_python,
+            pattern,
+            search_dir,
+            glob,
+            output_mode,
+            case_insensitive,
+            context,
+            max_results,
+            current_thread_id,
+            all_threads,
+            fence,
+        )
+        return fence.notice(result)
+
+    async def _authorize(self, pattern, path, glob, output_mode, case_insensitive, context, max_results, all_threads, kwargs):
+        return await _resolve_path_for_action(
+            tool=self,
+            tool_name=self.name,
+            params={
+                "pattern": pattern,
+                "path": path or ".",
+                "glob": glob,
+                "output_mode": output_mode,
+                "case_insensitive": case_insensitive,
+                "context": context,
+                "max_results": max_results,
+                "all_threads": all_threads,
+            },
+            path=path or ".",
+            workspace=self._workspace,
+            allowed_dir=self._allowed_dir,
+            thread_id=kwargs.get("_thread_id"),
+            project_id=kwargs.get("_thread_project_id"),
+        )
 
     def _search_reviewed(
         self,
@@ -265,20 +305,7 @@ class GrepTool(Tool):
                     if output_mode == "content" and len(results) >= max_results:
                         break
 
-        if output_mode == "files":
-            if not counts:
-                return f"No matches for pattern '{pattern}'"
-            return "\n".join(sorted(counts)[:max_results])
-        if output_mode == "count":
-            if not counts:
-                return f"No matches for pattern '{pattern}'"
-            return "\n".join(
-                f"{path}:{count}"
-                for path, count in sorted(counts.items())[:max_results]
-            )
-        if not results:
-            return f"No matches for pattern '{pattern}'"
-        return render(results, safe, self.OUTPUT_CHAR_CAP)
+        return _render_reviewed(pattern, output_mode, max_results, counts, results, safe, self.OUTPUT_CHAR_CAP)
 
     def _search_python(
         self,
@@ -347,21 +374,7 @@ class GrepTool(Tool):
         elif output_mode == "count":
             if not files_matched:
                 return f"No matches for pattern '{pattern}'"
-            counts = {}
-            for fpath, resolved_path in sorted(files):
-                try:
-                    if resolved_path.stat().st_size > _MAX_SEARCH_FILE_BYTES:
-                        continue
-                    content = resolved_path.read_text(encoding="utf-8", errors="ignore")
-                    c = len(regex.findall(content))
-                    if c > 0:
-                        rel = str(fpath.relative_to(search_dir))
-                        counts[rel] = c
-                except (PermissionError, OSError):
-                    continue
-            return "\n".join(
-                f"{f}:{c}" for f, c in sorted(counts.items())[:max_results]
-            )
+            return _python_counts(files, search_dir, regex, max_results)
         else:
             if not results:
                 return f"No matches for pattern '{pattern}'"
