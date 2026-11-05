@@ -99,7 +99,11 @@ def no_reload(monkeypatch):
     async def record(server_id, names):
         reloads.append((server_id, names))
 
+    async def read_loaded(_cfg):
+        return [{"identifier": name} for name in (reloads[-1][1] if reloads else [])]
+
     monkeypatch.setattr(local_keep_loaded, "reload_after_restart", record)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", read_loaded)
     return reloads
 
 
@@ -246,7 +250,7 @@ def test_only_a_restart_line_logged_after_the_watch_began_counts(tmp_path, monke
     watched: list = []
     asked: list[bool] = []
     monkeypatch.setattr(omlx_process, "watch_exit", lambda _pid, on_exit: watched.append(on_exit) or (lambda: None))
-    monkeypatch.setattr(restart, "on_exit", lambda *args: asked.append(args[-1]()))
+    monkeypatch.setattr(restart, "on_exit", lambda *args, **_kwargs: asked.append(args[-1]()))
     log = omlx_process.log_path(tmp_path, SID)
     log.write_text(f"earlier process: {restart.RESTART_REQUESTED}\n")
     sup.watch(SID, 4242)
@@ -379,9 +383,12 @@ async def test_restarts_stop_after_three_in_ten_minutes_and_the_event_and_log_sa
     start, calls = recording_start(ok=False)
     life = sup._life.setdefault(SID, restart.Life())
     with caplog.at_level(logging.INFO, logger=restart.log.name):
-        await restart._restart(SID, life, "signal 9", [], start, lambda _sid: "last words")
+        restart.on_exit(SID, life, GONE_PID, start, lambda _sid: "last words", ("signal 9", False))
+        await life.restart
+        await asyncio.sleep(0)
         assert len(calls) == 3
-        await restart._restart(SID, life, "signal 9", [], start, lambda _sid: "last words")  # window full
+        restart.on_exit(SID, life, GONE_PID, start, lambda _sid: "last words", ("signal 9", False))
+        await life.restart  # window full
         assert len(calls) == 3
     assert actions(events).count("restart.attempted") == 3
     gave_up = [props for _, action, props in events if action == "restart.gave_up"]
@@ -394,7 +401,8 @@ async def test_restarts_older_than_ten_minutes_no_longer_count(no_reload):
     stale = time.monotonic() - restart.RESTART_WINDOW_S - 1
     life = sup._life.setdefault(SID, restart.Life())
     life.restarts = deque([stale, stale, stale])
-    await restart._restart(SID, life, "exit code 1", [], start, lambda _sid: "")
+    restart.on_exit(SID, life, GONE_PID, start, lambda _sid: "", ("exit code 1", False))
+    await life.restart
     assert len(calls) == 1
 
 

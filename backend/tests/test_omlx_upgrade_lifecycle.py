@@ -32,6 +32,25 @@ async def test_stop_during_idle_proof_cancels_replacement(isolated_db, monkeypat
     assert calls == []
 
 
+async def test_stop_during_internal_stop_keeps_stop_intent(isolated_db, monkeypatch):
+    calls, _ = _seat(monkeypatch, recorded="old")
+    life = omlx_supervisor._life["seat"]
+    stopping = asyncio.Event()
+
+    async def held_stop(_cfg):
+        stopping.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(omlx_supervisor, "_stop_server", held_stop)
+    owner = omlx_supervisor.schedule_startup_upgrade("seat", "old")
+    await asyncio.wait_for(stopping.wait(), 2)
+    assert life.announce_stop() is owner
+    with pytest.raises(asyncio.CancelledError):
+        await owner
+    assert life.stopping
+    assert not any(call[0] == "start" for call in calls)
+
+
 async def test_an_unadopted_server_is_not_restarted(isolated_db, monkeypatch):
     calls, _ = _seat(monkeypatch, recorded="0.7.1rc1")
     monkeypatch.setattr(omlx_supervisor, "_life", {})
@@ -89,7 +108,7 @@ async def test_stop_cancels_boot_before_model_reload(isolated_db, monkeypatch, t
         await blocked.wait()
         return {"ok": True}
 
-    monkeypatch.setattr(omlx_supervisor, "start_server", start)
+    monkeypatch.setattr(omlx_supervisor, "_start_recovery", start)
     upgrade = asyncio.create_task(_upgrade())
     await asyncio.wait_for(booting.wait(), timeout=2)
 

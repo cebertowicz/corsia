@@ -82,7 +82,7 @@ async def test_stop_cancels_exit_recovery_and_releases_waiter(isolated_db, monke
         recovering.set()
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(omlx_supervisor, "start_server", start)
+    monkeypatch.setattr(omlx_supervisor, "_start_recovery", start)
     monkeypatch.setattr("infra.carry_in_capacity.omlx_state", state)
     monkeypatch.setattr(server_observation, "forget_loaded_on_exit", lambda _sid: ["exact-model"])
     monkeypatch.setattr(omlx_restart, "emit", lambda *_args, **_kwargs: None)
@@ -111,7 +111,7 @@ async def test_stop_cancels_exit_recovery_and_releases_waiter(isolated_db, monke
 
 async def test_failed_exit_recovery_reports_error_to_held_call(isolated_db, monkeypatch):
     _seat(monkeypatch, recorded="old")
-    monkeypatch.setattr(omlx_supervisor, "start_server", AsyncMock(return_value={"ok": False}))
+    monkeypatch.setattr(omlx_supervisor, "_start_recovery", AsyncMock(return_value={"ok": False}))
     life = omlx_supervisor._life["seat"]
     checking, release = asyncio.Event(), asyncio.Event()
 
@@ -136,8 +136,9 @@ async def test_failed_exit_recovery_reports_error_to_held_call(isolated_db, monk
         await asyncio.sleep(0)
         omlx_restart.on_exit("seat", life, 123, AsyncMock(return_value={"ok": False}), lambda _sid: "", ("crash", False))
         release.set()
-        with pytest.raises(RuntimeError, match="start_failed"):
+        with pytest.raises(RuntimeError, match="Check the server in Settings and try again"):
             await asyncio.wait_for(waiter, 2)
+        assert (await upgrade)["reason"] == "start_failed"
     finally:
         release.set()
         await _finish(waiter, upgrade, life.restart)

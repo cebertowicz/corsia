@@ -35,7 +35,7 @@ async def test_busy_external_activity_fails_held_calls_without_stopping(isolated
     await asyncio.sleep(0)
     release_check.set()
     assert (await asyncio.wait_for(upgrade, 2))["reason"] == "busy"
-    with pytest.raises(RuntimeError, match="upgrade failed: busy"):
+    with pytest.raises(RuntimeError, match="Check the server in Settings and try again"):
         await waiter
     assert calls == []
 
@@ -60,7 +60,7 @@ async def test_failed_replacement_start_recovers_then_restores_exact_models(isol
         calls.append(("start", "seat"))
         return {"ok": attempts == 2, "message": "boot failed"}
 
-    monkeypatch.setattr(omlx_supervisor, "start_server", start)
+    monkeypatch.setattr(omlx_supervisor, "_start_recovery", start)
     monkeypatch.setattr(omlx_restart, "emit", lambda _sid, action, **props: events.append((action, props)))
 
     assert (await _upgrade())["restarted"] is True

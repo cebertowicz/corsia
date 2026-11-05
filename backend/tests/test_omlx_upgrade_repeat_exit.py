@@ -9,6 +9,79 @@ from test_omlx_upgrade import _seat
 from test_omlx_upgrade_startup_order import _finish, forbid_external_process_and_network  # noqa: F401
 
 
+async def test_crash_during_crash_recovery_keeps_original_owner_and_models(isolated_db, monkeypatch):
+    _seat(monkeypatch, recorded="old")
+    life = omlx_supervisor._life["seat"]
+    entered, release = asyncio.Event(), asyncio.Event()
+    restored = []
+    observed = iter((["exact-model"], []))
+
+    async def reload(_sid, models):
+        restored.append(list(models))
+        if len(restored) == 1:
+            entered.set()
+            await release.wait()
+
+    monkeypatch.setattr(server_observation, "forget_loaded_on_exit", lambda _sid: next(observed))
+    monkeypatch.setattr(omlx_lifecycle, "read_loaded", AsyncMock(return_value=[{"identifier": "exact-model"}]))
+    monkeypatch.setattr("llm.local_keep_loaded.reload_after_restart", reload)
+    monkeypatch.setattr(omlx_restart, "emit", lambda *_args, **_kwargs: None)
+    omlx_restart.on_exit("seat", life, 123, omlx_supervisor._start_recovery, lambda _sid: "", ("exit", False))
+    owner = life.restart
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        omlx_restart.on_exit("seat", life, 124, omlx_supervisor._start_recovery, lambda _sid: "", ("exit", False))
+        assert life.restart is owner
+        release.set()
+        await asyncio.wait_for(owner, 2)
+        assert restored == [["exact-model"], ["exact-model"]]
+    finally:
+        release.set()
+        await _finish(owner, life.restart)
+
+
+async def test_crash_readback_shortfall_is_reported_without_completion(isolated_db, monkeypatch):
+    _seat(monkeypatch, recorded="old")
+    life = omlx_supervisor._life["seat"]
+    events = []
+    monkeypatch.setattr(server_observation, "forget_loaded_on_exit", lambda _sid: ["exact-model"])
+    monkeypatch.setattr(omlx_lifecycle, "read_loaded", AsyncMock(return_value=[]))
+    monkeypatch.setattr(omlx_restart, "emit", lambda _sid, action, **props: events.append((action, props)))
+    omlx_restart.on_exit("seat", life, 123, omlx_supervisor._start_recovery, lambda _sid: "", ("exit", False))
+    owner = life.restart
+    try:
+        assert await owner == {"restarted": True, "reason": "reload_failed", "missing": ["exact-model"]}
+        assert not any(action == "restart.completed" for action, _ in events)
+    finally:
+        await _finish(owner)
+
+
+async def test_exit_during_failed_snapshot_keeps_preexisting_models(isolated_db, monkeypatch):
+    calls, _ = _seat(monkeypatch, recorded="old")
+    life = omlx_supervisor._life["seat"]
+    reads = 0
+
+    async def read(_cfg):
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            omlx_restart.on_exit("seat", life, 123, omlx_supervisor._start_recovery, lambda _sid: "", ("exit", False))
+            raise OSError("snapshot interrupted")
+        return [{"identifier": "exact-model"}]
+
+    monkeypatch.setattr("llm.network_discovery.get_loaded_model_ids", lambda _sid: {"exact-model"})
+    monkeypatch.setattr(server_observation, "forget_loaded_on_exit", lambda _sid: [])
+    monkeypatch.setattr(omlx_lifecycle, "read_loaded", read)
+    monkeypatch.setattr(omlx_restart, "emit", lambda *_args, **_kwargs: None)
+    owner = omlx_supervisor.schedule_startup_upgrade("seat", "old")
+    try:
+        assert (await asyncio.wait_for(owner, 2))["restarted"]
+        assert ("reload", "seat", ["exact-model"]) in calls
+        assert not any(call[0] == "stop" for call in calls)
+    finally:
+        await _finish(owner)
+
+
 async def test_repeated_exit_restores_original_snapshot_before_admission(isolated_db, monkeypatch):
     _seat(monkeypatch, recorded="old")
     life = omlx_supervisor._life["seat"]
@@ -40,7 +113,7 @@ async def test_repeated_exit_restores_original_snapshot_before_admission(isolate
         waiter = asyncio.create_task(request())
         await asyncio.sleep(0)
         for index in (0, 1):
-            omlx_restart.on_exit("seat", life, 123 + index, omlx_supervisor.start_server, lambda _sid: "", ("exit", False))
+            omlx_restart.on_exit("seat", life, 123 + index, omlx_supervisor._start_recovery, lambda _sid: "", ("exit", False))
             assert life.restart is owner and not waiter.done()
             releases[index].set()
             assert await asyncio.wait_for(entered.get(), 2) == index + 1

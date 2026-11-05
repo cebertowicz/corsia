@@ -26,7 +26,7 @@ async def test_exit_during_version_read_cannot_bypass_upgrade_admission(monkeypa
         await finish_recovery.wait()
         return {"ok": True}
 
-    monkeypatch.setattr(omlx_supervisor, "start_server", start)
+    monkeypatch.setattr(omlx_supervisor, "_start_recovery", start)
     monkeypatch.setattr("llm.local_keep_loaded.reload_after_restart", AsyncMock())
     monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", AsyncMock(return_value=[]))
     monkeypatch.setattr(omlx_supervisor, "_stop_server", AsyncMock(return_value={"ok": True}))
@@ -50,13 +50,11 @@ async def test_exit_during_version_read_cannot_bypass_upgrade_admission(monkeypa
         return "old"
 
     def watch_exit(_pid, callback):
-        watched.append(True)
-
         def exit_callback():
             callback(("exited during version read", clean))
             callback_done.set()
 
-        asyncio.get_running_loop().call_soon(exit_callback)
+        watched.append(exit_callback)
         return lambda: None
 
     monkeypatch.setattr(omlx_upgrade, "recorded_version", version)
@@ -65,7 +63,9 @@ async def test_exit_during_version_read_cannot_bypass_upgrade_admission(monkeypa
     task = waiter = None
     try:
         await asyncio.wait_for(version_read.wait(), 2)
-        assert not watched
+        assert watched
+        assert omlx_supervisor._life["seat"].hold_requests
+        watched[0]()
         release.set()
         task = await startup
         assert task is not None

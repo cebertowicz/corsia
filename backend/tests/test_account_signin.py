@@ -781,7 +781,7 @@ async def test_backend_shutdown_stops_a_held_login_and_drops_its_record(scripted
     await _started(scripted_vendor_clis["log"])
     operation = account_controls._SIGNINS[account["id"]]
     assert operation.process.returncode is None
-    assert await shutdown_owned_tasks([None] * 5, logging.getLogger("shutdown")) is None
+    assert await shutdown_owned_tasks([None] * 6, logging.getLogger("shutdown")) is None
     assert operation.process.returncode is not None and operation.task.done()
     assert (operation.status, account_controls._SIGNINS) == ("cancelled", {})
     assert _account(account["id"])["state"] == "signed_out"
@@ -818,7 +818,7 @@ async def test_a_failing_sign_in_stop_is_logged_by_name_and_does_not_stop_shutdo
     refresh = asyncio.create_task(forever())
     monkeypatch.setattr(state, "_github_ownership_login_task", refresh, raising=False)
     logger = Mock()
-    assert await shutdown_owned_tasks([None] * 5, logger) is None
+    assert await shutdown_owned_tasks([None] * 6, logger) is None
     assert refresh.cancelled()
     assert [call.args[0] for call in logger.warning.call_args_list] == [
         "shutdown: account sign-in cleanup failed: will not stop"]

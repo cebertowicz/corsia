@@ -10,9 +10,8 @@ What each event does, by where the server is:
 ==================  ==========================  ===============================  =================
 event               running (watched)           restart in flight                stop asked for
 ==================  ==========================  ===============================  =================
-exit, not clean     restart it (bounded)        restart is replaced; a held    no restart
-                                                upgrade recovers under its gate
-exit, code 0        logged, not restarted       held upgrade recovers          no restart
+exit, not clean     restart it (bounded)        same owner recovers            no restart
+exit, code 0        logged, not restarted       same owner recovers            no restart
                     (an exit with no readable status is treated as unexpected)
 exit, code 0 after  restarted, bound reset      -                                no restart
 oMLX's own Restart  (its dashboard asked)
@@ -65,8 +64,8 @@ class Life:
     stopping: bool = False  # a stop was asked for: the exit it causes is not a crash
     restart: asyncio.Task | None = None
     hold_requests: bool = False  # only an upgrade drains calls before replacing the process
-    upgrade_models: list[str] | None = None  # exact snapshot survives a replacement process exit
-    upgrade_exit: tuple[str, list[str]] | None = None
+    exit_generation: int = 0  # incremented for every observed exit during an operation
+    exit_status: str = ""
     restarts: deque[float] = field(default_factory=deque)  # when each restart in the window began
     requests: set[asyncio.Future[None]] = field(default_factory=set)  # admitted provider calls, not whole Turns
 
@@ -112,10 +111,10 @@ async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIt
         try:
             result = task.result()
         except Exception as exc:
-            raise RuntimeError("Local model server upgrade failed") from exc
+            raise RuntimeError("Local model server upgrade failed. Check the server in Settings and try again.") from exc
         if isinstance(result, dict) and result.get("reason") != "already_current":
             if not result.get("restarted") or result.get("reason"):
-                raise RuntimeError(f"Local model server upgrade failed: {result.get('reason', 'unknown')}")
+                raise RuntimeError("Local model server upgrade failed. Check the server in Settings and try again.")
         life = lives.get(server_id or "")
     if life is None:
         yield  # unmanaged and other providers have no supervisor admission
@@ -190,6 +189,7 @@ def on_exit(
     server_id: str, life: Life, pid: int,
     start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
     observed: tuple[str, bool] | None = None, restart_requested: Callable[[], bool | None] = lambda: False,
+    *, timeout: float | None = None,
 ) -> None:
     """Restart the server unless CORSIA stopped it, or it exited 0 without oMLX's own Restart asking."""
     from llm.server_observation import forget_loaded_on_exit
@@ -200,8 +200,9 @@ def on_exit(
     if life.stopping:
         log.info("oMLX %s (pid %s) stopped as asked; not restarting", server_id, pid)
         return
-    if life.restart is not None and life.hold_requests:
-        life.upgrade_exit = (status, loaded)
+    if life.restart is not None:
+        life.exit_generation += 1
+        life.exit_status = status
         return
     if clean:
         asked = restart_requested()
@@ -218,9 +219,9 @@ def on_exit(
         emit(server_id, "restart.requested", loaded_models=len(loaded))
     else:
         emit(server_id, "exit.unexpected", status=status, loaded_models=len(loaded))
-    if life.restart:  # it exited again while a restart was running
-        life.restart.cancel()
-    schedule(server_id, life, _restart(server_id, life, status, loaded, start, tail_log))
+    prune_restart_window(life)
+    generation = life.exit_generation
+    schedule(server_id, life, recover(server_id, life, status, loaded, generation, start, tail_log, timeout=timeout))
 
 
 def schedule(server_id: str, life: Life, operation: Coroutine[Any, Any, Any], *, hold_requests: bool = False) -> asyncio.Task:
@@ -244,8 +245,6 @@ def _done(server_id: str, life: Life, task: asyncio.Task) -> None:
     if life.restart is task:
         life.restart = None
         life.hold_requests = False
-        life.upgrade_models = None
-        life.upgrade_exit = None
         notify_models_changed(server_id=server_id)
     error = None if task.cancelled() else task.exception()
     if error is not None:
@@ -253,39 +252,16 @@ def _done(server_id: str, life: Life, task: asyncio.Task) -> None:
         emit(server_id, "restart.failed", error=type(error).__name__, message=str(error)[:100])
 
 
-async def _recover_held(
-    server_id: str, life: Life, status: str, loaded: list[str],
-    start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
-) -> dict[str, Any]:
-    """Recover the models under the original upgrade's admission gate."""
-    from llm.local_keep_loaded import reload_after_restart
-    from llm.providers.omlx_lifecycle import read_loaded
-    from llm.providers.omlx_upgrade import STAGE_TIMEOUT_S, held_stage
+@dataclass
+class Recovery:
+    """Coroutine-local snapshot and exit baseline, captured before scheduling."""
 
-    started = await held_stage(
-        life, start_with_recovery(server_id, life, status, start, tail_log, prune_window=False),
-        STAGE_TIMEOUT_S * (MAX_RESTARTS + 1),
-    )
-    if not started:
-        return {"restarted": False, "reason": "start_failed"}
-    await held_stage(life, reload_after_restart(server_id, loaded), STAGE_TIMEOUT_S * (len(loaded) + 1))
-    restored = await held_stage(life, asyncio.wait_for(read_loaded({"server_id": server_id}), STAGE_TIMEOUT_S))
-    if restored is None or set(loaded) - {row["identifier"] for row in restored}:
-        emit(server_id, "restart.failed", status="upgrade", reason="reload_failed")
-        return {"restarted": False, "reason": "reload_failed"}
-    emit(server_id, "restart.completed", status="upgrade")
-    return {"restarted": True, "loaded": loaded}
+    models: list[str]
+    generation: int
+    version: str | None = None
 
-
-async def _restart(
-    server_id: str, life: Life, status: str, loaded: list[str],
-    start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
-) -> None:
-    from llm.local_keep_loaded import reload_after_restart
-
-    if await start_with_recovery(server_id, life, status, start, tail_log):
-        await reload_after_restart(server_id, loaded)
-        emit(server_id, "restart.completed", attempt=len(life.restarts))
+    def exited(self, life: Life) -> bool:
+        return life.exit_generation != self.generation
 
 
 def prune_restart_window(life: Life) -> None:
@@ -293,29 +269,63 @@ def prune_restart_window(life: Life) -> None:
         life.restarts.popleft()
 
 
-async def start_with_recovery(
-    server_id: str, life: Life, status: str,
+async def recover(
+    server_id: str, life: Life, status: str, loaded: list[str], generation: int,
     start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
-    *, prune_window: bool = True,
-) -> bool:
-    """The same bounded startup recovery after a crash or an intentional upgrade stop."""
-    if prune_window:
-        prune_restart_window(life)
-    if status == "upgrade":
-        log.info("oMLX server %s starting after upgrade stop", server_id)
-    else:
-        log.warning("oMLX server %s exited (%s); %d restarts in the last 10 minutes",
-                    server_id, status, len(life.restarts))
-    while len(life.restarts) < MAX_RESTARTS:
+    *, timeout: float | None = None,
+    prepare: Callable[[Recovery], Awaitable[dict[str, Any] | None]] | None = None,
+    version: str | None = None,
+) -> dict[str, Any]:
+    """Own preparation, every start and one restoration sequence until completion."""
+    from llm.local_keep_loaded import reload_after_restart
+    from llm.providers.omlx_lifecycle import read_loaded
+
+    context = Recovery(loaded, generation, version)
+    if prepare is not None and not context.exited(life):
+        try:
+            result = await prepare(context)
+        except Exception:
+            if not context.exited(life):
+                raise
+            result = None
+        if not context.exited(life) and result is not None:
+            return result
+
+    while len(life.restarts) < MAX_RESTARTS and not life.stopping:
+        if context.exited(life):
+            context.generation = life.exit_generation
+            status = life.exit_status
         life.restarts.append(time.monotonic())
         emit(server_id, "restart.attempted", attempt=len(life.restarts), status=status)
-        result = await start({"server_id": server_id})
-        if life.stopping:
-            return False
-        if result.get("ok"):
-            return True
-        log.warning("oMLX server %s restart failed: %s", server_id, result.get("message"))
+        try:
+            async with asyncio.timeout(None if timeout is None else timeout * (MAX_RESTARTS + 1)):
+                started = await start({"server_id": server_id})
+            if context.exited(life):
+                continue
+            if not started.get("ok"):
+                log.warning("oMLX server %s restart failed: %s", server_id, started.get("message"))
+                continue
+            async with asyncio.timeout(None if timeout is None else timeout * (len(context.models) + 1)):
+                await reload_after_restart(server_id, context.models)
+            if context.exited(life):
+                continue
+            async with asyncio.timeout(timeout):
+                restored = await read_loaded({"server_id": server_id})
+            if context.exited(life):
+                continue
+        except Exception:
+            if context.exited(life):
+                continue
+            raise
+        missing = sorted(set(context.models) - {row["identifier"] for row in restored or []})
+        if restored is None or missing:
+            missing = missing or context.models
+            emit(server_id, "restart.failed", status=status, reason="reload_failed", missing=missing)
+            return {"restarted": True, "reason": "reload_failed", "missing": missing}
+        properties = {"status": "upgrade", "version": context.version} if context.version else {"attempt": len(life.restarts)}
+        emit(server_id, "restart.completed", **properties)
+        return {"restarted": True, "loaded": context.models}
     emit(server_id, "restart.gave_up", status=status, restarts=len(life.restarts))
     log.error("oMLX server %s not restarted again: %d restarts in 10 minutes (last exit %s). Last log lines:\n%s",
               server_id, len(life.restarts), status, tail_log(server_id) or "(empty log)")
-    return False
+    return {"restarted": False, "reason": "start_failed"}

@@ -36,6 +36,39 @@ async def test_reconciliation_failure_allows_cloud_startup(monkeypatch, isolated
     assert len(shutdown_tasks) == 6 and shutdown_tasks[5] is None
 
 
+async def test_version_read_failure_keeps_all_adopted_watches_and_cloud_startup(monkeypatch, isolated_db):
+    from unittest.mock import AsyncMock
+    from llm import network_discovery
+    from llm.providers import omlx_startup, omlx_upgrade
+
+    _isolate_lifespan(monkeypatch)
+    monkeypatch.setattr(app_lifecycle, "adopt_and_upgrade", omlx_startup.adopt_and_upgrade)
+    monkeypatch.setattr(omlx_startup, "run_in_db", AsyncMock(side_effect=lambda fn, *args: fn(*args)))
+    monkeypatch.setattr(network_discovery, "get_servers", lambda: [{"id": "seat"}, {"id": "other"}])
+    monkeypatch.setattr(omlx_startup, "_reconcile_servers", lambda *_args: {"seat": 123, "other": 124})
+    monkeypatch.setattr("llm.local_sources.corsia_omlx_server", lambda _servers: {"id": "seat"})
+    watched = []
+    monkeypatch.setattr(omlx_supervisor, "_life", {})
+
+    def watch(sid, pid):
+        watched.append((sid, pid))
+        omlx_supervisor._life.setdefault(sid, omlx_restart.Life())
+
+    monkeypatch.setattr(omlx_supervisor, "watch", watch)
+    monkeypatch.setattr(omlx_upgrade, "recorded_version", AsyncMock(side_effect=OSError("version unavailable")))
+    cloud_started = asyncio.Event()
+
+    async def cloud():
+        cloud_started.set()
+
+    monkeypatch.setattr(app_lifecycle, "_startup_cloud_discovery", cloud)
+    monkeypatch.setattr(app_lifecycle, "_startup_network_discovery", AsyncMock())
+    async with app_lifecycle.lifespan(FastAPI()):
+        await asyncio.wait_for(cloud_started.wait(), 5)
+        omlx_upgrade.recorded_version.assert_awaited_once_with("seat")
+        assert set(watched) == {("seat", 123), ("other", 124)}
+
+
 async def test_reconciliation_cancellation_propagates(monkeypatch, isolated_db):
     _isolate_lifespan(monkeypatch)
 

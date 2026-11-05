@@ -426,7 +426,7 @@ def test_new_omlx_start_uses_the_managed_cap_only_for_the_bundled_row(isolated_r
     result = asyncio.run(sup.start_server({"server_id": "progress", "host": "127.0.0.1", "port": 9999}))
 
     assert result["ok"] is True
-    assert waited == {"timeout_s": expected_timeout, "server_id": "progress", "pid": 1234}
+    assert waited == {"timeout_s": expected_timeout, "server_id": "progress", "pid": 1234, "require_preload": False}
     if managed:
         # A pre-existing managed server gets the canonical limit on restart.
         assert argv[argv.index("--max-concurrent-requests") + 1] == "2"

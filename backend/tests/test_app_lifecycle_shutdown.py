@@ -144,7 +144,7 @@ async def test_shutdown_cancels_github_ownership_login_refresh(monkeypatch):
     await refresh_started.wait()
     monkeypatch.setattr(state, "_github_ownership_login_task", refresh_task)
 
-    pending_cancel = await app_lifecycle._shutdown_owned_tasks([None] * 5, Mock())
+    pending_cancel = await app_lifecycle._shutdown_owned_tasks([None] * 6, Mock())
 
     assert pending_cancel is None
     assert refresh_task.cancelled()

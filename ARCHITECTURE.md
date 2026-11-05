@@ -106,17 +106,17 @@ a cfg host to authorize a stored key. Admin routes remain separately owned by
 ### Managed oMLX replacement
 
 `omlx_supervisor` owns one `omlx_restart.Life` per adopted process. Before
-startup fans out, an outdated managed process is adopted and its existing restart
-task closes inference admission. `base.py` registers each concurrent provider
-call before preflight, and `omlx_lifecycle.warm_cache` registers before its
+startup fans out, adoption registers process watches and closes managed inference
+admission before reading the running version. `base.py` registers each concurrent
+provider call before preflight, and `omlx_lifecycle.warm_cache` registers before its
 loaded-model check. Replacement drains these scopes within a finite bound, then
 checks outside traffic once; a busy or unreadable result fails the held calls.
 Later calls wait through `/health` readiness and exact-model restoration, or
 receive the replacement failure. Cloud work can continue independently. Crash
-recovery and upgrade reuse the bounded start-attempt owner; this boundary covers
-CORSIA dispatch, not clients calling oMLX directly. Unexpected adoption failures
-stop startup before admission; cloud work continues while an established upgrade
-is in progress.
+recovery and upgrade share the original bounded recovery task, including model
+restoration; this boundary covers CORSIA dispatch, not clients calling oMLX
+directly. Ordinary adoption failures are contained so cloud startup can continue;
+a version-read failure leaves already adopted processes watched.
 Restart transitions tag the existing `models_updated` event with `server_id`,
 so Providers refreshes server state only for those transitions. Ordinary
 catalog events add no server-list read. `providersV7` owns the row's restart

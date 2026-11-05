@@ -150,8 +150,8 @@ async def test_never_ready_upgrade_fails_held_call_in_finite_time(isolated_db, m
         booting.set()
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(omlx_supervisor, "start_server", start)
-    monkeypatch.setattr(omlx_upgrade, "STAGE_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(omlx_supervisor, "_start_recovery", start)
+    monkeypatch.setattr(omlx_supervisor, "MANAGED_HEALTH_STARTUP_CAP_S", 0.05)
     upgrade = omlx_supervisor.schedule_startup_upgrade("seat", "old")
     assert upgrade is not None
     waiter = None
@@ -203,7 +203,7 @@ async def test_replacement_does_not_adopt_a_failed_boot_as_ready(monkeypatch):
     monkeypatch.setattr(omlx_supervisor, "_wait_for_healthy", health)
     monkeypatch.setattr(omlx_supervisor, "_stop_server", AsyncMock(return_value={"ok": True}))
     monkeypatch.setattr(omlx_supervisor, "_failed_boot_result", lambda *_args, **_kwargs: {"ok": False})
-    task = asyncio.create_task(omlx_supervisor.start_server({"server_id": "seat"}))
+    task = asyncio.create_task(omlx_supervisor._start_recovery({"server_id": "seat"}))
     life.restart = task
     try:
         result = await task
@@ -214,9 +214,9 @@ async def test_replacement_does_not_adopt_a_failed_boot_as_ready(monkeypatch):
 
 
 async def test_never_healthy_retry_does_not_admit_held_call(isolated_db, monkeypatch):
-    actual_start = omlx_supervisor.start_server
+    actual_start = omlx_supervisor._start_recovery
     _seat(monkeypatch, recorded="old")
-    monkeypatch.setattr(omlx_supervisor, "start_server", actual_start)
+    monkeypatch.setattr(omlx_supervisor, "_start_recovery", actual_start)
     monkeypatch.setattr(omlx_supervisor, "run_in_db", AsyncMock(return_value=("127.0.0.1", 9)))
     monkeypatch.setattr(omlx_supervisor, "_listen_host", lambda host: host)
     monkeypatch.setattr(omlx_supervisor, "_read_pid", lambda *_args, **_kwargs: 123)
@@ -246,7 +246,7 @@ async def test_never_healthy_retry_does_not_admit_held_call(isolated_db, monkeyp
 
     waiter = asyncio.create_task(request())
     try:
-        with pytest.raises(RuntimeError, match="upgrade failed: start_failed"):
+        with pytest.raises(RuntimeError, match="Check the server in Settings and try again"):
             await asyncio.wait_for(waiter, 3)
         assert (await upgrade)["reason"] == "start_failed"
         assert seen and set(seen) == {"/health"}
@@ -287,11 +287,11 @@ async def test_scope_drain_is_bounded_and_fails_the_held_call(isolated_db, monke
     monkeypatch.setattr(omlx_restart, "emit", lambda _sid, action, **props: events.append((action, props)))
     outstanding = asyncio.get_running_loop().create_future()
     life.requests.add(outstanding)
-    monkeypatch.setattr(omlx_upgrade, "STAGE_TIMEOUT_S", 0.02)
+    monkeypatch.setattr(omlx_supervisor, "MANAGED_HEALTH_STARTUP_CAP_S", 0.02)
     task = omlx_supervisor.schedule_startup_upgrade("seat", "old")
     assert task is not None
     try:
-        with pytest.raises(RuntimeError, match="upgrade failed: drain_timeout"):
+        with pytest.raises(RuntimeError, match="Check the server in Settings and try again"):
             async with omlx_supervisor.request_slot("seat"):
                 pytest.fail("the call passed a timed-out drain")
         assert (await task)["reason"] == "drain_timeout"

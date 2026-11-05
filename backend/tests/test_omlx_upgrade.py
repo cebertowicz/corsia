@@ -35,7 +35,7 @@ def _seat(monkeypatch, *, recorded: str | None, quiet: bool = True, start_ok: bo
     monkeypatch.setattr("infra.carry_in_capacity.omlx_state", fake_state)
     monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", read_loaded)
     monkeypatch.setattr("llm.providers.omlx_supervisor._stop_server", stop_server)
-    monkeypatch.setattr("llm.providers.omlx_supervisor.start_server", start_server)
+    monkeypatch.setattr("llm.providers.omlx_supervisor._start_recovery", start_server)
     monkeypatch.setattr(omlx_supervisor, "_tail_log", lambda _sid: "test boot failure")
     monkeypatch.setattr("llm.local_keep_loaded.reload_after_restart", reload_after_restart)
     return calls, seen
