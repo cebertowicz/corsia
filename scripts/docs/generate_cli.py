@@ -22,15 +22,23 @@ UNROUTED = set()
 INTERNAL = {"ensure-current-release", "prepare-redeploy", "restart-prepared", "discard-prepared", "redeploy"}
 # These dispatch arms do not have an entry in the shell help.
 EXTRA = {
-    "doc": "Document collaboration commands",
+    "doc": "Comment on and review documents",
     "local": "Set up a local model",
-    "agent": "CORSIA agent helpers",
+    "agent": "Prepare the CORSIA agent's first reply",
     "ensure-current-release": "Ensure the frontend release is current",
     "prepare-redeploy": "Prepare a redeploy",
     "restart-prepared": "Restart a prepared release",
     "discard-prepared": "Discard a prepared release",
 }
 SCRIPTS = {"delegate": "delegate_cli", "doc": "doc_cli", "context": "context_cli", "providers": "providers_cli"}
+# Shared descriptions where source and desktop help differ.
+SHARED_DESCRIPTIONS = {
+    "start": "Start CORSIA; --open also checks model sources and opens the browser",
+    "open": "Open CORSIA in the browser",
+    "stop": "Stop CORSIA; attempts to finish active work first unless --force is set",
+    "service": "Manage CORSIA's service; source installs use the service for their checkout",
+    "setup": "Choose local or server exposure",
+}
 
 
 def shell_commands(text):
@@ -148,9 +156,16 @@ def describe_parser(lines, parser, command):
                 details.append("Choices: " + ", ".join(str(x) for x in action.choices))
             if action.required:
                 details.append("Required")
-            if action.default not in (None, argparse.SUPPRESS) and isinstance(action.default, (str, int, float, bool)):
-                details.append(f"Default: {action.default}")
-            lines.append(f"| `{cell(label)}` | {cell('; '.join(details)) or '—'} |")
+            default = action.default
+            help_text = details[0].lower() if action.help and action.help != argparse.SUPPRESS else ""
+            default_in_help = "default" in help_text and str(default).lower() in help_text
+            if (default is not None and default != argparse.SUPPRESS and default != ""
+                    and not (isinstance(action, argparse._StoreTrueAction) and default is False)
+                    and isinstance(default, (str, int, float, bool)) and not default_in_help):
+                details.append(f"Default: {default}")
+            description = '; '.join(part.rstrip('.') if i < len(details) - 1 else part
+                                    for i, part in enumerate(details))
+            lines.append(f"| `{cell(label)}` | {cell(description) or '—'} |")
         lines.append("")
     children = subparsers(parser)
     if children:
@@ -181,14 +196,13 @@ def render():
     unknown = commands - set(help_text) - set(EXTRA) - backend_roots
     if unknown:
         raise ValueError(f"Shell commands lack descriptions: {', '.join(sorted(unknown))}")
-    lines = ["# CLI reference", "", "Generated reference for commands dispatched by `corsia`.", "",
-             f"Generate with `{regenerate_command('generate_cli')}`; add `--check` to compare the generated page. The backend's locked dependencies are required.", "",
-             "The desktop app routes some commands directly to the Python CLI and forwards the rest to the shell dispatcher. Availability is noted for each command.", "",
-             "## Commands", ""]
+    lines = ["# CLI reference", "", "Generated reference for `corsia` commands.", "",
+             f"Generate with `{regenerate_command('generate_cli')}`; add `--check` to compare the generated page. The backend's locked dependencies are required.", ""]
     for name in sorted(commands - INTERNAL):
-        description = help_text.get(name, EXTRA.get(name, ""))
-        availability = "Routed in source installs and the desktop app" if name in source_commands else "Desktop app only"
-        lines.extend([f"## `{name}`", "", cell(description), "", f"{availability}.", ""])
+        description = SHARED_DESCRIPTIONS.get(name, help_text.get(name, EXTRA.get(name, "")))
+        lines.extend([f"## `{name}`", "", cell(description), ""])
+        if name not in source_commands:
+            lines.extend(["Desktop app only.", ""])
         if name in available:
             describe_parser(lines, available[name], f"corsia {name}")
         elif name == "service":
@@ -204,7 +218,7 @@ def render():
             lines.extend([f"`corsia {name} [--force]`", ""])
         if name == "setup":
             lines.extend(["In source installs, `corsia setup local|server` updates the choice and restarts the service. "
-                          "The desktop app routes this command directly to the Python CLI.", ""])
+                          "In the desktop app, it updates the choice without restarting.", ""])
     lines.extend(["## Internal commands", "", "These commands are for internal operation.", ""])
     for name in sorted(INTERNAL & commands):
         lines.append(f"- `{name}`: {cell(help_text.get(name, EXTRA.get(name, '')))}")

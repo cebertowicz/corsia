@@ -1,18 +1,12 @@
 # CLI reference
 
-Generated reference for commands dispatched by `corsia`.
+Generated reference for `corsia` commands.
 
 Generate with `python scripts/docs/generate_cli.py`; add `--check` to compare the generated page. The backend's locked dependencies are required.
 
-The desktop app routes some commands directly to the Python CLI and forwards the rest to the shell dispatcher. Availability is noted for each command.
-
-## Commands
-
 ## `agent`
 
-CORSIA agent helpers
-
-Routed in source installs and the desktop app.
+Prepare the CORSIA agent's first reply
 
 ### `corsia agent`
 
@@ -34,7 +28,7 @@ Preview or apply known artifact pane repairs for a thread.
 
 | Argument | Description |
 |---|---|
-| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb).; Required |
+| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb); Required |
 | `--thread-id` | — |
 | `--mode` | Choices: preview, apply |
 
@@ -44,7 +38,7 @@ Register an artifact to a thread.
 
 | Argument | Description |
 |---|---|
-| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb).; Required |
+| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb); Required |
 | `--integration` | — |
 | `--type` | — |
 | `--external-id` | — |
@@ -61,7 +55,7 @@ Transfer artifact ownership (audited).
 
 | Argument | Description |
 |---|---|
-| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb).; Required |
+| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb); Required |
 | `--integration` | Required |
 | `--type` | Required |
 | `--external-id` | Required |
@@ -76,7 +70,7 @@ Release artifact ownership (audited de-own).
 
 | Argument | Description |
 |---|---|
-| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb).; Required |
+| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb); Required |
 | `--integration` | Required |
 | `--type` | Required |
 | `--external-id` | Required |
@@ -91,7 +85,7 @@ Move an artifact's backing file, preserving identity.
 
 | Argument | Description |
 |---|---|
-| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb).; Required |
+| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb); Required |
 | `--artifact-id` | Required |
 | `--target-path` | Required |
 
@@ -101,7 +95,7 @@ Resolve an artifact by id, path, or integration/type/external_id.
 
 | Argument | Description |
 |---|---|
-| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb).; Required |
+| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb); Required |
 | `--artifact-id` | — |
 | `--path` | — |
 | `--integration` | — |
@@ -114,7 +108,7 @@ Update an artifact description or pane visibility.
 
 | Argument | Description |
 |---|---|
-| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb).; Required |
+| `--as-session` | Thread id the CLI acts as (the actor/principal for the audited verb); Required |
 | `--artifact-id` | Required |
 | `--description` | — |
 | `--hide` | — |
@@ -136,8 +130,6 @@ Desktop app only.
 ## `context`
 
 CTX bootloader: attach\|create
-
-Routed in source installs and the desktop app.
 
 ### `corsia context`
 
@@ -172,8 +164,6 @@ Create and attach a bootloader file
 ## `delegate`
 
 Delegation: create-thread\|task\|send\|set-model\|status
-
-Routed in source installs and the desktop app.
 
 ### `corsia delegate`
 
@@ -227,7 +217,7 @@ Read a thread's turn-state + recent output
 | Argument | Description |
 |---|---|
 | `thread_id` | Required |
-| `--messages` | Recent messages to include (default 5, max 50); Default: 5 |
+| `--messages` | Recent messages to include (default 5, max 50) |
 
 ### `corsia delegate task`
 
@@ -243,9 +233,7 @@ Create a hidden child thread and send its first task turn
 
 ## `doc`
 
-Document collaboration commands
-
-Routed in source installs and the desktop app.
+Comment on and review documents
 
 ### `corsia doc`
 
@@ -263,7 +251,7 @@ Accept a document suggestion
 | Argument | Description |
 |---|---|
 | `comment_id` | Required |
-| `--all-from-author` | Default: False |
+| `--all-from-author` | — |
 | `--as` | Authoring thread id (default: $CORSIA_THREAD_ID) |
 
 ### `corsia doc ack`
@@ -285,7 +273,7 @@ Anchored comment on a doc span
 | `body` | Comment body — one arg, e.g. "$(cat msg.md)"; Required |
 | `--quote` | The span text to anchor to; Required |
 | `--near` | Disambiguating hint for a repeated span |
-| `--by-id` | Treat <target> as an artifact id, not a path; Default: False |
+| `--by-id` | Treat <target> as an artifact id, not a path |
 | `--as` | Authoring thread id (default: $CORSIA_THREAD_ID) |
 
 ### `corsia doc comments`
@@ -295,8 +283,8 @@ List a doc's comment threads (read)
 | Argument | Description |
 |---|---|
 | `path` | Doc path; Required |
-| `--unresolved` | Only unresolved threads; Default: False |
-| `--json` | Raw JSON output; Default: False |
+| `--unresolved` | Only unresolved threads |
+| `--json` | Raw JSON output |
 | `--as` | Authoring thread id (default: $CORSIA_THREAD_ID) |
 
 ### `corsia doc reject`
@@ -306,7 +294,7 @@ Reject a document suggestion
 | Argument | Description |
 |---|---|
 | `comment_id` | Required |
-| `--all-from-author` | Default: False |
+| `--all-from-author` | — |
 | `--as` | Authoring thread id (default: $CORSIA_THREAD_ID) |
 
 ### `corsia doc reply`
@@ -331,7 +319,7 @@ Queue a review task in another agent's plan
 | `--reviewer` | Reviewer thread ID from agent_roster; Required |
 | `--note` | Optional requester's note (at most 500 characters) |
 | `--client-id` | Stable request key for retries |
-| `--by-id` | Default: False |
+| `--by-id` | — |
 | `--as` | Authoring thread id (default: $CORSIA_THREAD_ID) |
 
 ### `corsia doc resolve`
@@ -350,7 +338,7 @@ Retry feedback batches on a document
 | Argument | Description |
 |---|---|
 | `target` | Doc path (or an artifact id with --id); Required |
-| `--by-id` | Default: False |
+| `--by-id` | — |
 | `--as` | Authoring thread id (default: $CORSIA_THREAD_ID) |
 
 ### `corsia doc review`
@@ -361,7 +349,7 @@ Whole-doc review comment
 |---|---|
 | `target` | Doc path (or an artifact id with --id); Required |
 | `body` | Review body — one arg; Required |
-| `--by-id` | Treat <target> as an artifact id, not a path; Default: False |
+| `--by-id` | Treat <target> as an artifact id, not a path |
 | `--as` | Authoring thread id (default: $CORSIA_THREAD_ID) |
 
 ### `corsia doc review-cancel`
@@ -380,7 +368,7 @@ Submit feedback batches on a document
 | Argument | Description |
 |---|---|
 | `target` | Doc path (or an artifact id with --id); Required |
-| `--by-id` | Default: False |
+| `--by-id` | — |
 | `--as` | Authoring thread id (default: $CORSIA_THREAD_ID) |
 
 ### `corsia doc suggest`
@@ -392,9 +380,9 @@ Suggest an anchored replacement
 | `target` | Doc path (or an artifact id with --id); Required |
 | `quote` | Exact current text to replace; Required |
 | `replacement` | Replacement text; empty deletes the quote; Required |
-| `body (?)` | Optional note; Default:  |
+| `body (?)` | Optional note |
 | `--near` | Disambiguating hint for a repeated span |
-| `--by-id` | Default: False |
+| `--by-id` | — |
 | `--as` | Authoring thread id (default: $CORSIA_THREAD_ID) |
 
 ## `event`
@@ -411,8 +399,8 @@ Emit one declared event through the live intake.
 
 | Argument | Description |
 |---|---|
-| `event_type` | Declared event type, such as qa.review_completed.; Required |
-| `--facts` | JSON object, or - to read one JSON object from stdin.; Required |
+| `event_type` | Declared event type, such as qa.review_completed; Required |
+| `--facts` | JSON object, or - to read one JSON object from stdin; Required |
 | `--id` | Stable identity for a retry-safe event. |
 | `--as-session` | Chat id the event is emitted as (default: $CORSIA_THREAD_ID). |
 
@@ -429,13 +417,11 @@ Desktop app only.
 | `--workspace, --path` | Workspace path (skips the prompt) |
 | `--name` | Human-readable workspace name |
 | `--setup` | local or server (skips the prompt); Choices: local, server |
-| `--force` | Overwrite existing config; Default: False |
+| `--force` | Overwrite existing config |
 
 ## `local`
 
 Set up a local model
-
-Routed in source installs and the desktop app.
 
 ### `corsia local`
 
@@ -445,16 +431,14 @@ Install oMLX and the local model its recommender picks for this Mac
 
 | Argument | Description |
 |---|---|
-| `--if-no-subscription` | Skip automatic setup when Claude Code or Codex is already signed in; Default: False |
-| `--automatic` | Default: False |
-| `--start-only` | Default: False |
-| `--before-start` | Default: False |
+| `--if-no-subscription` | Skip automatic setup when Claude Code or Codex is already signed in |
+| `--automatic` | — |
+| `--start-only` | — |
+| `--before-start` | — |
 
 ## `logs`
 
 Tail the backend log
-
-Routed in source installs and the desktop app.
 
 `corsia logs [backend]`
 
@@ -512,7 +496,7 @@ List connected MCP servers
 | Argument | Description |
 |---|---|
 | `--project` | List server reach for this project |
-| `--workspace` | List workspace-wide servers; Default: False |
+| `--workspace` | List workspace-wide servers |
 
 ### `corsia mcp reconnect`
 
@@ -532,17 +516,13 @@ Remove a connected MCP server
 
 ## `open`
 
-Open CORSIA
-
-Routed in source installs and the desktop app.
+Open CORSIA in the browser
 
 `corsia open [--force]`
 
 ## `perf`
 
 Historical latency reports: routes\|tools
-
-Routed in source installs and the desktop app.
 
 ### `corsia perf`
 
@@ -552,7 +532,7 @@ Historical route latency; needs the running server
 
 | Argument | Description |
 |---|---|
-| `--days` | Inclusive UTC day window: today plus the previous N-1 days (1-90; default: 7); Default: 7 |
+| `--days` | Inclusive UTC day window: today plus the previous N-1 days (1-90; default: 7) |
 | `--route` | Normalized route-template glob, for example /api/threads/* |
 
 ### `corsia perf tools`
@@ -561,13 +541,11 @@ Historical aggregate tool and LLM latency
 
 | Argument | Description |
 |---|---|
-| `--days` | Inclusive UTC day window: today plus the previous N-1 days (1-90; default: 7); Default: 7 |
+| `--days` | Inclusive UTC day window: today plus the previous N-1 days (1-90; default: 7) |
 
 ## `providers`
 
 Providers and models: list\|models\|add\|edit\|remove\|test\|window\|...
-
-Routed in source installs and the desktop app.
 
 ### `corsia providers`
 
@@ -576,7 +554,7 @@ corsia providers — CLI shim over the provider and model-catalog APIs.
 | Argument | Description |
 |---|---|
 | `--base` | API base URL (default $CORSIA_API_BASE or local) |
-| `--json` | print JSON instead of text; Default: False |
+| `--json` | print JSON instead of text |
 
 ### `corsia providers add`
 
@@ -607,7 +585,7 @@ change an External endpoint; omitted fields are kept (add the key in Providers)
 | `--base-url` | — |
 | `--dialect` | Choices: openai, anthropic |
 | `--model` | replace the declared model ids (repeatable) |
-| `--clear-models` | drop the declared model ids; Default: False |
+| `--clear-models` | drop the declared model ids |
 
 ### `corsia providers enable`
 
@@ -636,7 +614,7 @@ catalog rows
 | Argument | Description |
 |---|---|
 | `--provider` | filter by provider, harness or endpoint id |
-| `--all` | include hidden models; Default: False |
+| `--all` | include hidden models |
 
 ### `corsia providers remove`
 
@@ -697,15 +675,11 @@ Desktop app only.
 
 Restart CORSIA
 
-Routed in source installs and the desktop app.
-
 `corsia restart [--force]`
 
 ## `service`
 
-Manage the app service
-
-Routed in source installs and the desktop app.
+Manage CORSIA's service; source installs use the service for their checkout
 
 `corsia service [install|uninstall|start|stop|restart|status]`
 
@@ -715,34 +689,28 @@ Routed in source installs and the desktop app.
 
 Choose local or server exposure
 
-Routed in source installs and the desktop app.
-
 ### `corsia setup`
 
 | Argument | Description |
 |---|---|
 | `setup` | Choices: local, server; Required |
 
-In source installs, `corsia setup local|server` updates the choice and restarts the service. The desktop app routes this command directly to the Python CLI.
+In source installs, `corsia setup local|server` updates the choice and restarts the service. In the desktop app, it updates the choice without restarting.
 
 ## `sources`
 
 Which model sources are ready, one fix each
-
-Routed in source installs and the desktop app.
 
 ### `corsia sources`
 
 | Argument | Description |
 |---|---|
 | `action (?)` | Choices: recheck |
-| `--install-summary` | Default: False |
+| `--install-summary` | — |
 
 ## `start`
 
-Start CORSIA
-
-Routed in source installs and the desktop app.
+Start CORSIA; --open also checks model sources and opens the browser
 
 `corsia start [--open] [--force]`
 
@@ -750,21 +718,15 @@ Routed in source installs and the desktop app.
 
 Show CORSIA status
 
-Routed in source installs and the desktop app.
-
 ## `stop`
 
-Stop CORSIA
-
-Routed in source installs and the desktop app.
+Stop CORSIA; attempts to finish active work first unless --force is set
 
 `corsia stop [--stop-local-model] [--force]`
 
 ## `token`
 
 API tokens: create\|list\|revoke\|service
-
-Routed in source installs and the desktop app.
 
 ### `corsia token`
 
@@ -776,7 +738,7 @@ Mint an API token (shown once)
 |---|---|
 | `--user` | Account (default: the only one) |
 | `--label` | Label to identify the token later |
-| `--write-delegate-file` | Write it to the agent credential file instead of printing it; Default: False |
+| `--write-delegate-file` | Write it to the agent credential file instead of printing it |
 
 ### `corsia token list`
 
@@ -803,8 +765,6 @@ Mint the lifecycle shell's 1-hour service token
 
 Accounts: add\|passwd\|list
 
-Routed in source installs and the desktop app.
-
 ### `corsia user`
 
 ### `corsia user add`
@@ -814,7 +774,7 @@ Create an account
 | Argument | Description |
 |---|---|
 | `name (?)` | Username: 1-32 of a-z, 0-9, - or _ |
-| `--password-stdin` | Read the password from stdin; Default: False |
+| `--password-stdin` | Read the password from stdin |
 
 ### `corsia user list`
 
@@ -827,7 +787,7 @@ Change a password
 | Argument | Description |
 |---|---|
 | `name` | Account to update; Required |
-| `--password-stdin` | Read the password from stdin; Default: False |
+| `--password-stdin` | Read the password from stdin |
 
 ## Internal commands
 
