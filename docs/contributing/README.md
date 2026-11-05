@@ -16,4 +16,4 @@ The path from a fresh clone to a merged change, for developers who want to chang
 | 8 | [Testing and review](testing.md) | How to test your change, the checks your pull request runs, and how to read the review |
 | 9 | [Writing docs](writing-docs.md) | Where a page goes, the format, and how to keep it current |
 
-Checked against the code at `310115261`.
+Checked against the code at `ea522c7d6`.

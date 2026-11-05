@@ -36,10 +36,11 @@ Each `MISSING PATH` line names the page, then the path it cites. `check-pr` stop
 
 ## Fix it and run it again
 
-Change the file name back to `shell_guard.py`, then run `bash scripts/check-pr` again. Every step passes, and the run ends with:
+Change the file name back to `shell_guard.py`, then run `bash scripts/check-pr` again. Every step passes, and the last lines are:
 
 - **7/7 backend pytest — CI-OWNED**. CI runs the full backend suite on your pull request. Locally you run only the tests your change can affect ([Testing and review](testing.md#before-you-push)).
-- **Local gates passed WITHOUT the owner-identity scan**, in red, unless your machine has a CORSIA workspace profile (`USER.md`). This is expected on a contributor's machine and the run still passed. The owner-identity scan looks for one person's name and contact details in public files, so it needs that person's profile; CI doesn't run it either.
+- **Local gates passed WITHOUT the owner-identity scan**, in red, unless your machine has a CORSIA workspace profile (`USER.md`). This is expected on a contributor's machine and the run still passed. The owner-identity scan looks for one person's name and contact details in public files, so it needs that person's profile; CI doesn't run it either. A yellow line after it says how to provide one; you can ignore it.
+- **Run targeted tests from the actual change blast radius before push.**, in green: the reminder to run your change's own tests.
 
 ## Clean up
 
