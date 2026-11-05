@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
-from dataclasses import dataclass, field
 import hashlib
 import json
 import os
@@ -47,7 +46,7 @@ from host_access.supervisor import (
 from infra.db_async import run_in_db
 from tools.host_access_errors import HostAccessBlocked, HostAccessGateError, HostAccessRequired
 from tools.host_action_admission import no_lease_authorization
-from tools.host_action_types import ActionPermit as _ActionPermit, PreparedAction as _PreparedAction, HostActionAuthorization
+from tools.host_action_types import ActionPermit as _ActionPermit, PreparedAction as _PreparedAction, HostActionAuthorization, ConsumedHostAction
 from tools.host_action_values import boolean as _boolean, integer as _integer, number as _number, text as _text, search_payload
 from tools.host_access_external import (
     ExternalLaunchMismatch,
@@ -79,21 +78,6 @@ _HOST_ADAPTERS = _PATH_TOOLS | {
 
 
 
-@dataclass(frozen=True, slots=True)
-class ConsumedHostAction:
-    """Permit-free exact values the lower layer may now use for its effect."""
-
-    tool_name: str
-    resolved_path: Path | None = None
-    working_directory: Path | None = None
-    effective_timeout: int | None = None
-    _working_directory_fd: int | None = field(default=None, repr=False)
-    lease_id: str | None = field(default=None, repr=False)
-    lease_revision: int | None = field(default=None, repr=False)
-    permit_id: str | None = field(default=None, repr=False)
-    external_agent: bool = field(default=False, repr=False)
-
-
 _current_action_permit: ContextVar[_ActionPermit | None] = ContextVar(
     "host_access_action_permit",
     default=None,
@@ -105,6 +89,10 @@ def _canonical_tool_name(name: str | None) -> str:
     from tools.catalog import normalize_tool_name
 
     return normalize_tool_name(name)
+
+
+def is_path_tool(name: str | None) -> bool:
+    return _canonical_tool_name(name) in _PATH_TOOLS
 
 
 def _safe_params(params: Mapping[str, Any]) -> dict[str, Any]:

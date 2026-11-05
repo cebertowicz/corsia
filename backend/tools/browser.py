@@ -181,7 +181,7 @@ class BrowserScreenshotTool(Tool):
             try:
                 save_path = await asyncio.to_thread(
                     resolve_path, path, self._workspace, for_write=True,
-                    fence=kwargs.get("_host_access_fence"),
+                    thread_id=thread_id, fence=kwargs.get("_host_access_fence"),
                 )
             except PermissionError as exc:
                 return f"Error: {exc}"

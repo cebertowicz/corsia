@@ -44,6 +44,21 @@ class ActionPermit:
 
 
 @dataclass(frozen=True, slots=True)
+class ConsumedHostAction:
+    """Permit-free exact values the lower layer may now use for its effect."""
+
+    tool_name: str
+    resolved_path: Path | None = None
+    working_directory: Path | None = None
+    effective_timeout: int | None = None
+    _working_directory_fd: int | None = field(default=None, repr=False)
+    lease_id: str | None = field(default=None, repr=False)
+    lease_revision: int | None = field(default=None, repr=False)
+    permit_id: str | None = field(default=None, repr=False)
+    external_agent: bool = field(default=False, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class HostActionAuthorization:
     """Opaque registry result; only safe parameter overrides are public."""
 

@@ -134,12 +134,13 @@ class ToolRegistry:
         from tools.host_access_gate import (
             authorize_host_action,
             host_action_permit_scope,
+            is_path_tool,
         )
 
         if refusal := confined_reads.call_refusal(name, thread_context):
             return refusal
         fence_args = {}
-        if name in {"read_file", "write_file", "edit_file", "multi_edit", "list_dir", "glob", "grep", "browser_screenshot"}:
+        if is_path_tool(name):
             from tools.project_fence import fence_for_thread
 
             fence = await asyncio.to_thread(fence_for_thread, thread_context["id"])
