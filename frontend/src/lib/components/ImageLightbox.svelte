@@ -370,7 +370,7 @@
 	.viewport.pannable { cursor: grab; }
 	.viewport.panning { cursor: grabbing; user-select: none; }
 	/* Auto margins centre a smaller image and, unlike justify-content, never clip the start of a larger one. */
-	.pad { display: flex; box-sizing: border-box; width: max-content; min-width: var(--pad-min-width); min-height: var(--pad-min-height); padding: var(--image-margin); padding-bottom: calc(var(--image-margin) + var(--covered-height)); }
+	.pad { --pad-min-width: 100%; --pad-min-height: 100%; --image-margin: 0px; --covered-height: 0px; display: flex; box-sizing: border-box; width: max-content; min-width: var(--pad-min-width); min-height: var(--pad-min-height); padding: var(--image-margin); padding-bottom: calc(var(--image-margin) + var(--covered-height)); }
 	.frame {
 		position: relative; flex: none; margin: auto;
 		border-radius: 2px; box-shadow: 0 0 0 1px var(--border), 0 1px 4px color-mix(in srgb, #000 28%, transparent);
