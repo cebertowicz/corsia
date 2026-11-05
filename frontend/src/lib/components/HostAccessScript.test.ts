@@ -23,7 +23,8 @@ it('shows the script, trigger, purpose and request with approve and deny', async
 	} });
 	flushSync();
 	expect(target.textContent).toContain('task.py');
-	expect(target.textContent).toContain('Allow this script to take actions as your agent and on GitHub');
+	expect(target.textContent).toContain('Allow this script to act as your agent and use the agents’ GitHub account');
+	expect(target.textContent).toContain('Request (as the agent quoted it)');
 	expect(target.textContent).toContain('Needs approval');
 	expect(target.textContent).toContain('When it runs');
 	expect(target.textContent).toContain('Every 10 minutes');
