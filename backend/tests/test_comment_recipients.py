@@ -55,6 +55,35 @@ def test_tag_selection_uses_viewer_roster(isolated_db):
     db.close()
 
 
+def test_create_fails_closed_when_the_tag_roster_cannot_be_read(isolated_db, monkeypatch):
+    import sqlite3
+
+    from doceditor.review_requests import ReviewRosterError
+
+    db = get_db()
+    for name in ("owner", "viewer", "allowed"):
+        seed_thread(db, name, model=None)
+    db.execute("UPDATE threads SET agent_enabled=1,agent_status='active',agent_responsibility='Test' WHERE id='allowed'")
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="owner")
+    comments_before = db.execute("SELECT COUNT(*) FROM doc_comments").fetchone()[0]
+
+    def broken(*args):
+        raise sqlite3.OperationalError("private schema detail")
+
+    monkeypatch.setattr(comment_recipients, "agent_rows", broken)
+    with pytest.raises(ReviewRosterError):
+        create_in_db(CommentInput(
+            artifact_id=aid, path=None, body="Hello @Allowed", author="Person", author_kind="user", user_id="owner-token",
+            parent_id=root["id"], viewing_thread_id="viewer", tagged_agent_ids=["allowed"],
+            tagged_agent_mentions=[{"agent_id": "allowed", "start": 6, "end": 14}],
+        ), None, "tagged-roster-down", CreateReceipt())
+    assert db.execute("SELECT COUNT(*) FROM doc_comments").fetchone()[0] == comments_before
+    assert db.execute("SELECT COUNT(*) FROM doc_comments WHERE id='tagged-roster-down'").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM doc_comment_tags").fetchone()[0] == 0
+    db.close()
+
+
 def test_taggable_roster_includes_owner_and_corsia_excludes_viewer_and_unavailable(isolated_db, monkeypatch):
     from doceditor import feedback_delivery
 

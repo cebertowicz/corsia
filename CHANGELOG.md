@@ -12,6 +12,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
 - A pull request review that a restart cut off now picks up again when CORSIA starts, instead of waiting for the next push (thanks @mikemikimike).
 - A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.
+- A one-time reminder an agent sets for a time in another time zone now goes off at that time; before, it could go off hours early or late.
 - After this update, every chat that runs on your existing Claude Code or Codex account waits until you sign that account in again in CORSIA, automations and reviewers included; if many agents share that account, they all wait until then. Each Claude Code and Codex account now has its own CORSIA sign-in, so signing in or out of `claude` or `codex` in a terminal no longer changes the account CORSIA uses.
 - Agents can now read email attachments in Gmail and in mail accounts connected with a password: an agent reading an email sees its attachments and can save them into its workspace. Agents can now read PDFs, those attachments and any PDF in your workspace: the text page by page, a form's filled-in values, and a page as a picture when its text isn't enough.
 - A comment on selected document text still posts when an agent edits inside that text before you press Comment, and is anchored on what remains; you are asked to select again only when the agent removed all of it.
@@ -30,6 +31,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - On a local model that runs short of memory partway through a reply, the context meter now measures the chat against what still fits in memory for the rest of that reply, the same limit CORSIA checks before each call, instead of showing it far emptier than it is.
 - On a paired computer, the update screen no longer tells you to open CORSIA on your main computer during a normal restart; it says so only if the restart takes longer than usual.
 - Restart in oMLX's own dashboard now restarts CORSIA's local model server and loads the models it had loaded again, instead of saying the server isn't running under a supervisor. It takes effect once the local model server has been stopped and started since this update.
+- Review requests now let you choose Reject, Approve with changes, or Approve regardless of how many comments you left.
 - Selecting text in a table cell works across the whole cell: you can drag over any part of it, and its comment button appears when you let go.
 - Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
 - Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.

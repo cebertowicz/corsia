@@ -1,6 +1,10 @@
 # Documentation
 
-Every section of the docs, in reading order; each section's first page lists the rest. Start with the repository [README](../README.md) for what CORSIA is and how to install it.
+Every section of the docs, in reading order; each section's first page lists the rest. Start with the repository [README](../README.md) for what CORSIA is, then [Get started](#get-started) to install it.
+
+## Get started
+
+How to install CORSIA, create a first project and get a first agent doing work. Start with [Getting started](getting-started/README.md), which lists every page in order.
 
 ## Contribute
 
@@ -10,7 +14,7 @@ The rules for issues, the Contributor License Agreement and pull requests are in
 
 ## How CORSIA works
 
-How CORSIA is built and why, for engineers deciding whether to adopt it or contribute. Start with the [overview](how-it-works/README.md), which lists every page and defines the terms, then [Architecture](how-it-works/architecture.md).
+How CORSIA is built and why, for engineers deciding whether to adopt it or contribute. Start with the [overview](how-it-works/README.md), which lists every page, then [Architecture](how-it-works/architecture.md).
 
 ## Security
 
@@ -42,6 +46,7 @@ Before reporting a vulnerability, read [`SECURITY.md`](../SECURITY.md).
 | [CLI](reference/cli.md) | Commands and arguments, generated from the CLI code |
 | [Configuration](reference/configuration.md) | Environment variables CORSIA reads, generated from the code |
 | [Agent tools](reference/agent-tools.md) | Reachable agent tools and how to load them |
+| [Glossary](reference/glossary.md) | Terms used throughout the documentation |
 | [`CHANGELOG.md`](../CHANGELOG.md) | What has shipped |
 
 ## About this project

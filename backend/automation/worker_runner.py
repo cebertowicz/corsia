@@ -319,7 +319,7 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
         read_paths, task = await asyncio.to_thread(_write, found, row["id"], run_input)
         check = json.dumps({"workflow": found["workflow"], "schema": found["schema"],
                             "settings": {**found["settings"], "started_at": datetime.now(timezone.utc).isoformat()},
-                            "trace": run_input.get("trace") or [], "waited": waited,
+                            "waited": waited,
                             "item_version": found["facts"].get(inputs.HEAD_SHA_FACT),
                             "result_context": run_input.get("result_context"),
                             "intent": found["intent"][1]})
@@ -371,7 +371,7 @@ async def _refuse(row: Mapping[str, Any], run_input: Mapping[str, Any], reason: 
 
 async def _end(row: Mapping[str, Any], kept: Mapping[str, Any], outcome: str, reason: str) -> None:
     """End a start no worker result settles, reported with what its row ``kept``: the
-    claimed input (its trace) or, once its worker was made, its check."""
+    claimed input or, once its worker was made, its check."""
     check = {"workflow": row["workflow_id"], "waited": row["id"] <= _state["waited"], **kept}
     await _settle(worker_settle.settlement(row, check, outcome, {"reason": reason}))
 

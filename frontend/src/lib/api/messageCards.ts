@@ -28,7 +28,7 @@ export const CARD_STATE_LABELS: Record<MessageCardState, string> = {
 	needs_review: 'Needs your review',
 	approved: 'Approved',
 	approved_with_changes: 'Approved with changes',
-	changes_requested: 'Changes requested',
+	changes_requested: 'Rejected',
 	answered: 'Answered',
 	answered_internally: 'Answered',
 	closed: 'Task closed',

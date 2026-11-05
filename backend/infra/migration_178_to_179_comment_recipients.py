@@ -1,7 +1,7 @@
-"""Schema 177 -> 178: comment tags and per-thread notification state."""
+"""Schema 178 -> 179: comment tags and per-thread notification state."""
 
 
-def migrate_177_to_178(conn):
+def migrate_178_to_179(conn):
     conn.execute("""CREATE TABLE IF NOT EXISTS doc_comment_tags (
         comment_id TEXT NOT NULL REFERENCES doc_comments(id) ON DELETE CASCADE,
         agent_id TEXT NOT NULL,

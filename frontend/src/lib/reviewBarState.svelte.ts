@@ -27,19 +27,21 @@ export function createReviewBarState() {
 	/** The layout a send came from: the sending bar keeps it, so nothing remounts under the user's hands. */
 	let sendingFrom = $state<'ask' | 'noting'>('ask');
 	let note = $state('');
+	let noteFor = $state<'changes_requested' | 'approved_with_changes'>('changes_requested');
+	let accepting = $state(false);
 	let failure = $state('');
+	/** The server refused a verdict without a note: the note stays required for this ask whatever the local count says. */
+	let noteDemanded = $state(false);
 	let receipt = $state<ReviewReceipt | null>(null);
 	const current = (id: string, stamp: number) => artifactId === id && generation === stamp;
 
-	/** The label follows the round's feedback, never the last click. */
-	const approveLabel = () => ((read?.round_feedback_count ?? 0) > 0 ? 'Approve with changes' : 'Approve');
-	const noteRequired = () => (read?.round_feedback_count ?? 0) === 0;
+	const noteRequired = () => noteDemanded || (read?.round_feedback_count ?? 0) === 0;
 	const visible = () => phase === 'answered' || phase === 'stale' || phase === 'sending' || Boolean(read?.ask_raised);
 
 	function setTarget(id: string | null): boolean {
 		if (id === artifactId) return false;
 		artifactId = id; generation += 1; loadSequence += 1; settledAsk = null;
-		read = null; phase = 'ask'; note = ''; failure = ''; receipt = null;
+		read = null; phase = 'ask'; note = ''; noteFor = 'changes_requested'; failure = ''; receipt = null; noteDemanded = false;
 		return true;
 	}
 	async function load() {
@@ -50,7 +52,7 @@ export function createReviewBarState() {
 			if (!current(id, stamp) || sequence !== loadSequence) return;
 			read = next;
 			if ((phase === 'answered' || phase === 'stale') && next.ask_raised && next.ask_raised_at !== settledAsk) {
-				phase = 'ask'; receipt = null; failure = ''; note = ''; settledAsk = null;
+				phase = 'ask'; receipt = null; failure = ''; note = ''; settledAsk = null; noteDemanded = false;
 			} else if (phase === 'noting' && !next.ask_raised) {
 				phase = 'ask'; note = '';
 			}
@@ -67,13 +69,13 @@ export function createReviewBarState() {
 	): Promise<ReviewAnswerOutcome> {
 		const id = artifactId, stamp = generation;
 		if (!id || (phase !== 'ask' && phase !== 'noting')) return 'ignored';
-		if (verdict === 'changes_requested' && noteRequired() && !note.trim()) { failure = NOTE_NEEDED; return 'ignored'; }
+		if (verdict !== 'approved' && noteRequired() && !note.trim()) { failure = NOTE_NEEDED; return 'ignored'; }
 		const from = phase;
 		sendingFrom = from;
 		phase = 'sending'; failure = '';
 		onSendStarted?.();
 		try {
-			const sent = await answerReview(id, verdict, verdict === 'changes_requested' ? note : '', read?.hold_ids ?? []);
+			const sent = await answerReview(id, verdict, verdict !== 'approved' ? note : '', read?.hold_ids ?? []);
 			// The hold-keyed card overlay must receive the canonical server response even if this bar moved on.
 			onSendConfirmed?.(sent);
 			if (!current(id, stamp)) return 'sent';
@@ -89,7 +91,9 @@ export function createReviewBarState() {
 				phase = 'stale';
 				await load();
 			} else if (error instanceof ReviewRefusal && error.code === 'note_required') {
-				phase = 'noting'; failure = NOTE_NEEDED;
+				// The note opens for the verdict that was refused, so sending it records that verdict.
+				if (verdict !== 'approved') noteFor = verdict;
+				noteDemanded = true; phase = 'noting'; failure = NOTE_NEEDED;
 			} else {
 				phase = from; failure = SEND_FAILED;
 			}
@@ -99,8 +103,10 @@ export function createReviewBarState() {
 	return {
 		get read() { return read; }, get phase() { return phase; }, get sendingFrom() { return sendingFrom; }, get receipt() { return receipt; },
 		get note() { return note; }, set note(value: string) { note = value; },
+		get noteFor() { return noteFor; }, set noteFor(value: typeof noteFor) { noteFor = value; },
+		get accepting() { return accepting; }, set accepting(value: boolean) { accepting = value; },
 		get failure() { return failure; }, set failure(value: string) { failure = value; },
-		get visible() { return visible(); }, get approveLabel() { return approveLabel(); },
+		get visible() { return visible(); },
 		get noteRequired() { return noteRequired(); },
 		get artifactId() { return artifactId; },
 		setTarget, load, openNote, cancelNote, answer,

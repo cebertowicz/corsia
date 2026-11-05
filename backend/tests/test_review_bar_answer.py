@@ -135,9 +135,9 @@ def test_a_plain_approval_reaches_the_agent_with_its_note(db):
     assert stored["feedback_counts"] == {"comments": 0, "suggestions": 0, "edits": 0}
 
 
-def test_the_round_feedback_switches_approve_to_approve_with_changes(db):
+def test_approval_keeps_the_chosen_verdict_with_feedback(db):
     artifact = seed_document(db, "owner", name="proposal.md")
-    _ask(db, artifact)
+    node = _ask(db, artifact)
     assert review_bar.round_state(db, artifact)["round_feedback_count"] == 0
 
     _comment(db, artifact)
@@ -152,9 +152,15 @@ def test_the_round_feedback_switches_approve_to_approve_with_changes(db):
 
     assert state["round_feedback_count"] == 2
     assert state["round_feedback_counts"] == {"comments": 1, "suggestions": 1, "edits": 0}
-    # The label the client last showed does not decide: the round does.
     _answer(db, artifact, "approved")
-    assert "approved with changes" in _last_ask_wake(db)
+    stored = _clearance(db, node)
+    assert stored["verdict"] == "approved"
+    rows = db.execute("SELECT id, replacement FROM doc_comments WHERE artifact_id=?", (artifact,)).fetchall()
+    assert stored["feedback_ids"] == {
+        "comments": [row["id"] for row in rows if row["replacement"] is None],
+        "suggestions": [row["id"] for row in rows if row["replacement"] is not None],
+        "edits": [],
+    }
 
 
 def test_approve_with_changes_and_the_feedback_task_pointer(db):
@@ -181,13 +187,16 @@ def test_approve_with_changes_and_the_feedback_task_pointer(db):
     }
 
 
-def test_an_approval_with_changes_but_no_feedback_reads_as_plain(db):
+def test_approval_with_changes_without_feedback_needs_a_note(db):
     artifact = seed_document(db, "owner", name="proposal.md")
     node = _ask(db, artifact)
 
-    _answer(db, artifact, "approved_with_changes")
-
-    assert _clearance(db, node)["verdict"] == "approved"
+    with pytest.raises(review_bar.AnswerRefused) as refused:
+        _answer(db, artifact, "approved_with_changes")
+    assert refused.value.code == "note_required"
+    assert _open_holds(db, node) == 1
+    _answer(db, artifact, "approved_with_changes", "Revise the heading")
+    assert _clearance(db, node)["verdict"] == "approved_with_changes"
 
 
 def test_request_changes_with_no_feedback_needs_a_note(db):
@@ -438,8 +447,28 @@ def test_an_edit_sent_before_the_answer_still_counts_in_the_round(db):
     state = review_bar.round_state(db, artifact)
     assert state["round_feedback_counts"] == {"comments": 0, "suggestions": 0, "edits": 1}
     result = _answer(db, artifact, "approved")
-    assert result.review["verdict"] == "approved_with_changes"
+    assert result.review["verdict"] == "approved"
     assert result.review["feedback_counts"]["edits"] == 1
+    assert result.review["feedback_ids"]["edits"] == [batch]
+
+
+def test_open_edit_batch_id_survives_delivery_in_release(db):
+    from datetime import datetime, timedelta, timezone
+    from pathlib import Path
+    from doceditor.feedback_state import USER_AUTHOR_ID
+
+    artifact = seed_document(db, "owner", name="edited.md")
+    node = _ask(db, artifact)
+    later = (datetime.now(timezone.utc) + timedelta(minutes=1)).isoformat()
+    with write_transaction(db, scope="test_record_edit") as connection:
+        batch = feedback_batch_edits.record_edit(
+            connection, artifact_id=artifact, recipient_id="owner", author_kind="user",
+            author_id=USER_AUTHOR_ID, actor_display="Steve", path=Path("/workspace/shared/edited.md"),
+            before=b"before\n", after=b"after\n", at=later,
+        )
+    _answer(db, artifact, "approved")
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_edit_items WHERE batch_id=?", (batch,)).fetchone()[0] == 0
+    assert _clearance(db, node)["feedback_ids"] == {"comments": [], "suggestions": [], "edits": [batch]}
 
 
 @pytest.mark.parametrize("verdict,with_comment,note,feedback", [

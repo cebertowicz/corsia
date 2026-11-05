@@ -13,7 +13,7 @@
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
 	import { createReplyNavigation } from '$lib/docReplyLanding.svelte';
-	import { createDocViewerImages, type DocumentImageRequest } from '$lib/docViewerImages';
+	import { createDocViewerImages } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
 	import type { DocOpenRefusal } from '$lib/docOpenRefusal';
@@ -34,6 +34,7 @@
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import { syncActiveDocumentEditor } from '$lib/docViewerEditorState';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
+	import type { DocViewerProps } from '$lib/docViewerProps';
 	import type { TabLoadSignal } from '$lib/artifactTabs';
 	import {
 		withDraftArtifactId, existingDraft,
@@ -49,6 +50,7 @@
 	import DocBottomBand from './DocBottomBand.svelte';
 	import DocViewerStatus from './DocViewerStatus.svelte';
 	import ReviewBar from './ReviewBar.svelte';
+	import { createReviewBarState } from '$lib/reviewBarState.svelte';
 	import { toasts } from '$lib/stores/toast';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
 	import DocumentViewport from './DocumentViewport.svelte';
@@ -69,25 +71,7 @@
 		covered = false,
 		readStampSuppressed = false,
 		onLanded,
-	}: {
-		target: DocViewerTarget | null;
-		onClose?: () => void;
-		escapeCloses?: boolean;
-		/** Reports load progress against the tab instance that started it. */
-		onSignal?: (signal: TabLoadSignal) => void;
-		/** A newer revision exists than the one on screen. */
-		stale?: boolean;
-		onReload?: () => void;
-		/** Opens an image of the document larger in the canvas, with its comments. */
-		onOpenImage?: (request: DocumentImageRequest) => void;
-		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
-		/** The canvas shows an image viewer over this document; it keeps its state but answers no keys. */
-		covered?: boolean;
-		/** An image covers the document, or it is still being put back after a tab return, so its replies are not on screen and must not be marked read. */
-		readStampSuppressed?: boolean;
-		/** The tab's reply landing was acted on, or had no readable replies; the tab drops it. */
-		onLanded?: () => void;
-	} = $props();
+	}: DocViewerProps = $props();
 
 	let docState = $state<DocState>('loading');
 	let openRefusal = $state<DocOpenRefusal | null>(null);
@@ -133,6 +117,7 @@
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
 
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey);
+	const reviewBarState = createReviewBarState();
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
 	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it.
@@ -318,7 +303,7 @@
 		onReopen={() => reloadNonce += 1}
 		onRead={() => reloadNonce += 1}
 	>
-		{#snippet reviewBar()}<ReviewBar artifactId={loadedArtifactId} draftOpen={composerHasText} suppressed={commentUI.state !== null && commentUI.state !== undefined} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />{/snippet}
+		{#snippet reviewBar()}{#if !commentUI.sheetUp}{@render reviewControls(false)}{/if}{/snippet}
 		{#snippet presence()}
 			{#if target && loadedArtifactId}
 				<DocPresenceStatus {target} artifactId={loadedArtifactId} {docState} root={docRoot}
@@ -360,6 +345,8 @@
 		onStartComment={draftController.start}
 	/>
 	<DocCommentSurface
+		reviewBar={reviewControls}
+		reviewVisible={commentUI.sheetUp}
 		state={commentUI.state}
 		anchor={commentUI.anchor}
 		bounds={docRoot}
@@ -396,4 +383,7 @@
 		{readStampSuppressed}
 	/>
 </div>
+{#snippet reviewControls(inSheet: boolean)}
+	<ReviewBar artifactId={loadedArtifactId} bar={reviewBarState} draftOpen={composerHasText} suppressed={commentUI.state !== null && commentUI.state !== undefined && !inSheet} {inSheet} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
+{/snippet}
 <!-- Styles are in DocViewer.css. -->
