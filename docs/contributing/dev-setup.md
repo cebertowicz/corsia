@@ -56,7 +56,7 @@ Open `http://127.0.0.1:43872/` in a browser. If you chose a different frontend p
 
 ## Tests
 
-Run a targeted backend test from the checkout root with fresh temporary workspace and state directories:
+To check that the setup works, run one backend test from the checkout root with fresh temporary workspace and state directories:
 
 ```bash
 CORSIA_TEST_ROOT=$(mktemp -d)
@@ -65,15 +65,7 @@ CORSIA_WORKSPACE="$CORSIA_TEST_ROOT/workspace" CORSIA_STATE_DIR="$CORSIA_TEST_RO
 rm -rf "$CORSIA_TEST_ROOT"
 ```
 
-Choose tests that cover your change.
-
-Run the frontend tests from `frontend/`:
-
-```bash
-npm run test
-```
-
-Before you push, run the checks in [Pull requests](../../CONTRIBUTING.md#pull-requests).
+How to test a change and what to run before you push are in [Testing and review](testing.md).
 
 ## Next steps
 
