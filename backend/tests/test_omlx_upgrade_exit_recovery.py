@@ -148,7 +148,7 @@ async def test_failed_exit_recovery_reports_error_to_held_call(isolated_db, monk
         await asyncio.sleep(0)
         omlx_restart.on_exit("seat", life, 123, AsyncMock(return_value={"ok": False}), lambda _sid: "", ("crash", False))
         release.set()
-        with pytest.raises(RuntimeError, match="Check the server in Settings and try again"):
+        with pytest.raises(RuntimeError, match="Check the server in Settings. Restart CORSIA to retry the upgrade"):
             await asyncio.wait_for(waiter, 2)
         assert (await upgrade)["reason"] == "start_failed"
     finally:

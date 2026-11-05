@@ -9,14 +9,14 @@ from llm.providers import omlx_restart, omlx_supervisor
 
 
 @pytest.mark.parametrize(("reason", "cause"), [
-    ("busy", "busy"),
-    ("not_idle", "couldn’t determine whether it was idle"),
-    ("drain_timeout", "active requests did not finish in time"),
-    ("loaded_unknown", "couldn’t determine which models were loaded"),
-    ("stop_failed", "couldn’t stop"),
-    ("start_failed", "couldn’t start"),
-    ("reload_failed", "couldn’t restore"),
-    ("unexpected", "Check the server in Settings"),
+    ("busy", "Couldn’t upgrade the local model server because the server was busy. Wait for its activity to finish. Restart CORSIA to retry the upgrade."),
+    ("not_idle", "Couldn’t upgrade the local model server because CORSIA couldn’t determine whether it was idle. Check the server in Settings. Restart CORSIA to retry the upgrade."),
+    ("drain_timeout", "Couldn’t upgrade the local model server because active requests did not finish in time. Wait for them to finish. Restart CORSIA to retry the upgrade."),
+    ("loaded_unknown", "Couldn’t upgrade the local model server because CORSIA couldn’t determine which models were loaded. Check the server in Settings. Restart CORSIA to retry the upgrade."),
+    ("stop_failed", "Couldn’t upgrade the local model server because CORSIA couldn’t stop the server. Check the server in Settings. Restart CORSIA to retry the upgrade."),
+    ("start_failed", "Couldn’t upgrade the local model server because CORSIA couldn’t start the server. Check the server in Settings. Restart CORSIA to retry the upgrade."),
+    ("reload_failed", "Couldn’t upgrade the local model server because CORSIA couldn’t restore the loaded models. Check the server in Settings. Restart CORSIA to retry the upgrade."),
+    ("unexpected", "Couldn’t upgrade the local model server. Check the server in Settings. Restart CORSIA to retry the upgrade."),
 ])
 async def test_start_reports_held_upgrade_failure(monkeypatch, reason, cause):
     release = asyncio.Event()
@@ -36,9 +36,21 @@ async def test_start_reports_held_upgrade_failure(monkeypatch, reason, cause):
     release.set()
     result = await request
     assert result["ok"] is False
-    assert cause in result["message"]
-    assert "try again" in result["message"].lower()
+    assert result["message"] == cause
     start.assert_not_awaited()
+
+
+async def test_cancelled_upgrade_reports_retry_instructions():
+    operation = asyncio.create_task(asyncio.Event().wait())
+    life = omlx_restart.Life(restart=operation, hold_requests=True)
+    operation.cancel()
+    with pytest.raises(omlx_restart.UpgradeAdmissionError) as error:
+        async with omlx_restart.request_slot({"seat": life}, "seat"):
+            pytest.fail("a call passed a cancelled upgrade")
+    assert str(error.value) == (
+        "Couldn’t upgrade the local model server because the upgrade was cancelled. "
+        "Check the server in Settings. Restart CORSIA to retry the upgrade."
+    )
 
 
 async def test_start_does_not_translate_unrelated_runtime_error(monkeypatch):

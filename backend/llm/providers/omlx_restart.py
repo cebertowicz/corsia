@@ -122,17 +122,17 @@ async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIt
         task = life.restart
         await asyncio.wait({task})  # caller cancellation must not cancel the restart
         if task.cancelled():
-            raise UpgradeAdmissionError("Couldn’t upgrade the local model server because the upgrade was cancelled. Check the server in Settings and try again.")
+            raise UpgradeAdmissionError("Couldn’t upgrade the local model server because the upgrade was cancelled. Check the server in Settings. Restart CORSIA to retry the upgrade.")
         try:
             result = task.result()
         except Exception as exc:
-            raise UpgradeAdmissionError("Couldn’t upgrade the local model server. Check the server in Settings and try again.") from exc
+            raise UpgradeAdmissionError("Couldn’t upgrade the local model server. Check the server in Settings. Restart CORSIA to retry the upgrade.") from exc
         if isinstance(result, dict) and result.get("reason") != "already_current":
             if not result.get("restarted") or result.get("reason"):
                 reason = _UPGRADE_FAILURES.get(result.get("reason"))
                 if reason:
-                    raise UpgradeAdmissionError(f"Couldn’t upgrade the local model server because {reason} and try again.")
-                raise UpgradeAdmissionError("Couldn’t upgrade the local model server. Check the server in Settings and try again.")
+                    raise UpgradeAdmissionError(f"Couldn’t upgrade the local model server because {reason}. Restart CORSIA to retry the upgrade.")
+                raise UpgradeAdmissionError("Couldn’t upgrade the local model server. Check the server in Settings. Restart CORSIA to retry the upgrade.")
         life = lives.get(server_id or "")
     if life is None:
         yield  # unmanaged and other providers have no supervisor admission
@@ -308,6 +308,7 @@ async def recover(
         except Exception:
             if not context.exited(life):
                 raise
+            log.warning("oMLX preparation failed with an observed exit for %s", server_id, exc_info=True)
             result = None
         if not context.exited(life) and result is not None:
             return result
@@ -336,6 +337,7 @@ async def recover(
                 continue
         except Exception:
             if context.exited(life):
+                log.warning("oMLX recovery failed with an observed exit for %s", server_id, exc_info=True)
                 continue
             raise
         missing = sorted(set(context.models) - {row["identifier"] for row in restored or []})

@@ -93,8 +93,6 @@ async def _prepare(
     try:
         async with asyncio.timeout(timeout):
             stopped = await stop({"server_id": server_id})
-    except asyncio.CancelledError:
-        raise
     except Exception:
         life.stopping = False
         raise

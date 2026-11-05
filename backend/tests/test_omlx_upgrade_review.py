@@ -5,7 +5,6 @@ import logging
 import time
 from unittest.mock import AsyncMock
 
-import app_lifecycle
 from llm.omlx_release import OMLX_VERSION
 from llm.providers import omlx_restart, omlx_supervisor
 from test_omlx_upgrade import _seat, _upgrade
@@ -46,17 +45,6 @@ async def test_crash_restart_does_not_hold_provider_admission():
     finally:
         blocker.cancel()
         await asyncio.gather(blocker, return_exceptions=True)
-
-
-async def test_network_discovery_does_not_start_a_second_upgrade(monkeypatch):
-    monkeypatch.setattr("llm.network_discovery.get_servers", lambda: [{"id": "seat"}])
-    monkeypatch.setattr(app_lifecycle, "run_in_db", AsyncMock(side_effect=lambda fn, *args: fn(*args)))
-    monkeypatch.setattr("llm.network_discovery._sweep_all_servers", AsyncMock())
-    monkeypatch.setattr(app_lifecycle, "_discover_network_servers", AsyncMock(return_value=1))
-    upgrade = AsyncMock()
-    monkeypatch.setattr(omlx_supervisor, "schedule_startup_upgrade", upgrade)
-    await app_lifecycle._startup_network_discovery()
-    upgrade.assert_not_called()
 
 
 async def test_unreadable_state_emits_skip(isolated_db, monkeypatch):

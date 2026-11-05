@@ -35,7 +35,7 @@ async def test_busy_external_activity_fails_held_calls_without_stopping(isolated
     await asyncio.sleep(0)
     release_check.set()
     assert (await asyncio.wait_for(upgrade, 2))["reason"] == "busy"
-    with pytest.raises(RuntimeError, match="server was busy. Wait for its activity to finish and try again"):
+    with pytest.raises(RuntimeError, match="server was busy. Wait for its activity to finish. Restart CORSIA to retry the upgrade"):
         await waiter
     assert calls == []
 
