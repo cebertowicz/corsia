@@ -51,7 +51,7 @@ Checked against the code at `7a8c55d84`.
 
 The commit is the one your branch is based on, since a commit can't name itself. When you change code a page describes, update the page in the same pull request and set the line to your branch's base commit.
 
-If you checked only part of a page, name the part, for example "Product-event sections checked against the code at `<sha>`." Some section landing pages state one checked commit for the whole section. A page's own line overrides that statement.
+If you checked only part of a page, name the part, for example "Product-event sections checked against the code at `<sha>`." Some section landing pages state one checked commit for the whole section. A page's own line overrides that statement. Generated pages carry no checked line, because a test fails when they differ from the code.
 
 ## Public content
 
