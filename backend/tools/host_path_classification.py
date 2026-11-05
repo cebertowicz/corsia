@@ -18,8 +18,7 @@ def path_review_classification(
     from tools.host_path_policy import current_protected_host_path_policy
 
     forms = tuple(dict.fromkeys(paths))
-    policy = (current_protected_host_path_policy(thread_id=thread_id, fence=fence)
-              if thread_id is not None or fence is not None else current_protected_host_path_policy())
+    policy = current_protected_host_path_policy(thread_id=thread_id, fence=fence)
     for form in forms:
         if message := policy.hard_floor_denial(form):
             return True, message

@@ -211,9 +211,9 @@ def test_attachment_paths_obey_calling_thread_fence(tmp_path, monkeypatch):
     monkeypatch.setattr("tools.sandbox_config.is_path_allowed", lambda *args, **kwargs: True)
     monkeypatch.setattr("tools.project_fence._event", lambda *args, **kwargs: None)
     monkeypatch.setattr("tools.project_fence.fence_for_thread", lambda thread_id: Fence((FencedRoot(root, "private"),), thread_id))
-    with pytest.raises(DraftRefused, match="missing or unreadable"):
+    with pytest.raises(DraftRefused, match="in project `private`, outside your scope"):
         attachments.inspect("caller", ["project/file.txt"], 100)
-    with pytest.raises(DraftRefused, match="missing or unreadable"):
+    with pytest.raises(DraftRefused, match="in project `private`, outside your scope"):
         attachments.add("caller", EmailMessage(), [{"path": "project/file.txt", "size": 8}])
 
 
@@ -285,4 +285,4 @@ async def test_search_prunes_fenced_project_and_reports_it(tmp_path, monkeypatch
     result = await tool_type(workspace=tmp_path).execute(pattern, _thread_id="caller")
     assert "open.txt" in result
     assert "private.txt" not in result
-    assert "Other projects this agent can't read were left out." in result
+    assert "Folders this agent can't read were left out." in result

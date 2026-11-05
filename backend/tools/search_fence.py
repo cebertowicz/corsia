@@ -8,7 +8,7 @@ from pathlib import Path
 from tools import project_fence
 from tools.host_path_resolution import contains, containment_key, key_contains
 
-NOTICE = "Other projects this agent can't read were left out."
+NOTICE = "Folders this agent can't read were left out."
 _ESCAPE = str.maketrans({char: f"\\{char}" for char in "\\*?[]{}!"})
 
 
@@ -30,6 +30,7 @@ class SearchFence:
         )
         self._root_keys = tuple(containment_key(form) for fenced in self.roots for form in fenced.forms)
         self.pruned = False
+        self.incomplete = False
         self.has_exclusions = any(
             contains(search, form) for fenced in self.roots
             for form in fenced.forms for search in search_forms
@@ -84,12 +85,17 @@ class SearchFence:
                         for parent in paths:
                             if self.excludes(parent):
                                 continue
-                            with os.scandir(parent) as entries:
-                                next_paths.extend(
-                                    Path(entry.path) for entry in entries
-                                    if contains(Path(part), Path(entry.name))
-                                    and entry.is_dir(follow_symlinks=False)
-                                )
+                            try:
+                                with os.scandir(parent) as entries:
+                                    next_paths.extend(
+                                        Path(entry.path) for entry in entries
+                                        if contains(Path(part), Path(entry.name))
+                                        and entry.is_dir(follow_symlinks=False)
+                                    )
+                            except OSError:
+                                self.incomplete = True
+                                relative = parent.relative_to(root).as_posix().translate(_ESCAPE)
+                                exclusions.add(f"!/{relative}/" if relative != "." else "!/**")
                         paths = next_paths
                     for path in paths:
                         relative = path.relative_to(root).as_posix().translate(_ESCAPE)

@@ -224,7 +224,7 @@ def test_file_tools_cannot_write_workspace_git_controls(tmp_path, monkeypatch):
     init(repo)
     git = repo / '.git'
     policy = ProtectedHostPathPolicy(home=tmp_path / 'home', state_root=tmp_path / 'state', workspace=repo)
-    monkeypatch.setattr(host_path_policy, 'current_protected_host_path_policy', lambda: policy)
+    monkeypatch.setattr(host_path_policy, 'current_protected_host_path_policy', lambda **kwargs: policy)
     (repo / 'link').symlink_to(git / 'config')
     paths = (git / 'config', git / 'config.lock', git / 'commondir', git / 'hooks' / 'pre-commit', repo / 'link',
              repo / '.GIT' / 'CONFIG', repo / '.git' / 'Hooks' / 'pre-commit')

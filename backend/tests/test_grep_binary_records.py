@@ -25,4 +25,4 @@ async def test_binary_records_are_visible_or_incomplete(tmp_path, monkeypatch, m
     else:
         assert ("binary.dat" in result) if mode == "files" else result.strip().isdecimal()
         assert "INCOMPLETE" not in result
-    assert "Other projects this agent can't read were left out." not in result
+    assert "Folders this agent can't read were left out." not in result

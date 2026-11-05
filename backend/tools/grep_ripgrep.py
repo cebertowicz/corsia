@@ -88,6 +88,8 @@ async def search_ripgrep(
         f"INCOMPLETE: ripgrep could not search every path "
         f"({errors[0].splitlines()[0][:_ERROR_CHARS]}); results may be partial\n\n"
     ) if errors else ""
+    if scope.fence and scope.fence.incomplete:
+        header += "INCOMPLETE: some folders could not be checked; results may be partial\n\n"
     if output_mode == "content":
         # Reads matched files for the source path, so it runs off the event loop.
         return await asyncio.to_thread(

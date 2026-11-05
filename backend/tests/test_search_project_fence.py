@@ -8,7 +8,7 @@ from tools.glob import GlobTool
 from tools.grep import GrepTool
 from tools.project_fence import Fence, FencedRoot
 
-NOTICE = "Other projects this agent can't read were left out."
+NOTICE = "Folders this agent can't read were left out."
 
 
 @pytest.fixture
@@ -79,6 +79,52 @@ async def test_empty_and_outside_notice(fenced_workspace, monkeypatch, tool):
     assert NOTICE in result
     result = await search.execute(pattern, path=str(ws / "public"), _thread_id="caller")
     assert NOTICE not in result
+
+
+async def test_ripgrep_unlistable_fence_parent_is_excluded_and_incomplete(fenced_workspace, monkeypatch):
+    import os
+    from tools import grep
+
+    ws, private = fenced_workspace
+    if not grep._RG_AVAILABLE:
+        pytest.skip("ripgrep unavailable")
+    (private.parent / "also-hidden.txt").write_text("needle")
+    original = os.scandir
+
+    def scan(path):
+        if not isinstance(path, int) and Path(path) == private.parent:
+            raise PermissionError("private raw error")
+        return original(path)
+
+    monkeypatch.setattr(os, "scandir", scan)
+    result = await GrepTool(workspace=ws).execute("needle", _thread_id="caller")
+    assert "visible.txt" in result
+    assert "secret.txt" not in result
+    assert "also-hidden.txt" not in result
+    assert "INCOMPLETE" in result
+    assert "private raw error" not in result
+
+
+async def test_ripgrep_unlistable_search_root_fails_closed(fenced_workspace, monkeypatch):
+    import os
+    from tools import grep
+
+    ws, _private = fenced_workspace
+    if not grep._RG_AVAILABLE:
+        pytest.skip("ripgrep unavailable")
+    original = os.scandir
+
+    def scan(path):
+        if not isinstance(path, int) and Path(path) == ws:
+            raise PermissionError("private raw error")
+        return original(path)
+
+    monkeypatch.setattr(os, "scandir", scan)
+    result = await GrepTool(workspace=ws).execute("needle", _thread_id="caller")
+    assert "visible.txt" not in result
+    assert "secret.txt" not in result
+    assert "INCOMPLETE" in result
+    assert "private raw error" not in result
 
 
 @pytest.mark.parametrize("tool", ["glob", "grep-python"])

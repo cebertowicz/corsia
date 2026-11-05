@@ -33,6 +33,24 @@ def test_attachment_must_be_inside_thread_working_root(working_root, tmp_path):
         attachments.add("thread", EmailMessage(), [{"path": str(outside), "size": 6}])
 
 
+@pytest.mark.parametrize("operation", ["inspect", "add"])
+def test_fenced_project_attachment_preserves_refusal(tmp_path, monkeypatch, operation):
+    from tools import project_fence
+    from tools.project_fence import Fence, FencedRoot
+
+    private = tmp_path / "projects" / "Private"
+    private.mkdir(parents=True)
+    (private / "secret.txt").write_text("secret")
+    monkeypatch.setattr(attachments, "working_root", lambda thread_id: tmp_path)
+    monkeypatch.setattr(project_fence, "fence_for_thread", lambda thread_id: Fence((FencedRoot(private, "Private"),), thread_id))
+    monkeypatch.setattr(project_fence, "_event", lambda *args, **kwargs: None)
+    with pytest.raises(DraftRefused, match="in project `Private`, outside your scope"):
+        if operation == "inspect":
+            attachments.inspect("workspace-agent", [str(private / "secret.txt")], 100)
+        else:
+            attachments.add("workspace-agent", EmailMessage(), [{"path": str(private / "secret.txt"), "size": 6}])
+
+
 def test_total_limit_checked_before_reading_any_file(working_root, monkeypatch):
     (working_root / "one").write_bytes(b"123")
     (working_root / "two").write_bytes(b"456")
