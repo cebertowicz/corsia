@@ -3,6 +3,7 @@
 import asyncio
 
 from fastapi import FastAPI
+import pytest
 
 import app_lifecycle
 from llm import server_observation
@@ -11,7 +12,44 @@ from test_app_lifecycle_shutdown import _isolate_lifespan
 from test_omlx_upgrade import _seat
 
 
-async def test_shutdown_joins_upgrade_after_watched_exit(monkeypatch, isolated_db):
+async def test_reconciliation_failure_allows_cloud_startup(monkeypatch, isolated_db):
+    _isolate_lifespan(monkeypatch)
+    cloud_started = asyncio.Event()
+    shutdown_tasks = []
+    original_shutdown = app_lifecycle._shutdown_owned_tasks
+
+    async def fail(_logger):
+        raise OSError("reconciliation failed")
+
+    async def cloud():
+        cloud_started.set()
+
+    async def capture_shutdown(tasks, logger):
+        shutdown_tasks.extend(tasks)
+        return await original_shutdown(tasks, logger)
+
+    monkeypatch.setattr(app_lifecycle, "adopt_and_upgrade", fail)
+    monkeypatch.setattr(app_lifecycle, "_startup_cloud_discovery", cloud)
+    monkeypatch.setattr(app_lifecycle, "_shutdown_owned_tasks", capture_shutdown)
+    async with app_lifecycle.lifespan(FastAPI()):
+        await asyncio.wait_for(cloud_started.wait(), 5)
+    assert len(shutdown_tasks) == 6 and shutdown_tasks[5] is None
+
+
+async def test_reconciliation_cancellation_propagates(monkeypatch, isolated_db):
+    _isolate_lifespan(monkeypatch)
+
+    async def cancel(_logger):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(app_lifecycle, "adopt_and_upgrade", cancel)
+    with pytest.raises(asyncio.CancelledError):
+        async with app_lifecycle.lifespan(FastAPI()):
+            pytest.fail("cancelled startup yielded")
+
+
+@pytest.mark.parametrize("broadcast_failure", [False, True])
+async def test_shutdown_joins_upgrade_after_watched_exit(monkeypatch, isolated_db, broadcast_failure):
     _isolate_lifespan(monkeypatch)
     _seat(monkeypatch, recorded="old")
     life = omlx_supervisor._life["seat"]
@@ -28,7 +66,15 @@ async def test_shutdown_joins_upgrade_after_watched_exit(monkeypatch, isolated_d
 
     async def adopt(_logger):
         nonlocal original
-        original = omlx_supervisor.schedule_startup_upgrade("seat", "old")
+        if broadcast_failure:
+            def fail_broadcast(_message):
+                raise RuntimeError("broadcast failed")
+
+            with monkeypatch.context() as patch:
+                patch.setattr("infra.state.ws.broadcast_all", fail_broadcast)
+                original = omlx_supervisor.schedule_startup_upgrade("seat", "old")
+        else:
+            original = omlx_supervisor.schedule_startup_upgrade("seat", "old")
         return original
 
     monkeypatch.setattr("infra.carry_in_capacity.omlx_state", state)

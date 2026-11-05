@@ -231,7 +231,10 @@ def schedule(server_id: str, life: Life, operation: Coroutine[Any, Any, Any], *,
     life.restart = task
     life.hold_requests = hold_requests
     task.add_done_callback(lambda done: _done(server_id, life, done))
-    broadcast_all({"type": "models_updated", "server_id": server_id})  # lifecycle change without admitting held work
+    try:
+        broadcast_all({"type": "models_updated", "server_id": server_id})
+    except Exception:
+        log.warning("oMLX lifecycle notification failed for %s", server_id, exc_info=True)
     return task
 
 

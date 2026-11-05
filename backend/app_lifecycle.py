@@ -90,7 +90,10 @@ async def lifespan(app: FastAPI):
         from host_access.browser_orphan import close_dead_sessions
         from host_access.processes import PROCESS_OWNER
 
-        startup_tasks[5] = await adopt_and_upgrade(logger)
+        try:
+            startup_tasks[5] = await adopt_and_upgrade(logger)
+        except Exception as exc:
+            logger.warning(f"oMLX startup reconciliation failed: {exc}")
         try:
             await asyncio.to_thread(close_dead_sessions, PROCESS_OWNER.browser_sessions().socket_dir)
         except Exception:
