@@ -65,6 +65,12 @@ def read_pid(runtime_dir: Path, server_id: str, *, legacy_port_owner_pid: PortOw
     return None
 
 
+def is_recorded_process(runtime_dir: Path, pid: int) -> bool:
+    """Match a process to a durable spawn record, preserving legacy records during identity reads."""
+    return any(read_pid(path.parent, path.stem.removeprefix("omlx-"), preserve_legacy=True) == pid
+               for path in runtime_dir.glob("omlx-*.pid"))
+
+
 def write_pid(runtime_dir: Path, server_id: str, pid: int, *, omlx_version: str | None = None) -> None:
     """Bind the supervisor's spawn record to this process's creation time and, for a managed server, its build."""
     try:

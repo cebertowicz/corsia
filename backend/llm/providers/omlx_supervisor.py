@@ -51,10 +51,7 @@ _life: dict[str, restart.Life] = {}
 
 def is_corsia_process(pid: int) -> bool:
     """Match an observed process to the supervisor's durable spawn records, regardless of argv."""
-    for path in RUNTIME_DIR.glob("omlx-*.pid"):
-        if process.read_pid(path.parent, path.stem.removeprefix("omlx-"), preserve_legacy=True) == pid:
-            return True
-    return False
+    return process.is_recorded_process(RUNTIME_DIR, pid)
 
 
 def _pid_path(server_id: str):
