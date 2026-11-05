@@ -31,5 +31,3 @@ So keep notes about one project out of the installed copy. Put them in that proj
 ## Contributing
 
 The library does not take contributions.
-
-Checked against the code at c049915c7.

@@ -65,5 +65,3 @@ Claude Code runs as a separate process per thread. The backend caps how many are
 | Process caps | `backend/infra/subagent_caps.py`, `backend/infra/subagent_caps.json` |
 | Claude Code process management | `backend/subagents/` |
 | Skill ancestry | `backend/core/skill_resolution.py` |
-
-Checked against the code at c049915c7.

@@ -76,5 +76,3 @@ Conversations, plans and settings live in the state root described in [Architect
 | Skill precedence | `backend/core/skill_resolution.py`, `backend/core/skill_scanning.py` |
 | Cross-scope send rule | `backend/infra/delegation_scope.py` |
 | Bootloader file management | `backend/core/bootloader_management.py` |
-
-Checked against the code at c049915c7.
