@@ -99,9 +99,9 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
     writer), so its instruction and check reach the agent the step is handed to.
     A step naming a workflow becomes a child phase built the same way.
     """
-    from plans import closure, dependencies, gate_handoff, intent_words, node_creation
+    from plans import closure, dependencies, gate_handoff, intent_creation, node_creation
 
-    intent_node_id = intent_words.canonical(db, phase.id)["id"]
+    intent_node_id = intent_creation.canonical(db, phase.id)["id"]
     built: dict[str, Any] = {}
     listed = []
     for step in steps:

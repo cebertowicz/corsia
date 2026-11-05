@@ -70,11 +70,12 @@ def test_person_reply_joins_the_open_task_of_its_thread(isolated_db):
             (reply["id"],),
         ).fetchone()
         assert batch["delivered_node_id"] == first["id"]
-        words = db.execute(
-            "SELECT source_id FROM plan_node_intent_words WHERE node_id=? ORDER BY added_at,rowid",
-            (first["id"],),
+        comments = db.execute(
+            """SELECT i.comment_id FROM doc_feedback_batch_items i
+               JOIN doc_feedback_batches b ON b.id=i.batch_id
+               WHERE b.delivered_node_id=? ORDER BY i.comment_id""", (first["id"],),
         ).fetchall()
-        assert [row["source_id"] for row in words] == [root["id"], reply["id"]]
+        assert [row["comment_id"] for row in comments] == sorted([root["id"], reply["id"]])
 
         # Delivering the same batch again adds nothing.
         again = create_feedback_node(db, "owner", db.execute(
@@ -98,14 +99,14 @@ def test_person_reply_joins_the_task_its_owner_is_working_and_wakes_the_owner(is
         (first,) = _feedback_nodes(db, "owner")
         attempts = db.execute("SELECT id FROM plan_node_attempts WHERE node_id=?", (first["id"],)).fetchall()
 
-        reply = _person_reply(db, artifact_id, root["id"])
+        reply = _person_reply(db, artifact_id, root["id"], "Also the second point. " + "detail " * 300)
 
         assert [node["id"] for node in _feedback_nodes(db, "owner")] == [first["id"]]
         joined = service.get_node(first["id"], db=db)
         assert joined.description.startswith(first["description"])
         assert f"Comment {reply['id']}" in joined.description
         assert joined.title == first["title"].replace("1 comment on", "2 comments on")
-        # No intent words, so the owner keeps the task it is working.
+        # A reply to a task already in progress keeps the owner's selection.
         assert joined.requirements_revision == first["requirements_revision"]
         assert db.execute(
             "SELECT id FROM plan_node_attempts WHERE node_id=? AND released_at IS NULL", (first["id"],),
@@ -120,6 +121,8 @@ def test_person_reply_joins_the_task_its_owner_is_working_and_wakes_the_owner(is
         facts = json.loads(payload)["intent_input"]
         assert facts["node_id"] == first["id"] and facts["source_kind"] == "doc_comment"
         assert facts["words"].startswith(f"Comment {reply['id']}") and "Also the second point." in facts["words"]
+        from plans.person_input import WORDS_MAX_BYTES
+        assert len(facts["words"].encode()) <= WORDS_MAX_BYTES
         # The reply is not queued, so no note says it is.
         assert db.execute(
             "SELECT COUNT(*) FROM context_change_journal WHERE object_id='owner' AND summary LIKE '%is queued%'",
