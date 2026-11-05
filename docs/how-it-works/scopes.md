@@ -77,4 +77,4 @@ Conversations, plans and settings live in the state root described in [Architect
 | Cross-scope send rule | `backend/infra/delegation_scope.py` |
 | Bootloader file management | `backend/core/bootloader_management.py` |
 
-Checked against the code at 7a8c55d84.
+Checked against the code at c049915c7.

@@ -86,4 +86,4 @@ A skill is a folder with a `SKILL.md`. The skills index in context lists skills 
 | Knowledge base | `backend/memory/knowledge_base.py`, `backend/tools/knowledge.py` |
 | Skills | `backend/core/skills_registry.py`, `backend/core/skill_resolution.py` |
 
-Checked against the code at 7a8c55d84.
+Checked against the code at c049915c7.

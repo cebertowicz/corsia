@@ -499,7 +499,7 @@ are retained until the next install boundary; other turn-specific context can ch
 The directories are the normal source of truth for boot files. Provider-native
 boot files are thin connectors, not parallel context authorities.
 
-Checked against the code at 7a8c55d84.
+Checked against the code at c049915c7.
 
 ### Trial lessons
 
@@ -545,7 +545,7 @@ table and no second registry.
   Delivery and supported reads do not establish application or benefit.
   Incomplete historical populations and per-version costs remain unavailable.
 
-Checked against the code at 7a8c55d84.
+Checked against the code at c049915c7.
 
 ## Managed background processes
 

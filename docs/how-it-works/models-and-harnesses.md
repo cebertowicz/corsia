@@ -82,4 +82,4 @@ When an account reaches a usage limit, or a project's policy no longer permits i
 | Model switching | `backend/thread/model_row.py`, `backend/thread/model_state.py` |
 | Account rollover | `backend/connections/account_rollover.py` |
 
-Checked against the code at 7a8c55d84.
+Checked against the code at c049915c7.
