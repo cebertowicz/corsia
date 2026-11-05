@@ -98,8 +98,8 @@ def test_upgrade_stamps_newly_eligible_history_without_clearing_open_replies(iso
         for index, row in enumerate((person, root, resolved, old_reply, open_reply)):
             db.execute("UPDATE doc_comments SET created_at=? WHERE id=?", (f"2026-01-0{index + 1}T00:00:00Z", row["id"]))
         db.commit()
-        db.execute("PRAGMA user_version=175")
-        migrate_to_current(db, 176)
+        db.execute("PRAGMA user_version=176")
+        migrate_to_current(db, 177)
         first = [tuple(row) for row in db.execute("SELECT user_id,root_id,seen_at,seen_reply_id FROM doc_comment_thread_views ORDER BY user_id,root_id")]
         people = {row[0] for row in db.execute("SELECT id FROM users UNION SELECT user_id FROM threads WHERE user_id IS NOT NULL")}
         assert len(first) == 2 * len(people)  # One newer stamp was preserved; all other rows were inserted.
@@ -112,7 +112,7 @@ def test_upgrade_stamps_newly_eligible_history_without_clearing_open_replies(iso
         assert rows[1]["new_reply_ids"] == []
         assert rows[2]["new_reply_ids"] == [open_reply["id"]]
         later, _ = add_comment(db, artifact, author_id="owner")
-        migrate_to_current(db, 176)
+        migrate_to_current(db, 177)
         assert [tuple(row) for row in db.execute("SELECT user_id,root_id,seen_at,seen_reply_id FROM doc_comment_thread_views ORDER BY user_id,root_id")] == first
         fresh = [{"id": later["id"]}]
         annotate_thread_attention(db, "owner-token", artifact, fresh)

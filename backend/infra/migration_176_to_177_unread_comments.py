@@ -1,4 +1,4 @@
-"""Schema 175 -> 176: carry existing unread state through the expanded projection."""
+"""Schema 176 -> 177: carry existing unread state through the expanded projection."""
 from __future__ import annotations
 
 import sqlite3
@@ -8,9 +8,9 @@ def _has_table(conn: sqlite3.Connection, name: str) -> bool:
     return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
 
 
-def migrate_175_to_176(conn: sqlite3.Connection) -> None:
+def migrate_176_to_177(conn: sqlite3.Connection) -> None:
     """Stamp old resolved replies and eligible root comments, keeping newer views."""
-    if conn.execute("PRAGMA user_version").fetchone()[0] >= 176:
+    if conn.execute("PRAGMA user_version").fetchone()[0] >= 177:
         return
     if not all(_has_table(conn, name) for name in ('users', 'doc_comments', 'doc_comment_thread_views')):
         return
