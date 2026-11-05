@@ -15,7 +15,7 @@ from infra.context_receipts import (
     ContextReceiptIdentity,
     context_usage_receipt, context_usage_summary, live_context_usage_payload,
 )
-from core.turn_error_surface import persist_llm_error
+from core.turn_error_surface import broadcast_llm_error, persist_llm_error
 from infra.queries import insert_message
 from llm.error_cause import error_fields
 from core.plan_turn_end import record_turn_end_logged
@@ -395,13 +395,11 @@ class StepHandler:
             self.model_info.get("model"), self.turn_id, err_id, err_now, err_content,
             error_fields(payload),
         )
-
         await record_turn_end_logged(
             self.thread_id, "plan-liveness error wake failed; parent may wait",
             "parent drive after turn error failed; parent may wait",
             level="ERROR", outcome="error", error=err_content, turn_id=self.turn_id,
         )
-
         await self._emit({
             "type": "error",
             "thread_id": self.thread_id,
@@ -409,6 +407,8 @@ class StepHandler:
             **err_fields,
             **terminal_context,
         })
+        # The frame carries the saved row's reference, so the client draws only this row.
+        await broadcast_llm_error(self.thread_id, err_id, self.broadcast)
 
     async def _handle_turn_cancelled(self, payload: dict):
         effect_type = (

@@ -32,6 +32,7 @@ def requesting_task_block(task: dict) -> str:
     """The requesting task as the fork reads it, opening with the revision that was read.
 
     The task is the canonical intent holder, so a delegated worker's request names its parent's task.
+    The reviewer checks against the agreed intent and acceptance criteria, never stored quotes.
     """
     lines = [
         f'Requested from task "{task["title"]}" ({task["node_id"]}), '
@@ -39,12 +40,11 @@ def requesting_task_block(task: dict) -> str:
     ]
     if task["intent"]:
         lines.append(f"Intent: {task['intent']}")
-    # Intent and quotes are capped where Plans writes them; acceptance criteria are not, so cap them here.
+    # Intent is capped where Plans writes it; acceptance criteria are not, so cap them here.
     encoded = task["acceptance_criteria"].encode()
     criteria = encoded[:MAX_CRITERIA_BYTES].decode(errors="ignore")
     cut = " [truncated]" if len(encoded) > MAX_CRITERIA_BYTES else ""
     lines.append(f"Acceptance criteria: {criteria}{cut}")
-    lines += [f'{word["author"]} ({word["role"]}): "{word["quote"]}"' for word in task["intent_words"]]
     return "\n".join(lines)
 
 

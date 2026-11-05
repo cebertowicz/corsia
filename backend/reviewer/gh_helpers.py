@@ -324,6 +324,7 @@ def get_pull_request_info(repo: str, pr_number: int) -> dict[str, Any] | None:
     # A repository name is None when GitHub omits it (a deleted fork).
     return {
         "number": number,
+        "state": _text_or_empty(data.get("state")),
         "mergeable": mergeable_state,
         "isDraft": draft,
         "baseRefName": base_ref,

@@ -269,6 +269,9 @@ class TestResultMarker:
             "got empty content (loud-failure violation)")
         assert "tool execution failed" in r["content"].lower(), (
             f"error text not preserved, got: {r['content']!r}")
+        broadcasts = [m for _, m in casts if m.get("type") == "message_added"
+                      and m.get("message", {}).get("content") == r["content"]]
+        assert len(broadcasts) == 1, "the saved error marker must be broadcast live"
 
         await rt.retire("main-1")
 

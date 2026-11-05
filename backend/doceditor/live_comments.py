@@ -33,8 +33,11 @@ async def positions(entry, artifact_id: str, *, reload: bool = False) -> dict:
     rows = await run_in_db(comments.list_for_artifact, artifact_id)
     live = entry.live
     resolve_threads(rows, live.text, ranges=None if reload else live.ranges)
+    # A decided suggestion that lost its place keeps its last offsets, which a
+    # later, shorter text can leave past the end; it then has no live place.
     placed = [row for row in rows
-              if not row.get("orphaned") and row.get("anchor_text") and not row["parent_id"] and not row["review"]]
+              if not row.get("orphaned") and row.get("anchor_text") and not row["parent_id"] and not row["review"]
+              and (not row.get("decision") or live.fits(row["from_off"], row["to_off"]))]
     for row in placed:
         live.track_range(row["id"], row["from_off"], row["to_off"])
     # An orphaned row keeps its collapsed live range for a later resolution; naming it would report a place.

@@ -33,6 +33,9 @@ async def test_process_exit_signs_out_added_login_before_its_one_completion(clau
     assert row['content'] == 'Other is signed out of Claude Code. Sign it in again under Settings › Providers.'
     assert json.loads(row['metadata'])['account_id'] == claude.other
     assert json.loads(row['metadata'])['cause'] == 'process_exited'
+    saved = next(frame['message'] for frame in frames if frame.get('type') == 'message_added')
+    terminal = next(frame for frame in frames if frame.get('type') == 'turn_complete')
+    assert json.loads(row['metadata'])['turn_id'] == saved['metadata']['turn_id'] == terminal['turn_id'] == 'claude-turn'
     assert get_connection('claude-code', db=db) == before
     assert sum(frame.get('type') == 'turn_complete' for frame in frames) == 1
 

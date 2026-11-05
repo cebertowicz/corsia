@@ -6,10 +6,11 @@ What CORSIA listens on, who can reach it, how phones and other devices connect, 
 
 | Listener | Address | Port | Who can use it | Source |
 |---|---|---|---|---|
-| CORSIA server (web app and API) | `127.0.0.1` in a local setup; all interfaces (`0.0.0.0`) in a server setup | 1956 by default | Anyone who can reach the address; API calls need a signed-in session or token, except the routes listed below | `backend/infra/bind_host.py`, `backend/infra/auth.py` |
+| CORSIA server (web app and API) | `127.0.0.1` in a local setup; all interfaces (`0.0.0.0`) in a server setup | 1956 by default for a source install; the desktop app uses 47895 or another free port | Anyone who can reach the address; API calls need a signed-in session or token, except the routes listed below | `backend/infra/bind_host.py`, `backend/infra/auth.py` |
 | Local model server (oMLX), when CORSIA manages one | Follows the CORSIA server's choice | Its own port | Requests need oMLX's own key | `backend/llm/providers/omlx_supervisor_config.py` |
 | Devices listener, off unless you turn it on | All interfaces | 47901, or the next free one up to 47910 | Signed-in person sessions only, from private network addresses unless you configure an outside address | `backend/infra/devices_listener.py` |
-| Tool-server sign-in callback | `127.0.0.1` | Chosen at sign-in | The sign-in flow that opened it | `backend/tools/mcp_oauth_listener.py` |
+| Connected app sign-in callback | `127.0.0.1` | Chosen at sign-in | The sign-in flow that opened it | `backend/tools/mcp_oauth_listener.py` |
+| Measurement intake (OpenTelemetry logs over HTTP) | `127.0.0.1` | 47921, or the next free one up to 47930; `CORSIA_OTLP_PORT` sets one port | Programs on this computer that send a measure key (a key that lets an outside tool send measurements for one agent); anything else is refused before the body is read | `backend/infra/otlp_listener.py`, `backend/infra/otlp_receiver.py` |
 
 **Local or server.** `corsia setup local` binds to `127.0.0.1`, so only programs on the same machine can connect. `corsia setup server` binds to all interfaces, so any device that can reach the machine can reach the sign-in page. The installer chooses local. The desktop app always binds to `127.0.0.1`.
 
@@ -23,19 +24,19 @@ What CORSIA listens on, who can reach it, how phones and other devices connect, 
 | Anyone, with a check of its own | Webhooks (`/webhooks/…`): the sender's signature. Device pairing (`/api/devices/pair/…`): only while you have pairing open, with its pairing code. Sign-in callbacks: a matching sign-in you started. The Claude Code tool bridge (`/api/cc/_tool-bridge/{id}`), which lists and runs agent tools: a direct loopback connection plus the token CORSIA issues for that session (`backend/api/cc_attach.py`) |
 | Only programs on this machine, through a direct loopback connection | First-run setup routes, which close once an account exists. Also, at any time: whether an update or restart is running (`/api/system/operation-active`), stopping the local model servers CORSIA manages (`/api/system/stop-local-model`), and the corrections classifier's status and download (`/api/setup/classifier…`) |
 
-**Loopback is not a trust boundary for agents.** Agent shells run on the same machine, so they can reach `127.0.0.1:1956`. They have no token, so every other route refuses them. The machine-only routes above don't need one: an agent shell can call them, including stopping CORSIA's local model servers (`backend/api/setup.py`, `backend/api/system.py`, `backend/infra/local_connection.py`).
+**Loopback is not a trust boundary for agents.** Agent shells run on the same machine, so they can reach CORSIA's local port (1956 by default for a source install; for the desktop app see [Desktop app](../how-it-works/desktop-app.md#data-and-code)). They have no token, so every other route refuses them. The machine-only routes above don't need one: an agent shell can call them, including stopping CORSIA's local model servers (`backend/api/setup.py`, `backend/api/system.py`, `backend/infra/local_connection.py`).
 
 ## Other devices and remote access
 
 | Way | What it does | What to know |
 |---|---|---|
-| A private tailnet (for example `tailscale serve --bg http://127.0.0.1:1956`) | Gives your devices an HTTPS address that reaches the local server | Only devices on your tailnet can reach it. Agents can walk you through it (`backend/prompts/system/v1/skills/conductor-bootstrap/references/remote-access.md`); CORSIA doesn't check how your tailnet is configured |
+| A private tailnet (for example, for a source install on the default port: `tailscale serve --bg http://127.0.0.1:1956`) | Gives your devices an HTTPS address that reaches the local server | Only devices on your tailnet can reach it. Agents can walk you through it (`backend/prompts/system/v1/skills/conductor-bootstrap/references/remote-access.md`); CORSIA doesn't check how your tailnet is configured |
 | **Devices** pairing | A separate TLS listener with a certificate CORSIA generates (`backend/infra/devices_identity.py`); it announces itself on the local network | Only signed-in person sessions; only private addresses unless you set an outside address; managed only from the main computer |
 | A server setup on a network you don't control | Anyone on that network can reach the sign-in page | Sign-in is password only, with growing delays after failures and no second factor. Don't do this |
 
 ## Outbound
 
-Outbound network access is **not limited**. Agent shells, the `web_fetch` tool, the agents' browser and tool servers can connect to any address: the internet, your local network (printers, routers, other machines' admin pages) and services on the same machine. Nothing inspects or filters what is sent.
+Outbound network access is **not limited**. Agent shells, the `web_fetch` tool, the shared browser and connected apps can connect to any address: the internet, your local network (printers, routers, other machines' admin pages) and services on the same machine. Nothing inspects or filters what is sent.
 
 On Linux the sandbox has no network namespace, so the same is true there.
 
@@ -49,7 +50,7 @@ On macOS, in Terminal (run for this page):
 netstat -an -p tcp | grep LISTEN
 ```
 
-Look for port 1956. `127.0.0.1.1956` means only this machine can connect; `*.1956` means every interface. A `*.47901` line means the Devices listener is on.
+Look for your port: 1956 for a source install, or the desktop app's port otherwise ([Desktop app](../how-it-works/desktop-app.md#data-and-code)). For port 1956, `127.0.0.1.1956` means only this machine can connect; `*.1956` means every interface. A `*.47901` line means the Devices listener is on.
 
 ```bash
 curl -s http://127.0.0.1:1956/api/health

@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
 from core import turn_core
+from core.plan_turn_end import ending_with_turn_end
 from core.stop_causes import PlanLimitStop
 from infra.db_async import run_in_db, run_in_db_unless_owned
 from infra.database import get_db, write_transaction
@@ -33,7 +34,7 @@ from subagents.codex_runtime_errors import (
 )
 from subagents.codex_runtime_support import require_owned_accept_db
 from subagents.codex_runtime_events import record_terminal_marker
-from subagents.codex_shutdown_error import record_backend_shutdown_marker as _record_backend_shutdown_marker
+from subagents.codex_shutdown_error import record_and_broadcast_shutdown_marker
 from subagents.codex_retirement import retire_if_current
 from subagents.codex_runtime_event_delivery import (
     arm_delivery_event_barrier as _arm_delivery_event_barrier,
@@ -425,20 +426,17 @@ async def _finish_process_exit(
             emit_terminal=False,
         )
 
-    return await _end_owned_turn(
-        thread_id,
-        live,
-        identity,
-        "error",
-        error=_tool_terminal.retained_error(stderr, detail),
-        bcast=bcast,
+    retained = _tool_terminal.retained_error(stderr, detail)
+    return await ending_with_turn_end(_end_owned_turn(
+        thread_id, live, identity, "error",
+        error=retained, bcast=bcast,
         source="codex-app-server:transport-exit",
         marker=marker,
         # cc_error rows are WS anchors, not eligible context owners.
         marker_is_context_owner=False,
         db=db,
         defer_drive=defer_drive,
-    )
+    ), CommittedTerminalFailure, thread_id, identity, str(retained), db)
 
 
 async def _settle_exited_generation(
@@ -2237,7 +2235,7 @@ async def _shutdown_live_owner(
     if not cleaned:
         raise RuntimeError(f"Codex exact live survived shutdown: {thread_id}")
     if terminal is TurnTerminalResult.APPLIED:
-        await run_in_db(_record_backend_shutdown_marker, thread_id, turn_id)
+        await record_and_broadcast_shutdown_marker(thread_id, turn_id)
 
 
 async def _shutdown_idle_app_owner(thread_id: str) -> None:

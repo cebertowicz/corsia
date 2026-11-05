@@ -77,7 +77,10 @@ def shell_argv(command: str, cwd: Path, _profile=None, *, thread_id: str, polici
     from infra.config import WORKSPACE
     from infra.project_repo_policy import list_unsupported_pinned_repos
     from tools.linux_workspace_git import prepare_workspace_git
-    path_policy = current_protected_host_path_policy()
+    path_policy = current_protected_host_path_policy(thread_id=thread_id)
+    # Other projects are hidden like private roots. An absent one is skipped, not frozen: freezing
+    # its parent would make a repo read-only before its worktree exists. The next command masks it.
+    fenced = [form for root in path_policy.fence.roots for form in root.forms if form.exists()]
     repo_ro, repo_rw, overlays = _repo_mounts(policies, controlled_policy, controlled_operation)
     rw = [*get_sandbox_add_dirs_rw(thread_id, policies=policies), *repo_rw]
     ro = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account),
@@ -111,5 +114,6 @@ def shell_argv(command: str, cwd: Path, _profile=None, *, thread_id: str, polici
         raise RuntimeError(sandbox_error())
     return build_protected_argv(command, Path(cwd), path_policy=path_policy,
                                 rw_roots=rw, ro_roots=ro, readonly_overlays=overlays,
-                                hidden_roots=[*extra_hidden_roots, *([hidden_account] if hidden_account else [])],
+                                hidden_roots=[*extra_hidden_roots, *fenced,
+                                              *([hidden_account] if hidden_account else [])],
                                 env=passed, thread_id=thread_id, executable=executable)

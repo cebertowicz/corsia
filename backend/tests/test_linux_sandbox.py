@@ -18,7 +18,7 @@ def test_agent_account_personal_gh_home_is_masked(tmp_path, monkeypatch, linux_s
     workspace = home / 'work'
     workspace.mkdir()
     policy = ProtectedHostPathPolicy(home, home / '.local/state/corsia')
-    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda: policy)
+    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda **_: policy)
     monkeypatch.setattr(linux_shell, 'get_sandbox_add_dirs_rw', lambda *a, **k: [home, gh, workspace])
     monkeypatch.setattr(linux_shell, 'get_allowed_dirs_ro', lambda **k: [])
     monkeypatch.setattr(linux_shell, 'agent_tool_ro_dirs', lambda: [])
@@ -46,6 +46,34 @@ def test_agent_account_personal_gh_home_is_masked(tmp_path, monkeypatch, linux_s
     assert not any(argv[i:i + 3] == ['--ro-bind', str(socket_parent), str(socket_parent)]
                    for i in range(len(argv)))
     assert str(other) not in argv
+
+
+def test_fenced_projects_join_the_hidden_set_and_absent_ones_are_skipped(tmp_path, monkeypatch):
+    from infra import config, project_repo_policy
+    from tools import linux_shell
+    from tools.project_fence import Fence, FencedRoot
+    workspace = tmp_path / 'work'
+    other = workspace / 'projects/other'
+    other.mkdir(parents=True)
+    (workspace / 'projects/alias').symlink_to(other)
+    fence = Fence((FencedRoot(other, 'other'), FencedRoot(workspace / 'projects/alias', 'other'),
+                   FencedRoot(workspace / 'projects/later', 'later')), 'one')
+    policy = ProtectedHostPathPolicy(tmp_path / 'home', tmp_path / 'state', workspace=workspace, fence=fence)
+    asked = {}
+    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda **kw: asked.update(kw) or policy)
+    monkeypatch.setattr(linux_shell, 'get_sandbox_add_dirs_rw', lambda *a, **k: [workspace])
+    monkeypatch.setattr(linux_shell, 'get_allowed_dirs_ro', lambda **k: [])
+    monkeypatch.setattr(linux_shell, 'agent_tool_ro_dirs', lambda: [])
+    monkeypatch.setattr(project_repo_policy, 'list_unsupported_pinned_repos', lambda _: [])
+    monkeypatch.setattr(config, 'WORKSPACE', workspace)
+    monkeypatch.setattr(linux_shell.shutil, 'which', lambda _: '/usr/bin/bwrap')
+    captured = {}
+    monkeypatch.setattr(linux_shell, 'build_protected_argv', lambda *a, **k: captured.update(k) or [])
+    linux_shell.shell_argv('true', workspace, thread_id='one', policies=[], env={})
+    assert asked == {'thread_id': 'one'}
+    hidden = set(captured['hidden_roots'])
+    assert {other, workspace / 'projects/alias'} <= hidden
+    assert workspace / 'projects/later' not in hidden
 
 
 def test_protected_overlay_pins_every_ancestor_before_overlay(linux_sandbox_root):

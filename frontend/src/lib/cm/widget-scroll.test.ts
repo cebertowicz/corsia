@@ -34,25 +34,32 @@ function editorWithTable(rowTops: number[] | null) {
 		...spec, write: (value, current) => { measuring = true; try { spec.write?.(value, current); } finally { measuring = false; } },
 	}));
 	const rows: HTMLElement[] = [];
-	if (rowTops) {
+	const draw = (tops: number[]) => {
+		const wrap = document.createElement('div');
+		wrap.className = 'table-wrap';
+		wrap.getBoundingClientRect = () => rect(BAND.top, 100);
 		const widget = document.createElement('div');
 		widget.className = 'cm-md-table';
 		widget.dataset.srcLength = String(TABLE.length);
 		const table = widget.appendChild(document.createElement('table'));
-		rowTops.forEach((top, index) => {
+		tops.forEach((top, index) => {
 			const row = table.insertRow(index);
 			row.insertCell(0).textContent = 'cell';
+			const farCell = row.insertCell(1);
+			farCell.getBoundingClientRect = () => ({ ...rect(top, 40), left: 300 - wrap.scrollLeft, right: 400 - wrap.scrollLeft });
 			row.getBoundingClientRect = () => rect(top - scrollTop, 40);
 			rows.push(row);
 		});
 		const drawn = document.createElement('div');
-		drawn.appendChild(widget);
-		Object.defineProperty(view, 'contentDOM', { value: drawn });
+		drawn.appendChild(wrap).appendChild(widget);
+		Object.defineProperty(view, 'contentDOM', { value: drawn, configurable: true });
 		view.posAtDOM = () => TABLE_FROM;
-	}
+		return wrap;
+	};
+	if (rowTops) draw(rowTops);
 	const dispatch = vi.spyOn(view, 'dispatch');
 	const rowRect = (index: number) => rows[index].getBoundingClientRect();
-	return { view, dispatch, writes, rowRect, scrollTop: () => scrollTop };
+	return { view, dispatch, writes, rowRect, draw, scrollTop: () => scrollTop };
 }
 
 describe('scrollToRange inside a table', () => {
@@ -152,6 +159,14 @@ describe('scrollToRange inside a table', () => {
 		const target = (dispatch.mock.calls[0][0] as { effects: { value: { y: string; range: { head: number } } } }).effects.value;
 		expect(target.y).toBe('start');
 		expect(target.range.head).toBe(TABLE_FROM);
+	});
+
+	it('reveals a far cell when the table is drawn after the initial jump', () => {
+		const { view, draw } = editorWithTable(null);
+		scrollToRange(view, DANA, DANA);
+		const wrap = draw([200, 240]);
+		vi.advanceTimersByTime(300);
+		expect(wrap.scrollLeft).toBe(300);
 	});
 
 	it('scrolls a position outside any widget as usual', () => {

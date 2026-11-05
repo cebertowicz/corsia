@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TypeAlias
 
+from core.plan_turn_end import settlement_with_turn_end
 from core.stop_causes import ClaudeLoginRaceEnd, PlanLimitStop, frame_cause
 from core.turn_core import (
     TerminalSettlement,
@@ -14,7 +15,7 @@ from core.turn_core import (
 )
 from infra.plan_limit_continue import rerun_queued
 from infra.queries import insert_message
-from subagents.cc_event_context import commit_cc_terminal
+from subagents.cc_event_context import commit_cc_terminal, release_owned_turn
 from subagents.cc_runtime_errors import surface_exit_error
 from subagents.turn_account_error import claude_login_verdict, login_answered, login_race_answered, sign_out_on_verdict
 from subagents.cc_event_context_usage import consume_and_attach_terminal_context_usage
@@ -67,21 +68,12 @@ async def claim_terminal(
         assert db is None, "deferred CC terminal requires its own transaction"
     settlement = await commit_cc_terminal(identity.turn_id, outcome, error, db=db)
     if settlement.result is TurnTerminalResult.APPLIED:
-        _release_owned_turn(live, identity)
+        release_owned_turn(live, identity)
     if db is not None:
         return settlement.result
     if defer_drive:
         return settlement
     return await drive_turn_settlement(settlement)
-
-
-def _release_owned_turn(live: _Live, identity: TurnIdentity) -> None:
-    """Release one completed CC generation before its successor is driven."""
-    if live.corsia_turn != identity:
-        return
-    live.turn_active = False
-    live.interrupt_requested = False
-    live.apply_now_interrupt_turn = None
 
 
 def remember_process_exit(
@@ -156,7 +148,7 @@ async def _publish_process_exit(
     account = await sign_out_on_verdict(verdict, db=db, include_account=True)
     held = login_race_answered(detail, verdict) and rerun_queued(identity.turn_id, db=db)  # the re-run answers
     marker_id = live.tool_boundary_marker_id or (None if held else surface_exit_error(
-        child_thread_id, code, detail, broadcast, db, None,
+        child_thread_id, code, detail, broadcast, db, identity,
         insert_message_fn=insert_message, logger=log,
         account=account, login_answered=login_answered(verdict),
     ))
@@ -211,22 +203,30 @@ async def finish_process_exit(
         verdict = None if live.tool_boundary_marker_id else await claude_login_verdict(identity.turn_id, detail, db=db)
     terminal, resolved, complete = await _settle_process_exit(
         child_thread_id, live, identity, pending, detail, broadcast, db,
-        verdict=verdict, replaying=replaying, defer_drive=defer_drive,
+        verdict=verdict, replaying=replaying, defer_drive=defer_drive or db is None,
     )
     if complete and resolved:
         try:
-            await _publish_process_exit(
-                child_thread_id, live, identity, pending.code, detail,
-                broadcast, db, verdict,
-            )
+            try:
+                await _publish_process_exit(
+                    child_thread_id, live, identity, pending.code, detail,
+                    broadcast, db, verdict,
+                )
+            finally:
+                terminal = await settlement_with_turn_end(
+                    terminal, child_thread_id, identity, str(retained_error(pending.stderr, detail)), db,
+                )
         except BaseException as error:
-            if defer_drive:
-                assert isinstance(terminal, TerminalSettlement)
-                raise _CommittedTerminalFailure(terminal, error) from error
+            if isinstance(terminal, TerminalSettlement):
+                if defer_drive:
+                    raise _CommittedTerminalFailure(terminal, error) from error
+                await drive_turn_settlement(terminal)
             raise
         finally:
             if barrier is not None:
                 barrier.set()
+    if isinstance(terminal, TerminalSettlement) and not defer_drive:
+        return await drive_turn_settlement(terminal)
     return terminal
 
 

@@ -66,8 +66,11 @@ def read_for_artifact(artifact_id: str, *, db) -> dict | None:
     ).fetchone()
     if row is None:
         return None
+    from plans.workflow_fields import reader_titles
+
     return {
-        "node_id": row["id"], "node_title": row["title"], "node_revision": row["revision"],
+        "node_id": row["id"], "node_title": reader_titles(db, [row["id"]]).get(row["id"], row["title"]),
+        "node_revision": row["revision"],
         "plan_id": row["plan_id"], "owner_thread_id": row["owner_id"],
         "owner_name": row["owner_title"] or "An agent",
     }

@@ -81,12 +81,14 @@ def test_first_description_lines_and_email_refusal_bytes_are_pinned():
         "send it; attendees get emails"
     )
     assert action_gate.CHANGED_OUTSIDE == (
-        "Not sent: the draft was changed outside the draft tools. Save it with email_draft, "
-        "show the person, and wait for their reply."
+        "Not sent: the draft was changed outside the draft tools, maybe by the person. Read it "
+        "again and keep their changes when you save it with email_draft, then show the person "
+        "and wait for their reply."
     )
     assert action_gate._changed_outside("invite") == (
-        "Not sent: the draft was changed outside the draft tools. Save it with calendar_draft_invite, "
-        "show the person, and wait for their reply."
+        "Not sent: the draft was changed outside the draft tools, maybe by the person. Read it "
+        "again and keep their changes when you save it with calendar_draft_invite, then show "
+        "the person and wait for their reply."
     )
 
 
@@ -182,8 +184,9 @@ async def test_send_uses_the_real_gate_for_invite_refusals(deleg_db, workspace, 
         path.write_bytes(b"edited outside the draft tool")
         os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
         expected = (
-            "Error: Not sent: the draft was changed outside the draft tools. Save it with "
-            "calendar_draft_invite, show the person, and wait for their reply."
+            "Error: Not sent: the draft was changed outside the draft tools, maybe by the person. "
+            "Read it again and keep their changes when you save it with calendar_draft_invite, "
+            "then show the person and wait for their reply."
         )
     assert await CalendarSendInviteTool().execute(
         _thread_id="sender-self", draft_id=draft["draft_id"], revision=revision,

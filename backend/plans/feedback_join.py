@@ -129,13 +129,18 @@ def earlier_items(db, node_id: str, batch: Any) -> list[dict[str, Any]]:
     return held
 
 
-def join(db, node_id: str, *, title: str, blocks: str, words, provenance: str) -> None:
-    """Add a batch's items to the task through the node's one amend path."""
+def join(db, node_id: str, *, title: str, blocks: str, intent: str | None, provenance: str) -> None:
+    """Add a batch's items to the task through the node's one amend path.
+
+    ``intent`` restates the task's intent when the person's new comments change
+    what it must answer; None leaves it as it is.
+    """
     with transaction(db) as connection:
         node = service._node_row(connection, node_id)
+        restated: dict[str, Any] = {} if intent is None else {"intent": intent}
         mutations.edit_node(
             node_id, title=title, description=f"{node['description'] or ''}\n\n{blocks}".lstrip(),
-            intent_words=list(words) or None, provenance=provenance, db=connection,
+            **restated, provenance=provenance, db=connection,
         )
         plan_id = str(node["plan_id"])
 

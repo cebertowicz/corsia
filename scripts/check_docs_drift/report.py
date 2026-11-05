@@ -66,6 +66,8 @@ def _citations_section(r: CitationResult) -> list[str]:
     ]
     for path in r.missing_paths:
         lines.append(f"MISSING PATH: {path}")
+    for link in r.missing_links:
+        lines.append(f"BROKEN LINK: {link}")
     for route in r.missing_routes:
         lines.append(f"MISSING ROUTE: {route}")
     for cmd in r.missing_subcommands:

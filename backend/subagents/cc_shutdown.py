@@ -93,9 +93,9 @@ async def _terminate_for_shutdown(
     return False, None
 
 
-def _record_shutdown_marker(child_id: str, turn_id: str | None) -> None:
+def _record_shutdown_marker(child_id: str, turn_id: str | None) -> str | None:
     try:
-        insert_turn_error(
+        return insert_turn_error(
             insert_message, child_id, "Terminated by backend shutdown.",
             {
                 "cc": True, "type": "cc_error",
@@ -106,6 +106,7 @@ def _record_shutdown_marker(child_id: str, turn_id: str | None) -> None:
         )
     except Exception as exc:
         log.warning("shutdown marker failed for %s: %s", child_id, exc)
+        return None
 
 
 async def shutdown_one_live(child_id: str, live: _Live) -> None:
@@ -138,9 +139,12 @@ async def shutdown_one_live(child_id: str, live: _Live) -> None:
         finalized and was_active and not replaying_natural_exit
         and not live.turn_active and live.parent_thread_id
     ):
-        await run_in_db(
+        marker = await run_in_db(
             _record_shutdown_marker, child_id, getattr(identity, "turn_id", None),
         )
+        if marker:
+            from infra.send_broadcast import broadcast_message_rows
+            await broadcast_message_rows(child_id, (marker,))
 
 
 async def shutdown_all() -> None:

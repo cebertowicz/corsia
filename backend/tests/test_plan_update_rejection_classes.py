@@ -84,7 +84,7 @@ async def test_class2_add_without_kind_defaults_to_task(isolated_db):
     result = await _update(db, thread_id, _body(
         plan.id, "add", {
             "title": "New work", "acceptance_criteria": "Done", "size": "unknown",
-            "intent": intent, "intent_words": [{"quote": intent, "role": "authority"}],
+            "intent": intent,
         },
         "add-no-kind",
     ))

@@ -125,10 +125,6 @@ async def test_worker_takes_over_the_current_task_and_says_so(deleg_db, spawned)
     (
         ({"intent": "Revised intent"}, "Revised intent"),
         ({"acceptance_criteria": "Revised criteria"}, "Initial intent"),
-        ({"intent_words": [{
-            "quote": "The new constraint", "author": "agent", "role": "bears_on",
-            "source_kind": "message", "source_id": _PARENT,
-        }]}, "Initial intent"),
     ),
 )
 async def test_delegate_task_worker_gets_each_intent_revision_once(deleg_db, spawned, changes, expected_intent):
@@ -155,8 +151,6 @@ async def test_delegate_task_worker_gets_each_intent_revision_once(deleg_db, spa
     facts = json.loads(payload)["intent_revision"]
     assert facts["intent"] == expected_intent
     assert facts["acceptance_criteria"] == updated.acceptance_criteria
-    if "intent_words" in changes:
-        assert [word["quote"] for word in facts["intent_words"]] == ["The new constraint"]
 
 
 async def test_delegate_task_worker_is_not_woken_by_nonrequirements_edits_or_its_own_edit(deleg_db, spawned):

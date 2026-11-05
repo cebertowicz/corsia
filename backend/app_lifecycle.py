@@ -140,6 +140,9 @@ async def lifespan(app: FastAPI):
         await _start_otlp_listener()
         await start_documents()
         await resume_local_setup()
+        from events.connectors.github_reviewer_gate_recovery import recover_pending_reviews
+
+        await recover_pending_reviews(asyncio.get_running_loop())
         schedule_usage_rollup_refresh()
         from infra.usage_summary import record_current_install_week
 
