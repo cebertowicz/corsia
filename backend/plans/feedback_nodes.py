@@ -146,6 +146,8 @@ def item_blocks(batch: Any, items: list[dict[str, Any]]) -> str:
     blocks.extend(dict.fromkeys(marked))
     for item in items:
         if item["kind"] == "comment":
+            if item.get("thread_context"):
+                blocks.append(str(item["thread_context"]))
             lines = [
                 (
                     f"Comment {item['id']} (re-opened by {item['event_by']} after it was resolved)"
@@ -251,11 +253,20 @@ def create_feedback_node(
             db, joined.node_id, title=_title(author, document, held),
             blocks=blocks, words=() if joined.working else words, provenance=PROVENANCE,
         )
+        contexts = [str(item["thread_context"]) for item in loaded if item.get("thread_context")]
+        wake_blocks = item_blocks(batch, [{key: value for key, value in item.items() if key != "thread_context"}
+                                          for item in loaded])
+        if len(contexts) > 1:
+            from prompts.plan_tools import bounded_text
+            root = next(str(item["parent_id"]) for item in loaded if item.get("thread_context"))
+            contexts = [bounded_text("\n\n".join(contexts), person_input.WORDS_MAX_BYTES,
+                                     measure=lambda value: len(value.encode("utf-8")),
+                                     marker=f'… thread cut; read it all with doc_comments_list(comment_id="{root}")')]
         woke = joined.working and person_input.joined_reply(
             db, joined.node_id,
-            person_input.Source(SOURCE_KIND_DOC_COMMENT, str(loaded[0]["id"]), (blocks,),
+            person_input.Source(SOURCE_KIND_DOC_COMMENT, str(loaded[0]["id"]), (wake_blocks,),
                                 str(loaded[0]["sort_at"]), recipient_thread_id, None),
-            [str(item["id"]) for item in loaded],
+            [str(item["id"]) for item in loaded], context=contexts[0] if contexts else "",
         ) is not None
         return FeedbackNodeResult(joined.node_id, (), False, woke)
     return _create_linked_node(

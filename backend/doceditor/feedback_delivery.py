@@ -149,7 +149,22 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
         if tagged:
             refusal = comment_recipients.tag_locality_refusal(db, str(_value(batch, "author_id")), recipient)
             if refusal:
+                refused = [item for item in items if item.get("kind") == "comment"
+                           and item.get("event") != "reopened" and db.execute(
+                               "SELECT 1 FROM doc_comment_tags WHERE comment_id=? AND agent_id=?",
+                               (item["id"], recipient),
+                           ).fetchone()]
+                remaining = [item for item in items if item not in refused]
                 problem = f"Tag not delivered: {refusal}"
+                if remaining:
+                    undelivered_note(db, batch, problem, items=refused)
+                    for item in refused:
+                        db.execute("DELETE FROM doc_feedback_batch_items WHERE batch_id=? AND comment_id=?",
+                                   (_value(batch, "id"), item["id"]))
+                    db.execute("UPDATE doc_feedback_batches SET item_count=item_count-? WHERE id=?",
+                               (len(refused), _value(batch, "id")))
+                    items = remaining
+                    problem = None
     if problem is not None:
         if _value(batch, "author_kind") == "agent" and not problem.startswith("Tag not delivered: "):
             for item in items:

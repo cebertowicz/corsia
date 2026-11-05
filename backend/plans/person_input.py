@@ -288,7 +288,7 @@ def _wake(db, source: Source, picked: list[tuple]) -> list[str]:
     return woken
 
 
-def joined_reply(db, node_id: str, source: Source, comment_ids: list[str]) -> str | None:
+def joined_reply(db, node_id: str, source: Source, comment_ids: list[str], *, context: str = "") -> str | None:
     """Wake the owner working a task a person's reply just joined; return the wake id.
 
     The reply was delivered to that owner, so no scope or same-thread check
@@ -299,20 +299,21 @@ def joined_reply(db, node_id: str, source: Source, comment_ids: list[str]) -> st
 
     node = service._node_row(db, node_id)
     recipient = admission_projection.executor_of(node, service._plan_row(db, node["plan_id"]))
-    return None if recipient is None else _append(db, source, node, recipient, answer=comment_ids)
+    return None if recipient is None else _append(db, source, node, recipient, answer=comment_ids, context=context)
 
 
-def _append(db, source: Source, node, recipient: str, *, answer: list[str] | None = None) -> str | None:
+def _append(db, source: Source, node, recipient: str, *, answer: list[str] | None = None,
+            context: str = "") -> str | None:
     from plans import plan_wake
 
     return plan_wake.append(
         db, recipient=recipient, kind=plan_wake.INTENT_INPUT, subject_id=str(node["id"]),
         revision=source.kind, about=source.id, plan_id=str(node["plan_id"]),
-        open_node_id=str(node["id"]), content=_content(db, node, source, recipient, answer or []),
+        open_node_id=str(node["id"]), content=_content(db, node, source, recipient, answer or [], context=context),
     )
 
 
-def _content(db, node, source: Source, recipient: str, answer: list[str]) -> str:
+def _content(db, node, source: Source, recipient: str, answer: list[str], *, context: str = "") -> str:
     from plans import plan_wake
     from plans.close_next_bounds import bounded
     from prompts import plan_wakes as wakes
@@ -328,6 +329,6 @@ def _content(db, node, source: Source, recipient: str, answer: list[str]) -> str
         intent_input={
             "node_id": str(node["id"]), "requirements_revision": revision, "title": title,
             "source_kind": source.kind, "said_at": source.said_at,
-            "words": intent_words.bounded_text(source.words, WORDS_MAX_BYTES),
+            "words": (context + "\n\n" if context else "") + intent_words.bounded_text(source.words, WORDS_MAX_BYTES),
         },
     )

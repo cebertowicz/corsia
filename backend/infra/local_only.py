@@ -167,7 +167,8 @@ def write_family_local_only(thread_id: str, local_only: bool, now: str, *, db: s
 
 
 
-def send_needs_hold(sender: dict, recipient: dict, *, db: sqlite3.Connection | None = None) -> bool:
+def send_needs_hold(sender: dict, recipient: dict, *, db: sqlite3.Connection | None = None,
+                    emit_hold_event: bool = True) -> bool:
     """Whether a message from this sender to this recipient waits for the person to approve it.
 
     True for a Local only sender (its own switch or its project's) and a recipient bound to a cloud
@@ -190,7 +191,8 @@ def send_needs_hold(sender: dict, recipient: dict, *, db: sqlite3.Connection | N
     finally:
         if db is None:
             conn.close()
-    _emit("local_only.send_held", sender.get("id"), {"recipient_thread_id": recipient.get("id")})
+    if emit_hold_event:
+        _emit("local_only.send_held", sender.get("id"), {"recipient_thread_id": recipient.get("id")})
     return True
 
 

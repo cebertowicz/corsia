@@ -69,7 +69,7 @@ def tag_locality_refusal(db, sender_id: str, recipient_id: str) -> str | None:
 
     sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id=?", (sender_id,)).fetchone()
     recipient = db.execute("SELECT id,model,pending_model,title FROM threads WHERE id=?", (recipient_id,)).fetchone()
-    if sender and recipient and send_needs_hold(dict(sender), dict(recipient), db=db):
+    if sender and recipient and send_needs_hold(dict(sender), dict(recipient), db=db, emit_hold_event=False):
         name = recipient["title"] or recipient_id
         return (f"{name} is cloud-bound or has no model selected, and Local only applies to this chat or project, "
                 "so the tag wasn't delivered. Send it with delegate_send, which holds it for the person's approval, "
@@ -167,6 +167,29 @@ def filter_left_replies(db, items: list[dict], agent_id: str, *, person_owner: b
     return [item for item in items if keep(item)]
 
 
+def thread_context(db, item: dict) -> str:
+    """Render earlier comments as bounded context for a tagged reply."""
+    from plans.person_input import WORDS_MAX_BYTES
+    from prompts.plan_tools import bounded_text
+
+    root = root_id(item)
+    rows = db.execute(
+        """SELECT id,author,body,anchor_text,created_at FROM doc_comments
+           WHERE id=? OR parent_id=? ORDER BY created_at,id""", (root, root),
+    ).fetchall()
+    root_row = next((row for row in rows if row["id"] == root), None)
+    lines = ["Thread so far (context, not new feedback):"]
+    if root_row and root_row["anchor_text"]:
+        lines.append(f'Highlighted: "{root_row["anchor_text"]}"')
+    for row in rows:
+        if row["id"] == item["id"]:
+            break
+        lines.append(f'- {row["author"]}: {row["body"]}')
+    marker = f'… thread cut; read it all with doc_comments_list(comment_id="{root}")'
+    return bounded_text("\n".join(lines), WORDS_MAX_BYTES,
+                        measure=lambda value: len(value.encode("utf-8")), marker=marker)
+
+
 def prepare_notification(db, items: list[dict], agent_id: str) -> None:
     """Count one delivered batch per comment thread and attach any due hint."""
     roots = set()
@@ -180,6 +203,8 @@ def prepare_notification(db, items: list[dict], agent_id: str) -> None:
         ).fetchone()
         if tagged:
             reinstate(db, item, agent_id)
+            if item.get("parent_id"):
+                item["thread_context"] = thread_context(db, item)
         if root in roots:
             continue
         roots.add(root)

@@ -232,7 +232,7 @@ def test_agent_local_only_tag_is_refused_but_person_tag_is_not(isolated_db, monk
     for name in ("owner", "writer", "recipient"):
         seed_thread(db, name, model=None)
     aid = seed_document(db, "owner")
-    monkeypatch.setattr(local_only, "send_needs_hold", lambda sender, recipient, db: recipient["id"] == "recipient")
+    monkeypatch.setattr(local_only, "send_needs_hold", lambda sender, recipient, db, **kwargs: recipient["id"] == "recipient")
     with write_transaction(db, scope="test_local_tag") as connection:
         row, created = comments.create_with_status(aid, body="Tag", author="Writer", author_kind="agent",
                                                     author_thread_id="writer", db=connection)
@@ -258,7 +258,7 @@ def test_pending_agent_tag_rechecks_locality_before_delivery(isolated_db, monkey
     for name in ("owner", "writer", "recipient"):
         seed_thread(db, name, model=None)
     aid = seed_document(db, "owner")
-    monkeypatch.setattr(local_only, "send_needs_hold", lambda sender, recipient, db: False)
+    monkeypatch.setattr(local_only, "send_needs_hold", lambda sender, recipient, db, **kwargs: False)
     with write_transaction(db, scope="test_pending_tag") as connection:
         row, created = comments.create_with_status(aid, body="Tag", author="Writer", author_kind="agent",
                                                     author_thread_id="writer", db=connection)
@@ -267,7 +267,7 @@ def test_pending_agent_tag_rechecks_locality_before_delivery(isolated_db, monkey
         result = feedback_batches.record_comment(connection, row, created=created)
     batch = next(batch_id for batch_id in result["batch_ids"] if db.execute(
         "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0] == "recipient")
-    monkeypatch.setattr(local_only, "send_needs_hold", lambda sender, recipient, db: True)
+    monkeypatch.setattr(local_only, "send_needs_hold", lambda sender, recipient, db, **kwargs: True)
     feedback_batches.close_batch(db, batch, "send")
     state = db.execute("SELECT state,undelivered_reason FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()
     assert state[0] == "undelivered"
@@ -294,6 +294,83 @@ def test_pending_tag_names_recipient_when_admission_fails(isolated_db, monkeypat
     feedback_batches.close_batch(db, batch, "send")
     state = db.execute("SELECT state,undelivered_reason FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()
     assert tuple(state) == ("undelivered", "Tag not delivered: recipient: owner archived.")
+    db.close()
+
+
+def test_tag_locality_does_not_emit_held_event(isolated_db, monkeypatch):
+    from infra import local_only
+
+    db = get_db()
+    seed_thread(db, "writer", model=None)
+    seed_thread(db, "recipient", model=None)
+    db.execute("UPDATE threads SET local_only=1 WHERE id='writer'")
+    events = []
+    monkeypatch.setattr(local_only, "_emit", lambda *args: events.append(args))
+    assert comment_recipients.tag_locality_refusal(db, "writer", "recipient")
+    assert events == []
+    assert local_only.send_needs_hold({"id": "writer", "local_only": 1}, {"id": "recipient", "model": None}, db=db)
+    assert events[0][0] == "local_only.send_held"
+    db.close()
+
+
+def test_mixed_pending_batch_delivers_untagged_and_reports_refusal(isolated_db, monkeypatch):
+    from doceditor import feedback_delivery
+    from infra import local_only
+
+    db = get_db()
+    for name in ("writer", "recipient"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "recipient")
+    monkeypatch.setattr(local_only, "send_needs_hold", lambda *args, **kwargs: False)
+    with write_transaction(db, scope="mixed_pending") as connection:
+        plain, created = comments.create_with_status(aid, body="Ordinary", author="Writer", author_kind="agent", author_thread_id="writer", db=connection)
+        result = feedback_batches.record_comment(connection, plain, created=created)
+        tagged, created = comments.create_with_status(aid, body="Tagged", author="Writer", author_kind="agent", author_thread_id="writer", db=connection)
+        comment_recipients.save_tags(connection, tagged, ["recipient"])
+        comment_recipients.tags_for_comments(connection, [tagged])
+        feedback_batches.record_comment(connection, tagged, created=created)
+    batch = result["batch_ids"][0]
+    notes = []
+    monkeypatch.setattr(feedback_delivery, "undelivered_note", lambda db, batch, reason, **kwargs: notes.append(reason))
+    monkeypatch.setattr(local_only, "send_needs_hold", lambda *args, **kwargs: True)
+    feedback_batches.close_batch(db, batch, "send")
+    assert "recipient is cloud-bound" in notes[0]
+    assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == "delivered"
+    assert [row[0] for row in db.execute("SELECT comment_id FROM doc_feedback_batch_items WHERE batch_id=?", (batch,))] == [plain["id"]]
+    assert comments.get_comment(tagged["id"], db=db)["body"] == "Tagged"
+    db.close()
+
+
+def test_tagged_reply_context_is_bounded_and_not_an_item(isolated_db):
+    from plans.feedback_items import feedback_item_counts
+    from plans.feedback_nodes import item_blocks
+    from plans.person_input import WORDS_MAX_BYTES
+
+    db = get_db()
+    for name in ("owner", "first", "second", "recipient"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="first")
+    db.execute("UPDATE doc_comments SET author='First', body='Root text', anchor_text='Highlighted passage' WHERE id=?", (root["id"],))
+    db.commit()
+    prior, _ = add_comment(db, aid, author_id="second", parent_id=root["id"])
+    db.execute("UPDATE doc_comments SET author='Second', body='Earlier text' WHERE id=?", (prior["id"],))
+    db.commit()
+    reply, _ = add_comment(db, aid, author_id="first", parent_id=root["id"])
+    comment_recipients.save_tags(db, reply, ["recipient"])
+    item = {**reply, "kind": "comment", "body": "Actionable text"}
+    comment_recipients.prepare_notification(db, [item], "recipient")
+    rendered = item_blocks({"author_kind": "agent"}, [item])
+    assert 'Highlighted: "Highlighted passage"' in rendered
+    assert rendered.index('- First: Root text') < rendered.index('- Second: Earlier text') < rendered.index('Feedback: Actionable text')
+    assert 'thread cut' not in rendered
+    assert feedback_item_counts([item]) == (0, 1, 0)
+    db.execute("UPDATE doc_comments SET body=? WHERE id=?", ("é" * 2000, prior["id"]))
+    item.pop("thread_context")
+    comment_recipients.prepare_notification(db, [item], "recipient")
+    assert len(item["thread_context"].encode()) <= WORDS_MAX_BYTES
+    assert 'thread cut; read it all with doc_comments_list' in item["thread_context"]
+    assert 'Feedback: Actionable text' in item_blocks({"author_kind": "agent"}, [item])
     db.close()
 
 
