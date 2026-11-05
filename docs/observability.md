@@ -8,16 +8,16 @@
 ## Overview
 
 Product events are user-action-scoped emits written to DuckDB at
-`~/.corsia/analytics.duckdb` (Sprint 5 Slice 0; backend wrapper).
+`analytics.duckdb` in the state root (Sprint 5 Slice 0; backend wrapper); see
+[Architecture](how-it-works/architecture.md) for where the state root is.
 Frontend can emit to a separately configured PostHog endpoint. This
 repository does not provide a local PostHog stack. Any relay replacement
 requires a current plan/PRD; the archived subsystem spec does not authorize
 future work. The schema is portable —
 the same taxonomy works against DuckDB, ClickHouse, BigQuery, or
-PostHog Cloud via `INSERT INTO target SELECT * FROM source`. They power:
-
-- Evals tab live cards (Slice 8)
-- Ad-hoc analytics via `tools/qh-query` CLI (DuckDB SQL helpers)
+PostHog Cloud via `INSERT INTO target SELECT * FROM source`. No app screen
+reads them; they are read ad hoc with the `tools/qh-query` CLI (DuckDB SQL
+helpers).
 
 Emits are **not** the same as OTel spans. In-process evaluation tracing captures
 traces and latency (Slice 2 / Slice 6). Product events capture user
@@ -28,7 +28,7 @@ event) because the two surfaces answer different questions.
 ## Wrappers (the only public surface)
 
 - **Backend:** `backend/infra/product_events.py` →
-  `emit_product_event(category, action, *, session_id, user_id, properties)`
+  `emit_product_event(category, action, *, thread_id, user_id, properties)`
 - **Frontend:** `frontend/src/lib/product_events.ts` →
   `emitProductEvent(category, action, properties)`
 - **Dev tooling (CLI):** `tools/antipatterns/` uses a small
@@ -168,6 +168,19 @@ All six onboarding events are backend-only lifecycle observations. They contain 
 |---|---|---|
 | `dev_tool.antipatterns_invoked` | `tools/antipatterns/` CLI exits | CLI (pre-commit / CI / manual) |
 
+### Measure keys
+
+| Event | When it fires | Surface |
+|---|---|---|
+| `measure_key.minted` | An agent minted a key an outside tool sends its measures with; no properties beyond the defaults | backend |
+
+### Project fence
+
+| Event | When it fires | Surface |
+|---|---|---|
+| `project_fence.refused` | An agent's tool call was refused a path in a project it is fenced from; `local_only` says whether that project is Local only | backend |
+| `project_fence.failed_closed` | A project, repository or caller row couldn't be read, so the agent was fenced from more; `reason` is `local_only_folder_unresolved`, `repo_path_unreadable` or `caller_unknown` | backend |
+
 ### UI
 
 | Event | When it fires | Surface |
@@ -280,7 +293,7 @@ when the frontend relay lands.
 All events carry these defaults (attached by the wrappers, never by callers):
 
 - `project` — logical project name (`corsia`); lets multi-project PostHog instances filter
-- `session_id` — CORSIA session id when known
+- `thread_id` — (backend only) the CORSIA thread id when known, also stored in its own column
 - (frontend only) distinct_id is the PostHog user id, persisted in localStorage
 
 Caller-supplied properties merge with defaults. Caller properties win on key collision.
@@ -328,7 +341,7 @@ Both wrappers read environment variables; nothing is hard-coded.
 | `CORSIA_ANALYTICS_DISABLE` | `0` | Set to `1` to force-disable (tests, opt-out, CI smoke runs). Read per-call so `monkeypatch.setenv` takes effect without a singleton reset. |
 | `CORSIA_ANALYTICS_PROJECT` | `corsia` | Logical project tag (also stored in the dedicated `project_id` column for index lookup). |
 
-The DuckDB file lives at `~/.corsia/analytics.duckdb`. Schema +
+The DuckDB file is `analytics.duckdb` in the state root (`backend/infra/platform_paths.py`). Schema +
 indexes are bootstrapped lazily by `analytics_db.get_db()` on first
 emit. No daemon, no Colima, no API key — the wrapper writes to a local
 file synchronously; the `qh-query` CLI reads the same file.
@@ -400,7 +413,7 @@ a future automated monitor requires a current KPI contract.
    Backend:
    ```python
    from infra.product_events import emit_product_event
-   emit_product_event("turn", "completed", session_id=sid,
+   emit_product_event("turn", "completed", thread_id=thread_id,
                       properties={"model": model_id, "token_count": n})
    ```
 
@@ -416,22 +429,22 @@ a future automated monitor requires a current KPI contract.
 
 ## Local debugging
 
-Backend (DuckDB-backed):
+Backend (DuckDB-backed). Run from the root of a source checkout with its
+`.venv` (see the README's source install). Point `CORSIA_STATE_DIR` at a
+scratch folder so the test event stays out of your real analytics file:
 
 ```bash
-~/.corsia/.venv/bin/python -c "
-from infra.product_events import emit_product_event, flush
+export CORSIA_STATE_DIR="$(mktemp -d)"
+PYTHONPATH=backend .venv/bin/python -c "
+from infra.product_events import emit_product_event
 emit_product_event('smoke', 'test', properties={'src': 'manual'})
-flush()  # no-op under DuckDB but safe to call
 "
 ```
 
-Then read with `qh-query` or DuckDB SQL:
+Then read it with `qh-query`:
 
 ```bash
-~/.corsia/.venv/bin/python -m qh_query 'SELECT * FROM product_events WHERE category=$1 ORDER BY ts DESC LIMIT 5' --param smoke
-# or against the file directly:
-duckdb ~/.corsia/analytics.duckdb "SELECT * FROM product_events WHERE category='smoke' ORDER BY ts DESC LIMIT 5;"
+.venv/bin/python tools/qh-query/cli.py --sql "SELECT category, action, properties FROM product_events WHERE category='smoke' ORDER BY ts DESC LIMIT 5"
 ```
 
 For the frontend, set both `PUBLIC_POSTHOG_API_KEY` and
@@ -451,9 +464,9 @@ queries:
 
 ```bash
 CORSIA_ANALYTICS_PROJECT=corsia PYTHONPATH=tools \
-  ~/.corsia/.venv/bin/python -m antipatterns --paths backend/main.py
-duckdb ~/.corsia/analytics.duckdb \
-  "SELECT category, action, properties FROM product_events WHERE category='dev_tool' ORDER BY ts DESC LIMIT 1;"
+  .venv/bin/python -m antipatterns --paths backend/main.py
+.venv/bin/python tools/qh-query/cli.py \
+  --sql "SELECT category, action, properties FROM product_events WHERE category='dev_tool' ORDER BY ts DESC LIMIT 1"
 ```
 
 ## Structured plans (PLANS-AC41)
@@ -662,8 +675,7 @@ outcomes and counts only; never tool arguments or results.
 
 ## Cross-references
 
-- `sprints/2026-05-13-quality-foundation-sprint-04/PLAN.md` — Sprint 4 deliverables (this slice is #3)
-- `sprints/2026-05-13-quality-foundation-sprint-05/PLAN.md` — Slice 0 PostHog → DuckDB reversal (DECISIONS-LOG #26)
 - `backend/eval/otel.py` — OTel emit surface (distinct from product events)
 - `backend/infra/analytics_db.py` — DuckDB substrate (schema + connection singleton)
-- `.env.example` — required env vars template
+
+Product-event sections checked against the code at `7a8c55d84`.

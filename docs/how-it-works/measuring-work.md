@@ -30,22 +30,22 @@ Series read from records the system already writes for other reasons (`backend/a
 
 - **Outcomes and first-try acceptance:** eligible accepted plan tasks, aggregated by the period in which they settled. **Rejections:** recorded review send-backs, grouped by when they happened.
 - **Active time:** the person's recorded presence in the app on that scope.
-- **Decisions and corrections:** raised decisions, how they were answered, and recorded corrections.
+- **Decisions and corrections:** raised decisions, how they were answered, and recorded corrections. Correction coverage counts the corrections detected in a period and the share its agent triaged; it is recomputed on every read, so a late triage raises an old period (`backend/api/measurement_corrections.py`).
 - **Tokens:** the retained usage ledger, with cache re-reads counted separately and excluded from "fresh" tokens.
 - **Limits:** recorded usage-limit hits.
 - **Size:** the newest size rating for an outcome, or its author's declared size when no rating exists. Retracted, malformed, stale, conflicting and unknown latest ratings are counted but not used; outcomes can also be unsized. See [size rating import](../size-rating-import.md).
 
-The API is read-only. It serves series, an agents table, a models table and a lessons report (`backend/api/measurement.py`).
+The API is read-only. Under `/api/measurement` it serves series and their index, key figures, an agents table, a models table, cost, limits, a where-to-look list, a lessons report and agents' KPIs (`backend/api/measurement.py` and the other measurement modules in `backend/api/`).
 
 ### Rules the registry applies
 
 Each series carries rules that the API enforces, so no chart has to remember them:
 
-- **Minimum sample.** A ratio is withheld, served with no value, until it has enough samples: 20 outcomes for most ratios, 10 answered decisions for the shares of how decisions were answered. The raw value is kept alongside so the cut-off is visible.
+- **Minimum sample.** A ratio is withheld, served with no value, until it has enough samples: 20 outcomes for most ratios, 10 answered decisions for the shares of how decisions were answered, 20 detected corrections for the share triaged. The raw value is kept alongside so the cut-off is visible.
 - **Not measured is not zero.** A period before a series' source existed is served as not measured. A chart is never given a zero to draw a baseline through.
 - **Proxies are labeled.** A series that estimates something, such as active hours or asks per outcome, carries a proxy flag.
 - **Comparability is marked.** Each series has a method version. The API also uses a stored source-start mark or derives one from records, includes definition-change marks, and marks periods as comparable or not (`backend/api/measurement_breaks.py`) instead of letting a chart draw one line across them.
-- **Partial periods are marked.** A period still in progress is served with a partial flag, for fresh tokens and, on the Days view, for outcomes.
+- **Partial periods are marked.** A period still in progress is served with a partial flag, for fresh tokens, the correction coverage series and, on the Days view, for outcomes.
 - **Token counts are lower bounds when records lack counts.** The series includes how many calls had no token count. A period where no call had one has no figure; it is never served as zero tokens.
 
 ### Cost
@@ -60,8 +60,9 @@ Time is estimated from the person's presence in the app, recorded as visits, mer
 
 An agent can declare facts from its own work in `measures.yaml`, record them, react to events with rules, and read a KPI back (`backend/infra/measure_registry.py`, `backend/core/agent_kpi_formula.py`). Measurement's API returns an agent's KPIs (`/api/measurement/agent-kpis`, `backend/api/measurement_agent_kpis.py`); the Measurement page doesn't show them.
 
-- **Events** come from connected mail, GitHub, CORSIA itself and agents' scripts, not from calendar or chat (`backend/events/intake.py`).
-- **Who is woken.** The agent that owns an event's subject is woken when the event needs action, and gets a digest line otherwise (`backend/events/disposition.py`). A rule can wake only the agent that wrote it or one that agent started, and matches declared fields only, so it can't read mail text (`backend/events/rules.py`).
+- **Events** come from connected mail, GitHub, CORSIA itself, agents' scripts and outside tools on the same machine, not from calendar or chat (`backend/events/intake.py`).
+- **Outside tools.** A tool that exports OpenTelemetry logs can send an agent's declared events. The agent mints a measure key with its `measure_key` tool, and the tool posts OTLP/HTTP logs to `/v1/logs` on a loopback-only port: 47921, or the next free port up to 47930, or `CORSIA_OTLP_PORT`. Each record needs an `event.name` the agent declared. The key sets the agent and project, and a record that names another is refused. Each agent gets 60 requests and 600 records a minute, and a request holds at most 500 records and 1 MB as sent (`backend/infra/otlp_receiver.py`, `backend/infra/otlp_admission.py`, `backend/infra/measure_keys.py`).
+- **Who is woken.** The agent that owns an event's subject is woken when the event needs action, and gets a digest line otherwise (`backend/events/disposition.py`). An event type declared with `default_delivery: none` skips that owner delivery, and only the rules that name a recipient deliver it (`backend/events/rule_zero.py`). A rule can wake only the agent that wrote it or one that agent started, and matches declared fields only, so it can't read mail text (`backend/events/rules.py`).
 - **KPI weeks** run on UTC; an agent reads the current and the last complete week (`backend/tools/measures.py`).
 - **Review lines.** A KPI with a `review` line and `alert: wake` or `alert: digest` is checked nightly. Once a week has settled (its end plus the KPI's settle days), a value worse than the line wakes the agent, or adds a line to its digest, once for that week; the project's report lists the move for the conductor (`backend/jobs/kpi_thresholds.py`).
 
@@ -70,6 +71,7 @@ An agent can declare facts from its own work in `measures.yaml`, record them, re
 - **Little data looks like no data.** A new install or a scope with few outcomes can show empty ratio charts because of the minimum-sample rule. Count series need not have the same threshold.
 - **Only eligible plan work counts as outcomes.** Work done outside a plan task is not an outcome. Other records, such as token usage, can still be measured.
 - **Proxies are estimates.** Active hours, asks per outcome and size-based hours are approximations and are marked so. Do not read a small difference as a result.
+- **Refused outside-tool requests aren't stored.** The agent's measure status counts them by cause, but those counts and the last refusal texts are kept in memory and reset when CORSIA restarts (`backend/infra/otlp_state.py`, `backend/infra/measure_status.py`).
 - **Your own measures are the agent's word.** They are labeled Self-reported unless something vouches for them, and recording starts when the agent first records. An event type or field that isn't declared is refused when the rule is written, but a declared one chosen by mistake fires on nothing and raises no error (`backend/events/rule_authoring.py`). The Measurement page doesn't show them, and a review line reaches the agent, not you.
 - **First-try rate depends on recorded work.** A send-back, certain failed or changed-requirement attempts, or a failed predecessor makes an outcome not first-try. It cannot see a rejection that happened in conversation and was never recorded on the plan.
 - **API-equivalent is not the bill.** Subscriptions and plan limits change what a person actually pays.
@@ -90,3 +92,7 @@ An agent can declare facts from its own work in `measures.yaml`, record them, re
 | Comparability breaks | `backend/api/measurement_breaks.py` |
 | In-app page and reading guide | [Measurement](../measurement.md) |
 | Declared measures, events and KPIs | `backend/infra/measure_registry.py`, `backend/events/intake.py`, `backend/events/rules.py`, `backend/core/agent_kpi_formula.py` |
+| Correction coverage | `backend/api/measurement_corrections.py` |
+| Outside-tool intake | `backend/infra/otlp_receiver.py`, `backend/infra/otlp_listener.py`, `backend/infra/measure_keys.py`, `backend/tools/measure_keys.py` |
+
+Checked against the code at `7a8c55d84`.
