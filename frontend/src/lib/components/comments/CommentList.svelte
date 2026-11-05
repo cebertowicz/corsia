@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { tick, type Snippet } from 'svelte';
-	import CommentThread, { type CommentThreadData } from './CommentThread.svelte';
+	import CommentThread from './CommentThread.svelte';
+	import type { CommentThreadData } from './commentThreadData';
 	import { groupRows } from '$lib/docImageComments';
 	import { plainQuote } from '$lib/plainQuote';
 	import { leaveRow } from '$lib/actions/leaveRow';

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import './comment-link.css';
 	import { retryPlacement } from '$lib/stores/docComments';
-	import type { CommentThreadData } from './CommentThread.svelte';
+	import type { CommentThreadData } from './commentThreadData';
 
 	let { comment }: { comment: CommentThreadData } = $props();
 

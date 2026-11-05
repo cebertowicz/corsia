@@ -4,7 +4,8 @@
 	import { refreshChatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { formatTime } from '$lib/time';
 	import CommentQuote from './comments/CommentQuote.svelte';
-	import CommentThread, { type CommentThreadData } from './comments/CommentThread.svelte';
+	import CommentThread from './comments/CommentThread.svelte';
+	import type { CommentThreadData } from './comments/commentThreadData';
 	import './comments/comment-link.css';
 
 	let { messageId, threadId, comments }: { messageId: string; threadId: string; comments: ChatComment[] } = $props();

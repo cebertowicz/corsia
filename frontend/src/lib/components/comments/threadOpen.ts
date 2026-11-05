@@ -1,4 +1,4 @@
-import type { CommentThreadData } from './CommentThread.svelte';
+import type { CommentThreadData } from './commentThreadData';
 
 /** Select the latest unread item when a person opens a document thread. */
 export function createThreadOpen(comment: () => CommentThreadData, chat: () => boolean, stamp: (id: string) => void) {

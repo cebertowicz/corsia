@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import CommentThread, { type CommentThreadData } from './CommentThread.svelte';
+import CommentThread from './CommentThread.svelte';
+import type { CommentThreadData } from './commentThreadData';
 
 type Reply = NonNullable<CommentThreadData['replies']>[number];
 const reply = (id: string, createdAt = '2026-10-16T18:00:00Z'): Reply => ({ id, author: 'agent-1', authorKind: 'agent', text: `reply ${id}`, at: 'later', createdAt });
