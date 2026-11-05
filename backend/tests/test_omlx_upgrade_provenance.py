@@ -46,7 +46,7 @@ async def test_unknown_original_state_fails_held_call(isolated_db, monkeypatch, 
         release.set()
         result = await asyncio.wait_for(owner, 2)
         assert result["reason"] == "loaded_unknown"
-        with pytest.raises(omlx_restart.UpgradeAdmissionError, match="determine which models were loaded"):
+        with pytest.raises(omlx_restart.UpgradeAdmissionError, match="couldn’t verify which models to restore"):
             await asyncio.wait_for(waiter, 2)
         assert not any(action == "restart.completed" for action, _ in events)
         if stage == "incremental":
@@ -91,7 +91,7 @@ async def test_sweep_observation_reaches_reload_but_does_not_prove_completeness(
         omlx_restart.on_exit("seat", life, 123, omlx_supervisor._start_recovery, lambda _: "", ("crash", False))
         assert not network_discovery.get_loaded_model_ids("seat")
         release.set()
-        assert await asyncio.wait_for(owner, 2) == {"restarted": False, "reason": "loaded_unknown"}
+        assert await asyncio.wait_for(owner, 2) == {"restarted": True, "reason": "loaded_unknown"}
         assert ("reload", "seat", ["later"]) in calls
     finally:
         release.set()
@@ -126,7 +126,7 @@ async def test_first_exit_hints_survive_later_replacement_exit(isolated_db, monk
         omlx_restart.on_exit("seat", life, 124, start, lambda _: "", ("replacement", False))
         assert life.restart is owner
         release.set()
-        assert await asyncio.wait_for(owner, 2) == {"restarted": False, "reason": "loaded_unknown"}
+        assert await asyncio.wait_for(owner, 2) == {"restarted": True, "reason": "loaded_unknown"}
         assert ("reload", "seat", ["first", "second"]) in calls
         assert attempts == 2 and len(life.restarts) == 2
     finally:
@@ -189,7 +189,7 @@ async def test_lifecycle_timeout_has_specific_held_call_message(isolated_db, mon
             async with omlx_supervisor.request_slot("seat"):
                 pytest.fail("timed out upgrade admitted a call")
         waiter = asyncio.create_task(request())
-        with pytest.raises(omlx_restart.UpgradeAdmissionError, match="upgrade timed out"):
+        with pytest.raises(omlx_restart.UpgradeAdmissionError, match="wasn’t ready in time"):
             await asyncio.wait_for(waiter, 2)
         with pytest.raises(TimeoutError):
             await owner
@@ -202,7 +202,7 @@ async def test_timeout_has_specific_held_call_message():
         raise TimeoutError()
     task = asyncio.create_task(operation())
     life = omlx_restart.Life(restart=task, hold_requests=True)
-    with pytest.raises(omlx_restart.UpgradeAdmissionError, match="timed out"):
+    with pytest.raises(omlx_restart.UpgradeAdmissionError, match="wasn’t ready in time"):
         async with omlx_restart.request_slot({"seat": life}, "seat"):
             pass
 
@@ -217,8 +217,8 @@ async def test_unrelated_upgrade_exception_keeps_generic_held_call_message():
         async with omlx_restart.request_slot({"seat": life}, "seat"):
             pytest.fail("failed upgrade admitted a call")
     assert str(error.value) == (
-        "Couldn’t upgrade the local model server. Check the server in Settings. "
-        "Restart CORSIA to retry the upgrade."
+        "CORSIA couldn’t get the local model server ready. Check the server and loaded models in Settings. "
+        "Restart CORSIA if the server still needs updating."
     )
 
 

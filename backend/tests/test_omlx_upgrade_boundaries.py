@@ -89,7 +89,7 @@ async def test_exit_at_preparation_boundary_skips_later_preparation(isolated_db,
     try:
         result = await asyncio.wait_for(owner, 2)
         if boundary in {"version", "drain", "idle"}:
-            assert result == {"restarted": False, "reason": "loaded_unknown"}
+            assert result == {"restarted": True, "reason": "loaded_unknown"}
         else:
             assert result["restarted"]
         stages = ["version", "idle", "snapshot", "recheck"]

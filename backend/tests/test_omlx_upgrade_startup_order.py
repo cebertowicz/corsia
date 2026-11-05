@@ -163,7 +163,7 @@ async def test_never_ready_upgrade_fails_held_call_in_finite_time(isolated_db, m
                 pytest.fail("a call entered after the boot timed out")
 
         waiter = asyncio.create_task(request())
-        with pytest.raises(RuntimeError, match="Couldn’t upgrade the local model server"):
+        with pytest.raises(RuntimeError, match="wasn’t ready in time"):
             await asyncio.wait_for(waiter, 2)
         assert upgrade.done()
     finally:
@@ -325,7 +325,7 @@ async def test_stop_cancels_upgrade_and_releases_held_call(isolated_db, monkeypa
         waiter = asyncio.create_task(request())
         await asyncio.sleep(0)
         omlx_supervisor._life["seat"].announce_stop()
-        with pytest.raises(RuntimeError, match="upgrade was cancelled"):
+        with pytest.raises(RuntimeError, match="update was cancelled"):
             await asyncio.wait_for(waiter, 2)
         assert task.cancelled()
     finally:

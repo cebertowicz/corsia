@@ -115,6 +115,13 @@ _UPGRADE_FAILURES = {
 }
 
 
+_POST_START_FAILURES = {
+    "loaded_unknown": "The local model server is running, but CORSIA couldn’t verify which models to restore. Check the loaded models in Settings.",
+    "reload_failed": "The local model server is running, but CORSIA couldn’t restore its previous models. Check the loaded models in Settings.",
+}
+_UNKNOWN_FAILURE = "CORSIA couldn’t get the local model server ready. Check the server and loaded models in Settings. Restart CORSIA if the server still needs updating."
+
+
 @asynccontextmanager
 async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIterator[None]:
     """Keep concurrent calls admitted before replacement alive; later calls wait through restoration."""
@@ -123,19 +130,21 @@ async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIt
         task = life.restart
         await asyncio.wait({task})  # caller cancellation must not cancel the restart
         if task.cancelled():
-            raise UpgradeAdmissionError("Couldn’t upgrade the local model server because the upgrade was cancelled. Check the server in Settings. Restart CORSIA to retry the upgrade.")
+            raise UpgradeAdmissionError("The local model server update was cancelled. Check the server and loaded models in Settings. Restart CORSIA if the server still needs updating.")
         try:
             result = task.result()
         except TimeoutError as exc:
-            raise UpgradeAdmissionError("Couldn’t upgrade the local model server because the upgrade timed out. Check the server in Settings. Restart CORSIA to retry the upgrade.") from exc
+            raise UpgradeAdmissionError("The local model server wasn’t ready in time. Check the server and loaded models in Settings. Restart CORSIA if the server still needs updating.") from exc
         except Exception as exc:
-            raise UpgradeAdmissionError("Couldn’t upgrade the local model server. Check the server in Settings. Restart CORSIA to retry the upgrade.") from exc
+            raise UpgradeAdmissionError(_UNKNOWN_FAILURE) from exc
         if isinstance(result, dict) and result.get("reason") != "already_current":
             if not result.get("restarted") or result.get("reason"):
+                if result.get("restarted") and result.get("reason") in _POST_START_FAILURES:
+                    raise UpgradeAdmissionError(_POST_START_FAILURES[result["reason"]])
                 reason = _UPGRADE_FAILURES.get(result.get("reason"))
                 if reason:
                     raise UpgradeAdmissionError(f"Couldn’t upgrade the local model server because {reason}. Restart CORSIA to retry the upgrade.")
-                raise UpgradeAdmissionError("Couldn’t upgrade the local model server. Check the server in Settings. Restart CORSIA to retry the upgrade.")
+                raise UpgradeAdmissionError(_UNKNOWN_FAILURE)
         life = lives.get(server_id or "")
     if life is None:
         yield  # unmanaged and other providers have no supervisor admission
@@ -352,7 +361,7 @@ async def recover(
             raise
         if not context.complete:
             emit(server_id, "restart.failed", status=status, reason="loaded_unknown")
-            return {"restarted": False, "reason": "loaded_unknown"}
+            return {"restarted": True, "reason": "loaded_unknown"}
         missing = sorted(set(context.models) - {row["identifier"] for row in restored or []})
         if restored is None or missing:
             missing = missing or context.models

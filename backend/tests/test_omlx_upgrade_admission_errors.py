@@ -16,7 +16,7 @@ from llm.providers import omlx_restart, omlx_supervisor
     ("stop_failed", "Couldn’t upgrade the local model server because CORSIA couldn’t stop the server. Check the server in Settings. Restart CORSIA to retry the upgrade."),
     ("start_failed", "Couldn’t upgrade the local model server because CORSIA couldn’t start the server. Check the server in Settings. Restart CORSIA to retry the upgrade."),
     ("reload_failed", "Couldn’t upgrade the local model server because CORSIA couldn’t restore the loaded models. Check the server in Settings. Restart CORSIA to retry the upgrade."),
-    ("unexpected", "Couldn’t upgrade the local model server. Check the server in Settings. Restart CORSIA to retry the upgrade."),
+    ("unexpected", "CORSIA couldn’t get the local model server ready. Check the server and loaded models in Settings. Restart CORSIA if the server still needs updating."),
 ])
 async def test_start_reports_held_upgrade_failure(monkeypatch, reason, cause):
     release = asyncio.Event()
@@ -48,8 +48,8 @@ async def test_cancelled_upgrade_reports_retry_instructions():
         async with omlx_restart.request_slot({"seat": life}, "seat"):
             pytest.fail("a call passed a cancelled upgrade")
     assert str(error.value) == (
-        "Couldn’t upgrade the local model server because the upgrade was cancelled. "
-        "Check the server in Settings. Restart CORSIA to retry the upgrade."
+        "The local model server update was cancelled. Check the server and loaded models in Settings. "
+        "Restart CORSIA if the server still needs updating."
     )
 
 
