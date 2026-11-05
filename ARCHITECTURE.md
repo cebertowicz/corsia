@@ -117,6 +117,25 @@ so Providers refreshes server state only for those transitions. Ordinary
 catalog events add no server-list read. `providersV7` owns the row's restart
 text and dot for every host-group consumer.
 
+### Model and account resolution
+
+`backend/llm/account_catalog.py` projects each harness model's status for the
+accounts permitted in scope. The selected account's discovery supplies its
+identity and window when available; `backend/connections/account_rollover.py` owns an opt-in
+move to an eligible account before a queued input is claimed. The window
+resolver in `backend/llm/context_window.py` applies the saved profile and
+provider evidence. Managed oMLX memory refusals can add a temporary runtime
+cap shared by all turns using that model on that server. A later refusal
+replaces the observation; it is removed when the turn that recorded it ends
+(`backend/llm/memory_fit.py`). External server
+selectors carry both server identity and served model id; the External provider
+routes requests without managing the server's models
+(`backend/llm/external_provider.py`).
+
+The oMLX public authentication, managed oMLX replacement, and model and account
+resolution sections were checked against the code at
+`7a8c55d84c75cbee7b8f26c8839f188fa466b559`.
+
 ### System tier projection
 
 `backend/infra/system_package.py` locates immutable System source content. At
@@ -517,9 +536,11 @@ the transition.
 
 ## Context and skills
 
-CORSIA composes context every turn:
+CORSIA composes context for each turn. Static sources and the responsibility map
+are retained until the next install boundary; other turn-specific context can change:
 
-- system context from the workspace `context/` directory;
+- packaged System context;
+- workspace context from the workspace `context/` directory;
 - project context from the project `context/` directory;
 - Agent and Conductor context selected from `context/roles/<role>/` at those
   existing scopes, with Conductors composing Agent context before their additive layer;
@@ -552,13 +573,12 @@ table and no second registry.
   scheduled for the review date. It takes no executor slot before that date.
   The owner retires, promotes, extends, or revises the trial; nothing does so
   automatically.
-- **Index membership.** `backend/core/lesson_index.py` decides, once per
-  skills-index install, which trials are offered: the file is in its owner's
-  own skills, says `trial`, its date is ahead, its owner holds an open review
-  of that exact version, no ordinary skill has its name, and the lesson index
-  budget has room. Anything else is listed as omitted with its reason. The
-  installed index records the offered lessons; the per-turn manifest keeps only
-  each lesson's id and behavioral hash.
+- **Task-start delivery.** `backend/core/lesson_index.py` checks trial eligibility,
+  including ownership, state, review date, review version and skill-name conflicts.
+  Trials do not enter the installed skills index. At task start,
+  `backend/core/lesson_delivery.py` assigns eligible trials to a with or without
+  group and returns applicable guidance to the with group. Count and token caps
+  can leave a trial out of both groups; receipts record the result.
 - **Evidence report.** `backend/core/lesson_report.py` projects existing review
   history, validated current files, installed boundaries, per-call manifests,
   and canonical read results. The deferred `lesson_report` tool and Measurement
@@ -568,14 +588,12 @@ table and no second registry.
   identity may establish a body read; ambiguous or missing lineage stays unknown.
   Current files and packaged System availability do not establish delivery;
   unresolved project roots, System projection and role-skill coverage are named.
-- **Context accounting.** `backend/infra/lesson_usage_attribution.py` annotates
-  the selected frozen Skills inventory through a usage-level estimate sibling.
-  It changes no installed bytes or hashes. Descriptor estimates remain part of
-  Skills; body reads remain history. The Context sheet and Measurement Learning
-  detail use existing document and review navigation.
-- **Limits.** The index is frozen at install, so a new, changed, or expired
-  trial takes effect at the next install and never in a running conversation.
-  Offers and supported reads do not establish opportunity, application or benefit.
+- **Context accounting.** `backend/infra/lesson_usage_attribution.py` can
+  project descriptor estimates from a retained Skills snapshot without changing
+  its bytes or hashes. Current trials are delivered at task start rather than
+  included in that snapshot.
+- **Limits.** A trial is delivered at task start, not in the installed index.
+  Delivery and supported reads do not establish application or benefit.
   Incomplete historical populations and per-version costs remain unavailable.
 
 ## Managed background processes
@@ -724,8 +742,9 @@ work.
 
 ## Review authority
 
-The reviewer builds its request from the current diff plus the mapped approved
-PRD contract. GitHub trigger, review, comment, and check handling lives under
+The reviewer builds its request from the current diff and standards, plus any
+mapped approved PRD contracts. GitHub trigger and gate handling lives under
+`backend/events/`; review, comment, and status handling lives under
 `backend/reviewer/`.
 
 Author procedure, revised-head holds, and merge gates live in the project
@@ -737,3 +756,5 @@ second contract system.
 
 Use git history for deeper provenance. New rationale belongs in the current
 PRD/design and the code/tests that implement it.
+
+Checked against the code at `310115261`.

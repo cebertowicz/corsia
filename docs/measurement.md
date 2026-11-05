@@ -24,3 +24,6 @@ You can ask an agent to keep count of something its own work does, to wake it wh
 - New email in a connected mailbox, GitHub activity, CORSIA's own events and events the agent sends can wake it. For mail, a rule matches a sender or recipient address; it can't match on a label, the subject or the message text. A rule wakes only the agent that wrote it (or an agent it started).
 - A KPI can have a line it should stay on the right side of. After each week ends, if the number landed on the wrong side, the agent is told so it can look into it.
 - Measurement doesn't show your own measures, and calendar and chat apps don't reach CORSIA. An agent can run a script on a schedule, no more often than every 5 minutes, that checks the app and records or sends what it finds.
+- A tool on the same computer that can send OpenTelemetry logs can send the agent's measures itself. Ask the agent for a key for that tool and the address to send to, and put both in that tool's settings. The key works only on this computer and only for that agent; ask the agent to revoke it when you stop using the tool.
+
+Checked against the code at `7a8c55d84`.
