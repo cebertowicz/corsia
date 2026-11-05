@@ -1,6 +1,6 @@
 # Your first project
 
-What you see in the browser after [installing CORSIA](install.md): the setup screens, the first chat with the CORSIA agent, and creating a project. A **project** is one body of work with its own context, skills and files, kept in its own folder in your workspace; see [Scopes](../how-it-works/scopes.md). The **CORSIA agent** is the assistant you talk to outside any project.
+What you see in the browser after [installing CORSIA](install.md): the setup screens, the first chat with the CORSIA agent, and creating a project. A **project** is one body of work with its own context, skills and files, kept in its own folder in your workspace; see [Scopes](../how-it-works/scopes.md). The **CORSIA agent** is the assistant you talk to outside any project. The [Glossary](../reference/glossary.md) defines these and the other terms on this page, such as conductor, plan and agent.
 
 Control names below are the labels the app shows. This page was written from the app's source code and has not been walked through in a browser; if a screen differs from what you read, the screen is right and the page needs a fix.
 
