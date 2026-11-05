@@ -36,7 +36,7 @@ import asyncio
 import logging
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -142,14 +142,26 @@ def on_exit(
     emit(server_id, "exit.unexpected", status=status, loaded_models=len(loaded))
     if life.restart:  # it exited again while a restart was running
         life.restart.cancel()
-    task = asyncio.get_running_loop().create_task(_restart(server_id, life, status, loaded, start, tail_log))
+    schedule(server_id, life, _restart(server_id, life, status, loaded, start, tail_log))
+
+
+def schedule(server_id: str, life: Life, operation: Coroutine[Any, Any, Any]) -> asyncio.Task:
+    """Own one restart through the same Life, so Stop and shutdown can cancel and await it."""
+    from infra.state.ws import broadcast_all
+
+    task = asyncio.get_running_loop().create_task(operation)
     life.restart = task
     task.add_done_callback(lambda done: _done(server_id, life, done))
+    broadcast_all({"type": "models_updated"})  # show the lifecycle change without admitting held work
+    return task
 
 
 def _done(server_id: str, life: Life, task: asyncio.Task) -> None:
+    from infra.state.ws import notify_models_changed
+
     if life.restart is task:
         life.restart = None
+        notify_models_changed()
     error = None if task.cancelled() else task.exception()
     if error is not None:
         log.error("oMLX restart stopped on an error", exc_info=error)

@@ -59,7 +59,7 @@ export function agentCliGroup(providers: HostProvider[] = []): HostGroup {
 export const hostGroupSnapshot = writable<HostGroup[]>([]);
 export const hostGroups = derived([hostGroupSnapshot, vendorAccounts, networkServers], ([$snapshot, $accounts, $servers]) =>
 	$snapshot.map((group) => ({ ...group, providers: group.providers.map((provider) => {
-		const live = provider.server ? { ...provider, server: $servers.find((row) => row.id === provider.server?.id) ?? provider.server } : provider;
+		const live = provider.server ? _serverProvider($servers.find((row) => row.id === provider.server?.id) ?? provider.server, [provider.raw], provider.type) : provider;
 		return live.type === 'harness' && live.harnessModelCount != null
 			? { ...live, subline: _harnessSubline(live.name, live.harnessModelCount, $accounts) } : live;
 	}) })),

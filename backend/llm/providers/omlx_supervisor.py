@@ -75,17 +75,28 @@ def _write_pid(server_id: str, pid: int, *, omlx_version: str | None = None) -> 
     process.write_pid(RUNTIME_DIR, server_id, pid, omlx_version=omlx_version)
 
 
-def recorded_version(server_id: str) -> str | None:
-    """The oMLX build this server was spawned with, as recorded by this supervisor."""
-    return process.recorded_omlx_version(RUNTIME_DIR, server_id)
+async def upgrade_server(server_id: str) -> dict[str, Any] | None:
+    """Upgrade only a process this supervisor adopted, using its existing lifecycle."""
+    from llm.providers.omlx_upgrade import restart_when_idle
+
+    version = await run_in_db(process.recorded_omlx_version, RUNTIME_DIR, server_id)
+    return await restart_when_idle(server_id, _life.get(server_id), version, OMLX_VERSION, _stop_server, start_server)
+
+
+def is_restarting(server_id: str) -> bool:
+    """Whether the supervisor currently owns a restart, including model restoration."""
+    life = _life.get(server_id)
+    return life is not None and life.restart is not None
 
 
 def _clear_pid(server_id: str) -> None:
     process.clear_pid(RUNTIME_DIR, server_id)
 
 
-def _process_alive(pid: int) -> bool:
-    return process.process_alive(pid)
+# Keep the existing supervisor injection points for the canonical process primitives.
+_process_alive = process.process_alive
+_port_owner_pid = process.port_owner_pid
+_build_argv = process.build_argv
 
 
 def _process_exited(pid: int) -> bool:
@@ -95,20 +106,6 @@ def _process_exited(pid: int) -> bool:
     except ChildProcessError:
         return not _process_alive(pid)
     return waited_pid == pid or not _process_alive(pid)
-
-
-def _port_owner_pid(host: str, port: int) -> process.PortOwnerPid:
-    return process.port_owner_pid(host, port)
-
-
-def _build_argv(
-    host: str,
-    port: int,
-    settings: dict,
-    *,
-    executable: str | None = None,
-) -> list[str]:
-    return process.build_argv(host, port, settings, executable=executable)
 
 
 def _is_managed_omlx_server(server_id: str) -> bool:

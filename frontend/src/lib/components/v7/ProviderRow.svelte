@@ -38,6 +38,8 @@
 
 	const isSetup = $derived(setupLabel !== undefined);
 	const enabled = $derived(providerEnabled(provider));
+	const subline = $derived(provider.server?.restarting ? 'Restarting…' : provider.subline);
+	const statusDot = $derived(provider.server?.restarting ? 'idle' : provider.statusDot);
 	// Harness cards have account settings, but the provider-wide enable hold is not
 	// implemented yet. Keep its switch hidden until that state has a real owner.
 	const configurable = $derived(provider.type !== 'harness');
@@ -64,8 +66,8 @@
 	<div class="pr-head" class:setup={isSetup}>
 		{#if isSetup}
 			<div class="pr-setup-summary">
-				<span class="dot-wrap"><span class="dot {provider.statusDot}"></span></span>
-				<span class="pr-info"><span class="name-row"><span class="name">{provider.label}</span></span><span class="meta">{provider.subline}</span></span>
+				<span class="dot-wrap"><span class="dot {statusDot}"></span></span>
+				<span class="pr-info"><span class="name-row"><span class="name">{provider.label}</span></span><span class="meta">{subline}</span></span>
 			</div>
 		{:else}
 			<button
@@ -75,8 +77,8 @@
 				aria-label="{provider.label} — {expanded ? 'collapse' : 'expand'}"
 				onclick={() => onToggleExpand?.()}
 			>
-				<span class="dot-wrap"><span class="dot {provider.statusDot}"></span></span>
-				<span class="pr-info"><span class="name-row"><span class="name">{provider.label}</span></span><span class="meta">{provider.subline}</span></span>
+				<span class="dot-wrap"><span class="dot {statusDot}"></span></span>
+				<span class="pr-info"><span class="name-row"><span class="name">{provider.label}</span></span><span class="meta">{subline}</span></span>
 				<span class="ico-btn sm chev" aria-hidden="true"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
 			</button>
 		{/if}
