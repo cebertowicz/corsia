@@ -6,7 +6,6 @@ import asyncio
 import logging
 import os
 import signal
-import subprocess
 import time
 from contextlib import AbstractAsyncContextManager
 from typing import Any
@@ -93,7 +92,6 @@ def _clear_pid(server_id: str) -> None:
     process.clear_pid(RUNTIME_DIR, server_id)
 
 
-# Keep the existing supervisor injection points for the canonical process primitives.
 _process_alive = process.process_alive
 _port_owner_pid = process.port_owner_pid
 
@@ -143,22 +141,7 @@ def _tail_log(server_id: str, lines: int = 20) -> str:
     return process.tail_log(RUNTIME_DIR, server_id, lines=lines)
 
 
-def _spawn_process(argv: list[str], log_path) -> subprocess.Popen | dict[str, Any]:
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        log_fh = log_path.open("ab", buffering=0)
-        return subprocess.Popen(
-            argv,
-            env={**os.environ, "OMLX_SUPERVISED": "corsia"},  # enables oMLX's own Restart; see omlx_restart
-            stdout=log_fh,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-            close_fds=True,
-        )
-    except Exception as exc:
-        log.exception("Failed to spawn oMLX")
-        return {"ok": False, "message": "Couldn’t start the model server. Try again.", "error": str(exc)}
+_spawn_process = process.spawn_process
 
 
 def _failed_boot_result(
@@ -217,6 +200,29 @@ def stop_watching() -> None:  # the backend is shutting down: an oMLX exit from 
         life.shutdown()
 
 
+async def _confirm_ready(
+    sid: str, host: str, port: int, pid: int, *, timeout_s: float | None = None, require_preload: bool = False,
+) -> dict[str, Any] | None:
+    """Complete startup or adoption through the same readiness and watch owner."""
+    try:
+        if timeout_s is not None:
+            health = await _wait_for_healthy(
+                host, port, timeout_s=timeout_s, server_id=sid, pid=pid,
+                **({"require_preload": True} if require_preload else {}),
+            )
+            if health != "healthy":
+                if require_preload and health == "timed_out":
+                    await restart.require_stopped(lambda: _stop_server({"server_id": sid, "host": host, "port": port}))
+                return _failed_boot_result(sid, host, port, pid, reason=health, timeout_s=timeout_s)
+        await run_in_db(_mark_endpoint_alive, sid, host, port)
+        watch(sid, pid)
+        return None
+    except asyncio.CancelledError:
+        if require_preload:
+            await restart.require_stopped(lambda: _stop_server({"server_id": sid, "host": host, "port": port}))
+        raise
+
+
 async def start_server(cfg: dict) -> dict[str, Any]:
     """Spawn ``omlx serve`` for the given network-servers row. Idempotent."""
     sid = cfg.get("server_id")
@@ -229,30 +235,27 @@ async def start_server(cfg: dict) -> dict[str, Any]:
                 return await start_server(cfg)
         except RuntimeError as exc:
             return {"ok": False, "message": str(exc)}
+    return await _start_server(cfg, sid, life)
 
+
+async def _start_server(cfg: dict, sid: str, life: restart.Life | None) -> dict[str, Any]:
+    """Resolve and start a server after its admission gate has opened."""
     host, port = await run_in_db(_resolve_endpoint, cfg)
     if not host or not port:
         return {"ok": False, "message": "start_server: cfg has no host/port"}
     host = _listen_host(host)
 
+    preload = bool(life and life.hold_requests and life.restart is asyncio.current_task())
     existing_pid = _read_pid(sid, host=host, port=int(port))
     if existing_pid and _process_alive(existing_pid):
         owner = _port_owner_pid(host, port)
         if owner == existing_pid:
-            # A prior failed boot can still own the port while it is exiting.
-            # An upgrade may only adopt it after pinned-model preload is complete.
-            if life and life.hold_requests and life.restart is asyncio.current_task():
-                health = await _wait_for_healthy(
-                    host, int(port), timeout_s=MANAGED_HEALTH_STARTUP_CAP_S,
-                    server_id=sid, pid=existing_pid, require_preload=True,
-                )
-                if health != "healthy":
-                    return _failed_boot_result(
-                        sid, host, int(port), existing_pid, reason=health,
-                        timeout_s=MANAGED_HEALTH_STARTUP_CAP_S,
-                    )
-            await run_in_db(_mark_endpoint_alive, sid, host, int(port))
-            watch(sid, existing_pid)
+            failure = await _confirm_ready(
+                sid, host, int(port), existing_pid,
+                timeout_s=MANAGED_HEALTH_STARTUP_CAP_S if preload else None, require_preload=preload,
+            )
+            if failure is not None:
+                return failure
             return {
                 "ok": True,
                 "pid": existing_pid,
@@ -291,16 +294,11 @@ async def start_server(cfg: dict) -> dict[str, Any]:
              proc.pid, sid, host, port)
 
     timeout_s = MANAGED_HEALTH_STARTUP_CAP_S if managed else DEFAULT_HEALTH_TIMEOUT_S
-    preload = bool(managed and life and life.hold_requests and life.restart is asyncio.current_task())
-    health = await _wait_for_healthy(
-        host, int(port), timeout_s=timeout_s, server_id=sid, pid=proc.pid,
-        **({"require_preload": True} if preload else {}),
+    failure = await _confirm_ready(
+        sid, host, int(port), proc.pid, timeout_s=timeout_s, require_preload=bool(managed and preload),
     )
-    if health == "healthy":
-        await run_in_db(_mark_endpoint_alive, sid, host, int(port))
-        watch(sid, proc.pid)
-    else:
-        return _failed_boot_result(sid, host, int(port), proc.pid, reason=health, timeout_s=timeout_s)
+    if failure is not None:
+        return failure
 
     return {
         "ok": True,

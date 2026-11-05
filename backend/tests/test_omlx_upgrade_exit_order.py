@@ -17,9 +17,18 @@ async def test_exit_during_version_read_cannot_bypass_upgrade_admission(monkeypa
 
     version_read, release = asyncio.Event(), asyncio.Event()
     callback_done, state_release = asyncio.Event(), asyncio.Event()
+    recovering, finish_recovery = asyncio.Event(), asyncio.Event()
     watched = []
     monkeypatch.setattr(omlx_supervisor, "_life", {})
-    monkeypatch.setattr(omlx_supervisor, "start_server", AsyncMock(return_value={"ok": False}))
+
+    async def start(_cfg):
+        recovering.set()
+        await finish_recovery.wait()
+        return {"ok": True}
+
+    monkeypatch.setattr(omlx_supervisor, "start_server", start)
+    monkeypatch.setattr("llm.local_keep_loaded.reload_after_restart", AsyncMock())
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", AsyncMock(return_value=[]))
     monkeypatch.setattr(omlx_supervisor, "_stop_server", AsyncMock(return_value={"ok": True}))
     monkeypatch.setattr(omlx_supervisor, "_tail_log", lambda _sid: "")
     monkeypatch.setattr(omlx_startup, "run_in_db", AsyncMock(side_effect=lambda fn, *args: fn(*args)))
@@ -63,17 +72,21 @@ async def test_exit_during_version_read_cannot_bypass_upgrade_admission(monkeypa
         await asyncio.wait_for(callback_done.wait(), 2)
         assert omlx_supervisor._life["seat"].restart is task
         assert omlx_supervisor._life["seat"].hold_requests
+        state_release.set()
+        await asyncio.wait_for(recovering.wait(), 2)
 
         async def request():
             async with omlx_supervisor.request_slot("seat"):
-                pytest.fail("a crash restart bypassed the held upgrade")
+                return "admitted"
 
         waiter = asyncio.create_task(request())
         await asyncio.sleep(0)
-        state_release.set()
-        with pytest.raises(RuntimeError, match="upgrade failed"):
-            await asyncio.wait_for(waiter, 2)
+        assert not waiter.done()
+        finish_recovery.set()
+        assert await asyncio.wait_for(waiter, 2) == "admitted"
     finally:
         release.set()
         state_release.set()
-        await _finish(waiter, task, startup)
+        finish_recovery.set()
+        life = omlx_supervisor._life.get("seat")
+        await _finish(waiter, task, startup, life.restart if life else None)

@@ -51,7 +51,54 @@ def schedule_upgrade(
     )
 
 
+class HeldExit(Exception):
+    """A watched process exited while the held owner was in a bounded stage."""
+
+
+async def held_stage(life: restart.Life, operation: Awaitable[Any], timeout: float | None = None) -> Any:
+    try:
+        async with asyncio.timeout(timeout):
+            result = await operation
+    except TimeoutError:
+        if life.upgrade_exit is not None:
+            raise HeldExit from None
+        raise
+    if life.upgrade_exit is not None:
+        raise HeldExit
+    return result
+
+
 async def _replace(
+    server_id: str, life: restart.Life, wanted: str,
+    stop: Callable[[dict], Awaitable[dict[str, Any]]], start: Callable[[dict], Awaitable[dict[str, Any]]],
+    tail_log: Callable[[str], str],
+) -> dict[str, Any]:
+    restart.prune_restart_window(life)
+    try:
+        return await _replace_once(server_id, life, wanted, stop, start, tail_log)
+    except HeldExit:
+        while life.upgrade_exit is not None:
+            status, observed = life.upgrade_exit
+            life.upgrade_exit = None
+            if life.upgrade_models is None:
+                life.upgrade_models = observed
+            try:
+                return await restart._recover_held(server_id, life, status, life.upgrade_models, start, tail_log)
+            except HeldExit:
+                continue
+        raise RuntimeError("Local model server recovery lost its exit observation")
+
+
+async def _snapshot(server_id: str, life: restart.Life) -> list[dict] | None:
+    from llm.providers.omlx_lifecycle import read_loaded
+
+    rows = await read_loaded({"server_id": server_id})
+    if rows is not None:
+        life.upgrade_models = sorted({row["identifier"] for row in rows})
+    return rows
+
+
+async def _replace_once(
     server_id: str, life: restart.Life, wanted: str,
     stop: Callable[[dict], Awaitable[dict[str, Any]]], start: Callable[[dict], Awaitable[dict[str, Any]]],
     tail_log: Callable[[str], str],
@@ -63,13 +110,12 @@ async def _replace(
     # schedule() closed admission synchronously. Drain provider scopes, never
     # whole Turns (which may need another call), then prove idle inside that boundary.
     if life.requests:
-        _, pending = await asyncio.wait(life.requests, timeout=STAGE_TIMEOUT_S)
+        _, pending = await held_stage(life, asyncio.wait(life.requests, timeout=STAGE_TIMEOUT_S))
         if pending:
             log.warning("Local oMLX upgrade failed: admitted calls did not finish")
             restart.emit(server_id, "restart.failed", status="upgrade", reason="drain_timeout")
             return {"restarted": False, "reason": "drain_timeout"}
-    async with asyncio.timeout(STAGE_TIMEOUT_S):
-        state = await _state(server_id, life)
+    state = await held_stage(life, _state(server_id, life), STAGE_TIMEOUT_S)
     if state != IDLE:
         if state == BUSY:
             log.warning("Local oMLX upgrade failed: the server has outside activity")
@@ -78,13 +124,13 @@ async def _replace(
         log.warning("Local oMLX upgrade skipped until next startup: idle status could not be established")
         restart.emit(server_id, "restart.skipped", status="upgrade", reason="not_idle")
         return {"restarted": False, "reason": "not_idle"}
-    rows = await asyncio.wait_for(read_loaded({"server_id": server_id}), STAGE_TIMEOUT_S)
+    rows = await held_stage(life, _snapshot(server_id, life), STAGE_TIMEOUT_S)
     if rows is None:
         log.warning("Local oMLX upgrade skipped until next startup: loaded models could not be read")
         restart.emit(server_id, "restart.skipped", status="upgrade", reason="loaded_unknown")
         return {"restarted": False, "reason": "loaded_unknown"}
     loaded = sorted({row["identifier"] for row in rows})
-    if await asyncio.wait_for(recorded_version(server_id), STAGE_TIMEOUT_S) == wanted:
+    if await held_stage(life, asyncio.wait_for(recorded_version(server_id), STAGE_TIMEOUT_S)) == wanted:
         return {"restarted": False, "reason": "already_current"}
     life.stopping = True  # the exit caused by our internal stop is intentional
     try:
@@ -100,13 +146,14 @@ async def _replace(
     life.drop_watch()
     life.stopping = False
     life.restarts.clear()  # intentional upgrade has the same fresh budget as a dashboard restart
-    async with asyncio.timeout(STAGE_TIMEOUT_S * (restart.MAX_RESTARTS + 1)):
-        started = await restart.start_with_recovery(server_id, life, "upgrade", start, tail_log)
+    started = await held_stage(
+        life, restart.start_with_recovery(server_id, life, "upgrade", start, tail_log),
+        STAGE_TIMEOUT_S * (restart.MAX_RESTARTS + 1),
+    )
     if not started:
         return {"restarted": False, "reason": "start_failed"}
-    async with asyncio.timeout(STAGE_TIMEOUT_S * (len(loaded) + 1)):
-        await reload_after_restart(server_id, loaded)
-    restored = await asyncio.wait_for(read_loaded({"server_id": server_id}), STAGE_TIMEOUT_S)
+    await held_stage(life, reload_after_restart(server_id, loaded), STAGE_TIMEOUT_S * (len(loaded) + 1))
+    restored = await held_stage(life, asyncio.wait_for(read_loaded({"server_id": server_id}), STAGE_TIMEOUT_S))
     missing = sorted(set(loaded) - {row["identifier"] for row in restored or []})
     if restored is None or missing:
         log.error("Local oMLX moved to %s but model restoration was not confirmed: %s", wanted, missing)

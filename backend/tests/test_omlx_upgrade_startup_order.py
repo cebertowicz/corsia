@@ -201,6 +201,7 @@ async def test_replacement_does_not_adopt_a_failed_boot_as_ready(monkeypatch):
     monkeypatch.setattr(omlx_supervisor, "watch", lambda *_args: None)
     health = AsyncMock(return_value="timed_out")
     monkeypatch.setattr(omlx_supervisor, "_wait_for_healthy", health)
+    monkeypatch.setattr(omlx_supervisor, "_stop_server", AsyncMock(return_value={"ok": True}))
     monkeypatch.setattr(omlx_supervisor, "_failed_boot_result", lambda *_args, **_kwargs: {"ok": False})
     task = asyncio.create_task(omlx_supervisor.start_server({"server_id": "seat"}))
     life.restart = task

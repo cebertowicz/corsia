@@ -259,7 +259,7 @@ def test_only_a_restart_line_logged_after_the_watch_began_counts(tmp_path, monke
 
 def test_corsia_launches_omlx_as_its_supervisor(tmp_path, monkeypatch):
     seen: dict = {}
-    monkeypatch.setattr(sup.subprocess, "Popen", lambda argv, **kwargs: seen.update(kwargs) or object())
+    monkeypatch.setattr(sup.process.subprocess, "Popen", lambda argv, **kwargs: seen.update(kwargs) or object())
     sup._spawn_process(["omlx", "serve"], tmp_path / "omlx.log")
     assert seen["env"]["OMLX_SUPERVISED"] == "corsia"
     assert seen["env"]["PATH"] == os.environ["PATH"]

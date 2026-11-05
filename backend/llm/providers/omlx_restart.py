@@ -10,9 +10,9 @@ What each event does, by where the server is:
 ==================  ==========================  ===============================  =================
 event               running (watched)           restart in flight                stop asked for
 ==================  ==========================  ===============================  =================
-exit, not clean     restart it (bounded)        crash restart is replaced; a    no restart
-                                                held upgrade keeps ownership
-exit, code 0        logged, not restarted       -                                no restart
+exit, not clean     restart it (bounded)        restart is replaced; a held    no restart
+                                                upgrade recovers under its gate
+exit, code 0        logged, not restarted       held upgrade recovers          no restart
                     (an exit with no readable status is treated as unexpected)
 exit, code 0 after  restarted, bound reset      -                                no restart
 oMLX's own Restart  (its dashboard asked)
@@ -65,6 +65,8 @@ class Life:
     stopping: bool = False  # a stop was asked for: the exit it causes is not a crash
     restart: asyncio.Task | None = None
     hold_requests: bool = False  # only an upgrade drains calls before replacing the process
+    upgrade_models: list[str] | None = None  # exact snapshot survives a replacement process exit
+    upgrade_exit: tuple[str, list[str]] | None = None
     restarts: deque[float] = field(default_factory=deque)  # when each restart in the window began
     requests: set[asyncio.Future[None]] = field(default_factory=set)  # admitted provider calls, not whole Turns
 
@@ -127,6 +129,19 @@ async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIt
         finished.set_result(None)
 
 
+async def require_stopped(stop_process: Callable[[], Awaitable[dict[str, Any]]]) -> None:
+    """Fail the owning operation if cleanup cannot stop its process."""
+    from app_shutdown_join import join_cleanup_owner
+
+    result, cancelled = await join_cleanup_owner(stop_process())
+    if isinstance(result, BaseException):
+        raise RuntimeError("Local model server cleanup failed") from result
+    if not isinstance(result, dict) or not result.get("ok"):
+        raise RuntimeError(f"Local model server cleanup failed: {result}")
+    if cancelled is not None:
+        raise cancelled
+
+
 async def stop(
     lives: dict[str, Life], server_id: str,
     spawned: Callable[[], bool], stop_process: Callable[[], Awaitable[dict[str, Any]]],
@@ -186,7 +201,7 @@ def on_exit(
         log.info("oMLX %s (pid %s) stopped as asked; not restarting", server_id, pid)
         return
     if life.restart is not None and life.hold_requests:
-        log.warning("oMLX %s exited during a held upgrade; replacement retains ownership", server_id)
+        life.upgrade_exit = (status, loaded)
         return
     if clean:
         asked = restart_requested()
@@ -226,11 +241,37 @@ def _done(server_id: str, life: Life, task: asyncio.Task) -> None:
     if life.restart is task:
         life.restart = None
         life.hold_requests = False
+        life.upgrade_models = None
+        life.upgrade_exit = None
         notify_models_changed(server_id=server_id)
     error = None if task.cancelled() else task.exception()
     if error is not None:
         log.error("oMLX restart stopped on an error", exc_info=error)
         emit(server_id, "restart.failed", error=type(error).__name__, message=str(error)[:100])
+
+
+async def _recover_held(
+    server_id: str, life: Life, status: str, loaded: list[str],
+    start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
+) -> dict[str, Any]:
+    """Recover the models under the original upgrade's admission gate."""
+    from llm.local_keep_loaded import reload_after_restart
+    from llm.providers.omlx_lifecycle import read_loaded
+    from llm.providers.omlx_upgrade import STAGE_TIMEOUT_S, held_stage
+
+    started = await held_stage(
+        life, start_with_recovery(server_id, life, status, start, tail_log, prune_window=False),
+        STAGE_TIMEOUT_S * (MAX_RESTARTS + 1),
+    )
+    if not started:
+        return {"restarted": False, "reason": "start_failed"}
+    await held_stage(life, reload_after_restart(server_id, loaded), STAGE_TIMEOUT_S * (len(loaded) + 1))
+    restored = await held_stage(life, asyncio.wait_for(read_loaded({"server_id": server_id}), STAGE_TIMEOUT_S))
+    if restored is None or set(loaded) - {row["identifier"] for row in restored}:
+        emit(server_id, "restart.failed", status="upgrade", reason="reload_failed")
+        return {"restarted": False, "reason": "reload_failed"}
+    emit(server_id, "restart.completed", status="upgrade")
+    return {"restarted": True, "loaded": loaded}
 
 
 async def _restart(
@@ -244,13 +285,19 @@ async def _restart(
         emit(server_id, "restart.completed", attempt=len(life.restarts))
 
 
+def prune_restart_window(life: Life) -> None:
+    while life.restarts and time.monotonic() - life.restarts[0] > RESTART_WINDOW_S:
+        life.restarts.popleft()
+
+
 async def start_with_recovery(
     server_id: str, life: Life, status: str,
     start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
+    *, prune_window: bool = True,
 ) -> bool:
     """The same bounded startup recovery after a crash or an intentional upgrade stop."""
-    while life.restarts and time.monotonic() - life.restarts[0] > RESTART_WINDOW_S:
-        life.restarts.popleft()
+    if prune_window:
+        prune_restart_window(life)
     if status == "upgrade":
         log.info("oMLX server %s starting after upgrade stop", server_id)
     else:
