@@ -11,7 +11,7 @@ CORSIA records corrections and can try a proposed lesson on later work. This pag
 
 ## Why it exists
 
-The records connect a correction to the response taken, while a trial can compare subsequent work before a proposed rule is promoted (`backend/core/correction_learning.py`, `backend/core/lesson_outcomes.py`, `backend/core/lesson_trial_verdicts.py`). An offer or read of guidance shows exposure, not that the guidance was applied or helped (`backend/core/lesson_outcomes.py`).
+An agent saying it learned from a correction is not evidence that it did. These records tie each correction to what the agent did about it, and a trial compares later work with and without a proposed lesson before the owner promotes it (`backend/core/correction_learning.py`, `backend/core/lesson_outcomes.py`, `backend/core/lesson_trial_verdicts.py`). An offer or read of guidance shows exposure, not that the guidance was applied or helped (`backend/core/lesson_outcomes.py`).
 
 ## How it works
 
@@ -49,7 +49,7 @@ The comparison excludes task revisions, prior exposure in the same checkpoint ge
 
 A trial uses a workflow's declared deciding measures when they include a quality measure; otherwise send-backs and restarts decide, with cost as a tie-breaker. The default minimum is 20 eligible observations per half, with looks at 20, 40 and 80; a workflow's deciding measures can raise that minimum. A shared group needs at least 5 observations per side. The send-back and restart margins are the larger of 25% of the baseline or 0.02 (`backend/core/lesson_trial_verdicts.py`, `backend/core/workflow_verdicts.py`, `backend/core/workflow_verdict_looks.py`, `backend/core/workflow_verdict_rules.py`).
 
-Workflow verdicts compare a version with a selected earlier baseline, using the same decision rules. The default confidence is 80%; workflow metadata can raise it to 90% or 95%. The rules use a bootstrap interval and can return collecting or not enough data as well as keep or revert (`backend/core/workflow_verdict_rules.py`, `backend/core/workflow_verdicts.py`, `backend/core/workflow_verdict_looks.py`).
+Workflow verdicts compare a version with a selected earlier baseline, using the same decision rules. The default confidence is 80%; a workflow's metadata can raise it to 90% or 95% with a stated reason. Lesson trials always use 80% (`backend/core/workflow_verdict_rules.py`, `backend/core/lesson_trial_verdicts.py`). The rules use a bootstrap interval and can return collecting or not enough data as well as keep or revert (`backend/core/workflow_verdict_rules.py`, `backend/core/workflow_verdicts.py`, `backend/core/workflow_verdict_looks.py`).
 
 A daily job evaluates open workflow versions and delivered lesson trials. It records reached keep or revert verdicts and attempts to wake their owners; a refused wake is retried on a later run. For a lesson, the owner is resolved from the target file or the lesson's own location (`backend/jobs/workflow_verdicts.py`, `backend/core/workflow_verdict_evaluator.py`, `backend/core/lesson_trial_verdicts.py`). The verdict is evidence for the owner, not an automatic edit to the target (`backend/core/workflow_verdict_evaluator.py`, `backend/core/lesson_outcomes.py`).
 
