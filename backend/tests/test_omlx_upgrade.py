@@ -12,7 +12,8 @@ def _seat(monkeypatch, *, recorded: str | None, quiet: bool = True, start_ok: bo
     seen: dict[str, object] = {}
 
     async def fake_state(server_id, *, reads):
-        return ("idle", reads)
+        seen["reads"] = reads
+        return "idle"
 
     async def fake_wait(read, *, timeout, interval):
         seen["state"] = await read()
@@ -42,6 +43,7 @@ def _seat(monkeypatch, *, recorded: str | None, quiet: bool = True, start_ok: bo
     monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", read_loaded)
     monkeypatch.setattr("llm.providers.omlx_supervisor._stop_server", stop_server)
     monkeypatch.setattr("llm.providers.omlx_supervisor.start_server", start_server)
+    monkeypatch.setattr(omlx_supervisor, "_tail_log", lambda _sid: "test boot failure")
     monkeypatch.setattr("llm.local_keep_loaded.reload_after_restart", reload_after_restart)
     return calls, seen
 
@@ -66,7 +68,8 @@ async def test_an_outdated_seat_moves_once_idle_and_reloads_the_same_models(isol
         ("reload", "seat", ["A/first-oQ4e-mtp", "B/second-mtp"]),
         ("loaded", None),
     ]
-    assert seen["state"] == ("idle", 2)  # idle needs both counts, proved twice
+    assert seen["state"] == "idle"
+    assert seen["reads"] == 2  # idle needs both counts, proved twice
     assert (seen["timeout"], seen["interval"]) == (float("inf"), omlx_upgrade.QUIET_INTERVAL_S)
 
 
@@ -88,4 +91,4 @@ async def test_a_failed_start_loads_nothing(isolated_db, monkeypatch):
     calls, _ = _seat(monkeypatch, recorded="0.7.1rc1", start_ok=False)
 
     assert await omlx_upgrade.upgrade_managed_omlx() == {"restarted": False, "reason": "start_failed"}
-    assert [call[0] for call in calls] == ["loaded", "stop", "start"]
+    assert [call[0] for call in calls] == ["loaded", "stop", "start", "start", "start"]

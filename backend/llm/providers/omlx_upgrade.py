@@ -46,6 +46,7 @@ async def _state(server_id: str, life: restart.Life) -> str:
 async def restart_when_idle(
     server_id: str, life: restart.Life | None, recorded: str | None, wanted: str,
     stop: Callable[[dict], Awaitable[dict[str, Any]]], start: Callable[[dict], Awaitable[dict[str, Any]]],
+    tail_log: Callable[[str], str],
 ) -> dict[str, Any] | None:
     """Wait for idle, then let the supervisor's existing restart task replace the adopted process."""
     from infra.carry_in_capacity import wait_until_quiet
@@ -55,20 +56,25 @@ async def restart_when_idle(
     if recorded == wanted:
         return None
     log.info("Local oMLX is %s; waiting for idle to run bundled %s", recorded or "unrecorded", wanted)
-    quiet = await wait_until_quiet(partial(_state, server_id, life), timeout=float("inf"), interval=QUIET_INTERVAL_S)
-    if life.stopping or life.restart is not None:
-        return {"restarted": False, "reason": "stopped_or_restarting"}
-    if not quiet:
-        log.warning("Local oMLX upgrade deferred: idle status could not be established")
-        return {"restarted": False, "reason": "not_idle"}
-    return await restart.schedule(server_id, life, _replace(server_id, life, wanted, stop, start))
+    while True:
+        quiet = await wait_until_quiet(partial(_state, server_id, life), timeout=float("inf"), interval=QUIET_INTERVAL_S)
+        if life.stopping or life.restart is not None:
+            return {"restarted": False, "reason": "stopped_or_restarting"}
+        if not quiet:
+            log.warning("Local oMLX upgrade deferred: idle status could not be established")
+            return {"restarted": False, "reason": "not_idle"}
+        result = await restart.schedule(server_id, life, _replace(server_id, life, wanted, stop, start, tail_log))
+        if result.get("reason") != "busy":
+            return result
+        # Outside traffic won the final proof: admission is open again while we wait.
 
 
 async def _replace(
     server_id: str, life: restart.Life, wanted: str,
     stop: Callable[[dict], Awaitable[dict[str, Any]]], start: Callable[[dict], Awaitable[dict[str, Any]]],
+    tail_log: Callable[[str], str],
 ) -> dict[str, Any]:
-    from infra.carry_in_capacity import wait_until_quiet
+    from infra.carry_in_capacity import BUSY, IDLE
     from llm.local_keep_loaded import reload_after_restart
     from llm.providers.omlx_lifecycle import read_loaded
 
@@ -76,8 +82,10 @@ async def _replace(
     # whole Turns (which may need another call), then prove idle inside that boundary.
     if life.requests:
         await asyncio.wait(life.requests)
-    if not await wait_until_quiet(partial(_state, server_id, life), timeout=float("inf"), interval=QUIET_INTERVAL_S):
-        return {"restarted": False, "reason": "not_idle"}
+    state = await _state(server_id, life)
+    if state != IDLE:
+        log.info("Local oMLX upgrade deferred (%s); reopening inference admission", state)
+        return {"restarted": False, "reason": "busy" if state == BUSY else "not_idle"}
     rows = await read_loaded({"server_id": server_id})
     if rows is None:
         log.warning("Local oMLX upgrade deferred: loaded models could not be read")
@@ -93,12 +101,11 @@ async def _replace(
     if not stopped.get("ok"):
         life.stopping = False
         log.warning("Local oMLX upgrade stop failed: %s", stopped.get("message"))
+        restart.emit(server_id, "restart.failed", status="upgrade", reason="stop_failed")
         return {"restarted": False, "reason": "stop_failed"}
     life.drop_watch()
     life.stopping = False
-    started = await start({"server_id": server_id})
-    if not started.get("ok"):
-        log.error("Local oMLX upgrade start failed: %s", started.get("message"))
+    if not await restart.start_with_recovery(server_id, life, "upgrade", start, tail_log):
         return {"restarted": False, "reason": "start_failed"}
     await reload_after_restart(server_id, loaded)
     restored = await read_loaded({"server_id": server_id})

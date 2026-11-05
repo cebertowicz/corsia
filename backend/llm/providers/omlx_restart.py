@@ -223,6 +223,16 @@ async def _restart(
 ) -> None:
     from llm.local_keep_loaded import reload_after_restart
 
+    if await start_with_recovery(server_id, life, status, start, tail_log):
+        await reload_after_restart(server_id, loaded)
+        emit(server_id, "restart.completed", attempt=len(life.restarts))
+
+
+async def start_with_recovery(
+    server_id: str, life: Life, status: str,
+    start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
+) -> bool:
+    """The same bounded startup recovery after a crash or an intentional upgrade stop."""
     while life.restarts and time.monotonic() - life.restarts[0] > RESTART_WINDOW_S:
         life.restarts.popleft()
     log.warning("oMLX server %s exited (%s); %d restarts in the last 10 minutes",
@@ -232,12 +242,11 @@ async def _restart(
         emit(server_id, "restart.attempted", attempt=len(life.restarts), status=status)
         result = await start({"server_id": server_id})
         if life.stopping:
-            return
+            return False
         if result.get("ok"):
-            emit(server_id, "restart.completed", attempt=len(life.restarts))
-            await reload_after_restart(server_id, loaded)
-            return
+            return True
         log.warning("oMLX server %s restart failed: %s", server_id, result.get("message"))
     emit(server_id, "restart.gave_up", status=status, restarts=len(life.restarts))
     log.error("oMLX server %s not restarted again: %d restarts in 10 minutes (last exit %s). Last log lines:\n%s",
               server_id, len(life.restarts), status, tail_log(server_id) or "(empty log)")
+    return False

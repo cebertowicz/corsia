@@ -71,9 +71,12 @@ a cfg host to authorize a stored key. Admin routes remain separately owned by
 `omlx_supervisor` owns one `omlx_restart.Life` per adopted process. A version
 upgrade uses that Life's existing restart task as its inference admission
 boundary: `base.py` registers each concurrent provider call before preflight,
-replacement waits for those calls to finish and rechecks server idleness, and
-later calls wait through boot and exact-model restoration. This boundary covers
-CORSIA dispatch; clients calling oMLX directly do not participate in it.
+replacement waits for those calls to finish and rechecks server idleness once,
+and later calls wait through boot and exact-model restoration. If outside traffic
+makes that final proof busy, admission reopens before waiting for quiet again.
+Crash recovery and upgrade startup reuse the same bounded start-attempt owner;
+failed Stop and exhausted startup emit terminal lifecycle events. This boundary
+covers CORSIA dispatch; clients calling oMLX directly do not participate in it.
 
 ### System tier projection
 

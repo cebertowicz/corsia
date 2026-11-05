@@ -77,7 +77,7 @@ async def upgrade_server(server_id: str) -> dict[str, Any] | None:
     from llm.providers.omlx_upgrade import restart_when_idle
 
     version = await run_in_db(process.recorded_omlx_version, RUNTIME_DIR, server_id)
-    return await restart_when_idle(server_id, _life.get(server_id), version, OMLX_VERSION, _stop_server, start_server)
+    return await restart_when_idle(server_id, _life.get(server_id), version, OMLX_VERSION, _stop_server, start_server, _tail_log)
 
 
 def is_restarting(server_id: str) -> bool:
