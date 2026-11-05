@@ -46,7 +46,9 @@ RELEVANCE_PATTERN_CASES = {
         "must_skip": ("frontend/app.ts",),
     },
     "unit-tests.yml": {
-        "must_run": ("backend/module.py", "frontend/app.ts", "requirements-test.txt", "frontend/package-lock.json"),
+        # backend tests read every workflow file, so a workflow-only change must run them
+        "must_run": ("backend/module.py", "frontend/app.ts", "requirements-test.txt", "frontend/package-lock.json",
+                     ".github/workflows/integration.yml", ".github/workflows/e2e.yml"),
         "must_skip": ("README.md",),
     },
 }
