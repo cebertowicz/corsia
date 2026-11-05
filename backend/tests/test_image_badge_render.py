@@ -50,6 +50,27 @@ def test_actual_renderer_matches_viewer_natural_sides_without_overlapping_discs(
     assert all(math.dist(a[:2], b[:2]) >= 22 for i, a in enumerate(actual) for b in actual[i + 1:])
 
 
+def test_capped_4000_pixel_image_matches_viewer_at_point_four_zoom(monkeypatch):
+    from doceditor import image_markup
+
+    regions = [Region(.4, .4, .002, .02), Region(.4065, .4, .002, .02)]
+    actual = []
+    real_tags = image_markup.badge_tags
+
+    def capture_tags(*args, **kwargs):
+        assert args[1:3] == (1600, 400)
+        assert kwargs == {'radius': 11, 'gap': 3}
+        actual.extend(real_tags(*args, **kwargs))
+        return actual
+
+    monkeypatch.setattr(image_markup, 'badge_tags', capture_tags)
+    source = io.BytesIO()
+    Image.new('RGB', (4000, 1000), 'white').save(source, format='PNG')
+    render_marked_image(source.getvalue(), [Mark(i, region) for i, region in enumerate(regions, 1)])
+    assert [tag[2] for tag in actual] == ['up-left', 'above']
+    assert math.dist(actual[0][:2], actual[1][:2]) >= 22
+
+
 def test_single_badge_stays_on_picture_and_is_translucent():
     source = io.BytesIO()
     Image.new('RGB', (800, 500), 'white').save(source, format='PNG')

@@ -30,6 +30,12 @@ describe('badge placement', () => {
 	it.each(parity)('matches the server placement contract', ({ regions, width, height, radius, gap, expected }) => {
 		expect(badgeTags(regions, { width, height }, radius, gap)).toEqual(expected);
 	});
+	it('matches the capped 4000px raster at viewer zoom 0.4', () => {
+		const regions = [{ x: 0.4, y: 0.4, w: 0.002, h: 0.02 }, { x: 0.4065, y: 0.4, w: 0.002, h: 0.02 }];
+		const tags = viewerBadgeTags(regions, { width: 1600, height: 400 });
+		expect(tags.map((tag) => tag.side)).toEqual(['up-left', 'above']);
+		expect(Math.hypot(tags[0].x - tags[1].x, tags[0].y - tags[1].y)).toBeGreaterThanOrEqual(22);
+	});
 	it('keeps a lone badge on the picture', () => {
 		const [badge] = badgeTags([region], size, 11, 3);
 		expect(badge.x).toBeGreaterThan(0);
