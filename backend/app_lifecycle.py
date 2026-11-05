@@ -88,7 +88,7 @@ async def _startup_network_discovery() -> None:
         )
         from llm.providers.omlx_upgrade import upgrade_managed_omlx
 
-        asyncio.create_task(upgrade_managed_omlx())  # may wait for the seat to be idle; never blocks startup
+        await upgrade_managed_omlx()  # this startup task is retained and cancelled on shutdown
     except Exception as exc:
         logger.warning(f"network discovery startup failed: {exc}")
 

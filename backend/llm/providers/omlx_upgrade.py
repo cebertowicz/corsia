@@ -61,9 +61,12 @@ async def restart_when_idle(
         if life.stopping or life.restart is not None:
             return {"restarted": False, "reason": "stopped_or_restarting"}
         if not quiet:
-            log.warning("Local oMLX upgrade deferred: idle status could not be established")
+            log.warning("Local oMLX upgrade skipped until next startup: idle status could not be established")
+            restart.emit(server_id, "restart.skipped", status="upgrade", reason="not_idle")
             return {"restarted": False, "reason": "not_idle"}
-        result = await restart.schedule(server_id, life, _replace(server_id, life, wanted, stop, start, tail_log))
+        result = await restart.schedule(
+            server_id, life, _replace(server_id, life, wanted, stop, start, tail_log), hold_requests=True,
+        )
         if result.get("reason") != "busy":
             return result
         # Outside traffic won the final proof: admission is open again while we wait.
@@ -77,6 +80,7 @@ async def _replace(
     from infra.carry_in_capacity import BUSY, IDLE
     from llm.local_keep_loaded import reload_after_restart
     from llm.providers.omlx_lifecycle import read_loaded
+    from llm.providers.omlx_supervisor import recorded_version
 
     # schedule() closed admission synchronously. Drain provider scopes, never
     # whole Turns (which may need another call), then prove idle inside that boundary.
@@ -84,14 +88,20 @@ async def _replace(
         await asyncio.wait(life.requests)
     state = await _state(server_id, life)
     if state != IDLE:
-        log.info("Local oMLX upgrade deferred (%s); reopening inference admission", state)
-        return {"restarted": False, "reason": "busy" if state == BUSY else "not_idle"}
+        if state == BUSY:
+            log.info("Local oMLX is busy; reopening inference admission while waiting")
+            return {"restarted": False, "reason": "busy"}
+        log.warning("Local oMLX upgrade skipped until next startup: idle status could not be established")
+        restart.emit(server_id, "restart.skipped", status="upgrade", reason="not_idle")
+        return {"restarted": False, "reason": "not_idle"}
     rows = await read_loaded({"server_id": server_id})
     if rows is None:
-        log.warning("Local oMLX upgrade deferred: loaded models could not be read")
+        log.warning("Local oMLX upgrade skipped until next startup: loaded models could not be read")
+        restart.emit(server_id, "restart.skipped", status="upgrade", reason="loaded_unknown")
         return {"restarted": False, "reason": "loaded_unknown"}
     loaded = sorted({row["identifier"] for row in rows})
-    restart.emit(server_id, "restart.attempted", status="upgrade", version=wanted)
+    if await recorded_version(server_id) == wanted:
+        return {"restarted": False, "reason": "already_current"}
     life.stopping = True  # the exit caused by our internal stop is intentional
     try:
         stopped = await stop({"server_id": server_id})
@@ -105,6 +115,7 @@ async def _replace(
         return {"restarted": False, "reason": "stop_failed"}
     life.drop_watch()
     life.stopping = False
+    life.restarts.clear()  # intentional upgrade has the same fresh budget as a dashboard restart
     if not await restart.start_with_recovery(server_id, life, "upgrade", start, tail_log):
         return {"restarted": False, "reason": "start_failed"}
     await reload_after_restart(server_id, loaded)

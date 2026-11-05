@@ -84,6 +84,7 @@ async def test_failed_replacement_start_recovers_then_restores_exact_models(isol
     assert (await omlx_upgrade.upgrade_managed_omlx())["restarted"] is True
     assert [call[0] for call in calls] == ["loaded", "stop", "start", "start", "reload", "loaded"]
     assert [action for action, _ in events].count("restart.completed") == 1
+    assert [action for action, _ in events].count("restart.attempted") == 2
     assert "restart.gave_up" not in [action for action, _ in events]
 
 
