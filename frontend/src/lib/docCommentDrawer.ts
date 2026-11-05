@@ -1,5 +1,9 @@
 import { get } from 'svelte/store';
 import { prefersReducedMotion } from '$lib/stores/viewport';
+import type { DocComment } from '$lib/stores/docCommentProjection';
+
+/** Image comments follow their tag numbers. */
+export const byCommentNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
 
 /** The grid owns the drawer's maximum; add this measured pinned footer before that cap so the list keeps its normal room when it can. */
 export function drawerFooterHeight(node: HTMLElement) {

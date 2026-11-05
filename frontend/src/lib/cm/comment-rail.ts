@@ -40,7 +40,7 @@ function glyph(replyWaiting = false): SVGSVGElement {
 		dot.setAttribute('cx', '17');
 		dot.setAttribute('cy', '7');
 		dot.setAttribute('r', '3');
-		dot.setAttribute('fill', 'currentColor');
+		dot.setAttribute('fill', 'var(--accent)');
 		svg.append(dot);
 	}
 	return svg;

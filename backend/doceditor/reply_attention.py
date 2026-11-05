@@ -30,7 +30,9 @@ def unread_reply_items(db, user_id: str) -> list[dict]:
     """
     source, params = new_reply_rows(user_id, None, include_author_thread=True)
     rows = db.execute(
-        f"""SELECT root.artifact_id, reply.author_thread_id, COUNT(*) AS unread_count, MAX(reply.created_at) AS newest_at
+        f"""SELECT root.artifact_id, reply.author_thread_id, COUNT(*) AS unread_count,
+                  SUM(CASE WHEN reply.parent_id IS NULL THEN 1 ELSE 0 END) AS new_comment_count,
+                  MAX(reply.created_at) AS newest_at
               {source}
                AND reply.author_kind='agent' AND thread.user_id=?
               GROUP BY root.artifact_id, reply.author_thread_id
@@ -65,7 +67,8 @@ def unread_reply_items(db, user_id: str) -> list[dict]:
         title = artifact['title'] or Path(path).name
         result.append({
             'detail': {
-                'title': title, 'unread_count': row['unread_count'], 'newest_at': row['newest_at'],
+                'title': title, 'unread_count': row['unread_count'], 'new_comment_count': row['new_comment_count'],
+                'newest_at': row['newest_at'],
                 'destination': {'pane': 'document-replies', 'id': row['artifact_id'], 'path': path, 'title': title},
                 'source': {'thread_id': roots[str(row['author_thread_id'])] or row['author_thread_id']},
             },

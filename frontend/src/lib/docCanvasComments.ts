@@ -72,7 +72,7 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
  */
 export function commentSurfaceStatus(comments: DocComment[]) {
 	return {
-		commentCount: comments.filter((comment) => !comment.resolved).length,
+		commentCount: comments.filter((comment) => !comment.resolved || hasNewReplies(comment)).length,
 		orphanedCount: comments.filter((comment) => comment.orphaned && !comment.resolved).length,
 		replaceableCount: comments.filter((comment) => comment.orphaned && !comment.resolved && !comment.detached).length,
 		placementReloading: comments.some((comment) => comment.placementReloading),

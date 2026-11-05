@@ -182,7 +182,7 @@ export async function markThreadViewed(artifactId: string, rootId: string, seenR
 	docComments.update((all) => ({
 		...all,
 		[artifactId]: (all[artifactId] ?? []).map((comment) => (
-			comment.id === result.root_id ? { ...comment, newReplyIds: result.new_reply_ids } : comment
+			comment.id === result.root_id ? { ...comment, newComment: result.new_reply_ids.includes(comment.id), newReplyIds: result.new_reply_ids.filter((id) => id !== comment.id) } : comment
 		)),
 	}));
 }

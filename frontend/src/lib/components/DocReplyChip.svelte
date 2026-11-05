@@ -28,7 +28,7 @@
 
 {#if count > 0}
 	<div class="doc-reply-chip" data-doc-reply-chip in:arrive|global out:leave|global>
-		<UnreadReplyChip {artifactId} {count} onOpen={onStep} />
+		<UnreadReplyChip {artifactId} {count} comments={threads.some((thread) => thread.newComment)} onOpen={onStep} />
 	</div>
 {/if}
 

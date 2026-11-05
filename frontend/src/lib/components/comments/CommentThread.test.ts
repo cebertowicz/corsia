@@ -132,7 +132,7 @@ describe('CommentThread', () => {
 	it('stamps an unread reply only after it is observed in the viewport', async () => {
 		visibleObserver();
 		const onViewed = vi.fn().mockResolvedValue(undefined);
-		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed });
+		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed, viewEachUnread: true });
 		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
 		vi.unstubAllGlobals();
 	});
@@ -141,7 +141,7 @@ describe('CommentThread', () => {
 		visibleObserver();
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const onViewed = vi.fn().mockRejectedValue(new Error('offline'));
-		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed });
+		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed, viewEachUnread: true });
 		await vi.waitFor(() => expect(warn).toHaveBeenCalled(), { timeout: 3000 });
 		flushSync(); await Promise.resolve(); flushSync();
 		expect(onViewed).toHaveBeenCalledTimes(1);

@@ -179,17 +179,15 @@ def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
 
 
 def new_reply_rows(user_id: str, artifact_id: str | None, *, include_author_thread: bool = False) -> tuple[str, tuple]:
-    """The one definition of a new reply: the FROM/JOIN/WHERE every read of it shares.
+    """The shared unread projection for replies and eligible top-level comments.
 
-    A reply is new for a user when someone else wrote it, in an open root the
-    user touched (wrote it or replied in it), and it is newer than the user's
-    seen stamp on that root: by time, then by reply id.
+    Both use the same per-thread watermark, ordered by creation time and id.
     """
     # A document read binds both sides to its artifact so idx_doc_comments_artifact bounds the scan to that document.
     scoped = artifact_id is not None
     sql = f"""FROM doc_comments reply
            {"JOIN threads thread ON thread.id=reply.author_thread_id" if include_author_thread else ""}
-           JOIN doc_comments root ON root.id=reply.parent_id
+           JOIN doc_comments root ON root.id=COALESCE(reply.parent_id, reply.id)
            LEFT JOIN (
                SELECT DISTINCT parent_id FROM doc_comments
                WHERE author_kind='user' AND parent_id IS NOT NULL
@@ -197,9 +195,14 @@ def new_reply_rows(user_id: str, artifact_id: str | None, *, include_author_thre
            ) touched ON touched.parent_id=root.id
            LEFT JOIN doc_comment_thread_views thread_view
              ON thread_view.user_id=? AND thread_view.root_id=root.id
-           WHERE reply.author_kind<>'user' AND root.resolved=0
+           WHERE reply.author_kind<>'user'
              {"AND reply.artifact_id=? AND root.artifact_id=?" if scoped else ""}
-             AND (root.author_kind='user' OR touched.parent_id IS NOT NULL)
+             AND ((reply.parent_id IS NOT NULL AND (root.author_kind='user' OR touched.parent_id IS NOT NULL))
+                  OR (reply.parent_id IS NULL AND reply.author_kind='agent'
+                      AND root.replacement IS NULL AND root.review=0
+                      AND EXISTS (SELECT 1 FROM doc_comments person
+                                  WHERE person.artifact_id=root.artifact_id AND person.author_kind='user'
+                                    AND person.created_at<root.created_at)))
              AND (
                  reply.created_at>COALESCE(thread_view.seen_at, '')
                  OR (
@@ -234,7 +237,9 @@ def annotate_thread_attention(db, user_id: str, artifact_id: str, threads: list[
     for root_id, reply_id in _new_replies(db, user_id, artifact_id):
         new_by_root.setdefault(root_id, []).append(reply_id)
     for thread in threads:
-        thread["new_reply_ids"] = new_by_root.get(thread["id"], [])
+        unread = new_by_root.get(thread["id"], [])
+        thread["new_comment"] = thread["id"] in unread
+        thread["new_reply_ids"] = [item for item in unread if item != thread["id"]]
 
 
 def mark_thread_viewed(
@@ -251,8 +256,12 @@ def mark_thread_viewed(
     if root is None:
         raise ValueError("root_not_found")
     reply = db.execute(
-        "SELECT id,created_at FROM doc_comments WHERE id=? AND parent_id=?",
-        (seen_reply_id, root_id),
+        """SELECT item.id,item.created_at FROM doc_comments item
+           WHERE item.id=? AND (item.parent_id=? OR (item.id=? AND item.author_kind='agent'
+             AND item.replacement IS NULL AND item.review=0 AND EXISTS (
+               SELECT 1 FROM doc_comments person WHERE person.artifact_id=item.artifact_id
+                 AND person.author_kind='user' AND person.created_at<item.created_at)))""",
+        (seen_reply_id, root_id, root_id),
     ).fetchone()
     if reply is None:
         raise ValueError("reply_not_found")

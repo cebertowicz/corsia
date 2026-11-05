@@ -6,13 +6,13 @@
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { onDestroy, untrack } from 'svelte';
 	import { ensureEditorArtifactId, releaseDocEditor } from '$lib/stores/activeDocEditor';
-	import { docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements } from '$lib/stores/docComments';
+	import { docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements, hasNewReplies } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
-	import { createReplyNavigation } from '$lib/docReplyLanding.svelte';
+	import { createReplyNavigation, createReplyArrival } from '$lib/docReplyLanding.svelte';
 	import { createDocViewerImages, type DocumentImageRequest } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
@@ -125,7 +125,7 @@
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
 	const commentStatus = $derived(commentSurfaceStatus(listedComments));
-	const unreadThreads = $derived(listedComments.filter((comment) => (comment.newReplyIds?.length ?? 0) > 0));
+	const unreadThreads = $derived(listedComments.filter(hasNewReplies));
 	const scroll = createCommentScrollTarget({
 		focused: () => focusedComment, comments: () => listedComments, text: () => editText, listOpen: () => commentUI.state?.kind === 'list',
 	});
@@ -154,11 +154,12 @@
 	/** The comments of the image shown over this document, bound to it as it is now: an image's host rebuilds them when it shows one. */
 	export function imageComments() { return images.comments(); }
 	function focusInText(id: string, placement?: 'top') { scroll.toComment(id, commentUI.state?.kind === 'list', placement === 'top' ? 'quote-tap' : 'navigation'); commentUI.selectMarkerThread(id); focusedDocComment.set(id); }
+	const replyArrival = createReplyArrival(() => loadedArtifactId, markThreadViewed);
 	const replyNavigation = createReplyNavigation({
 		target: () => target, ready: () => !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready' && docState === 'ready',
 		comments: () => listedComments, text: () => editText,
-		show: (thread, landing) => { if (thread && landing) { scroll.value = landing; focusedDocComment.set(thread.id); } commentUI.state = { kind: 'list' }; },
-		openImageOr: (id, otherwise) => images.openOr([id], { id }, otherwise), onLanded: () => onLanded?.(),
+		show: (thread, landing) => { if (thread && landing) scroll.value = landing; if (thread) focusedDocComment.set(thread.id); commentUI.state = { kind: 'list' }; if (thread) replyArrival.whenShown(thread); },
+		openImageOr: (id, otherwise) => { const thread = listedComments.find((comment) => comment.id === id); images.openOr([id], { id }, otherwise); if (thread) replyArrival.whenShown(thread); }, onLanded: () => onLanded?.(),
 	});
 	export function stepToUnreadReply(beforeText?: () => void, excludeId?: string) { replyNavigation.step(beforeText, excludeId); }
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.

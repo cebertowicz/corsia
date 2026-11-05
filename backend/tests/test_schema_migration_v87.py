@@ -12,7 +12,7 @@ _V86 = """
     CREATE TABLE doc_comments (
         id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL, parent_id TEXT,
         author_kind TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL, replacement TEXT, review INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE doc_comment_views (
         user_id TEXT NOT NULL, artifact_id TEXT NOT NULL,
@@ -27,7 +27,7 @@ def _v86() -> sqlite3.Connection:
     db.row_factory = sqlite3.Row
     db.executescript(_V86)
     db.executemany(
-        "INSERT INTO doc_comments VALUES (?,?,?,?,0,?)",
+        "INSERT INTO doc_comments (id,artifact_id,parent_id,author_kind,resolved,created_at) VALUES (?,?,?,?,0,?)",
         [
             ('root-a', 'doc-1', None, 'user', '2026-10-01T00:00:00+00:00'),
             ('a-seen', 'doc-1', 'root-a', 'agent', SEEN),
