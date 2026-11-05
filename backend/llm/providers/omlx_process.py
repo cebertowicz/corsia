@@ -79,7 +79,7 @@ def write_pid(runtime_dir: Path, server_id: str, pid: int, *, omlx_version: str 
         clear_pid(runtime_dir, server_id)
         return
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    record = {"pid": pid, "create_time": created}
+    record: dict[str, int | float | str] = {"pid": pid, "create_time": created}
     if omlx_version is not None:
         record["omlx"] = omlx_version
     pid_path(runtime_dir, server_id).write_text(json.dumps(record))
