@@ -181,7 +181,7 @@ def diagram(tables):
                 parent = "||" if required else "o|"
                 unique = any(is_unique and cols == column for _, is_unique, cols in info["indexes"])
                 child = "o|" if unique else "o{"
-                lines.append(f'    {target} {parent}--{child} {name} : references')
+                lines.append(f'    {target} {parent}--{child} {name} : {column}')
     return "\n".join(lines + ["```"])
 
 

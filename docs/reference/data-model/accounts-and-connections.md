@@ -6,28 +6,28 @@ These tables store accounts, credentials, connections and connected apps.
 
 ```mermaid
 erDiagram
-    users ||--o{ auth_tokens : references
-    auth_tokens ||--o| key_write_attempts : references
+    users ||--o{ auth_tokens : user_id
+    auth_tokens ||--o| key_write_attempts : token_hash
 ```
 
 ```mermaid
 erDiagram
-    connected_accounts ||--o{ connected_account_reach : references
+    connected_accounts ||--o{ connected_account_reach : account_id
 ```
 
 ```mermaid
 erDiagram
-    connected_apps ||--o{ connected_app_reach : references
+    connected_apps ||--o{ connected_app_reach : app_id
 ```
 
 ```mermaid
 erDiagram
-    vendor_accounts o|--o{ thread_vendor_accounts : references
-    vendor_accounts ||--o{ thread_vendor_accounts : references
-    vendor_account_billing_facts o|--o| vendor_account_billing_facts : references
-    vendor_accounts o|--o{ vendor_account_billing_facts : references
-    vendor_accounts o|--o| vendor_account_billing_revisions : references
-    connections ||--o| vendor_accounts : references
+    vendor_accounts o|--o{ thread_vendor_accounts : pending_account_id
+    vendor_accounts ||--o{ thread_vendor_accounts : account_id
+    vendor_account_billing_facts o|--o| vendor_account_billing_facts : supersedes_id
+    vendor_accounts o|--o{ vendor_account_billing_facts : account_id
+    vendor_accounts o|--o| vendor_account_billing_revisions : account_id
+    connections ||--o| vendor_accounts : connection_id
 ```
 
 ## Tables

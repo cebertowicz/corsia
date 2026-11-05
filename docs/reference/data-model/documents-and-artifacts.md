@@ -6,30 +6,30 @@ These tables store artifact registrations, identities, comments and document fee
 
 ```mermaid
 erDiagram
-    artifact_identities ||--o{ artifact_reconcile_receipts : references
-    artifact_identities ||--o{ artifact_registration_events : references
-    artifact_identities ||--o{ artifact_registrations : references
-    artifact_identities ||--o{ artifact_relocation_intents : references
-    doc_comments o|--o{ doc_comments : references
-    doc_comments ||--o{ doc_feedback_batch_items : references
-    doc_feedback_batches ||--o{ doc_feedback_batch_items : references
-    artifact_identities ||--o{ doc_feedback_batches : references
+    artifact_identities ||--o{ artifact_reconcile_receipts : artifact_id
+    artifact_identities ||--o{ artifact_registration_events : artifact_id
+    artifact_identities ||--o{ artifact_registrations : artifact_id
+    artifact_identities ||--o{ artifact_relocation_intents : artifact_id
+    doc_comments o|--o{ doc_comments : parent_id
+    doc_comments ||--o{ doc_feedback_batch_items : comment_id
+    doc_feedback_batches ||--o{ doc_feedback_batch_items : batch_id
+    artifact_identities ||--o{ doc_feedback_batches : artifact_id
 ```
 
 ```mermaid
 erDiagram
-    doc_comments ||--o{ doc_comment_thread_views : references
-    doc_comments o|--o{ doc_comments : references
+    doc_comments ||--o{ doc_comment_thread_views : root_id
+    doc_comments o|--o{ doc_comments : parent_id
 ```
 
 ```mermaid
 erDiagram
-    doc_feedback_batches ||--o| doc_feedback_edit_items : references
+    doc_feedback_batches ||--o| doc_feedback_edit_items : batch_id
 ```
 
 ```mermaid
 erDiagram
-    artifact_identities ||--o{ doc_review_requests : references
+    artifact_identities ||--o{ doc_review_requests : artifact_id
 ```
 
 ## Tables

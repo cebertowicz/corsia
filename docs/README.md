@@ -26,6 +26,12 @@ How CORSIA is built and why, for engineers deciding whether to adopt it or contr
 | [Importing size ratings](size-rating-import.md) | Importing task size ratings |
 | [Client metadata](client-metadata/README.md) | The public file a sign-in provider reads when you connect a hosted tool server |
 
+## Reference
+
+| Page | What it covers |
+|---|---|
+| [Data model](reference/data-model/README.md) | Tables and relationships in CORSIA's data stores |
+
 ## About this project
 
 | Page | What it covers |

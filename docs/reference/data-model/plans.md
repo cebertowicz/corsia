@@ -6,48 +6,48 @@ These tables store plans, their nodes, events, dependencies and execution state.
 
 ```mermaid
 erDiagram
-    plan_node_holds ||--o| plan_ask_deferrals : references
-    plans ||--o{ plan_events : references
-    plan_nodes ||--o{ plan_node_artifact_links : references
-    plan_nodes ||--o| plan_node_attempts : references
-    plans ||--o{ plan_node_attempts : references
-    plan_node_events o|--o{ plan_node_events : references
-    plan_nodes ||--o{ plan_node_events : references
-    plan_node_events o|--o{ plan_node_holds : references
-    plan_nodes ||--o| plan_node_holds : references
-    plan_nodes ||--o{ plan_nodes : references
-    plan_nodes o|--o{ plan_nodes : references
-    plan_nodes o|--o{ plan_nodes : references
-    plan_nodes o|--o{ plan_nodes : references
-    plans ||--o{ plan_nodes : references
-    plans o|--o{ plans : references
+    plan_node_holds ||--o| plan_ask_deferrals : hold_id
+    plans ||--o{ plan_events : plan_id
+    plan_nodes ||--o{ plan_node_artifact_links : node_id
+    plan_nodes ||--o| plan_node_attempts : node_id
+    plans ||--o{ plan_node_attempts : plan_id
+    plan_node_events o|--o{ plan_node_events : causal_event_id
+    plan_nodes ||--o{ plan_node_events : node_id
+    plan_node_events o|--o{ plan_node_holds : clearance_event_id
+    plan_nodes ||--o| plan_node_holds : node_id
+    plan_nodes ||--o{ plan_nodes : commitment_id
+    plan_nodes o|--o{ plan_nodes : follow_up_of
+    plan_nodes o|--o{ plan_nodes : intent_node_id
+    plan_nodes o|--o{ plan_nodes : parent_id
+    plans ||--o{ plan_nodes : plan_id
+    plans o|--o{ plans : parent_plan_id
 ```
 
 ```mermaid
 erDiagram
-    plan_markdown_imports ||--o{ plan_markdown_import_issues : references
+    plan_markdown_imports ||--o{ plan_markdown_import_issues : import_id
 ```
 
 ```mermaid
 erDiagram
-    plans ||--o{ plan_mutation_receipts : references
-    plans o|--o{ plans : references
+    plans ||--o{ plan_mutation_receipts : plan_id
+    plans o|--o{ plans : parent_plan_id
 ```
 
 ```mermaid
 erDiagram
-    plan_nodes ||--o{ plan_node_dependencies : references
-    plan_nodes ||--o{ plan_node_dependencies : references
-    plan_nodes ||--o{ plan_node_intent_words : references
-    plan_nodes ||--o{ plan_nodes : references
-    plan_nodes o|--o{ plan_nodes : references
-    plan_nodes o|--o{ plan_nodes : references
-    plan_nodes o|--o{ plan_nodes : references
+    plan_nodes ||--o{ plan_node_dependencies : depends_on_node_id
+    plan_nodes ||--o{ plan_node_dependencies : node_id
+    plan_nodes ||--o{ plan_node_intent_words : node_id
+    plan_nodes ||--o{ plan_nodes : commitment_id
+    plan_nodes o|--o{ plan_nodes : follow_up_of
+    plan_nodes o|--o{ plan_nodes : intent_node_id
+    plan_nodes o|--o{ plan_nodes : parent_id
 ```
 
 ```mermaid
 erDiagram
-    plan_node_attempts ||--o{ plan_tool_dispatches : references
+    plan_node_attempts ||--o{ plan_tool_dispatches : attempt_id
 ```
 
 ## Tables

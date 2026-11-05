@@ -6,9 +6,9 @@ These tables store checkpoints, continuity, context changes and extracted facts.
 
 ```mermaid
 erDiagram
-    checkpoints ||--o{ checkpoint_entry_search : references
-    checkpoints ||--o{ checkpoint_entry_search : references
-    checkpoints ||--o{ checkpoint_staged_edits : references
+    checkpoints ||--o{ checkpoint_entry_search : last_generation_order
+    checkpoints ||--o{ checkpoint_entry_search : first_generation_order
+    checkpoints ||--o{ checkpoint_staged_edits : checkpoint_id
 ```
 
 ## Tables

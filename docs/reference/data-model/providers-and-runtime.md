@@ -6,7 +6,7 @@ These tables store provider, model, server and runtime process data.
 
 ```mermaid
 erDiagram
-    network_servers ||--o{ network_server_endpoints : references
+    network_servers ||--o{ network_server_endpoints : server_id
 ```
 
 ## Tables

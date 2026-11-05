@@ -6,7 +6,7 @@ These tables store host access leases and action reviews.
 
 ```mermaid
 erDiagram
-    host_access_leases ||--o{ host_access_action_reviews : references
+    host_access_leases ||--o{ host_access_action_reviews : lease_id
 ```
 
 ## Tables

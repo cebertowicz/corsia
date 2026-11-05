@@ -6,10 +6,10 @@ These tables store projects, settings and policies.
 
 ```mermaid
 erDiagram
-    projects ||--o| project_inference_policies : references
-    projects ||--o| project_policy_overrides : references
-    projects ||--o{ project_repo_policies : references
-    projects o|--o{ provider_policies : references
+    projects ||--o| project_inference_policies : project_id
+    projects ||--o| project_policy_overrides : project_id
+    projects ||--o{ project_repo_policies : project_id
+    projects o|--o{ provider_policies : project_id
 ```
 
 ## Tables

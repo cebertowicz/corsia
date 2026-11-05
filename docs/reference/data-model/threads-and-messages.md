@@ -6,14 +6,14 @@ These tables store threads, turns, messages, presence and related updates.
 
 ```mermaid
 erDiagram
-    threads ||--o| active_turns : references
-    threads ||--o{ automation_schedules : references
-    threads ||--o{ continuation_triggers : references
-    threads ||--o{ messages : references
-    threads ||--o{ thread_presence : references
-    threads ||--o{ thread_updates : references
-    threads o|--o{ threads : references
-    threads o|--o{ threads : references
+    threads ||--o| active_turns : thread_id
+    threads ||--o{ automation_schedules : thread_id
+    threads ||--o{ continuation_triggers : thread_id
+    threads ||--o{ messages : thread_id
+    threads ||--o{ thread_presence : thread_id
+    threads ||--o{ thread_updates : thread_id
+    threads o|--o{ threads : spawned_by
+    threads o|--o{ threads : parent_thread_id
 ```
 
 ## Tables
