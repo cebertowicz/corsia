@@ -1,6 +1,21 @@
 """Diagram revisions remain tied to their own blocks when listing comments."""
 
+import json
+from pathlib import Path
+
+import pytest
+
 from doceditor import diagram_pins
+
+
+CASES = json.loads((Path(__file__).parent / 'fixtures' / 'diagram-fences.json').read_text())
+
+
+@pytest.mark.parametrize('case', CASES, ids=lambda case: case['name'])
+def test_shared_diagram_fixtures(case):
+    block = case['block']
+    expected = (block['first'], block['last'], block['source']) if block else None
+    assert diagram_pins.block_at(case['markdown'], case['anchor']) == expected
 
 
 def test_listing_marks_each_diagram_against_its_own_revision(tmp_path):

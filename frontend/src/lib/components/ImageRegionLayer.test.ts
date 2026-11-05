@@ -118,7 +118,7 @@ describe('ImageRegionLayer', () => {
 	});
 
 	it('words a pin on a changed diagram as a diagram, not an image', () => {
-		render({ comments: [comment('a', 1, { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }, { anchor: '```mermaid', regionStale: true })] });
+		render({ diagram: true, comments: [comment('a', 1, { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }, { anchor: '```mermaid', regionStale: true })] });
 		const label = host.querySelector<HTMLElement>('[data-region-tag]')!.getAttribute('aria-label') ?? '';
 		expect(label).toContain('diagram changed since this comment');
 		expect(label).not.toContain('image');

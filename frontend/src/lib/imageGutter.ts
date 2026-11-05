@@ -66,7 +66,7 @@ export function gutterTags(regions: ImageRegion[], size: Size, radius: number, g
 			positions.push(Math.max(desired, positions.length ? positions[positions.length - 1] + spacing : lower));
 		}
 		for (let i = positions.length - 1; i >= 0; i--) positions[i] = Math.min(positions[i], i === positions.length - 1 ? upper : positions[i + 1] - spacing);
-		// If this edge cannot hold every tag, keep them visible and report the overlap in the evidence.
+		// If this edge cannot hold every tag, spread them evenly along it.
 		if (positions.length && positions[0] < lower) {
 			positions.forEach((_, i) => positions[i] = lower + (upper - lower) * i / Math.max(1, positions.length - 1));
 		}

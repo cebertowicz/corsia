@@ -31,10 +31,12 @@ def test_changed_diagram_refuses_new_and_moved_pins(integration_client, integrat
 
     rejected = integration_client.post(url, json={**body, 'body': 'Old snapshot'})
     assert rejected.status_code == 409
+    assert 'This diagram changed. Place the pin again; your draft is kept.' in rejected.text
     assert set(_threads(integration_client, artifact)) == {pin['id']}
     rejected_move = integration_client.patch(_url(f"/api/comments/{pin['id']}"),
         json={'region': {'x': 0.8, 'y': 0.7}, 'diagram_source': old})
     assert rejected_move.status_code == 409
+    assert 'This diagram changed. Place the pin again; your draft is kept.' in rejected_move.text
     unchanged = _threads(integration_client, artifact)[pin['id']]
     assert (unchanged['region_x'], unchanged['region_y'], unchanged['image_rev']) == (pin['region_x'], pin['region_y'], pin['image_rev'])
 
@@ -44,6 +46,23 @@ def test_changed_diagram_refuses_new_and_moved_pins(integration_client, integrat
         json={'region': {'x': 0.8, 'y': 0.7}, 'diagram_source': new})
     assert moved.status_code == 200, moved.text
     assert moved.json()['comment']['image_rev'] == accepted.json()['comment']['image_rev']
+
+
+@pytest.mark.parametrize(('opening', 'body', 'closing'), [
+    ('> ```mermaid', '> graph TD\n> A-->B', '> ```'),
+    ('- ```mermaid', '  graph TD\n  A-->B', '  ```'),
+    ('1. ```mermaid', '   graph TD\n   A-->B', '   ```'),
+])
+def test_nested_diagram_accepts_pin(integration_client, integration_workspace, opening, body, closing):
+    path = integration_workspace / 'nested-diagram.md'
+    path.write_text(f'{opening}\n{body}\n{closing}\n')
+    artifact = _register(integration_client, path)
+    response = integration_client.post(_url(f'/api/artifacts/{artifact}/comments'), json={
+        'delivery_policy': 'immediate', 'body': 'Pin', 'anchor_text': opening,
+        'from_off': 0, 'to_off': len(opening), 'region': {'x': 0.2, 'y': 0.3},
+        'diagram_source': 'graph TD\nA-->B',
+    })
+    assert response.status_code == 200, response.text
 
 
 @pytest.mark.asyncio

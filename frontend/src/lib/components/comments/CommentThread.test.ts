@@ -398,7 +398,7 @@ describe('CommentThread', () => {
 
 	it('says when the diagram changed under a pin, with the same Move pin', () => {
 		const onMovePin = vi.fn();
-		render(thread({ anchor: '```mermaid', regionNumber: 1, regionStale: true }), false, { onMovePin });
+		render(thread({ anchor: '```mermaid', regionNumber: 1, regionStale: true }), false, { onMovePin, diagram: true });
 		const note = host.querySelector('[data-region-stale]')?.textContent ?? '';
 		expect(note).toContain('Diagram changed since this comment');
 		expect(note).not.toContain('Image');

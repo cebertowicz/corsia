@@ -15,7 +15,6 @@ import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type
  * widget, because the widget replaces the range the mark decorations would sit on.
  */
 
-// Shared widget selection types and touch helpers live in widget-selection-types.
 
 /** Maps what the browser has selected inside a widget to source offsets, or null when there is nothing to comment on. */
 export function selectionIn(view: EditorView, el: HTMLElement, range: Range): WidgetSelection | null {

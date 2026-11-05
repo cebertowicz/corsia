@@ -10,43 +10,33 @@ told which block it is on.
 from __future__ import annotations
 
 import hashlib
-import re
 from typing import Any, Iterable, Mapping
+
+from markdown_it import MarkdownIt
 
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import _cp_at_u16
 
-_OPEN = re.compile(r"^[ \t]*(?P<fence>`{3,}|~{3,})[ \t]*mermaid[ \t]*$", re.IGNORECASE)
+
+def _blocks(text: str) -> dict[int, tuple[int, int, str]]:
+    return {
+        token.map[0]: (token.map[0] + 1, token.map[1], token.content.removesuffix("\n"))
+        for token in MarkdownIt().parse(text)
+        if token.type == "fence" and token.map and token.info.strip().lower() == "mermaid"
+    }
 
 
-def is_fence_quote(quote: str | None) -> bool:
-    """Whether ``quote`` is the opening line of a mermaid fence, the anchor of a diagram pin."""
-    return quote is not None and _OPEN.match(quote.strip("\n")) is not None
+def _anchor_line(text: str, from16: int | None) -> int | None:
+    start = _cp_at_u16(text, from16)
+    if start is None or (start and text[start - 1] != "\n"):
+        return None
+    return text.count("\n", 0, start)
 
 
 def block_at(text: str, from16: int | None) -> tuple[int, int, str] | None:
-    """(first line, last line, source) of the mermaid block whose opening fence line holds the UTF-16 offset."""
-    return _block_at(text, from16, text.split("\n"))
-
-
-def _block_at(text: str, from16: int | None, lines: list[str]) -> tuple[int, int, str] | None:
-    start = _cp_at_u16(text, from16)
-    if start is None:
-        return None
-    position = 0
-    for number, line in enumerate(lines):
-        if position <= start <= position + len(line):
-            opening = _OPEN.match(line)
-            if opening is None:
-                return None
-            fence = opening.group("fence")
-            closer = re.compile(rf"^[ \t]*{re.escape(fence[0])}{{{len(fence)},}}[ \t]*$")
-            for last in range(number + 1, len(lines)):
-                if closer.match(lines[last]):
-                    return number + 1, last + 1, "\n".join(lines[number + 1:last])
-            return number + 1, len(lines), "\n".join(lines[number + 1:])
-        position += len(line) + 1
-    return None
+    """The block whose opening line starts at the UTF-16 anchor offset."""
+    line = _anchor_line(text, from16)
+    return _blocks(text).get(line) if line is not None else None
 
 
 def source_revision(source: str) -> str:
@@ -70,12 +60,13 @@ def mark_stale(group: Iterable[dict], path: str | None) -> None:
         text = read_doc_text(path)
     except (OSError, ValueError):
         return
-    lines = text.split("\n")
+    blocks = _blocks(text)
     revisions: dict[int | None, str | None] = {}
     for row in group:
         offset = row.get("from_off")
         if offset not in revisions:
-            block = _block_at(text, offset, lines)
+            line = _anchor_line(text, offset)
+            block = blocks.get(line) if line is not None else None
             revisions[offset] = source_revision(block[2]) if block else None
         current = revisions[offset]
         row["region_stale"] = current is not None and row.get("image_rev") != current

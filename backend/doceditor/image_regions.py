@@ -153,7 +153,6 @@ def _bases_for(db, groups: Iterable[list[dict]], thread_id: str | None) -> list[
     return reader_bases(db, thread_id) if any(group[0].get("image_src") for group in groups) else []
 
 
-# Image revision caching is shared by pin creation and staleness checks.
 def move_fields(comment: Mapping[str, Any], fields: dict[str, Any], image: Path) -> dict[str, Any]:
     """Turn a patch's ``region`` into column updates; a moved pin is placed on ``image`` as it is now."""
     return move_fields_on(comment, fields, image_revision(image))
@@ -327,7 +326,7 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
         if not is_image_path(path) and diagram_pins.is_diagram_group(group, path):
             diagram_pins.mark_stale(group, path)
             for item in group:
-                item["region_line"] = describe_region(item)
+                item["region_line"] = describe_region(item, diagram=True)
                 item["marked_image_line"] = diagram_pins.delivery_line(item, path)
             continue
         try:
@@ -379,7 +378,7 @@ def _unmarkable(path: str | None) -> str | None:
     return None
 
 
-def describe_region(row: Mapping[str, Any]) -> str | None:
+def describe_region(row: Mapping[str, Any], *, diagram: bool = False) -> str | None:
     """'Region 3: box at x 10%, y 20%, 30% wide, 10% tall' for the wake text."""
     region = region_of(row)
     if region is None:
@@ -395,5 +394,5 @@ def describe_region(row: Mapping[str, Any]) -> str | None:
     else:
         text = f"Region {row['region_number']}: box at {where}, {pct(region.w)} wide, {pct(region.h)} tall"
     if row.get("region_stale"):
-        text += " (the image changed after this was placed)"
+        text += f" (the {'diagram' if diagram else 'image'} changed after this was placed)"
     return text

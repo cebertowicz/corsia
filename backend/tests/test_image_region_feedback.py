@@ -306,4 +306,5 @@ def test_a_pin_on_a_diagram_in_a_document_names_its_block(isolated_db, tmp_path,
 
     assert item["marked_image_line"].startswith("Diagram (mermaid block, lines 3 to 6 of notes.md):")
     assert "A --> B" in item["marked_image_line"]
+    assert item['region_line'].endswith('(the diagram changed after this was placed)')
     assert renders == []

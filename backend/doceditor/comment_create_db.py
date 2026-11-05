@@ -4,7 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from doceditor import comments, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, review_feedback, review_lifecycle
-from doceditor.comment_action_errors import CommentActionError
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
@@ -81,12 +80,10 @@ def _image(db, request: CommentInput, quote: str | None, start: int | None) -> t
     """
     if image_regions.is_image_path(request.path):
         return None, image_regions.image_revision(image_regions.require_image(request.path))
-    if diagram_pins.is_fence_quote(quote):
-        revision = diagram_pins.revision(read_doc_text(request.path), start)
-        if revision is None:
-            raise CommentActionError("region_target", "a pin goes on a mermaid block, anchored on its opening line.")
+    revision = diagram_pins.revision(read_doc_text(request.path), start)
+    if revision is not None:
         if request.browser and (request.diagram_source is None or diagram_pins.source_revision(request.diagram_source) != revision):
-            raise CommentSelectionChanged("The text you selected changed or was removed. Select it again; your draft is kept.")
+            raise CommentSelectionChanged("This diagram changed. Place the pin again; your draft is kept.")
         return None, revision
     if request.artifact_id is not None:
         artifact = registry_models.get_artifact(request.artifact_id, db=db)

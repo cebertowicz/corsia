@@ -16,13 +16,14 @@
 	import type { ImageRegion } from '$lib/imageRegions';
 	import { regionColor, revealCentre } from '$lib/imageRegions';
 	import { subjectForRegion } from '$lib/diagramSubject';
-	const COMMENT_IMAGE_MARGIN = 40;
 	import { subscribeToDocumentCommentChanges } from '$lib/docViewerOperations';
 	import { commentLoads, docComments, loadComments, markThreadViewed, type DocComment } from '$lib/stores/docComments';
 	import { isPaneDrawer } from '$lib/stores/paneOpen';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { projects } from '$lib/stores/projects';
 	import { projectAccent } from '$lib/utils/projectColors';
+
+	const COMMENT_IMAGE_MARGIN = 40;
 
 	let { src, alt, readableScale, diagramElements, diagramSource, artifactId, projectId = null, readOnly = false, docName = '', docPath = null, onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, visibleBottom = null, onPlace, onLoaded, onFailed, onRetry }: {
 		src: string;
@@ -250,6 +251,7 @@
 					<ImageRegionLayer
 						bind:this={layer}
 						{scale}
+						diagram={diagramSource !== undefined}
 						{comments}
 						{colorOf}
 						draftColor={projectAccent(projectId, accent)}
@@ -300,7 +302,7 @@
 			readOnly={!canComment}
 			onDrawerShown={(shown) => drawerShown = shown}
 			onSheetModalChange={(up) => { sheetUp = up; if (!up) lightbox?.clearSheet(); }}
-			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks, candidateOrder: image.listCandidateOrder }}
+			image={{ src, alt, diagram: diagramSource !== undefined, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks, candidateOrder: image.listCandidateOrder }}
 		/>
 	{/if}
 </div>

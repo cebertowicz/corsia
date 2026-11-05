@@ -2,7 +2,7 @@ import { get } from 'svelte/store';
 import { imageRequestAt, type OpenImageRequest } from '$lib/cm/markdown-image';
 import { widgetImageRequestAt } from '$lib/cm/widget-open';
 import { imageContentUrl } from '$lib/artifactImage';
-import { diagramAt, sharedImage, type ImageOccurrence } from '$lib/docImageComments';
+import { diagramAtAnchor, isDiagramPin, sharedImage, type ImageOccurrence } from '$lib/docImageComments';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
 import { liveFailureMessage } from '$lib/docViewerCommentDraft.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -97,7 +97,7 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 	const groups = {
 		srcOf: (comment: DocComment) => (comment.imageSrc ? imageContentUrl({ path: comment.imageSrc, projectId: projectId(), token: get(token) ?? '', imageCacheKey: options.imageCacheKey() }) : null),
 		/** The diagram a pin is on, as the document has it now: its source to draw, and its drawer caption. */
-		diagramOf: (comment: DocComment) => (comment.from != null ? diagramAt(options.text(), comment.from) : null),
+		diagramOf: (comment: DocComment) => (isDiagramPin(comment, options.text()) ? diagramAtAnchor(options.text(), comment.from!) : null),
 		colorOf: (comment: DocComment) => regionColor(comment, projectId(), options.accent()),
 		onOpen: (comment: DocComment, focus?: Focus) => openOr([comment.id], focus, () => options.showInText(comment.id)),
 	};

@@ -49,12 +49,6 @@ def image_url(markdown: str) -> str | None:
     return match.group("url") if match else None
 
 
-def check_image_quote(quote: str) -> None:
-    """A region the browser places in a document quotes the image's markdown exactly."""
-    if image_url(quote) is None and not diagram_pins.is_fence_quote(quote):
-        raise CommentActionError("region_target", NOT_AN_IMAGE)
-
-
 def resolve_image_path(doc_path: str | None, url: str) -> str | None:
     """The workspace path ``url`` names from the document at ``doc_path``, or ``None`` for a web URL."""
     target = url.strip()
@@ -146,5 +140,5 @@ def _diagram_patch(comment: Mapping[str, Any], fields: dict[str, Any], doc_path:
         raise CommentActionError("region_target", "the diagram this pin is on is no longer in the document.")
     if require_source and (source is None or diagram_pins.source_revision(source) != current):
         from doceditor.comment_creation import CommentSelectionChanged
-        raise CommentSelectionChanged("The text you selected changed or was removed. Select it again; your draft is kept.")
+        raise CommentSelectionChanged("This diagram changed. Place the pin again; your draft is kept.")
     return move_fields_on(comment, fields, current)

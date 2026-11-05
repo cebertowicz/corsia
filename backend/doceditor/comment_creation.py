@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from doceditor import comments
-from doceditor.doc_images import check_image_quote, widen_to_image
+from doceditor.doc_images import widen_to_image
 from doceditor.image_regions import check_region_target
 from doceditor.live_document import IdentityInUse
 from doceditor.quote_anchor import anchor_context, resolve_quote
@@ -154,8 +154,6 @@ async def create_validated_comment(request, client_id):
 
     if request.region is not None:
         check_region_target(request.path, request.quote)
-        if request.browser and request.quote:
-            check_image_quote(request.quote)
     prepare = None
     if request.quote and not request.parent_id and not request.review:
         if request.browser:

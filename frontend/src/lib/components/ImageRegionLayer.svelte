@@ -23,7 +23,7 @@
 	type Pinned = DocComment & { region: ImageRegion; regionNumber: number; movedFrom?: ImageRegion; saves: number };
 	/** A box or point on the image: the pin itself, its new place while that saves, or its old place meanwhile. */
 	type Mark = { comment: Pinned; region: ImageRegion; role: 'pin' | 'pending' | 'leaving'; key: string };
-	let { comments, colorOf, draftColor, draft = null, moving = null, selectedId = null, hoveredId = null, boxMode = false, cardOpen = false, readOnly = false, scale = 1, onPick, onAmbiguous, onHover, onDraw, onDismiss }: {
+	let { comments, colorOf, draftColor, draft = null, moving = null, selectedId = null, hoveredId = null, boxMode = false, cardOpen = false, readOnly = false, scale = 1, diagram = false, onPick, onAmbiguous, onHover, onDraw, onDismiss }: {
 		/** Region comments to show; a resolved one shows only while it is selected. */
 		comments: DocComment[];
 		colorOf: (comment: DocComment) => string;
@@ -42,6 +42,7 @@
 		readOnly?: boolean;
 		/** The viewer's zoom; the tags are placed again when it changes. */
 		scale?: number;
+		diagram?: boolean;
 		onPick: (id: string, anchor: () => DOMRect | null, opener: HTMLElement) => void;
 		onAmbiguous: (ids: string[], opener: HTMLElement) => void;
 		onHover: (id: string | null) => void;
@@ -206,7 +207,7 @@
 	}
 
 	const pct = (value: number) => `${value * 100}%`;
-	const label = (comment: Pinned) => `Comment ${comment.regionNumber} by ${comment.authorKind === 'agent' ? comment.author : 'you'}, ${describeRegion(comment.region)}${comment.movedFrom ? ', moving here' : comment.regionStale ? `, ${changedLabel(comment.anchor).toLowerCase()}` : ''}`;
+	const label = (comment: Pinned) => `Comment ${comment.regionNumber} by ${comment.authorKind === 'agent' ? comment.author : 'you'}, ${describeRegion(comment.region)}${comment.movedFrom ? ', moving here' : comment.regionStale ? `, ${changedLabel(diagram).toLowerCase()}` : ''}`;
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
