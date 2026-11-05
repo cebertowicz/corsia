@@ -29,10 +29,12 @@ ALREADY_DONE = "Not sent: that draft was already sent or discarded."
 DRAFT_TOOL_BY_KIND = {"email": "email_draft", "invite": "calendar_draft_invite", "message": "messages_draft"}
 
 
-def _changed_outside(kind: str) -> str:
+def _changed_outside(kind: str, draft_tool: str | None = None) -> str:
+    tool = draft_tool or DRAFT_TOOL_BY_KIND[kind]
     return (
-        "Not sent: the draft was changed outside the draft tools. Save it with "
-        f"{DRAFT_TOOL_BY_KIND[kind]}, show the person, and wait for their reply."
+        "Not sent: the draft was changed outside the draft tools, maybe by the person. Read it "
+        f"again and keep their changes when you save it with {tool}, then "
+        "show the person and wait for their reply."
     )
 
 
@@ -190,8 +192,13 @@ def _read_bytes(relative: str) -> bytes | None:
         return None
 
 
-async def check_action(kind: str, draft_id: str, revision: str) -> Approved | Refusal:
-    """Decide whether this call may send ``draft_id``; run on the event-loop task."""
+async def check_action(
+    kind: str, draft_id: str, revision: str, *, draft_tool: str | None = None,
+) -> Approved | Refusal:
+    """Decide whether this call may send ``draft_id``; run on the event-loop task.
+
+    ``draft_tool`` names the tool that saves this draft when it is not the kind's default.
+    """
     thread_id = state._current_thread_id.get(None)
     # Contextvars are not visible in executor threads: read the identity here.
     identity = state._current_turn_identity.get(None)
@@ -210,7 +217,7 @@ async def check_action(kind: str, draft_id: str, revision: str) -> Approved | Re
     draft = stage.draft
     data = _read_bytes(draft["path"])
     if data is None or document_revision(data) != draft["recorded_revision"]:
-        return Refusal(_changed_outside(kind))
+        return Refusal(_changed_outside(kind, draft_tool))
     if revision != draft["recorded_revision"]:
         return Refusal(STALE_REVISION)
     person_at, recorded_at = _utc(stage.human_at or ""), _utc(draft["recorded_at"])
