@@ -395,13 +395,11 @@ class StepHandler:
             self.model_info.get("model"), self.turn_id, err_id, err_now, err_content,
             error_fields(payload),
         )
-
         await record_turn_end_logged(
             self.thread_id, "plan-liveness error wake failed; parent may wait",
             "parent drive after turn error failed; parent may wait",
             level="ERROR", outcome="error", error=err_content, turn_id=self.turn_id,
         )
-
         await self._emit({
             "type": "error",
             "thread_id": self.thread_id,
