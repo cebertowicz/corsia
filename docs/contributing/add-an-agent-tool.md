@@ -38,7 +38,7 @@ Use this guide to add a built-in tool that CORSIA's agents can call, from its de
 
 5. **Add tests and guidance.** Add focused tests for the behavior, invalid inputs, errors and access boundaries, as in `backend/tests/test_workspace_git_tools.py`. The catalog coverage test in `backend/tests/test_agent_tool_surface.py` checks for registered tools missing catalog entries and stale entries. Put call-specific guidance in the tool description. If a wider workflow needs agent instructions, packaged System skills live under `backend/prompts/system/v1/skills/`; contributor changes to `backend/prompts/system/` require maintainer approval. A System skill is not required for every tool.
 
-6. **Run the checks and prepare the pull request.** Follow [Testing and review](testing.md) for disposable state, the local gate and review. Run your tool's focused tests and the catalog coverage test below. Follow [`CONTRIBUTING.md`](../../CONTRIBUTING.md) for issue, claim, CLA and pull request requirements.
+6. **Run the checks and prepare the pull request.** Follow [Testing and review](testing.md) for disposable state, the local gate and review. Run your tool's focused tests and the catalog coverage test below. Follow [`CONTRIBUTING.md`](../../CONTRIBUTING.md) for issue, CLA and pull request requirements.
 
 ## Check it yourself
 

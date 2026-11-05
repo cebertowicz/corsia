@@ -53,7 +53,7 @@ git branch -D practice-first-change
 
 The same loop, with the project's rules around it:
 
-1. Pick an issue open to outside contributors and claim it. Which issues are open, and how to claim one, are in [`CONTRIBUTING.md`](../../CONTRIBUTING.md#picking-up-an-issue).
+1. Pick an issue. For anything beyond a mechanical fix, discuss the approach on it first, as [`CONTRIBUTING.md`](../../CONTRIBUTING.md#issues) says.
 2. Branch from `dev` with the branch name `CONTRIBUTING.md` gives.
 3. Make the change. For a docs page, follow [Writing docs](writing-docs.md), including the line at the end of the page that says which commit you checked it against.
 4. Run the tests your change can affect, then `bash scripts/check-pr`.
