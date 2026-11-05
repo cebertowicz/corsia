@@ -2,7 +2,7 @@
 
 How people and programs sign in to CORSIA, how agents act, and what a project or an account does and doesn't separate.
 
-**In short:** CORSIA is built for one person per install. Sign-in protects the server from other devices and other people on the network. It doesn't separate agents from each other or accounts on the same install from each other. On macOS, projects are separated only for agents' shells.
+**In short:** CORSIA is built for one person per install. Sign-in protects the server from other devices and other people on the network. It doesn't separate agents from each other or accounts on the same install from each other. Projects are separated only for agents' shells.
 
 ## Signing in
 

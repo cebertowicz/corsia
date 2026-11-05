@@ -32,7 +32,7 @@ CORSIA runs on your computer. Data leaves it in the cases below. "Agent's choice
 
 ## Local only
 
-**Local only** controls which models may run and holds messages bound for cloud models. For a whole project it also closes the project to other agents' shells. It doesn't stop traffic from tools.
+**Local only** (a chat setting) and **Local models only** (the same control for a whole project) decide which models may run and hold messages bound for cloud models. Local models only also closes the project to other agents' shells. It doesn't stop traffic from tools.
 
 | | |
 |---|---|
