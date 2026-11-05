@@ -52,7 +52,7 @@ def _install_prepared_transcript(destination: Any) -> Any | None:
     return install_cc_prepared_transcript(destination.transcript)
 
 
-def _launch_confinement(confinement: LaunchConfinement, working_dir: str) -> tuple[str, tuple[str, ...]]:
+def _launch_confinement(confinement: LaunchConfinement, working_dir: str, thread_id: str) -> tuple[str, tuple[str, ...]]:
     """Carry the confinement the destination read into this launch, rechecking its reads."""
     if not confinement.confined:
         return CONFINEMENT_NONE, ()
@@ -60,7 +60,7 @@ def _launch_confinement(confinement: LaunchConfinement, working_dir: str) -> tup
         raise ConfinementRefused(
             "confined Claude Code child lost its own working directory"
         )
-    return confinement.mode, require_readable_dirs(list(confinement.add_dirs), None)
+    return confinement.mode, require_readable_dirs(list(confinement.add_dirs), None, thread_id)
 
 
 def build_cc_startup_context(
@@ -98,7 +98,7 @@ def build_cc_startup_context(
         if authority.source == "provider_resume"
         else (destination.cc_session_id if transcript is not None else None)
     )
-    confinement, add_dirs = _launch_confinement(destination.confinement, destination.working_dir)
+    confinement, add_dirs = _launch_confinement(destination.confinement, destination.working_dir, session_id)
     reconstruction = destination.seed_reconstruction
     if reconstruction is None:
         raise CCPreparedDestinationStale(

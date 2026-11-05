@@ -320,9 +320,13 @@ def test_a_linux_denial_names_only_a_fenced_project(world, monkeypatch):
     assert host_path_policy.denial_guidance_prefix("cat: ../beta/x: Permission denied", ALPHA_AGENT, alpha) == ""
 
 
-def test_private_thread_folder_has_no_project_copy(world):
+def test_workspace_agent_private_folder_refusal_copy(world):
     path = world.workspace / ".threads" / WORKSPACE_AGENT / "notes.md"
-    assert _policy(ALPHA_AGENT).denial_guidance_for_paths([path]) is None
+    message = _policy(ALPHA_AGENT).denial_guidance_for_paths([path])
+    assert message == (
+        f"`{path}` is in a workspace agent's private folder, outside your scope. "
+        "Ask the CORSIA agent, or use `request_host_access` for reviewed temporary access."
+    )
 
 
 @pytest.mark.integration

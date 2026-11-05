@@ -63,13 +63,14 @@ def resolve_path(
     allowed_dir: Path | None = None,
     *,
     for_write: bool = False,
+    thread_id: str | None = None,
 ) -> Path:
     """Resolve path against workspace (if relative) and enforce directory restriction.
 
     The configured workspace/registered-repository boundary applies independent
     of whether the optional Safehouse executable is installed. ``allowed_dir``
-    preserves the legacy denial detail, but does not override a registered-repo
-    grant or turn project scope into a confidentiality boundary.
+    preserves the legacy denial detail. When supplied, ``thread_id`` applies
+    the caller's project fence independently of registered-repo grants.
     """
     p = _join_relative_to_workspace(path, workspace)
     resolved = p.resolve(strict=False)
@@ -77,6 +78,11 @@ def resolve_path(
     from tools.host_path_policy import ordinary_host_path_denial
 
     confined_reads.check(p, resolved, for_write=for_write)
+    if thread_id:
+        from tools.project_fence import fence_for_thread
+
+        if refusal := fence_for_thread(thread_id).refusal(p):
+            raise PermissionError(refusal)
     if not for_write and carry_in_hides(resolved, reading=True):
         raise FileNotFoundError(path)  # absent for this carry-in side
 
@@ -134,6 +140,13 @@ async def _resolve_path_for_action(
     """
     import tools.confined_reads as confined_reads
     from tools.host_access_gate import consume_current_action_permit
+    from tools.project_fence import Fence, fence_for_thread
+
+    fence = await asyncio.to_thread(fence_for_thread, thread_id)
+    target = _join_relative_to_workspace(path, workspace)
+    local_fence = Fence(tuple(root for root in fence.roots if root.local_only), fence.caller)
+    if refusal := local_fence.refusal(target):
+        raise PermissionError(refusal)
 
     # A confined worker's reads never take a host permit: its read paths are all it has.
     consumed = None if confined_reads.confined() else await consume_current_action_permit(
@@ -152,6 +165,7 @@ async def _resolve_path_for_action(
                 workspace,
                 allowed_dir,
                 for_write=for_write,
+                thread_id=thread_id,
             ),
             reviewed=False,
         )

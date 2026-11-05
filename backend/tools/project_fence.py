@@ -36,6 +36,10 @@ _ORDINARY_COPY = (
     "`{path}` is in project `{name}`, outside your scope. "
     "Ask the CORSIA agent, or use `request_host_access` for reviewed temporary access."
 )
+_WORKSPACE_AGENT_COPY = (
+    "`{path}` is in a workspace agent's private folder, outside your scope. "
+    "Ask the CORSIA agent, or use `request_host_access` for reviewed temporary access."
+)
 _LOCAL_ONLY_COPY = (
     "`{path}` is in Local only project `{name}`, outside your scope. "
     "Host access doesn't open it. Ask its conductor{conductor}."
@@ -79,18 +83,23 @@ class Fence:
         """Deny rules for every other fenced root."""
         return self._rules(False, quote)
 
-    def refusal(self, path: Path) -> str | None:
-        """The approved refusal naming a fenced project path, or None."""
-        candidate = canonical(path)
+    def matching_root(self, path: Path) -> FencedRoot | None:
+        """Return the strongest fenced root containing either form of a path."""
+        candidates = (Path(os.path.abspath(path.expanduser())), canonical(path))
         matches = [
             root for root in self.roots
-            if root.project is not None and any(contains(form, candidate) for form in root.forms)
+            if any(contains(form, candidate) for form in root.forms for candidate in candidates)
         ]
-        # A Local only root inside an ordinary one still holds under a lease, so its copy wins.
-        root = next((root for root in matches if root.local_only), matches[0] if matches else None)
+        return next((root for root in matches if root.local_only), matches[0] if matches else None)
+
+    def refusal(self, path: Path) -> str | None:
+        """The approved refusal naming a fenced project path, or None."""
+        root = self.matching_root(path)
         if root is None:
             return None
         _event("refused", self.caller, local_only=root.local_only)
+        if root.project is None:
+            return _WORKSPACE_AGENT_COPY.format(path=path)
         if not root.local_only:
             return _ORDINARY_COPY.format(path=path, name=root.project)
         who = f" (`{root.conductor}`)" if root.conductor else ""

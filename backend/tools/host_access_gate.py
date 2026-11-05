@@ -46,7 +46,8 @@ from host_access.supervisor import (
 )
 from infra.db_async import run_in_db
 from tools.host_access_errors import HostAccessBlocked, HostAccessGateError, HostAccessRequired
-from tools.host_action_values import _boolean, _integer, _number, _text
+from tools.host_action_admission import no_lease_authorization
+from tools.host_action_values import _boolean, _integer, _number, _text, search_payload
 from tools.host_access_external import (
     ExternalLaunchMismatch,
     classify_external_launch,
@@ -274,6 +275,7 @@ def _path_requires_elevation(
     lexical: Path,
     resolved: Path,
     for_write: bool,
+    thread_id: str | None = None,
 ) -> bool:
     from tools.host_path_policy import path_review_classification
 
@@ -281,7 +283,7 @@ def _path_requires_elevation(
     # requested and again before it is consumed: a hard-floor path is refused
     # before any review happens or any permit is honoured.
     ordinary_denied, hard_floor = path_review_classification(
-        lexical, resolved, for_write=for_write
+        lexical, resolved, for_write=for_write, thread_id=thread_id
     )
     if hard_floor:
         raise HostAccessBlocked(hard_floor)
@@ -305,6 +307,7 @@ def _path_action(
     params: Mapping[str, Any],
     *,
     tool: Any,
+    thread_id: str | None = None,
 ) -> _PreparedAction:
     base = _tool_workspace(tool)
     raw_path = params.get("path")
@@ -321,6 +324,7 @@ def _path_action(
         lexical=lexical,
         resolved=resolved,
         for_write=for_write,
+        thread_id=thread_id,
     )
     payload: dict[str, Any] = {"path": _path_payload(lexical, resolved)}
 
@@ -352,35 +356,8 @@ def _path_action(
         ]
         if len(payload["edits"]) != len(edits):
             raise HostAccessBlocked("Host action edits are invalid.")
-    elif canonical == "glob":
-        payload.update(
-            {
-                "pattern": _text(params.get("pattern"), "pattern"),
-                "all_threads": _boolean(params.get("all_threads")),
-            }
-        )
-    elif canonical == "grep":
-        payload.update(
-            {
-                "pattern": _text(params.get("pattern"), "pattern"),
-                "glob": params.get("glob"),
-                "output_mode": params.get("output_mode") or "files",
-                "case_insensitive": _boolean(params.get("case_insensitive")),
-                "context": _integer(
-                    params.get("context"),
-                    0,
-                    minimum=0,
-                    maximum=10,
-                ),
-                "max_results": _integer(
-                    params.get("max_results"),
-                    50,
-                    minimum=1,
-                    maximum=200,
-                ),
-                "all_threads": _boolean(params.get("all_threads")),
-            }
-        )
+    elif canonical in {"glob", "grep"}:
+        payload.update(search_payload(canonical, params))
     elif canonical == "browser_screenshot":
         payload["full_page"] = _boolean(params.get("full_page"))
 
@@ -546,6 +523,7 @@ def _prepare_action(
     params: Mapping[str, Any],
     *,
     tool: Any,
+    thread_id: str | None = None,
 ) -> _PreparedAction | None:
     canonical = _canonical_tool_name(tool_name)
     if canonical not in _HOST_ADAPTERS:
@@ -557,7 +535,7 @@ def _prepare_action(
         return None
     if canonical in {"process_discover", "process_signal"}:
         return _process_action(canonical, safe)
-    return _path_action(canonical, safe, tool=tool)
+    return _path_action(canonical, safe, tool=tool, thread_id=thread_id)
 
 
 async def _resolve_active_lease(thread_id: str) -> dict[str, Any] | None:
@@ -787,7 +765,7 @@ async def authorize_host_action(
         params=params,
         tool=tool,
     )
-    action = await asyncio.to_thread(_prepare_action, tool_name, materialized, tool=tool)
+    action = await asyncio.to_thread(_prepare_action, tool_name, materialized, tool=tool, thread_id=thread_id)
     if action is None:
         return HostActionAuthorization(_parameter_overrides=tuple(overrides.items()))
     if action.parameter_overrides:
@@ -821,27 +799,7 @@ async def authorize_host_action(
         )
     lease = await _resolve_active_lease(thread_id)
     if lease is None:
-        if ordinary_action:
-            return HostActionAuthorization(
-                _parameter_overrides=tuple(overrides.items())
-            )
-        if action.tool_name == "bash":
-            # host:true with no active lease is a fast structured denial, never
-            # a wall — host scope is only reviewable under an already-active
-            # lease, so the guidance sends the agent to request one first.
-            raise HostAccessRequired(
-                protected_scope_denial(
-                    "host scope was requested but no host-access lease is "
-                    "active",
-                    lease_active=False,
-                )
-            )
-        raise HostAccessRequired(
-            protected_scope_denial(
-                "this action is outside protected scope",
-                lease_active=False,
-            )
-        )
+        return await no_lease_authorization(action, ordinary_action, overrides, thread_id)
     try:
         external_agent = classify_external_launch(
             lease,
@@ -901,7 +859,7 @@ async def consume_current_action_permit(
         tool_name=tool_name,
         params=params, tool=tool,
     )
-    action = await asyncio.to_thread(_prepare_action, tool_name, materialized, tool=tool)
+    action = await asyncio.to_thread(_prepare_action, tool_name, materialized, tool=tool, thread_id=thread_id)
     if (
         action is None
         or action.tool_name != permit.action.tool_name
