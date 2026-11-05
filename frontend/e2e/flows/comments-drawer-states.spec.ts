@@ -263,15 +263,22 @@ journey('the server names the new replies, a long thread keeps only them and the
 	}
 });
 
-journey('new replies clear once the newest is seen, and the person\'s own never mark', [['1440 light pane closed', 'closed', 'light']], async ({ page, request, mode, theme }) => {
+journey('new replies clear once the thread is opened, and the person\'s own never mark', [['1440 light pane closed', 'closed', 'light']], async ({ page, request, mode, theme }) => {
 	const doc = await seed(request, `Drawer seen replies ${mode} ${theme}`);
 	const parent = await comment(request, doc, 'Ring two should wait.', 2);
 	await agentReply(request, doc, parent, 'Agreed, ring two waits for the canary.');
 	await reply(request, doc, parent, 'My own newest reply.');
 	await open(page, doc, mode, theme);
-	const stamped = page.waitForResponse((response) => response.url().includes('/viewed') && response.request().method() === 'POST');
+	let stamps = 0;
+	page.on('request', (req) => { if (req.url().includes('/viewed') && req.method() === 'POST') stamps++; });
 	await pill(page).click();
 	await expect(drawerOf(page).locator('.ct-new')).toHaveCount(1);
+	// Showing the thread is not opening it: the reply stays new until the person opens the thread.
+	await page.waitForTimeout(1_500);
+	expect(stamps).toBe(0);
+	await expect(drawerOf(page).locator('.ct-new')).toHaveCount(1);
+	const stamped = page.waitForResponse((response) => response.url().includes('/viewed') && response.request().method() === 'POST');
+	await drawerOf(page).getByText('Ring two should wait.').click();
 	await stamped;
 	await open(page, doc, mode, theme);
 	await pill(page).click();

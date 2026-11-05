@@ -7,7 +7,7 @@ from tools.linux_sandbox import HOME_CACHES, HOME_RW, build_protected_argv, prot
 from tests.linux_sandbox_test_support import linux_sandbox_root
 
 
-def test_agent_account_personal_gh_home_is_masked(tmp_path, monkeypatch):
+def test_agent_account_personal_gh_home_is_masked(tmp_path, monkeypatch, linux_sandbox_root):
     from connections import github_agent
     from infra import config, project_repo_policy
     from tools import linux_shell
@@ -35,6 +35,17 @@ def test_agent_account_personal_gh_home_is_masked(tmp_path, monkeypatch):
                                          agent_account=absent, extra_hidden_roots=[gh])
     assert any(script_argv[i:i + 4] == ['--perms', '0000', '--tmpfs', str(gh)]
                for i in range(len(script_argv)))
+    socket_parent = linux_sandbox_root / 'sockets'
+    own = socket_parent / 'own'
+    other = socket_parent / 'other'
+    own.mkdir(parents=True)
+    other.mkdir()
+    argv = linux_shell.shell_argv('true', workspace, thread_id='one', policies=[], env={},
+                                  agent_account=absent, extra_hidden_roots=[gh], extra_socket_roots=[own])
+    assert any(argv[i:i + 3] == ['--ro-bind', str(own), str(own)] for i in range(len(argv)))
+    assert not any(argv[i:i + 3] == ['--ro-bind', str(socket_parent), str(socket_parent)]
+                   for i in range(len(argv)))
+    assert str(other) not in argv
 
 
 def test_fenced_projects_join_the_hidden_set_and_absent_ones_are_skipped(tmp_path, monkeypatch):

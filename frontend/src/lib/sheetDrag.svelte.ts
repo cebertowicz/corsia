@@ -53,5 +53,7 @@ export function createSheetDrag(props: {
 		start: startDrag,
 		move: moveDrag,
 		finish: finishDrag,
+		/** Back to the resting place. A dismissing drag leaves the sheet where it was let go, for its outro. */
+		reset: () => { dragY = 0; },
 	};
 }

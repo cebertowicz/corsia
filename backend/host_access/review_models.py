@@ -44,6 +44,16 @@ class ApplicationReview:
 
 
 @dataclass(frozen=True, slots=True)
+class ScriptApplicationReview:
+    """Validated standing-script verdict and reviewer identity."""
+
+    identity: ReviewerIdentity
+    verdict: Literal["allow", "reject", "ask_person"]
+    reason: str
+    reviewer_fallback: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class ActionReview:
     """Validated single-action verdict plus the exact reviewer identity."""
 
