@@ -12,6 +12,7 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 	let reduced = options.reduced ?? false;
 	let last = node.getBoundingClientRect().height;
 	let animation: Animation | null = null;
+	let destroyed = false;
 	let detentMoves = 0;
 	const border = () => {
 		const style = getComputedStyle(node);
@@ -28,6 +29,8 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 		}
 	};
 	const run = (from: number, to: number) => {
+		// The panel's own animation changes its size; observe it again once that animation settles.
+		observer?.unobserve(node);
 		const inset = border();
 		animation = node.animate(
 			[{ height: `${from - inset}px` }, { height: `${to - inset}px` }],
@@ -39,9 +42,14 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 			const now = node.getBoundingClientRect().height;
 			last = now;
 			if (enabled && Math.abs(now - to) > 1) run(to, now);
+			else if (!destroyed) observer?.observe(node);
 		};
 		animation.addEventListener('finish', done, { once: true });
-		animation.addEventListener('cancel', () => { animation = null; last = node.getBoundingClientRect().height; }, { once: true });
+		animation.addEventListener('cancel', () => {
+			animation = null;
+			last = node.getBoundingClientRect().height;
+			if (!destroyed) observer?.observe(node);
+		}, { once: true });
 	};
 	const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
 		const now = node.getBoundingClientRect().height;
@@ -66,6 +74,7 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 	return {
 		update(next: { enabled: boolean; reduced?: boolean }) { enabled = next.enabled; reduced = next.reduced ?? false; },
 		destroy() {
+			destroyed = true;
 			observer?.disconnect();
 			animation?.cancel();
 			node.removeEventListener('transitionrun', moveStart);
