@@ -87,7 +87,7 @@ describe('MessageArtifactCards', () => {
 	it('shows the clearing round as text beside the title, with the feedback counts as a second line', () => {
 		render({ cards: [ask({ state: 'changes_requested', feedback: { comments: 2, suggestions: 1 } })] });
 
-		expect(tiles()[0].querySelector('.state')?.textContent).toBe('Changes requested');
+		expect(tiles()[0].querySelector('.state')?.textContent).toBe('Rejected');
 		expect(tiles()[0].querySelector('.name')?.textContent).toBe('2 comments, 1 suggestion');
 	});
 
@@ -215,7 +215,7 @@ describe('MessageArtifactCards', () => {
 
 		answerSubmitted(['h1'], { state: 'approved' });
 		flushSync();
-		expect(host.querySelector('.state')?.textContent).toBe('Changes requested');
+		expect(host.querySelector('.state')?.textContent).toBe('Rejected');
 	});
 
 	it('does not apply an answered round to a later open ask for the same artifact', () => {

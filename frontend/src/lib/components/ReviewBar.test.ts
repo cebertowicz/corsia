@@ -51,15 +51,38 @@ afterEach(() => {
 });
 
 describe('ReviewBar', () => {
-	it('labels the primary action by the round feedback, not by a click', async () => {
+	it('offers all three answers regardless of feedback', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		await render();
 		expect(button('Approve')).toBeTruthy();
-		expect(button('Approve with changes')).toBeUndefined();
+		expect(button('Approve with changes')).toBeTruthy();
+		expect(button('Reject')).toBeTruthy();
 		unmount(component!); component = null; host.innerHTML = '';
 		api.fetchReviewBar.mockResolvedValue(read(2));
 		await render();
 		expect(button('Approve with changes')).toBeTruthy();
+	});
+
+	it.each([[1, 'Your 1 comment goes to Docs agent'], [2, 'Your 2 comments go to Docs agent']])(
+		'says where %i comment(s) go on Approve, with the verb agreeing',
+		async (comments, text) => {
+			api.fetchReviewBar.mockResolvedValue(read(comments));
+			await render();
+			expect(button('Approve')!.title).toBe(text);
+		},
+	);
+
+	it.each(['Reject', 'Approve with changes'])('returns focus to %s when its note is dismissed', async (label) => {
+		api.fetchReviewBar.mockResolvedValue(read(0));
+		await render();
+		button(label)!.click();
+		await vi.waitFor(() => expect(host.querySelector('textarea')).toBe(document.activeElement));
+		host.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		await vi.waitFor(() => expect(document.activeElement).toBe(button(label)));
+		button(label)!.click();
+		await vi.waitFor(() => expect(host.querySelector('textarea')).toBe(document.activeElement));
+		button('Cancel')!.click();
+		await vi.waitFor(() => expect(document.activeElement).toBe(button(label)));
 	});
 
 	it('keeps a long ask compact and reveals both askers only when expanded', async () => {
@@ -103,7 +126,7 @@ describe('ReviewBar', () => {
 		expect(button('Done')).toBeTruthy();
 		expect(button('Won’t do')).toBeTruthy();
 		expect(button('Approve')).toBeUndefined();
-		expect(button('Request changes')).toBeUndefined();
+		expect(button('Reject')).toBeUndefined();
 	});
 
 	it('settles the person step through its existing Done action without waiting on comments', async () => {
@@ -172,12 +195,12 @@ describe('ReviewBar', () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		api.answerReview.mockRejectedValue(new Error('500'));
 		await render();
-		button('Request changes')!.click();
+		button('Reject')!.click();
 		flushSync();
 		const input = host.querySelector<HTMLTextAreaElement>('textarea')!;
 		input.value = 'Tighten the rollout'; input.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
-		button('Request changes')!.click();
+		button('Reject')!.click();
 		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
 		expect(host.querySelector('.review-bar.receipt')).toBeNull();
 		expect(host.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Tighten the rollout');
@@ -188,12 +211,12 @@ describe('ReviewBar', () => {
 		let fail!: (error: Error) => void;
 		api.answerReview.mockReturnValue(new Promise((_, reject) => { fail = reject; }));
 		await render();
-		button('Request changes')!.click();
+		button('Reject')!.click();
 		flushSync();
 		const input = host.querySelector<HTMLTextAreaElement>('textarea')!;
 		input.value = 'Tighten the rollout'; input.dispatchEvent(new Event('input', { bubbles: true }));
 		flushSync();
-		button('Request changes')!.click();
+		button('Reject')!.click();
 		flushSync();
 
 		// Mid-send: the same input is still mounted, the bar is still the note layout, and only the sender spins.
@@ -201,7 +224,7 @@ describe('ReviewBar', () => {
 		expect(host.querySelector('.review-bar.noting')).toBeTruthy();
 		expect(button('Approve')).toBeUndefined();
 		expect(host.querySelectorAll('.spinner')).toHaveLength(1);
-		expect(button('Request changes')!.querySelector('.spinner')).toBeTruthy();
+		expect(button('Reject')!.querySelector('.spinner')).toBeTruthy();
 		expect(button('Cancel')!.disabled).toBe(true);
 		input.focus();
 
@@ -220,8 +243,8 @@ describe('ReviewBar', () => {
 		button('Approve')!.click();
 		flushSync();
 		expect(button('Approve')!.querySelector('.spinner')).toBeTruthy();
-		expect(button('Request changes')!.disabled).toBe(true);
-		expect(button('Request changes')!.querySelector('.spinner')).toBeNull();
+		expect(button('Reject')!.disabled).toBe(true);
+		expect(button('Reject')!.querySelector('.spinner')).toBeNull();
 		fail(new Error('500'));
 		await vi.waitFor(() => expect(host.textContent).toContain(SEND_FAILED));
 		await vi.waitFor(() => expect(document.activeElement).toBe(button('Approve')));
@@ -245,10 +268,10 @@ describe('ReviewBar', () => {
 		expect(get(submittedAnswers)).toEqual({});
 	});
 
-	it('reconciles the submitted verdict and feedback with the server response after success', async () => {
+	it('reconciles feedback while retaining the chosen verdict after success', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		api.answerReview.mockResolvedValue({
-			verdict: 'approved_with_changes', note: null,
+			verdict: 'approved', note: null,
 			feedback_counts: { comments: 1, suggestions: 2, edits: 3 },
 		});
 		await render();
@@ -256,7 +279,7 @@ describe('ReviewBar', () => {
 		button('Approve')!.click();
 
 		await vi.waitFor(() => expect(get(submittedAnswers)).toEqual({
-			h1: { state: 'approved_with_changes', feedback: { comments: 1, suggestions: 2, edits: 3 } },
+			h1: { state: 'approved', feedback: { comments: 1, suggestions: 2, edits: 3 } },
 		}));
 	});
 
@@ -264,9 +287,9 @@ describe('ReviewBar', () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		await render();
 
-		button('Request changes')!.click();
+		button('Reject')!.click();
 		flushSync();
-		button('Request changes')!.click();
+		button('Reject')!.click();
 		flushSync();
 
 		expect(api.answerReview).not.toHaveBeenCalled();
@@ -274,7 +297,7 @@ describe('ReviewBar', () => {
 	});
 
 	it('reconciles the original hold with the server response when the ReviewBar switches artifacts before a successful send resolves', async () => {
-		const response = { verdict: 'approved_with_changes' as const, note: null, feedback_counts: { comments: 1, suggestions: 2, edits: 3 } };
+		const response = { verdict: 'approved' as const, note: null, feedback_counts: { comments: 1, suggestions: 2, edits: 3 } };
 		api.fetchReviewBar.mockResolvedValueOnce(read(0)).mockResolvedValueOnce({ ...read(0), hold_ids: ['h2'] });
 		let succeed!: (value: typeof response) => void;
 		api.answerReview.mockReturnValue(new Promise<typeof response>((resolve) => { succeed = resolve; }));
@@ -289,7 +312,7 @@ describe('ReviewBar', () => {
 		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalledTimes(2));
 		succeed(response);
 
-		await vi.waitFor(() => expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved_with_changes', feedback: { comments: 1, suggestions: 2, edits: 3 } } }));
+		await vi.waitFor(() => expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved', feedback: { comments: 1, suggestions: 2, edits: 3 } } }));
 	});
 
 	it('clears the original hold overlay when the ReviewBar switches artifacts before a failed send resolves', async () => {
@@ -335,22 +358,22 @@ describe('ReviewBar', () => {
 		const receipt = host.querySelector<HTMLElement>('.rb-receipt')!;
 		await vi.waitFor(() => expect(document.activeElement).toBe(receipt));
 		expect(receipt.closest('[role="status"]') ?? receipt.getAttribute('role')).toBeTruthy();
-		expect(host.textContent).toContain('You approved this');
+		expect(host.textContent).toContain('Approved');
 		expect(receipt.textContent).not.toMatch(/sent \d/);
 	});
 
-	it('lists delivered feedback kinds in canonical order with singular and plural wording', async () => {
+	it('counts only comments in the approval receipt', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts(2, 1, 3) });
 		await render();
 		button('Approve')!.click();
-		await vi.waitFor(() => expect(host.querySelector('.rb-receipt')?.textContent).toContain('sent 2 comments, 1 suggestion, 3 edits'));
+		await vi.waitFor(() => expect(host.querySelector('.rb-receipt')?.textContent).toContain('2 comments sent'));
 		unmount(component!); component = null; host.innerHTML = '';
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts(0, 0, 1) });
 		await render();
 		button('Approve')!.click();
-		await vi.waitFor(() => expect(host.querySelector('.rb-receipt')?.textContent).toContain('sent 1 edit'));
+		await vi.waitFor(() => expect(host.querySelector('.rb-receipt')?.textContent).toContain('Approved'));
 		expect(host.querySelector('.rb-receipt')?.textContent).not.toContain('comments');
 	});
 
@@ -361,7 +384,7 @@ describe('ReviewBar', () => {
 		flushSync();
 		expect(host.textContent).toContain(DRAFT_OPEN);
 		expect(api.answerReview).not.toHaveBeenCalled();
-		button('Request changes')!.click();
+		button('Reject')!.click();
 		flushSync();
 		expect(host.querySelector('textarea')).toBeNull();
 	});

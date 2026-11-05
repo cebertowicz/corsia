@@ -20,6 +20,7 @@
 		doneLabel = 'Done',
 		onClose,
 		children,
+		above,
 		initialFocusSelector = '[data-drawer-autofocus]',
 		fill = false,
 		flushBottom = false,
@@ -51,6 +52,8 @@
 		doneLabel?: string;
 		onClose: () => void;
 		children: Snippet;
+		/** A row above the chrome title, below the grabber. */
+		above?: Snippet;
 		initialFocusSelector?: string;
 		/** Make the content a column bounded by the drawer, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
@@ -190,6 +193,7 @@
 				>
 					<span class="drawer-grabber"></span>
 				</div>
+				{#if above}{@render above()}{/if}
 				{#if !headless}<div class="drawer-head" class:centered={!!leading}>
 					{#if leading}<span class="drawer-lead">{@render leading()}</span>{/if}
 					{#if heading}<h2>{heading}{#if headingMeta}{' '}<span class="drawer-head-meta">{headingMeta}</span>{/if}</h2>{:else if contextLabel}<span class="drawer-context" title={contextLabel}>{contextLabel}</span>{:else}<span class="drawer-head-spacer"></span>{/if}

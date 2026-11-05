@@ -49,13 +49,13 @@ describe('ReviewBar accept all and approve', () => {
 		expect(host.textContent).not.toContain('Accept 0');
 	});
 
-	it('names how many suggestions the approve accepts', async () => {
+	it('describes how many suggestions Approve all accepts', async () => {
 		await render(2, vi.fn());
-		expect(button('Accept 2 suggestions and approve')).toBeTruthy();
+		expect(button('Approve all')?.title).toBe('Accepts the 2 suggestions, then approves');
 		expect(button('Approve')).toBeUndefined();
 		unmount(component!); component = null; host.innerHTML = '';
 		await render(1, vi.fn());
-		expect(button('Accept 1 suggestion and approve')).toBeTruthy();
+		expect(button('Approve all')?.title).toBe('Accepts the 1 suggestion, then approves');
 	});
 
 	it('accepts first, then sends the verdict', async () => {
@@ -63,7 +63,7 @@ describe('ReviewBar accept all and approve', () => {
 		const accept = vi.fn(async () => { order.push('accept'); });
 		api.answerReview.mockImplementation(async () => { order.push('answer'); return { verdict: 'approved', note: null, feedback_counts: counts(0) }; });
 		await render(2, accept);
-		button('Accept 2 suggestions and approve')!.click();
+		button('Approve all')!.click();
 		await vi.waitFor(() => expect(host.querySelector('.review-bar.receipt')).toBeTruthy());
 		expect(order).toEqual(['accept', 'answer']);
 		expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', '', ['h1']);
@@ -72,7 +72,7 @@ describe('ReviewBar accept all and approve', () => {
 	it('shows the busy state while the accept runs', async () => {
 		let finish: () => void = () => {};
 		await render(2, () => new Promise<void>((resolve) => { finish = resolve; }));
-		button('Accept 2 suggestions and approve')!.click();
+		button('Approve all')!.click();
 		flushSync();
 		expect(host.querySelector('.review-bar')?.getAttribute('aria-busy')).toBe('true');
 		expect(api.answerReview).not.toHaveBeenCalled();
@@ -83,20 +83,30 @@ describe('ReviewBar accept all and approve', () => {
 	it('sends no verdict when the accept fails, and says so on the bar', async () => {
 		const accept = vi.fn().mockRejectedValueOnce(new Error('stale')).mockResolvedValueOnce(undefined);
 		await render(2, accept);
-		button('Accept 2 suggestions and approve')!.click();
+		button('Approve all')!.click();
 		await vi.waitFor(() => expect(host.textContent).toContain("Couldn't accept the suggestions. Try again."));
 		expect(api.answerReview).not.toHaveBeenCalled();
 		expect(host.querySelector('.review-bar')?.getAttribute('aria-busy')).toBe('false');
-		button('Accept 2 suggestions and approve')!.click();
+		button('Approve all')!.click();
 		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledTimes(1));
 	});
 
-	it('still approves with changes when the person has comments in the round', async () => {
+	it('approves cleanly when the person has comments in the round', async () => {
+		api.fetchReviewBar.mockResolvedValue(read(1));
+		api.answerReview.mockResolvedValue({ verdict: 'approved', note: null, feedback_counts: counts(1) });
+		await render(1, vi.fn(async () => {}));
+		button('Approve all')!.click();
+		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved', '', ['h1']));
+	});
+
+	it('leaves pending suggestions undecided when approving with changes', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(1));
 		api.answerReview.mockResolvedValue({ verdict: 'approved_with_changes', note: null, feedback_counts: counts(1) });
-		await render(1, vi.fn(async () => {}));
-		button('Accept 1 suggestion and approve')!.click();
+		const accept = vi.fn(async () => {});
+		await render(2, accept);
+		button('Approve with changes')!.click();
 		await vi.waitFor(() => expect(api.answerReview).toHaveBeenCalledWith('doc-1', 'approved_with_changes', '', ['h1']));
+		expect(accept).not.toHaveBeenCalled();
 	});
 
 	it('leaves the approve button plain where no accept is wired in', async () => {
