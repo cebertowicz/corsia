@@ -148,7 +148,7 @@ async def test_many_settled_and_failed_heads_leave_no_state(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_sink_failure_clears_both_maps(monkeypatch):
+async def test_sink_failure_is_logged_and_clears_both_maps(monkeypatch, caplog):
     async def read(*_args):
         return response(), None
 
@@ -159,8 +159,8 @@ async def test_sink_failure_clears_both_maps(monkeypatch):
     monkeypatch.setattr(poller, "gated_read", read)
     agg = aggregator(FailingSink())
     agg.observe(payload())
-    with pytest.raises(RuntimeError, match="intake unavailable"):
-        await finish(agg)
+    await finish(agg)  # never escapes the task
+    assert "could not admit settled head" in caplog.text
     assert not agg._tasks and not agg._facts
 
 

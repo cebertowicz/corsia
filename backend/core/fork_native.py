@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import replace
 from typing import Any
 
+from llm.error_cause import MODEL_NOT_LOADED, SERVER_UNREACHABLE
 from subagents.provider_context_limits import is_provider_context_limit
 
 from core.fork_native_warm import NativeWarmSource
@@ -23,6 +24,7 @@ from core.fork_pressure import soft_pressure_remaining
 from core.fork_runtime import ForkKind, ForkStepLimitError, ForkStepLimitReached
 from core.fork_failures import ForkCredentialsUnavailable
 from core.fork_types import (
+    ForkInputExhausted,
     ProviderForkRejected,
     WarmForkUnusable,
     ProviderForkRequest,
@@ -39,6 +41,10 @@ from core.fork_types import (
 # left a 41,681-token local seat under 7k of input, so it never folded. A fifth
 # still covers the largest local checkpoint call measured (7,336 tokens).
 SMALL_WINDOW_OUTPUT_DIVISOR = 5
+
+# Failures decided before any request reached a model (connect refused, model
+# not loaded): no usage exists to record.
+_NEVER_SENT = frozenset({SERVER_UNREACHABLE, MODEL_NOT_LOADED})
 
 
 def _window_output(request: ProviderForkRequest) -> ProviderForkRequest:
@@ -192,7 +198,9 @@ async def _truncated_result(
             "\n".join(bodies), {"calls": usage_calls}, FORK_CONTEXT_TRUNCATED,
         )
     room = await asyncio.to_thread(input_room, request, messages, tools, 0, measured)
-    raise ProviderForkRejected(
+    # A reply cut off at its output cap ran out of output, not input: no cold route is shown to help.
+    refusal = ProviderForkRejected if path == "iv_output_cap" else ForkInputExhausted
+    raise refusal(
         f"{FORK_CONTEXT_TRUNCATED}: path={path} iteration={iteration} "
         f"counted={room.counted} bound={room.bound} unusable={room.unusable} "
         f"finish_reason={getattr(response, 'finish_reason', None)} "
@@ -297,7 +305,8 @@ async def invoke_fork(
             await yield_to_turn_call(request, cancel_event)
             response = await _complete(request, messages, tools, model, provider, cancel_event)
             usage_calls.append(dict(response.usage or {}))
-            if request.on_usage is not None:
+            # A call that never connected spent nothing; any other unmeasured call is a defect.
+            if request.on_usage is not None and (usage_calls[-1] or response.error_kind not in _NEVER_SENT):
                 await request.on_usage(str(_iteration), model, usage_calls[-1])
             if response.finish_reason == "error":
                 if (response.error_kind == "provider_context_overflow"
