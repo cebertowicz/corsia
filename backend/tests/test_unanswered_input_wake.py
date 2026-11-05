@@ -230,15 +230,15 @@ def _queue(db, message="m2", **metadata) -> None:
     db.commit()
 
 
-async def _end_claiming(db, error: str = "provider exploded", turn="t1", successor="t2"):
-    """End a Turn as every terminal does with input queued: its successor claims it first."""
+async def _end_claiming(db, error: str = "provider exploded"):
+    """End t1 as every terminal does with input queued: its successor t2 claims it first."""
     from infra.thread_driver import finish_turn
 
-    finish_turn(turn, outcome="error", ended_at=successor, successor_turn_id=successor,
+    finish_turn("t1", outcome="error", ended_at="t2", successor_turn_id="t2",
                 boot_epoch="boot-1", error=error, db=db)
     db.commit()
     return await record_turn_end(
-        on_thread_turn_complete, _THREAD, outcome="error", error=error, turn_id=turn,
+        on_thread_turn_complete, _THREAD, outcome="error", error=error, turn_id="t1",
     )
 
 
@@ -269,76 +269,14 @@ async def test_an_agents_queued_input_does_not_replace_the_wake(db) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_successor_that_fails_before_writing_queues_the_replaced_wake(db) -> None:
-    """The queued input settles failed, so no Turn sees m1; the wake its input replaced is owed."""
-    _take_in(db)
-    _queue(db)
-    await _end_claiming(db)
-    assert _wakes(db) == []
-
-    effects = await _end(db, turn="t2", error="provider exploded again")
-
-    assert db.execute("SELECT delivery_state FROM messages WHERE id='m2'").fetchone()[0] == "failed"
-    (wake,) = _wakes(db)
-    assert json.loads(wake["metadata"])["failed_turn_id"] == "t1"
-    assert effects.drives.count(_THREAD) == 1
-
-
-def _carries(db, message="m2"):
-    from infra.unanswered_input_wake import CARRIED_KEY
-
-    return json.loads(db.execute("SELECT metadata FROM messages WHERE id=?", (message,)).fetchone()[0]
-                      or "{}").get(CARRIED_KEY)
-
-
-@pytest.mark.asyncio
-async def test_the_replacing_input_carries_the_wake_once(db) -> None:
-    _take_in(db)
-    _queue(db)
-    await _end_claiming(db)
-    assert _carries(db) == "t1"
-
-    await _end(db, turn="t2")
-
-    assert len(_wakes(db)) == 1
-    assert _carries(db) is None
-
-
-@pytest.mark.asyncio
-async def test_a_failed_carrier_hands_the_wake_to_the_next_persons_input(db) -> None:
-    """Another person's input still queued answers instead, so it carries the wake on."""
-    _take_in(db)
-    _queue(db)
-    await _end_claiming(db)
-    _queue(db, message="m3")
-
-    effects = await _end_claiming(db, turn="t2", successor="t3")
-
-    assert _wakes(db) == []
-    assert _THREAD not in effects.drives
-    assert (_carries(db), _carries(db, "m3")) == (None, "t1")
-
-
-@pytest.mark.asyncio
-async def test_a_successor_failing_on_its_limit_owes_no_wake(db) -> None:
-    from infra.queries import insert_message
-
-    _take_in(db)
-    _queue(db)
-    await _end_claiming(db)
-    insert_message(_THREAD, "system", "limit", metadata={"turn_id": "t2", "cause_kind": "usage_limit"}, db=db)
-    db.commit()
-
-    await _end(db, turn="t2", error="You've hit your usage limit")
-
-    assert _wakes(db) == []
-
-
-@pytest.mark.asyncio
 async def test_a_queued_input_claimed_by_an_ended_turn_does_not_replace_the_wake(db) -> None:
     """An orphaned claim starts no Turn, so the person's message would go unanswered."""
     _take_in(db)
     _queue(db)
+    db.execute(
+        "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,ended_at,boot_epoch) "
+        "VALUES ('t-gone',?,0,'oMLX/qwen','error','t0','t1','boot-1')", (_THREAD,),
+    )
     db.execute("UPDATE messages SET active_turn_id='t-gone' WHERE id='m2'")
     db.commit()
 

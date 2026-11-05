@@ -15,6 +15,7 @@ import uuid
 from loguru import logger
 
 from core.message_history import NON_HUMAN_MARKERS
+from infra.thread_input_rows import LIVE_CLAIM
 
 EVENT = "system.turn.unanswered_input"
 # The wake's texts live only here.
@@ -26,8 +27,6 @@ GUIDANCE = (
 )
 #: Failure kinds a second Turn would meet the same way (``llm.error_cause.KINDS``).
 _EXCLUDED_KINDS = ("usage_limit", "sign_in_expired", "auth_rejected", "context_overflow")
-#: On a person's queued input: the errored Turn whose wake that input replaced.
-CARRIED_KEY = "carries_unanswered_wake_of"
 
 
 def _excluded(db: sqlite3.Connection, thread_id: str, turn_id: str, error: str) -> bool:
@@ -75,47 +74,14 @@ def _unanswered_input(db: sqlite3.Connection, thread_id: str, turn_id: str) -> b
     ).fetchone() is None
 
 
-def _carried(db: sqlite3.Connection, turn_id: str) -> tuple[str, str] | None:
-    """``(input id, replaced Turn)`` of a carrying person input this Turn claimed and never wrote."""
-    path = f"$.{CARRIED_KEY}"
-    row = db.execute(
-        "SELECT id, json_extract(metadata,?) AS owed FROM messages "
-        "WHERE active_turn_id=? AND role='user' AND delivery_state='failed' "
-        "AND write_outcome='proved_no_write' AND json_extract(metadata,?) IS NOT NULL "
-        "ORDER BY input_order LIMIT 1",
-        (path, turn_id, path),
-    ).fetchone()
-    return None if row is None else (str(row["id"]), str(row["owed"]))
-
-
-def _queued_person_input(db: sqlite3.Connection, thread_id: str) -> str | None:
-    """The first person's queued input that will start, or after its hold lifts start, a Turn that sees the message.
-
-    A claim held by a Turn that is no longer running does not count, as in
-    ``thread_input_rows.liveness_wake_queued``.
-    """
-    return next((str(row["id"]) for row in db.execute(
-        "SELECT m.id, m.metadata FROM messages m WHERE m.thread_id=? AND m.role='user' "
+def _person_input_queued(db: sqlite3.Connection, thread_id: str) -> bool:
+    """Whether a person's queued input will start a Turn that sees the message."""
+    return any(_is_person(row["metadata"]) for row in db.execute(
+        "SELECT m.metadata FROM messages m WHERE m.thread_id=? AND m.role='user' "
         "AND m.delivery_state='queued' AND m.input_order IS NOT NULL "
-        "AND (m.active_turn_id IS NULL OR EXISTS (SELECT 1 FROM active_turns t "
-        "WHERE t.id=m.active_turn_id AND t.status='running')) ORDER BY m.input_order",
+        f"AND {LIVE_CLAIM}",
         (thread_id,),
-    ) if _is_person(row["metadata"])), None)
-
-
-def _set_carried(db: sqlite3.Connection, message_id: str, owed: str | None) -> None:
-    path = f"$.{CARRIED_KEY}"
-    if owed is None:
-        db.execute("UPDATE messages SET metadata=json_remove(metadata,?) WHERE id=?", (path, message_id))
-    else:
-        db.execute(
-            "UPDATE messages SET metadata=json_set(COALESCE(metadata,'{}'),?,?) WHERE id=?",
-            (path, owed, message_id),
-        )
-
-
-def _wake_id(turn_id: str) -> str:
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia-unanswered-input:{turn_id}"))
+    ))
 
 
 def _took_in_wake(db: sqlite3.Connection, turn_id: str) -> bool:
@@ -144,32 +110,21 @@ def queue_unanswered_input_wake(
     resumes it; a plan backoff wake does not, since it neither fires soon nor
     names the person's message. A person's queued input replaces it too: its
     Turn answers with the message in history, and recovery may already have
-    claimed it, so the wake would be a second Turn after it. That input carries
-    the replaced wake (``CARRIED_KEY``); if its Turn errors before writing it,
-    the input settles failed and that Turn's end owes the carried wake instead.
+    claimed it, so the wake would be a second Turn after it. If that Turn fails
+    before writing, the input shows failed with Retry and is not re-woken here.
     """
     turn_id = outcome.get("turn_id")
     if outcome.get("outcome") != "error" or not turn_id:
         return
     if liveness_wake is not None and liveness_wake.provider_reset_at is not None:
         return
-    if _unanswered_input(db, thread_id, turn_id):
-        owed: str | None = turn_id
-    else:
-        carrier, owed = _carried(db, turn_id) or (None, None)
-        if carrier is not None:
-            # Read once: whatever this end decides, the failed input carries nothing more.
-            _set_carried(db, carrier, None)
     if (
-        owed is None
+        not _unanswered_input(db, thread_id, turn_id)
         or _excluded(db, thread_id, turn_id, str(outcome.get("error") or ""))
         or _took_in_wake(db, turn_id)
         or _restart_resumes(db, thread_id, turn_id)
+        or _person_input_queued(db, thread_id)
     ):
-        return
-    replacing = _queued_person_input(db, thread_id)
-    if replacing is not None:
-        _set_carried(db, replacing, owed)
         return
     from events.delivery import enqueue_event_wake
     from infra.send_types import SendRejected
@@ -177,8 +132,8 @@ def queue_unanswered_input_wake(
     try:
         enqueue_event_wake(
             thread_id, EVENT, SUMMARY, {"guidance": GUIDANCE},
-            metadata={"kind": "unanswered_input", "failed_turn_id": owed},
-            message_id=_wake_id(owed),
+            metadata={"kind": "unanswered_input", "failed_turn_id": turn_id},
+            message_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia-unanswered-input:{turn_id}")),
             db=db,
         )
     # A thread being deleted refuses it (SendRejected); the Turn-end record still commits.
