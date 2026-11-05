@@ -49,6 +49,8 @@ def shell_help(text, usage):
     block = text.split(f'echo "{usage}"', 1)[1].split(';;', 1)[0].split('exit "$help_status"', 1)[0]
     entries = {}
     for line in re.findall(r'^\s*echo "  ([a-z][^"]*)"', block, re.M):
+        # A value the shell fills in at run time is shown as a placeholder.
+        line = re.sub(r"\$\((\w+)\)", r"`<\1>`", line)
         parts = re.split(r"\s{2,}", line.strip(), maxsplit=1)
         if len(parts) == 2:
             entries.setdefault(parts[0].split()[0], []).append(tuple(parts))

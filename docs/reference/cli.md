@@ -689,7 +689,7 @@ Print the saved outside address while devices can connect
 
 ## `service`
 
-`corsia service install` — Render + install $(service_label) for this checkout
+`corsia service install` — Render + install `<service_label>` for this checkout
 
 `corsia service start|stop` — Use or preserve the installed service definition
 
