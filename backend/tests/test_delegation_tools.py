@@ -13,9 +13,11 @@ from delegation_fixtures import deleg_db  # noqa: F401
 def _sync_tool_db(monkeypatch):
     """Run tool DB closures synchronously under the delegated sqlite fixture."""
     import tools.delegation as delegation_tools
+    import tools.delegation_completion as completion_tools
 
     runner = AsyncMock(side_effect=lambda fn, *a, **k: fn(*a, **k))
     monkeypatch.setattr(delegation_tools, "run_in_db", runner)
+    monkeypatch.setattr(completion_tools, "run_in_db", runner)
     return runner
 
 

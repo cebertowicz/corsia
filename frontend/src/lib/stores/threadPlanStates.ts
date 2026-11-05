@@ -3,7 +3,7 @@
  * state by the plan header's rule; this store only holds the last reading.
  *
  * One batched read covers the listed threads. It is refreshed for the threads a
- * `plans_changed`, `thread_updates_changed` or `host_access_changed` nudge
+ * `plans_changed`, `thread_updates_changed`, `host_access_changed` or `held_reply_changed` nudge
  * names (the update dot's seen state, an access request), and in full on
  * reconnect and on sign-in. A failed read keeps the last reading, and the next
  * trigger retries.
@@ -87,6 +87,10 @@ function startAmbient(): () => void {
 	const offHostAccessNudge = on('host_access_changed', (message: { thread_ids?: unknown }) => {
 		void load(message?.thread_ids === undefined ? [...listed] : namedListed(message.thread_ids));
 	});
+	// A held reply puts a hold on its sender's row: re-read the threads the nudge names.
+	const offHeldNudge = on('held_reply_changed', (message: { thread_ids?: unknown }) => {
+		void load(namedListed(message?.thread_ids));
+	});
 	let wasConnected = get(connectionState) === 'connected';
 	const offConnection = connectionState.subscribe((state) => {
 		const connected = state === 'connected';
@@ -103,6 +107,7 @@ function startAmbient(): () => void {
 		offNudge();
 		offUpdatesNudge();
 		offHostAccessNudge();
+		offHeldNudge();
 		offConnection();
 		offToken();
 	};

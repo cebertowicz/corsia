@@ -94,6 +94,7 @@ from plans.activity_projection import (
     read_project as read_activity_project,
     read_workspace as read_activity_workspace,
 )
+from plans.held_attention import queue_rows as held_reply_queue_rows
 from plans.user_ask import (
     ASKABLE_TYPES,
     ASK_ENDINGS,

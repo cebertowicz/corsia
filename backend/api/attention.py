@@ -169,7 +169,7 @@ def _queue_for(user_id: str, *, db=None) -> list[dict]:
         annotated = public.annotate_attention(
             _authorized_raised(None, user_id, db=_db), db=_db,
         )
-        ordered = public.attention_queue(annotated)
+        ordered = public.attention_queue([*annotated, *public.held_reply_queue_rows(_db, user_id)])
         counted = public.activity_counted_plan_ids(
             {row["detail"]["plan_id"] for row in ordered if row["renderer"] == "decision"},
             actor=public.PlanActor(None, user_id, None, kind="user"), db=_db,

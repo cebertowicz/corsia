@@ -26,7 +26,7 @@ from host_access.credential_sanitizer import REDACTION_MARKER, sanitize_credenti
 if TYPE_CHECKING:
     from events.connectors.github_read_budget import ReadBudget
 
-__all__ = ["GithubReadBroker", "GithubReadRefused", "default_broker", "person_broker"]
+__all__ = ["GithubReadBroker", "GithubReadRefused", "agents_broker", "default_broker", "person_broker"]
 log = logging.getLogger(__name__)
 
 
@@ -51,23 +51,27 @@ class GithubReadBroker:
     """Vet request shape before passing reads to ``gh``.
 
     ``inner`` runs each vetted read and spends ``read_budget``. Without an ``inner``, reads
-    run as the agents' GitHub account when there is one and as the host's ``gh`` otherwise.
+    run as the agents' GitHub account when there is one and as the host's ``gh`` otherwise;
+    ``agents_only`` refuses a read with no agents' account instead.
     """
 
     def __init__(
         self, inner: Callable[..., subprocess.CompletedProcess] | None = None,
-        read_budget: ReadBudget | None = None,
+        read_budget: ReadBudget | None = None, *, agents_only: bool = False,
     ) -> None:
         from events.connectors.github_read_budget import budget
 
         self._inner = inner or self._run_as_account
         self.read_budget = read_budget or budget
+        self._agents_only = agents_only
 
     def _run_as_account(self, args: list[str], *, timeout: float) -> subprocess.CompletedProcess:
         from connections import github_agent
         from events.connectors.github_read_budget import budget, person_budget
 
         binary, env, account = github_agent.backend_gh_now()
+        if account.absent and self._agents_only:
+            raise GithubReadRefused("no_agents_account")
         # With no agents' account the host's gh login is the person's: its reads spend the person's budget.
         self.read_budget = person_budget if account.absent else budget
         return subprocess.run(
@@ -109,6 +113,7 @@ class GithubReadBroker:
 
 _default: GithubReadBroker | None = None
 _person: GithubReadBroker | None = None
+_agents: GithubReadBroker | None = None
 
 
 def default_broker() -> GithubReadBroker:
@@ -117,6 +122,14 @@ def default_broker() -> GithubReadBroker:
     if _default is None:
         _default = GithubReadBroker()
     return _default
+
+
+def agents_broker() -> GithubReadBroker:
+    """The broker for a read of the agents' own account, such as its notifications feed."""
+    global _agents
+    if _agents is None:
+        _agents = GithubReadBroker(agents_only=True)
+    return _agents
 
 
 def person_broker() -> GithubReadBroker:

@@ -30,6 +30,7 @@ from infra.chat_comment_schema import CHAT_COMMENT_SCHEMA_SQL
 from infra.checkpoint_schema import CHECKPOINT_SCHEMA_SQL
 from infra.continuity_schema import CONTINUITY_SCHEMA_SQL
 from infra.continuity_staging import STAGING_SCHEMA_SQL
+from infra.held_replies_schema import HELD_REPLIES_SCHEMA_SQL
 from infra.presence_schema import PRESENCE_SCHEMA_SQL
 from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 
@@ -176,6 +177,7 @@ def _db(path: Path | None = None) -> sqlite3.Connection:
     conn.executescript(CHAT_COMMENT_SCHEMA_SQL)
     conn.executescript(PRESENCE_SCHEMA_SQL)
     conn.executescript(THREAD_UPDATES_SCHEMA_SQL)
+    conn.executescript(HELD_REPLIES_SCHEMA_SQL)
     # Archive/purge now carries a plan-decision consequence too, so the
     # fixture loads those real schemas rather than a hand-copied subset.
     conn.executescript(ARTIFACT_IDENTITY_SCHEMA_SQL)
@@ -483,6 +485,8 @@ def test_archived_to_purged_removes_dir_and_history(tmp_path):
     _add_session(db, "s1", state="archived", archived_reason="dormancy",
                  archived_at=NOW - timedelta(days=181),
                  last_activity=NOW - timedelta(days=250))
+    db.execute("INSERT INTO held_replies (id,user_id,sender_thread_id,recipient_thread_id,text,via,created_at) "
+               "VALUES ('hold-1','user','s1','other','private reply','tool','t')")
     db.execute(
         "INSERT INTO messages (id, thread_id, role, content, created_at) VALUES (?,?,?,?,?)",
         ("m-old", "s1", "assistant", "history", _iso(NOW - timedelta(days=250))),
@@ -495,6 +499,7 @@ def test_archived_to_purged_removes_dir_and_history(tmp_path):
     report = run_retention_sweep(db, now=NOW, config=CFG, workspace=tmp_path)
 
     assert report.purged == ["s1"]
+    assert db.execute("SELECT count(*) FROM held_replies WHERE sender_thread_id='s1'").fetchone()[0] == 0
     assert not root.exists()
     assert db.execute(
         "SELECT lifecycle_state FROM threads WHERE id='s1'"

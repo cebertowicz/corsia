@@ -18,7 +18,8 @@ export function isPendingPassiveContextEvent(msg: TranscriptMessage): boolean {
 }
 
 export function isCompactTranscriptEvent(msg: TranscriptMessage): boolean {
-	return isPassiveContextEvent(msg) || isActivityReceipt(msg);
+	return !String(msg.metadata?.event_type ?? '').startsWith('held_reply.')
+		&& (isPassiveContextEvent(msg) || isActivityReceipt(msg));
 }
 
 /** View-only raw references: never serialized as transcript details or API state. */

@@ -162,6 +162,29 @@ async def test_deleting_a_subagent_with_a_live_spawner_deletes_its_children(stop
 
 
 @pytest.mark.asyncio
+async def test_deleting_a_thread_removes_its_held_reply_text(stopped):
+    from infra.database import get_db
+    from infra.held_replies import hold
+
+    _seed(("root", None, 0), ("worker", "root", 0))
+    db = get_db()
+    try:
+        hold(user_id="user", sender_thread_id="worker", recipient_thread_id="root",
+             text="private reply", via="tool", db=db)
+        db.commit()
+    finally:
+        db.close()
+
+    await _delete("worker")
+
+    db = get_db()
+    try:
+        assert db.execute("SELECT COUNT(*) FROM held_replies WHERE sender_thread_id='worker'").fetchone()[0] == 0
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
 async def test_deleting_a_thread_removes_rules_it_wrote_or_received(stopped):
     from infra.database import get_db
 

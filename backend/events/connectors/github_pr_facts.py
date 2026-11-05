@@ -1,22 +1,18 @@
-"""The current pull-request facts a GitHub review event can carry.
+"""PR facts from webhook payloads and rule-gated reads.
 
-A webhook's ``pull_request`` object supplies ``base_sha``, ``draft`` and ``labels``.
-Three more are only ever read: ``current_head``, the PR's live head, so the recipient of
-a rule's delivery or script finds a stale event by comparing it with the event's own head
-(``sha`` on a PR event, ``head_sha`` on a checks event; a rule test compares a fact only
-with a value, so a rule names a read fact to have it read); ``check_state``, the state
-of that own head; and ``mergeable``, which GitHub computes after it sends ``opened`` and
-``synchronize``, so those payloads almost always hold ``null``. A settled head has no
-payload, so its read also supplies the PR's ``draft``, ``labels`` and author origin
-(``HEAD_FACTS``). One ranking (``rank``) orders check conclusions everywhere: a settled
-head's ``conclusion`` is it, and every ``check_state`` is ``state_of`` it.
-A read happens when an enabled rule of the event's type names a fact the read supplies
-(``read_facts``), whichever rule it is and whatever else it tests. The pull request is
-read once; the head's check suites once and its check runs page by page. Every read
-passes the repo-activity poller's budget and backoff gate; a spent budget is what
-bounds the paging. A failed read is never an error: ``check_state`` reads
-``unreadable`` and the event still goes out. Check selection, the green conclusions,
-the mergeable mapping and author origin come from their owners.
+PR events supply ``base_sha``, ``draft`` and ``labels`` from their payload. Replies
+(created PR comments and submitted reviews) read all three from the PR's live state,
+even when the PR is closed. Every enriched type also reads ``current_head`` and
+``mergeable``. Its ``check_state`` describes ``head_sha``, else ``sha``, else that
+live head. A settled head reuses its ranked ``conclusion`` without reading checks
+again, and its read supplies ``HEAD_FACTS`` including PR author origin.
+
+An enabled rule naming a fact from ``read_facts`` requests enrichment. The PR is
+read once, its head's check suites once and check runs page by page. Every request
+uses the repo-activity poller's existing budget/backoff gate, which bounds paging.
+A failed PR read leaves ``check_state`` = ``unreadable`` with no ``current_head``;
+the reply still goes out. Ranking, green conclusions, mergeability and author
+origin come from their canonical owners.
 """
 from __future__ import annotations
 
@@ -28,20 +24,21 @@ from typing import Any
 
 from events import rule_reads
 from events.connectors.github_content_facts import author_origin
+from events.connectors.github_reply_facts import REPLY_TYPES
 from events.connectors.github_label_events import label_names
-from events.connectors.github_pr_quiet_reasons import GREEN, mergeable_label
+from events.connectors.github_pr_quiet_reasons import GREEN, mergeable_label, rank
 from reviewer.gh_helpers import newest_check_runs
 
 log = logging.getLogger(__name__)
 
-#: Facts a PR event's payload holds; the read never changes them.
+#: PR payload facts; replies and settled heads fill missing values from a read.
 PAYLOAD_FACTS = ("base_sha", "draft", "labels")
 #: Facts only a read supplies, on every event type that is read.
 READ_FACTS = ("current_head", "check_state", "mergeable")
 #: A settled head's read also supplies the PR's own facts: nothing else on that event has them.
-HEAD_FACTS = ("author_origin", "draft", "labels", *READ_FACTS)
-#: Open-PR event types whose facts are completed by a read; a terminal event keeps what its payload holds.
-READ_TYPES = frozenset({"pr.opened", "pr.synchronize", "pr.ready_for_review", "pr.labeled", "pr.unlabeled"})
+HEAD_FACTS = ("author_origin", *PAYLOAD_FACTS, *READ_FACTS)
+#: PR lifecycle and reply types completed by a read; replies include closed PRs.
+READ_TYPES = frozenset({"pr.opened", "pr.synchronize", "pr.ready_for_review", "pr.labeled", "pr.unlabeled"}) | REPLY_TYPES
 HEAD_TYPE = "head.checks_completed"
 UNREADABLE = "unreadable"
 
@@ -71,22 +68,6 @@ def counted_suites(suites: Any) -> list[dict[str, Any]]:
     ] if isinstance(suites, list) else []
 
 
-#: Conclusions ranked worst first; a held head waits for a maintainer first, whatever else failed.
-_RANKED = ("action_required", "timed_out", "startup_failure", "stale", "failure")
-
-
-def rank(conclusions: Any) -> str:
-    """The one conclusion for a set of completed checks: the worst in ``_RANKED``; then any other
-    one outside ``GREEN`` (unknown or missing) as ``failure``; then ``cancelled``; else ``success``."""
-    values = {str(value or "failure").lower() for value in conclusions}
-    for value in _RANKED:
-        if value in values:
-            return value
-    if values - GREEN - {"cancelled"}:
-        return "failure"
-    return "cancelled" if "cancelled" in values else "success"
-
-
 def state_of(conclusion: str) -> str:
     """A completed head's ``check_state`` from its ``rank``: green only in ``GREEN``, the set the merge gate counts."""
     return conclusion if conclusion == "action_required" else "green" if conclusion in GREEN else "failing"
@@ -112,7 +93,8 @@ def check_state(suites: list[Any], runs: list[Any]) -> str:
 
 def read_facts(event_type: str) -> tuple[str, ...]:
     """The facts a read supplies for one event type; none for a type that is never read."""
-    return READ_FACTS if event_type in READ_TYPES else HEAD_FACTS if event_type == HEAD_TYPE else ()
+    return ((*PAYLOAD_FACTS, *READ_FACTS) if event_type in REPLY_TYPES else
+            READ_FACTS if event_type in READ_TYPES else HEAD_FACTS if event_type == HEAD_TYPE else ())
 
 
 async def _read(runner: Any, repo: str, path: str) -> Any:
@@ -158,15 +140,16 @@ async def _check_state(runner: Any, repo: str, sha: Any) -> str:
         page += 1
 
 
-async def head_facts(runner: Any, repo: str, number: int | None, facts: Mapping[str, Any]) -> dict[str, Any]:
-    """An event's ``facts`` completed with ``check_state`` of its own head and the PR's ``current_head``
-    and ``mergeable``, and, on a settled head's, the PR's own facts (``HEAD_FACTS``); a PR event's
-    payload facts stay.
+async def head_facts(
+    runner: Any, repo: str, number: int | None, facts: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Complete PR facts without replacing values already supplied by the event.
 
-    The own head is ``head_sha`` (a settled head) or ``sha`` (a PR event's payload head); no
-    read changes it. A settled head's ``check_state`` is ``state_of`` its ``conclusion``, so its
-    checks are not read again. When the PR read fails, ``current_head`` is absent and
-    ``check_state`` is ``unreadable``.
+    The check head is ``head_sha``, else ``sha``, else ``current_head``. Replies
+    supply neither own-head fact, so their checks describe the PR's live head.
+    Settled heads reuse ``state_of(conclusion)`` without rereading checks. Missing
+    payload facts are filled from the PR read; existing PR payload values win.
+    A failed PR read leaves no ``current_head`` and marks checks ``unreadable``.
     """
     out = dict(facts)
     if number is not None:
@@ -177,14 +160,15 @@ async def head_facts(runner: Any, repo: str, number: int | None, facts: Mapping[
         if live_head := _text(_object(body.get("head")).get("sha")):
             out["current_head"] = live_head
         out["mergeable"] = mergeable_label(body.get("mergeable"))
+        for name, value in pull_facts(body).items():
+            out.setdefault(name, value)
         if "head_sha" in out:
-            out.update({name: value for name, value in pull_facts(body).items() if name in HEAD_FACTS})
             if login := _text(_object(body.get("user")).get("login")):
                 out["author_origin"] = author_origin(login)
     if isinstance(conclusion := out.get("conclusion"), str):
         out["check_state"] = state_of(conclusion)
     else:
-        out["check_state"] = await _check_state(runner, repo, out.get("head_sha") or out.get("sha"))
+        out["check_state"] = await _check_state(runner, repo, out.get("head_sha") or out.get("sha") or out.get("current_head"))
     return out
 
 
@@ -204,7 +188,7 @@ async def settled_head_facts(runner: Any, repo: str, number: int | None, facts: 
 
 
 async def enriched(envelope: Any, runner: Any = None) -> Any:
-    """An open-PR webhook envelope with its facts completed; any other envelope as it was."""
+    """Complete a declared PR or reply envelope; leave other types unchanged."""
     if envelope is None or envelope.type not in READ_TYPES:
         return envelope
     if runner is None:

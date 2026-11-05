@@ -149,16 +149,10 @@ def test_refusals_never_carry_a_secret(monkeypatch) -> None:
         local_only.require_local_only_model(
             "codex/gpt-6.1-sol", thread_local_only=True, db=db, spawn=True,
         )
-    send_refusal = local_only.send_confirmation_refusal(
-        {"local_only": 1},
-        {"id": "r", "title": "Reviewer", "model": "codex/gpt-6.1-sol"},
-        no_sensitive_content=None,
-        db=db,
+    assert local_only.send_needs_hold(
+        {"local_only": 1}, {"id": "r", "title": "Reviewer", "model": "codex/gpt-6.1-sol"}, db=db,
     )
-
-    assert send_refusal
     assert secret not in str(refused.value)
-    assert secret not in send_refusal
 
 
 def test_scope_to_thread_resolves_a_local_only_thread_through_the_canonical_resolver(
@@ -618,27 +612,25 @@ async def test_delegate_set_model_tool_returns_the_agent_text(monkeypatch) -> No
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("sender_local_only", "cloud_off", "recipient_model", "confirmed", "refused"),
+    ("sender_local_only", "cloud_off", "recipient_model", "held"),
     [
-        (True, False, "cloud", False, True),
-        (True, False, "cloud", True, False),
-        (True, False, None, False, True),
-        (True, False, None, True, False),
-        (True, False, "local", False, False),
-        (False, False, "cloud", False, False),
-        (False, True, "cloud", False, True),
-        (False, True, "cloud", True, False),
+        (True, False, "cloud", True),
+        (True, False, None, True),
+        (True, False, "local", False),
+        (False, False, "cloud", False),
+        (False, True, "cloud", True),
     ],
 )
-async def test_delegate_send_enforces_cloud_confirmation_at_send_time(
+async def test_delegate_send_holds_a_cloud_bound_message_at_send_time(
     isolated_db,
     monkeypatch,
     sender_local_only,
     cloud_off,
     recipient_model,
-    confirmed,
-    refused,
+    held,
 ) -> None:
+    import json
+
     from infra.database import get_db
     from tools import delegate_send
 
@@ -660,8 +652,8 @@ async def test_delegate_send_enforces_cloud_confirmation_at_send_time(
         db.close()
     sent: list[str] = []
 
-    async def deliver(*_args, **_kwargs):
-        sent.append("delivered")
+    async def deliver(_thread_id, _target, text, *_args, **_kwargs):
+        sent.append(text)
         return {"ok": True}
 
     async def no_plan(*_args, **_kwargs):
@@ -675,16 +667,20 @@ async def test_delegate_send_enforces_cloud_confirmation_at_send_time(
     monkeypatch.setattr(delegate_send, "_send", deliver)
 
     result = await delegate_send.DelegateSendTool().execute(
-        "recipient",
-        "private-key-material",
-        _thread_id="sender",
-        **({"no_sensitive_content": True} if confirmed else {}),
+        "recipient", "private-key-material", _thread_id="sender",
     )
 
-    assert ("no_sensitive_content: true" in result) is refused
-    if refused:
+    stored = [
+        tuple(row) for row in get_db().execute("SELECT text, via, state FROM held_replies").fetchall()
+    ]
+    if held:
+        assert json.loads(result)["status"] == "held"
         assert "private-key-material" not in result
-    assert sent == ([] if refused else ["delivered"])
+        assert stored == [("private-key-material", "tool", "held")]
+        assert sent == []
+    else:
+        assert stored == []
+        assert sent == ["private-key-material"]
 
 
 def test_post_update_needs_no_local_only_confirmation_flag() -> None:
@@ -693,41 +689,33 @@ def test_post_update_needs_no_local_only_confirmation_flag() -> None:
     assert "no_sensitive_content" not in PostUpdateTool().parameters["properties"]
 
 
-def test_person_chat_on_a_cloud_model_still_needs_confirmation(monkeypatch) -> None:
+def test_person_chat_on_a_cloud_model_is_still_held(monkeypatch) -> None:
     from infra import local_only
 
     db = _db()
     monkeypatch.setattr(local_only, "_is_cloud", lambda *_args, **_kwargs: True)
 
-    refusal = local_only.send_confirmation_refusal(
+    assert local_only.send_needs_hold(
         {"local_only": True},
         {"id": "recipient", "title": "Researcher", "model": "cloud", "agent_enabled": 0, "spawned_by": None},
-        no_sensitive_content=False,
         db=db,
     )
 
-    assert refusal == (
-        "local_only_send_needs_confirm: Researcher runs on a cloud model (cloud). Remove anything "
-        "sensitive from the message (keys, secrets, personal data, private file contents), then call "
-        "again with no_sensitive_content: true (on `corsia delegate send`, add --no-sensitive-content)."
-    )
 
-
-def test_send_confirmation_uses_pending_model_when_present(monkeypatch) -> None:
+def test_send_hold_uses_pending_model_when_present(monkeypatch) -> None:
     from infra import local_only
 
     db = _db()
     monkeypatch.setattr(local_only, "_is_cloud", lambda selector, **_kwargs: selector == "cloud")
 
-    refusal = local_only.send_confirmation_refusal(
+    assert local_only.send_needs_hold(
         {"local_only": True},
         {"id": "recipient", "title": "Researcher", "model": "local", "pending_model": "cloud"},
-        no_sensitive_content=False,
         db=db,
     )
-
-    assert refusal is not None
-    assert "cloud model (cloud)" in refusal
+    assert not local_only.send_needs_hold(
+        {"local_only": True}, {"id": "recipient", "title": "Researcher", "model": "local"}, db=db,
+    )
 
 
 @pytest.mark.asyncio
@@ -762,7 +750,7 @@ async def test_delegate_task_relies_on_fresh_thread_admission(monkeypatch) -> No
     assert sent == []
 
 
-def test_send_confirmation_records_the_refusal_and_the_confirmation(monkeypatch, events) -> None:
+def test_send_hold_records_the_hold(monkeypatch, events) -> None:
     from infra import local_only
 
     db = _db()
@@ -770,9 +758,5 @@ def test_send_confirmation_records_the_refusal_and_the_confirmation(monkeypatch,
     sender = {"id": "sender", "local_only": True}
     recipient = {"id": "recipient", "title": "Researcher", "model": "cloud"}
 
-    assert local_only.send_confirmation_refusal(sender, recipient, no_sensitive_content=None, db=db)
-    assert local_only.send_confirmation_refusal(sender, recipient, no_sensitive_content=True, db=db) is None
-    assert events == [
-        ("local_only.send_needs_confirm", "sender", {"recipient_thread_id": "recipient"}),
-        ("local_only.send_confirmed", "sender", {"recipient_thread_id": "recipient"}),
-    ]
+    assert local_only.send_needs_hold(sender, recipient, db=db)
+    assert events == [("local_only.send_held", "sender", {"recipient_thread_id": "recipient"})]
