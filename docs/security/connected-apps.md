@@ -2,7 +2,7 @@
 
 What CORSIA can do in the accounts and tools you connect: tool servers, Google, Microsoft and other mail hosts, Messages, GitHub, sending, and the agents' browser.
 
-**In short:** a connected account lets agents read and change what its sign-in allows, inside the projects you give it. Sending email, invites and texts through CORSIA's own tools needs your reply in chat first. Most other actions in a connected account don't. A local tool server you add runs as your own program with wide access to your home folder.
+**In short:** a connected account lets agents read and change what its sign-in allows, inside the projects you give it. Sending email, invites and texts through CORSIA's mail, calendar and Messages tools needs your reply in chat first; the `google_workspace` tool can share a file or email a calendar event's guests without asking. Most other actions in a connected account don't. A local tool server you add runs as your own program with wide access to your home folder.
 
 ## Tool servers
 

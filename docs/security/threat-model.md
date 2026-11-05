@@ -51,7 +51,7 @@ flowchart TB
     R[Agent request] --> T{Which tool}
     T -->|shell| SB[Sandbox: OS]
     T -->|file tools| FG[Path checks:<br/>CORSIA code]
-    T -->|send email,<br/>invite or text| G[Send gate:<br/>CORSIA code]
+    T -->|send email,<br/>invite or text,<br/>except through google_workspace| G[Send gate:<br/>CORSIA code]
     T -->|outside<br/>workspace| L[Lease: you or<br/>reviewer model]
     L --> AR[Each command:<br/>reviewer model]
     T -->|read email| ES[Local screen:<br/>model, labels only]

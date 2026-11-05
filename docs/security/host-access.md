@@ -63,7 +63,7 @@ The **hard floor** applies under every lease (Operating system for the shell, CO
 
 - CORSIA's key store, the agents' saved browser profile and the folder holding the `corsia` command's API token
 - The Safehouse binary and the generated sandbox profile, so a leased command can't rewrite its own confinement
-- On macOS, Local only projects the agent isn't in ([Agent sandbox](agent-sandbox.md#projects)). An ordinary project the agent is fenced from **can** be opened by a lease
+- On macOS, for the shell only, Local only projects the agent isn't in; file tools aren't fenced from them ([Agent sandbox](agent-sandbox.md#projects)). An ordinary project the agent is fenced from **can** be opened by a lease
 
 CORSIA's state folder (database, logs, and the Claude Code and Codex sign-ins CORSIA keeps there) is outside the default sandbox but **can** be opened by a lease.
 

@@ -64,7 +64,7 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 | Make any outbound network request | Allowed, not limited | — |
 | Read a provider API key CORSIA stores | Refused; values are not in the shell's environment | Operating system and CORSIA code |
 | See a credential that sits in a workspace file | Masked in most cases; see [Secrets](secrets.md) for what masking misses | CORSIA code |
-| Send an email, calendar invite or text message | Only an unchanged open draft, and only after you write in the conversation after its last change; it doesn't check what your reply said | CORSIA code |
+| Send an email, calendar invite or text message | Only an unchanged open draft, and only after you write in the conversation after its last change; it doesn't check what your reply said. The `google_workspace` tool can share a file or email a calendar event's guests without this check | CORSIA code |
 | Anything outside the workspace that the rows above refuse | Only through a lease | CORSIA code to require it; Model judgment to review it |
 | Approve its own lease | No; you approve, or the reviewer model does when Auto-approve is on ([Host access](host-access.md)) | CORSIA code; Model judgment under Auto-approve |
 

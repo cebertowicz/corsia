@@ -51,7 +51,7 @@ An agent that must read content from a source neither it nor you controls (an ou
 | Control | Stops | Doesn't stop |
 |---|---|---|
 | [Sandbox](agent-sandbox.md) | Reading most of your home folder; writing outside the workspace, apart from a few named exceptions such as temporary folders | Reading or changing anything in the workspace |
-| [Send gate](connected-apps.md#sending-email-and-invites) | Sending email, invites or texts other than the conversation's unchanged open draft, or before you've written after its last change | Sending that draft after you replied about something else; sharing a Google file or emailing event guests through `google_workspace` |
+| [Send gate](connected-apps.md#sending-email-and-invites) | Sending email, invites or texts other than the conversation's unchanged open draft, or before you've written after its last change | Sending that draft when your reply was on another subject; sharing a Google file or emailing event guests through `google_workspace` |
 | [Lease reviewers](host-access.md) | They are instructed to block exposing secrets, changing access controls and needless destruction; as models, they can miss them | A plausible request to read your personal files |
 | [Masking](secrets.md) | Most recognizable credentials reaching the model | Commands that use them |
 | Nothing | — | Sending what the agent can read to any website: outbound access is not limited |
