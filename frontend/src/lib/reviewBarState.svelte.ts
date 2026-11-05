@@ -27,6 +27,8 @@ export function createReviewBarState() {
 	/** The layout a send came from: the sending bar keeps it, so nothing remounts under the user's hands. */
 	let sendingFrom = $state<'ask' | 'noting'>('ask');
 	let note = $state('');
+	let noteFor = $state<'changes_requested' | 'approved_with_changes'>('changes_requested');
+	let accepting = $state(false);
 	let failure = $state('');
 	let receipt = $state<ReviewReceipt | null>(null);
 	const current = (id: string, stamp: number) => artifactId === id && generation === stamp;
@@ -97,6 +99,8 @@ export function createReviewBarState() {
 	return {
 		get read() { return read; }, get phase() { return phase; }, get sendingFrom() { return sendingFrom; }, get receipt() { return receipt; },
 		get note() { return note; }, set note(value: string) { note = value; },
+		get noteFor() { return noteFor; }, set noteFor(value: typeof noteFor) { noteFor = value; },
+		get accepting() { return accepting; }, set accepting(value: boolean) { accepting = value; },
 		get failure() { return failure; }, set failure(value: string) { failure = value; },
 		get visible() { return visible(); },
 		get noteRequired() { return noteRequired(); },

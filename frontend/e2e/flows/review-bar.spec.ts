@@ -437,10 +437,56 @@ journey('the review controls remain usable in the phone comments sheet', [['393 
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	const approve = drawer.getByRole('button', { name: 'Approve', exact: true });
 	await expect(approve).toBeVisible();
+	const reply = drawer.getByPlaceholder('Reply…').first();
+	await reply.focus();
+	await expect(approve).toBeHidden();
+	await reply.blur();
+	await expect(approve).toBeVisible();
 	await approve.click();
 	await expect(drawer.locator('.rb-receipt')).toContainText('Approved');
 	await drawer.getByRole('button', { name: 'Close comments', exact: true }).click();
 	await expect(page.locator('.review-bar .rb-receipt')).toBeVisible();
+});
+
+journey('a review note survives moving into and out of the phone comments sheet', [['393 light', 'phone', 'light']], async ({ page, request, mode, theme }) => {
+	const doc = await seed(request, 'Review note across comments');
+	raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
+	await comment(request, doc, 'Check the first step.', 1);
+	await open(page, doc, mode, theme);
+	await page.getByRole('button', { name: 'Reject', exact: true }).click();
+	await page.getByRole('textbox', { name: /^Note for / }).fill('Keep this note');
+	await page.getByRole('button', { name: /^1 open thread\b/ }).click();
+	const drawer = page.locator('[data-doc-comments-drawer]');
+	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Keep this note');
+	await expect(page.getByRole('textbox', { name: /^Note for / })).toHaveCount(1);
+	await drawer.getByRole('button', { name: 'Close comments', exact: true }).click();
+	await expect(page.getByRole('textbox', { name: /^Note for / })).toHaveValue('Keep this note');
+	await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+	await expect(page.getByRole('button', { name: 'Reject', exact: true })).toBeFocused();
+});
+
+journey('a pending review send survives moving through the phone comments sheet', [['393 light', 'phone', 'light']], async ({ page, request, mode, theme }) => {
+	const doc = await seed(request, 'Review send across comments');
+	raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
+	await comment(request, doc, 'Check the first step.', 1);
+	await open(page, doc, mode, theme);
+	let release!: () => void;
+	let started!: () => void;
+	const blocked = new Promise<void>((resolve) => { release = resolve; });
+	const sent = new Promise<void>((resolve) => { started = resolve; });
+	await page.route(`**/api/attention/${doc.artifactId}/clear`, async (route) => { started(); await blocked; await route.continue(); });
+	await page.getByRole('button', { name: 'Reject', exact: true }).click();
+	await page.getByRole('textbox', { name: /^Note for / }).fill('Please revise');
+	await page.getByRole('button', { name: 'Reject', exact: true }).click();
+	await sent;
+	await page.getByRole('button', { name: /^1 open thread\b/ }).click();
+	const drawer = page.locator('[data-doc-comments-drawer]');
+	await expect(drawer.getByText('Sending your review…')).toBeVisible();
+	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Please revise');
+	await drawer.getByRole('button', { name: 'Close comments', exact: true }).click();
+	await expect(page.getByText('Sending your review…')).toBeVisible();
+	release();
+	await expect(page.locator('.rb-receipt')).toContainText('Rejected');
 });
 
 journey('held comments have the header Send, whole at every size, and the drawer has no footer', [

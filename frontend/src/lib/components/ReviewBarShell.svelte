@@ -81,33 +81,6 @@
 		const reach = (container ? container.getBoundingClientRect().bottom : window.innerHeight) - top;
 		return reach > 0 ? Math.round(reach + (Number.parseFloat(style.left) || 0)) : 0;
 	}
-	/** Move the same answer controls into the phone comment sheet while it is open. */
-	function intoSheet(node: HTMLElement, on: boolean) {
-		const anchor = document.createComment('rb-capsule-home');
-		node.parentNode?.insertBefore(anchor, node);
-		let stop = () => {};
-		const apply = (up: boolean) => {
-			stop(); stop = () => {};
-			if (!up) { if (node.parentNode !== anchor.parentNode) anchor.parentNode?.insertBefore(node, anchor.nextSibling); return; }
-			let raf = 0;
-			let off = () => {};
-			const seek = () => {
-				const host = document.querySelector<HTMLElement>('.rb-sheet-host');
-				if (!host) { raf = requestAnimationFrame(seek); return; }
-				if (node.parentNode !== host) host.append(node);
-				const panel = host.closest<HTMLElement>('[role="dialog"]');
-				const typing = (target: EventTarget | null) => target instanceof HTMLElement && !host.contains(target) && target.matches('textarea, input, [contenteditable="true"]');
-				const onIn = (event: Event) => { if (typing(event.target)) host.style.display = 'none'; };
-				const onOut = (event: Event) => { if (typing(event.target)) host.style.display = ''; };
-				panel?.addEventListener('focusin', onIn); panel?.addEventListener('focusout', onOut);
-				off = () => { panel?.removeEventListener('focusin', onIn); panel?.removeEventListener('focusout', onOut); host.style.display = ''; };
-			};
-			seek();
-			stop = () => { cancelAnimationFrame(raf); off(); };
-		};
-		apply(on);
-		return { update: apply, destroy() { stop(); node.remove(); anchor.remove(); } };
-	}
 	// The capsule's own size (it grows with a status or the note) and the window's decide whether and how far it
 	// floats over the container; its tucked-away state is the `suppressed` prop, read by the measure.
 	$effect(() => {
@@ -128,7 +101,7 @@
 <!-- The slot outlives the phase: it grows once when the first ask arrives, and an answer or a replaced notice swaps inside it at the same height. -->
 <div class="rb-slot" bind:this={slotEl}>
 {#if view === 'receipt' && receipt}
-	<section class="review-bar receipt" class:changes={receipt.icon === 'changes'} class:insheet={inSheet} use:intoSheet={inSheet} aria-label={receipt.label} in:swap={{ leaving: false }} out:swap={{ leaving: true }}>
+	<section class="review-bar receipt" class:changes={receipt.icon === 'changes'} class:insheet={inSheet} aria-label={receipt.label} in:swap={{ leaving: false }} out:swap={{ leaving: true }}>
 		<svg class="rb-icon" aria-hidden="true" viewBox="0 0 16 16">
 			{#if receipt.icon === 'changes'}<g transform="scale(0.666667)"><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></g>
 			{:else if receipt.icon === 'dash'}<circle cx="8" cy="8" r="6" /><path d="M5 8h6" />
@@ -146,7 +119,7 @@
 		<span class="rb-text">{stale.text}</span><span class="rb-sub">{stale.sub}</span>
 	</section>
 {:else if view === 'ask' && who}
-	<section class="review-bar ask" class:noting class:expanded class:static={!expandable} aria-label={askLabel} aria-busy={busy} in:swap={{ leaving: false, content: true }} out:swap={{ leaving: true, content: true }}>
+	<section class="review-bar ask" class:insheet={inSheet} class:noting class:expanded class:static={!expandable} aria-label={askLabel} aria-busy={busy} in:swap={{ leaving: false, content: true }} out:swap={{ leaving: true, content: true }}>
 		<span class="rb-head">
 			{#snippet lead()}
 				<span class="rb-lead">
@@ -171,7 +144,7 @@
 			{/if}
 		</span>
 		<span class="rb-row2">
-			<div class="rb-capsule" class:suppressed class:lifted={inSheet} class:insheet={inSheet} class:noting use:intoSheet={inSheet} bind:this={capsuleEl} out:capsuleOut|global>
+			<div class="rb-capsule" class:suppressed class:lifted={inSheet} class:insheet={inSheet} class:noting bind:this={capsuleEl} out:capsuleOut|global>
 				<!-- At a fine pointer the status keeps its height when empty, so the buttons never move when a status appears. On a phone it shows above the buttons inside the floating capsule, which grows upward. -->
 				<span class="rb-status" class:busy role="status">{status}</span>
 				{@render actions()}
@@ -205,6 +178,7 @@
 		background: transparent; box-shadow: none;
 	}
 	.rb-head { display: flex; flex-direction: column; min-width: 0; }
+	.review-bar.ask.insheet .rb-head { display: none; }
 	.rb-line { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); min-width: 0; padding: 0; border: 0; background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
 	.review-bar.static .rb-line { cursor: default; }
 	.rb-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

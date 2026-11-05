@@ -4,15 +4,15 @@
 	import { on } from '$lib/ws';
 	import PersonStepReviewBar from './PersonStepReviewBar.svelte';
 	import ReviewBarShell from './ReviewBarShell.svelte';
-	import { createReviewBarState, DRAFT_OPEN } from '$lib/reviewBarState.svelte';
+	import { createReviewBarState, DRAFT_OPEN, type ReviewBarState } from '$lib/reviewBarState.svelte';
 	import { answerSubmissionFailed, answerSubmitted } from '$lib/stores/cardAnswers';
 
 	/**
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
 	 * answer is one click from the reading. `draftOpen` is the comment composer's unsaved text.
 	 */
-	let { artifactId, draftOpen = false, suppressed = false, inSheet = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
-		artifactId: string | null; draftOpen?: boolean; suppressed?: boolean; inSheet?: boolean;
+	let { artifactId, bar = createReviewBarState(), draftOpen = false, suppressed = false, inSheet = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
+		artifactId: string | null; bar?: ReviewBarState; draftOpen?: boolean; suppressed?: boolean; inSheet?: boolean;
 		/** Open suggestions the bar's own accept applies before it approves; with `onAcceptAll`, the approve button says so. */
 		pendingSuggestions?: number;
 		/** Accepts them all and puts the accepted text on screen; throws when it could not, so no verdict is sent. */
@@ -22,14 +22,10 @@
 		onAnswered?: () => void;
 	} = $props();
 
-	const bar = createReviewBarState();
 	const ACCEPT_FAILED = "Couldn't accept the suggestions. Try again.";
-	let accepting = $state(false);
 	let noteInput = $state<HTMLTextAreaElement>();
 	let requestButton = $state<HTMLButtonElement>();
 	let changesButton = $state<HTMLButtonElement>();
-	/** Which change answer the open note sends. */
-	let noteFor = $state<'changes_requested' | 'approved_with_changes'>('changes_requested');
 	/** Reject asks for another review; approval with changes does not. */
 	const LABELS = { changes_requested: 'Reject', approved_with_changes: 'Approve with changes' } as const;
 	let approveButton = $state<HTMLButtonElement>();
@@ -42,7 +38,7 @@
 	const others = $derived(read?.other_askers ?? []);
 	const round = $derived(read?.round_feedback_count ?? 0);
 	const pending = $derived(`${round} comment${round === 1 ? '' : 's'}`);
-	const busy = $derived(bar.phase === 'sending' || accepting);
+	const busy = $derived(bar.phase === 'sending' || bar.accepting);
 	const personStep = $derived(bar.read?.person_step ?? null);
 	let personReceipt = $state<'done' | 'wont_do' | null>(null);
 	/** A send keeps the layout it came from: the note stays mounted while its own send is in flight. */
@@ -122,8 +118,8 @@
 	async function approve() {
 		if (round > 0 && blocked()) return;
 		if (acceptFirst) {
-			accepting = true; bar.failure = '';
-			try { await onAcceptAll?.(); } catch { bar.failure = ACCEPT_FAILED; return; } finally { accepting = false; }
+			bar.accepting = true; bar.failure = '';
+			try { await onAcceptAll?.(); } catch { bar.failure = ACCEPT_FAILED; return; } finally { bar.accepting = false; }
 		}
 		void settle('approved');
 	}
@@ -131,14 +127,14 @@
 	async function approveWithChanges() {
 		if (blocked()) return;
 		if (round > 0) { void settle('approved_with_changes'); return; }
-		noteFor = 'approved_with_changes';
+		bar.noteFor = 'approved_with_changes';
 		bar.openNote();
 		await tick();
 		noteInput?.focus();
 	}
 	async function requestChanges() {
 		if (blocked()) return;
-		noteFor = 'changes_requested';
+		bar.noteFor = 'changes_requested';
 		bar.openNote();
 		await tick();
 		noteInput?.focus();
@@ -146,11 +142,11 @@
 	async function cancelNote() {
 		bar.cancelNote();
 		await tick();
-		(noteFor === 'approved_with_changes' ? changesButton : requestButton)?.focus();
+		(bar.noteFor === 'approved_with_changes' ? changesButton : requestButton)?.focus();
 	}
 	function sendNote() {
 		if (blocked()) return;
-		void settle(noteFor);
+		void settle(bar.noteFor);
 	}
 	function onNoteKey(event: KeyboardEvent) {
 		if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendNote(); }
@@ -174,7 +170,7 @@
 					bind:this={noteInput} bind:value={bar.note} onkeydown={onNoteKey}></textarea>
 				<div class="rb-actions">
 					<Button size="sm" variant="ghost" disabled={busy} onclick={cancelNote}>Cancel</Button>
-					<Button size="sm" variant="primary" loading={busy} disabled={bar.noteRequired && !bar.note.trim()} onclick={sendNote}>{LABELS[noteFor]}</Button>
+					<Button size="sm" variant="primary" loading={busy} disabled={bar.noteRequired && !bar.note.trim()} onclick={sendNote}>{LABELS[bar.noteFor]}</Button>
 				</div>
 			{:else}
 				<div class="rb-actions">
