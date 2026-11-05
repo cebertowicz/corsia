@@ -4,7 +4,7 @@ A phone or another computer can reach a local CORSIA server through a network ro
 
 ## Reach the server
 
-A source install configured for local use binds its main web and API server to loopback, so another device cannot reach it directly. Server setup binds it to all interfaces. The desktop app's main server binds to loopback. Tailscale Serve can expose the loopback server over a private HTTPS address using the server's actual port. For the source install's phone path, [Getting started](../../README.md#install) gives an example. The device signs in to CORSIA after reaching that address. See [Network](../security/network.md) for the sign-in boundary and routes that do not require a session.
+A source install configured for local use binds its main web and API server to loopback, so another device cannot reach it directly. Server setup binds it to all interfaces. The desktop app's main server binds to loopback. Tailscale Serve can expose the loopback server over a private HTTPS address using the server's actual port. For the source install's phone path, [Install CORSIA](../getting-started/install.md#install) gives an example. The device signs in to CORSIA after reaching that address. See [Network](../security/network.md) for the sign-in boundary and routes that do not require a session.
 
 ## Devices
 

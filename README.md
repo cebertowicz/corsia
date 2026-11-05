@@ -136,17 +136,8 @@ Review at this volume is automated, so the reviewer is itself audited. From Octo
 
 ## Getting started
 
-### Know before you start
-
-- **A Mac with Apple Silicon (M1 or later) and macOS 15 or later.** Agent Safehouse, which sandboxes agent shell commands, is built on macOS `sandbox-exec`.
-- **16 GB Macs currently need a cloud model provider for agent work.** Connect Claude Code, Codex or an API provider until a suitable local agent model is available. The corrections classifier still needs to run locally.
-- **Corrections are recorded only once the local corrections classifier is installed.** Until then CORSIA records none. Installing the classifier during setup is tracked in [#704](https://github.com/cebertowicz/corsia/issues/704).
-- **Agents run as your macOS user, with unrestricted network access.** Read [Security](#security) first.
-- **Keep the workspace out of Documents, Desktop, Downloads and iCloud Drive.** CORSIA's sandbox refuses those folders, and macOS privacy prompts can keep interrupting background agents there. The default, `~/corsia`, avoids both; agents still reach files there through a reviewed request (see [Security](#security)).
-- **Teams use a lot of tokens.** Start with one agent, watch its usage, and set spending limits on any API key.
-- **Pre-release.** Releases are version tags. The release workflow builds an unsigned desktop app and signing is a separate manual step, so check a downloaded app before opening it ([Supply chain](docs/security/supply-chain.md#check-it-yourself)), or build one from your checkout (below).
-
-### Install
+- A Mac with Apple Silicon and macOS 15 or later, or an Ubuntu 24.04+ or Debian 12+ server. Agents run as your macOS user with unrestricted network access, so read [Security](#security) first.
+- Macs with less than 32 GB of memory need a cloud model provider (Claude Code, Codex or an API key) for agent work. Teams use a lot of tokens, so start with one agent.
 
 Open Terminal and run:
 
@@ -156,72 +147,7 @@ cd ~/.corsia
 bash scripts/install.sh
 ```
 
-The installer adds any missing prerequisites, builds the environment, creates your workspace at `~/corsia` and opens CORSIA at `http://localhost:1956`. It asks no setup questions in Terminal. The rest happens in the browser:
-
-1. Create a local account.
-2. Connect a model source. CORSIA detects Claude Code and Codex logins, takes an API key, or connects a local [oMLX](https://github.com/jundot/omlx) server, and offers a fix for anything missing.
-3. CORSIA walks you through the rest of setup in its plan: more model providers, web search, GitHub, remote access, and your first project.
-
-Updates arrive through **Settings → System → Update now**. Update lets running work finish before restarting, but goes ahead if it doesn't finish in time. If the update fails before CORSIA stops, the old version keeps running. If CORSIA has stopped and the new version then fails to start, CORSIA can be left stopped. If that happens, run `corsia start`; it starts the new version again, so if it fails again, `corsia logs` shows why. Update follows the upstream of the branch you have checked out. It refuses while the checkout has uncommitted edits (commit or stash them first) and offers nothing while you have local commits ahead of that upstream. A branch with no upstream, or one that has diverged from it, gets a message naming the branch and how to fix it.
-
-**On your phone:** reach your Mac over a private HTTPS address, for example `tailscale serve --bg http://127.0.0.1:1956`, then use **Add to Home Screen**.
-
-<details>
-<summary><strong>Manual install and requirements</strong></summary>
-
-| Need | Install |
-|---|---|
-| Python 3.11 (SQLite 3.45+) | `brew install python@3.11` |
-| Node.js 20.19+ or 22.12+ | `brew install node` |
-| Git 2.36+ | `xcode-select --install` |
-| Agent Safehouse 0.11.1+, on `PATH` as `safehouse` | `brew install eugene1g/safehouse/agent-safehouse` |
-| GitHub CLI, signed in with `gh auth login` | `brew install gh` |
-| `agent-browser` 0.31.x (the installer adds it) | `npm install -g agent-browser@0.31 && agent-browser install` |
-| Optional: web search | A Brave Search API key (entered in **Settings → Keys**) |
-
-```bash
-git clone --branch main https://github.com/cebertowicz/corsia.git ~/.corsia
-cd ~/.corsia
-python3.11 -m venv .venv
-.venv/bin/python -m pip install -r backend/requirements.lock
-(cd frontend && npm ci && npm run build)
-cp .env.example .env                  # optional
-scripts/corsia start
-```
-
-First-run setup runs only from a checkout at `~/.corsia`.
-
-</details>
-
-<details>
-<summary><strong>Desktop app from your checkout</strong></summary>
-
-```bash
-cd ~/.corsia
-bash desktop/scripts/build-macos-bundle.sh --skip-dmg
-```
-
-The build downloads its own Rust, Python and resources, and needs room for the build plus a backup of your data. It leaves `CORSIA.app` in `~/.corsia/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/`; copy it to Applications and open it. It offers to **Take over** your source install: the app keeps your account, workspace and data where they are, stops the source install, and from then on serves them with the code it was built from. `http://localhost:1956` stops answering; use the app. Bookmarks and anything else pointed at that address, including the phone setup above, stop working with it. Take over is one-way: afterwards `scripts/corsia start` in your checkout refuses, saying the CORSIA app owns this install, and any `corsia` link in `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin` that pointed at your checkout's `scripts/corsia` now points at the app's command. Start and restart CORSIA from the app; there is no supported way back to running the checkout. The app then looks for updates in CORSIA's published releases, not in your checkout. Opening a newer build over an installed one is untested. If a takeover fails, your source install is restarted as it was.
-
-</details>
-
-<details>
-<summary><strong>Everyday commands</strong></summary>
-
-For the source install, `corsia` means `~/.corsia/scripts/corsia`. After a desktop app takeover, a `corsia` link in `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin` that pointed at the checkout's `scripts/corsia` runs the app's command instead.
-
-| Command | Does |
-|---|---|
-| `corsia start` / `stop` / `restart` / `status` / `logs` | Run and inspect the backend |
-| `corsia sources` / `sources recheck` | Show each model source with a fix for anything missing |
-| `corsia setup local` / `setup server` | Switch between this-computer-only and an always-on server |
-| `corsia service install` / `uninstall` | Run as a launchd service |
-| `corsia user …` / `corsia token …` | Manage accounts and API tokens |
-| `corsia delegate …` / `doc …` / `context …` / `providers …` | Drive threads, documents, context files and model endpoints from the shell |
-
-A second checkout on the same machine needs its own `CORSIA_WORKSPACE`, `CORSIA_STATE_DIR` and `BACKEND_PORT`.
-
-</details>
+The installer opens CORSIA at `http://localhost:1956`, where setup continues in the browser. The [getting-started guide](docs/getting-started/README.md) covers [requirements and install options](docs/getting-started/install.md), [your first project](docs/getting-started/first-project.md) and [your first agent](docs/getting-started/first-agent.md).
 
 ## Security
 
