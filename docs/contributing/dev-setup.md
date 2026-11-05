@@ -27,11 +27,11 @@ cd ..
 
 ## Run the app
 
-The following example keeps the workspace and application state in `.dev-data` inside the checkout. Do not commit these development data. For risky changes such as migrations, use the same setup in a second checkout with its own workspace, state directory, and ports. Never point `CORSIA_WORKSPACE` or `CORSIA_STATE_DIR` at the CORSIA you use day to day. Pick unused ports if 43871 or 43872 is already in use.
+The following example keeps the development workspace and application state in `~/corsia-dev-data`, outside the checkout so they can't be committed. For risky changes such as migrations, use the same setup in a second checkout with its own workspace, state directory, and ports. Never point `CORSIA_WORKSPACE` or `CORSIA_STATE_DIR` at the CORSIA you use day to day. Pick unused ports if 43871 or 43872 is already in use.
 
 ```bash
-mkdir -p .dev-data/workspace .dev-data/state .dev-data/cache .dev-data/logs
-export CORSIA_WORKSPACE="$PWD/.dev-data/workspace" CORSIA_STATE_DIR="$PWD/.dev-data/state" XDG_CACHE_HOME="$PWD/.dev-data/cache"
+mkdir -p ~/corsia-dev-data/workspace ~/corsia-dev-data/state
+export CORSIA_WORKSPACE=~/corsia-dev-data/workspace CORSIA_STATE_DIR=~/corsia-dev-data/state
 cd backend
 ../.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 43871
 ```
