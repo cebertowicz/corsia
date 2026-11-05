@@ -17,21 +17,17 @@ Many things talk to one thread at once: a person typing, a worker finishing, a w
 
 ```mermaid
 flowchart TB
-    S[Sender] --> A[Admit input<br/>one transaction]
-    A --> Q{Turn running?}
-    Q -->|no, eligible| T[Start turn]
-    Q -->|no, held| H[Wait for<br/>hold to clear]
-    H -->|eligible| T
-    Q -->|yes,<br/>apply_now| B[Attempt delivery at<br/>a safe boundary]
-    Q -->|yes,<br/>queue_after_turn| W[Remains queued]
-    B -->|delivered| T2[Delivered into<br/>running turn]
+    S[Sender] --> A[Admit input]
+    A --> Q{Turn<br/>running?}
+    Q -->|no| T[Start turn<br/>when eligible]
+    Q -->|yes| I{Intent}
+    I -->|apply_now| B[Deliver at a<br/>safe boundary]
+    I -->|queue_after_turn| W[Wait in<br/>queue]
     B -->|does not fit| W
-    W -->|later apply_now<br/>claims prefix| B
-    W -->|eligible after<br/>settlement| T
-    T --> F[Finish turn]
-    T2 --> F
-    F -->|if present| N[Next queued input]
+    W -->|turn finishes| T
 ```
+
+A held input waits in the queue until its hold clears. A later `apply_now` input can bring earlier queued input along to a safe boundary (below).
 
 ### One way in
 
@@ -48,6 +44,15 @@ In both cases the input keeps its place in the queue.
 
 A turn ends through `finish_turn`, which settles the turn and attempts to claim eligible successor work in the same transaction. A hold can leave input queued, and failed admission can fail it visibly (`backend/infra/thread_driver.py`). An unstructured worker's final reply can be admitted to its parent in the transaction that settles the worker's completed turn; structured delegation returns through the plan (see [Agents and threads](agents-and-threads.md)).
 
+When a turn errors after it had written input to the provider, inputs it claimed but never wrote go back to the queue at their original place, and the next turn takes them. A turn that errors before writing anything fails its own inputs, so a failure that repeats does not start turn after turn.
+
+Some failures get one more try:
+
+- **Too large for the model:** when the provider refuses a native turn's input for size, the loop goes back to the checkpoint boundary and tries once more (`backend/core/turn_iteration.py`). A Claude Code or Codex turn refused for size runs once more (`backend/infra/plan_limit_continue.py`).
+- **Claude Code login briefly reported as failed:** the turn runs once more.
+
+If the second try fails too, the turn ends with the error. There is no third try.
+
 When a turn is stopped by a plan limit or vendor usage limit, the system can queue a continue input so work can resume when the limit allows it. It does not add one when other queued input will restart the thread, and repeated vendor refusals can stop the continuation chain (`backend/infra/plan_limit_continue.py`).
 
 ### Surviving a restart
@@ -56,6 +61,7 @@ Recovery is a single pass at boot, not a periodic repair loop (`backend/infra/th
 
 - A turn recorded as running by an earlier boot is ended with the error "backend restarted while Turn was running". It is not resumed mid-turn.
 - A queued input whose provider write started but whose outcome was never recorded for the interrupted turn is marked **ambiguous**. It is not replayed, because replaying could repeat a side effect.
+- An input the interrupted turn claimed but never started writing goes back to the queue at its original place.
 - Recovery attempts to start a new turn for threads with unclaimed queued inputs; normal admission and hold rules still apply.
 
 ### Liveness
@@ -80,3 +86,5 @@ Actionable plan work can receive a liveness wake with backoff; a wake delivered 
 | Restart recovery | `backend/infra/thread_recovery.py` |
 | Limit continue | `backend/infra/plan_limit_continue.py` |
 | WebSocket ingress for the UI | `backend/ws/ingress.py`, `backend/ws/message_dispatch.py` |
+
+Checked against the code at `7a8c55d84`.
