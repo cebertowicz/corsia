@@ -74,7 +74,9 @@ def test_a_codex_childs_parent_is_driven_after_its_terminal_release(
     ))
 
     assert len(wakes(lineage)) == 1
-    assert order == ["release:start", "release:done", "drive:parent"]
+    # An errored worker Turn also left its input unanswered, so its own wake drives last.
+    woken = ["drive:worker"] if kind == "child_turn_errored" else []
+    assert order == ["release:start", "release:done", "drive:parent", *woken]
 
 
 def test_a_codex_release_failure_still_drives_the_parent_it_woke(
@@ -108,7 +110,7 @@ def test_a_codex_release_failure_still_drives_the_parent_it_woke(
             {"kind": "turn_failed", "cause": "process_exited"}, live,
         ))
 
-    assert order == ["release:start", "drive:parent"]
+    assert order == ["release:start", "drive:parent", "drive:worker"]
 
 
 async def test_cc_result_keeps_event_db_but_uses_canonical_terminal_owner(
@@ -223,7 +225,7 @@ async def test_a_claude_code_childs_parent_is_driven_after_its_settlement(
     cc_stream_control.observe_terminal_event(session, delivered)
     await session._terminal_driver
 
-    assert order == ["release", "drive:parent"]
+    assert order == ["release", "drive:parent", "drive:worker"]
 
 
 async def test_cc_broadcast_failure_is_recoverable_after_commit(
@@ -273,7 +275,8 @@ async def test_cc_broadcast_failure_is_recoverable_after_commit(
     cc_stream_control.observe_terminal_event(session, completed)
     await session._terminal_driver
 
-    assert order == ["release", "drive:parent"]
+    # The errored worker Turn took in an input it never answered, so it is also woken.
+    assert order == ["release", "drive:parent", "drive:worker"]
     process.kill.assert_not_called()
     assert any(
         "Post-commit plans_changed delivery failed" in message
@@ -397,3 +400,24 @@ async def test_failed_invalidation_broadcast_does_not_strand_the_parent(
         "Post-commit plans_changed delivery failed" in message
         for message in caplog.messages
     )
+
+
+async def test_a_claude_code_process_exit_drives_the_parent_it_woke(lineage, order) -> None:
+    """A worker's process exit records its Turn end, which wakes and drives the parent."""
+    from core.turn_core import drive_turn_settlement
+    from subagents import cc_runtime as rt
+    from tests.test_cc_turn_preempt import _admit_active_turn
+
+    delegated(lineage)
+    identity = _admit_active_turn(lineage, "worker", "turn-worker")
+    live = rt._Live(session=None, parent_thread_id="parent", name="cc",
+                    corsia_turn=identity, turn_active=True)
+
+    settlement = await rt._finish_process_exit(
+        "worker", live, 1, "provider died", lambda *_a: None, None, defer_drive=True,
+    )
+
+    assert len(wakes(lineage)) == 1
+    assert order == []
+    await drive_turn_settlement(settlement)
+    assert "drive:parent" in order

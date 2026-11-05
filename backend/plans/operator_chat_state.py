@@ -13,6 +13,7 @@ import plans.open_tree as open_tree
 import plans.operator_owners as operator_owners
 import plans.operator_projection as operator_projection
 import plans.service as service
+import plans.workflow_fields as workflow_fields
 from plans.boundary import PlanActor
 
 THREAD_STATE_LIMIT = 200
@@ -145,6 +146,22 @@ def _plan_attention_items(presented: dict) -> list[dict]:
     return items
 
 
+def _name_runs(states: dict[str, dict], *, db) -> None:
+    """Give every plan item, failed ones included, its reader title in one read.
+
+    Read outside the plan tree, a workflow step names its run. A decision's
+    review node already carries the decision's own question as its title.
+    Access requests and held replies are not plan nodes and carry no node id.
+    """
+    items = [
+        item for row in states.values() for item in row["attention_items"]
+        if item["node_id"] is not None
+    ]
+    readers = workflow_fields.reader_titles(db, [item["node_id"] for item in items])
+    for item in items:
+        item["title"] = readers.get(item["node_id"], item["title"])
+
+
 def _live_visible_thread_ids(ids: list[str], *, actor: PlanActor, db) -> list[str]:
     """Return requested threads which are live and visible to the operator."""
     rows = db.execute(
@@ -265,6 +282,7 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
                 and plan_row["has_finished"]
             ),
         }
+    _name_runs(states, db=db)
     _add_planless_rows(states, access_by_thread, seen)
     for thread_id, row in states.items():
         row["latest_update"] = latest_updates.get(thread_id)

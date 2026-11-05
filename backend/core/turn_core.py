@@ -248,9 +248,10 @@ async def drive_turn_settlement(
     settlement: TerminalSettlement,
 ) -> TerminalResult:
     """Drive every action returned by one already-committed terminal."""
+    from automation.turn_end_effects import deliver_turn_end_after
     from infra.thread_execution import drive_terminal_settlement
 
-    await drive_terminal_settlement(settlement)
+    await deliver_turn_end_after(settlement.turn_end_effects, lambda: drive_terminal_settlement(settlement))
     return settlement.result
 
 

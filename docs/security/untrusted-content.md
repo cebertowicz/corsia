@@ -26,12 +26,12 @@ It reads the first 24,000 characters of the body and keeps its verdicts, never t
 
 ## What isn't screened
 
-- Web pages fetched with `web_fetch` or visited in the agents' browser
+- Web pages fetched with `web_fetch` or visited in the shared browser
 - Search results
 - Email attachments
 - Text messages read through the Messages tools
 - Files in the workspace, including code from outside contributors
-- Results from tool servers you add
+- Results from connected apps you add
 - Calendar invites, and Docs, Sheets and Drive files read through the `google_workspace` tool
 
 All of these reach the agent as ordinary tool output. The Messages tools' descriptions tell the agent texts are data from other people, but that is an instruction, not a screen.
@@ -51,7 +51,7 @@ An agent that must read content from a source neither it nor you controls (an ou
 | Control | Stops | Doesn't stop |
 |---|---|---|
 | [Sandbox](agent-sandbox.md) | Reading most of your home folder; writing outside the workspace, apart from a few named exceptions such as temporary folders | Reading or changing anything in the workspace |
-| [Send gate](connected-apps.md#sending-email-and-invites) | Sending email, invites or texts other than the conversation's unchanged open draft, or before you've written after its last change | Sending that draft when your reply was on another subject; sharing a Google file or emailing event guests through `google_workspace` |
+| [Send gate](connected-apps.md#sending-email-and-invites) | Sending email, invites or texts other than the chat's unchanged open draft, or before you've written after its last change | Sending that draft when your reply was on another subject; sharing a Google file or emailing event guests through `google_workspace` |
 | [Lease reviewers](host-access.md) | They are instructed to block exposing secrets, changing access controls and needless destruction; as models, they can miss them | A plausible request to read your personal files |
 | [Masking](secrets.md) | Most recognizable credentials reaching the model | Commands that use them |
 | Nothing | — | Sending what the agent can read to any website: outbound access is not limited |
