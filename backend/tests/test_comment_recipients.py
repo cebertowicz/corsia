@@ -369,10 +369,13 @@ def test_locality_preserves_existing_recipient_without_tag_effects(isolated_db, 
         comment_recipients.save_tags(connection, reply, [recipient])
         comment_recipients.tags_for_comments(connection, [reply])
         result = feedback_batches.record_comment(connection, reply, created=created)
+    assert result["tag_refusals"] == []
     batch = next(batch_id for batch_id in result["batch_ids"] if db.execute(
         "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0] == recipient)
     monkeypatch.setattr(local_only, "send_needs_hold", lambda *args, **kwargs: True)
     seen = []
+    notes = []
+    monkeypatch.setattr(feedback_delivery, "undelivered_note", lambda *args, **kwargs: notes.append(args))
     original = feedback_delivery.create_feedback_node
     def capture(db, recipient_id, batch, *, items):
         seen.extend(items)
@@ -381,6 +384,7 @@ def test_locality_preserves_existing_recipient_without_tag_effects(isolated_db, 
     feedback_batches.close_batch(db, batch, "send")
     assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == "delivered"
     assert seen[0].get("suppress_tag") and "thread_context" not in seen[0]
+    assert notes == []
     db.close()
 
 
@@ -413,6 +417,10 @@ def test_mixed_pending_batch_delivers_untagged_and_reports_refusal(isolated_db, 
     with write_transaction(db, scope="mixed_pending") as connection:
         plain, created = comments.create_with_status(aid, body="Ordinary", author="Writer", author_kind="agent", author_thread_id="writer", parent_id=root["id"], db=connection)
         result = feedback_batches.record_comment(connection, plain, created=created)
+        ordinary_tagged, created = comments.create_with_status(aid, body="Ordinary tagged", author="Writer", author_kind="agent", author_thread_id="writer", parent_id=root["id"], db=connection)
+        comment_recipients.save_tags(connection, ordinary_tagged, ["recipient"])
+        comment_recipients.tags_for_comments(connection, [ordinary_tagged])
+        feedback_batches.record_comment(connection, ordinary_tagged, created=created)
         tagged, created = comments.create_with_status(aid, body="Tagged", author="Writer", author_kind="agent", author_thread_id="writer", db=connection)
         comment_recipients.save_tags(connection, tagged, ["recipient"])
         comment_recipients.tags_for_comments(connection, [tagged])
@@ -423,9 +431,10 @@ def test_mixed_pending_batch_delivers_untagged_and_reports_refusal(isolated_db, 
     monkeypatch.setattr(feedback_delivery, "undelivered_note", lambda db, batch, reason, **kwargs: notes.append(reason))
     monkeypatch.setattr(local_only, "send_needs_hold", lambda *args, **kwargs: True)
     feedback_batches.close_batch(db, batch, "send")
-    assert "recipient is cloud-bound" in notes[0]
+    assert len(notes) == 1 and "recipient is cloud-bound" in notes[0]
+    assert tagged["id"] in notes[0] and ordinary_tagged["id"] not in notes[0]
     assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == "delivered"
-    assert [row[0] for row in db.execute("SELECT comment_id FROM doc_feedback_batch_items WHERE batch_id=?", (batch,))] == [plain["id"]]
+    assert {row[0] for row in db.execute("SELECT comment_id FROM doc_feedback_batch_items WHERE batch_id=?", (batch,))} == {plain["id"], ordinary_tagged["id"]}
     assert comments.get_comment(tagged["id"], db=db)["body"] == "Tagged"
     db.close()
 

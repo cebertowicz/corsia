@@ -169,19 +169,20 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
                         item["suppress_tag"] = True
                     else:
                         refused.append(item)
-                remaining = [item for item in items if item not in refused]
-                document = (artifact.get("path") or artifact.get("title") or str(_value(batch, "artifact_id"))) if artifact else str(_value(batch, "artifact_id"))
-                comment_ids = ", ".join(str(item["id"]) for item in tagged_items)
-                problem = f"Tag not delivered: {document}, comment {comment_ids}. {refusal}"
-                if remaining:
-                    undelivered_note(db, batch, problem, items=tagged_items)
-                    for item in refused:
-                        db.execute("DELETE FROM doc_feedback_batch_items WHERE batch_id=? AND comment_id=?",
-                                   (_value(batch, "id"), item["id"]))
-                    db.execute("UPDATE doc_feedback_batches SET item_count=item_count-? WHERE id=?",
-                               (len(refused), _value(batch, "id")))
-                    items = remaining
-                    problem = None
+                if refused:
+                    remaining = [item for item in items if item not in refused]
+                    document = (artifact.get("path") or artifact.get("title") or str(_value(batch, "artifact_id"))) if artifact else str(_value(batch, "artifact_id"))
+                    comment_ids = ", ".join(str(item["id"]) for item in refused)
+                    problem = f"Tag not delivered: {document}, comment {comment_ids}. {refusal}"
+                    if remaining:
+                        undelivered_note(db, batch, problem, items=refused)
+                        for item in refused:
+                            db.execute("DELETE FROM doc_feedback_batch_items WHERE batch_id=? AND comment_id=?",
+                                       (_value(batch, "id"), item["id"]))
+                        db.execute("UPDATE doc_feedback_batches SET item_count=item_count-? WHERE id=?",
+                                   (len(refused), _value(batch, "id")))
+                        items = remaining
+                        problem = None
     if problem is not None:
         undelivered_note(db, batch, problem, items=items)
         return DeliveryResult(reason=problem)
