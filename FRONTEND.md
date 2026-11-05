@@ -28,4 +28,4 @@ Use semantic theme variables from `frontend/src/app.css` instead of hardcoded co
 
 After installing dependencies with `npm ci` in `frontend/`, `npm run check` runs Svelte and TypeScript checks; `npm run test -- <test-file>` runs a focused Vitest test. `npm run test` runs the frontend unit suite. See `frontend/package.json` for the current scripts.
 
-Checked against the code at `7a8c55d84c75cbee7b8f26c8839f188fa466b559`.
+Checked against the code at `de2e414bce808912cf9b297650277cd0711b4676`.

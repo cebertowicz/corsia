@@ -1,4 +1,4 @@
-from memory.task_match import MAX_TERMS, NodeText, first_term_at, match, task_terms
+from memory.task_match import MAX_TERMS, NodeText, match, task_terms
 
 
 def test_terms_put_title_first_and_drop_boilerplate():
@@ -39,8 +39,3 @@ def test_match_returns_counts_and_rejects_scattered_topics():
 
     assert match(terms, words) is None
 
-
-def test_first_term_at_skips_a_term_inside_a_longer_word():
-    text = "The catalog stays. Log rotation runs nightly."
-
-    assert first_term_at(frozenset({"log"}), text) == text.index("Log")

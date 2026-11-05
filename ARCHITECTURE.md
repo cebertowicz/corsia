@@ -63,7 +63,25 @@ returns the item for retry. `api/heldReplies.ts` calls the server for that
 operation. The dock is not mounted in documents or settings.
 
 Frontend composition checked against the code at
-`7a8c55d84c75cbee7b8f26c8839f188fa466b559`.
+`de2e414bce808912cf9b297650277cd0711b4676`.
+
+### Connected apps and external events
+
+Connected apps expose MCP tools through `backend/tools/mcp.py` and
+`backend/tools/mcp_runtime.py`; `backend/api/mcp.py` and `backend/cli_mcp.py`
+manage configuration. `backend/tools/tool_surface.py` supplies the tool index
+and on-demand schemas. `backend/connections/` owns connected-account state,
+including Google, Microsoft, mail hosts and Messages. See
+[Connected apps](docs/how-it-works/connected-apps.md) for the user-facing model.
+
+`backend/api/webhooks.py` and `backend/api/webhook_receivers.py` receive
+webhooks; `backend/events/` maps and routes events, and
+`backend/events/connectors/` implements connector-specific intake. The GitHub
+head-check aggregator (`github_head_checks.py`) combines completed check suites
+into a per-head event. Its admission hook is on by default outside test mode;
+`CORSIA_GITHUB_HEAD_CHECKS_ENABLE=0` turns it off.
+
+Checked against the code at `7a8c55d84`.
 
 ### Verified ONNX assets
 

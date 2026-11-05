@@ -30,8 +30,8 @@ _REASONS = ("no_linked_task", "several_linked_tasks", LOOKUP_FAILED)
 def attach(row: Mapping[str, Any], skill: Any, *, db: sqlite3.Connection) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """The start's intent and the record its result is stamped from, ``(None, None)`` when
     its subject is not a GitHub pull request or its workflow does not declare ``task_intent``.
-    With no intent the record is its reason. The workflow opts in because the intent carries a
-    person's own words."""
+    With no intent the record is its reason. The intent is the agreed intent and its done test,
+    never stored quotes. The workflow opts in because the intent is the task's private text."""
     if ((getattr(skill, "corsia", None) or {}).get("workflow") or {}).get("task_intent") is not True:
         return None, None
     subject = dict(row)
@@ -47,15 +47,12 @@ def attach(row: Mapping[str, Any], skill: Any, *, db: sqlite3.Connection) -> tup
             "requirements_revision": read["requirements_revision"],
             "intent": bounded_label(str(read["intent"] or ""), REVISION_BRIEF_MAX_BYTES),
             "acceptance_criteria": bounded_label(str(read["acceptance_criteria"] or ""), REVISION_BRIEF_MAX_BYTES),
-            "intent_words": [{key: word[key] for key in ("author", "role", "quote", "added_at")}
-                             for word in read["intent_words"]],
         }
     except Exception:  # noqa: BLE001 - a Plans failure is never "no linked task", and the review still starts
         logger.exception("the review's intent lookup failed")
         return None, {"reason": LOOKUP_FAILED}
     return intent, {key: intent[key] for key in ("node_id", "linked_node", "requirements_revision",
-                                                  "intent", "acceptance_criteria")} | {
-        "quotes": [word["quote"] for word in intent["intent_words"]]}
+                                                  "intent", "acceptance_criteria")}
 
 
 def stamp(record: Mapping[str, Any] | None, *, db: sqlite3.Connection | None) -> dict[str, Any]:
@@ -69,8 +66,7 @@ def stamp(record: Mapping[str, Any] | None, *, db: sqlite3.Connection | None) ->
     facts = {
         "intent_node": record["node_id"], "intent_linked_node": record["linked_node"],
         "intent_revision": record["requirements_revision"],
-        "intent_text": {"intent": record["intent"], "acceptance_criteria": record["acceptance_criteria"],
-                        "quotes": list(record["quotes"])},
+        "intent_text": {"intent": record["intent"], "acceptance_criteria": record["acceptance_criteria"]},
     }
     try:
         facts["intent_current_revision"] = int(intent_of(record["node_id"], db=db)["requirements_revision"])

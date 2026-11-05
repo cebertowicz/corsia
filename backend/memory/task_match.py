@@ -36,7 +36,6 @@ class NodeText:
     intent: str = ""
     criteria: str = ""
     words: str = ""
-    node_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -109,14 +108,6 @@ def _windows(words: str) -> list[str]:
         if run:
             windows.append(run)
     return windows
-
-
-def first_term_at(terms: frozenset[str], text: str) -> int:
-    """Offset of the first word in ``text`` that ``match()`` counts for one of ``terms``, else 0."""
-    for token in _TOKEN.finditer(text.lower()):
-        if any(token.group().startswith(term) for term in terms):
-            return token.start()
-    return 0
 
 
 def match(terms: TaskTerms, words: str) -> Match | None:

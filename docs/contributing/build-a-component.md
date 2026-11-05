@@ -41,4 +41,4 @@ npm run check
 
 Replace the test path with the test for the component you changed. Both checks should pass. Run the app in the project's development environment and exercise the actual surface as well; a unit test alone does not check its layout or interaction in context.
 
-Checked against the code at `7a8c55d84c75cbee7b8f26c8839f188fa466b559`.
+Checked against the code at `de2e414bce808912cf9b297650277cd0711b4676`.
