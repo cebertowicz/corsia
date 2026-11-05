@@ -4,13 +4,13 @@
 
 ## Status
 
-Not published. Until it is, CORSIA signs in with automatic registration or a pasted client ID, and sends no metadata URL.
+Off by default. While `CORSIA_CLIENT_METADATA_URL` (`backend/infra/config.py`) is empty, CORSIA signs in with automatic registration or a pasted client ID. Once it is set, CORSIA uses it with providers that accept metadata documents (`backend/tools/mcp_oauth_protocol.py`).
 
 ## Turning it on
 
 1. Publish `corsia-client.json` at a fixed HTTPS address (planned: the project owner's domain through GitHub Pages).
 2. Replace `client_id` in the file with that exact address, then publish the edited file.
-3. Set `CORSIA_CLIENT_METADATA_URL` to the same address. The setting is empty by default; while it is empty CORSIA never sends a metadata URL.
+3. Set `CORSIA_CLIENT_METADATA_URL` to the same address.
 
 ## Never move it
 
@@ -22,3 +22,5 @@ Providers key refresh tokens to the client ID. Changing the address signs every 
 - Loopback callbacks only: `127.0.0.1`, `localhost` and `[::1]` at `/callback`. The port is chosen at sign-in time; providers match loopback addresses on any port (RFC 8252 §7.3).
 
 `backend/tests/test_client_metadata_document.py` checks the file's shape.
+
+Checked against the code at `7a8c55d84`.

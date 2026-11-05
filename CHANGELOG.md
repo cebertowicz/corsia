@@ -8,7 +8,9 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
 - A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
+- A pull request review that a restart cut off now picks up again when CORSIA starts, instead of waiting for the next push (thanks @mikemikimike).
 - A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.
 - After this update, every chat that runs on your existing Claude Code or Codex account waits until you sign that account in again in CORSIA, automations and reviewers included; if many agents share that account, they all wait until then. Each Claude Code and Codex account now has its own CORSIA sign-in, so signing in or out of `claude` or `codex` in a terminal no longer changes the account CORSIA uses.
 - Agents can now read email attachments in Gmail and in mail accounts connected with a password: an agent reading an email sees its attachments and can save them into its workspace. Agents can now read PDFs, those attachments and any PDF in your workspace: the text page by page, a form's filled-in values, and a page as a picture when its text isn't enough.
@@ -19,6 +21,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - GitHub rules for completed checks now work by default when a repository webhook is connected, and temporary failures get another chance to deliver the event.
 - If the first setup chat ends without a visible reply, CORSIA now gives the agent one more chance to send it.
 - In the desktop app, Sign in and Open the page again on a connected app or account now open the sign-in page in your default browser; before, a connected app's page didn't open and you had to copy its link.
+- Jumping to a comment in a wide table now brings its cell into view sideways as well as its row.
 - Local models now follow each model's own defaults: a chat with no thinking level chosen runs at the model's default level (the picker reads Auto), and setup and model downloads no longer set a reply-length limit. Existing reply-length limits, including those earlier setup runs set, remain until changed in oMLX.
 - Local models now run on oMLX 0.7.3: several chats running at once on a local model use less memory and reply faster, and oMLX no longer gets stuck refusing every prompt for lack of memory after two prompts overlap. After an app update, CORSIA updates its running local model server once requests finish and reloads the same models; Settings shows “Restarting…” until they are loaded.
 - Messages in Connected apps now says Enable and Turn off, and explains what Full Disk Access allows before you enable it.

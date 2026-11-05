@@ -327,14 +327,17 @@ def start_trials(
 
 def attach_plan_result(db, result: object, thread_id: str, direct_node: bool) -> None:
     """Attach trials to the task actually selected by a plan mutation."""
-    from memory.node_text import started_node_id
+    from plans.public import TASK_STARTED_HOWS
 
     result = getattr(result, "result", result)
     if not isinstance(result, dict):
         return
     node = result.get("node") if direct_node else None
+    after = result.get("next")
+    selected = after.get("selected") if isinstance(after, dict) else None
     node_id = (str(node["id"]) if isinstance(node, dict) and node.get("kind") == "task" and node.get("id")
-               else started_node_id(result.get("next")))
+               else str(selected["id"]) if isinstance(selected, dict) and selected.get("how") in TASK_STARTED_HOWS
+               else None)
     if node_id:
         attach_at_start(db, result, thread_id=thread_id, node_id=node_id)
 

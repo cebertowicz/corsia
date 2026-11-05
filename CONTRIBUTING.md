@@ -4,7 +4,7 @@ Thank you for contributing. Public contributions must contain only material you 
 
 ## Before you start
 
-Read [`AGENTS.md`](AGENTS.md) and the relevant parts of [`ARCHITECTURE.md`](ARCHITECTURE.md), [`BACKEND.md`](BACKEND.md), or [`FRONTEND.md`](FRONTEND.md). Work on a feature branch based on `dev`. You can make it in your CORSIA checkout at `~/.corsia` and edit there: `corsia restart` serves your edits, uncommitted ones included. Commit or stash them before **Settings → System → Update now**, which refuses while the checkout has uncommitted edits. Try a risky change, such as a migration, on a second checkout with its own data first (see the README's everyday commands). Never run tests against your real CORSIA's data.
+Follow the developer path in [`docs/contributing/`](docs/contributing/README.md). Read [`AGENTS.md`](AGENTS.md) and the relevant parts of [`ARCHITECTURE.md`](ARCHITECTURE.md), [`BACKEND.md`](BACKEND.md), or [`FRONTEND.md`](FRONTEND.md). Work on a feature branch based on `dev`. You can make it in your CORSIA checkout at `~/.corsia` and edit there: `corsia restart` serves your edits, uncommitted ones included. Commit or stash them before **Settings → System → Update now**, which refuses while the checkout has uncommitted edits. Try a risky change, such as a migration, on a second checkout with its own data first (see the README's everyday commands). Never run tests against your real CORSIA's data.
 
 Try your change in the browser. The desktop app does not run your checkout's backend, even under `tauri dev`, and a desktop app that has taken over your source install stops it from serving your checkout.
 
@@ -40,14 +40,6 @@ Open a public pull request to `dev` from your feature branch. Explain the user-v
 
 If your PR changes what a person sees or does, add one plain-language line under `## Unreleased` in `CHANGELOG.md`, in its alphabetical place (not simply at the top or the end), describing the change as a user would notice it. If it doesn't (tests, refactors, CI, internal docs), write `none` under **Release note** in the pull request description.
 
-Before pushing, run the local gate:
+Before pushing, test your change and run the local gate as [Testing and review](docs/contributing/testing.md) describes; that page also explains the checks and the review your pull request gets. For system design and runtime boundaries, use the architecture documents above.
 
-```bash
-bash scripts/check-pr
-```
-
-Also run the targeted tests for the files and behavior you changed. For frontend changes, use the applicable commands from `frontend/package.json`, such as `npm run check` and `npm run test`; for backend changes, run the affected tests with the repository's Python 3.11 environment. Do not run the backend full suite locally: CI owns that suite.
-
-Every pull request reports the required check contexts. When a job is irrelevant to the changed files, its context is reported as skipped rather than omitted.
-
-For browser and end-to-end test guidance, see [`frontend/e2e/README.md`](frontend/e2e/README.md). For system design and runtime boundaries, use the architecture documents above.
+Checked against the code at `310115261`.
