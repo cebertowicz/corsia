@@ -7,7 +7,7 @@ import { fromServer, type CommentAuthor, type DocComment } from './docCommentPro
 import { heldIds, withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
 
-export { fromServer, hasNewReplies, regionFromServer } from './docCommentProjection';
+export { fromServer, hasUnread, regionFromServer } from './docCommentProjection';
 export type { CommentAuthor, CommentReply, DocComment } from './docCommentProjection';
 
 function findById(rows: ServerComment[], id: string): ServerComment | null {
@@ -182,7 +182,7 @@ export async function markThreadViewed(artifactId: string, rootId: string, seenR
 	docComments.update((all) => ({
 		...all,
 		[artifactId]: (all[artifactId] ?? []).map((comment) => (
-			comment.id === result.root_id ? { ...comment, newComment: result.new_reply_ids.includes(comment.id), newReplyIds: result.new_reply_ids.filter((id) => id !== comment.id) } : comment
+			comment.id === result.root_id ? { ...comment, newComment: false, newReplyIds: result.new_reply_ids } : comment
 		)),
 	}));
 }

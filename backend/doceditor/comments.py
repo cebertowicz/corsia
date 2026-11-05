@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from doceditor import comment_notifications, feedback_reopens, feedback_settlement, live_events
+from doceditor import comment_notifications, feedback_reopens, feedback_settlement, feedback_state, live_events
 from infra.database import get_db, write_transaction
 
 _CLIENT_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
@@ -203,9 +203,9 @@ def create_with_status(
                 comment_notifications.announce_after_commit(
                     connection, artifact_id, comment_id=cid if named else None,
                     author_thread_id=author_thread_id if named else None,
-                    # Matches feedback_state.new_reply_rows: suggestions and review notes are never unread.
-                    reply_attention_changed=bool(
-                        author_kind == 'agent' and (parent_id or (replacement is None and not review))))
+                    # reply_attention_changed includes eligible new top-level comments.
+                    reply_attention_changed=feedback_state.may_change_unread_attention(
+                        author_kind, parent_id, replacement, review))
             if region is not None:
                 live_events.region_after_commit(connection, "placed", artifact_id, w, h, author_kind=author_kind)
         return r, created

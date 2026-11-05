@@ -296,5 +296,5 @@ def test_workspace_marker_reads_one_row_per_document_not_one_per_reply(isolated_
     assert marked == set(documents[:2])
     reads = [" ".join(sql.split()) for sql in statements if "doc_comment_thread_views" in sql]
     assert len(reads) == 1
-    assert reads[0].startswith("SELECT DISTINCT root.artifact_id AS artifact_id FROM doc_comments reply")
-    assert "reply.id AS reply_id" not in reads[0] and "ORDER BY" not in reads[0]
+    assert reads[0].startswith("SELECT DISTINCT root.artifact_id AS artifact_id FROM doc_comments item")
+    assert "item.id AS reply_id" not in reads[0] and "ORDER BY" not in reads[0]

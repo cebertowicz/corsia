@@ -34,7 +34,7 @@ export interface DocComment {
 	insertAfter?: boolean;
 	decision?: 'accepted' | 'rejected' | null;
 	decidedBy?: string | null;
-	/** Replies by others newer than this viewer's seen stamp. The only copy of reply attention; read it through `hasNewReplies`. */
+	/** Unread reply IDs; `newComment` separately marks an unread top-level comment. */
 	newReplyIds?: string[];
 	newComment?: boolean;
 	replies: CommentReply[];
@@ -55,8 +55,8 @@ export interface DocComment {
 	imageSrc?: string | null;
 }
 
-/** Whether a thread has a reply this viewer has not seen: the one reading of `newReplyIds`. */
-export function hasNewReplies(comment: Pick<DocComment, 'newReplyIds' | 'newComment'>): boolean {
+/** Whether a thread contains an unread top-level comment or reply. */
+export function hasUnread(comment: Pick<DocComment, 'newReplyIds' | 'newComment'>): boolean {
 	return !!comment.newComment || (comment.newReplyIds?.length ?? 0) > 0;
 }
 

@@ -98,20 +98,9 @@ def test_grouping_combines_unread_replies_and_new_top_level_comments(isolated_db
             add_comment(db, artifact_id, author_kind='user', author_id=None, parent_id=agent_root['id'])
         for root in (user_root, agent_root, untouched):
             add_comment(db, artifact_id, author_id='owner', parent_id=root['id'])
-        original = db.execute('''SELECT root.artifact_id, reply.author_thread_id, COUNT(*) AS n
-            FROM doc_comments reply JOIN threads thread ON thread.id=reply.author_thread_id
-            JOIN doc_comments root ON root.id=reply.parent_id
-            LEFT JOIN doc_comment_thread_views view ON view.user_id=? AND view.root_id=root.id
-            WHERE reply.author_kind='agent' AND thread.user_id=? AND root.resolved=0
-              AND (root.author_kind='user' OR EXISTS (SELECT 1 FROM doc_comments touched
-                   WHERE touched.parent_id=root.id AND touched.author_kind='user'))
-              AND (reply.created_at>COALESCE(view.seen_at, '') OR
-                   (view.seen_at IS NOT NULL AND reply.created_at=view.seen_at AND reply.id>view.seen_reply_id))
-            GROUP BY root.artifact_id, reply.author_thread_id''', ('owner-token', 'owner-token')).fetchall()
         rows = unread_reply_items(db, 'owner-token')
         assert [(row['detail']['destination']['id'], row['detail']['source']['thread_id'], row['detail']['unread_count'])
                 for row in rows] == [(artifact_id, 'owner', 4)]
-        assert [tuple(row) for row in original] == [(artifact_id, 'owner', 2)]
         assert rows[0]['detail']['new_comment_count'] == 2
     finally:
         db.close()

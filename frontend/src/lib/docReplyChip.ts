@@ -1,7 +1,7 @@
-import { hasNewReplies, type DocComment } from '$lib/stores/docComments';
+import { hasUnread, type DocComment } from '$lib/stores/docComments';
 
-/** New replies across a document's threads: the chat chip's unit, so both show the same number. */
-export function unreadReplyCount(threads: DocComment[]): number {
+/** Unread comments across a document's threads: the chat chip's unit, so both show the same number. */
+export function unreadCommentCount(threads: DocComment[]): number {
 	return threads.reduce((total, thread) => total + (thread.newReplyIds?.length ?? 0) + (thread.newComment ? 1 : 0), 0);
 }
 
@@ -12,6 +12,6 @@ export function unreadReplyCount(threads: DocComment[]): number {
  */
 export function nextUnreadThread(inDocumentOrder: DocComment[], lastId: string | null, excludeId?: string): DocComment | null {
 	const from = lastId ? inDocumentOrder.findIndex((thread) => thread.id === lastId) : -1;
-	const waiting = (thread: DocComment) => thread.id !== excludeId && hasNewReplies(thread);
+	const waiting = (thread: DocComment) => thread.id !== excludeId && hasUnread(thread);
 	return inDocumentOrder.slice(from + 1).find(waiting) ?? inDocumentOrder.find(waiting) ?? null;
 }

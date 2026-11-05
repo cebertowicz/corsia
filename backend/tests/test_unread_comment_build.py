@@ -57,6 +57,31 @@ def test_new_agent_comment_requires_prior_person_comment_and_clears_on_open(isol
         db.close()
 
 
+def test_top_level_unread_ids_stay_reply_only_after_view(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'owner')
+        artifact = seed_document(db, 'owner')
+        person, _ = add_comment(db, artifact, author_kind='user', author_id=None)
+        root, _ = add_comment(db, artifact, author_id='owner')
+        touch, _ = add_comment(db, artifact, author_kind='user', author_id=None, parent_id=root['id'])
+        reply, _ = add_comment(db, artifact, author_id='owner', parent_id=root['id'])
+        for index, row in enumerate((person, root, touch, reply)):
+            db.execute('UPDATE doc_comments SET created_at=? WHERE id=?', (f'2026-01-0{index + 1}T00:00:00Z', row['id']))
+        db.commit()
+        threads = [{'id': root['id']}]
+        annotate_thread_attention(db, 'owner-token', artifact, threads)
+        assert threads[0]['new_comment'] is True
+        assert threads[0]['new_reply_ids'] == [reply['id']]
+        with write_transaction(db, scope='test_top_level_view_ids') as connection:
+            remaining = mark_thread_viewed(connection, 'owner-token', artifact, root['id'], root['id'])
+        annotate_thread_attention(db, 'owner-token', artifact, threads)
+        assert threads[0]['new_comment'] is False
+        assert threads[0]['new_reply_ids'] == remaining == [reply['id']]
+    finally:
+        db.close()
+
+
 def test_upgrade_stamps_newly_eligible_history_without_clearing_open_replies(isolated_db):
     db = get_db()
     try:

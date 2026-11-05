@@ -6,7 +6,7 @@
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { onDestroy, untrack } from 'svelte';
 	import { ensureEditorArtifactId, releaseDocEditor } from '$lib/stores/activeDocEditor';
-	import { docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements, hasNewReplies } from '$lib/stores/docComments';
+	import { docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements, hasUnread } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
@@ -125,7 +125,7 @@
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
 	const commentStatus = $derived(commentSurfaceStatus(listedComments));
-	const unreadThreads = $derived(listedComments.filter(hasNewReplies));
+	const unreadThreads = $derived(listedComments.filter(hasUnread));
 	const scroll = createCommentScrollTarget({
 		focused: () => focusedComment, comments: () => listedComments, text: () => editText, listOpen: () => commentUI.state?.kind === 'list',
 	});
@@ -141,7 +141,7 @@
 		if (!commentUI.focusComment(id, anchor, viaSuggestion)) return;
 		scroll.toComment(id, false, 'navigation');
 	}
-	function showMarkerCards(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { if (ids.length === 1) scroll.toComment(ids[0], false, 'navigation'); commentUI.focusMarker(ids, opener, reading); replyArrival.whenShown(ids[0]); }
+	function showMarkerCards(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { if (ids.length === 1) scroll.toComment(ids[0], false, 'navigation'); commentUI.focusMarker(ids, opener, reading); if (listedComments.some((comment) => comment.id === ids[0] && hasUnread(comment))) replyArrival.whenShown(ids[0]); }
 	// A marker over comments on parts of one image opens the image, at the comment when it is the only one (DCOL-FR13.5).
 	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => showMarkerCards(ids, opener, reading)); }
 	function onDocEdit(mapPos: (p: number) => number) { if (loadedArtifactId) remapComments(loadedArtifactId, mapPos); images.remap(mapPos); }

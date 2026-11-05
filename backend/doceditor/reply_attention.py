@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 from core.thread_identity import root_visible_thread_ids
-from doceditor.feedback_state import new_reply_rows
+from doceditor.feedback_state import unread_comment_rows
 from infra.auth import is_owner_sentinel
 from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE
 
@@ -23,20 +23,20 @@ def _removed(path: str) -> bool:
 
 
 def unread_reply_items(db, user_id: str) -> list[dict]:
-    """Group unread agent replies by replying thread and document, after authorization.
+    """Group unread agent replies and eligible new top-level comments by thread and document.
 
     Each item's ``source.thread_id`` is the replying thread's visible root chat, so one chat
     and document can carry several items. An unresolved lineage keeps the replying thread.
     """
-    source, params = new_reply_rows(user_id, None, include_author_thread=True)
+    source, params = unread_comment_rows(user_id, None, include_author_thread=True)
     rows = db.execute(
-        f"""SELECT root.artifact_id, reply.author_thread_id, COUNT(*) AS unread_count,
-                  SUM(CASE WHEN reply.parent_id IS NULL THEN 1 ELSE 0 END) AS new_comment_count,
-                  MAX(reply.created_at) AS newest_at
+        f"""SELECT root.artifact_id, item.author_thread_id, COUNT(*) AS unread_count,
+                  SUM(CASE WHEN item.parent_id IS NULL THEN 1 ELSE 0 END) AS new_comment_count,
+                  MAX(item.created_at) AS newest_at
               {source}
-               AND reply.author_kind='agent' AND thread.user_id=?
-              GROUP BY root.artifact_id, reply.author_thread_id
-              ORDER BY newest_at DESC, root.artifact_id, reply.author_thread_id""",
+               AND item.author_kind='agent' AND thread.user_id=?
+              GROUP BY root.artifact_id, item.author_thread_id
+              ORDER BY newest_at DESC, root.artifact_id, item.author_thread_id""",
         (*params, user_id),
     ).fetchall()
     if not rows:
@@ -57,6 +57,7 @@ def unread_reply_items(db, user_id: str) -> list[dict]:
     ).fetchall()
     by_id = {str(row['id']): row for row in artifacts if row['owner_rank'] == 1}
     result = []
+    # unread_count includes eligible new top-level comments as well as replies.
     for row in rows:
         artifact = by_id.get(str(row['artifact_id']))
         if not artifact:

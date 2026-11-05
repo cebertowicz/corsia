@@ -58,7 +58,7 @@ vi.mock('$lib/stores/docCommentArrivals', () => ({
 vi.mock('$lib/stores/docComments', async () => ({
 	docComments: mocks.docComments,
 	commentLoads: { subscribe(run: (value: Record<string, unknown>) => void) { run({}); return () => {}; } },
-	hasNewReplies: (await import('$lib/stores/docCommentProjection')).hasNewReplies,
+	hasUnread: (await import('$lib/stores/docCommentProjection')).hasUnread,
 	rangeFor: mocks.rangeFor,
 	remapComments: () => {},
 	loadComments: mocks.loadComments,
@@ -965,9 +965,14 @@ describe('ArtifactLeaf comment focus from the text', () => {
 			expect(found).not.toBeNull();
 			return found!;
 		});
+		const observe = vi.spyOn(MutationObserver.prototype, 'observe');
 		marker.focus();
 		marker.click();
 		flushSync();
+		await Promise.resolve();
+		// A read thread opens normally without starting the body-wide arrival observer.
+		expect(observe.mock.calls.some(([target]) => target === document.body)).toBe(false);
+		observe.mockRestore();
 		expect(get(focusedDocComment)).toBe('comment');
 		expect(document.body.querySelector('.popover')).not.toBeNull();
 		expect(view.state.selection.main).toMatchObject({ anchor: 0, head: 0 });
