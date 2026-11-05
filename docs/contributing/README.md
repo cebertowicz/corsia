@@ -7,9 +7,10 @@ The path from a fresh clone to a merged change, for developers who want to chang
 | Step | Read | To learn |
 |---|---|---|
 | 1 | [`CONTRIBUTING.md`](../../CONTRIBUTING.md) | Which issues are open to you, how to claim one, the CLA, and what a pull request needs |
-| 2 | [How CORSIA works](../how-it-works/README.md) | The parts of the system and the terms used everywhere else |
-| 3 | [`ARCHITECTURE.md`](../../ARCHITECTURE.md) | Where each part lives in the code |
-| 4 | [`BACKEND.md`](../../BACKEND.md) or [`FRONTEND.md`](../../FRONTEND.md) | Rules for the side you are changing |
-| 5 | [Writing docs](writing-docs.md) | Where a page goes, the format, and how to keep it current |
+| 2 | [Developer setup](dev-setup.md) | Running CORSIA from a checkout with its own data, and running targeted tests |
+| 3 | [How CORSIA works](../how-it-works/README.md) | The parts of the system and the terms used everywhere else |
+| 4 | [`ARCHITECTURE.md`](../../ARCHITECTURE.md) | Where each part lives in the code |
+| 5 | [`BACKEND.md`](../../BACKEND.md) or [`FRONTEND.md`](../../FRONTEND.md) | Rules for the side you are changing |
+| 6 | [Writing docs](writing-docs.md) | Where a page goes, the format, and how to keep it current |
 
 Checked against the code at `7a8c55d84`.

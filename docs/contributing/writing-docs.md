@@ -22,12 +22,12 @@ Write facts once. If another page already explains something, link to it instead
 - Diagrams are fenced `mermaid` blocks, which GitHub renders. No pictures of diagrams. Keep labels short and the diagram narrow enough to read on a phone.
 - Use a table for anything compared across options.
 - File names are lowercase with hyphens, short, and still right in a year.
-- Each folder has a `README.md` as its landing page.
+- A new folder has a `README.md` as its landing page.
 - Don't move or rename an existing page. Links from outside the repository depend on its path.
 
 ## Navigation
 
-[`docs/README.md`](../README.md) is the only navigation source: it lists every section in reading order, and each section's `README.md` lists that section's pages. When you add a page, add it to its folder's `README.md`; a new top-level page or folder also goes in `docs/README.md`.
+[`docs/README.md`](../README.md) is where navigation starts: it lists every section in reading order, and each section's landing page lists that section's pages. When you add a page, add it to its folder's landing page; a new top-level page or folder also goes in `docs/README.md`.
 
 ## Voice
 
@@ -51,7 +51,7 @@ Checked against the code at `7a8c55d84`.
 
 The commit is the one your branch is based on, since a commit can't name itself. When you change code a page describes, update the page in the same pull request and set the line to your branch's base commit.
 
-Some section landing pages state one checked commit for the whole section. A page's own line overrides that statement.
+If you checked only part of a page, name the part, for example "Product-event sections checked against the code at `<sha>`." Some section landing pages state one checked commit for the whole section. A page's own line overrides that statement.
 
 ## Public content
 

@@ -76,9 +76,6 @@ Fix anything the gate marks as FAIL. Run the targeted tests for your change sepa
 
 ## Next steps
 
-- Read the [contributor guide](README.md).
-- Learn how to [write documentation](writing-docs.md).
-- Explore [how CORSIA works](../how-it-works/README.md).
-- Read the [architecture](../../ARCHITECTURE.md).
+Continue with the [reading order](README.md#reading-order).
 
 Checked against the code at `7a8c55d84`.
