@@ -795,6 +795,12 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 175 -> 176 removes the retired plan quote table.
         from infra.migration_175_to_176_drop_plan_quotes import migrate_175_to_176
         migrate_175_to_176(db)
+        # 176 -> 177 carries unread state into the expanded projection.
+        from infra.migration_176_to_177_unread_comments import migrate_176_to_177
+        migrate_176_to_177(db)
+        # 177 -> 178 only moves offset clock schedules to UTC.
+        from infra.migration_177_to_178_clock_utc import migrate_177_to_178
+        migrate_177_to_178(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
@@ -928,7 +934,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 177
+    assert SCHEMA_VERSION == 178
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83

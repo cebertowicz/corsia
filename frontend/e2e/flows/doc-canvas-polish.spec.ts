@@ -67,7 +67,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await loginByUrl(page);
 	await chooseThread(page, viewerTitle);
 	await expect(page.locator('.cm-content')).toContainText('Paragraph 1:');
-	await expect(page.getByRole('button', { name: /^0 open threads\b/ })).toBeEnabled();
+	await expect(page.getByRole('button', { name: /^0 threads\b/ })).toBeEnabled();
 	if (!mobile) {
 		await expect(page.locator('.leaf:not(.compact)')).toBeVisible();
 		await measurements(page, testInfo, 'canvas-desktop-expanded');
@@ -129,7 +129,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await expect(page.locator('[data-doc-activity-pill]')).toHaveCount(0);
 	await scroller.evaluate((element) => { element.scrollTop = 0; });
 	const paneLabel = await page.locator('.pane-scope').textContent();
-	await page.getByRole('button', { name: /^1 open thread\b/ }).click();
+	await page.getByRole('button', { name: /^1 thread\b/ }).click();
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
 	await expect(drawer).toBeVisible();
 	const viewportBefore = await page.evaluate(() => window.visualViewport?.height ?? window.innerHeight);
@@ -192,7 +192,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await drawer.getByRole('button', { name: 'Filter comments: Open', exact: true }).focus();
 	await page.keyboard.press('Escape');
 	await expect(drawer).toHaveCount(0);
-	await expect(page.getByRole('button', { name: /^1 open thread\b/ })).toBeFocused();
+	await expect(page.getByRole('button', { name: /^1 thread\b/ })).toBeFocused();
 	await page.locator('.cm-content').focus();
 	await page.keyboard.press('Shift+ArrowRight');
 	await expect(page.getByRole('button', { name: 'Comment', exact: true })).toBeVisible();

@@ -1,4 +1,4 @@
-"""Schema 176 -> 177: clock schedules stored with an offset move to UTC.
+"""Schema 177 -> 178: clock schedules stored with an offset move to UTC.
 
 Data only. ``due`` and ``settle_run`` compare ``next_run_at`` to a UTC timestamp as text, so a
 row that kept its caller's offset would still fire at the wrong instant after the update.
@@ -10,7 +10,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 
-def migrate_176_to_177(conn: sqlite3.Connection) -> None:
+def migrate_177_to_178(conn: sqlite3.Connection) -> None:
     """Rewrite each active clock schedule's next run to its UTC instant.
 
     Every real database has the table, but the older rungs' migration tests run this on a

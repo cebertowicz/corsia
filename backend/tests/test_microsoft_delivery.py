@@ -234,7 +234,7 @@ async def test_calendar_send_refuses_a_legacy_raw_event_draft(microsoft, workspa
 
 
 def _approve(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def approved(_kind: str, draft_id: str, _revision: str) -> Approved:
+    async def approved(_kind: str, draft_id: str, _revision: str, **_: object) -> Approved:
         row = _row(draft_id)
         from infra import config
         return Approved(row, (config.WORKSPACE / row["path"]).read_bytes())
@@ -386,3 +386,25 @@ async def test_delivery_logs_only_unexpected_credential_failures(monkeypatch, ca
     )
     assert out == "Error: Not sent: sign in"
     assert ("could not acquire delivery credentials" in caplog.text) is logged
+
+
+async def test_changed_outside_refusals_name_the_microsoft_draft_tools(microsoft, deleg_db):  # noqa: F811
+    from infra import config
+
+    mail = await _mail_draft(microsoft)
+    invite = await _calendar_draft(microsoft, operation="create")
+    for saved in (mail, invite):
+        path = config.WORKSPACE / saved["path"]
+        path.write_text(path.read_text() + "\nEdited by the person.\n")
+    _admit(deleg_db, "outlook-send")
+    _bind(deleg_db, "outlook-send")
+
+    refused = await MicrosoftMailSendTool().execute(
+        _thread_id=THREAD, account_id=microsoft, draft_id=mail["draft_id"], revision=mail["revision"],
+    )
+    assert refused.startswith("Error: Not sent: the draft was changed outside the draft tools")
+    assert "keep their changes when you save it with microsoft_mail_draft," in refused
+    refused = await MicrosoftCalendarCreateTool().execute(
+        _thread_id=THREAD, account_id=microsoft, draft_id=invite["draft_id"], revision=invite["revision"],
+    )
+    assert "keep their changes when you save it with microsoft_calendar_draft," in refused

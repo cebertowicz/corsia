@@ -102,6 +102,7 @@ export interface AttentionDestination {
 export interface CommentReplyDetail {
 	title: string;
 	unread_count: number;
+	new_comment_count?: number;
 	newest_at: string;
 	destination: AttentionDestination;
 	source: { thread_id: string };

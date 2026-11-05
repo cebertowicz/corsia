@@ -1,12 +1,12 @@
 <script lang="ts">
 	// The comments pill, one for every review surface (RSR-4): the document's header and the image viewer's bar open the
-	// same drawer, so they read the same. It counts open threads (resolved ones are not counted), names the unit on a
+	// same drawer. It counts the threads shown by that surface's default list, names the unit on a
 	// canvas wider than 600 px, carries a dot while messages wait to be sent, and an amber mark on its icon while
 	// comments could not be placed. The host gives it its own button look through `class`.
 	let { count, unread = 0, unsent = 0, unplaced = 0, loading = false, unknown = false, expanded = false, disabled = false, element = $bindable(), class: look = '', onOpen, ...data }: {
-		/** Open threads. */
+		/** Threads in the default list. */
 		count: number;
-		/** Open threads with an agent reply the viewer has not seen. */
+		/** Threads with unread comments or replies. */
 		unread?: number;
 		/** Messages in the feedback batch that are not sent yet. */
 		unsent?: number;
@@ -25,7 +25,7 @@
 	// Threads, unplaced comments, and unsent messages each contribute their already-visible status to the pill name.
 	const unplacedPhrase = $derived(`${unplaced} comment${unplaced === 1 ? '' : 's'} couldn't be placed`);
 	const unreadPhrase = $derived(`${unread} unread`);
-	const label = $derived(unknown ? 'Comments unavailable until the document opens' : `${count} open thread${count === 1 ? '' : 's'}${unread ? `, ${unreadPhrase}` : ''}${unplaced ? `, ${unplacedPhrase}` : ''}${unsent ? `, ${unsent} message${unsent === 1 ? '' : 's'} not sent yet` : ''}`);
+	const label = $derived(unknown ? 'Comments unavailable until the document opens' : `${count} thread${count === 1 ? '' : 's'}${unread ? `, ${unreadPhrase}` : ''}${unplaced ? `, ${unplacedPhrase}` : ''}${unsent ? `, ${unsent} message${unsent === 1 ? '' : 's'} not sent yet` : ''}`);
 </script>
 
 <button type="button" class={look} {...data} bind:this={element} aria-expanded={expanded} {disabled}

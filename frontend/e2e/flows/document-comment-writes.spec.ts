@@ -43,7 +43,7 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	const { title, commentUrl, commentId } = await seedCommentedDocument({ page, request });
 	// Comments live in the canvas drawer, which starts closed on every load.
 	const openComments = async () => {
-		await page.getByRole('button', { name: /^1 open thread\b/ }).click();
+		await page.getByRole('button', { name: /^1 thread\b/ }).click();
 		await expect(page.getByRole('region', { name: 'Document comments', exact: true })).toBeVisible();
 		await showAllThreads(page.getByRole('region', { name: 'Document comments', exact: true }));
 	};
@@ -110,12 +110,11 @@ test('@flow:resolved-reply a person can reply to an agent on a resolved thread',
 	await loginByUrl(page);
 	if (mobile) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
-	await page.getByRole('button', { name: /^0 open threads\b/ }).click();
+	// The agent's reply is still unread after the agent resolved the thread, so the default list keeps it, open.
+	await page.getByRole('button', { name: /^1 thread, 1 unread\b/ }).click();
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
-	await drawer.getByRole('button', { name: /Filter comments:/ }).click();
-	await drawer.getByRole('menuitemradio', { name: 'Resolved', exact: true }).click();
 	const resolved = drawer.getByRole('region', { name: /^Resolved comment by / });
-	await resolved.getByRole('button', { name: 'Resolved · 2 messages' }).click();
+	await expect(resolved.getByRole('button', { name: 'Resolved · 2 messages' })).toBeVisible();
 	await expect(resolved).toContainText('Agent reply before resolution');
 	const input = resolved.getByRole('textbox', { name: 'Reply' });
 	await expect(input).toBeVisible();
@@ -151,7 +150,7 @@ test('@flow:document-comment-highlight a resolved comment loses its highlight, s
 	await expect(anchorMark).toHaveCount(0);
 	await saveEvidenceScreenshot(page, testInfo, 'highlight-2-resolved', { fullPage: false });
 	// Picking the resolved comment in the drawer shows which text it was.
-	await page.getByRole('button', { name: /^0 open threads\b/ }).click();
+	await page.getByRole('button', { name: /^0 threads\b/ }).click();
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
 	await showAllThreads(drawer);
 	await drawer.getByRole('button', { name: /^Go to text: / }).click();

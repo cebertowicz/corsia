@@ -350,7 +350,7 @@ test.describe('@flow:image-viewer-zoom @surface:documents the canvas image viewe
 			const overlay = page.locator('.image-overlay');
 			await expect(overlay.locator('.frame img')).toBeVisible();
 			const labels = await overlay.locator('.bar button').evaluateAll((buttons) => buttons.map((b) => b.getAttribute('aria-label') ?? b.textContent?.trim()));
-			expect(labels).toEqual(['Back to walkthrough.md', 'Comment', '0 open threads', 'Fit']);
+			expect(labels).toEqual(['Back to walkthrough.md', 'Comment', '0 threads', 'Fit']);
 			await expect(overlay.locator('.back-text')).toHaveText('Back');
 			await expect(overlay.getByRole('button', { name: 'Fit' })).toHaveAttribute('aria-pressed', 'true');
 			expect((await page.locator('.image-overlay .bar button').first().boundingBox())!.height).toBeGreaterThanOrEqual(44);
