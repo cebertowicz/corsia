@@ -275,6 +275,7 @@ async def test_codex_turn_is_owned_until_its_terminal_commits(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("route", _ROUTES_WITH_TOOL_DEBT)
+@pytest.mark.usefixtures("held_wake_drives")
 async def test_tool_debt_settlement_happens_inside_the_ownership_window(
     isolated_db, monkeypatch, owner_probe, route,
 ) -> None:

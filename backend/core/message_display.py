@@ -7,6 +7,7 @@ from typing import Any
 
 from core.message_row import assistant_calls, call_id, parse_meta
 from core.tool_lineage import ToolLineageError, resolve_tool_lineage
+from infra.focus_rows import is_result_notice
 from loguru import logger
 from tools.tool_display import settled_display_call
 
@@ -72,7 +73,8 @@ def llm_to_display(rows: list[dict]) -> list[dict]:
 
     Tool-result children never become display rows. They attach to the assistant
     row named by durable lineage regardless of intervening user or assistant
-    rows, so an Assistant Step is stable across live delivery and reload.
+    rows, so an Assistant Step is stable across live delivery and reload. A
+    provider `result` row shows only as a failed Turn's notice.
     """
     try:
         lineage = resolve_tool_lineage(rows, lenient=True)
@@ -91,8 +93,10 @@ def llm_to_display(rows: list[dict]) -> list[dict]:
         role = row.get("role", "")
         if role == "tool":
             continue
-        if role == "system" and parse_meta(row.get("metadata")).get("type") == "result":
-            continue
+        if role == "system":
+            meta = parse_meta(row.get("metadata"))
+            if meta.get("type") == "result" and not is_result_notice(meta, row.get("content")):
+                continue
         if role == "assistant":
             step_id = row.get("id")
             display.append(_convert_assistant_for_display(

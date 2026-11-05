@@ -11,7 +11,7 @@ import {
 	presentContextDigest,
 	summarizeContextEvents,
 } from './contextEventModel';
-import { isNeverDrawn } from './transcriptRowKinds';
+import { isNeverDrawn, pairUnansweredInput } from './transcriptRowKinds';
 
 export {
 	buildPendingContextDigest,
@@ -185,6 +185,7 @@ export function buildVisibleMessages(
 	allMessages: TranscriptMessage[],
 	barriers: readonly TranscriptMessage[] = [],
 ): TranscriptMessage[] {
+	allMessages = pairUnansweredInput(allMessages);
 	if (barriers.length) {
 		const stops = new Set(barriers.map((row) => row.id));
 		const visible: TranscriptMessage[] = [];
