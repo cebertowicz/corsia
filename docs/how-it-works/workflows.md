@@ -11,7 +11,7 @@ A workflow is a reusable sequence of steps for one kind of work. This page cover
 
 ## Why it exists
 
-Work of one kind repeats, and agents repeat it differently each time: one skips the check, another forgets the person's sign-off. Writing the sequence once, as steps with checks, makes the sequence a plan every time instead of a habit. Because every run has the same steps, runs can be set side by side, which [Measuring work](measuring-work.md) uses.
+Work of one kind repeats, and agents repeat it differently each time: one skips the check, another forgets the person's sign-off. Writing the sequence once, as steps with checks, makes the sequence a plan every time instead of a habit. Because every run has the same steps, runs can be set side by side: the workflow verdict job compares one version's runs with another's (`backend/jobs/workflow_verdicts.py`, reading through `backend/core/workflow_verdict_read.py`).
 
 ## How it works
 
