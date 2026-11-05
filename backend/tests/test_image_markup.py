@@ -11,7 +11,9 @@ from itertools import combinations
 import pytest
 from PIL import Image
 
-from doceditor.image_markup import MAX_RENDER_SIDE, TAG_GAP, TAG_RADIUS, Mark, Region, gutter_tags, place_tag, place_tags, render_marked_image
+from doceditor.badge_tone import badge_fill, contrast
+from doceditor.image_markup import MAX_RENDER_SIDE, TAG_GAP, TAG_RADIUS, Mark, Region, _rgb, gutter_tags, place_tag, place_tags, render_marked_image
+from doceditor.image_regions import AGENT_COLORS
 
 
 def _png(width: int, height: int, color=(240, 240, 240)) -> bytes:
@@ -131,8 +133,31 @@ def test_render_draws_the_tag_outside_the_box_and_leaves_the_corner_clear():
     assert side == "up-left"
     # The translucent badge stays by the box, leaving its corner clear.
     r, g, b = img.getpixel((round(cx) - radius + 3, round(cy)))
-    assert r > 200 and g < 120 and b < 120
+    assert r > 200 and g < 160 and b < 160
     assert img.getpixel((412, 312)) == (240, 240, 240)
+
+
+def test_badge_digit_reads_over_the_disc_on_black_and_white_for_every_agent_color():
+    ink = (17, 17, 17)
+    for color in AGENT_COLORS:
+        fill = badge_fill(_rgb(color))
+        for backdrop in (0, 255):
+            shown = [c * 0.8 + backdrop * 0.2 for c in fill]
+            assert contrast(ink, shown) >= 4.5, (color, fill, backdrop)
+
+
+def test_badge_fill_leaves_a_colour_that_already_reads_and_lightens_one_that_does_not():
+    assert badge_fill(_rgb("#22c55e")) == (34, 197, 94)
+    assert badge_fill(_rgb("#8b5cf6")) != (139, 92, 246)
+    assert badge_fill(_rgb("#8b5cf6"))[0] > 139
+
+
+def test_render_draws_the_disc_in_the_stepped_fill_so_its_digit_reads_on_black():
+    png = render_marked_image(_png(800, 600, (0, 0, 0)), [Mark(1, Region(0.5, 0.5, 0.25, 0.25), "#8b5cf6")])
+    img = Image.open(io.BytesIO(png)).convert("RGB")
+    cx, cy, _side = place_tag(Region(0.5, 0.5, 0.25, 0.25), 800, 600, radius=TAG_RADIUS, gap=TAG_GAP)
+    disc = img.getpixel((round(cx) - TAG_RADIUS + 3, round(cy)))
+    assert contrast((17, 17, 17), disc) >= 4.5
 
 
 def test_render_caps_the_longest_side():

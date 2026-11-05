@@ -13,6 +13,7 @@
  */
 import type { ImageRegion } from '$lib/api/docs';
 import { agentColor } from '$lib/docPresence';
+import { contrastRatio, over, parseColor, stepUntil, toHex, type Rgb } from '$lib/utils/contrast';
 import { projectAccent } from '$lib/utils/projectColors';
 
 export type { ImageRegion };
@@ -165,6 +166,23 @@ export function nearestTarget<T extends Point & { id: string }>(targets: T[], at
 export function regionColor(comment: { authorKind?: 'user' | 'agent'; authorThreadId?: string | null }, projectId: string | null, accent?: string | null): string {
 	if (comment.authorKind === 'agent' && comment.authorThreadId) return agentColor(comment.authorThreadId);
 	return projectAccent(projectId, accent);
+}
+
+/** The digit's ink (`--image-region-ink`), the disc's fill opacity and the two backdrops it is read over. Keep equal to `INK`, `ALPHA` and `BACKDROPS` in `backend/doceditor/badge_tone.py`. */
+const BADGE_INK: Rgb = [17, 17, 17];
+const BADGE_ALPHA = 0.8;
+const BADGE_BACKDROPS: Rgb[] = [[0, 0, 0], [255, 255, 255]];
+
+/**
+ * The disc's fill: the author's colour, stepped lighter only as far as the digit needs to meet 4.5:1
+ * against the fill at 80% over black and over white. A colour that already does is returned as it came,
+ * and so is anything that is not a colour.
+ */
+export function badgeFill(colour: string): string {
+	const own = parseColor(colour);
+	if (!own) return colour;
+	const tone = stepUntil(own, 'dark', (fill) => BADGE_BACKDROPS.every((backdrop) => contrastRatio(BADGE_INK, over(fill, backdrop, BADGE_ALPHA)) >= 4.5));
+	return tone === own ? colour : toHex(tone);
 }
 
 const pct = (value: number) => `${Math.round(value * 100)}%`;

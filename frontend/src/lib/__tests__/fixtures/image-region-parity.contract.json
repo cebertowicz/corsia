@@ -1,5 +1,5 @@
 {
-	"_comment": "Backend ports of viewer rules (doceditor/image_regions.py agent_color, _project_color; doceditor/image_markup.py place_tag, place_tags) must match the viewer (docPresence.ts agentColor, projectColors.ts projectColor, imageRegions.ts placeTag, placeTags). doceditor/doc_images.py resolve_image_path must match markdown-image.ts resolveImagePath. Both sides test against this file.",
+	"_comment": "Backend ports of viewer rules (doceditor/image_regions.py agent_color, _project_color; doceditor/image_markup.py place_tag, place_tags; doceditor/badge_tone.py badge_fill) must match the viewer (docPresence.ts agentColor, projectColors.ts projectColor, imageRegions.ts placeTag, placeTags, badgeFill). doceditor/doc_images.py resolve_image_path must match markdown-image.ts resolveImagePath. Both sides test against this file.",
 	"agent_colors": [
 		{
 			"thread_id": "author",
@@ -646,6 +646,40 @@
 			"doc_path": null,
 			"url": "/ws/a.png",
 			"expected": "/ws/a.png"
+		}
+	],
+	"badge_fills": [
+		{
+			"color": "#8b5cf6",
+			"fill": "#aa87f8"
+		},
+		{
+			"color": "#2dd4bf",
+			"fill": "#2dd4bf"
+		},
+		{
+			"color": "#60a5fa",
+			"fill": "#60a5fa"
+		},
+		{
+			"color": "#f59e0b",
+			"fill": "#f59e0b"
+		},
+		{
+			"color": "#e0489e",
+			"fill": "#e774b5"
+		},
+		{
+			"color": "#22c55e",
+			"fill": "#22c55e"
+		},
+		{
+			"color": "#ef4444",
+			"fill": "#f37575"
+		},
+		{
+			"color": "#06b6d4",
+			"fill": "#06b6d4"
 		}
 	]
 }

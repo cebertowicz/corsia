@@ -91,7 +91,6 @@ def test_agent_copy_uses_the_viewer_numeral_ink():
 def test_badge_blends_with_the_underlying_picture():
     source = io.BytesIO()
     Image.new('RGB', (800, 500), (255, 0, 0)).save(source, format='PNG')
-    result = Image.open(io.BytesIO(render_marked_image(source.getvalue(), [Mark(1, Region(0, 0, 1, 0.5), '#000000')])))
-    red, green, blue = result.getpixel((15, 20))
-    assert 0 < red < 255
-    assert green == blue == 0
+    # A colour whose digit already reads keeps its fill: 80% of it over the red picture.
+    result = Image.open(io.BytesIO(render_marked_image(source.getvalue(), [Mark(1, Region(0, 0, 1, 0.5), '#22c55e')])))
+    assert result.getpixel((15, 20)) == pytest.approx((78, 158, 75), abs=1)

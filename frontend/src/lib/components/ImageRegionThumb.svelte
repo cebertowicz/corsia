@@ -4,7 +4,7 @@
 	// numbered, so the numbers below it can be found on it.
 	import { onMount } from 'svelte';
 	import type { DocComment } from '$lib/stores/docComments';
-	import { isPoint, type ImageRegion } from '$lib/imageRegions';
+	import { badgeFill, isPoint, type ImageRegion } from '$lib/imageRegions';
 	import { rasterBadgeTags } from '$lib/imageGutter';
 
 	type Pinned = DocComment & { region: ImageRegion; regionNumber: number };
@@ -56,7 +56,7 @@
 		{/each}
 		{#each marks as { comment, x, y, anchor } (comment.id)}
 			{#if anchor}<svg class="connector" aria-hidden="true"><line x1={x} y1={y} x2={anchor.x} y2={anchor.y} stroke={colorOf(comment)} stroke-width="1" /></svg>{/if}
-			<span class="num" class:stale={comment.regionStale} style:left="{x}px" style:top="{y}px" style:--region-color={colorOf(comment)} data-thumb-number={comment.regionNumber}>{comment.regionNumber}</span>
+			<span class="num" class:stale={comment.regionStale} style:left="{x}px" style:top="{y}px" style:--region-color={colorOf(comment)} style:--disc-color={badgeFill(colorOf(comment))} data-thumb-number={comment.regionNumber}>{comment.regionNumber}</span>
 		{/each}
 	</span>
 	{#if caption && alt}<span class="caption" data-thumb-caption aria-hidden="true">{alt}</span>{/if}
@@ -79,7 +79,7 @@
 	.dot { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--region-color); box-shadow: 0 0 0 1px var(--image-region-halo); }
 	.num {
 		position: absolute; box-sizing: border-box; display: grid; place-items: center; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
-		background: color-mix(in srgb, var(--region-color) 80%, transparent); color: var(--image-region-ink); border: 1px solid color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge)); box-shadow: 0 0 0 1px var(--image-region-halo);
+		background: color-mix(in srgb, var(--disc-color) 80%, transparent); color: var(--image-region-ink); border: 1px solid color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge)); box-shadow: 0 0 0 1px var(--image-region-halo);
 		font-size: var(--text-caption); font-weight: var(--fw-bold); line-height: 1; font-variant-numeric: tabular-nums;
 	}
 	.num.stale { border-style: dashed; }

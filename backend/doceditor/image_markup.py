@@ -23,6 +23,7 @@ from typing import Literal, Sequence
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from core.image_resize import decode_slot, heif_supported
+from doceditor.badge_tone import badge_fill
 from infra.config import MAX_CONCURRENT_IMAGE_NORMALIZATIONS
 from infra.host_resources import image_decode_pixel_budget
 
@@ -287,11 +288,10 @@ def _draw_region(draw: ImageDraw.ImageDraw, mark: Mark, img: Image.Image, scale:
 
 
 def _draw_tag(draw: ImageDraw.ImageDraw, mark: Mark, centre: tuple[float, float], scale: _Scale) -> None:
-    color = _rgb(mark.color)
     r = scale.radius
     cx, cy = centre
     draw.ellipse((cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2), outline="white", width=2)
-    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(*color, 204))
+    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(*badge_fill(_rgb(mark.color)), 204))
     # Match the viewer's --image-region-ink token.
     draw.text((cx, cy), str(mark.number), fill=(17, 17, 17), font=scale.font, anchor="mm")
 

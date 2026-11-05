@@ -8,7 +8,7 @@
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import type { DocComment } from '$lib/stores/docComments';
 	import {
-		crowdedNames, describeRegion, isPoint, regionFromDrag, regionRect, type ImageRegion, type Point,
+		badgeFill, crowdedNames, describeRegion, isPoint, regionFromDrag, regionRect, type ImageRegion, type Point,
 	} from '$lib/imageRegions';
 	import { viewerBadgeTags } from '$lib/imageGutter';
 	import { imageRegionPick, trackSpace } from '$lib/imageRegionPick';
@@ -278,7 +278,7 @@
 			class:leftward={side === 'left'}
 			style:left="{x}px"
 			style:top="{y}px"
-			style:--region-color={colorOf(comment)}
+			style:--region-color={colorOf(comment)} style:--disc-color={badgeFill(colorOf(comment))}
 			aria-label={label(comment)}
 			aria-pressed={comment.id === selectedId}
 			data-region-tag={comment.regionNumber}
@@ -357,7 +357,7 @@
 	.tag.leftward::before { left: auto; right: -11px; }
 	.disc {
 		position: relative; box-sizing: border-box; display: grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-circle);
-		background: color-mix(in srgb, var(--region-color) 80%, transparent); color: var(--image-region-ink); border: 1.5px solid color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge));
+		background: color-mix(in srgb, var(--disc-color) 80%, transparent); color: var(--image-region-ink); border: 1.5px solid color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge));
 		box-shadow: 0 0 0 1.5px var(--image-region-halo); font-size: var(--text-caption); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; line-height: 1;
 		transition: background var(--dur-tight) var(--ease-snap), border-color var(--dur-tight) var(--ease-snap), scale var(--dur-tight) var(--ease-snap);
 	}
@@ -382,15 +382,16 @@
 	}
 	.name.hidden { opacity: 0; pointer-events: none; transition-duration: calc(var(--dur-tight) * 0.7); }
 	/* Faint until hovered, focused or picked: only the fill fades; the digit, border and white ring stay solid. */
-	.tag.faint .disc, .tag.faint .name { background: color-mix(in srgb, var(--region-color) 80%, transparent); }
-	.tag.stale .disc, .tag.stale .name, .tag.pending .disc, .tag.pending .name { border-color: transparent; background: color-mix(in srgb, var(--region-color) 80%, transparent); }
+	.tag.faint .disc, .tag.stale .disc, .tag.pending .disc { background: color-mix(in srgb, var(--disc-color) 80%, transparent); }
+	.tag.faint .name, .tag.stale .name, .tag.pending .name { background: color-mix(in srgb, var(--region-color) 80%, transparent); }
+	.tag.stale .disc, .tag.stale .name, .tag.pending .disc, .tag.pending .name { border-color: transparent; }
 	.tag.stale .disc::before, .tag.pending .disc::before { opacity: 1; }
 	.tag.stale .name, .tag.pending .name { outline-color: color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge)); }
 	.tag:hover .name { background: var(--region-color); }
 	.tag:focus-visible { outline: none; }
 	.tag:focus-visible .disc { outline: 2px solid var(--accent); outline-offset: 3px; }
 	/* Held: the disc tints and compresses at once; last, so it wins over hover. */
-	.tag:active .disc { scale: 0.97; background: color-mix(in srgb, var(--region-color) 82%, var(--image-region-edge)); transition-duration: 0s; }
+	.tag:active .disc { scale: 0.97; background: color-mix(in srgb, var(--disc-color) 82%, var(--image-region-edge)); transition-duration: 0s; }
 	@media (prefers-reduced-motion: reduce) {
 		.box.sweep { animation: none; }
 		/* Fades stay as short crossfades; a press only tints. */

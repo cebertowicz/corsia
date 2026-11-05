@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AGENT_COLORS } from '$lib/docPresence';
-import { crowdedNames, describeRegion, nearestTarget, placeTag, placeTags, POINT_RADIUS, regionColor, regionFromDrag, regionRect, revealCentre, TAG_RADIUS } from './imageRegions';
+import { contrastRatio, over, parseHex } from '$lib/utils/contrast';
+import { badgeFill, crowdedNames, describeRegion, nearestTarget, placeTag, placeTags, POINT_RADIUS, regionColor, regionFromDrag, regionRect, revealCentre, TAG_RADIUS } from './imageRegions';
 
 const FRAME = { width: 800, height: 500 };
 
@@ -210,5 +213,38 @@ describe('crowdedNames', () => {
 			tagWithName('f', [600, 10, 40, 12]), element('<div data-region-dot="g"></div>', [610, 8, 14, 14]),
 		);
 		expect([...crowdedNames(layer)].sort()).toEqual(['a', 'f']);
+	});
+});
+
+describe('badgeFill', () => {
+	const INK = parseHex('#111111')!;
+	const digitOver = (fill: string, backdrop: number) => contrastRatio(INK, over(parseHex(fill)!, [backdrop, backdrop, backdrop], 0.8));
+
+	it('steps a colour whose digit fails on black lighter, until the digit reads on black and on white', () => {
+		expect(digitOver('#8b5cf6', 0)).toBeLessThan(4.5);
+		const fill = badgeFill('#8b5cf6');
+		expect(fill).not.toBe('#8b5cf6');
+		expect(digitOver(fill, 0)).toBeGreaterThanOrEqual(4.5);
+		expect(digitOver(fill, 255)).toBeGreaterThanOrEqual(4.5);
+	});
+
+	it('leaves a colour whose digit already reads as it came', () => {
+		expect(badgeFill('#22c55e')).toBe('#22c55e');
+		expect(badgeFill('#2DD4BF')).toBe('#2DD4BF');
+	});
+
+	it('reads the digit on every agent colour, over black and over white', () => {
+		for (const colour of AGENT_COLORS) {
+			for (const backdrop of [0, 255]) expect(digitOver(badgeFill(colour), backdrop)).toBeGreaterThanOrEqual(4.5);
+		}
+	});
+
+	it('reads the digit in the ink the token gives it', () => {
+		const tokens = readFileSync(resolve(__dirname, '../app-tokens.css'), 'utf8');
+		expect(/--image-region-ink:\s*#111;/.test(tokens)).toBe(true);
+	});
+
+	it('returns what is not a colour as it came', () => {
+		expect(badgeFill('var(--accent)')).toBe('var(--accent)');
 	});
 });
