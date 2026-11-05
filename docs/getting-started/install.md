@@ -5,12 +5,12 @@ How to put CORSIA on your computer, what it needs, and the commands you use afte
 ## Know before you start
 
 - **A Mac with Apple Silicon (M1 or later) and macOS 15 or later**, or a Linux server running Ubuntu 24.04 or later or Debian 12 or later, on x86_64 or arm64. Agent Safehouse, which sandboxes agent shell commands on a Mac, is built on macOS `sandbox-exec`. Linux has no local model and runs protected commands with bubblewrap; see [Install on Linux](#install-on-linux).
-- **Macs with less than 32 GB of memory currently need a cloud model provider for agent work.** Connect Claude Code, Codex or an API provider until a suitable local agent model is available. The corrections classifier still runs locally.
+- **Macs with less than 32 GB of memory need a cloud model provider for agent work.** Connect Claude Code, Codex or an API provider. The corrections classifier still runs locally.
 - **Corrections are recorded once the local corrections classifier is installed.** Setup starts that download in the background and never waits for it. Corrections you make before it finishes are recorded once it is installed.
 - **Agents run as your macOS user, with unrestricted network access.** Read [Security](../security/README.md) first.
 - **Keep the workspace out of Documents, Desktop, Downloads and iCloud Drive.** CORSIA's sandbox refuses those folders, and macOS privacy prompts can keep interrupting background agents there. The default, `~/corsia`, avoids both; agents still reach files there through a reviewed request (see [Security](../security/README.md)).
 - **Teams use a lot of tokens.** Start with one agent, watch its usage, and set spending limits on any API key.
-- **Pre-release.** Each GitHub release ships a signed, notarized Mac app as a disk image, with a `SHA256SUMS` file; the installed app updates itself. [Supply chain](../security/supply-chain.md#check-it-yourself) shows how to check a download.
+- **Pre-release.** Releases from v0.4.1 on attach a Mac disk image and a `SHA256SUMS` file, and the installed app updates itself. The release workflow builds an unsigned app and signing is a separate manual step, so check a download before opening it ([Supply chain](../security/supply-chain.md#check-it-yourself)), or build the app from your checkout ([below](#desktop-app-from-your-checkout)).
 
 ## Install
 
