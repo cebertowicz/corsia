@@ -18,6 +18,7 @@ These pages were last checked against the code at commit `43a8c7780`, except a p
 | [Connected apps](connected-apps.md) | How tools from other services reach agents, and how outside events wake them |
 | [Coordination models](coordination-models.md) | How a project's way of working is packaged and versioned |
 | [Measuring work](measuring-work.md) | What CORSIA counts, and what it refuses to claim |
+| [Learning from corrections](learning.md) | How corrections become lessons and how trials are judged |
 
 Security is covered in its own section: [Security](../security/README.md). These pages mention security only where it changes how a part works, and link there instead of repeating it.
 
