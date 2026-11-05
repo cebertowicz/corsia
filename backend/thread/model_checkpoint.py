@@ -133,15 +133,26 @@ async def prepare_source_checkpoint(
         and context.source_target.provider == "omlx"
     ):
         from llm.capabilities import make_provider_params
+        from llm.locality import row_server_id
+        from llm.network_endpoints import freshness_guard
         from llm.providers.omlx_lifecycle import (
             OmlxLoadedStateError,
             require_loaded_model,
         )
 
-        provider = await run_in_db(
-            make_provider_params,
-            context.source_target.transport_model,
+        # A probe missed by one sweep is stale, not down: refresh it first.
+        await freshness_guard(
+            row_server_id({"litellm_model": context.source_target.transport_model}) or ""
         )
+        try:
+            provider = await run_in_db(
+                make_provider_params,
+                context.source_target.transport_model,
+            )
+        except ValueError:
+            # A server with no reachable endpoint (stopped, reloading) can't
+            # author a warm fold; the switch goes on with a cold one.
+            return warm_capture_refused(request.thread_id, "native", "source_unreachable")
         try:
             await require_loaded_model(
                 provider.get("api_base"),

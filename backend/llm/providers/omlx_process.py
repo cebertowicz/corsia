@@ -256,6 +256,28 @@ def build_argv(
     return argv
 
 
+def log_size(runtime_dir: Path, server_id: str) -> int | None:
+    try:
+        return log_path(runtime_dir, server_id).stat().st_size
+    except FileNotFoundError:
+        return 0
+    except OSError:
+        return None
+
+
+def logged_since(runtime_dir: Path, server_id: str, offset: int | None, text: str) -> bool | None:
+    """Whether ``text`` was logged after ``offset``; None if the offset or log is unreadable."""
+    if offset is None:
+        return None
+    try:
+        with log_path(runtime_dir, server_id).open("rb") as file:
+            size = file.seek(0, os.SEEK_END)
+            file.seek(max(offset, size - 64 * 1024))
+            return text.encode() in file.read()
+    except OSError:
+        return None
+
+
 def tail_log(runtime_dir: Path, server_id: str, lines: int = 20) -> str:
     path = log_path(runtime_dir, server_id)
     if not path.exists():

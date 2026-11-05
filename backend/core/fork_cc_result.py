@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from core.fork_types import (
+    ForkInputExhausted,
     ProviderForkRejected,
     ProviderForkResult,
 )
@@ -118,7 +119,7 @@ def result(
                     kind.provider_failure("claude-code", diagnostic)
     if not (body := "\n".join(bodies)).strip():
         if truncated:
-            raise ProviderForkRejected(f"{FORK_CONTEXT_TRUNCATED}: {diagnostic or 'no narrative'}")
+            raise ForkInputExhausted(f"{FORK_CONTEXT_TRUNCATED}: {diagnostic or 'no narrative'}")
         detail = "; ".join(filter(None, (_no_body_detail(stdout), process)))
         raise ProviderForkRejected(f"Claude Code {kind.name} produced no body: {detail}")
     measured = from_anthropic(usage)
