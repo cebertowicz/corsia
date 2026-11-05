@@ -1,23 +1,23 @@
 # Connected apps
 
-What CORSIA can do in the accounts and tools you connect: tool servers, Google, Microsoft and other mail hosts, Messages, GitHub, sending, and the agents' browser.
+What CORSIA can do in the accounts and tools you connect: connected apps, Google, Microsoft and other mail hosts, Messages, GitHub, sending, and the shared browser.
 
-**In short:** a connected account lets agents read and change what its sign-in allows, inside the projects you give it. Sending email, invites and texts through CORSIA's mail, calendar and Messages tools needs your reply in chat first; the `google_workspace` tool can share a file or email a calendar event's guests without asking. Most other actions in a connected account don't. A local tool server you add runs as your own program with wide access to your home folder.
+**In short:** a connected account lets agents read and change what its sign-in allows, inside the projects you give it. Sending email, invites and texts through CORSIA's mail, calendar and Messages tools needs your reply in chat first; the `google_workspace` tool can share a file or email a calendar event's guests without asking. Most other actions in a connected account don't. A local connected app (a program CORSIA starts on your computer) runs as your own program with wide access to your home folder.
 
-## Tool servers
+## Local and remote connected apps
 
-A **tool server** (an MCP server) gives agents extra tools. You add it in **Settings → Connected apps**, either as a program CORSIA starts on your computer or as a web address.
+A **connected app** (an MCP server) gives agents extra tools. You add it in **Settings → Connected apps**, either as a program CORSIA starts on your computer or as a web address.
 
 | Kind | How it runs | What it can reach |
 |---|---|---|
-| Local (a command CORSIA starts) | Inside a macOS sandbox profile that allows by default, in its own working and cache folder (`backend/tools/mcp_local_transport.py`, `backend/tools/safehouse_launch.py`) | Your home folder, **including** the places the agent shell can't read (Documents, `~/.ssh`, cloud credential folders). Refused: CORSIA's state folder (database, key store, the agents' browser profile), CORSIA's private files and the sandbox's own files. Network: not limited |
+| Local (a command CORSIA starts) | Inside a macOS sandbox profile that allows by default, in its own working and cache folder (`backend/tools/mcp_local_transport.py`, `backend/tools/safehouse_launch.py`) | Your home folder, **including** the places the agent shell can't read (Documents, `~/.ssh`, cloud credential folders). Refused: CORSIA's state folder (database, key store, the shared browser profile), CORSIA's private files and the sandbox's own files. Network: not limited |
 | Remote (a web address) | CORSIA connects to it; nothing runs on your computer | Only what agents send it in tool calls, plus its own service |
 
-Treat a local tool server like any program you install: it can do what you can, apart from the refusals above. Add only ones you trust. Its keys come from the key store and are passed in its environment when CORSIA starts it ([Secrets](secrets.md)).
+Treat a local connected app like any program you install: it can do what you can, apart from the refusals above. Add only ones you trust. Its keys come from the key store and are passed in its environment when CORSIA starts it ([Secrets](secrets.md)).
 
-On Linux, CORSIA starts local tool servers and Google Workspace only through Agent Safehouse, which is macOS only, so they refuse to start (read from code, not run for this page).
+On Linux, CORSIA starts local connected apps and Google Workspace only through Agent Safehouse, which is macOS only, so they refuse to start (read from code, not run for this page).
 
-**Results from any tool server reach the agent unscreened.** See [Untrusted content](untrusted-content.md).
+**Results from any connected app reach the agent unscreened.** See [Untrusted content](untrusted-content.md).
 
 ### Who can use a connected app
 
@@ -63,7 +63,7 @@ iCloud, Yahoo and similar hosts connect with an app password you create at the h
 On a Mac, agents can read, search and send your texts (iMessage and SMS) through the Messages app (`backend/tools/messages_tools.py`, `messages_send.py`).
 
 - The CORSIA agent adds Messages to **Settings → Connected apps**; it stays off until you press **Enable** there, and reaches only the projects you choose, like any app.
-- Reading needs **Full Disk Access** for CORSIA (**System Settings → Privacy & Security → Full Disk Access**). That grant is for the whole app: once it is on, local tool servers and leased commands can also read every file macOS protects, such as Mail, Messages and Photos ([Host access](host-access.md#what-no-lease-opens)).
+- Reading needs **Full Disk Access** for CORSIA (**System Settings → Privacy & Security → Full Disk Access**). That grant is for the whole app: once it is on, local connected apps and leased commands can also read every file macOS protects, such as Mail, Messages and Photos ([Host access](host-access.md#what-no-lease-opens)).
 - Sending needs macOS's permission for CORSIA to control Messages (**Automation → Messages**), and goes through the send gate below.
 - Texts reach the agent unscreened ([Untrusted content](untrusted-content.md)).
 
@@ -75,23 +75,23 @@ You can give agents their own GitHub account, separate from yours. Its GitHub CL
 
 ## Sending email and invites
 
-CORSIA's email, invite and text-message tools send only the conversation's open draft, unchanged, and only after you have written in the conversation since its last change. CORSIA can't tell whether you read the draft. The send is refused by CORSIA code, not a model, unless all of these hold (`backend/tools/action_gate.py`):
+CORSIA's email, invite and text-message tools send only the chat's open draft, unchanged, and only after you have written in the chat since its last change. CORSIA can't tell whether you read the draft. The send is refused by CORSIA code, not a model, unless all of these hold (`backend/tools/action_gate.py`):
 
 1. The call runs inside a live turn that you started or wrote into.
-2. The draft is this conversation's own open draft, and its text is exactly what the draft tool recorded.
+2. The draft is this chat's own open draft, and its text is exactly what the draft tool recorded.
 3. Your newest message in this turn came after the draft's last change.
 
 **What it doesn't check:** whether your reply said "send". Any reply after the draft counts, including "wait" or a question. The agent is told to send only on your yes, but that is an instruction, not a check.
 
 **What it doesn't cover:**
 
-- Tool servers you add (a Slack or Gmail tool server sends without this gate)
+- Connected apps you add (a Slack or Gmail connected app sends without this gate)
 - The `google_workspace` tool: sharing a file, or a calendar change that emails its guests
-- The agents' browser, if it is signed in to your mail
+- The shared browser, if it is signed in to your mail
 - Agent shells, which can reach any web service ([Network](network.md))
 - Other changes in connected accounts: deleting or labelling mail, changing calendar events you own, uploading files
 
-## The agents' browser
+## The shared browser
 
 Agents can drive a headless Chrome. Each CORSIA account has one saved browser profile, shared by all of that account's agents (`backend/host_access/browser_launch.py`).
 
@@ -100,7 +100,7 @@ Agents can drive a headless Chrome. Each CORSIA account has one saved browser pr
 - Pages it visits are not screened.
 - It identifies as an ordinary Chrome browser to sites.
 
-Sign out of anything agents shouldn't use, or don't sign in from the agents' browser.
+Sign out of anything agents shouldn't use, or don't sign in from the shared browser.
 
 ## Check it yourself
 
