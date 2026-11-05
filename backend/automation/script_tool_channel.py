@@ -16,13 +16,17 @@ from subagents.harness_tool_bridge import build_tool_registry
 from tools.registry import ToolRegistry
 
 SOCKET_ENV = "CORSIA_SCRIPT_TOOL_SOCKET"
+# Above the largest argv `corsia tool` can carry (macOS ARG_MAX is 1 MiB) after JSON escaping.
+REQUEST_LIMIT = 8 * 1024 * 1024
+OVER_LIMIT = (f"Tool request is larger than {REQUEST_LIMIT // (1024 * 1024)} MiB and was not run. "
+              "Split the input across smaller tool calls.\n")
 logger = logging.getLogger(__name__)
 
 
 async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
                  thread_id: str, registry: ToolRegistry) -> None:
     try:
-        request: Any = json.loads(await reader.readline())
+        request: Any = json.loads(await reader.readuntil(b"\n"))
         if not isinstance(request, dict) or not isinstance(request.get("name"), str) or not isinstance(request.get("arguments"), dict):
             raise ValueError("expected a tool name and JSON object")
         context = state._current_thread_id.set(thread_id)
@@ -34,6 +38,9 @@ async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
             state._current_turn_identity.reset(turn)
             state._current_thread_id.reset(context)
         response = {"code": 1 if is_error_result(result) else 0, "stdout": str(result), "stderr": ""}
+    except asyncio.LimitOverrunError:
+        logger.warning("script tool request over %d bytes", REQUEST_LIMIT)
+        response = {"code": 1, "stdout": "", "stderr": OVER_LIMIT}
     except Exception as exc:
         logger.warning("script tool request failed: %s", type(exc).__name__)
         response = {"code": 1, "stdout": "", "stderr": "Tool request failed.\n"}
@@ -66,7 +73,7 @@ async def tool_channel(path: Path, thread_id: str, *, registry: ToolRegistry | N
         active.add(task)
         task.add_done_callback(active.discard)
 
-    server = await asyncio.start_unix_server(connected, path=str(path))
+    server = await asyncio.start_unix_server(connected, path=str(path), limit=REQUEST_LIMIT)
     try:
         path.chmod(0o600)
         yield
