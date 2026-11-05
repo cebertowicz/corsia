@@ -27,7 +27,7 @@ def _git_pointer(path: Path, base: Path, prefix: str = "") -> Path | None:
 
 
 def _workspace_git_locations(workspace: Path, *, invalid_marker: Path) -> tuple[Path, Path, Path]:
-    """Resolve Git locations once, using the consumer's invalid-marker fallback."""
+    """Resolve Git locations once; an invalid pointer resolves to ``invalid_marker``."""
     marker = workspace.resolve(strict=False) / ".git"
     if marker.is_file():
         git_dir = _git_pointer(marker, marker.parent, "gitdir:")
@@ -40,25 +40,13 @@ def _workspace_git_locations(workspace: Path, *, invalid_marker: Path) -> tuple[
     return marker, git_dir, common if common is not None else resolved_git_dir
 
 
-def workspace_git_paths(workspace: Path | None) -> tuple[Path, ...]:
-    """Return the Git marker and control paths, ending with the hooks directory.
+def workspace_git_history_paths(workspace: Path | None) -> tuple[Path, ...]:
+    """Return the marker, git directory and common directory, without invoking Git.
 
     Read from disk, never by running Git, so a broken repository keeps its rules.
-    With no repository yet the paths still apply: the backend adopts any ``.git``
+    With no repository yet the marker still applies: the backend adopts any ``.git``
     it finds, so an agent must not be able to make one.
     """
-    if workspace is None:
-        return ()
-    marker, git_dir, common = _workspace_git_locations(
-        workspace, invalid_marker=workspace.resolve(strict=False),
-    )
-    git_dir, common = git_dir.resolve(strict=False), common.resolve(strict=False)
-    return (marker, common / "config", common / "config.lock", git_dir / "config.worktree",
-            git_dir / "commondir", common / "hooks")
-
-
-def workspace_git_history_paths(workspace: Path | None) -> tuple[Path, ...]:
-    """Return the marker, git directory and common directory, without invoking Git."""
     if workspace is None:
         return ()
     lexical_marker = Path(os.path.abspath(workspace)) / ".git"
@@ -104,7 +92,7 @@ def workspace_git_history_rules(workspace: Path | None) -> list[str]:
 
 
 def workspace_git_rules(paths: tuple[Path, ...]) -> list[str]:
-    """Render Seatbelt denies for ``workspace_git_paths`` output."""
+    """Render Seatbelt write denies for Git control paths; the last one is a directory."""
     if not paths:
         return []
     exact = [f'(deny file-write* (regex #"^{_any_case(path)}$"))' for path in paths[:-1]]

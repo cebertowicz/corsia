@@ -10,7 +10,7 @@ import subprocess
 import pytest
 
 from tests.linux_sandbox_test_support import linux_sandbox_root
-from tools.workspace_git_paths import workspace_git_history_rules, workspace_git_paths, workspace_git_rules
+from tools.workspace_git_paths import workspace_git_history_paths, workspace_git_history_rules, workspace_git_rules
 
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -270,8 +270,8 @@ def test_separate_git_dir_rules(tmp_path):
     repo = tmp_path / 'workspace'
     repo.mkdir()
     git(repo, 'init', '-q', '--separate-git-dir', str(repo / 'metadata'))
-    paths = workspace_git_paths(repo)
-    assert repo / '.git' in paths and repo / 'metadata' / 'config' in paths and repo / 'metadata' / 'commondir' in paths
+    paths = workspace_git_history_paths(repo)
+    assert repo / '.git' in paths and repo / 'metadata' in paths
 
 
 def linux_launch(tmp_path, monkeypatch, workspace):
