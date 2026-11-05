@@ -1,6 +1,6 @@
 # Conductor API and instruction setup
 
-This additive capability gives the designated CORSIA agent bounded, credential-free access to reviewed application handlers. Project conductors use existing scoped roster and instruction tools. Human-only operations retain their existing entry points.
+The CORSIA agent and designated project conductors can call reviewed application handlers through a bounded, credential-free tool. Human-only operations retain their existing entry points.
 
 ## Code ground
 
@@ -12,7 +12,7 @@ Agent creation and promotion reuse `delegate_create_thread`, the existing agent 
 
 ## State and failure behavior
 
-No schema migration is needed. Existing threads, roster state and attached files remain intact. An instruction bundle requires `absent` or its returned revision; identical desired bytes are an idempotent retry. Revisions include destination paths so same-named script and reference files remain distinct. Saved bytes are checked before attachment. A stale edit refuses replacement; an interrupted API write requires reading the destination before retry.
+An instruction bundle requires `absent` or its returned revision; identical desired bytes are an idempotent retry. Revisions include destination paths so same-named script and reference files remain distinct. Saved bytes are checked before attachment. A stale edit refuses replacement; an interrupted API write requires reading the destination before retry.
 
 Requests and collected responses are limited to 32 KiB, and each request has a 30-second deadline. A handler may complete a write before a timeout or response-limit error. These errors therefore instruct the caller to verify destination state. No background loop, polling service or provider inference call is introduced by the broker.
 
@@ -26,15 +26,13 @@ Requests and collected responses are limited to 32 KiB, and each request has a 3
 | Promote | Revisioned roster update enables the agent and supplies its approved responsibility. |
 | Attach | Instruction tool saves responsibility, attaches it, and reports next-turn inclusion. |
 | Verify | Roster read contains the new agent; repeated desired state changes nothing. |
-| Recover | Ordinary/project actors receive explicit API capability denial; stale edits require current files and revision. |
+| Recover | Threads without conductor capability receive an explicit API capability denial; stale edits require current files and revision. |
 
 ## Verification surface
 
 `backend/tests/test_conductor_setup_journey.py` exercises the composed journey through native `ToolRegistry` dispatch, with disposable state and mock delegation. Other targeted tests cover route enumeration, every denied route, conductor eligibility, cross-scope installation refusal, inherited-principal revocation, request/response bounds, credential redaction, origin forgery, stale revisions, support-file validation and next-turn skill inclusion. Authentication, agent service, delegation and instruction-file regression suites cover affected consumers.
 
-A fresh inexpensive model reader independently checked the positive setup case, the neighboring read-only roster case and denial/stale-state recovery without a correction round. This supplements mock dispatch and resolver evidence; it does not claim actual delivery of proposed code by a serving instance.
-
-The independent security review's demonstrated origin-forgery and standalone-key disclosure counterexamples are covered by broker regression tests. Same-user workspace-wide administration remains intentional. Concurrent local symlink replacement during instruction saving is a residual filesystem race hypothesis; initial traversal and symlink escapes are rejected. No real inference or daemon action is executed by these tests.
+The tests use disposable state and mock delegation; they do not prove delivery by a serving instance.
 
 ## Complexity ledger
 
@@ -52,4 +50,4 @@ Reusing the application's existing handlers keeps validation, authorization, aud
 
 ### Falsification / removal condition
 
-When scoped agent tokens land, agent calls authenticate as a scoped agent principal, and `bind_delegation_origin`, `attribution_matches` and the credential regex layers are deleted.
+The broker uses a revocable task-local principal and binds attribution to the acting thread (`backend/tools/corsia_api.py`, `backend/infra/internal_principal.py`).

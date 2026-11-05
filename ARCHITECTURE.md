@@ -312,7 +312,10 @@ attach path, but only for a task the caller names: a send is often just a
 question, so it never takes the caller's current task by default. The named
 task is checked before the message goes (the target must be the caller's own
 worker holding no other open task). Without `plan_node_id`, a send to such an
-idle worker carries a `plan_task` note saying its reply arrives as chat.
+idle worker carries a `plan_task` note saying its reply arrives as chat. When
+local-only policy requires a hold, the send is held for the person before task
+handover and delivery; approval resumes through the same delivery function
+(`backend/tools/delegate_send.py`).
 
 ### Reading and depending on another plan
 

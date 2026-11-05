@@ -16,8 +16,8 @@ flowchart TB
     P --> A1[Agent]
     C --> A1
     C --> A2[Agent]
-    A1 -->|delegate_task| W1[Temporary<br/>worker]
-    A1 -->|delegate_task| W2[Temporary<br/>worker]
+    A1 -->|delegate_task| W1[Worker]
+    A1 -->|delegate_task| W2[Worker]
     W1 -->|return| A1
 ```
 
@@ -33,7 +33,7 @@ An agent is a thread with the roster fields set. Two paths change the roster: th
 
 ### Addressing another thread
 
-`delegate_send` sends a message into another thread. Same-scope sends are the default; cross-scope sends are limited as described in [Scopes](scopes.md). A send is admitted through the same path as a person's message; see [Turns and delivery](turns-and-delivery.md).
+`delegate_send` sends a message into another thread. Same-scope sends are the default; cross-scope sends are limited as described in [Scopes](scopes.md). When the local-only policy requires a hold, the message is held for the person instead of being delivered immediately; an approved held reply uses the same delivery path (`backend/tools/delegate_send.py`). See [Turns and delivery](turns-and-delivery.md).
 
 ### Delegating a task
 
