@@ -190,7 +190,7 @@ def thread_context(db, item: dict) -> str:
     def marker(count: int) -> str:
         return f'… {count} earlier comments not shown; read them all with doc_comments_list(comment_id="{root}")'
 
-    selected = []
+    selected: list[str] = []
     for index in range(len(prior) - 1, -1, -1):
         candidate = [prior[index], *selected]
         dropped = index
