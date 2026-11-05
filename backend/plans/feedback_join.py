@@ -137,9 +137,10 @@ def join(db, node_id: str, *, title: str, blocks: str, intent: str | None, prove
     """
     with transaction(db) as connection:
         node = service._node_row(connection, node_id)
+        restated: dict[str, Any] = {} if intent is None else {"intent": intent}
         mutations.edit_node(
             node_id, title=title, description=f"{node['description'] or ''}\n\n{blocks}".lstrip(),
-            **({} if intent is None else {"intent": intent}), provenance=provenance, db=connection,
+            **restated, provenance=provenance, db=connection,
         )
         plan_id = str(node["plan_id"])
 

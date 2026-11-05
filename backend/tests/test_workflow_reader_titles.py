@@ -63,9 +63,7 @@ async def test_a_plain_node_and_the_run_itself_keep_their_own_title(isolated_db,
     reply = await run.start("ship", title="Ship the 0.4.1 notes")
     plain = await run.update("add", {
         "title": "Book the venue", "acceptance_criteria": "Booked", "size": "S",
-        "intent": "Book it", "intent_words": [
-            {"author": "person", "quote": "Ship the release notes.", "role": "authority"},
-        ],
+        "intent": "Book it",
     })
 
     db = get_db()
