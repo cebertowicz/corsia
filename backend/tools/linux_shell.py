@@ -85,15 +85,8 @@ def shell_argv(command: str, cwd: Path, _profile=None, *, thread_id: str, polici
     rw = [*get_sandbox_add_dirs_rw(thread_id, policies=policies), *repo_rw]
     ro = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account),
           *agent_tool_ro_dirs(), *repo_ro]
+    # Only the backend reads or writes the workspace's Git history: hide its marker, git dir and common dir.
     workspace_git = prepare_workspace_git(path_policy.workspace)
-    if workspace_git:
-        marker, config, _lock, worktree_config, commondir, hooks = workspace_git
-        if marker.is_dir() and any(marker.is_relative_to(root) for root in rw):
-            rw.append(marker)
-        elif not marker.is_dir():
-            overlays.append(marker)
-        # In an empty .git these are absent, so the plan freezes .git, never the workspace root.
-        overlays.extend((config, worktree_config, commondir, hooks))
     overlays.extend(WORKSPACE / path for path in GENERATED_WORKSPACE_PROJECTIONS)
     for unsupported in list_unsupported_pinned_repos(policies):
         overlays.extend(unsupported.metadata_roots)
@@ -114,6 +107,6 @@ def shell_argv(command: str, cwd: Path, _profile=None, *, thread_id: str, polici
         raise RuntimeError(sandbox_error())
     return build_protected_argv(command, Path(cwd), path_policy=path_policy,
                                 rw_roots=rw, ro_roots=ro, readonly_overlays=overlays,
-                                hidden_roots=[*extra_hidden_roots, *fenced,
+                                hidden_roots=[*extra_hidden_roots, *fenced, *workspace_git,
                                               *([hidden_account] if hidden_account else [])],
                                 env=passed, thread_id=thread_id, executable=executable)
