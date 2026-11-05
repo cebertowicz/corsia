@@ -43,7 +43,7 @@ def cmd_create(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="corsia context",
         description="Manage workspace, project, and thread CTX bootloader files.",
@@ -65,7 +65,11 @@ def main(argv: list[str] | None = None) -> int:
     create.add_argument("--content")
     create.set_defaults(func=cmd_create)
 
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     return args.func(args)
 
 

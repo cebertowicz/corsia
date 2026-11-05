@@ -2,7 +2,7 @@
 
 Generated reference for the primary, document, log, and analytics stores.
 
-Generate with `PYTHONPATH=backend .venv/bin/python scripts/docs/generate_data_model.py`; add `--check` to compare the generated pages. The backend's locked dependencies are required.
+Generate with `.venv/bin/python scripts/docs/generate_data_model.py`; add `--check` to compare the generated pages. The backend's locked dependencies are required.
 
 SQLite full-text search creates shadow tables; SQLite creates `sqlite_sequence`. Relationships shown in a diagram connect tables in that diagram; column tables list all declared foreign keys. The measurement tables are temporary and are created on a primary connection when needed.
 
@@ -16,7 +16,7 @@ SQLite full-text search creates shadow tables; SQLite creates `sqlite_sequence`.
 | Events and webhooks | [Events and webhooks](events-and-webhooks.md) | `backend/infra/bulletin_schema.py`, `backend/infra/event_intake_schema.py`, `backend/infra/event_rule_schema.py`, `backend/infra/event_watch_schema.py`, `backend/infra/schema.py`, `backend/infra/webhook_delivery_schema.py` |
 | Host access | [Host access](host-access.md) | `backend/infra/host_access_schema.py` |
 | Log store | [Log store](log-store.md) | `backend/infra/otel_logs/store.py` |
-| Plans | [Plans](plans.md) | `backend/infra/plan_events_schema.py`, `backend/infra/plan_intent_schema.py`, `backend/infra/plan_liveness_schema.py`, `backend/infra/plan_markdown_import_schema.py`, `backend/infra/plan_pane_views_schema.py`, `backend/infra/plan_schema.py`, `backend/infra/plan_status_schema.py`, `backend/infra/unattributed_dispatch_schema.py` |
+| Plans | [Plans](plans.md) | `backend/infra/plan_events_schema.py`, `backend/infra/plan_liveness_schema.py`, `backend/infra/plan_markdown_import_schema.py`, `backend/infra/plan_pane_views_schema.py`, `backend/infra/plan_schema.py`, `backend/infra/plan_status_schema.py`, `backend/infra/unattributed_dispatch_schema.py` |
 | Providers and runtime | [Providers and runtime](providers-and-runtime.md) | `backend/infra/limit_history_schema.py`, `backend/infra/managed_process_schema.py`, `backend/infra/provider_availability_schema.py`, `backend/infra/schema.py` |
 | Settings and policy | [Settings and policy](settings-and-policy.md) | `backend/infra/project_policy_schema.py`, `backend/infra/reviewer_gate_schema.py`, `backend/infra/schema.py`, `backend/infra/settings_schema.py`, `backend/infra/vendor_policy_schema.py` |
 | Store internals | [Store internals](store-internals.md) | `SQLite internal`, `backend/infra/db_fts.py` |

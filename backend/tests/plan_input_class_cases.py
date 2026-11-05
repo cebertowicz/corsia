@@ -16,7 +16,7 @@ from __future__ import annotations
 from functools import partial
 
 from plans import (
-    boundary_dispatch, delegate_attach, holds, intent_words, service, status_cursor, system_user_steps,
+    boundary_dispatch, delegate_attach, holds, intent_creation, service, status_cursor, system_user_steps,
 )
 from plans.boundary import PlanActor, mutate
 from plans.current import read_current_plan, read_current_status
@@ -507,21 +507,12 @@ def _user_block_on_non_document(db, scene):
     return _user_block(db, scene, ask_artifact_id=ask)
 
 
-def _missing_intent_word(_db, _scene):
-    return partial(intent_words.validate_intent, "")
+def _missing_intent(_db, _scene):
+    return partial(intent_creation.validate_intent, "")
 
 
-def _too_many_intent_words(db, scene):
-    words = [{"quote": f"Word {index}", "author": "agent"} for index in range(intent_words.MAX_WORDS_PER_CALL + 1)]
-    return partial(intent_words.resolve_words, db, words, actor_id=None)
-
-
-def _person_quote_without_thread(db, _scene):
-    return partial(intent_words.resolve_words, db, [{"quote": "Build it", "role": "authority"}], actor_id=None)
-
-
-def _oversized_intent_word(_db, _scene):
-    return partial(intent_words.validate_intent, "x" * (intent_words.MAX_INTENT_BYTES + 1))
+def _oversized_intent(_db, _scene):
+    return partial(intent_creation.validate_intent, "x" * (intent_creation.MAX_INTENT_BYTES + 1))
 
 
 def _missing_task_intent(db, scene):
@@ -597,16 +588,9 @@ _CASES = {
             "acceptance_criteria": "DOD",
         },
     ),
-    # --- plans/intent_words.py ---
-    ("intent_words.py", 'f"{field} is required"'): _missing_intent_word,
-    ("intent_words.py", 'f"{field} exceeds the {limit}-byte limit"'): _oversized_intent_word,
-    ("intent_words.py", '"intent_words must be a nonempty array"'): _missing_intent_word,
-    ("intent_words.py", 'f"intent_words takes at most {MAX_WORDS_PER_CALL} quotes per call; keep the strongest {MAX_WORDS_PER_CALL}"'): _too_many_intent_words,
-    ("intent_words.py", '"intent_words items require quote, author?, and role?"'): _missing_intent_word,
-    ("intent_words.py", '"intent word author must be person or agent"'): _missing_intent_word,
-    ("intent_words.py", '"intent word role must be origin, bears_on, or authority"'): _missing_intent_word,
-    ("intent_words.py", "QUOTE_NOT_FOUND"): _missing_intent_word,
-    ("intent_words.py", '"person quotes must be recorded from the agent\'s own thread"'): _person_quote_without_thread,
+    # --- plans/intent_creation.py ---
+    ("intent_creation.py", '"intent is required"'): _missing_intent,
+    ("intent_creation.py", 'f"intent exceeds the {MAX_INTENT_BYTES}-byte limit"'): _oversized_intent,
     # --- plans/boundary_dispatch.py ---
     # --- plans/boundary_fields.py ---
     ("boundary_fields.py", '"task creation requires size and intent"'): _missing_task_size_and_intent,
