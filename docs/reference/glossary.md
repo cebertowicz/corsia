@@ -16,7 +16,7 @@ Terms used in the CORSIA documentation:
 - **Document:** a file that can be opened and edited in CORSIA's document editor.
 - **Harness:** the program that runs the agent loop for a turn. CORSIA has three: its own native loop, Claude Code and Codex. See [Models and harnesses](../how-it-works/models-and-harnesses.md).
 - **Local model:** a model served by a local or network model server rather than a cloud inference provider. See [Models and harnesses](../how-it-works/models-and-harnesses.md).
-- **Pack:** a versioned bundle of related files in the shared library; a blueprint pack can carry a coordination model. See [The skill library](../skill-library.md).
+- **Pack:** a versioned bundle of related files in the skill library; a blueprint pack carries a coordination model. The coordination model bundled in this repository is called a package. See [Coordination models](../how-it-works/coordination-models.md).
 - **Plan:** a thread's or scope's structured record of tasks, with acceptance criteria, waits and decisions. See [Plans](../how-it-works/plans.md).
 - **Project:** a body of work inside the workspace, such as a product or a household, with its own context, skills, documents and agents. See [Scopes](../how-it-works/scopes.md).
 - **Provider:** a service or server that supplies model inference. See [Models and harnesses](../how-it-works/models-and-harnesses.md).
