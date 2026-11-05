@@ -17,7 +17,7 @@ flowchart LR
         H[Rest of your<br/>home folder]
         F[Hard floor: CORSIA keys,<br/>agents' browser profile,<br/>sandbox itself]
     end
-    A[Agent shell and<br/>file tools] -->|read and write| P1
+    A[A project agent's<br/>shell and file tools] -->|read and write| P1
     A -->|file tools; shell<br/>only with a lease| P2
     A -->|file tools;<br/>shell never| P3
     A -->|reviewed<br/>lease only| H
@@ -27,9 +27,11 @@ flowchart LR
     S --> C[Email, calendar, Messages,<br/>tool servers you connect]
 ```
 
+The arrows show an agent in a project. The CORSIA agent's shell also reaches ordinary projects without a lease; it is fenced from Local only projects only while its own chat isn't Local only ([Agent sandbox](agent-sandbox.md#projects)).
+
 - **Workspace:** the folder CORSIA works in (by default `~/corsia`). It holds every project, shared files, context and each conversation's working files.
 - **Project:** a folder inside the workspace. Projects organize work and settings, and on macOS they are a **partial** boundary: an agent's shell can't read or write another project's folder or its repositories, but its file tools and conversation tools still can, and so can a shell reading the workspace's Git history. See [Agent sandbox](agent-sandbox.md#projects).
-- **Local only:** a setting that keeps a chat or project on local models. A whole project with it on is also closed to every other agent's shell, even under a lease. See [Data and privacy](data-and-privacy.md#local-only).
+- **Local only:** a setting that keeps a chat or project on local models. A whole project with it on is also closed to other agents' shells, even under a lease; the one exception is a CORSIA agent whose own chat is Local only. See [Data and privacy](data-and-privacy.md#local-only).
 - **Thread:** one conversation with one agent. Each thread has its own working folder inside the workspace.
 - **Lease:** a short, reviewed grant that lets one agent run commands outside the workspace. See [Host access](host-access.md).
 - **Hard floor:** paths no leased command can read or write. It stops direct access only; see [What no lease opens](host-access.md#what-no-lease-opens) for the indirect route.
@@ -52,7 +54,7 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 | Action | Default | Strength |
 |---|---|---|
 | Read and write its own project, the workspace's shared files and its own working folder | Allowed | — |
-| Read or write another project's folder or registered repositories from the shell | Refused on macOS; a lease opens it unless that project is Local only. Allowed on Linux | Operating system |
+| Read or write another project's folder or registered repositories from the shell | Refused on macOS for an agent in a project; a lease opens it unless that project is Local only. The CORSIA agent is refused only Local only projects. Allowed on Linux | Operating system |
 | Read or write another project's files with file tools (`read_file`, `write_file` and the rest), or read its conversations | Allowed | — |
 | Read the rest of your home folder (Documents, Desktop, Downloads, Pictures, shell history, Mail, browser data, `~/.ssh` keys, Keychains, cloud credential folders) | Refused | Operating system |
 | Read some tool settings in your home folder: `~/.gitconfig`, most of `~/.config` (your GitHub CLI login in `~/.config/gh` included; if an agents' GitHub account is set up, that account's token instead), `~/.cache`, `~/.npm`, `~/.cargo`; and system files such as `/etc` | Allowed | — |

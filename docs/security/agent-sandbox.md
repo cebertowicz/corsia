@@ -35,7 +35,7 @@ On macOS the shell sandbox fences each agent out of projects that aren't its own
 |---|---|
 | An agent in a project | Every other project's folder, the repositories and worktrees registered to those projects, and the working folders of agents outside any project |
 | An agent outside any project | Every project's folder and registered repositories |
-| The CORSIA agent | Only Local only projects |
+| The CORSIA agent | Only Local only projects, and nothing while its own chat is Local only |
 | A local tool server | Only Local only projects; it serves no single agent |
 
 - A repository registered to two projects stays open to agents of both, unless one of them is Local only and the agent reaches it only through the other.
