@@ -152,7 +152,7 @@ Source: `backend/infra/doc_comments_schema.py`.
 | `start_offset` | INTEGER | No | Yes | — | — |
 | `end_offset` | INTEGER | No | Yes | — | — |
 
-Indexes: None.
+Indexes: `idx_doc_comment_mentions_comment` (comment_id, agent_id).
 
 ### `doc_comment_recipient_state`
 
