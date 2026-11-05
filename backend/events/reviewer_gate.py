@@ -162,7 +162,7 @@ def on_pull_request_ready_for_review(
     internal_event: str,
     loop: asyncio.AbstractEventLoop | None = None,
 ) -> None:
-    """Re-evaluate the gate when a draft PR becomes ready or a fork head is approved."""
+    """Re-evaluate the gate when a draft PR becomes ready, a fork head is approved, or a restart cut off its review."""
     if not pr_number or not repo or not head_sha:
         log.debug("reviewer-gate: ready event missing required fields, skipping")
         return
@@ -235,9 +235,12 @@ def _evaluate_ready_pr(
     if pr_info is None:
         _report_pr_info_unreadable(repo, pr_number, head_sha, loop)
         return
-    if pr_info.get("headRefOid") != head_sha:
+    if pr_info.get("headRefOid") != head_sha or pr_info.get("state") == "closed":
+        reviewer_gate_state.clear_pending(
+            reviewer_gate_state.pr_key(repo, pr_number), head_sha,
+        )
         log.info(
-            "reviewer-gate: PR #{} sha={} — no longer current head, holding review",
+            "reviewer-gate: PR #{} sha={} — closed or no longer current head, holding review",
             pr_number, head_sha[:8],
         )
         return
@@ -268,6 +271,7 @@ def _evaluate_ready_pr(
     try:
         if reviewer_gate_state.get_reviewed_sha(pr_key) == head_sha:
             return
+        reviewer_gate_state.record_pending(pr_key, head_sha, internal_event)
         base_ref = pr_info.get("baseRefName", "")
         _report_review_firing(repo, pr_number, head_sha)
         pr_payload: dict[str, Any] = {
