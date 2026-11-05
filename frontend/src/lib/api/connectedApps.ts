@@ -200,7 +200,7 @@ export function startAccountSignIn(account: Pick<ConnectedAccount, 'id' | 'provi
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ account_id: account.id }),
-	}, `Couldn't start ${account.provider_display_name} sign-in. Try again.`);
+	}, account.provider === 'messages' ? "Couldn't enable Messages. Try again." : `Couldn't start ${account.provider_display_name} sign-in. Try again.`);
 }
 
 export function signOutOfAccount(account: Pick<ConnectedAccount, 'id' | 'provider' | 'provider_display_name'>): Promise<AccountSignOutResult> {
