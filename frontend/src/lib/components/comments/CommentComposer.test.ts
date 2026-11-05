@@ -88,7 +88,7 @@ describe('CommentComposer', () => {
 		flushSync();
 
 		host.querySelector<HTMLButtonElement>('.submit')!.click();
-		await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledWith('Wait for saved acknowledgement', []));
+		await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledWith('Wait for saved acknowledgement', [], []));
 		expect(textarea.value).toBe('Wait for saved acknowledgement');
 
 		acknowledge();

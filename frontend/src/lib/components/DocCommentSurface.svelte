@@ -12,6 +12,7 @@
 	import Popover from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
 	import CommentList from './comments/CommentList.svelte';
+	import SuggestionStatus from './comments/SuggestionStatus.svelte';
 	import CommentPlacementRecovery, { type PlacementRecoveryProps } from './comments/CommentPlacementRecovery.svelte';
 	import ImageRegionThumb from './ImageRegionThumb.svelte';
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
@@ -325,13 +326,7 @@
 	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer selectedTags={sheet.draft?.mentionSelection ?? draftTags} quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={sheet.cancelDraft} />
 	{:else}
 		{#if !readOnly && sheet.state?.kind !== 'thread'}
-			<div class="suggestion-status">
-				{#each authorsWithOpenSuggestions as [author, suggestions] (author)}
-					<button type="button" aria-busy={outcome.acceptAllShownBusy === author} disabled={acceptAllBusy !== null} onclick={() => acceptAllFrom(author, suggestions[0].id)}>{outcome.acceptAllShownBusy === author ? 'Accepting…' : `Accept all from ${author}`}</button>
-				{/each}
-				{#if outcome.skipped.length}<details><summary>{outcome.skipped.length} skipped</summary>{#each outcome.skipped as item (item.id)}<p>{item.reason}</p>{/each}</details>{/if}
-			</div>
-			{#if outcome.acceptAllError}<div class="suggestion-error" role="alert">{outcome.acceptAllError}</div>{/if}
+			<SuggestionStatus authors={authorsWithOpenSuggestions} busy={acceptAllBusy} shownBusy={outcome.acceptAllShownBusy} skipped={outcome.skipped} error={outcome.acceptAllError} acceptAll={acceptAllFrom} />
 		{/if}
 		<CommentList {replyTags} docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={displayed} {cellLabel} documentOrder={sheet.state?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
@@ -394,12 +389,4 @@
 	/* The one measured wrapper owns the drawer's pinned-footer height, including either or both child footers. */
 	.drawer-footers { flex: none; }
 	.drawer-footers > :not(:last-child) { border-radius: 0; }
-	.suggestion-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-	.suggestion-status button { background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); cursor: pointer; }
-	.suggestion-status button:not(:disabled):hover { text-decoration: underline; }
-	.suggestion-status button:disabled { opacity: 0.55; cursor: not-allowed; }
-	.suggestion-status button:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }
-	.suggestion-error { font-size: var(--text-caption); color: var(--red-text); }
-	.suggestion-status details { color: var(--text-tertiary); font-size: var(--text-footnote); }
-	.suggestion-status p { margin: 4px 0; }
 </style>
