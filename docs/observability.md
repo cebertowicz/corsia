@@ -627,7 +627,8 @@ Decision age uses the same `plan_node_events` series, from `decision_raised` to
 ### `plans.close_next`
 
 A closing or parking mutation (request_review, mark_done, fail, accept,
-accept_with_follow_up, close_node, archive_node, block_node, arm_watch) returns
+accept_with_follow_up, close_node, archive_node, pause_node, block_node,
+arm_watch; the set is `backend/plans/boundary_fields.py` `NEXT_OPERATIONS`) returns
 a bounded `next` block: the task now holding its
 executor's slot, a few of that executor's other open tasks, and the outcome of
 an optional named next task. The plans domain's one emit point, in

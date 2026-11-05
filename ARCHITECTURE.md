@@ -173,7 +173,8 @@ reconciliation and the worker's Turn end (`plans/delegated_selection.py`).
 The step taking its slot back is state; the parent hears about its
 worker only through the notification matrix. A closing or parking mutation
 (request_review, mark_done, fail, accept, accept_with_follow_up, close_node,
-archive_node, block_node, arm_watch) may start one task the caller
+archive_node, pause_node, block_node, arm_watch; the set is
+`plans/boundary_fields.NEXT_OPERATIONS`) may start one task the caller
 names through the same activate/start writers, after its own release and before
 reconciliation, and returns a bounded `next` block composed by
 `plans/close_next.py`, which reads the selection owners and is not one; nothing
