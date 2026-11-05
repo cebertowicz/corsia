@@ -2,7 +2,7 @@
 
 How CORSIA confines an agent's shell commands and file tools, on macOS and Linux, without a lease. Leases are on [Host access](host-access.md).
 
-**In short:** agents run as your user. File tools reach only the workspace and registered repositories. Shell commands run inside an OS sandbox that lets them read and write the workspace apart from other projects, read a few tool-settings folders, and reach the network freely. On macOS the shell is fenced out of other projects; file tools are not, so the workspace is still the boundary that holds for every tool.
+**In short:** agents run as your user. File tools reach only the workspace and registered repositories. Shell commands run inside an OS sandbox that lets them read and write the workspace, read a few tool-settings folders, and reach the network freely. On macOS the shell is also fenced out of other projects; file tools are not, so the workspace is still the boundary that holds for every tool.
 
 ## Layers
 
@@ -10,7 +10,7 @@ How CORSIA confines an agent's shell commands and file tools, on macOS and Linux
 |---|---|---|---|
 | File-tool gate | `read_file`, `write_file`, `edit_file`, `grep`, `glob`, `list_dir` | CORSIA code | `backend/tools/filesystem_gate.py`, `backend/tools/sandbox_config.py` |
 | Shell sandbox | Every `bash` command and everything it starts | Operating system | `backend/tools/shell_guard.py`, `backend/tools/shell_sandbox.py` |
-| Project fence (macOS) | Other projects' folders and registered repositories, in the shell, leased shells, other AI agent command-line tools started under a lease, and local tool servers | Operating system | `backend/tools/project_fence.py`, `backend/tools/host_path_policy.py` |
+| Project fence (macOS) | Other projects' folders and registered repositories, in the shell, other AI agent command-line tools started under a lease, and local tool servers; for a leased shell command, Local only projects only | Operating system | `backend/tools/project_fence.py`, `backend/tools/host_path_policy.py` |
 | Command refusals | A list of commands refused before they run | CORSIA code | `backend/tools/shell_guard.py` (`check_command_safety`) |
 
 The file tools run inside the CORSIA server, so the OS sandbox doesn't apply to them; their own path check does. The shell runs in a separate sandboxed process.
@@ -39,7 +39,7 @@ On macOS the shell sandbox fences each agent out of projects that aren't its own
 | A local tool server | Only Local only projects; it serves no single agent |
 
 - A repository registered to two projects stays open to agents of both, unless one of them is Local only and the agent reaches it only through the other.
-- A lease opens an ordinary fenced project to that agent's leased commands. A Local only project stays closed under every lease.
+- A lease opens an ordinary fenced project to that agent's leased shell commands. Another AI agent's command-line tool started under a lease stays fenced from every project but its own. A Local only project stays closed under every lease.
 - If CORSIA can't read a project's or repository's record, it fences more, not less.
 - An agent can't register a repository that sits inside a project it is fenced from.
 

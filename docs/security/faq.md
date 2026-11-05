@@ -9,7 +9,7 @@ Without a lease: read and change its own project and the workspace's shared file
 
 **2. Can an agent delete my home folder? My git history? My other projects?**
 - Home folder: not without a lease. Writes to your home folder are refused by the OS, apart from `~/.ssh/known_hosts` and some developer-tool caches ([Agent sandbox](agent-sandbox.md#whats-allowed)), and `rm -rf ~` is refused by CORSIA code. Under a lease, the action reviewer, a model, is told to block needless destruction; nothing else stops it.
-- Other projects: yes, through its file tools, which every project's files are open to. Its shell can't on macOS; a lease opens an ordinary project to the shell, but not a Local only one.
+- Other projects: yes, through its file tools, which every project's files are open to. Its shell can't on macOS; a lease opens an ordinary project to leased shell commands, but not a Local only one, and not to another AI agent's command-line tool started under the lease.
 - Git history: local history of repositories in the workspace, yes, except the main checkout of a registered repository whose base is protected, which is read-only. Remote history: an agent using your SSH keys or GitHub login can force-push wherever you can, unless the remote protects the branch.
 
 **3. Can an agent in one project read another project?**

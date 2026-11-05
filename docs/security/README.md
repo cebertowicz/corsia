@@ -54,7 +54,7 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 | Action | Default | Strength |
 |---|---|---|
 | Read and write its own project, the workspace's shared files and its own working folder | Allowed | — |
-| Read or write another project's folder or registered repositories from the shell | Refused on macOS for an agent in a project; a lease opens it unless that project is Local only. The CORSIA agent is refused only Local only projects. Allowed on Linux | Operating system |
+| Read or write another project's folder or registered repositories from the shell | Refused on macOS for an agent in a project; a lease opens it to leased shell commands unless that project is Local only. The CORSIA agent is refused only Local only projects. Allowed on Linux | Operating system |
 | Read or write another project's files with file tools (`read_file`, `write_file` and the rest), or read its conversations | Allowed | — |
 | Read the rest of your home folder (Documents, Desktop, Downloads, Pictures, shell history, Mail, browser data, `~/.ssh` keys, Keychains, cloud credential folders) | Refused | Operating system |
 | Read some tool settings in your home folder: `~/.gitconfig`, most of `~/.config` (your GitHub CLI login in `~/.config/gh` included; if an agents' GitHub account is set up, that account's token instead), `~/.cache`, `~/.npm`, `~/.cargo`; and system files such as `/etc` | Allowed | — |
