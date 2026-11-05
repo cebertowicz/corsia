@@ -80,7 +80,7 @@ def test_absent_account_does_not_read_and_rechecks(monkeypatch):
 
 
 def test_loop_uses_agents_broker(monkeypatch):
-    from connections.github_broker import default_broker
+    from connections.github_broker import agents_broker
     from events.connectors import github_notifications as poller
 
     seen = []
@@ -91,7 +91,24 @@ def test_loop_uses_agents_broker(monkeypatch):
 
     monkeypatch.setattr(poller, "run_cycle", stop)
     asyncio.run(poller.notifications_poll_loop(agents=True))
-    assert seen == [(default_broker(), True)]
+    assert seen == [(agents_broker(), True)]
+
+
+def test_agents_broker_never_reads_as_the_host_login(monkeypatch):
+    """The account removed after the cycle's check fails the read; the person's feed is never read."""
+    import subprocess
+
+    from connections import github_agent
+    from connections.github_agent import AgentAccountView
+    from connections.github_broker import GithubReadBroker, GithubReadRefused
+
+    def never(*_args, **_kwargs):
+        raise AssertionError("gh must not run as the host login")
+
+    monkeypatch.setattr(github_agent, "backend_gh_now", lambda: ("gh", None, AgentAccountView("not_installed", absent=True)))
+    monkeypatch.setattr(subprocess, "run", never)
+    with pytest.raises(GithubReadRefused, match="no_agents_account"):
+        GithubReadBroker(agents_only=True)(["api", "--method", "GET", "-i", "notifications"])
 
 
 def test_failure_does_not_affect_other_feed():

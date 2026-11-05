@@ -315,9 +315,9 @@ def _record_failure(error_class: str, failures: int, *, agents: bool = False) ->
 async def notifications_poll_loop(runner: feed.GhRunner | None = None, *, agents: bool = False) -> None:
     """Poll until shut down, or until a static reason turns the poller off."""
     if runner is None:
-        from connections.github_broker import default_broker, person_broker
+        from connections.github_broker import agents_broker, person_broker
 
-        runner = default_broker() if agents else person_broker()
+        runner = agents_broker() if agents else person_broker()
     failures = 0
     while True:
         delay, failures = await run_cycle(runner, failures, agents=agents)
