@@ -925,7 +925,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 175
+    assert SCHEMA_VERSION == 176
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83
