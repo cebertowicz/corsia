@@ -188,7 +188,7 @@ Create a new delegated thread
 |---|---|
 | `--title` | — |
 | `--project-id` | — |
-| `--model` | Required explicit model id; Required |
+| `--model` | Required explicit model id |
 | `--provider` | — |
 | `--thread-kind` | Thread visibility kind: chat is visible; subagent is a hidden child and requires a parent; Choices: chat, subagent; Default: chat |
 | `--spawned-by` | Parent thread id for a hidden subagent |
@@ -233,7 +233,7 @@ Create a hidden child thread and send its first task turn
 |---|---|
 | `message (+)` | The task text; Required |
 | `--title` | Child thread title |
-| `--model` | Required explicit model id; Required |
+| `--model` | Required explicit model id |
 | `--provider` | — |
 | `--from-thread-id` | Parent/sender thread id (default: $CORSIA_THREAD_ID when present) |
 
