@@ -214,6 +214,29 @@ def _open_step(db, node_id: str):
     return node, creation_payload(db, node_id)
 
 
+def reader_titles(db, node_ids) -> dict[str, str]:
+    """Each node's title as the person reads it outside its plan tree.
+
+    A workflow step keeps its workflow's stage title (Problem brief, Direction
+    agreed), which names no subject once it leaves the tree, so it reads as
+    ``<run> — <step>``. Every other node reads as its own title; an unknown id
+    is absent.
+    """
+    ids = list(dict.fromkeys(str(node_id) for node_id in node_ids))
+    if not ids:
+        return {}
+    rows = db.execute(
+        f"""SELECT n.id, n.title, CASE WHEN n.workflow_step IS NOT NULL THEN r.title END AS run_title
+              FROM plan_nodes n LEFT JOIN plan_nodes r ON r.id = n.parent_id
+             WHERE n.id IN ({','.join('?' * len(ids))})""",
+        ids,
+    ).fetchall()
+    return {
+        str(row["id"]): f"{row['run_title']} — {row['title']}" if row["run_title"] else row["title"]
+        for row in rows
+    }
+
+
 def creation_payload(db, node_id: str) -> dict[str, Any]:
     """A node's creation-event payload, where a workflow step's flags are recorded."""
     row = db.execute(
