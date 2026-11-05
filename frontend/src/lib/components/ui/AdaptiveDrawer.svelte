@@ -122,6 +122,8 @@
 
 	$effect(() => {
 		if (!open || !panel) return;
+		// A caller that keeps the drawer mounted reopens it after a drag dismissal; it opens at rest, not where it was let go.
+		drag.reset();
 		const removeBackLayer = pushBackLayer(() => {
 			onClose();
 			return true;
