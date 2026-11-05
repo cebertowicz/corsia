@@ -7,10 +7,10 @@
       "sha256": "01f766a8d568c83815c1d577f03f99a490d73df3e37fb4df7ee95e819f5953f8"
     },
     {
-      "bytes": 7675,
+      "bytes": 7285,
       "kind": "context",
       "path": "context/10-HOW-TO-WORK.md",
-      "sha256": "c0beee76d3db8a1ac04fc3f9f052128bf38cb89efe45878c02de9bd847b67c3f"
+      "sha256": "4dea8e3273485da2378fcc015b089e04ef4e44b6ed75004398490bbb15dcf174"
     },
     {
       "bytes": 830,
@@ -25,11 +25,11 @@
       "sha256": "da81b707715e15034d1bfb5cdc702d25936017d59efda2ad3ddb1e43157aaf22"
     },
     {
-      "bytes": 3681,
+      "bytes": 3177,
       "kind": "context",
       "path": "context/roles/agent/00-operating-contract.md",
       "role": "agent",
-      "sha256": "e502bb1a11239b1cffb039e3be552956841af2819b80c762c3e1d5c94963e7bf"
+      "sha256": "05eaa1d141635cb1b74e633268fecd81939859b3a5bd77c683168a58c15d8bb8"
     },
     {
       "bytes": 389,
@@ -394,10 +394,10 @@
       "sha256": "a6cf9bc8558c748f61d1397990e88c7f46e202b206e2290ab866bfb96048c1c7"
     },
     {
-      "bytes": 7510,
+      "bytes": 7581,
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
-      "sha256": "eddb421e39148867e028200b917d5dce92c5385fe7feb3083d3a85d6e873d31d"
+      "sha256": "f2096c1eb268f940f3816fa142e62187cd1cc72e0505021cf814627061f2c5a0"
     },
     {
       "bytes": 10491,

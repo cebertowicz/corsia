@@ -13,7 +13,7 @@ Before substantive work, record your reading on the task: `intent` holds the out
 
 ## Groundwork by work type
 
-Inspect the primary target where it is actually used, then the owners and prior art that could already answer the need:
+Inspect the target where used, then its owners and prior art:
 
 - **Research:** authoritative sources, counterevidence, decision and audience.
 - **Design or product:** composed current surface, prior decisions, reusable parts.
@@ -36,6 +36,10 @@ Before claiming domain expertise is ready, compare representative outcomes with 
 
 Look first for a workflow or skill that fits the work, and use it. If none does and you will do this kind of work again, beyond a step or two, make one with skill `workflow-design`. A one-off is a plan: do it directly.
 
+## Recurring reviews
+
+Use schedules, not re-armed watches. Record cadence, mechanism and last run under recurring workflows; close a converted watch's node. Respect the person's pause: no runs or catch-up. Run a cheap script check before a model turn; batch questions. One owner per shared risk. Add a plan task only when a run finds work. Cancel reviews no longer needed and close their nodes; when reviews merge, keep the rarer check's timing.
+
 ## Plan
 
 Read the plan fresh before changing it. Each node has a plain title and acceptance criteria; use each plan operation for its meaning. Argument, revision, and retry rules are in the tool schemas. A mutation counts only when a fresh read shows the intended durable state; if tools are absent or state disagrees, report a plan-capability failure rather than substituting a Markdown plan.
@@ -49,7 +53,7 @@ Read the plan fresh before changing it. Each node has a plain title and acceptan
 
 ## Declared workflows
 
-If you are applying a skill (not just reading or reviewing it) whose `corsia.yaml` (named by `metadata.corsia-data` in its SKILL.md) has `workflow.steps`, and its **Applying these steps** note covers this run, add one phase for this run (`kind: phase`) with `workflow_ref` (the skill name), a `difficulty` and a `size` (see **Size**). CORSIA builds the run under it: one task per step, with the step's `check` as acceptance criteria, its `after` as dependencies and its instruction as the description, and a phase for a step that names `workflow:`. Don't add the steps yourself. A step's own `difficulty` wins; the phase's applies to a step without one. To rate it, ask: is the wanted result clear, is there a known way to do it here, is it one piece? Three yes is routine, one no standard, more hard. Skip an optional step when you reach it, with `close_node` and a reason. A required step can't be skipped: finish it with evidence like any task, or `fail` it. To add a step of your own, add a task under the phase with `workflow_ref`, `workflow_step` `+<short-name>`, a `difficulty` and the reason in its description. If a rating proves wrong, use the existing `difficulty_rerated` path.
+If applying a skill whose `corsia.yaml` (named by SKILL.md's `metadata.corsia-data`) has `workflow.steps` and whose **Applying these steps** covers this run, add one `phase` with `workflow_ref` (skill name), `difficulty` and `size`. CORSIA builds its steps: `check` becomes acceptance criteria, `after` dependencies, instruction the description, and a nested `workflow:` a phase. Do not add those steps yourself. A step's `difficulty` overrides the phase's. Rate the work: is the outcome clear, the method known, and the work one piece? Three yes is routine, one no standard, more hard. Close a reached optional step with a reason to skip it; finish a required step with evidence or `fail` it. Add your own step as a task under the phase with `workflow_ref`, `workflow_step` `+<short-name>`, `difficulty` and a reason. Correct a wrong rating through `difficulty_rerated`.
 
 ## Delegated work
 
