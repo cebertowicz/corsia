@@ -333,30 +333,41 @@ def _invalid_record_header(errors: list[str]) -> str:
 
 def _records(output: str, scope: SearchScope, mode: str, errors: list[str]):
     """Parse the complete NUL-delimited path before its record, failing closed."""
-    while output:
-        if mode == "content" and output.startswith("--\n"):
-            output = output[3:]
+    offset = 0
+    allowed_paths: dict[str, bool] = {}
+    while offset < len(output):
+        if mode == "content" and output.startswith("--\n", offset):
+            offset += 3
             yield None, ""
             continue
-        path, delimiter, output = output.partition("\0")
-        if not delimiter or not path:
+        end = output.find("\0", offset)
+        if end <= offset:
             errors.append("invalid or unfilterable record")
             return
+        path = output[offset:end]
+        offset = end + 1
         rest = ""
         if mode != "files":
-            rest, newline, output = output.partition("\n")
-            if not newline or (mode == "count" and not rest.isdecimal()):
+            end = output.find("\n", offset)
+            if end < 0:
+                errors.append("invalid or unfilterable record")
+                return
+            rest = output[offset:end]
+            offset = end + 1
+            if mode == "count" and not rest.isdecimal():
                 errors.append("invalid or unfilterable record")
                 return
         try:
-            candidate = Path(path)
-            allowed = keep_path(candidate, scope.current_thread_id, scope.all_threads)
-            if scope.fence and scope.fence.excludes_ripgrep(candidate):
-                allowed = False
+            if path not in allowed_paths:
+                candidate = Path(path)
+                allowed = keep_path(candidate, scope.current_thread_id, scope.all_threads)
+                if scope.fence and scope.fence.excludes_ripgrep(candidate):
+                    allowed = False
+                allowed_paths[path] = allowed
         except Exception:
             errors.append("invalid or unfilterable record")
             continue
-        if allowed:
+        if allowed_paths[path]:
             yield path, rest
 
 

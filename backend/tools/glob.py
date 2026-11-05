@@ -131,8 +131,6 @@ class GlobTool(Tool):
             # The walk never selects a path outside the search scope.
             for relative in select_matches(search_dir, pattern, traversal):
                 match = search_dir.joinpath(*relative)
-                if fence and fence.excludes(match):
-                    continue
                 resolved_match = match.resolve(strict=False)
                 if not resolved_match.is_relative_to(search_dir):
                     try:

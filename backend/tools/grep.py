@@ -61,10 +61,13 @@ def _render_reviewed(pattern, output_mode, max_results, counts, results, safe, o
     return render(results, safe, output_cap)
 
 
-def _python_counts(files, search_dir, regex, max_results):
+def _python_counts(files, search_dir, regex, max_results, fence):
     counts = {}
     for fpath, resolved_path in sorted(files):
         try:
+            resolved_path = resolved_path.resolve(strict=False)
+            if fence and fence.excludes(resolved_path):
+                continue
             if resolved_path.stat().st_size > _MAX_SEARCH_FILE_BYTES:
                 continue
             content = resolved_path.read_text(encoding="utf-8", errors="ignore")
@@ -358,6 +361,9 @@ class GrepTool(Tool):
                 break
 
             try:
+                resolved_path = resolved_path.resolve(strict=False)
+                if fence and fence.excludes(resolved_path):
+                    continue
                 if resolved_path.stat().st_size > _MAX_SEARCH_FILE_BYTES:
                     continue
                 content = resolved_path.read_text(encoding="utf-8", errors="ignore")
@@ -385,7 +391,7 @@ class GrepTool(Tool):
         elif output_mode == "count":
             if not files_matched:
                 return f"No matches for pattern '{pattern}'"
-            return _python_counts(files, search_dir, regex, max_results)
+            return _python_counts(files, search_dir, regex, max_results, fence)
         else:
             if not results:
                 return f"No matches for pattern '{pattern}'"

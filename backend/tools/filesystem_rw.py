@@ -2,7 +2,6 @@
 
 import asyncio
 from dataclasses import dataclass
-from tools.file_write_receipt import write_success_path, write_success_result
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +13,7 @@ from infra.db_async import run_in_db, run_off_db
 from infra.guidance_targets import guidance_target
 from tools.base import Tool
 from tools.filesystem_binary import open_bound_binary
+from tools.file_write_receipt import write_success_path, write_success_result
 from tools.file_write_completion import (
     GUIDANCE_PARAMETERS,
     announce_published_write,

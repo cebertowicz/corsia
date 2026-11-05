@@ -7,6 +7,7 @@ from pathlib import Path
 
 from tools import project_fence
 from tools.host_path_resolution import contains, containment_key, key_contains
+from tools.workspace_git_paths import workspace_git_history_paths
 
 NOTICE = "Folders this agent can't read were left out."
 _ESCAPE = str.maketrans({char: f"\\{char}" for char in "\\*?[]{}!"})
@@ -24,11 +25,17 @@ class SearchFence:
         self.thread_id = thread_id
         search_forms = _forms(root)
         fence = fence if fence is not None else project_fence.fence_for_thread(thread_id)
+        from infra.config import WORKSPACE
+
         self.roots = tuple(
             fenced for fenced in fence.roots
             if not any(contains(form, search) for form in fenced.forms for search in search_forms)
-        )
+        ) + tuple(project_fence.FencedRoot(path) for path in workspace_git_history_paths(WORKSPACE))
         self._root_keys = tuple(containment_key(form) for fenced in self.roots for form in fenced.forms)
+        self._file_keys = tuple(containment_key(form) for fenced in self.roots for form in fenced.forms if form.is_file())
+        self.has_file_exclusions = any(
+            key_contains(containment_key(search), key) for search in search_forms for key in self._file_keys
+        )
         self.pruned = False
         self.incomplete = False
         self.has_exclusions = any(
@@ -45,14 +52,41 @@ class SearchFence:
         self.pruned |= excluded
         return excluded
 
+    def excludes_directory(self, path: Path) -> bool:
+        """Prune a real directory using its lexical key."""
+        if not self.has_exclusions:
+            return False
+        key = containment_key(path)
+        excluded = any(key_contains(root, key) for root in self._root_keys)
+        self.pruned |= excluded
+        return excluded
+
+    def follow_symlink(self, path: Path) -> Path | None:
+        """Resolve a link before traversal and activate any roots below its target."""
+        resolved = path.resolve(strict=False)
+        if self.excludes(path):
+            return None
+        key = containment_key(resolved)
+        self.has_exclusions |= any(key_contains(key, root) for root in self._root_keys)
+        self.has_file_exclusions |= any(key_contains(key, root) for root in self._file_keys)
+        return resolved
+
+    def excludes_file(self, path: Path) -> bool:
+        """Exclude a Git marker that is itself a file."""
+        if not self._file_keys:
+            return False
+        excluded = containment_key(path) in self._file_keys
+        self.pruned |= excluded
+        return excluded
+
     def excludes_ripgrep(self, path: Path) -> bool:
         """Filter a no-follow ripgrep record below the authorized resolved root."""
         try:
             relative = path.relative_to(self.root)
-            if ".." in relative.parts:
-                raise ValueError("ripgrep path escapes its search root")
         except ValueError as exc:
             raise ValueError("ripgrep path escapes its search root") from exc
+        if ".." in relative.parts:
+            raise ValueError("ripgrep path escapes its search root")
         key = containment_key(self.root / relative)
         excluded = any(key_contains(root, key) for root in self._root_keys)
         self.pruned |= excluded
@@ -80,7 +114,7 @@ class SearchFence:
                         continue
                     parts = form.parts[len(base.parts):]
                     paths = [root]
-                    for part in parts:
+                    for index, part in enumerate(parts):
                         next_paths = []
                         for parent in paths:
                             if self.excludes(parent):
@@ -90,7 +124,7 @@ class SearchFence:
                                     next_paths.extend(
                                         Path(entry.path) for entry in entries
                                         if contains(Path(part), Path(entry.name))
-                                        and entry.is_dir(follow_symlinks=False)
+                                        and (index == len(parts) - 1 or entry.is_dir(follow_symlinks=False))
                                     )
                             except OSError:
                                 self.incomplete = True
@@ -99,5 +133,5 @@ class SearchFence:
                         paths = next_paths
                     for path in paths:
                         relative = path.relative_to(root).as_posix().translate(_ESCAPE)
-                        exclusions.add(f"!/{relative}/")
+                        exclusions.update((f"!/{relative}", f"!/{relative}/"))
         return sorted(exclusions)

@@ -24,8 +24,6 @@ def iter_python_files(
             for relative in select_grep_files(search_dir, glob_filter, scope)
         )
     for candidate in candidates:
-        if fence and fence.excludes(candidate):
-            continue
         resolved = candidate.resolve(strict=False)
         if not resolved.is_relative_to(search_dir):
             try:
