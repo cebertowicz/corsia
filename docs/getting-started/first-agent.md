@@ -36,13 +36,13 @@ A chat that did something useful, and that you expect to need again, can become 
 3. Write the **Responsibility**: the outcome this agent owns, in a sentence or two. **Paths** (folders or files) and **Topics** are optional and tell other agents what it covers.
 4. Press **Save**. **Edit** and **Remove** appear in the same place afterwards.
 
-The agent now appears in the sidebar's agent list for the project, under the conductor, with its responsibility as its tooltip. It keeps its history, plan and files, and the conductor can send it work. Everything it can do is bounded by what [Security](../security/README.md) describes: agents ask you before they send or post as you, or spend money.
+The agent now appears in the sidebar's agent list for the project, under the conductor, with its responsibility as its tooltip. It keeps its history, plan and files, and the conductor can send it work. What it can reach is set by what [Security](../security/README.md) describes. Agents are instructed to ask you before they send or post as you, or spend money, unless you gave them standing permission; that is an instruction to the model, not a technical block.
 
 ## Or ask the conductor
 
 You do not have to write a responsibility yourself. Open the project's conductor, the `<Name> Conductor` entry at the top of the sidebar's agent list, and tell it what is taking your time:
 
-- The conductor looks at how you handle that work, interviews you about what is left, and writes a one-page charter: the workflow, the steps to automate, and the limits.
+- The conductor looks at how you handle that work, asks you what it still needs to know, and writes a one-page charter: the workflow, the steps to automate, and the limits.
 - Nothing gets authority until you approve that charter. No agent is created or enabled, and nothing is sent or spent on your behalf, before then.
 - If the charter recommends a dedicated agent, the conductor creates it after your approval. If a chat or the conductor can do the job, it says so instead.
 

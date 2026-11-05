@@ -42,7 +42,7 @@ The setup plan's tasks come in this order. A task that does not apply to you is 
 | Your files, and when agents ask first | A short explanation, no question; the same facts as [Security](../security/README.md) |
 | Hand over to your agents | Asks what is taking your time this week, and what you would do with a free afternoon at your computer |
 
-Every task accepts **not now**, and saying **skip the rest** closes all remaining setup tasks and goes straight to the last one. Nothing here is required to create a project. Agents ask you before they send or post as you, or spend money.
+Every task accepts **not now**, and saying **skip the rest** closes all remaining setup tasks and goes straight to the last one. Nothing here is required to create a project. Agents are instructed to ask you before they send or post as you, or spend money, unless you gave them standing permission; that is an instruction to the model, not a technical block.
 
 The last question is the quickest way to see what CORSIA does: describe a small real chore or side project and the CORSIA agent starts on it, or tells you which setup it would suggest.
 
