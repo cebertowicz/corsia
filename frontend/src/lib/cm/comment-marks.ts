@@ -129,6 +129,8 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 			},
 			write(onScreen) {
 				if (onScreen) {
+					// A table drawn after the initial jump still needs its target cell revealed sideways.
+					if (steady === 0) widget?.reveal(view);
 					steady += 1;
 					if (steady < STEADY_CHECKS) check(pass);
 					return;
