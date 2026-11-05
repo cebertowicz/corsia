@@ -4,7 +4,11 @@ import { provideMentionRoster } from './mentionContext';
 
 export function loadMentionRoster(target: () => { artifactId: string | null; threadId: string | null }) {
 	const model = createDocumentReviewState();
-	provideMentionRoster(model);
+	// The picker reads the tag roster's own failure, never the reviewer list's.
+	provideMentionRoster({
+		get taggableAgents() { return model.taggableAgents; }, get loadState() { return model.loadState; },
+		get rosterError() { return model.tagRosterError; }, load: () => model.load(),
+	});
 	$effect(() => {
 		const { artifactId, threadId } = target();
 		untrack(() => { if (model.setTarget(artifactId, threadId, artifactId)) void model.load(); });

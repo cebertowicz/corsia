@@ -1,4 +1,4 @@
-import { fetchContent, markArtifactVerified } from '$lib/api/docs';
+import { fetchContent, markArtifactVerified, RequestRefused } from '$lib/api/docs';
 import { on } from '$lib/ws/events';
 import type { DocumentFreshness } from '$lib/docFreshness';
 import { ackComment, addReply, loadComments, resolveComment } from '$lib/stores/docComments';
@@ -10,9 +10,14 @@ import { shouldReloadPresenceEdit } from '$lib/docPresence';
 import { withDraftArtifactId, existingDraft } from '$lib/stores/docSaveQueue';
 import { toasts } from '$lib/stores/toast';
 
-function commentFailure(error: unknown): string {
-	if (error instanceof Error && error.message.includes('A valid viewing thread_id is required to tag agents')) return 'Open this document from a chat to tag agents. Your comment is still here.';
-	return "Couldn't post the comment — try again";
+/** One message per known reason the server refuses a comment's tags, picked by the refusal's `kind`. */
+const TAG_REFUSALS: Record<string, string> = {
+	no_viewing_thread: 'Open this document from a chat to tag agents. Your comment is still here.',
+	tag_unavailable: 'An agent you tagged can’t be tagged from this chat. Remove its tag and post again. Your comment is still here.',
+};
+
+function tagRefusal(error: unknown): string | undefined {
+	return error instanceof RequestRefused && error.kind ? TAG_REFUSALS[error.kind] : undefined;
 }
 
 // The viewer retains retry state; the composer needs the rejection to keep its draft.
@@ -22,7 +27,8 @@ export async function submitDocumentComment<T>(action: () => Promise<T>, onFailu
 	} catch (error) {
 		if (error instanceof DOMException && error.name === 'AbortError') throw error;
 		console.error('comment failed', error);
-		const toastId = toasts.show(failureMessage?.(error) ?? commentFailure(error), 'error');
+		// A tag refusal has the same cause on every surface, so its message comes before the surface's own.
+		const toastId = toasts.show(tagRefusal(error) ?? failureMessage?.(error) ?? "Couldn't post the comment — try again", 'error');
 		onFailure?.(toastId);
 		throw error;
 	}

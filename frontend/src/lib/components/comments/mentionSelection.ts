@@ -1,12 +1,17 @@
+import { hashSeed } from '$lib/typingPace';
+
 export type MentionOccurrence = { agent_id: string; start: number; end: number };
 type Selection = { id: string; start: number; text: string };
+
+/** Identifies a draft's text by its length and hash, so a snapshot stays the same size however long the draft grows. */
+const textKey = (text: string) => `${text.length}:${hashSeed(text)}`;
 
 /** The text and its selected identities share a lifetime. Offsets are UTF-16 code units. */
 export function createMentionSelection(initial = '') {
 	let previous = initial;
 	let selections: Selection[] = [];
-	let snapshots: { text: string; selections: Selection[] }[] = [];
-	function remember() { snapshots.push({ text: previous, selections: selections.map(item => ({ ...item })) }); }
+	let snapshots: { key: string; selections: Selection[] }[] = [];
+	function remember() { snapshots.push({ key: textKey(previous), selections: selections.map(item => ({ ...item })) }); }
 	let pending: { start: number; end: number; direction?: 'backward' | 'forward' } | null = null;
 	let historyEdit = false;
 	function begin(start: number, end: number, inputType: string) {
@@ -33,7 +38,8 @@ export function createMentionSelection(initial = '') {
 		}
 		if (!edit || !next.startsWith(previous.slice(0, edit.start)) || !next.endsWith(previous.slice(edit.end))) {
 			// Undo can restore a known state, but identical text with different identities is ambiguous.
-			const candidates = history ? snapshots.filter(snapshot => snapshot.text === next) : [];
+			const key = textKey(next);
+			const candidates = history ? snapshots.filter(snapshot => snapshot.key === key) : [];
 			const identities = new Map(candidates.map(snapshot => [JSON.stringify(snapshot.selections), snapshot.selections]));
 			selections = identities.size === 1 ? [...identities.values()][0].map(item => ({ ...item })) : [];
 			previous = next; remember(); return;
@@ -52,7 +58,7 @@ export function createMentionSelection(initial = '') {
 	return {
 		begin, update,
 		clear() { previous = ''; selections = []; snapshots = []; pending = null; historyEdit = false; },
-		select(id: string, start: number, text: string) { selections.push({ id, start, text }); if (snapshots.at(-1)?.text === previous) snapshots.pop(); remember(); },
+		select(id: string, start: number, text: string) { selections.push({ id, start, text }); if (snapshots.at(-1)?.key === textKey(previous)) snapshots.pop(); remember(); },
 		occurrences(text: string): MentionOccurrence[] {
 			update(text);
 			return selections.filter(item => text.slice(item.start, item.start + item.text.length) === item.text)

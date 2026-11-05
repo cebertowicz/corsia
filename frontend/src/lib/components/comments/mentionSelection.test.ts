@@ -28,6 +28,18 @@ describe('picker selections', () => {
 		tags.begin(3, 3, 'historyUndo'); tags.update('@A');
 		expect(tags.ids('@A')).toEqual(['agent']);
 	});
+	it('restores identity on undo in a long draft, matching the text by its key rather than a stored copy', () => {
+		const tags = createMentionSelection('@A'); tags.select('agent', 0, '@A');
+		let text = '@A';
+		for (let index = 0; index < 2000; index++) { tags.begin(text.length, text.length, 'insertText'); text += 'x'; tags.update(text); }
+		const before = text;
+		tags.begin(text.length, text.length, 'insertText'); tags.update(`${text}!`);
+		tags.begin(text.length + 1, text.length + 1, 'historyUndo'); tags.update(before);
+		expect(tags.ids(before)).toEqual(['agent']);
+		// Same length, different text: nothing was recorded for it, so no identity is guessed.
+		tags.begin(0, 0, 'historyRedo'); tags.update(`${before.slice(0, -1)}y`);
+		expect(tags.ids(`${before.slice(0, -1)}y`)).toEqual([]);
+	});
 	it('drops identities when an edit has no reliable range', () => {
 		const tags = createMentionSelection('@A @A'); tags.select('second', 3, '@A');
 		tags.update('@A'); expect(tags.ids('@A')).toEqual([]);

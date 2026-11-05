@@ -151,9 +151,12 @@ def test_held_tag_joins_only_on_delivery_and_rejoins_after_leave(isolated_db):
 
 
 @pytest.mark.asyncio
-async def test_leave_through_comment_tool(isolated_db):
+async def test_leave_through_comment_tool(isolated_db, monkeypatch):
+    from doceditor import live_events
     from tools.documents import DocCommentUpdateTool
 
+    events = []
+    monkeypatch.setattr(live_events, "emit", lambda action, **properties: events.append((action, properties)))
     db = get_db()
     seed_thread(db, "owner", model=None)
     seed_thread(db, "agent", model=None)
@@ -161,6 +164,7 @@ async def test_leave_through_comment_tool(isolated_db):
     root, _ = add_comment(db, aid, author_id="agent")
     result = await DocCommentUpdateTool().execute(comment_id=root["id"], leave=True, _thread_id="agent")
     assert json.loads(result) == {"left": True, "comment_id": root["id"]}
+    assert events == [("comment_thread_left", {"comment_id": root["id"]})]
     state = db.execute(
         "SELECT left_thread FROM doc_comment_recipient_state WHERE root_id=? AND agent_id='agent'", (root["id"],)
     ).fetchone()
@@ -353,8 +357,11 @@ def test_pending_reply_from_deleted_agent_is_not_delivered(isolated_db):
 
 
 def test_agent_local_only_tag_is_refused_but_person_tag_is_not(isolated_db, monkeypatch):
+    from doceditor import live_events
     from infra import local_only
 
+    events = []
+    monkeypatch.setattr(live_events, "emit", lambda action, **properties: events.append((action, properties)))
     db = get_db()
     for name in ("owner", "writer", "recipient"):
         seed_thread(db, name, model=None)
@@ -369,6 +376,7 @@ def test_agent_local_only_tag_is_refused_but_person_tag_is_not(isolated_db, monk
     assert len(result["tag_refusals"]) == 1
     assert row["id"] in result["tag_refusals"][0] and "recipient is cloud-bound" in result["tag_refusals"][0]
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches WHERE recipient_id='recipient'").fetchone()[0] == 0
+    assert events == [("comment_local_only_refused", {"comment_id": row["id"], "reply": False})]
     with write_transaction(db, scope="test_person_tag") as connection:
         row, created = comments.create_with_status(aid, body="Person", author="User", author_kind="user", db=connection)
         comment_recipients.save_tags(connection, row, ["recipient"])
@@ -376,6 +384,7 @@ def test_agent_local_only_tag_is_refused_but_person_tag_is_not(isolated_db, monk
         result = feedback_batches.record_comment(connection, row, created=created)
     assert "tag_refusals" not in result
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches WHERE recipient_id='recipient'").fetchone()[0] == 1
+    assert len(events) == 1
     db.close()
 
 
@@ -489,6 +498,7 @@ def test_locality_preserves_existing_recipient_without_tag_effects(isolated_db, 
 
 
 def test_tag_locality_does_not_emit_held_event(isolated_db, monkeypatch):
+    from doceditor import live_events
     from infra import local_only
 
     db = get_db()
@@ -498,12 +508,17 @@ def test_tag_locality_does_not_emit_held_event(isolated_db, monkeypatch):
     aid = seed_document(db, "owner")
     comment, _ = add_comment(db, aid, author_id="writer")
     db.execute("UPDATE threads SET local_only=1 WHERE id='writer'")
+    db.commit()
     events = []
     monkeypatch.setattr(local_only, "_emit", lambda *args: events.append(args))
+    documents = []
+    monkeypatch.setattr(live_events, "emit", lambda action, **properties: documents.append((action, properties)))
     sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id='writer'").fetchone()
     refusal, exempt = comment_recipients.locality_disposition(db, comment, "recipient", sender, "owner")
     assert refusal and not exempt
     assert events == []
+    # The comment is refused, not held for approval, so it reports its own documents event instead.
+    assert documents == [("comment_local_only_refused", {"comment_id": comment["id"], "reply": False})]
     assert local_only.send_needs_hold({"id": "writer", "local_only": 1}, {"id": "recipient", "model": None}, db=db)
     assert events[0][0] == "local_only.send_held"
     db.close()

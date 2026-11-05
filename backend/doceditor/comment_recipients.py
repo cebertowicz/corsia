@@ -1,24 +1,32 @@
 """Comment-thread participants, tags and recipient notification state."""
 from __future__ import annotations
 
+import sqlite3
+
 from core.agent_roster_queries import agent_rows
+from doceditor.comment_action_errors import CommentActionError
 from infra.queries import get_thread_for_user
 
 
 LEGACY_RECIPIENTS_SKIP_LOCALITY = True
 
 
-class TagValidationError(ValueError):
-    """A tag is outside the authenticated viewer's visible roster."""
+class TagValidationError(CommentActionError):
+    """A tag the comment cannot carry; ``kind`` names which known cause it is."""
 
 
 def taggable_agents(db, *, user_id: str, thread_id: str) -> list[dict]:
     """The viewer's visible roster, limited to agents that can receive feedback."""
     from doceditor.feedback_delivery import recipient_problem
+    from doceditor.review_requests import ROSTER_ERROR, ReviewRosterError
 
     if not thread_id or get_thread_for_user(thread_id, user_id, db=db) is None:
-        raise TagValidationError("A valid viewing thread_id is required to tag agents")
-    _, visible = agent_rows(thread_id, db)
+        raise TagValidationError("no_viewing_thread", "A valid viewing thread_id is required to tag agents")
+    try:
+        _, visible = agent_rows(thread_id, db)
+    except sqlite3.OperationalError as exc:
+        # The roster read reports an unreadable roster this way; reviewer choice reads it the same.
+        raise ReviewRosterError(ROSTER_ERROR) from exc
     return [{"id": row["id"], "name": row["title"] or row["id"],
              "responsibility": row["agent_responsibility"]}
             for row in visible if row["id"] != thread_id and recipient_problem(db, row["id"]) is None]
@@ -30,7 +38,7 @@ def validate_tags(db, *, user_id: str, thread_id: str | None, agent_ids: list[st
         return
     available = {row["id"] for row in taggable_agents(db, user_id=user_id, thread_id=thread_id or "")}
     if any(agent_id not in available for agent_id in agent_ids):
-        raise TagValidationError("Tagged agents must be in the viewing thread's visible roster")
+        raise TagValidationError("tag_unavailable", "Tagged agents must be in the viewing thread's visible roster")
 
 
 def validate_mentions(body: str, agent_ids: list[str], mentions: list[dict]) -> None:
@@ -45,7 +53,7 @@ def validate_mentions(body: str, agent_ids: list[str], mentions: list[dict]) -> 
         start, end = mention["start"], mention["end"]
         if (mention["agent_id"] not in selected or type(start) is not int or type(end) is not int
                 or start not in boundaries or end not in boundaries or start >= end):
-            raise TagValidationError("Mention must reference a selected agent and valid UTF-16 body offsets")
+            raise TagValidationError("mention_position", "Mention must reference a selected agent and valid UTF-16 body offsets")
 
 
 def trim_mentions(body: str, agent_ids: list[str], mentions: list[dict]) -> list[dict]:
@@ -90,6 +98,13 @@ def locality_disposition(db, comment: dict, recipient_id: str, sender, owner_id:
         refusal = (f"{name} is cloud-bound or has no model selected, and Local only applies to this chat or project, "
                    "so the comment wasn't delivered. Send it with delegate_send, which holds it for the person's approval, "
                    "or send it to a local agent.")
+        if not legacy_exempt:
+            from doceditor import live_events
+            from infra.write_effects import after_commit
+
+            # Not local_only.send_held: that event means held for the person's approval, and this is not delivered.
+            refused = {"comment_id": comment["id"], "reply": bool(comment.get("parent_id"))}
+            after_commit(db, lambda: live_events.emit("comment_local_only_refused", **refused))
         return refusal, legacy_exempt
     return None, legacy_exempt
 

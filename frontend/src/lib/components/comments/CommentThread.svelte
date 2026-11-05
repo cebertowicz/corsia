@@ -3,7 +3,7 @@
 	import { fade, slide } from 'svelte/transition';
 	import './comment-link.css';
 	import { clipFade } from '$lib/actions/clipFade';
-	import { useAgreeCrossfade } from './agreeCrossfade.svelte';
+	import { useLayoutCrossfade } from './layoutCrossfade.svelte';
 	import { lineDiff } from '$lib/diff';
 	import ToolDiff from '$lib/components/ToolDiff.svelte';
 	import type { CommentThreadData } from './CommentThreadData';
@@ -88,7 +88,7 @@
 	let resolvedOpen = $state(untrack(() => !viewEachUnread && (!!comment.newComment || !!comment.newReplyIds?.length)));
 	$effect(() => { if (!viewEachUnread && (comment.newComment || comment.newReplyIds?.length)) resolvedOpen = true; });
 	let el = $state<HTMLElement>();
-	const agreeTransition = useAgreeCrossfade(() => el, () => !!comment.acked);
+	const agreeTransition = useLayoutCrossfade(() => el, () => !!comment.acked);
 	let replyField = $state<ReplyField>();
 	let newestReply = $state<HTMLElement>();
 	// Bumped to observe rendered replies again with fresh geometry.

@@ -3,13 +3,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from doceditor import comments, comment_recipients, doc_images, feedback_batch_core, feedback_batches, image_regions, review_feedback, review_lifecycle
+from doceditor import comments, comment_recipients, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
 from doceditor.suggestion_overlap import check_agent_suggestion_fits
 from infra.auth import may_access_artifact
 from infra.database import get_db, write_transaction
+from infra.write_effects import after_commit
 from registry import models as registry_models, service as registry_service
 
 
@@ -131,6 +132,10 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
             if created:
                 comment_recipients.save_tags(connection, row, request.tagged_agent_ids)
                 comment_recipients.save_mentions(connection, row, request.tagged_agent_mentions)
+                if request.tagged_agent_ids:
+                    tags = {"tag_count": len(set(request.tagged_agent_ids)), "reply": bool(request.parent_id),
+                            "author_kind": request.author_kind}
+                    after_commit(connection, lambda: live_events.emit("comment_tagged", **tags))
                 if request.author_thread_id:
                     comment_recipients.reset_action(connection, row, request.author_thread_id)
             comment_recipients.tags_for_comments(connection, [row])

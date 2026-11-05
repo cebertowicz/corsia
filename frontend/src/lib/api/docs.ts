@@ -14,14 +14,21 @@ function tok(): string {
 	return encodeURIComponent(get(token) ?? '');
 }
 
+/** A refused request. Its message stays "<status> <body>"; `kind` is the server's stable reason when it names one. */
+export class RequestRefused extends Error {
+	constructor(message: string, readonly kind: string | null) {
+		super(message);
+	}
+}
+
 export async function ok(res: Response) {
 	if (!res.ok) {
 		const detail = await res.text().catch(() => '');
-		let parsed: unknown;
-		try { parsed = JSON.parse(detail)?.detail; } catch { /* Non-JSON failures keep the HTTP status below. */ }
+		let parsed: unknown, kind: unknown;
+		try { ({ detail: parsed, kind } = JSON.parse(detail) ?? {}); } catch { /* Non-JSON failures keep the HTTP status below. */ }
 		const refusal = docOpenFailure(parsed);
 		if (refusal) throw refusal;
-		throw new Error(`${res.status} ${detail.slice(0, 200)}`);
+		throw new RequestRefused(`${res.status} ${detail.slice(0, 200)}`, typeof kind === 'string' ? kind : null);
 	}
 	return res.json();
 }

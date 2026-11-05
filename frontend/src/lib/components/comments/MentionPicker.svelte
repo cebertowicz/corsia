@@ -1,9 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { get } from 'svelte/store';
-	import { prefersReducedMotion } from '$lib/stores/viewport';
-	import { captureMentionLayout, mentionHost, playMentionLayout, type MentionPlayback } from '$lib/actions/layoutCrossfade';
-	import { clipFade } from '$lib/actions/clipFade';
+	import { useLayoutCrossfade } from './layoutCrossfade.svelte';
 	import AgentOptions from '../reviews/AgentOptions.svelte';
 	import { agentOptionIndex } from '../reviews/agentOptionKeys';
 	import { hasMentionRoster, useMentionRoster } from './mentionContext';
@@ -18,15 +15,12 @@
 	const id = `mention-${uniqueId}`;
 	let query = $state<string | null>(null), start = 0, active = $state(0);
 	let lastQuery = '';
-	let region = $state<HTMLElement>();
-	let motionKey = '', motionGeneration = 0;
-	let playback: MentionPlayback | undefined;
-	function transition(node: HTMLElement) {
-		return get(prefersReducedMotion) ? { duration: 0 } : clipFade(node);
-	}
 	let chosen: { start: number; text: string } | null = null;
 	const matches = $derived(roster.loadState !== 'ready' || roster.rosterError ? [] : roster.taggableAgents.filter((agent) => agent.name.toLowerCase().includes((query ?? lastQuery).toLowerCase())));
 	const status = $derived(roster.loadState === 'loading' ? 'loading' : roster.loadState === 'error' || roster.rosterError ? 'error' : !roster.taggableAgents.length ? 'empty' : 'ready');
+	// What the picker shows: a change to it crossfades the panel around it under reduced motion.
+	const shownKey = $derived(query === null ? 'closed' : `${status}:${matches.map((agent) => `${agent.id}:${agent.name}:${agent.responsibility}`).join('|')}`);
+	const transition = useLayoutCrossfade(() => input, () => shownKey);
 	function refresh() {
 		if (input) selectedTags.update(input.value);
 		if (!available || !input || input.selectionStart !== input.selectionEnd) { query = null; return; }
@@ -68,48 +62,18 @@
 		}
 		return () => { node.removeAttribute('aria-autocomplete'); node.removeAttribute('aria-controls'); node.removeAttribute('aria-activedescendant'); };
 	});
-	$effect.pre(() => {
-		const node = input;
-		const key = query === null ? 'closed' : `${status}:${matches.map((agent) => `${agent.id}:${agent.name}:${agent.responsibility}`).join('|')}`;
-		const previous = motionKey; motionKey = key;
-		if (!node || !previous || key === previous) return;
-		const reduced = get(prefersReducedMotion);
-		if (!reduced && (previous === 'closed' || key === 'closed')) return;
-		// The copy made to open the picker shows the layout from before the person saw any of it, so it is never handed on:
-		// a change that lands while that fade is still running captures the layout actually on screen instead.
-		const opening = previous === 'closed';
-		let capture = playback?.handoff();
-		if (!capture) {
-			// Nothing carried, so the old playback must still be stopped: its copy would keep fading underneath the
-			// new one and the host would keep its stale opacity animation. Then start the new fade at the opacities
-			// the screen was showing, not at full opacity, which would step the picture up and back down.
-			const seen = playback?.supersede();
-			capture = captureMentionLayout(region ?? null, node, reduced);
-			if (capture && seen?.midFade) Object.assign(capture, {from: seen.from, liveFrom: seen.liveFrom});
-		}
-		playback = undefined;
-		if (!capture) return;
-		const generation = ++motionGeneration;
-		void tick().then(() => {
-			if (generation !== motionGeneration || !node.isConnected) { capture.overlay.remove(); return; }
-			const live = reduced ? mentionHost(node) : region ?? null;
-			playback = playMentionLayout(capture, live, reduced, !opening);
-		});
-	});
 	$effect(() => {
 		const node = input; if (!node) return;
-		const cancel = () => { motionGeneration++; playback?.cancel(); playback = undefined; };
 		const beforeInput = (event: InputEvent) => selectedTags.begin(node.selectionStart, node.selectionEnd, event.inputType);
 		node.addEventListener('beforeinput', beforeInput);
-		node.addEventListener('input', cancel); node.addEventListener('compositionstart', cancel);
 		node.addEventListener('input', refresh); node.addEventListener('click', refresh); node.addEventListener('keydown', keys, true);
-		return () => { cancel(); node.removeEventListener('beforeinput', beforeInput); node.removeEventListener('input', cancel); node.removeEventListener('compositionstart', cancel); node.removeEventListener('input', refresh); node.removeEventListener('click', refresh); node.removeEventListener('keydown', keys, true); };
+		return () => { node.removeEventListener('beforeinput', beforeInput); node.removeEventListener('input', refresh); node.removeEventListener('click', refresh); node.removeEventListener('keydown', keys, true); };
 	});
 </script>
 {#if query !== null}
 	<!-- The children provide the keyboard controls; these handlers preserve the textarea and contain pointer clicks. -->
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-	<div class="mention-region" bind:this={region} transition:transition onpointerdown={preserveCaret} onclick={(event) => event.stopPropagation()}><AgentOptions {id} label="Agents to tag" {matches} active={Math.min(active, matches.length - 1)} {choose} {status} retry={roster.load} /></div>
+	<div class="mention-region" transition:transition onpointerdown={preserveCaret} onclick={(event) => event.stopPropagation()}><AgentOptions {id} label="Agents to tag" {matches} active={Math.min(active, matches.length - 1)} {choose} {status} retry={roster.load} /></div>
 {/if}
 <style>
 	.mention-region { padding-top: var(--space-2); }

@@ -17,6 +17,8 @@ export function createDocumentReviewState() {
 	let taggableAgents = $state<TaggableAgent[]>([]);
 	let loadState = $state<'loading' | 'ready' | 'error'>('loading');
 	let rosterError = $state(false);
+	/** The tag roster is read apart from reviewers, so either can fail while the other still shows. */
+	let tagRosterError = $state(false);
 	let selected = $state<DocumentReviewer[]>([]);
 	let lastSent = $state<string[]>([]);
 	let note = $state('');
@@ -33,7 +35,7 @@ export function createDocumentReviewState() {
 	function setTarget(id: string | null, thread: string | null, key: string | null) {
 		if (id === artifactId && thread === threadId && key === targetKey) return false;
 		artifactId = id; threadId = thread; targetKey = key; generation += 1; loadSequence += 1;
-		requests = []; reviewers = []; taggableAgents = []; loadState = 'loading'; rosterError = false;
+		requests = []; reviewers = []; taggableAgents = []; loadState = 'loading'; rosterError = false; tagRosterError = false;
 		selected = []; lastSent = []; note = ''; sending = false; refusal = ''; failures = {}; cancelPending = []; cancelErrors = {}; attempts = new Map();
 		return true;
 	}
@@ -46,6 +48,7 @@ export function createDocumentReviewState() {
 			if (!current(id, thread, stamp) || sequence !== loadSequence) return;
 			requests = response.reviews;
 			rosterError = response.reviewers_error === 'roster_error';
+			tagRosterError = response.taggable_agents_error === 'roster_error';
 			reviewers = response.reviewers ?? [];
 			taggableAgents = response.taggable_agents ?? [];
 			loadState = 'ready';
@@ -117,6 +120,7 @@ export function createDocumentReviewState() {
 	return {
 		get requests() { return requests; }, get reviewers() { return reviewers; }, get taggableAgents() { return taggableAgents; },
 		get loadState() { return loadState; }, get rosterError() { return rosterError; },
+		get tagRosterError() { return tagRosterError; },
 		get selected() { return selected; }, get lastSent() { return lastSent; },
 		get note() { return note; }, set note(value: string) { note = value; },
 		get sending() { return sending; }, get refusal() { return refusal; }, get failures() { return failures; },

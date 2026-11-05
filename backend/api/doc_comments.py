@@ -133,7 +133,7 @@ async def create_comment(
     try:
         mentions = trim_mentions(body.body, body.tagged_agent_ids, [mention.model_dump() for mention in body.tagged_agent_mentions])
     except TagValidationError as exc:
-        raise HTTPException(400, str(exc)) from exc
+        return decision_refusal(exc)
     request = CommentInput(
         artifact_id=artifact_id, path=path, body=text, author=user["name"], author_kind="user", user_id=user["id"],
         parent_id=body.parent_id, review=body.review, replacement=body.replacement,
@@ -146,10 +146,11 @@ async def create_comment(
         row, _registered, feedback, created = await create_validated_comment(request, body.client_id)
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
+    except TagValidationError as exc:
+        # Its kind tells the browser which of the known causes to name.
+        return decision_refusal(exc)
     except CommentActionError as exc:
         raise HTTPException(400, exc.message) from exc
-    except TagValidationError as exc:
-        raise HTTPException(400, str(exc)) from exc
     except (CommentSelectionChanged, AppLoopUnavailable) as exc:
         raise HTTPException(409, str(exc)) from exc
     except CrossArtifactIdError as exc:

@@ -125,6 +125,36 @@ def test_roster_error_preserves_known_requests_and_is_not_empty_or_500(client, r
     assert db.execute("SELECT COUNT(*) FROM doc_review_requests").fetchone()[0] == 1
 
 
+def test_tag_roster_error_keeps_the_reviewer_list(client, review_env, monkeypatch):
+    from doceditor import comment_recipients
+    db, aid = review_env
+    request(db, aid)
+
+    def broken(*args):
+        raise sqlite3.OperationalError("private schema detail")
+
+    monkeypatch.setattr(comment_recipients, "agent_rows", broken)
+    response = client.get(f"/api/artifacts/{aid}/reviews", params={"thread_id": "requester"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["taggable_agents_error"] == "roster_error"
+    assert "taggable_agents" not in body and "reviewers_error" not in body
+    assert body["reviewers"]
+    assert "private schema detail" not in response.text
+
+
+def test_database_error_outside_a_roster_read_is_not_a_roster_error(client, review_env, monkeypatch):
+    from doceditor import review_requests as reviews
+    _db, aid = review_env
+
+    def broken(*args):
+        raise sqlite3.OperationalError("not a roster read")
+
+    monkeypatch.setattr(reviews, "reviewer_eligibility", broken)
+    with pytest.raises(sqlite3.OperationalError):
+        client.get(f"/api/artifacts/{aid}/reviews", params={"thread_id": "requester"})
+
+
 @pytest.mark.parametrize("path,fields", [
     ("/api/doc-reviews", {"thread_id": "requester"}),
     ("/api/delegation/docs/reviews", {"as_session_id": "requester"}),

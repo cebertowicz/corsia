@@ -32,6 +32,7 @@ export interface DocumentReviews {
 	reviewers?: DocumentReviewer[];
 	taggable_agents?: TaggableAgent[];
 	reviewers_error?: 'roster_error';
+	taggable_agents_error?: 'roster_error';
 }
 function headers() { return { Authorization: `Bearer ${get(token) ?? ''}`, 'Content-Type': 'application/json' }; }
 export async function fetchDocumentReviews(artifactId: string, threadId: string | null): Promise<DocumentReviews> {
