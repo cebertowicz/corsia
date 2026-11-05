@@ -162,7 +162,7 @@ The installer adds any missing prerequisites, builds the environment, creates yo
 2. Connect a model source. CORSIA detects Claude Code and Codex logins, takes an API key, or connects a local [oMLX](https://github.com/jundot/omlx) server, and offers a fix for anything missing.
 3. CORSIA walks you through the rest of setup in its plan: more model providers, web search, GitHub, remote access, and your first project.
 
-Updates arrive through **Settings → System → Update now**. Update lets running work finish before restarting, but goes ahead if it doesn't finish in time. If the update fails before CORSIA stops, the old version keeps running; if CORSIA then fails to start again, the new version can be left stopped. Update follows the upstream of the branch you have checked out. It refuses while the checkout has uncommitted edits (commit or stash them first) and offers nothing while you have local commits ahead of that upstream. A branch with no upstream, or one that has diverged from it, gets a message naming the branch and how to fix it.
+Updates arrive through **Settings → System → Update now**. Update lets running work finish before restarting, but goes ahead if it doesn't finish in time. If the update fails before CORSIA stops, the old version keeps running. If CORSIA has stopped and the new version then fails to start, CORSIA can be left stopped. Update follows the upstream of the branch you have checked out. It refuses while the checkout has uncommitted edits (commit or stash them first) and offers nothing while you have local commits ahead of that upstream. A branch with no upstream, or one that has diverged from it, gets a message naming the branch and how to fix it.
 
 **On your phone:** reach your Mac over a private HTTPS address, for example `tailscale serve --bg http://127.0.0.1:1956`, then use **Add to Home Screen**.
 
@@ -201,14 +201,14 @@ cd ~/.corsia
 bash desktop/scripts/build-macos-bundle.sh --skip-dmg
 ```
 
-The build downloads its own Rust, Python and resources, and needs room for the build plus a backup of your data. It leaves `CORSIA.app` in `~/.corsia/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/`; copy it to Applications and open it. It offers to **Take over** your source install: the app keeps your account, workspace and data where they are, stops the source install, and from then on serves them with the code it was built from. `http://localhost:1956` stops answering; use the app. Bookmarks and anything else pointed at that address, including the phone setup above, stop working with it. Take over is one-way: afterwards `scripts/corsia start` in your checkout refuses, saying the CORSIA app owns this install, and the app repoints recognized existing `corsia` links to its own command. Start and restart CORSIA from the app; there is no supported way back to running the checkout. The app then looks for updates in CORSIA's published releases, not in your checkout. Opening a newer build over an installed one is untested. If a takeover fails, your source install is restarted as it was.
+The build downloads its own Rust, Python and resources, and needs room for the build plus a backup of your data. It leaves `CORSIA.app` in `~/.corsia/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/`; copy it to Applications and open it. It offers to **Take over** your source install: the app keeps your account, workspace and data where they are, stops the source install, and from then on serves them with the code it was built from. `http://localhost:1956` stops answering; use the app. Bookmarks and anything else pointed at that address, including the phone setup above, stop working with it. Take over is one-way: afterwards `scripts/corsia start` in your checkout refuses, saying the CORSIA app owns this install, and any `corsia` link in `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin` that pointed at your checkout's `scripts/corsia` now points at the app's command. Start and restart CORSIA from the app; there is no supported way back to running the checkout. The app then looks for updates in CORSIA's published releases, not in your checkout. Opening a newer build over an installed one is untested. If a takeover fails, your source install is restarted as it was.
 
 </details>
 
 <details>
 <summary><strong>Everyday commands</strong></summary>
 
-For the source install, `corsia` means `~/.corsia/scripts/corsia`. After a desktop app takeover, recognized existing links to the source command are repointed to the app's command.
+For the source install, `corsia` means `~/.corsia/scripts/corsia`. After a desktop app takeover, a `corsia` link in `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin` that pointed at the checkout's `scripts/corsia` runs the app's command instead.
 
 | Command | Does |
 |---|---|

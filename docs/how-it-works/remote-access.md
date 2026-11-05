@@ -8,7 +8,7 @@ A source install configured for local use binds its main web and API server to l
 
 ## Devices
 
-In **Settings → System**, **Let other devices connect** starts a separate TLS listener and displays a pairing code. The listener announces the computer on the local network; when discovery is unavailable, the settings show addresses to type. The code expires, and **New code** issues another. Pairing pauses after too many wrong codes. Connections are managed on the main computer; turning the switch off disconnects them. The pairing exchange confirms the listener's TLS identity. See [Network](../security/network.md) for the listener's ports and who it accepts.
+In **Settings → System**, **Let other devices connect** starts a separate TLS listener and displays a pairing code. The listener announces the computer on the local network; when discovery is unavailable, the settings show addresses to type. The code expires, and **New code** issues another. Pairing pauses after too many codes that don't match. Connections are managed on the main computer; turning the switch off disconnects them. The pairing exchange confirms the listener's TLS identity. See [Network](../security/network.md) for the listener's ports and who it accepts.
 
 CORSIA does not operate a hosted relay.
 
