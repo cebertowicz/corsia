@@ -1,4 +1,4 @@
-"""Move an adopted managed oMLX onto the bundled build once idle, preserving its loaded models.
+"""Move an adopted managed oMLX onto the bundled build at startup, preserving its loaded models.
 
 Only the spawn record proves which build is running: the executable path survives app updates and oMLX
 reports no version over HTTP. A legacy record without a version needs the same upgrade. The supervisor's
@@ -10,13 +10,13 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from functools import partial
 from typing import Any
 
 from llm.providers import omlx_restart as restart
+from llm.providers.omlx_supervisor import MANAGED_HEALTH_STARTUP_CAP_S
 
 log = logging.getLogger("llm.providers.omlx.upgrade")
-QUIET_INTERVAL_S = 60.0
+STAGE_TIMEOUT_S = MANAGED_HEALTH_STARTUP_CAP_S
 
 
 async def recorded_version(server_id: str) -> str | None:
@@ -28,22 +28,6 @@ async def recorded_version(server_id: str) -> str | None:
     return await run_in_db(recorded_omlx_version, RUNTIME_DIR, server_id)
 
 
-async def upgrade_managed_omlx() -> dict[str, Any] | None:
-    """Consider only CORSIA's online managed server after startup discovery has adopted it."""
-    from infra.db_async import run_in_db
-    from llm.local_sources import corsia_omlx_server
-    from llm.providers.omlx_supervisor import upgrade_server
-
-    try:
-        server = await run_in_db(corsia_omlx_server)
-        if not server or server.get("status") != "online":
-            return None
-        return await upgrade_server(server["id"])
-    except Exception:
-        log.exception("The local model server's upgrade did not run")
-        return {"restarted": False, "reason": "error"}
-
-
 async def _state(server_id: str, life: restart.Life) -> str:
     from infra.carry_in_capacity import UNREADABLE, omlx_state
 
@@ -52,33 +36,19 @@ async def _state(server_id: str, life: restart.Life) -> str:
     return await omlx_state(server_id, reads=2)
 
 
-async def restart_when_idle(
+def schedule_upgrade(
     server_id: str, life: restart.Life | None, recorded: str | None, wanted: str,
     stop: Callable[[dict], Awaitable[dict[str, Any]]], start: Callable[[dict], Awaitable[dict[str, Any]]],
     tail_log: Callable[[str], str],
-) -> dict[str, Any] | None:
-    """Wait for idle, then let the supervisor's existing restart task replace the adopted process."""
-    from infra.carry_in_capacity import wait_until_quiet
-
-    if life is None or life.stopping:
-        return {"restarted": False, "reason": "not_running"}
-    if recorded == wanted:
+) -> asyncio.Task | None:
+    """Close admission synchronously, before yielding to other startup work."""
+    if life is None or life.stopping or recorded == wanted:
         return None
-    log.info("Local oMLX is %s; waiting for idle to run bundled %s", recorded or "unrecorded", wanted)
-    while True:
-        quiet = await wait_until_quiet(partial(_state, server_id, life), timeout=float("inf"), interval=QUIET_INTERVAL_S)
-        if life.stopping or life.restart is not None:
-            return {"restarted": False, "reason": "stopped_or_restarting"}
-        if not quiet:
-            log.warning("Local oMLX upgrade skipped until next startup: idle status could not be established")
-            restart.emit(server_id, "restart.skipped", status="upgrade", reason="not_idle")
-            return {"restarted": False, "reason": "not_idle"}
-        result = await restart.schedule(
-            server_id, life, _replace(server_id, life, wanted, stop, start, tail_log), hold_requests=True,
-        )
-        if result.get("reason") != "busy":
-            return result
-        # Outside traffic won the final proof: admission is open again while we wait.
+    if life.restart is not None:
+        return life.restart
+    return restart.schedule(
+        server_id, life, _replace(server_id, life, wanted, stop, start, tail_log), hold_requests=True,
+    )
 
 
 async def _replace(
@@ -93,26 +63,32 @@ async def _replace(
     # schedule() closed admission synchronously. Drain provider scopes, never
     # whole Turns (which may need another call), then prove idle inside that boundary.
     if life.requests:
-        await asyncio.wait(life.requests)
-    state = await _state(server_id, life)
+        _, pending = await asyncio.wait(life.requests, timeout=STAGE_TIMEOUT_S)
+        if pending:
+            log.warning("Local oMLX upgrade failed: admitted calls did not finish")
+            restart.emit(server_id, "restart.failed", status="upgrade", reason="drain_timeout")
+            return {"restarted": False, "reason": "drain_timeout"}
+    async with asyncio.timeout(STAGE_TIMEOUT_S):
+        state = await _state(server_id, life)
     if state != IDLE:
         if state == BUSY:
-            log.info("Local oMLX is busy; reopening inference admission while waiting")
+            log.warning("Local oMLX upgrade failed: the server has outside activity")
+            restart.emit(server_id, "restart.failed", status="upgrade", reason="busy")
             return {"restarted": False, "reason": "busy"}
         log.warning("Local oMLX upgrade skipped until next startup: idle status could not be established")
         restart.emit(server_id, "restart.skipped", status="upgrade", reason="not_idle")
         return {"restarted": False, "reason": "not_idle"}
-    rows = await read_loaded({"server_id": server_id})
+    rows = await asyncio.wait_for(read_loaded({"server_id": server_id}), STAGE_TIMEOUT_S)
     if rows is None:
         log.warning("Local oMLX upgrade skipped until next startup: loaded models could not be read")
         restart.emit(server_id, "restart.skipped", status="upgrade", reason="loaded_unknown")
         return {"restarted": False, "reason": "loaded_unknown"}
     loaded = sorted({row["identifier"] for row in rows})
-    if await recorded_version(server_id) == wanted:
+    if await asyncio.wait_for(recorded_version(server_id), STAGE_TIMEOUT_S) == wanted:
         return {"restarted": False, "reason": "already_current"}
     life.stopping = True  # the exit caused by our internal stop is intentional
     try:
-        stopped = await stop({"server_id": server_id})
+        stopped = await asyncio.wait_for(stop({"server_id": server_id}), STAGE_TIMEOUT_S)
     except Exception:
         life.stopping = False  # a failed stop leaves the existing crash watch responsible
         raise
@@ -124,10 +100,13 @@ async def _replace(
     life.drop_watch()
     life.stopping = False
     life.restarts.clear()  # intentional upgrade has the same fresh budget as a dashboard restart
-    if not await restart.start_with_recovery(server_id, life, "upgrade", start, tail_log):
+    async with asyncio.timeout(STAGE_TIMEOUT_S * (restart.MAX_RESTARTS + 1)):
+        started = await restart.start_with_recovery(server_id, life, "upgrade", start, tail_log)
+    if not started:
         return {"restarted": False, "reason": "start_failed"}
-    await reload_after_restart(server_id, loaded)
-    restored = await read_loaded({"server_id": server_id})
+    async with asyncio.timeout(STAGE_TIMEOUT_S * (len(loaded) + 1)):
+        await reload_after_restart(server_id, loaded)
+    restored = await asyncio.wait_for(read_loaded({"server_id": server_id}), STAGE_TIMEOUT_S)
     missing = sorted(set(loaded) - {row["identifier"] for row in restored or []})
     if restored is None or missing:
         log.error("Local oMLX moved to %s but model restoration was not confirmed: %s", wanted, missing)

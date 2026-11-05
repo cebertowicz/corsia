@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import shutil
 import signal
 import subprocess
 import time
@@ -72,12 +71,11 @@ def _write_pid(server_id: str, pid: int, *, omlx_version: str | None = None) -> 
     process.write_pid(RUNTIME_DIR, server_id, pid, omlx_version=omlx_version)
 
 
-async def upgrade_server(server_id: str) -> dict[str, Any] | None:
-    """Upgrade only a process this supervisor adopted, using its existing lifecycle."""
-    from llm.providers.omlx_upgrade import recorded_version, restart_when_idle
+def schedule_startup_upgrade(server_id: str, recorded: str | None) -> asyncio.Task | None:
+    """Close admission for an adopted outdated server without yielding."""
+    from llm.providers.omlx_upgrade import schedule_upgrade
 
-    version = await recorded_version(server_id)
-    return await restart_when_idle(server_id, _life.get(server_id), version, OMLX_VERSION, _stop_server, start_server, _tail_log)
+    return schedule_upgrade(server_id, _life.get(server_id), recorded, OMLX_VERSION, _stop_server, start_server, _tail_log)
 
 
 def is_restarting(server_id: str) -> bool:
@@ -98,7 +96,6 @@ def _clear_pid(server_id: str) -> None:
 # Keep the existing supervisor injection points for the canonical process primitives.
 _process_alive = process.process_alive
 _port_owner_pid = process.port_owner_pid
-_build_argv = process.build_argv
 
 
 def _process_exited(pid: int) -> bool:
@@ -113,34 +110,16 @@ def _is_managed_omlx_server(server_id: str) -> bool:
     return is_corsia_managed_server(get_server(server_id) or {})
 
 
-def _managed_omlx_argv(
-    host: str, port: int, settings: dict, *, managed: bool,
-) -> list[str] | dict[str, Any]:
-    """Resolve the bundled executable only for CORSIA's setup-created row."""
-    if managed:
-        install_error = process.managed_omlx_install_error()
-        if install_error:
-            return {"ok": False, "message": install_error}
-        executable = process.managed_omlx_executable()
-    else:
-        executable = None
-    executable = executable or shutil.which("omlx")
-    if not executable:
-        return {
-            "ok": False,
-            "message": (
-                "omlx binary not found on PATH. Install oMLX "
-                "(`brew install omlx` or pip install omlx) and retry."
-            ),
-        }
-    return _build_argv(host, port, settings, executable=executable)
-
-
 async def _wait_for_healthy(
     host: str, port: int, *, timeout_s: float, server_id: str | None = None, pid: int | None = None,
+    require_preload: bool = False,
 ) -> str:
     """Return whether oMLX became healthy, its child exited, or the timeout elapsed."""
-    url = models_probe_url(lan_base(host, port))
+    if require_preload:
+        from llm.providers.omlx_endpoints import health_url
+        url = health_url(host, port)
+    else:
+        url = models_probe_url(lan_base(host, port))
     started = time.monotonic()
     async with httpx.AsyncClient(timeout=2.0) as client:
         while time.monotonic() - started < timeout_s:
@@ -243,6 +222,13 @@ async def start_server(cfg: dict) -> dict[str, Any]:
     sid = cfg.get("server_id")
     if not sid:
         return {"ok": False, "message": "start_server: missing server_id in cfg"}
+    life = _life.get(sid)
+    if life is not None and life.hold_requests and life.restart is not asyncio.current_task():
+        try:
+            async with request_slot(sid):
+                return await start_server(cfg)
+        except RuntimeError as exc:
+            return {"ok": False, "message": str(exc)}
 
     host, port = await run_in_db(_resolve_endpoint, cfg)
     if not host or not port:
@@ -253,6 +239,18 @@ async def start_server(cfg: dict) -> dict[str, Any]:
     if existing_pid and _process_alive(existing_pid):
         owner = _port_owner_pid(host, port)
         if owner == existing_pid:
+            # A prior failed boot can still own the port while it is exiting.
+            # An upgrade may only adopt it after pinned-model preload is complete.
+            if life and life.hold_requests and life.restart is asyncio.current_task():
+                health = await _wait_for_healthy(
+                    host, int(port), timeout_s=MANAGED_HEALTH_STARTUP_CAP_S,
+                    server_id=sid, pid=existing_pid, require_preload=True,
+                )
+                if health != "healthy":
+                    return _failed_boot_result(
+                        sid, host, int(port), existing_pid, reason=health,
+                        timeout_s=MANAGED_HEALTH_STARTUP_CAP_S,
+                    )
             await run_in_db(_mark_endpoint_alive, sid, host, int(port))
             watch(sid, existing_pid)
             return {
@@ -278,7 +276,7 @@ async def start_server(cfg: dict) -> dict[str, Any]:
     managed = await run_in_db(_is_managed_omlx_server, sid)
     if managed:
         settings = _managed_launch_settings(settings)
-    argv = _managed_omlx_argv(host, int(port), settings, managed=managed)
+    argv = process.managed_omlx_argv(host, int(port), settings, managed=managed)
     if isinstance(argv, dict):
         return argv
 
@@ -293,8 +291,10 @@ async def start_server(cfg: dict) -> dict[str, Any]:
              proc.pid, sid, host, port)
 
     timeout_s = MANAGED_HEALTH_STARTUP_CAP_S if managed else DEFAULT_HEALTH_TIMEOUT_S
+    preload = bool(managed and life and life.hold_requests and life.restart is asyncio.current_task())
     health = await _wait_for_healthy(
         host, int(port), timeout_s=timeout_s, server_id=sid, pid=proc.pid,
+        **({"require_preload": True} if preload else {}),
     )
     if health == "healthy":
         await run_in_db(_mark_endpoint_alive, sid, host, int(port))

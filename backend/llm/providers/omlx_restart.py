@@ -10,8 +10,8 @@ What each event does, by where the server is:
 ==================  ==========================  ===============================  =================
 event               running (watched)           restart in flight                stop asked for
 ==================  ==========================  ===============================  =================
-exit, not clean     restart it (bounded)        that restart is cancelled and    no restart
-                                                a new one begins
+exit, not clean     restart it (bounded)        crash restart is replaced; a    no restart
+                                                held upgrade keeps ownership
 exit, code 0        logged, not restarted       -                                no restart
                     (an exit with no readable status is treated as unexpected)
 exit, code 0 after  restarted, bound reset      -                                no restart
@@ -103,7 +103,17 @@ async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIt
     """Keep concurrent calls admitted before replacement alive; later calls wait through restoration."""
     life = lives.get(server_id or "")
     while life is not None and life.hold_requests and life.restart is not None:
-        await asyncio.wait({life.restart})  # caller cancellation must not cancel the restart
+        task = life.restart
+        await asyncio.wait({task})  # caller cancellation must not cancel the restart
+        if task.cancelled():
+            raise RuntimeError("Local model server upgrade was cancelled")
+        try:
+            result = task.result()
+        except Exception as exc:
+            raise RuntimeError("Local model server upgrade failed") from exc
+        if isinstance(result, dict) and result.get("reason") != "already_current":
+            if not result.get("restarted") or result.get("reason"):
+                raise RuntimeError(f"Local model server upgrade failed: {result.get('reason', 'unknown')}")
         life = lives.get(server_id or "")
     if life is None:
         yield  # unmanaged and other providers have no supervisor admission
@@ -174,6 +184,9 @@ def on_exit(
     status, clean = observed if observed is not None else process.reap_status(pid)
     if life.stopping:
         log.info("oMLX %s (pid %s) stopped as asked; not restarting", server_id, pid)
+        return
+    if life.restart is not None and life.hold_requests:
+        log.warning("oMLX %s exited during a held upgrade; replacement retains ownership", server_id)
         return
     if clean:
         asked = restart_requested()

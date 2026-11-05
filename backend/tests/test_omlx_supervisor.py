@@ -28,8 +28,8 @@ def isolated_runtime(tmp_path, monkeypatch):
 
 
 def test_build_argv_minimal():
-    from llm.providers.omlx_supervisor import _build_argv
-    argv = _build_argv("127.0.0.1", 5200, {})
+    from llm.providers.omlx_process import build_argv
+    argv = build_argv("127.0.0.1", 5200, {})
     assert argv == ["omlx", "serve", "--host", "127.0.0.1", "--port", "5200"]
 
 
@@ -47,8 +47,8 @@ def test_managed_supervisor_argv_uses_the_bundled_binary_only_for_the_managed_ro
 
     bundled = "/Applications/CORSIA.app/Contents/Resources/bin/omlx"
     monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: bundled)
-    monkeypatch.setattr(sup.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
-    argv = sup._managed_omlx_argv("127.0.0.1", 5200, {}, managed=True)
+    monkeypatch.setattr(sup.process.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
+    argv = sup.process.managed_omlx_argv("127.0.0.1", 5200, {}, managed=True)
 
     assert isinstance(argv, list)
     assert argv[:2] == [bundled, "serve"]
@@ -62,7 +62,7 @@ def test_managed_supervisor_uses_relocatable_source_module(tmp_path, monkeypatch
     monkeypatch.setattr(managed_omlx_binary, "source_omlx_environment", lambda: environment)
     monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: str(environment / "bin" / "omlx"))
     monkeypatch.setattr(sup.process, "managed_omlx_install_error", lambda: None)
-    argv = sup._managed_omlx_argv("127.0.0.1", 5200, {}, managed=True)
+    argv = sup.process.managed_omlx_argv("127.0.0.1", 5200, {}, managed=True)
     assert isinstance(argv, list)
     assert argv[:4] == [str(environment / "bin" / "python"), "-m", "omlx.cli", "serve"]
 
@@ -71,15 +71,15 @@ def test_legacy_supervisor_argv_uses_path_binary(monkeypatch):
     from llm.providers import omlx_supervisor as sup
 
     monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: "/Applications/CORSIA.app/Contents/Resources/bin/omlx")
-    monkeypatch.setattr(sup.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
-    argv = sup._managed_omlx_argv("127.0.0.1", 8000, {}, managed=False)
+    monkeypatch.setattr(sup.process.shutil, "which", lambda _name: "/opt/homebrew/bin/omlx")
+    argv = sup.process.managed_omlx_argv("127.0.0.1", 8000, {}, managed=False)
 
     assert isinstance(argv, list)
     assert argv[:2] == ["/opt/homebrew/bin/omlx", "serve"]
 
 
 def test_build_argv_with_settings():
-    from llm.providers.omlx_supervisor import _build_argv
+    from llm.providers.omlx_process import build_argv
     settings = {
         "model_dir": "/Users/alice/models",
         "max_model_memory": "200GB",
@@ -89,7 +89,7 @@ def test_build_argv_with_settings():
         "no_cache": False,           # falsy → omitted
         "ignored_extra_field": "x",  # unknown → ignored, not crashed
     }
-    argv = _build_argv("0.0.0.0", 8000, settings)
+    argv = build_argv("0.0.0.0", 8000, settings)
     assert "--host" in argv and argv[argv.index("--host") + 1] == "0.0.0.0"
     assert "--port" in argv and argv[argv.index("--port") + 1] == "8000"
     assert "--model-dir" in argv
@@ -104,17 +104,17 @@ def test_build_argv_with_settings():
 
 
 def test_build_argv_no_cache_flag():
-    from llm.providers.omlx_supervisor import _build_argv
-    argv = _build_argv("127.0.0.1", 5200, {"no_cache": True})
+    from llm.providers.omlx_process import build_argv
+    argv = build_argv("127.0.0.1", 5200, {"no_cache": True})
     assert "--no-cache" in argv
 
 
 def test_build_argv_binds_a_key_that_starts_with_a_dash():
     import argparse
 
-    from llm.providers.omlx_supervisor import _build_argv
+    from llm.providers.omlx_process import build_argv
     dashed = "-" + "x" * 42
-    argv = _build_argv("127.0.0.1", 5200, {"api_key": dashed})
+    argv = build_argv("127.0.0.1", 5200, {"api_key": dashed})
     parser = argparse.ArgumentParser()
     parser.add_argument("--host")
     parser.add_argument("--port")
@@ -345,7 +345,7 @@ def test_start_server_missing_host_port(isolated_runtime, monkeypatch):
 def test_start_server_missing_omlx_binary(isolated_runtime, monkeypatch):
     from llm.providers import omlx_supervisor as sup
     monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: None)
-    monkeypatch.setattr(sup.shutil, "which", lambda _name: None)
+    monkeypatch.setattr(sup.process.shutil, "which", lambda _name: None)
     monkeypatch.setattr(sup, "_port_owner_pid", lambda h, p: None)
     result = asyncio.run(sup.start_server(
         {"server_id": "ns-no-binary", "host": "127.0.0.1", "port": 9999},
@@ -419,7 +419,7 @@ def test_new_omlx_start_uses_the_managed_cap_only_for_the_bundled_row(isolated_r
     monkeypatch.setattr(sup, "_is_managed_omlx_server", lambda _server_id: managed)
     monkeypatch.setattr(sup.process, "managed_omlx_install_error", lambda: None)
     monkeypatch.setattr(sup.process, "managed_omlx_executable", lambda: "/bundled/omlx")
-    monkeypatch.setattr(sup.shutil, "which", lambda _name: "/path/omlx")
+    monkeypatch.setattr(sup.process.shutil, "which", lambda _name: "/path/omlx")
     monkeypatch.setattr(sup, "_spawn_process", spawn)
     monkeypatch.setattr(sup, "_wait_for_healthy", healthy)
 

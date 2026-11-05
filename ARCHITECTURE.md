@@ -105,16 +105,18 @@ a cfg host to authorize a stored key. Admin routes remain separately owned by
 
 ### Managed oMLX replacement
 
-`omlx_supervisor` owns one `omlx_restart.Life` per adopted process. A version
-upgrade uses that Life's existing restart task as its inference admission
-boundary: `base.py` registers each concurrent provider call before preflight,
-and `omlx_lifecycle.warm_cache` registers before its loaded-model check.
-Replacement waits for both producers to finish and rechecks server idleness
-once; later calls wait through boot and exact-model restoration. If outside traffic
-makes that final proof busy, admission reopens before waiting for quiet again.
-Crash recovery and upgrade startup reuse the same bounded start-attempt owner;
-failed Stop and exhausted startup emit terminal lifecycle events. This boundary
-covers CORSIA dispatch; clients calling oMLX directly do not participate in it.
+`omlx_supervisor` owns one `omlx_restart.Life` per adopted process. Before
+startup fans out, an outdated managed process is adopted and its existing restart
+task closes inference admission. `base.py` registers each concurrent provider
+call before preflight, and `omlx_lifecycle.warm_cache` registers before its
+loaded-model check. Replacement drains these scopes within a finite bound, then
+checks outside traffic once; a busy or unreadable result fails the held calls.
+Later calls wait through `/health` readiness and exact-model restoration, or
+receive the replacement failure. Cloud work can continue independently. Crash
+recovery and upgrade reuse the bounded start-attempt owner; this boundary covers
+CORSIA dispatch, not clients calling oMLX directly. Unexpected adoption failures
+stop startup before admission; cloud work continues while an established upgrade
+is in progress.
 Restart transitions tag the existing `models_updated` event with `server_id`,
 so Providers refreshes server state only for those transitions. Ordinary
 catalog events add no server-list read. `providersV7` owns the row's restart

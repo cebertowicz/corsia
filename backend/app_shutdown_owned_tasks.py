@@ -36,7 +36,7 @@ async def shutdown_owned_tasks(
         ("LiteLLM cost map refresh", refresh_task()),
         *zip(
             ("provider auto-start", "cloud discovery", "network discovery",
-             "harness discovery", "continuity drive"),
+             "harness discovery", "continuity drive", "managed oMLX upgrade")[:len(startup_tasks)],
             startup_tasks,
             strict=True,
         ),

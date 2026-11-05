@@ -9,26 +9,26 @@ import pytest
 
 from infra import carry_in_capacity
 
-from llm.providers import omlx_lifecycle, omlx_restart, omlx_supervisor, omlx_upgrade
-from test_omlx_upgrade import _seat
+from llm.providers import omlx_lifecycle, omlx_restart, omlx_supervisor
+from test_omlx_upgrade import _seat, _upgrade
 
 
-async def test_stop_during_idle_wait_wins(isolated_db, monkeypatch):
+async def test_stop_during_idle_proof_cancels_replacement(isolated_db, monkeypatch):
     calls, _ = _seat(monkeypatch, recorded="0.7.1rc1")
     life = omlx_restart.Life()
     monkeypatch.setattr(omlx_supervisor, "_life", {"seat": life})
+    checking = asyncio.Event()
 
-    async def wait(read, **_kwargs):
-        # The real lifecycle owner records a person's Stop before any signal.
-        life.announce_stop()
-        await read()
-        return True
+    async def state(_server, *, reads):
+        checking.set()
+        await asyncio.Event().wait()
 
-    monkeypatch.setattr("infra.carry_in_capacity.wait_until_quiet", wait)
-
-    result = await omlx_upgrade.upgrade_managed_omlx()
-
-    assert result["restarted"] is False
+    monkeypatch.setattr(carry_in_capacity, "omlx_state", state)
+    upgrade = asyncio.create_task(_upgrade())
+    await asyncio.wait_for(checking.wait(), 2)
+    life.announce_stop()
+    with pytest.raises(asyncio.CancelledError):
+        await upgrade
     assert calls == []
 
 
@@ -36,7 +36,7 @@ async def test_an_unadopted_server_is_not_restarted(isolated_db, monkeypatch):
     calls, _ = _seat(monkeypatch, recorded="0.7.1rc1")
     monkeypatch.setattr(omlx_supervisor, "_life", {})
 
-    result = await omlx_upgrade.upgrade_managed_omlx()
+    result = await _upgrade()
 
     assert result["restarted"] is False
     assert calls == []
@@ -49,42 +49,30 @@ async def test_unreadable_loaded_models_prevents_stop(isolated_db, monkeypatch):
     monkeypatch.setattr(omlx_lifecycle, "read_loaded", original_read)
     monkeypatch.setattr(omlx_lifecycle, "_loaded_snapshot", AsyncMock(return_value=([], False)))
 
-    result = await omlx_upgrade.upgrade_managed_omlx()
+    result = await _upgrade()
 
     assert result["restarted"] is False
     assert calls == []
 
 
-async def test_active_and_waiting_requests_clear_before_restart(isolated_db, monkeypatch):
-    real_wait, real_state = carry_in_capacity.wait_until_quiet, carry_in_capacity.omlx_state
+@pytest.mark.parametrize("counts", [(1, 0), (0, 1)])
+async def test_external_requests_prevent_restart_without_waiting(isolated_db, monkeypatch, counts):
+    real_state = carry_in_capacity.omlx_state
     calls, _ = _seat(monkeypatch, recorded="0.7.1rc1")
-    snapshots = iter([
-        {"active_requests": 1, "waiting_requests": 0, "total_requests": 8},
-        {"active_requests": 0, "waiting_requests": 1, "total_requests": 9},
-        {"active_requests": 0, "waiting_requests": 0, "total_requests": 10},
-        {"active_requests": 0, "waiting_requests": 0, "total_requests": 10},
-        # Replacement re-proves quiet after closing CORSIA request admission.
-        {"active_requests": 0, "waiting_requests": 0, "total_requests": 10},
-        {"active_requests": 0, "waiting_requests": 0, "total_requests": 10},
-    ])
     observed = []
 
     async def probe(_client, server_id, host, port):
         assert (server_id, host, port) == ("seat", "127.0.0.1", 9)
-        assert calls == []  # no stop while either request count is nonzero
-        payload = next(snapshots)
-        observed.append(payload)
-        return None, None, payload
+        assert calls == []
+        observed.append(counts)
+        return None, None, {"active_requests": counts[0], "waiting_requests": counts[1], "total_requests": 8}
 
-    monkeypatch.setattr(carry_in_capacity, "wait_until_quiet", real_wait)
     monkeypatch.setattr(carry_in_capacity, "omlx_state", real_state)
     monkeypatch.setattr(carry_in_capacity, "_status_address", lambda _sid: ("127.0.0.1", 9))
-    monkeypatch.setattr(carry_in_capacity.asyncio, "sleep", AsyncMock())
     monkeypatch.setattr("llm.providers.omlx_public_probe.probe_registered_status", probe)
-
-    assert (await omlx_upgrade.upgrade_managed_omlx())["restarted"] is True
-    assert len(observed) == 6
-    assert [call[0] for call in calls] == ["loaded", "stop", "start", "reload", "loaded"]
+    assert (await _upgrade())["reason"] == "busy"
+    assert observed == [counts]
+    assert calls == []
 
 
 async def test_stop_cancels_boot_before_model_reload(isolated_db, monkeypatch, tmp_path):
@@ -102,7 +90,7 @@ async def test_stop_cancels_boot_before_model_reload(isolated_db, monkeypatch, t
         return {"ok": True}
 
     monkeypatch.setattr(omlx_supervisor, "start_server", start)
-    upgrade = asyncio.create_task(omlx_upgrade.upgrade_managed_omlx())
+    upgrade = asyncio.create_task(_upgrade())
     await asyncio.wait_for(booting.wait(), timeout=2)
 
     stopped = await omlx_supervisor.stop_server({"server_id": "seat"})
@@ -118,7 +106,7 @@ async def test_failed_stop_does_not_start_or_reload(isolated_db, monkeypatch):
     calls, _ = _seat(monkeypatch, recorded="0.7.1rc1")
     monkeypatch.setattr(omlx_supervisor, "_stop_server", AsyncMock(return_value={"ok": False}))
 
-    result = await omlx_upgrade.upgrade_managed_omlx()
+    result = await _upgrade()
 
     assert result == {"restarted": False, "reason": "stop_failed"}
     assert [call[0] for call in calls] == ["loaded"]
