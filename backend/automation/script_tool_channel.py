@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from subagents.harness_tool_bridge import build_tool_registry
 from tools.registry import ToolRegistry
 
 SOCKET_ENV = "CORSIA_SCRIPT_TOOL_SOCKET"
+logger = logging.getLogger(__name__)
 
 
 async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
@@ -30,7 +32,8 @@ async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
             state._current_turn_identity.reset(turn)
             state._current_thread_id.reset(context)
         response = {"code": 1 if is_error_result(result) else 0, "stdout": str(result), "stderr": ""}
-    except Exception:
+    except Exception as exc:
+        logger.warning("script tool request failed: %s", type(exc).__name__)
         response = {"code": 1, "stdout": "", "stderr": "Tool request failed.\n"}
     try:
         data = json.dumps(response).encode()

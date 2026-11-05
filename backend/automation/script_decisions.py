@@ -31,11 +31,11 @@ def pending(user_id: str, thread_id: str | None) -> list[dict]:
     try:
         rows = db.execute(
             "SELECT s.* FROM automation_schedules s JOIN threads t ON t.id=s.thread_id "
-            "WHERE t.user_id=? AND s.kind='script' AND s.state='paused' ORDER BY s.created_at,s.id",
+            "WHERE t.user_id=? AND s.kind='script' AND s.state='paused' "
+            "AND json_extract(s.payload_json, '$.authentication.state')='pending' "
+            "ORDER BY s.created_at,s.id",
             (user_id,),
         ).fetchall()
-        rows = [row for row in rows
-                if (json.loads(row["payload_json"] or "{}").get("authentication") or {}).get("state") == "pending"]
         if thread_id is not None:
             from core.thread_identity import root_visible_thread_ids
             visible = root_visible_thread_ids([row["thread_id"] for row in rows], db=db)

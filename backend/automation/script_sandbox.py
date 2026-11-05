@@ -174,7 +174,11 @@ async def _run(
 
 @asynccontextmanager
 async def _legacy_github_client(thread_id: str, run_id: str, rule_id: str | None, repo: str):
-    """Preserve the repository-scoped read channel for rule-started scripts."""
+    """The repository-scoped read channel for rule-started scripts that are not authenticated.
+
+    Retire it once the scripts that read through it (the GitHub screen's and the review
+    gate's) are registered as authenticated and call ``corsia github``.
+    """
     stack = AsyncExitStack()
     try:
         socket = await stack.enter_async_context(github_channel(thread_id, run_id, rule_id, repo=repo))

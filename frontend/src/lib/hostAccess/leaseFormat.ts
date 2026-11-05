@@ -153,7 +153,10 @@ export function duration(seconds: unknown): string {
 
 export function cadence(seconds: number | null): string {
 	if (seconds == null) return 'When a matching event arrives';
-	return seconds === 1 ? 'Every second' : `Every ${seconds} seconds`;
+	const [size, unit] = ([[86_400, 'day'], [3_600, 'hour'], [60, 'minute']] as const)
+		.find(([size]) => seconds % size === 0) ?? [1, 'second'];
+	const count = seconds / size;
+	return count === 1 ? `Every ${unit}` : `Every ${count} ${unit}s`;
 }
 
 export function remaining(lease: HostAccessLease, nowMs: number): string {

@@ -64,22 +64,6 @@ def _serialize_lease(row: dict) -> dict:
     return result
 
 
-@router.get("/scripts")
-async def script_requests(
-    root_thread_id: str | None = None,
-    user: dict = Depends(require_user),
-    interactive_ui: str | None = Header(None, alias=INTERACTIVE_UI_HEADER),
-):
-    from automation.script_decisions import pending
-    from infra.db_async import run_in_db
-
-    rows = await run_in_db(pending, user["id"], root_thread_id)
-    if interactive_ui == "1":
-        require_human_user(user)
-        rows = [attach_user_decision_capability(row, user_id=user["id"]) for row in rows]
-    return {"scripts": rows}
-
-
 async def _decide_script(schedule_id: str, body: LeaseMutation, user: dict,
                          capability: str | None, approve: bool):
     from automation.script_decisions import decide

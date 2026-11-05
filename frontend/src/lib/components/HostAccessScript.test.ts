@@ -21,10 +21,10 @@ it('shows the script, trigger, purpose and request with approve and deny', async
 	} });
 	flushSync();
 	expect(target.textContent).toContain('task.py');
-	expect(target.textContent).toContain('Allow this script to use GitHub');
+	expect(target.textContent).toContain('Allow this script to take actions as your agent and on GitHub');
 	expect(target.textContent).toContain('Needs approval');
 	expect(target.textContent).toContain('When it runs');
-	expect(target.textContent).toContain('Every 600 seconds');
+	expect(target.textContent).toContain('Every 10 minutes');
 	expect(target.textContent).toContain('Check the result');
 	expect(target.textContent).toContain('Please check the result');
 	const buttons = [...target.querySelectorAll('button')];
@@ -39,5 +39,5 @@ it('shows the script, trigger, purpose and request with approve and deny', async
 it('says when a script runs in plain words', () => {
 	expect(cadence(null)).toBe('When a matching event arrives');
 	expect(cadence(1)).toBe('Every second');
-	expect(cadence(600)).toBe('Every 600 seconds');
+	expect(cadence(600)).toBe('Every 10 minutes');
 });

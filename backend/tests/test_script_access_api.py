@@ -37,8 +37,9 @@ def test_script_decision_user_binding_and_single_use(isolated_db, tmp_path, monk
     monkeypatch.setattr(delivery, "deliver_to_thread", AsyncMock(return_value=True))
     monkeypatch.setattr(state, "broadcast_to_user", lambda *args: None)
     client = TestClient(app)
-    request = client.get("/api/host-access/leases/scripts?root_thread_id=owner",
-                         headers={"X-CORSIA-Interactive-UI": "1"}).json()["scripts"][0]
+    leases = client.get("/api/host-access/leases?root_thread_id=owner",
+                        headers={"X-CORSIA-Interactive-UI": "1"}).json()["leases"]
+    request = next(row for row in leases if row["kind"] == "script")
     payload = {"revision": request["revision"], "application_hash": request["application_hash"]}
     headers = {"X-CORSIA-User-Decision": request["decision_capability"]}
     person["id"] = "other"
