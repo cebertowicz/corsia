@@ -83,6 +83,23 @@ so Providers refreshes server state only for those transitions. Ordinary
 catalog events add no server-list read. `providersV7` owns the row's restart
 text and dot for every host-group consumer.
 
+### Model and account resolution
+
+`backend/llm/account_catalog.py` projects each harness model's status for the
+accounts permitted in scope. The selected account's discovery supplies its
+identity and window when available; `backend/connections/account_rollover.py` owns an opt-in
+move to an eligible account before a queued input is claimed. The window
+resolver in `backend/llm/context_window.py` applies the saved profile and
+provider evidence. Managed oMLX memory refusals can add a temporary runtime
+cap for the recovering turn (`backend/llm/memory_fit.py`). External server
+selectors carry both server identity and served model id; the External provider
+routes requests without managing the server's models
+(`backend/llm/external_provider.py`).
+
+The oMLX public authentication, managed oMLX replacement, and model and account
+resolution sections were checked against the code at
+`7a8c55d84c75cbee7b8f26c8839f188fa466b559`.
+
 ### System tier projection
 
 `backend/infra/system_package.py` locates immutable System source content. At
