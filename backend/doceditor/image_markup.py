@@ -3,9 +3,10 @@
 An agent that places a box gets the image back with its box drawn, so it can
 check where the box landed; a delivered feedback batch carries the image with
 every region comment's numbered box. Both read the same picture the viewer
-shows: a box (or a point) in the author's colour, joined to its numbered tag
-outside the nearest image edge. The viewer's ``imageGutter.ts`` uses the same
-placement rule.
+shows: a box (or a point) in the author's colour with a numbered tag. Tags
+that do not overlap stay on the picture; overlapping tags move outside the
+nearest edge and join to their boxes. The viewer's ``imageGutter.ts`` uses the
+same placement rule.
 
 Rendering is local Pillow work on bytes the caller already read; nothing is
 fetched. Callers run it off the event loop.
