@@ -162,7 +162,7 @@ The installer adds any missing prerequisites, builds the environment, creates yo
 2. Connect a model source. CORSIA detects Claude Code and Codex logins, takes an API key, or connects a local [oMLX](https://github.com/jundot/omlx) server, and offers a fix for anything missing.
 3. CORSIA walks you through the rest of setup in its plan: more model providers, web search, GitHub, remote access, and your first project.
 
-Updates arrive through **Settings → System → Update now**, which waits for running turns to finish and keeps the old build serving if the new one fails. Update follows the upstream of the branch you have checked out. It refuses while the checkout has uncommitted edits (commit or stash them first) and offers nothing while you have local commits ahead of that upstream. A branch with no upstream, or one that has diverged from it, gets a message naming the branch and how to fix it.
+Updates arrive through **Settings → System → Update now**. Update tries to drain running work before restarting, but can proceed if the drain does not complete. A failure before teardown leaves the old build serving; a later restart failure can leave the updated build stopped. Update follows the upstream of the branch you have checked out. It refuses while the checkout has uncommitted edits (commit or stash them first) and offers nothing while you have local commits ahead of that upstream. A branch with no upstream, or one that has diverged from it, gets a message naming the branch and how to fix it.
 
 **On your phone:** reach your Mac over a private HTTPS address, for example `tailscale serve --bg http://127.0.0.1:1956`, then use **Add to Home Screen**.
 
@@ -208,7 +208,7 @@ The build downloads its own Rust, Python and resources, and needs room for the b
 <details>
 <summary><strong>Everyday commands</strong></summary>
 
-`corsia` means `~/.corsia/scripts/corsia`.
+For the source install, `corsia` means `~/.corsia/scripts/corsia`. After a desktop app takeover, the `corsia` command on your `PATH` is the app's.
 
 | Command | Does |
 |---|---|

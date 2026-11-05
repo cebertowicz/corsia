@@ -42,6 +42,9 @@ any person input, using the same persisted nudge and settlement path for both.
 | Transport | `backend/ws/` | WebSocket connection and message transport |
 | Evaluation | `backend/eval/`, `evals/` | scenario execution, scorers, and evaluation fixtures |
 | Frontend | `frontend/src/` | SvelteKit application, stores, API client, and UI primitives |
+| Desktop | `desktop/` | Tauri shell, packaged service, app updates, and macOS bundle |
+| Onboarding | `backend/onboarding/` | first-run setup and first-chat instructions |
+| Installation | `scripts/install.sh` | source installation and managed dependencies |
 | Operations | `scripts/` | supported start, dev, verification, and maintenance commands |
 
 Deeper callable maps live in `BACKEND.md` and `FRONTEND.md`. Visual work also
@@ -584,14 +587,14 @@ handle retention remains separate.
 
 ## Runtime and checkout isolation
 
-An instance is a checkout. `scripts/corsia` operates exactly the checkout it
+A source instance uses a checkout. `scripts/corsia` operates exactly the checkout it
 lives in: the script's own location resolves the backend, interpreter, env
 file, port, state root, and launchd job, so a copy running from a worktree
 cannot address another checkout's instance. There is no environment selector
 and nothing to choose between; a `CORSIA_DIR` naming a different directory is
 refused rather than honored.
 
-The ordinary machine has one serving checkout, one launchd service, and one set
+A source install normally has one serving checkout, one launchd service, and one set
 of operational databases under the platform state root (`corsia.db`,
 `analytics.duckdb`, `uploads/`). The serving checkout tracks whichever branch
 its owner has pointed it at. A checkout's launchd job is named by
@@ -614,7 +617,9 @@ and evals run against disposable state seeded into an explicit
 database. The backend log lives in that instance's state root, so two checkouts
 on one machine never write to, truncate, or tail one shared file.
 
-The supported lifecycle is through `scripts/corsia`. Do not infer checkout
+The source lifecycle is through `scripts/corsia`. The packaged app instead runs
+its bundled service and code; after takeover it retains the source install's state
+location. See [Desktop app](docs/how-it-works/desktop-app.md). Do not infer checkout
 paths or switch branches from a running process.
 
 ## Scoped audit reads and host-access refusals
