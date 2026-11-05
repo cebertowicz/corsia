@@ -30,5 +30,3 @@ By default, app metadata lives in `~/Library/Application Support/CORSIA` and ope
 | Update availability and staging | `backend/infra/update_status.py`, `desktop/src-tauri/src/update_stage.rs` |
 | Update restart and rollback | `scripts/corsia.d/app_mode.sh` |
 | App state paths | `desktop/src-tauri/src/app_paths.rs` |
-
-Checked against the code at `7a8c55d84`.
