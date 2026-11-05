@@ -2,7 +2,7 @@
 
 How CORSIA confines an agent's shell commands and file tools, on macOS and Linux, without a lease. Leases are on [Host access](host-access.md).
 
-**In short:** agents run as your user. File tools reach only the workspace and registered repositories. Shell commands run inside an OS sandbox that lets them read and write the workspace, read a few tool-settings folders, and reach the network freely. A project agent's shell is also fenced out of other projects (the CORSIA agent's only out of ones set to Local models only); file tools are not, so the workspace is still the boundary that holds for every tool.
+**In short:** agents run as your user. File tools reach only the workspace and registered repositories. Shell commands run inside an OS sandbox that lets them read and write the workspace, read a few tool-settings folders, and reach the network freely. A project agent's shell is also fenced out of other projects (the CORSIA agent's shell is fenced less, [below](#projects)); file tools are not, so the workspace is still the boundary that holds for every tool.
 
 ## Layers
 
@@ -10,7 +10,7 @@ How CORSIA confines an agent's shell commands and file tools, on macOS and Linux
 |---|---|---|---|
 | File-tool gate | `read_file`, `write_file`, `edit_file`, `grep`, `glob`, `list_dir` | CORSIA code | `backend/tools/filesystem_gate.py`, `backend/tools/sandbox_config.py` |
 | Shell sandbox | Every `bash` command and everything it starts | Operating system | `backend/tools/shell_guard.py`, `backend/tools/shell_sandbox.py` |
-| Project fence | Other projects' folders and registered repositories, in the shell, other AI agent command-line tools started under a lease, and local tool servers; for a leased shell command, only projects set to Local models only. On Linux, the shell only | Operating system | `backend/tools/project_fence.py`, `backend/tools/host_path_policy.py`, `backend/tools/linux_shell.py` |
+| Project fence | Other projects' folders and registered repositories, for the shell and for another AI agent's command-line tool started under a lease. Local tool servers and leased shell commands are fenced only from projects set to Local models only. On Linux it covers the shell only | Operating system | `backend/tools/project_fence.py`, `backend/tools/host_path_policy.py`, `backend/tools/linux_shell.py` |
 | Command refusals | A list of commands refused before they run | CORSIA code | `backend/tools/shell_guard.py` (`check_command_safety`) |
 
 The file tools run inside the CORSIA server, so the OS sandbox doesn't apply to them; their own path check does. The shell runs in a separate sandboxed process.

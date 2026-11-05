@@ -20,7 +20,7 @@ The workspace itself is **not** in this list as something agents are kept out of
 |---|---|---|
 | An agent that makes a mistake | Deletes the wrong folder, runs a destructive command | Sandbox write limits; command refusals; the reviewer on leased commands |
 | An agent that has been tricked by content it read | An email or web page tells it to upload your files | Sandbox read limits; email screening; isolated workers; masking. Partial: see [Untrusted content](untrusted-content.md) |
-| An agent reaching into another project | Its shell lists or copies another project's files | The project fence in the shell sandbox. Partial: file tools and conversation tools aren't fenced, and the CORSIA agent's shell is fenced only from projects set to Local models only |
+| An agent reaching into another project | Its shell lists or copies another project's files | The project fence in the shell sandbox. Partial: file tools and conversation tools aren't fenced, and the CORSIA agent's shell is fenced less ([Agent sandbox](agent-sandbox.md#projects)) |
 | An agent trying to widen its own access | Asks for a lease it doesn't need, edits the sandbox profile | Leases need approval; the hard floor; the reviewer is instructed to block access-control changes |
 | Someone else on your network | A device on the same Wi-Fi | Local-only listening by default; sign-in on every request except a few named routes; see [Network](network.md) |
 
