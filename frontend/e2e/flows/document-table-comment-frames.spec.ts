@@ -143,7 +143,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		].join('\n');
 		const doc = DOC.replace(['| Item | Owner |', '| --- | --- |', ...TABLE_ROWS].join('\n'), wideTable);
 		const { ids } = await openDocument(page, { width: 1440, height: 900 }, doc);
-		await page.getByRole('button', { name: /^2 open threads\b/ }).click();
+		await page.getByRole('button', { name: /^2 threads\b/ }).click();
 		const side = page.locator('[data-doc-comments-drawer]');
 		await side.locator(`[data-comment-id="${ids.table}"]`).locator('[data-comment-jump]').click();
 		const cell = page.locator('.cm-md-table td', { hasText: 'owner-07' });
