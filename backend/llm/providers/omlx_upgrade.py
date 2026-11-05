@@ -7,6 +7,7 @@ existing Life owns Stop, shutdown and the restart; this module adds no lifecycle
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 from functools import partial
@@ -37,7 +38,7 @@ async def upgrade_managed_omlx() -> dict[str, Any] | None:
 async def _state(server_id: str, life: restart.Life) -> str:
     from infra.carry_in_capacity import UNREADABLE, omlx_state
 
-    if life.stopping or life.restart is not None:
+    if life.stopping or (life.restart is not None and life.restart is not asyncio.current_task()):
         return UNREADABLE
     return await omlx_state(server_id, reads=2)
 
@@ -48,7 +49,6 @@ async def restart_when_idle(
 ) -> dict[str, Any] | None:
     """Wait for idle, then let the supervisor's existing restart task replace the adopted process."""
     from infra.carry_in_capacity import wait_until_quiet
-    from llm.providers.omlx_lifecycle import read_loaded
 
     if life is None or life.stopping:
         return {"restarted": False, "reason": "not_running"}
@@ -61,23 +61,28 @@ async def restart_when_idle(
     if not quiet:
         log.warning("Local oMLX upgrade deferred: idle status could not be established")
         return {"restarted": False, "reason": "not_idle"}
+    return await restart.schedule(server_id, life, _replace(server_id, life, wanted, stop, start))
+
+
+async def _replace(
+    server_id: str, life: restart.Life, wanted: str,
+    stop: Callable[[dict], Awaitable[dict[str, Any]]], start: Callable[[dict], Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    from infra.carry_in_capacity import wait_until_quiet
+    from llm.local_keep_loaded import reload_after_restart
+    from llm.providers.omlx_lifecycle import read_loaded
+
+    # schedule() closed admission synchronously. Drain provider scopes, never
+    # whole Turns (which may need another call), then prove idle inside that boundary.
+    if life.requests:
+        await asyncio.wait(life.requests)
+    if not await wait_until_quiet(partial(_state, server_id, life), timeout=float("inf"), interval=QUIET_INTERVAL_S):
+        return {"restarted": False, "reason": "not_idle"}
     rows = await read_loaded({"server_id": server_id})
     if rows is None:
         log.warning("Local oMLX upgrade deferred: loaded models could not be read")
         return {"restarted": False, "reason": "loaded_unknown"}
-    if life.stopping or life.restart is not None:
-        return {"restarted": False, "reason": "stopped_or_restarting"}
     loaded = sorted({row["identifier"] for row in rows})
-    return await restart.schedule(server_id, life, _replace(server_id, life, loaded, wanted, stop, start))
-
-
-async def _replace(
-    server_id: str, life: restart.Life, loaded: list[str], wanted: str,
-    stop: Callable[[dict], Awaitable[dict[str, Any]]], start: Callable[[dict], Awaitable[dict[str, Any]]],
-) -> dict[str, Any]:
-    from llm.local_keep_loaded import reload_after_restart
-    from llm.providers.omlx_lifecycle import read_loaded
-
     restart.emit(server_id, "restart.attempted", status="upgrade", version=wanted)
     life.stopping = True  # the exit caused by our internal stop is intentional
     try:

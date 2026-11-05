@@ -9,6 +9,7 @@ import shutil
 import signal
 import subprocess
 import time
+from contextlib import AbstractAsyncContextManager
 from typing import Any
 
 import httpx
@@ -40,8 +41,7 @@ def _mark_endpoint_alive(server_id: str, host: str, port: int) -> None:
     except Exception as e:
         log.warning("_mark_endpoint_alive failed for %s: %s", server_id, e)
 
-# A first spawn pays Gatekeeper's scan of CORSIA's signed bundle and a cold Metal
-# start; ordinary user-managed servers retain the caller's shorter timeout.
+# Managed first spawn pays Gatekeeper and cold Metal startup; other servers keep the caller's timeout.
 MANAGED_HEALTH_STARTUP_CAP_S = 600.0
 DEFAULT_HEALTH_TIMEOUT_S = 30.0
 HEALTH_POLL_INTERVAL_S = 0.5
@@ -86,6 +86,11 @@ def is_restarting(server_id: str) -> bool:
     return life is not None and life.restart is not None
 
 
+def request_slot(server_id: str | None) -> AbstractAsyncContextManager[None]:
+    """Admit a provider call through this supervisor's existing server lifecycle."""
+    return restart.request_slot(_life, server_id)
+
+
 def _clear_pid(server_id: str) -> None:
     process.clear_pid(RUNTIME_DIR, server_id)
 
@@ -98,11 +103,7 @@ _build_argv = process.build_argv
 
 def _process_exited(pid: int) -> bool:
     """Return true for a dead process, including an exited child awaiting reap."""
-    try:
-        waited_pid, _ = os.waitpid(pid, os.WNOHANG)
-    except ChildProcessError:
-        return not _process_alive(pid)
-    return waited_pid == pid or not _process_alive(pid)
+    return process.process_exited(pid, _process_alive)
 
 
 def _is_managed_omlx_server(server_id: str) -> bool:

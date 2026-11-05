@@ -66,6 +66,15 @@ sweep and freshness recovery reuse `omlx_public_probe.py`. This path never uses
 a cfg host to authorize a stored key. Admin routes remain separately owned by
 `omlx_endpoints.admin_request` and its cookie session.
 
+### Managed oMLX replacement
+
+`omlx_supervisor` owns one `omlx_restart.Life` per adopted process. A version
+upgrade uses that Life's existing restart task as its inference admission
+boundary: `base.py` registers each concurrent provider call before preflight,
+replacement waits for those calls to finish and rechecks server idleness, and
+later calls wait through boot and exact-model restoration. This boundary covers
+CORSIA dispatch; clients calling oMLX directly do not participate in it.
+
 ### System tier projection
 
 `backend/infra/system_package.py` locates immutable System source content. At

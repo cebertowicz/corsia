@@ -63,6 +63,9 @@ async def test_active_and_waiting_requests_clear_before_restart(isolated_db, mon
         {"active_requests": 0, "waiting_requests": 1, "total_requests": 9},
         {"active_requests": 0, "waiting_requests": 0, "total_requests": 10},
         {"active_requests": 0, "waiting_requests": 0, "total_requests": 10},
+        # Replacement re-proves quiet after closing CORSIA request admission.
+        {"active_requests": 0, "waiting_requests": 0, "total_requests": 10},
+        {"active_requests": 0, "waiting_requests": 0, "total_requests": 10},
     ])
     observed = []
 
@@ -80,7 +83,7 @@ async def test_active_and_waiting_requests_clear_before_restart(isolated_db, mon
     monkeypatch.setattr("llm.providers.omlx_public_probe.probe_registered_status", probe)
 
     assert (await omlx_upgrade.upgrade_managed_omlx())["restarted"] is True
-    assert len(observed) == 4
+    assert len(observed) == 6
     assert [call[0] for call in calls] == ["loaded", "stop", "start", "reload", "loaded"]
 
 

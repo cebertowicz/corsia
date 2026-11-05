@@ -31,6 +31,15 @@ PORT_OWNER_UNKNOWN = _PortOwnerUnknown()
 PortOwnerPid = int | None | _PortOwnerUnknown
 
 
+def process_exited(pid: int, alive: Callable[[int], bool]) -> bool:
+    """Reap an exited child, or check the identity of a process adopted from another parent."""
+    try:
+        waited_pid, _ = os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        return not alive(pid)
+    return waited_pid == pid or not alive(pid)
+
+
 def pid_path(runtime_dir: Path, server_id: str) -> Path:
     return runtime_dir / f"omlx-{server_id}.pid"
 

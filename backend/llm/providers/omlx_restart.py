@@ -40,7 +40,8 @@ import asyncio
 import logging
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -64,6 +65,7 @@ class Life:
     stopping: bool = False  # a stop was asked for: the exit it causes is not a crash
     restart: asyncio.Task | None = None
     restarts: deque[float] = field(default_factory=deque)  # when each restart in the window began
+    requests: set[asyncio.Future[None]] = field(default_factory=set)  # admitted provider calls, not whole Turns
 
     def watch(self, pid: int, on_exit: Callable[[tuple[str, bool] | None], None]) -> None:
         """The server is up and wanted running: have the OS tell us when ``pid`` exits.
@@ -93,6 +95,25 @@ class Life:
         if self.restart:
             self.restart.cancel()
         return self.restart
+
+
+@asynccontextmanager
+async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIterator[None]:
+    """Keep concurrent calls admitted before replacement alive; later calls wait through restoration."""
+    life = lives.get(server_id or "")
+    while life is not None and life.restart is not None:
+        await asyncio.wait({life.restart})  # caller cancellation must not cancel the restart
+        life = lives.get(server_id or "")
+    if life is None:
+        yield  # unmanaged and other providers have no supervisor admission
+        return
+    finished = asyncio.get_running_loop().create_future()
+    life.requests.add(finished)  # no await between observing the restart and claiming admission
+    try:
+        yield
+    finally:
+        life.requests.remove(finished)
+        finished.set_result(None)
 
 
 async def stop(

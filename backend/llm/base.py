@@ -7,7 +7,6 @@ Used for the managed engine (oMLX) and External openai-dialect providers
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 from typing import Any
 
 import json_repair
@@ -290,10 +289,6 @@ async def base_completion(
     retry_transient_errors: bool = True,
 ) -> "LLMResponse":
     """Generic litellm transport after provider-specific shaping."""
-    preflight_error = await _omlx_loaded_only_preflight(api_key, api_base, model, omlx_server_id)
-    if preflight_error is not None:
-        return preflight_error
-
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": sanitize_messages(sanitize_empty_content(messages)),
@@ -358,24 +353,25 @@ async def _completion_with_retries(
         overflow_disposition,
     )
     from llm.router import _is_transient_error, provider_error_response
+    from llm.providers.omlx_supervisor import request_slot
 
     transient_attempts = _MAX_RETRIES if retry_transient_errors else 1
     attempt = 0
     overflow_retried = False
     while True:
         try:
-            if use_streaming:
-                return await _streaming_completion(
-                    kwargs, model, on_reasoning_chunk, on_content_chunk,
-                    on_tool_call_chunk, on_response_started,
-                )
-            response = await acompletion(**kwargs)
-            # Read the endpoint from the request actually sent, not from an
-            # outer variable: it decides how the response's cache counts are
-            # interpreted, so it has to be the value the provider saw.
-            return parse_response(
-                response, model=model, api_base=kwargs.get("api_base"),
-            )
+            async with request_slot(omlx_server_id):
+                error = await _omlx_loaded_only_preflight(kwargs.get("api_key"), kwargs.get("api_base"), model, omlx_server_id)
+                if error is not None:
+                    return error
+                if use_streaming:
+                    return await _streaming_completion(
+                        kwargs, model, on_reasoning_chunk, on_content_chunk,
+                        on_tool_call_chunk, on_response_started,
+                    )
+                response = await acompletion(**kwargs)
+                # Cache counts use the endpoint actually sent.
+                return parse_response(response, model=model, api_base=kwargs.get("api_base"))
         except Exception as e:
             disposition = await overflow_disposition(
                 e,
