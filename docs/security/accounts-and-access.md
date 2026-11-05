@@ -38,7 +38,7 @@ What an agent can reach through tools:
 
 | | Reach |
 |---|---|
-| Files | File tools: the whole workspace and registered repositories. Shell: the same, minus the projects it is fenced from ([Agent sandbox](agent-sandbox.md#projects)) |
+| Files | The whole workspace and registered repositories, minus the projects it is fenced from and the workspace's Git history, for both its file tools and its shell ([Agent sandbox](agent-sandbox.md#projects)) |
 | Other chats | Any chat's messages by its id, in any project, except an [isolated worker's](untrusted-content.md#isolated-workers) (`backend/tools/query_projects.py`) |
 | Connected apps | Those whose reach includes its project ([Connected apps](connected-apps.md)) |
 | Host access | Only through a reviewed lease ([Host access](host-access.md)) |
@@ -48,7 +48,7 @@ What an agent can reach through tools:
 
 A **project** decides what an agent is given by default: its project's context and instructions, which connected apps it can use, and whether Local only applies.
 
-It also fences the shells of other projects' agents out of its folder and repositories; the CORSIA agent's shell is fenced only from projects set to Local models only, which stay closed even under a lease, and from none while its own chat is Local only ([Agent sandbox](agent-sandbox.md#projects)). It does **not** stop an agent's file tools from reading or changing another project's files, or its chat tools from reading another project's chats.
+It also fences the shells and file tools of other projects' agents out of its folder and repositories; the CORSIA agent is fenced only from projects set to Local models only, which stay closed even under a lease, and from none while its own chat is Local only ([Agent sandbox](agent-sandbox.md#projects)). It does **not** stop an agent's chat tools from reading another project's chats.
 
 To keep two bodies of work apart, give each its own workspace and CORSIA install, ideally under separate macOS users.
 
