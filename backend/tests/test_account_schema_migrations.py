@@ -426,6 +426,28 @@ def test_empty_fresh_schema_has_no_policy_or_hold_rows():
             assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
 
 
+def test_160_to_161_creates_pending_reviewer_table():
+    with closing(sqlite3.connect(":memory:")) as db:
+        db.execute("PRAGMA user_version=160")
+        result = migrate_to_current(db, SCHEMA_VERSION)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 160, 161)
+        columns, foreign_keys, indexes = _shape(db, "reviewer_gate_pending")
+        assert columns == [
+            ("head_sha", "TEXT", 1, None, 2),
+            ("internal_event", "TEXT", 1, None, 0),
+            ("pr_key", "TEXT", 1, None, 1),
+        ]
+        assert foreign_keys == []
+        assert indexes == [("sqlite_autoindex_reviewer_gate_pending_1", 1, "pk", 0)]
+        db.execute(
+            "INSERT INTO reviewer_gate_pending VALUES ('owner/repo#42', 'head-1', 'check_suite')"
+        )
+        assert db.execute(
+            "SELECT pr_key, head_sha, internal_event FROM reviewer_gate_pending"
+        ).fetchone() == ("owner/repo#42", "head-1", "check_suite")
+        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
+
+
 def test_genuine88_upgrade_maps_legacy_policy_to_fresh89_and_is_idempotent():
     with canonical82() as db:
         populated_policy(db)

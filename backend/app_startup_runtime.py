@@ -75,6 +75,10 @@ async def resume_local_setup() -> None:
             if label in {"record an earlier setup's model", "resume local setup", "resume local download notice"}:
                 record_resume_failure(ref)
 
+    from events.reviewer_gate_recovery import recover_pending_reviews
+
+    recover_pending_reviews(asyncio.get_running_loop())
+
 
 async def _startup_harness_discovery() -> list[dict]:
     """Re-ask Claude/Codex for their catalogs and sign-in once at backend startup."""
