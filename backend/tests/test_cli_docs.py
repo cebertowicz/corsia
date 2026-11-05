@@ -16,18 +16,25 @@ def test_cli_reference_is_current():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_source_help_change_makes_reference_stale(tmp_path, monkeypatch):
-    monkeypatch.syspath_prepend(str(ROOT / "scripts/docs"))
-    import generate_cli
+def check_with_shell(shell):
+    # A subprocess: the generator repoints workspace paths and imports the CLI modules.
+    code = ("import sys; from pathlib import Path; import generate_cli; "
+            "generate_cli.SHELL = Path(sys.argv[1]); sys.argv[1:] = ['--check']; "
+            "raise SystemExit(generate_cli.main())")
+    return subprocess.run(
+        [sys.executable, "-c", code, str(shell)],
+        cwd=ROOT / "scripts/docs", capture_output=True, text=True,
+    )
 
+
+def test_source_help_change_makes_reference_stale(tmp_path):
     shell = tmp_path / "corsia"
     text = (ROOT / "scripts/corsia").read_text()
     shell.write_text(text)
-    monkeypatch.setattr(generate_cli, "SHELL", shell)
-    monkeypatch.setattr(sys, "argv", ["generate_cli.py", "--check"])
-    assert generate_cli.main() == 0
+    result = check_with_shell(shell)
+    assert result.returncode == 0, result.stdout + result.stderr
     shell.write_text(text.replace("Open the local CORSIA app", "Open the local application"))
-    assert generate_cli.main() == 1
+    assert check_with_shell(shell).returncode == 1
 
 
 def test_parser_defaults_are_readable(monkeypatch):
