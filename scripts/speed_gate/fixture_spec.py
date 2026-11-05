@@ -46,6 +46,12 @@ SMALL_ROWS: dict[str, int] = {
     "system_bulletins": 11, "doc_review_requests": 9, "project_repo_policies": 7,
 }
 
+#: Schema 176 postdates the census. Synthetic stress shape: one tag, mention and
+#: recipient state per fixture comment; these are assumptions, not production counts.
+SYNTHETIC_ROWS = {name: max(1, round(PRODUCTION_ROWS["doc_comments"] * SCALE)) for name in (
+    "doc_comment_tags", "doc_comment_mentions", "doc_comment_recipient_state",
+)}
+
 #: The one thread at the largest production parent, and its sibling relations.
 MAX_THREAD_MESSAGES = 100_639
 MAX_THREAD_USAGE = 36_834
@@ -61,7 +67,7 @@ def target_rows(table: str) -> int | None:
     """Rows this fixture builds for ``table``; None when the census has no figure."""
     if table in PRODUCTION_ROWS:
         return max(1, round(PRODUCTION_ROWS[table] * SCALE))
-    return SMALL_ROWS.get(table)
+    return SMALL_ROWS.get(table, SYNTHETIC_ROWS.get(table))
 
 
 def quantile_rows(knots: tuple[tuple[float, int], ...], count: int) -> list[int]:
