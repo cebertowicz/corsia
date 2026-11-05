@@ -203,8 +203,8 @@ def create_with_status(
                 comment_notifications.announce_after_commit(
                     connection, artifact_id, comment_id=cid if named else None,
                     author_thread_id=author_thread_id if named else None,
-                    # reply_attention_changed includes eligible new top-level comments.
-                    reply_attention_changed=feedback_state.may_change_unread_attention(
+                    # unread_attention_changed includes eligible new top-level comments.
+                    unread_attention_changed=feedback_state.may_change_unread_attention(
                         author_kind, parent_id, replacement, review))
             if region is not None:
                 live_events.region_after_commit(connection, "placed", artifact_id, w, h, author_kind=author_kind)
@@ -246,7 +246,7 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
             live_events.region_after_commit(connection, "moved", row["artifact_id"], row["region_w"], row["region_h"])
         comment_notifications.announce_after_commit(
             connection, row["artifact_id"],
-            reply_attention_changed="resolved" in fields and row["parent_id"] is None,
+            unread_attention_changed="resolved" in fields and row["parent_id"] is None,
         )
         return row
 

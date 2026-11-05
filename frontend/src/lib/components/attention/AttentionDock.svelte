@@ -15,7 +15,7 @@
 	 */
 	import { onMount } from 'svelte';
 	import CommentReplyChipRow from './CommentReplyChipRow.svelte';
-	import { replyItemsForThread, subscribeReplyAttention } from './replyItems';
+	import { unreadItemsForThread, subscribeUnreadAttention } from './replyItems';
 	import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { get } from 'svelte/store';
 	import { on } from '$lib/ws';
@@ -74,7 +74,7 @@
 
 	const dockQueue = $derived($visibleQueue);
 	const current = $derived(shownItem(dockQueue, $activeId));
-	const hasReplies = $derived(replyItemsForThread($visibleQueue, $activeThreadId).length > 0 ||
+	const hasUnreadItems = $derived(unreadItemsForThread($visibleQueue, $activeThreadId).length > 0 ||
 		($chatReplyAttention?.threadId === $activeThreadId && $chatReplyAttention.items.length > 0));
 	const position = $derived(
 		current ? dockQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,
@@ -199,7 +199,7 @@
 		// missed nudge is recovered on reconnect.
 		const offNudge = on('plans_changed', () => { void reload(); });
 		const offHeld = on('held_reply_changed', () => { void reload(); });
-		const offReplies = subscribeReplyAttention(() => { void reload(); });
+		const offUnread = subscribeUnreadAttention(() => { void reload(); });
 		// Typing, pasting or sending ends in a re-judge once the window has passed,
 		// so a hold on a draft is released when the draft is sent or cleared.
 		const offActivity = watchDockActivity(TYPING_IDLE_MS, () => { lastKeydown = Date.now(); }, () => { busyTick += 1; });
@@ -223,7 +223,7 @@
 			forgetAutoOpen();
 			offNudge?.();
 			offHeld?.();
-			offReplies();
+			offUnread();
 			offConnection();
 			offToken();
 		};
@@ -239,7 +239,7 @@
 	<!-- The question left the queue before this answer reached it. -->
 	<p class="dock-receipt" role="status">{$answerNotice}</p>
 {/if}
-{#if current || hasReplies}
+{#if current || hasUnreadItems}
 	<div
 		class="attention-dock"
 		class:expanded={showChip}

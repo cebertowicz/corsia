@@ -228,13 +228,13 @@ def _unread_items(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
     """One document's unread items as (root id, item id), ordered by time and id."""
     sql, params = unread_comment_rows(user_id, artifact_id)
     rows = db.execute(
-        f"SELECT root.id AS root_id, item.id AS reply_id {sql} ORDER BY item.created_at, item.id",
+        f"SELECT root.id AS root_id, item.id AS item_id {sql} ORDER BY item.created_at, item.id",
         params,
     ).fetchall()
-    return [(str(row["root_id"]), str(row["reply_id"])) for row in rows]
+    return [(str(row["root_id"]), str(row["item_id"])) for row in rows]
 
 
-def reply_waiting_ids(db, user_id: str) -> set[str]:
+def unread_item_ids(db, user_id: str) -> set[str]:
     """Return document IDs with unread replies or eligible top-level comments."""
     sql, params = unread_comment_rows(user_id, None)
     rows = db.execute(f"SELECT DISTINCT root.artifact_id AS artifact_id {sql}", params).fetchall()
@@ -244,8 +244,8 @@ def reply_waiting_ids(db, user_id: str) -> set[str]:
 def annotate_thread_attention(db, user_id: str, artifact_id: str, threads: list[dict]) -> None:
     """Attach unread reply IDs and the separate top-level comment flag to each thread."""
     new_by_root: dict[str, list[str]] = {}
-    for root_id, reply_id in _unread_items(db, user_id, artifact_id):
-        new_by_root.setdefault(root_id, []).append(reply_id)
+    for root_id, item_id in _unread_items(db, user_id, artifact_id):
+        new_by_root.setdefault(root_id, []).append(item_id)
     for thread in threads:
         unread = new_by_root.get(thread["id"], [])
         thread["new_comment"] = thread["id"] in unread
@@ -253,9 +253,9 @@ def annotate_thread_attention(db, user_id: str, artifact_id: str, threads: list[
 
 
 def mark_thread_viewed(
-    db, user_id: str, artifact_id: str, root_id: str, seen_reply_id: str,
+    db, user_id: str, artifact_id: str, root_id: str, seen_item_id: str,
 ) -> list[str]:
-    """Persist the newest rendered reply for one root, never moving its stamp back.
+    """Persist the newest rendered item for one root, never moving its stamp back.
 
     Returns the root's new reply ids that remain after the stamp.
     """
@@ -265,12 +265,12 @@ def mark_thread_viewed(
     ).fetchone()
     if root is None:
         raise ValueError("root_not_found")
-    reply = db.execute(
+    item = db.execute(
         f"""SELECT item.id,item.created_at FROM doc_comments item
            WHERE item.id=? AND (item.parent_id=? OR (item.id=? AND {_eligible_top_level('item')}))""",
-        (seen_reply_id, root_id, root_id),
+        (seen_item_id, root_id, root_id),
     ).fetchone()
-    if reply is None:
+    if item is None:
         raise ValueError("reply_not_found")
     db.execute(
         """INSERT INTO doc_comment_thread_views(user_id,root_id,seen_at,seen_reply_id)
@@ -280,7 +280,7 @@ def mark_thread_viewed(
            WHERE excluded.seen_at>doc_comment_thread_views.seen_at
               OR (excluded.seen_at=doc_comment_thread_views.seen_at
                   AND excluded.seen_reply_id>doc_comment_thread_views.seen_reply_id)""",
-        (user_id, root_id, reply["created_at"], reply["id"]),
+        (user_id, root_id, item["created_at"], item["id"]),
     )
     return [item_id for waiting_root, item_id in _unread_items(db, user_id, artifact_id)
             if waiting_root == root_id and item_id != root_id]
@@ -288,7 +288,7 @@ def mark_thread_viewed(
 
 def annotate_pane(pane: dict, user_id: str, *, db) -> dict:
     """Add the passive reply marker to every artifact row in a pane payload."""
-    waiting = reply_waiting_ids(db, user_id)
+    waiting = unread_item_ids(db, user_id)
 
     def visit(nodes: list[dict]) -> None:
         for node in nodes:

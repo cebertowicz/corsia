@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import closing
 
-from doceditor.feedback_state import annotate_thread_attention, reply_waiting_ids
+from doceditor.feedback_state import annotate_thread_attention, unread_item_ids
 from infra.migration_86_to_87_doc_comment_thread_views import migrate_86_to_87
 
 _V86 = """
@@ -43,7 +43,7 @@ def _v86() -> sqlite3.Connection:
 
 def test_v87_carries_each_document_stamp_to_its_threads_and_drops_the_old_table():
     with closing(_v86()) as db:
-        before = reply_waiting_ids_before_thread_views(db)
+        before = unread_item_ids_before_thread_views(db)
         migrate_86_to_87(db)
 
         stamps = {
@@ -54,7 +54,7 @@ def test_v87_carries_each_document_stamp_to_its_threads_and_drops_the_old_table(
         assert db.execute(
             "SELECT 1 FROM sqlite_master WHERE name='doc_comment_views'",
         ).fetchone() is None
-        assert reply_waiting_ids(db, 'ui') == before == {'doc-1', 'doc-2'}
+        assert unread_item_ids(db, 'ui') == before == {'doc-1', 'doc-2'}
         threads = [{'id': 'root-a'}, {'id': 'root-b'}]
         annotate_thread_attention(db, 'ui', 'doc-1', threads)
         assert [t['new_reply_ids'] for t in threads] == [[], ['b-new']]
@@ -67,7 +67,7 @@ def test_v87_is_idempotent_without_the_old_table():
         assert db.execute("SELECT COUNT(*) FROM doc_comment_thread_views").fetchone()[0] == 2
 
 
-def reply_waiting_ids_before_thread_views(db) -> set[str]:
+def unread_item_ids_before_thread_views(db) -> set[str]:
     """The prior rule: a non-user reply after the document stamp is waiting."""
     rows = db.execute(
         """SELECT DISTINCT root.artifact_id FROM doc_comments reply

@@ -3,7 +3,6 @@ import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { hasUnread, type DocComment } from '$lib/stores/docComments';
 import { canvasCommentScrollTarget, type CanvasScrollTarget } from '$lib/docCanvasComments';
 import { nextUnreadThread } from '$lib/docReplyChip';
-export { createReplyArrival } from '$lib/docReplyArrival';
 
 export function createReplyNavigation(source: {
 	target: () => DocViewerTarget | null;

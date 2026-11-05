@@ -2,7 +2,7 @@
 
 from doc_feedback_helpers import add_comment, seed_document, seed_thread
 from doceditor.feedback_state import annotate_thread_attention, mark_thread_viewed
-from doceditor.reply_attention import unread_reply_items
+from doceditor.reply_attention import unread_items
 from infra.database import get_db, write_transaction
 from infra.database_migrations import migrate_to_current
 
@@ -46,13 +46,13 @@ def test_new_agent_comment_requires_prior_person_comment_and_clears_on_open(isol
         threads = [{"id": row["id"]} for row in (old, new, suggestion)]
         annotate_thread_attention(db, "owner-token", artifact, threads)
         assert [row["new_comment"] for row in threads] == [False, True, False]
-        items = unread_reply_items(db, "owner-token")
+        items = unread_items(db, "owner-token")
         assert items[0]["detail"]["new_comment_count"] == 1
         with write_transaction(db, scope="test_unread_top_level_view") as connection:
             mark_thread_viewed(connection, "owner-token", artifact, new["id"], new["id"])
         annotate_thread_attention(db, "owner-token", artifact, threads)
         assert threads[1]["new_comment"] is False
-        assert unread_reply_items(db, "owner-token") == []
+        assert unread_items(db, "owner-token") == []
     finally:
         db.close()
 
@@ -98,8 +98,8 @@ def test_upgrade_stamps_newly_eligible_history_without_clearing_open_replies(iso
         for index, row in enumerate((person, root, resolved, old_reply, open_reply)):
             db.execute("UPDATE doc_comments SET created_at=? WHERE id=?", (f"2026-01-0{index + 1}T00:00:00Z", row["id"]))
         db.commit()
-        db.execute("PRAGMA user_version=174")
-        migrate_to_current(db, 175)
+        db.execute("PRAGMA user_version=175")
+        migrate_to_current(db, 176)
         first = [tuple(row) for row in db.execute("SELECT user_id,root_id,seen_at,seen_reply_id FROM doc_comment_thread_views ORDER BY user_id,root_id")]
         people = {row[0] for row in db.execute("SELECT id FROM users UNION SELECT user_id FROM threads WHERE user_id IS NOT NULL")}
         assert len(first) == 2 * len(people)  # One newer stamp was preserved; all other rows were inserted.
@@ -112,7 +112,7 @@ def test_upgrade_stamps_newly_eligible_history_without_clearing_open_replies(iso
         assert rows[1]["new_reply_ids"] == []
         assert rows[2]["new_reply_ids"] == [open_reply["id"]]
         later, _ = add_comment(db, artifact, author_id="owner")
-        migrate_to_current(db, 175)
+        migrate_to_current(db, 176)
         assert [tuple(row) for row in db.execute("SELECT user_id,root_id,seen_at,seen_reply_id FROM doc_comment_thread_views ORDER BY user_id,root_id")] == first
         fresh = [{"id": later["id"]}]
         annotate_thread_attention(db, "owner-token", artifact, fresh)

@@ -57,6 +57,7 @@ vi.mock('$lib/stores/docCommentArrivals', () => ({
 }));
 vi.mock('$lib/stores/docComments', async () => ({
 	docComments: mocks.docComments,
+	arrivedDocComments: (await import('svelte/store')).writable(new Set<string>()),
 	commentLoads: { subscribe(run: (value: Record<string, unknown>) => void) { run({}); return () => {}; } },
 	hasUnread: (await import('$lib/stores/docCommentProjection')).hasUnread,
 	rangeFor: mocks.rangeFor,
@@ -157,6 +158,7 @@ function render(mode: 'expanded' | 'compact' = 'expanded') {
 }
 
 beforeEach(() => {
+	vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} });
 	realRO = globalThis.ResizeObserver;
 	globalThis.ResizeObserver = class {
 		observe() {}
@@ -977,6 +979,37 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		expect(document.body.querySelector('.popover')).not.toBeNull();
 		expect(view.state.selection.main).toMatchObject({ anchor: 0, head: 0 });
 		expect(view.contentDOM.contains(document.activeElement)).toBe(false);
+	});
+
+	it('marks every unread card opened by a shared marker even when the first is read', async () => {
+		const observers: Array<{ callback: IntersectionObserverCallback; target: Element; observer: IntersectionObserver }> = [];
+		vi.stubGlobal('IntersectionObserver', class {
+			constructor(private callback: IntersectionObserverCallback) {}
+			observe(target: Element) { observers.push({ callback: this.callback, target, observer: this as unknown as IntersectionObserver }); }
+			unobserve() {} disconnect() {}
+		});
+		focusedDocComment.set(null);
+		mocks.rangeFor.mockReturnValue(QUOTE);
+		mocks.fetchContent.mockResolvedValue({ text: 'The quick brown fox.', revision: 'r-1', writable: true, artifact: { id: 'art-multiple' } });
+		mocks.setComments({ 'art-multiple': [
+			{ id: 'read', ...QUOTE, anchor: 'quick', author: 'you', text: 'read', at: '', resolved: false, replies: [] },
+			{ id: 'new1', ...QUOTE, anchor: 'quick', author: 'agent', text: 'new one', at: '', resolved: false, replies: [], newComment: true },
+			{ id: 'new2', ...QUOTE, anchor: 'quick', author: 'agent', text: 'new two', at: '', resolved: false, replies: [], newComment: true },
+		] });
+		openArtifactTab(THREAD, { path: '/art-multiple.md', title: 'art-multiple.md' });
+		render();
+		await vi.waitFor(() => expect(host.querySelector('.cm-editor')).not.toBeNull());
+		flushSync();
+		const marker = await vi.waitFor(() => { const found = host.querySelector<HTMLButtonElement>('.cm-comment-marker'); expect(found).not.toBeNull(); return found!; });
+		marker.click(); flushSync();
+		await vi.waitFor(() => expect(document.body.querySelectorAll('.ct').length).toBeGreaterThanOrEqual(3));
+		for (const { callback, target, observer } of observers) callback([{ target, isIntersecting: true } as IntersectionObserverEntry], observer);
+		flushSync();
+		await vi.waitFor(() => {
+			expect(mocks.markThreadViewed).toHaveBeenCalledWith('art-multiple', 'new1', 'new1');
+			expect(mocks.markThreadViewed).toHaveBeenCalledWith('art-multiple', 'new2', 'new2');
+		});
+		expect(mocks.markThreadViewed).toHaveBeenCalledTimes(2);
 	});
 
 	it('opens the image from a marker over a comment on part of it, at that comment, instead of its card', async () => {

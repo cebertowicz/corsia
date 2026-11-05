@@ -4,7 +4,7 @@
 	import { activeThreadId } from '$lib/stores/threads';
 	import { visibleQueue } from '$lib/stores/attentionDock.svelte';
 	import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
-	import { replyItemsForThread } from './replyItems';
+	import { unreadItemsForThread } from './replyItems';
 
 	let {
 		onOpenDocument = () => {},
@@ -12,16 +12,15 @@
 		onOpenDocument?: (destination: AttentionDestination, threadId?: string | null) => void;
 	} = $props();
 
-	// Reply notices belong to the agent who answered. They are not Needs-you work, so
-	// the dock keeps its single-job queue and this stable chip carries only unread replies.
-	const replies = $derived([
-		...replyItemsForThread($visibleQueue, $activeThreadId),
+	// Unread comment notices belong to the agent who wrote them. They stay separate from Needs you.
+	const unreadItems = $derived([
+		...unreadItemsForThread($visibleQueue, $activeThreadId),
 		...($chatReplyAttention?.threadId === $activeThreadId ? $chatReplyAttention.items : []),
 	]);
-	const unreadCount = $derived(replies.reduce((total, item) => total + item.detail.unread_count, 0));
+	const unreadCount = $derived(unreadItems.reduce((total, item) => total + item.detail.unread_count, 0));
 	const documents = $derived.by(() => {
 		const unique = new Map<string, CommentReplyItem>();
-		for (const item of replies) unique.set(item.detail.destination.id, item);
+		for (const item of unreadItems) unique.set(item.detail.destination.id, item);
 		return [...unique.values()];
 	});
 	const newest = $derived.by(() => documents.reduce((latest, item) =>
@@ -41,5 +40,5 @@
 </script>
 
 {#if target && unreadCount}
-	<UnreadReplyChip artifactId={target.detail.destination.id} count={unreadCount} comments={replies.some((item) => (item.detail.new_comment_count ?? 0) > 0)} {where} type={target.detail.destination.pane === 'chat-replies' ? 'chat' : 'document'} onOpen={openReplyDocument} />
+	<UnreadReplyChip artifactId={target.detail.destination.id} count={unreadCount} comments={unreadItems.some((item) => (item.detail.new_comment_count ?? 0) > 0)} {where} type={target.detail.destination.pane === 'chat-replies' ? 'chat' : 'document'} onOpen={openReplyDocument} />
 {/if}
