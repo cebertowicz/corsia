@@ -8,11 +8,12 @@ The path from a fresh clone to a merged change, for developers who want to chang
 |---|---|---|
 | 1 | [`CONTRIBUTING.md`](../../CONTRIBUTING.md) | Which issues are open to you, how to claim one, the CLA, and what a pull request needs |
 | 2 | [Developer setup](dev-setup.md) | Running CORSIA from a checkout with its own data |
-| 3 | [How CORSIA works](../how-it-works/README.md) | The parts of the system and the terms used everywhere else |
-| 4 | [`ARCHITECTURE.md`](../../ARCHITECTURE.md) | Where each part lives in the code |
-| 5 | [`BACKEND.md`](../../BACKEND.md) or [`FRONTEND.md`](../../FRONTEND.md) | Rules for the side you are changing |
-| 6 | [Build a component](build-a-component.md) | How to use shared frontend controls in a component |
-| 7 | [Testing and review](testing.md) | How to test your change, the checks your pull request runs, and how to read the review |
-| 8 | [Writing docs](writing-docs.md) | Where a page goes, the format, and how to keep it current |
+| 3 | [Your first change](first-change.md) | The edit, check, fix loop, practised on a one-line docs edit, and the steps to a pull request |
+| 4 | [How CORSIA works](../how-it-works/README.md) | The parts of the system and the terms used everywhere else |
+| 5 | [`ARCHITECTURE.md`](../../ARCHITECTURE.md) | Where each part lives in the code |
+| 6 | [`BACKEND.md`](../../BACKEND.md) or [`FRONTEND.md`](../../FRONTEND.md) | Rules for the side you are changing |
+| 7 | [Build a component](build-a-component.md) | How to use shared frontend controls in a component |
+| 8 | [Testing and review](testing.md) | How to test your change, the checks your pull request runs, and how to read the review |
+| 9 | [Writing docs](writing-docs.md) | Where a page goes, the format, and how to keep it current |
 
-Checked against the code at `310115261`.
+Checked against the code at `ea522c7d6`.
