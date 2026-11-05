@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
-
 from check_docs_drift import citation_verify as verify
 
 
@@ -56,20 +54,17 @@ def test_line_suffix_is_removed_for_existence_checks(tmp_path):
     assert verify.missing_paths(paths, tmp_path) == ["missing.py:3"]
 
 
-def test_git_ignored_paths_are_checked_in_one_batch(tmp_path, monkeypatch):
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+def test_local_only_files_are_accepted_without_existing(tmp_path):
+    assert verify.missing_paths({"frontend/.env", "frontend/.env.missing"}, tmp_path) == ["frontend/.env.missing"]
+
+
+def test_machine_ignore_settings_do_not_change_the_verdict(tmp_path):
+    """A dead citation stays missing even if this machine's Git would ignore it."""
+    (tmp_path / ".git" / "info").mkdir(parents=True)
+    (tmp_path / ".git" / "info" / "exclude").write_text("*.local\n")
     (tmp_path / ".gitignore").write_text("*.local\n")
-    calls = []
-    run = subprocess.run
 
-    def record(*args, **kwargs):
-        calls.append(args[0])
-        return run(*args, **kwargs)
-
-    monkeypatch.setattr(verify.subprocess, "run", record)
-    paths = {"one.local", "two.local", "missing.txt"}
-    assert verify.missing_paths(paths, tmp_path) == ["missing.txt"]
-    assert calls == [["git", "check-ignore", "--stdin", "-z"]]
+    assert verify.missing_paths({"dead.local"}, tmp_path) == ["dead.local"]
 
 
 def _write_api_file(api_dir, name: str, text: str) -> None:
