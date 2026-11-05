@@ -23,7 +23,7 @@ from doceditor.doc_text import read_doc_text
 from doceditor.image_regions import (
     checked_image, comment_image, is_image_path, move_fields, move_fields_on, reader_bases, require_image,
 )
-from doceditor.quote_anchor import _cp_at_u16, _span16, anchor_context
+from doceditor.quote_anchor import _cp_at_u16, _span16, anchor_context, reanchor
 
 
 # One inline image: alt text without unescaped brackets, then a destination that
@@ -122,17 +122,31 @@ def region_patch(db, comment: Mapping[str, Any], fields: dict[str, Any], *, doc_
     bases = reader_bases(db, owner_thread_id) if image_src else []
     if image_src and "anchor_text" in fields:
         named = image_file(db, doc_path=doc_path, markdown=fields["anchor_text"], bases=bases)
-        if str(named) != image_src:
-            raise CommentActionError(
-                "region_target", "a comment on part of an image stays on its image; comment on the other image instead.")
+        _require_same_target(str(named) == image_src, 'image')
     if "region" not in fields:
         return fields
     return move_fields(comment, fields, require_image(comment_image(db, comment, doc_path, bases)))
 
 
+def _require_same_target(same: bool, kind: str) -> None:
+    if not same:
+        raise CommentActionError(
+            "region_target", f"a comment on part of an {kind} stays on its {kind}; comment on the other {kind} instead."
+            if kind == 'image' else
+            "a comment on part of a diagram stays on its diagram; comment on the other diagram instead.")
+
+
 def _diagram_patch(comment: Mapping[str, Any], fields: dict[str, Any], doc_path: str | None,
                    source: str | None, require_source: bool) -> dict[str, Any]:
     """A pin on a diagram has no file: a moved pin is placed on the block as it is now."""
+    if 'anchor_text' in fields or 'from_off' in fields or 'to_off' in fields:
+        text = read_doc_text(doc_path)
+        quote = comment.get('anchor_text') or ''
+        original = reanchor(text, quote, from16=comment.get('from_off'), to16=comment.get('to_off'),
+                            prefix=comment.get('anchor_prefix'), suffix=comment.get('anchor_suffix'))
+        target = (fields.get('from_off', comment.get('from_off')), fields.get('to_off', comment.get('to_off')))
+        same = original == target and fields.get('anchor_text', quote) == quote
+        _require_same_target(same and diagram_pins.block_at(text, target[0]) is not None, 'diagram')
     if "region" not in fields:
         return fields
     current = diagram_pins.revision(read_doc_text(doc_path), comment.get("from_off"))

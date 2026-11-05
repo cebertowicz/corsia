@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { leaveImageOnExit } from '$lib/docFeedbackLifecycle.svelte';
 	import { get } from 'svelte/store';
+	import { onDestroy } from 'svelte';
+	import type { OpenImageRequest } from '$lib/cm/markdown-image';
 	import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 	import ImageLightbox from './ImageLightbox.svelte';
 	import ImageCommentLightbox from './ImageCommentLightbox.svelte';
@@ -22,6 +24,21 @@
 		onReplyStep: (excludeId?: string) => void;
 	} = $props();
 
+	let refreshed = $state<OpenImageRequest | null>(null);
+	const currentImage = $derived(refreshed ? { ...image, ...refreshed, from: image.from, to: image.to } : image);
+	async function refreshDiagram(): Promise<boolean> {
+		if (!comments || image.diagramSource === undefined) return false;
+		const next = await comments.refreshDiagram(image.from, image.to);
+		if (!next) return false;
+		if (next.diagramSource === currentImage.diagramSource) {
+			if (next.src.startsWith('blob:')) URL.revokeObjectURL(next.src);
+			return false;
+		}
+		if (refreshed?.src.startsWith('blob:')) URL.revokeObjectURL(refreshed.src);
+		refreshed = next;
+		return true;
+	}
+	onDestroy(() => { if (refreshed?.src.startsWith('blob:')) URL.revokeObjectURL(refreshed.src); });
 	let hasDraft = $state(false);
 	let sheetUp = $state(false);
 	let selectedThread = $state<string | null>(null);
@@ -53,11 +70,12 @@
 		{#if comments}
 			<ImageCommentLightbox
 				bind:this={viewer}
-				src={image.src}
-				alt={image.alt}
-				readableScale={image.readableScale}
-				diagramElements={image.diagramElements}
-				diagramSource={image.diagramSource}
+				src={currentImage.src}
+				alt={currentImage.alt}
+				readableScale={currentImage.readableScale}
+				diagramElements={currentImage.diagramElements}
+				diagramSource={currentImage.diagramSource}
+				{refreshDiagram}
 				artifactId={comments.artifactId}
 				projectId={comments.projectId}
 				readOnly={comments.readOnly}
@@ -70,7 +88,7 @@
 				onLoaded={() => loaded = true}
 				inDocument={{
 					occurrence: { from: image.from, to: image.to },
-					post: (region, text) => comments.post(image.from, image.to, region, text, image.diagramSource),
+					post: (region, text) => comments.post(image.from, image.to, region, text, currentImage.diagramSource),
 					failure: comments.failure,
 				}}
 				focus={image.focus ?? null}

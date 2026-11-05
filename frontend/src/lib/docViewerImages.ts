@@ -28,6 +28,8 @@ export interface DocumentImageComments {
 	post: (from: number, to: number, region: ImageRegion, text: string, diagramSource?: string) => Promise<string>;
 	/** What a failed post says. */
 	failure?: (error: unknown) => string;
+	/** Snapshot the current diagram using the editor's existing render. */
+	refreshDiagram: (from: number, to: number) => Promise<OpenImageRequest | null>;
 	/** The document's feedback batch: the viewer shows its pending-send status and Send (DCOL-FR13.12). */
 	feedback?: DocFeedback;
 }
@@ -68,6 +70,17 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 			artifactId, projectId: projectId(), readOnly: options.readOnly(),
 			post: (from, to, region, body, diagramSource) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session(), diagramSource }, region, body),
 			failure: options.session() ? liveFailureMessage : undefined, feedback: options.feedback(),
+			refreshDiagram: async (from, to) => {
+				const root = options.root();
+				if (!root) return null;
+				const snapshot = await widgetImageRequestAt(root, { from, to });
+				const current = diagramAtAnchor(options.text(), from);
+				if (snapshot && (!current || snapshot.diagramSource !== current.source)) {
+					if (snapshot.src.startsWith('blob:')) URL.revokeObjectURL(snapshot.src);
+					return null;
+				}
+				return snapshot;
+			},
 		} : undefined;
 	}
 	/** The one image all of `ids` are region comments on, when the viewer can open images. */

@@ -75,6 +75,17 @@ def _threads(client, artifact_id: str) -> dict[str, dict]:
     return {c["id"]: c for c in r.json()["comments"]}
 
 
+def test_image_pin_survives_unreadable_document_context(integration_client, doc, monkeypatch):
+    from doceditor import comment_create_db
+    artifact = _register(integration_client, doc)
+    def unreadable(_path):
+        raise OSError('document unavailable')
+    monkeypatch.setattr(comment_create_db, 'read_doc_text', unreadable)
+    response = _post(integration_client, artifact, doc, LOGIN, {'x': .1, 'y': .2})
+    assert response.status_code == 200, response.text
+    assert response.json()['comment']['image_src'] == str(doc.parent / 'img' / 'login.png')
+
+
 def test_a_region_on_a_doc_image_anchors_on_its_markdown_and_numbers_per_image(integration_client, doc):
     artifact_id = _register(integration_client, doc)
     login = doc.parent / "img" / "login.png"

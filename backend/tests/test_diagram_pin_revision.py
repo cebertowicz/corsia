@@ -13,7 +13,7 @@ from tests.test_document_live_file_tools import opened
 from tests.test_document_live_suggestions import typing, user_id
 from tests.test_shared_document_ownership import ownership_scope as ownership_scope
 from delegation_docs_fixtures import _registrable_roots  # noqa: F401
-from test_doc_image_region_comments import _register, _threads, _url
+from test_doc_image_region_comments import _register, _threads, _url, _mk_thread, _OWNER
 
 
 def test_changed_diagram_refuses_new_and_moved_pins(integration_client, integration_workspace):
@@ -46,6 +46,56 @@ def test_changed_diagram_refuses_new_and_moved_pins(integration_client, integrat
         json={'region': {'x': 0.8, 'y': 0.7}, 'diagram_source': new})
     assert moved.status_code == 200, moved.text
     assert moved.json()['comment']['image_rev'] == accepted.json()['comment']['image_rev']
+
+
+def test_person_diagram_pin_stays_on_its_diagram(integration_client, integration_workspace):
+    path = integration_workspace / 'diagram-reanchor.md'
+    text = '```mermaid\ngraph TD\n```\nWords\n```mermaid\ngraph LR\n```\n'
+    path.write_text(text)
+    artifact = _register(integration_client, path)
+    created = integration_client.post(_url(f'/api/artifacts/{artifact}/comments'), json={
+        'delivery_policy': 'immediate', 'body': 'Pin', 'anchor_text': '```mermaid',
+        'from_off': 0, 'to_off': 10, 'region': {'x': .2, 'y': .3}, 'diagram_source': 'graph TD',
+    })
+    assert created.status_code == 200, created.text
+    pin = created.json()['comment']['id']
+    for start in (text.index('Words'), text.rindex('```mermaid')):
+        response = integration_client.patch(_url(f'/api/comments/{pin}'), json={
+            'anchor_text': text[start:start + 10], 'from_off': start, 'to_off': start + 10,
+        })
+        assert response.status_code == 400, response.text
+        assert 'stays on its diagram' in response.text
+    assert _threads(integration_client, artifact)[pin]['from_off'] == 0
+    path.write_text('Intro\n' + text)
+    shifted = integration_client.patch(_url(f'/api/comments/{pin}'), json={
+        'anchor_text': '```mermaid', 'from_off': 6, 'to_off': 16,
+    })
+    assert shifted.status_code == 200, shifted.text
+
+
+@pytest.mark.asyncio
+async def test_agent_diagram_pin_stays_on_its_diagram(integration_client, integration_workspace):
+    from tools.documents import DocCommentUpdateTool
+    path = integration_workspace / 'agent-diagram-reanchor.md'
+    text = '```mermaid\ngraph TD\n```\nWords\n```mermaid\ngraph LR\n```\n'
+    path.write_text(text)
+    artifact = _register(integration_client, path)
+    from doceditor import comments, diagram_pins
+    from infra.database import get_db
+    sid = _mk_thread(integration_client, _OWNER, title='Design Reviewer')
+    db = get_db()
+    try:
+        row, _ = comments.create_with_status(artifact, body='Pin', author='Reviewer', author_kind='agent',
+            author_thread_id=sid, anchor_text='```mermaid', from_off=0, to_off=10,
+            region=(.2, .3, 0, 0), image_rev=diagram_pins.source_revision('graph TD'), db=db)
+        pin = row['id']
+    finally:
+        db.close()
+    for start in (text.index('Words'), text.rindex('```mermaid')):
+        result = await DocCommentUpdateTool().execute(comment_id=pin, anchor_text=text[start:start + 10],
+            from_off=start, to_off=start + 10, _thread_id=sid)
+        assert str(result).startswith('Error:') and 'stays on its diagram' in str(result), result
+    assert _threads(integration_client, artifact)[pin]['from_off'] == 0
 
 
 @pytest.mark.parametrize(('opening', 'body', 'closing'), [

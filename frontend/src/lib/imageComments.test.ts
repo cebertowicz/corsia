@@ -62,6 +62,28 @@ describe('image comments', () => {
 		expect(comments.draftRegion).toEqual(BOX);
 	});
 
+	it('refreshes a changed diagram and keeps the draft for a new placement', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		let source = 'old';
+		const post = vi.fn(async (_region, _text) => {
+			if (source === 'old') throw new Error('409 {"detail":"This diagram changed. Place the pin again; your draft is kept."}');
+			return 'new';
+		});
+		const refreshDiagram = vi.fn(async () => { source = 'new'; return true; });
+		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
+			restoreFocus: () => {}, post: () => ({ create: post }), refreshDiagram });
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Keep this');
+		await expect(comments.submit('Keep this')).rejects.toThrow('409');
+		expect(refreshDiagram).toHaveBeenCalledOnce();
+		expect(comments.boxMode).toBe(true);
+		await comments.draw({ x: .6, y: .6, w: 0, h: 0 }, rect);
+		expect(comments.draft?.body).toBe('Keep this');
+		await comments.submit('Keep this');
+		expect(post).toHaveBeenLastCalledWith({ x: .6, y: .6, w: 0, h: 0 }, 'Keep this');
+		expect(comments.selectedId).toBe('new');
+	});
+
 	it('keeps the newly drawn pin visible while its move is saving, then shows its card', async () => {
 		let settle: () => void = () => {};
 		mocks.moveRegion.mockImplementationOnce(() => new Promise<void>((resolve) => { settle = resolve; }));

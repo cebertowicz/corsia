@@ -22,6 +22,8 @@ export function createImageComments(context: {
 	artifactId: () => string | null;
 	readOnly: () => boolean;
 	diagramSource?: () => string | undefined;
+	/** Refresh the rendered diagram before asking for a replacement placement. */
+	refreshDiagram?: () => Promise<boolean>;
 	/** Where focus goes when a card closes with nothing else to return to. */
 	restoreFocus: () => void;
 	/** Scroll a comment's region and its tag into view at the current zoom. */
@@ -42,6 +44,7 @@ export function createImageComments(context: {
 	let boxMode = $state(false);
 	let draftRegion = $state<ImageRegion | null>(null);
 	let draftBody = $state('');
+	let replacingDraft = $state(false);
 	/** A stale pin is either awaiting a placement or visibly saving the newly drawn one. */
 	let moving = $state<{ id: string; region?: ImageRegion } | null>(null);
 	/** Counts tags picked with the drawer open, so picking the selected one again still brings its card back. */
@@ -60,12 +63,17 @@ export function createImageComments(context: {
 		ui.close();
 		draftRegion = null;
 		draftBody = '';
+		replacingDraft = false;
 	}
 	/** The Comment button: box mode on, or off again without placing anything. */
 	function toggleBoxMode() {
 		if (context.readOnly() || moving?.region) return;
 		boxMode = !boxMode;
 		if (!boxMode) moving = null;
+	}
+	async function refreshAfterStale(error: unknown): Promise<boolean> {
+		return error instanceof Error && error.message.startsWith('409 ') && error.message.includes('This diagram changed.')
+			? await context.refreshDiagram?.() ?? false : false;
 	}
 	/** A box, point or whole-image region was drawn: it opens the composer, or moves the pin being moved. */
 	async function draw(region: ImageRegion, anchor: CommentAnchor) {
@@ -82,11 +90,15 @@ export function createImageComments(context: {
 				retryToast.dismissAfterSuccess();
 				moving = null;
 				show(move.id, anchor);
-			} catch { moving = null; /* The toast says why; the pin stays where it was. */ }
+			} catch (error) {
+				if (await refreshAfterStale(error)) { moving = { id: move.id }; boxMode = true; }
+				else moving = null;
+			}
 			return;
 		}
 		draftRegion = region;
-		draftBody = '';
+		if (!replacingDraft) draftBody = '';
+		replacingDraft = false;
 		ui.openDraft(anchor);
 	}
 	async function submit(text: string) {
@@ -94,9 +106,21 @@ export function createImageComments(context: {
 		if (!artifact || !region) return;
 		// The composer keeps the text when this rejects.
 		const post = context.post?.();
-		const id = await submitDocumentComment(
-			() => (post ? post.create(region, text) : addRegionComment(artifact, region, text)), retryToast.remember, post?.failure,
-		);
+		let id: string;
+		try {
+			id = await submitDocumentComment(
+				() => (post ? post.create(region, text) : addRegionComment(artifact, region, text)), retryToast.remember, post?.failure,
+			);
+		} catch (error) {
+			if (await refreshAfterStale(error)) {
+				draftBody = text;
+				draftRegion = null;
+				replacingDraft = true;
+				ui.close();
+				boxMode = true;
+			}
+			throw error;
+		}
 		retryToast.dismissAfterSuccess();
 		draftRegion = null;
 		draftBody = '';
@@ -184,7 +208,7 @@ export function createImageComments(context: {
 		/** A card or the composer is open over the image. */
 		get cardOpen() { return ui.state?.kind === 'thread' || ui.state?.kind === 'draft'; },
 		/** The composer has text, so the review bar must not answer over it. */
-		get hasDraftText() { return !!draftRegion && draftBody.trim() !== ''; },
+		get hasDraftText() { return (!!draftRegion || replacingDraft) && draftBody.trim() !== ''; },
 		get draft() { return draftRegion ? { text: '', label: regionLabel(draftRegion), body: draftBody } : null; },
 		setDraftBody(text: string) { draftBody = text; },
 		threads,

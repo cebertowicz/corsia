@@ -80,7 +80,10 @@ def _image(db, request: CommentInput, quote: str | None, start: int | None) -> t
     """
     if image_regions.is_image_path(request.path):
         return None, image_regions.image_revision(image_regions.require_image(request.path))
-    revision = diagram_pins.revision(read_doc_text(request.path), start)
+    try:
+        revision = diagram_pins.revision(read_doc_text(request.path), start)
+    except (OSError, ValueError):
+        revision = None
     if revision is not None:
         if request.browser and (request.diagram_source is None or diagram_pins.source_revision(request.diagram_source) != revision):
             raise CommentSelectionChanged("This diagram changed. Place the pin again; your draft is kept.")

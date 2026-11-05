@@ -25,13 +25,14 @@
 
 	const COMMENT_IMAGE_MARGIN = 40;
 
-	let { src, alt, readableScale, diagramElements, diagramSource, artifactId, projectId = null, readOnly = false, docName = '', docPath = null, onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, visibleBottom = null, onPlace, onLoaded, onFailed, onRetry }: {
+	let { src, alt, readableScale, diagramElements, diagramSource, refreshDiagram, artifactId, projectId = null, readOnly = false, docName = '', docPath = null, onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, visibleBottom = null, onPlace, onLoaded, onFailed, onRetry }: {
 		src: string;
 		alt: string;
 		/** A diagram's labels are body size at this scale; it opens there rather than at Fit. */
 		readableScale?: number;
 		diagramElements?: ImageRegion[];
 		diagramSource?: string;
+		refreshDiagram?: () => Promise<boolean>;
 		/** Comments need the image's artifact (a document's, for an image in it); until it is known the viewer shows the image alone. */
 		artifactId: string | null;
 		projectId?: string | null;
@@ -88,6 +89,7 @@
 		artifactId: () => artifactId,
 		readOnly: () => !canComment,
 		diagramSource: () => diagramSource,
+		refreshDiagram: () => refreshDiagram?.() ?? Promise.resolve(false),
 		restoreFocus: () => root?.querySelector<HTMLElement>('.viewport')?.focus({ preventScroll: true }),
 		reveal: (id, region, fromList) => {
 			const frame = root?.querySelector('[data-image-regions]')?.getBoundingClientRect();
