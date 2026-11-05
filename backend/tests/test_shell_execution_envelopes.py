@@ -333,7 +333,7 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
         if line.strip().startswith("(deny ")
     }
     from tools.host_path_policy import current_protected_host_path_policy
-    from tools.workspace_git_paths import workspace_git_paths, workspace_git_rules
+    from tools.workspace_git_paths import workspace_git_history_rules
     policy = current_protected_host_path_policy()
     workspace = policy.workspace
     # Folders above each credential root stay in place under a lease.
@@ -348,7 +348,7 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
     token_folder_deny = f'(deny file-read* file-write* (subpath "{token_folder}"))'
     assert f'(deny file-write* (literal "{token_folder.parent}"))' in credential_pins
     expected_denied_lines = {
-        *workspace_git_rules(workspace_git_paths(workspace)),
+        *workspace_git_history_rules(workspace),
         f'(deny file-write* (literal "{profile.resolve(strict=False)}"))',
         (
             f"(deny file-write* process-exec "

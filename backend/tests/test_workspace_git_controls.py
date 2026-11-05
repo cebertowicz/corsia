@@ -10,7 +10,7 @@ import subprocess
 import pytest
 
 from tests.linux_sandbox_test_support import linux_sandbox_root
-from tools.workspace_git_paths import workspace_git_paths, workspace_git_rules
+from tools.workspace_git_paths import workspace_git_history_rules, workspace_git_paths, workspace_git_rules
 
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -205,8 +205,9 @@ def test_workspace_git_rules_and_no_repository(tmp_path):
                        git_dir / 'commondir', git_dir / 'hooks', git_dir / 'hooks' / 'pre-commit'):
             for name in (str(target), str(target).upper()):
                 assert any(re.search(pattern, name) for pattern in patterns), name
-        for name in (git_dir / 'index', git_dir.parent / 'xgit', git_dir / 'hooks.old'):
-            assert not any(re.search(pattern, str(name)) for pattern in patterns), name
+        for name in (git_dir / 'index', git_dir / 'hooks.old'):
+            assert any(re.search(pattern, str(name)) for pattern in patterns), name
+        assert not any(re.search(pattern, str(git_dir.parent / 'xgit')) for pattern in patterns)
 
 
 def test_workspace_git_rules_keep_odd_paths_inside_the_profile():
@@ -229,8 +230,8 @@ def test_file_tools_cannot_write_workspace_git_controls(tmp_path, monkeypatch):
     for path in paths:
         assert 'No host-access lease' in policy.ordinary_denial(path, for_write=True)
         assert 'No host-access lease' in host_path_policy.path_review_classification(path, for_write=True)[1]
-        assert policy.ordinary_denial(path, for_write=False) is None
-    assert policy.ordinary_denial(git / 'index', for_write=True) is None
+        assert 'No host-access lease' in policy.ordinary_denial(path, for_write=False)
+    assert policy.ordinary_denial(git / 'index', for_write=True)
     assert policy.ordinary_denial(repo / 'notes.md', for_write=True) is None
 
 
@@ -249,8 +250,8 @@ def test_workspace_git_controls_in_all_macos_profiles(tmp_path, monkeypatch):
         host_access_external.external_agent_sandbox_rules(profile, []),
         safehouse_launch.mcp_private_state_profile(profile, tmp_path / 'safehouse', tmp_path / 'state', tmp_path / 'cache'),
     ]
-    rules = workspace_git_rules(workspace_git_paths(workspace))
-    assert len(rules) == 6
+    rules = workspace_git_history_rules(workspace)
+    assert rules
     for rendered in profiles:
         assert all(rule in rendered for rule in rules)
 
@@ -262,7 +263,7 @@ def test_broken_head_keeps_workspace_git_rules(tmp_path):
     init(repo)
     (repo / '.git' / 'HEAD').write_text('broken')
     rules = ProtectedHostPathPolicy(home=tmp_path / 'home', state_root=tmp_path / 'state', workspace=repo).hard_floor_sandbox_rules()
-    assert all(rule in rules for rule in workspace_git_rules(workspace_git_paths(repo)))
+    assert all(rule in rules for rule in workspace_git_history_rules(repo))
 
 
 def test_separate_git_dir_rules(tmp_path):
@@ -627,6 +628,9 @@ def test_safehouse_workspace_git_controls(tmp_path, monkeypatch, separate):
         git(workspace, 'config', 'user.email', 'test@example.invalid')
     else:
         init(workspace)
+    (workspace / 'file').write_text('content')
+    git(workspace, 'add', 'file')
+    git(workspace, 'commit', '-qm', 'initial')
     run = safehouse_runner(workspace, tmp_path, monkeypatch)
     git_dir = 'metadata' if separate else '.git'
     for target in (f'{git_dir.upper()}/CONFIG', f'{git_dir}/COMMONDIR', f'{git_dir}/CONFIG.WORKTREE', f'{git_dir}/config', f'{git_dir}/config.lock', f'{git_dir}/config.worktree', f'{git_dir}/commondir', f'{git_dir}/hooks/test'):
@@ -639,6 +643,8 @@ def test_safehouse_workspace_git_controls(tmp_path, monkeypatch, separate):
     result = run('mv .git saved-git')
     assert result.returncode != 0
     assert (workspace / '.git').is_file() if separate else (workspace / '.git').is_dir()
-    result = run('printf content > file && git add file && git commit -qm test')
-    assert result.returncode == 0, result.stderr
-    assert git(workspace, 'status', '--porcelain').stdout == ('?? metadata/\n' if separate else '')
+    (workspace / 'file').write_text('content')
+    assert run('cat file').stdout == 'content'
+    assert run(f'cat {git_dir}/HEAD').returncode != 0
+    assert run('git log -1').returncode != 0
+    assert run('git add file').returncode != 0
