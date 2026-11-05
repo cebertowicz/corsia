@@ -15,7 +15,6 @@ import shutil
 import sys
 from typing import Iterable
 
-
 from tools.host_path_resolution import (
     canonical,
     contains,

@@ -276,7 +276,7 @@ async def _native_read_dirs(
         return ()
     working_dir, _project = await run_in_db(resolve_spawn_working_dir, parent_thread_id)
     try:
-        return await asyncio.to_thread(require_readable_dirs, read_paths, working_dir)
+        return await asyncio.to_thread(require_readable_dirs, read_paths, working_dir, thread_id=parent_thread_id)
     except ConfinementRefused as e:
         return f"Error: {e}"
 
@@ -370,7 +370,9 @@ async def _spawn_claude_code_child(
     add_dirs: tuple[str, ...] = ()
     if confinement != CONFINEMENT_NONE:
         try:
-            add_dirs = await asyncio.to_thread(require_readable_dirs, read_paths or [], working_dir)
+            add_dirs = await asyncio.to_thread(
+                require_readable_dirs, read_paths or [], working_dir, thread_id=parent_thread_id,
+            )
         except ConfinementRefused as e:
             return f"Error: {e}"
     try:
