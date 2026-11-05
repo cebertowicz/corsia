@@ -1,0 +1,205 @@
+"""Comment routing follows involvement, leave state, and delivered tags."""
+
+import json
+
+import pytest
+
+from doc_feedback_helpers import add_comment, seed_document, seed_thread
+from doceditor import comment_actions, comment_recipients, comments, feedback_batches, feedback_comments
+from doceditor.comment_create_db import CommentInput, create_in_db
+from doceditor.comment_creation import CreateReceipt
+from doceditor.comment_state_updates import update_comment
+from infra.database import get_db, write_transaction
+
+
+def test_reply_routing_and_leaving(isolated_db):
+    db = get_db()
+    for name in ("owner", "first", "second", "outsider"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="first")
+    reply, _ = add_comment(db, aid, author_id="second", parent_id=root["id"])
+    assert db.execute(
+        "SELECT COUNT(*) FROM context_change_journal WHERE object_kind='artifact' AND object_id=? AND summary LIKE '%commented on%'",
+        (aid,),
+    ).fetchone()[0] == 0
+    assert set(feedback_comments.recipients(db, reply)) == {"owner", "first"}
+    comment_recipients.leave(db, root, "first")
+    db.commit()
+    person, _ = add_comment(db, aid, author_kind="user", author_id=None, parent_id=root["id"])
+    assert set(feedback_comments.recipients(db, person)) == {"owner", "second"}
+    comment_recipients.leave(db, root, "owner")
+    db.commit()
+    assert "owner" in feedback_comments.recipients(db, person)
+    person["tagged_agent_ids"] = ["first"]
+    assert "first" in feedback_comments.recipients(db, person)
+    db.close()
+
+
+def test_tag_selection_uses_viewer_roster(isolated_db):
+    db = get_db()
+    for name in ("viewer", "allowed", "not-an-agent"):
+        seed_thread(db, name, model=None)
+    db.execute("UPDATE threads SET agent_enabled=1,agent_status='active',agent_responsibility='Test' WHERE id='allowed'")
+    comment_recipients.validate_tags(db, user_id="owner-token", thread_id="viewer", agent_ids=["allowed"])
+    with pytest.raises(comment_recipients.TagValidationError):
+        comment_recipients.validate_tags(db, user_id="owner-token", thread_id="viewer", agent_ids=["not-an-agent"])
+    with pytest.raises(comment_recipients.TagValidationError):
+        comment_recipients.validate_tags(db, user_id="other-user", thread_id="viewer", agent_ids=["allowed"])
+    db.close()
+
+
+def test_top_level_routes_only_to_owner_and_tags(isolated_db):
+    db = get_db()
+    for name in ("owner", "writer", "tagged", "outsider"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="writer")
+    root["tagged_agent_ids"] = ["tagged"]
+    assert set(feedback_comments.recipients(db, root)) == {"owner", "tagged"}
+    db.close()
+
+
+def test_tags_preserve_names_and_hint_counts_notifications(isolated_db):
+    db = get_db()
+    seed_thread(db, "owner", model=None)
+    seed_thread(db, "tagged", title="Original name", model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_kind="user", author_id=None)
+    comment_recipients.save_tags(db, root, ["tagged"])
+    db.execute("UPDATE threads SET title='New name' WHERE id='tagged'")
+    loaded = comments.get_comment(root["id"], db=db)
+    assert loaded["tagged_agent_ids"] == ["tagged"]
+    assert loaded["tagged_agents"] == [{"id": "tagged", "name": "Original name"}]
+    for count in range(4):
+        item = {**loaded, "kind": "comment"}
+        comment_recipients.prepare_notification(db, [item], "tagged")
+        assert ("leave_hint" in item) is (count == 3)
+    from plans.feedback_nodes import item_blocks
+    assert 'leave=true' in item_blocks({"author_kind": "user"}, [item])
+    comment_recipients.reset_action(db, loaded, "tagged")
+    item = {**loaded, "kind": "comment"}
+    comment_recipients.prepare_notification(db, [item], "tagged")
+    assert "leave_hint" not in item
+    comment_recipients.leave(db, loaded, "owner")
+    comment_recipients.save_tags(db, loaded, ["owner"])
+    comment_recipients.prepare_notification(db, [{**loaded, "kind": "comment", "event": "reopened"}], "owner")
+    assert db.execute(
+        "SELECT left_thread FROM doc_comment_recipient_state WHERE root_id=? AND agent_id='owner'", (root["id"],)
+    ).fetchone()[0] == 1
+    db.close()
+
+
+def test_held_tag_joins_only_on_delivery_and_rejoins_after_leave(isolated_db):
+    db = get_db()
+    for name in ("owner", "tagged", "other", "newcomer"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="tagged")
+    comment_recipients.leave(db, root, "tagged")
+    db.commit()
+    with write_transaction(db, scope="test_held_tag") as connection:
+        tagged_comment, created = comments.create_with_status(
+            aid, body="Please join", author="User", author_kind="user", parent_id=root["id"], db=connection,
+        )
+        comment_recipients.save_tags(connection, tagged_comment, ["tagged", "newcomer"])
+        comment_recipients.tags_for_comments(connection, [tagged_comment])
+        feedback = feedback_batches.record_comment(
+            connection, tagged_comment, created=created, delivery_policy=feedback_batches.DOCUMENT_HELD,
+        )
+    before, _ = add_comment(db, aid, author_id="other", parent_id=root["id"])
+    assert "tagged" not in feedback_comments.recipients(db, before)
+    assert "newcomer" not in feedback_comments.recipients(db, before)
+    batch_id = next(
+        batch_id for batch_id in feedback["batch_ids"]
+        if db.execute("SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0] == "tagged"
+    )
+    assert feedback_batches.close_batch(db, batch_id, "send")[0]
+    state = db.execute(
+        "SELECT left_thread, notifications FROM doc_comment_recipient_state WHERE root_id=? AND agent_id='tagged'",
+        (root["id"],),
+    ).fetchone()
+    assert tuple(state) == (0, 1)
+    assert not feedback_batches.close_batch(db, batch_id, "send")[0]
+    assert db.execute(
+        "SELECT notifications FROM doc_comment_recipient_state WHERE root_id=? AND agent_id='tagged'", (root["id"],),
+    ).fetchone()[0] == 1
+    after, _ = add_comment(db, aid, author_id="other", parent_id=root["id"])
+    assert "tagged" in feedback_comments.recipients(db, after)
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_leave_through_comment_tool(isolated_db):
+    from tools.documents import DocCommentUpdateTool
+
+    db = get_db()
+    seed_thread(db, "owner", model=None)
+    seed_thread(db, "agent", model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="agent")
+    result = await DocCommentUpdateTool().execute(comment_id=root["id"], leave=True, _thread_id="agent")
+    assert json.loads(result) == {"left": True, "comment_id": root["id"]}
+    state = db.execute(
+        "SELECT left_thread FROM doc_comment_recipient_state WHERE root_id=? AND agent_id='agent'", (root["id"],)
+    ).fetchone()
+    assert state[0] == 1
+    db.close()
+
+
+def test_leave_suppresses_reply_already_waiting_in_batch(isolated_db):
+    db = get_db()
+    for name in ("owner", "agent", "other"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="agent")
+    _, feedback = add_comment(db, aid, author_id="other", parent_id=root["id"])
+    batch = next(batch_id for batch_id in feedback["batch_ids"] if db.execute(
+        "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,),
+    ).fetchone()[0] == "agent")
+    with write_transaction(db, scope="test_leave_pending") as connection:
+        comment_recipients.leave(connection, root, "agent")
+    assert feedback_batches.close_batch(db, batch, "send")[1] == ()
+    assert db.execute("SELECT delivery_outcome FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == "empty"
+    db.close()
+
+
+def test_agent_actions_reset_the_notification_count(isolated_db):
+    db = get_db()
+    seed_thread(db, "owner", model=None)
+    seed_thread(db, "agent", model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="agent", replacement="new text")
+
+    def set_count():
+        for _ in range(3):
+            comment_recipients.prepare_notification(db, [{**root, "kind": "comment"}], "agent")
+        db.commit()
+
+    def count():
+        return db.execute(
+            "SELECT notifications FROM doc_comment_recipient_state WHERE root_id=? AND agent_id='agent'", (root["id"],)
+        ).fetchone()[0]
+
+    set_count()
+    create_in_db(CommentInput(
+        artifact_id=aid, path=None, body="Reply", author="agent", author_kind="agent", user_id="owner-token",
+        author_thread_id="agent", parent_id=root["id"],
+    ), None, "reply-reset", CreateReceipt())
+    assert count() == 0
+    set_count()
+    with write_transaction(db, scope="test_resolve") as connection:
+        update_comment(connection, root["id"], {"resolved": True}, actor_thread_id="agent")
+    assert count() == 0
+    set_count()
+    with write_transaction(db, scope="test_decide") as connection:
+        comment_actions._record_decision_row(
+            connection, root["id"], decision="reject", decided_by="agent", decided_by_thread_id="agent",
+            decision_event_id="decision", decided_at="2026-01-01T00:00:00Z",
+        )
+    assert count() == 0
+    set_count()
+    with write_transaction(db, scope="test_leave") as connection:
+        comment_recipients.leave(connection, root, "agent")
+    assert count() == 0
+    db.close()

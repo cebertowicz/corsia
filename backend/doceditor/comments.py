@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from doceditor import comment_notifications, feedback_reopens, feedback_settlement, live_events
+from doceditor import comment_notifications, comment_recipients, feedback_reopens, feedback_settlement, live_events
 from infra.database import get_db, write_transaction
 
 _CLIENT_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
@@ -66,7 +66,11 @@ def get_comment(comment_id: str, *, db=None) -> dict | None:
         row = _db.execute(
             "SELECT * FROM doc_comments WHERE id=?", (comment_id,)
         ).fetchone()
-        return dict(row) if row else None
+        if row is None:
+            return None
+        comment = dict(row)
+        comment_recipients.tags_for_comments(_db, [comment])
+        return comment
     finally:
         if not db:
             _db.close()
@@ -95,6 +99,7 @@ def list_for_artifact(artifact_id: str, *, db=None) -> list[dict]:
                 (artifact_id,),
             ).fetchall()
         ]
+        comment_recipients.tags_for_comments(_db, rows)
         return _rows_to_threads(rows)
     finally:
         if not db:
@@ -240,6 +245,7 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
             feedback_reopens.discard_open_item(connection, comment_id, now)
             feedback_settlement.settle_batches_of(connection, comment_id)
         row = dict(connection.execute("SELECT * FROM doc_comments WHERE id=?", (comment_id,)).fetchone())
+        comment_recipients.tags_for_comments(connection, [row])
         if "region_x" in fields:
             live_events.region_after_commit(connection, "moved", row["artifact_id"], row["region_w"], row["region_h"])
         comment_notifications.announce_after_commit(

@@ -27,6 +27,7 @@ from doceditor import comments as store, doc_images, feedback_batches, feedback_
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_creation import CommentSelectionChanged, create_validated_comment
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
+from doceditor.comment_recipients import TagValidationError
 from doceditor.feedback_batch_core import PersonDocumentLane
 from infra.app_loop import AppLoopUnavailable
 from doceditor.comment_feedback_transitions import apply_user_transition
@@ -134,7 +135,7 @@ async def create_comment(
         parent_id=body.parent_id, review=body.review, replacement=body.replacement,
         quote=body.anchor_text, start=body.from_off, end=body.to_off, browser=True, live_capture=body.live_capture,
         region=region,
-        delivery_policy=body.delivery_policy,
+        delivery_policy=body.delivery_policy, tagged_agent_ids=body.tagged_agent_ids, viewing_thread_id=body.thread_id,
     )
     try:
         row, _registered, feedback, created = await create_validated_comment(request, body.client_id)
@@ -142,6 +143,8 @@ async def create_comment(
         raise HTTPException(404, str(exc)) from exc
     except CommentActionError as exc:
         raise HTTPException(400, exc.message) from exc
+    except TagValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
     except (CommentSelectionChanged, AppLoopUnavailable) as exc:
         raise HTTPException(409, str(exc)) from exc
     except CrossArtifactIdError as exc:

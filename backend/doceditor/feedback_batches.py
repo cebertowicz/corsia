@@ -78,7 +78,6 @@ def record_comment(
     )
     if created:
         feedback_comments.make_user_document_durable(db, comment)
-        feedback_comments.emit_comment_created(db, comment)
         batch_ids = [
             _join_open_batch(db, comment, recipient, delivery_policy)
             for recipient in feedback_comments.recipients(db, comment)

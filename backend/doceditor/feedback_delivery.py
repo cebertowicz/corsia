@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from doceditor import image_regions
+from doceditor import comment_recipients, image_regions
 from infra.passive_changes import append_thread_context_note
 from infra.send_types import SendRejected
 from infra.thread_inputs import thread_admission_state
@@ -132,15 +132,23 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
     recipient = str(_value(batch, "recipient_id"))
     if recipient == "ui":
         return DeliveryResult(outcome="ui")
+    artifact = registry_models.get_artifact(str(_value(batch, "artifact_id")), db=db)
+    items = comment_recipients.filter_left_replies(
+        db, items, recipient,
+        person_owner=_value(batch, "author_kind") == "user" and bool(artifact)
+        and artifact.get("parent_thread_id") == recipient,
+    )
+    if not items:
+        return DeliveryResult(outcome="empty")
     problem = recipient_problem(db, recipient)
     if problem is not None:
         undelivered_note(db, batch, problem, items=items)
         return DeliveryResult(reason=problem)
-    artifact = registry_models.get_artifact(str(_value(batch, "artifact_id")), db=db)
     image_regions.annotate_delivery(
         db, items, path=artifact["path"] if artifact else None, reader_thread_id=recipient,
         batch_id=str(_value(batch, "id")),
     )
+    comment_recipients.prepare_notification(db, items, recipient)
     created = create_feedback_node(db, recipient, batch, items=items)
     # A reply that joined the task its owner is working woke that owner; it is not queued.
     if not created.woke:

@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from doceditor import comments as store, doc_images, image_regions
+from doceditor import comments as store, comment_recipients, doc_images, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_creation import create_validated_comment
 from doceditor.comment_create_db import CommentInput
@@ -187,6 +187,7 @@ class DocCommentCreateTool(Tool):
         return ("Create a document comment as the current agent thread. To suggest an edit, "
                 "pass quote (the exact current text) and replacement (the new text); body is "
                 "an optional note. To add text without replacing it, quote the preceding text and set insert_after. "
+                "To tag agents, pass their thread IDs from agent_roster in tagged_agent_ids. "
                 "To retry undelivered feedback, use doc_feedback_send.")
 
     @property
@@ -197,7 +198,8 @@ class DocCommentCreateTool(Tool):
             "artifact_id": {"type": ["string", "null"]},
             "quote": {"type": ["string", "null"]},
             "near": {"type": ["string", "null"]},
-            "parent_id": {"type": ["string", "null"]},
+            "parent_id": {"type": ["string", "null"], "description": "Comment ID to reply to; the reply needs body text."},
+            "tagged_agent_ids": {"type": "array", "items": {"type": "string"}, "description": "Agent thread IDs from agent_roster to tag in this comment."},
             "review": {"type": "boolean"},
             "client_id": {"type": ["string", "null"]},
             "replacement": {"type": ["string", "null"]},
@@ -256,6 +258,7 @@ class DocCommentCreateTool(Tool):
                 quote=kwargs.get("quote"), near=kwargs.get("near"),
                 registration=target[2], submit=bool(kwargs.get("submit")), region=region,
                 review_request_id=kwargs.get("_review_request_id"),
+                tagged_agent_ids=kwargs.get("tagged_agent_ids") or [],
             )
             row, registered, feedback, _created = await create_validated_comment(request, client_id)
         except QuoteResolveError as exc:
@@ -286,7 +289,7 @@ class DocCommentUpdateTool(Tool):
 
     @property
     def description(self) -> str:
-        return ("Resolve, acknowledge, edit, or accept/reject a document suggestion as the current agent thread. "
+        return ("Resolve, acknowledge, edit, leave a comment thread, or accept/reject a document suggestion as the current agent thread. "
                 "You may edit only comments you wrote, and resolve or acknowledge only on a document you own or a "
                 "comment you wrote; otherwise reply with doc_comment_create. " + PERSON_COMMENT_RESOLVE_RULE)
 
@@ -294,6 +297,7 @@ class DocCommentUpdateTool(Tool):
     def parameters(self) -> dict[str, Any]:
         return _tool_schema({
             "comment_id": {"type": "string"},
+            "leave": {"type": "boolean", "description": "Leave this comment thread and stop its reply notifications; a tag can bring you back."},
             "resolved": {"type": ["boolean", "null"]},
             "acked": {"type": ["boolean", "null"]},
             "body": {"type": ["string", "null"]},
@@ -316,6 +320,24 @@ class DocCommentUpdateTool(Tool):
         if isinstance(context, str):
             return context
         actor_thread_id, actor = context
+        if kwargs.get("leave"):
+            def _leave():
+                db = get_db()
+                try:
+                    with write_transaction(db, scope="leave_comment_thread") as connection:
+                        comment = store.get_comment(comment_id, db=connection)
+                        art = registry_models.get_artifact(comment["artifact_id"], db=connection) if comment else None
+                        if art is None or not may_access_artifact(art["parent_thread_id"], actor["user_id"], db=connection):
+                            return None
+                        comment_recipients.leave(connection, comment, actor_thread_id)
+                        return comment_recipients.root_id(comment)
+                finally:
+                    db.close()
+            try:
+                root = await run_in_db(_leave)
+            except ValueError as exc:
+                return f"Error: {exc}"
+            return _json({"left": True, "comment_id": root}) if root else "Error: Comment not found"
         if refusal := decision_only_error(
                 decision=kwargs.get("decision"), all_from_author=bool(kwargs.get("all_from_author")),
                 reason=kwargs.get("reason")):

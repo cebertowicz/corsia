@@ -61,4 +61,20 @@ DOC_COMMENTS_SCHEMA_SQL = """
 """ + f"    {REGION_NUMBER_INDEX_SQL};\n" + USER_COMMENTS_BY_TIME_INDEX_SQL
 
 # Feedback batches reference doc_comments, so they follow it.
-DOCUMENT_SCHEMA_SQL = DOC_COMMENTS_SCHEMA_SQL + DOC_FEEDBACK_SCHEMA_SQL + DOC_REVIEW_SCHEMA_SQL
+# Tag and recipient state also follow their referenced comments.
+COMMENT_RECIPIENT_SCHEMA_SQL = """
+    CREATE TABLE IF NOT EXISTS doc_comment_tags (
+        comment_id TEXT NOT NULL REFERENCES doc_comments(id) ON DELETE CASCADE,
+        agent_id TEXT NOT NULL,
+        agent_name TEXT NOT NULL,
+        PRIMARY KEY (comment_id, agent_id)
+    );
+    CREATE TABLE IF NOT EXISTS doc_comment_recipient_state (
+        root_id TEXT NOT NULL REFERENCES doc_comments(id) ON DELETE CASCADE,
+        agent_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+        left_thread INTEGER NOT NULL DEFAULT 0,
+        notifications INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (root_id, agent_id)
+    );
+"""
+DOCUMENT_SCHEMA_SQL = DOC_COMMENTS_SCHEMA_SQL + DOC_FEEDBACK_SCHEMA_SQL + DOC_REVIEW_SCHEMA_SQL + COMMENT_RECIPIENT_SCHEMA_SQL

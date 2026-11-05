@@ -16,8 +16,8 @@ from plans.plan_write import transaction
 
 PROVENANCE = "document.feedback_batch"
 COMMENT_ACCEPTANCE = (
-    "Every item is acknowledged, resolved, or replied to, and every change made for one is also made "
-    "wherever this document says the same thing in other words."
+    "Every item is considered and acted on where needed, and every change made for one is also made "
+    "wherever this document says the same thing in other words. Do not reply if no reply is needed."
 )
 EDIT_ACCEPTANCE = (
     "The edit is checked against current intent and kept, adjusted, or reverted "
@@ -158,6 +158,8 @@ def item_blocks(batch: Any, items: list[dict[str, Any]]) -> str:
             if item.get("region_line"):
                 lines.append(str(item["region_line"]))
             lines.append(f"Feedback: {item['body']}")
+            if item.get("leave_hint"):
+                lines.append(str(item["leave_hint"]))
             if item.get("replacement") is not None:
                 label = "Suggested insertion after the quote" if item.get("insert_after") else "Suggested replacement"
                 lines.append(f"{label}: {item['replacement']}")
