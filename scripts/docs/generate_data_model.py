@@ -15,6 +15,7 @@ import tempfile
 from collections import defaultdict
 
 from data_model_layout import connected_diagrams, module_group, regroup
+from docs_commands import regenerate_command
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "docs/reference/data-model"
@@ -232,7 +233,7 @@ def filename(group):
 def render(groups):
     files = {}
     lines = ["# Data model", "", "Generated reference for the primary, document, log, and analytics stores.",
-             "", "Generate with `PYTHONPATH=backend .venv/bin/python scripts/docs/generate_data_model.py`; "
+             "", f"Generate with `{regenerate_command('generate_data_model')}`; "
              "add `--check` to compare the generated pages. The backend's locked dependencies are required.",
              "", "SQLite full-text search creates shadow tables; SQLite creates `sqlite_sequence`. "
              "Relationships shown in a diagram connect tables in that diagram; column tables list all declared foreign keys. "

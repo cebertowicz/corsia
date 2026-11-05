@@ -74,55 +74,5 @@ def _content(db, node, recipient: str) -> str:
             "title": bounded(str(node["title"]), plan_wake.RETURNED_TITLE_MAX_BYTES),
             "intent": bounded(str(node["intent"] or ""), cap),
             "acceptance_criteria": bounded(str(node["acceptance_criteria"]), cap),
-            "intent_words": _words_since_last_wake(db, node, recipient),
         },
     )
-
-
-def _words_since_last_wake(db, node, recipient: str) -> list[dict[str, object]]:
-    from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES as cap, bounded
-
-    last_revision = _last_wake_revision(db, str(node["id"]), recipient)
-    revision = int(node["requirements_revision"])
-    rows = db.execute(
-        """SELECT author,role,quote,added_at,requirements_revision
-           FROM plan_node_intent_words
-           WHERE node_id=? AND requirements_revision>?
-           ORDER BY requirements_revision,added_at,rowid""",
-        (node["id"], last_revision),
-    ).fetchall()
-    if not rows:
-        rows = db.execute(
-            """SELECT author,role,quote,added_at,requirements_revision
-               FROM plan_node_intent_words
-               WHERE node_id=? AND requirements_revision=?
-               ORDER BY added_at,rowid""",
-            (node["id"], revision),
-        ).fetchall()
-    return [
-        {
-            "author": row["author"], "role": row["role"],
-            "quote": bounded(str(row["quote"]), cap), "added_at": row["added_at"],
-            "requirements_revision": int(row["requirements_revision"]),
-        }
-        for row in rows
-    ]
-
-
-def _last_wake_revision(db, node_id: str, recipient: str) -> int:
-    """The revision this node's last intent wake to ``recipient`` carried, or 0.
-
-    The wake ids share one prefix, read as an id range so the message id index
-    bounds it to this node's wakes, never the thread's history.
-    """
-    prefix = f"plan-wake:intent_revised:{node_id}:"
-    rows = db.execute(
-        """SELECT id FROM messages WHERE id >= ? AND id < ? AND thread_id=?""",
-        (prefix, prefix[:-1] + ";", recipient),
-    ).fetchall()
-    revisions = []
-    for row in rows:
-        revision, _separator, wake_recipient = str(row["id"])[len(prefix):].partition(":")
-        if wake_recipient == recipient and revision.isdigit():
-            revisions.append(int(revision))
-    return max(revisions, default=0)
