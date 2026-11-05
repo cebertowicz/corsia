@@ -116,14 +116,14 @@ def record_plan_update(
 
     The caller decides qualification (owner, top-level or user-assigned node,
     outcome, block suppression) and calls this inside the plan mutation's
-    transaction. The node's current reader title (``plans.workflow_fields.reader_titles``:
+    transaction. The node's current reader title (``plans.public.reader_titles``:
     a workflow step names its run) is snapshotted here; a missing node
     or blank title raises rather than committing an unreadable card, and so
     does any kind that is not a card outcome (``hold_cleared``, a reply).
     """
     if kind not in PLAN_UPDATE_KINDS:
         raise ValueError(f"{kind!r} is not a plan update outcome")
-    from plans.workflow_fields import reader_titles
+    from plans.public import reader_titles  # lazy: plans imports infra
 
     title = str(reader_titles(db, [node_id]).get(node_id) or "").strip()
     if not title:
