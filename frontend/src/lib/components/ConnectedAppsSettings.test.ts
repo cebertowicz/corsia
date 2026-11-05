@@ -8,6 +8,9 @@ import { projects } from '$lib/stores/projects';
 import { get } from 'svelte/store';
 import { requestConnectedApp, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
+const openUrl = vi.hoisted(() => vi.fn(async (_href: string) => undefined));
+vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl }));
+
 const awaiting = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: false } };
 const googleAccount = { id: 'google-work', provider: 'google' as const, provider_display_name: 'Google', address: 'sam.work@example.com', capabilities: ['mail', 'calendar', 'files'] as ('mail' | 'calendar' | 'files')[], state: 'connected' as const, tenant_id: null, reach: { mode: 'corsia' as const, project_ids: [], outside_projects: false } };
 let host: HTMLElement;
@@ -25,6 +28,8 @@ afterEach(() => {
 	if (component) unmount(component);
 	component = null;
 	host.remove();
+	delete document.documentElement.dataset.shell;
+	openUrl.mockReset();
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
 	token.set(null);
@@ -401,6 +406,32 @@ describe('ConnectedAppsSettings', () => {
 		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/messages/connect'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ account_id: 'messages-row' }) })));
 		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="messages-row"]')?.textContent).toContain('Sign out'));
 		expect(open).not.toHaveBeenCalledWith('', '_blank');
+	});
+
+	async function signInFromDesktop() {
+		document.documentElement.dataset.shell = 'tauri';
+		const signedOut = { ...googleAccount, state: 'signed_out' as const };
+		const open = vi.spyOn(window, 'open');
+		const fetch = vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/api/google/connect') ? { url: 'https://accounts.example/auth', account_id: 'google-work' } : { servers: [], accounts: [signedOut], sign_in_here: true } }));
+		vi.stubGlobal('fetch', fetch);
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="google-work"]')).not.toBeNull());
+		(host.querySelector('[data-connected-account-id="google-work"] button') as HTMLButtonElement).click();
+		flushSync();
+		[...host.querySelectorAll<HTMLButtonElement>('[data-connected-account-id="google-work"] button')].find((button) => button.textContent?.trim() === 'Sign in')!.click();
+		await vi.waitFor(() => expect(openUrl).toHaveBeenCalledWith('https://accounts.example/auth'));
+		return open;
+	}
+
+	it('opens an account sign-in in the default browser from the desktop app', async () => {
+		const open = await signInFromDesktop();
+		expect(open).not.toHaveBeenCalled();
+	});
+
+	it('says so when the desktop app cannot open the browser, instead of loading the sign-in in the app', async () => {
+		openUrl.mockRejectedValueOnce(new Error('no opener'));
+		await signInFromDesktop();
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="google-work"]')?.textContent).toContain("Couldn't open your browser. Try again."));
 	});
 
 	it('renders Microsoft admin approval, cancellation, refresh and provider failure with the correct next actions', async () => {

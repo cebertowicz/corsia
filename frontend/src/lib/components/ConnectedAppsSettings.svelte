@@ -9,6 +9,7 @@
 		type ConnectedAppsRow, isOnlyCorsia, needsManualAccountStep,
 	} from '$lib/api/connectedApps';
 	import { anyFirstSignIn, appAccount, hasSignInToShow, needsSignInAttention, SIGN_IN_LEDE } from '$lib/appSignIn';
+	import { pendingExternalPage } from '$lib/pendingExternalPage';
 	import AppSignInPanel from './AppSignInPanel.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import SettingsRow from './SettingsRow.svelte';
@@ -138,12 +139,12 @@
 	async function startSignIn(account: ConnectedAccount): Promise<void> {
 		actionId = account.id; errorId = account.id; actionError = '';
 		// Messages has no page to open; its Sign in only checks access and answers with no link.
-		const page = signInHere && account.provider !== 'messages' ? window.open('', '_blank') : null;
+		const page = signInHere && account.provider !== 'messages' ? pendingExternalPage() : null;
 		try {
 			const started = await startAccountSignIn(account);
 			if (!started.url) { page?.close(); await refresh(); }
-			else if (page) { page.opener = null; page.location.href = started.url; }
-			else window.location.assign(started.url);
+			else if (page?.desktop) { if (!await page.open(started.url)) actionError = "Couldn't open your browser. Try again."; }
+			else if (!(page && await page.open(started.url))) window.location.assign(started.url);
 		} catch (cause) {
 			page?.close();
 			actionError = cause instanceof Error ? cause.message : "Couldn't start the sign-in. Try again.";
