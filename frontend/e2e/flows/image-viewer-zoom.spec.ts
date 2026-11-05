@@ -70,13 +70,13 @@ const frame = (page: Page) => page.locator('.image-overlay .frame');
 const frameWidth = async (page: Page) => (await frame(page).boundingBox())!.width;
 const level = (page: Page) => page.locator('.image-overlay .level');
 /**
- * The frame's width and the width Fit gives it inside the viewport's 24px margins, read in one layout. The pane is still
+ * The frame's width and the width Fit gives it inside the viewport's 40px margins for outside badges, read in one layout. The pane is still
  * widening when the viewer opens, so the two read in separate calls belong to different frames of that animation.
  */
 const fitWidths = (page: Page) => page.evaluate((natural) => {
 	const viewport = document.querySelector('.image-overlay .viewport')!;
 	const drawn = document.querySelector('.image-overlay .frame')!.getBoundingClientRect().width;
-	const scale = Math.min(1, (viewport.clientWidth - 48) / natural.width, (viewport.clientHeight - 48) / natural.height);
+	const scale = Math.min(1, (viewport.clientWidth - 80) / natural.width, (viewport.clientHeight - 80) / natural.height);
 	return { drawn: Math.round(drawn), fit: Math.round(natural.width * scale) };
 }, NATURAL);
 const atFit = async (page: Page) => {
