@@ -42,7 +42,7 @@ async def test_channel_executes_as_owner_without_turn(isolated_db):
 @pytest.mark.asyncio
 @pytest.mark.parametrize("data, stderr", [
     (b"not-json\n", "Tool request failed.\n"),
-    (b"x" * (REQUEST_LIMIT + 1) + b"\n", "Tool request is larger than 8 MiB.\n"),
+    (b"x" * (REQUEST_LIMIT + 1) + b"\n", "Tool request is larger than 8 MiB and was not run. Split the input across smaller tool calls.\n"),
 ])
 async def test_bad_or_over_limit_request_returns_error(data, stderr):
     reader = asyncio.StreamReader(limit=REQUEST_LIMIT)

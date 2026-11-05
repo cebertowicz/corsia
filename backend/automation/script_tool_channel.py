@@ -18,6 +18,8 @@ from tools.registry import ToolRegistry
 SOCKET_ENV = "CORSIA_SCRIPT_TOOL_SOCKET"
 # Above the largest argv `corsia tool` can carry (macOS ARG_MAX is 1 MiB) after JSON escaping.
 REQUEST_LIMIT = 8 * 1024 * 1024
+OVER_LIMIT = (f"Tool request is larger than {REQUEST_LIMIT // (1024 * 1024)} MiB and was not run. "
+              "Split the input across smaller tool calls.\n")
 logger = logging.getLogger(__name__)
 
 
@@ -38,7 +40,7 @@ async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
         response = {"code": 1 if is_error_result(result) else 0, "stdout": str(result), "stderr": ""}
     except asyncio.LimitOverrunError:
         logger.warning("script tool request over %d bytes", REQUEST_LIMIT)
-        response = {"code": 1, "stdout": "", "stderr": "Tool request is larger than 8 MiB.\n"}
+        response = {"code": 1, "stdout": "", "stderr": OVER_LIMIT}
     except Exception as exc:
         logger.warning("script tool request failed: %s", type(exc).__name__)
         response = {"code": 1, "stdout": "", "stderr": "Tool request failed.\n"}
