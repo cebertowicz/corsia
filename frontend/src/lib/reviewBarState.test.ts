@@ -60,6 +60,26 @@ describe('review-bar submission outcomes', () => {
 		expect(state.noteFor).toBe('approved_with_changes');
 	});
 
+	it('keeps the note required after the server refuses one, until the document changes', async () => {
+		api.fetchReviewBar.mockResolvedValue({ ...read, round_feedback_count: 1, round_feedback_counts: { comments: 1, suggestions: 0, edits: 0 } });
+		api.answerReview.mockRejectedValue(new ReviewRefusal('note_required', 'Add a note'));
+		const state = createReviewBarState();
+		state.setTarget('doc-1');
+		await state.load();
+		expect(state.noteRequired).toBe(false);
+
+		await state.answer('changes_requested');
+		expect(state.noteRequired).toBe(true);
+		expect(await state.answer('changes_requested')).toBe('ignored');
+		expect(api.answerReview).toHaveBeenCalledTimes(1);
+
+		state.setTarget('doc-2');
+		expect(state.noteRequired).toBe(true);
+		api.fetchReviewBar.mockResolvedValue({ ...read, round_feedback_count: 1 });
+		await state.load();
+		expect(state.noteRequired).toBe(false);
+	});
+
 	it('starts each document with the default note verdict', () => {
 		const state = createReviewBarState();
 		state.setTarget('doc-1');

@@ -30,16 +30,18 @@ export function createReviewBarState() {
 	let noteFor = $state<'changes_requested' | 'approved_with_changes'>('changes_requested');
 	let accepting = $state(false);
 	let failure = $state('');
+	/** The server refused a verdict without a note: the note stays required for this ask whatever the local count says. */
+	let noteDemanded = $state(false);
 	let receipt = $state<ReviewReceipt | null>(null);
 	const current = (id: string, stamp: number) => artifactId === id && generation === stamp;
 
-	const noteRequired = () => (read?.round_feedback_count ?? 0) === 0;
+	const noteRequired = () => noteDemanded || (read?.round_feedback_count ?? 0) === 0;
 	const visible = () => phase === 'answered' || phase === 'stale' || phase === 'sending' || Boolean(read?.ask_raised);
 
 	function setTarget(id: string | null): boolean {
 		if (id === artifactId) return false;
 		artifactId = id; generation += 1; loadSequence += 1; settledAsk = null;
-		read = null; phase = 'ask'; note = ''; noteFor = 'changes_requested'; failure = ''; receipt = null;
+		read = null; phase = 'ask'; note = ''; noteFor = 'changes_requested'; failure = ''; receipt = null; noteDemanded = false;
 		return true;
 	}
 	async function load() {
@@ -50,7 +52,7 @@ export function createReviewBarState() {
 			if (!current(id, stamp) || sequence !== loadSequence) return;
 			read = next;
 			if ((phase === 'answered' || phase === 'stale') && next.ask_raised && next.ask_raised_at !== settledAsk) {
-				phase = 'ask'; receipt = null; failure = ''; note = ''; settledAsk = null;
+				phase = 'ask'; receipt = null; failure = ''; note = ''; settledAsk = null; noteDemanded = false;
 			} else if (phase === 'noting' && !next.ask_raised) {
 				phase = 'ask'; note = '';
 			}
@@ -91,7 +93,7 @@ export function createReviewBarState() {
 			} else if (error instanceof ReviewRefusal && error.code === 'note_required') {
 				// The note opens for the verdict that was refused, so sending it records that verdict.
 				if (verdict !== 'approved') noteFor = verdict;
-				phase = 'noting'; failure = NOTE_NEEDED;
+				noteDemanded = true; phase = 'noting'; failure = NOTE_NEEDED;
 			} else {
 				phase = from; failure = SEND_FAILED;
 			}
