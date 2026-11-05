@@ -30,13 +30,27 @@ def test_tag_create_list_and_idempotent_retry(integration_client, artifact_id):
     finally:
         db.close()
     url = f"/api/artifacts/{artifact_id}/comments?token={OWNER_TOKEN}"
-    request = {"body": "Hello", "delivery_policy": "document-held", "thread_id": "viewer",
-               "tagged_agent_ids": ["agent"], "client_id": "tag-retry"}
+    mentions = [{"agent_id": "agent", "start": 3, "end": 9}, {"agent_id": "agent", "start": 10, "end": 16}]
+    request = {"body": "😀 @Agent @Agent", "delivery_policy": "document-held", "thread_id": "viewer",
+               "tagged_agent_ids": ["agent", "agent"], "tagged_agent_mentions": mentions, "client_id": "tag-retry"}
     first = integration_client.post(url, json=request)
     assert first.status_code == 200
     assert first.json()["comment"]["tagged_agents"] == [{"id": "agent", "name": "Named agent"}]
+    assert first.json()["comment"]["tagged_agent_mentions"] == mentions
     again = integration_client.post(url, json=request)
     assert again.status_code == 200
     assert again.json()["comment"]["tagged_agents"] == first.json()["comment"]["tagged_agents"]
     listed = integration_client.get(url).json()["comments"]
     assert listed[0]["tagged_agents"] == first.json()["comment"]["tagged_agents"]
+    assert listed[0]["tagged_agent_mentions"] == mentions
+    reply = integration_client.post(url, json={**request, "parent_id": listed[0]["id"], "client_id": "tag-reply"})
+    assert reply.status_code == 200
+    assert reply.json()["comment"]["tagged_agent_mentions"] == mentions
+    for invalid in (
+        {"agent_id": "other", "start": 3, "end": 9},
+        {"agent_id": "agent", "start": 1, "end": 9},
+        {"agent_id": "agent", "start": 3, "end": 99},
+        {"agent_id": "agent", "start": 9, "end": 3},
+    ):
+        response = integration_client.post(url, json={**request, "client_id": None, "tagged_agent_mentions": [invalid]})
+        assert response.status_code == 400

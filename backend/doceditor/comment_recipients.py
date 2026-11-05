@@ -21,6 +21,28 @@ def validate_tags(db, *, user_id: str, thread_id: str | None, agent_ids: list[st
         raise TagValidationError("Tagged agents must be in the viewing thread's visible roster")
 
 
+def validate_mentions(body: str, agent_ids: list[str], mentions: list[dict]) -> None:
+    """Validate positions in UTF-16 units, including character boundaries."""
+    boundaries = {0}
+    offset = 0
+    for character in body:
+        offset += 2 if ord(character) > 0xFFFF else 1
+        boundaries.add(offset)
+    selected = set(agent_ids)
+    for mention in mentions:
+        start, end = mention["start"], mention["end"]
+        if (mention["agent_id"] not in selected or type(start) is not int or type(end) is not int
+                or start not in boundaries or end not in boundaries or start >= end):
+            raise TagValidationError("Mention must reference a selected agent and valid UTF-16 body offsets")
+
+
+def save_mentions(db, comment: dict, mentions: list[dict]) -> None:
+    db.executemany(
+        "INSERT INTO doc_comment_mentions(comment_id,agent_id,start_offset,end_offset) VALUES (?,?,?,?)",
+        [(comment["id"], mention["agent_id"], mention["start"], mention["end"]) for mention in mentions],
+    )
+
+
 def root_id(comment: dict) -> str:
     return str(comment.get("parent_id") or comment["id"])
 
@@ -43,11 +65,16 @@ def tags_for_comments(db, rows: list[dict]) -> None:
     for row in rows:
         row["tagged_agent_ids"] = []
         row["tagged_agents"] = []
+        row["tagged_agent_mentions"] = []
     marks = ",".join("?" for _ in by_id)
     for tag in db.execute(f"SELECT comment_id,agent_id,agent_name FROM doc_comment_tags WHERE comment_id IN ({marks}) ORDER BY agent_id", tuple(by_id)):
         row = by_id[tag["comment_id"]]
         row["tagged_agent_ids"].append(tag["agent_id"])
         row["tagged_agents"].append({"id": tag["agent_id"], "name": tag["agent_name"]})
+    for mention in db.execute(f"SELECT comment_id,agent_id,start_offset,end_offset FROM doc_comment_mentions WHERE comment_id IN ({marks}) ORDER BY start_offset,end_offset,agent_id", tuple(by_id)):
+        by_id[mention["comment_id"]]["tagged_agent_mentions"].append({
+            "agent_id": mention["agent_id"], "start": mention["start_offset"], "end": mention["end_offset"],
+        })
 
 
 def reset_action(db, comment: dict, agent_id: str) -> None:
@@ -89,22 +116,21 @@ def filter_left_replies(db, items: list[dict], agent_id: str, *, person_owner: b
     roots = {root_id(item) for item in items if item.get("kind") == "comment"}
     if not roots:
         return items
-    tagged_roots = set()
-    for item in items:
-        if item.get("kind") == "comment" and item.get("event") != "reopened" and db.execute(
-            "SELECT 1 FROM doc_comment_tags WHERE comment_id=? AND agent_id=?", (item["id"], agent_id),
-        ).fetchone():
-            tagged_roots.add(root_id(item))
     left_roots = {
         root for root in roots if db.execute(
             "SELECT 1 FROM doc_comment_recipient_state WHERE root_id=? AND agent_id=? AND left_thread=1",
             (root, agent_id),
         ).fetchone()
     }
-    return [item for item in items if not (
-        item.get("kind") == "comment" and item.get("parent_id")
-        and root_id(item) in left_roots and root_id(item) not in tagged_roots and not person_owner
-    )]
+    def keep(item: dict) -> bool:
+        if (person_owner or item.get("kind") != "comment" or not item.get("parent_id")
+                or root_id(item) not in left_roots):
+            return True
+        return bool(item.get("event") != "reopened" and db.execute(
+            "SELECT 1 FROM doc_comment_tags WHERE comment_id=? AND agent_id=?", (item["id"], agent_id),
+        ).fetchone())
+
+    return [item for item in items if keep(item)]
 
 
 def prepare_notification(db, items: list[dict], agent_id: str) -> None:

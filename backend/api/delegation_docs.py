@@ -11,6 +11,7 @@ from doceditor.comment_creation import create_validated_comment
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
 from infra.app_loop import AppLoopUnavailable
 from api.doc_comments import comment_action_status, decision_refusal
+from api.doc_comment_models import TaggedAgentMention
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSaveError, agent_document_writer
 from doceditor.comment_actions import (
@@ -88,6 +89,7 @@ class AgentCommentCreate(BaseModel):
     as_session_id: str | None = None
     client_id: str | None = None
     tagged_agent_ids: list[str] = Field(default_factory=list)
+    tagged_agent_mentions: list[TaggedAgentMention] = Field(default_factory=list)
     submit: bool = False
 
     @field_validator("client_id")
@@ -156,6 +158,7 @@ async def create_agent_comment(token: str, body: AgentCommentCreate):
         author_thread_id=body.as_session_id, parent_id=body.parent_id, review=is_review,
         quote=body.quote, near=body.near, replacement=body.replacement, insert_after=body.insert_after,
         registration=register_spec, submit=body.submit, tagged_agent_ids=body.tagged_agent_ids,
+        tagged_agent_mentions=[mention.model_dump() for mention in body.tagged_agent_mentions],
     )
     try:
         row, registered, feedback, _created = await create_validated_comment(request, body.client_id)

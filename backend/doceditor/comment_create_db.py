@@ -44,6 +44,7 @@ class CommentInput:
     # An agent comment is always immediate (the batch layer enforces it); a person's caller names the lane.
     delivery_policy: str = feedback_batch_core.IMMEDIATE
     tagged_agent_ids: list[str] = field(default_factory=list)
+    tagged_agent_mentions: list[dict] = field(default_factory=list)
     viewing_thread_id: str | None = None
 
 
@@ -119,6 +120,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 thread_id=request.author_thread_id or request.viewing_thread_id,
                 agent_ids=request.tagged_agent_ids,
             )
+            comment_recipients.validate_mentions(request.body, request.tagged_agent_ids, request.tagged_agent_mentions)
             row, created = comments.create_with_status(
                 artifact_id, body=request.body, author=request.author, author_kind=request.author_kind,
                 author_thread_id=request.author_thread_id, parent_id=request.parent_id,
@@ -128,6 +130,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
             )
             if created:
                 comment_recipients.save_tags(connection, row, request.tagged_agent_ids)
+                comment_recipients.save_mentions(connection, row, request.tagged_agent_mentions)
                 if request.author_thread_id:
                     comment_recipients.reset_action(connection, row, request.author_thread_id)
             comment_recipients.tags_for_comments(connection, [row])

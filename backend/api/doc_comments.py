@@ -136,6 +136,7 @@ async def create_comment(
         quote=body.anchor_text, start=body.from_off, end=body.to_off, browser=True, live_capture=body.live_capture,
         region=region,
         delivery_policy=body.delivery_policy, tagged_agent_ids=body.tagged_agent_ids, viewing_thread_id=body.thread_id,
+        tagged_agent_mentions=[mention.model_dump() for mention in body.tagged_agent_mentions],
     )
     try:
         row, _registered, feedback, created = await create_validated_comment(request, body.client_id)

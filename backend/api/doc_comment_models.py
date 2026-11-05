@@ -1,8 +1,14 @@
 """Validated transport models for document-comment requests."""
-from pydantic import BaseModel, Field, StrictBool, field_validator
+from pydantic import BaseModel, Field, StrictBool, StrictInt, field_validator
 
 from doceditor import comments as store
 from doceditor.feedback_batch_core import PersonDocumentLane
+
+
+class TaggedAgentMention(BaseModel):
+    agent_id: str
+    start: StrictInt
+    end: StrictInt
 
 
 class CommentCreate(BaseModel):
@@ -15,6 +21,7 @@ class CommentCreate(BaseModel):
     replacement: str | None = None
     client_id: str | None = None
     tagged_agent_ids: list[str] = Field(default_factory=list)
+    tagged_agent_mentions: list[TaggedAgentMention] = Field(default_factory=list)
     thread_id: str | None = None
     live_capture: StrictBool = False
     # {x, y, w, h} in fractions of an image artifact; w = h = 0 (or omitted) is a point.

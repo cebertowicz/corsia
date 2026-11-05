@@ -164,6 +164,52 @@ def test_leave_suppresses_reply_already_waiting_in_batch(isolated_db):
     db.close()
 
 
+def test_mixed_held_replies_only_deliver_explicit_tag_to_left_agent(isolated_db):
+    db = get_db()
+    for name in ("owner", "agent", "other"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="agent")
+    untagged, _ = add_comment(db, aid, author_id="other", parent_id=root["id"])
+    tagged, _ = add_comment(db, aid, author_id="other", parent_id=root["id"])
+    comment_recipients.save_tags(db, tagged, ["agent"])
+    comment_recipients.leave(db, root, "agent")
+    items = [{**untagged, "kind": "comment"}, {**tagged, "kind": "comment"}]
+    assert [item["id"] for item in comment_recipients.filter_left_replies(db, items, "agent", person_owner=False)] == [tagged["id"]]
+    assert len(comment_recipients.filter_left_replies(db, items, "agent", person_owner=True)) == 2
+    db.close()
+
+
+def test_failed_node_delivery_rolls_back_rejoin_and_notification(isolated_db, monkeypatch):
+    from doceditor import feedback_delivery
+
+    db = get_db()
+    for name in ("owner", "agent"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="agent")
+    with write_transaction(db, scope="leave_before_failure") as connection:
+        comment_recipients.leave(connection, root, "agent")
+        reply, created = comments.create_with_status(
+            aid, body="Please join", author="User", author_kind="user", parent_id=root["id"], db=connection,
+        )
+        comment_recipients.save_tags(connection, reply, ["agent"])
+        comment_recipients.tags_for_comments(connection, [reply])
+        feedback = feedback_batches.record_comment(connection, reply, created=created, delivery_policy=feedback_batches.DOCUMENT_HELD)
+    batch = next(batch_id for batch_id in feedback["batch_ids"] if db.execute(
+        "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,),
+    ).fetchone()[0] == "agent")
+    def fail(*args, **kwargs):
+        raise RuntimeError("node creation failed")
+    monkeypatch.setattr(feedback_delivery, "create_feedback_node", fail)
+    with pytest.raises(RuntimeError, match="node creation failed"):
+        feedback_batches.close_batch(db, batch, "send")
+    state = db.execute("SELECT left_thread,notifications FROM doc_comment_recipient_state WHERE root_id=? AND agent_id=?", (root["id"], "agent")).fetchone()
+    assert tuple(state) == (1, 0)
+    assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == "open"
+    db.close()
+
+
 def test_agent_actions_reset_the_notification_count(isolated_db):
     db = get_db()
     seed_thread(db, "owner", model=None)
