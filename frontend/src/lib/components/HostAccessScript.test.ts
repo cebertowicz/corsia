@@ -65,7 +65,7 @@ it('names a stale script request as the lease names it', async () => {
 	target.remove();
 });
 
-it('says an incomplete script request can be denied but not approved', async () => {
+it('says an incomplete script request cannot be approved', async () => {
 	const lease = {
 		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
 		application_hash: 'a'.repeat(64), decision_capability: '',
@@ -81,7 +81,7 @@ it('says an incomplete script request can be denied but not approved', async () 
 		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
 	} });
 	flushSync();
-	expect(target.textContent).toContain('This request arrived without everything needed to approve it.');
+	expect(target.textContent).toContain('This request arrived without everything needed to approve it. Retry to load it again.');
 	const labels = [...target.querySelectorAll('button')].map((button) => button.textContent?.trim());
 	expect(labels).toContain('Deny');
 	expect(labels).not.toContain('Approve');
