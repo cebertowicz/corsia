@@ -295,7 +295,7 @@
 			.rb-capsule.suppressed { transform: translateY(calc(100% + var(--space-3) + var(--safe-bottom))); pointer-events: none; visibility: hidden; transition-duration: calc(var(--dur-standard) * 0.7), 0s; transition-delay: 0s, calc(var(--dur-standard) * 0.7); }
 			.review-bar.ask .rb-capsule .rb-status { order: -1; flex: 1 0 100%; padding: 0 var(--space-2); }
 			.review-bar.ask .rb-capsule .rb-status:empty { display: none; }
-			.rb-capsule.insheet { position: static; z-index: auto; animation: none; box-shadow: none; --rb-hit: calc(var(--space-8) - var(--space-1)); font-size: var(--text-footnote); color: var(--text-secondary); }
+			.rb-capsule.insheet { position: static; z-index: auto; animation: none; box-shadow: none; padding-inline: 0; --rb-hit: calc(var(--space-8) - var(--space-1)); font-size: var(--text-footnote); color: var(--text-secondary); }
 			.rb-capsule.insheet .rb-status { order: -1; flex: 1 0 100%; padding: 0 var(--space-2); }
 			.rb-capsule.insheet .rb-status:empty { display: none; }
 			.rb-capsule.insheet.noting :global(.rb-actions) { flex: 1 0 100%; justify-content: flex-end; }

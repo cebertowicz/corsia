@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
-import { loginByUrl } from '../support/corsia';
+import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { raiseAsk } from '../support/reviewAsk';
 import { expectSenders, headerSend, leaveUnsent } from '../support/heldComments';
 import { journey, type Case, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled } from '../support/reviewFixtures';
@@ -446,6 +446,27 @@ journey('the review controls remain usable in the phone comments sheet', [['393 
 	await expect(drawer.locator('.rb-receipt')).toContainText('Approved');
 	await drawer.getByRole('button', { name: 'Close comments', exact: true }).click();
 	await expect(page.locator('.review-bar .rb-receipt')).toBeVisible();
+});
+
+test.describe('375px review sheet', () => {
+	test.use({ hasTouch: true, isMobile: true });
+	test('@surface:review-bar suggestion actions stay on one row in the sheet', async ({ page, request }) => {
+		const doc = await seed(request, 'Review sheet suggestion actions');
+		raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
+		const reviewer = await createSession(request, 'Sheet suggester');
+		for (const step of [1, 2]) {
+			const result = await request.post('/api/delegation/docs/comments', { params: { token: TEST_TOKEN }, data: { artifact_id: doc.artifactId, quote: `Step ${step}: the rollout`, replacement: `Phase ${step}: the rollout`, body: 'Use phase.', as_session_id: reviewer } });
+			expect(result.ok()).toBeTruthy();
+		}
+		await open(page, doc, 'phone', 'light');
+		await page.setViewportSize({ width: 375, height: 852 });
+		await page.getByRole('button', { name: /^\d+ open threads?\b/ }).click();
+		const buttons = page.locator('[data-doc-comments-drawer] .review-bar .rb-actions .btn');
+		await expect(buttons).toHaveCount(3);
+		await expect(page.locator('[data-doc-comments-drawer]').getByRole('button', { name: 'Approve all', exact: true })).toBeVisible();
+		const boxes = await buttons.evaluateAll((items) => items.map((item) => item.getBoundingClientRect().top));
+		expect(new Set(boxes.map(Math.round)).size).toBe(1);
+	});
 });
 
 journey('a review note survives moving into and out of the phone comments sheet', [['393 light', 'phone', 'light']], async ({ page, request, mode, theme }) => {
