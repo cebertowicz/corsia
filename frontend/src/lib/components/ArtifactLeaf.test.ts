@@ -510,19 +510,19 @@ describe('reply stamping through the document canvas', () => {
 		flushSync();
 		await vi.waitFor(() => expect(document.querySelector('[data-reply-id="reply"]')).not.toBeNull());
 	}
-	it('stops a document reply dwell when its image opens', async () => {
+	// A document reply is read only when its thread is opened, never by being in view.
+	it('never marks a document reply read from view, including when its image opens', async () => {
 		const observers = setupObserver();
 		const tab = seedReply();
 		render();
 		await openComments();
-		await vi.waitFor(() => expect(observers().some((observer) => !observer.disconnected)).toBe(true));
 		openTabDocumentImage(THREAD, tab, { src: '/image.png', alt: 'image', from: 0, to: 1, top: 0, scrollTop: 0 });
 		flushSync();
 		expect(observers().every((observer) => observer.disconnected)).toBe(true);
 		await new Promise((resolve) => setTimeout(resolve, 1600));
 		expect(mocks.markThreadViewed).not.toHaveBeenCalled();
 	});
-	it('does not observe document replies while restoring their document place', async () => {
+	it('never marks a document reply read from view while or after restoring its document place', async () => {
 		const observers = setupObserver();
 		const restore = deferred<void>();
 		mocks.restoreDocumentPlace.mockImplementation((_root, _place, options) => restore.promise.then(() => options.onPlaced()));
@@ -535,7 +535,8 @@ describe('reply stamping through the document canvas', () => {
 		await new Promise((resolve) => setTimeout(resolve, 1600));
 		expect(mocks.markThreadViewed).not.toHaveBeenCalled();
 		restore.resolve();
-		await vi.waitFor(() => expect(observers().some((observer) => !observer.disconnected)).toBe(true));
+		await new Promise((resolve) => setTimeout(resolve, 1600));
+		expect(mocks.markThreadViewed).not.toHaveBeenCalled();
 	});
 });
 
@@ -927,6 +928,8 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		rangeLayout.getClientRects = () => [new DOMRect(10, 20, 8, 16)] as unknown as DOMRectList;
 		rangeLayout.getBoundingClientRect = () => new DOMRect(10, 20, 8, 16);
 		Element.prototype.scrollIntoView = () => {};
+		// A marker opens its thread, which waits for the card to be seen; jsdom has no IntersectionObserver.
+		vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} });
 	});
 	afterEach(() => {
 		delete rangeLayout.getClientRects;

@@ -24,6 +24,14 @@ const button = (selector: string) => host.querySelector<HTMLButtonElement>(selec
 afterEach(() => { if (component) unmount(component); component = null; host?.remove(); });
 
 describe('CommentThread', () => {
+	it('names its thread on the card, open or resolved, so an arrival can find it on any surface', () => {
+		render(thread());
+		expect(host.querySelector<HTMLElement>('.ct')?.dataset.threadCard).toBe('c1');
+		unmount(component!); host.remove();
+		render(thread({ resolved: true }));
+		expect(host.querySelector<HTMLElement>('.ct')?.dataset.threadCard).toBe('c1');
+	});
+
 	it('posts a reply and clears the input', async () => {
 		const { onReply } = render(thread());
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
