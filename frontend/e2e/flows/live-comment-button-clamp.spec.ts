@@ -16,7 +16,7 @@ for (const width of [1440, 393]) {
 		// An existing comment opens the comments pane beside the document.
 		await createComment(request, seeded, 'word50', `Existing ${stamp}`);
 		await openLiveDocument(page, seeded, `# Clamp ${stamp}`);
-		const commentsPill = page.getByRole('button', { name: /^1 open thread\b/ });
+		const commentsPill = page.getByRole('button', { name: /^1 thread\b/ });
 		// The pill mounts after the comment thread loads; start the held save only once it is there, or the cue can end first.
 		await expect(commentsPill).toBeVisible();
 		const editor = page.locator('.cm-content');
@@ -52,7 +52,7 @@ for (const width of [1440, 393]) {
 		const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('.sel-comment') !== null, { x: box.x + box.width / 2, y: box.y + box.height / 2 });
 		expect(hit, 'the button is the element under its own centre').toBe(true);
 		const comments = page.getByRole('region', { name: 'Document comments', exact: true });
-		await page.getByRole('button', { name: /^1 open thread\b/ }).click();
+		await page.getByRole('button', { name: /^1 thread\b/ }).click();
 		await expect(comments).toBeVisible();
 		await expect(button).toHaveCount(0);
 		await comments.getByRole('button', { name: 'Close comments', exact: true }).click();

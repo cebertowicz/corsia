@@ -11,7 +11,6 @@ from infra.plan_aggregates_schema import (
     PLAN_AGGREGATE_COLUMNS, TOUCH_INDEXES_SQL, column_ddl,
 )
 from infra.plan_events_schema import PLAN_EVENTS_SCHEMA_SQL
-from infra.plan_intent_schema import PLAN_INTENT_SCHEMA_SQL
 from infra.plan_markdown_import_schema import PLAN_MARKDOWN_IMPORT_SCHEMA_SQL
 from infra.plan_pane_views_schema import PLAN_PANE_VIEWS_SCHEMA_SQL
 from infra.plan_status_schema import PLAN_STATUS_DIRTY_SCHEMA_SQL
@@ -116,8 +115,6 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_spawned_thread ON plan_nodes(spawned_thread_id);
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_executor_thread ON plan_nodes(executor_thread_id);
     {NODE_AGGREGATE_INDEXES_SQL}
-
-    {PLAN_INTENT_SCHEMA_SQL}
 
     CREATE TABLE IF NOT EXISTS plan_node_dependencies (
         node_id TEXT NOT NULL REFERENCES plan_nodes(id) ON DELETE CASCADE,

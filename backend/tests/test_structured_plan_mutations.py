@@ -85,10 +85,6 @@ def _mutate(db, plan_id, operation, params, actor=None, mutation_id=None):
         params = {
             **params,
             "intent": params.get("intent", "Mutate the requested plan task."),
-            "intent_words": params.get(
-                "intent_words",
-                [{"quote": "Mutate the requested plan task.", "role": "authority"}],
-            ),
         }
     deferred = mutate(
         plan_id, operation, params, actor=actor or _actor(), provenance="test",

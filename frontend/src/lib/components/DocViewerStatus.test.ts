@@ -69,7 +69,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		const header = host.querySelector('header');
 		expect(header?.textContent).toContain('Review document');
 		expect(header?.textContent).toContain('Owner: Structured Plans');
-		expect(header?.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('0 open threads');
+		expect(header?.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('0 threads');
 		const delivery = header?.querySelector<HTMLButtonElement>('[aria-label="Deliver comments immediately"]');
 		expect(delivery?.getAttribute('aria-pressed')).toBe('true');
 		delivery?.click();
@@ -97,7 +97,7 @@ describe('DocViewerStatus freshness metadata', () => {
 		component!.sync('artifact-1', { open_count: 3, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
 		const pill = host.querySelector('.comment-status');
-		expect(pill?.getAttribute('aria-label')).toBe('2 open threads, 3 messages not sent yet');
+		expect(pill?.getAttribute('aria-label')).toBe('2 threads, 3 messages not sent yet');
 		expect(pill?.querySelector('.unsent-dot')).toBeTruthy();
 		expect(host.textContent).not.toContain('Send 3 comments');
 		// Nothing is held back for the document, so no Send shows, not even clipped.
@@ -144,15 +144,15 @@ describe('DocViewerStatus freshness metadata', () => {
 		const pill = host.querySelector('.comment-status')!;
 		expect(pill.querySelector('.count')!.textContent).toBe('1');
 		expect(pill.querySelector('.count-unit')!.textContent).toBe('thread');
-		expect(pill.getAttribute('aria-label')).toBe('1 open thread');
+		expect(pill.getAttribute('aria-label')).toBe('1 thread');
 		expect(pill.querySelector('.unsent-dot')).toBeNull();
 		component!.sync('artifact-1', { open_count: 1, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
-		expect(pill.getAttribute('aria-label')).toBe('1 open thread, 1 message not sent yet');
+		expect(pill.getAttribute('aria-label')).toBe('1 thread, 1 message not sent yet');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
 		component!.sync('artifact-1', { open_count: 0, owner_label: 'Style', undelivered_batches: [] });
 		flushSync();
-		expect(pill.getAttribute('aria-label')).toBe('1 open thread');
+		expect(pill.getAttribute('aria-label')).toBe('1 thread');
 		expect(pill.querySelector('.unsent-dot')).toBeNull();
 	});
 
@@ -202,10 +202,10 @@ describe('DocViewerStatus freshness metadata', () => {
 	});
 
 	it.each([
-		['unplaced and unsent', { commentCount: 2, orphanedCount: 2 }, { open_count: 3, owner_label: 'Style', undelivered_batches: [] }, "2 open threads, 2 comments couldn't be placed, 3 messages not sent yet"],
-		['unplaced only', { commentCount: 2, orphanedCount: 2 }, null, "2 open threads, 2 comments couldn't be placed"],
-		['unsent only', { commentCount: 2 }, { open_count: 3, owner_label: 'Style', undelivered_batches: [] }, '2 open threads, 3 messages not sent yet'],
-		['neither', { commentCount: 2 }, null, '2 open threads'],
+		['unplaced and unsent', { commentCount: 2, orphanedCount: 2 }, { open_count: 3, owner_label: 'Style', undelivered_batches: [] }, "2 threads, 2 comments couldn't be placed, 3 messages not sent yet"],
+		['unplaced only', { commentCount: 2, orphanedCount: 2 }, null, "2 threads, 2 comments couldn't be placed"],
+		['unsent only', { commentCount: 2 }, { open_count: 3, owner_label: 'Style', undelivered_batches: [] }, '2 threads, 3 messages not sent yet'],
+		['neither', { commentCount: 2 }, null, '2 threads'],
 	])('names %s comment status once', (_state, props, feedback, expected) => {
 		render(value(), undefined, props);
 		if (feedback) component!.sync('artifact-1', feedback);
@@ -217,7 +217,7 @@ describe('DocViewerStatus freshness metadata', () => {
 	it('names unplaced comments from the status pill', () => {
 		render(value(), undefined, { orphanedCount: 1 });
 		const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
-		expect(pill.getAttribute('aria-label')).toBe("0 open threads, 1 comment couldn't be placed");
+		expect(pill.getAttribute('aria-label')).toBe("0 threads, 1 comment couldn't be placed");
 	});
 
 	it('removes Mark verified when the parent replaces freshness after success', async () => {
@@ -285,7 +285,7 @@ describe('DocViewerStatus toolbar', () => {
 		const dot = button.querySelector('.unplaced-dot')!;
 		expect(dot.parentElement?.classList.contains('icon-anchor')).toBe(true);
 		expect(dot.parentElement?.querySelector('svg.tool-icon')).not.toBeNull();
-		expect(button.getAttribute('aria-label')).toBe("2 open threads, 1 comment couldn't be placed");
+		expect(button.getAttribute('aria-label')).toBe("2 threads, 1 comment couldn't be placed");
 	});
 });
 

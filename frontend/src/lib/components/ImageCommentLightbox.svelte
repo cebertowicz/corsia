@@ -73,8 +73,8 @@
 	let surface = $state<ReturnType<typeof DocCommentSurface>>();
 	const all = $derived(artifactId ? $docComments[artifactId] ?? [] : []);
 	const comments = $derived(inDocument ? commentsAtImage(all, inDocument.occurrence) : all);
-	// The pill counts open threads, as the document's does: resolved ones are in the drawer's other filters.
-	const openThreads = $derived(comments.filter((comment) => !comment.resolved).length);
+	// The image list opens on All, so its pill counts every thread.
+	const threadCount = $derived(comments.length);
 	const accent = $derived($projects.find((project) => project.id === projectId)?.accent_color ?? null);
 	const colorOf = (comment: DocComment) => regionColor(comment, projectId, accent);
 	const canComment = $derived(!readOnly && !!artifactId);
@@ -234,7 +234,7 @@
 						ready={loaded}
 						moving={!!image.moving}
 						savingMove={image.moveSaving}
-						count={openThreads}
+						count={threadCount}
 						unsent={feedback?.pendingCount ?? 0}
 						loading={$commentLoads[artifactId]?.state === 'loading'}
 						listOpen={image.ui.state?.kind === 'list'}

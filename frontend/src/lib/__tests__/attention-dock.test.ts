@@ -159,11 +159,11 @@ describe("AttentionDock — reply attention refresh", () => {
     await settle();
     expect(calls.filter((call) => call.url.includes("/api/attention/queue"))).toHaveLength(0);
     expect(host.querySelector('.reply-chip-notice')).not.toBeNull();
-    emit("doc_comment_changed", { type: "doc_comment_changed", artifact_id: "doc", reply_attention_changed: true });
+    emit("doc_comment_changed", { type: "doc_comment_changed", artifact_id: "doc", unread_attention_changed: true });
     await settle();
     expect(host.querySelector('.reply-chip-notice')).toBeNull();
     body = { ...queueBody(null, 0), reply_items: [reply] };
-    emit("doc_comment_changed", { type: "doc_comment_changed", artifact_id: "doc", reply_attention_changed: true });
+    emit("doc_comment_changed", { type: "doc_comment_changed", artifact_id: "doc", unread_attention_changed: true });
     await settle();
     expect(host.querySelector('.reply-chip-notice')?.textContent).toContain('1 new reply');
     activeThreadId.set(null);

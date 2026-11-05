@@ -141,33 +141,18 @@ def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
     return replace(candidates[0], arrived=True) if candidates else None
 
 
-def _plans_hear(source_kind: str, source_id: str) -> None:
-    """Tell Plans the person's words arrived; it schedules off-path, and a failure here stays here."""
-    try:
-        from plans.public import person_words_arrived
-
-        person_words_arrived(source_kind, source_id)
-    except Exception:
-        logger.exception("plan input matching hook failed")
-
-
 def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
-    """Hand Plans and the corrections worker an admitted owner message; best effort, never failing the send.
+    """Hand the corrections worker an admitted owner message; best effort, never failing the send.
 
-    Plans hears any message holding the person's words, comment notes included;
-    the corrections worker takes typed text as the message and each non-blank
+    The corrections worker takes typed text as the message and each non-blank
     chat comment note as its own source.
     """
     from core.corrections_recording import is_owner_authored_message
     from jobs.corrections_realtime import notify
 
     try:
-        from plans.public import person_message_words
-
         if accepted.duplicate:
             return
-        if person_message_words(role=role, content=content, metadata=metadata):
-            _plans_hear(SOURCE_KIND_MESSAGE, accepted.message_id)
         if is_owner_authored_message(role=role, content=content, metadata=metadata):
             notify(SOURCE_KIND_MESSAGE, accepted.message_id)
         if is_owner_authored_message(role=role, content=content, metadata=metadata, allow_blank=True):
@@ -188,7 +173,6 @@ def notify_doc_comment(comment_id: str) -> None:
     """Hand the worker a committed user comment; best effort, never failing the comment."""
     from jobs.corrections_realtime import notify
 
-    _plans_hear(SOURCE_KIND_DOC_COMMENT, comment_id)
     try:
         notify(SOURCE_KIND_DOC_COMMENT, comment_id)
     except Exception:
@@ -204,7 +188,6 @@ def notify_decision_answer(decision_id: str, other_text: object) -> None:
 
     try:
         if isinstance(other_text, str) and other_text.strip():
-            _plans_hear(SOURCE_KIND_DECISION_ANSWER, decision_id)
             notify(SOURCE_KIND_DECISION_ANSWER, decision_id)
     except Exception:
         logger.exception("corrections classifier decision-answer notification failed")

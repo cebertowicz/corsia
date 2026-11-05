@@ -64,12 +64,12 @@ def test_reply_waiting_marker_is_passive_and_clears_one_seen_thread(isolated_db)
         )
         add_comment(db, artifact_id, author_id="owner", author="Owner", parent_id=second["id"])
 
-        assert feedback_batches.reply_waiting_ids(db, "owner-token") == {artifact_id}
+        assert feedback_batches.unread_item_ids(db, "owner-token") == {artifact_id}
         with write_transaction(db, scope="test_mark_one_thread_viewed") as connection:
             assert feedback_state.mark_thread_viewed(
                 connection, "owner-token", artifact_id, first["id"], first_reply["id"],
             ) == []
-        assert feedback_batches.reply_waiting_ids(db, "owner-token") == {artifact_id}
+        assert feedback_batches.unread_item_ids(db, "owner-token") == {artifact_id}
         threads = comments.list_for_artifact(artifact_id, db=db)
         feedback_state.annotate_thread_attention(db, "owner-token", artifact_id, threads)
         by_root = {thread["id"]: thread for thread in threads}

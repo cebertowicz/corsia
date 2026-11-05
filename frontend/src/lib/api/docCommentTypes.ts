@@ -22,6 +22,7 @@ export interface ServerComment {
 	created_at: string;
 	updated_at: string;
 	new_reply_ids?: string[];
+	new_comment?: boolean;
 	replies?: ServerComment[];
 	/** A region comment on an image (DCOL-FR13.3): fractions of the image; w = h = 0 is a point. */
 	region_x?: number | null;

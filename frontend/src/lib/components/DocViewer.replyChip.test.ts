@@ -59,6 +59,7 @@ const chip = () => host.querySelector<HTMLButtonElement>('[data-doc-reply-chip] 
 
 beforeEach(() => {
 	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+	vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} });
 	vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ open_count: 0, undelivered_batches: [], reviews: [], reviewers: [] }), { status: 200 })));
 	HTMLElement.prototype.scrollIntoView = vi.fn();
 	Range.prototype.getClientRects = vi.fn(() => [] as unknown as DOMRectList);

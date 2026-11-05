@@ -71,6 +71,20 @@ describe('DocCommentSurface suggestions', () => {
 		expect(drawer!.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-2');
 	});
 
+	it('keeps a resolved unread card in Open until the list is reopened', async () => {
+		const comments = writable([{ ...suggestion, resolved: true, newReplyIds: ['reply'], replies: [{ id: 'reply', author: 'agent', text: 'Answer', at: 'now' }] }]);
+		const state = writable<{ kind: 'list' } | null>({ kind: 'list' });
+		const liveComments = fromStore(comments), liveState = fromStore(state);
+		render({ get state() { return liveState.current; }, get comments() { return liveComments.current; } });
+		const card = () => document.body.querySelector('[data-comment-id="comment-1"]');
+		expect(card()).not.toBeNull();
+		comments.update((rows) => rows.map((row) => ({ ...row, newReplyIds: [] }))); flushSync();
+		expect(card()).not.toBeNull();
+		state.set(null); flushSync();
+		state.set({ kind: 'list' }); flushSync(); await tick();
+		expect(card()).toBeNull();
+	});
+
 	it('opens on Open and switches filters from the named menu', () => {
 		render({ state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }] });
 		const drawer = document.body.querySelector<HTMLElement>('[data-doc-comments-drawer]')!;

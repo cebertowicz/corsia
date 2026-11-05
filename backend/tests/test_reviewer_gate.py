@@ -151,7 +151,7 @@ class TestReviewerVerdictReturn:
                 reviewer_version="test-version", reviewer_standards=["product"],
             )
 
-        assert "approach reset required" in verdict["summary"]
+        assert verdict["summary"].startswith("Different approach needed")
 
     def test_approach_churn_is_a_required_action_and_one_grouped_finding(self):
         """Reset mode must stop the patch queue, not merely rename a code fail."""
@@ -196,7 +196,7 @@ class TestReviewerVerdictReturn:
         assert verdict["verdict"] == "code_fail"
         assert verdict["required_action"] == "approach_reset"
         assert set_failure.call_args.args[2].startswith(
-            "STOP: approach reset required"
+            "Different approach needed"
         )
         grouped = published[0]["findings"]
         assert len(grouped) == 1

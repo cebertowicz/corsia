@@ -13,7 +13,7 @@ No review checklist for library items is published. The hashes are read from `ma
 Agents do this through the `skill_library` tool:
 
 - **Search** is for when none of the agent's own skills fits. Each result shows whether the agent already has that item, and whether a newer version exists. If nothing in the library fits either, the agent writes its own skill.
-- **Install** fetches the item and checks every file against its recorded hash before writing anything. It puts a copy in the agent's own skills, and the agent can load it right away. A temporary agent's install goes to the agent that started it. Install is refused when the item is withdrawn, or when the agent already has a skill with that name.
+- **Install** fetches the item and checks every file against its recorded hash before writing anything. It puts a copy in the agent's own skills, and the agent can load it right away. A worker's install goes to the agent that started it. Install is refused when the item is withdrawn, or when the agent already has a skill with that name.
 - **Updates** never happen on their own. The library is checked daily. When an installed item changes or is withdrawn, the agent that owns the copy gets a notice and decides whether to `update` or `remove` it. A withdrawn item stays in place until its owner removes it.
 
 If the index can't be reached, search uses the last valid copy if one exists and says how old it is. Install and update still need to fetch and verify the item files; if those can't be reached, they stop and say to try again later.

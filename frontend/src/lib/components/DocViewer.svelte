@@ -6,7 +6,7 @@
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { onDestroy, untrack } from 'svelte';
 	import { ensureEditorArtifactId, releaseDocEditor } from '$lib/stores/activeDocEditor';
-	import { docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements } from '$lib/stores/docComments';
+	import { docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements, hasUnread, arrivedDocComments } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
@@ -125,7 +125,7 @@
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
 	const commentStatus = $derived(commentSurfaceStatus(listedComments));
-	const unreadThreads = $derived(listedComments.filter((comment) => (comment.newReplyIds?.length ?? 0) > 0));
+	const unreadThreads = $derived(listedComments.filter(hasUnread));
 	const scroll = createCommentScrollTarget({
 		focused: () => focusedComment, comments: () => listedComments, text: () => editText, listOpen: () => commentUI.state?.kind === 'list',
 	});
@@ -141,9 +141,9 @@
 		if (!commentUI.focusComment(id, anchor, viaSuggestion)) return;
 		scroll.toComment(id, false, 'navigation');
 	}
-	function showMarkerCards(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { if (ids.length === 1) scroll.toComment(ids[0], false, 'navigation'); commentUI.focusMarker(ids, opener, reading); }
+	function showMarkerCards(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { if (ids.length === 1) scroll.toComment(ids[0], false, 'navigation'); commentUI.focusMarker(ids, opener, reading); arrivedDocComments.set(new Set(ids)); }
 	// A marker over comments on parts of one image opens the image, at the comment when it is the only one (DCOL-FR13.5).
-	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => showMarkerCards(ids, opener, reading)); }
+	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { arrivedDocComments.set(new Set(ids)); images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => showMarkerCards(ids, opener, reading)); }
 	function onDocEdit(mapPos: (p: number) => number) { if (loadedArtifactId) remapComments(loadedArtifactId, mapPos); images.remap(mapPos); }
 
 	const accent = $derived($projects.find((project) => project.id === target?.projectId)?.accent_color ?? null);
@@ -157,8 +157,8 @@
 	const replyNavigation = createReplyNavigation({
 		target: () => target, ready: () => !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready' && docState === 'ready',
 		comments: () => listedComments, text: () => editText,
-		show: (thread, landing) => { if (thread && landing) { scroll.value = landing; focusedDocComment.set(thread.id); } commentUI.state = { kind: 'list' }; },
-		openImageOr: (id, otherwise) => images.openOr([id], { id }, otherwise), onLanded: () => onLanded?.(),
+		show: (thread, landing) => { if (thread && landing) scroll.value = landing; if (thread) focusedDocComment.set(thread.id); commentUI.state = { kind: 'list' }; if (thread) arrivedDocComments.set(new Set([thread.id])); },
+		openImageOr: (id, otherwise) => { images.openOr([id], { id }, otherwise); arrivedDocComments.set(new Set([id])); }, onLanded: () => onLanded?.(),
 	});
 	export function stepToUnreadReply(beforeText?: () => void, excludeId?: string) { replyNavigation.step(beforeText, excludeId); }
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
@@ -275,7 +275,7 @@
 		canEdit: () => docState === 'ready' && !readonly && !confirming && !openRefusal,
 		canFlush: () => !readonly && !confirming });
 
-	onDestroy(() => teardownDocumentViewer(target, flushNow, releaseDocEditor));
+	onDestroy(() => { teardownDocumentViewer(target, flushNow, releaseDocEditor); });
 
 	function onKey(event: KeyboardEvent): void {
 		handleDocumentKey(event, {

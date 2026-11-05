@@ -66,23 +66,6 @@ def test_ok_attaches_the_intent_in_its_shape(db):
     assert "Ship the thing" not in worker_inputs.brief("w@1", "body", {}, [], {})
 
 
-def test_stored_quotes_never_reach_the_start_its_record_or_its_stamp(db, monkeypatch):
-    # The agreed intent and its done test are the spec; a quoted line is not handed to the reviewer.
-    thread_id, plan = _plan(db)
-    task = _task(db, plan.id, "Open the PR", intent="Ship the thing")
-    _registered_from(db, thread_id, plan.id, task.id)
-    real = review_intent.intent_of
-    quoted = [{"author": "person", "role": "authority", "quote": "A quoted example line", "added_at": "x"}]
-    monkeypatch.setattr(review_intent, "intent_of", lambda node_id, **kw: {**real(node_id, **kw), "intent_words": quoted})
-
-    intent, record = review_intent.attach(ROW, OPTED_IN, db=db)
-    facts = _settled_facts(db, record)
-
-    assert "A quoted example line" not in worker_inputs.brief("w@1", "body", {}, [], {}, intent)
-    assert "A quoted example line" not in repr((intent, record, facts))
-    assert facts["intent_text"] == {"intent": "Ship the thing", "acceptance_criteria": "Done"}
-
-
 def test_the_canonical_node_and_the_linked_node_are_both_recorded(db):
     thread_id, plan = _plan(db)
     canonical = _task(db, plan.id, "Canonical", intent="The shared goal")

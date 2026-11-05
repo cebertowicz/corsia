@@ -10,7 +10,7 @@ The rules for issues, the Contributor License Agreement and pull requests are in
 
 ## How CORSIA works
 
-How CORSIA is built and why, for engineers deciding whether to adopt it or contribute. Start with the [overview](how-it-works/README.md), which lists every page and defines the terms, then [Architecture](how-it-works/architecture.md).
+How CORSIA is built and why, for engineers deciding whether to adopt it or contribute. Start with the [overview](how-it-works/README.md), which lists every page, then [Architecture](how-it-works/architecture.md).
 
 ## Security
 
@@ -39,6 +39,10 @@ Before reporting a vulnerability, read [`SECURITY.md`](../SECURITY.md).
 | [`ARCHITECTURE.md`](../ARCHITECTURE.md) | Code map: where each part lives |
 | [`BACKEND.md`](../BACKEND.md) · [`FRONTEND.md`](../FRONTEND.md) | Module maps and rules for each side of the code |
 | [Data model](reference/data-model/README.md) | Tables and relationships in CORSIA's data stores, generated from the schema code |
+| [CLI](reference/cli.md) | Commands and arguments, generated from the CLI code |
+| [Configuration](reference/configuration.md) | Environment variables CORSIA reads, generated from the code |
+| [Agent tools](reference/agent-tools.md) | Reachable agent tools and how to load them |
+| [Glossary](reference/glossary.md) | Terms used throughout the documentation |
 | [`CHANGELOG.md`](../CHANGELOG.md) | What has shipped |
 
 ## About this project

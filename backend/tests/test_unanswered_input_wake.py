@@ -219,6 +219,73 @@ async def test_an_agents_input_is_not_a_persons(db, marker) -> None:
     assert _wakes(db) == []
 
 
+def _queue(db, message="m2", **metadata) -> None:
+    from infra.thread_driver import admit_input
+
+    admit_input(
+        _THREAD, role="user", content="queued behind it", intent="queue_after_turn",
+        message_id=message, turn_id="t-unused", boot_epoch="boot-1", admitted_at="t1",
+        metadata=metadata or None, db=db,
+    )
+    db.commit()
+
+
+async def _end_claiming(db, error: str = "provider exploded"):
+    """End t1 as every terminal does with input queued: its successor t2 claims it first."""
+    from infra.thread_driver import finish_turn
+
+    finish_turn("t1", outcome="error", ended_at="t2", successor_turn_id="t2",
+                boot_epoch="boot-1", error=error, db=db)
+    db.commit()
+    return await record_turn_end(
+        on_thread_turn_complete, _THREAD, outcome="error", error=error, turn_id="t1",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", ["provider exploded", "restart"])
+async def test_a_persons_queued_input_replaces_the_wake(db, error) -> None:
+    """The successor answers with the message in history; a wake would be a second Turn after it."""
+    from infra.thread_recovery import RESTART_TURN_ERROR
+
+    _take_in(db)
+    _queue(db)
+
+    effects = await _end_claiming(db, RESTART_TURN_ERROR if error == "restart" else error)
+
+    assert _wakes(db) == []
+    assert _THREAD not in effects.drives
+
+
+@pytest.mark.asyncio
+async def test_an_agents_queued_input_does_not_replace_the_wake(db) -> None:
+    _take_in(db)
+    _queue(db, sender_kind="agent")
+
+    effects = await _end_claiming(db)
+
+    assert len(_wakes(db)) == 1
+    assert effects.drives.count(_THREAD) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_queued_input_claimed_by_an_ended_turn_does_not_replace_the_wake(db) -> None:
+    """An orphaned claim starts no Turn, so the person's message would go unanswered."""
+    _take_in(db)
+    _queue(db)
+    db.execute(
+        "INSERT INTO active_turns (id,thread_id,execution_epoch,model,status,started_at,ended_at,boot_epoch) "
+        "VALUES ('t-gone',?,0,'oMLX/qwen','error','t0','t1','boot-1')", (_THREAD,),
+    )
+    db.execute("UPDATE messages SET active_turn_id='t-gone' WHERE id='m2'")
+    db.commit()
+
+    effects = await _end(db)
+
+    assert len(_wakes(db)) == 1
+    assert effects.drives.count(_THREAD) == 1
+
+
 @pytest.mark.asyncio
 async def test_a_turn_a_restart_registration_resumes_queues_nothing(db) -> None:
     """The restart's own recovery wake resumes the Turn; a second instruction would double it."""

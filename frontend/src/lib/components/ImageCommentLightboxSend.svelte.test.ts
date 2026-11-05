@@ -338,12 +338,13 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		const shown = await imageTab();
 		const pill = shown.target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!;
 		expect(pill.getAttribute('aria-expanded')).toBe('false');
-		expect(pill.getAttribute('aria-label')).toBe('1 open thread, 3 messages not sent yet');
-		expect(pill.querySelector('.count-unit')!.textContent).toBe('thread');
+		// The image viewer's list opens on All, so its pill counts the resolved thread too.
+		expect(pill.getAttribute('aria-label')).toBe('2 threads, 3 messages not sent yet');
+		expect(pill.querySelector('.count-unit')!.textContent).toBe('threads');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
 	});
 
-	it('marks the in-document lightbox\'s pill from the document\'s batch, counting this image\'s open threads', async () => {
+	it('marks the in-document lightbox\'s pill from the document\'s batch, counting this image\'s threads', async () => {
 		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1), onImage('there', 2), { ...onImage('done', 3), resolved: true }], feedback: pending(2) });
 		const doc = documentStatus();
 		doc.component.sync('art-doc', pending(2));
@@ -352,11 +353,11 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
 		});
 		const pill = shown.target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!;
-		expect(pill.getAttribute('aria-label')).toBe('2 open threads, 2 messages not sent yet');
+		expect(pill.getAttribute('aria-label')).toBe('3 threads, 2 messages not sent yet');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
 		doc.component.sync('art-doc', pending(0));
 		flushSync();
-		expect(pill.getAttribute('aria-label')).toBe('2 open threads');
+		expect(pill.getAttribute('aria-label')).toBe('3 threads');
 		expect(pill.querySelector('.unsent-dot')).toBeNull();
 	});
 

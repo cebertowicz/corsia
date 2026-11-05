@@ -1,6 +1,9 @@
 import { get } from 'svelte/store';
-import type { DocComment } from '$lib/stores/docComments';
 import { prefersReducedMotion } from '$lib/stores/viewport';
+import type { DocComment } from '$lib/stores/docCommentProjection';
+
+/** Image comments follow their tag numbers. */
+export const byCommentNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
 
 /** An image drawer follows the viewer's grid track; a document drawer appears at once. */
 export function imageDrawerMotion(_node: Element, { leaving }: { leaving: boolean }, isImage: boolean) {
