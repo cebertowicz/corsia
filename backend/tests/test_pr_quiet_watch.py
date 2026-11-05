@@ -978,6 +978,14 @@ def test_a_cancelled_run_without_a_successor_is_not_a_pass():
     assert reasons.ci_state(body).conclusion == "failure", "a real failure outranks a cancel"
 
 
+def test_ci_conclusion_uses_shared_worst_first_ranking():
+    for first, second, expected in (("timed_out", "failure", "timed_out"),
+                                    ("startup_failure", "stale", "startup_failure")):
+        ci = reasons.ci_state({"workflow_runs": [run(first, id=1, workflow_id=1),
+                                                  run(second, id=2, workflow_id=2)]})
+        assert ci.conclusion == expected
+
+
 def test_a_cancelled_run_superseded_by_a_newer_run_drops_out():
     body = {"workflow_runs": [
         run("success", workflow_id=2, id=12),
