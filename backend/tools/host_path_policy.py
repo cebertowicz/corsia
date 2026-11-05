@@ -15,7 +15,7 @@ import shutil
 import sys
 from typing import Iterable
 
-from tools.host_path_classification import path_review_classification as path_review_classification
+
 from tools.host_path_resolution import (
     canonical,
     contains,
@@ -335,6 +335,7 @@ def current_protected_host_path_policy(
     write_roots: Iterable[Path] = (),
     granted_roots: Iterable[Path] = (),
     thread_id: str | None = None,
+    fence: Fence | None = None,
 ) -> ProtectedHostPathPolicy:
     """Build the live policy, with the caller's fenced project roots, without caching."""
     from infra.config import STATE_ROOT, WORKSPACE
@@ -353,7 +354,7 @@ def current_protected_host_path_policy(
         write_roots=(application_cache_root(), *write_roots),
         workspace=WORKSPACE,
         granted_roots=tuple(granted_roots),
-        fence=fence_for_thread(thread_id),
+        fence=fence if fence is not None else fence_for_thread(thread_id),
     )
 
 
@@ -361,9 +362,10 @@ def ordinary_host_path_denial(
     path: Path,
     *,
     for_write: bool,
+    fence: Fence | None = None,
 ) -> str | None:
     """Apply protected-execution denial before any lease permit is consumed."""
-    return current_protected_host_path_policy().ordinary_denial(
+    return current_protected_host_path_policy(fence=fence).ordinary_denial(
         path,
         for_write=for_write,
     )

@@ -6,13 +6,13 @@ from typing import Any, Mapping
 from tools.host_access_errors import HostAccessBlocked
 
 
-def _text(value: Any, field_name: str) -> str:
+def text(value: Any, field_name: str) -> str:
     if not isinstance(value, str) or not value:
         raise HostAccessBlocked(f"Host action {field_name} is invalid.")
     return value
 
 
-def _boolean(value: Any, default: bool = False) -> bool:
+def boolean(value: Any, default: bool = False) -> bool:
     if value is None:
         return default
     if not isinstance(value, bool):
@@ -20,7 +20,7 @@ def _boolean(value: Any, default: bool = False) -> bool:
     return value
 
 
-def _integer(value: Any, default: int, *, minimum: int, maximum: int) -> int:
+def integer(value: Any, default: int, *, minimum: int, maximum: int) -> int:
     if value is None:
         value = default
     if isinstance(value, bool) or not isinstance(value, int):
@@ -30,7 +30,7 @@ def _integer(value: Any, default: int, *, minimum: int, maximum: int) -> int:
     return min(value, maximum)
 
 
-def _number(value: Any, field_name: str, *, minimum: float = 0.0) -> float:
+def number(value: Any, field_name: str, *, minimum: float = 0.0) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise HostAccessBlocked(f"Host action {field_name} is invalid.")
     normalized = float(value)
@@ -42,15 +42,15 @@ def _number(value: Any, field_name: str, *, minimum: float = 0.0) -> float:
 def search_payload(canonical: str, params: Mapping[str, Any]) -> dict[str, Any]:
     """Normalize the search parameters bound into a reviewed action."""
     payload = {
-        "pattern": _text(params.get("pattern"), "pattern"),
-        "all_threads": _boolean(params.get("all_threads")),
+        "pattern": text(params.get("pattern"), "pattern"),
+        "all_threads": boolean(params.get("all_threads")),
     }
     if canonical == "grep":
         payload.update({
             "glob": params.get("glob"),
             "output_mode": params.get("output_mode") or "files",
-            "case_insensitive": _boolean(params.get("case_insensitive")),
-            "context": _integer(params.get("context"), 0, minimum=0, maximum=10),
-            "max_results": _integer(params.get("max_results"), 50, minimum=1, maximum=200),
+            "case_insensitive": boolean(params.get("case_insensitive")),
+            "context": integer(params.get("context"), 0, minimum=0, maximum=10),
+            "max_results": integer(params.get("max_results"), 50, minimum=1, maximum=200),
         })
     return payload

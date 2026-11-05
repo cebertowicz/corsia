@@ -119,9 +119,7 @@ class GrepTool(Tool):
             )
         except PermissionError as exc:
             return f"Error: {exc}"
-        search_dir = authorized.resolved
-        fence = await asyncio.to_thread(SearchFence, search_dir, kwargs.get("_thread_id"), authorized.fence)
-        current_thread_id, all_threads = search_identity(search_dir, kwargs.get("_thread_id"), all_threads)
+        search_dir, fence, current_thread_id, all_threads = await self._search_setup(authorized, kwargs, all_threads)
         if not keep_path(search_dir, current_thread_id, all_threads):
             return fence.notice(f"No matches for pattern '{pattern}'\n{THREADS_NOTICE}")
 
@@ -189,8 +187,16 @@ class GrepTool(Tool):
             current_thread_id,
             all_threads,
             fence,
+            authorized.fence,
         )
         return fence.notice(result)
+
+    @staticmethod
+    async def _search_setup(authorized, kwargs, all_threads):
+        search_dir = authorized.resolved
+        fence = await asyncio.to_thread(SearchFence, search_dir, kwargs.get("_thread_id"), authorized.fence)
+        current_thread_id, all_threads = search_identity(search_dir, kwargs.get("_thread_id"), all_threads)
+        return search_dir, fence, current_thread_id, all_threads
 
     async def _authorize(self, pattern, path, glob, output_mode, case_insensitive, context, max_results, all_threads, kwargs):
         return await _resolve_path_for_action(
@@ -211,6 +217,7 @@ class GrepTool(Tool):
             allowed_dir=self._allowed_dir,
             thread_id=kwargs.get("_thread_id"),
             project_id=kwargs.get("_thread_project_id"),
+            fence=kwargs.get("_host_access_fence"),
         )
 
     def _search_reviewed(
@@ -319,6 +326,7 @@ class GrepTool(Tool):
         current_thread_id: str | None,
         all_threads: bool,
         fence: SearchFence | None = None,
+        project_fence=None,
     ) -> str:
         """Fallback: pure Python regex search (slower, no .gitignore respect)."""
         flags = re.IGNORECASE if case_insensitive else 0
@@ -328,12 +336,15 @@ class GrepTool(Tool):
             return f"Error: Invalid regex pattern: {e}"
 
         files = list(
-            self._iter_python_files(
+            iter_python_files(
                 search_dir,
                 glob_filter,
                 current_thread_id,
                 all_threads,
                 fence,
+                workspace=self._workspace,
+                allowed_dir=self._allowed_dir,
+                project_fence=project_fence,
             )
         )
 
@@ -379,5 +390,3 @@ class GrepTool(Tool):
             if not results:
                 return f"No matches for pattern '{pattern}'"
             return render(results, safe, self.OUTPUT_CHAR_CAP)
-
-    _iter_python_files = iter_python_files

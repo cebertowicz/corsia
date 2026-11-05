@@ -1,5 +1,6 @@
 """Tool registry for dynamic tool management."""
 
+import asyncio
 from contextlib import nullcontext
 from dataclasses import replace
 import logging
@@ -137,7 +138,15 @@ class ToolRegistry:
 
         if refusal := confined_reads.call_refusal(name, thread_context):
             return refusal
+        fence_args = {}
+        if name in {"read_file", "write_file", "edit_file", "multi_edit", "list_dir", "glob", "grep", "browser_screenshot"}:
+            from tools.project_fence import fence_for_thread
+
+            fence = await asyncio.to_thread(fence_for_thread, thread_context["id"])
+            fence_args["fence"] = fence
+            execution_params["_host_access_fence"] = fence
         authorization = await authorize_host_action(
+            **fence_args,
             thread_id=thread_context["id"],
             project_id=thread_context.get("project_id"),
             tool=tool,

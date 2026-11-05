@@ -344,7 +344,8 @@ def test_unparseable_ripgrep_record_is_not_emitted(monkeypatch, mode):
     else:
         result = _render("needle", root, "unparseable-secret", 50, scope, 1000, mode)
     assert "unparseable-secret" not in result
-    assert NOTICE in fence.notice(result)
+    assert "INCOMPLETE" in result
+    assert NOTICE not in fence.notice(result)
 
 
 @pytest.mark.parametrize("mode", ["files", "content", "count"])

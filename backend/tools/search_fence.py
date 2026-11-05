@@ -3,22 +3,13 @@
 from __future__ import annotations
 
 import os
-import unicodedata
 from pathlib import Path
 
 from tools import project_fence
+from tools.host_path_resolution import contains, containment_key, key_contains
 
 NOTICE = "Other projects this agent can't read were left out."
 _ESCAPE = str.maketrans({char: f"\\{char}" for char in "\\*?[]{}!"})
-
-
-def _key(path: Path) -> tuple[str, ...]:
-    return tuple(unicodedata.normalize("NFC", unicodedata.normalize("NFC", part).casefold()) for part in path.parts)
-
-
-def _contains(parent: Path, child: Path) -> bool:
-    parts = _key(parent)
-    return _key(child)[:len(parts)] == parts
 
 
 def _forms(path: Path) -> tuple[Path, ...]:
@@ -35,15 +26,12 @@ class SearchFence:
         fence = fence if fence is not None else project_fence.fence_for_thread(thread_id)
         self.roots = tuple(
             fenced for fenced in fence.roots
-            if not any(_contains(form, search) for form in fenced.forms for search in search_forms)
+            if not any(contains(form, search) for form in fenced.forms for search in search_forms)
         )
-        self._root_keys = tuple(
-            unicodedata.normalize("NFC", str(form)).casefold().rstrip(os.sep) or os.sep
-            for fenced in self.roots for form in fenced.forms
-        )
+        self._root_keys = tuple(containment_key(form) for fenced in self.roots for form in fenced.forms)
         self.pruned = False
         self.has_exclusions = any(
-            _contains(search, form) for fenced in self.roots
+            contains(search, form) for fenced in self.roots
             for form in fenced.forms for search in search_forms
         )
 
@@ -51,12 +39,8 @@ class SearchFence:
         """Refuse paths in an excluded root, in written or resolved form."""
         if not self._root_keys:
             return False
-        forms = (os.path.abspath(path.expanduser()), str(path.expanduser().resolve(strict=False)))
-        keys = (unicodedata.normalize("NFC", form).casefold() for form in forms)
-        excluded = any(
-            key == root or key.startswith(root.rstrip(os.sep) + os.sep)
-            for key in keys for root in self._root_keys
-        )
+        keys = tuple(containment_key(form) for form in _forms(path.expanduser()))
+        excluded = any(key_contains(root, key) for key in keys for root in self._root_keys)
         self.pruned |= excluded
         return excluded
 
@@ -66,11 +50,10 @@ class SearchFence:
             relative = path.relative_to(self.root)
             if ".." in relative.parts:
                 raise ValueError("ripgrep path escapes its search root")
-        except ValueError:
-            self.pruned = True
-            return True
-        key = unicodedata.normalize("NFC", str(self.root / relative)).casefold()
-        excluded = any(key == root or key.startswith(root.rstrip(os.sep) + os.sep) for root in self._root_keys)
+        except ValueError as exc:
+            raise ValueError("ripgrep path escapes its search root") from exc
+        key = containment_key(self.root / relative)
+        excluded = any(key_contains(root, key) for root in self._root_keys)
         self.pruned |= excluded
         return excluded
 
@@ -92,7 +75,7 @@ class SearchFence:
         for fenced in self.roots:
             for form in fenced.forms:
                 for base in _forms(root):
-                    if not _contains(base, form):
+                    if not contains(base, form):
                         continue
                     parts = form.parts[len(base.parts):]
                     paths = [root]
@@ -104,7 +87,7 @@ class SearchFence:
                             with os.scandir(parent) as entries:
                                 next_paths.extend(
                                     Path(entry.path) for entry in entries
-                                    if _key(Path(entry.name)) == _key(Path(part))
+                                    if contains(Path(part), Path(entry.name))
                                     and entry.is_dir(follow_symlinks=False)
                                 )
                         paths = next_paths

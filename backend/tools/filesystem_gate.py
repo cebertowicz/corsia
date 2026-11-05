@@ -82,7 +82,9 @@ def resolve_path(
     if thread_id:
         from tools.project_fence import fence_for_thread
 
-        if refusal := (fence if fence is not None else fence_for_thread(thread_id)).refusal(p):
+        if fence is None:
+            fence = fence_for_thread(thread_id)
+        if refusal := fence.refusal(p):
             raise PermissionError(refusal)
     confined_reads.check(p, resolved, for_write=for_write)
     if not for_write and carry_in_hides(resolved, reading=True):
@@ -92,6 +94,7 @@ def resolve_path(
         if denial := ordinary_host_path_denial(
             candidate,
             for_write=for_write,
+            fence=fence,
         ):
             raise PermissionError(denial)
 
@@ -132,6 +135,7 @@ async def _resolve_path_for_action(
     thread_id: str | None,
     project_id: str | None,
     for_write: bool = False,
+    fence: Any = None,
 ) -> AuthorizedPath:
     """Consume one exact host permit, or apply the ordinary path boundary.
 
@@ -142,13 +146,14 @@ async def _resolve_path_for_action(
     """
     import tools.confined_reads as confined_reads
     from tools.host_access_gate import consume_current_action_permit
-    from tools.project_fence import Fence, fence_for_thread
+    from tools.project_fence import fence_for_thread
 
-    fence = await asyncio.to_thread(fence_for_thread, thread_id)
+    if fence is None:
+        fence = await asyncio.to_thread(fence_for_thread, thread_id)
     target = _join_relative_to_workspace(path, workspace)
-    local_fence = Fence(tuple(root for root in fence.roots if root.local_only), fence.caller)
-    if refusal := local_fence.refusal(target):
-        raise PermissionError(refusal)
+    root = fence.matching_root(target)
+    if root is not None and root.local_only:
+        raise PermissionError(fence.refusal(target))
 
     # A confined worker's reads never take a host permit: its read paths are all it has.
     consumed = None if confined_reads.confined() else await consume_current_action_permit(
@@ -157,6 +162,7 @@ async def _resolve_path_for_action(
         tool=tool,
         tool_name=tool_name,
         params=params,
+        fence=fence,
     )
     if consumed is None:
         # Repository policy behind the boundary reads SQLite and runs Git.

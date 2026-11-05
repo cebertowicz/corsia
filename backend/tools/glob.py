@@ -83,6 +83,7 @@ class GlobTool(Tool):
                 allowed_dir=self._allowed_dir,
                 thread_id=current_thread_id,
                 project_id=kwargs.get("_thread_project_id"),
+                fence=kwargs.get("_host_access_fence"),
             )
             search_dir = authorized.resolved
             fence = await asyncio.to_thread(SearchFence, search_dir, current_thread_id, authorized.fence)
@@ -97,7 +98,7 @@ class GlobTool(Tool):
                 return fence.notice(result)
 
             result = await asyncio.to_thread(
-                self._glob_unreviewed, pattern, search_dir, path, current_thread_id, all_threads, fence,
+                self._glob_unreviewed, pattern, search_dir, path, current_thread_id, all_threads, fence, authorized.fence,
             )
             return fence.notice(result)
 
@@ -114,6 +115,7 @@ class GlobTool(Tool):
         current_thread_id: str | None,
         all_threads: bool,
         fence: SearchFence | None = None,
+        project_fence=None,
     ) -> str:
         """Traverse an authorized ordinary path outside the server event loop."""
         path = requested_path
@@ -137,6 +139,7 @@ class GlobTool(Tool):
                         resolved_match = resolve_path(
                             str(match), self._workspace, self._allowed_dir,
                             thread_id=fence.thread_id if fence else current_thread_id,
+                            fence=project_fence,
                         )
                     except PermissionError:
                         continue

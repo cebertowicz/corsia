@@ -109,9 +109,11 @@ def _render(
 ) -> str:
     """Grep's text for ripgrep's files or count output: kept lines, limited,
     root-relative and capped."""
-    lines = _kept_lines(output, scope, output_mode)
+    errors: list[str] = []
+    lines = _kept_lines(output, scope, output_mode, errors)
+    header = _invalid_record_header(errors)
     if not lines:
-        return f"No matches for pattern '{pattern}'"
+        return f"{header}No matches for pattern '{pattern}'"
     lines = lines[:max_results]
     prefix = _display(f"{search_dir}/")
     if output_mode == "count" and search_dir.is_file():
@@ -124,7 +126,7 @@ def _render(
             + f"\n\n... (output truncated at {output_cap:,} chars. Narrow your search "
             "with glob filters or use 'files' mode.)"
         )
-    return rendered
+    return f"{header}{rendered}"
 
 
 async def _run(command: list[str], *, cwd: Path | None = None) -> _Ripgrep:
@@ -254,7 +256,9 @@ def _render_content(
 ) -> str:
     """Grep's text for ripgrep's ``--null`` content output, each line as ``read_file``
     would show it where the file has a source path."""
-    parsed = _first_matches(_content_lines(output, search_dir, scope), max_results)
+    errors: list[str] = []
+    parsed = _first_matches(_content_lines(output, search_dir, scope, errors), max_results)
+    header += _invalid_record_header(errors)
     if not parsed:
         return f"{header}No matches for pattern '{pattern}'"
     source = SourceLines()
@@ -273,7 +277,7 @@ def _render_content(
 
 
 def _content_lines(
-    output: str, search_dir: Path, scope: SearchScope,
+    output: str, search_dir: Path, scope: SearchScope, errors: list[str],
 ) -> list[tuple[str | None, GrepLine]]:
     """Each content line's file and rendering, outside other threads' folders;
     empty when no match line remains.
@@ -285,13 +289,13 @@ def _content_lines(
     prefix = f"{search_dir}/"
     direct_file = search_dir.is_file()
     parsed: list[tuple[str | None, GrepLine]] = []
-    for path, rest in _records(output, scope, "content"):
+    for path, rest in _records(output, scope, "content", errors):
         if path is None:
             parsed.append((None, SEPARATOR))
             continue
         match = _CONTENT_RE.match(rest)
         if match is None:
-            _mark_pruned(scope)
+            errors.append("invalid record")
             continue
         separator = match.group("separator")
         number = match.group("number")
@@ -321,12 +325,11 @@ def _first_matches(
     return kept
 
 
-def _mark_pruned(scope: SearchScope) -> None:
-    if scope.fence:
-        scope.fence.pruned = True
+def _invalid_record_header(errors: list[str]) -> str:
+    return "INCOMPLETE: ripgrep returned an invalid or unfilterable record; results may be partial\n\n" if errors else ""
 
 
-def _records(output: str, scope: SearchScope, mode: str):
+def _records(output: str, scope: SearchScope, mode: str, errors: list[str]):
     """Parse the complete NUL-delimited path before its record, failing closed."""
     while output:
         if mode == "content" and output.startswith("--\n"):
@@ -335,13 +338,13 @@ def _records(output: str, scope: SearchScope, mode: str):
             continue
         path, delimiter, output = output.partition("\0")
         if not delimiter or not path:
-            _mark_pruned(scope)
+            errors.append("invalid or unfilterable record")
             return
         rest = ""
         if mode != "files":
             rest, newline, output = output.partition("\n")
             if not newline or (mode == "count" and not rest.isdecimal()):
-                _mark_pruned(scope)
+                errors.append("invalid or unfilterable record")
                 return
         try:
             candidate = Path(path)
@@ -349,7 +352,7 @@ def _records(output: str, scope: SearchScope, mode: str):
             if scope.fence and scope.fence.excludes_ripgrep(candidate):
                 allowed = False
         except Exception:
-            _mark_pruned(scope)
+            errors.append("invalid or unfilterable record")
             continue
         if allowed:
             yield path, rest
@@ -359,10 +362,10 @@ def _display(text: str) -> str:
     return text.encode("utf-8", errors="backslashreplace").decode("utf-8")
 
 
-def _kept_lines(output: str, scope: SearchScope, mode: str) -> list[str]:
+def _kept_lines(output: str, scope: SearchScope, mode: str, errors: list[str]) -> list[str]:
     """Render only records whose complete path passed the scope checks."""
     return [_display(path + (f":{rest}" if mode == "count" else ""))
-            for path, rest in _records(output, scope, mode) if path is not None]
+            for path, rest in _records(output, scope, mode, errors) if path is not None]
 
 
 def _glob_arguments(globs: list[str]) -> list[str]:

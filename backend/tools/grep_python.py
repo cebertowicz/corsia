@@ -10,8 +10,9 @@ from tools.search_fence import SearchFence
 
 
 def iter_python_files(
-    self, search_dir: Path, glob_filter: str | None,
+    search_dir: Path, glob_filter: str | None,
     current_thread_id: str | None, all_threads: bool, fence: SearchFence | None = None,
+    *, workspace: Path | None, allowed_dir: Path | None, project_fence=None,
 ) -> Iterator[tuple[Path, Path]]:
     """Yield display paths with authorized resolved targets for fallback reads."""
     scope = SearchScope(current_thread_id, all_threads, root_name=search_dir.name, fence=fence)
@@ -29,8 +30,9 @@ def iter_python_files(
         if not resolved.is_relative_to(search_dir):
             try:
                 resolved = resolve_path(
-                    str(candidate), self._workspace, self._allowed_dir,
+                    str(candidate), workspace, allowed_dir,
                     thread_id=fence.thread_id if fence else current_thread_id,
+                    fence=project_fence,
                 )
             except PermissionError:
                 continue
