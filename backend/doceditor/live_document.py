@@ -169,12 +169,21 @@ class LiveDocument:
         self.doc.apply_update(update)
         self._merged_text()
 
-    def _observe(self, start: int, end: int) -> None:
+    def fits(self, start: int, end: int) -> bool:
+        """Whether UTF-16 offsets lie inside the live text on character boundaries."""
         data = self.text.encode("utf-16-le")
         if not 0 <= start <= end <= len(data) // 2:
+            return False
+        try:
+            data[:start * 2].decode("utf-16-le")
+            data[:end * 2].decode("utf-16-le")
+        except UnicodeDecodeError:
+            return False
+        return True
+
+    def _observe(self, start: int, end: int) -> None:
+        if not self.fits(start, end):
             raise ValueError("Comment range is outside the live document")
-        data[:start * 2].decode("utf-16-le")
-        data[:end * 2].decode("utf-16-le")
         if self._subscription is None:
             self._before = self.text
             self._subscription = self._text.observe(self._changed)
