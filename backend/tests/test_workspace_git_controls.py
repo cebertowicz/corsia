@@ -281,7 +281,7 @@ def linux_launch(tmp_path, monkeypatch, workspace):
 
     policy = ProtectedHostPathPolicy(home=tmp_path / 'home', state_root=tmp_path / 'state', workspace=workspace)
     monkeypatch.setattr(config, 'WORKSPACE', workspace)
-    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda: policy)
+    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda **_: policy)
     monkeypatch.setattr(linux_shell, 'get_sandbox_add_dirs_rw', lambda *a, **k: [workspace])
     monkeypatch.setattr(linux_shell, 'get_allowed_dirs_ro', lambda **k: [])
     monkeypatch.setattr(linux_shell, 'agent_tool_ro_dirs', lambda: [])
@@ -370,7 +370,7 @@ def test_the_empty_workspace_marker_is_bound_read_only_in_the_rendered_argv(linu
     home.mkdir(parents=True, exist_ok=True)
     policy = ProtectedHostPathPolicy(home=home, state_root=home / '.local/state/corsia', workspace=workspace)
     monkeypatch.setattr(config, 'WORKSPACE', workspace)
-    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda: policy)
+    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda **_: policy)
     monkeypatch.setattr(linux_shell, 'get_sandbox_add_dirs_rw', lambda *a, **k: [workspace])
     monkeypatch.setattr(linux_shell, 'get_allowed_dirs_ro', lambda **k: [])
     monkeypatch.setattr(linux_shell, 'agent_tool_ro_dirs', lambda: [])
