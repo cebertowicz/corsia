@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,8 +14,57 @@ import httpx
 
 from events.connectors.github_read_budget import budget
 
+logger = logging.getLogger(__name__)
+
 _ALLOWED_HOSTS = frozenset({b"api.github.com", b"uploads.github.com"})
 _HOP_HEADERS = frozenset({b"connection", b"transfer-encoding", b"content-length", b"host", b"authorization"})
+
+
+async def _read_request(reader: asyncio.StreamReader, conn: h11.Connection):
+    """The one request on this connection and its body, or ``None`` if it ended first."""
+    request = None
+    body = bytearray()
+    while True:
+        event = conn.next_event()
+        if event is h11.NEED_DATA:
+            data = await reader.read(65536)
+            conn.receive_data(data)
+            if not data:
+                return None
+        elif isinstance(event, h11.Request):
+            request = event
+        elif isinstance(event, h11.Data):
+            body.extend(event.data)
+        elif isinstance(event, h11.EndOfMessage):
+            return (request, bytes(body)) if request is not None else None
+        elif isinstance(event, h11.ConnectionClosed):
+            return None
+
+
+def _github_target(request: h11.Request) -> tuple[bytes, str] | None:
+    """The normalized GitHub host and origin-form target, or ``None`` for anything else."""
+    hosts = [value.lower() for name, value in request.headers if name.lower() == b"host"]
+    host = hosts[0] if len(hosts) == 1 else b""
+    if host.endswith(b":443"):
+        host = host[:-4]
+    host = host.removesuffix(b".")
+    target = request.target.decode("ascii")
+    if target.startswith(("http://", "https://")):
+        parsed = urlsplit(target)
+        target = (parsed.path or "/") + ("?" + parsed.query if parsed.query else "")
+    if host not in _ALLOWED_HOSTS or not target.startswith("/"):
+        return None
+    return host, target
+
+
+async def _reply(conn: h11.Connection, writer: asyncio.StreamWriter, status: int, message: bytes) -> None:
+    writer.write(conn.send(h11.Response(status_code=status, headers=[
+        (b"content-length", str(len(message)).encode()), (b"connection", b"close"),
+    ])))
+    if message:
+        writer.write(conn.send(h11.Data(data=message)))
+    writer.write(conn.send(h11.EndOfMessage()))
+    await writer.drain()
 
 
 async def _serve(
@@ -24,53 +74,23 @@ async def _serve(
     conn = h11.Connection(h11.SERVER)
     started = False
     try:
-        request = None
-        body = bytearray()
-        while True:
-            event = conn.next_event()
-            if event is h11.NEED_DATA:
-                data = await reader.read(65536)
-                conn.receive_data(data)
-                if not data:
-                    return
-            elif isinstance(event, h11.Request):
-                request = event
-            elif isinstance(event, h11.Data):
-                body.extend(event.data)
-            elif isinstance(event, h11.EndOfMessage):
-                break
-            elif isinstance(event, h11.ConnectionClosed):
-                return
-        if request is None:
+        received = await _read_request(reader, conn)
+        if received is None:
             return
-        hosts = [value.lower() for name, value in request.headers if name.lower() == b"host"]
-        host = hosts[0] if len(hosts) == 1 else b""
-        if host.endswith(b":443"):
-            host = host[:-4]
-        host = host.removesuffix(b".")
-        target = request.target.decode("ascii")
-        if target.startswith(("http://", "https://")):
-            parsed = urlsplit(target)
-            target = (parsed.path or "/") + ("?" + parsed.query if parsed.query else "")
-        if host not in _ALLOWED_HOSTS or not target.startswith("/"):
-            writer.write(conn.send(h11.Response(status_code=403, headers=[(b"content-length", b"0")])))
-            writer.write(conn.send(h11.EndOfMessage()))
-            await writer.drain()
+        request, body = received
+        github = _github_target(request)
+        if github is None:
+            await _reply(conn, writer, 403, b"")
             return
+        host, target = github
         if request.method in (b"GET", b"HEAD") and budget.blocked_until(low_priority=True) is not None:
-            message = b"GitHub reads are paused by the shared rate-limit budget\n"
-            writer.write(conn.send(h11.Response(status_code=429, headers=[
-                (b"content-length", str(len(message)).encode()), (b"connection", b"close"),
-            ])))
-            writer.write(conn.send(h11.Data(data=message)))
-            writer.write(conn.send(h11.EndOfMessage()))
-            await writer.drain()
+            await _reply(conn, writer, 429, b"GitHub reads are paused by the shared rate-limit budget\n")
             return
         headers = [(name, value) for name, value in request.headers if name.lower() not in _HOP_HEADERS]
         headers.append((b"authorization", b"token " + credential().encode("utf-8")))
         url = "https://" + host.decode("ascii") + target
         async with httpx.AsyncClient(transport=transport, follow_redirects=False, trust_env=False) as client:
-            async with client.stream(request.method.decode("ascii"), url, headers=headers, content=bytes(body)) as response:
+            async with client.stream(request.method.decode("ascii"), url, headers=headers, content=body) as response:
                 response_headers = [(name, value) for name, value in response.headers.raw
                                     if name.lower() not in _HOP_HEADERS]
                 response_headers.append((b"connection", b"close"))
@@ -89,18 +109,14 @@ async def _serve(
                 budget.record(response.status_code, dict(response.headers), parsed_body)
                 writer.write(conn.send(h11.EndOfMessage()))
                 await writer.drain()
-    except Exception:  # The client gets fixed text, never request or credential details.
+    except Exception as exc:  # The client gets fixed text, never request or credential details.
+        # Only the exception type is logged: its message could carry the request or the credential.
+        logger.warning("script GitHub forwarder request failed: %s", type(exc).__name__)
         if not started:
             try:
-                message = b"GitHub request failed\n"
-                writer.write(conn.send(h11.Response(status_code=502, headers=[
-                    (b"content-length", str(len(message)).encode()), (b"connection", b"close"),
-                ])))
-                writer.write(conn.send(h11.Data(data=message)))
-                writer.write(conn.send(h11.EndOfMessage()))
-                await writer.drain()
-            except Exception:
-                pass
+                await _reply(conn, writer, 502, b"GitHub request failed\n")
+            except (OSError, h11.LocalProtocolError):
+                logger.debug("script GitHub forwarder: client gone before the failure reply")
     finally:
         writer.close()
         try:
