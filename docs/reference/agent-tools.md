@@ -2,7 +2,7 @@
 
 This reference lists tools an agent can reach. Core tools are sent on every turn; other tools are loaded by pack through `tools_load` and called with `tool_call`. Connected apps' tools depend on the installation and are not listed here.
 
-Generate with `.venv/bin/python scripts/docs/generate_agent_tools.py`; add `--check` to compare the generated page.
+Generate with `.venv/bin/python scripts/docs/generate_agent_tools.py`; add `--check` to compare the generated page. The backend's locked dependencies are required.
 
 ## Core tools
 

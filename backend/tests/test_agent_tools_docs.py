@@ -19,23 +19,32 @@ def test_generated_page_is_current():
     )
 
 
+def _core(*names):
+    return tuple({"function": {"name": name, "description": "Description. More."}}
+                 for name in names)
+
+
+def test_core_section_lists_exactly_the_advertised_tools():
+    page = generator.render(_core("tool_call", "not_a_catalog_tool"))
+    core = page.split("## Core tools", 1)[1].split("\n## ", 1)[0]
+    assert "| `tool_call` | Description. |" in core
+    assert "not_a_catalog_tool" not in core
+    assert core.count("| `") == 1
+
+
 def test_catalog_summary_changes_page(monkeypatch):
     name = next(name for names in generator.pack_members().values() for name in names)
-    descriptions = {name: "Description." for name, entry in generator.TOOL_CATALOG.items()
-                    if entry.core and generator.is_reachable(name)}
-    before = generator.render(descriptions)
+    before = generator.render(_core())
     entry = generator.TOOL_CATALOG[name]
     monkeypatch.setitem(generator.TOOL_CATALOG, name, replace(entry, summary="Changed summary"))
-    after = generator.render(descriptions)
+    after = generator.render(_core())
     assert before != after
     assert f"| `{name}` | Changed summary" in after
 
 
 def test_missing_catalog_summary_fails(monkeypatch):
     name = next(name for names in generator.pack_members().values() for name in names)
-    descriptions = {name: "Description." for name, entry in generator.TOOL_CATALOG.items()
-                    if entry.core and generator.is_reachable(name)}
     entry = generator.TOOL_CATALOG[name]
     monkeypatch.setitem(generator.TOOL_CATALOG, name, replace(entry, summary=""))
     with pytest.raises(ValueError, match=f"No catalog summary for pack tool: {name}"):
-        generator.render(descriptions)
+        generator.render(_core())
