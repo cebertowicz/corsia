@@ -792,6 +792,9 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 174 -> 175 only adds the reviewer gate's pending-run table.
         from infra.migration_174_to_175_reviewer_gate_pending import migrate_174_to_175
         migrate_174_to_175(db)
+        # 175 -> 176 removes the retired plan quote table.
+        from infra.migration_175_to_176_drop_plan_quotes import migrate_175_to_176
+        migrate_175_to_176(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
