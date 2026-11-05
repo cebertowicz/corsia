@@ -651,8 +651,10 @@ rows with an explicit `rank_limit` of 10. `seat_usage` sums tokens under
 Measurement's priceable-token contract (`core/measurement_token_contract.py`),
 reports the rows that contract drops as `excluded_calls`, and splits
 unattributed Claude Code and Codex rows by harness. Every metric except an
-unwindowed pressure ranking needs a window of at most seven days. All metrics and the caller use the canonical
-`thread_available_sql` predicate. Rows with an installed checkpoint take their
+unwindowed pressure ranking needs a window of at most seven days. The caller
+and every metric except `seat_usage` use the canonical `thread_available_sql`
+predicate; `seat_usage` scopes by user only and counts archived threads,
+since a subscription account is shared across projects. Rows with an installed checkpoint take their
 current-epoch boundary from `checkpoint_queries.current_installed_through_seq`,
 which shares the exact selection rule with `current_installed`; rows without one
 are labeled `no_checkpoint` and count full stored history. These numeric sizes

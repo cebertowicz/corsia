@@ -463,7 +463,11 @@ count / runtime attrs — useful for verifying that a
 new emit point is wired correctly before relying on it for KPI
 queries:
 
+Run it from the repository root, in a new shell with its own disposable
+state root:
+
 ```bash
+export CORSIA_WORKSPACE=$(mktemp -d) CORSIA_STATE_DIR=$(mktemp -d)
 CORSIA_ANALYTICS_PROJECT=corsia PYTHONPATH=tools \
   .venv/bin/python -m antipatterns --paths backend/main.py
 .venv/bin/python tools/qh-query/cli.py \
