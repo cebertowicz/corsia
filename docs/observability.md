@@ -168,11 +168,12 @@ All six onboarding events are backend-only lifecycle observations. They contain 
 |---|---|---|
 | `dev_tool.antipatterns_invoked` | `tools/antipatterns/` CLI exits | CLI (pre-commit / CI / manual) |
 
-### Measure keys
+### Outside-tool intake
 
 | Event | When it fires | Surface |
 |---|---|---|
 | `measure_key.minted` | An agent minted a key an outside tool sends its measures with; no properties beyond the defaults | backend |
+| `otlp_intake.request_accepted` | An outside tool's OTLP/HTTP logs request was accepted; `records` is how many records it held, `rejected` how many were refused | backend |
 
 ### Project fence
 
