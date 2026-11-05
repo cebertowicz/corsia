@@ -134,7 +134,8 @@ MODEL = {"OMLX_BASE_URL", "CLAUDE_BIN", "CODEX_BIN", "CODEX_HOME"}
 def add(found, name, path, default):
     if isinstance(name, str):
         found[name][0].add(path.relative_to(ROOT).as_posix())
-        if default is not None:
+        # An empty fallback only makes an unset variable read as empty; it is not a default.
+        if default is not None and default != repr(""):
             found[name][1].add(default)
 
 
@@ -159,10 +160,14 @@ def python_reads(path, found):
 
 
 def shell_reads(path, found):
+    text = path.read_text(encoding="utf-8")
     pattern = r"\$\{((?:CORSIA|BACKEND)_[A-Z0-9_]+)([^}]*)\}"
-    for match in re.finditer(pattern, path.read_text(encoding="utf-8")):
-        suffix = match.group(2)
-        default = suffix[2:] if suffix.startswith(":-") else None
+    for match in re.finditer(pattern, text):
+        name, suffix = match.group(1), match.group(2)
+        # A fallback is a default only when it is the whole quoted word ("${NAME:-value}"),
+        # not text inside a message.
+        whole = text[match.start() - 1:match.start()] == '"' and text[match.end():match.end() + 1] == '"'
+        default = suffix[2:] if suffix.startswith(":-") and whole else None
         if default is not None:
             default = None if any(char in default for char in "$`{}") else repr(default)
         add(found, match.group(1), path, default)
@@ -228,7 +233,7 @@ def render():
             paths, defaults = found[name]
             locations = ", ".join(f"`{cell(p)}`" for p in sorted(paths))
             values = ", ".join(
-                f"`{cell('empty' if d == repr('') else d)}`" for d in sorted(defaults)) or "—"
+                f"`{cell(d)}`" for d in sorted(defaults)) or "—"
             lines.append(f"| `{cell(name)}` | {values} | {cell(DOCUMENTED[name])} | {locations} |")
         lines.append("")
     lines.extend(["", "## Internal and test variables", "", "These variables are used internally or for tests.", ""])
