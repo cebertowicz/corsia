@@ -1,6 +1,6 @@
 # Security model
 
-CORSIA runs agents on your own computer, as your own user account, with real tools: a shell, file tools, the web, your email and the apps you connect. This section says what those agents can reach, what stops them, how strong each stop is, and where it doesn't hold. These pages were last checked against the code at commit `43a8c7780`, and that check did not cover every claim; "at this commit" on these pages means that commit. Nothing rechecks them automatically, so a later change can leave a page out of date. The pages name the source files so you can check.
+CORSIA runs agents on your own computer, as your own user account, with real tools: a shell, file tools, the web, your email and the apps you connect. This section says what those agents can reach, what stops them, how strong each stop is, and where it doesn't hold. These pages were last checked against the code at commit `43a8c7780`, and that check did not cover every claim; "at this commit" on these pages means that commit. On each pull request, CI checks only that the files and links a page cites still exist, not that what the page says is still true, so a later change can leave a page out of date. The pages name the source files so you can check.
 
 **Who this is for:** someone deciding whether to let agents work on their machine. If you only read one page, read this one and [Known limits](limits.md).
 
