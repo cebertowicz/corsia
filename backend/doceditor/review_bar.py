@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 from doceditor import feedback_batches
 from doceditor.feedback_state import USER_AUTHOR_ID
+from doceditor.review_round_feedback import round_feedback
 
 VERDICTS = {
     "approved": "approved",
@@ -46,11 +47,13 @@ class ReviewAnswer:
     note: str | None = None
     counts: dict = field(default_factory=dict)
     feedback_task: str | None = None
+    feedback_ids: dict = field(default_factory=dict)
 
     def payload(self) -> dict:
+        """Include comment and suggestion row IDs and edit feedback batch IDs for the round."""
         return {
             "verdict": self.verdict, "note": self.note,
-            "feedback_counts": self.counts,
+            "feedback_counts": self.counts, "feedback_ids": self.feedback_ids,
         }
 
     def release(self):
@@ -66,36 +69,7 @@ def round_counts(db, artifact_id: str, since: str | None) -> dict:
     ``since`` is the ask's raise stamp. Plans and Documents both write UTC ISO-8601
     (``plans.service._now``, ``doceditor.comments._now``), so the string comparison is exact.
     """
-    floor = since or ""
-    rows = db.execute(
-        """SELECT SUM(replacement IS NULL) AS comments,
-                  SUM(replacement IS NOT NULL) AS suggestions
-             FROM doc_comments
-            WHERE artifact_id=? AND author_kind='user' AND created_at>?""",
-        (artifact_id, floor),
-    ).fetchone()
-    edits = db.execute(
-        """SELECT COUNT(*) FROM doc_feedback_edit_items e
-             JOIN doc_feedback_batches b ON b.id=e.batch_id
-            WHERE b.state='open' AND b.author_kind='user' AND b.author_id=?
-              AND b.artifact_id=? AND e.last_at>?
-              AND (e.prior_segments_diff<>'' OR e.latest_sha256<>e.baseline_sha256)""",
-        (USER_AUTHOR_ID, artifact_id, floor),
-    ).fetchone()[0]
-    # An edit item is deleted once its batch is delivered, but the batch keeps its item count, which
-    # is its comment rows plus the one edit item: the difference is the edits the user already sent.
-    sent_edits = db.execute(
-        """SELECT COALESCE(SUM(MAX(b.item_count - (
-                    SELECT COUNT(*) FROM doc_feedback_batch_items i WHERE i.batch_id=b.id), 0)), 0)
-             FROM doc_feedback_batches b
-            WHERE b.state='delivered' AND b.author_kind='user' AND b.author_id=?
-              AND b.artifact_id=? AND b.last_item_at>?""",
-        (USER_AUTHOR_ID, artifact_id, floor),
-    ).fetchone()[0]
-    return {
-        "comments": rows["comments"] or 0, "suggestions": rows["suggestions"] or 0,
-        "edits": edits + sent_edits,
-    }
+    return round_feedback(db, artifact_id, since)[0]
 
 
 def _feedback_task(db, artifact_id: str, since: str | None) -> str | None:
@@ -190,14 +164,11 @@ def answer(db, artifact_id: str, verdict: str, note: str | None) -> ReviewAnswer
     if not asks:
         raise AnswerRefused("ask_stale", STALE)
     since = asks[0]["raised_at"]
-    counts = round_counts(db, artifact_id, since)
-    if verdict == "changes_requested" and not note and not any(counts.values()):
+    counts, feedback_ids = round_feedback(db, artifact_id, since)
+    if verdict != "approved" and not note and not any(counts.values()):
         raise AnswerRefused("note_required", NOTE_REQUIRED)
-    # The round decides which approval it was, whatever the client last showed.
-    if verdict in ("approved", "approved_with_changes"):
-        verdict = "approved_with_changes" if any(counts.values()) else "approved"
     feedback_batches.close_for_document(
         db, author_kind="user", author_id=USER_AUTHOR_ID,
         artifact_id=artifact_id, reason="send",
     )
-    return ReviewAnswer(verdict, note, counts, _feedback_task(db, artifact_id, since))
+    return ReviewAnswer(verdict, note, counts, _feedback_task(db, artifact_id, since), feedback_ids)

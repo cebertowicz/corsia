@@ -99,6 +99,7 @@ def test_request_changes_without_feedback_or_note_is_refused_with_a_code(integra
     assert sent.json()["review"] == {
         "verdict": "changes_requested", "note": "Cut section 3.",
         "feedback_counts": {"comments": 0, "suggestions": 0, "edits": 0},
+        "feedback_ids": {"comments": [], "suggestions": [], "edits": []},
     }
 
 

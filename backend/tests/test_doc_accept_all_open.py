@@ -263,7 +263,7 @@ async def test_the_bars_own_accept_does_not_count_as_the_persons_round_feedback(
 
 
 @pytest.mark.asyncio
-async def test_the_persons_own_comment_still_makes_it_approved_with_changes(
+async def test_the_persons_own_comment_preserves_the_approved_verdict(
     integration_client, doc, _registrable_roots,
 ):
     _owner, artifact_id = await _own(integration_client, doc)
@@ -280,7 +280,7 @@ async def test_the_persons_own_comment_still_makes_it_approved_with_changes(
     after = _review(integration_client, artifact_id)
     assert after["round_feedback_counts"] == {"comments": 1, "suggestions": 0, "edits": 0}
     answered = _clear(integration_client, artifact_id, verdict="approved")
-    assert answered.json()["review"]["verdict"] == "approved_with_changes"
+    assert answered.json()["review"]["verdict"] == "approved"
 
 
 def test_the_accept_route_is_not_open_without_a_token(integration_client):
