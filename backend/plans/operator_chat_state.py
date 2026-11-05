@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from core.thread_identity import root_visible_thread_ids
 import infra.thread_updates as thread_updates
+import plans.held_attention as held_attention
 import plans.node_states as node_states
 import plans.not_moving as not_moving
 import plans.operator_node_state as operator_node_state
@@ -229,6 +230,10 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
     plan_ids = list(plans_by_id)
     failed_by_plan = _failed_nodes(plan_ids, actor=actor, db=db)
     access_by_thread = _access_requests(visible_thread_ids, actor=actor, db=db)
+    # A held reply is the person's to decide, on the same footing as an access request.
+    for thread_id, items in held_attention.items_by_thread(db, actor.user_id).items():
+        if thread_id in visible_thread_ids:
+            access_by_thread.setdefault(thread_id, []).extend(items)
     latest_updates, attention_updates = thread_updates.latest_by_thread_with_attention(
         db, visible_thread_ids,
     )

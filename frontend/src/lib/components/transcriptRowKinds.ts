@@ -45,6 +45,7 @@ export function isRecoveredError(message: TranscriptMessage): boolean {
 export function isSystemNotice(message: TranscriptMessage): boolean {
 	if (message.role !== 'system') return false;
 	const type = systemType(message);
+	if (type === 'context_event' && String(message.metadata?.event_type ?? '').startsWith('held_reply.')) return true;
 	if (ERROR_SYSTEM_TYPES.has(type)) return message.metadata?.recovered !== true;
 	// A provider result splits only as an error with something to read.
 	if (type === 'result') return message.metadata?.is_error === true && Boolean(message.content);
@@ -80,6 +81,7 @@ export function rowKind(message: TranscriptMessage): RowKind {
 	}
 	if (message.role !== 'system') return 'other';
 	const type = systemType(message);
+	if (isSystemNotice(message)) return 'other';
 	if (ERROR_SYSTEM_TYPES.has(type)) return isRecoveredError(message) ? 'error_recovered' : 'other';
 	if (type === 'context_event') return 'context_update';
 	if (type === 'account_switch') return 'account_move';
