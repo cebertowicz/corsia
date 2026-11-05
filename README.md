@@ -136,7 +136,7 @@ Review at this volume is automated, so the reviewer is itself audited. From Octo
 
 ## Getting started
 
-- A Mac with Apple Silicon and macOS 15 or later, or an Ubuntu 24.04+ or Debian 12+ server. Agents run as your macOS user with unrestricted network access, so read [Security](#security) first.
+- A Mac with Apple Silicon and macOS 15 or later, or an Ubuntu 24.04+ or Debian 12+ server. Agents run as your own user account with unrestricted network access, so read [Security](#security) first.
 - Macs with less than 32 GB of memory need a cloud model provider (Claude Code, Codex or an API key) for agent work. Teams use a lot of tokens, so start with one agent.
 
 Open Terminal and run:
