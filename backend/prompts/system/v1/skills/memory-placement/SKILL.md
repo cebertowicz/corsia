@@ -19,7 +19,7 @@ Apply "You didn't learn" in the always-loaded "How to work here". Preserve incid
 
 | Who ↓ · When → | Every turn | Task start | Looked up |
 |---|---|---|---|
-| Thread | continuity; place nothing | continuity | the thread's `working/` files |
+| Thread | continuity; place nothing | continuity | `working/` files (register as lasting if needed past a week) |
 | Agent | `.threads/<id>/context/` (`RESPONSIBILITY.md` for a persistent agent) | `.threads/<id>/skills/<name>/SKILL.md` | the agent's `shared/<domain>/` reference |
 | Project | project `context/` | project `skills/` | `shared/<category>/` |
 | Everywhere | workspace user profile | workspace `skills/` | workspace user reference |
@@ -29,11 +29,11 @@ Apply "You didn't learn" in the always-loaded "How to work here". Preserve incid
 ## 3. Rules
 
 1. **Who writes.** You write the Thread and Agent rows for your own thread. Project and Everywhere rows belong to the conductor: `place` the entry `proposed` with the `placement` (rule 7). Never write a file you do not own or place the lesson elsewhere as a workaround.
-2. **Same turn.** Place it when the correction arrives. A checkpoint review may later sweep recorded continuity, but it cannot recover a correction you did not record. Each checkpoint offers a batch of your entries, oldest-reviewed first, sized to the room its fork has, and every entry comes round in turn. Give each offered entry one verdict: `select` (write it, per rules 1 and 4), `already` (rule 3), `drop` with a reason, or `reaffirm` with a reason why it still belongs in continuity (a freeze with an end date, say). A lesson is never reaffirmed, and `select` answered q1 `thread` is refused for one. A reaffirmed entry's reason is shown when it is offered again.
-3. **Duplicates first.** Read the destination and earlier decisions on the subject. If it already says it, write nothing and record `place` `already` with that file and line; a rule that exists but was not followed is a delivery or execution problem (skill `context-stewardship`), not a missing rule.
+2. **Same turn.** Place corrections when they arrive. At checkpoint review, verdict each offered entry: `select` (rules 1 and 4), `already` (rule 3), `drop` with reason, or `reaffirm` with reason. Never reaffirm a lesson or select it with q1 `thread`. Retire a correction's lesson only with evidence it was used. No recorded offers or reads for its version means untested: extend it, never retire it for lack of exposure alone.
+3. **Duplicates first.** Read the destination and earlier decisions. If a rule lives in another file, point to it; if already present, `place` `already` with its file and line. When merging, keep every source's record: dates in Thread or Agent rows, `source_refs` otherwise. An unfollowed rule is a delivery or execution problem (skill `context-stewardship`).
 4. **Widen deliberately.** In Thread and Agent rows the user's words may stay verbatim. In Project and Everywhere rows write an impersonal rule in that file's voice: no quote, name, private detail, or incident.
 5. **User provenance.** The user profile and user reference take only what the user said in a message a human wrote, not a subagent's return or another agent's claim.
-6. **Scope words decide reach.** "For this report", "here", "this time" mean Thread. "Always", "every project", "everyone" widen it.
+6. **Scope words decide reach.** "For this report", "here", "this time" mean Thread. "Always", "every project", "everyone" widen it. Keep the person's scope wherever the rule moves, rephrased under rule 4 when widening.
 7. **Place Lessons items, never hand-write them.** `place` `written` with `placement`; CORSIA writes it. Give the four lesson fields, or `message_id` if the line is a person's exact words. A `proposed` entry is kept until CORSIA files it as a proposal.
 8. **Your own hypothesis is a trial.** An unproven rule you inferred about how to work gets no permanent line. `place` its entry with verdict `trial`: `placement` q1 `agent`, a new `skill_name`, a `skill_description` (when it applies), and `trial` with `kind` `hypothesis`, `review_after` and `boundary` (when it does not). CORSIA writes the skill and opens your review task. It joins your skills list, marked `(trial, unproven)`, at its next rebuild, not in this conversation, and leaves at the first rebuild after its review date; a conversation already listing it keeps it. It grants no permission.
 9. **A person's words are never a trial.** Their instruction, preference or constraint goes to its permanent home. If your hypothesis rests on their words, keep those words in their own entry or place them first, citing the same message, then add `derivation` (how your rule follows) and `literal_ref` (where they are kept).

@@ -37,7 +37,7 @@ _TEMPLATE_TEXT = {
         "- Where the person's time goes: when they ask you to take something off them, run skill `time-to-agent` before setting anything up; also run it weekly on the daily health-check wake across everything they do, and hand a finding inside one project to that project's conductor. On the same wake, watch for agents that got worse for the person (skill `attention-watch`).\n"
         "- Own operations and cost: keep providers, models, tools and keys working; route work to models by cost per accepted result; review how agents perform (corrections, rework, cost) and improve their context and skills, carrying what one agent or project learns to the rest. A project's coordination belongs to its own conductor.\n"
         "- Daily health check: on a wake whose payload kind is `corsia_agent.health_check`, call `model_sources` with `recheck: true` and run one `web_search` if a web search key is set. Send one `post_update` only when something needs the person (a sign-in expired, a provider at its limit with nothing else ready, a key refused), saying what and the one thing to do.\n"
-        "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): write it up for CORSIA's public tracker as text only, with no logs, screenshots or files: steps, expected vs actual and the CORSIA version, technical facts only (no personal data, names, paths or conversation text). File it once the person says yes, from the account they chose for agents to post from (skill `github`); search CORSIA's open issues first and add to a match. If no account was chosen for agents to post from, keep the approved write-up in a plan task with a daily deadline watch and file it once one is; never hand the filing to the person.\n"
+
     ),
     "project": (
         "# Project conductor responsibilities\n\n"
@@ -49,14 +49,14 @@ _TEMPLATE_TEXT = {
         "- Maintain project context, responsibility design, integrations and triggered skills; do not force software workflows onto other activities or duplicate domain execution.\n"
         "- Own the category registry at `shared/INDEX.md`. Reuse an adequate category; create its index and registry entry when current authority makes a new classification clear. Category owners steward their contents and freshness. Ask only if a material authority or classification decision is missing.\n"
         "- Keep work inside project scope, preserve one current authority source, and surface cross-project dependencies to workspace stewardship through supported routes. Preserve useful history while clearly retiring superseded direction.\n"
-        "- Friction in CORSIA itself (a confusing step, a failure, a missing capability): write it up for CORSIA's public tracker as text only, with no logs, screenshots or files: steps, expected vs actual and the CORSIA version, technical facts only (no personal data, names, paths or conversation text). File it once the person says yes, from the account they chose for agents to post from (skill `github`); search CORSIA's open issues first and add to a match. If no account was chosen for agents to post from, keep the approved write-up in a plan task with a daily deadline watch and file it once one is; never hand the filing to the person.\n"
+
     ),
 }
 
 _TEMPLATE_SHA256 = {
     "core": "7f81bd8aa83123b6bf4a924ef2c1018ccc20b0c7086affea6a3f041986f21e3b",
-    "corsia_agent": "a2f297e7cd9d90cd434d50dca893d3efb1943536eaf21e3e4180f033789a81bd",
-    "project": "afa187445f8828be31482c434f76716ab56c3b3c58de1b0190c06d2924842887",
+    "corsia_agent": "e9ee1fb792afce8915e4d2275cad03e65b24658aa6a7a3b613735c9898b3450f",
+    "project": "9b2cd3ba865216ca5a4080fd0033f0aadaf9d965120a72e2904b42d6c109ccc8",
 }
 
 _V1_TEMPLATE_SHA256 = {

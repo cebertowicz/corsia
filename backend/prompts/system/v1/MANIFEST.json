@@ -7,10 +7,10 @@
       "sha256": "01f766a8d568c83815c1d577f03f99a490d73df3e37fb4df7ee95e819f5953f8"
     },
     {
-      "bytes": 7382,
+      "bytes": 7675,
       "kind": "context",
       "path": "context/10-HOW-TO-WORK.md",
-      "sha256": "3c05032c461f4b120dd2a8c7372c299e39e42b84393f9757be85443ddcf8a1e8"
+      "sha256": "c0beee76d3db8a1ac04fc3f9f052128bf38cb89efe45878c02de9bd847b67c3f"
     },
     {
       "bytes": 830,
@@ -25,11 +25,11 @@
       "sha256": "da81b707715e15034d1bfb5cdc702d25936017d59efda2ad3ddb1e43157aaf22"
     },
     {
-      "bytes": 3204,
+      "bytes": 3681,
       "kind": "context",
       "path": "context/roles/agent/00-operating-contract.md",
       "role": "agent",
-      "sha256": "cfc5fc6853862c49b97b632e52e16064d9965d14b764ff1a731ac88c5099e7cc"
+      "sha256": "e502bb1a11239b1cffb039e3be552956841af2819b80c762c3e1d5c94963e7bf"
     },
     {
       "bytes": 389,
@@ -136,10 +136,10 @@
       "sha256": "8c76c3448e68bb117d2fd018df1a0b2da0371b6cf03287ac4a6ddf102370641c"
     },
     {
-      "bytes": 3251,
+      "bytes": 3379,
       "kind": "skill",
       "path": "skills/asking-the-person/SKILL.md",
-      "sha256": "8932d1298c385e563b165ac15bf4ed02eba32110616339422c4dfc5b5bc96921"
+      "sha256": "bb6e88bb3db14f5aea076da04c0becbb5bab1c0ab30b087c895791daf44c1e4c"
     },
     {
       "bytes": 18740,
@@ -304,10 +304,10 @@
       "sha256": "8c28458f9fd95c7d10624142ce4d1f1f86d380d983d3cdc8bf523e0a8afe1534"
     },
     {
-      "bytes": 3796,
+      "bytes": 4498,
       "kind": "skill",
       "path": "skills/github/SKILL.md",
-      "sha256": "e50eb57e2a986686c1ded7a662ae14b9baf0cbbf4f1495888cc5c673aace9497"
+      "sha256": "57be256c04e2fa036d7b7a6490dd2800dec6742b20fc269dcd176ab2f50645ba"
     },
     {
       "bytes": 6558,
@@ -346,10 +346,10 @@
       "sha256": "555c420af73ca25223f147bcd40a2e471fc96fa97216c04861881bea2bc2377e"
     },
     {
-      "bytes": 8928,
+      "bytes": 8862,
       "kind": "skill",
       "path": "skills/memory-placement/SKILL.md",
-      "sha256": "a7f7490bac983cc3319db9016c32094d7d0b8deb61ace2d09b1ac1822950682d"
+      "sha256": "9e1d7930b64a7d674bba8eeb9abd4daaaed343f3215e33ce5551070b00fd0530"
     },
     {
       "bytes": 5914,
@@ -400,16 +400,16 @@
       "sha256": "eddb421e39148867e028200b917d5dce92c5385fe7feb3083d3a85d6e873d31d"
     },
     {
-      "bytes": 10651,
+      "bytes": 10491,
       "kind": "skill",
       "path": "skills/time-to-agent/SKILL.md",
-      "sha256": "b5225bc152ffc68f41b13c41f7790acd429872aa8363e08d130a40a258d90971"
+      "sha256": "b690043ae812a95106ecb7f351eadc453bc84c70bd1581ee31ca2c8ed024951b"
     },
     {
-      "bytes": 4996,
+      "bytes": 4487,
       "kind": "skill",
       "path": "skills/workflow-design/SKILL.md",
-      "sha256": "71424ad46a0ed871d8049eb26deace2edb8813fcbcd6468d12b769c5f6a3c35e"
+      "sha256": "16b6832d2a76dfea1bcb567d54186b1a868bec5fc21388ccebddc25f088a5649"
     }
   ],
   "version": "v1"

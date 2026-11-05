@@ -1,6 +1,6 @@
 ---
 name: github
-description: Use when working with GitHub from any thread — opening or updating a pull request, reading PR/CI/review status, merging, commenting on PRs or issues, or any repo operation. Load before creating a PR so its events route back to you.
+description: Use when working with GitHub from any thread — opening or updating a pull request, reading PR/CI/review status, merging, commenting on PRs or issues, or any repo operation — or reporting friction in CORSIA. Load before creating a PR so its events route back to you.
 ---
 
 # GitHub (via the `gh` CLI)
@@ -8,6 +8,10 @@ description: Use when working with GitHub from any thread — opening or updatin
 When `model_sources` reports `github_agent` other than `not_installed`, agent shells act as the agents' own GitHub account; read [the agents' account procedure](references/agent-account.md) before connecting, recovering, or using it. Never fall back to the person's own `gh` login while an agents' account exists. With `not_installed`, shells use the person's own setup, including when they chose to post as themselves.
 
 Use the installed, authorized `gh` integration. If it is unavailable, record the integration gap and discover a supported alternative before proceeding; do not invent a credential/raw-HTTP workaround or claim the action occurred. CORSIA may observe recognized commands, but that is best-effort; every owned PR needs verified canonical registration for configured CI, review and lifecycle routing. Registration does not establish that the event source is configured or healthy.
+
+## Reporting CORSIA friction
+
+Friction in CORSIA itself (a confusing step, a failure, a missing capability): write it up for CORSIA's public tracker as text only, with no logs, screenshots or files: steps, expected vs actual and the CORSIA version, technical facts only (no personal data, names, paths or conversation text). File it once the person says yes, from the account they chose for agents to post from (skill `github`); search CORSIA's open issues first and add to a match. If no account was chosen for agents to post from, keep the approved write-up in a plan task with a daily deadline watch and file it once one is; never hand the filing to the person.
 
 ## Opening a PR
 
