@@ -11,7 +11,6 @@ import { emit } from './events';
 import { registerSubagent, setSubagentStatus, setSubagentInit } from '../stores/subagents';
 import { handleAuthOk, handleSystemDraining, handleWsError } from './handlersConnection';
 import { compareMessageOrder } from '../messageHistory';
-import { settleClientErrors } from './clientErrors';
 import { startTypewriter } from './typewriter';
 import { consumeFirstRunOpening } from './firstRunOpeningReveal';
 import {
@@ -256,7 +255,7 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 			if (isDisplayedThread(threadId)) {
 				const alreadyPresent = get(messages).some(message => message.id === injected.id);
 				messages.update(current =>
-					settleClientErrors(reconcileCorrelatedMessage(current, injected, inputId).sort(compareMessageOrder))
+					reconcileCorrelatedMessage(current, injected, inputId).sort(compareMessageOrder)
 				);
 				if (localOpening && !alreadyPresent && !matchMedia('(prefers-reduced-motion: reduce)').matches) {
 					startTypewriter(threadId, injected.id, 0, injected.content.length, undefined, 'words');
@@ -281,7 +280,7 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 							? message.metadata.input_id : null;
 						reconciled = reconcileCorrelatedMessage(reconciled, message, inputId);
 					}
-					return settleClientErrors(reconciled.sort(compareMessageOrder));
+					return reconciled.sort(compareMessageOrder);
 				});
 			}
 			emit('messages_added', data);

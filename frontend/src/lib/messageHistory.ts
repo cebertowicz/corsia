@@ -1,6 +1,5 @@
 import { parseUTC } from '$lib/time';
 import { mergeMessageDelivery } from '$lib/stores/threads';
-import { settleClientErrors } from '$lib/ws/clientErrors';
 
 export interface HistoryMessage {
 	id?: string;
@@ -165,7 +164,7 @@ function mergeAdoptedRow(existing: any, incoming: any): any {
 
 /** Merges refetched rows into the live transcript, preserving each row's delivery state. */
 export function mergeFetchedHistoryRows(current: any[], incoming: any[]): any[] {
-	return settleClientErrors(mergeChronologicalMessageHistory(current, incoming, mergeAdoptedRow));
+	return mergeChronologicalMessageHistory(current, incoming, mergeAdoptedRow);
 }
 
 /**

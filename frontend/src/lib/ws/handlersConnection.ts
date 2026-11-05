@@ -26,7 +26,6 @@ import {
 	handleTurnError,
 } from './handlersTurns';
 import { recoverPendingInputs } from './pendingRecovery';
-import { dropClientErrorsBefore, settleClientErrors } from './clientErrors';
 import { restoreAuthTurns, type TurnIdentity } from './turnState';
 
 // `isCurrentOwner` is the delivering socket's ownership check. The body below
@@ -69,7 +68,6 @@ export function handleAuthOk(
 	const transitions = restoreAuthTurns(activeTurns);
 	for (const [threadId, transition] of transitions) {
 		if (transition.lifecycle === 'successor' && transition.previousIdentity) {
-			dropClientErrorsBefore(threadId, transition.next.turnId);
 			cancelThreadTypewriters(threadId, transition.previousIdentity);
 			clearThreadBuffers(threadId);
 		} else if (transition.terminalApplied) {
@@ -102,7 +100,7 @@ export function handleSystemDraining(data: any) {
 	void loadUpdateStatus();
 }
 
-function appendVisibleError(data: any, turnId?: string): void {
+function appendVisibleError(data: any): void {
 	if (!isDisplayedThread(data.thread_id)) return;
 	// Provider errors are sentences; some of ours are identifiers. An identifier
 	// in the transcript asks the user to act on evidence they do not hold.
@@ -125,10 +123,8 @@ function appendVisibleError(data: any, turnId?: string): void {
 			total_tokens: data.total_tokens,
 		} : undefined,
 		created_at: new Date().toISOString(),
-		...(turnId ? { _clientErrorTurnId: turnId } : {}),
 	};
-	// A saved error row for the same Turn already in the list leaves no client row at all.
-	messages.update(current => settleClientErrors([...current, errMsg]));
+	messages.update(current => [...current, errMsg]);
 }
 
 export function handleWsError(data: any) {
@@ -162,7 +158,7 @@ export function handleWsError(data: any) {
 		return;
 	}
 	if (identity !== null) {
-		if (handleTurnError(data)) appendVisibleError(data, identity.turnId);
+		if (handleTurnError(data) && !data.reference) appendVisibleError(data);
 		emit('error', data);
 		return;
 	}

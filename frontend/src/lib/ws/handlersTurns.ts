@@ -39,13 +39,13 @@ import {
 	type TurnTransition,
 } from './turnState';
 import { frameIdentity, frameTurnFacts, stepTextMessage } from './turnFrames';
-import { dropClientErrorsBefore } from './clientErrors';
 
-function resetPredecessor(threadId: string, transition: TurnTransition): void {
-	// Only an admitted successor supersedes the previous Turn's presentation.
+function resetPredecessor(
+	threadId: string,
+	transition: TurnTransition,
+): void {
 	if (transition.lifecycle !== 'successor' || !transition.previousIdentity) return;
 	const awaitingSnapshot = isPendingSnapshot(threadId);
-	dropClientErrorsBefore(threadId, transition.next.turnId);
 	cancelThreadTypewriters(threadId, transition.previousIdentity);
 	clearThreadBuffers(threadId);
 	setContextUsage(threadId, null);

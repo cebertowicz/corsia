@@ -200,7 +200,9 @@ def _announce_result_marker(
     metadata: dict,
     created_at: str,
 ) -> None:
-    if marker_id is None or context_message_id != marker_id:
+    from infra.turn_errors import needs_reference
+
+    if marker_id is None or (context_message_id != marker_id and not needs_reference(metadata)):
         return
     try:
         broadcast_stored_message(

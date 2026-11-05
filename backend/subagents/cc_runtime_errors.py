@@ -47,7 +47,6 @@ def surface_exit_error(
     logger,
     account=None,
     login_answered: bool = False,
-    emit_terminal: bool = True,
 ) -> str | None:
     if code in (0, None) and not (stderr or "").strip():
         return None
@@ -77,12 +76,6 @@ def surface_exit_error(
             msg_id=str(uuid.uuid4()), db=db,
         )
         broadcast_stored_message(thread_id, mid, db=db, broadcast=bcast)
-        if turn_identity is not None and emit_terminal:
-            bcast(thread_id, {
-                "type": "turn_complete",
-                "thread_id": thread_id,
-                **turn_identity.frame_fields(),
-            })
         return mid
     except Exception as exc:
         logger.error("cc_runtime: failed to surface CC exit error: %s", exc)
