@@ -14,6 +14,7 @@ These pages were last checked against the code at commit `43a8c7780`, except a p
 | [Turns and delivery](turns-and-delivery.md) | How a message becomes a turn, and how it survives a restart |
 | [Events and automations](events-and-automations.md) | How events reach owners and agents schedule work |
 | [Plans](plans.md) | How commitments, waits and decisions are recorded |
+| [Workflows](workflows.md) | How a repeated kind of work becomes the same plan steps every run |
 | [Context and memory](context-and-memory.md) | What an agent is told, in what order, and what survives a checkpoint |
 | [Models and harnesses](models-and-harnesses.md) | How a model is chosen and run, and what a switch preserves |
 | [Connected apps](connected-apps.md) | How tools from other services reach agents, and how outside events wake them |
