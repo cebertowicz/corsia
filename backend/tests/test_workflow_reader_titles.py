@@ -88,16 +88,44 @@ async def test_a_nested_runs_step_and_a_moved_follow_up_still_name_the_outer_run
     reply = await run.start("outer", title="Redesign the pane", difficulty="standard")
     design = reply["steps"][0]["id"]
     sketch = reply["steps"][0]["steps"][0]["id"]
+    moved = (await run.update("add", {
+        "title": "Sketch it again", "acceptance_criteria": "Sketch exists", "size": "S", "intent": "Redo the sketch",
+    }))["node"]["id"]
     db = get_db()
     try:
-        # Where followups._unsettled_parent puts a step's follow-up once its run has settled: the top level.
+        # A revision of the sketch where followups._unsettled_parent puts it once its run has settled: the top level.
         with raw_plan_seed(db):
-            db.execute("UPDATE plan_nodes SET parent_id=NULL WHERE id=?", (sketch,))
+            db.execute(
+                "UPDATE plan_nodes SET workflow_ref='inner', workflow_step='sketch', follow_up_of=? WHERE id=?",
+                (sketch, moved),
+            )
         db.commit()
-        titles = workflow_fields.reader_titles(db, [design, sketch])
+        titles = workflow_fields.reader_titles(db, [design, sketch, moved])
     finally:
         db.close()
-    assert titles == {design: "Redesign the pane — design", sketch: "Redesign the pane — Sketch it"}
+    assert titles == {
+        design: "Redesign the pane — design",
+        sketch: "Redesign the pane — Sketch it",
+        moved: "Redesign the pane — Sketch it again",
+    }
+
+
+async def test_a_run_under_an_ordinary_task_names_the_run_not_the_task(isolated_db, tmp_path, monkeypatch):
+    # The step's commitment is the top-level task, where its cost rolls up; the run is the phase below it.
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, _PERSON_FIRST)})
+    release = await run.update("add", {
+        "kind": "phase", "title": "Release 0.4.1", "acceptance_criteria": "Released", "size": "L",
+        "intent": "Ship the release",
+    })
+    reply = await run.start("ship", title="Ship the 0.4.1 notes", parent_id=release["node"]["id"])
+    sign = reply["steps"][0]["id"]
+
+    db = get_db()
+    try:
+        titles = workflow_fields.reader_titles(db, [sign])
+    finally:
+        db.close()
+    assert titles == {sign: "Ship the 0.4.1 notes — Sign the release form"}
 
 
 async def test_a_failed_step_names_its_run_and_every_plan_is_named_in_one_read(isolated_db, tmp_path, monkeypatch):
