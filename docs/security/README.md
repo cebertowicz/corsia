@@ -54,7 +54,7 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 | Action | Default | Strength |
 |---|---|---|
 | Read and write its own project, the workspace's shared files and its own working folder | Allowed | — |
-| Read or write another project's folder or registered repositories from the shell | Refused on macOS for an agent in a project; a lease opens it to leased shell commands unless that project is Local only. The CORSIA agent is refused only Local only projects. Allowed on Linux | Operating system |
+| Read or write another project's folder or registered repositories from the shell | Refused for an agent in a project; on macOS a lease opens it to leased shell commands unless that project is Local only. The CORSIA agent is refused only Local only projects | Operating system |
 | Read or write another project's files with file tools (`read_file`, `write_file` and the rest), or read its conversations | Allowed | — |
 | Read the rest of your home folder (Documents, Desktop, Downloads, Pictures, shell history, Mail, browser data, `~/.ssh` keys, Keychains, cloud credential folders) | Refused | Operating system |
 | Read some tool settings in your home folder: `~/.gitconfig`, most of `~/.config` (your GitHub CLI login in `~/.config/gh` included; if an agents' GitHub account is set up, that account's token instead), `~/.cache`, `~/.npm`, `~/.cargo`; and system files such as `/etc` | Allowed | — |
@@ -73,7 +73,7 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 The full list, with what to do about each, is in [Known limits](limits.md).
 
 1. **Agents run as you.** The sandbox narrows what a command can touch; it is not a container or a separate user. A sandbox flaw exposes what your user can reach.
-2. **Projects are only partly separated.** On macOS an agent's shell is fenced out of other projects, but its file tools and conversation tools are not, and nothing is fenced on Linux. Keep work that must stay apart in separate workspaces, each with its own CORSIA install and state.
+2. **Projects are only partly separated.** A project agent's shell is fenced out of other projects, and the CORSIA agent's only out of Local only ones, but file tools and conversation tools are not fenced. Keep work that must stay apart in separate workspaces, each with its own CORSIA install and state.
 3. **Outbound network access is not limited.** An agent that reads something it shouldn't can send it anywhere.
 4. **Reviewers are not a defense against a tricked agent.** The models that review lease requests and leased commands assume the agent is yours and working on your task. They are instructed to block a short list: secret exposure, changes to access controls, needless destruction, and commands plainly outside the approved purpose. A model can miss those. They will usually allow a plausible request to read your ordinary personal files.
 5. **Prompt injection is not solved.** Email is screened by a local model and labelled; web pages, attachments, text messages and tool results are not screened. Labelled content still reaches the agent.

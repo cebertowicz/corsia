@@ -13,7 +13,7 @@ CORSIA runs on your computer. Data leaves it in the cases below. "Agent's choice
 | Web search: Brave with your key, otherwise a keyless search library that queries public search engines | The search text | When an agent searches | Don't give agents a reason to search; there is no setting that removes the tool |
 | Any website | Whatever the agent puts in the request | Agent's choice, through the `web_fetch` tool, the agents' browser or the shell | Not limited |
 | Your email, calendar and file providers (Google, including Docs, Sheets and Drive; Microsoft; mail hosts) | Reads, drafts and changes; sends that passed the send gate; and file shares and calendar changes that email guests, made through `google_workspace` without the send gate ([Connected apps](connected-apps.md#sending-email-and-invites)) | When an agent uses those tools | Disconnect the account |
-| Apple Messages on this Mac | Texts that passed the send gate, sent by the Messages app to their recipients | When an agent sends a text | Switch CORSIA off under Full Disk Access and Automation in **System Settings → Privacy & Security** |
+| Apple Messages on this computer | Texts that passed the send gate, sent by the Messages app to their recipients | When an agent sends a text | Switch CORSIA off under Full Disk Access and Automation in **System Settings → Privacy & Security** |
 | Tool servers you add | What the agent passes to the tool | When an agent calls the tool | Remove the app |
 | GitHub, if you connect it | Pull requests, comments, pushes | When an agent uses it | Disconnect it |
 | GitHub, for update checks | An anonymous request: `git fetch` of your branch's upstream for a source install; the release manifest for the desktop app | While the app is open, at most once every five minutes | No setting at this commit |
@@ -32,7 +32,7 @@ CORSIA runs on your computer. Data leaves it in the cases below. "Agent's choice
 
 ## Local only
 
-**Local only** controls which models may run and holds messages bound for cloud models. For a whole project it also closes the project to other agents' shells on macOS. It doesn't stop traffic from tools.
+**Local only** controls which models may run and holds messages bound for cloud models. For a whole project it also closes the project to other agents' shells. It doesn't stop traffic from tools.
 
 | | |
 |---|---|
@@ -41,7 +41,7 @@ CORSIA runs on your computer. Data leaves it in the cases below. "Agent's choice
 | What it allows | Models whose every endpoint is a loopback address on this machine, and models on a server you marked **Trusted device** in its provider settings (the mark is yours to set; it isn't checked). An External endpoint counts as local only with that mark, even if it runs on your machine (`backend/llm/locality.py`) |
 | Inherited by | Every worker the chat starts, and their workers |
 | Messages to other chats | A message from a Local only chat to a chat on a cloud model is held until you approve its exact text in the app; declining delivers nothing (`backend/infra/local_only.py`): CORSIA code |
-| Other agents (whole project, macOS) | Every other agent's shell is fenced out of the project and its repositories, and no lease opens it. The exception is the CORSIA agent while its own chat is Local only; local tool servers can't reach it either (Operating system). Other agents' file tools and conversation tools still reach it ([Agent sandbox](agent-sandbox.md#projects)). Linux has no such fence |
+| Other agents (whole project) | Every other agent's shell is fenced out of the project and its repositories, and no lease opens it. The exception is the CORSIA agent while its own chat is Local only; local tool servers can't reach it either (Operating system). Other agents' file tools and conversation tools still reach it ([Agent sandbox](agent-sandbox.md#projects)) |
 | Reviewer | The lease reviewer must also be a model the chat may use |
 
 Local only does **not** stop the chat's agent from using the web, email, tool servers, GitHub or the shell's network access. Content those tools send goes where they send it. A Local only chat on a local model with no network-facing tools sends nothing, but nothing in CORSIA enforces that combination.

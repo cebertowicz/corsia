@@ -2,7 +2,7 @@
 
 How CORSIA confines an agent's shell commands and file tools, on macOS and Linux, without a lease. Leases are on [Host access](host-access.md).
 
-**In short:** agents run as your user. File tools reach only the workspace and registered repositories. Shell commands run inside an OS sandbox that lets them read and write the workspace, read a few tool-settings folders, and reach the network freely. On macOS the shell is also fenced out of other projects; file tools are not, so the workspace is still the boundary that holds for every tool.
+**In short:** agents run as your user. File tools reach only the workspace and registered repositories. Shell commands run inside an OS sandbox that lets them read and write the workspace, read a few tool-settings folders, and reach the network freely. The shell is also fenced out of other projects; file tools are not, so the workspace is still the boundary that holds for every tool.
 
 ## Layers
 
@@ -10,7 +10,7 @@ How CORSIA confines an agent's shell commands and file tools, on macOS and Linux
 |---|---|---|---|
 | File-tool gate | `read_file`, `write_file`, `edit_file`, `grep`, `glob`, `list_dir` | CORSIA code | `backend/tools/filesystem_gate.py`, `backend/tools/sandbox_config.py` |
 | Shell sandbox | Every `bash` command and everything it starts | Operating system | `backend/tools/shell_guard.py`, `backend/tools/shell_sandbox.py` |
-| Project fence (macOS) | Other projects' folders and registered repositories, in the shell, other AI agent command-line tools started under a lease, and local tool servers; for a leased shell command, Local only projects only | Operating system | `backend/tools/project_fence.py`, `backend/tools/host_path_policy.py` |
+| Project fence | Other projects' folders and registered repositories, in the shell, other AI agent command-line tools started under a lease, and local tool servers; for a leased shell command, Local only projects only. On Linux, the shell only | Operating system | `backend/tools/project_fence.py`, `backend/tools/host_path_policy.py`, `backend/tools/linux_shell.py` |
 | Command refusals | A list of commands refused before they run | CORSIA code | `backend/tools/shell_guard.py` (`check_command_safety`) |
 
 The file tools run inside the CORSIA server, so the OS sandbox doesn't apply to them; their own path check does. The shell runs in a separate sandboxed process.
@@ -29,7 +29,7 @@ The file tools run inside the CORSIA server, so the OS sandbox doesn't apply to 
 
 ## Projects
 
-On macOS the shell sandbox fences each agent out of projects that aren't its own (`backend/tools/project_fence.py`). The fence is worked out again on every command, so a change to a project's Local only setting or an agent's project applies to its next command.
+On macOS and Linux the shell sandbox fences each agent out of projects that aren't its own (`backend/tools/project_fence.py`). On Linux, a project folder or repository that doesn't exist yet isn't fenced until it exists ([Linux](#linux)). The fence is worked out again on every command, so a change to a project's Local only setting or an agent's project applies to its next command.
 
 | Agent | Its shell can't read or write |
 |---|---|
@@ -58,7 +58,7 @@ If two bodies of work must stay apart, give each its own workspace and CORSIA in
 |---|---|
 | The rest of your home folder: Documents, Desktop, Downloads, Pictures, Music, Movies, shell history and startup files, `~/Library` data (Mail, Messages, cookies, browser data, Keychains), `~/.ssh` private keys, `~/.aws`, `~/.docker`, `~/.kube`, `~/.gnupg`, `~/.netrc`, other AI tools' folders | Operating system |
 | CORSIA's state folder (database, logs, keys, the agents' browser profile, Claude Code and Codex sign-ins) and its checkout's private files | Operating system |
-| Other projects' folders and registered repositories, as listed under [Projects](#projects) (macOS) | Operating system |
+| Other projects' folders and registered repositories, as listed under [Projects](#projects) | Operating system |
 | Writes outside the workspace and registered repositories, including your home folder and `/`, apart from the exceptions under [What's allowed](#whats-allowed) | Operating system |
 | CORSIA's startup items (`LaunchAgents`), its restart control files, the generated `.corsia/context` and `.corsia/skills` folders | Operating system |
 | Writes to the workspace's Git settings, hooks and pointer files (`.git/config`, `.git/config.worktree`, `.git/commondir`, `.git/hooks`) and its `.git` marker, because the server runs Git there outside the sandbox. Agents can't run `git init` at the workspace root. On Linux, the first agent command in a workspace with no `.git` makes one so the rule covers it, and a symlinked `.git` stops agent commands until it's replaced with a directory or a `gitdir:` file | Operating system for the shell, CORSIA code for file tools |

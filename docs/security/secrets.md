@@ -56,7 +56,7 @@ Masking also has a side effect: an agent that reads a file and writes the whole 
 
 If a key sits in a file inside the workspace (a `.env`, a config file):
 
-1. Any agent's file tools can read the file. On macOS, agents in other projects can't reach it from their shell, unless a lease opens that project to them.
+1. Any agent's file tools can read the file. Agents in other projects can't reach it from their shell unless a lease opens that project to them. The CORSIA agent's shell can, unless the project is set to Local models only.
 2. What the model sees is masked when the masker recognizes the value (above), so the value usually doesn't reach the model provider.
 3. Commands the agent runs can still use the real value, and outbound network access is not limited.
 4. A whole-file rewrite by an agent can replace the value with `[REDACTED]`.
@@ -65,7 +65,7 @@ If a key sits in a file inside the workspace (a `.env`, a config file):
 
 ## Sign-in tokens for connected apps
 
-Google, Microsoft and tool-server sign-ins store their tokens in the key store. Agents call those services through CORSIA's tools; the token never appears in the agent's context. For Google Docs, Sheets, Drive and Calendar, the `google_workspace` tool hands an access token only to the `gws` process it starts for that one command, and `gws` isn't on agent shells' path (`backend/tools/gws_run.py`). Messages needs no stored credential: CORSIA reads this Mac's Messages history directly, which takes Full Disk Access ([Connected apps](connected-apps.md#messages)). A tool server you add gets its own keys in its environment when CORSIA starts it; see [Connected apps](connected-apps.md) for how tool servers are confined.
+Google, Microsoft and tool-server sign-ins store their tokens in the key store. Agents call those services through CORSIA's tools; the token never appears in the agent's context. For Google Docs, Sheets, Drive and Calendar, the `google_workspace` tool hands an access token only to the `gws` process it starts for that one command, and `gws` isn't on agent shells' path (`backend/tools/gws_run.py`). Messages needs no stored credential: CORSIA reads this computer's Messages history directly, which takes Full Disk Access ([Connected apps](connected-apps.md#messages)). A tool server you add gets its own keys in its environment when CORSIA starts it; see [Connected apps](connected-apps.md) for how tool servers are confined.
 
 ## SSH keys
 

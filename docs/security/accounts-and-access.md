@@ -48,7 +48,7 @@ What an agent can reach through tools:
 
 A **project** decides what an agent is given by default: its project's context and instructions, which connected apps it can use, and whether Local only applies.
 
-On macOS it also fences the shells of other projects' agents out of its folder and repositories; the CORSIA agent's shell is fenced only from Local only projects, which stay closed even under a lease, and from none while its own chat is Local only ([Agent sandbox](agent-sandbox.md#projects)). It does **not** stop an agent's file tools from reading or changing another project's files, or its conversation tools from reading another project's conversations. Linux has no fence.
+It also fences the shells of other projects' agents out of its folder and repositories; the CORSIA agent's shell is fenced only from Local only projects, which stay closed even under a lease, and from none while its own chat is Local only ([Agent sandbox](agent-sandbox.md#projects)). It does **not** stop an agent's file tools from reading or changing another project's files, or its conversation tools from reading another project's conversations. Linux has no fence.
 
 To keep two bodies of work apart, give each its own workspace and CORSIA install, ideally under separate macOS users.
 
