@@ -29,6 +29,9 @@ def test_tag_create_list_and_idempotent_retry(integration_client, artifact_id):
         db.commit()
     finally:
         db.close()
+    reviews = integration_client.get(f"/api/artifacts/{artifact_id}/reviews?token={OWNER_TOKEN}&thread_id=viewer")
+    assert reviews.status_code == 200, reviews.text
+    assert reviews.json()["taggable_agents"] == [{"id": "agent", "name": "Named agent", "responsibility": "Review"}]
     url = f"/api/artifacts/{artifact_id}/comments?token={OWNER_TOKEN}"
     mentions = [{"agent_id": "agent", "start": 3, "end": 9}, {"agent_id": "agent", "start": 10, "end": 16}]
     request = {"body": "😀 @Agent @Agent", "delivery_policy": "document-held", "thread_id": "viewer",

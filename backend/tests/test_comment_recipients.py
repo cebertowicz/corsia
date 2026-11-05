@@ -49,6 +49,21 @@ def test_tag_selection_uses_viewer_roster(isolated_db):
     db.close()
 
 
+def test_taggable_roster_includes_owner_and_corsia_excludes_viewer_and_unavailable(isolated_db, monkeypatch):
+    from doceditor import feedback_delivery
+
+    db = get_db()
+    for name in ("viewer", "owner", "corsia", "unavailable"):
+        seed_thread(db, name, model=None)
+        db.execute("UPDATE threads SET agent_enabled=1,agent_responsibility='Work' WHERE id=?", (name,))
+    monkeypatch.setattr(feedback_delivery, "recipient_problem", lambda db, agent: "unavailable" if agent == "unavailable" else None)
+    agents = comment_recipients.taggable_agents(db, user_id="owner-token", thread_id="viewer")
+    assert {agent["id"] for agent in agents} == {"owner", "corsia"}
+    with pytest.raises(comment_recipients.TagValidationError):
+        comment_recipients.validate_tags(db, user_id="owner-token", thread_id="viewer", agent_ids=["unavailable"])
+    db.close()
+
+
 def test_top_level_routes_only_to_owner_and_tags(isolated_db):
     db = get_db()
     for name in ("owner", "writer", "tagged", "outsider"):
@@ -207,6 +222,78 @@ def test_failed_node_delivery_rolls_back_rejoin_and_notification(isolated_db, mo
     state = db.execute("SELECT left_thread,notifications FROM doc_comment_recipient_state WHERE root_id=? AND agent_id=?", (root["id"], "agent")).fetchone()
     assert tuple(state) == (1, 0)
     assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == "open"
+    db.close()
+
+
+def test_agent_local_only_tag_is_refused_but_person_tag_is_not(isolated_db, monkeypatch):
+    from infra import local_only
+
+    db = get_db()
+    for name in ("owner", "writer", "recipient"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    monkeypatch.setattr(local_only, "send_needs_hold", lambda sender, recipient, db: recipient["id"] == "recipient")
+    with write_transaction(db, scope="test_local_tag") as connection:
+        row, created = comments.create_with_status(aid, body="Tag", author="Writer", author_kind="agent",
+                                                    author_thread_id="writer", db=connection)
+        comment_recipients.save_tags(connection, row, ["recipient"])
+        comment_recipients.tags_for_comments(connection, [row])
+        result = feedback_batches.record_comment(connection, row, created=created)
+    assert result["tag_refusals"] == ["recipient is cloud-bound or has no model selected, and Local only applies to this chat or project, so the tag wasn't delivered. Send it with delegate_send, which holds it for the person's approval, or tag a local agent."]
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches WHERE recipient_id='recipient'").fetchone()[0] == 0
+    with write_transaction(db, scope="test_person_tag") as connection:
+        row, created = comments.create_with_status(aid, body="Person", author="User", author_kind="user", db=connection)
+        comment_recipients.save_tags(connection, row, ["recipient"])
+        comment_recipients.tags_for_comments(connection, [row])
+        result = feedback_batches.record_comment(connection, row, created=created)
+    assert result["tag_refusals"] == []
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches WHERE recipient_id='recipient'").fetchone()[0] == 1
+    db.close()
+
+
+def test_pending_agent_tag_rechecks_locality_before_delivery(isolated_db, monkeypatch):
+    from infra import local_only
+
+    db = get_db()
+    for name in ("owner", "writer", "recipient"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    monkeypatch.setattr(local_only, "send_needs_hold", lambda sender, recipient, db: False)
+    with write_transaction(db, scope="test_pending_tag") as connection:
+        row, created = comments.create_with_status(aid, body="Tag", author="Writer", author_kind="agent",
+                                                    author_thread_id="writer", db=connection)
+        comment_recipients.save_tags(connection, row, ["recipient"])
+        comment_recipients.tags_for_comments(connection, [row])
+        result = feedback_batches.record_comment(connection, row, created=created)
+    batch = next(batch_id for batch_id in result["batch_ids"] if db.execute(
+        "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0] == "recipient")
+    monkeypatch.setattr(local_only, "send_needs_hold", lambda sender, recipient, db: True)
+    feedback_batches.close_batch(db, batch, "send")
+    state = db.execute("SELECT state,undelivered_reason FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()
+    assert state[0] == "undelivered"
+    assert "recipient is cloud-bound or has no model selected" in state[1]
+    db.close()
+
+
+def test_pending_tag_names_recipient_when_admission_fails(isolated_db, monkeypatch):
+    from doceditor import feedback_delivery
+
+    db = get_db()
+    for name in ("owner", "writer", "recipient"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    with write_transaction(db, scope="test_pending_unavailable") as connection:
+        row, created = comments.create_with_status(aid, body="Tag", author="Writer", author_kind="agent",
+                                                    author_thread_id="writer", db=connection)
+        comment_recipients.save_tags(connection, row, ["recipient"])
+        comment_recipients.tags_for_comments(connection, [row])
+        result = feedback_batches.record_comment(connection, row, created=created)
+    batch = next(batch_id for batch_id in result["batch_ids"] if db.execute(
+        "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0] == "recipient")
+    monkeypatch.setattr(feedback_delivery, "recipient_problem", lambda db, recipient: "owner_archived")
+    feedback_batches.close_batch(db, batch, "send")
+    state = db.execute("SELECT state,undelivered_reason FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()
+    assert tuple(state) == ("undelivered", "Tag not delivered: recipient: owner archived.")
     db.close()
 
 

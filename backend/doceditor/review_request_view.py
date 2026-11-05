@@ -1,7 +1,9 @@
 """Document review list projection; the service owns all permission rules."""
 from __future__ import annotations
 
-from doceditor import review_requests as reviews
+import sqlite3
+
+from doceditor import comment_recipients, review_requests as reviews
 
 
 def _thread_names(db, rows: list[dict]) -> dict[str, str]:
@@ -43,7 +45,12 @@ def document_reviews(db, artifact_id: str, actor: reviews.ReviewActor) -> dict:
         return result
     try:
         eligible = reviews.reviewer_eligibility(db, artifact, actor)
-    except reviews.ReviewRosterError:
+        result["taggable_agents"] = comment_recipients.taggable_agents(
+            db, user_id=actor.user_id, thread_id=actor.thread_id,
+        )
+    except comment_recipients.TagValidationError as exc:
+        raise PermissionError(str(exc)) from exc
+    except (reviews.ReviewRosterError, sqlite3.OperationalError):
         result["reviewers_error"] = "roster_error"
         return result
     requested = {row["reviewer_thread_id"] for row in rows if row["outcome"] == "open"}

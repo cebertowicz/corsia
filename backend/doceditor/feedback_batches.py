@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from doceditor import comment_notifications, feedback_comments
+from doceditor import comment_notifications, comment_recipients, feedback_comments
 from doceditor.feedback_batch_core import (
     AGENT_QUIET,
     DOCUMENT_HELD,
@@ -71,17 +71,25 @@ def record_comment(
     """Attach a newly inserted comment to recipient batches in the caller's write."""
     batch_ids: list[str] = []
     woken: list[str] = []
+    tag_refusals: list[str] = []
     notices = (
         take_unreported_undelivered(db, feedback_comments.author_id(comment), utc_now())
         if comment["author_kind"] == "agent"
         else []
     )
+    recipients = feedback_comments.recipients(db, comment)
+    refused = set()
+    if comment["author_kind"] == "agent":
+        for recipient in sorted(set(recipients) & set(comment.get("tagged_agent_ids") or ())):
+            refusal = comment_recipients.tag_locality_refusal(db, str(comment["author_thread_id"]), recipient)
+            if refusal:
+                refused.add(recipient)
+                tag_refusals.append(refusal)
     if created:
         feedback_comments.make_user_document_durable(db, comment)
-        batch_ids = [
-            _join_open_batch(db, comment, recipient, delivery_policy)
-            for recipient in feedback_comments.recipients(db, comment)
-        ]
+        for recipient in recipients:
+            if recipient not in refused:
+                batch_ids.append(_join_open_batch(db, comment, recipient, delivery_policy))
         if submit and comment["author_kind"] == "agent":
             woken = close_for_document(
                 db,
@@ -99,7 +107,7 @@ def record_comment(
         )
         known = {row["id"] for row in notices}
         notices.extend(row for row in current_failures if row["id"] not in known)
-    return {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken}
+    return {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken, "tag_refusals": tag_refusals}
 
 
 def deliver_person_comment(db, batch_ids: list[str], artifact_id: str) -> list[str]:

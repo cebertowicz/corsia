@@ -118,7 +118,8 @@ def undelivered_note(
     append_thread_context_note(
         db,
         thread_id=str(_value(batch, "author_id")),
-        summary=(f"{undelivered_phrase} on {document} not delivered: {readable}. Retry with "
+        summary=(reason if reason.startswith("Tag not delivered: ") else
+                 f"{undelivered_phrase} on {document} not delivered: {readable}. Retry with "
                  f'doc_feedback_send(artifact_id="{artifact_id}") once the owner can receive it.'),
         details={"batch_id": _value(batch, "id"), "reason": reason},
     )
@@ -141,7 +142,24 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
     if not items:
         return DeliveryResult(outcome="empty")
     problem = recipient_problem(db, recipient)
+    if problem is None and _value(batch, "author_kind") == "agent":
+        tagged = any(item.get("kind") == "comment" and item.get("event") != "reopened" and db.execute(
+            "SELECT 1 FROM doc_comment_tags WHERE comment_id=? AND agent_id=?", (item["id"], recipient),
+        ).fetchone() for item in items)
+        if tagged:
+            refusal = comment_recipients.tag_locality_refusal(db, str(_value(batch, "author_id")), recipient)
+            if refusal:
+                problem = f"Tag not delivered: {refusal}"
     if problem is not None:
+        if _value(batch, "author_kind") == "agent" and not problem.startswith("Tag not delivered: "):
+            for item in items:
+                if item.get("kind") != "comment":
+                    continue
+                tag = db.execute("SELECT agent_name FROM doc_comment_tags WHERE comment_id=? AND agent_id=?",
+                                 (item["id"], recipient)).fetchone()
+                if tag:
+                    problem = f"Tag not delivered: {tag['agent_name']}: {problem.replace('_', ' ')}."
+                    break
         undelivered_note(db, batch, problem, items=items)
         return DeliveryResult(reason=problem)
     image_regions.annotate_delivery(

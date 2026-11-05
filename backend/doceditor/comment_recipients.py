@@ -9,14 +9,23 @@ class TagValidationError(ValueError):
     """A tag is outside the authenticated viewer's visible roster."""
 
 
-def validate_tags(db, *, user_id: str, thread_id: str | None, agent_ids: list[str]) -> None:
-    """Validate tag IDs against the authenticated viewer's visible roster."""
-    if not agent_ids:
-        return
+def taggable_agents(db, *, user_id: str, thread_id: str) -> list[dict]:
+    """The viewer's visible roster, limited to agents that can receive feedback."""
+    from doceditor.feedback_delivery import recipient_problem
+
     if not thread_id or get_thread_for_user(thread_id, user_id, db=db) is None:
         raise TagValidationError("A valid viewing thread_id is required to tag agents")
     _, visible = agent_rows(thread_id, db)
-    available = {row["id"] for row in visible}
+    return [{"id": row["id"], "name": row["title"] or row["id"],
+             "responsibility": row["agent_responsibility"]}
+            for row in visible if row["id"] != thread_id and recipient_problem(db, row["id"]) is None]
+
+
+def validate_tags(db, *, user_id: str, thread_id: str | None, agent_ids: list[str]) -> None:
+    """Validate tag IDs against the authenticated viewer's eligible roster."""
+    if not agent_ids:
+        return
+    available = {row["id"] for row in taggable_agents(db, user_id=user_id, thread_id=thread_id or "")}
     if any(agent_id not in available for agent_id in agent_ids):
         raise TagValidationError("Tagged agents must be in the viewing thread's visible roster")
 
@@ -52,6 +61,20 @@ def save_mentions(db, comment: dict, mentions: list[dict]) -> None:
         "INSERT INTO doc_comment_mentions(comment_id,agent_id,start_offset,end_offset) VALUES (?,?,?,?)",
         [(comment["id"], mention["agent_id"], mention["start"], mention["end"]) for mention in mentions],
     )
+
+
+def tag_locality_refusal(db, sender_id: str, recipient_id: str) -> str | None:
+    """Apply the sender-to-recipient locality rule and explain how to proceed."""
+    from infra.local_only import send_needs_hold
+
+    sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id=?", (sender_id,)).fetchone()
+    recipient = db.execute("SELECT id,model,pending_model,title FROM threads WHERE id=?", (recipient_id,)).fetchone()
+    if sender and recipient and send_needs_hold(dict(sender), dict(recipient), db=db):
+        name = recipient["title"] or recipient_id
+        return (f"{name} is cloud-bound or has no model selected, and Local only applies to this chat or project, "
+                "so the tag wasn't delivered. Send it with delegate_send, which holds it for the person's approval, "
+                "or tag a local agent.")
+    return None
 
 
 def root_id(comment: dict) -> str:
