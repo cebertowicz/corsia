@@ -77,7 +77,7 @@ def _next_run(kind: str, spec: str, now: str, max_runs: int) -> str:
         due = _parse(spec)
         if due <= now_dt:
             raise ValueError("clock schedule must be in the future")
-        return due.isoformat()
+        return due.astimezone(timezone.utc).isoformat()
     if kind != "cadence":
         raise ValueError(
             "schedule kind must be clock or cadence; register a script with "

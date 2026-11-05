@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -29,6 +30,34 @@ def _db() -> sqlite3.Connection:
 
 async def _delivered(*_args) -> bool:
     return True
+
+
+OFFSET_CLOCKS = [
+    ("2026-01-01T09:00:00-06:00", "2026-01-01T15:00:00+00:00"),
+    ("2026-01-01T18:00:00+09:00", "2026-01-01T09:00:00+00:00"),
+]
+
+
+def _clock(db, spec: str):
+    return schedules.create(
+        "thread", "__workspace__", "thread", kind="clock", spec=spec,
+        max_runs=1, now="2026-01-01T08:00:00+00:00", db=db,
+    )
+
+
+async def _assert_fires_only_from(db, schedule, instant: str) -> None:
+    just_before = datetime.fromisoformat(instant) - timedelta(seconds=1)
+    early = await runner.sweep(just_before.isoformat(), db=db, deliver=_delivered)
+    assert early["woken"] == []
+
+    result = await runner.sweep(instant, db=db, deliver=_delivered)
+
+    assert result["woken"] == ["thread"]
+    row = db.execute(
+        "SELECT state,runs FROM automation_schedules WHERE id=?",
+        (schedule.id,),
+    ).fetchone()
+    assert dict(row) == {"state": "exhausted", "runs": 1}
 
 
 @pytest.mark.asyncio
@@ -191,3 +220,13 @@ def test_unrun_cadence_occurrence_advances_to_the_next(outcome):
         "runs": 1,
         "next_run_at": "2026-01-01T00:02:00+00:00",
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("spec", "instant"), OFFSET_CLOCKS)
+async def test_clock_with_an_offset_is_stored_and_fires_at_its_utc_instant(spec, instant):
+    db = _db()
+    schedule = _clock(db, spec)
+
+    assert (schedule.spec, schedule.next_run_at) == (spec, instant)
+    await _assert_fires_only_from(db, schedule, instant)
