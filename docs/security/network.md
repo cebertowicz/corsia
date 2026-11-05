@@ -52,8 +52,6 @@ netstat -an -p tcp | grep LISTEN
 
 Look for your port: 1956 for a source install, or the desktop app's port otherwise ([Desktop app](../how-it-works/desktop-app.md#data-and-code)). For port 1956, `127.0.0.1.1956` means only this machine can connect; `*.1956` means every interface. A `*.47901` line means the Devices listener is on.
 
-Use your port in this command: 1956 for a source install, or the desktop app's port.
-
 ```bash
 curl -s http://127.0.0.1:1956/api/health
 ```

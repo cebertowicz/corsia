@@ -71,7 +71,7 @@ The state folder is `~/Library/Application Support/CORSIA/state` for the desktop
 4. Delete the checkout (`~/.corsia`) or the app.
 5. If you set up an agents' GitHub account, delete its folder (default `~/.config/corsia-gh-agent`), which holds a live token, and revoke that account's GitHub CLI access in its GitHub settings.
 6. Optional: remove local models from the model folder your local model server reports in its settings; uninstall Agent Safehouse and `agent-browser` if nothing else uses them.
-7. Revoke CORSIA's access in your Google or Microsoft account settings, and remove any connected apps you added (**Settings → Connected apps**).
+7. Revoke CORSIA's access in your Google or Microsoft account settings, and for any connected app you signed in to, revoke CORSIA's access in that service's own settings.
 8. If you gave CORSIA Full Disk Access for Messages, switch it off in **System Settings → Privacy & Security → Full Disk Access**.
 
 Data you sent to cloud model providers and other services is held under their policies. Deleting CORSIA doesn't remove it.
