@@ -40,7 +40,8 @@ import asyncio
 import logging
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -63,7 +64,9 @@ class Life:
     unwatch: Callable[[], None] | None = None
     stopping: bool = False  # a stop was asked for: the exit it causes is not a crash
     restart: asyncio.Task | None = None
+    hold_requests: bool = False  # only an upgrade drains calls before replacing the process
     restarts: deque[float] = field(default_factory=deque)  # when each restart in the window began
+    requests: set[asyncio.Future[None]] = field(default_factory=set)  # admitted provider calls, not whole Turns
 
     def watch(self, pid: int, on_exit: Callable[[tuple[str, bool] | None], None]) -> None:
         """The server is up and wanted running: have the OS tell us when ``pid`` exits.
@@ -93,6 +96,25 @@ class Life:
         if self.restart:
             self.restart.cancel()
         return self.restart
+
+
+@asynccontextmanager
+async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIterator[None]:
+    """Keep concurrent calls admitted before replacement alive; later calls wait through restoration."""
+    life = lives.get(server_id or "")
+    while life is not None and life.hold_requests and life.restart is not None:
+        await asyncio.wait({life.restart})  # caller cancellation must not cancel the restart
+        life = lives.get(server_id or "")
+    if life is None:
+        yield  # unmanaged and other providers have no supervisor admission
+        return
+    finished = asyncio.get_running_loop().create_future()
+    life.requests.add(finished)  # no await between observing the restart and claiming admission
+    try:
+        yield
+    finally:
+        life.requests.remove(finished)
+        finished.set_result(None)
 
 
 async def stop(
@@ -170,14 +192,28 @@ def on_exit(
         emit(server_id, "exit.unexpected", status=status, loaded_models=len(loaded))
     if life.restart:  # it exited again while a restart was running
         life.restart.cancel()
-    task = asyncio.get_running_loop().create_task(_restart(server_id, life, status, loaded, start, tail_log))
+    schedule(server_id, life, _restart(server_id, life, status, loaded, start, tail_log))
+
+
+def schedule(server_id: str, life: Life, operation: Coroutine[Any, Any, Any], *, hold_requests: bool = False) -> asyncio.Task:
+    """Own one restart through the same Life, so Stop and shutdown can cancel and await it."""
+    from infra.state.ws import broadcast_all
+
+    task = asyncio.get_running_loop().create_task(operation)
     life.restart = task
+    life.hold_requests = hold_requests
     task.add_done_callback(lambda done: _done(server_id, life, done))
+    broadcast_all({"type": "models_updated", "server_id": server_id})  # lifecycle change without admitting held work
+    return task
 
 
 def _done(server_id: str, life: Life, task: asyncio.Task) -> None:
+    from infra.state.ws import notify_models_changed
+
     if life.restart is task:
         life.restart = None
+        life.hold_requests = False
+        notify_models_changed(server_id=server_id)
     error = None if task.cancelled() else task.exception()
     if error is not None:
         log.error("oMLX restart stopped on an error", exc_info=error)
@@ -190,21 +226,33 @@ async def _restart(
 ) -> None:
     from llm.local_keep_loaded import reload_after_restart
 
+    if await start_with_recovery(server_id, life, status, start, tail_log):
+        await reload_after_restart(server_id, loaded)
+        emit(server_id, "restart.completed", attempt=len(life.restarts))
+
+
+async def start_with_recovery(
+    server_id: str, life: Life, status: str,
+    start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
+) -> bool:
+    """The same bounded startup recovery after a crash or an intentional upgrade stop."""
     while life.restarts and time.monotonic() - life.restarts[0] > RESTART_WINDOW_S:
         life.restarts.popleft()
-    log.warning("oMLX server %s exited (%s); %d restarts in the last 10 minutes",
-                server_id, status, len(life.restarts))
+    if status == "upgrade":
+        log.info("oMLX server %s starting after upgrade stop", server_id)
+    else:
+        log.warning("oMLX server %s exited (%s); %d restarts in the last 10 minutes",
+                    server_id, status, len(life.restarts))
     while len(life.restarts) < MAX_RESTARTS:
         life.restarts.append(time.monotonic())
         emit(server_id, "restart.attempted", attempt=len(life.restarts), status=status)
         result = await start({"server_id": server_id})
         if life.stopping:
-            return
+            return False
         if result.get("ok"):
-            emit(server_id, "restart.completed", attempt=len(life.restarts))
-            await reload_after_restart(server_id, loaded)
-            return
+            return True
         log.warning("oMLX server %s restart failed: %s", server_id, result.get("message"))
     emit(server_id, "restart.gave_up", status=status, restarts=len(life.restarts))
     log.error("oMLX server %s not restarted again: %d restarts in 10 minutes (last exit %s). Last log lines:\n%s",
               server_id, len(life.restarts), status, tail_log(server_id) or "(empty log)")
+    return False

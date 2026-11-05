@@ -69,6 +69,8 @@ export interface NetworkServer {
 	masked_key?: string;
 	/** True only for CORSIA's own oMLX, online or not: identity, never status (read ``status`` for that). */
 	corsia_omlx?: boolean;
+	/** The supervisor owns a restart, through restoration of the same loaded models. */
+	restarting?: boolean;
 	/** How the endpoint is billed; null when unset. */
 	billing?: ServerBilling | null;
 	/** Fences billing writes; sent back unchanged. */

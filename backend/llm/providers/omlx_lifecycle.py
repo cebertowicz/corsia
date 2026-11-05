@@ -261,58 +261,61 @@ async def warm_cache(
     thinking_budget: int | None = None,
     reasoning_effort: str | None = None,
 ) -> dict[str, Any]:
-    """Pre-warm KV cache for a loaded model via ``max_tokens=1``."""
-    api_base = _api_base(cfg)
-    if not api_base:
-        return {"ok": False, "message": "Server has no reachable endpoint"}
-    if not model_id:
-        return {"ok": False, "message": "warm_cache requires explicit model_id"}
+    """Pre-warm a loaded model under the same replacement admission as a Turn call."""
+    from llm.providers.omlx_supervisor import request_slot
 
-    loaded = await list_loaded(cfg)
-    loaded_ids = {m.get("identifier", "") for m in loaded}
-    if model_id not in loaded_ids:
-        return {
-            "ok": False,
-            "message": f"model not loaded: {model_id}",
-            "loaded_models": sorted(loaded_ids),
+    async with request_slot(cfg.get("server_id")):
+        api_base = _api_base(cfg)
+        if not api_base:
+            return {"ok": False, "message": "Server has no reachable endpoint"}
+        if not model_id:
+            return {"ok": False, "message": "warm_cache requires explicit model_id"}
+
+        loaded = await list_loaded(cfg)
+        loaded_ids = {m.get("identifier", "") for m in loaded}
+        if model_id not in loaded_ids:
+            return {
+                "ok": False,
+                "message": f"model not loaded: {model_id}",
+                "loaded_models": sorted(loaded_ids),
+            }
+
+        body: dict[str, Any] = {
+            "model": model_id,
+            "messages": messages,
+            "max_tokens": 1,
+            "stream": False,
         }
+        if tools:
+            body["tools"] = tools
+        if chat_template_kwargs:
+            body["chat_template_kwargs"] = chat_template_kwargs
+        if thinking_budget is not None:
+            body["thinking_budget"] = thinking_budget
+        # The chat template injects the effort level into the prompt, so warming
+        # without it would build a different prefix than the turn sends.
+        if reasoning_effort is not None:
+            body["reasoning_effort"] = reasoning_effort
 
-    body: dict[str, Any] = {
-        "model": model_id,
-        "messages": messages,
-        "max_tokens": 1,
-        "stream": False,
-    }
-    if tools:
-        body["tools"] = tools
-    if chat_template_kwargs:
-        body["chat_template_kwargs"] = chat_template_kwargs
-    if thinking_budget is not None:
-        body["thinking_budget"] = thinking_budget
-    # The chat template injects the effort level into the prompt, so warming
-    # without it would build a different prefix than the turn sends.
-    if reasoning_effort is not None:
-        body["reasoning_effort"] = reasoning_effort
-
-    try:
-        headers = await public_headers(cfg, url=f"{api_base}/chat/completions")
-        async with httpx.AsyncClient(timeout=_WARM_TIMEOUT) as client:
-            resp = await client.post(
-                f"{api_base}/chat/completions", headers=headers, json=body,
-            )
-            if resp.status_code == 200:
-                usage = (resp.json() or {}).get("usage", {}) or {}
-                return {
-                    "ok": True,
-                    "model": model_id,
-                    "ttft_seconds": usage.get("time_to_first_token"),
-                    "cached_tokens": (usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
-                    "prompt_tokens": usage.get("prompt_tokens"),
-                }
-            return {"ok": False, "message": f"HTTP {resp.status_code}: {resp.text[:200]}"}
-    except Exception as e:
-        log.warning("warm_cache failed: %s", e)
-        return {"ok": False, "message": str(e)}
+        try:
+            headers = await public_headers(cfg, url=f"{api_base}/chat/completions")
+            async with httpx.AsyncClient(timeout=_WARM_TIMEOUT) as client:
+                resp = await client.post(
+                    f"{api_base}/chat/completions", headers=headers, json=body,
+                )
+                if resp.status_code == 200:
+                    usage = (resp.json() or {}).get("usage", {}) or {}
+                    return {
+                        "ok": True,
+                        "model": model_id,
+                        "ttft_seconds": usage.get("time_to_first_token"),
+                        "cached_tokens": (usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
+                        "prompt_tokens": usage.get("prompt_tokens"),
+                    }
+                return {"ok": False, "message": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+        except Exception as e:
+            log.warning("warm_cache failed: %s", e)
+            return {"ok": False, "message": str(e)}
 
 
 async def probe_cache(

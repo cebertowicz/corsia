@@ -94,6 +94,10 @@ async def list_servers():
         s.update(await run_in_db(_network_view, s["id"]))
         s.update(billing[s["id"]])
         s["corsia_omlx"] = own is not None and s["id"] == own["id"]
+        if s["provider"] == "omlx":
+            from llm.providers.omlx_supervisor import is_restarting
+
+            s["restarting"] = is_restarting(s["id"])
     keys = await run_in_db(server_keys, [s["id"] for s in servers])
     return {"servers": [_public_server_view(s, keys) for s in servers]}
 
