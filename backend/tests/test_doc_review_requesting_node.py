@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from doceditor import review_requests as reviews
-from plans import admission, intent_words, mutations, public, service
+from plans import admission, mutations, public, service
 from registry.registration_origin import RegistrationOrigin
 from test_doc_review_requests import review_env, stored  # noqa: F401
 from test_review_fork_cold_request import TARGET, _prepare, _turn
@@ -75,21 +75,9 @@ def test_a_person_request_is_null_even_from_a_thread_with_a_live_node(review_env
     assert _ask(aid, kind="user", origin=origin)["requesting_node_id"] is None
 
 
-def _words(db, node: str) -> None:
-    mutations.edit_node(
-        node, expected_revision=service.get_node(node, db=db).revision, actor_id="requester", db=db,
-        intent_words=[{
-            "quote": "Keep the claims honest", "author": "agent", "role": "bears_on",
-            "source_kind": "message", "source_id": "requester",
-        }],
-    )
-    db.commit()
-
-
 def test_the_fork_input_carries_the_task_and_revision_read_not_a_plan_read_line(review_env, monkeypatch):
     db, aid = review_env
     node = _task(db, "requester", "Ship it", intent="Preserve the outcome")
-    _words(db, node)
     result = _ask(aid, origin=_current(db, "requester", node))
     _turn(db, "completed", "completed", messages=True)
     instruction = _prepare(monkeypatch, result["id"])[1].instruction
@@ -97,7 +85,6 @@ def test_the_fork_input_carries_the_task_and_revision_read_not_a_plan_read_line(
     assert f'Requested from task "Ship it" ({node}), requirements revision {revision}.' in instruction
     assert "Intent: Preserve the outcome" in instruction
     assert "Acceptance criteria: Ship it secret criteria" in instruction
-    assert 'agent (bears_on): "Keep the claims honest"' in instruction
     assert "Check claims" in instruction and "plan_read" not in instruction
 
 
@@ -123,13 +110,13 @@ def test_an_overlong_criteria_text_is_bounded_in_the_fork_input():
 
     block = requesting_task_block({
         "node_id": "n", "title": "T", "requirements_revision": 1, "intent": None,
-        "acceptance_criteria": "é" * 5000, "intent_words": [],
+        "acceptance_criteria": "é" * 5000,
     })
     assert "Intent:" not in block and block.count("é") == MAX_CRITERIA_BYTES // 2
     assert block.endswith(" [truncated]")
     whole = requesting_task_block({
         "node_id": "n", "title": "T", "requirements_revision": 1, "intent": None,
-        "acceptance_criteria": "short", "intent_words": [],
+        "acceptance_criteria": "short",
     })
     assert whole.endswith("Acceptance criteria: short")
 
@@ -229,6 +216,5 @@ def test_the_fork_and_the_inherited_task_name_the_same_intent_source(review_env,
     result = _ask(aid, origin=_current(db, "requester", child))
     _turn(db, "completed", "completed", messages=True)
     instruction = _prepare(monkeypatch, result["id"])[1].instruction
-    canonical = intent_words.canonical(db, child)
-    assert canonical["id"] == parent
+    assert public.intent_of(child, db=db)["node_id"] == parent
     assert f'Requested from task "Parent" ({parent})' in instruction
