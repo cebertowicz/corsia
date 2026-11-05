@@ -49,10 +49,8 @@ follows `frontend/DESIGN-SYSTEM.md`.
 
 ### Frontend composition
 
-The SvelteKit entry at `frontend/src/routes/+page.svelte` composes the app's
-surfaces. Shared controls live in `frontend/src/lib/components/ui/`, client
-state in `frontend/src/lib/stores/`, API clients in `frontend/src/lib/api/`,
-and WebSocket handlers in `frontend/src/lib/ws/`.
+See the [frontend component map](FRONTEND.md#component-map) for the app's
+composition root, shared controls, state, API clients, and WebSocket handlers.
 
 The attention dock is mounted in the thread chat slot above the composer.
 `components/attention/AttentionDock.svelte` renders the queue; the
@@ -62,7 +60,7 @@ advances the visible queue while its request is in flight; a failed request
 returns the item for retry. `api/heldReplies.ts` calls the server for that
 operation. The dock is not mounted in documents or settings.
 
-Frontend composition checked against the code at
+This frontend composition section was checked against the code at
 `de2e414bce808912cf9b297650277cd0711b4676`.
 
 ### Connected apps and external events
@@ -81,7 +79,7 @@ head-check aggregator (`github_head_checks.py`) combines completed check suites
 into a per-head event. Its admission hook is on by default outside test mode;
 `CORSIA_GITHUB_HEAD_CHECKS_ENABLE=0` turns it off.
 
-Checked against the code at `7a8c55d84`.
+The other entries in this system map were checked against the code at `7a8c55d84`.
 
 ### Verified ONNX assets
 
