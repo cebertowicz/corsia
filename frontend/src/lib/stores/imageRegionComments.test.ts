@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({ postComment: vi.fn(), captureComment: vi.fn(),
 vi.mock('$lib/api/docs', async (importOriginal) => ({
 	...(await importOriginal<object>()), postComment: mocks.postComment, fetchComments: vi.fn(async () => ({ comments: [] })),
 }));
-vi.mock('./commentSelection', () => ({ captureComment: mocks.captureComment, selectComment: mocks.selectComment, SELECTION_LOST: 'Lost' }));
+vi.mock('./commentSelection', () => ({ captureComment: mocks.captureComment, selectComment: mocks.selectComment }));
 
 import { DocRequestError } from '$lib/api/docs';
 import { docComments } from './docComments';
@@ -43,14 +43,13 @@ describe('a comment on part of an image inside a document', () => {
 		expect(get(docComments)['live-doc']).toBeUndefined();
 	});
 
-	it('reports a diagram whose range is gone from the live document as a changed diagram, and leaves a photo as it was', async () => {
+	it('leaves a diagram whose range is gone from the live document as a lost selection, never a changed diagram the viewer could refresh to', async () => {
 		const session = { artifactId: 'live-doc', releaseReservation: vi.fn() } as unknown as LiveDocumentSession;
 		mocks.selectComment.mockReturnValue('selection');
 		mocks.captureComment.mockRejectedValue(new Error('Lost'));
 		const diagram = addDocImageComment({ artifactId: 'doc', from: 0, to: 10, text: '```mermaid', session, diagramSource: 'graph TD' }, BOX, 'Pin');
-		await expect(diagram).rejects.toBeInstanceOf(DocRequestError);
-		await expect(diagram).rejects.toMatchObject({ status: 409, kind: 'diagram_changed' });
-		await expect(addDocImageComment({ artifactId: 'doc', from: 9, to: 23, text: TEXT, session }, BOX, 'Pin')).rejects.toThrow('Lost');
+		await expect(diagram).rejects.toThrow('Lost');
+		await expect(diagram).rejects.not.toBeInstanceOf(DocRequestError);
 		expect(mocks.postComment).not.toHaveBeenCalled();
 	});
 
