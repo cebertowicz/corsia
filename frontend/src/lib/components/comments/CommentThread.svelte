@@ -1,13 +1,9 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import { fade, slide } from 'svelte/transition';
-	import { tick } from 'svelte';
-	import { get } from 'svelte/store';
-	import { prefersReducedMotion } from '$lib/stores/viewport';
-	import { captureLayout, mentionHost, playLayoutCrossfade, type MentionPlayback } from '$lib/actions/layoutCrossfade';
-	import type { Snippet } from 'svelte';
 	import './comment-link.css';
 	import { clipFade } from '$lib/actions/clipFade';
+	import { useAgreeCrossfade } from './agreeCrossfade.svelte';
 	import { lineDiff } from '$lib/diff';
 	import ToolDiff from '$lib/components/ToolDiff.svelte';
 	import type { CommentThreadData } from './CommentThreadData';
@@ -92,32 +88,7 @@
 	let resolvedOpen = $state(untrack(() => !viewEachUnread && (!!comment.newComment || !!comment.newReplyIds?.length)));
 	$effect(() => { if (!viewEachUnread && (comment.newComment || comment.newReplyIds?.length)) resolvedOpen = true; });
 	let el = $state<HTMLElement>();
-	let previousAck: boolean | undefined;
-	let agreePlayback: MentionPlayback | undefined;
-	let agreeGeneration = 0;
-	$effect.pre(() => {
-		const acked = !!comment.acked;
-		const previous = previousAck; previousAck = acked;
-		if (previous === undefined || previous === acked || !el || !get(prefersReducedMotion)) return;
-		const host = mentionHost(el);
-		let capture = agreePlayback?.handoff();
-		if (!capture) {
-			const seen = agreePlayback?.supersede();
-			capture = captureLayout(host);
-			if (capture && seen?.midFade) Object.assign(capture, { from: seen.from, liveFrom: seen.liveFrom });
-		}
-		agreePlayback = undefined;
-		if (!capture) return;
-		const generation = ++agreeGeneration;
-		void tick().then(() => {
-			if (generation !== agreeGeneration || !host?.isConnected) { capture.overlay.remove(); return; }
-			agreePlayback = playLayoutCrossfade(capture, host);
-		});
-	});
-	$effect(() => () => { agreeGeneration++; agreePlayback?.cancel(); });
-	function agreeTransition(node: HTMLElement) {
-		return get(prefersReducedMotion) ? { duration: 0 } : clipFade(node);
-	}
+	const agreeTransition = useAgreeCrossfade(() => el, () => !!comment.acked);
 	let replyField = $state<ReplyField>();
 	let newestReply = $state<HTMLElement>();
 	// Bumped to observe rendered replies again with fresh geometry.
