@@ -85,6 +85,7 @@ describe('comment rail', () => {
 		const open = vi.fn();
 		await show(view, [{ from: 0, to: 5, id: 'a', onMarkerFocus: open, replyWaiting: true }]);
 		expect(buttons(view)[0].querySelector('circle')?.getAttribute('fill')).toBe('var(--accent)');
+		expect(buttons(view)[0].querySelector('circle')?.getAttribute('stroke')).toBe('none');
 		const cluster = (waiting: boolean) => [
 			{ from: 0, to: 2, id: 'a', onMarkerFocus: open, replyWaiting: waiting },
 			{ from: 2, to: 5, id: 'b', onMarkerFocus: open },

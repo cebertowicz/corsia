@@ -41,6 +41,8 @@ function glyph(replyWaiting = false): SVGSVGElement {
 		dot.setAttribute('cy', '7');
 		dot.setAttribute('r', '3');
 		dot.setAttribute('fill', 'var(--accent)');
+		// The glyph's amber stroke would ring the dot and blur it into the icon.
+		dot.setAttribute('stroke', 'none');
 		svg.append(dot);
 	}
 	return svg;
