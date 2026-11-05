@@ -19,3 +19,5 @@ CORSIA does not operate a hosted relay.
 | Pairing exchange | `backend/core/device_pairing.py` |
 | Devices settings | `frontend/src/lib/components/SettingsDevicesView.svelte` |
 | Main server binding | `backend/infra/bind_host.py` |
+
+Checked against the code at `7a8c55d84`.
