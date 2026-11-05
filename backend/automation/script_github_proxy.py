@@ -96,14 +96,14 @@ async def _serve(
                 response_headers.append((b"connection", b"close"))
                 writer.write(conn.send(h11.Response(status_code=response.status_code, headers=response_headers)))
                 started = True
-                limited_body = bytearray()
+                forbidden_body = bytearray()
                 async for chunk in response.aiter_raw():
                     if response.status_code == 403:
-                        limited_body.extend(chunk)
+                        forbidden_body.extend(chunk)
                     writer.write(conn.send(h11.Data(data=chunk)))
                     await writer.drain()
                 try:
-                    parsed_body = json.loads(limited_body) if limited_body else None
+                    parsed_body = json.loads(forbidden_body) if forbidden_body else None
                 except (ValueError, UnicodeDecodeError):
                     parsed_body = None
                 budget.record(response.status_code, dict(response.headers), parsed_body)

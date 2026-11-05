@@ -215,6 +215,8 @@ async def _authenticated_client(thread_id: str, view: AgentAccountView):
             config_dir = client_dir / "gh"
             config_dir.mkdir(mode=0o700)
             (config_dir / "config.yml").write_text(f"http_unix_socket: {github_socket}\n")
+            # gh won't run without a stored login; the forwarder adds the real one. The key is split
+            # so credential scanners don't take this placeholder for a secret.
             (config_dir / "hosts.yml").write_text(
                 "github.com:\n    user: script\n    oauth_" + "token: placeholder\n"
             )

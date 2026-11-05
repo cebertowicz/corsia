@@ -33,3 +33,14 @@ async def test_channel_executes_as_owner_without_turn(isolated_db):
     result = json.loads(bytes(writer.data[8:]))
     assert result["stdout"] == "ok" and result["code"] == 0
     assert tool.calls == [{"value": "x", "_thread_id": "script-owner", "_thread_project_id": "p"}]
+
+
+@pytest.mark.asyncio
+async def test_channel_registry_uses_owner_working_dir(monkeypatch):
+    import automation.script_tool_channel as channel
+
+    built: list[str | None] = []
+    monkeypatch.setattr(channel, "resolve_spawn_working_dir", lambda thread_id, db=None: ("/projects/p", "p"))
+    monkeypatch.setattr(channel, "build_tool_registry", lambda working_dir=None: built.append(working_dir) or ToolRegistry())
+    await channel._owner_registry("script-owner")
+    assert built == ["/projects/p"]

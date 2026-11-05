@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from infra import state
+from infra.db_async import run_in_db
+from infra.fresh_threads import resolve_spawn_working_dir
 from infra.tool_result_errors import is_error_result
 from subagents.harness_tool_bridge import build_tool_registry
 from tools.registry import ToolRegistry
@@ -47,10 +49,16 @@ async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
             pass
 
 
+async def _owner_registry(thread_id: str) -> ToolRegistry:
+    """The owner's tools at its project root, as its own turns get; unset would bind the workspace root."""
+    working_dir, _project = await run_in_db(resolve_spawn_working_dir, thread_id)
+    return await asyncio.to_thread(build_tool_registry, working_dir)
+
+
 @asynccontextmanager
 async def tool_channel(path: Path, thread_id: str, *, registry: ToolRegistry | None = None):
     """Serve tool calls for the lifetime of one script run."""
-    registry = registry or await asyncio.to_thread(build_tool_registry)
+    registry = registry or await _owner_registry(thread_id)
     active: set[asyncio.Task] = set()
 
     def connected(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
