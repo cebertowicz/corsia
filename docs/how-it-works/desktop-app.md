@@ -22,6 +22,8 @@ If the swap fails, CORSIA tries to start the old version. If the new version fai
 
 By default, app metadata lives in `~/Library/Application Support/CORSIA` and operational state in its `state` folder. A takeover can retain the source install's existing state location; `CORSIA_STATE_DIR` can also specify a state root.
 
+The app's server listens only on this computer (`127.0.0.1`). On first run it uses port 47895, or the port `CORSIA_DESKTOP_PORT` names; if that port is taken, it picks a free one. It records the port in `service.json` in the app metadata folder and uses it on every later launch. A takeover of a source install that ran as a background service keeps that service's port. A source install without the app serves on 1956 unless `BACKEND_PORT` is set, for example in its `.env`.
+
 | Part | Path |
 |---|---|
 | App and first-run handling | `desktop/src-tauri/src/` |
