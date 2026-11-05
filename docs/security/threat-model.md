@@ -12,7 +12,7 @@ What CORSIA tries to protect, from whom, what it assumes, and what it does not t
 | Your accounts' outbound actions | Email you send, invites, posts made in your name |
 | Your machine's integrity | System files, startup items, disks |
 
-The workspace itself is **not** in this list as something agents are kept out of. Agents work there, and their file tools can read and change anything in it. Other projects are kept from an agent's shell on macOS, which narrows what a mistaken or tricked command reaches but doesn't separate projects. See [Agent sandbox](agent-sandbox.md#projects).
+The workspace itself is **not** in this list as something agents are kept out of. Agents work there, and their file tools can read and change anything in it. Other projects are kept from an agent's shell, which narrows what a mistaken or tricked command reaches but doesn't separate projects. See [Agent sandbox](agent-sandbox.md#projects).
 
 ## Who we defend against
 

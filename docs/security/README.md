@@ -30,7 +30,7 @@ flowchart LR
 The arrows show an agent in a project. The CORSIA agent's shell also reaches ordinary projects without a lease; it is fenced from Local only projects only while its own chat isn't Local only ([Agent sandbox](agent-sandbox.md#projects)).
 
 - **Workspace:** the folder CORSIA works in (by default `~/corsia`). It holds every project, shared files, context and each conversation's working files.
-- **Project:** a folder inside the workspace. Projects organize work and settings, and on macOS they are a **partial** boundary: an agent's shell can't read or write another project's folder or its repositories, but its file tools and conversation tools still can, and so can a shell reading the workspace's Git history. See [Agent sandbox](agent-sandbox.md#projects).
+- **Project:** a folder inside the workspace. Projects organize work and settings, and they are a **partial** boundary: an agent's shell can't read or write another project's folder or its repositories, but its file tools and conversation tools still can, and so can a shell reading the workspace's Git history. See [Agent sandbox](agent-sandbox.md#projects).
 - **Local only:** a setting that keeps a chat or project on local models. A whole project with it on is also closed to other agents' shells, even under a lease; the one exception is a CORSIA agent whose own chat is Local only. See [Data and privacy](data-and-privacy.md#local-only).
 - **Thread:** one conversation with one agent. Each thread has its own working folder inside the workspace.
 - **Lease:** a short, reviewed grant that lets one agent run commands outside the workspace. See [Host access](host-access.md).

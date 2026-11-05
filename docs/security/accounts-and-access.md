@@ -38,7 +38,7 @@ What an agent can reach through tools:
 
 | | Reach |
 |---|---|
-| Files | File tools: the whole workspace and registered repositories. Shell on macOS: the same, minus the projects it is fenced from ([Agent sandbox](agent-sandbox.md#projects)) |
+| Files | File tools: the whole workspace and registered repositories. Shell: the same, minus the projects it is fenced from ([Agent sandbox](agent-sandbox.md#projects)) |
 | Other conversations | Any conversation's messages by its id, in any project, except an [isolated worker's](untrusted-content.md#isolated-workers) (`backend/tools/query_projects.py`) |
 | Connected apps | Those whose reach includes its project ([Connected apps](connected-apps.md)) |
 | Host access | Only through a reviewed lease ([Host access](host-access.md)) |
@@ -48,7 +48,7 @@ What an agent can reach through tools:
 
 A **project** decides what an agent is given by default: its project's context and instructions, which connected apps it can use, and whether Local only applies.
 
-It also fences the shells of other projects' agents out of its folder and repositories; the CORSIA agent's shell is fenced only from Local only projects, which stay closed even under a lease, and from none while its own chat is Local only ([Agent sandbox](agent-sandbox.md#projects)). It does **not** stop an agent's file tools from reading or changing another project's files, or its conversation tools from reading another project's conversations. Linux has no fence.
+It also fences the shells of other projects' agents out of its folder and repositories; the CORSIA agent's shell is fenced only from Local only projects, which stay closed even under a lease, and from none while its own chat is Local only ([Agent sandbox](agent-sandbox.md#projects)). It does **not** stop an agent's file tools from reading or changing another project's files, or its conversation tools from reading another project's conversations.
 
 To keep two bodies of work apart, give each its own workspace and CORSIA install, ideally under separate macOS users.
 
