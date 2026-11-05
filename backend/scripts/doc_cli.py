@@ -231,7 +231,7 @@ def _add_review_request_commands(sub) -> None:
     rc.set_defaults(func=cmd_review_cancel)
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="corsia doc",
         description="Agent doc-collab — comment / reply / review / resolve / ack / read.")
@@ -306,7 +306,11 @@ def main(argv: list[str] | None = None) -> int:
     _add_common(cm)
     cm.set_defaults(func=cmd_comments)
 
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     return args.func(args)
 
 
