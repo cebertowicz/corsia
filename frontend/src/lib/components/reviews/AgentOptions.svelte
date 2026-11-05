@@ -14,7 +14,7 @@
 		</div>
 	{/each}
 	{#if status === 'loading'}<p class="empty" role="status">Loading agents…</p>
-	{:else if status === 'error'}<p class="empty" role="status">Couldn't load agents. <Button size="sm" variant="ghost" onclick={retry}>Retry</Button></p>
+	{:else if status === 'error'}<p class="empty" role="status">Couldn’t load agents. <Button size="sm" variant="ghost" onclick={retry}>Retry</Button></p>
 	{:else if status === 'empty'}<p class="empty" role="status">No agents in this project to tag.</p>
 	{:else if !matches.length}<p class="empty" role="status">No matching agents.</p>{/if}
 </div>

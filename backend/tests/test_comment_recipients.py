@@ -191,6 +191,10 @@ async def test_leave_through_comment_tool(isolated_db, monkeypatch):
     seed_thread(db, "agent", model=None)
     aid = seed_document(db, "owner")
     root, _ = add_comment(db, aid, author_id="agent")
+    # Leave never silently drops another change asked for in the same call.
+    combined = await DocCommentUpdateTool().execute(comment_id=root["id"], leave=True, resolved=True, _thread_id="agent")
+    assert combined.startswith("Error: leave can't be combined with resolved")
+    assert events == []
     result = await DocCommentUpdateTool().execute(comment_id=root["id"], leave=True, _thread_id="agent")
     assert json.loads(result) == {"left": True, "comment_id": root["id"]}
     assert events == [("comment_thread_left", {"comment_id": root["id"]})]
@@ -577,10 +581,16 @@ def test_mixed_pending_batch_delivers_untagged_and_reports_refusal(isolated_db, 
     batch = next(batch_id for batch_id in result["batch_ids"] if db.execute(
         "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0] == "recipient")
     notes = []
-    monkeypatch.setattr(feedback_delivery, "undelivered_note", lambda db, batch, reason, **kwargs: notes.append(reason))
+    finals = []
+    def note(db, batch, reason, **kwargs):
+        notes.append(reason)
+        finals.append(kwargs.get("final"))
+    monkeypatch.setattr(feedback_delivery, "undelivered_note", note)
     monkeypatch.setattr(local_only, "send_needs_hold", lambda *args, **kwargs: True)
     feedback_batches.close_batch(db, batch, "send")
     assert len(notes) == 1 and "recipient is cloud-bound" in notes[0]
+    # The refusal is sent whole: a retry can't clear Local only, so it never gets the retry wording.
+    assert finals == [True]
     assert tagged["id"] in notes[0] and ordinary_tagged["id"] not in notes[0]
     assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == "delivered"
     assert {row[0] for row in db.execute("SELECT comment_id FROM doc_feedback_batch_items WHERE batch_id=?", (batch,))} == {plain["id"], ordinary_tagged["id"]}

@@ -322,6 +322,12 @@ class DocCommentUpdateTool(Tool):
             return context
         actor_thread_id, actor = context
         if kwargs.get("leave"):
+            others = [name for name in ("resolved", "acked", "body", "from_off", "to_off", "anchor_text", "region",
+                                        "decision", "reason") if kwargs.get(name) is not None]
+            if kwargs.get("all_from_author"):
+                others.append("all_from_author")
+            if others:
+                return f"Error: leave can't be combined with {', '.join(others)}. Leave in its own call."
             return await leave_comment_thread(comment_id, actor_thread_id, actor["user_id"])
         if refusal := decision_only_error(
                 decision=kwargs.get("decision"), all_from_author=bool(kwargs.get("all_from_author")),

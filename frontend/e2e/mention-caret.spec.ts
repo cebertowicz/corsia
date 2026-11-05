@@ -23,7 +23,7 @@ for (const host of ['comment', 'reply'] as const) {
 				? page.locator('textarea[placeholder="Comment, or @ to tag an agent"]:not([inert] *)')
 				: page.locator('.ct:not([inert] *)').filter({ hasText: 'Existing thread' }).first().locator('textarea');
 			await input.fill('Hello @Al');
-			await expect(page.getByText("Couldn't load agents.")).toBeVisible();
+			await expect(page.getByText("Couldn’t load agents.")).toBeVisible();
 			const caret = await input.evaluate((element: HTMLTextAreaElement) => element.selectionStart);
 			fail = false;
 			await page.getByRole('listbox', { name: 'Agents to tag' }).getByRole('button', { name: 'Retry' }).click();
