@@ -1,6 +1,6 @@
 # Turns and delivery
 
-A turn is one run of a thread's agent loop. This page covers how an input from a person, another agent or an external event becomes a turn, how inputs that arrive during a turn are handled, what survives a restart, and what can go wrong.
+A turn is one run of a thread's agent loop. This page covers how an input from a person, another agent or an external event becomes a turn, how inputs that arrive during a turn are handled, what Stop does, how a turn waits for a checkpoint, what survives a restart, and what can go wrong.
 
 ## What it is
 
@@ -55,6 +55,21 @@ If the second try fails too, the turn ends with the error. There is no third try
 
 When a turn is stopped by a plan limit or vendor usage limit, the system can queue a continue input so work can resume when the limit allows it. It does not add one when other queued input will restart the thread, and repeated vendor refusals can stop the continuation chain (`backend/infra/plan_limit_continue.py`).
 
+### Stop
+
+Stop names one exact turn. If that turn has already ended, or a newer one is running, Stop changes nothing and says so (`backend/ws/stop_control.py`).
+
+- A stopped turn ends as cancelled and is not resumed. If it was waiting for a checkpoint, it stops without waiting for the checkpoint to finish (`backend/core/checkpoint_wait.py`).
+- Inputs the stopped turn had claimed but never written end as cancelled. Inputs still waiting in the queue stay there, and the next one can start a new turn (`backend/infra/thread_driver.py`).
+- A stop caused by a plan limit is different: the turn's unwritten inputs go back to the queue.
+
+### Checkpoints during a turn
+
+When history nears the model's window, a turn can need a checkpoint before its next model call. At that boundary it waits for the checkpoint, or adopts one that another request already installed, then continues (`backend/core/fork_fit.py`). What starts a checkpoint and what it keeps is in [Context and memory](context-and-memory.md).
+
+- **Warm checkpoint:** reuses the provider's current, cached conversation, so the summary call can reuse the provider's prompt cache.
+- **Cold checkpoint:** rebuilds a bounded copy of the history for a fresh call. It is used when there is no usable warm source. If the provider refuses a warm checkpoint's input as too large, the system tries a cold one instead (`backend/core/checkpoint_cold_fallback.py`).
+
 ### Surviving a restart
 
 Recovery is a single pass at boot, not a periodic repair loop (`backend/infra/thread_recovery.py`).
@@ -85,6 +100,8 @@ Actionable plan work can receive a liveness wake with backoff; a wake delivered 
 | Native safe-boundary claim | `backend/core/turn_safe_boundary.py` |
 | Restart recovery | `backend/infra/thread_recovery.py` |
 | Limit continue | `backend/infra/plan_limit_continue.py` |
+| Stop | `backend/ws/stop_control.py`, `backend/core/checkpoint_wait.py` |
+| Checkpoint at a turn boundary | `backend/core/fork_fit.py`, `backend/core/checkpoint_cold_fallback.py` |
 | WebSocket ingress for the UI | `backend/ws/ingress.py`, `backend/ws/message_dispatch.py` |
 
 Checked against the code at `7a8c55d84`.
