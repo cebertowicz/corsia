@@ -43,6 +43,7 @@ async def test_an_agent_create_names_the_comment_and_its_author_thread(
     assert sent == [{
         "type": "doc_comment_changed", "artifact_id": artifact_id,
         "comment_id": created["comment"]["id"], "author_thread_id": reviewer,
+        "reply_attention_changed": True,
     }]
 
 

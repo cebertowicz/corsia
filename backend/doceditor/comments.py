@@ -203,7 +203,9 @@ def create_with_status(
                 comment_notifications.announce_after_commit(
                     connection, artifact_id, comment_id=cid if named else None,
                     author_thread_id=author_thread_id if named else None,
-                    reply_attention_changed=bool(author_kind == 'agent'))
+                    # Matches feedback_state.new_reply_rows: suggestions and review notes are never unread.
+                    reply_attention_changed=bool(
+                        author_kind == 'agent' and (parent_id or (replacement is None and not review))))
             if region is not None:
                 live_events.region_after_commit(connection, "placed", artifact_id, w, h, author_kind=author_kind)
         return r, created
