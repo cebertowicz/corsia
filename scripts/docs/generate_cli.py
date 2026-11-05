@@ -123,7 +123,7 @@ def describe_parser(lines, parser, command):
                 details.append(text)
             if action.choices is not None:
                 details.append("Choices: " + ", ".join(str(x) for x in action.choices))
-            if action.required:
+            if action.required and "required" not in (action.help or "").lower():
                 details.append("Required")
             default = action.default
             help_text = details[0].lower() if action.help and action.help != argparse.SUPPRESS else ""
