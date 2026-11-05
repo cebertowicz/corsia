@@ -58,7 +58,7 @@ def test_add_captures_the_person_input_consumed_by_its_turn(db):
 
 
 @pytest.mark.parametrize("operation", ("add", "insert"))
-def test_multiple_person_inputs_need_authority_and_capture_only_that_quote(db, operation):
+def test_multiple_person_inputs_capture_only_the_quoted_one(db, operation):
     _init_messages_fts(db)
     plan = service.ensure_plan("thread", "root", db=db)
     for message_id, content in (("requested", "Build the requested outcome."), ("unrelated", "Check the weather.")):
@@ -66,9 +66,6 @@ def test_multiple_person_inputs_need_authority_and_capture_only_that_quote(db, o
     db.execute("UPDATE messages SET active_turn_id='multi-turn' WHERE id IN ('requested', 'unrelated')")
     actor = replace(ACTOR, turn_id="multi-turn")
     params = {"title": "Build", "acceptance_criteria": "Outcome exists", "size": "S", "intent": "Build the outcome"}
-
-    with pytest.raises(service.PlanInputError, match="task creation needs intent_words"):
-        mutate(plan.id, operation, params, actor=actor, provenance="test", mutation_id=f"multi-refuse-{operation}", db=db)
 
     result = mutate(
         plan.id, operation, {**params, "intent_words": [{"quote": "Build the requested outcome.", "role": "authority"}]},
@@ -81,7 +78,7 @@ def test_multiple_person_inputs_need_authority_and_capture_only_that_quote(db, o
 
 
 @pytest.mark.parametrize("role", ("bears_on", "authority"))
-def test_caller_person_quote_replaces_single_turn_input_and_needs_authority(db, role):
+def test_caller_person_quote_replaces_single_turn_input(db, role):
     _init_messages_fts(db)
     plan = service.ensure_plan("thread", "root", db=db)
     accept_thread_input("root", role="user", content="Build the requested outcome.", intent="apply_now",
@@ -92,15 +89,10 @@ def test_caller_person_quote_replaces_single_turn_input_and_needs_authority(db, 
     params = {"title": "Build", "acceptance_criteria": "Outcome exists", "size": "S",
               "intent": "Build the outcome", "intent_words": [{"quote": "Build the requested outcome.", "role": role}]}
     actor = replace(ACTOR, turn_id="one-turn")
-    if role == "bears_on":
-        # The turn input is not recorded, so it cannot admit the task either.
-        with pytest.raises(service.PlanInputError, match="task creation needs intent_words"):
-            mutate(plan.id, "add", params, actor=actor, provenance="test", mutation_id="one-caller-bears", db=db)
-        return
-    result = mutate(plan.id, "add", params, actor=actor, provenance="test", mutation_id="one-caller-quote", db=db).result
+    result = mutate(plan.id, "add", params, actor=actor, provenance="test", mutation_id=f"one-caller-{role}", db=db).result
     words = intent_words.newest(db, result["node"]["id"])
     assert [(w["author"], w["role"], w["quote"]) for w in words] == [
-        ("person", "authority", "Build the requested outcome."),
+        ("person", role, "Build the requested outcome."),
     ]
 
 
@@ -181,22 +173,19 @@ def test_add_and_insert_refuse_missing_intent(db, operation):
 
 
 @pytest.mark.parametrize("operation", ("add", "insert"))
-def test_add_and_insert_require_authority_when_no_person_origin(db, operation):
+def test_add_and_insert_need_no_person_quote_without_a_person_origin(db, operation):
     plan = service.ensure_plan("thread", "root", db=db)
     params = {
-        "title": "Ungrounded", "acceptance_criteria": "It is grounded", "size": "S",
-        "intent": "Ground the requested outcome",
+        "title": "Agent-started", "acceptance_criteria": "It is done", "size": "S",
+        "intent": "Do the work the agent took on",
     }
 
-    with pytest.raises(service.PlanInputError) as refusal:
-        mutate(
-            plan.id, operation, params, actor=ACTOR, provenance="test",
-            mutation_id=f"intent-authority-{operation}", db=db,
-        )
+    result = mutate(
+        plan.id, operation, params, actor=ACTOR, provenance="test",
+        mutation_id=f"intent-no-quote-{operation}", db=db,
+    ).result
 
-    assert str(refusal.value) == (
-        "task creation needs intent_words with an exact person quote and role: authority"
-    )
+    assert result["node"]["title"] == "Agent-started"
 
 
 def test_human_add_requires_intent_but_not_an_authority_quote(db):
@@ -300,7 +289,7 @@ def test_doc_comment_quote_resolves_and_agent_words_skip_lookup(db):
     ]
 
 
-def test_agent_only_turn_needs_person_authority_and_uses_it_as_anchor(db):
+def test_agent_only_turn_keeps_a_supplied_person_authority_as_anchor(db):
     _init_messages_fts(db)
     plan = service.ensure_plan("thread", "root", db=db)
     accept_thread_input(
@@ -312,18 +301,6 @@ def test_agent_only_turn_needs_person_authority_and_uses_it_as_anchor(db):
         message_id="agent-relay", metadata={"sender_kind": "agent"}, db=db,
     )
     db.execute("UPDATE messages SET active_turn_id='agent-turn' WHERE id='agent-relay'")
-
-    with pytest.raises(service.PlanInputError) as refusal:
-        mutate(
-            plan.id, "add", {
-                "title": "Unapproved delegated task", "acceptance_criteria": "It is approved", "size": "S",
-                "intent": "Delegate the implementation",
-            }, actor=replace(ACTOR, turn_id="agent-turn"), provenance="test",
-            mutation_id="agent-turn-refusal", db=db,
-        )
-    assert str(refusal.value) == (
-        "task creation needs intent_words with an exact person quote and role: authority"
-    )
 
     result = mutate(
         plan.id, "add", {
@@ -353,18 +330,14 @@ def test_wrapped_delivered_and_blank_user_rows_are_not_the_persons_words(db):
         )
     db.execute("UPDATE messages SET active_turn_id='wrapped-turn'")
 
-    assert not intent_words.has_person_origin(db, "wrapped-turn")
-    with pytest.raises(service.PlanInputError) as refusal:
-        mutate(
-            plan.id, "add", {
-                "title": "Not asked", "acceptance_criteria": "It was asked", "size": "S",
-                "intent": "Build it now",
-            }, actor=replace(ACTOR, turn_id="wrapped-turn"), provenance="test",
-            mutation_id="wrapped-turn-refusal", db=db,
-        )
-    assert str(refusal.value) == (
-        "task creation needs intent_words with an exact person quote and role: authority"
-    )
+    result = mutate(
+        plan.id, "add", {
+            "title": "Not asked", "acceptance_criteria": "It was asked", "size": "S",
+            "intent": "Build it now",
+        }, actor=replace(ACTOR, turn_id="wrapped-turn"), provenance="test",
+        mutation_id="wrapped-turn-add", db=db,
+    ).result
+    assert all(word["author"] != "person" for word in intent_words.newest(db, result["node"]["id"]))
 
 
 def test_a_long_person_origin_is_kept_within_the_quote_limit(db):

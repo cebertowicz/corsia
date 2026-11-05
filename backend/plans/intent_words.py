@@ -272,11 +272,6 @@ def turn_origin(connection: sqlite3.Connection, turn_id: str | None) -> sqlite3.
     return agents[0] if len(agents) == 1 else None
 
 
-def has_person_origin(connection: sqlite3.Connection, turn_id: str | None) -> bool:
-    row = turn_origin(connection, turn_id)
-    return row is not None and _is_person_message(row)
-
-
 def capture_origin(connection: sqlite3.Connection, node_id: str, *, turn_id: str | None, revision: int) -> bool:
     """Capture the turn's unambiguous input and report whether it is person-authored."""
     row = turn_origin(connection, turn_id)
