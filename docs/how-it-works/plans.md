@@ -58,10 +58,10 @@ A task handed to a worker stays on the parent's plan and is linked to the worker
 
 ### Decisions
 
-A decision goes through draft, parent review, raised, then answered, or invalidated if it can no longer be answered (`backend/plans/decision_lifecycle.py`). It has two to four lettered options and a free-form "other", which must always be offered, plus a recommendation; it can ask for one pick or any subset (`backend/plans/decision_fields.py`). A decision belongs to the plan, not to the agent that asked it:
+An agent's decision goes through draft, parent review, raised, then answered, or invalidated if it can no longer be answered (`backend/plans/decision_lifecycle.py`). The one decision CORSIA raises itself, the offer to hand a workflow's acceptance gate to an agent (see [Workflows](workflows.md)), is created already raised, with no draft or review step (`backend/plans/decisions.py`). A decision has two to four lettered options and a free-form "other", which must always be offered, plus a recommendation; it can ask for one pick or any subset (`backend/plans/decision_fields.py`). A decision belongs to the plan, not to the agent that asked it:
 
 - If an asking thread is archived but the owning plan remains, the question stays and still lands on that plan.
-- If the owning plan goes away, including when its owner thread is archived, or the task it came from is closed, the question is withdrawn as `invalidated` and not counted as a failure.
+- If the owning plan goes away, including when its owner thread is archived, or the task it came from is closed or marked done, or the person chooses Won't do on it, the question is withdrawn as `invalidated` and not counted as a failure.
 
 ### Liveness
 
@@ -86,3 +86,5 @@ A thread with actionable plan work can receive a liveness wake. The initial idle
 | Liveness wakes | `backend/automation/plan_liveness.py` |
 | Holds and decision fields | `backend/plans/holds.py`, `backend/plans/decision_fields.py` |
 | Plan tool an agent calls | `backend/tools/plans.py` |
+
+Checked against the code at `7a8c55d84`.

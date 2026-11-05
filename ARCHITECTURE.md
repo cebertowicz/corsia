@@ -171,8 +171,9 @@ without a manual start or another Turn. A delegated step's wait is read from
 its worker, so the worker's side reconciles the delegator: every worker-plan
 reconciliation and the worker's Turn end (`plans/delegated_selection.py`).
 The step taking its slot back is state; the parent hears about its
-worker only through the notification matrix. A closing mutation (request_review,
-fail, accept, accept_with_follow_up, archive_node) may start one task the caller
+worker only through the notification matrix. A closing or parking mutation
+(request_review, mark_done, fail, accept, accept_with_follow_up, close_node,
+archive_node, block_node, arm_watch) may start one task the caller
 names through the same activate/start writers, after its own release and before
 reconciliation, and returns a bounded `next` block composed by
 `plans/close_next.py`, which reads the selection owners and is not one; nothing
@@ -414,6 +415,8 @@ node's own `waited_seconds` in the ages of running, review and waiting rows.
 `plans.public.open_wait_intervals` returns the same intervals per thread,
 unioned over that thread's own plan nodes and clipped to a window, for a run's
 open time (the caller passes descendant threads; there is no delegation walk).
+
+Checked against the code at `7a8c55d84`.
 
 ### User presence
 

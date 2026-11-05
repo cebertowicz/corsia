@@ -475,8 +475,9 @@ CORSIA_ANALYTICS_PROJECT=corsia PYTHONPATH=tools \
 ### What is state and what is evidence
 
 Plan **state** lives in `plans`, `plan_nodes`, `plan_node_dependencies`,
-`plan_node_events`, `plan_node_artifact_links` and `plan_mutation_receipts`.
-It is transactional and audited, and it is the only
+`plan_node_events`, `plan_node_artifact_links`, `plan_mutation_receipts`,
+`plan_markdown_imports`, `plan_node_attempts`, `plan_tool_dispatches` and
+`plan_node_holds`. It is transactional and audited, and it is the only
 thing any decision or authorization reads.
 
 Product events are **operational evidence**: fail-silent, post-state, and
@@ -499,7 +500,7 @@ transactional, exact, and survives an analytics store that was never enabled.
 | stalled duration | `plan_liveness_wakes.fired_at` |
 | wake admission (attempts) | `continuation_triggers.attempt` |
 | delivery outcome | `continuation_triggers.state` / `.reason` |
-| wake deferral and stall | `continuation_triggers.state` / `.deferrals` / `.reason` |
+| wake deferral and failure | `continuation_triggers.state` / `.deferrals` / `.reason` |
 | wake cost | `llm_usage.cost_usd`, joined through `sessions` |
 | dedupe | **not observable** — see below |
 | rollup freshness | `plans.revision`, `plan_nodes.updated_at` |
@@ -569,7 +570,8 @@ SELECT kind,
 incremented `attempt`, and a wake that was admitted and then failed to land was
 still admitted. Read delivery success as
 `delivered / (delivered + failed WHERE reason='delivery_failed')`.
-Only a failed delivery stalls a trigger now, and nothing defers one; rows
+A failed delivery marks its trigger `failed` with reason `delivery_failed` and
+stalls the wake in `plan_liveness_wakes`; nothing defers a trigger. Rows
 written before 2026-10-22 may still carry `deferred`, `deferrals`, or the
 reasons `cycle_cap_reached`, `wake_budget_exhausted` and `deferral_exhausted`.
 
@@ -624,11 +626,13 @@ Decision age uses the same `plan_node_events` series, from `decision_raised` to
 
 ### `plans.close_next`
 
-A closing mutation (request_review, fail, accept, accept_with_follow_up,
-archive_node) returns a bounded `next` block: the task now holding its
+A closing or parking mutation (request_review, mark_done, fail, accept,
+accept_with_follow_up, close_node, archive_node, block_node, arm_watch) returns
+a bounded `next` block: the task now holding its
 executor's slot, a few of that executor's other open tasks, and the outcome of
 an optional named next task. The plans domain's one emit point, in
-`backend/plans/boundary.py`, measures whether that block replaces a whole-plan
+`backend/plans/close_next_event.py` (called from `backend/plans/boundary.py`),
+measures whether that block replaces a whole-plan
 reread: follow-through, the refusal mix, and how often an already-active task
 fills the slot. It fires once per fresh closing mutation, after its write has
 committed; a replayed mutation emits nothing.
@@ -636,6 +640,7 @@ committed; a replayed mutation emits nothing.
 | Property | Meaning |
 |---|---|
 | `operation` | the closing or parking operation |
+| `idle` | `pick_up` when the block carries an idle pick-up line, `imminent` when only its listing is in the idle order, else `none` |
 | `named` | `absent` (no task named), `started`, or the refusal code: `unknown`, `not_open`, `lane_owned`, `user_assigned`, `other_executor`, `not_ready`, `slot_held` |
 | `selected_how` | `started`, `auto_selected`, `running`, or `none` (slot empty) |
 | `open_total` | the executor's other open tasks in the plan |
@@ -673,6 +678,8 @@ worker right after the write it reports commits or fails, and the terminal
 settlement driver hands the count to that worker after the terminal write
 commits. Plans' own tools record no row and emit nothing. Tool names, reasons,
 outcomes and counts only; never tool arguments or results.
+
+Checked against the code at `7a8c55d84`.
 
 ## Cross-references
 
