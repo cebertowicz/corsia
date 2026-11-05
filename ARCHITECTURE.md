@@ -50,6 +50,22 @@ any person input, using the same persisted nudge and settlement path for both.
 Deeper callable maps live in `BACKEND.md` and `FRONTEND.md`. Visual work also
 follows `frontend/DESIGN-SYSTEM.md`.
 
+### Frontend composition
+
+See the [frontend component map](FRONTEND.md#component-map) for the app's
+composition root, shared controls, state, API clients, and WebSocket handlers.
+
+The attention dock is mounted in the thread chat slot above the composer.
+`components/attention/AttentionDock.svelte` renders the queue; the
+`attentionDock`, `attentionAnswerState`, and `attentionHeld` stores retain
+queue and answer state outside the transient drawer. A held-reply decision
+advances the visible queue while its request is in flight; a failed request
+returns the item for retry. `api/heldReplies.ts` calls the server for that
+operation. The dock is not mounted in documents or settings.
+
+This frontend composition section was checked against the code at
+`de2e414bce808912cf9b297650277cd0711b4676`.
+
 ### Connected apps and external events
 
 Connected apps expose MCP tools through `backend/tools/mcp.py` and
@@ -66,7 +82,7 @@ head-check aggregator (`github_head_checks.py`) combines completed check suites
 into a per-head event. Its admission hook is on by default outside test mode;
 `CORSIA_GITHUB_HEAD_CHECKS_ENABLE=0` turns it off.
 
-Checked against the code at `7a8c55d84`.
+The other entries in this system map were checked against the code at `7a8c55d84`.
 
 ### Verified ONNX assets
 

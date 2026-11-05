@@ -11,7 +11,8 @@ The path from a fresh clone to a merged change, for developers who want to chang
 | 3 | [How CORSIA works](../how-it-works/README.md) | The parts of the system and the terms used everywhere else |
 | 4 | [`ARCHITECTURE.md`](../../ARCHITECTURE.md) | Where each part lives in the code |
 | 5 | [`BACKEND.md`](../../BACKEND.md) or [`FRONTEND.md`](../../FRONTEND.md) | Rules for the side you are changing |
-| 6 | [Testing and review](testing.md) | How to test your change, the checks your pull request runs, and how to read the review |
-| 7 | [Writing docs](writing-docs.md) | Where a page goes, the format, and how to keep it current |
+| 6 | [Build a component](build-a-component.md) | How to use shared frontend controls in a component |
+| 7 | [Testing and review](testing.md) | How to test your change, the checks your pull request runs, and how to read the review |
+| 8 | [Writing docs](writing-docs.md) | Where a page goes, the format, and how to keep it current |
 
 Checked against the code at `310115261`.
