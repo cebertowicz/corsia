@@ -159,7 +159,10 @@ def test_an_enclosing_repository_leaves_an_unplanted_marker_in_a_real_shell(linu
 
 
 def test_another_project_is_hidden_from_a_real_shell(linux_box, monkeypatch):
+    from tools import project_fence
+    from tools.host_path_resolution import linux_denied_paths_in
     from tools.project_fence import Fence, FencedRoot
+    monkeypatch.setattr(project_fence, '_event', lambda *_a, **_k: None)
     box = linux_box
     projects = box.workspace / 'projects'
     for name in ('own', 'other'):
@@ -175,6 +178,9 @@ def test_another_project_is_hidden_from_a_real_shell(linux_box, monkeypatch):
         print(f'{command}: exit={result.returncode} stdout={result.stdout.strip()} stderr={result.stderr.strip()}')
         assert result.returncode != 0, command
         assert 'other-marker' not in result.stdout
+        if not command.startswith(('mv', 'rm')):  # a mount point refuses those as busy, not denied
+            named = [fence.refusal(path) for path in linux_denied_paths_in(result.stderr, box.workspace)]
+            assert any(message and 'in project `other`' in message for message in named), result.stderr
     assert (projects / 'other/notes.md').read_text() == 'other-marker\n'
     assert not (projects / 'other/new').exists()
     # Control: the caller's own project stays readable and writable.

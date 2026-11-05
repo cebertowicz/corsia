@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import unicodedata
 from pathlib import Path
 
@@ -86,4 +87,30 @@ def denied_paths_in(text: str) -> tuple[Path, ...]:
         candidate = candidate.strip().rstrip("/")
         if candidate.startswith("/"):
             found.append(Path(candidate))
+    return tuple(dict.fromkeys(found))
+
+
+# A bwrap mask refuses with ``Permission denied``, naming the path as the program was given it:
+# ``cat: ../B/file: ...``, ``ls: cannot open directory '../B': ...``, ``mkdir: ... ‘../B/x’: ...``
+# or ``PermissionError: [Errno 13] Permission denied: '../B/file'`` (Ubuntu 24.04, bubblewrap 0.9.0).
+_LINUX_DENIAL = "Permission denied"
+# A quote opens only after a non-word character, so the apostrophe in ``can't`` never opens one.
+_LINUX_QUOTED = re.compile(r"(?<!\w)['‘]([^'’\r\n]+)['’]")
+
+
+def linux_denied_paths_in(text: str, cwd: Path) -> tuple[Path, ...]:
+    """Return the paths a Linux program named as refused in ``text``, relative ones joined to ``cwd``.
+
+    ``cwd`` is where the command started, so a ``cd`` inside it can point a relative path elsewhere.
+    """
+    found: list[Path] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if _LINUX_DENIAL not in line:
+            continue
+        candidates = _LINUX_QUOTED.findall(line)
+        if not candidates and line.endswith(f": {_LINUX_DENIAL}"):
+            field = line[: -len(f": {_LINUX_DENIAL}")].rpartition(": ")[2]
+            candidates = [field.rpartition(" ")[2]]  # sed: can't read ../B/file
+        found.extend(canonical(cwd / candidate) for candidate in candidates if candidate.strip("/"))
     return tuple(dict.fromkeys(found))
