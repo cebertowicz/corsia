@@ -9,8 +9,13 @@ concurrency:
   group: unit-${{ github.ref }}
   cancel-in-progress: true
 
+# The relevance pattern names every path the unit tests read or import, not
+# only the code they cover: root scripts, desktop, qa, testdata, bulletins,
+# evals, benchmarks, tools and the packaged coordination models, plus every
+# tracked .md and .yaml (the source-redaction corpus and the skill-form checks
+# walk them all).
 env:
-  UNIT_TEST_RELEVANCE_PATTERNS: '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/|^\.github/actions/relevance/action\.yml$'
+  UNIT_TEST_RELEVANCE_PATTERNS: '^backend/|^frontend/|^requirements[^/]*\.txt$|^frontend/package[^/]*\.json$|^\.github/workflows/|^\.github/actions/relevance/action\.yml$|^(scripts|desktop|qa|testdata|bulletins|evals|benchmarks|tools|docs/coordination-models)/|\.(md|yaml)$'
 
 jobs:
   relevance:
