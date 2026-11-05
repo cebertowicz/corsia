@@ -219,7 +219,7 @@
 <div class="image-comments">
 <div class="layout" class:drawer-open={trackOpen} style:--drawer-size="{drawerSize}px" bind:this={root}>
 	<div class="viewer-cell">
-		<ImageLightbox bind:this={lightbox} {src} {alt} imageMargin={COMMENT_IMAGE_MARGIN} pendingReveal={!!focus && !revealed} visibleBottom={() => {
+		<ImageLightbox bind:this={lightbox} {src} {alt} preserveSameSource={diagramSource !== undefined} imageMargin={COMMENT_IMAGE_MARGIN} pendingReveal={!!focus && !revealed} visibleBottom={() => {
 			const sheet = surface?.sheetTop() ?? null;
 			const band = visibleBottom?.() ?? null;
 			return sheet === null ? band : band === null ? sheet : Math.min(sheet, band);

@@ -17,7 +17,7 @@
 	import type { ImageRegion } from '$lib/imageRegions';
 	import { attachImageWheel, imageViewerPointer } from '$lib/imageViewerPointer';
 
-	let { src, alt, readableScale, docName = '', onBack, barActions, overlay, imageMargin = FIT_MARGIN, visibleBottom, pendingReveal = false, place = null, onPlace, onLoaded, onFailed, onRetry }: {
+	let { src, alt, readableScale, docName = '', onBack, barActions, overlay, imageMargin = FIT_MARGIN, visibleBottom, pendingReveal = false, preserveSameSource = false, place = null, onPlace, onLoaded, onFailed, onRetry }: {
 		src: string;
 		alt: string;
 		/** A scale to open at instead of Fit, for an image that is readable there (a diagram); Fit when the whole image fits at it. */
@@ -35,6 +35,8 @@
 		visibleBottom?: () => number | null;
 		/** Keep a from-card subject hidden until its first positioning is complete. */
 		pendingReveal?: boolean;
+		/** A retained diagram snapshot keeps its load state when the document remaps its anchor. */
+		preserveSameSource?: boolean;
 		/** The in-session image camera, including user-chosen free zoom or Fit. */
 		place?: ImageViewportPlace | null;
 		onPlace?: (place: ImageViewportPlace) => void;
@@ -69,9 +71,14 @@
 	let coveredHeight = $state(0);
 
 	// A new image starts over at Fit, or at its readable scale when it has one and does not fit there.
+	let previousSource: string | undefined;
+	let previousAttempt = -1;
 	$effect(() => {
-		src;
-		attempt;
+		const nextSource = src;
+		const nextAttempt = attempt;
+		if (preserveSameSource && nextSource === previousSource && nextAttempt === previousAttempt) return;
+		previousSource = nextSource;
+		previousAttempt = nextAttempt;
 		natural = null;
 		failure = null;
 		free = null;
@@ -282,7 +289,7 @@
 		{/if}
 		<span class="spacer"></span>
 		{@render barActions?.({ loaded })}
-		<div class="zoom" role="group" aria-label="Zoom">
+		<div class="zoom" data-image-zoom role="group" aria-label="Zoom">
 			<button type="button" class="control" aria-pressed={loaded && atFit} disabled={!loaded} onclick={toFit}>Fit</button>
 			{#if !$isMobile}
 				<button type="button" class="control" aria-pressed={loaded && isActualSize(scale)} disabled={!loaded} onclick={() => zoomTo(1)}>100%</button>

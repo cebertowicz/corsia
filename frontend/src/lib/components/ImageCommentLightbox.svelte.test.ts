@@ -164,6 +164,25 @@ describe('ImageCommentLightbox', () => {
 		expect(commentButton()!.disabled).toBe(false);
 	});
 
+	it.each([['image', undefined], ['diagram', 'flowchart LR\n A-->B']])('keeps a %s draft open while using viewer zoom controls', async (_kind, diagramSource) => {
+		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img', diagramSource });
+		commentButton()!.click();
+		await settle();
+		host.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		await settle();
+		const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
+		textarea.value = 'Keep this draft';
+		textarea.dispatchEvent(new Event('input', { bubbles: true }));
+		await settle();
+		for (const name of ['Zoom in', 'Zoom out', 'Fit']) {
+			const button = [...host.querySelectorAll<HTMLButtonElement>('[data-image-zoom] button')].find((el) => (el.getAttribute('aria-label') ?? el.textContent?.trim()) === name)!;
+			button.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+			button.click();
+			await settle();
+			expect(document.body.querySelector('textarea')?.value, name).toBe('Keep this draft');
+		}
+	});
+
 	it('comments on the whole image from the keyboard, and holds the review bar while the comment has text', async () => {
 		const props = $state({ src: SRC, alt: 'Mock screen', artifactId: 'art-img', draftOpen: false });
 		await render(props);
