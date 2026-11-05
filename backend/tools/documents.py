@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from doceditor import comments as store, comment_recipients, doc_images, image_regions
+from doceditor import comments as store, doc_images, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_creation import create_validated_comment
 from doceditor.comment_create_db import CommentInput
@@ -32,6 +32,7 @@ from tools.artifact_tool_helpers import default_workspace, tool_path
 from tools.base import Tool
 from tools.delegation import _require_context, _tool_schema
 from tools.document_comment_listing import select_comment_threads
+from tools.document_comment_leave import leave_comment_thread
 from tools.document_regions import REGION_SCHEMA, region_result
 
 
@@ -321,23 +322,7 @@ class DocCommentUpdateTool(Tool):
             return context
         actor_thread_id, actor = context
         if kwargs.get("leave"):
-            def _leave():
-                db = get_db()
-                try:
-                    with write_transaction(db, scope="leave_comment_thread") as connection:
-                        comment = store.get_comment(comment_id, db=connection)
-                        art = registry_models.get_artifact(comment["artifact_id"], db=connection) if comment else None
-                        if art is None or not may_access_artifact(art["parent_thread_id"], actor["user_id"], db=connection):
-                            return None
-                        comment_recipients.leave(connection, comment, actor_thread_id)
-                        return comment_recipients.root_id(comment)
-                finally:
-                    db.close()
-            try:
-                root = await run_in_db(_leave)
-            except ValueError as exc:
-                return f"Error: {exc}"
-            return _json({"left": True, "comment_id": root}) if root else "Error: Comment not found"
+            return await leave_comment_thread(comment_id, actor_thread_id, actor["user_id"])
         if refusal := decision_only_error(
                 decision=kwargs.get("decision"), all_from_author=bool(kwargs.get("all_from_author")),
                 reason=kwargs.get("reason")):
