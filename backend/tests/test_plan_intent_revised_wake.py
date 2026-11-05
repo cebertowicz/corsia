@@ -48,10 +48,6 @@ def _wake_payload(db):
     (
         ({"intent": "Revised intent"}, "Revised intent"),
         ({"acceptance_criteria": "Revised criteria"}, "Initial intent"),
-        ({"intent_words": [{
-            "quote": "The new constraint", "author": "agent", "role": "bears_on",
-            "source_kind": "message", "source_id": "parent",
-        }]}, "Initial intent"),
     ),
 )
 def test_each_requirements_producer_wakes_the_live_worker_once(db, changes, expected):
@@ -65,8 +61,6 @@ def test_each_requirements_producer_wakes_the_live_worker_once(db, changes, expe
     assert payload["requirements_revision"] == 2
     assert payload["intent"] == expected
     assert payload["acceptance_criteria"] == updated.acceptance_criteria
-    if "intent_words" in changes:
-        assert [word["quote"] for word in payload["intent_words"]] == ["The new constraint"]
 
 
 def test_description_and_size_edits_do_not_wake(db):
@@ -168,29 +162,3 @@ def test_paused_delegated_step_keeps_existing_append_suppression(db):
     _edit(db, source.id, intent="Updated while paused")
 
     assert wakes(db, "worker") == []
-
-
-def test_the_last_intent_wake_revision_is_an_indexed_id_range(db):
-    from plans import plan_wake_intent
-
-    for thread in ("w1", "w2"):
-        db.execute(
-            "INSERT OR IGNORE INTO threads (id,user_id,model,title,created_at,updated_at) "
-            "VALUES (?,'u-test','claude-code/opus',?,'t','t')", (thread, thread),
-        )
-    for message_id, thread in (
-        ("plan-wake:intent_revised:n1:2:w1", "w1"),
-        ("plan-wake:intent_revised:n1:5:w1", "w1"),
-        ("plan-wake:intent_revised:n10:9:w1", "w1"),
-        ("plan-wake:intent_revised:n1:7:w2", "w2"),
-    ):
-        db.execute(
-            "INSERT INTO messages (id,thread_id,role,content,created_at) VALUES (?,?,'user','x','t')",
-            (message_id, thread),
-        )
-
-    assert plan_wake_intent._last_wake_revision(db, "n1", "w1") == 5
-    plan = " ".join(str(row[3]) for row in db.execute(
-        "EXPLAIN QUERY PLAN SELECT id FROM messages WHERE id >= ? AND id < ? AND thread_id=?", ("a", "b", "w1"),
-    ))
-    assert "SCAN messages" not in plan

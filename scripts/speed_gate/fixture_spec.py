@@ -46,7 +46,7 @@ SMALL_ROWS: dict[str, int] = {
     "system_bulletins": 11, "doc_review_requests": 9, "project_repo_policies": 7,
 }
 
-#: Schema 176 postdates the census. Synthetic stress shape: one tag, mention and
+#: Schema 177 postdates the census. Synthetic stress shape: one tag, mention and
 #: recipient state per fixture comment; these are assumptions, not production counts.
 SYNTHETIC_ROWS = {name: max(1, round(PRODUCTION_ROWS["doc_comments"] * SCALE)) for name in (
     "doc_comment_tags", "doc_comment_mentions", "doc_comment_recipient_state",

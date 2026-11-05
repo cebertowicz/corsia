@@ -20,14 +20,14 @@ def _dev_137() -> sqlite3.Connection:
     db.execute("DROP INDEX idx_plan_nodes_intent_node")
     db.execute("ALTER TABLE plan_nodes DROP COLUMN intent_node_id")
     db.execute("ALTER TABLE plan_nodes DROP COLUMN intent")
-    db.execute("DROP TABLE plan_node_intent_words")
+    db.execute("DROP TABLE IF EXISTS plan_node_intent_words")
     db.execute("PRAGMA user_version=137")
     db.commit()
     return db
 
 
 def test_v138_registers_the_task_intent_step() -> None:
-    assert SCHEMA_VERSION == 176
+    assert SCHEMA_VERSION == 177
     assert MIGRATIONS[137] is migrate_137_to_138
 
 
@@ -45,7 +45,7 @@ def test_existing_plan_nodes_survive_the_intent_migration() -> None:
 
         result = migrate_to_current(db, SCHEMA_VERSION)
 
-        assert (result.from_version, result.to_version) == (137, 176)
+        assert (result.from_version, result.to_version) == (137, 177)
         row = db.execute("SELECT intent,intent_node_id FROM plan_nodes WHERE id=?", (node.id,)).fetchone()
         assert tuple(row) == (None, None)
 

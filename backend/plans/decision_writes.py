@@ -13,7 +13,7 @@ import plans.artifact_links as artifact_links
 import plans.decision_authz as authz
 import plans.decision_fields as decision_fields
 import plans.decision_projection as decision_projection
-import plans.intent_words as intent_words
+import plans.intent_creation as intent_creation
 import plans.notifications as notifications
 import plans.receipts as receipts
 import plans.service as service
@@ -154,7 +154,7 @@ def _create(db, plan, source, author, content, actor, provenance) -> dict:
         plan["id"], kind="task", title=content["title"],
         acceptance_criteria=REVIEW_DOD, description=content["context"],
         parent_id=source["parent_id"], assignee="user",
-        intent_node_id=str(intent_words.canonical(db, source["id"])["id"]),
+        intent_node_id=str(intent_creation.canonical(db, source["id"])["id"]),
         actor_id=actor.audit_id, provenance=provenance, db=db, person_step=False,
     )
     body = {

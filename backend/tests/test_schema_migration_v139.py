@@ -126,7 +126,7 @@ def _v137() -> sqlite3.Connection:
     db.execute("DROP INDEX idx_plan_nodes_intent_node")
     db.execute("ALTER TABLE plan_nodes DROP COLUMN intent_node_id")
     db.execute("ALTER TABLE plan_nodes DROP COLUMN intent")
-    db.execute("DROP TABLE plan_node_intent_words")
+    db.execute("DROP TABLE IF EXISTS plan_node_intent_words")
     for table in ("event_route_decisions", "event_rules", "automation_schedules"):
         db.execute(f"DROP TABLE {table}")
     db.executescript(_V138)
@@ -142,11 +142,11 @@ def test_a_v137_install_takes_both_steps_and_ends_where_a_fresh_install_starts()
     from infra.migration_137_to_138_plan_intent import migrate_137_to_138
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 176
+    assert SCHEMA_VERSION == 177
     assert (MIGRATIONS[137], MIGRATIONS[138]) == (migrate_137_to_138, migrate_138_to_139)
     db = _v137()
     result = migrate_to_current(db, SCHEMA_VERSION)
-    assert (result.migrated, result.from_version, result.to_version) == (True, 137, 176)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 137, 177)
     fresh = sqlite3.connect(":memory:")
     initialize_schema(fresh)
     # Step 138 adds its columns and table with ALTER/CREATE text laid out unlike the fresh DDL, so its two

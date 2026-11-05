@@ -116,13 +116,12 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow, actor)
     if operation in {"add", "insert"}:
         from plans import intent_creation, user_step_instructions, workflow_fields
         workflow_version, workflow_steps = workflow
-        created, resolved_words = intent_creation.prepare(
+        created = intent_creation.prepare(
             db, plan_id, params, workflow_version=workflow_version, operation=operation, actor=actor,
             run=bool(workflow_steps),
         )
         node = service.add_node(plan_id, **created, **common) if operation == "add" else mutations.insert_node(plan_id, **created, **common)
         user_step_instructions.link_requested(node.id, params, actor, db=db)
-        intent_creation.capture(db, node, resolved_words, actor=actor)
         if "depends_on_node_id" in params:
             from plans import dependencies
 
@@ -136,39 +135,27 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow, actor)
         )
         return workflow_fields.added(db, node, line, workflow_steps, causing_executor=acting)
     if operation == "edit":
-        from plans import intent_words
         changed = fields.edit_fields(params)
-        if "intent_words" in changed:
-            changed["intent_words"] = intent_words.resolve_words(
-                db, changed["intent_words"], actor_id=acting,
-            )
         mutations.edit_node(
             params["node_id"], **changed, **fields.expected(params), **common,
         )
 
         return admission.result(params["node_id"], db=db)
     if operation == "split":
-        from plans import intent_words
-
-        requested_words = params.get("intent_words")
         return mutations.split_node(
             params["node_id"], title=fields.text(params, "title"),
             acceptance_criteria=fields.text(params, "acceptance_criteria"),
             description=params.get("description"), size=fields.require_task_size(params.get("size")),
             intent=params.get("intent"),
-            intent_words=intent_words.resolve_words(db, requested_words, actor_id=acting),
             **fields.expected(params), **common,
         )
     if operation == "reorder":
         return _reorder(params, common)
-    from plans import corrections, intent_words
+    from plans import corrections
     return corrections.add(
         params["node_id"], title=fields.text(params, "title"),
         acceptance_criteria=fields.text(params, "acceptance_criteria"),
         affected_nodes=params.get("affected_nodes"), intent=params.get("intent"),
-        intent_words=intent_words.resolve_words(
-            db, params.get("intent_words"), actor_id=acting,
-        ),
         **fields.expected(params), **common,
     )
 
@@ -295,13 +282,10 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
             verified_by=actor.audit_id, **expected, **common,
         )
         return after.after_close(node_id, "accepted", params, common, executor=acting)
-    from plans import intent_words
-
     _node, follow_up = service.accept_with_follow_up(
         node_id, title=fields.text(params, "title"),
         acceptance_criteria=fields.text(params, "acceptance_criteria"),
         size=fields.require_task_size(params.get("size")), intent=params.get("intent"),
-        intent_words=intent_words.resolve_words(db, params.get("intent_words"), actor_id=acting),
         verification_result="passed", verified_by=actor.audit_id,
         **expected, **common,
     )
