@@ -15,7 +15,7 @@ for (const host of ['comment', 'reply'] as const) {
 			let fail = true;
 			await page.route(`**/api/artifacts/${doc.artifactId}/reviews**`, (route) => fail
 				? route.fulfill({ status: 503, json: {} })
-				: route.fulfill({ json: { reviews: [], reviewers: agents } }));
+				: route.fulfill({ json: { reviews: [], reviewers: agents, taggable_agents: agents } }));
 			await open(page, doc, info.project.name.includes('mobile') ? 'phone' : 'closed', 'light');
 			if (host === 'comment') await beginComment(page, 'Step 1: the rollout proceeds to the next ring.');
 			else await page.getByRole('button', { name: /open thread/ }).click();
