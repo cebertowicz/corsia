@@ -46,10 +46,16 @@ RELEVANCE_PATTERN_CASES = {
         "must_skip": ("frontend/app.ts",),
     },
     "unit-tests.yml": {
-        # backend tests read every workflow file, so a workflow-only change must run them
+        # unit tests read or import these paths, so a change to only them must run them
         "must_run": ("backend/module.py", "frontend/app.ts", "requirements-test.txt", "frontend/package-lock.json",
-                     ".github/workflows/integration.yml", ".github/workflows/e2e.yml"),
-        "must_skip": ("README.md",),
+                     ".github/workflows/integration.yml", ".github/workflows/e2e.yml",
+                     "scripts/corsia", "scripts/corsia.d/service.sh", "desktop/scripts/corsia",
+                     "qa/select-tests.mjs", "testdata/link-target-vectors.json", "bulletins/index.json",
+                     "evals/scenarios/canonical/case.yaml", "benchmarks/harbor/proxy.py",
+                     "tools/antipatterns/engine.py", "docs/coordination-models/corsia-default/context/guide.tmpl",
+                     "README.md", "docs/observability.md", "skills/demo/SKILL.md", "skills/demo/corsia.yaml"),
+        "must_skip": ("quality/file-size-limits.json", "docs/activity.png", "infra/github/labels.json",
+                      "pyproject.toml"),
     },
 }
 HISTORICAL_SCENARIO_TESTS = (
