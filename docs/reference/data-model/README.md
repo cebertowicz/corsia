@@ -2,7 +2,7 @@
 
 Generated reference for the primary, document, log, and analytics stores.
 
-Generate with `PYTHONPATH=backend .venv/bin/python scripts/docs/generate_data_model.py`; add `--check` to compare the generated pages. The backend's locked dependencies are required.
+Generate with `python scripts/docs/generate_data_model.py`; add `--check` to compare the generated pages. The backend's locked dependencies are required.
 
 SQLite full-text search creates shadow tables; SQLite creates `sqlite_sequence`. Relationships shown in a diagram connect tables in that diagram; column tables list all declared foreign keys. The measurement tables are temporary and are created on a primary connection when needed.
 
