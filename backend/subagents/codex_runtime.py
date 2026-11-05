@@ -33,7 +33,7 @@ from subagents.codex_runtime_errors import (
 )
 from subagents.codex_runtime_support import require_owned_accept_db
 from subagents.codex_runtime_events import record_terminal_marker
-from subagents.codex_shutdown_error import record_backend_shutdown_marker as _record_backend_shutdown_marker
+from subagents.codex_shutdown_error import record_and_broadcast_shutdown_marker
 from subagents.codex_retirement import retire_if_current
 from subagents.codex_runtime_event_delivery import (
     arm_delivery_event_barrier as _arm_delivery_event_barrier,
@@ -2237,7 +2237,7 @@ async def _shutdown_live_owner(
     if not cleaned:
         raise RuntimeError(f"Codex exact live survived shutdown: {thread_id}")
     if terminal is TurnTerminalResult.APPLIED:
-        await run_in_db(_record_backend_shutdown_marker, thread_id, turn_id)
+        await record_and_broadcast_shutdown_marker(thread_id, turn_id)
 
 
 async def _shutdown_idle_app_owner(thread_id: str) -> None:

@@ -171,6 +171,16 @@ def broadcast_input_row(
     )
 
 
+def input_rows_payload(thread_id: str, rows: tuple[InputBroadcastRow, ...]) -> dict:
+    """The one frame shape for saved rows: a singleton or one ordered multi-row event."""
+    messages = [project_input_message(row) for row in rows]
+    return {
+        "type": "message_added" if len(messages) == 1 else "messages_added",
+        "thread_id": thread_id,
+        **({"message": messages[0]} if len(messages) == 1 else {"messages": messages}),
+    }
+
+
 def broadcast_input_rows(
     thread_id: str,
     rows: tuple[InputBroadcastRow, ...],
@@ -181,12 +191,7 @@ def broadcast_input_rows(
     """Publish one singleton or one atomically ordered multi-row event."""
     if not rows:
         return
-    messages = [project_input_message(row) for row in rows]
-    payload = {
-        "type": "message_added" if len(messages) == 1 else "messages_added",
-        "thread_id": thread_id,
-        **({"message": messages[0]} if len(messages) == 1 else {"messages": messages}),
-    }
+    payload = input_rows_payload(thread_id, rows)
     if broadcast is not None:
         if exclude_ws is not None:
             raise ValueError("custom input broadcast cannot exclude one socket")

@@ -155,19 +155,19 @@ path, including symlink targets. The parent's tool surface is unchanged.
 Codex uses this same model-reachable tool boundary as native workers. Its
 app-server process is **not OS-sandboxed** by CORSIA, and this boundary does not
 restrict the process's network access. `subagents/codex_confinement.py` reads
-confinement through the canonical thread owner and admits only the captured
+confinement through the canonical thread owner and admits only a captured
 Codex version before spawning and again at app-server start. It disables native
 and hosted tool producers, uses a neutral empty working directory, and refuses
 forks at launch. Project instructions
 are disabled. The isolated Codex home projects subscription auth for the
 app-server, without importing the person's config, profiles or MCP servers;
-confined reads cannot reach that home. No model-invoked native tool can reach a
-TCC-granted capability.
+confined reads cannot reach that home.
 
-The pinned app-server has no full model-tool readback. The credential-free
+The admitted app-server versions have no full model-tool readback. The credential-free
 integration capture checks the entire outgoing model request's tools array,
-including hosted entries, on cold start and process resume. A new Codex version
-refuses confined launches until CORSIA updates and repeats that proof.
+including hosted entries, on cold start and process resume for each admitted
+version. An uncaptured Codex version refuses confined launches until CORSIA
+updates and repeats that proof (`backend/subagents/codex_versions.py`).
 
 ### Foreground shell invocation identity
 
@@ -206,8 +206,10 @@ without a manual start or another Turn. A delegated step's wait is read from
 its worker, so the worker's side reconciles the delegator: every worker-plan
 reconciliation and the worker's Turn end (`plans/delegated_selection.py`).
 The step taking its slot back is state; the parent hears about its
-worker only through the notification matrix. A closing mutation (request_review,
-fail, accept, accept_with_follow_up, archive_node) may start one task the caller
+worker only through the notification matrix. A closing or parking mutation
+(request_review, mark_done, fail, accept, accept_with_follow_up, close_node,
+archive_node, pause_node, block_node, arm_watch; the set is
+`plans/boundary_fields.NEXT_OPERATIONS`) may start one task the caller
 names through the same activate/start writers, after its own release and before
 reconciliation, and returns a bounded `next` block composed by
 `plans/close_next.py`, which reads the selection owners and is not one; nothing
@@ -365,7 +367,10 @@ attach path, but only for a task the caller names: a send is often just a
 question, so it never takes the caller's current task by default. The named
 task is checked before the message goes (the target must be the caller's own
 worker holding no other open task). Without `plan_node_id`, a send to such an
-idle worker carries a `plan_task` note saying its reply arrives as chat.
+idle worker carries a `plan_task` note saying its reply arrives as chat. When
+local-only policy requires a hold, the send is held for the person before task
+handover and delivery; approval resumes through the same delivery function
+(`backend/tools/delegate_send.py`).
 
 ### Reading and depending on another plan
 
@@ -450,6 +455,8 @@ node's own `waited_seconds` in the ages of running, review and waiting rows.
 unioned over that thread's own plan nodes and clipped to a window, for a run's
 open time (the caller passes descendant threads; there is no delegation walk).
 
+Checked against the code at `7a8c55d84`.
+
 ### User presence
 
 Whether the user is actually looking at a thread is state with one owner:
@@ -515,8 +522,9 @@ roster says why instead of omitting it.
 mutual exclusion between repository *effects* (any tool call that may read or
 touch a working repository) and repository *policy transitions* (attaching,
 detaching, pinning or checkout-protecting a repository). The fence is global on
-purpose; it is not scoped per repository, and effects, transitions and owned
-background processes stay mutually exclusive in every direction.
+purpose; it is not scoped per repository. A transition refuses while tool
+effects or owned processes are active, and tool effects refuse while a
+transition is active.
 
 `ToolRegistry._authorized_execute` wraps every tool call in `admit_repo_effect()`
 except the tools whose own execution enters the stronger transition:

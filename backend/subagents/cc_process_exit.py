@@ -156,7 +156,7 @@ async def _publish_process_exit(
     account = await sign_out_on_verdict(verdict, db=db, include_account=True)
     held = login_race_answered(detail, verdict) and rerun_queued(identity.turn_id, db=db)  # the re-run answers
     marker_id = live.tool_boundary_marker_id or (None if held else surface_exit_error(
-        child_thread_id, code, detail, broadcast, db, None,
+        child_thread_id, code, detail, broadcast, db, identity,
         insert_message_fn=insert_message, logger=log,
         account=account, login_answered=login_answered(verdict),
     ))

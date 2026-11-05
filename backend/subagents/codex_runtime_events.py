@@ -536,7 +536,7 @@ async def _on_result(ctx, ev: dict) -> None:
             metadata=meta_r,
             bcast=ctx.bcast,
             label="result",
-            announce=ctx.live.last_assistant_message_id is None,
+            announce=is_error or ctx.live.last_assistant_message_id is None,
             created_at=datetime.now(timezone.utc).isoformat(),
             best_effort_announcement=True,
         )
