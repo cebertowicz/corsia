@@ -5,6 +5,17 @@ from __future__ import annotations
 from infra.turn_errors import insert_turn_error
 
 
+async def broadcast_llm_error(thread_id: str, error_id: str, broadcast) -> None:
+    """Publish the saved error at its durable transcript position."""
+    from infra.db_async import run_in_db
+    from infra.send_broadcast import input_rows_payload, read_input_broadcast_row
+
+    row = await run_in_db(read_input_broadcast_row, error_id)
+    if row is None:
+        raise RuntimeError(f"Cannot broadcast missing error {error_id}")
+    await broadcast(input_rows_payload(thread_id, (row,)))
+
+
 def persist_llm_error(
     write_transaction_fn,
     insert_message_fn,
