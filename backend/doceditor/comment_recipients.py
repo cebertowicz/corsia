@@ -36,6 +36,17 @@ def validate_mentions(body: str, agent_ids: list[str], mentions: list[dict]) -> 
             raise TagValidationError("Mention must reference a selected agent and valid UTF-16 body offsets")
 
 
+def trim_mentions(body: str, agent_ids: list[str], mentions: list[dict]) -> list[dict]:
+    """Translate submitted UTF-16 offsets to the existing stripped body."""
+    validate_mentions(body, agent_ids, mentions)
+    prefix = body[:len(body) - len(body.lstrip())]
+    removed = sum(2 if ord(character) > 0xFFFF else 1 for character in prefix)
+    adjusted = [{**mention, "start": mention["start"] - removed, "end": mention["end"] - removed}
+                for mention in mentions]
+    validate_mentions(body.strip(), agent_ids, adjusted)
+    return adjusted
+
+
 def save_mentions(db, comment: dict, mentions: list[dict]) -> None:
     db.executemany(
         "INSERT INTO doc_comment_mentions(comment_id,agent_id,start_offset,end_offset) VALUES (?,?,?,?)",

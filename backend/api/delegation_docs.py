@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from doceditor import comments as store, feedback_batches
 from doceditor.comment_creation import create_validated_comment
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
+from doceditor.comment_recipients import TagValidationError, trim_mentions
 from infra.app_loop import AppLoopUnavailable
 from api.doc_comments import comment_action_status, decision_refusal
 from api.doc_comment_models import TaggedAgentMention
@@ -153,12 +154,16 @@ async def create_agent_comment(token: str, body: AgentCommentCreate):
 
     author, artifact_id, doc_path, register_spec = await run_in_db(_preflight)
 
+    try:
+        mentions = trim_mentions(body.body, body.tagged_agent_ids, [mention.model_dump() for mention in body.tagged_agent_mentions])
+    except TagValidationError as exc:
+        raise HTTPException(422, str(exc)) from exc
     request = CommentInput(
         artifact_id=artifact_id, path=doc_path, body=text, author=author, author_kind="agent", user_id=user["id"],
         author_thread_id=body.as_session_id, parent_id=body.parent_id, review=is_review,
         quote=body.quote, near=body.near, replacement=body.replacement, insert_after=body.insert_after,
         registration=register_spec, submit=body.submit, tagged_agent_ids=body.tagged_agent_ids,
-        tagged_agent_mentions=[mention.model_dump() for mention in body.tagged_agent_mentions],
+        tagged_agent_mentions=mentions,
     )
     try:
         row, registered, feedback, _created = await create_validated_comment(request, body.client_id)

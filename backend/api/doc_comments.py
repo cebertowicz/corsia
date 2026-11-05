@@ -27,7 +27,7 @@ from doceditor import comments as store, doc_images, feedback_batches, feedback_
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_creation import CommentSelectionChanged, create_validated_comment
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
-from doceditor.comment_recipients import TagValidationError
+from doceditor.comment_recipients import TagValidationError, trim_mentions
 from doceditor.feedback_batch_core import PersonDocumentLane
 from infra.app_loop import AppLoopUnavailable
 from doceditor.comment_feedback_transitions import apply_user_transition
@@ -130,13 +130,17 @@ async def create_comment(
 
     if body.anchor_text and not body.parent_id and not body.review and (body.from_off is None or body.to_off is None):
         raise HTTPException(400, "Anchored comments require selection offsets")
+    try:
+        mentions = trim_mentions(body.body, body.tagged_agent_ids, [mention.model_dump() for mention in body.tagged_agent_mentions])
+    except TagValidationError as exc:
+        raise HTTPException(400, str(exc)) from exc
     request = CommentInput(
         artifact_id=artifact_id, path=path, body=text, author=user["name"], author_kind="user", user_id=user["id"],
         parent_id=body.parent_id, review=body.review, replacement=body.replacement,
         quote=body.anchor_text, start=body.from_off, end=body.to_off, browser=True, live_capture=body.live_capture,
         region=region,
         delivery_policy=body.delivery_policy, tagged_agent_ids=body.tagged_agent_ids, viewing_thread_id=body.thread_id,
-        tagged_agent_mentions=[mention.model_dump() for mention in body.tagged_agent_mentions],
+        tagged_agent_mentions=mentions,
     )
     try:
         row, _registered, feedback, created = await create_validated_comment(request, body.client_id)

@@ -43,6 +43,23 @@ def test_tag_create_list_and_idempotent_retry(integration_client, artifact_id):
     listed = integration_client.get(url).json()["comments"]
     assert listed[0]["tagged_agents"] == first.json()["comment"]["tagged_agents"]
     assert listed[0]["tagged_agent_mentions"] == mentions
+    # Both transports accept offsets in the exact submitted text, then retain
+    # positions relative to the stripped text they actually store.
+    from delegation_docs_fixtures import _post
+    submitted = [{"agent_id": "agent", "start": 5, "end": 11}]
+    expected = [{"agent_id": "agent", "start": 3, "end": 9}]
+    spaced = {"body": "  😀 @Agent  ", "tagged_agent_ids": ["agent"], "tagged_agent_mentions": submitted}
+    person = integration_client.post(url, json={**spaced, "thread_id": "viewer", "delivery_policy": "document-held"})
+    assert person.status_code == 200, person.text
+    assert person.json()["comment"]["body"] == "😀 @Agent"
+    assert person.json()["comment"]["tagged_agent_mentions"] == expected
+    agent = _post(integration_client, OWNER_TOKEN, **spaced, as_session_id="viewer", parent_id=listed[0]["id"])
+    assert agent.status_code == 200, agent.text
+    assert agent.json()["comment"]["body"] == "😀 @Agent"
+    assert agent.json()["comment"]["tagged_agent_mentions"] == expected
+    invalid_spaced = {**spaced, "tagged_agent_mentions": [{"agent_id": "agent", "start": 0, "end": 5}]}
+    assert integration_client.post(url, json={**invalid_spaced, "thread_id": "viewer", "delivery_policy": "document-held"}).status_code == 400
+    assert _post(integration_client, OWNER_TOKEN, **invalid_spaced, as_session_id="viewer", parent_id=listed[0]["id"]).status_code == 422
     reply = integration_client.post(url, json={**request, "parent_id": listed[0]["id"], "client_id": "tag-reply"})
     assert reply.status_code == 200
     assert reply.json()["comment"]["tagged_agent_mentions"] == mentions
