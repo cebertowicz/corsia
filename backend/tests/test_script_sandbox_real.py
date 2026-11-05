@@ -276,10 +276,10 @@ async def test_script_cli_reads_broker(sandbox, monkeypatch):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("github_repo", [None, "o/r"])
+@pytest.mark.parametrize("mode", [None, "o/r", "authenticated"])
 @pytest.mark.parametrize("state", ["absent", "person", "ready"])
-async def test_script_cannot_read_person_gh_or_token_variables(sandbox, monkeypatch, state, github_repo):
-    """Neither the person's nor the agents' gh home is exposed to scripts."""
+async def test_script_cannot_read_person_gh_or_token_variables(sandbox, monkeypatch, state, mode):
+    """Neither the person's nor the agents' gh home is exposed to scripts, authenticated ones included."""
     from tools import sandbox_config
 
     home = Path(os.environ["HOME"])
@@ -306,8 +306,9 @@ async def test_script_cannot_read_person_gh_or_token_variables(sandbox, monkeypa
              'test -z "${!name}" || exit 1; done\n'
              f'if cat {shlex.quote(str(gh / "hosts.yml"))} >/dev/null 2>&1; then exit 2; fi\n' + agent_probe)
     path = _script(sandbox, "canaries.sh", probe)
+    authenticated = mode == "authenticated"
     run = await run_script(THREAD_ID, None, path, run_id="canaries", timeout_seconds=20,
-                           github_repo=github_repo)
+                           github_repo=None if authenticated else mode, authenticated=authenticated)
     assert run.returncode == 0, run.stderr
 
 
