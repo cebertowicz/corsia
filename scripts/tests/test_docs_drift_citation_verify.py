@@ -40,6 +40,33 @@ def test_missing_paths_still_reports_missing_when_absent_from_both_locations(tmp
     assert missing == ["infra/ghost.py"]
 
 
+def test_glob_citations_are_not_treated_as_literal_paths(tmp_path):
+    assert verify.missing_paths({"docs/*.md", "docs/a?.md", "docs/[ab].md"}, tmp_path) == []
+
+
+def test_git_control_paths_are_not_repository_file_citations(tmp_path):
+    assert verify.missing_paths({".git/config", ".git/commondir"}, tmp_path) == []
+
+
+def test_line_suffix_is_removed_for_existence_checks(tmp_path):
+    (tmp_path / "source.py").write_text("")
+    paths = {"source.py:47", "source.py:47-52", "missing.py:3"}
+    assert verify.missing_paths(paths, tmp_path) == ["missing.py:3"]
+
+
+def test_local_only_files_are_accepted_without_existing(tmp_path):
+    assert verify.missing_paths({"frontend/.env", "frontend/.env.missing"}, tmp_path) == ["frontend/.env.missing"]
+
+
+def test_machine_ignore_settings_do_not_change_the_verdict(tmp_path):
+    """A dead citation stays missing even if this machine's Git would ignore it."""
+    (tmp_path / ".git" / "info").mkdir(parents=True)
+    (tmp_path / ".git" / "info" / "exclude").write_text("*.local\n")
+    (tmp_path / ".gitignore").write_text("*.local\n")
+
+    assert verify.missing_paths({"dead.local"}, tmp_path) == ["dead.local"]
+
+
 def _write_api_file(api_dir, name: str, text: str) -> None:
     (api_dir / name).write_text(text, encoding="utf-8")
 
