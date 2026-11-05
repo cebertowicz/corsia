@@ -169,7 +169,7 @@ def filter_left_replies(db, items: list[dict], agent_id: str, *, person_owner: b
 
 def thread_context(db, item: dict) -> str:
     """Render earlier comments as bounded context for a tagged reply."""
-    from plans.person_input import WORDS_MAX_BYTES
+    from plans.public import WORDS_MAX_BYTES
     from prompts.plan_tools import bounded_text
 
     root = root_id(item)

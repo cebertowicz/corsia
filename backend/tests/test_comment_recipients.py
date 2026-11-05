@@ -274,7 +274,7 @@ def test_agent_local_only_tag_is_refused_but_person_tag_is_not(isolated_db, monk
         comment_recipients.save_tags(connection, row, ["recipient"])
         comment_recipients.tags_for_comments(connection, [row])
         result = feedback_batches.record_comment(connection, row, created=created)
-    assert result["tag_refusals"] == []
+    assert "tag_refusals" not in result
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches WHERE recipient_id='recipient'").fetchone()[0] == 1
     db.close()
 
@@ -369,7 +369,7 @@ def test_locality_preserves_existing_recipient_without_tag_effects(isolated_db, 
         comment_recipients.save_tags(connection, reply, [recipient])
         comment_recipients.tags_for_comments(connection, [reply])
         result = feedback_batches.record_comment(connection, reply, created=created)
-    assert result["tag_refusals"] == []
+    assert "tag_refusals" not in result
     batch = next(batch_id for batch_id in result["batch_ids"] if db.execute(
         "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0] == recipient)
     monkeypatch.setattr(local_only, "send_needs_hold", lambda *args, **kwargs: True)

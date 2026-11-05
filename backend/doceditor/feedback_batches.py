@@ -113,7 +113,10 @@ def record_comment(
         )
         known = {row["id"] for row in notices}
         notices.extend(row for row in current_failures if row["id"] not in known)
-    return {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken, "tag_refusals": tag_refusals}
+    result = {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken}
+    if tag_refusals:
+        result["tag_refusals"] = tag_refusals
+    return result
 
 
 def deliver_person_comment(db, batch_ids: list[str], artifact_id: str) -> list[str]:

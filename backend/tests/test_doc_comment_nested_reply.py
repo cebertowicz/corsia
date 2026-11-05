@@ -76,7 +76,7 @@ def test_reply_to_a_reply_notifies_the_root_comment_author(isolated_db):
         db.close()
 
     assert nested["parent_id"] == root["id"]
-    assert recipients == ("owner", "root-author")
+    assert recipients == ("middle-author", "owner", "root-author")
 
 
 def test_migrated_legacy_reply_is_reported_as_new_on_its_root_thread(isolated_db):
