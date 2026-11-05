@@ -71,6 +71,7 @@ Every known limit of CORSIA's security, with what it means for you and what to d
 | Limit | What it means |
 |---|---|
 | Leased commands, local tool servers and Google Workspace need Agent Safehouse, which is macOS only ([Host access](host-access.md), [Connected apps](connected-apps.md)) | All three are expected to refuse on Linux |
+| A project folder or repository that doesn't exist yet isn't hidden ([Protected commands on Linux](../linux-sandbox.md)) | An agent in another project can create it and write into it; once it exists, the next command hides it |
 | The sandbox has no network namespace ([Agent sandbox](agent-sandbox.md)) | Network access is the same as on macOS |
 | The Linux behavior in these pages was read from code and tests, not run | Treat it as less verified than the macOS behavior |
 
