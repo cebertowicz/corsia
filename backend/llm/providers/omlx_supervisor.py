@@ -231,7 +231,7 @@ async def start_server(cfg: dict) -> dict[str, Any]:
     try:
         async with request_slot(sid):
             return await _start_server(cfg, sid, require_preload=False)
-    except RuntimeError as exc:
+    except restart.UpgradeAdmissionError as exc:
         return {"ok": False, "message": str(exc)}
 
 

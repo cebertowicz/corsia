@@ -99,6 +99,21 @@ class Life:
         return self.restart
 
 
+class UpgradeAdmissionError(RuntimeError):
+    """A held call cannot proceed because the managed upgrade failed."""
+
+
+_UPGRADE_FAILURES = {
+    "busy": "the server was busy. Wait for its activity to finish",
+    "not_idle": "CORSIA couldn’t determine whether it was idle. Check the server in Settings",
+    "drain_timeout": "active requests did not finish in time. Wait for them to finish",
+    "loaded_unknown": "CORSIA couldn’t determine which models were loaded. Check the server in Settings",
+    "stop_failed": "CORSIA couldn’t stop the server. Check the server in Settings",
+    "start_failed": "CORSIA couldn’t start the server. Check the server in Settings",
+    "reload_failed": "CORSIA couldn’t restore the loaded models. Check the server in Settings",
+}
+
+
 @asynccontextmanager
 async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIterator[None]:
     """Keep concurrent calls admitted before replacement alive; later calls wait through restoration."""
@@ -107,14 +122,17 @@ async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIt
         task = life.restart
         await asyncio.wait({task})  # caller cancellation must not cancel the restart
         if task.cancelled():
-            raise RuntimeError("Couldn’t upgrade the local model server because the upgrade was cancelled. Check the server in Settings and try again.")
+            raise UpgradeAdmissionError("Couldn’t upgrade the local model server because the upgrade was cancelled. Check the server in Settings and try again.")
         try:
             result = task.result()
         except Exception as exc:
-            raise RuntimeError("Couldn’t upgrade the local model server. Check the server in Settings and try again.") from exc
+            raise UpgradeAdmissionError("Couldn’t upgrade the local model server. Check the server in Settings and try again.") from exc
         if isinstance(result, dict) and result.get("reason") != "already_current":
             if not result.get("restarted") or result.get("reason"):
-                raise RuntimeError("Couldn’t upgrade the local model server. Check the server in Settings and try again.")
+                reason = _UPGRADE_FAILURES.get(result.get("reason"))
+                if reason:
+                    raise UpgradeAdmissionError(f"Couldn’t upgrade the local model server because {reason} and try again.")
+                raise UpgradeAdmissionError("Couldn’t upgrade the local model server. Check the server in Settings and try again.")
         life = lives.get(server_id or "")
     if life is None:
         yield  # unmanaged and other providers have no supervisor admission
@@ -191,7 +209,10 @@ def on_exit(
     observed: tuple[str, bool] | None = None, restart_requested: Callable[[], bool | None] = lambda: False,
     *, timeout: float | None = None,
 ) -> None:
-    """Restart the server unless CORSIA stopped it, or it exited 0 without oMLX's own Restart asking."""
+    """Record an exit for an unfinished operation until explicit Stop or shutdown cancels it.
+
+    With no unfinished operation, apply the ordinary clean-exit and restart-request policy.
+    """
     from llm.server_observation import forget_loaded_on_exit
 
     life.unwatch = None

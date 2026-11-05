@@ -1,7 +1,7 @@
 """A watched exit during an upgrade remains owned and keeps admission closed."""
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -55,7 +55,9 @@ async def test_exit_during_upgrade_recovers_before_held_call(isolated_db, monkey
 
         waiter = asyncio.create_task(request())
         await asyncio.sleep(0)
-        omlx_restart.on_exit("seat", life, 123, start, lambda _sid: "", ("exit", clean))
+        restart_requested = Mock(return_value=None)  # the log would be unreadable
+        omlx_restart.on_exit("seat", life, 123, start, lambda _sid: "", ("exit", clean), restart_requested)
+        restart_requested.assert_not_called()
         assert life.restart is upgrade
         release.set()
         await asyncio.wait_for(recovering.wait(), 2)
@@ -66,6 +68,16 @@ async def test_exit_during_upgrade_recovers_before_held_call(isolated_db, monkey
         release.set()
         finish_recovery.set()
         await _finish(waiter, upgrade, life.restart)
+
+
+def test_clean_exit_with_unreadable_log_and_no_operation_does_not_restart(monkeypatch):
+    life = omlx_restart.Life()
+    events = []
+    monkeypatch.setattr(server_observation, "forget_loaded_on_exit", lambda _sid: [])
+    monkeypatch.setattr(omlx_restart, "emit", lambda _sid, action, **_kwargs: events.append(action))
+    omlx_restart.on_exit("seat", life, 123, AsyncMock(), lambda _sid: "", ("exit", True), lambda: None)
+    assert life.restart is None
+    assert events == ["exit.intent_unknown"]
 
 
 async def test_stop_cancels_exit_recovery_and_releases_waiter(isolated_db, monkeypatch):

@@ -291,7 +291,7 @@ async def test_scope_drain_is_bounded_and_fails_the_held_call(isolated_db, monke
     task = omlx_supervisor.schedule_startup_upgrade("seat", "old")
     assert task is not None
     try:
-        with pytest.raises(RuntimeError, match="Check the server in Settings and try again"):
+        with pytest.raises(RuntimeError, match="active requests did not finish in time. Wait for them to finish and try again"):
             async with omlx_supervisor.request_slot("seat"):
                 pytest.fail("the call passed a timed-out drain")
         assert (await task)["reason"] == "drain_timeout"

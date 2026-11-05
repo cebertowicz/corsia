@@ -59,7 +59,6 @@ async def _startup_network_discovery() -> None:
             f"network discovery startup: probed {len(servers)} server(s), "
             f"{online_count} online, discovery complete"
         )
-        # Managed adoption and upgrade were started before the startup fan-out.
     except Exception as exc:
         logger.warning(f"network discovery startup failed: {exc}")
 
