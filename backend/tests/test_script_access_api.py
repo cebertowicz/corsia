@@ -25,7 +25,7 @@ def test_script_decision_user_binding_and_single_use(isolated_db, tmp_path, monk
     path = tmp_path / "script.py"
     path.write_text("print(1)")
     auth = {"state": "pending", "application_hash": "a" * 64, "purpose": "work",
-            "user_request": "please work", "trigger": {"cadence_seconds": None}, "approved_sha256": None}
+            "user_request": "please work", "trigger": {"cadence_seconds": None}, "review": {"reason": "appropriate"}}
     schedule = create_script("owner", "__workspace__", script_path=path, script_sha256="b" * 64,
                              cadence_seconds=None, series=[], timeout_seconds=5,
                              now="2026-01-01T00:00:00+00:00", db=None, authentication=auth)
@@ -40,7 +40,10 @@ def test_script_decision_user_binding_and_single_use(isolated_db, tmp_path, monk
     leases = client.get("/api/host-access/leases?root_thread_id=owner",
                         headers={"X-CORSIA-Interactive-UI": "1"}).json()["leases"]
     request = next(row for row in leases if row["kind"] == "script")
-    payload = {"revision": request["revision"], "application_hash": request["application_hash"]}
+    assert request["script_path"] == str(path)
+    assert request["reviewer_reason"] == "appropriate"
+    assert "revision" not in request and "state" not in request
+    payload = {"application_hash": request["application_hash"]}
     headers = {"X-CORSIA-User-Decision": request["decision_capability"]}
     person["id"] = "other"
     url = f"/api/host-access/leases/scripts/{schedule.id}/{decision}"

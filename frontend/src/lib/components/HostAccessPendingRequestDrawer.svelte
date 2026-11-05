@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { Button, StatePill } from '$lib/components/ui';
 	import { text, duration, cadence, policyLabel, approvalReady, owner } from '$lib/hostAccess/leaseFormat';
-	import type { HostAccessLease } from '$lib/api/hostAccess';
-
+	import type { HostAccessItem } from '$lib/api/hostAccess';
 	let {
 		lease,
 		stale,
@@ -13,7 +12,7 @@
 		onReject,
 		onRetry,
 	}: {
-		lease: HostAccessLease;
+		lease: HostAccessItem;
 		stale: boolean;
 		/** Whether this lease's own decision is in flight, vs. another lease's. */
 		deciding: boolean;
@@ -26,7 +25,7 @@
 	} = $props();
 
 	const ready = $derived(approvalReady(lease));
-	const exceptions = $derived(Array.isArray(lease.requested_policy_exceptions)
+	const exceptions = $derived(lease.kind !== 'script' && Array.isArray(lease.requested_policy_exceptions)
 		? lease.requested_policy_exceptions : []);
 	const external = $derived(exceptions.some((exception) => exception?.policy === 'external_agent'));
 </script>
@@ -77,9 +76,11 @@
 			<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Needs refresh' : 'Needs approval'} />
 		</header>
 		<div class="decision-body">
+			<section><span class="label">File</span><p>{lease.script_path}</p></section>
 			<section><span class="label">When it runs</span><p>{cadence(lease.trigger?.cadence_seconds ?? null)}</p></section>
 			<section class="purpose"><span class="label">Purpose</span><p>{lease.purpose}</p></section>
 			<section><span class="label">Your request</span><p>{lease.user_request}</p></section>
+			<section class="review"><span class="label">Reviewer’s reason</span><p>{lease.reviewer_reason}</p></section>
 			{#if stale || !ready}<div class="approval-blocked" role="status"><strong>The request couldn’t be verified. Try again.</strong><Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
 		</div>
 		<footer class="decision-actions">

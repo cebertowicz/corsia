@@ -307,6 +307,16 @@ def shell_env(account: AgentAccountView) -> dict[str, str]:
 
 
 
+def script_view() -> AgentAccountView:
+    """Scripts have a locked identity and no account-home grant; GitHub uses the forwarder."""
+    return AgentAccountView("needs_auth")
+
+
+def locked_env() -> dict[str, str]:
+    """Git and gh settings for a script without direct account access."""
+    return _identity_env(script_view())
+
+
 def _identity_env(account: AgentAccountView) -> dict[str, str]:
     entries = _git_config(account)
     env = {"GH_CONFIG_DIR": account.home if account.ready and account.home else LOCKED_HOME,

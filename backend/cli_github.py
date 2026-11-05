@@ -35,8 +35,7 @@ def tool(args: list[str]) -> int:
             raise ValueError("tool arguments must be a JSON object")
         with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
             client.connect(path)
-            client.sendall(json.dumps({"name": args[0], "arguments": params}).encode())
-            client.shutdown(socket.SHUT_WR)
+            client.sendall(json.dumps({"name": args[0], "arguments": params}).encode() + b"\n")
             size = int.from_bytes(_read_exact(client, 8), "big")
             response = json.loads(_read_exact(client, size))
         sys.stdout.write(response["stdout"])

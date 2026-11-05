@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 async def _serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
                  thread_id: str, registry: ToolRegistry) -> None:
     try:
-        request: Any = json.loads(await reader.read())
+        request: Any = json.loads(await reader.readline())
         if not isinstance(request, dict) or not isinstance(request.get("name"), str) or not isinstance(request.get("arguments"), dict):
             raise ValueError("expected a tool name and JSON object")
         context = state._current_thread_id.set(thread_id)

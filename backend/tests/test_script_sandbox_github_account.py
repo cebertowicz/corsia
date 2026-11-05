@@ -98,7 +98,7 @@ def run(monkeypatch, tmp_path):
     monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
     views = _views(agent_home)
 
-    def go(state: str, verified: str | None = None):
+    def go(state: str, verified: str | None = None, *, authenticated: bool = False):
         reads: list[bool] = []
         waits: list[bool] = []
         view = views[state]
@@ -114,8 +114,16 @@ def run(monkeypatch, tmp_path):
 
         monkeypatch.setattr(github_agent, "view", read)
         monkeypatch.setattr(github_agent, "verify_now", verify)
+        if authenticated:
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def client(*_args):
+                yield tmp_path, tmp_path / "socket", tmp_path / "placeholder", tmp_path
+
+            monkeypatch.setattr(script_sandbox, "_authenticated_client", client)
         result = asyncio.run(script_sandbox.run_script(
-            THREAD, None, tmp_path / "s.sh", run_id="r", timeout_seconds=5))
+            THREAD, None, tmp_path / "s.sh", run_id="r", timeout_seconds=5, authenticated=authenticated))
         return {**seen, "reads": len(reads), "waits": len(waits), "result": result, "view": answer,
                 "person_gh": person_gh.resolve(), "agent_home": agent_home.resolve(),
                 "home_gh": (home / ".config" / "gh").resolve()}
@@ -146,6 +154,15 @@ def test_unapproved_run_hides_even_a_verified_account(run):
     for home in (seen["person_gh"], seen["home_gh"], seen["agent_home"]):
         assert _deny(home) in seen["profile"]
     assert not any(name in env for name in _TOKENS)
+
+
+def test_authenticated_run_keeps_ready_account_locked(run):
+    seen = run("ready", authenticated=True)
+    assert seen["env"]["GH_CONFIG_DIR"] != str(seen["agent_home"])
+    assert _git(seen["env"]) == _LOCKED_GIT
+    assert str(seen["agent_home"]) not in _read_only(seen["argv"])
+    assert _deny(seen["agent_home"]) in seen["profile"]
+    assert not any(name in seen["env"] for name in _TOKENS)
 
 
 def test_a_run_with_no_cached_answer_waits_for_the_verification(run):

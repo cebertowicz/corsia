@@ -21,9 +21,7 @@ _HOP_HEADERS = frozenset({b"connection", b"transfer-encoding", b"content-length"
 
 
 async def _read_request(reader: asyncio.StreamReader, conn: h11.Connection):
-    """The one request on this connection and its body, or ``None`` if it ended first."""
-    request = None
-    body = bytearray()
+    """Read the request headers, leaving its body for streaming."""
     while True:
         event = conn.next_event()
         if event is h11.NEED_DATA:
@@ -32,13 +30,23 @@ async def _read_request(reader: asyncio.StreamReader, conn: h11.Connection):
             if not data:
                 return None
         elif isinstance(event, h11.Request):
-            request = event
-        elif isinstance(event, h11.Data):
-            body.extend(event.data)
-        elif isinstance(event, h11.EndOfMessage):
-            return (request, bytes(body)) if request is not None else None
+            return event
         elif isinstance(event, h11.ConnectionClosed):
             return None
+
+
+async def _request_body(reader: asyncio.StreamReader, conn: h11.Connection):
+    while True:
+        event = conn.next_event()
+        if event is h11.NEED_DATA:
+            data = await reader.read(65536)
+            conn.receive_data(data)
+        elif isinstance(event, h11.Data):
+            yield bytes(event.data)
+        elif isinstance(event, h11.EndOfMessage):
+            return
+        elif isinstance(event, h11.ConnectionClosed):
+            raise ValueError("request ended before its body")
 
 
 def _github_target(request: h11.Request) -> tuple[bytes, str] | None:
@@ -74,10 +82,9 @@ async def _serve(
     conn = h11.Connection(h11.SERVER)
     started = False
     try:
-        received = await _read_request(reader, conn)
-        if received is None:
+        request = await _read_request(reader, conn)
+        if request is None:
             return
-        request, body = received
         github = _github_target(request)
         if github is None:
             await _reply(conn, writer, 403, b"")
@@ -86,11 +93,13 @@ async def _serve(
         if request.method in (b"GET", b"HEAD") and budget.blocked_until(low_priority=True) is not None:
             await _reply(conn, writer, 429, b"GitHub reads are paused by the shared rate-limit budget\n")
             return
-        headers = [(name, value) for name, value in request.headers if name.lower() not in _HOP_HEADERS]
+        headers = [(name, value) for name, value in request.headers
+                   if name.lower() not in _HOP_HEADERS or name.lower() == b"content-length"]
         headers.append((b"authorization", b"token " + credential().encode("utf-8")))
         url = "https://" + host.decode("ascii") + target
         async with httpx.AsyncClient(transport=transport, follow_redirects=False, trust_env=False) as client:
-            async with client.stream(request.method.decode("ascii"), url, headers=headers, content=body) as response:
+            async with client.stream(request.method.decode("ascii"), url, headers=headers,
+                                     content=_request_body(reader, conn)) as response:
                 response_headers = [(name, value) for name, value in response.headers.raw
                                     if name.lower() not in _HOP_HEADERS]
                 response_headers.append((b"connection", b"close"))

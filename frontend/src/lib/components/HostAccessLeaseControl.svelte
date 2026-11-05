@@ -55,7 +55,7 @@
 		decideHostAccessLease,
 		fetchHostAccessLeases,
 		HostAccessApiError,
-		type HostAccessLease,
+		type HostAccessLease, type HostAccessItem,
 		type HostAccessLeaseDecision,
 	} from '$lib/api/hostAccess';
 	import { token } from '$lib/stores/auth';
@@ -78,7 +78,7 @@
 		awaitingUser?: boolean;
 	} = $props();
 
-	let leases = $state<HostAccessLease[]>([]);
+	let leases = $state<HostAccessItem[]>([]);
 	let stale = $state(false);
 	let error = $state('');
 	let inFlightDecisionIds = $state<Set<string>>(new Set());
@@ -99,7 +99,7 @@
 	let pendingTriggerEl = $state<HTMLButtonElement | null>(null);
 
 	const currentPending = $derived(
-		leases.find((lease) => lease.state === 'awaiting_user') ?? null,
+		leases.find((lease) => lease.kind === 'script' || lease.state === 'awaiting_user') ?? null,
 	);
 	$effect(() => {
 		awaitingUser = !!currentPending;
@@ -116,9 +116,9 @@
 		pendingOpenFor = id;
 		pendingOpen = false;
 	});
-	const active = $derived(leases.filter((lease) => lease.state === 'active'));
+	const active = $derived(leases.filter((lease): lease is HostAccessLease => lease.kind !== 'script' && lease.state === 'active'));
 	const transitional = $derived(
-		leases.filter((lease) => lease.state === 'reviewing' || lease.state === 'activating'),
+		leases.filter((lease): lease is HostAccessLease => lease.kind !== 'script' && (lease.state === 'reviewing' || lease.state === 'activating')),
 	);
 	/**
 	 * Every shape that is not the compact chip is named once here and rendered
@@ -163,7 +163,7 @@
 	}
 
 	async function reconcileAuthoritativeLeases(
-		nextLeases: HostAccessLease[],
+		nextLeases: HostAccessItem[],
 		requestedThreadId: string,
 	): Promise<void> {
 		const intent = focusRestoreIntent;
@@ -239,7 +239,7 @@
 	}
 
 	async function decide(
-		lease: HostAccessLease,
+		lease: HostAccessItem,
 		decision: HostAccessLeaseDecision,
 		decisionControl: Element | null = null,
 	): Promise<void> {

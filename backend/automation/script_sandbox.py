@@ -11,10 +11,8 @@ read channel for that repository (``script_github_channel``) and the
 ``corsia github read`` client; every other run gets neither. The person's
 ``gh`` homes stay hidden from every run.
 
-Each run reads the agents' GitHub account once. Verified, the script gets
-exactly what an agent shell gets: that account's ``gh`` and Git identity and its
-home read-only. In every other state, no account at all included, it gets the
-shell's locked state, and the run records why it had no GitHub login.
+Each run hides the person's and agents' GitHub homes from the script itself.
+Authenticated scripts use the owner tool channel to act as their agent.
 """
 
 from __future__ import annotations
@@ -291,7 +289,7 @@ async def _run_with_channel(
 ) -> ScriptRun:
     env = safehouse_subprocess_env(thread_id)
     # Keep the shell's locked Git configuration, without exposing either gh home.
-    env.update(github_agent.shell_env(replace(view, state="needs_auth", absent=False)))
+    env.update(github_agent.locked_env())
     env.pop(SOCKET_ENV, None)
     env.pop(GITHUB_READ_SOCKET_ENV, None)
     if github_read_socket is not None:
@@ -320,7 +318,7 @@ async def _run_with_channel(
         raise ScriptSandboxError(denial)
     envelope = execution_envelope_for_consumed_action(
         None, leased=False, thread_id=thread_id, grant_policies=grant_policies,
-        policies=policies, agent_account=replace(view, state="needs_auth", absent=False), env=env,
+        policies=policies, agent_account=github_agent.script_view(), env=env,
         build_profile=_script_profile(view, socket_dir), build_argv=safehouse_argv,
     )
     if socket_dir is not None and envelope is None:

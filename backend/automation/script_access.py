@@ -51,5 +51,5 @@ async def review_script(thread_id: str, params: dict[str, Any]) -> tuple[Path, s
     approved = review.verdict == "allow" and auto and await run_in_db(get_host_access_auto_approve)
     record = {"state": "approved" if approved else "pending", "purpose": purpose,
               "user_request": user_request, "trigger": trigger, "application_hash": application_hash,
-              "approved_sha256": sha if approved else None, "review": asdict(review)}
+              "review": asdict(review)}
     return path, sha, record

@@ -37,7 +37,7 @@ async def test_script_review_decides_registration(monkeypatch, tmp_path, auto, v
         assert (path, digest) == (script, sha)
         approved = auto and verdict == "allow"
         assert record["state"] == ("approved" if approved else "pending")
-        assert record["approved_sha256"] == (sha if approved else None)
+        assert "approved_sha256" not in record
         assert reviewer.await_args.args[1]["script"] == "print('ok')\n"
         assert reviewer.await_args.args[1]["user_request"] == "please do work"
 

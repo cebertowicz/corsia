@@ -1,5 +1,6 @@
 import type {
 	HostAccessLease,
+	HostAccessItem,
 	HostAccessPolicyException,
 	HostAccessRepoPolicy,
 } from '$lib/api/hostAccess';
@@ -80,13 +81,12 @@ export function policyLabel(policy: HostAccessPolicyException['policy']): string
 		: 'Protected base checkout';
 }
 
-export function casReady(lease: HostAccessLease | null): boolean {
+export function casReady(lease: HostAccessItem | null): boolean {
 	return !!lease
 		&& text(lease.id)
 		&& text(lease.application_hash)
 		&& text(lease.decision_capability)
-		&& Number.isInteger(lease.revision)
-		&& lease.revision > 0;
+		&& (lease.kind === 'script' || (Number.isInteger(lease.revision) && lease.revision > 0));
 }
 
 /**
@@ -97,18 +97,17 @@ export function casReady(lease: HostAccessLease | null): boolean {
  * would silently no-op the click.
  */
 export function decisionBlocked(
-	lease: HostAccessLease | null,
+	lease: HostAccessItem | null,
 	stale: boolean,
 	blockingLeaseId: string | null,
 ): boolean {
 	return stale || blockingLeaseId !== null || !casReady(lease);
 }
 
-export function approvalReady(lease: HostAccessLease | null): boolean {
+export function approvalReady(lease: HostAccessItem | null): boolean {
 	if (lease?.kind === 'script') {
-		return lease.state === 'awaiting_user' && casReady(lease)
-			&& text(lease.script_name) && text(lease.purpose) && text(lease.user_request)
-			&& !!lease.trigger;
+		return casReady(lease) && text(lease.script_name) && text(lease.purpose)
+			&& text(lease.user_request) && !!lease.trigger;
 	}
 	return !!lease
 		&& lease.state === 'awaiting_user'
@@ -136,7 +135,8 @@ export function approvalReady(lease: HostAccessLease | null): boolean {
 		&& nullableText(lease.terminal_reason);
 }
 
-export function owner(lease: HostAccessLease): string {
+export function owner(lease: HostAccessItem): string {
+	if (lease.kind === 'script') return lease.root_thread_id;
 	return text(lease.root_thread_title)
 		? lease.root_thread_title.trim()
 		: (text(lease.root_thread_id) ? lease.root_thread_id : 'Unknown chat');

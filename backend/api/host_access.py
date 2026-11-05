@@ -48,6 +48,11 @@ class LeaseMutation(BaseModel):
     application_hash: str
 
 
+class ScriptMutation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    application_hash: str
+
+
 def _http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, LeaseNotFoundError):
         return HTTPException(404, "Host-access lease not found")
@@ -60,19 +65,19 @@ def _serialize_lease(row: dict) -> dict:
     """Convert domain-naive UTC timestamps only at the public API boundary."""
     result = dict(row)
     for field in _PUBLIC_TIMESTAMP_FIELDS:
-        result[field] = utc_storage_iso_to_api(result.get(field))
+        if field in result or result.get("kind") != "script":
+            result[field] = utc_storage_iso_to_api(result.get(field))
     return result
 
 
-async def _decide_script(schedule_id: str, body: LeaseMutation, user: dict,
+async def _decide_script(schedule_id: str, body: ScriptMutation, user: dict,
                          capability: str | None, approve: bool):
     from automation.script_decisions import decide
     from events.delivery import deliver_to_thread
     from infra.db_async import run_in_db
 
-    if body.revision != 1 or not verify_user_decision_capability(
-        capability, {"id": schedule_id, "revision": body.revision,
-                     "application_hash": body.application_hash},
+    if not verify_user_decision_capability(
+        capability, {"id": schedule_id, "application_hash": body.application_hash},
         user_id=user["id"], operation="approve" if approve else "reject",
     ):
         raise HTTPException(403, "A current interactive user decision is required")
@@ -91,14 +96,14 @@ async def _decide_script(schedule_id: str, body: LeaseMutation, user: dict,
 
 
 @router.post("/scripts/{schedule_id}/approve")
-async def approve_script(schedule_id: str, body: LeaseMutation,
+async def approve_script(schedule_id: str, body: ScriptMutation,
                          user: dict = Depends(require_human_user),
                          capability: str | None = Header(None, alias=USER_DECISION_HEADER)):
     return await _decide_script(schedule_id, body, user, capability, True)
 
 
 @router.post("/scripts/{schedule_id}/reject")
-async def reject_script(schedule_id: str, body: LeaseMutation,
+async def reject_script(schedule_id: str, body: ScriptMutation,
                         user: dict = Depends(require_human_user),
                         capability: str | None = Header(None, alias=USER_DECISION_HEADER)):
     return await _decide_script(schedule_id, body, user, capability, False)
@@ -125,7 +130,10 @@ async def leases(
     if interactive_ui == "1":
         require_human_user(user)
         rows = [
-            attach_user_decision_capability(row, user_id=user["id"]) for row in rows
+            ({**row, "decision_capability": attach_user_decision_capability(
+                {**row, "state": "awaiting_user"}, user_id=user["id"])["decision_capability"]}
+             if row.get("kind") == "script" else attach_user_decision_capability(row, user_id=user["id"]))
+            for row in rows
         ]
     return {"leases": [_serialize_lease(row) for row in rows]}
 

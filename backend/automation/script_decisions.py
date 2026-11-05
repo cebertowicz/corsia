@@ -13,15 +13,10 @@ def _public(row) -> dict:
     auth = payload["authentication"]
     return {
         "id": row["id"], "kind": "script", "thread_id": row["thread_id"],
-        "root_thread_id": row["thread_id"], "root_thread_title": None, "state": "awaiting_user",
-        "revision": 1, "application_hash": auth["application_hash"],
-        "script_name": Path(row["script_path"]).name, "trigger": auth["trigger"],
-        "purpose": auth["purpose"], "user_request": auth["user_request"],
-        "plan": [], "requested_duration_seconds": 0, "expected_resources": None,
-        "persistent_effects": None, "rollback_plan": None, "forbidden_effects": None,
-        "requesting_project_id": None, "repo_policy_snapshot": [], "repo_policy_hash": "",
-        "requested_policy_exceptions": [], "reviewer_model": None, "reviewer": None,
-        "application_review_result": None, "expires_at": None, "terminal_reason": None,
+        "root_thread_id": row["thread_id"], "application_hash": auth["application_hash"],
+        "script_name": Path(row["script_path"]).name, "script_path": row["script_path"],
+        "trigger": auth["trigger"], "purpose": auth["purpose"],
+        "user_request": auth["user_request"], "reviewer_reason": auth["review"]["reason"],
         "created_at": row["created_at"], "updated_at": row["updated_at"],
     }
 
@@ -63,7 +58,6 @@ def decide(schedule_id: str, user_id: str, application_hash: str, approve: bool)
         if row["state"] != "paused" or auth.get("state") != "pending" or auth.get("application_hash") != application_hash:
             raise ValueError("Script request is no longer current")
         auth["state"] = "approved" if approve else "denied"
-        auth["approved_sha256"] = row["script_sha256"] if approve else None
         now = datetime.now(timezone.utc).isoformat()
         db.execute(
             "UPDATE automation_schedules SET state=?, payload_json=?, updated_at=? WHERE id=?",

@@ -74,6 +74,32 @@ async def test_proxy_normalizes_host_and_ignores_absolute_target_host():
 
 
 @pytest.mark.asyncio
+async def test_proxy_streams_request_body_before_it_is_complete():
+    reader = asyncio.StreamReader()
+    writer = Writer()
+    first = asyncio.Event()
+    chunks = []
+
+    class StreamingTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request):
+            async for chunk in request.stream:
+                chunks.append(chunk)
+                first.set()
+            return httpx.Response(200, stream=httpx.ByteStream(b"ok"))
+
+    reader.feed_data(b"POST /upload HTTP/1.1\r\nHost: api.github.com\r\nContent-Length: 6\r\n\r\nabc")
+    task = asyncio.create_task(_serve(reader, writer, credential=lambda: "synthetic-value",
+                                      transport=StreamingTransport()))
+    await asyncio.wait_for(first.wait(), 1)
+    assert chunks == [b"abc"]
+    reader.feed_data(b"def")
+    reader.feed_eof()
+    await task
+    assert b"".join(chunks) == b"abcdef"
+    assert b"200" in writer.data and b"ok" in writer.data
+
+
+@pytest.mark.asyncio
 async def test_proxy_returns_fixed_failure_without_credential():
     def fail():
         raise ValueError("synthetic-value")

@@ -229,7 +229,9 @@ class AutomationScheduleTool(Tool):
             "has no expiry: cancel it with "
             "automation_cancel. Check its last_status with automation_list. "
             "For authenticated commands set authenticated=true, purpose, and user_request quoting "
-            "the person's request. Once approved, call your tools with corsia tool and GitHub with corsia github."
+            "the person's request. Once approved, scripts run corsia tool <name> '<json>' as their "
+            "agent; tools needing a live conversation, such as shell and sends, are refused. "
+            "corsia github <gh args> runs as the agents' GitHub account."
         )
 
     @property
