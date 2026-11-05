@@ -47,9 +47,10 @@ def content_facts(raw: dict[str, Any]) -> dict[str, Any]:
     container = raw.get("pull_request") or raw.get("issue") or {}
     if not isinstance(container, dict):
         container = {}
-    if raw.get("issue") and not raw.get("pull_request") and not container.get("pull_request"):
+    if raw.get("issue") and not raw.get("pull_request"):
+        # A PR conversation comment keeps its number for staging; its PR labels come from the read.
         facts["issue_number"] = container.get("number")
-        if isinstance(container.get("labels"), list):
+        if not container.get("pull_request") and isinstance(container.get("labels"), list):
             facts["labels"] = label_names(container["labels"])
     if link := item.get("html_url"):
         facts["link"] = link
