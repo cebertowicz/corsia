@@ -41,6 +41,7 @@ Before reporting a vulnerability, read [`SECURITY.md`](../SECURITY.md).
 | [Data model](reference/data-model/README.md) | Tables and relationships in CORSIA's data stores, generated from the schema code |
 | [CLI](reference/cli.md) | Commands and arguments, generated from the CLI code |
 | [Configuration](reference/configuration.md) | Environment variables CORSIA reads, generated from the code |
+| [Agent tools](reference/agent-tools.md) | Reachable agent tools and how to load them |
 | [`CHANGELOG.md`](../CHANGELOG.md) | What has shipped |
 
 ## About this project
