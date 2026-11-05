@@ -396,6 +396,14 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct-res-head .ct-num')?.textContent).toBe('3');
 	});
 
+	it("fills the drawer's number chip with the viewer disc's stepped colour so the digit reads on it", () => {
+		render(thread({ anchor: '', regionNumber: 3 }), false, { tagColor: '#8b5cf6' });
+		expect(host.querySelector<HTMLElement>('.ct-head .ct-num')!.style.getPropertyValue('--disc-color')).toBe('#aa87f8');
+		unmount(component!); host.remove();
+		render(thread({ anchor: '', regionNumber: 3 }));
+		expect(host.querySelector<HTMLElement>('.ct-head .ct-num')!.style.getPropertyValue('--disc-color')).toBe('');
+	});
+
 	it('says when the diagram changed under a pin, with the same Move pin', () => {
 		const onMovePin = vi.fn();
 		render(thread({ anchor: '```mermaid', regionNumber: 1, regionStale: true }), false, { onMovePin, diagram: true });

@@ -8,6 +8,10 @@ import { focusedDocComment } from '$lib/stores/docCommentFocus';
 import { addRegionComment, moveRegion } from '$lib/stores/imageRegionComments';
 import { toasts } from '$lib/stores/toast';
 
+/** What a person is told when the diagram changed under their pin; the server's `diagram_changed` refusal carries the same words. */
+export const DIAGRAM_CHANGED_MESSAGE = 'Place the pin on the current diagram; your draft is kept.';
+const isDiagramChanged = (error: unknown) => error instanceof DocRequestError && error.kind === 'diagram_changed';
+
 const WHOLE = (region: ImageRegion) => region.x === 0 && region.y === 0 && region.w === 1 && region.h === 1;
 /** What the composer says a new comment is on, in place of a quote. */
 export function regionLabel(region: ImageRegion): string {
@@ -73,8 +77,7 @@ export function createImageComments(context: {
 		if (!boxMode) moving = null;
 	}
 	async function refreshAfterStale(error: unknown): Promise<boolean> {
-		return error instanceof DocRequestError && error.kind === 'diagram_changed'
-			? await context.refreshDiagram?.() ?? false : false;
+		return isDiagramChanged(error) ? await context.refreshDiagram?.() ?? false : false;
 	}
 	/** A box, point or whole-image region was drawn: it opens the composer, or moves the pin being moved. */
 	async function draw(region: ImageRegion, anchor: CommentAnchor) {
@@ -110,7 +113,8 @@ export function createImageComments(context: {
 		let id: string;
 		try {
 			id = await submitDocumentComment(
-				() => (post ? post.create(region, text) : addRegionComment(artifact, region, text)), retryToast.remember, post?.failure,
+				() => (post ? post.create(region, text) : addRegionComment(artifact, region, text)), retryToast.remember,
+				(error) => (isDiagramChanged(error) ? DIAGRAM_CHANGED_MESSAGE : post?.failure?.(error)),
 			);
 		} catch (error) {
 			if (await refreshAfterStale(error)) {

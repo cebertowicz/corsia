@@ -32,13 +32,13 @@ def test_changed_diagram_refuses_new_and_moved_pins(integration_client, integrat
     rejected = integration_client.post(url, json={**body, 'body': 'Old snapshot'})
     assert rejected.status_code == 409
     assert rejected.json()['kind'] == 'diagram_changed'
-    assert 'This diagram changed. Place the pin again; your draft is kept.' in rejected.text
+    assert 'Place the pin on the current diagram; your draft is kept.' in rejected.text
     assert set(_threads(integration_client, artifact)) == {pin['id']}
     rejected_move = integration_client.patch(_url(f"/api/comments/{pin['id']}"),
         json={'region': {'x': 0.8, 'y': 0.7}, 'diagram_source': old})
     assert rejected_move.status_code == 409
     assert rejected_move.json()['kind'] == 'diagram_changed'
-    assert 'This diagram changed. Place the pin again; your draft is kept.' in rejected_move.text
+    assert 'Place the pin on the current diagram; your draft is kept.' in rejected_move.text
     unchanged = _threads(integration_client, artifact)[pin['id']]
     assert (unchanged['region_x'], unchanged['region_y'], unchanged['image_rev']) == (pin['region_x'], pin['region_y'], pin['image_rev'])
 
@@ -137,6 +137,7 @@ async def test_live_edit_refuses_pin_on_viewers_previous_snapshot(ownership_scop
                       'from_off': 0, 'to_off': 10, 'live_capture': True, 'client_id': 'old-view',
                       'region': {'x': 0.2, 'y': 0.3}, 'diagram_source': old})
         assert response.status_code == 409, response.text
+        assert response.json()['kind'] == 'diagram_changed'
         from doceditor import comments
         assert comments.get_comment('old-view', db=ownership_scope['db']) is None
     finally:

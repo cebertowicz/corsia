@@ -5,8 +5,9 @@ const mocks = vi.hoisted(() => ({ postComment: vi.fn(), captureComment: vi.fn(),
 vi.mock('$lib/api/docs', async (importOriginal) => ({
 	...(await importOriginal<object>()), postComment: mocks.postComment, fetchComments: vi.fn(async () => ({ comments: [] })),
 }));
-vi.mock('./commentSelection', () => ({ captureComment: mocks.captureComment, selectComment: mocks.selectComment }));
+vi.mock('./commentSelection', () => ({ captureComment: mocks.captureComment, selectComment: mocks.selectComment, SELECTION_LOST: 'Lost' }));
 
+import { DocRequestError } from '$lib/api/docs';
 import { docComments } from './docComments';
 import { addDocImageComment } from './imageRegionComments';
 import type { LiveDocumentSession } from './liveDocumentSession';
@@ -40,6 +41,17 @@ describe('a comment on part of an image inside a document', () => {
 		expect(mocks.postComment).toHaveBeenCalledWith('live-doc', expect.objectContaining({ diagram_source: 'graph TD\n A-->B', live_capture: true }));
 		expect(session.releaseReservation).toHaveBeenCalledWith('diagram-1');
 		expect(get(docComments)['live-doc']).toBeUndefined();
+	});
+
+	it('reports a diagram whose range is gone from the live document as a changed diagram, and leaves a photo as it was', async () => {
+		const session = { artifactId: 'live-doc', releaseReservation: vi.fn() } as unknown as LiveDocumentSession;
+		mocks.selectComment.mockReturnValue('selection');
+		mocks.captureComment.mockRejectedValue(new Error('Lost'));
+		const diagram = addDocImageComment({ artifactId: 'doc', from: 0, to: 10, text: '```mermaid', session, diagramSource: 'graph TD' }, BOX, 'Pin');
+		await expect(diagram).rejects.toBeInstanceOf(DocRequestError);
+		await expect(diagram).rejects.toMatchObject({ status: 409, kind: 'diagram_changed' });
+		await expect(addDocImageComment({ artifactId: 'doc', from: 9, to: 23, text: TEXT, session }, BOX, 'Pin')).rejects.toThrow('Lost');
+		expect(mocks.postComment).not.toHaveBeenCalled();
 	});
 
 	it('captures the image in a live document as it does a selected quote, and frees the capture when posting fails', async () => {

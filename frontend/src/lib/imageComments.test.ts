@@ -85,6 +85,32 @@ describe('image comments', () => {
 		expect(comments.selectedId).toBe('new');
 	});
 
+	it.each([
+		['the server refuses through the document request', undefined],
+		['the live document words the failure itself', () => 'The document changed before your comment could be attached. Your draft is kept. Try again.'],
+	])('says to place the pin on the current diagram, with the draft kept, when %s', async (_flow, failure) => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const post = vi.fn(async () => { throw new DocRequestError('409 {"kind":"diagram_changed"}', 409, 'diagram_changed'); });
+		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
+			restoreFocus: () => {}, post: () => ({ create: post, failure }), refreshDiagram: async () => true });
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('Keep this');
+		await expect(comments.submit('Keep this')).rejects.toThrow('409');
+		expect(mocks.show).toHaveBeenCalledWith('Place the pin on the current diagram; your draft is kept.', 'error');
+		expect(comments.boxMode).toBe(true);
+		expect(comments.hasDraftText).toBe(true);
+	});
+
+	it('keeps the failure wording of any other refusal', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const post = vi.fn(async () => { throw new DocRequestError('409 {"kind":"selection_changed"}', 409, 'selection_changed'); });
+		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
+			restoreFocus: () => {}, post: () => ({ create: post, failure: () => 'Live words' }), refreshDiagram: async () => true });
+		await comments.draw(BOX, rect);
+		await expect(comments.submit('Keep this')).rejects.toThrow('409');
+		expect(mocks.show).toHaveBeenCalledWith('Live words', 'error');
+	});
+
 	it('refreshes on the refusal kind, never on its wording', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		const post = vi.fn(async () => { throw new DocRequestError('409 {"detail":"This diagram changed."}', 409, 'selection_changed'); });

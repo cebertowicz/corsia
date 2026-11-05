@@ -27,7 +27,7 @@ class CommentSelectionChanged(ValueError):
 
 def diagram_changed() -> CommentSelectionChanged:
     """The diagram a pin was drawn on is not the one the document holds now."""
-    return CommentSelectionChanged("This diagram changed. Place the pin again; your draft is kept.", "diagram_changed")
+    return CommentSelectionChanged("Place the pin on the current diagram; your draft is kept.", "diagram_changed")
 
 
 @dataclass(frozen=True)
