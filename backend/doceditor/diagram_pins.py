@@ -21,7 +21,7 @@ _OPEN = re.compile(r"^[ \t]*(?P<fence>`{3,}|~{3,})[ \t]*mermaid[ \t]*$", re.IGNO
 
 def is_fence_quote(quote: str | None) -> bool:
     """Whether ``quote`` is the opening line of a mermaid fence, the anchor of a diagram pin."""
-    return bool(quote) and _OPEN.match(quote.strip("\n")) is not None
+    return quote is not None and _OPEN.match(quote.strip("\n")) is not None
 
 
 def block_at(text: str, from16: int | None) -> tuple[int, int, str] | None:
