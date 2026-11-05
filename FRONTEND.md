@@ -1,49 +1,31 @@
-# CORSIA — Frontend Instructions
+# CORSIA frontend
+
+This map points contributors to the frontend's composition, shared controls, and conventions. For a worked example, see [Build a component](docs/contributing/build-a-component.md).
 
 ## Component Map
 
-```
-frontend/src/
-├── routes/+page.svelte      # Layout shell, WS events, session management
-├── lib/
-│   ├── components/          # 45+ components — see ls frontend/src/lib/components/
-│   │   ├── Chat: Sidebar, MessageList, InputBar, AssistantMessage, UserMessageBubble, LiveToolActivity, Lightbox
-│   │   ├── Pane/artifacts: Pane, PaneShell, ArtifactPane, EventChip, SubagentChip, SendRefChip
-│   │   ├── Documents: DocumentsView, DocViewer, MarkdownEditor, DocCommentsPane, DocCommentThread, DocDetailPane
-│   │   ├── Providers/settings: SettingsView, SettingsSystem, SettingsDebug, ProviderManager, ModelCard, ModelProfileEditor, v7 provider components
-│   │   ├── Cost/system: CostDashboard, CostSummaryCards, CostDailyChart, CostBreakdownSection
-│   │   └── Shell/project: HomeShell, HomePageView, HomeOverlays, ProjectSettingsView, ProjectRepos, CreateProjectModal, CommandPalette, ToastContainer
-│   ├── stores/              # auth, sessions, documents, doc comments, providers, models, projects, costs, pane, theme, connection
-│   ├── ws.ts                # WebSocket client — emits 'active_turns_restored' on auth_ok when active sessions exist (page refresh recovery)
-│   └── markdown.ts          # Markdown renderer
-```
+- `frontend/src/routes/+page.svelte` is the application entry and composition root; `+layout.svelte` supplies the layout.
+- `frontend/src/lib/components/` contains the application surfaces and their components. Shared controls are in `components/ui/`; `components/attention/` contains the attention dock and its rows.
+- `frontend/src/lib/stores/` holds shared client state, including the attention queue and answer state. `frontend/src/lib/api/` contains API clients.
+- `frontend/src/lib/ws/` handles WebSocket transport and events. `frontend/src/lib/cm/` contains CodeMirror editor extensions.
+- `frontend/src/routes/_design/` demonstrates shared controls at `/_design`.
 
 ## Design System
 
-**Read `frontend/DESIGN-SYSTEM.md` before touching anything visual.**
-It is the canonical spec for:
+Read [the design system](frontend/DESIGN-SYSTEM.md) before visual work. It describes the chat reference screen, tokens, existing primitives, accessibility, mobile contracts, and surface composition. Theme tokens live in `frontend/src/app.css`; shared control implementations live in `frontend/src/lib/components/ui/`. The barrel `ui/index.ts` exports commonly used primitives, including `Button`, `Field`, `Modal`, `IconButton`, `Message`, `Section`, `StatePill`, and `Toggle`.
 
-- **Tokens** in `app.css` (color, surface, radius, spacing, glass
-  materials, motion, z-index, typography, theme overrides, accessibility,
-  Tauri / PWA contracts).
-- **Primitives** in `frontend/src/lib/components/ui/`: `Modal`, `Button`,
-  `IconButton`, `Field`, `StatePill`, `Section`, `Message`. Demonstrated
-  at `/_design`.
-- **Surface composition rules** (sidebars, headers, drawers, modals,
-  floating chips, overlays).
-- **Anti-patterns** (glass over content, glass-in-glass, hardcoded blurs,
-  custom buttons / fields / pills).
-- **Audit appendix (§8)** — the punch list for ongoing refinements
-  (glass token cleanup, drawer harmonization, Settings glass adoption,
-  model-selector overhaul). Future implementation roadmap is §10.
-
-Execution history of how this system came together lives in
-the workspace, under `shared/`.
+Use the existing semantic tokens and controls for new work. Check the implementation and actual callers for supported props and variants: not every component in `ui/` is exported by the barrel. The design system's section 10 is its design review rule.
 
 ## Svelte 5
 
-Use `$props()`, `$state()`, `$derived()`, `$effect()`. Do NOT use Svelte 4 syntax. **No `createEventDispatcher`** — use callback props instead (e.g., `onSelect?: (id: string) => void` in `$props()`). Mixing Svelte 4 event dispatch with Svelte 5 prop passing silently fails — the parent never receives the event.
+For new Svelte 5 components, use runes such as `$props()`, `$state()`, and `$derived()`, and pass callback props for component events.
 
 ## CSS Variable Convention
 
-All color/theme values must be defined as CSS variables in `frontend/src/app.css` under both `:root` (dark mode defaults) and `[data-theme="light"]`. Do NOT use hex or rgba fallbacks in `var()` calls inside `.svelte` files (e.g., `var(--bg-surface, #fff)` is wrong — define `--bg-surface` in `app.css` instead). Numeric fallbacks are fine (e.g., `var(--radius-xs, 4px)`).
+Use semantic theme variables from `frontend/src/app.css` instead of hardcoded color fallbacks in component styles. Check dark and light themes, keyboard access, reduced motion, and narrow layouts for the surface being changed.
+
+## Checks
+
+After installing dependencies with `npm ci` in `frontend/`, `npm run check` runs Svelte and TypeScript checks; `npm run test -- <test-file>` runs a focused Vitest test. `npm run test` runs the frontend unit suite. See `frontend/package.json` for the current scripts.
+
+Checked against the code at `7a8c55d84c75cbee7b8f26c8839f188fa466b559`.

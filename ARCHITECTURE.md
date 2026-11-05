@@ -47,6 +47,24 @@ any person input, using the same persisted nudge and settlement path for both.
 Deeper callable maps live in `BACKEND.md` and `FRONTEND.md`. Visual work also
 follows `frontend/DESIGN-SYSTEM.md`.
 
+### Frontend composition
+
+The SvelteKit entry at `frontend/src/routes/+page.svelte` composes the app's
+surfaces. Shared controls live in `frontend/src/lib/components/ui/`, client
+state in `frontend/src/lib/stores/`, API clients in `frontend/src/lib/api/`,
+and WebSocket handlers in `frontend/src/lib/ws/`.
+
+The attention dock is mounted in the thread chat slot above the composer.
+`components/attention/AttentionDock.svelte` renders the queue; the
+`attentionDock`, `attentionAnswerState`, and `attentionHeld` stores retain
+queue and answer state outside the transient drawer. A held-reply decision
+advances the visible queue while its request is in flight; a failed request
+returns the item for retry. `api/heldReplies.ts` calls the server for that
+operation. The dock is not mounted in documents or settings.
+
+Frontend composition checked against the code at
+`7a8c55d84c75cbee7b8f26c8839f188fa466b559`.
+
 ### Verified ONNX assets
 
 `backend/core/onnx_asset.py` is the single owner of verified ONNX asset
