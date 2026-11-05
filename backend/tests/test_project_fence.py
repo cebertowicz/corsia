@@ -295,6 +295,9 @@ def test_linux_denials_resolve_against_the_command_cwd(tmp_path):
         assert linux_denied_paths_in(f"x\n{line}\n", projects / "A") == (projects / expected,), line
     absolute = f"cat: {projects}/B/file: Permission denied"
     assert linux_denied_paths_in(absolute, Path("/elsewhere")) == (projects / "B" / "file",)
+    # CPython's own wording: the apostrophe in "can't" must not open a quote.
+    script = f"python3: can't open file '{projects}/B/x.py': [Errno 13] Permission denied"
+    assert linux_denied_paths_in(script, projects / "A") == (projects / "B" / "x.py",)
     assert linux_denied_paths_in("rm: cannot remove '../B': Device or resource busy", projects / "A") == ()
 
 

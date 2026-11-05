@@ -94,7 +94,8 @@ def denied_paths_in(text: str) -> tuple[Path, ...]:
 # ``cat: ../B/file: ...``, ``ls: cannot open directory '../B': ...``, ``mkdir: ... ‘../B/x’: ...``
 # or ``PermissionError: [Errno 13] Permission denied: '../B/file'`` (Ubuntu 24.04, bubblewrap 0.9.0).
 _LINUX_DENIAL = "Permission denied"
-_LINUX_QUOTED = re.compile(r"['‘]([^'’\r\n]+)['’]")
+# A quote opens only after a non-word character, so the apostrophe in ``can't`` never opens one.
+_LINUX_QUOTED = re.compile(r"(?<!\w)['‘]([^'’\r\n]+)['’]")
 
 
 def linux_denied_paths_in(text: str, cwd: Path) -> tuple[Path, ...]:
