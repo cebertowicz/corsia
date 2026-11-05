@@ -1,10 +1,17 @@
 # Developer setup
 
-Set up a checkout, run CORSIA with separate development data, and run targeted tests.
+Choose where to work, run CORSIA with separate development data, and run targeted tests.
 
 ## Requirements
 
 See the [requirements table](../../README.md#getting-started). This setup uses Python 3.11 and Node.js with npm.
+
+## Choose where to work
+
+- **Your everyday checkout** at `~/.corsia`, if you installed CORSIA from source. Make your feature branch there; `corsia restart` serves your edits, uncommitted ones included, against your real data. Commit or stash them before **Settings → System → Update now**, which refuses while the checkout has uncommitted edits.
+- **A separate checkout** with its own development data, set up below. Use it for anything that could harm your data, such as a migration, and for running tests.
+
+Try your change in the browser. The desktop app does not run your checkout's backend, even under `tauri dev`, and a desktop app that has taken over your source install stops it from serving your checkout.
 
 ## Clone and install
 
@@ -27,7 +34,7 @@ cd ..
 
 ## Run the app
 
-The following example keeps the development workspace and application state in `~/corsia-dev-data`, outside the checkout so they can't be committed. For risky changes such as migrations, use the same setup in a second checkout with its own workspace, state directory, and ports. Never point `CORSIA_WORKSPACE` or `CORSIA_STATE_DIR` at the CORSIA you use day to day. Pick unused ports if 43871 or 43872 is already in use.
+The following example keeps the development workspace and application state in `~/corsia-dev-data`, outside the checkout so they can't be committed. Never point `CORSIA_WORKSPACE` or `CORSIA_STATE_DIR` at the CORSIA you use day to day. Pick unused ports if 43871 or 43872 is already in use.
 
 ```bash
 mkdir -p ~/corsia-dev-data/workspace ~/corsia-dev-data/state
@@ -58,7 +65,7 @@ CORSIA_WORKSPACE="$CORSIA_TEST_ROOT/workspace" CORSIA_STATE_DIR="$CORSIA_TEST_RO
 rm -rf "$CORSIA_TEST_ROOT"
 ```
 
-Choose tests that cover your change. CI runs the backend full suite; do not run it locally.
+Choose tests that cover your change.
 
 Run the frontend tests from `frontend/`:
 
@@ -66,16 +73,10 @@ Run the frontend tests from `frontend/`:
 npm run test
 ```
 
-Before a pull request, run the local gate from the checkout root:
-
-```bash
-bash scripts/check-pr
-```
-
-Fix anything the gate marks as FAIL. Run the targeted tests for your change separately.
+Before you push, run the checks in [Pull requests](../../CONTRIBUTING.md#pull-requests).
 
 ## Next steps
 
 Continue with the [reading order](README.md#reading-order).
 
-Checked against the code at `7a8c55d84`.
+Checked against the code at `310115261`.
