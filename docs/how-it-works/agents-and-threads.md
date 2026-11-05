@@ -40,7 +40,7 @@ An agent is a thread with the roster fields set. Two paths change the roster: th
 `delegate_task` creates a hidden child thread and sends its first message. By default it also attempts to hand the child the parent's current plan task; the caller can name another task or request a chat return instead. The child may already be running if the handover fails, so the result reports that failure (`backend/tools/delegate_task.py`).
 
 - **A model is required.** The caller names the model; there is no default. See [Models and harnesses](models-and-harnesses.md).
-- **Confinement is `none` or `untrusted`.** `untrusted` limits the worker to file reads in directories the caller lists and its own confined working directory. It is for content neither the caller nor the person controls, such as outside contributors' code or mail from an unknown sender. The sandbox model is described in the security section: [Security](../security/README.md).
+- **Confinement is `none` or `untrusted`.** `untrusted` limits the worker's model-accessible tools to file reads; the caller lists the directories it may read. It is for content neither the caller nor the person controls, such as outside contributors' code or mail from an unknown sender. The sandbox model is described in the security section: [Security](../security/README.md).
 - **Completion returns to the parent.** For an unstructured child with a final reply, the reply can be admitted to the parent in the transaction that settles the completed turn. Structured delegation uses the plan's harvest path instead. A fenced parent, a rule-started worker, or a turn without a final reply also does not produce that completion message; an error does not send one this way (`backend/infra/thread_driver.py`, `backend/plans/delegation.py`).
 - **Skills inherit down the ancestry.** A child sees its ancestors' thread-level skills; a skill in the child overrides the parent's of the same name (`backend/core/skill_resolution.py`).
 
@@ -65,3 +65,5 @@ Claude Code runs as a separate process per thread. The backend caps how many are
 | Process caps | `backend/infra/subagent_caps.py`, `backend/infra/subagent_caps.json` |
 | Claude Code process management | `backend/subagents/` |
 | Skill ancestry | `backend/core/skill_resolution.py` |
+
+Checked against the code at `7a8c55d84`.

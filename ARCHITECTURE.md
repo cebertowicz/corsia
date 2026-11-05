@@ -102,19 +102,19 @@ path, including symlink targets. The parent's tool surface is unchanged.
 Codex uses this same model-reachable tool boundary as native workers. Its
 app-server process is **not OS-sandboxed** by CORSIA, and this boundary does not
 restrict the process's network access. `subagents/codex_confinement.py` reads
-confinement through the canonical thread owner and admits only the captured
+confinement through the canonical thread owner and admits only a captured
 Codex version before spawning and again at app-server start. It disables native
 and hosted tool producers, uses a neutral empty working directory, and refuses
 forks at launch. Project instructions
 are disabled. The isolated Codex home projects subscription auth for the
 app-server, without importing the person's config, profiles or MCP servers;
-confined reads cannot reach that home. No model-invoked native tool can reach a
-TCC-granted capability.
+confined reads cannot reach that home.
 
-The pinned app-server has no full model-tool readback. The credential-free
+The admitted app-server versions have no full model-tool readback. The credential-free
 integration capture checks the entire outgoing model request's tools array,
-including hosted entries, on cold start and process resume. A new Codex version
-refuses confined launches until CORSIA updates and repeats that proof.
+including hosted entries, on cold start and process resume for each admitted
+version. An uncaptured Codex version refuses confined launches until CORSIA
+updates and repeats that proof (`backend/subagents/codex_versions.py`).
 
 ### Foreground shell invocation identity
 
@@ -465,8 +465,9 @@ roster says why instead of omitting it.
 mutual exclusion between repository *effects* (any tool call that may read or
 touch a working repository) and repository *policy transitions* (attaching,
 detaching, pinning or checkout-protecting a repository). The fence is global on
-purpose; it is not scoped per repository, and effects, transitions and owned
-background processes stay mutually exclusive in every direction.
+purpose; it is not scoped per repository. A transition refuses while tool
+effects or owned processes are active, and tool effects refuse while a
+transition is active.
 
 `ToolRegistry._authorized_execute` wraps every tool call in `admit_repo_effect()`
 except the tools whose own execution enters the stronger transition:
@@ -706,3 +707,5 @@ second contract system.
 
 Use git history for deeper provenance. New rationale belongs in the current
 PRD/design and the code/tests that implement it.
+
+Checked against the code at `7a8c55d84`.
