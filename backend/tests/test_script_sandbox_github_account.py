@@ -154,10 +154,14 @@ def test_unapproved_run_hides_even_a_verified_account(run):
     for home in (seen["person_gh"], seen["home_gh"], seen["agent_home"]):
         assert _deny(home) in seen["profile"]
     assert not any(name in env for name in _TOKENS)
+    assert seen["result"].github_locked == (
+        "scripts get no GitHub login: this script isn't approved to use the agents' GitHub account; "
+        "schedule it with authenticated=true so the person can approve it")
 
 
 def test_authenticated_run_keeps_ready_account_locked(run):
     seen = run("ready", authenticated=True)
+    assert seen["result"].github_locked is None
     assert seen["env"]["GH_CONFIG_DIR"] != str(seen["agent_home"])
     assert _git(seen["env"]) == _LOCKED_GIT
     assert str(seen["agent_home"]) not in _read_only(seen["argv"])
@@ -169,7 +173,7 @@ def test_a_run_with_no_cached_answer_waits_for_the_verification(run):
     seen = run("verifying", verified="ready")  # nothing cached yet; the verification says ready
     assert seen["reads"] == 1 and seen["waits"] == 1
     assert seen["env"]["GH_CONFIG_DIR"] == LOCKED_HOME
-    assert seen["result"].github_locked is None
+    assert seen["result"].github_locked.endswith("so the person can approve it")
 
 
 @pytest.mark.parametrize("state, reason", [

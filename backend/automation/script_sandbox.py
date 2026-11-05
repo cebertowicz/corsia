@@ -174,8 +174,9 @@ async def _run(
 async def _legacy_github_client(thread_id: str, run_id: str, rule_id: str | None, repo: str):
     """The repository-scoped read channel for rule-started scripts that are not authenticated.
 
-    Retire it once the scripts that read through it (the GitHub screen's and the review
-    gate's) are registered as authenticated and call ``corsia github``.
+    A bridge with one exit: Agent Substrate deletes it, the read socket, its environment
+    name and ``cli_github``'s legacy branch in one change once the scripts that read through
+    it (the GitHub screen's and the review gate's) run as authenticated scripts.
     """
     stack = AsyncExitStack()
     try:
@@ -241,12 +242,14 @@ _NO_LOGIN: dict[Cause, str] = {
                        "in as the agents' own account"),
 }
 _NOT_READY = "the agents' GitHub account isn't ready"
+_UNAPPROVED = ("scripts get no GitHub login: this script isn't approved to use the agents' GitHub account; "
+               "schedule it with authenticated=true so the person can approve it")
 
 
-def github_lock_reason(view: AgentAccountView) -> str | None:
-    """Why a run gets no GitHub login; None once verified."""
+def github_lock_reason(view: AgentAccountView, *, approved: bool = True) -> str | None:
+    """Why a run gets no GitHub login; None only for an approved run on a verified account."""
     if view.ready:
-        return None
+        return None if approved else _UNAPPROVED
     if view.absent:
         why: str | None = "there is no agents' GitHub account"
     else:
@@ -343,5 +346,5 @@ async def _run_with_channel(
     await shell_sandbox.recheck_after(owned)
     return ScriptRun(
         owned.returncode, owned.stdout, owned.stderr, bool(owned.timed_out),
-        github_lock_reason(view),
+        github_lock_reason(view, approved=socket_dir is not None),
     )
