@@ -31,8 +31,6 @@ export function createReviewBarState() {
 	let receipt = $state<ReviewReceipt | null>(null);
 	const current = (id: string, stamp: number) => artifactId === id && generation === stamp;
 
-	/** The label follows the round's feedback, never the last click. */
-	const approveLabel = () => ((read?.round_feedback_count ?? 0) > 0 ? 'Approve with changes' : 'Approve');
 	const noteRequired = () => (read?.round_feedback_count ?? 0) === 0;
 	const visible = () => phase === 'answered' || phase === 'stale' || phase === 'sending' || Boolean(read?.ask_raised);
 
@@ -67,13 +65,13 @@ export function createReviewBarState() {
 	): Promise<ReviewAnswerOutcome> {
 		const id = artifactId, stamp = generation;
 		if (!id || (phase !== 'ask' && phase !== 'noting')) return 'ignored';
-		if (verdict === 'changes_requested' && noteRequired() && !note.trim()) { failure = NOTE_NEEDED; return 'ignored'; }
+		if (verdict !== 'approved' && noteRequired() && !note.trim()) { failure = NOTE_NEEDED; return 'ignored'; }
 		const from = phase;
 		sendingFrom = from;
 		phase = 'sending'; failure = '';
 		onSendStarted?.();
 		try {
-			const sent = await answerReview(id, verdict, verdict === 'changes_requested' ? note : '', read?.hold_ids ?? []);
+			const sent = await answerReview(id, verdict, verdict !== 'approved' ? note : '', read?.hold_ids ?? []);
 			// The hold-keyed card overlay must receive the canonical server response even if this bar moved on.
 			onSendConfirmed?.(sent);
 			if (!current(id, stamp)) return 'sent';
@@ -100,7 +98,7 @@ export function createReviewBarState() {
 		get read() { return read; }, get phase() { return phase; }, get sendingFrom() { return sendingFrom; }, get receipt() { return receipt; },
 		get note() { return note; }, set note(value: string) { note = value; },
 		get failure() { return failure; }, set failure(value: string) { failure = value; },
-		get visible() { return visible(); }, get approveLabel() { return approveLabel(); },
+		get visible() { return visible(); },
 		get noteRequired() { return noteRequired(); },
 		get artifactId() { return artifactId; },
 		setTarget, load, openNote, cancelNote, answer,

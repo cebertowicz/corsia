@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 from doceditor import feedback_batches
 from doceditor.feedback_state import USER_AUTHOR_ID
+from doceditor.review_feedback_ids import round_feedback_ids
 
 VERDICTS = {
     "approved": "approved",
@@ -46,11 +47,13 @@ class ReviewAnswer:
     note: str | None = None
     counts: dict = field(default_factory=dict)
     feedback_task: str | None = None
+    feedback_ids: dict = field(default_factory=dict)
 
     def payload(self) -> dict:
+        """Include comment and suggestion row IDs and edit feedback batch IDs for the round."""
         return {
             "verdict": self.verdict, "note": self.note,
-            "feedback_counts": self.counts,
+            "feedback_counts": self.counts, "feedback_ids": self.feedback_ids,
         }
 
     def release(self):
@@ -191,13 +194,11 @@ def answer(db, artifact_id: str, verdict: str, note: str | None) -> ReviewAnswer
         raise AnswerRefused("ask_stale", STALE)
     since = asks[0]["raised_at"]
     counts = round_counts(db, artifact_id, since)
-    if verdict == "changes_requested" and not note and not any(counts.values()):
+    if verdict != "approved" and not note and not any(counts.values()):
         raise AnswerRefused("note_required", NOTE_REQUIRED)
-    # The round decides which approval it was, whatever the client last showed.
-    if verdict in ("approved", "approved_with_changes"):
-        verdict = "approved_with_changes" if any(counts.values()) else "approved"
+    feedback_ids = round_feedback_ids(db, artifact_id, since)
     feedback_batches.close_for_document(
         db, author_kind="user", author_id=USER_AUTHOR_ID,
         artifact_id=artifact_id, reason="send",
     )
-    return ReviewAnswer(verdict, note, counts, _feedback_task(db, artifact_id, since))
+    return ReviewAnswer(verdict, note, counts, _feedback_task(db, artifact_id, since), feedback_ids)

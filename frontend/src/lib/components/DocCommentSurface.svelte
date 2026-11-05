@@ -15,7 +15,7 @@
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 	import { loadComments, type DocComment } from '$lib/stores/docComments';
-	import { clickedOpener, drawerFooterHeight, drawerKeys, onSheetMoved, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
+	import { COMMENT_FILTERS as FILTERS, clickedOpener, drawerFooterHeight, drawerKeys, observeCanvasWidth, onSheetMoved, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
 	import { trackOverlaySheet } from '$lib/cm/visible-region';
 	import { createCellLabels, type WidgetLabelReader } from '$lib/docCommentLabels';
 	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
@@ -88,16 +88,10 @@
 	}
 	let filter = $state<'all' | 'open' | 'resolved'>('open');
 	let filterOpen = $state(false);
-	const FILTERS = [['open', 'Open'], ['resolved', 'Resolved'], ['all', 'All']] as const;
 	const filterName = $derived(FILTERS.find(([key]) => key === filter)?.[1] ?? 'Open');
 	let drawer = $state<HTMLElement>();
 	let canvasWidth = $state(Number.POSITIVE_INFINITY);
-	$effect(() => {
-		if (!bounds || typeof ResizeObserver === 'undefined') return;
-		const read = () => canvasWidth = bounds.getBoundingClientRect().width;
-		read(); const observer = new ResizeObserver(read); observer.observe(bounds);
-		return () => observer.disconnect();
-	});
+	$effect(() => observeCanvasWidth(bounds, (width) => canvasWidth = width));
 	// Image viewers already decide whether their canvas is a sheet; document canvases use the 900 px rule.
 	const sheetDrawer = $derived(narrow || (!image && canvasWidth < 900));
 	let detent = $state<'full' | 'half'>('full');
@@ -330,7 +324,10 @@
 		<CommentList docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={displayed} {cellLabel} documentOrder={sheet.state?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
+{#snippet rowHost()}<div class="rb-sheet-host"></div>{/snippet}
+{#snippet rowHostAbove()}<div class="rb-sheet-host above"></div>{/snippet}
 {#snippet listBody()}
+	{@render rowHost()}
 	<div class="drawer-heading"><h2 tabindex="-1" data-drawer-focus-home>Comments <span>{headerCount}</span></h2><div class="drawer-tools"><div class="filter-menu">
 		<button type="button" class="filter-button" data-drawer-filter aria-haspopup="menu" aria-expanded={filterOpen} aria-label="Filter comments: {filterName}" onclick={() => filterOpen = !filterOpen}>Filter <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></button>
 		{#if filterOpen}<div class="filter-popup" role="menu" aria-label="Filter comments" in:menuPop={{ origin: 'top right' }} out:menuPop={{ origin: 'top right' }}>{#each FILTERS as [key, name] (key)}<button type="button" role="menuitemradio" aria-checked={filter === key} onclick={() => { filter = key; filterOpen = false; }}><span class="filter-check" aria-hidden="true">{#if filter === key}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10" /></svg>{/if}</span>{name}</button>{/each}</div>{/if}
@@ -354,11 +351,15 @@
 		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
-	{:else if narrow && sheet.state}<AdaptiveDrawer bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}>{@render content()}</AdaptiveDrawer>
+	{:else if narrow && sheet.state}<AdaptiveDrawer bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose} above={rowHostAbove}>{@render content()}</AdaptiveDrawer>
 	{:else if surfaceState}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} sideKey={surfaceState.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 
 <style>
+	/* Keep the review controls in the canvas container when the phone sheet is open. */
+	.rb-sheet-host { container: doc-canvas / inline-size; padding: var(--space-2) 0 0; flex: none; overflow: hidden; scrollbar-gutter: stable; }
+	.rb-sheet-host.above { margin: 0 2px 0 -4px; padding-top: 0; }
+	.rb-sheet-host:empty { display: none; }
 	.canvas-comment-drawer { grid-area: drawer; display: flex; flex-direction: column; gap: var(--space-1); min-height: 0; min-width: 0; padding: var(--space-1) var(--space-2) 0; border-top: 1px solid var(--border-subtle); }
 	.canvas-comment-drawer.sheet { flex: 1; padding: 0; border-top: 0; }
 	@container doc-canvas (min-width: 900px) { .canvas-comment-drawer { border-top: 0; border-left: 1px solid var(--border-subtle); padding-left: var(--space-3); } }

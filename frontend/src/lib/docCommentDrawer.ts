@@ -1,6 +1,16 @@
 import { get } from 'svelte/store';
 import { prefersReducedMotion } from '$lib/stores/viewport';
 
+export const COMMENT_FILTERS = [['open', 'Open'], ['resolved', 'Resolved'], ['all', 'All']] as const;
+
+/** Observe the canvas width so document drawers can choose the sheet layout. */
+export function observeCanvasWidth(bounds: HTMLElement | null, update: (width: number) => void) {
+	if (!bounds || typeof ResizeObserver === 'undefined') return;
+	const read = () => update(bounds.getBoundingClientRect().width);
+	read(); const observer = new ResizeObserver(read); observer.observe(bounds);
+	return () => observer.disconnect();
+}
+
 /** The grid owns the drawer's maximum; add this measured pinned footer before that cap so the list keeps its normal room when it can. */
 export function drawerFooterHeight(node: HTMLElement) {
 	const doc = node.closest<HTMLElement>('.doc');

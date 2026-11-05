@@ -11,8 +11,8 @@
 	 * The in-view review bar (DCOL-FR12.4): when an agent has asked for a review of this artifact, the
 	 * answer is one click from the reading. `draftOpen` is the comment composer's unsaved text.
 	 */
-	let { artifactId, draftOpen = false, suppressed = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
-		artifactId: string | null; draftOpen?: boolean; suppressed?: boolean;
+	let { artifactId, draftOpen = false, suppressed = false, inSheet = false, capsuleClearance = $bindable(0), onAnswered, pendingSuggestions = 0, onAcceptAll }: {
+		artifactId: string | null; draftOpen?: boolean; suppressed?: boolean; inSheet?: boolean;
 		/** Open suggestions the bar's own accept applies before it approves; with `onAcceptAll`, the approve button says so. */
 		pendingSuggestions?: number;
 		/** Accepts them all and puts the accepted text on screen; throws when it could not, so no verdict is sent. */
@@ -27,6 +27,11 @@
 	let accepting = $state(false);
 	let noteInput = $state<HTMLTextAreaElement>();
 	let requestButton = $state<HTMLButtonElement>();
+	let changesButton = $state<HTMLButtonElement>();
+	/** Which change answer the open note sends. */
+	let noteFor = $state<'changes_requested' | 'approved_with_changes'>('changes_requested');
+	/** Reject asks for another review; approval with changes does not. */
+	const LABELS = { changes_requested: 'Reject', approved_with_changes: 'Approve with changes' } as const;
 	let approveButton = $state<HTMLButtonElement>();
 	let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -47,17 +52,16 @@
 		`${asker} asked for your review: ${ask}${others.length ? `. ${others.join(' and ')} also asked.` : ''}`,
 	);
 	const alsoSends = $derived(round > 0 ? `Also sends your ${pending} to ${asker}` : undefined);
+	const approveSends = $derived(round > 0 ? `Your ${pending} go to ${asker}` : undefined);
 	const receiptText = $derived.by(() => {
 		const receipt = bar.receipt;
 		if (!receipt) return [];
-		const said = { approved: 'You approved this', approved_with_changes: 'You approved this with changes', changes_requested: 'You requested changes' }[receipt.verdict];
+		const said = { approved: 'Approved', approved_with_changes: 'Approved with changes', changes_requested: 'Rejected' }[receipt.verdict];
 		const time = receipt.at.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-		const delivered = (['comments', 'suggestions', 'edits'] as const)
-			.map((kind) => [kind, receipt.sent[kind]] as const)
-			.filter(([, count]) => count > 0)
-			.map(([kind, count]) => `${count} ${kind === 'edits' ? 'edit' : kind.slice(0, -1)}${count === 1 ? '' : 's'}`)
-			.join(', ');
-		return [said, delivered ? `sent ${delivered}` : '', time].filter(Boolean);
+		const comments = receipt.sent.comments;
+		const delivered = receipt.verdict === 'approved' && comments > 0
+			? `${comments} comment${comments === 1 ? '' : 's'} sent` : '';
+		return [said, delivered, time].filter(Boolean);
 	});
 	const view = $derived(bar.phase === 'answered' ? 'receipt' : bar.phase === 'stale' ? 'stale' : 'ask');
 
@@ -113,17 +117,28 @@
 		else if (bar.phase === 'ask') approveButton?.focus();
 	}
 	const acceptFirst = $derived(pendingSuggestions > 0 && onAcceptAll !== undefined);
-	const approveText = $derived(acceptFirst ? `Accept ${pendingSuggestions} suggestion${pendingSuggestions === 1 ? '' : 's'} and approve` : bar.approveLabel);
+	const approveText = $derived(acceptFirst ? 'Approve all' : 'Approve');
+	const approveDescription = $derived(acceptFirst ? `Accepts the ${pendingSuggestions} suggestion${pendingSuggestions === 1 ? '' : 's'}, then approves` : approveSends);
 	async function approve() {
 		if (round > 0 && blocked()) return;
 		if (acceptFirst) {
 			accepting = true; bar.failure = '';
 			try { await onAcceptAll?.(); } catch { bar.failure = ACCEPT_FAILED; return; } finally { accepting = false; }
 		}
-		void settle(round > 0 ? 'approved_with_changes' : 'approved');
+		void settle('approved');
+	}
+	/** Approve with changes sends at once when the round has feedback; otherwise it needs a note, like Request changes. */
+	async function approveWithChanges() {
+		if (blocked()) return;
+		if (round > 0) { void settle('approved_with_changes'); return; }
+		noteFor = 'approved_with_changes';
+		bar.openNote();
+		await tick();
+		noteInput?.focus();
 	}
 	async function requestChanges() {
 		if (blocked()) return;
+		noteFor = 'changes_requested';
 		bar.openNote();
 		await tick();
 		noteInput?.focus();
@@ -131,11 +146,11 @@
 	async function cancelNote() {
 		bar.cancelNote();
 		await tick();
-		requestButton?.focus();
+		(noteFor === 'approved_with_changes' ? changesButton : requestButton)?.focus();
 	}
 	function sendNote() {
 		if (blocked()) return;
-		void settle('changes_requested');
+		void settle(noteFor);
 	}
 	function onNoteKey(event: KeyboardEvent) {
 		if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); sendNote(); }
@@ -149,7 +164,7 @@
 	<ReviewBarShell
 		{view} who={{ name: asker, id: read?.asker?.id ?? asker }} plus={others.length} {ask} full={ask} lineLabel={label}
 		others={read?.other_asks ?? []} askLabel="Review request" {noting} {busy} status={busy ? 'Sending your review…' : bar.failure}
-		{suppressed} bind:capsuleClearance
+		{suppressed} {inSheet} bind:capsuleClearance
 		receipt={{ icon: bar.receipt?.verdict === 'changes_requested' ? 'changes' : 'check', label: 'Review answered', segments: receiptText }}
 		stale={{ label: 'Review request ended', text: 'This review request has ended', sub: 'Refreshing' }}
 	>
@@ -159,12 +174,13 @@
 					bind:this={noteInput} bind:value={bar.note} onkeydown={onNoteKey}></textarea>
 				<div class="rb-actions">
 					<Button size="sm" variant="ghost" disabled={busy} onclick={cancelNote}>Cancel</Button>
-					<Button size="sm" variant="primary" loading={busy} disabled={bar.noteRequired && !bar.note.trim()} onclick={sendNote}>Request changes</Button>
+					<Button size="sm" variant="primary" loading={busy} disabled={bar.noteRequired && !bar.note.trim()} onclick={sendNote}>{LABELS[noteFor]}</Button>
 				</div>
 			{:else}
 				<div class="rb-actions">
-					<Button size="sm" variant="ghost" disabled={busy} bind:el={requestButton} onclick={requestChanges}>Request changes</Button>
-					<Button size="sm" variant="primary" loading={busy} bind:el={approveButton} description={alsoSends} title={alsoSends} onclick={approve}>{approveText}</Button>
+					<Button size="sm" variant="ghost" disabled={busy} bind:el={requestButton} onclick={requestChanges}>{LABELS.changes_requested}</Button>
+					<Button size="sm" variant="secondary" disabled={busy} bind:el={changesButton} description={alsoSends} title={alsoSends} onclick={approveWithChanges}>{LABELS.approved_with_changes}</Button>
+					<Button size="sm" variant="primary" loading={busy} bind:el={approveButton} description={approveDescription} title={approveDescription} onclick={approve}>{approveText}</Button>
 				</div>
 			{/if}
 		{/snippet}
