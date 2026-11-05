@@ -143,7 +143,7 @@
 		await loadHostGroups();
 		groupsRead = true;
 		loadModels();
-		stopLocalSourceUpdates = on('models_updated', () => { void refreshSources(); void loadNetworkServers(); if (cliRows.length) void loadHostGroups(); });
+		stopLocalSourceUpdates = on('models_updated', (event) => { void refreshSources(); if (event?.server_id) void loadNetworkServers(); if (cliRows.length) void loadHostGroups(); });
 	});
 	onDestroy(() => stopLocalSourceUpdates?.());
 

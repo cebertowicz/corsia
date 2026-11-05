@@ -196,9 +196,9 @@ def broadcast_all(message: dict):
                 _schedule_send(ws_ref, message)
 
 
-def notify_models_changed() -> None:
-    """Broadcast catalog changes and resume any now-runnable held FIFO heads."""
-    broadcast_all({"type": "models_updated"})
+def notify_models_changed(*, server_id: str | None = None) -> None:
+    """Broadcast catalog changes, optionally naming a server lifecycle change, and resume held heads."""
+    broadcast_all({"type": "models_updated", **({"server_id": server_id} if server_id else {})})
     from infra.unavailable_model_recovery import schedule_unavailable_model_recovery
 
     schedule_unavailable_model_recovery()

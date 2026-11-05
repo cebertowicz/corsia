@@ -1,5 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { get } from 'svelte/store';
+import { hostGroups, liveHostGroups } from '$lib/stores/providersV7';
 import ProvidersV7View from './ProvidersV7View.svelte';
 import { groupByHost, hostGroupSnapshot } from '$lib/stores/providersV7';
 import { networkServers, type NetworkServer } from '$lib/stores/networkServers';
@@ -20,6 +22,19 @@ afterEach(() => {
 	networkServers.set([]);
 	document.body.innerHTML = '';
 	vi.unstubAllGlobals();
+});
+
+it('projects restart state for every host-group consumer before rendering', () => {
+	for (const status of ['online', 'offline'] as const) {
+		const restarting = { ...server, status, restarting: true };
+		networkServers.set([restarting]);
+		hostGroupSnapshot.set(groupByHost([], [server], null));
+		for (const groups of [groupByHost([], [restarting], null), get(hostGroups), get(liveHostGroups)]) {
+			const provider = groups.flatMap(group => group.providers).find(row => row.server?.id === server.id)!;
+			expect(provider.subline).toBe('Restarting…');
+			expect(provider.statusDot).toBe('idle');
+		}
+	}
 });
 
 it('shows the live restart through unavailable health, then the real success or stopped state', () => {

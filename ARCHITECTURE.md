@@ -71,12 +71,17 @@ a cfg host to authorize a stored key. Admin routes remain separately owned by
 `omlx_supervisor` owns one `omlx_restart.Life` per adopted process. A version
 upgrade uses that Life's existing restart task as its inference admission
 boundary: `base.py` registers each concurrent provider call before preflight,
-replacement waits for those calls to finish and rechecks server idleness once,
-and later calls wait through boot and exact-model restoration. If outside traffic
+and `omlx_lifecycle.warm_cache` registers before its loaded-model check.
+Replacement waits for both producers to finish and rechecks server idleness
+once; later calls wait through boot and exact-model restoration. If outside traffic
 makes that final proof busy, admission reopens before waiting for quiet again.
 Crash recovery and upgrade startup reuse the same bounded start-attempt owner;
 failed Stop and exhausted startup emit terminal lifecycle events. This boundary
 covers CORSIA dispatch; clients calling oMLX directly do not participate in it.
+Restart transitions tag the existing `models_updated` event with `server_id`,
+so Providers refreshes server state only for those transitions. Ordinary
+catalog events add no server-list read. `providersV7` owns the row's restart
+text and dot for every host-group consumer.
 
 ### System tier projection
 

@@ -91,8 +91,8 @@ function _harnessSubline(name: string, modelCount: number, accounts = get(vendor
 }
 
 function _statusDotForServer(s: NetworkServer): HostProvider['statusDot'] {
+	if (s.restarting || s.status === 'offline') return 'idle';
 	if (s.status === 'online') return 'online';
-	if (s.status === 'offline') return 'idle';
 	if (s.status === 'disabled') return 'disabled';
 	return 'idle';
 }
@@ -247,6 +247,7 @@ function _remoteHostSubname(s: NetworkServer): string {
 }
 
 function _networkSubline(s: NetworkServer): string {
+	if (s.restarting) return 'Restarting…';
 	if (s.kind === 'external') {
 		// Registered by URL: the URL is the address; a port says nothing here.
 		const url = s.api_base || '';

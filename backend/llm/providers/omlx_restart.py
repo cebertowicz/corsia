@@ -203,7 +203,7 @@ def schedule(server_id: str, life: Life, operation: Coroutine[Any, Any, Any], *,
     life.restart = task
     life.hold_requests = hold_requests
     task.add_done_callback(lambda done: _done(server_id, life, done))
-    broadcast_all({"type": "models_updated"})  # show the lifecycle change without admitting held work
+    broadcast_all({"type": "models_updated", "server_id": server_id})  # lifecycle change without admitting held work
     return task
 
 
@@ -213,7 +213,7 @@ def _done(server_id: str, life: Life, task: asyncio.Task) -> None:
     if life.restart is task:
         life.restart = None
         life.hold_requests = False
-        notify_models_changed()
+        notify_models_changed(server_id=server_id)
     error = None if task.cancelled() else task.exception()
     if error is not None:
         log.error("oMLX restart stopped on an error", exc_info=error)
