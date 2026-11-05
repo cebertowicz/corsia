@@ -9,6 +9,7 @@
 	import { hasMentionRoster, useMentionRoster } from './mentionContext';
 	import { createMentionSelection } from './mentionSelection';
 	export function taggedAgentIds(text: string) { return selectedTags.ids(text); }
+	export function occurrences(text: string) { return selectedTags.occurrences(text); }
 	import type { DocumentReviewer } from '$lib/api/docReviews';
 	let { input, selectedTags = createMentionSelection() }: { input: HTMLTextAreaElement | undefined; selectedTags?: ReturnType<typeof createMentionSelection> } = $props();
 	const available = hasMentionRoster();
@@ -38,7 +39,8 @@
 	async function choose(agent: DocumentReviewer) {
 		if (!input || query === null) return;
 		const end = input.selectionStart, next = `${input.value.slice(0, start)}@${agent.name} ${input.value.slice(end)}`;
-		const pos = start + agent.name.length + 2; chosen = { start, text: `@${agent.name} ` }; input.value = next;
+		const pos = start + agent.name.length + 2; chosen = { start, text: `@${agent.name} ` };
+		selectedTags.begin(start, end, 'insertText'); input.value = next;
 		input.dispatchEvent(new Event('input', { bubbles:true }));
 		selectedTags.select(agent.id, start, `@${agent.name}`); query = null;
 		await tick(); input?.focus(); input?.setSelectionRange(pos, pos);
@@ -97,9 +99,11 @@
 	$effect(() => {
 		const node = input; if (!node) return;
 		const cancel = () => { motionGeneration++; playback?.cancel(); playback = undefined; };
+		const beforeInput = (event: InputEvent) => selectedTags.begin(node.selectionStart, node.selectionEnd, event.inputType);
+		node.addEventListener('beforeinput', beforeInput);
 		node.addEventListener('input', cancel); node.addEventListener('compositionstart', cancel);
 		node.addEventListener('input', refresh); node.addEventListener('click', refresh); node.addEventListener('keydown', keys, true);
-		return () => { cancel(); node.removeEventListener('input', cancel); node.removeEventListener('compositionstart', cancel); node.removeEventListener('input', refresh); node.removeEventListener('click', refresh); node.removeEventListener('keydown', keys, true); };
+		return () => { cancel(); node.removeEventListener('beforeinput', beforeInput); node.removeEventListener('input', cancel); node.removeEventListener('compositionstart', cancel); node.removeEventListener('input', refresh); node.removeEventListener('click', refresh); node.removeEventListener('keydown', keys, true); };
 	});
 </script>
 {#if query !== null}

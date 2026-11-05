@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import CommentThread, { type CommentThreadData } from './CommentThread.svelte';
-	import { createMentionSelection } from './mentionSelection';
+	import { createMentionSelection, type MentionOccurrence } from './mentionSelection';
 	import { groupRows } from '$lib/docImageComments';
 	import { plainQuote } from '$lib/plainQuote';
 	import { leaveRow } from '$lib/actions/leaveRow';
@@ -19,7 +19,7 @@
 		/** Off where the caller scrolls the list to the focused card itself. */
 		scrollOnFocus?: boolean;
 		onFocus?: (id: string) => void;
-		onReply?: (id: string, text: string, taggedAgentIds: string[]) => Promise<void>;
+		onReply?: (id: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
 		onResolve?: (id: string, resolved: boolean) => void;
 		onAgree?: (id: string, agreed: boolean) => void;
 		onDecision?: (id: string, decision: 'accept' | 'reject') => Promise<void>;

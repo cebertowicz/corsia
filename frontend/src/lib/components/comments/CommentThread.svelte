@@ -18,6 +18,7 @@
 		authorThreadId?: string | null;
 		text: string;
 		taggedAgents?: { id: string; name: string }[];
+		mentions?: import('./mentionSelection').MentionOccurrence[];
 		at: string;
 		createdAt?: string;
 		resolved: boolean;
@@ -43,7 +44,7 @@
 	import CommentMeta from './CommentMeta.svelte';
 	import CommentPlacementLine from './CommentPlacementLine.svelte';
 	import ReplyField from './ReplyField.svelte';
-	import { createMentionSelection } from './mentionSelection';
+	import { createMentionSelection, type MentionOccurrence } from './mentionSelection';
 	import ResolvedWhileReplying from './ResolvedWhileReplying.svelte';
 	import CommentMarkdownBody from './CommentMarkdownBody.svelte';
 	import CommentReplyList, { type CommentReplyData } from './CommentReplyList.svelte';
@@ -77,7 +78,7 @@
 		scrollOnFocus?: boolean;
 		onFocus?: () => void;
 		readOnly?: boolean;
-		onReply?: (commentId: string, text: string, taggedAgentIds: string[]) => Promise<void>;
+		onReply?: (commentId: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
 		onResolve?: (commentId: string, resolved: boolean) => void;
 		onAgree?: (commentId: string, agreed: boolean) => void;
 		/** Settles when the decision does and never rejects: a refusal comes back as `decisionError`. */
@@ -236,7 +237,8 @@
 		if (readOnly || !t || replyPosting) return;
 		replyPosting = true;
 		try {
-			await onReply?.(comment.id, t, replyField?.taggedAgentIds() ?? []);
+			const mentions = replyField?.mentions() ?? [];
+			await onReply?.(comment.id, t, [...new Set(mentions.map(item => item.agent_id))], mentions);
 			replyField?.clearTags(); replyText = ''; onReplySelection?.(null);
 		} catch {
 			// The caller reports the refusal; keep the reply for retry.
@@ -278,7 +280,7 @@
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
-				{#if comment.text}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} />{/if}
+				{#if comment.text}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} />{/if}
 				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 			</div>
 		{/if}
@@ -289,7 +291,7 @@
 		{@render resolvedHead('check', `Resolved · ${comment.replies.length + 1} message${comment.replies.length ? 's' : ''}`)}
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
-				<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} />
+				<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} />
 				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />{/if}
 				<div class="ct-res-acts">
@@ -325,7 +327,7 @@
 		{#if isSuggestion}
 			{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
 			{#if comment.orphaned}<div class="ct-orphan">The text this suggestion replaces has changed.</div>{/if}
-			{#if comment.text}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} />{/if}
+			{#if comment.text}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} />{/if}
 			{#if !readOnly}
 				<div class="ct-suggestion-actions">
 					<button class="ct-suggestion-accept" aria-busy={decisionBusy === 'accept'} disabled={decisionBusy !== null || comment.orphaned} title={comment.orphaned ? 'The text this suggestion replaces has changed.' : undefined} onclick={(e) => { e.stopPropagation(); decide('accept'); }}>{decisionBusy === 'accept' ? 'Accepting…' : 'Accept'}</button>
@@ -339,7 +341,7 @@
 			{#if comment.regionStale}
 				<div class="ct-orphan" data-region-stale>Image changed since this comment{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
 			{/if}
-			<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} />
+			<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} />
 		{/if}
 
 		{#if comment.replies.length && !leaving}

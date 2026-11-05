@@ -4,7 +4,7 @@
 	import Field from '$lib/components/ui/Field.svelte';
 	import CommentQuote from './CommentQuote.svelte';
 	import MentionPicker from './MentionPicker.svelte';
-	import { createMentionSelection } from './mentionSelection';
+	import { createMentionSelection, type MentionOccurrence } from './mentionSelection';
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
 
@@ -21,7 +21,7 @@
 		mentions?: boolean;
 		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onBody?: (text: string) => void;
-		onSubmit: (text: string, taggedAgentIds: string[]) => Promise<void>;
+		onSubmit: (text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
 		onCancel: () => void;
 	} = $props();
 	let text = $state(untrack(() => body));
@@ -35,7 +35,9 @@
 		const value = text.trim();
 		if (!value || posting || disabledReason) return;
 		posting = true;
-		try { await onSubmit(value, picker?.taggedAgentIds(text) ?? []); selectedTags.clear(); text = ''; }
+		const offset = text.length - text.trimStart().length;
+		const mentions = (picker?.occurrences(text) ?? []).map(item => ({ ...item, start: item.start - offset, end: item.end - offset }));
+		try { await onSubmit(value, [...new Set(mentions.map(item => item.agent_id))], mentions); selectedTags.clear(); text = ''; }
 		catch { /* onSubmit reports its own failure; keep the draft for a retry. */ }
 		finally { posting = false; }
 	}

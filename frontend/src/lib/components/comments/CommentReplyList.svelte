@@ -10,6 +10,7 @@
 		authorThreadId?: string | null;
 		text: string;
 		taggedAgents?: { id: string; name: string }[];
+		mentions?: import('./mentionSelection').MentionOccurrence[];
 		at: string;
 		createdAt?: string;
 	};
@@ -65,7 +66,7 @@
 				<span class="ct-at">{reply.at}</span>
 				{#if isNew}<NewMarker />{/if}
 			</div>
-			<CommentMarkdownBody text={reply.text} taggedAgents={reply.taggedAgents} />
+			<CommentMarkdownBody text={reply.text} taggedAgents={reply.taggedAgents} mentions={reply.mentions} />
 		</div>
 	{/each}
 </div>

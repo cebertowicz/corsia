@@ -171,8 +171,8 @@
 		onStart: commentUI.openDraft, onClose: commentUI.close,
 		awaitsMark: (id) => awaitsFirstMark(listedComments.find((item) => item.id === id), highlights.some((range) => range.id === id)),
 	});
-	async function submitComment(text: string, taggedAgentIds: string[]) {
-		const id = await draftController.submit(text, taggedAgentIds, target?.threadId ?? null);
+	async function submitComment(text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[]) {
+		const id = await draftController.submit(text, taggedAgentIds, target?.threadId ?? null, mentions);
 		if (!id) return;
 		scroll.toComment(id, true, 'comment-save');
 		focusedDocComment.set(id);

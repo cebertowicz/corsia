@@ -452,7 +452,7 @@ describe('ImageCommentLightbox', () => {
 			await settle();
 			document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
 			await settle();
-			expect(post).toHaveBeenCalledWith({ x: 0, y: 0, w: 1, h: 1 }, 'Too dark', []);
+			expect(post).toHaveBeenCalledWith({ x: 0, y: 0, w: 1, h: 1 }, 'Too dark', [], []);
 		});
 
 		it('opens at the comment it was opened on, its card at its tag', async () => {

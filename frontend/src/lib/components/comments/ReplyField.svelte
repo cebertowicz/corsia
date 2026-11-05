@@ -18,7 +18,7 @@
 	const inputId = $props.id();
 	let input = $state<HTMLTextAreaElement>();
 	let picker = $state<MentionPicker>();
-	export function taggedAgentIds() { return picker?.taggedAgentIds(value) ?? []; }
+	export function mentions() { const offset = value.length - value.trimStart().length; return (picker?.occurrences(value) ?? []).map(item => ({ ...item, start: item.start - offset, end: item.end - offset })); }
 	export function clearTags() { selectedTags.clear(); }
 	let appliedSelection: string | null = null;
 	export function focus(options?: FocusOptions) { input?.focus(options); }

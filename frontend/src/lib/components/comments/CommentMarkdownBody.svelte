@@ -1,8 +1,8 @@
 <script lang="ts">
-	import { renderMarkdown } from '$lib/markdown';
-	import { colorMentions, type TaggedAgent } from './mentionMarkup';
+	import { renderMentions, type TaggedAgent } from './mentionMarkup';
+	import type { MentionOccurrence } from './mentionSelection';
 
-	let { text, taggedAgents = [] }: { text: string; taggedAgents?: TaggedAgent[] } = $props();
+	let { text, taggedAgents = [], mentions = [] }: { text: string; taggedAgents?: TaggedAgent[]; mentions?: MentionOccurrence[] } = $props();
 	let open = $state(false);
 	let clamped = $state(false);
 	let reveal: HTMLDivElement;
@@ -31,7 +31,7 @@
 </script>
 
 <div bind:this={reveal} class:open class:clamped={clamped && !open} class="ct-markdown-reveal" style:--ct-expanded-height="{expandedHeight}px">
-	<div class="ct-markdown md-content" use:trackClamp>{@html colorMentions(renderMarkdown(text), taggedAgents)}</div>
+	<div class="ct-markdown md-content" use:trackClamp>{@html renderMentions(text, taggedAgents, mentions)}</div>
 </div>
 {#if clamped}<button class="ct-more" onclick={(e) => { e.stopPropagation(); toggle(); }}>{open ? 'Show less' : 'Show more'}</button>{/if}
 

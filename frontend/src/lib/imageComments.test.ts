@@ -33,7 +33,7 @@ describe('image comments', () => {
 		await comments.draw(BOX, rect);
 		expect(comments.boxMode).toBe(false);
 		expect(comments.ui.state).toEqual({ kind: 'draft' });
-		expect(comments.draft).toEqual({ text: '', label: 'Box on the image', body: '' });
+		expect(comments.draft).toEqual(expect.objectContaining({ text: '', label: 'Box on the image', body: '' }));
 		expect(comments.cardOpen).toBe(true);
 	});
 
@@ -44,7 +44,7 @@ describe('image comments', () => {
 		comments.setDraftBody('Too dark');
 		expect(comments.hasDraftText).toBe(true);
 		await comments.submit('Too dark');
-		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark', [], null);
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark', [], null, []);
 		expect(onCreated).toHaveBeenCalledOnce();
 		expect(comments.ui.state).toEqual({ kind: 'thread', id: 'new' });
 		expect(comments.selectedId).toBe('new');
@@ -55,8 +55,9 @@ describe('image comments', () => {
 		mocks.addRegionComment.mockResolvedValueOnce('new');
 		const comments = createImageComments({ artifactId: () => 'image', threadId: () => 'viewer', readOnly: () => false, restoreFocus: vi.fn() });
 		await comments.draw(BOX, rect);
-		await comments.submit('@Agent', ['agent']);
-		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, '@Agent', ['agent'], 'viewer');
+		const mentions = [{ agent_id: 'agent', start: 0, end: 6 }];
+		await comments.submit('@Agent', ['agent'], mentions);
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, '@Agent', ['agent'], 'viewer', mentions);
 	});
 
 	it('keeps a tagged draft and explains a missing viewing thread', async () => {

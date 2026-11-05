@@ -122,10 +122,10 @@ export function reloadDocumentFeedback(
 /** Reply, resolve and agree on the open document's threads; a reply also tells the feedback status a comment arrived. */
 export function createThreadActions(artifactId: () => string | null, commentCreated: () => void, threadId: () => string | null = () => null) {
 	return {
-		async reply(id: string, text: string, taggedAgentIds: string[] = []) {
+		async reply(id: string, text: string, taggedAgentIds: string[] = [], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []) {
 			const artifact = artifactId();
 			if (!artifact) return;
-			await submitDocumentComment(() => addReply(artifact, id, text, 'you', taggedAgentIds, threadId()));
+			await submitDocumentComment(() => addReply(artifact, id, text, 'you', taggedAgentIds, threadId(), mentions));
 			commentCreated();
 		},
 		resolve(id: string, resolved: boolean) { const artifact = artifactId(); if (artifact) resolveComment(artifact, id, resolved); },

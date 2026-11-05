@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { loadMentionRoster } from './comments/mentionRoster.svelte';
-	import { createMentionSelection } from './comments/mentionSelection';
+	import { createMentionSelection, type MentionOccurrence } from './comments/mentionSelection';
 	import { keptThreads } from '$lib/docKeptThreads.svelte';
 	import { get } from 'svelte/store';
 	import { Button, IconButton } from './ui';
@@ -41,15 +41,15 @@
 		widgetLabel?: WidgetLabelReader;
 		focusedId: string | null;
 		/** `label` names what a non-text comment is on, in place of the quote. */
-		draft: { text: string; body?: string; label?: string } | null;
+		draft: { text: string; body?: string; label?: string; mentionSelection?: ReturnType<typeof createMentionSelection> } | null;
 		draftReason?: string;
 		onDraftBody?: (text: string) => void;
 		onCancelDraft?: () => void;
 		onClose: () => void;
 		restoreFocus: () => void;
 		onFocus: (id: string, placement?: 'top') => void;
-		onSubmit: (text: string, taggedAgentIds: string[]) => Promise<void>;
-		onReply: (id: string, text: string, taggedAgentIds: string[]) => Promise<void>;
+		onSubmit: (text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
+		onReply: (id: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
 		onResolve: (id: string, resolved: boolean) => void;
 		onAgree: (id: string, agreed: boolean) => void;
 		onViewed?: (id: string, replyId: string) => Promise<void>;
@@ -322,7 +322,7 @@
 	{#if images && src}<ImageRegionThumb {src} alt={imageAlt(group[0])} caption comments={group} colorOf={images.colorOf} onOpen={onItsImage(group[0]) ? () => images?.onOpen(group[0]) : undefined} />{/if}
 {/snippet}
 {#snippet content()}
-	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer selectedTags={draftTags} quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={sheet.cancelDraft} />
+	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer selectedTags={sheet.draft?.mentionSelection ?? draftTags} quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={sheet.cancelDraft} />
 	{:else}
 		{#if !readOnly && sheet.state?.kind !== 'thread'}
 			<div class="suggestion-status">

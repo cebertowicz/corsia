@@ -132,27 +132,27 @@ export function upsertTop(artifactId: string, row: ServerComment) {
 	});
 }
 
-export async function addComment(artifactId: string, from: number, to: number, anchor: string, text: string, author: CommentAuthor = 'you', liveCapture = false, clientId?: string, taggedAgentIds: string[] = [], threadId: string | null = null): Promise<string> {
+export async function addComment(artifactId: string, from: number, to: number, anchor: string, text: string, author: CommentAuthor = 'you', liveCapture = false, clientId?: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []): Promise<string> {
 	const cid = clientId ?? newClientId();
 	const row = await postReconciled(artifactId, cid, {
 		body: text, anchor_text: anchor, from_off: from, to_off: to, ...(liveCapture ? { live_capture: true } : {}),
-		author, author_kind: isAgent(author) ? 'agent' : 'user', tagged_agent_ids: taggedAgentIds, thread_id: threadId
+		author, author_kind: isAgent(author) ? 'agent' : 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId
 	});
 	upsertTop(artifactId, row);
 	return row.id;
 }
 
 
-export async function addReply(artifactId: string, commentId: string, text: string, author: CommentAuthor = 'you', taggedAgentIds: string[] = [], threadId: string | null = null) {
+export async function addReply(artifactId: string, commentId: string, text: string, author: CommentAuthor = 'you', taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []) {
 	const cid = newClientId();
 	const row = await postReconciled(artifactId, cid, {
-		body: text, parent_id: commentId, author, author_kind: isAgent(author) ? 'agent' : 'user', tagged_agent_ids: taggedAgentIds, thread_id: threadId
+		body: text, parent_id: commentId, author, author_kind: isAgent(author) ? 'agent' : 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId
 	});
 	docComments.update((all) => {
 		const list = (all[artifactId] ?? []).map((c) => {
 			if (c.id !== commentId) return c;
 			if (c.replies.some((r) => r.id === row.id)) return c;
-			return { ...c, replies: [...c.replies, { id: row.id, author, text, taggedAgents: row.tagged_agents ?? [], at: 'just now' }] };
+			return { ...c, replies: [...c.replies, { id: row.id, author, text, taggedAgents: row.tagged_agents ?? [], mentions: row.tagged_agent_mentions ?? [], at: 'just now' }] };
 		});
 		return { ...all, [artifactId]: list };
 	});

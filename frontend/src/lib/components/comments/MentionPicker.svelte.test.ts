@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import MentionPickerHarness from './MentionPickerHarness.svelte';
-import { colorMentions } from './mentionMarkup';
+import { renderMentions } from './mentionMarkup';
+import { createMentionSelection } from './mentionSelection';
 import optionsSource from '../reviews/AgentOptions.svelte?raw';
 const agent = (id: string, name: string) => ({ id, name, responsibility:'', requested:false, unavailable_reason:null, unavailable_text:null });
 const agents = [agent('a','Alpha Agent'), agent('b','Beta Agent')];
@@ -44,17 +45,25 @@ describe('comment mentions', () => {
   unmount(component); component=undefined; host.replaceChildren(); component=mount(MentionPickerHarness,{target:host,props:{agents:all,status:'error',retry}}); flushSync();
   const next=host.querySelector('textarea')!; next.value='@'; next.setSelectionRange(1,1); next.dispatchEvent(new Event('input',{bubbles:true})); flushSync(); host.querySelector('button')!.click(); expect(retry).toHaveBeenCalledOnce();
  });
- it('decorates agents already requested for review',()=>{
-  const el=document.createElement('div');el.innerHTML=colorMentions('<p>@Alpha Agent</p>',[agents[0]]);
-  expect(el.querySelector('.comment-mention')?.textContent).toBe('@Alpha Agent');
+ it('keeps the selected identity when the picker is destroyed and recreated with its draft',()=>{
+  const selectedTags=createMentionSelection(); host=document.createElement('div'); document.body.append(host);
+  component=mount(MentionPickerHarness,{target:host,props:{agents,selectedTags}}); flushSync();
+  const field=host.querySelector('textarea')!; field.value='@'; field.setSelectionRange(1,1); field.dispatchEvent(new Event('input',{bubbles:true})); flushSync();
+  field.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true})); flushSync();
+  const body=field.value; expect((component as {taggedAgentIds:()=>string[]}).taggedAgentIds()).toEqual(['a']);
+  unmount(component); component=mount(MentionPickerHarness,{target:host,props:{agents,selectedTags,body}}); flushSync();
+  expect((component as {taggedAgentIds:()=>string[]}).taggedAgentIds()).toEqual(['a']);
  });
- it('adds a tool-selected tag without duplicating an inline tag',()=>{
-  const el=document.createElement('div'); el.innerHTML=colorMentions('<p>@Alpha Agent please review</p>',agents);
-  expect(el.textContent).toBe('@Alpha Agent please review @Beta Agent');
+ it('colors only the selected occurrence when names and typed text are identical',()=>{
+  const el=document.createElement('div');
+  el.innerHTML=renderMentions('😀 @Same and @Same', [{id:'a',name:'Same'},{id:'b',name:'Same'}], [{agent_id:'b',start:13,end:18}]);
   expect(el.querySelectorAll('.comment-mention')).toHaveLength(2);
+  expect(el.querySelector('p')?.textContent).toBe('😀 @Same and @Same');
+  expect(el.querySelector('p .comment-mention')?.getAttribute('data-agent-id')).toBe('b');
  });
- it('colors matched names and leaves unmatched mentions plain',()=>{
-  const el=document.createElement('div');el.innerHTML=colorMentions('<p>Hello @Alpha Agent and @Unknown.</p>',[agents[0]]);
-  expect(el.querySelector('.comment-mention')?.textContent).toBe('@Alpha Agent');expect(el.textContent).toBe('Hello @Alpha Agent and @Unknown.');expect(el.querySelectorAll('.comment-mention')).toHaveLength(1);
+ it('shows a tool-selected tag separately without coloring typed text',()=>{
+  const el=document.createElement('div'); el.innerHTML=renderMentions('@Alpha Agent please review', [agents[0]]);
+  expect(el.querySelector('p')?.textContent).toBe('@Alpha Agent please review');
+  expect(el.querySelector('.comment-mention')?.textContent).toBe('@Alpha Agent');
  });
 });

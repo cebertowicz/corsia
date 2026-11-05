@@ -39,7 +39,7 @@
 		/** An image inside a document: where its markdown is, and how a comment anchors on it. */
 		inDocument?: {
 			occurrence: ImageOccurrence;
-			post: (region: ImageRegion, text: string, taggedAgentIds: string[]) => Promise<string>;
+			post: (region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[]) => Promise<string>;
 			failure?: (error: unknown) => string;
 		} | null;
 		/** Opened on this comment: its card shows at its tag, or with `move` its pin is placed again. */
