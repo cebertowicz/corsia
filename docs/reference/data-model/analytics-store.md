@@ -17,7 +17,7 @@ Source: `backend/infra/analytics_db.py`.
 | `session_id` | VARCHAR | No | No | — | — |
 | `project_id` | VARCHAR | No | No | — | — |
 
-Indexes: `idx_pe_cat_act_ts` ([category, '"action"', ts]), `idx_pe_proj_ts` ([project_id, ts]).
+Indexes: `idx_pe_cat_act_ts` (category, action, ts), `idx_pe_proj_ts` (project_id, ts).
 
 ### `request_slow`
 
@@ -38,7 +38,7 @@ Source: `backend/infra/analytics_db.py`.
 | `dbq_bulk_ms` | DOUBLE | No | No | — | — |
 | `db_bulk_ms` | DOUBLE | No | No | — | — |
 
-Indexes: `idx_request_slow_ts` ([ts]).
+Indexes: `idx_request_slow_ts` (ts).
 
 ### `request_timing_daily`
 

@@ -48,8 +48,7 @@ def initialize_stores(root: Path):
     workspace.mkdir()
     state.mkdir()
     os.environ.update(CORSIA_WORKSPACE=str(workspace), CORSIA_STATE_DIR=str(state),
-                      CORSIA_TEST_MODE="1", CORSIA_ANALYTICS_DISABLE="1",
-                      CORSIA_ALLOW_HOME_WORKSPACE_IN_CI="1")
+                      CORSIA_TEST_MODE="1", CORSIA_ANALYTICS_DISABLE="1")
     sys.path.insert(0, str(ROOT / "backend"))
     from infra.database import initialize_schema
     from doceditor.live_store import LiveStore
@@ -123,6 +122,11 @@ def index_kind(unique, partial=False):
     return "partial unique" if partial else "unique"
 
 
+def duck_index_columns(expressions):
+    """DuckDB reports index columns as one string such as `[category, '"action"', ts]`."""
+    return ", ".join(part.strip("'\"") for part in expressions.strip("[]").split(", "))
+
+
 def duck_tables(connection):
     names = connection.execute(
         "SELECT table_name FROM duckdb_tables() WHERE NOT internal ORDER BY table_name"
@@ -143,7 +147,8 @@ def duck_tables(connection):
             "columns": [(r[1], r[2] or "", bool(r[3]), bool(r[5]), r[4]) for r in columns],
             "foreign": [(col, target, ref) for cols, target, refs in foreign
                         for col, ref in zip(cols, refs)],
-            "indexes": [(name, index_kind(unique), columns) for name, unique, columns in indexes],
+            "indexes": [(name, index_kind(unique), duck_index_columns(expressions))
+                        for name, unique, expressions in indexes],
         }
     return result
 
