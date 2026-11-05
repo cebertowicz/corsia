@@ -60,8 +60,9 @@ When a turn is stopped by a plan limit or vendor usage limit, the system can que
 Stop names one exact turn. If that turn has already ended, or a newer one is running, Stop changes nothing and says so (`backend/ws/stop_control.py`).
 
 - A stopped turn ends as cancelled and is not resumed. If it was waiting for a checkpoint, it stops without waiting for the checkpoint to finish (`backend/core/checkpoint_wait.py`).
-- Inputs the stopped turn had claimed but never written end as cancelled. Inputs still waiting in the queue stay there, and the next one can start a new turn (`backend/infra/thread_driver.py`).
-- A stop caused by a plan limit is different: the turn's unwritten inputs go back to the queue.
+- Inputs the stopped turn had claimed but never written end as cancelled. Other inputs still waiting in the queue stay there, and the next one can start a new turn (`backend/infra/thread_driver.py`).
+- A person's Stop also cancels the thread's queued plan liveness wakes (see [Plans](plans.md)), so a liveness wake does not restart a thread the person just stopped (`backend/infra/queued_input_settlement.py`).
+- A stop caused by a plan limit is different: the turn's unwritten inputs go back to the queue, and queued liveness wakes are kept.
 
 ### Checkpoints during a turn
 
