@@ -6,15 +6,17 @@ How to put CORSIA on your computer, what it needs, and the commands you use afte
 
 - **A Mac with Apple Silicon (M1 or later) and macOS 15 or later**, or a Linux server running Ubuntu 24.04 or later or Debian 12 or later, on x86_64 or arm64. Agent Safehouse, which sandboxes agent shell commands on a Mac, is built on macOS `sandbox-exec`. Linux has no local model and runs protected commands with bubblewrap; see [Install on Linux](#install-on-linux).
 - **Macs with less than 32 GB of memory currently need a cloud model provider for agent work.** Connect Claude Code, Codex or an API provider until a suitable local agent model is available. The corrections classifier still runs locally.
-- **Corrections are recorded once the local corrections classifier is installed.** Setup starts that download in the background and never waits for it. Until it finishes, CORSIA records no corrections.
+- **Corrections are recorded once the local corrections classifier is installed.** Setup starts that download in the background and never waits for it. Corrections you make before it finishes are recorded once it is installed.
 - **Agents run as your macOS user, with unrestricted network access.** Read [Security](../security/README.md) first.
 - **Keep the workspace out of Documents, Desktop, Downloads and iCloud Drive.** CORSIA's sandbox refuses those folders, and macOS privacy prompts can keep interrupting background agents there. The default, `~/corsia`, avoids both; agents still reach files there through a reviewed request (see [Security](../security/README.md)).
 - **Teams use a lot of tokens.** Start with one agent, watch its usage, and set spending limits on any API key.
-- **Pre-release.** Releases are version tags. The release workflow builds an unsigned desktop app and signing is a separate manual step, so check a downloaded app before opening it ([Supply chain](../security/supply-chain.md#check-it-yourself)), or build one from your checkout ([below](#desktop-app-from-your-checkout)).
+- **Pre-release.** Each GitHub release ships a signed, notarized Mac app as a disk image, with a `SHA256SUMS` file; the installed app updates itself. [Supply chain](../security/supply-chain.md#check-it-yourself) shows how to check a download.
 
 ## Install
 
-Open Terminal and run:
+**Desktop app:** download `CORSIA-<version>-aarch64.dmg` from the [latest release](https://github.com/cebertowicz/corsia/releases/latest), open it and copy CORSIA to Applications. The rest of this section installs from a source checkout instead.
+
+For the source install, open Terminal and run:
 
 ```bash
 git clone --branch main https://github.com/cebertowicz/corsia.git ~/.corsia
@@ -22,10 +24,10 @@ cd ~/.corsia
 bash scripts/install.sh
 ```
 
-The installer adds any missing prerequisites, builds the environment, creates your workspace at `~/corsia` and opens CORSIA at `http://localhost:1956`. On a Mac it asks no setup questions in Terminal. The rest happens in the browser:
+The installer adds any missing prerequisites, builds the environment, creates your workspace at `~/corsia` and opens CORSIA at `http://localhost:1956`. On a Mac it asks no setup questions in Terminal; the one prompt there is your administrator password, and only if it has to install Homebrew. The rest happens in the browser:
 
 1. Create a local account.
-2. Connect a model source. CORSIA asks which subscription you pay for (Claude, ChatGPT, both or neither), installs and signs in Claude Code or Codex through its own **Sign in** button, takes an API key, or connects a local [oMLX](https://github.com/jundot/omlx) server, and offers a fix for anything missing. A tool you are already signed in to in a terminal still needs that sign-in.
+2. Connect a model source. CORSIA asks which subscription you pay for (Claude, ChatGPT, both or neither) and starts installing Claude Code or Codex for each one you pick. The next screen gives each tool its own **Sign in**, takes an API key, or connects a local [oMLX](https://github.com/jundot/omlx) server, and offers a fix for anything missing. A tool you are already signed in to in a terminal still needs CORSIA's sign-in.
 3. CORSIA walks you through the rest of setup in its plan: more model providers, web search, GitHub, remote access, and your first project.
 
 [Your first project](first-project.md) goes through those screens one at a time.
@@ -76,7 +78,7 @@ cd ~/.corsia
 bash desktop/scripts/build-macos-bundle.sh --skip-dmg
 ```
 
-The build downloads its own Rust, Python and resources, and needs room for the build plus a backup of your data. It leaves `CORSIA.app` in `~/.corsia/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/`; copy it to Applications and open it. It offers to **Take over** your source install: the app keeps your account, workspace and data where they are, stops the source install, and from then on serves them with the code it was built from. `http://localhost:1956` stops answering; use the app. Bookmarks and anything else pointed at that address, including the phone setup above, stop working with it. Take over is one-way: afterwards `scripts/corsia start` in your checkout refuses, saying the CORSIA app owns this install, and any `corsia` link in `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin` that pointed at your checkout's `scripts/corsia` now points at the app's command. Start and restart CORSIA from the app; there is no supported way back to running the checkout. The app then looks for updates in CORSIA's published releases, not in your checkout. Opening a newer build over an installed one is untested. If a takeover fails, your source install is restarted as it was. [The desktop app](../how-it-works/desktop-app.md) covers the app's first run, updates and where it keeps its state.
+The build downloads its own Rust, Python and resources, and needs room for the build plus a backup of your data. It leaves `CORSIA.app` in `~/.corsia/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/`; copy it to Applications and open it. It offers to **Take over** your source install, or **Start fresh instead**, which stops the source install and moves it into a dated backup folder without deleting anything. Take over works like this: the app keeps your account, workspace and data where they are, stops the source install, and from then on serves them with the code it was built from. `http://localhost:1956` stops answering; use the app. Bookmarks and anything else pointed at that address, including the phone setup above, stop working with it. Take over is one-way: afterwards `scripts/corsia start` in your checkout refuses, saying the CORSIA app owns this install, and any `corsia` link in `~/.local/bin`, `/opt/homebrew/bin` or `/usr/local/bin` that pointed at your checkout's `scripts/corsia` now points at the app's command. Start and restart CORSIA from the app; there is no supported way back to running the checkout. The app then looks for updates in CORSIA's published releases, not in your checkout. Opening a newer build over an installed one is untested. If a takeover fails, your source install is restarted as it was. [The desktop app](../how-it-works/desktop-app.md) covers the app's first run, updates and where it keeps its state.
 
 ## Everyday commands
 
