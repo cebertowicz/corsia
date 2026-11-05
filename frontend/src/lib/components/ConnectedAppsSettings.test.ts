@@ -408,7 +408,7 @@ describe('ConnectedAppsSettings', () => {
 		expect(open).not.toHaveBeenCalledWith('', '_blank');
 	});
 
-	it('opens an account sign-in in the default browser from the desktop app, leaving the app where it is', async () => {
+	async function signInFromDesktop() {
 		document.documentElement.dataset.shell = 'tauri';
 		const signedOut = { ...googleAccount, state: 'signed_out' as const };
 		const open = vi.spyOn(window, 'open');
@@ -420,8 +420,18 @@ describe('ConnectedAppsSettings', () => {
 		flushSync();
 		[...host.querySelectorAll<HTMLButtonElement>('[data-connected-account-id="google-work"] button')].find((button) => button.textContent?.trim() === 'Sign in')!.click();
 		await vi.waitFor(() => expect(openUrl).toHaveBeenCalledWith('https://accounts.example/auth'));
+		return open;
+	}
+
+	it('opens an account sign-in in the default browser from the desktop app', async () => {
+		const open = await signInFromDesktop();
 		expect(open).not.toHaveBeenCalled();
-		expect(window.location.href).not.toContain('accounts.example');
+	});
+
+	it('says so when the desktop app cannot open the browser, instead of loading the sign-in in the app', async () => {
+		openUrl.mockRejectedValueOnce(new Error('no opener'));
+		await signInFromDesktop();
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="google-work"]')?.textContent).toContain("Couldn't open your browser. Try again."));
 	});
 
 	it('renders Microsoft admin approval, cancellation, refresh and provider failure with the correct next actions', async () => {

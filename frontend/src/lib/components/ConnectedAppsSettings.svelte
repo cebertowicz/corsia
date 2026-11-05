@@ -143,6 +143,7 @@
 		try {
 			const started = await startAccountSignIn(account);
 			if (!started.url) { page?.close(); await refresh(); }
+			else if (page?.desktop) { if (!await page.open(started.url)) actionError = "Couldn't open your browser. Try again."; }
 			else if (!(page && await page.open(started.url))) window.location.assign(started.url);
 		} catch (cause) {
 			page?.close();

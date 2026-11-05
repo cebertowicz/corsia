@@ -1,7 +1,9 @@
-import { openUrl } from '@tauri-apps/plugin-opener';
+import { openExternalUrl } from '$lib/linkTargetResolver';
 
 /** A browser page for a link a request has yet to return. `open` says whether a page showed it. */
 export interface PendingExternalPage {
+	/** The desktop app, where leaving the app window for the link is never a fallback. */
+	readonly desktop: boolean;
 	open(href: string): Promise<boolean>;
 	close(): void;
 }
@@ -12,10 +14,11 @@ export interface PendingExternalPage {
  */
 export function pendingExternalPage(): PendingExternalPage {
 	if (document.documentElement.dataset.shell === 'tauri') {
-		return { open: (href) => openUrl(href).then(() => true, () => false), close: () => {} };
+		return { desktop: true, open: (href) => openExternalUrl(href).then(() => true, () => false), close: () => {} };
 	}
 	const page = window.open('', '_blank');
 	return {
+		desktop: false,
 		async open(href) {
 			if (!page) return false;
 			page.opener = null;
