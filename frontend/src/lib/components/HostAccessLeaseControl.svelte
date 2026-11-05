@@ -45,7 +45,8 @@
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import HostAccessPendingRequestDrawer from './HostAccessPendingRequestDrawer.svelte';
 	import HostAccessActiveLeaseChip from './HostAccessActiveLeaseChip.svelte';
-	import { decisionBlocked, duration, owner, text } from '$lib/hostAccess/leaseFormat';
+	import HostAccessPendingTrigger from './HostAccessPendingTrigger.svelte';
+	import { decisionBlocked, owner, pendingLabel, text } from '$lib/hostAccess/leaseFormat';
 	import {
 		focusRestoreIntentForDecision,
 		restoreComposerFocusAfterLeaseRemoval,
@@ -55,7 +56,7 @@
 		decideHostAccessLease,
 		fetchHostAccessLeases,
 		HostAccessApiError,
-		type HostAccessLease,
+		type HostAccessLease, type HostAccessItem,
 		type HostAccessLeaseDecision,
 	} from '$lib/api/hostAccess';
 	import { token } from '$lib/stores/auth';
@@ -78,7 +79,7 @@
 		awaitingUser?: boolean;
 	} = $props();
 
-	let leases = $state<HostAccessLease[]>([]);
+	let leases = $state<HostAccessItem[]>([]);
 	let stale = $state(false);
 	let error = $state('');
 	let inFlightDecisionIds = $state<Set<string>>(new Set());
@@ -116,9 +117,9 @@
 		pendingOpenFor = id;
 		pendingOpen = false;
 	});
-	const active = $derived(leases.filter((lease) => lease.state === 'active'));
+	const active = $derived(leases.filter((lease): lease is HostAccessLease => lease.state === 'active'));
 	const transitional = $derived(
-		leases.filter((lease) => lease.state === 'reviewing' || lease.state === 'activating'),
+		leases.filter((lease): lease is HostAccessLease => lease.state === 'reviewing' || lease.state === 'activating'),
 	);
 	/**
 	 * Every shape that is not the compact chip is named once here and rendered
@@ -163,7 +164,7 @@
 	}
 
 	async function reconcileAuthoritativeLeases(
-		nextLeases: HostAccessLease[],
+		nextLeases: HostAccessItem[],
 		requestedThreadId: string,
 	): Promise<void> {
 		const intent = focusRestoreIntent;
@@ -239,7 +240,7 @@
 	}
 
 	async function decide(
-		lease: HostAccessLease,
+		lease: HostAccessItem,
 		decision: HostAccessLeaseDecision,
 		decisionControl: Element | null = null,
 	): Promise<void> {
@@ -395,23 +396,16 @@
 		{/if}
 
 		{#if currentPending}
-			<button
-				type="button"
-				class="pending-request-trigger"
-				aria-label="Review temporary host access"
-				aria-haspopup="dialog"
-				aria-expanded={pendingOpen}
-				bind:this={pendingTriggerEl}
+			<HostAccessPendingTrigger
+				request={currentPending}
+				{stale} deciding={decidingLeaseId === currentPending.id}
+				open={pendingOpen}
+				bind:element={pendingTriggerEl}
 				onclick={openPendingDrawer}
-			>
-				<span class="eyebrow">Temporary host access</span>
-				<span class="pending-owner">{owner(currentPending)}</span>
-				<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : duration(currentPending.requested_duration_seconds)} size="sm" />
-				<span class="pending-action">Review →</span>
-			</button>
+			/>
 			{#key currentPending.id}
 				<AdaptiveDrawer
-					ariaLabel="Review temporary host access" flushBottom
+					ariaLabel={pendingLabel(currentPending)} flushBottom
 					open={pendingOpen}
 					onClose={closePendingDrawer}
 				>
@@ -492,49 +486,6 @@
 		scrollbar-width: thin;
 		pointer-events: none;
 	}
-	.pending-request-trigger {
-		display: flex;
-		align-items: center;
-		gap: var(--space-3);
-		width: 100%;
-		min-height: 44px;
-		padding: var(--space-2) var(--space-3);
-		border: 1px solid var(--amber-line);
-		border-radius: var(--radius-sm);
-		background: color-mix(in srgb, var(--amber) 10%, var(--bg-secondary));
-		color: var(--text-primary);
-		font: inherit;
-		text-align: left;
-		cursor: pointer;
-		pointer-events: auto;
-	}
-	.pending-request-trigger:focus-visible {
-		outline: 2px solid var(--accent-line);
-		outline-offset: 2px;
-	}
-	.pending-owner {
-		flex: 1;
-		min-width: 0;
-		overflow: hidden;
-		font-size: var(--text-footnote);
-		font-weight: var(--fw-medium);
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.pending-request-trigger .eyebrow {
-		flex: none;
-		color: var(--amber);
-		text-transform: uppercase;
-		letter-spacing: 0.07em;
-		font-size: var(--text-caption);
-		font-weight: 650;
-	}
-	.pending-action {
-		flex: none;
-		color: var(--amber);
-		font-size: var(--text-footnote);
-		font-weight: var(--fw-medium);
-	}
 
 	@media (max-width: 720px) {
 		.thread-host-access {
@@ -552,8 +503,8 @@
 				+ 6px
 			);
 			max-height: var(--host-access-available-height);
+			--host-access-owner-wrap: normal;
+			--host-access-eyebrow-display: none;
 		}
-		.pending-owner { white-space: normal; }
-		.eyebrow { display: none; }
 	}
 </style>

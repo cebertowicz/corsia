@@ -331,6 +331,19 @@ async def test_changed_script_file_stops_runs_and_wakes_owner(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_changed_approved_script_never_executes(tmp_path, monkeypatch):
+    from dataclasses import replace
+
+    db = _db()
+    schedule = replace(_register(db, tmp_path), payload={"authentication": {"state": "approved"}})
+    calls = _use_run(monkeypatch, _run())
+    Path(schedule.script_path).write_text("print('changed')")
+    report = await script_runner._execute(schedule)
+    assert report.status == "hash_mismatch"
+    assert calls == []
+
+
+@pytest.mark.asyncio
 async def test_restart_marks_in_flight_run_interrupted_without_replay(
     tmp_path, monkeypatch,
 ):
