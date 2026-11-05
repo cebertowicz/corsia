@@ -205,12 +205,11 @@ def test_document_open_link_escapes_markdown_label_and_destination():
     assert result["link"] == "[Plan \\[α\\]\\\\draft](</workspace/Meeting notes (α) %3Cdraft%3E.md>)"
 
 
-def test_document_open_guidance_names_post_update_and_how_to_load_it():
+def test_document_open_guidance_names_post_update():
     from tools.document_open import _REQUESTED, _VIEW_LINK
 
     for guidance in (_REQUESTED, _VIEW_LINK):
         assert "`post_update`" in guidance
-        assert "load it by name" in guidance
 
 
 @pytest.mark.asyncio

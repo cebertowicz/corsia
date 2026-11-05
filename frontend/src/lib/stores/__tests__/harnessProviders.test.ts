@@ -20,6 +20,13 @@ describe('harnessSummaries', () => {
 		expect(harnessSummaries([row({ id: 'codex/gpt-5.6-sol' }), row({ id: 'codex/gpt-6-sol' })], catalog))
 			.toEqual([{ name: 'codex', label: 'Codex', total: 1, ready: 1 }]);
 	});
+
+	it('counts a model that can run on an account, not the row status alone', () => {
+		const signedOut = pickerRow({ runnable: { status: 'unavailable', status_reason: 'account_signed_out' } });
+		const signedIn = pickerRow({ runnable: { status: 'ready', status_reason: null } });
+		expect(harnessSummaries([row({})], [signedOut])).toEqual([{ name: 'codex', label: 'Codex', total: 1, ready: 0 }]);
+		expect(harnessSummaries([row({})], [signedIn])).toEqual([{ name: 'codex', label: 'Codex', total: 1, ready: 1 }]);
+	});
 });
 
 describe('harnessProviderModels', () => {

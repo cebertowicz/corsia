@@ -21,17 +21,17 @@ import functools
 import logging
 import os
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from connections.github_read_request import AUTH_PROBE
 from events import delivery
 from events.connectors import github_pr_quiet_reasons as reasons
 from events.connectors import github_pr_quiet_rows as rows
 from events.connectors import github_notifications_feed as feed
-from events.connectors.github_read_budget import budget
+from events.connectors.github_read_budget import budget_of
 from infra.db_async import run_in_db
-from reviewer.reviewer_categories import STATUS_CHECK_CONTEXT
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +46,8 @@ _status: dict[str, Any] = {
     "state": "starting", "reason": None, "last_run": None, "fired_count": 0, "last_error": None,
 }
 _etags: dict[str, tuple[str, Any]] = {}
+#: (repo, base ref) -> whether its merge gate requires the reviewer; one sweep's reads only.
+_review_required: dict[tuple[str, str], bool] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,12 +61,15 @@ class Candidate:
 
 
 def quiet_watch_status() -> dict[str, Any]:
-    """State, reason, last completed sweep, wakes accepted, and the last error class.
+    """State, reason, last completed sweep, wakes accepted, the last error class, and
+    the read budget of the account its reads run as (``read_budget``).
 
     ``fired_count`` counts wakes the owner's FIFO accepted, not wakes delivered
     to a Turn; a later admission failure is reported by the wake's settlement.
     """
-    return dict(_status)  # the shared read budget is shown with the notifications poller
+    from connections.github_broker import default_broker
+
+    return {**_status, "read_budget": default_broker().read_budget.status()}
 
 
 def _now() -> datetime:
@@ -78,7 +83,7 @@ def disabled_reason(runner: feed.GhRunner) -> str | None:
     if os.environ.get(DISABLE_ENV) == "1":
         return "config_off"
     try:
-        result = runner(["auth", "status"], timeout=30.0)
+        result = runner(list(AUTH_PROBE), timeout=30.0)
     except FileNotFoundError:
         return "gh_missing"
     except Exception:  # noqa: BLE001 — an unreadable auth state is "not signed in"
@@ -155,35 +160,36 @@ def _log_answers_from() -> datetime | None:
 
 
 def _local_facts(
-    candidate: Candidate, ci: reasons.CiState, webhook: bool, log_answers_from: datetime | None,
-) -> reasons.LocalFacts:
-    """The logged CI deliveries for this CI attempt, the reviewed head, and
-    whether the reviewer runs here.
+    ci: reasons.CiState, webhook: bool, log_answers_from: datetime | None,
+) -> reasons.HeadFacts:
+    """The logged CI deliveries for this CI attempt."""
+    return reasons.HeadFacts(
+        webhook=webhook, ci_received_at=_ci_received_at(ci), log_answers_from=log_answers_from,
+    )
+
+
+async def _review_required_for(runner: feed.GhRunner, view: reasons.PrView) -> bool:
+    """Whether the base branch's merge gate requires ``qa/llm-reviewer-present``: the
+    repo runs the reviewer. Read once per (repo, base) per sweep. A 404 (no rules
+    GitHub will show) counts as not required; any other failure is raised, so the
+    head stays unsettled until a sweep can read the gate.
     """
-    from events.reviewer_gate_state import get_reviewed_sha, pr_key
-    from infra.database import get_db
-
-    prefix = f"{candidate.repo}#"
-    reviewer_ran = get_db().execute(
-        "SELECT 1 FROM reviewer_gate_state WHERE substr(pr_key, 1, ?) = ? LIMIT 1",
-        (len(prefix), prefix),
-    ).fetchone() is not None
-    return reasons.LocalFacts(
-        webhook=webhook,
-        ci_received_at=_ci_received_at(ci),
-        log_answers_from=log_answers_from,
-        reviewed_sha=get_reviewed_sha(pr_key(candidate.repo, candidate.number)),
-        reviewer_ran=reviewer_ran,
-    )
+    key = (view.repo, view.base_ref)
+    if key not in _review_required:
+        try:
+            body = await _get(runner, f"repos/{view.repo}/rules/branches/{view.base_ref}")
+        except feed.FeedError as exc:
+            if exc.error_class != "http_404":
+                raise
+            body = None
+        _review_required[key] = reasons.review_required(body)
+    return _review_required[key]
 
 
-async def _reviewer_state(runner: feed.GhRunner, view: reasons.PrView) -> str | None:
+async def _reviewer_statuses(runner: feed.GhRunner, view: reasons.PrView) -> dict[str, str]:
+    """The head's ``qa/llm-reviewer*`` statuses: ``-present`` success is reviewed."""
     body = await _get(runner, f"repos/{view.repo}/commits/{view.head}/status")
-    statuses = body.get("statuses") if isinstance(body, dict) else None
-    return next(
-        (str(s.get("state")) for s in statuses or [] if s.get("context") == STATUS_CHECK_CONTEXT),
-        None,
-    )
+    return reasons.reviewer_statuses(body)
 
 
 async def _repo_runs_actions(runner: feed.GhRunner, repo: str) -> bool:
@@ -246,6 +252,7 @@ async def sweep_candidate(
     view = reasons.PrView(
         candidate.repo, candidate.number, head, bool(pr.get("draft")),
         reasons.mergeable_label(pr.get("mergeable")), str(pr.get("html_url") or ""),
+        str(((pr.get("base") or {}).get("ref")) or ""),
     )
     now = _now()
     state = await run_in_db(rows.head_state, candidate.external_id, head, now)
@@ -258,18 +265,25 @@ async def sweep_candidate(
     ci = reasons.ci_state(await _get(
         runner, f"repos/{candidate.repo}/actions/runs?head_sha={head}&per_page=100",
     ))
-    facts = await run_in_db(_local_facts, candidate, ci, webhook, log_answers_from)
+    facts = await run_in_db(_local_facts, ci, webhook, log_answers_from)
     fired = list(state.get("fired") or [])
     first_seen = reasons.parse_time(state.get("first_seen_at")) or now
     faults: list[str] = []
     review_from = reasons.parse_time(state.get("review_from"))
+    if reasons.REVIEW_MISSING not in fired and reasons.review_possible(view, ci):
+        required = await _review_required_for(runner, view)
+        facts = replace(
+            facts, review_required=required,
+            reviewer_statuses=await _reviewer_statuses(runner, view) if required else {},
+        )
     for reason in reasons.due_reasons(
         view, ci, facts, fired=fired, first_seen=first_seen, now=now, review_from=review_from,
     ):
         if reason == reasons.CI_NOT_STARTED and not await _repo_runs_actions(runner, view.repo):
             continue
         reviewer_state = (
-            await _reviewer_state(runner, view) if reason == reasons.REVIEW_MISSING else None
+            (facts.reviewer_statuses or {}).get(reasons.STATUS_CHECK_CONTEXT)
+            if reason == reasons.REVIEW_MISSING else None
         )
         if not await _wake(candidate, view, ci, reason, now, reviewer_state):
             continue
@@ -318,15 +332,16 @@ def _report_ingress(affected: list[str], now: datetime) -> None:
 async def sweep_once(runner: feed.GhRunner) -> None:
     """Evaluate every candidate once; one PR's failure never stops the others.
 
-    While the shared read budget keeps the sweep out of its reserve the sweep
-    is skipped, not failed: the budget's own status says why.
+    While its account's read budget keeps the sweep out of the reserve the
+    sweep is skipped, not failed: the budget's own status says why.
     """
     from events.connectors.github_pr_notice import webhook_configured
 
-    if budget.sweep_paused():
+    if budget_of(runner).sweep_paused():
         _status.update({"state": "enabled", "reason": None})
         return
 
+    _review_required.clear()
     candidates = await run_in_db(_candidates)
     webhook = await run_in_db(webhook_configured)
     answers_from = await run_in_db(_log_answers_from)

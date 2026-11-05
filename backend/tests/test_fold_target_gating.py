@@ -26,6 +26,8 @@ from infra.database import get_db
 from llm.resolution import ExecutionTarget
 from vendor_account_fixtures import default_id, default_receipt
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 SONNET = "claude-code/sonnet"
 OPUS = "claude-code/opus"
 

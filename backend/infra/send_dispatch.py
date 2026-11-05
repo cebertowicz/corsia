@@ -465,9 +465,9 @@ async def _accept_cc(
     effort = resolve_effort(ctx.reasoning_effort, "cc")
     if ctx.target.harness != "claude-code":
         raise SendRejected(500, "Claude Code dispatch received a non-CC target")
-    from connections.models import connection_available
+    from connections.models import provider_may_run
 
-    if not connection_available("claude-code"):
+    if not provider_may_run("claude-code"):
         raise SendRejected(
             503,
             "Claude Code connection is not available",

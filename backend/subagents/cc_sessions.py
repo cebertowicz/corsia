@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -20,13 +19,12 @@ _JUNK_PREFIXES = ("<", "[", "Caveat:")
 
 
 def resolve_claude_dir(claude_dir: str | None = None) -> str:
-    """Return the absolute transcript root owned by one CC invocation."""
-    configured = (
-        claude_dir
-        or os.environ.get("CLAUDE_CONFIG_DIR")
-        or str(Path.home() / ".claude")
-    )
-    return str(Path(configured).expanduser().resolve())
+    """Return the explicit transcript root owned by one CC invocation."""
+    if not claude_dir:
+        from connections.account_policy import AccountAdmissionError
+
+        raise AccountAdmissionError('account_not_configured')
+    return str(Path(claude_dir).expanduser().resolve())
 
 
 def _is_prompt(text: str | None) -> bool:

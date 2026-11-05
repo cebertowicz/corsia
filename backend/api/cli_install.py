@@ -160,7 +160,8 @@ def _failure_reason(vendor: str, result: subprocess.CompletedProcess[bytes]) -> 
     """Classify known installer output without exposing it through the API."""
     output = _bounded_output(result)
     safe_output = _SECRET_VALUE.sub(r"\1\2[redacted]", output)
-    log.info("CLI installer ended with return code %s: %s", result.returncode, safe_output)
+    # WARNING, not INFO: the packaged service logs at WARNING, and this tail is the only record of why.
+    log.warning("CLI installer for %s ended with return code %s: %s", vendor, result.returncode, safe_output)
     if "Checksum verification failed" in output:
         return DOWNLOAD_UNVERIFIED
     if vendor == "claude-code" and "Failed to get a valid version" in output:
@@ -204,6 +205,8 @@ def _run_installer(vendor: str, job: InstallJob) -> str | None:
         script = _download_script(vendor)
     except InstallerFailure as failure:
         job.cancelled = job.cancel_requested
+        if not job.cancelled:
+            log.warning("CLI installer download for %s failed: %r", vendor, failure.__cause__)
         return None if job.cancelled else str(failure)
     try:
         with job.lock:
@@ -245,7 +248,9 @@ async def _complete_job(vendor: str, job: InstallJob) -> None:
     job.settled.set()
     if job.state == "failed":
         # The reference ties a setup report's row to this line.
-        log.warning("CLI install for %s failed reference=%s cause=%s", vendor, job.ref, install_cause(job.reason))
+        log.warning(
+            "CLI install for %s failed reference=%s cause=%s reason=%r", vendor, job.ref, install_cause(job.reason), job.reason
+        )
     if job.state == "done":
         try:
             job.path_shadowed_by = await asyncio.to_thread(path_shadowed_binary, vendor)

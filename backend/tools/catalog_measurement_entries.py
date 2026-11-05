@@ -14,4 +14,9 @@ MEASUREMENT_CATALOG_ENTRIES: dict[str, ToolCatalogEntry] = {
         summary="Read this agent's recorded measure rows, drops and sync state",
         activity="Reading measure status",
     ),
+    "measure_key": ToolCatalogEntry(
+        "automations", status="active", authority="measurement-write",
+        summary="Mint, list or revoke the keys outside tools send this agent's measures with",
+        activity="Managing measure keys",
+    ),
 }

@@ -91,11 +91,14 @@ def mutate(
     mutation_id: str,
     db,
     workflow_version: str | None = None,
+    workflow_steps: tuple = (),
 ) -> notifications.DeferredMutation:
     """Atomically authorize, execute, and receipt one idempotent mutation.
 
     ``workflow_version`` is the server-resolved version of the workflow skill
-    an ``add`` or ``insert`` names; it is not a caller parameter.
+    an ``add`` or ``insert`` names, and ``workflow_steps`` the plain steps a
+    phase running it is built from (``plans.workflow_fields.build_run``);
+    neither is a caller parameter.
     """
     fields.validate_operation_params(operation, params)
     mutation_id = _required_mutation_id(mutation_id)
@@ -127,7 +130,7 @@ def mutate(
         else:
             result = _authorize_and_dispatch(
                 db, plan_id, operation, params, actor, provenance, plan,
-                workflow_version,
+                workflow_version, workflow_steps,
             )
             receipts.record(
                 db, plan_id=plan_id, mutation_id=mutation_id,
@@ -167,7 +170,7 @@ _revalidate_actor = boundary_actor.revalidate_actor
 
 
 def _authorize_and_dispatch(
-    db, plan_id, operation, params, actor, provenance, plan, workflow_version,
+    db, plan_id, operation, params, actor, provenance, plan, workflow_version, workflow_steps,
 ) -> dict[str, Any]:
     """Dispatch one freshly authorized mutation inside the outer write."""
     boundary_worker.authorize(db, plan, operation, params, actor)
@@ -200,7 +203,7 @@ def _authorize_and_dispatch(
             _authorize_prerequisite(db, plan_id, params, actor)
     result = boundary_dispatch.dispatch(
         plan_id, operation, params, actor, provenance, db,
-        workflow_version=workflow_version,
+        workflow_version=workflow_version, workflow_steps=workflow_steps,
     )
     if isinstance(result, tuple):
         return {"node": node_projection(result[0]), "follow_up": node_projection(result[1])}

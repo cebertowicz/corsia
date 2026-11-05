@@ -5,6 +5,16 @@ through ``PROCESS_OWNER`` under the thread and Turn identity. A script run has
 no Turn, so it uses a synthetic one (``script:<run_id>``) and the unleased
 envelope: it can never inherit a host-access lease. Every builder below is the
 one ``BashTool.execute`` calls, so the two cannot drift apart.
+
+A rule-started run whose stored event names a repository also gets a GitHub
+read channel for that repository (``script_github_channel``) and the
+``corsia github read`` client; every other run gets neither. The person's
+``gh`` homes stay hidden from every run.
+
+Each run reads the agents' GitHub account once. Verified, the script gets
+exactly what an agent shell gets: that account's ``gh`` and Git identity and its
+home read-only. In every other state, no account at all included, it gets the
+shell's locked state, and the run records why it had no GitHub login.
 """
 
 from __future__ import annotations
@@ -13,9 +23,14 @@ import asyncio
 import os
 import shlex
 import tempfile
-from dataclasses import dataclass
+from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+from automation.script_github_channel import SOCKET_ENV, github_channel
+from connections import github_agent
+from connections.github_agent import AgentAccountView, Cause
+from connections.github_agent_home import default_home
 from events.trace_env import TRACE_ENV
 from events.trace_env import encode as encode_trace
 from host_access.processes import PROCESS_OWNER, ForegroundProcessResult
@@ -29,6 +44,7 @@ from tools.shell_envelope import (
     execution_envelope_for_consumed_action,
     prepare_execution_envelope,
 )
+from infra.db_async import run_in_db, run_off_db
 from tools.shell_environment import safehouse_subprocess_env
 from tools.shell_guard import (
     execution_envelope_profile,
@@ -36,6 +52,7 @@ from tools.shell_guard import (
     safehouse_version_error,
 )
 from tools.shell_policy import load_shell_repo_policies
+from tools.sandbox_git import sandbox_literal
 import tools.shell_sandbox as shell_sandbox
 from tools.unix_socket_policy import corsia_temp_root_for_bind
 
@@ -59,13 +76,15 @@ class ScriptRun:
     stdout: bytes
     stderr: bytes
     timed_out: bool
+    #: Why the run had no GitHub login, in plain words; None when it ran as the agents' account.
+    github_locked: str | None = None
 
     @property
     def over_cap(self) -> bool:
         return len(self.stdout) > STDOUT_CAP_BYTES
 
 
-def script_command(path: Path, stdin: Path | None = None) -> str:
+def script_command(path: Path, stdin: Path | None = None, *, client_dir: Path | None = None) -> str:
     """The one bash command line for a script: ``stdin`` or none, capped stdout and stderr.
 
     ``head`` ends a runaway script with SIGPIPE instead of letting the process
@@ -76,8 +95,9 @@ def script_command(path: Path, stdin: Path | None = None) -> str:
     interpreter = _INTERPRETERS.get(path.suffix)
     run = f"{interpreter} {quoted}" if interpreter else quoted
     source = shlex.quote(str(stdin)) if stdin is not None else "/dev/null"
+    client_path = f'export PATH={shlex.quote(str(client_dir))}:"$PATH"; ' if client_dir else ""
     return (
-        f"set -o pipefail; {run} <{source} "
+        f"{client_path}set -o pipefail; {run} <{source} "
         f"2> >(head -c {STDERR_CAP_BYTES} >&2) | head -c {STDOUT_CAP_BYTES + 1}"
     )
 
@@ -99,16 +119,21 @@ async def run_script(
     timeout_seconds: int,
     stdin: bytes | None = None,
     trace: tuple[str, ...] = (),
+    rule_id: str | None = None,
+    github_repo: str | None = None,
 ) -> ScriptRun:
     """Run ``script`` in the owner's protected envelope and return its capped output.
 
     ``stdin`` is written to a private file in the thread's own temp root, which
     the envelope grants read-write, and removed once the run ends. ``trace`` is a
     rule-started run's rule chain, handed to ``corsia event emit`` (``events.trace_env``).
+    ``github_repo`` is the repository a rule run's claimed event names; only then
+    does the run get a GitHub read channel, and only for that repository.
     """
     await _checked_environment()
     if stdin is None:
-        return await _run(thread_id, project_id, script, run_id, timeout_seconds, None, trace)
+        return await _run(thread_id, project_id, script, run_id, timeout_seconds, None, trace,
+                          rule_id, github_repo)
     try:
         fd, name = tempfile.mkstemp(prefix="rule-input-", suffix=".json",
                                     dir=corsia_temp_root_for_bind(thread_id))
@@ -117,16 +142,115 @@ async def run_script(
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(stdin)
-        return await _run(thread_id, project_id, script, run_id, timeout_seconds, Path(name), trace)
+        return await _run(thread_id, project_id, script, run_id, timeout_seconds, Path(name), trace,
+                          rule_id, github_repo)
     finally:
         Path(name).unlink(missing_ok=True)
 
 
 async def _run(
     thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
-    stdin: Path | None, trace: tuple[str, ...],
+    stdin: Path | None, trace: tuple[str, ...], rule_id: str | None, github_repo: str | None,
+) -> ScriptRun:
+    if github_repo is None:
+        return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
+                                       stdin, trace, None, None)
+    async with _github_client(thread_id, run_id, rule_id, github_repo) as (socket_path, client_dir):
+        return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
+                                       stdin, trace, socket_path, client_dir)
+
+
+@asynccontextmanager
+async def _github_client(thread_id: str, run_id: str, rule_id: str | None, repo: str):
+    """The run's channel socket and a directory holding its ``corsia`` client.
+
+    Only a failure to set these up is reported as the channel's; the run's own
+    failures keep their cause.
+    """
+    stack = AsyncExitStack()
+    try:
+        socket_path = await stack.enter_async_context(github_channel(thread_id, run_id, rule_id, repo=repo))
+        client_dir = Path(stack.enter_context(tempfile.TemporaryDirectory(
+            prefix="github-client-", dir=corsia_temp_root_for_bind(thread_id))))
+        client = client_dir / "corsia"
+        client.write_bytes((Path(__file__).resolve().parents[1] / "cli_github.py").read_bytes())
+        client.chmod(0o700)
+    except OSError as exc:
+        await stack.aclose()
+        raise ScriptSandboxError(f"script GitHub channel unavailable: {type(exc).__name__}: {exc}") from exc
+    async with stack:
+        yield socket_path, client_dir
+
+
+#: One line per account cause: what is wrong, and who fixes it or what CORSIA does next.
+_NO_LOGIN: dict[Cause, str] = {
+    "read_failed": "CORSIA couldn’t read the agents' GitHub account settings and reads them again on the next run",
+    "multiple_accounts": "there are several agents' GitHub accounts; the person needs to remove all but one",
+    "github_executable_missing": "GitHub CLI for the agents' GitHub account is missing; install it again",
+    "signed_out": "the agents' GitHub account is signed out; sign it in again",
+    "credential_missing": "the saved sign-in for the agents' GitHub account is missing; sign it out and in again",
+    "token_not_in_home": ("the sign-in for the agents' GitHub account isn't saved in the account's own settings; "
+                          "sign it out and in again"),
+    "token_rejected": "GitHub rejected the sign-in for the agents' GitHub account; sign it out and in again",
+    "verify_failed": ("CORSIA couldn’t confirm the agents' GitHub account with GitHub and checks again "
+                      "when a script next runs"),
+    "verifying": "CORSIA is still checking the agents' GitHub account; a later run uses the answer",
+    "own_login_unknown": ("CORSIA doesn't know the person's own GitHub login, so it can't tell the agents' "
+                          "account from it; it checks again on a later run, and if the person isn't signed in "
+                          "to GitHub CLI on this computer, they need to sign in"),
+    "person_account": ("the agents' GitHub sign-in is the person's own GitHub account; sign it out and sign "
+                       "in as the agents' own account"),
+}
+_NOT_READY = "the agents' GitHub account isn't ready"
+
+
+def github_lock_reason(view: AgentAccountView) -> str | None:
+    """Why a run gets no GitHub login; None once verified."""
+    if view.ready:
+        return None
+    if view.absent:
+        why: str | None = "there is no agents' GitHub account"
+    else:
+        why = _NO_LOGIN.get(view.cause) if view.cause else None
+    return f"scripts get no GitHub login: {why or _NOT_READY}"
+
+
+def _script_gh_homes(view: AgentAccountView) -> set[Path]:
+    """The ``gh`` homes a run may not touch: the person's always, the agents' unless verified."""
+    paths = {default_home(), Path.home() / ".config" / "gh"}
+    if os.environ.get("XDG_CONFIG_HOME"):
+        paths.add(Path(os.environ["XDG_CONFIG_HOME"]) / "gh")
+    if view.home and not view.ready:
+        paths.add(Path(view.home))
+    return {path.resolve(strict=False) for path in paths}
+
+
+def _script_profile(view: AgentAccountView):
+    hidden = _script_gh_homes(view)
+
+    def build(*args, **kwargs) -> str:
+        profile = execution_envelope_profile(*args, **kwargs)
+        for path in hidden:
+            profile += f'(deny file-read* file-write* (subpath "{sandbox_literal(path)}"))\n'
+        return profile
+    return build
+
+
+async def _run_with_channel(
+    thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
+    stdin: Path | None, trace: tuple[str, ...], socket_path: Path | None, client_dir: Path | None,
 ) -> ScriptRun:
     env = safehouse_subprocess_env(thread_id)
+    # The one read of the agents' account; the env, the grant and the denies below all use it.
+    # A rule run is never replayed, so when no answer is cached yet (after a restart, say) it
+    # waits, bounded and off the DB pool, for the verification instead of running locked.
+    view = await run_in_db(github_agent.view)
+    if view.answer_pending:
+        view = await run_off_db(github_agent.verify_now)
+    env.update(github_agent.script_env(view))
+    env.pop(SOCKET_ENV, None)
+    if socket_path is not None:
+        env[SOCKET_ENV] = str(socket_path)
     if trace:
         env[TRACE_ENV] = encode_trace(trace)
     try:
@@ -146,11 +270,14 @@ async def _run(
         raise ScriptSandboxError(denial)
     envelope = execution_envelope_for_consumed_action(
         None, leased=False, thread_id=thread_id, grant_policies=grant_policies,
-        policies=policies, agent_account=None, env=env,
-        build_profile=execution_envelope_profile, build_argv=safehouse_argv,
+        policies=policies, agent_account=view, env=env,
+        build_profile=_script_profile(view), build_argv=safehouse_argv,
     )
+    if envelope is not None and not envelope.profile_required:
+        envelope = replace(envelope, argv_options={**envelope.argv_options,
+                                                  "extra_hidden_roots": _script_gh_homes(view)})
     profile_path, argv = await prepare_execution_envelope(
-        script_command(script, stdin), cwd, envelope,
+        script_command(script, stdin, client_dir=client_dir), cwd, envelope,
     )
     try:
         owned = await PROCESS_OWNER.spawn(
@@ -165,4 +292,5 @@ async def _run(
     await shell_sandbox.recheck_after(owned)
     return ScriptRun(
         owned.returncode, owned.stdout, owned.stderr, bool(owned.timed_out),
+        github_lock_reason(view),
     )

@@ -255,7 +255,8 @@ cancel_failed_drain() {
     # Releasing the hold for it would readmit work into the gap before teardown
     # and then kill that work without a recovery registration. The surviving
     # hold is safe: startup adopts any pre-bounce phase and settles it.
-    if [ "${DRAIN_FAILURE_ACTION:-release}" = hold ]; then
+    if [ "${DRAIN_FAILURE_ACTION:-release}" = hold ] \
+        || [ "${_CORSIA_LIFECYCLE_ENVELOPE_ACTIVE:-}" = true ]; then
         return 0
     fi
     if [ -z "$operation_id" ]; then
@@ -789,13 +790,13 @@ prove_backend_replaced() {
 }
 
 print_backend_status() {
-    local payload revision checkout topology pid
+    local payload identity revision backend_dirty frontend_dirty checkout_dirty checkout topology pid
     if ! payload=$(curl -sf --max-time 5 \
         "http://127.0.0.1:$BACKEND_PORT/api/version" 2>/dev/null); then
         fail "Backend health responded, but build identity could not be read"
         return 1
     fi
-    if ! revision=$(
+    if ! identity=$(
         printf '%s' "$payload" |
             python3 -c 'import json,sys
 payload = json.load(sys.stdin)
@@ -810,12 +811,16 @@ if not isinstance(frontend_sha, str) or frontend_sha != backend_sha:
     raise ValueError("frontend and backend revisions differ")
 if current_sha is not None and current_sha != backend_sha:
     raise ValueError("running backend and checkout revisions differ")
-print(backend_sha)' 2>/dev/null
+def state(value):
+    return "dirty" if value is True else "clean" if value is False else "unknown"
+print("\t".join((backend_sha, state(backend.get("dirty")),
+                 state(frontend.get("dirty")), state((backend.get("current_head") or {}).get("dirty")))))' 2>/dev/null
     ); then
         fail "Backend is reachable, but backend, frontend, and checkout revisions do not agree"
         return 1
     fi
 
+    IFS=$'\t' read -r revision backend_dirty frontend_dirty checkout_dirty <<< "$identity"
     checkout="$(serving_checkout_root)"
     if service_managed; then
         if [ "${CORSIA_SERVICE_MANAGER:-}" = systemd ]; then
@@ -831,6 +836,7 @@ print(backend_sha)' 2>/dev/null
     echo "  Serving on :$BACKEND_PORT"
     echo "  Checkout: $checkout"
     echo "  Revision: ${revision:0:12} (backend + frontend)"
+    echo "  Dirty state: backend $backend_dirty, frontend $frontend_dirty, checkout $checkout_dirty"
     echo "  Process: $topology"
 }
 
@@ -918,6 +924,7 @@ bounce_server() {
         # A failed stop leaves the old backend serving with no bounce coming to
         # settle the operation, so the hold has to come off here. Past this
         # point the backend is down and startup owns the surviving operation.
+        _corsia_update_stopping=1
         if ! stop_backend; then
             [ "$drain_attempted" = false ] \
                 || cancel_failed_drain "$(current_drain_url)" || :
@@ -1040,11 +1047,13 @@ UPDATE_PREPARE_INDEX_LOCKED=43
 UPDATE_PREPARE_DETACHED=44
 UPDATE_PREPARE_DIRTY=45
 UPDATE_PREPARE_AWAITING_RESTART=46
+UPDATE_PREPARE_NO_UPSTREAM=47
+UPDATE_PREPARE_DIVERGED=48
 
 # Pull, dependency-check, and stage a build from the serving checkout's CURRENT
 # branch. The caller holds the Update mutex for this whole function.
 prepare_redeploy_locked() {
-    local checkout="$1" git_dir="$2" branch fe stage prepared backup absent
+    local checkout="$1" git_dir="$2" branch fe stage prepared backup absent pull_output ahead behind
 
     recover_stale_git_index_lock "$git_dir" || return "$UPDATE_PREPARE_INDEX_LOCKED"
     branch="$(git -C "$checkout" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
@@ -1067,10 +1076,23 @@ prepare_redeploy_locked() {
         return "$UPDATE_PREPARE_AWAITING_RESTART"
     fi
     echo "  Pulling --ff-only ($branch) in $checkout ..."
-    if ! git -C "$checkout" pull --ff-only; then
-        fail "Redeploy refused: git pull --ff-only failed (diverged / non-fast-forward / offline) — checkout left untouched"
+    if ! pull_output="$(LC_ALL=C git -C "$checkout" pull --ff-only 2>&1)"; then
+        printf '%s\n' "$pull_output" >&2
+        if [[ "$pull_output" == *"There is no tracking information for the current branch."* ]]; then
+            fail "Redeploy refused: branch $branch has no upstream — checkout left untouched"
+            return "$UPDATE_PREPARE_NO_UPSTREAM"
+        fi
+        if [[ "$pull_output" == *"Not possible to fast-forward, aborting."* ]]; then
+            read -r ahead behind <<< "$(git -C "$checkout" rev-list --left-right --count 'HEAD...@{u}' 2>/dev/null)"
+            if [[ "$ahead" =~ ^[0-9]+$ && "$behind" =~ ^[0-9]+$ ]] && (( ahead > 0 && behind > 0 )); then
+                fail "Redeploy refused: branch $branch and its upstream have diverged — checkout left untouched"
+                return "$UPDATE_PREPARE_DIVERGED"
+            fi
+        fi
+        fail "Redeploy refused: git pull --ff-only failed — checkout left untouched"
         return "$UPDATE_PREPARE_FETCH_FAILED"
     fi
+    [ -z "$pull_output" ] || printf '%s\n' "$pull_output"
     redeploy_sync_python_dependencies "$checkout" || return "$UPDATE_PREPARE_BUILD_FAILED"
     redeploy_build "$checkout" || return "$UPDATE_PREPARE_BUILD_FAILED"
     echo "  Pull + dependency check + build OK"
@@ -1115,9 +1137,10 @@ prepare_redeploy() {
 }
 
 activate_prepared_frontend() {
-    local checkout expected_sha fe stage prepared backup absent recovering=false
+    local checkout expected_sha release_mode fe stage prepared backup absent recovering=false
     checkout="${1:-$(serving_checkout_root)}"
     expected_sha="${2:-}"
+    release_mode="${3:-}"
     IFS=$'\t' read -r fe stage prepared backup absent \
         <<< "$(frontend_release_paths "$checkout")"
     [ -d "$fe" ] || { REDEPLOY_FRONTEND_STATE=activated; return 0; }
@@ -1127,14 +1150,14 @@ activate_prepared_frontend() {
         recovering=true
         if [ -e "$fe/dist" ] || [ -z "$expected_sha" ] \
             || [ ! -f "$prepared" ] \
-            || ! frontend_release_matches_sha "$stage" "$expected_sha"
+            || ! frontend_release_matches_sha "$stage" "$expected_sha" "$release_mode"
         then
             fail "Frontend activation recovery refused: incomplete state was preserved"
             return 1
         fi
         if [ -d "$backup" ] && [ ! -e "$absent" ] \
             && [ -s "$backup/index.html" ] \
-            && frontend_release_sha "$backup" > /dev/null
+            && frontend_release_sha "$backup" source > /dev/null
         then
             :
         elif [ ! -e "$backup" ] && [ -f "$absent" ]; then
@@ -1173,17 +1196,17 @@ if (
     not isinstance(value, str)
     or not value
     or value == "unknown"
-    or payload.get("dirty") is not False
+    or (payload.get("dirty") is not False and not (len(sys.argv) > 2 and sys.argv[2] == "source" and payload.get("dirty") is True))
 ):
     raise SystemExit(1)
 print(value)
-' "$1/build-info.json" 2>/dev/null
+' "$1/build-info.json" "${2:-}" 2>/dev/null
 }
 
 frontend_release_matches_sha() {
     local release_dir="$1" expected_sha="$2" actual_sha
     [ -d "$release_dir" ] && [ -s "$release_dir/index.html" ] || return 1
-    actual_sha="$(frontend_release_sha "$release_dir")" || return 1
+    actual_sha="$(frontend_release_sha "$release_dir" "${3:-}")" || return 1
     [ "$actual_sha" = "$expected_sha" ]
 }
 
@@ -1207,13 +1230,17 @@ clear_frontend_release_state() {
 }
 
 ensure_current_frontend_release_locked() {
-    local checkout="$1" fe stage prepared backup absent head_sha
+    local checkout="$1" fe stage prepared backup absent head_sha worktree_status fresh_source_build=false recovered_source_build=false
     IFS=$'\t' read -r fe stage prepared backup absent \
         <<< "$(frontend_release_paths "$checkout")"
     [ -d "$fe" ] || return 0
     head_sha="$(git -C "$checkout" rev-parse HEAD 2>/dev/null || true)"
     if [ -z "$head_sha" ]; then
         fail "Frontend startup refused: could not resolve the serving checkout revision"
+        return 1
+    fi
+    if ! worktree_status="$(git -C "$checkout" status --porcelain 2>/dev/null)"; then
+        fail "Frontend startup refused: could not read checkout status"
         return 1
     fi
     if is_backend_running; then
@@ -1229,48 +1256,65 @@ ensure_current_frontend_release_locked() {
     fi
 
     if [ ! -d "$stage" ] &&
-        frontend_release_matches_sha "$fe/dist" "$head_sha" &&
+        frontend_release_matches_sha "$fe/dist" "$head_sha" source &&
         { [ -e "$prepared" ] || [ -e "$backup" ] || [ -e "$absent" ]; }
     then
         if ! clear_frontend_release_state "$checkout"; then
             fail "Frontend startup refused: completed activation cleanup did not finish"
             return 1
         fi
-        return 0
+        if [ -z "$worktree_status" ] && frontend_release_matches_sha "$fe/dist" "$head_sha"; then
+            return 0
+        fi
     fi
     if { [ -e "$backup" ] || [ -e "$absent" ]; } \
         && { [ -e "$fe/dist" ] || [ ! -f "$prepared" ] \
-            || ! frontend_release_matches_sha "$stage" "$head_sha"; }
+            || ! frontend_release_matches_sha "$stage" "$head_sha" source; }
     then
         fail "Frontend startup refused: incomplete activation state remains in $fe/node_modules"
         return 1
     fi
 
     if [ -e "$prepared" ]; then
-        if [ ! -d "$stage" ] || ! frontend_release_matches_sha "$stage" "$head_sha"; then
+        if [ ! -d "$stage" ] || ! frontend_release_matches_sha "$stage" "$head_sha" source; then
             fail "Frontend startup refused: prepared build does not match checkout $head_sha; retained at $stage"
             return 1
         fi
-    elif frontend_release_matches_sha "$fe/dist" "$head_sha"; then
+        if ! frontend_release_matches_sha "$stage" "$head_sha"; then
+            recovered_source_build=true
+        fi
+    elif [ -z "$worktree_status" ] && frontend_release_matches_sha "$fe/dist" "$head_sha"; then
         return 0
     else
         redeploy_build "$checkout" || return 1
-        if [ ! -e "$prepared" ] \
-            || ! frontend_release_matches_sha "$stage" "$head_sha"
+        fresh_source_build=true
+        if [ ! -e "$prepared" ] || [ ! -s "$stage/index.html" ] \
+            || [ "$(frontend_release_sha "$stage" source)" != "$head_sha" ]
         then
             fail "Frontend startup refused: completed build does not match checkout $head_sha; retained at $stage"
             return 1
         fi
     fi
 
-    activate_prepared_frontend "$checkout" "$head_sha" || return 1
+    activate_prepared_frontend "$checkout" "$head_sha" source || return 1
     if ! clear_frontend_release_state "$checkout"; then
         fail "Frontend startup refused: activated release cleanup did not complete"
         return 1
     fi
-    if ! frontend_release_matches_sha "$fe/dist" "$head_sha"; then
+    if [ "$recovered_source_build" = true ]; then
+        # The working tree may have changed since the interrupted build.
+        ensure_current_frontend_release_locked "$checkout" || return 1
+    elif [ "$fresh_source_build" = true ]; then
+        [ -s "$fe/dist/index.html" ] && [ "$(frontend_release_sha "$fe/dist" source)" = "$head_sha" ] || {
+            fail "Frontend startup refused: activated assets do not match checkout $head_sha"
+            return 1
+        }
+    elif ! frontend_release_matches_sha "$fe/dist" "$head_sha"; then
         fail "Frontend startup refused: activated assets do not match checkout $head_sha"
         return 1
+    elif [ -n "$worktree_status" ]; then
+        # Resolve prepared update ownership before building the working tree.
+        ensure_current_frontend_release_locked "$checkout" || return 1
     fi
 }
 
@@ -1289,20 +1333,30 @@ ensure_current_frontend_release() {
         "$checkout" "Frontend startup refused" ensure_current_frontend_release_locked
 }
 
+# Pre-stop checks run in the owning shell so their failure reason is retained.
 # Drain while the old release is intact. The lifecycle owner invokes frontend
 # activation only after it has confirmed that no old backend remains.
 restart_prepared() {
-    local checkout fe stage prepared backup absent original_force
+    local checkout fe stage prepared backup absent original_force reason
     local drain_attempted=false
     checkout="$(serving_checkout_root)"
     IFS=$'\t' read -r fe stage prepared backup absent \
         <<< "$(frontend_release_paths "$checkout")"
 
     if [ -d "$fe" ]; then
-        [ -d "$stage" ] || { fail "Prepared frontend build is missing"; return 1; }
-        [ -e "$prepared" ] || { fail "Prepared frontend ownership marker is missing"; return 1; }
+        if [ ! -d "$stage" ]; then
+            reason="Prepared frontend build is missing"
+            fail "$reason"
+            return 1
+        fi
+        if [ ! -e "$prepared" ]; then
+            reason="Prepared frontend ownership marker is missing"
+            fail "$reason"
+            return 1
+        fi
         if [ -e "$backup" ] || [ -e "$absent" ]; then
-            fail "Prepared frontend rollback path already exists"
+            reason="Prepared frontend rollback path already exists"
+            fail "$reason"
             return 1
         fi
     fi
@@ -1327,7 +1381,8 @@ restart_prepared() {
     fi
     if [ "$FORCE" = "false" ]; then
         if ! is_backend_running; then
-            fail "Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The prepared build was retained at $stage; recover the running service, or explicitly use --force if interruption is intended."
+            reason="Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The prepared build was retained at $stage; recover the running service, or explicitly use --force if interruption is intended."
+            fail "$reason"
             return 1
         fi
         # Update is the only path that pulls, so refusing here on an incomplete

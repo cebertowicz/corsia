@@ -31,6 +31,7 @@ from subagents.cc_runtime_helpers import (
 from subagents.cc_runtime_lifecycle import close_and_finalize, finalize
 from subagents.cc_runtime_state import Broadcast, _Live
 from subagents.cc_preempt import replay_pending_exit_before_preempt
+from subagents.vendor_write_admission import session_login_stale
 
 if TYPE_CHECKING:
     from core.context_payload import PreparedContextPayload
@@ -212,6 +213,23 @@ def _stale_working_dir(transition: CCFeedTransition, live: _Live) -> tuple[bool,
     return native_stale_working_dir(live_wd, default) is not None, live_wd
 
 
+def _stale_login(transition: CCFeedTransition, live: _Live) -> bool:
+    """Whether a live process was admitted on a login that is no longer current.
+
+    Its frozen receipt can never pass the write check again, so only a replacement
+    launched on the Turn's own login can accept this input.
+    """
+    if not _proc_is_alive(live.session):
+        return False
+    if transition.db is not None:
+        return session_login_stale(live.session, db=transition.db)
+    db = get_db()
+    try:
+        return session_login_stale(live.session, db=db)
+    finally:
+        db.close()
+
+
 def _replacement_reason(
     transition: CCFeedTransition, live: _Live
 ) -> tuple[str | None, str | None]:
@@ -230,6 +248,8 @@ def _replacement_reason(
         return "switching", None
     if live.provider_context_untrusted:
         return "untrusted", None
+    if _stale_login(transition, live):
+        return "stale_login", None
     stale, live_wd = _stale_working_dir(transition, live)
     if stale:
         return "stale_working_dir", live_wd
@@ -264,6 +284,12 @@ def _log_replacement(
             transition.thread_id,
             live_wd,
         )
+    elif reason == "stale_login":
+        log.warning(
+            "cc_runtime: %s process was admitted on a login that is no longer "
+            "current; respawning on the Turn's login",
+            transition.thread_id,
+        )
     elif reason == "rejected":
         log.warning(
             "cc_runtime: %s resume was rejected before input; "
@@ -281,12 +307,12 @@ def _log_replacement(
 async def replace_if_required(
     transition: CCFeedTransition, live: _Live
 ) -> _Live | None:
-    """Replace a rejected, switched, untrusted, stale-cwd, or dead process."""
+    """Replace a rejected, switched, untrusted, stale-login, stale-cwd, or dead process."""
     reason, live_wd = _replacement_reason(transition, live)
     if reason is None:
         return live
     _log_replacement(transition, live, reason, live_wd)
-    if reason in {"switching", "untrusted", "stale_working_dir"}:
+    if reason in {"switching", "untrusted", "stale_login", "stale_working_dir"}:
         retired = await close_and_finalize(
             transition.thread_id, live, transition.bcast, transition.db
         )

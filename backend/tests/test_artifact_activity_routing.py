@@ -27,7 +27,7 @@ def _disable_analytics(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _alice_is_inside(monkeypatch):
-    # Only an inside author's comment text reaches a summary.
+    # Mark the author as inside to exercise routing with known origin.
     monkeypatch.setattr("events.connectors.github_content_facts.is_own", lambda login: login == "alice")
 
 
@@ -118,45 +118,30 @@ async def test_owner_wake_records_passive_activity_for_subscribers(isolated_db):
     assert len(rows) == 1
     assert rows[0]["internal_event"] == "webhook.github.pr_comment"
     assert rows[0]["external_id"] == "o/r#301"
-    assert "subscriber should digest this later" in rows[0]["summary"]
+    assert rows[0]["summary"] == "o/r#301 comment from alice"
+    assert "subscriber should digest this later" not in rows[0]["summary"]
 
 
 @pytest.mark.asyncio
-async def test_structured_event_tag_wakes_tagged_thread_without_owner_mutation(
-    isolated_db,
-):
+async def test_a_thread_id_in_the_payload_never_picks_the_recipient(isolated_db):
+    """Only registrations and rules route a webhook; a thread a commenter names does not."""
     owner = _mk_session("a2-owner-tag")
-    tagged = _mk_session("a2-tagged-thread")
+    named = _mk_session("a2-named-thread")
     _register_pr("o/r", 302, owner)
-
-    payload = _comment_payload("o/r", 302, body="@a2-tagged-thread take this one")
-    payload["corsia_tags"] = [
-        {
-            "tag": "@a2-tagged-thread",
-            "thread_id": tagged,
-            "source": "structured-event-metadata",
-        }
-    ]
 
     with patch(
         "events.router.delivery.deliver_to_thread", return_value=True
     ) as mock_deliver:
-        res = await _route("webhook.github.pr_comment", payload)
+        res = await _route(
+            "webhook.github.pr_comment",
+            _comment_payload("o/r", 302, body=f"@{named} take this one"),
+        )
 
     from events.router import RouteOutcome
 
-    assert res.outcome == RouteOutcome.ACCEPTED
-    assert res.thread_id == tagged
-    mock_deliver.assert_called_once()
-    assert mock_deliver.call_args.args[0] == tagged
-    assert mock_deliver.call_args.args[0] != owner
-    details = mock_deliver.call_args.args[3]
-    assert details["tag_provenance"] == {
-        "tag": "@a2-tagged-thread",
-        "thread_id": tagged,
-        "source": "structured-event-metadata",
-    }
-    assert _registrations_for_thread(isolated_db, tagged) == []
+    assert (res.outcome, res.thread_id) == (RouteOutcome.ACCEPTED, owner)
+    assert [call.args[0] for call in mock_deliver.call_args_list] == [owner]
+    assert _registrations_for_thread(isolated_db, named) == []
 
 
 @pytest.mark.asyncio
@@ -247,7 +232,8 @@ async def test_rehome_routes_future_events_to_new_owner_once_and_old_owner_passi
     old_rows = _passive_change_rows(isolated_db, old_owner)
     assert len(old_rows) == 1
     assert old_rows[0]["internal_event"] == "webhook.github.pr_comment"
-    assert "future event follows rescue owner" in old_rows[0]["summary"]
+    assert old_rows[0]["summary"] == "o/r#305 comment from alice"
+    assert "future event follows rescue owner" not in old_rows[0]["summary"]
     assert _passive_change_rows(isolated_db, new_owner) == []
 
 
@@ -395,4 +381,5 @@ async def test_release_with_explicit_triage_routes_future_events_to_triage(
     assert mock_deliver.call_args.args[0] == triage
     old_rows = _passive_change_rows(isolated_db, old_owner)
     assert len(old_rows) == 1
-    assert "triage should repair ownership" in old_rows[0]["summary"]
+    assert old_rows[0]["summary"] == "o/r#307 comment from alice"
+    assert "triage should repair ownership" not in old_rows[0]["summary"]

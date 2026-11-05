@@ -12,7 +12,9 @@ from pathlib import Path
 import pytest
 
 from core.turn_core import TurnIdentity
+from tests.backend_git_helpers import git_subcommand
 from tests.project_ref_helpers import project_ref, select_workspace
+from tools.workspace_git_paths import workspace_git_rules
 
 
 _RECOVERY_FETCH = "fetches the configured remote"
@@ -880,6 +882,19 @@ def test_branch_pin_support_rejects_shared_or_non_files_git_metadata(tmp_path):
     assert "reftable" in branch_pin_support_error(reftable).lower()
 
 
+def test_branch_pin_support_tells_a_local_commondir_from_a_shared_one(tmp_path):
+    from infra.project_repo_policy import branch_pin_support_error
+
+    local = _git_repo(tmp_path / "local")
+    (local / ".git" / "commondir").write_text(".\n", encoding="utf-8")
+    shared = _git_repo(tmp_path / "shared")
+    common = _git_repo(tmp_path / "common")
+    (shared / ".git" / "commondir").write_text(f"{common / '.git'}\n", encoding="utf-8")
+
+    assert branch_pin_support_error(local) is None
+    assert "different Git or common directory" in branch_pin_support_error(shared)
+
+
 def test_unsupported_pinned_repo_quarantines_metadata_when_layout_times_out(
     tmp_path,
     monkeypatch,
@@ -895,9 +910,11 @@ def test_unsupported_pinned_repo_quarantines_metadata_when_layout_times_out(
         True,
     )
     real_run = project_repo_policy.subprocess.run
+    timed_out = []
 
     def _timeout_layout(command, *args, **kwargs):
-        if command[:2] == ["git", "config"]:
+        if git_subcommand(command) == "config":
+            timed_out.append(list(command))
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
@@ -905,6 +922,8 @@ def test_unsupported_pinned_repo_quarantines_metadata_when_layout_times_out(
 
     unsupported = project_repo_policy.list_unsupported_pinned_repos([policy])
 
+    assert len(timed_out) == 1
+    assert timed_out[0][-2:] == ["--get-all", "extensions.refStorage"]
     assert len(unsupported) == 1
     assert "Git ref storage verification timed out" in unsupported[0].reason
     assert unsupported[0].metadata_roots == (repo / ".git",)
@@ -1866,7 +1885,7 @@ def test_worktree_management_receives_narrow_write_exceptions(
         f'(deny file-write* (literal "{repo / ".git" / "packed-refs.lock"}"))'
     )
     assert packed_refs_lock_deny in profile
-    assert f'(deny file-write* (subpath "{repo / ".git" / "hooks"}"))' in profile
+    assert workspace_git_rules((repo / ".git" / "hooks",))[0] in profile
 
 
 @pytest.mark.parametrize("action", ["lock", "remove", "repair", "unlock"])
@@ -2166,7 +2185,7 @@ def test_worktree_git_access_does_not_reopen_base_git_identity(
         deny = f'(deny file-write* (literal "{protected}"))'
         assert worktree_commit.index(deny) > worktree_commit.index(git_allow)
         assert deny in base_pull
-    hooks_deny = f'(deny file-write* (subpath "{repo / ".git" / "hooks"}"))'
+    hooks_deny = workspace_git_rules((repo / ".git" / "hooks",))[0]
     marker_deny = f'(deny file-write* (literal "{worktree / ".git"}"))'
     assert worktree_commit.index(hooks_deny) > worktree_commit.index(git_allow)
     assert worktree_commit.index(marker_deny) > worktree_commit.index(git_allow)
@@ -2210,6 +2229,8 @@ def test_real_worktree_git_profile_protects_common_control_files(
     hooks = repo / ".git" / "hooks"
     hooks.mkdir(exist_ok=True)
     protected = [
+        repo / ".git" / "commondir",
+        repo / ".git" / "COMMONDIR",
         repo / ".git" / "config",
         repo / ".git" / "packed-refs",
         hooks / "post-merge",
@@ -2226,7 +2247,7 @@ def test_real_worktree_git_profile_protects_common_control_files(
             "--",
             "bash",
             "-c",
-            'for path do printf pwned > "$path" || exit; done',
+            'for path do printf pwned > "$path" && exit 0; done; exit 1',
             "_",
             *(str(path) for path in protected),
         ],

@@ -72,15 +72,25 @@ def _repo_mounts(policies, controlled_policy=None, controlled_operation=None):
 
 def shell_argv(command: str, cwd: Path, _profile=None, *, thread_id: str, policies: list[Any],
                env: dict[str, str], agent_account=None, controlled_policy=None,
-               controlled_operation=None) -> list[str]:
+               controlled_operation=None, extra_hidden_roots=()) -> list[str]:
     from connections import github_agent
     from infra.config import WORKSPACE
     from infra.project_repo_policy import list_unsupported_pinned_repos
+    from tools.linux_workspace_git import prepare_workspace_git
     path_policy = current_protected_host_path_policy()
     repo_ro, repo_rw, overlays = _repo_mounts(policies, controlled_policy, controlled_operation)
     rw = [*get_sandbox_add_dirs_rw(thread_id, policies=policies), *repo_rw]
     ro = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account),
           *agent_tool_ro_dirs(), *repo_ro]
+    workspace_git = prepare_workspace_git(path_policy.workspace)
+    if workspace_git:
+        marker, config, _lock, worktree_config, commondir, hooks = workspace_git
+        if marker.is_dir() and any(marker.is_relative_to(root) for root in rw):
+            rw.append(marker)
+        elif not marker.is_dir():
+            overlays.append(marker)
+        # In an empty .git these are absent, so the plan freezes .git, never the workspace root.
+        overlays.extend((config, worktree_config, commondir, hooks))
     overlays.extend(WORKSPACE / path for path in GENERATED_WORKSPACE_PROJECTIONS)
     for unsupported in list_unsupported_pinned_repos(policies):
         overlays.extend(unsupported.metadata_roots)
@@ -101,5 +111,5 @@ def shell_argv(command: str, cwd: Path, _profile=None, *, thread_id: str, polici
         raise RuntimeError(sandbox_error())
     return build_protected_argv(command, Path(cwd), path_policy=path_policy,
                                 rw_roots=rw, ro_roots=ro, readonly_overlays=overlays,
-                                hidden_roots=[hidden_account] if hidden_account is not None else (),
+                                hidden_roots=[*extra_hidden_roots, *([hidden_account] if hidden_account else [])],
                                 env=passed, thread_id=thread_id, executable=executable)

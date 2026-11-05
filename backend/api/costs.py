@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from fastapi import APIRouter, HTTPException
 
+from connections import fact_memo
 from infra.auth import authenticate
 from infra.database import get_db
 from infra.db_async import run_bulk, run_in_db
@@ -137,6 +138,7 @@ def _weekly_costs(db, scope: _UsageScope):
     ).fetchall()
 
 
+@fact_memo.fact_reads()
 def _costs_by_model(db, scope: _UsageScope):
     """Stored token and cost totals per model identity, most expensive first.
 

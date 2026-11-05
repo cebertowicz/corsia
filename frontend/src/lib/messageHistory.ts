@@ -149,7 +149,6 @@ function mergeAdoptedRow(existing: any, incoming: any): any {
 	// A page states a message's cards afresh (server-computed, live state), so an absent key means none.
 	if (incoming?.cards !== undefined || existing?.cards !== undefined) {
 		merged.cards = incoming?.cards;
-		merged.cards_more = incoming?.cards_more;
 	}
 	const priorMeta = existing?.metadata;
 	const nextMeta = incoming?.metadata;

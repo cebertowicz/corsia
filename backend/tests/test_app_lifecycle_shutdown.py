@@ -14,22 +14,11 @@ import app_startup_runtime
 from core import checkpoint_runtime, fork_runtime
 from infra import state
 from infra.config import RUNTIME_DIR
+from tests.browser_startup_fixture import ProcessOwnerTestContract as _ProcessOwnerTestContract
 
 # A hang guard, not a latency budget: several waits span a cold lifespan startup
 # (about 0.75s unloaded), which a 1s bound fails whenever the host is busy.
 _HANG_GUARD_SECONDS = 20
-
-
-class _ProcessOwnerTestContract:
-    """Minimal managed-process owner surface required by lifespan startup."""
-
-    process_dir = RUNTIME_DIR / "managed-processes"
-
-    def configure_transition_callback(self, _callback) -> None:
-        return None
-
-    def configure_long_running_capacity_callback(self, _callback) -> None:
-        return None
 
 
 async def _noop(*_args, **_kwargs) -> None:
@@ -77,13 +66,14 @@ def _isolate_lifespan(monkeypatch) -> None:
         def live_count(self) -> int:
             return 0
 
-    monkeypatch.setattr(app_lifecycle, "init_db", lambda: None)
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", lambda: None)
     monkeypatch.setattr(frontend_build, "ensure_frontend_built", lambda: None)
     monkeypatch.setattr(app_startup_runtime, "rearm_idle_checkpoints", _noop)
     monkeypatch.setattr(app_startup_runtime, "nightly_job_loop", _noop)
     monkeypatch.setattr(app_startup_runtime, "_start_current_corrections_classifier", lambda: None)
     monkeypatch.setattr(app_lifecycle, "shutdown_pool", lambda: None)
     monkeypatch.setattr("infra.key_store_providers.provider_keys", lambda: {})
+    monkeypatch.setattr("llm.live_cost_map._refresh", _noop)
     monkeypatch.setattr("llm.lifecycle.get_local_providers", lambda: [])
     monkeypatch.setattr(network_discovery, "get_servers", lambda **_filters: [])
     monkeypatch.setattr(network_discovery, "health_sweep_loop", _noop)
@@ -188,10 +178,62 @@ async def test_frontend_prerequisite_precedes_database_and_runtime_startup(monke
         "ensure_frontend_built",
         lambda: events.append("frontend"),
     )
-    monkeypatch.setattr(app_lifecycle, "init_db", lambda: events.append("init_db"))
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", lambda: events.append("init_db"))
 
     async with app_lifecycle.lifespan(FastAPI()):
         assert events[:2] == ["frontend", "init_db"]
+
+
+async def test_browser_orphan_sweep_failure_does_not_stop_startup(monkeypatch):
+    from host_access import browser_orphan
+
+    _isolate_lifespan(monkeypatch)
+    calls = []
+
+    def fail_sweep(_directory):
+        calls.append("sweep")
+        raise RuntimeError("sweep failed")
+
+    monkeypatch.setattr(browser_orphan, "close_dead_sessions", fail_sweep)
+    async with app_lifecycle.lifespan(FastAPI()):
+        assert calls == ["sweep"]
+
+
+async def test_lifespan_serves_while_cost_map_fetch_is_pending(monkeypatch):
+    from llm import live_cost_map
+
+    _isolate_lifespan(monkeypatch)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hanging_fetch():
+        entered.set()
+        await release.wait()
+
+    monkeypatch.setattr(live_cost_map, "_refresh", hanging_fetch)
+    async with asyncio.timeout(_HANG_GUARD_SECONDS):
+        async with app_lifecycle.lifespan(FastAPI()):
+            await entered.wait()
+            assert not live_cost_map.refresh_task().done()
+            release.set()
+
+
+async def test_lifespan_skips_cost_map_fetch_when_operator_keeps_it_offline(monkeypatch):
+    from llm import live_cost_map
+
+    _isolate_lifespan(monkeypatch)
+    fetches: list[str] = []
+
+    async def fetch():
+        fetches.append("fetch")
+
+    monkeypatch.setattr(live_cost_map, "_refresh", fetch)
+    app = FastAPI()
+    app.state.litellm_cost_map_offline = True
+    async with app_lifecycle.lifespan(app):
+        assert live_cost_map.refresh_task() is None
+        await live_cost_map.wait_for_refresh()
+    assert fetches == []
 
 
 async def test_lifespan_applies_sqlite_fetch_switch_interval_before_database(monkeypatch):
@@ -208,7 +250,7 @@ async def test_lifespan_applies_sqlite_fetch_switch_interval_before_database(mon
         intervals_at_database_start.append(sys.getswitchinterval())
         raise _StopStartup
 
-    monkeypatch.setattr(app_lifecycle, "_initialize_startup", stop_at_database_start)
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "initialize_startup", stop_at_database_start)
     try:
         with pytest.raises(_StopStartup):
             async with app_lifecycle.lifespan(FastAPI()):
@@ -255,7 +297,7 @@ async def test_predecessor_direct_uvicorn_lifespan_fails_before_database(
         "ensure_frontend_built",
         ensure_frontend_built,
     )
-    monkeypatch.setattr(app_lifecycle, "init_db", init_db)
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", init_db)
 
     with pytest.raises(RuntimeError, match="frontend release pairing failed"):
         async with app_lifecycle.lifespan(main.app):
@@ -270,7 +312,7 @@ async def test_durable_write_recovery_runs_immediately_after_schema_init(monkeyp
 
     _isolate_lifespan(monkeypatch)
     events: list[str] = []
-    monkeypatch.setattr(app_lifecycle, "init_db", lambda: events.append("init_db"))
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", lambda: events.append("init_db"))
     monkeypatch.setattr(
         durable_writes,
         "recover_write_intents",

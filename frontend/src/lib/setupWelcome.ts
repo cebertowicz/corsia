@@ -10,7 +10,7 @@ export const WELCOME_LINES = [
 export const WELCOME_ROWS = [
 	{ label: 'CORSIA handles:', text: 'the setup steps for connecting your tools, and checking work against what you asked before it reaches you.' },
 	{ label: 'You decide:', text: 'what gets done. When a choice is yours to make, agents bring it to you with a recommendation.' },
-	{ label: 'Asks you first:', text: 'sending or posting as you, spending money, and opening files outside your work folder.' },
+	{ label: 'Asks you first:', text: 'sending or posting as you, and spending money.' },
 ] as const;
 export const ACCOUNT_LEDE = 'Your account and password stay on this computer.';
 export const EMAIL_HINT = 'Used only to sign you up for services you choose, such as web search.';

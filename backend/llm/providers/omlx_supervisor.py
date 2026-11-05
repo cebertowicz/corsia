@@ -9,6 +9,7 @@ import shutil
 import signal
 import subprocess
 import time
+from contextlib import AbstractAsyncContextManager
 from typing import Any
 
 import httpx
@@ -16,6 +17,7 @@ import httpx
 from infra.config import RUNTIME_DIR
 from infra.db_async import run_in_db
 from llm.network_endpoints import lan_base, models_probe_url
+from llm.omlx_release import OMLX_VERSION
 from llm.providers import omlx_process as process
 from llm.providers import omlx_restart as restart
 from llm.providers.omlx_endpoints import _resolve_endpoint as _resolve_endpoint_via_freshness
@@ -39,8 +41,7 @@ def _mark_endpoint_alive(server_id: str, host: str, port: int) -> None:
     except Exception as e:
         log.warning("_mark_endpoint_alive failed for %s: %s", server_id, e)
 
-# A first spawn pays Gatekeeper's scan of CORSIA's signed bundle and a cold Metal
-# start; ordinary user-managed servers retain the caller's shorter timeout.
+# Managed first spawn pays Gatekeeper and cold Metal startup; other servers keep the caller's timeout.
 MANAGED_HEALTH_STARTUP_CAP_S = 600.0
 DEFAULT_HEALTH_TIMEOUT_S = 30.0
 HEALTH_POLL_INTERVAL_S = 0.5
@@ -50,10 +51,7 @@ _life: dict[str, restart.Life] = {}
 
 def is_corsia_process(pid: int) -> bool:
     """Match an observed process to the supervisor's durable spawn records, regardless of argv."""
-    for path in RUNTIME_DIR.glob("omlx-*.pid"):
-        if process.read_pid(path.parent, path.stem.removeprefix("omlx-"), preserve_legacy=True) == pid:
-            return True
-    return False
+    return process.is_recorded_process(RUNTIME_DIR, pid)
 
 
 def _pid_path(server_id: str):
@@ -70,39 +68,42 @@ def _read_pid(server_id: str, *, host: str | None = None, port: int | None = Non
     return process.read_pid(RUNTIME_DIR, server_id, legacy_port_owner_pid=owner)
 
 
-def _write_pid(server_id: str, pid: int) -> None:
-    process.write_pid(RUNTIME_DIR, server_id, pid)
+def _write_pid(server_id: str, pid: int, *, omlx_version: str | None = None) -> None:
+    process.write_pid(RUNTIME_DIR, server_id, pid, omlx_version=omlx_version)
+
+
+async def upgrade_server(server_id: str) -> dict[str, Any] | None:
+    """Upgrade only a process this supervisor adopted, using its existing lifecycle."""
+    from llm.providers.omlx_upgrade import recorded_version, restart_when_idle
+
+    version = await recorded_version(server_id)
+    return await restart_when_idle(server_id, _life.get(server_id), version, OMLX_VERSION, _stop_server, start_server, _tail_log)
+
+
+def is_restarting(server_id: str) -> bool:
+    """Whether the supervisor currently owns a restart, including model restoration."""
+    life = _life.get(server_id)
+    return life is not None and life.restart is not None
+
+
+def request_slot(server_id: str | None) -> AbstractAsyncContextManager[None]:
+    """Admit a provider call through this supervisor's existing server lifecycle."""
+    return restart.request_slot(_life, server_id)
 
 
 def _clear_pid(server_id: str) -> None:
     process.clear_pid(RUNTIME_DIR, server_id)
 
 
-def _process_alive(pid: int) -> bool:
-    return process.process_alive(pid)
+# Keep the existing supervisor injection points for the canonical process primitives.
+_process_alive = process.process_alive
+_port_owner_pid = process.port_owner_pid
+_build_argv = process.build_argv
 
 
 def _process_exited(pid: int) -> bool:
     """Return true for a dead process, including an exited child awaiting reap."""
-    try:
-        waited_pid, _ = os.waitpid(pid, os.WNOHANG)
-    except ChildProcessError:
-        return not _process_alive(pid)
-    return waited_pid == pid or not _process_alive(pid)
-
-
-def _port_owner_pid(host: str, port: int) -> process.PortOwnerPid:
-    return process.port_owner_pid(host, port)
-
-
-def _build_argv(
-    host: str,
-    port: int,
-    settings: dict,
-    *,
-    executable: str | None = None,
-) -> list[str]:
-    return process.build_argv(host, port, settings, executable=executable)
+    return process.process_exited(pid, _process_alive)
 
 
 def _is_managed_omlx_server(server_id: str) -> bool:
@@ -169,6 +170,7 @@ def _spawn_process(argv: list[str], log_path) -> subprocess.Popen | dict[str, An
         log_fh = log_path.open("ab", buffering=0)
         return subprocess.Popen(
             argv,
+            env={**os.environ, "OMLX_SUPERVISED": "corsia"},  # enables oMLX's own Restart; see omlx_restart
             stdout=log_fh,
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
@@ -227,7 +229,8 @@ def _duration(seconds: float) -> str:
 
 def watch(server_id: str, pid: int) -> None:
     life = _life.setdefault(server_id, restart.Life())
-    life.watch(pid, lambda status: restart.on_exit(server_id, life, pid, start_server, _tail_log, status))
+    asked = restart.restart_logged_from_now(RUNTIME_DIR, server_id)
+    life.watch(pid, lambda status: restart.on_exit(server_id, life, pid, start_server, _tail_log, status, asked))
 
 
 def stop_watching() -> None:  # the backend is shutting down: an oMLX exit from here on is not a crash
@@ -285,7 +288,7 @@ async def start_server(cfg: dict) -> dict[str, Any]:
         return spawned
     proc = spawned
 
-    _write_pid(sid, proc.pid)
+    _write_pid(sid, proc.pid, omlx_version=OMLX_VERSION if managed else None)
     log.info("start_server: spawned omlx pid=%s for server_id=%s on %s:%s",
              proc.pid, sid, host, port)
 

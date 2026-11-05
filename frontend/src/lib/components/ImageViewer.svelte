@@ -119,7 +119,7 @@
 		</div>
 	{/if}
 	{#if src && imageState !== 'error'}
-		<ImageCommentLightbox bind:this={lightbox} {src} alt={target.name} {artifactId} {feedback} projectId={target.projectId ?? null} bind:draftOpen {place} {onPlace} onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
+		<ImageCommentLightbox bind:this={lightbox} {src} alt={target.name} docPath={target.path} {artifactId} {feedback} projectId={target.projectId ?? null} bind:draftOpen {place} {onPlace} onLoaded={onLoaded} onFailed={onFailed} onRetry={reload} />
 	{/if}
 </div>
 

@@ -24,7 +24,7 @@ from plans import selection_validity, service
 from plans.boundary import PlanActor, mutate
 from plans.delegation import has_open_structured_attachment
 from plans.errors import PlanInputError
-from plans.node_states import _TERMINAL_STATES
+from plans.node_states import _TERMINAL_STATES, in_work_sql
 
 #: The ``plan_node_id`` value that keeps the caller's task with the caller.
 KEEP = "none"
@@ -132,6 +132,15 @@ def _require_open(node, *, attached_worker: str | None = None) -> None:
             f"task {node['id']} already has worker {node['spawned_thread_id']};"
             " use plan_update replace_spawned_thread to hand it to another"
         )
+
+
+def is_doing_open_step(db, thread_id: str, node_id: str) -> bool:
+    """Whether ``thread_id`` is the worker on this workflow step, not yet returned or settled."""
+    return db.execute(
+        "SELECT 1 FROM plan_nodes n WHERE n.id=? AND n.spawned_thread_id=? AND n.workflow_step IS NOT NULL"
+        f" AND n.state IN ('pending','active') AND {in_work_sql('n')}",
+        (node_id, thread_id),
+    ).fetchone() is not None
 
 
 def _step(node, *, already_attached: bool = False) -> Step:

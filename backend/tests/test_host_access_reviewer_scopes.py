@@ -310,7 +310,8 @@ def test_selected_account_without_the_model_rejects_despite_a_ready_sibling(acco
 
 def test_model_unavailable_everywhere_rejects(accounts):
     db, legacy, second, third = accounts
-    _discover(db, legacy)
+    for account in accounts[1:]:
+        _discover(db, account, models=())  # an account's own discovery decides what it offers: none lists it
     db.execute("UPDATE models SET available=0 WHERE id=?", (MODEL,))
     db.commit()
 

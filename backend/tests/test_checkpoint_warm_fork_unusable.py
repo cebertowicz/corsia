@@ -88,6 +88,75 @@ async def test_unusable_warm_fork_runs_cold_once_on_the_same_row(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_warm_fork_refused_for_size_before_any_narrative_runs_cold_once(monkeypatch):
+    """A warm fold the provider refuses mid-loop with nothing written folds cold, not fails."""
+    from core import checkpoint_cold_fallback as fallback
+    from core.fork_types import ForkInputExhausted
+
+    async def fake_run_in_db(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(fallback, "run_in_db", fake_run_in_db)
+    calls = []
+
+    async def invoke(request, _cancel):
+        calls.append(request)
+        if request.warm_source is not None:
+            raise ForkInputExhausted("checkpoint_context_truncated: path=ii_provider_context_limit")
+        return ProviderForkResult("cold body", None)
+
+    result = await fallback.invoke_with_cold_correction(
+        _warm_request("native", cold_builder=_cold_admission), asyncio.Event(), invoke,
+    )
+    assert result.raw_body == "cold body"
+    assert [call.warm_source is None for call in calls] == [False, True]
+
+
+@pytest.mark.asyncio
+async def test_cold_fork_refused_for_size_stays_terminal(monkeypatch):
+    """The corrected cold fork has no further correction: one extra dispatch, never a loop."""
+    from core import checkpoint_cold_fallback as fallback
+    from core.fork_types import ForkInputExhausted
+
+    async def fake_run_in_db(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(fallback, "run_in_db", fake_run_in_db)
+    calls = []
+
+    async def invoke(request, _cancel):
+        calls.append(request)
+        raise ForkInputExhausted("checkpoint_context_truncated: path=ii_provider_context_limit")
+
+    with pytest.raises(ForkInputExhausted):
+        await fallback.invoke_with_cold_correction(
+            _warm_request("native", cold_builder=_cold_admission), asyncio.Event(), invoke,
+        )
+    assert len(calls) == 2
+
+
+def test_cc_and_codex_type_a_size_refusal_with_no_narrative():
+    import json
+
+    from core.checkpoint_fork_kind import CHECKPOINT_KIND
+    from core.fork_cc_result import result as cc_result
+    from core.fork_codex_result import CodexForkCapture
+    from core.fork_types import ForkInputExhausted
+
+    refusal = {"type": "result", "is_error": True, "result": "Prompt is too long"}
+    with pytest.raises(ForkInputExhausted):
+        cc_result(json.dumps(refusal).encode(), truncated=False, kind=CHECKPOINT_KIND)
+
+    async def codex() -> None:
+        capture = CodexForkCapture(kind=CHECKPOINT_KIND)
+        capture.truncate()
+        await capture.terminal
+
+    with pytest.raises(ForkInputExhausted):
+        asyncio.run(codex())
+
+
+@pytest.mark.asyncio
 async def test_native_warm_fork_correction_uses_canonical_refusal_log(monkeypatch):
     from core import checkpoint_cold_fallback as fallback
     from loguru import logger
@@ -214,6 +283,7 @@ def test_pressure_warm_admission_carries_its_cold_builder(harness, model):
         target=_target(harness), boundary=boundary,
         previous_generation_id=None, working_dir="/work",
         reasoning_effort=None, binary=harness, warm_source=WARM_SOURCE,
+        carried_tokens=0,
     )
 
     # The builder is attached by each pressure admission, not by the warm
@@ -322,3 +392,77 @@ def test_warm_request_bytes_are_untouched_by_the_correction_path():
     carrying = _warm_request("claude-code", cold_builder=_cold_admission)
 
     assert replace(carrying, same_model_cold=None) == plain
+
+
+@pytest.mark.asyncio
+async def test_a_warm_fork_refused_after_tool_calls_leaves_the_cold_attempt_clean(tmp_path, monkeypatch):
+    """Warm staged edits are discarded, both attempts' calls stay paid, the numbers are logged."""
+    from loguru import logger
+
+    from core import checkpoint_cold_fallback as fallback
+    from core.fork_types import ForkInputExhausted
+    from infra.checkpoint_usage import freeze_binding, record_call
+    from infra.checkpoints import create_running
+    from infra.continuity_store import active_entries
+    from tests.test_checkpoint_spend_ledger import _binding, _usage
+    from tests.test_continuity_staging import (
+        _capture_install, _connect, _db, _request, _seed_thread, _statement, _tool_db,
+    )
+
+    path = tmp_path / "cold.db"
+    db = _db(str(path))
+    _seed_thread(db)
+    create_running(replace(_request("thread-1", "checkpoint-1"), first_included_seq=None), db=db)
+    freeze_binding("checkpoint-1", _binding(), db=db)
+    db.commit()
+    db.close()
+    continuity = _tool_db(path, monkeypatch)
+
+    async def run_in_db(fn, *args, **kwargs):
+        conn = _connect(str(path))
+        try:
+            return fn(*args, db=conn, **kwargs)
+        finally:
+            conn.close()
+
+    async def on_usage(call_key, model, measured):
+        conn = _connect(str(path))
+        try:
+            record_call("checkpoint-1", call_key, model, measured, now_iso="t2", db=conn)
+        finally:
+            conn.close()
+
+    async def invoke(request, _cancel):
+        mode = "warm" if request.warm_source is not None else "cold"
+        output = 50 if mode == "warm" else 70
+        await request.on_usage("0", "native/writer", {**_usage(), "completion_tokens": output})
+        continuity._run(
+            "thread-1", "add", {"field": "facts", "body": _statement(f"{mode} fact")}, "checkpoint-1",
+        )
+        if mode == "warm":
+            raise ForkInputExhausted(
+                "fork_context_truncated: path=iii_tool_results_over_bound iteration=1 "
+                "counted=270000 bound=262144",
+            )
+        return ProviderForkResult("cold body", None)
+
+    monkeypatch.setattr(fallback, "run_in_db", run_in_db)
+    lines: list[str] = []
+    sink = logger.add(lines.append, level="INFO")
+    try:
+        await fallback.invoke_with_cold_correction(
+            replace(_warm_request("native", cold_builder=_cold_admission), on_usage=on_usage),
+            asyncio.Event(), invoke,
+        )
+    finally:
+        logger.remove(sink)
+
+    db = _connect(str(path))
+    try:
+        assert _capture_install(db, "checkpoint-1").status == "installed"
+        facts = active_entries(db, "thread-1", 0)["facts"]
+        assert [entry["statement"] for entry in facts] == ["cold fact"]
+        assert db.execute("SELECT COUNT(*) FROM llm_usage").fetchone()[0] == 2
+    finally:
+        db.close()
+    assert any("counted=270000 bound=262144" in line for line in lines)

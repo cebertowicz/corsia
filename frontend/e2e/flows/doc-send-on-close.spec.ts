@@ -17,7 +17,7 @@ async function addUserComment(request: Parameters<typeof createSession>[0], arti
 // Narrow viewports keep tabs in the compact sheet; its close uses the same path.
 async function tabControl(page: Page, fileName: string, action: 'close' | 'select'): Promise<Locator> {
 	if ((page.viewportSize()?.width ?? 0) <= 768) {
-		await page.getByRole('button', { name: /^Tabs \(/ }).click();
+		await page.getByRole('button', { name: /^Files \(/ }).click();
 		const sheet = page.getByRole('dialog', { name: 'Open side panel items' });
 		return action === 'close'
 			? sheet.getByRole('button', { name: `Close ${fileName}` })

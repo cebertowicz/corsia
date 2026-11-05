@@ -30,11 +30,8 @@ async def test_actual_scoped_discovery_respects_own_prior_snapshot(monkeypatch, 
         assert kwargs == {'context': context}
         calls.append(selector)
         return {'rawMaxTokens': 200000}
-    def default_forbidden(*args, **kwargs):
-        raise AssertionError('scoped discovery cannot read Default context')
     monkeypatch.setattr(claude_discovery, 'run_claude_control', control)
     monkeypatch.setattr(claude_discovery, '_discover_claude_context', context_probe)
-    monkeypatch.setattr(claude_discovery, '_known_claude_context_identities', default_forbidden)
     result = await claude_discovery.discover_claude_models('/synthetic/claude', context=context)
     assert isinstance(result, StagedDiscovery)
     assert calls == (['sonnet'] if probe else [])

@@ -7,6 +7,8 @@ import sqlite3
 
 import pytest
 
+from vendor_account_fixtures import signed_in_default
+
 
 @pytest.fixture
 def connections_db(tmp_path, monkeypatch):
@@ -29,6 +31,8 @@ def connections_db(tmp_path, monkeypatch):
         type=ConnectionType.CLI, provider="claude-code",
         status=ConnectionStatus.AVAILABLE, config={"binary": "/bin/claude"}, db=db,
     )
+    signed_in_default("claude-code", db=db)  # discovery runs for an account: there is no ambient login
+    db.commit()
     yield db
     db.close()
 
@@ -53,36 +57,38 @@ NEW_LIST = [
 
 
 def _rows(db) -> dict[str, dict]:
-    return {
-        row["provider_model_id"]: dict(row)
-        for row in db.execute("SELECT * FROM models WHERE harness = 'claude-code'")
-    }
+    """Each Claude Code row as readers see it: what the signed-in account lists now."""
+    from llm.harness_catalog import project_stored_rows
+
+    stored = db.execute("SELECT * FROM models WHERE harness = 'claude-code'").fetchall()
+    return {row["provider_model_id"]: row for row in project_stored_rows(stored, db=db)}
 
 
-async def _refresh(db, monkeypatch, listing, accepted: dict[str, str]):
-    """Run one discovery; ``accepted`` maps selector -> model the CLI reports."""
+async def _refresh(db, monkeypatch, listing, accepted: dict[str, str], window: int = 1_000_000):
+    """Run one discovery; ``accepted`` maps selector -> model the CLI reports, at ``window``."""
     import connections.harness_models as harness_models
 
     probed: list[str] = []
 
-    async def _discover(_binary):
-        return {"models": [dict(raw) for raw in listing]}
+    async def _discover(_binary, context=None):
+        from connections.account_discovery_types import StagedDiscovery
 
-    async def _probe(_binary, selector):
+        return StagedDiscovery(payload={"models": [dict(raw) for raw in listing]})
+
+    async def _probe(_binary, selector, context=None):
         probed.append(selector)
         if selector not in accepted:
             raise RuntimeError(f"Claude Code rejected selector {selector}")
-        return {"model": accepted[selector], "maxTokens": 1_000_000,
-                "rawMaxTokens": 1_000_000}
+        return {"model": accepted[selector], "maxTokens": window, "rawMaxTokens": window}
 
-    async def _version(_binary):
+    async def _version(_binary, env=None):
         return "2.1.283"
 
     monkeypatch.setitem(
         harness_models._ADAPTERS, "claude-code",
         (_discover, harness_models.normalize_claude_models, harness_models.CLAUDE_SOURCE),
     )
-    monkeypatch.setattr(harness_models, "_discover_claude_context", _probe)
+    monkeypatch.setattr("connections.claude_discovery._discover_claude_context", _probe)
     monkeypatch.setattr(harness_models, "binary_version", _version)
     result = await harness_models.refresh_provider(
         "claude-code", reason="version_changed", db=db,
@@ -103,8 +109,9 @@ async def test_accepted_unlisted_selector_keeps_running_as_an_alias(
         {"opus[1m]": "claude-opus-5-5[1m]", "fable[1m]": "claude-fable-5-1[1m]"},
     )
 
-    # The update-required placeholder names no model the CLI still lists.
-    assert sorted(probed) == ["fable[1m]", "opus[1m]"]
+    # The update-required placeholder names no model the CLI still lists; each
+    # listed selector's own [1m] variant is probed unless an old row has it.
+    assert sorted(probed) == ["claude-fable-5-1[1m]", "fable[1m]", "opus[1m]"]
     rows = _rows(connections_db)
     for selector, alias_of in (("opus[1m]", "opus"), ("fable[1m]", "claude-fable-5-1")):
         row = rows[selector]
@@ -125,7 +132,7 @@ async def test_accepted_unlisted_selector_keeps_running_as_an_alias(
 
 
 @pytest.mark.asyncio
-async def test_a_selector_not_kept_says_why(connections_db, monkeypatch):
+async def test_a_selector_not_kept_says_why(connections_db, monkeypatch, caplog):
     await _refresh(connections_db, monkeypatch, OLD_LIST, {})
     await _refresh(
         connections_db, monkeypatch, NEW_LIST,
@@ -134,12 +141,74 @@ async def test_a_selector_not_kept_says_why(connections_db, monkeypatch):
 
     rows = _rows(connections_db)
     remapped, rejected = rows["opus[1m]"], rows["fable[1m]"]
-    assert remapped["available"] == 0
-    assert json.loads(remapped["metadata_json"])[
-        "availability_reason"] == "not_returned_by_discovery"
-    assert "now maps it to claude-fable-5-1[1m], not claude-opus-5-5[1m]" in remapped["last_error"]
-    assert rejected["available"] == 0
-    assert "RuntimeError: Claude Code rejected selector fable[1m]" in rejected["last_error"]
+    for row in (remapped, rejected):
+        assert row["available"] == 0
+        assert json.loads(row["metadata_json"])["availability_reason"] == "not_returned_by_discovery"
+    # No reader shows a retired row's probe error; the discovery log keeps it.
+    assert "maps it to claude-fable-5-1[1m], not claude-opus-5-5[1m]" in caplog.text
+    assert "RuntimeError: Claude Code rejected selector fable[1m]" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_fresh_catalog_keeps_the_1m_variant_as_a_hidden_alias(connections_db, monkeypatch):
+    """No old row is needed: a main-base review and a larger-context workflow find ``opus[1m]``."""
+    from llm.context_window import resolve_live_window_facts
+    from llm.resolution import catalog_row, resolve_harness_selector
+
+    probed = await _refresh(connections_db, monkeypatch, NEW_LIST, {"opus[1m]": "claude-opus-5-5[1m]"})
+
+    assert sorted(probed) == ["claude-fable-5-1[1m]", "opus[1m]"]
+    rows = _rows(connections_db)
+    assert "claude-fable-5-1[1m]" not in rows
+    meta = json.loads(rows["opus[1m]"]["metadata_json"])
+    assert (rows["opus[1m]"]["available"], meta["alias_of"]) == (1, "claude-code/opus")
+    assert meta["resolved_identity"] == "claude-opus-5-5[1m]"
+
+    target = resolve_harness_selector("claude-code", "opus[1m]", db=connections_db)
+    assert (target.catalog_id, target.transport_model) == ("claude-code/opus[1m]", "opus[1m]")
+    # The [1m] row runs at the window the CLI reported, not the default checkpoint cap.
+    row = catalog_row("claude-code/opus[1m]", db=connections_db)
+    assert resolve_live_window_facts(row, db=connections_db).effective == 1_000_000
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_1m_variant_leaves_no_row(connections_db, monkeypatch, caplog):
+    from llm.resolution import ModelUnavailableError, resolve_harness_selector
+
+    await _refresh(connections_db, monkeypatch, NEW_LIST, {})
+
+    assert "opus[1m]" not in _rows(connections_db)
+    assert "Claude Code does not list opus[1m], and probing it failed" in caplog.text
+    with pytest.raises(ModelUnavailableError):
+        resolve_harness_selector("claude-code", "opus[1m]", db=connections_db)
+
+
+@pytest.mark.asyncio
+async def test_a_1m_variant_the_cli_runs_smaller_leaves_no_row(connections_db, monkeypatch, caplog):
+    """The CLI accepts ``opus[1m]`` but reports the plain model at 200k: a main-base review refuses."""
+    from llm.resolution import ModelUnavailableError, resolve_harness_selector
+
+    await _refresh(connections_db, monkeypatch, NEW_LIST, {"opus[1m]": "claude-opus-5-5"}, window=200_000)
+
+    assert "opus[1m]" not in _rows(connections_db)
+    assert "reports a 200000-token window for it, not 1M" in caplog.text
+    with pytest.raises(ModelUnavailableError):
+        resolve_harness_selector("claude-code", "opus[1m]", db=connections_db)
+
+
+@pytest.mark.asyncio
+async def test_a_kept_1m_variant_the_cli_later_runs_smaller_is_dropped(connections_db, monkeypatch, caplog):
+    """A row kept at 1M is checked again on each refresh: losing 1M access retires it."""
+    from llm.resolution import resolve_execution_target
+
+    accepted = {"opus[1m]": "claude-opus-5-5[1m]"}
+    await _refresh(connections_db, monkeypatch, NEW_LIST, accepted)
+    assert resolve_execution_target("claude-code/opus[1m]", db=connections_db).available is True
+
+    await _refresh(connections_db, monkeypatch, NEW_LIST, accepted, window=200_000)
+
+    assert "reports a 200000-token window for it, not 1M" in caplog.text
+    assert resolve_execution_target("claude-code/opus[1m]", db=connections_db).available is False
 
 
 @pytest.mark.asyncio

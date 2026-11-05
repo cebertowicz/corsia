@@ -6,7 +6,7 @@ from fastapi import WebSocketDisconnect
 
 from host_access import browser_cdp, browser_pane, browser_pane_state, browser_session_commands
 from tools import browser, browser_actions
-from ws import browser_stream
+from ws import browser_pane_input, browser_stream
 
 
 @pytest.mark.asyncio
@@ -182,6 +182,7 @@ async def test_target_change_restarts_page_streams_and_clears_endpoint(monkeypat
     started = []
     cleared = []
     events = []
+    notices = []
     change_ready = asyncio.Event()
 
     async def stream(*_args):
@@ -198,7 +199,7 @@ async def test_target_change_restarts_page_streams_and_clears_endpoint(monkeypat
     monkeypatch.setattr(browser_stream, '_metadata_events', stream)
     monkeypatch.setattr(browser_pane, 'watch_targets', watch)
     monkeypatch.setattr(browser_pane, 'clear_page_endpoint', lambda *args: cleared.append(args))
-    task = asyncio.create_task(browser_stream._follow_page('thread', 'pane', object(), lambda _m: None))
+    task = asyncio.create_task(browser_stream._follow_page('thread', 'pane', object(), notices.append))
     for _ in range(20):
         if len(started) == 2:
             break
@@ -208,6 +209,7 @@ async def test_target_change_restarts_page_streams_and_clears_endpoint(monkeypat
     task.cancel()
     await asyncio.gather(task, return_exceptions=True)
     assert cleared == [('thread', 'pane')]
+    assert notices == [{'type': 'browser_target_changed'}]
     assert events == [(('browser_pane', 'target_changed'), {'thread_id': 'thread'})]
     assert 'thread' not in browser_pane_state._target_changes
 
@@ -260,7 +262,7 @@ async def test_queued_pointer_moves_collapse_as_they_arrive():
         async def receive_text(self):
             return await sent.get()
 
-    messages = browser_stream._pane_messages(Pane())
+    messages = browser_pane_input.pane_messages(Pane())
     # A stalled page holds at most one waiting move: moves behind a move replace it, a click never does.
     assert [await anext(messages) for _ in range(3)] == [move(3), click, move(4)]
     await messages.aclose()
@@ -268,7 +270,7 @@ async def test_queued_pointer_moves_collapse_as_they_arrive():
 
 @pytest.mark.asyncio
 async def test_a_stalled_page_closes_the_pane_instead_of_queueing_input_without_end(monkeypatch):
-    monkeypatch.setattr(browser_stream, '_MAX_QUEUED_INPUT', 3)
+    monkeypatch.setattr(browser_pane_input, '_MAX_QUEUED_INPUT', 3)
     key = {'type': 'input_keyboard', 'key': 'a'}
     sent = asyncio.Queue()
     for _ in range(5):
@@ -282,7 +284,7 @@ async def test_a_stalled_page_closes_the_pane_instead_of_queueing_input_without_
         async def close(self, code):
             closed.append(code)
 
-    messages = browser_stream._pane_messages(Pane())
+    messages = browser_pane_input.pane_messages(Pane())
     delivered = 0
     with pytest.raises(WebSocketDisconnect):
         while True:

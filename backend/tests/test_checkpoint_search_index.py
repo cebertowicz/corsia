@@ -12,6 +12,8 @@ substring matching.
 
 from __future__ import annotations
 
+from infra.thread_confinement import Reader
+
 from checkpoint_retrieval_fixtures import (  # noqa: F401
     _install_checkpoint,
     fresh_db,
@@ -57,9 +59,9 @@ def test_a_quote_in_the_query_does_not_break_the_search(fresh_db):
         narrative="We rejected the polling design and chose event routing.",
     )
 
-    assert search_checkpoints(fresh_db, 'polling"', caller_thread_id="t1") != []
-    assert search_checkpoints(fresh_db, '"', caller_thread_id="t1") == []
-    assert search_checkpoints(fresh_db, 'a"b', caller_thread_id="t1") == []
+    assert search_checkpoints(fresh_db, 'polling"', reader=Reader.agent("t1")) != []
+    assert search_checkpoints(fresh_db, '"', reader=Reader.agent("t1")) == []
+    assert search_checkpoints(fresh_db, 'a"b', reader=Reader.agent("t1")) == []
 
 
 def test_word_prefix_recall_is_preserved(fresh_db):
@@ -75,9 +77,9 @@ def test_word_prefix_recall_is_preserved(fresh_db):
         narrative="We rejected the polling design and chose event routing.",
     )
 
-    assert search_checkpoints(fresh_db, "poll", caller_thread_id="t1") != []
-    assert search_checkpoints(fresh_db, "rout", caller_thread_id="t1") != []
-    assert search_checkpoints(fresh_db, "polling", caller_thread_id="t1") != []
+    assert search_checkpoints(fresh_db, "poll", reader=Reader.agent("t1")) != []
+    assert search_checkpoints(fresh_db, "rout", reader=Reader.agent("t1")) != []
+    assert search_checkpoints(fresh_db, "polling", reader=Reader.agent("t1")) != []
 
 
 def test_matching_is_anchored_at_word_starts(fresh_db):
@@ -94,8 +96,8 @@ def test_matching_is_anchored_at_word_starts(fresh_db):
         fresh_db, thread_id="t1", narrative="Extrapolling is a different word.",
     )
 
-    assert search_checkpoints(fresh_db, "extra", caller_thread_id="t1") != []
-    assert search_checkpoints(fresh_db, "polling", caller_thread_id="t1") == []
+    assert search_checkpoints(fresh_db, "extra", reader=Reader.agent("t1")) != []
+    assert search_checkpoints(fresh_db, "polling", reader=Reader.agent("t1")) == []
 
 
 def test_hyphenated_terms_still_match(fresh_db):
@@ -111,7 +113,7 @@ def test_hyphenated_terms_still_match(fresh_db):
         continuity=[{"statement": "Region pinned to eu-west-1 for latency."}],
     )
 
-    assert search_checkpoints(fresh_db, "eu-west-1", caller_thread_id="t1") != []
+    assert search_checkpoints(fresh_db, "eu-west-1", reader=Reader.agent("t1")) != []
 
 
 def test_snake_case_terms_match_unicode61_token_boundaries(fresh_db):
@@ -125,7 +127,7 @@ def test_snake_case_terms_match_unicode61_token_boundaries(fresh_db):
         continuity=[{"statement": "The agent_search route remains enabled."}],
     )
 
-    assert search_checkpoints(fresh_db, "agent_search", caller_thread_id="t1") != []
+    assert search_checkpoints(fresh_db, "agent_search", reader=Reader.agent("t1")) != []
 
 
 def test_entry_index_uses_the_shared_snapshot_search_text(fresh_db):
@@ -172,8 +174,8 @@ def test_json_key_names_are_not_searchable_terms(fresh_db):
         )
 
     for structural in ("statement", "source_refs", "kind"):
-        assert _entry_rows(fresh_db, structural, "u", None, 50, 25) == []
-    assert len(_entry_rows(fresh_db, "indexed", "u", None, 50, 25)) == 3
+        assert _entry_rows(fresh_db, structural, "u", None, 50, 25, Reader.agent("t1")) == []
+    assert len(_entry_rows(fresh_db, "indexed", "u", None, 50, 25, Reader.agent("t1"))) == 3
 
 
 def test_index_stays_in_sync_when_a_narrative_is_written(fresh_db):
@@ -193,7 +195,7 @@ def test_index_stays_in_sync_when_a_narrative_is_written(fresh_db):
         " 'native','m','native','m',0,'[]','2026-09-01T00:00:00')"
     )
     fresh_db.commit()
-    assert search_checkpoints(fresh_db, "afterwards", caller_thread_id="t1") == []
+    assert search_checkpoints(fresh_db, "afterwards", reader=Reader.agent("t1")) == []
 
     fresh_db.execute(
         "UPDATE checkpoints SET status='installed', raw_result=?,"
@@ -203,5 +205,5 @@ def test_index_stays_in_sync_when_a_narrative_is_written(fresh_db):
     )
     fresh_db.commit()
 
-    hits = search_checkpoints(fresh_db, "afterwards", caller_thread_id="t1")
+    hits = search_checkpoints(fresh_db, "afterwards", reader=Reader.agent("t1"))
     assert [h["checkpoint_id"] for h in hits] == ["cp-late"]

@@ -70,7 +70,7 @@ describe('switching threads never presents the prior thread as the newly selecte
 
 		expect(priorThreadRow()).toBeNull();
 		expect(host.textContent).not.toContain('prior thread answer');
-		expect(host.textContent).toContain('Loading this thread');
+		expect(host.textContent).toContain('Loading this chat');
 	});
 
 	it('never renders another thread\'s rows under the active selection, independent of load-state flags', () => {

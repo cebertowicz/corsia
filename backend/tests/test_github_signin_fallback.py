@@ -92,9 +92,13 @@ def test_old_gh_without_a_login_asks_for_the_update_never_not_signed_in(gh):
     assert "login" not in row["config"]
 
 
-def test_old_gh_signed_out_needs_auth(gh):
+@pytest.mark.parametrize("stderr", [
+    NOT_LOGGED_IN,
+    b'Hostname "github.com" not found among authenticated GitHub hosts\n',  # another host only
+])
+def test_old_gh_signed_out_needs_auth(gh, stderr):
     gh.script[JSON_STATUS] = (1, b"", UNKNOWN_FLAG)
-    gh.script[PLAIN_STATUS] = (1, b"", NOT_LOGGED_IN)
+    gh.script[PLAIN_STATUS] = (1, b"", stderr)
 
     row, shown = _refresh()
 

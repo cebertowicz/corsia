@@ -196,6 +196,30 @@ def test_finish_turn_work_is_independent_of_unrelated_history() -> None:
     assert with_history < 25
 
 
+def test_successor_claim_reads_added_accounts_once(monkeypatch) -> None:
+    """An added-only model shares account facts across successor admission checks."""
+    statements = []
+    real_db = _db
+
+    class TracedConnection:
+        def __init__(self, connection):
+            self.connection = connection
+
+        def __getattr__(self, name):
+            return getattr(self.connection, name)
+
+        def set_progress_handler(self, callback, steps):
+            self.connection.set_trace_callback(
+                (lambda sql: statements.append(sql) if 'a.discovery_json' in sql else None)
+                if callback is not None else None
+            )
+            return self.connection.set_progress_handler(callback, steps)
+
+    monkeypatch.setitem(globals(), '_db', lambda: TracedConnection(real_db()))
+    _finish_turn_progress_calls(0)
+    assert len(statements) == 1
+
+
 def test_terminal_settles_an_unsettled_plan_dispatch_without_a_hold() -> None:
     """A Turn that dies mid-call closes its dispatch and keeps valid work.
 
@@ -358,6 +382,37 @@ def test_child_completion_is_one_ordinary_parent_fifo_input() -> None:
             "SELECT COUNT(*) FROM messages WHERE thread_id='parent' "
             "AND json_extract(metadata,'$.child_turn_id')='child-turn'"
         ).fetchone()[0] == 1
+    finally:
+        db.close()
+
+
+def test_local_child_final_result_reaches_cloud_parent_without_hold(monkeypatch) -> None:
+    from infra import local_only
+    from infra.thread_driver import finish_turn
+
+    monkeypatch.setattr(local_only, "_is_cloud", lambda *_args, **_kwargs: True)
+    db = _db()
+    try:
+        _session(db, "parent")
+        _session(db, "child", parent_id="parent")
+        db.execute("UPDATE threads SET local_only=1 WHERE id='child'")
+        db.commit()
+        _running_turn(db, "child", "child-turn")
+        db.execute(
+            "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,delivery_state,seq) "
+            "VALUES ('answer','child','assistant','done',?,'t3','delivered',2)",
+            (json.dumps({"turn_id": "child-turn"}),),
+        )
+        db.execute("UPDATE threads SET next_message_seq=3 WHERE id='child'")
+        result = finish_turn("child-turn", outcome="completed", ended_at="t4",
+                             successor_turn_id="child-next", boot_epoch="boot-1", db=db)
+        assert db.execute("SELECT count(*) FROM held_replies").fetchone()[0] == 0
+        assert result.wake_thread_ids == ("parent",)
+        row = db.execute(
+            "SELECT content FROM messages WHERE thread_id='parent' "
+            "AND json_extract(metadata,'$.child_turn_id')='child-turn'"
+        ).fetchone()
+        assert "done" in row["content"]
     finally:
         db.close()
 

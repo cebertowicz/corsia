@@ -21,7 +21,7 @@ def test_dirty_refusal_on_a_long_path_is_a_race_not_pending(tmp_path, monkeypatc
     assert "contains modified or untracked files" not in git_detail(_done(128, refusal))
     calls: list[list[str]] = []
 
-    def _git(_repo: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    def _git(_repo: Path, args: list[str], **_kwargs) -> subprocess.CompletedProcess[str]:
         calls.append(args)
         if args[:2] == ["worktree", "remove"]:
             return _done(128, refusal)

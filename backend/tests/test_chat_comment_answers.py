@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from auth_fixtures import OTHER_TOKEN, OWNER_TOKEN, OWNER_USER
 from doc_feedback_helpers import seed_thread
-from infra.chat_comment_answers import parse_answers, visible_answer_content
+from infra.chat_comment_answers import parse_answers, strip_answer_tags, visible_answer_content
 from infra.database import get_db, initialize_schema
 from infra.database_migrations import migrate_to_current
 from infra.queries import insert_message
@@ -50,6 +50,29 @@ def test_parser_places_multitag_sections_and_leaves_uncited_text():
 ])
 def test_visible_content_keeps_only_unplaced_sections(text, cids, expected):
     assert visible_answer_content(text, cids) == expected
+
+
+@pytest.mark.parametrize(('text', 'expected'), [
+    ('[c5.1] Moved. Tonight runs at 4 AM.', 'Moved. Tonight runs at 4 AM.'),
+    ('Two answers:\n\n[c1.1][c1.2] shared\n\n[c1.3] final', 'Two answers:\n\nshared\n\nfinal'),
+    ('See [c1.1] inline, not a section', 'See [c1.1] inline, not a section'),
+    (None, None),
+])
+def test_strip_answer_tags_keeps_the_text(text, expected):
+    assert strip_answer_tags(text) == expected
+
+
+def test_thread_list_preview_hides_answer_tags(isolated_db):
+    from main import app
+    db = get_db()
+    try:
+        _seed(db)
+        _answer(db, "[c1.1] Moved. Tonight runs at 4 AM.")
+        db.commit()
+    finally:
+        db.close()
+    listed = TestClient(app).get(f"/api/threads?token={OWNER_TOKEN}").json()["threads"]
+    assert [t["last_message"] for t in listed if t["id"] == "thread"] == ["Moved. Tonight runs at 4 AM."]
 
 
 def test_malformed_cid_is_rejected():
@@ -134,6 +157,41 @@ def test_route_stamps_the_newest_seen_answer_and_checks_ownership(isolated_db):
     assert unread_and_stamps() == (1, ["2026-01-04"])
 
 
+def test_viewing_each_reply_answer_clears_its_own_unread_entry(isolated_db):
+    from doceditor.reply_attention import chat_reply_items
+    from infra.chat_comment_index import place_comments
+    from main import app
+
+    db = get_db()
+    try:
+        _seed(db)
+        metadata = {'reply_context': {'comments': [
+            {'cid': 'c2.1', 'seq': 0, 'root_user_message_id': 'question', 'root_cid': 'c1.1'},
+            {'cid': 'c2.2', 'seq': 0, 'root_user_message_id': 'question', 'root_cid': 'c1.1'},
+        ]}}
+        db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq,input_order) "
+                   "VALUES ('followup','thread','user','',?,'2026-01-02',2,2)", (json.dumps(metadata),))
+        place_comments(db, 'thread', 'followup', metadata, '2026-01-02')
+        db.execute("UPDATE threads SET next_message_seq=3 WHERE id='thread'")
+        insert_message('thread', 'assistant', '[c2.1][c2.2] shared', {'turn_unbound_reason': 'legacy_import'},
+                       msg_id='shared-answer', db=db, created_at='2026-01-03')
+        db.commit()
+    finally:
+        db.close()
+    client = TestClient(app)
+    for cid, remaining in [('c2.1', 1), ('c2.2', 0)]:
+        response = client.post(f'/api/threads/thread/messages/followup/comments/{cid}/viewed',
+                               headers={'Authorization': f'Bearer {OWNER_TOKEN}'},
+                               json={'assistant_message_id': 'shared-answer'})
+        assert response.status_code == 200
+        db = get_db()
+        try:
+            items = chat_reply_items(db, OWNER_USER, 'thread')
+            assert (items[0]['detail']['unread_count'] if items else 0) == remaining
+        finally:
+            db.close()
+
+
 @pytest.mark.parametrize("operation", ["purge", "delete"])
 def test_thread_teardown_removes_only_its_chat_comment_rows(isolated_db, operation):
     from datetime import datetime, timezone
@@ -145,6 +203,11 @@ def test_thread_teardown_removes_only_its_chat_comment_rows(isolated_db, operati
     try:
         _seed(db)
         _answer(db)
+        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('followup','thread','user','x','t',3)")
+        db.execute("INSERT INTO chat_comments(thread_id,target_message_id,user_message_id,cid,created_at,root_user_message_id,root_cid) "
+                   "VALUES ('thread','target','followup','c2.1','t','question','c1.1')")
+        db.execute("INSERT INTO chat_comment_answers VALUES ('thread','followup','c2.1','answer','t')")
+        db.execute("INSERT INTO chat_comment_views VALUES (?,?,?,?)", (OWNER_USER, 'followup', 'c2.1', 't'))
         seed_thread(db, "other")
         db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) "
                    "VALUES ('other-question','other','user','x','t',1)")

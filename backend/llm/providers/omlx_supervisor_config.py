@@ -82,6 +82,24 @@ def _ssd_cache_enabled(settings_path: Path) -> bool:
     return not (isinstance(cache, dict) and cache.get("enabled") is False)
 
 
+def managed_global_settings() -> dict:
+    """CORSIA's server-wide oMLX values: what oMLX saved under scheduler, else the shipped default.
+
+    The one source for every writer of these values, the launch flags and the setup POST alike,
+    so a value the person saved in oMLX survives a restart, a download and a setup run.
+    """
+    from llm.local_profiles import OMLX_GLOBAL_SETTINGS
+    from llm.managed_omlx_binary import managed_omlx_paths
+
+    try:
+        raw = json.loads(managed_omlx_paths().settings_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        raw = {}
+    scheduler = raw.get("scheduler", {}) if isinstance(raw, dict) else {}
+    scheduler = scheduler if isinstance(scheduler, dict) else {}
+    return {key: scheduler.get(key, value) for key, value in OMLX_GLOBAL_SETTINGS.items()}
+
+
 def managed_launch_settings(settings: dict) -> dict:
     """Return CORSIA's managed server's launch settings, every folder from the current state root.
 
@@ -90,7 +108,6 @@ def managed_launch_settings(settings: dict) -> dict:
     folder, whatever that file or the server row still names. A cache that
     oMLX's settings turn off stays off: passing the cache folder would turn it on.
     """
-    from llm.local_profiles import OMLX_GLOBAL_SETTINGS
     from llm.managed_omlx_binary import managed_omlx_paths
 
     paths = managed_omlx_paths()
@@ -100,13 +117,5 @@ def managed_launch_settings(settings: dict) -> dict:
         "model_dir": str(paths.model_dir),
         "paged_ssd_cache_dir": str(paths.base_path / "cache") if cache_on else None,
     }
-    # oMLX persists these values under scheduler. Its CLI flags override that
-    # file, so use its saved values when present and shipped defaults otherwise.
-    try:
-        raw = json.loads(paths.settings_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        raw = {}
-    scheduler = raw.get("scheduler", {}) if isinstance(raw, dict) else {}
-    scheduler = scheduler if isinstance(scheduler, dict) else {}
-    global_settings = {key: scheduler.get(key, value) for key, value in OMLX_GLOBAL_SETTINGS.items()}
-    return {**settings, **global_settings, **folders}
+    # oMLX's CLI flags override its settings file, so pass its saved values back.
+    return {**settings, **managed_global_settings(), **folders}

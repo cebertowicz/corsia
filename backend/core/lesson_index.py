@@ -10,6 +10,10 @@ running conversation.
 
 The same rendered index line is the unit of the lesson budget and of every
 later per-lesson estimate, so the parts never add up to more than the index.
+A skill stored at ``<root>/<name>/SKILL.md`` has no path on its line: the index
+states the root once in a group header, which no lesson is charged for and
+which stays in the block's remainder. A trial's line keeps its path: it is
+delivered per task, outside the index and under no header.
 That line marks a trial, so a reader of the index can tell an unproven rule
 its owner wrote from an approved skill before loading it.
 
@@ -28,21 +32,21 @@ that was not checked the same way.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any
 
 from core.lesson_files import raw_sha256, read_trial
-from core.lesson_trials import INDEX_TOKEN_BUDGET, lesson_block, offer_refusal
+from core.lesson_trials import lesson_block, offer_refusal
 from core.skill_registry_types import SkillRow
 from core.skill_scanning import omitted_row
 
 OVERRIDDEN = "overridden by a more specific skill"
-OVER_BUDGET = "the lesson index budget is full"
 UNCHECKED = "its review could not be checked"
 UNREADABLE = "its file could not be read"
 SAME_NAME = "an ordinary skill has its name"
 MISPLACED = "its file is not in its owner's skills"
+PER_TASK = "trial lesson is delivered per task"
 HELD_PREFIX = "trial lesson not offered: "
 #: Follows a trial's name on its index line; an ordinary skill has none.
 TRIAL_MARK = " (trial, unproven)"
@@ -57,6 +61,7 @@ class LessonPartition:
     offered: list[SkillRow]
     omitted: list[SkillRow]
     lessons: list[dict[str, Any]]
+    per_task: list[SkillRow] = field(default_factory=list)
 
 
 def index_line(row: SkillRow) -> str:
@@ -65,29 +70,33 @@ def index_line(row: SkillRow) -> str:
     if row.scope != "system":
         description = description[:NON_SYSTEM_DESCRIPTION_LIMIT]
     trial = lesson_block(row.metadata) is not None
+    if not trial and skill_root(row.name, row.path) is not None:
+        return f"- {row.name}: {description}"
     return line_for(row.name, description, row.path, trial=trial)
+
+
+def skill_root(name: str, path: object) -> str | None:
+    """``<root>/`` when ``path`` is exactly ``<root>/<name>/SKILL.md``, else None."""
+    head, sep, file = str(path).rpartition("/")
+    root, sep2, folder = head.rpartition("/")
+    if file != "SKILL.md" or not sep or not sep2 or not root or folder != name:
+        return None
+    return f"{root}/"
+
+
+def root_header(root: str) -> str:
+    """The line naming a shared root and how to build each skill's path from it."""
+    return f"Skills in {root} (read {root}<name>/SKILL.md):"
 
 
 def name_entry(name: str, path: object) -> str:
     """The compact findable entry for a names-only overflow skill."""
-    return f"{name} ({path})"
+    return name if skill_root(name, path) is not None else f"{name} ({path})"
 
 
 def line_for(name: str, description: str, path: object, *, trial: bool = False) -> str:
     """The index line a skill with these fields would contribute."""
     return f"- {name}{TRIAL_MARK if trial else ''}: {description} ({path})"
-
-
-def fits_budget(lessons: list[dict[str, Any]], line: str, lesson_id: str) -> bool:
-    """Whether one more trial's line fits beside the offered ones.
-
-    ``lessons`` is an install's offered list; the candidate's own earlier
-    version does not count against it.
-    """
-    spent = sum(
-        line_tokens(str(lesson["index_line"])) for lesson in lessons if lesson["id"] != lesson_id
-    )
-    return spent + line_tokens(line) <= INDEX_TOKEN_BUDGET
 
 
 def line_tokens(line: str, model: str | None = None) -> int:
@@ -132,12 +141,8 @@ def _review_state(db, lesson, behavioral_sha256: str) -> tuple[str | None, str]:
 
 def _candidate(row: SkillRow, *, thread_id: str, db, now: datetime):
     """One trial row as (refusal, opened_at, record)."""
-    try:
-        data = row.path.read_bytes()
-        trial = read_trial(data.decode("utf-8"))
-    except (OSError, UnicodeDecodeError):
-        trial = None
-    if trial is None:
+    trial, data = row.trial, row.source_data
+    if trial is None or data is None:
         return UNREADABLE, "", None
     # The review covers the owner's own file: a copy anywhere else is not the trial.
     if row.scope != "thread" or row.scope_id != trial.lesson.owner:
@@ -225,15 +230,13 @@ def partition(
         if standing.record is not None:
             admitted.append((standing.opened, standing.record["id"], index, standing.record))
     lessons: list[dict[str, Any]] = []
-    spent = 0
+    per_task: list[SkillRow] = []
     for _opened, _id, index, record in sorted(admitted):
-        cost = line_tokens(record["index_line"])
-        if spent + cost > INDEX_TOKEN_BUDGET:
-            # No ordinary skill is under a trial that passed, so nothing takes its place.
-            held.append(omitted_row(stands[index], HELD_PREFIX + OVER_BUDGET))
+        row = stands[index]
+        if row is not None:
+            held.append(omitted_row(row, HELD_PREFIX + PER_TASK))
+            per_task.append(row)
+            lessons.append(record)
             stands[index] = None
-            continue
-        spent += cost
-        lessons.append(record)
     offered = [row for row in stands if row is not None]
-    return LessonPartition(offered=offered, omitted=[*remaining, *held], lessons=lessons)
+    return LessonPartition(offered=offered, omitted=[*remaining, *held], lessons=lessons, per_task=per_task)

@@ -13,6 +13,7 @@ from doceditor.document_scope import (
     ProjectNotFound,
     resolve_project as _resolve_project,
     scope_bases as _scope_bases,
+    scope_roots as _scope_roots,
 )
 from infra import config
 from infra.workspace_paths import looks_like_workspace_reference
@@ -38,6 +39,13 @@ def resolve_project(project_id: str, db) -> tuple[Path | None, list[tuple[str, P
 def scope_bases(project_id: str | None, db) -> list[Path]:
     try:
         return _scope_bases(project_id, db)
+    except ProjectNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+def scope_roots(project_id: str | None, db) -> tuple[Path | None, list[Path]]:
+    try:
+        return _scope_roots(project_id, db)
     except ProjectNotFound as exc:
         raise HTTPException(404, str(exc)) from exc
 

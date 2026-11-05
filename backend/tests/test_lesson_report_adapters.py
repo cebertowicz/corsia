@@ -783,3 +783,98 @@ async def test_measurement_lessons_joins_disconnect_monitor_for_every_outcome(mo
 
     assert facts["monitor_event"] is facts["report_event"]
     assert joined.is_set()
+
+
+def _add_owner_threads(db):
+    db.execute("INSERT INTO projects(id,name,created_at,updated_at) VALUES('other','O','t','t')")
+    for thread, project in (("other-owner", "other"), ("workspace-owner", None)):
+        db.execute("INSERT INTO threads(id,user_id,project_id,agent_enabled,model,created_at,updated_at) "
+                   "VALUES(?,?,?,1,'test/model','t','t')", (thread, "user", project))
+    db.commit()
+
+
+def _summary(owners):
+    return {"rows": [{"owner_ids": owners}], "detail": {"owner_ids": owners}}
+
+
+def _attach(result, user="user"):
+    from core.lesson_report_projects import attach_project_ids
+    return attach_project_ids(result, user)
+
+
+@pytest.mark.asyncio
+async def test_rows_and_detail_carry_sorted_project_ids_of_their_owners(report_target):
+    db, _app, tool = report_target
+    _add_owner_threads(db)
+    review(db, owner="other-owner", subject="shared")
+    review(db, owner="owner", subject="shared")
+    review(db, owner="workspace-owner", subject="workspace-only")
+    detail = json.loads(await tool.execute(_thread_id="owner", scope="all", lesson_id="shared"))["detail"]
+    assert detail["owner_ids"] == ["other-owner", "owner"]
+    assert detail["project_ids"] == ["other", "project"] and detail["project_ids_reason"] is None
+    listed = {}
+    result = json.loads(await tool.execute(_thread_id="owner", scope="all"))
+    while True:
+        listed.update({row["id"]: row for row in result["rows"]})
+        if result["next_cursor"] is None:
+            break
+        result = json.loads(await tool.execute(_thread_id="owner", scope="all", cursor=result["next_cursor"]))
+    assert listed["shared"]["project_ids"] == ["other", "project"]
+    assert listed["workspace-only"]["owner_ids"] == ["workspace-owner"]
+    assert listed["workspace-only"]["project_ids"] == []
+
+
+def test_two_owners_in_two_projects_give_both_ids_sorted(report_target):
+    db, _app, _tool = report_target
+    _add_owner_threads(db)
+    row = _attach(_summary(["owner", "other-owner"]))["rows"][0]
+    assert row["project_ids"] == ["other", "project"] and row["project_ids_reason"] is None
+
+
+def test_workspace_only_owner_adds_nothing(report_target):
+    db, _app, _tool = report_target
+    _add_owner_threads(db)
+    assert _attach(_summary(["workspace-owner"]))["rows"][0]["project_ids"] == []
+    assert _attach(_summary(["workspace-owner", "owner"]))["rows"][0]["project_ids"] == ["project"]
+
+
+@pytest.mark.parametrize("owners,reason", [
+    (["owner", "orphan"], "an owner thread is not in this user's thread tree"),
+    (["owner", "no-such-thread"], "an owner thread is not in this user's thread tree"),
+    ([], "no owner recorded"),
+])
+def test_unresolvable_owner_gives_null_with_reason(report_target, owners, reason):
+    row = _attach(_summary(owners))["rows"][0]
+    assert row["project_ids"] is None and row["project_ids_reason"] == reason
+
+
+def test_another_users_thread_never_contributes(report_target):
+    db, _app, _tool = report_target
+    db.execute("INSERT INTO threads(id,user_id,project_id,agent_enabled,model,created_at,updated_at) "
+               "VALUES('stranger','other-user','other',1,'test/model','t','t')")
+    db.commit()
+    row = _attach(_summary(["owner", "stranger"]))["rows"][0]
+    assert row["project_ids"] is None
+    assert _attach(_summary(["stranger"]), user="other-user")["rows"][0]["project_ids"] == ["other"]
+    assert _attach(_summary(["owner"]), user="other-user")["rows"][0]["project_ids"] is None
+
+
+def test_owner_projects_read_is_one_query_however_many_rows(report_target, monkeypatch):
+    from core import lesson_report_projects
+
+    db, _app, _tool = report_target
+    _add_owner_threads(db)
+    traced = []
+    real = lesson_report_projects.report_snapshot
+
+    @contextmanager
+    def tracing(**kwargs):
+        with real(**kwargs) as snapshot:
+            snapshot.set_trace_callback(traced.append)
+            yield snapshot
+
+    monkeypatch.setattr(lesson_report_projects, "report_snapshot", tracing)
+    for rows in (1, 20):
+        traced.clear()
+        _attach({"rows": [{"owner_ids": ["owner", "other-owner", "child"]} for _ in range(rows)]})
+        assert len([sql for sql in traced if "WITH RECURSIVE" in sql]) == 1

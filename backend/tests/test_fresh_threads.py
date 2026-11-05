@@ -92,7 +92,6 @@ def fresh_db(tmp_path, monkeypatch):
     from infra.schema import SCHEMA_SQL
     from infra.vendor_account_schema import VENDOR_ACCOUNT_SCHEMA_SQL
     from infra.vendor_policy_schema import VENDOR_POLICY_SCHEMA_SQL
-    from connections.vendor_accounts import ensure_default_account
 
     model_ddl = "CREATE TABLE IF NOT EXISTS models" + SCHEMA_SQL.split("CREATE TABLE IF NOT EXISTS models", 1)[1].split(";", 1)[0] + ";"
     conn.executescript(model_ddl + CONNECTION_SCHEMA_SQL + VENDOR_ACCOUNT_SCHEMA_SQL + VENDOR_POLICY_SCHEMA_SQL)
@@ -101,7 +100,6 @@ def fresh_db(tmp_path, monkeypatch):
     for provider in ("claude-code", "codex"):
         conn.execute("INSERT INTO connections(id,type,provider,status,created_at,updated_at) VALUES (?,'cli',?,'available','t','t')",
                      (provider, provider))
-        ensure_default_account(provider, db=conn)
     for model in ("claude-code/sonnet", "claude-code/opus", "codex/gpt-5", "codex/gpt-4o",
                   "anthropic/claude-3-5-sonnet", "omlx@server/Qwen-35B"):
         target = _target(model)
@@ -137,6 +135,17 @@ class _ImmediateRunInDb:
         return fn(*args, **kwargs)
 
 
+@pytest.fixture
+def claude_account(fresh_db):
+    from connections.vendor_accounts import set_account_state
+    from vendor_account_fixtures import seed_default_account
+
+    account = seed_default_account('claude-code', db=fresh_db)
+    set_account_state(account['id'], 'signed_in', expected_revision=account['revision'], db=fresh_db)
+    fresh_db.commit()
+
+
+@pytest.mark.usefixtures('claude_account')
 def test_local_only_child_inherits_parent_scope(fresh_db, monkeypatch):
     """A worker created from a local-only thread stores Local only itself."""
     from infra import fresh_threads
@@ -244,6 +253,7 @@ async def test_broadcast_failure_does_not_fail_committed_thread(fresh_db, monkey
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures('claude_account')
 async def test_create_visible_fresh_thread_links_spawn_and_emits_chip(fresh_db, monkeypatch):
     from infra import fresh_threads
 
@@ -374,6 +384,7 @@ async def test_spawn_chip_uses_model_derived_provider_for_native(fresh_db, monke
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures('claude_account')
 async def test_spawn_chip_uses_cc_provider_for_cc_model(fresh_db, monkeypatch):
     """A CC model spawn chip must carry provider='cc'."""
     import json

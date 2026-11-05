@@ -60,13 +60,14 @@ def _delete_one_thread_rows(
     entry index derived from it, the continuity store, and the chat-comment
     answer index and read stamps, through the same helpers retention uses (#2291).
     """
-    from infra.chat_comment_answers import delete_thread_chat_comment_answers
+    from infra.chat_comment_answers import delete_thread_chat_comment_index_rows
     from infra.checkpoint_entry_index import delete_thread_checkpoints
     from infra.continuity_store import delete_thread_continuity
     from infra.passive_changes import append_agent_roster_transition
     from infra.presence import delete_thread_presence
     from infra.thread_updates import delete_thread_updates
     from infra.thread_driver import delete_thread_turns
+    from infra.thread_history_cleanup import delete_thread_history
     from plans import public
     from registry import models as registry_models
     from registry.ownership import rehome_on_thread_end
@@ -77,6 +78,9 @@ def _delete_one_thread_rows(
     # claiming runs for a thread that no longer exists, and its row would
     # block the thread's own deletion.
     db.execute("DELETE FROM automation_schedules WHERE thread_id = ?", (thread_id,))
+    # Nor does its measure key: an outside tool's credential must stop
+    # resolving once the agent it was issued to is gone.
+    db.execute("DELETE FROM measure_keys WHERE agent_thread_id = ?", (thread_id,))
     # Its event rules go too, with every outcome naming them or the thread.
     thread_rules = 'SELECT id FROM event_rules WHERE created_by = ? OR "to" = \'thread:\' || ?'
     db.execute(
@@ -84,9 +88,10 @@ def _delete_one_thread_rows(
         (thread_id, thread_id, thread_id),
     )
     db.execute(f"DELETE FROM event_rules WHERE id IN ({thread_rules})", (thread_id, thread_id))
+    db.execute("DELETE FROM self_caused_events WHERE thread_id = ?", (thread_id,))
     delete_thread_checkpoints(db, thread_id)
     delete_thread_continuity(db, thread_id)
-    delete_thread_chat_comment_answers(db, thread_id)
+    delete_thread_chat_comment_index_rows(db, thread_id)
     delete_thread_turns(db, thread_id)
     delete_thread_presence(db, thread_id)
     public.delete_pane_view(db, thread_id)
@@ -101,7 +106,7 @@ def _delete_one_thread_rows(
         "DELETE FROM artifact_registrations WHERE parent_thread_id = ?", (thread_id,),
     )
     runtime_boundary.bump_history_epoch(db, thread_id)
-    db.execute("DELETE FROM messages WHERE thread_id = ?", (thread_id,))
+    delete_thread_history(db, thread_id)
     append_agent_roster_transition(
         db,
         before=thread,

@@ -16,12 +16,14 @@ import html
 import hashlib
 import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 
 from connections.account_errors import AccountError
 from connections.connected_accounts import resolve_credentials
-from connections.mailhost import imap, store
+from connections.mail.received_attachments import Attachment
+from connections.mailhost import attachment_parts, imap, store
 from connections.mailhost.endpoints import Endpoints
 from connections.mailhost.errors import PASSWORD_REFUSED, MailHostError
 from connections.mailhost.provider import PASSWORD
@@ -53,6 +55,7 @@ class Message:
     thread_id: str
     headers: dict[str, str] = field(default_factory=dict)
     body: str = ""
+    attachments: tuple[Attachment, ...] = ()
 
 
 def account_tag(account_id: str) -> str:
@@ -102,9 +105,13 @@ def _text_of(msg: email.message.EmailMessage) -> str:
     return text.strip()
 
 
+def _message(raw: bytes) -> email.message.EmailMessage:
+    return email.message_from_bytes(raw, policy=email.policy.default)  # type: ignore[return-value]
+
+
 def parse(raw: bytes, *, with_body: bool) -> tuple[dict[str, str], str]:
-    msg = email.message_from_bytes(raw, policy=email.policy.default)
-    return _headers(msg), _text_of(msg) if with_body else ""  # type: ignore[arg-type]
+    msg = _message(raw)
+    return _headers(msg), _text_of(msg) if with_body else ""
 
 
 def credentials(account_id: str) -> tuple[Endpoints, str, str, dict[str, object]]:
@@ -157,12 +164,31 @@ async def fetch(account_id: str, message_id: str) -> Message:
     validity, uid = parse_message_id(account_id, message_id)
     endpoints, username, password, check = await run_in_db(credentials, account_id)
 
+    def call() -> tuple[bytes | None, bytes | None]:
+        with imap.account_lock(account_id):
+            return imap.fetch_listed(endpoints, username, password, validity, uid, MAX_FETCH_BYTES)
+
+    raw, structure = await guarded(account_id, check, call)
+    if raw is None:
+        raise MessageNotFound(NOT_FOUND)
+    msg = _message(raw)
+    attachments = attachment_parts.from_structure(structure) if structure else attachment_parts.listed(msg)
+    return Message(mint_message_id(account_id, validity, uid), "", _headers(msg), _text_of(msg), attachments)
+
+
+async def attachment_bytes(account_id: str, message_id: str, attachments: Sequence[Attachment]) -> list[bytes | None]:
+    """Each attachment's bytes from one full fetch of the message, however large it is."""
+    validity, uid = parse_message_id(account_id, message_id)
+    endpoints, username, password, check = await run_in_db(credentials, account_id)
+
     def call() -> bytes | None:
         with imap.account_lock(account_id):
-            return imap.fetch(endpoints, username, password, validity, uid, MAX_FETCH_BYTES)
+            return imap.fetch(endpoints, username, password, validity, uid, None)
 
     raw = await guarded(account_id, check, call)
     if raw is None:
         raise MessageNotFound(NOT_FOUND)
-    headers, body = parse(raw, with_body=True)
-    return Message(mint_message_id(account_id, validity, uid), "", headers, body)
+    found = await asyncio.to_thread(attachment_parts.contents, raw)
+    # A listing from BODYSTRUCTURE names parts by index; an index whose name differs is not that file.
+    return [found[int(a.ref)][1] if a.ref.isdigit() and int(a.ref) < len(found) and found[int(a.ref)][0] == a.name
+            else None for a in attachments]

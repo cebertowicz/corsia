@@ -134,15 +134,15 @@ function signinOf(body: Record<string, unknown> | null, accountId: string): Sign
 }
 
 /**
- * The account a sign-in runs on: the vendor's own added account that is still signed out, else
- * a new one. The built-in Default is never used; it keeps the person's CLI login.
+ * The account a sign-in runs on: the vendor's account that is still signed out (the Default
+ * included), else a new one.
  */
 export async function accountToSignIn(t: string, provider: string, name: string): Promise<string> {
 	const listed = await fetch(`/api/vendor-accounts?provider=${encodeURIComponent(provider)}`, { headers: headers(t) });
 	if (listed.ok) {
 		const body = await listed.json();
-		const reusable = (body?.accounts ?? []).find((account: { is_default: boolean; state: string }) =>
-			!account.is_default && account.state === 'signed_out');
+		const reusable = (body?.accounts ?? []).find((account: { state: string }) =>
+			account.state === 'signed_out');
 		if (reusable) return reusable.id;
 	}
 	const added = await fetch('/api/vendor-accounts', {

@@ -16,28 +16,40 @@ const load = async (name) => import(pathToFileURL(require.resolve(name)).href);
 const header = (source) => `Generated from frontend/src/lib/update/shellEntry.ts by desktop/scripts/gen-shell-update.mjs. Do not edit.${source}`;
 
 export async function buildShellUpdate() {
-	const { build } = await load('vite');
-	const { svelte } = await load('@sveltejs/vite-plugin-svelte');
-	const result = await build({
-		root: frontend,
-		configFile: false,
-		logLevel: 'silent',
-		mode: 'production',
-		plugins: [svelte({ configFile: path.join(frontend, 'svelte.config.js') })],
-		resolve: { alias: { $lib: path.join(frontend, 'src/lib') }, conditions: ['browser'] },
-		define: { 'process.env.NODE_ENV': '"production"' },
-		build: {
-			write: false,
-			cssCodeSplit: false,
-			lib: { entry: path.join(frontend, 'src/lib/update/shellEntry.ts'), formats: ['iife'], name: 'corsiaUpdateScreen', fileName: () => 'update-screen.js' },
-		},
-	});
+	const previousNodeEnv = process.env.NODE_ENV;
+	process.env.NODE_ENV = 'production';
+	let result;
+	try {
+		const { build } = await load('vite');
+		const { svelte } = await load('@sveltejs/vite-plugin-svelte');
+		result = await build({
+			root: frontend,
+			configFile: false,
+			logLevel: 'silent',
+			mode: 'production',
+			plugins: [svelte({ configFile: path.join(frontend, 'svelte.config.js'), compilerOptions: { rootDir: frontend, dev: false } })],
+			resolve: { alias: { $lib: path.join(frontend, 'src/lib') }, conditions: ['browser'] },
+			define: { 'process.env.NODE_ENV': '"production"' },
+			build: {
+				write: false,
+				cssCodeSplit: false,
+				lib: { entry: path.join(frontend, 'src/lib/update/shellEntry.ts'), formats: ['iife'], name: 'corsiaUpdateScreen', fileName: () => 'update-screen.js' },
+			},
+		});
+	} finally {
+		if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+		else process.env.NODE_ENV = previousNodeEnv;
+	}
 	const output = (Array.isArray(result) ? result : [result]).flatMap((entry) => entry.output);
 	const script = output.find((file) => file.type === 'chunk');
 	const style = output.find((file) => file.type === 'asset' && file.fileName.endsWith('.css'));
 	if (!script || !style) throw new Error('the shell update screen build produced no script or no stylesheet');
+	// Svelte emits this whitespace-character list as a multiline template literal.
+	// Escape its space and tab so the generated source has no trailing whitespace;
+	// the template's cooked value is unchanged.
+	const code = script.code.replace('[...` \t\n\\r\\f \\v\\uFEFF`]', '[...`\\x20\\t\n\\r\\f \\v\\uFEFF`]');
 	return {
-		'update-screen.js': `// ${header('')}\n${script.code}`,
+		'update-screen.js': `// ${header('')}\n${code}`,
 		'update-screen.css': `/* ${header('')} */\n${typeof style.source === 'string' ? style.source : Buffer.from(style.source).toString('utf8')}`,
 	};
 }

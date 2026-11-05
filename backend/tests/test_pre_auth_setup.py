@@ -305,6 +305,15 @@ def test_first_account_accepts_the_required_data_owner_name(client, monkeypatch)
     assert [user["id"] for user in accounts.list_users()] == ["legacy-owner"]
 
 
+@pytest.mark.parametrize(("region", "expected"), [("DE", False), ("NO", False), ("GB", True), ("US", True), (None, True)])
+def test_status_starts_usage_sharing_from_the_region_default(client, monkeypatch, region, expected):
+    import infra.settings as settings
+
+    monkeypatch.setattr(setup_api, "_setup_status", setup_api._setup_status)
+    monkeypatch.setattr(settings, "os_region", lambda: region)
+    assert client.get("/api/setup/status", headers=LOOPBACK_HEADERS).json()["usage_sharing_default"] is expected
+
+
 def test_status_names_the_data_owner_only_when_there_is_exactly_one(client, monkeypatch):
     monkeypatch.setattr(setup_api, "_setup_status", setup_api._setup_status)
     assert client.get("/api/setup/status", headers=LOOPBACK_HEADERS).json()["required_username"] is None
@@ -409,29 +418,30 @@ def test_status_has_a_stable_below_minimum_ram_variant(monkeypatch, tmp_path):
         ({"claude-code": "ready", "codex": "ready"}, "Claude Code"),
     ],
 )
-def test_status_names_a_ready_cli_source_from_the_stored_check(monkeypatch, states, expected):
-    from connections import models as connection_models
+def test_status_names_a_ready_cli_source_from_its_accounts(monkeypatch, states, expected):
     from connections import source_state
 
-    monkeypatch.setattr(connection_models, "get_connection", lambda provider: {"provider": provider})
-    monkeypatch.setattr(source_state, "row_state", lambda row: {"state": states.get(row["provider"], "not_installed")})
+    monkeypatch.setattr(source_state, "harness_state",
+                        lambda provider: {"state": states.get(provider, "not_installed"), "checked_at": None})
     assert setup_api._ready_ai() == expected
 
 
 @pytest.mark.parametrize(
-    ("checked", "expected"),
+    ("views", "expected"),
     [
-        ({}, True),
-        ({"claude-code": "t1"}, True),
-        ({"claude-code": "t1", "codex": "t2"}, False),
+        ({}, False),
+        ({"claude-code": ("unverified", None)}, True),
+        ({"claude-code": ("unverified", "t1"), "codex": ("ready", "t2")}, False),
     ],
 )
-def test_status_says_the_install_check_is_pending_until_both_tools_have_a_result(monkeypatch, checked, expected):
-    from connections import models as connection_models
+def test_status_says_the_check_is_pending_while_a_signed_in_account_is_unchecked(monkeypatch, views, expected):
     from connections import source_state
 
-    monkeypatch.setattr(connection_models, "get_connection", lambda provider: {"provider": provider})
-    monkeypatch.setattr(source_state, "row_state", lambda row: {"checked_at": checked.get(row["provider"])})
+    def view(provider):
+        state, checked_at = views.get(provider, ("needs_auth", None))
+        return {"state": state, "checked_at": checked_at}
+
+    monkeypatch.setattr(source_state, "harness_state", view)
     assert setup_api._ai_check_pending() is expected
 
 
@@ -487,7 +497,7 @@ def test_welcome_picks_then_get_started_downloads_that_model_through_the_setup_r
         "download_size_bytes": row["download_bytes"], "download_size_gb": round(row["download_bytes"] / 1000**3, 1),
         "context_window": 262_144, "quantization_bits": row["level"], "relative_speed": row["relative_speed"],
         "resident_bytes": row["resident_bytes"],
-        "smarts_level": row["smarts_level"], "tokens_per_second": row["tokens_per_second"],
+        "smarts_level": row["smarts_level"], "tokens_per_second": row["tokens_per_second"], "smarts": row["smarts"],
     }}
     # Welcome only picked; nothing downloaded and nothing was written to oMLX.
     assert mac.downloads == [] and mac.omlx.puts() == []

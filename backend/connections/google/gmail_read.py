@@ -8,12 +8,18 @@ from __future__ import annotations
 import asyncio
 import base64
 import html
+import logging
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 from connections.google import client
 from connections.google.email_gmail import GMAIL
+from connections.mail.received_attachments import Attachment
+
+log = logging.getLogger(__name__)
 
 API = f"{GMAIL}/messages"
 MAX_RESULTS = 25
@@ -33,6 +39,7 @@ class Message:
     thread_id: str
     headers: dict[str, str] = field(default_factory=dict)
     body: str = ""
+    attachments: tuple[Attachment, ...] = ()
 
 
 def check_message_id(value: object, _account_id: str | None = None) -> str:
@@ -79,9 +86,12 @@ async def search(account_id: str, query: str, max_results: int) -> list[Message]
     return list(await asyncio.gather(*(one(ref) for ref in refs)))
 
 
+def _decode_bytes(data: str) -> bytes:
+    return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4))
+
+
 def _decode(data: str) -> str:
-    padded = data + "=" * (-len(data) % 4)
-    return base64.urlsafe_b64decode(padded).decode("utf-8", "replace")
+    return _decode_bytes(data).decode("utf-8", "replace")
 
 
 def parts(payload: dict[str, Any], mime: str) -> list[str]:
@@ -102,6 +112,57 @@ def body_text(payload: dict[str, Any]) -> str:
     return _BLANKS.sub("\n\n", "\n".join(rendered)).strip()
 
 
+def _attached(part: dict[str, Any]) -> bool:
+    """A part with a filename is an attachment, as is one marked ``attachment``; an inline image has neither."""
+    if part.get("filename"):
+        return True
+    disposition = next((h.get("value", "") for h in part.get("headers") or []
+                        if str(h.get("name", "")).lower() == "content-disposition"), "")
+    return disposition.strip().lower().startswith("attachment")
+
+
+def attachments_of(payload: dict[str, Any]) -> tuple[Attachment, ...]:
+    """The message's attachments in order, each with Gmail's ``attachmentId`` or its inline bytes."""
+    found: list[Attachment] = []
+    _collect(payload, found)
+    return tuple(found)
+
+
+def _collect(part: dict[str, Any], found: list[Attachment]) -> None:
+    children = part.get("parts") or []
+    for child in children:
+        _collect(child, found)
+    if children or not _attached(part):
+        return
+    body = part.get("body") or {}
+    data = None
+    if not body.get("attachmentId"):
+        data = _decode_bytes(body["data"]) if body.get("data") else b""
+    size = len(data) if data is not None else int(body.get("size") or 0)
+    found.append(Attachment(str(part.get("filename") or ""), str(part.get("mimeType") or ""), size,
+                            str(body.get("attachmentId") or ""), data))
+
+
+async def attachment_bytes(account_id: str, message_id: str, attachments: Sequence[Attachment]) -> list[bytes | None]:
+    """Each attachment's bytes (None for one Gmail would not give), from the message just read."""
+    mid = check_message_id(message_id)
+    blobs: list[bytes | None] = []
+    for item in attachments:
+        if item.data is not None:
+            blobs.append(item.data)
+            continue
+        try:
+            got = await client.request_json(
+                "GET", f"{API}/{mid}/attachments/{quote(item.ref, safe='')}", account_id=account_id,
+                params={"fields": "data"},
+            )
+            blobs.append(_decode_bytes(got["data"]))
+        except Exception:  # noqa: BLE001 - this one is reported in its own note
+            log.exception("Gmail attachment download failed")
+            blobs.append(None)
+    return blobs
+
+
 async def fetch(account_id: str, message_id: str) -> Message:
     """One message of one account, with its headers and decoded body."""
     mid = check_message_id(message_id)
@@ -110,4 +171,5 @@ async def fetch(account_id: str, message_id: str) -> Message:
         params={"format": "full", "fields": "id,threadId,payload"},
     )
     payload = data.get("payload") or {}
-    return Message(mid, str(data.get("threadId") or ""), headers_from_payload(payload), body_text(payload))
+    return Message(mid, str(data.get("threadId") or ""), headers_from_payload(payload), body_text(payload),
+                   attachments_of(payload))

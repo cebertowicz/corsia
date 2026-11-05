@@ -141,6 +141,21 @@ async def test_foreground_spawn_owns_a_new_process_group_and_mode_0600_log(
     assert process_owner.live_count() == 0
 
 
+async def test_an_empty_argument_is_passed_and_only_an_empty_program_is_refused(process_owner) -> None:
+    from host_access.processes import ProcessOwnerError
+
+    # An empty value is a real argument (bwrap's ``--setenv NAME ''`` for the locked Git helper).
+    result = await process_owner.spawn(
+        [sys.executable, "-c", "import sys; print(repr(sys.argv[1]))", ""],
+        thread_id="thread-a", turn_id="turn-a", cwd=Path.cwd(), env=os.environ,
+        timeout_seconds=2.0, background=False,
+    )
+    assert result.stdout == b"''\n"
+    with pytest.raises(ProcessOwnerError, match="argv is invalid"):
+        await process_owner.spawn(["", "x"], thread_id="thread-a", turn_id="turn-a", cwd=Path.cwd(),
+                                  env=os.environ, timeout_seconds=2.0, background=False)
+
+
 async def test_foreground_spawn_uses_identity_bound_cwd_fd_after_path_replacement(
     process_owner,
     tmp_path,

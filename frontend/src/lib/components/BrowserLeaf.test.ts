@@ -91,6 +91,25 @@ afterEach(() => {
 });
 
 describe('BrowserLeaf drawing', () => {
+	it.each([[700, 1400], [1400, 500]])('sends the %ix%i pane on connect and after following a tab', (width, height) => {
+		vi.spyOn(HTMLCanvasElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, width, height));
+		const { socket } = render();
+		const appearances = () => socket.sent.filter(message => message.type === 'appearance');
+		expect(appearances()).toEqual([{ type: 'appearance', width, height, scale: 1, scheme: 'dark' }]);
+		socket.receive({ type: 'browser_target_changed' });
+		expect(appearances()).toEqual([
+			{ type: 'appearance', width, height, scale: 1, scheme: 'dark' },
+			{ type: 'appearance', width, height, scale: 1, scheme: 'dark' },
+		]);
+	});
+	it('resends the pane appearance after following another page target', () => {
+		const { socket } = render();
+		const appearances = () => socket.sent.filter(message => message.type === 'appearance');
+		expect(appearances()).toHaveLength(1);
+		socket.receive({ type: 'browser_target_changed' });
+		expect(appearances()).toHaveLength(2);
+		expect(appearances()[1]).toEqual(appearances()[0]);
+	});
 	it('clears the old letterbox when the page size changes inside an unchanged pane', async () => {
 		const { socket } = render();
 		await vi.waitFor(() => expect(drawing).toContain('draw 0,25,100,50'));
@@ -101,6 +120,62 @@ describe('BrowserLeaf drawing', () => {
 		socket.receive({ type: 'frame', metadata: { deviceWidth: 50, deviceHeight: 50 }, data: '' });
 		await vi.waitFor(() => expect(drawing).toEqual(['clear 0,0,100,100', 'draw 0,0,100,100']));
 	});
+});
+
+describe('BrowserLeaf clipboard shortcuts', () => {
+ it('keeps each pane failure until its own source clears, showing the newest', () => {
+  const { socket } = render();
+  socket.receive({ type: 'pane_error', source: 'fit', error: 'Fit failed' });
+  socket.receive({ type: 'pane_error', source: 'clipboard', error: 'Copy failed' });
+  socket.receive({ type: 'navigate_result', error: null });
+  flushSync();
+  expect(page().textContent).toContain('Copy failed');
+  socket.receive({ type: 'pane_error', source: 'clipboard', error: null });
+  flushSync();
+  expect(page().textContent).toContain('Fit failed');
+  socket.receive({ type: 'pane_error', source: 'clipboard', error: 'Copy failed again' });
+  socket.receive({ type: 'pane_error', source: 'fit', error: null });
+  flushSync();
+  expect(page().textContent).toContain('Copy failed again');
+  socket.receive({ type: 'pane_error', source: 'clipboard', error: null });
+  flushSync();
+  expect(page().textContent).not.toContain('Copy failed again');
+ });
+ it('offers undo when a cut fails', async () => {
+  vi.stubGlobal('ClipboardItem', class { constructor(public data: Record<string, Promise<Blob>>) {} });
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write: vi.fn(async (items: { data: Record<string, Promise<Blob>> }[]) => { await items[0].data['text/plain']; }), readText: vi.fn() } });
+  const { canvas, socket } = render();
+  canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'x', code: 'KeyX', ctrlKey: true, bubbles: true, cancelable: true }));
+  socket.receive({ type: 'clipboard_selection', id: 1, error: 'Copy failed' });
+  await vi.waitFor(() => expect(page().textContent).toContain('Undo'));
+  const undo = [...page().querySelectorAll('button')].find(button => button.textContent?.trim() === 'Undo');
+  undo?.click();
+  expect(socket.sent).toContainEqual({ type: 'clipboard_undo' });
+  socket.receive({ type: 'pane_error', source: 'clipboard', error: 'Paste failed' });
+  flushSync();
+  expect(page().textContent).not.toContain('Undo');
+ });
+ it('copies the selected page text to the host clipboard', async () => {
+  let written: Promise<Blob> | undefined;
+  const write = vi.fn(async (items: { data: Record<string, Promise<Blob>> }[]) => { written = items[0].data['text/plain']; await written; });
+  vi.stubGlobal('ClipboardItem', class { constructor(public data: Record<string, Promise<Blob>>) {} });
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write, readText: vi.fn() } });
+  const { canvas, socket } = render();
+  canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', code: 'KeyC', ctrlKey: true, bubbles: true, cancelable: true }));
+  expect(socket.sent).toContainEqual({ type: 'clipboard_selection', id: 1, cut: false });
+  socket.receive({ type: 'clipboard_selection', id: 1, text: 'page selection' });
+  await vi.waitFor(() => expect(written).toBeDefined());
+  expect(await (await written!).text()).toBe('page selection');
+ });
+ it('uses the host clipboard for paste and forwards select-all to the page', async () => {
+  vi.stubGlobal('ClipboardItem', class { constructor(public data: Record<string, Promise<Blob>>) {} });
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { write: vi.fn(), readText: vi.fn().mockResolvedValue('host text') } });
+  const { canvas, socket } = render();
+  canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'v', code: 'KeyV', ctrlKey: true, bubbles: true, cancelable: true }));
+  await vi.waitFor(() => expect(socket.sent).toContainEqual({ type: 'clipboard_paste', text: 'host text' }));
+  canvas.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', ctrlKey: true, bubbles: true, cancelable: true }));
+  expect(socket.sent).toContainEqual(expect.objectContaining({ type: 'input_keyboard', key: 'a', modifiers: 2 }));
+ });
 });
 
 describe('BrowserLeaf navigation metadata', () => {

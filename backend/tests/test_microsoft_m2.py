@@ -311,15 +311,13 @@ async def test_microsoft_search_uses_persisted_screen_to_limit_headers(
 
 
 @pytest.mark.asyncio
-async def test_unscreened_message_withholds_provider_body(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_unscreened_message_returns_marked_body(monkeypatch: pytest.MonkeyPatch) -> None:
     async def account(_kwargs: dict[str, Any]) -> str: return "m"
     async def fetch(_account: str, _message: object) -> mail.Message: return mail.Message("id", "thread", {}, "provider secret")
-    class Screen: flagged = False; clean = False
-    async def screen(*_args: object) -> Screen: return Screen()
+    async def screen(*_args: object): return actions.email_screen.Screen("failed", reason="unreadable")
     monkeypatch.setattr(actions, "_account", account); monkeypatch.setattr(actions.mail, "fetch", fetch); monkeypatch.setattr(actions.email_screen, "screen_message", screen)
-    result = await actions.MicrosoftMailReadTool().execute(_thread_id="t", account_id="m", message_id="id")
-    assert actions.UNSCREENED in result and "provider secret" not in result
-
+    result = json.loads(await actions.MicrosoftMailReadTool().execute(_thread_id="t", account_id="m", message_id="id"))
+    assert "unreadable" in result["screen_notice"] and "provider secret" in result["body"]
 
 @pytest.mark.asyncio
 async def test_poller_initializes_then_advances_cursor(isolated_db, monkeypatch: pytest.MonkeyPatch) -> None:

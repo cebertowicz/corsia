@@ -13,16 +13,21 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _row_to_dict(row) -> dict | None:
-    return dict(row) if row else None
+def _projected(rows, db) -> list[dict]:
+    """Read Claude Code and Codex rows through what signed-in accounts list now."""
+    from llm.harness_catalog import project_stored_rows
+
+    try:
+        return project_stored_rows([row for row in rows if row], db=db)
+    finally:
+        db.close()
 
 
 def get_model(model_id: str) -> dict | None:
     """Look up a model by its short ID (e.g. 'claude-haiku')."""
     db = get_db()
     row = db.execute("SELECT * FROM models WHERE id = ?", (model_id,)).fetchone()
-    db.close()
-    return _row_to_dict(row)
+    return next(iter(_projected([row], db)), None)
 
 
 def get_model_by_litellm(litellm_model: str) -> dict | None:
@@ -48,9 +53,7 @@ def get_model_by_litellm(litellm_model: str) -> dict | None:
                     "SELECT * FROM models WHERE provider = ? AND provider_model_id = ? AND available = 1",
                     (provider, provider_model_id),
                 ).fetchone()
-
-    db.close()
-    return _row_to_dict(row)
+    return next(iter(_projected([row], db)), None)
 
 
 def list_models(
@@ -64,8 +67,6 @@ def list_models(
     params: list = []
     if not include_disabled:
         clauses.append("enabled = 1")
-    if not include_unavailable:
-        clauses.append("available = 1")
     if provider:
         clauses.append("provider = ?")
         params.append(provider)
@@ -77,8 +78,7 @@ def list_models(
     rows = db.execute(
         f"SELECT * FROM models{where} ORDER BY provider, display_name", params
     ).fetchall()
-    db.close()
-    return [dict(r) for r in rows]
+    return [row for row in _projected(rows, db) if include_unavailable or row["available"]]
 
 
 def get_selectable_models() -> list[dict]:
@@ -103,9 +103,6 @@ def get_model_status_catalog_rows() -> list[dict]:
           END,
           CASE WHEN harness = 'native' THEN provider END,
           CASE WHEN harness = 'native' THEN display_name END,
-          CASE WHEN harness != 'native'
-            THEN COALESCE(json_extract(metadata_json, '$.discovery_order'), 2147483647)
-          END,
           display_name,
           id
         """
@@ -116,13 +113,8 @@ def get_model_status_catalog_rows() -> list[dict]:
 
 def is_valid_model_choice(litellm_model: str) -> bool:
     """Check if a litellm model string is a valid selection (enabled + available)."""
-    db = get_db()
-    row = db.execute(
-        "SELECT id FROM models WHERE litellm_model = ? AND enabled = 1 AND available = 1",
-        (litellm_model,),
-    ).fetchone()
-    db.close()
-    return row is not None
+    row = get_model_by_litellm(litellm_model)
+    return bool(row and row["enabled"] and row["available"])
 
 
 def is_dispatchable_model(model: str | None) -> bool:

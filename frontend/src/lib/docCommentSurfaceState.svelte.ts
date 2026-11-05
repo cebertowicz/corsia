@@ -1,6 +1,7 @@
 import { EditorView } from '@codemirror/view';
 import { Transaction } from '@codemirror/state';
 import { get } from 'svelte/store';
+import { tick } from 'svelte';
 import type { Anchor as PopoverAnchor } from '$lib/components/ui/Popover.svelte';
 import { cancelCommentCapture } from '$lib/stores/commentDraft';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
@@ -8,7 +9,7 @@ import { focusedDocComment } from '$lib/stores/docCommentFocus';
 /** What a card is anchored to; the popover owns the union. */
 export type CommentAnchor = NonNullable<PopoverAnchor>;
 
-export type CommentSurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string } | { kind: 'list' } | null;
+export type CommentSurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string; ids?: string[] } | { kind: 'list' } | null;
 
 /**
  * Return focus to the document's editor. CodeMirror's own focus() re-applies its selection without scrolling;
@@ -30,7 +31,13 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 	let anchor = $state<CommentAnchor | null>(null);
 	let restoreFocus = $state<() => void>(restoreEditor);
 	// Derived solely from createCommentSheet's modal lifecycle; the viewer uses it to hide its sibling selection control.
-	let sheetModalOpen = $state(false);
+	let sheetUp = $state(false);
+	function restoreReplyFocus(root: () => HTMLElement | undefined) {
+		restoreFocus = () => void tick().then(() => {
+			const button = root()?.querySelector<HTMLElement>('[data-doc-reply-chip] button');
+			if (button) button.focus({ preventScroll: true }); else restoreEditor();
+		});
+	}
 	/** The suggestion under the pointer: it and its card take the focus tint without a click. */
 	let hovered = $state<string | null>(null);
 	function close() {
@@ -49,6 +56,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		if (state?.kind === 'list' && !viaSuggestion) return false;
 		const changed = get(focusedDocComment) !== id;
 		if (state?.kind === 'list') { focusedDocComment.set(id); return changed; }
+		if (state?.kind === 'thread' && state.ids?.includes(id)) { state = { ...state, id }; focusedDocComment.set(id); return changed; }
 		focusedDocComment.set(id);
 		state = { kind: 'thread', id };
 		anchor = rect;
@@ -56,10 +64,21 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		return changed;
 	}
 	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) {
-		state = ids.length === 1 ? { kind: 'thread', id: ids[0] } : { kind: 'list' };
-		if (ids.length === 1) focusedDocComment.set(ids[0]);
+		state = ids.length === 1 ? { kind: 'thread', id: ids[0] } : { kind: 'thread', id: ids[0], ids };
+		focusedDocComment.set(ids[0]);
 		anchor = reading ?? opener;
 		restoreFocus = () => opener.focus();
+	}
+	function selectMarkerThread(id: string) {
+		if (state?.kind === 'thread' && state.ids?.includes(id)) state = { ...state, id };
+	}
+	function focusRemainingThread(ids: string[]) {
+		if (state?.kind !== 'thread' || !state.ids) return;
+		const after = state.ids.indexOf(state.id) + 1;
+		const id = [...state.ids.slice(after), ...state.ids.slice(0, after)].find((candidate) => ids.includes(candidate));
+		if (!id) { close(); return; }
+		state = { ...state, id };
+		focusedDocComment.set(id);
 	}
 	function openList(opener: HTMLElement) {
 		if (state?.kind === 'list') { close(); return; }
@@ -71,8 +90,8 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		get state() { return state; }, set state(value: CommentSurfaceState) { state = value; },
 		get anchor() { return anchor; }, set anchor(value: CommentAnchor | null) { anchor = value; },
 		get restoreFocus() { return restoreFocus; },
-		get sheetModalOpen() { return sheetModalOpen; }, set sheetModalOpen(value: boolean) { sheetModalOpen = value; },
+		get sheetUp() { return sheetUp; }, set sheetUp(value: boolean) { sheetUp = value; },
 		get hovered() { return hovered; }, hover(id: string | null) { hovered = id; },
-		close, openDraft, focusComment, focusMarker, openList,
+		close, openDraft, focusComment, focusMarker, selectMarkerThread, focusRemainingThread, openList, restoreReplyFocus,
 	};
 }

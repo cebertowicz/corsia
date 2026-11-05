@@ -28,6 +28,14 @@ describe('canvas comment order and navigation', () => {
 		expect(canvasFocusedCommentScrollTarget(saved, rows, text, 'missing', true)).toBeNull();
 		expect(canvasCommentScrollTarget(rows, text, 'missing', true, 'navigation')).toBeNull();
 	});
+	it('leaves image-region focus in the image while preserving explicit text fallback navigation', () => {
+		const text = '![image](image.jpg)';
+		const rows = [comment('pin', 0, text, { imageSrc: 'image.jpg', region: { x: 0.3, y: 0.4, w: 0, h: 0 }, regionNumber: 1 })];
+		expect(canvasFocusedCommentScrollTarget(null, rows, text, 'pin', false)).toBeNull();
+		const fallback = canvasCommentScrollTarget(rows, text, 'pin', false, 'navigation');
+		expect(fallback).toMatchObject({ from: 0, to: text.length, commentId: 'pin' });
+		expect(canvasFocusedCommentScrollTarget(fallback, rows, text, 'pin', false)).toBe(fallback);
+	});
 	it('keeps unanchored review and orphaned cards after located cards with stable ties', () => {
 		const rows = commentsInDocumentOrder([
 			comment('b', 0, 'text'), comment('review', -1, '', { review: true }), comment('a', 0, 'text'),

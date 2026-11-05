@@ -76,8 +76,9 @@
 	/* A count is decisive text: the sender may move to the next line, never shrink its wording. */
 	.sending-now > :global(.btn) { flex: none; min-width: max-content; width: max-content; }
 	/* The press shrink would pull the touch padding's last pixels off the button before the tap lands. */
-	.sending-now > :global(.btn:not(:disabled):active) { transform: none; }
-	@container doc-header (max-width: 32.5rem) {
+	.sending-now > :global(.btn:not(:disabled):active) { transform: none; background: var(--accent-wash); border-color: var(--accent-line); color: var(--accent-text, var(--accent)); }
+	/* The document header and image bar each provide the size container for their compact Send label. */
+	@container (max-width: 32.5rem) {
 		.sending-now > :global(.btn) { font-size: 0; }
 		.sending-now > :global(.btn)::before { content: attr(data-short); font-size: var(--text-footnote); }
 		/* Sending swaps the count for the spinner in place, so the tight row never gains width mid-send and never wraps or moves the document. */

@@ -44,6 +44,25 @@ describe('comment surface state', () => {
 		expect(surface.state).toEqual({ kind: 'thread', id: 's1' });
 	});
 
+	it('opens one or several marker threads and keeps the next when the focused thread is deleted', () => {
+		const surface = createCommentSurfaceState(() => {});
+		const opener = document.createElement('button');
+		surface.focusMarker(['a'], opener);
+		expect(surface.state).toEqual({ kind: 'thread', id: 'a' });
+		expect(get(focusedDocComment)).toBe('a');
+		surface.focusMarker(['a', 'b', 'c'], opener);
+		expect(surface.state).toEqual({ kind: 'thread', id: 'a', ids: ['a', 'b', 'c'] });
+		surface.focusRemainingThread(['b', 'c']);
+		expect(surface.state).toEqual({ kind: 'thread', id: 'b', ids: ['a', 'b', 'c'] });
+		expect(get(focusedDocComment)).toBe('b');
+		surface.focusComment('c', new DOMRect());
+		expect(surface.state).toEqual({ kind: 'thread', id: 'c', ids: ['a', 'b', 'c'] });
+		surface.focusRemainingThread(['a', 'b']);
+		expect(surface.state).toEqual({ kind: 'thread', id: 'a', ids: ['a', 'b', 'c'] });
+		surface.focusRemainingThread([]);
+		expect(surface.state).toBeNull();
+	});
+
 	it('tracks the hovered suggestion without moving focus', () => {
 		const surface = createCommentSurfaceState(() => {});
 		surface.hover('s1');

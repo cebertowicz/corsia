@@ -17,6 +17,9 @@ import connections.harness_process as harness_process
 import connections.harness_refresh as harness_refresh
 import connections.harness_usage_check as usage_checks
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {'claude-code': ('claude-code/reviewer',)}
+
 
 @pytest.fixture
 def harness_spawns(monkeypatch, isolated_db):

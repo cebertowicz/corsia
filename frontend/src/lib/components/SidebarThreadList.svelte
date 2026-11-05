@@ -322,7 +322,7 @@
 			<div
 				class="scope-pane"
 				role="list"
-				aria-label="Conversations"
+				aria-label="Chats"
 				in:fly={{ y: 6, duration: 180, easing: cubicOut }}
 				use:win.attachPane
 				onfocusin={win.onFocusIn}
@@ -353,7 +353,7 @@
 				{/each}
 			</div>
 		{:else}
-		<div class="scope-pane" role="list" aria-label="Conversations" in:fly={{ y: 6, duration: 180, easing: cubicOut }}>
+		<div class="scope-pane" role="list" aria-label="Chats" in:fly={{ y: 6, duration: 180, easing: cubicOut }}>
 			{#if pinnedThreads.length > 0}
 				<div class="list-section-label" role="presentation">Pinned</div>
 				{#each pinnedThreads as thread (thread.id)}
@@ -367,7 +367,7 @@
 				{/each}
 			{/each}
 			{#if scopedThreads.length === 0}
-				<div class="empty-threads">No conversations here yet</div>
+				<div class="empty-threads">No chats here</div>
 			{/if}
 		</div>
 		{/if}

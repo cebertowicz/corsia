@@ -46,6 +46,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from infra.backend_git import git_argv
 from infra.config import WORKSPACE
 from infra.product_events import emit_product_event
 from infra.project_repo_policy import (
@@ -236,7 +237,7 @@ def _run_git(
     repo_root: Path, args: list[str], timeout: float,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *args],
+        git_argv(*args),
         cwd=repo_root,
         capture_output=True,
         text=True,

@@ -38,9 +38,10 @@ from pathlib import Path
 
 from loguru import logger
 
-from infra.chat_comment_answers import delete_thread_chat_comment_answers
+from infra.chat_comment_answers import delete_thread_chat_comment_index_rows
 from infra.checkpoint_entry_index import delete_thread_checkpoints
 from infra.continuity_store import delete_thread_continuity
+from infra.thread_history_cleanup import delete_thread_history
 from infra.presence import delete_thread_presence
 from infra.thread_updates import delete_thread_updates
 from infra.database import TransactionOwnershipError, write_transaction
@@ -54,6 +55,7 @@ from infra.constants import (
 from thread.runtime_boundary import bump_history_epoch
 from infra.thread_driver import delete_thread_turns
 from infra.thread_inputs import invalidate_markers_for_archive
+from core.thread_lifecycle_paths import thread_dir as _thread_dir
 from core.thread_lifecycle_plans import (
     announce_lifecycle as _announce_lifecycle,
     wake_parent_of_ended_child as _wake_parent_of_ended_child,
@@ -126,22 +128,6 @@ def _row_get(row, key, default=None):
     except (IndexError, KeyError):
         return default
     return default
-
-
-def _thread_dir(db, sid: str, project_id: str | None, workspace: Path) -> Path | None:
-    """Resolve ``.threads/{id}`` through the public Workspace layout owner."""
-    from core.workspace_layout import (
-        resolve_project_root,
-        resolve_thread_root,
-        resolve_workspace_root,
-    )
-
-    scope = (
-        resolve_project_root(workspace, project_id, db=db)
-        if project_id
-        else resolve_workspace_root(workspace)
-    )
-    return resolve_thread_root(scope, sid) if scope is not None else None
 
 
 # --- physical effects -------------------------------------------------------
@@ -305,14 +291,14 @@ def _apply_purge(db, sid: str, now: datetime) -> None:
     _wake_parent_of_ended_child(db, sid, reason="purged")
     delete_thread_checkpoints(db, sid)
     delete_thread_continuity(db, sid)
-    delete_thread_chat_comment_answers(db, sid)
+    delete_thread_chat_comment_index_rows(db, sid)
     # One rule: held input dies exactly when the transcript dies, never
     # otherwise. Held input rides the reactor's tables, so its one teardown
     # door drops all of them; nothing survives a purge a reversible archive keeps.
     delete_thread_turns(db, sid)
     delete_thread_presence(db, sid)
     delete_thread_updates(db, sid)
-    db.execute("DELETE FROM messages WHERE thread_id = ?", (sid,))
+    delete_thread_history(db, sid)
     bump_history_epoch(db, sid)
     db.execute(
         "UPDATE threads SET lifecycle_state = 'purged', purged_at = ? WHERE id = ?",

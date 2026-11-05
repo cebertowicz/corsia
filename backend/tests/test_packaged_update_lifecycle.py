@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 
 from automation import restart, restart_startup, self_restart
+from automation.self_restart import record_update_log
 from auth_fixtures import OWNER_TOKEN
 from infra.database import get_db
 from infra.db_async import run_in_db
@@ -146,6 +147,74 @@ def test_interrupted_confirmation_settles_without_holding(
     assert row["status"] == "failed" and row["failure_code"] == code
     assert not self_restart.restart_holds_new_work()
     assert self_restart.previous_version(row) == previous
+
+
+async def test_pre_stop_refusal_fails_through_real_shell_and_http(isolated_db, tmp_path, monkeypatch):
+    import os
+    import socket
+    from pathlib import Path
+
+    import uvicorn
+    from api.drain import router
+    from api.restart_shell import spawn_restart_lifecycle
+
+    operation_id = await run_in_db(operation_in, "draining")
+    app = FastAPI()
+    app.include_router(router)
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    port = listener.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
+    serving = asyncio.create_task(server.serve(sockets=[listener]))
+    root = Path(__file__).resolve().parents[2]
+    corsia_text = (root / "scripts/corsia").read_text()
+    fail = "fail() {" + corsia_text.split("fail() {", 1)[1].split("\n}", 1)[0] + "\n}"
+    app_mode = root / "scripts/corsia.d/app_mode.sh"
+    runtime = root / "scripts/corsia.d/runtime.sh"
+    from infra import config
+    monkeypatch.setattr(config, "LOGS_DIR", tmp_path)
+    script = tmp_path / "corsia"
+    script.write_text(f'''#!/bin/bash
+SCRIPT_DIR=/disposable
+source "{app_mode}"
+source "{runtime}"
+require_owned_service_definition() {{ :; }}
+service_is_loaded() {{ return 1; }}
+require_no_unmanaged_backend() {{ :; }}
+app_mode_hold_update_lock() {{ :; }}
+is_backend_running() {{ return 1; }}
+RED=""; NC=""
+{fail}
+FORCE=false
+BACKEND_PORT={port}
+app_mode_swap_staged_update /disposable/staged
+''')
+    script.chmod(0o755)
+    try:
+        log_path = tmp_path / f"update-{operation_id}.log"
+        with log_path.open("w") as log:
+            assert await run_in_db(record_update_log, operation_id, str(log_path))
+            child = spawn_restart_lifecycle(
+                script, ["restart-prepared"],
+                {**os.environ, "CORSIA_RESTART_BACKEND_PORT": str(port)},
+                operation_id, log, caller_credential=OWNER_TOKEN,
+            )
+            assert await asyncio.to_thread(child.wait, 10) == 1
+    finally:
+        server.should_exit = True
+        await serving
+        listener.close()
+    assert "Safe update refused" in log_path.read_text()
+    assert "Lifecycle drain cleanup HTTP 200" in log_path.read_text()
+    row = await run_in_db(self_restart.operation_by_id, operation_id)
+    assert row["status"] == "failed"
+    assert row["failure_code"] == "update_refused"
+    assert "current backend is not healthy" in row["error"]
+    detail = json.loads(row["failure_detail"])
+    assert detail["backend_healthy"] is False
+    assert detail["log_path"] == str(log_path)
+    assert not self_restart.restart_holds_new_work()
 
 
 async def test_failure_report_releases_before_bundle_rollback(isolated_db, monkeypatch):

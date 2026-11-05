@@ -221,7 +221,7 @@ def _discover(ctx, monkeypatch, *, during_fetch=None, fail=None):
             during_fetch()
         if fail:
             raise fail
-        return ["model-a"]
+        return {"model-a": None}
 
     monkeypatch.setattr(ep, "fetch_external_models", fetch)
     return asyncio.run(ep.discover_external_models(ctx.sid))

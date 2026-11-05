@@ -88,7 +88,7 @@ def snapshot(request, isolated_db, monkeypatch):
                             lambda _sid: (server, "http://fixture/v1", None, caps))
 
         async def fetch(*_args):
-            return list(model_ids)
+            return dict.fromkeys(model_ids)
 
         monkeypatch.setattr(module, "fetch_external_models", fetch)
         discover = module.discover_external_models

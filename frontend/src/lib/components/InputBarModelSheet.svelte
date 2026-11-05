@@ -54,8 +54,8 @@
 		group.state === 'ready'
 			? open ? group.rows : []
 			: open ? group.blocked : group.blocked.filter((model) => modelMatchesId(model, sel.modelId));
-	const pendingModelId = $derived(activeThread?.pending_model ?? null);
-	const pendingStatus = $derived(activeThread?.switch_status ?? null);
+	const pendingModelId = $derived(sel.switching?.pending_model ?? null);
+	const pendingStatus = $derived(sel.switching?.switch_status ?? null);
 
 	// What each account has left is the account's own state, read once when the picker opens
 	// over a catalog with account-run rows; a catalog of local or external models has none.
@@ -255,7 +255,7 @@
 										{/if}
 										{#if modelMatchesId(model, pendingModelId)}
 											{#if pendingStatus === 'failed'}
-												<span class="switch-marker failed" title={activeThread?.switch_error ?? undefined}>Switch failed</span>
+												<span class="switch-marker failed" title={sel.switching?.switch_error ?? undefined}>Switch failed</span>
 											{:else}
 												<span class="switching-slot" in:inlineSlot out:inlineSlot><SwitchingIcon ariaLabel="Switching model" /></span>
 											{/if}

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from infra.database import get_db, write_transaction
 from infra.devices_setting import DEVICE_SETTING_KEY, parse_devices_setting
+from infra.os_region import EU_EEA_REGIONS, os_region
 
 log = logging.getLogger(__name__)
 
@@ -92,6 +93,45 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+#: The person's usage-sharing choice, made in setup's account step or Settings.
+#: It gates only a future upload; local usage recording never reads it.
+USAGE_SHARING_KEY = "usage_sharing"
+
+
+def usage_sharing_default() -> bool:
+    """Off when this computer's region is in the EU or EEA, on everywhere else, unknown included.
+
+    Only an install with no saved choice reads it.
+    """
+    return os_region() not in EU_EEA_REGIONS
+
+
+def get_usage_sharing(*, db: sqlite3.Connection | None = None) -> bool:
+    """The saved choice, or the default when none is saved.
+
+    A saved value that can't be read counts as off and is logged, so damage to a
+    person's "off" never reads as consent.
+    """
+    db = db if db is not None else get_db()
+    row = db.execute("SELECT value FROM settings WHERE key = ?", (USAGE_SHARING_KEY,)).fetchone()
+    if row is None:
+        return usage_sharing_default()
+    try:
+        saved = json.loads(row["value"])
+    except (json.JSONDecodeError, TypeError):
+        saved = None
+    enabled = saved.get("enabled") if isinstance(saved, dict) else None
+    if isinstance(enabled, bool):
+        return enabled
+    log.warning("usage_sharing: saved value is unreadable; treating it as off")
+    return False
+
+
+def save_usage_sharing(enabled: bool, *, db: sqlite3.Connection | None = None) -> None:
+    """Save the person's choice."""
+    set_setting(USAGE_SHARING_KEY, {"enabled": enabled}, db=db)
+
+
 def get_agent_defaults() -> dict:
     """Get agent default settings."""
     agents = get_setting("agents") or {}
@@ -101,6 +141,13 @@ def get_agent_defaults() -> dict:
 def get_host_access_auto_approve() -> bool:
     """Return whether reviewer-approved host-access leases activate automatically."""
     return get_agent_defaults().get("host_access_auto_approve") is True
+
+
+def default_host_access_auto_approve_on(db: sqlite3.Connection, *, fresh: bool) -> None:
+    """Turn Auto-approve on for a fresh install; a stored choice, on or off, is left as it is."""
+    defaults = (get_setting("agents", db=db) or {}).get("defaults", {})
+    if fresh and "host_access_auto_approve" not in defaults:
+        save_setting_merge("agents", {"defaults": {"host_access_auto_approve": True}}, db=db)
 
 
 def get_host_access_reviewer_fallback(*, db=None) -> bool:

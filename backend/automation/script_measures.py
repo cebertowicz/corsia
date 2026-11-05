@@ -42,6 +42,7 @@ def run_stamps(schedule: Schedule, report: RunReport) -> MeasureStamps:
 
     ref, version = report.workflow_stamp or (None, None)
     return MeasureStamps(
+        source="agent", provenance="agent_recorded",
         run_id=f"script:{schedule.id}:{report.run_id}", workflow_ref=ref, workflow_version=version,
         project_id=None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id,
         unversioned=bool((schedule.payload or {}).get("workflow")) and version is None,
@@ -62,7 +63,8 @@ def settle_measures(db: sqlite3.Connection, schedule: Schedule, report: RunRepor
     for measure in report.measures:
         admission = admit(
             db, owner_thread_id=schedule.thread_id, event_name=measure["event.name"],
-            attributes=measure.get("attributes", {}), project_id=stamps.project_id,
+            attributes=measure.get("attributes", {}), source=stamps.source, provenance=stamps.provenance,
+            project_id=stamps.project_id,
             run_id=stamps.run_id, workflow_ref=stamps.workflow_ref, workflow_version=stamps.workflow_version,
             ts=measure.get("time"),
         )

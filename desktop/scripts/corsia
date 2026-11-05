@@ -1,7 +1,17 @@
 #!/bin/sh
 set -eu
 
-resources="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"
+source_path="$0"
+while [ -L "$source_path" ]; do
+  source_dir="$(CDPATH= cd -- "$(dirname -- "$source_path")" && pwd -P)"
+  source_path="$(readlink "$source_path")"
+  case "$source_path" in /*) ;; *) source_path="$source_dir/$source_path" ;; esac
+done
+resources="$(CDPATH= cd -- "$(dirname -- "$source_path")/.." && pwd -P)"
+case "${1:-status}" in
+  init|setup|bind-host|remote-address|event|artifact|mcp) ;;
+  *) exec "$resources/scripts/corsia" "$@" ;;
+esac
 export PATH="$resources/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PYTHONNOUSERSITE=1
 export PYTHONDONTWRITEBYTECODE=1

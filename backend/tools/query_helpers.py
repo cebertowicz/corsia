@@ -6,6 +6,7 @@ from __future__ import annotations
 # definition lives with the index definitions in infra so that memory/ can
 # use it without importing back up into the tool layer.
 from infra.db_fts import fts5_escape
+from infra.thread_confinement import Reader, hidden_clause
 
 __all__ = ["fts5_escape"]
 
@@ -53,12 +54,14 @@ def search_messages_fts(
     thread_id: str | None = None,
     sender: str | None = None,
     limit: int = 20,
+    reader: Reader = Reader.agent(),
 ) -> list:
     """Search delivered messages by text and durable sender class."""
     sender_expression = _sender_expression()
     fts_query = fts5_escape(query)
-    filters = " AND m.delivery_state = 'delivered'"
-    params: list = [fts_query]
+    visible, identity = hidden_clause(reader, "t")
+    filters = f" AND m.delivery_state = 'delivered' AND {visible}"
+    params: list = [fts_query, *identity]
 
     if thread_id:
         filters += " AND m.thread_id = ?"
@@ -80,8 +83,8 @@ def search_messages_fts(
         )
         return db.execute(sql, params).fetchall()
     except Exception:
-        like_params: list = [f"%{query}%"]
-        like_filters = " AND m.delivery_state = 'delivered'"
+        like_params: list = [f"%{query}%", *identity]
+        like_filters = f" AND m.delivery_state = 'delivered' AND {visible}"
         if thread_id:
             like_filters += " AND m.thread_id = ?"
             like_params.append(thread_id)

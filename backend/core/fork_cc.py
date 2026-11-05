@@ -14,7 +14,7 @@ from history.types import HistoryBoundary
 from llm.resolution import ExecutionTarget
 from core import fork_cc_commands
 from subagents.cc_invocation import CONFINEMENT_NONE, ClaudeInvocation
-from subagents.cc_sessions import resolve_claude_dir
+
 from core.fork_runtime import ForkKind
 from core.fork_failures import ForkBinaryResolutionError
 from core.fork_types import (
@@ -60,8 +60,7 @@ def _identity_from_live(live: Any):
     claude_dir = getattr(live, "claude_dir", None) or getattr(
         session, "claude_dir", None
     )
-    # Only a Default-account process carries no root: admission binds every other.
-    transcript = _transcript_path(provider_id, claude_dir or resolve_claude_dir()) if provider_id else None
+    transcript = _transcript_path(provider_id, claude_dir) if provider_id and claude_dir else None
     if transcript is None:
         return None
     definitions = getattr(live, "tool_definitions", None)

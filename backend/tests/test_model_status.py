@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from vendor_account_fixtures import register_harness_rows
+
 
 def _catalog_row(**over):
     row = {
@@ -24,7 +26,7 @@ def _catalog_row(**over):
 
 
 @pytest.fixture
-def status_env(monkeypatch):
+def status_env(isolated_db, monkeypatch):
     """Wire the accessor's external inputs to controllable fakes."""
     from llm import catalog as model_catalog
     import llm.model_status as ms
@@ -33,7 +35,14 @@ def status_env(monkeypatch):
     loaded = {"srv-local": set()}
     rows: list[dict] = []
 
+    import llm.harness_catalog as harness_catalog
+
     monkeypatch.setattr(model_catalog, "get_model_status_catalog_rows", lambda: rows)
+    # The signed-in account lists each harness row a test sets, as that row describes it.
+    monkeypatch.setattr(harness_catalog, "account_rows", lambda **_kw: {
+        row["litellm_model"]: {"supports_reasoning": False, "last_error": None, **row}
+        for row in rows if row.get("harness") in ("claude-code", "codex")
+    })
     monkeypatch.setattr(ms, "_network_server_status", lambda *_a: dict(servers))
     monkeypatch.setattr(ms, "_loaded_model_ids_fn", lambda: (lambda sid: loaded.get(sid, set())))
     monkeypatch.setattr(ms, "_cloud_providers_active", lambda: {"anthropic"})
@@ -52,6 +61,7 @@ def status_env(monkeypatch):
     class Env:
         def set_rows(self, r):
             rows[:] = r
+            register_harness_rows([row for row in r if row.get("harness") in ("claude-code", "codex")])
 
         def set_loaded(self, sid, ids):
             loaded[sid] = set(ids)

@@ -32,7 +32,7 @@ async def test_newer_host_message_stops_then_new_draft_sends(make_host, monkeypa
                                    .replace(b"Noon on Friday?", b"New details"))
 
     async def screen(account, message):
-        return json.dumps({"subject": message.headers["subject"],
+        return json.dumps({"subject": message.headers["subject"], "screen": {"state": "clean"},
                            "body": f"<untrusted-email>{message.body}</untrusted-email>"})
 
     monkeypatch.setattr(mail_guard_runtime, "screened_message", screen)
@@ -92,7 +92,7 @@ async def test_host_same_second_new_arrival_is_shown_and_stops_send(make_host, m
     host.built.imap.messages[6] = (ORIGINAL.replace(b'<orig@example.com>', b'<new@example.com>')
                                    .replace(b'Noon on Friday?', b'New details'))
     async def screen(account, message):
-        return json.dumps({'subject': message.headers['subject'], 'body': message.body})
+        return json.dumps({'subject': message.headers['subject'], 'screen': {'state': 'clean'}, 'body': message.body})
     monkeypatch.setattr(mail_guard_runtime, 'screened_message', screen)
     result = await _send(host, saved)
     assert 'Not sent' in result and 'New details' in result

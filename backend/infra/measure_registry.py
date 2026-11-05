@@ -85,6 +85,8 @@ class DeclaredEvent:
     keep_days: int
     use: str = "record"
     since: dict[str, Any] | None = None
+    default_delivery: str = "owner"  # "none": rule 0 adds no owner target; only rules deliver it
+    event_class: str = "informational"  # "actionable": rule 0's delivery wakes the owner
 
 
 @dataclass(frozen=True)
@@ -172,6 +174,7 @@ def _declared(owner: str, spec: dict[str, Any]) -> DeclaredEvent:
     return DeclaredEvent(
         owner, {**_attribute_specs(attributes), **_STAMPED_SPECS},
         tuple(spec["dedupe"]), attributes, keep_days(spec), spec.get("use", "record"), spec.get("since"),
+        spec.get("default_delivery", "owner"), spec.get("event_class", "informational"),
     )
 
 
@@ -200,6 +203,22 @@ def _check_workflow_file(path: str, workflow: str, agent: str, workflows: Mappin
     folder = workflows[workflow].skill_dir
     if Path(path).resolve().parent != folder.resolve():
         raise ValueError(_NOT_BESIDE.format(workflow=workflow, folder=folder, path=path))
+
+
+def workflow_for_file(path: str, agent: str, workflows: Mapping[str, WorkflowOwner]) -> str | None:
+    """Resolve a synced file through the same live ownership and path checks as sync."""
+    try:
+        _check_agent_file(path, agent)
+        return None
+    except ValueError:
+        pass
+    for workflow in workflows:
+        try:
+            _check_workflow_file(path, workflow, agent, workflows)
+            return workflow
+        except ValueError:
+            continue
+    return None
 
 
 def namespace_refusal(namespace: str, holder: str, held: list[str]) -> str:
@@ -272,7 +291,7 @@ def _claim_namespace(connection: sqlite3.Connection, namespace: str, owner: str,
     return retire, taken
 
 
-def _attempt(db: sqlite3.Connection, owner: str, path: str, namespace: str, items: list[tuple[str, str, str]], sha: str) -> dict[str, Any]:
+def persist_declaration(db: sqlite3.Connection, owner: str, path: str, namespace: str, items: list[tuple[str, str, str]], sha: str, version_attr: str | None = None) -> dict[str, Any]:
     """Plan from one read outside the transaction, then write the finished rows in one short transaction."""
     now = datetime.now(timezone.utc).isoformat()
     latest = _latest(db.execute(_OWNER_ROWS, (owner,)))
@@ -281,6 +300,9 @@ def _attempt(db: sqlite3.Connection, owner: str, path: str, namespace: str, item
     with write_transaction(db, scope="measure_sync") as connection:
         retire, taken = _claim_namespace(connection, namespace, owner, held, now)
         connection.executemany(_INSERT, inserts + retire)
+        connection.execute("UPDATE measure_definitions SET version_attr=? "
+                           "WHERE owner_thread_id=? AND file_path=? AND version_attr IS NOT ?",
+                           (version_attr, owner, path, version_attr))
     result: dict[str, Any] = {"namespace": namespace, "items": changes}
     if taken:
         result["namespace_takeover"] = taken
@@ -310,11 +332,18 @@ def sync(
         _check_workflow_file(path, workflow, owner_thread_id, workflows or {})
     else:
         _check_agent_file(path, owner_thread_id)
+        for kind, name, spec in items:
+            if kind == 'kpi':
+                if spec['formula'] == 'rate_per_run':
+                    raise ValueError(f'kpi {name}: rate_per_run requires a workflow')
+                for field in ('num', 'den'):
+                    if 'builtin' in spec.get(field, {}):
+                        raise ValueError(f'kpi {name}: {field}.builtin requires a workflow')
     sha = hashlib.sha256(text.encode()).hexdigest()
     normalized = [(kind, name, json.dumps(spec, sort_keys=True, separators=(",", ":"))) for kind, name, spec in items]
     for attempt in (1, 2):
         try:
-            result = _attempt(db, owner_thread_id, path, namespace, normalized, sha)
+            result = persist_declaration(db, owner_thread_id, path, namespace, normalized, sha, data.get("version_attr"))
             break
         except sqlite3.IntegrityError:
             if attempt == 2:

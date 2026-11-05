@@ -13,6 +13,7 @@ import pytest
 
 from subagents.cc_runtime_helpers import CCWorkingDirMissing
 from tests.registry_helpers import artifact_rows_for_thread
+from tests.vendor_account_fixtures import point_default_home
 
 from tests.cc_main_mode_fixtures import (  # noqa: F401
     fake_claude_crash,
@@ -78,6 +79,8 @@ async def _feed_main(
 
     turn_id = kwargs.setdefault("turn_id", str(uuid.uuid4()))
     target = cc_target(model)
+    if kwargs.get("claude_dir"):
+        point_default_home("claude-code", kwargs["claude_dir"])
     admission = admit_input(
         thread_id,
         role="user",
@@ -128,6 +131,8 @@ async def _feed(
 
     turn_id = kwargs.setdefault("turn_id", str(uuid.uuid4()))
     target = cc_target(model)
+    if kwargs.get("claude_dir"):
+        point_default_home("claude-code", kwargs["claude_dir"])
     admission = admit_input(
         thread_id,
         role="user",
@@ -725,6 +730,7 @@ class TestModelSwitch:
         # Isolate attach lookup to this test's fixture home rather than the
         # developer's real ~/.claude.
         monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
+        point_default_home("claude-code", home)
         from connections import models as cm
         import subagents.cc_runtime as _rt
         _rt._default_broadcast  # noqa: B018
@@ -808,11 +814,11 @@ class TestAttachedMainResume:
 
 class TestCCSessionId:
     @pytest.mark.asyncio
-    async def test_spawn_main_passes_uuid_not_slug_to_cc(self, main_db, fake_claude):
+    async def test_spawn_main_passes_uuid_not_slug_to_cc(self, main_db, fake_claude, tmp_path):
         import uuid as _uuid
         import subagents.cc_runtime as rt
         await _feed_main("main-1", "hi", binary=fake_claude,
-                           claude_dir="/nonexistent", broadcast=lambda s, m: None)
+                           claude_dir=str(tmp_path / "claude"), broadcast=lambda s, m: None)
         cc_sid = rt._LIVE.get("main-1").session.session_id
         assert cc_sid != "main-1"
         assert str(_uuid.UUID(cc_sid)) == cc_sid
@@ -847,11 +853,11 @@ class TestMainWorkingDir:
             _main_working_dir("nope", main_db)
 
     @pytest.mark.asyncio
-    async def test_spawned_main_chat_runs_in_workspace(self, main_db, fake_claude):
+    async def test_spawned_main_chat_runs_in_workspace(self, main_db, fake_claude, tmp_path):
         import subagents.cc_runtime as rt
         from infra.config import WORKSPACE
         await _feed_main("main-1", "hi", binary=fake_claude,
-                           claude_dir="/nonexistent", broadcast=lambda s, m: None)
+                           claude_dir=str(tmp_path / "claude"), broadcast=lambda s, m: None)
         assert rt._LIVE.get("main-1").session.working_dir == str(WORKSPACE)
         seed = main_db.execute(
             "SELECT content FROM messages WHERE thread_id='main-1' "
@@ -1285,6 +1291,7 @@ class TestLoudFailure:
 
         launches, _ = _seed_native_resume(main_db, tmp_path, monkeypatch)
         claude_dir = str(tmp_path / "claude")
+        point_default_home("claude-code", claude_dir)
         opus = cc_target("opus")
 
         async def refresh():
@@ -1343,12 +1350,12 @@ class TestLoudFailure:
         await rt.retire("main-1")
 
     @pytest.mark.asyncio
-    async def test_cc_crash_surfaces_error_to_canvas(self, main_db, fake_claude_crash):
+    async def test_cc_crash_surfaces_error_to_canvas(self, main_db, fake_claude_crash, tmp_path):
         import subagents.cc_runtime as rt
 
         casts: list[tuple[str, dict]] = []
         await _feed_main("main-1", "hi", binary=fake_claude_crash,
-                           claude_dir="/nonexistent",
+                           claude_dir=str(tmp_path / "claude"),
                            broadcast=lambda sid, m: casts.append((sid, m)))
         ok = await _wait(lambda: any(
             sid == "main-1" and m.get("type") == "message_added"
@@ -1369,11 +1376,11 @@ class TestLoudFailure:
         assert await _wait(lambda: not rt.is_live("main-1")), "live handle survived the crash"
 
     @pytest.mark.asyncio
-    async def test_clean_exit_surfaces_nothing(self, main_db, fake_claude_oneshot):
+    async def test_clean_exit_surfaces_nothing(self, main_db, fake_claude_oneshot, tmp_path):
         import subagents.cc_runtime as rt
         casts: list[tuple[str, dict]] = []
         await _feed_main("main-1", "once", binary=fake_claude_oneshot,
-                           claude_dir="/nonexistent",
+                           claude_dir=str(tmp_path / "claude"),
                            broadcast=lambda sid, m: casts.append((sid, m)))
         await _wait(lambda: not rt.is_live("main-1"))
         assert not any(m.get("type") == "message_added"

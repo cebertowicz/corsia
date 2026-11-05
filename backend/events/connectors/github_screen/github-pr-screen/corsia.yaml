@@ -1,0 +1,47 @@
+handler:
+  kind: instruction
+workflow:
+  result:
+    type: object
+    additionalProperties: false
+    required: [payload, injection_signs]
+    properties:
+      injection_signs:
+        type: array
+        items:
+          type: string
+          enum: [R1, R2, R3, R4, R5]
+      payload:
+        type: object
+        additionalProperties: false
+        required: [verdict, categories, findings]
+        properties:
+          verdict:
+            type: string
+            enum: [safe, flagged, unsafe]
+          categories:
+            type: array
+            items:
+              type: string
+              enum:
+                - hidden payload
+                - CI or workflow change
+                - credential reach
+                - agent-aimed injection
+                - floor.github_dir
+                - floor.ci_file
+                - floor.agent_instructions
+                - floor.binary
+                - floor.encoded_blob
+                - floor.symlink
+                - floor.hidden_chars
+          findings:
+            type: array
+            maxItems: 5
+            items:
+              type: object
+              additionalProperties: false
+              required: [path, text]
+              properties:
+                path: {type: string}
+                text: {type: string, maxLength: 200}

@@ -12,6 +12,8 @@ from core.turn_core import TurnIdentity
 from shared_send_fixtures import _install_fake_native_context_agent
 from tests.event_routing_helpers import mk_session as _mk_session
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 async def _accept_cc_bound_turn(*_args, **kwargs):
     await kwargs["persist_input_once"]()

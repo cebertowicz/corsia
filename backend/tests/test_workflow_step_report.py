@@ -228,7 +228,7 @@ def test_k_revision_without_workflow_fields_lands_in_root_step(db):
     assert group["metrics"]["task_count"] == 1
 
 
-def test_l_accept_with_follow_up_is_a_separate_step(db):
+def test_l_follow_up_on_another_step_is_a_separate_step(db):
     plan = service.ensure_plan("thread", "owner", db=db)
     phase = _node(db, plan.id, "run", kind="phase", workflow_ref="demo", workflow_version="v1")
     original = _node(db, plan.id, "build", parent_id=phase.id, workflow_ref="demo",
@@ -245,6 +245,49 @@ def test_l_accept_with_follow_up_is_a_separate_step(db):
     groups = {group["step"]: group for group in report(db)["groups"]}
     assert set(groups) == {"build", "review"}
     assert groups["build"]["metrics"]["first_attempt_accepted"] == 1
+
+
+def test_m_follow_up_on_the_same_step_is_its_next_round(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    phase = _node(db, plan.id, "run", kind="phase", workflow_ref="demo", workflow_version="v1")
+    original = _node(db, plan.id, "build", parent_id=phase.id, workflow_ref="demo",
+                     workflow_version="v1", workflow_step="build", difficulty="standard")
+    round_two = _node(db, plan.id, "re-check", parent_id=phase.id, workflow_ref="demo",
+                      workflow_version="v1", workflow_step="build", difficulty="standard")
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='accepted_with_followup' WHERE id=?", (original.id,))
+        db.execute("UPDATE plan_nodes SET state='accepted' WHERE id=?", (round_two.id,))
+    db.execute("UPDATE plan_nodes SET follow_up_of=? WHERE id=?", (original.id, round_two.id))
+    _attempt(db, original, 1)
+    _attempt(db, round_two, 1)
+    _usage(db, original, "first", "model/a", 10, 0.1)
+    _usage(db, round_two, "second", "model/a", 20, 0.2)
+    db.commit()
+
+    metrics = report(db)["groups"][0]["metrics"]
+    assert metrics["task_count"] == 1
+    assert metrics["first_attempt_accepted"] == 0
+    assert metrics["revisions"] == 1
+    assert metrics["tokens_known_total"] == 30
+    assert metrics["rework_tokens_known_total"] == 20
+
+
+def test_n_closed_follow_up_leaves_the_step_accepted(db):
+    plan = service.ensure_plan("thread", "owner", db=db)
+    phase = _node(db, plan.id, "run", kind="phase", workflow_ref="demo", workflow_version="v1")
+    original = _node(db, plan.id, "build", parent_id=phase.id, workflow_ref="demo",
+                     workflow_version="v1", workflow_step="build", difficulty="standard")
+    follow_up = _node(db, plan.id, "re-check", parent_id=phase.id, workflow_ref="demo",
+                      workflow_version="v1", workflow_step="build", difficulty="standard")
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='accepted_with_followup' WHERE id=?", (original.id,))
+        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (follow_up.id,))
+    db.execute("UPDATE plan_nodes SET follow_up_of=? WHERE id=?", (original.id, follow_up.id))
+    db.commit()
+
+    metrics = report(db)["groups"][0]["metrics"]
+    assert metrics["task_count"] == 1 and metrics["revisions"] == 1
+    assert metrics["failed_or_closed_without_completion"] == 0
 
 
 def test_attached_child_usage_does_not_create_own_attribution_mismatch(db):

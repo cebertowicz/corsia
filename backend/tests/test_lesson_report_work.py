@@ -147,6 +147,7 @@ def oracle_summary(row, offers, reads):
           "source_scope": (row["current_source"] or {}).get("source_scope"),
           "source_scope_reason": "recorded source scope unavailable" if not row["current_source"] else None,
           "body_reads": sum((read["id"], read["version"]) == (row["id"], row["version"]) for read in reads),
+          "delivered": 0,
           "next_call": f"lesson_report(lesson_id={json.dumps(row['id'])}, version={json.dumps(row['version'])})"}
 
 

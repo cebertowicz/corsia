@@ -115,6 +115,24 @@ describe('the launch shell page’s copy of the mark', () => {
 	});
 });
 
+describe('the launch shell page’s generated assets', () => {
+	const root = resolve(__dirname, '../../..');
+	it('has the app’s current tokens', () => {
+		expect(() => execFileSync('node', [resolve(root, 'desktop/scripts/gen-shell-tokens.mjs'), '--check'], { stdio: 'pipe' })).not.toThrow();
+	});
+
+	it.each(['.', 'frontend', 'desktop'].flatMap((cwd) => [undefined, 'test', 'production'].map((nodeEnv) => [cwd, nodeEnv] as const)))(
+		'has the current update screen from %s with NODE_ENV=%s', (cwd, nodeEnv) => {
+			const env = { ...process.env };
+			if (nodeEnv === undefined) delete env.NODE_ENV;
+			else env.NODE_ENV = nodeEnv;
+			expect(() => execFileSync('node', [resolve(root, 'desktop/scripts/gen-shell-update.mjs'), '--check'], {
+				stdio: 'pipe', cwd: resolve(root, cwd), env,
+			})).not.toThrow();
+		},
+	);
+});
+
 describe('the mark’s two sources', () => {
 	it('keeps the animated circles identical to the static corsia-mark.svg the empty chat shows', () => {
 		const svg = readFileSync(resolve(__dirname, '../../static/icons/corsia-mark.svg'), 'utf8');

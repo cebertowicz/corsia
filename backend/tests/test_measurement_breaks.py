@@ -342,6 +342,24 @@ def test_seeded_start_skips_its_live_query(isolated_db, monkeypatch) -> None:
     assert breaks["outcomes"][0]["period"] == "2026-09-14"
 
 
+def test_groups_sharing_a_source_scan_it_once(isolated_db) -> None:
+    from core.correction_attribution import FIRST_ARRIVAL_SQL
+
+    metrics = ("corrections_per_outcome", "asks_plus_corrections_per_outcome", "corrections_detected")
+    db = get_db()
+    statements: list[str] = []
+    try:
+        _thread(db)
+        db.commit()
+        db.set_trace_callback(statements.append)
+        breaks = derive_breaks(db, metrics, _grain())
+        db.set_trace_callback(None)
+    finally:
+        db.close()
+    assert sum(sql.count(FIRST_ARRIVAL_SQL.strip()) for sql in statements) == 1
+    assert set(breaks) == set(metrics)
+
+
 def test_one_recorded_rater_skips_the_history_wide_rating_read(isolated_db, monkeypatch) -> None:
     from api import measurement_breaks
 

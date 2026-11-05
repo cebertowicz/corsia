@@ -299,26 +299,14 @@ FINAL_REPLY_CHARS = 2000
 def turn_reply(connection, worker: str):
     """What the worker said as its last words this Turn: ``{id, text}``, or None.
 
-    The latest non-empty assistant message, only if the worker's latest Turn
-    began before it: an older reply may be a question already answered. Not
-    every harness passes its Turn id here, so the bound is that Turn's start.
-    The question or result usually ends the reply, so the tail is what travels.
+    The child's shared answer (``ChildOutput``), so a reply older than the latest
+    Turn's start never travels and a confined one travels labelled. The question
+    or result usually ends the reply, so the tail is what travels.
     """
-    last = connection.execute(
-        """SELECT id,content,created_at FROM messages WHERE thread_id=? AND seq IS NOT NULL
-             AND role='assistant' AND length(trim(content)) > 0
-           ORDER BY seq DESC LIMIT 1""",
-        (worker,),
-    ).fetchone()
-    turn = latest_turn(connection, worker)
-    if last is None or (
-        turn is not None and instant(last["created_at"]) < instant(turn["started_at"])
-    ):
-        return None
-    text = str(last["content"]).strip()
-    if len(text) > FINAL_REPLY_CHARS:
-        text = "…" + text[-FINAL_REPLY_CHARS:]
-    return {"id": str(last["id"]), "text": text}
+    from infra.thread_confinement import ChildOutput
+
+    last = ChildOutput.read(connection, worker).final_reply(connection, tail_chars=FINAL_REPLY_CHARS)
+    return None if last is None else {"id": str(last["id"]), "text": last["content"]}
 
 
 def instant(value: str) -> datetime:

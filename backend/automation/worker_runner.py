@@ -20,7 +20,11 @@ spawn it makes runs inside, so no start is claimed twice:
    the owner through ``worker.no_result``;
 3. each worker that was already started when the pass began and whose last turn ended settles
    once (``automation.worker_settle``); a worker made in this pass is observed on the next
-   pass, so its start is visible before its completion.
+   pass, so its start is visible before its completion;
+4. a started worker still running past its workflow's time limit is stopped and settles
+   ``no_result`` the same way (see below).
+
+A workflow's ``worker`` block sets what its worker runs with and for how long (``automation.worker_settings``).
 
 Every way a start ends (refused, cut short, settled) goes through :func:`_settle`, which
 reports it with what its row kept (its trace and workflow) and removes its inputs.
@@ -36,12 +40,14 @@ import asyncio
 import json
 import sqlite3
 from collections.abc import Mapping
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-from automation import worker_inputs as inputs
-from automation import worker_settle
+from automation import review_intent, worker_inputs as inputs
+from automation import worker_settings, worker_settle
 from events import rule_runs, worker_starts
 from events.rule_outcomes import NO_RESULT, REFUSED, SKIPPED
 from infra.database import write_transaction
@@ -109,9 +115,14 @@ async def drive() -> int:
         made = 0
         for row, run_input in claimed:
             made += await _start(row, run_input)
+        settled = set()
         for item in await run_in_db(_read, worker_settle.ready):
             if item.decision_id not in claimed_ids:
                 await _settle(item)
+                settled.add(item.decision_id)
+        for row in await run_in_db(_read, worker_starts.with_workers):
+            if row["id"] not in claimed_ids | settled:
+                await _enforce_limit(row)
         _state["open"] = await run_in_db(worker_starts.any_open)
         return made
 
@@ -148,6 +159,7 @@ def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any]
     """Claim up to one queued start per free slot, oldest first. With no slot free nothing
     is written: the starts wait, and the newest of them is remembered as having waited."""
     claimed: list[tuple[Mapping[str, Any], dict[str, Any]]] = []
+    cleanup: list[tuple[str, int, str | None]] = []
     with write_transaction(db, scope="worker_starts_claim") as conn:
         free = _free(conn)
         if free <= 0:
@@ -159,15 +171,21 @@ def _claim(db: sqlite3.Connection | None = None) -> list[tuple[Mapping[str, Any]
                 break
             skipped = _skip(conn, row)
             if skipped is not None:
+                if row["origin"] and row["origin"].startswith("rule_set:"):
+                    data = json.loads(row["run_input"] or "{}")
+                    facts = (data.get("event") or {}).get("facts") or {}
+                    cleanup.append((row["thread_id"], row["id"], facts.get(inputs.STAGING_FACT)))
                 worker_starts.end(conn, row["id"], SKIPPED, skipped)
                 continue
             run_input = worker_starts.claim(conn, row["id"])
             if run_input is not None:
                 claimed.append((row, run_input))
+    for owner, decision, staging in cleanup:
+        _remove_inputs(owner, decision, staging)
     return claimed
 
 
-def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, Any]:
+def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None) -> dict[str, Any]:
     """Everything the start reads from the database, or :class:`worker_inputs.StartRefused`."""
     from infra.config import WORKSPACE
     from infra.database import get_db
@@ -188,7 +206,8 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, 
     if not model:
         raise inputs.StartRefused("refused: this chat has no model. Choose a model for this chat.")
     model_row = catalog_row(model, db=db)
-    rows = scoped_status_rows(**dispatch_scope({}, project))
+    scope = dispatch_scope({}, project)
+    rows = scoped_status_rows(**scope)
     status_row = next((item for item in rows if model in (item.get("id"), item.get("litellm_model"))), None)
     name = (status_row or {}).get("display_name") or (model_row or {}).get("display_name") or model
     cause = locality_refusal(model_row, thread_local_only=inherited_local_only((owner["id"],), db=db),
@@ -208,7 +227,12 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, 
         raise inputs.StartRefused(f"refused: your model {name} can't run now. "
                                   "Choose a model that is ready for this chat.")
     # A skill whose declared result fails validation is not included, so one found here is valid.
-    skill = reachable_workflows(db, owner["id"], project, WORKSPACE).get(row["workflow_id"])
+    if shipped is not None:
+        if shipped.error or project is None:
+            raise inputs.StartRefused("refused: " + (shipped.error or "the shipped workflow needs a project"))
+        skill = shipped.declaration.load(project)
+    else:
+        skill = reachable_workflows(db, owner["id"], project, WORKSPACE).get(row["workflow_id"])
     schema = ((skill.corsia or {}).get("workflow") or {}).get("result") if skill else None
     if skill is None or schema is None:
         raise inputs.StartRefused(f"refused: {row['workflow_id']} is no longer a workflow you can "
@@ -217,12 +241,27 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any]) -> dict[str, 
     root = inputs.owner_root(owner["id"], project, db)
     from llm.resolution import resolve_execution_target
 
+    harness = resolve_execution_target(model, db=db).harness
+    spawn_extra, applied = worker_settings.settings_for(
+        skill, dict(row).get("worker_profile"), model, model_row, status_row, name, harness, scope, db)
     return {"owner": owner, "model": owner.get("model"),
-            "harness": resolve_execution_target(model, db=db).harness,
+            "harness": harness, "spawn_extra": spawn_extra, "settings": applied,
             "skill": skill, "schema": schema, "root": root, "facts": facts,
             "workflow": f"{skill.name}@{_workflow_version(skill) or 'unversioned'}",
             "staging": inputs.staging_dir(root, facts.get(inputs.STAGING_FACT)),
-            "head": inputs.head_source(project, facts, db)}
+            "head": inputs.head_source(project, facts, db),
+            "intent": review_intent.attach(row, skill, db=db)}
+
+
+async def _enforce_limit(row: Mapping[str, Any]) -> None:
+    """Stop a started worker that ran past its workflow's time limit and settle it once as
+    ``no_result``, only when its turn ended by that stop. Anything else (a failed stop, a turn
+    still queued, another turn) settles nothing: the next pass checks again."""
+    check = json.loads(row["run_input"] or "{}")
+    limit = worker_settings.past_limit(check)
+    if limit is None or not await worker_settings.stop_worker(row["worker_thread_id"]):
+        return
+    await _end(row, check, NO_RESULT, f"the agent ran past its {limit}-minute limit")
 
 
 def _write(found: Mapping[str, Any], decision_id: int, run_input: Mapping[str, Any]) -> tuple[list[str], str]:
@@ -232,8 +271,11 @@ def _write(found: Mapping[str, Any], decision_id: int, run_input: Mapping[str, A
     if found["head"] is not None:
         inputs.write_head(found["head"], dest)
     read_paths = [path for path in (found["staging"], str(dest)) if path]
-    task = inputs.brief(found["workflow"], inputs.skill_body(found["skill"].body_path),
-                        found["schema"], read_paths, run_input.get("event") or {})
+    body = inputs.skill_body(found["skill"].body_path)
+    if found.get("result_instructions"):
+        body += "\n\n" + found["result_instructions"]
+    task = inputs.brief(found["workflow"], body,
+                        found["schema"], read_paths, run_input.get("event") or {}, found["intent"][0])
     return read_paths, task
 
 
@@ -243,9 +285,19 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
     from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
     from tools.delegate_task import _spawn
 
+    from events.connector_workflows import resolve_shipped_workflow
+
     waited = row["id"] <= _state["waited"]
+    made: dict[str, str] = {}
     try:
-        found = await run_in_db(_prepare, row, run_input)
+        origin = dict(row).get("origin")
+        shipped = resolve_shipped_workflow(origin, row["workflow_id"])
+        contract = shipped.declaration.result if shipped and shipped.declaration else None
+        if contract:
+            event_facts = run_input["event"]["facts"]
+            run_input["result_context"] = contract.context(origin, row["workflow_id"], event_facts)
+            run_input["workflow"] = f"{row['workflow_id']}@{contract.version()}"
+        found = await run_in_db(_prepare, row, run_input, shipped)
         if found["harness"] == "codex":
             from subagents.cc_confinement import ConfinementRefused
             from subagents.codex_confinement import verify_version
@@ -254,20 +306,34 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
                 await verify_version()
             except ConfinementRefused as exc:
                 raise inputs.StartRefused(str(exc)) from exc
+        if contract:
+            found["result_instructions"] = contract.instructions()
+            found["workflow"] = run_input["workflow"]
+            try:
+                run_input["result_context"]["record"] = await asyncio.to_thread(
+                    contract.capture, Path(found["staging"]),
+                )
+            except Exception as exc:  # CORSIA input failure, before any worker turn.
+                logger.exception("worker start {} could not capture its result record", row["id"])
+                raise inputs.StartRefused(f"Couldn’t read the workflow result inputs. {worker_settle.NO_RESULT_NEXT}") from exc
         read_paths, task = await asyncio.to_thread(_write, found, row["id"], run_input)
         check = json.dumps({"workflow": found["workflow"], "schema": found["schema"],
+                            "settings": {**found["settings"], "started_at": datetime.now(timezone.utc).isoformat()},
                             "trace": run_input.get("trace") or [], "waited": waited,
-                            "item_version": found["facts"].get(inputs.HEAD_SHA_FACT)})
+                            "item_version": found["facts"].get(inputs.HEAD_SHA_FACT),
+                            "result_context": run_input.get("result_context"),
+                            "intent": found["intent"][1]})
 
         async def record(worker: str) -> None:
             await run_in_db(_made, row["id"], worker, check)
+            made.update(worker=worker, check=check)
 
         started = await _spawn(row["thread_id"], found["owner"], task, {
             "model": found["model"], "confinement": CONFINEMENT_UNTRUSTED,
-            "read_paths": read_paths, "title": found["skill"].name,
+            "read_paths": read_paths, "title": found["skill"].name, **found["spawn_extra"],
         }, rule_start=record)
     except inputs.StartRefused as exc:
-        return await _refuse(row, run_input, str(exc), waited)
+        return await _refuse(row, run_input, str(exc), waited, made)
     except LiveSpawnCapExceeded:
         # Another spawn took the slot after the claim: back to the queue at its place.
         _state["waited"] = max(_state["waited"], row["id"])
@@ -275,10 +341,10 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
         return 0
     except Exception:  # noqa: BLE001 - a start that fails is told to its owner, not lost
         logger.exception("worker start {} failed", row["id"])  # the exception stays in the log
-        return await _refuse(row, run_input, _FAILED, waited)
+        return await _refuse(row, run_input, _FAILED, waited, made)
     if isinstance(started, str):
         logger.warning("worker start {} was refused: {}", row["id"], started)
-        return await _refuse(row, run_input, _SPAWN_FAILED, waited)
+        return await _refuse(row, run_input, _SPAWN_FAILED, waited, made)
     return 1
 
 
@@ -294,7 +360,11 @@ def _requeue(owner: str, decision_id: int) -> None:
 
 
 async def _refuse(row: Mapping[str, Any], run_input: Mapping[str, Any], reason: str,
-                  waited: bool) -> int:
+                  waited: bool, made: Mapping[str, str]) -> int:
+    """End a refused start. One refused after its worker was ``made`` reports that worker
+    and its check, as the start's own row does; the claimed ``row`` predates both."""
+    if made:
+        row, run_input = {**dict(row), "worker_thread_id": made["worker"]}, json.loads(made["check"])
     await _end(row, {**run_input, "waited": waited}, REFUSED, reason)
     return 0
 
@@ -309,14 +379,16 @@ async def _end(row: Mapping[str, Any], kept: Mapping[str, Any], outcome: str, re
 async def _settle(item: worker_settle.Settle) -> None:
     """Settle one start and remove its inputs: the one way every start ends."""
     await worker_settle.settle(item)
-    await run_in_db(_remove_inputs, item.owner, item.decision_id)
+    await run_in_db(_remove_inputs, item.owner, item.decision_id, item.staging_path)
 
 
-def _remove_inputs(owner: str, decision_id: int) -> None:
+def _remove_inputs(owner: str, decision_id: int, staging_path: str | None = None) -> None:
     from infra.database import get_db
     from infra.queries import get_thread
 
     db = get_db()
     thread = get_thread(owner, db=db)
     if thread is not None:
-        inputs.remove_start_dir(inputs.owner_root(owner, thread["project_id"], db), decision_id)
+        root = inputs.owner_root(owner, thread["project_id"], db)
+        inputs.remove_start_dir(root, decision_id)
+        inputs.remove_staging_dir(root, staging_path)

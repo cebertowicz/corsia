@@ -52,6 +52,8 @@ class FirstAccountRequest(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=1024)
     email: str | None = Field(default=None, max_length=320)
+    # The step's usage sharing switch, saved with the account; absent leaves the setting as it is.
+    usage_sharing: StrictBool | None = None
 
     @field_validator("name")
     @classmethod
@@ -69,6 +71,7 @@ class AccountUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     password: str | None = Field(default=None, min_length=1, max_length=1024)
     email: str | None = Field(default=None, max_length=320)
+    usage_sharing: StrictBool | None = None
 
     @field_validator("name")
     @classmethod

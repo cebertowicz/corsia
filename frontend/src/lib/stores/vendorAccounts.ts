@@ -1,68 +1,32 @@
 import { get, writable } from 'svelte/store';
 import { token } from './auth';
 import { plainErrorText, SERVER_UNREACHABLE } from '../plainError';
-import type { ModelUsage } from './modelUsage';
+import type { VendorAccountState, SigninStatus, VendorAccountLabel, AccountBilling, VendorAccountUsage, VendorAccount, SigninResult } from './vendorAccountTypes';
+export type { VendorAccountState, SigninStatus, VendorAccountLabel, AccountBilling, VendorAccountUsage, VendorAccount, SigninResult } from './vendorAccountTypes';
 
 const BASE = '';
 const auth = () => get(token) || '';
 
-export type VendorAccountState = 'legacy' | 'signed_in' | 'signed_out' | 'removed';
-export type SigninStatus = 'waiting' | 'completed' | 'failed' | 'refused' | 'cancelled' | 'superseded' | 'unavailable';
-
-export interface VendorAccountLabel {
-	name: string;
-	email: string | null;
-	text: string;
-	custom: string | null;
+export function visibleVendorAccounts(accounts: VendorAccount[], provider: string, removed: VendorAccount[]): VendorAccount[] {
+	return [...accounts.filter((account) => account.provider === provider && account.state !== 'removed' && !removed.some((row) => row.id === account.id)), ...removed];
 }
 
-/** An account's recorded subscription price; the account's billing is null when none is recorded. */
-export interface AccountBilling {
-	monthly_price_cents: number;
-	charge_day: number;
+export function rememberVisibleSignin(signins: Record<string, SigninResult>, result: SigninResult, accounts: VendorAccount[]): Record<string, SigninResult> {
+	// A same-account sign-in removes the added row, so its message moves to the account it reached.
+	const listed = (id: string | null | undefined) => accounts.some((account) => account.id === id);
+	const key = listed(result.account_id) ? result.account_id : result.cause === 'same_account' && listed(result.duplicate_of) ? result.duplicate_of : null;
+	const { [result.account_id]: _, ...rest } = signins;
+	return key ? { ...rest, [key]: result } : rest;
 }
 
-export interface VendorAccountUsage extends ModelUsage {
-	/** A background account-usage recheck is still running. */
-	checking: boolean;
-	/** The most recent usage check, including any failure the account row should show. */
-	check: { outcome?: string; at?: string; error?: string | null } | null;
-}
-
-export interface VendorAccount {
-	id: string;
-	provider: string;
-	name: string;
-	is_default: boolean;
-	state: VendorAccountState;
-	revision: number;
-	identity: Record<string, string>;
-	label: VendorAccountLabel;
-	duplicate_of?: string | null;
-	/** This account's 'Spend past usage limit' switch; null where no plan limit applies. */
-	allow_overage?: boolean | null;
-	/** Signed in, but none of the vendor's models can run on this account. */
-	no_usable_model?: boolean;
-	/** Account-owned plan usage, rendered once in its Settings account row. */
-	usage?: VendorAccountUsage;
-	/** The recorded monthly price and charge day; null when no price is recorded. */
-	billing?: AccountBilling | null;
-	/** Fences billing writes; sent back unchanged. */
-	billing_revision?: number;
-	/** A receipt confirmed state, but account details/revision require an explicit reload. */
-	details_stale?: boolean;
-}
-
-export interface SigninResult {
-	account_id: string;
-	route: 'browser' | null;
-	status: SigninStatus;
-	cause: string | null;
-	duplicate_of?: string | null;
-	held_by?: string | null;
+/** A list-reload failure line, with its support reference when the server gave one. */
+export function reloadErrorText(error: string, ref?: string): string {
+	return ref ? `${error} Reference: ${ref}` : error;
 }
 
 export const vendorAccounts = writable<VendorAccount[]>([]);
+/** One live sign-in state per account, shared by Settings and every held chat. */
+export const signin = writable<Record<string, SigninResult>>({});
 // Confirmations invalidate in-flight inventories, including equal-revision receipts.
 // Among unchanged confirmations, the latest successful request wins; failures do not.
 let confirmationSequence = 0;
@@ -196,25 +160,61 @@ export async function setVendorAccountOverage(account: VendorAccount, allow: boo
 }
 
 export async function startVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; error?: string }> {
+	const wasSignedIn = get(vendorAccounts).some((account) => account.id === accountId && account.state === 'signed_in');
 	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin`, json('POST'), 'Could not start sign-in.');
 	if (!result.ok) return result;
+	if (wasSignedIn && result.data.status === 'waiting') {
+		const refreshed = await loadVendorAccounts();
+		if (!refreshed.ok && !refreshed.superseded) return { ok: true, signin: result.data, error: reloadErrorText(refreshed.error ?? 'Couldn’t load your accounts.', refreshed.ref) };
+	}
 	return reconcileSignin(result.data);
 }
 
 async function reconcileSignin(signin: SigninResult): Promise<{ ok: boolean; signin: SigninResult; error?: string }> {
-	if (signin.status !== 'completed') return { ok: true, signin };
-	confirmAccounts((accounts) => accounts.map((account) => account.id === signin.account_id
-		? { ...account, state: 'signed_in', details_stale: true } : account));
+	if (signin.status === 'superseded' && signin.cause === 'account_refresh_superseded') {
+		await loadVendorAccounts();
+		return { ok: true, signin };
+	}
+	const signedIn = signin.status === 'completed' || signin.status === 'already_signed_in';
+	if (!signedIn && signin.status !== 'cancelled' && signin.cause !== 'same_account') return { ok: true, signin };
+	if (signedIn) {
+		confirmAccounts((accounts) => accounts.map((account) => account.id === signin.account_id
+			? { ...account, state: 'signed_in', details_stale: true } : account));
+	}
 	const refreshed = await loadVendorAccounts();
-	return refreshed.ok
-		? { ok: true, signin }
-		: { ok: true, signin, error: 'Signed in, but the account list could not be reloaded.' };
+	if (refreshed.ok || refreshed.superseded) return { ok: true, signin };
+	return { ok: true, signin, error: reloadErrorText(signedIn ? 'Signed in, but the account list could not be reloaded.' : 'Couldn’t load your accounts.', refreshed.ref) };
 }
 
 export async function checkVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; absent?: boolean; error?: string }> {
 	const result = await request<SigninResult>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/signin/check`, json('POST'), 'Could not check sign-in.');
 	if (!result.ok) return result.error === 'no sign-in is in progress for this account' ? { ok: false, absent: true } : result;
 	return reconcileSignin(result.data);
+}
+
+export async function refreshVendorModels(accountId: string): Promise<{ ok: boolean; signedOut?: boolean; superseded?: boolean; error?: string; ref?: string }> {
+	const result = await request<{ state: VendorAccountState; vendor_signed_in: boolean | null; model_refresh_ok: boolean | null; model_refresh_cause: string | null; model_refresh_ref: string | null }>(`/api/vendor-accounts/${encodeURIComponent(accountId)}/verify`, json('POST'), 'Couldn’t refresh models. Try again.');
+	if (!result.ok) return result;
+	if (result.data.state === 'signed_out') {
+		confirmAccounts((accounts) => accounts.map((account) => account.id === accountId ? { ...account, state: 'signed_out', details_stale: true } : account));
+		const refreshed = await loadVendorAccounts();
+		return refreshed.ok || refreshed.superseded ? { ok: true, signedOut: true } : { ok: false, signedOut: true, error: reloadErrorText(refreshed.error ?? 'Couldn’t load your accounts. Try again.', refreshed.ref) };
+	}
+	if (result.data.vendor_signed_in === true && result.data.model_refresh_ok === true) return { ok: true };
+	// A newer login replaced the one this refresh read: nothing failed, and the reload shows the account as it now is.
+	if (result.data.model_refresh_cause === 'account_refresh_superseded') {
+		await loadVendorAccounts();
+		return { ok: true, superseded: true };
+	}
+	return { ok: false, error: 'The model list couldn’t be refreshed.', ref: result.data.model_refresh_ref ?? undefined };
+}
+
+/** Reload an account's model list and record the outcome as its one sign-in line, for Settings and chat alike. */
+export async function refreshAndRecordModels(accountId: string): ReturnType<typeof refreshVendorModels> {
+	const result = await refreshVendorModels(accountId);
+	if (result.signedOut || result.superseded) signin.update(({ [accountId]: _, ...rest }) => rest);
+	else signin.update((current) => ({ ...current, [accountId]: { account_id: accountId, route: null, status: result.ok ? 'already_signed_in' : 'model_refresh_failed', cause: null, ref: result.ref } }));
+	return result;
 }
 
 export async function cancelVendorSignin(accountId: string): Promise<{ ok: boolean; signin?: SigninResult; error?: string }> {

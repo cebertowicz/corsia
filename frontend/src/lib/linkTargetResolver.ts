@@ -266,7 +266,9 @@ export function installLinkTargetResolver(root: Document = document, deps = defa
 			return;
 		}
 		event.preventDefault();
-		void resolveLinkTarget(href, currentDeps);
+		// A comment on a document resolves its links as that document's body does.
+		const docPath = anchor.closest<HTMLElement>('[data-doc-path]')?.dataset.docPath;
+		void resolveLinkTarget(docPath ? documentLinkTarget(docPath, href) : href, currentDeps);
 	};
 	root.addEventListener('click', handler);
 	root.addEventListener('auxclick', handler);

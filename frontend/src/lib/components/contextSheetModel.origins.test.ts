@@ -44,6 +44,22 @@ function categoryOf(originSection: string): string | undefined {
 	return model?.sources.find(source => source.id === `origin:${originSection}`)?.category;
 }
 
+describe('file navigation in the context sheet', () => {
+	it('retains the System projection path for its document action', () => {
+		const model = contextSheetSnapshotModel({
+			model_context_window: 1000, system_tokens: 0, tool_def_tokens: 0, history_tokens: 0,
+			user_tokens: 0, total_used: 1, utilization: 0.001, was_trimmed: false, history_messages: 0,
+			context_snapshot: { snapshot_id: 'system', source_inventory: [{
+				source_id: 'system-file', origin_section: 'corsia', label: 'System file',
+				stable_reference: 'package://context/example', freshness: 'fresh', inclusion: 'included',
+				owner_surface: 'system-tier', metadata: { path: '/workspace/.corsia/context/example.md' },
+			}] },
+		});
+		expect(model?.sources[0].filePath).toBe('/workspace/.corsia/context/example.md');
+		expect(model?.sources[0].actionLabel).toBe('Open Document');
+	});
+});
+
 describe('sourceCategory covers every emitted origin_section', () => {
 	it('has a recorded group for each value the backend emits', () => {
 		expect(Object.keys(EXPECTED).filter(key => key !== 'summary').sort())

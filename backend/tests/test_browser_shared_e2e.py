@@ -160,24 +160,59 @@ async def test_scripted_steps_guard_a_mock_password_page(tmp_path, monkeypatch):
             commands.append((args, reply))
             return reply
 
-    path = tmp_path / "local/steps"
+    path = tmp_path / "skills/local/steps"
     path.mkdir(parents=True)
+    (path.parent / "SKILL.md").write_text("---\nname: local\ndescription: Use for local setup.\n---\nSetup.\n", encoding="utf-8")
     password_steps = []
     _quiet_password_steps(monkeypatch, password_steps)
     browser_control.pane_connected(thread_id, "pane")
     monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", ProcessOwner())
-    monkeypatch.setattr(browser_run_steps, "_run", browser_runtime._run)
-    monkeypatch.setattr(browser_run_steps, "_SKILLS", tmp_path)
+    monkeypatch.setattr(browser_run_steps.config, "WORKSPACE", tmp_path)
     try:
         with fixture_server() as origin:
             (path / "mock.json").write_text(json.dumps({"domains": ["127.0.0.1"], "steps": [{
                 "id": "password-page", "says": "Open the mock password page.", "action": "goto", "url": f"{origin}/probe.html"
             }]}), encoding="utf-8")
             result = json.loads(await browser_run_steps.BrowserRunStepsTool().execute("local/mock", _thread_id=thread_id))
-        assert result["ok"] is False and result["step"] == "password-page"
-        assert result.get("start_at") == "password-page", (result, commands)
+        # The page opened, so its step is done; the guard's message hands the rest to the person.
+        assert result["ok"] is True and result["steps"] == ["password-page"], (result, commands)
         assert result["message"].startswith(browser_control.PASSWORD_PAGE)
         assert password_steps == ["opened"]
+    finally:
+        browser_control.pane_disconnected(thread_id, "pane")
+        # The agent's close is refused while the person's password step owns the page.
+        await owner.shutdown()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_installed_setup_steps_run_in_native_browser(tmp_path, monkeypatch):
+    if os.environ.get("CORSIA_BROWSER_E2E") != "1":
+        pytest.skip("set CORSIA_BROWSER_E2E=1 in the isolated host browser environment")
+    thread_id = f"installed-steps-{uuid4().hex}"
+    owner = BrowserSessionOwner(namespace="corsia-installed-steps", instance_key=uuid4().hex)
+
+    class ProcessOwner:
+        async def run_browser(self, thread, args, **kwargs):
+            kwargs["show_window"] = False
+            return await owner.run(thread, args, session="new" if args[0] == "open" else "existing", **kwargs)
+
+    path = tmp_path / "skills/shared-setup/steps"
+    path.mkdir(parents=True)
+    (path.parent / "SKILL.md").write_text("---\nname: shared-setup\ndescription: Use for shared setup.\n---\nSetup.\n", encoding="utf-8")
+    monkeypatch.setattr(browser_run_steps.config, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(browser_runtime, "PROCESS_OWNER", ProcessOwner())
+    browser_control.pane_connected(thread_id, "pane")
+    try:
+        with fixture_server() as origin:
+            (path / "run.json").write_text(json.dumps({"domains": ["127.0.0.1"], "steps": [
+                {"id": "open", "says": "Open", "action": "goto", "url": f"{origin}/plain.html"},
+                {"id": "click", "says": "Click", "action": "click", "selector": "#agent-button"},
+            ]}), encoding="utf-8")
+            result = json.loads(await browser_run_steps.BrowserRunStepsTool().execute("shared-setup/run", _thread_id=thread_id))
+            assert result == {"ok": True, "steps": ["open", "click"]}
+            text = await owner.run(thread_id, ("get", "text", "#result"), session="existing")
+            assert text == "1" or json.loads(text).get("text") == "1", text
     finally:
         browser_control.pane_disconnected(thread_id, "pane")
         await owner.close_thread(thread_id)

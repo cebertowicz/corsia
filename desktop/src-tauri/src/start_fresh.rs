@@ -658,7 +658,10 @@ fn set_journal_aside(app_dir: &Path, details: String) -> (String, bool) {
 pub trait Launchd {
     /// launchd lists the earlier install's job.
     fn loaded(&mut self) -> Result<bool, String>;
-    /// Something answers on the earlier install's backend port.
+    /// Something answers on the earlier install's backend port, whatever it is.
+    fn port_open(&mut self) -> bool;
+    /// The earlier install itself answers there: for a plain install, whose port is a guess,
+    /// a listener that runs from its backend folder.
     fn port_answers(&mut self) -> bool;
     /// Ask launchd to stop the job. Only for an install this app can't adopt.
     fn bootout(&mut self) -> Result<(), String>;
@@ -672,6 +675,9 @@ pub trait Launchd {
 pub struct SystemLaunchd {
     plist: PathBuf,
     port: Option<u16>,
+    /// For a plain install, whose port is only a guess: the backend folder a listener there must
+    /// run from to count as the install's. Anything else answering is not the earlier install.
+    listener_dir: Option<PathBuf>,
     databases: Vec<PathBuf>,
     python: PathBuf,
 }
@@ -694,19 +700,20 @@ impl Launchd for SystemLaunchd {
             })
     }
 
-    fn port_answers(&mut self) -> bool {
+    fn port_open(&mut self) -> bool {
         self.port.is_some_and(|port| !release_proof::port_refuses(port))
     }
 
+    fn port_answers(&mut self) -> bool {
+        self.port_open()
+            && self.port.is_some_and(|port| {
+                self.listener_dir.as_ref().map_or(true, |dir| release_proof::listener_runs_from(port, dir))
+            })
+    }
+
     fn bootout(&mut self) -> Result<(), String> {
-        let status = Command::new("/bin/launchctl")
-            .args(["bootout", &Self::target()])
-            .status()
-            .map_err(|error| format!("could not ask launchd to stop the earlier install: {error}"))?;
-        if !status.success() {
-            log::warn!("`launchctl bootout` exited {status}; checking whether the earlier install stopped");
-        }
-        Ok(())
+        release_proof::launchctl_bootout(Path::new("/bin/launchctl"), &Self::target())
+            .map_err(|error| format!("could not ask launchd to stop the earlier install: {error}"))
     }
 
     fn bootstrap(&mut self) -> Result<(), String> {
@@ -744,9 +751,19 @@ pub struct LaunchdService<L = SourceLifecycle, D = SystemLaunchd> {
 }
 
 impl LaunchdService {
-    pub fn new(home: &Path, source: Option<SourceLifecycle>, python: PathBuf) -> Self {
+    /// `backend_dir` is the adoptable checkout's backend folder, when there is one.
+    pub fn new(home: &Path, source: Option<SourceLifecycle>, backend_dir: Option<PathBuf>, python: PathBuf) -> Self {
         let plist = home.join(PLIST);
         let roots = plist_roots(&plist);
+        // An install this app can adopt either has a plist that names its port or is a plain
+        // checkout, started by hand or by `install.sh`, that serves the port its own `.env`
+        // names, else its script's default. Either way the port is a guess, which is why a plain
+        // install counts as running only when a listener there runs from its backend folder.
+        let plain = roots.port.is_none().then_some(backend_dir).flatten();
+        let port = roots.port.or_else(|| {
+            plain.as_ref()?;
+            Some(source.as_ref().map_or(adoption::SOURCE_DEFAULT_PORT, SourceLifecycle::plain_port))
+        });
         let mut states: Vec<PathBuf> = roots.state.into_iter().collect();
         if let Some((_, state)) = adoption::bootstrap_roots(&home.join(".corsia").join("config.json")) {
             states.push(state);
@@ -760,22 +777,32 @@ impl LaunchdService {
         // Where the data folder move puts an adopted install's data.
         states.push(app_paths::app_dir_for_home(home).join(app_paths::STATE_DIRECTORY));
         let databases = states.into_iter().map(|state| state.join("corsia.db")).collect();
-        let launchd = SystemLaunchd { plist, port: roots.port, databases, python };
+        let launchd = SystemLaunchd { plist, port, listener_dir: plain, databases, python };
         Self { source, launchd, timeout: STOP_TIMEOUT }
     }
 }
 
 impl<L: adoption::Lifecycle, D: Launchd> LaunchdService<L, D> {
+    /// After a stop nothing may answer on the port, whoever lsof says it is: a listener it
+    /// cannot attribute is not proof that the install let go.
     fn released(&mut self) -> Result<(), String> {
-        if self.running()? {
+        if self.launchd.loaded()? || self.launchd.port_open() {
             return Err("the earlier install is still running".into());
         }
         self.launchd.databases_released()
     }
 
     /// Wait until `check` passes, or say why it never did.
-    fn wait_for(&mut self, mut check: impl FnMut(&mut Self) -> Result<(), String>) -> Result<(), String> {
-        let deadline = Instant::now() + self.timeout;
+    fn wait_for(&mut self, check: impl FnMut(&mut Self) -> Result<(), String>) -> Result<(), String> {
+        self.wait_within(self.timeout, check)
+    }
+
+    fn wait_within(
+        &mut self,
+        timeout: Duration,
+        mut check: impl FnMut(&mut Self) -> Result<(), String>,
+    ) -> Result<(), String> {
+        let deadline = Instant::now() + timeout;
         loop {
             match check(self) {
                 Ok(()) => return Ok(()),
@@ -797,10 +824,15 @@ impl<L: adoption::Lifecycle, D: Launchd> OldService for LaunchdService<L, D> {
         if self.running()? {
             if let Some(source) = self.source.as_mut() {
                 source.stop_old(progress, spawned)?;
+                // A plain install has no job or process id for the stop to prove gone, so the
+                // port has to refuse before the databases are looked at.
+                return self.wait_for(Self::released);
             } else {
                 progress(None);
                 self.launchd.bootout()?;
-                return self.wait_for(Self::released);
+                // A plain bootout returns at once and launchd lists the job until its process
+                // has exited, which a source job's `ExitTimeOut` allows 120 s for.
+                return self.wait_within(release_proof::BOOTOUT_TIMEOUT, Self::released);
             }
         }
         // Whatever stopped it, and even when launchd never ran it, a backend still holding a
@@ -832,11 +864,12 @@ impl<L: adoption::Lifecycle, D: Launchd> OldService for LaunchdService<L, D> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{cell::Cell, rc::Rc};
 
     #[test]
     fn the_release_check_covers_a_moved_install_s_database() {
         let home = Path::new("/tmp/corsia-release-list");
-        let service = LaunchdService::new(home, None, PathBuf::from("python3"));
+        let service = LaunchdService::new(home, None, None, PathBuf::from("python3"));
         assert!(service
             .launchd
             .databases
@@ -1415,15 +1448,24 @@ mod tests {
         databases_held: bool,
         bootouts: u32,
         bootstraps: u32,
+        /// Set by the earlier install's own stop: the job is gone and, unless `survives_stop`, the port refuses.
+        stopped: Rc<Cell<bool>>,
+        survives_stop: bool,
+        /// After the stop, whatever answers on the port can no longer be tied to the install.
+        blind_after_stop: bool,
     }
 
     impl Launchd for FakeLaunchd {
         fn loaded(&mut self) -> Result<bool, String> {
-            Ok(self.loaded)
+            Ok(self.loaded && !self.stopped.get())
+        }
+
+        fn port_open(&mut self) -> bool {
+            self.port && (!self.stopped.get() || self.survives_stop)
         }
 
         fn port_answers(&mut self) -> bool {
-            self.port
+            self.port_open() && !(self.stopped.get() && self.blind_after_stop)
         }
 
         fn bootout(&mut self) -> Result<(), String> {
@@ -1453,6 +1495,7 @@ mod tests {
         refuse: bool,
         stops: u32,
         starts: u32,
+        stopped: Rc<Cell<bool>>,
         /// Looks for which a stop left by an earlier run is still draining.
         draining: u32,
     }
@@ -1472,6 +1515,7 @@ mod tests {
             if self.refuse {
                 return Err("`corsia stop` refused: work is still running".into());
             }
+            self.stopped.set(true);
             Ok(())
         }
 
@@ -1512,7 +1556,10 @@ mod tests {
         }
     }
 
-    fn launchd_service(source: Option<FakeSource>, launchd: FakeLaunchd) -> LaunchdService<FakeSource, FakeLaunchd> {
+    fn launchd_service(mut source: Option<FakeSource>, launchd: FakeLaunchd) -> LaunchdService<FakeSource, FakeLaunchd> {
+        if let Some(source) = source.as_mut() {
+            source.stopped = launchd.stopped.clone();
+        }
         LaunchdService { source, launchd, timeout: Duration::from_millis(300) }
     }
 
@@ -1584,5 +1631,131 @@ mod tests {
         service.start(None).unwrap();
         service.start(None).unwrap();
         assert_eq!(service.launchd.bootstraps, 1);
+    }
+
+    /// An install `install.sh` left with no launchd job: a checkout, its bootstrap file and no plist.
+    fn plain_install(home: &Home) -> adoption::SourceInstall {
+        home.write(".corsia/.git/HEAD", "ref: refs/heads/main");
+        home.write(".corsia/scripts/corsia", "#!/bin/sh\n");
+        let state = home.0.join("Library/Application Support/CORSIA/source-state");
+        home.write(
+            ".corsia/config.json",
+            &format!(r#"{{"workspace":{{"root":"{}"}},"state_root":"{}"}}"#, home.0.join("corsia").display(), state.display()),
+        );
+        adoption::source_from_bootstrap(&home.0).unwrap()
+    }
+
+    fn earlier_service(home: &Home, source: Option<adoption::SourceInstall>) -> LaunchdService {
+        let backend_dir = source.as_ref().map(|source| source.working_directory.clone());
+        let lifecycle = source.map(|source| SourceLifecycle::new(source, crate::source_lifecycle::Bundled::in_resources(&home.0)));
+        LaunchdService::new(&home.0, lifecycle, backend_dir, PathBuf::from("python3"))
+    }
+
+    #[test]
+    fn a_plain_install_is_looked_for_on_the_port_its_own_script_serves() {
+        let home = Home::new("plain-port");
+        let source = plain_install(&home);
+        assert_eq!(earlier_service(&home, Some(source)).launchd.port, Some(1956));
+    }
+
+    #[test]
+    fn a_plain_install_is_looked_for_on_the_port_its_env_names() {
+        let home = Home::new("plain-env-port");
+        let source = plain_install(&home);
+        home.write(".corsia/.env", "# a second instance\nexport BACKEND_PORT=\"47124\"\n");
+        assert_eq!(earlier_service(&home, Some(source)).launchd.port, Some(47124));
+    }
+
+    #[test]
+    fn a_plist_names_the_port_and_an_install_this_app_cannot_adopt_has_none() {
+        let home = Home::new("plist-port");
+        source_install(&home);
+        let source = adoption::source_from_plist(&home.0, &home.0.join(PLIST)).unwrap();
+        assert_eq!(earlier_service(&home, Some(source)).launchd.port, Some(47895));
+        assert_eq!(earlier_service(&home, None).launchd.port, Some(47895));
+
+        let bare = Home::new("no-port");
+        assert_eq!(earlier_service(&bare, None).launchd.port, None);
+    }
+
+    #[test]
+    fn a_plain_install_that_answers_is_running_and_is_stopped_only_by_its_own_stop() {
+        let mut service = launchd_service(Some(FakeSource::default()), FakeLaunchd { port: true, ..Default::default() });
+        assert!(service.running().unwrap(), "so a failed Start fresh starts it again");
+        stop(&mut service).unwrap();
+        assert_eq!(service.source.as_ref().unwrap().stops, 1);
+        assert_eq!(service.launchd.bootouts, 0);
+    }
+
+    #[test]
+    fn a_plain_install_whose_port_still_answers_after_its_stop_is_not_moved() {
+        let home = Home::new("plain-port-stays");
+        plain_install(&home);
+        let before = home.files();
+        // Also when lsof can no longer say whose the listener is: the raw port decides.
+        for blind_after_stop in [false, true] {
+            let launchd = FakeLaunchd { port: true, survives_stop: true, blind_after_stop, ..Default::default() };
+            let mut service = launchd_service(Some(FakeSource::default()), launchd);
+
+            let error = start_fresh(&home.0, &home.app_dir(), &mut service, &mut |_| {}, SystemTime::now()).unwrap_err();
+
+            assert!(error.restored && !error.left_stopped, "blind {blind_after_stop}: {error:?}");
+            assert!(error.message.contains("couldn’t finish stopping"), "{}", error.message);
+            assert_eq!(home.files(), before, "nothing moved");
+        }
+        assert_eq!(home.files(), before, "nothing moved");
+    }
+
+    #[test]
+    fn something_else_answering_on_the_port_is_not_the_earlier_install() {
+        let home = Home::new("plain-foreign-listener");
+        plain_install(&home);
+        let source = FakeSource::default();
+        // The port answers, but not from the checkout, so the install itself was not running.
+        let mut service = launchd_service(Some(source), FakeLaunchd::default());
+        assert!(!service.running().unwrap());
+
+        start_fresh(&home.0, &home.app_dir(), &mut service, &mut |_| {}, SystemTime::now()).unwrap();
+
+        assert_eq!(service.source.as_ref().unwrap().stops, 0);
+        assert_eq!(service.source.as_ref().unwrap().starts, 0);
+    }
+
+    #[test]
+    #[ignore = "needs a real lsof, which the agent sandbox blocks"]
+    fn a_plain_install_counts_only_a_listener_that_runs_from_its_backend_folder() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let here = std::env::current_dir().unwrap();
+        let elsewhere = std::env::temp_dir();
+        let launchd = |listener_dir| SystemLaunchd {
+            plist: PathBuf::new(),
+            port: Some(port),
+            listener_dir,
+            databases: Vec::new(),
+            python: PathBuf::from("python3"),
+        };
+        assert!(launchd(Some(here)).port_answers(), "this process listens, from its own folder");
+        assert!(!launchd(Some(elsewhere)).port_answers(), "a listener from another folder is not the install");
+        assert!(launchd(None).port_answers(), "a plist's port is taken as given");
+    }
+
+    #[test]
+    fn a_plain_install_that_answers_and_refuses_to_stop_is_put_back_where_it_was() {
+        let home = Home::new("plain-refuses");
+        plain_install(&home);
+        let before = home.files();
+        let source = FakeSource { refuse: true, ..Default::default() };
+        let mut service = launchd_service(Some(source), FakeLaunchd { port: true, ..Default::default() });
+        let mut phases = Vec::new();
+
+        let error = start_fresh(&home.0, &home.app_dir(), &mut service, &mut |phase| phases.push(phase), SystemTime::now())
+            .unwrap_err();
+
+        assert!(error.restored && !error.left_stopped, "{error:?}");
+        assert!(error.message.contains("couldn’t finish stopping"), "{}", error.message);
+        assert_eq!(home.files(), before, "nothing moved");
+        assert_eq!(service.source.as_ref().unwrap().stops, 1);
+        assert_eq!(service.source.as_ref().unwrap().starts, 1, "it was running, so it is started again");
     }
 }

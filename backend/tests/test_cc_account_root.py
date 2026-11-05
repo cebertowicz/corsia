@@ -17,7 +17,7 @@ def added_root(monkeypatch, tmp_path) -> Path:
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "default-home"))
     root = tmp_path / "added-home"
     monkeypatch.setattr(account_runtime, "launch_homes", lambda account_id, *, db=None:
-        account_runtime.LaunchHomes("added", True, claude_dir=str(root)))
+        account_runtime.LaunchHomes("added", claude_dir=str(root)))
     return root
 
 

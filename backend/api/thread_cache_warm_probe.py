@@ -17,6 +17,16 @@ def warm_transport_identity(target: ExecutionTarget) -> tuple[str, str] | None:
     return server_id, model_id
 
 
+def shape_warm_messages(messages: list[dict], target: ExecutionTarget) -> list[dict]:
+    from llm.providers.omlx_messages import shape_messages
+
+    identity = warm_transport_identity(target)
+    if identity is None:
+        return messages
+    server_id, model_id = identity
+    return shape_messages(messages, f"openai/{model_id}", server_id)
+
+
 def probe_progress(probe: dict) -> dict:
     return {
         "total_blocks": probe.get("total_blocks"),

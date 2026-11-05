@@ -90,6 +90,7 @@ async def test_live_status_loads_even_when_cache_says_loaded(seat, lifecycle, mo
 @pytest.mark.parametrize("status,payload,expected", [
     (200, {"models": []}, []),
     (200, {"models": "invalid"}, None),
+    (200, {"models": [None]}, None),
     (500, {}, None),
 ])
 @pytest.mark.asyncio

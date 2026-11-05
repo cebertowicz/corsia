@@ -165,16 +165,20 @@ def _commit_stop_terminal(
         ambiguous_stale_writes(
             connection, turn_id, error="Stop ended the turn after provider dispatch",
         )
+        # A user Stop must not restart the agent on a plan wake, armed or
+        # already queued. Both end here, before the terminal claims a successor,
+        # so no claim (now, or after a restart or admission hold lifts) can run
+        # the queued one. A steer never commits here. A plan-limit pause is not
+        # a user Stop: its wake survives, held by admission.
+        if cause is None:
+            from automation import plan_liveness
+            from infra.queued_input_settlement import cancel_queued_liveness_wakes
+
+            plan_liveness.cancel_plan_wake(sid, db=connection)
+            cancel_queued_liveness_wakes(connection, sid)
         settlement = persist_turn_settlement(turn_id, "cancelled", cause, db=connection)
         if settlement.result is not TurnTerminalResult.APPLIED:
             return _turn_status(user_id, sid, turn_id, db=connection), None
-        # A Stop leaves no successor Turn, so an armed plan wake would restart
-        # the agent the user just stopped. A steer never commits here. A
-        # plan-limit pause is not a user Stop: its wake survives, held by admission.
-        if cause is None:
-            from automation import plan_liveness
-
-            plan_liveness.cancel_plan_wake(sid, db=connection)
         inputs = tuple(str(item["id"]) for item in connection.execute(
             "SELECT id FROM messages WHERE active_turn_id=? ORDER BY input_order",
             (turn_id,),
@@ -240,14 +244,18 @@ def _thread_owner(sid: str) -> str | None:
         connection.close()
 
 
-async def stop_turn_for_cause(sid: str, turn_id: str) -> StopReceipt:
-    """The system caller of Stop: hold one exact Turn at the plan limit.
+async def stop_turn_for_cause(sid: str, turn_id: str, *, plan_limit: bool = True) -> StopReceipt:
+    """The system caller of Stop: end one exact Turn with no requester.
 
-    It has no requester, so no ownership check: never reach it from a ws or
-    API handler. It shares ``_stop_exact_turn`` with user Stop, so the cancel
-    keeps one writer, lock and deadline, and never interrupts a harness
-    directly. The limited verdict is already committed, so the successor
-    claim in this Stop's terminal holds instead of spending.
+    By default it holds the Turn at the plan limit: the limited verdict is
+    already committed, so the successor claim in this Stop's terminal holds
+    instead of spending. With ``plan_limit=False`` it is a cause-less Stop (a
+    time limit): the Turn's inputs are cancelled and its plan wake cancelled,
+    as a user's Stop does.
+
+    It has no ownership check: never reach it from a ws or API handler. It
+    shares ``_stop_exact_turn`` with user Stop, so the cancel keeps one writer,
+    lock and deadline, and never interrupts a harness directly.
     """
     from subagents.runtime_guard import join_task_through_cancellation
 
@@ -257,7 +265,7 @@ async def stop_turn_for_cause(sid: str, turn_id: str) -> StopReceipt:
     task = asyncio.create_task(_stop_exact_turn(
         {"id": user_id}, sid, state._active_turns.get(sid),
         state._active_llm_tasks.get(sid), turn_id,
-        log=default_logger, cause=PlanLimitStop(),
+        log=default_logger, cause=PlanLimitStop() if plan_limit else None,
     ))
     cancellation = await join_task_through_cancellation(task)
     receipt = task.result()

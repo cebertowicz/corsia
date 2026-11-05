@@ -15,26 +15,6 @@ from ws.message_dispatch import _send_error, _send_input_accepted
 OwnedThread = Callable[[dict, str], Awaitable[object | None]]
 
 
-def cc_attachment_block(attachments: list, user_id: str) -> str:
-    from infra.config import UPLOADS_DIR
-
-    lines = []
-    for attachment in attachments or []:
-        mime_type = attachment.get("mime_type")
-        if isinstance(mime_type, str) and mime_type.startswith("image/"):
-            continue
-        fid, name = attachment.get("file_id"), attachment.get("filename")
-        if not fid or not name:
-            continue
-        path = UPLOADS_DIR / user_id / fid / name
-        if path.is_file():
-            lines.append(f"- {path}")
-    if not lines:
-        return ""
-    return ("\n\n[Attached files — on this machine, read them as needed:]\n"
-            + "\n".join(lines))
-
-
 async def _deliver_subagent_input(
     ws: WebSocket, child_thread_id: str, session: object, content: str,
     attachments: list | None, is_edited: bool, input_id: str,

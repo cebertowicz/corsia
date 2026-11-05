@@ -129,6 +129,7 @@ def _build_manual_cold_admission(
 ):
     """Build manual cold admission through the shared checkpoint renderer."""
     from core.checkpoint_cold_admission import build_checkpoint_admission
+    from core.checkpoint_native_admission import last_carried_tokens
     from history.projection import slice_portable_projection
     from infra.database import get_db
 
@@ -149,6 +150,7 @@ def _build_manual_cold_admission(
             reasoning_effort=context.reasoning_effort,
             binary=context.binary,
             db=db,
+            carried_tokens=last_carried_tokens(context.thread_id, context.target, db),
         )
     finally:
         db.close()

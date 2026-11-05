@@ -73,6 +73,8 @@ export const CREATE_FAILED = 'Couldn’t create the chat. Try again.';
 export const WAITING_FOR_ACCOUNT = 'Waiting for account';
 
 const SIGN_IN_AGAIN = 'Your message is saved and will send as soon as you sign in again in Settings › Providers.';
+// Only a signed-out hold has the in-chat Sign in row (`heldSignedOutInput`), so only it needs no pointer to Settings.
+const SIGN_IN_AGAIN_IN_CHAT = 'Your message is saved and will send as soon as you sign in again.';
 const SWITCH_MODELS = 'Your message is saved and will send as soon as you switch models';
 const SIGN_IN_MISSING = `CORSIA can’t find this chat’s account sign-in on this computer. ${SIGN_IN_AGAIN}`;
 
@@ -83,7 +85,11 @@ const SIGN_IN_MISSING = `CORSIA can’t find this chat’s account sign-in on th
  * the held chat is not bound to, so switching models is its only route.
  */
 export const ACCOUNT_HOLD_COPY: Readonly<Record<string, { label: typeof WAITING_FOR_ACCOUNT; title: string }>> = Object.freeze({
-	account_signed_out: { label: WAITING_FOR_ACCOUNT, title: `This chat’s account is signed out. ${SIGN_IN_AGAIN}` },
+	account_signed_out: { label: WAITING_FOR_ACCOUNT, title: `This chat’s account is signed out. ${SIGN_IN_AGAIN_IN_CHAT}` },
+	account_not_configured: {
+		label: WAITING_FOR_ACCOUNT,
+		title: 'No account is signed in for this chat’s provider. Your message is saved and will send as soon as you sign one in under Settings › Providers.',
+	},
 	account_login_unverified: {
 		label: WAITING_FOR_ACCOUNT,
 		title: `CORSIA couldn’t confirm this chat’s account is still signed in. ${SIGN_IN_AGAIN}`,

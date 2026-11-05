@@ -55,7 +55,7 @@ class FakeGoogle:
         self.refresh_status = 200
         self.scope = " ".join(oauth.SCOPES)
         self.id_token: str | None = None
-        self.token_subject: str | None = "published-subject"
+        self.token_subject = "published-subject"
         self.email = EMAIL
 
     def handler(self, request: httpx.Request) -> httpx.Response:
@@ -79,8 +79,11 @@ class FakeGoogle:
             return httpx.Response(200, json=grant)
         if url == google_client.TOKEN_INFO_URL:
             assert request.method == "POST" and parse_qs(request.content.decode())["access_token"] == [ACCESS]
+            # Google's tokeninfo carries the account subject only for a token granted openid.
+            if "openid" not in self.scope.split():
+                return httpx.Response(200, json={"scope": self.scope})
             subject = google_client.id_token_subject(self.id_token) if self.id_token else self.token_subject
-            return httpx.Response(200, json={"sub": subject})
+            return httpx.Response(200, json={"sub": subject, "scope": self.scope})
         if url == oauth.PROFILE_URL:
             return httpx.Response(200, json={"emailAddress": self.email})
         return httpx.Response(200, json={"ok": True})
@@ -859,6 +862,9 @@ async def test_published_callback_and_refresh(google, conductor, monkeypatch, ca
     state = json.loads(base64.b64decode(query["state"][0]))
     assert state == {"uri": oauth.redirect_uri(), "manual": False, "csrf": state["csrf"]}
     assert query["scope"][0].split() == list(oauth.PUBLISHED_SCOPES)
+    # The relay passes no ID token; Google's tokeninfo returns the account subject only for an openid token.
+    assert "openid" in query["scope"][0].split()
+    google.scope = query["scope"][0]
     params = {"state": state["csrf"], "access_token": ACCESS, "refresh_token": REFRESH,
               "scope": " ".join(oauth.PUBLISHED_SCOPES)}
     async with _http() as http:
@@ -930,7 +936,8 @@ async def test_published_callback_rejects_missing_required_grant(google, conduct
 
 
 async def test_published_callback_refuses_missing_subject(google, conductor):
-    google.token_subject = None
+    # A grant without openid: Google's tokeninfo then has no subject, so the sign-in is refused.
+    google.scope = " ".join(oauth.PUBLISHED_REQUIRED_SCOPES)
     url = json.loads(await GoogleConnectTool().execute(_thread_id=conductor))["url"]
     query = parse_qs(urlparse(url).query)
     state = json.loads(base64.b64decode(query["state"][0]))["csrf"]

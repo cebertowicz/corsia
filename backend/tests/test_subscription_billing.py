@@ -9,9 +9,12 @@ from fastapi import HTTPException
 
 from connections import subscription_billing as sb
 from connections.models import ConnectionStatus, ConnectionType, upsert_connection
-from connections.vendor_accounts import default_account, get_account
+from connections.vendor_accounts import get_account
 from infra.database import get_db
 from llm import network_discovery as nd
+from vendor_account_fixtures import signed_in_default
+
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
 
 PARAMS = {"scope_project": "all", "scope_agent": None, "user_id": "steve", "from": "2026-09-01", "to": "2026-10-31"}
 CREATED = "2026-09-01T00:00:00Z"
@@ -28,7 +31,7 @@ def today(monkeypatch):
 def _account(db, provider: str = "codex") -> dict:
     upsert_connection(type=ConnectionType.CLI, provider=provider, status=ConnectionStatus.AVAILABLE,
                       config={"binary": f"/bin/{provider}"}, db=db)
-    account = default_account(provider, db=db)
+    account = signed_in_default(provider, db=db)
     # The fixture database seeds placeholder accounts; every account here existed from CREATED.
     db.execute("UPDATE vendor_accounts SET created_at=?", (CREATED,))
     return account

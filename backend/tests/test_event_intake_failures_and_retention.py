@@ -9,7 +9,7 @@ import pytest
 
 from automation import schedules, script_runner, script_schedules
 from automation.script_readings import RunReport
-from events import intake, rule_declarations, rules
+from events import intake, intake_errors, rule_declarations, rules
 from infra.database import get_db
 from tests.test_event_emit import emit_world  # noqa: F401 - fixture
 from tests.test_event_intake import OWNER, _admit, intake_world  # noqa: F401 - fixture
@@ -47,7 +47,7 @@ def test_an_intake_exception_on_an_event_line_settles_the_run_as_an_owner_error(
 
     # A script can't resend a line by id (the runner builds it), so its outage says to run it again.
     fix = script_runner._RERUN_FIX if code == "intake_unreachable" else None
-    message = f"event line refused: {intake.format_event_error(code, text, fix)}"
+    message = f"event line refused: {intake_errors.format_event_error(code, text, fix)}"
     assert "same event id" not in message
     assert report.status == "error" and report.error == message
     assert [signal.kind for signal in report.signals] == ["error"] and message in report.signals[0].summary
@@ -94,7 +94,7 @@ def test_rules_and_intake_read_one_declaration(emit_world):  # noqa: F811
     (OSError("disk gone"), "intake_unreachable"),
 ])
 def test_failure_code_splits_unreachable_from_a_defect(exc, expected):
-    assert intake.failure_code(exc) == expected
+    assert intake_errors.failure_code(exc) == expected
 
 
 def test_agent_emit_reports_a_defect_as_internal_error_and_an_outage_as_retryable(emit_world, monkeypatch):  # noqa: F811
@@ -112,10 +112,10 @@ def test_agent_emit_reports_a_defect_as_internal_error_and_an_outage_as_retryabl
 
 
 def test_error_fixes_name_no_surface_flags_and_point_at_the_declaration_surface():
-    for code in intake._ERROR_FIXES:
-        assert "--" not in intake.format_event_error(code, "text"), code
+    for code in intake_errors._ERROR_FIXES:
+        assert "--" not in intake_errors.format_event_error(code, "text"), code
     for code in ("undeclared_type", "not_your_namespace"):
-        fix = intake.format_event_error(code, "text")
+        fix = intake_errors.format_event_error(code, "text")
         assert "measures.yaml" in fix and "measure_sync" in fix and "use: route or both" in fix
 
 

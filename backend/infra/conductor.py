@@ -29,7 +29,11 @@ from infra.fresh_threads import create_fresh_thread
 from infra.queries import thread_is_openable
 
 WORKSPACE_SCOPE = "workspace"
-CONDUCTOR_THREAD_TITLE = "Conductor"
+
+
+def conductor_title(project_name: str) -> str:
+    """Canonical conductor title for a project name: its creation title and the match for a rename."""
+    return f"{project_name} Conductor"
 
 
 class CoordinationScope(TypedDict):
@@ -170,7 +174,7 @@ def ensure_project_conductor(
                 return existing
 
             row = conn.execute(
-                "SELECT id FROM projects WHERE id = ?",
+                "SELECT id, name FROM projects WHERE id = ?",
                 (project_id,),
             ).fetchone()
             if row is None:
@@ -178,7 +182,7 @@ def ensure_project_conductor(
 
             session = create_fresh_thread(
                 user_id=user_id,
-                title=CONDUCTOR_THREAD_TITLE,
+                title=conductor_title(row["name"]),
                 model=model,
                 project_id=row["id"],
                 db=conn,
@@ -296,6 +300,10 @@ def set_project_conductor(project_id: str, thread_id: str | None, db=None) -> bo
             (thread_id, now, project_id),
         )
         bump_context_epochs(_db, (previous, thread_id), now)
+        from events.connectors.github_screen.install import sync
+        from infra.write_effects import after_commit
+
+        after_commit(_db, lambda: sync(_db, project_id))
         return True
 
 

@@ -3,12 +3,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 from infra import config
 from infra.database import get_db
-from infra.db_async import run_in_db
+from infra.db_async import run_bulk, run_in_db
 from infra.measure_registry import sync
 from infra.measure_status import status
 from tools.base import Tool
@@ -52,6 +53,34 @@ def _read_declaration(path: str) -> tuple[Path, str]:
     return target, target.read_text(encoding="utf-8")
 
 
+_KPI_PERIOD_FIELDS = ("period", "value", "n", "unknown", "status", "reason", "partial")
+
+
+def _kpi_summary(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Trim the agent KPI read to each KPI's current and last completed period."""
+    def trim(period: dict[str, Any]) -> dict[str, Any]:
+        return {key: period[key] for key in _KPI_PERIOD_FIELDS if key in period}
+
+    return [{"name": item["name"], "definition_version": item["definition_version"], "workflow": item["workflow"],
+             "current": trim(item["periods"][-1]), "last_complete": trim(item["periods"][-2])}
+            for item in result["kpis"]]
+
+
+async def _own_kpis(user_id: str, thread_id: str) -> list[dict[str, Any]] | str:
+    from fastapi import HTTPException
+
+    from api.measurement_agent_kpis import read_own
+    from api.measurement_scope import resolve_grain
+
+    try:
+        weeks = resolve_grain("weeks", "UTC")
+        # Only the two periods the summary keeps are read: the last complete week and the current one.
+        grain = replace(weeks, periods=weeks.periods[-1:], starts=weeks.starts[-2:])
+        return _kpi_summary(await run_bulk(read_own, user_id, thread_id, grain))
+    except HTTPException as exc:
+        return f"Error: {exc.detail}"
+
+
 class MeasureSyncTool(Tool):
     @property
     def name(self) -> str:
@@ -71,7 +100,8 @@ class MeasureSyncTool(Tool):
                 "end-to-start names, for example on: {introduced_by: pr}. Intake stamps whole minutes from "
                 "the newest matching earlier start, or leaves it absent if none has arrived; later starts do not "
                 "backfill it. KPI operands may declare latest or first "
-                "with one or two id/enum attributes; these are validated but do not filter results yet. "
+                "with one or two id/enum attributes to keep one row per value: latest keeps the newest row, "
+                "then applies where; first applies where, then keeps the earliest row. "
                 "Run it after every change; nothing takes effect until sync succeeds.")
 
     @property
@@ -95,17 +125,24 @@ class MeasureStatusTool(Tool):
         return ("Show your measure intake for today and the last 7 days: rows recorded, drops "
                 "and refusals by event, plus the active synced definition files. Each recent "
                 "refusal names the event, attribute and value, whether the row or only the "
-                "attribute was dropped, and the fix. Use it after a script run.")
+                "attribute was dropped, and the fix. Use it after a script run. With kpis true it also "
+                "returns kpis: each KPI you synced, with its current and last complete UTC week (value, n, unknown, status, partial).")
 
     @property
     def parameters(self) -> dict[str, Any]:
-        return {"type": "object", "additionalProperties": False, "properties": {}, "required": []}
+        return {"type": "object", "additionalProperties": False, "properties": {"kpis": {"type": "boolean"}}, "required": []}
 
     async def execute(self, **kwargs: Any) -> str:
         context = _context(kwargs)
         if isinstance(context, str):
             return context
-        thread_id, _ = context
+        thread_id, actor_row = context
         def read() -> dict[str, Any]:
             return status(get_db(), thread_id)
-        return json.dumps(await run_in_db(read), sort_keys=True)
+        result = await run_in_db(read)
+        if kwargs.get("kpis"):
+            kpis = await _own_kpis(actor_row["user_id"], thread_id)
+            if isinstance(kpis, str):
+                return kpis
+            result["kpis"] = kpis
+        return json.dumps(result, sort_keys=True)

@@ -1,10 +1,11 @@
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
 
 from tools import mail_guard_runtime
-from tools.email_read import UNSCREENED, flagged_text
+
 from tools.mail_guard import FLAGGED, UNCHECKED, Message
 
 
@@ -18,7 +19,7 @@ async def test_flagged_newer_message_is_withheld(monkeypatch):
         return target, [target, newer], [], 0
 
     async def screened(*args):
-        return f"Error: {flagged_text('R1')}"
+        return json.dumps({"screen": {"state": "flagged", "rule": "R1"}, "body": "malicious instructions"})
 
     async def fetch_body(*args):
         return newer.body
@@ -43,7 +44,7 @@ async def test_unscreened_message_says_it_was_not_screened(monkeypatch):
     target = Message("old", "thread", "Taylor <taylor@example.test>", "Budget", now, "old")
 
     async def screened(*args):
-        return f"Error: {UNSCREENED}"
+        return json.dumps({"screen": {"state": "unscreened"}, "body": "old"})
 
     async def fetch_body(*args):
         return target.body
@@ -52,3 +53,22 @@ async def test_unscreened_message_says_it_was_not_screened(monkeypatch):
     visible = await mail_guard_runtime._visible(SimpleNamespace(fetch_body=fetch_body), "account", target)
     text = mail_guard_runtime.evidence(visible)
     assert UNCHECKED in text and FLAGGED not in text and "Try again later" not in text
+
+
+@pytest.mark.asyncio
+async def test_own_target_is_not_screened(monkeypatch):
+    now = datetime.now(timezone.utc)
+    target = Message("old", "thread", "Me <me@example.test>", "Budget", now - timedelta(days=1), "",
+                     to="pat@example.test", own=True)
+
+    async def data(*args):
+        return target, [target], [], 0
+
+    async def screened(*args):
+        raise AssertionError("own mail must not be screened")
+
+    monkeypatch.setattr(mail_guard_runtime, "screened_message", screened)
+    verdict, shown = await mail_guard_runtime.guarded_reply(SimpleNamespace(guard_data=data),
+                                                            {"id": "account", "address": "me@example.test"},
+                                                            "old", "reply", [])
+    assert shown is target and verdict.recipients == ["pat@example.test"]

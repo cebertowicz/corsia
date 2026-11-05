@@ -9,6 +9,7 @@
 		BROWSER_DIDNT_OPEN, failureText, NOT_ON_THIS_COMPUTER, PROVIDER_NOT_TOLD_AFTER, PROVIDER_NOT_TOLD_BEFORE, retryLabel,
 		SIGN_OUT_BODY, WAITING_TEXT,
 	} from '$lib/appSignIn';
+	import { pendingExternalPage } from '$lib/pendingExternalPage';
 
 	interface Props {
 		app: ConnectedApp;
@@ -45,13 +46,11 @@
 
 	async function signIn(): Promise<void> {
 		busy = 'signIn'; error = ''; copied = false;
-		// The page opens inside the click, before the request, so the browser allows it; it is pointed at the link once known.
-		const page = signInHere ? window.open('', '_blank') : null;
+		const page = signInHere ? pendingExternalPage() : null;
 		try {
 			const started = await startAppSignIn(app.id);
 			link = started.authorization_url;
-			blocked = !page;
-			if (page) { page.opener = null; page.location.href = link; }
+			blocked = !(page && await page.open(link));
 			patchView({ status: 'pending', failure_class: undefined, expires_at: started.expires_at });
 		} catch (cause) {
 			page?.close();

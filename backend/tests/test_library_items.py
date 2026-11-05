@@ -4,7 +4,7 @@ import hashlib
 
 import pytest
 
-from library.items import LibraryIntegrityError, fetch_bundle, search_items, source_ref
+from library.items import LibraryIntegrityError, LibraryItemError, fetch_bundle, search_items, source_ref
 
 
 def _item(*, withdrawn: bool = False) -> dict:
@@ -44,6 +44,13 @@ def test_digest_mismatch_refuses_the_whole_bundle_before_any_writer_can_run():
 
     with pytest.raises(LibraryIntegrityError, match="SKILL.md"):
         fetch_bundle(item, fetch=lambda _url: b"changed")
+
+
+def test_fetch_refuses_main_for_an_external_repository():
+    item = _item()
+    item["source"]["commit"] = "main"
+    with pytest.raises(LibraryItemError, match="invalid library item source"):
+        fetch_bundle(item, fetch=lambda _url: pytest.fail("must not fetch"))
 
 
 def test_search_orders_matches_and_excludes_withdrawn_items():

@@ -66,7 +66,7 @@ def _register_continuity_tool(agent: CORSIAAgent) -> None:
     """Expose the one continuity editor on native and harness registries."""
     from tools.continuity import ContinuityEditTool
 
-    agent.tools.register(ContinuityEditTool())
+    agent.tools.register(ContinuityEditTool(agent.tools))
 
 
 def _register_tool_surface(agent: CORSIAAgent) -> None:
@@ -141,8 +141,8 @@ def _register_memory_tools(agent: CORSIAAgent) -> None:
     agent.tools.register(SkillLibraryTool())
 
 
-def _register_project_creation_tools(agent: CORSIAAgent) -> None:
-    """Register project creation and the consent-gated reads of the person's other tools.
+def _register_project_and_workspace_tools(agent: CORSIAAgent) -> None:
+    """Register project and workspace Git tools, and consent-gated reads.
 
     The registry is shared by every thread, so ``agent_import`` refuses at call
     time anyone but the CORSIA agent and a first-run thread.
@@ -150,7 +150,10 @@ def _register_project_creation_tools(agent: CORSIAAgent) -> None:
     from tools.agent_import import AgentImportTool
     from tools.project_discovery import ProjectDiscoveryListTool
     from tools.projects import CreateProjectTool
+    from tools.workspace_git import WorkspaceCommitTool, WorkspaceHistoryTool
 
+    agent.tools.register(WorkspaceCommitTool())
+    agent.tools.register(WorkspaceHistoryTool())
     agent.tools.register(CreateProjectTool())
     agent.tools.register(ProjectDiscoveryListTool())
     agent.tools.register(AgentImportTool())
@@ -170,10 +173,12 @@ def _register_access_tools(agent: CORSIAAgent) -> None:
 
 def _register_measure_tools(agent: CORSIAAgent) -> None:
     """Register the declared-measure tools: loading a measures.yaml and reading what intake did with it."""
+    from tools.measure_keys import MeasureKeyTool
     from tools.measures import MeasureStatusTool, MeasureSyncTool
 
     agent.tools.register(MeasureSyncTool())
     agent.tools.register(MeasureStatusTool())
+    agent.tools.register(MeasureKeyTool())
 
 
 def _register_automation_tools(agent: CORSIAAgent) -> None:
@@ -249,16 +254,16 @@ def _register_delegation_tools(agent: CORSIAAgent) -> None:
     from tools.github_agent_account import GitHubAgentAccountTool
     from tools.model_sources import ModelSourcesTool
     from tools.register_microsoft import register as register_microsoft_tools
+    from tools.register_messages import register as register_messages_tools
 
     for tool_type in (
         DelegateCreateThreadTool, DelegateSendTool, DelegateStatusTool,
-        DelegateSetModelTool, DelegateTaskTool, ModelCatalogTool,
+        DelegateSetModelTool, DelegateTaskTool, ModelCatalogTool, ModelSourcesTool, GitHubAgentAccountTool,
     ):
         agent.tools.register(tool_type())
-    agent.tools.register(ModelSourcesTool())
-    agent.tools.register(GitHubAgentAccountTool())
     _register_google_tools(agent)
     register_microsoft_tools(agent)
+    register_messages_tools(agent)
 
 
 def _register_google_tools(agent: CORSIAAgent) -> None:
@@ -266,17 +271,15 @@ def _register_google_tools(agent: CORSIAAgent) -> None:
     from tools.calendar_list import CalendarDraftInviteTool, CalendarListTool, CalendarSendInviteTool
     from tools.google_email import EmailDraftTool, EmailSendTool
     from tools.email_read import EmailReadTool, EmailSearchTool
+    from tools.google_workspace import GoogleWorkspaceTool
     from tools.mail_host_connect import MailHostConnectTool
 
-    for tool in (MailHostConnectTool(), EmailSearchTool(), EmailReadTool()):
+    for tool in (
+        MailHostConnectTool(), EmailSearchTool(), EmailReadTool(), GoogleConnectTool(), GoogleStatusTool(),
+        EmailDraftTool(), EmailSendTool(), CalendarListTool(), CalendarDraftInviteTool(), CalendarSendInviteTool(),
+        GoogleWorkspaceTool(workspace=agent.workspace),
+    ):
         agent.tools.register(tool)
-    agent.tools.register(GoogleConnectTool())
-    agent.tools.register(GoogleStatusTool())
-    agent.tools.register(EmailDraftTool())
-    agent.tools.register(EmailSendTool())
-    agent.tools.register(CalendarListTool())
-    agent.tools.register(CalendarDraftInviteTool())
-    agent.tools.register(CalendarSendInviteTool())
 
 
 def _register_document_tools(agent: CORSIAAgent, workspace: Path) -> None:
@@ -352,7 +355,7 @@ def _register_tools(agent: CORSIAAgent, tool_cfg: dict, workspace: Path):
     from tools.worktrees import WorktreeCreateTool
 
     agent.tools.register(ReadToolResultTool())
-    _register_project_creation_tools(agent)
+    _register_project_and_workspace_tools(agent)
     agent.tools.register(WorktreeCreateTool())
     agent.tools.register(PlanReadTool())
     agent.tools.register(PlanEnsureTool())

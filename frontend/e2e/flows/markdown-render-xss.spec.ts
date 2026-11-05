@@ -82,7 +82,7 @@ test.describe('@flow:markdown-copy @surface:chat code-block copy still works aft
 		const copyBtn = page.locator('.assistant-msg .copy-btn').first();
 		await expect(copyBtn).toBeVisible({ timeout: 10_000 });
 		await copyBtn.click();
-		await expect(copyBtn).toHaveText('Copied!', { timeout: 5_000 });
+		await expect(copyBtn).toHaveText('Copied', { timeout: 5_000 });
 		const clip = await page.evaluate(() => navigator.clipboard.readText());
 		expect(clip).toContain('const answer = 42;');
 	});

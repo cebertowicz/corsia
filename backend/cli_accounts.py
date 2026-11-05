@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -107,29 +106,14 @@ def _read_password(from_stdin: bool) -> str:
 
 
 def _delegate_token_path() -> Path:
-    """The credential file the agent CLIs read, resolved by their own rule."""
-    from scripts.corsia_api import TOKEN_FILE
+    """The credential file the agent CLIs read, resolved by their own rule.
 
-    return Path(TOKEN_FILE)
-
-
-def _write_secret_file(path: Path, value: str) -> None:
-    """Write ``value`` to ``path`` atomically and readable only by its owner.
-
-    Created at mode 600 before anything is written, so the secret is never
-    briefly world-readable, and replaced atomically so a reader sees either the
-    old credential or the new one and never a half-written file.
+    A token left at an earlier location moves into the token folder first.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f"{path.name}.tmp-{os.getpid()}")
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        with os.fdopen(descriptor, "w") as handle:
-            handle.write(value)
-        os.replace(temporary, path)
-    except BaseException:
-        temporary.unlink(missing_ok=True)
-        raise
+    from scripts.corsia_api import TOKEN_FILE, settle_token_file
+
+    settle_token_file()
+    return Path(TOKEN_FILE)
 
 
 def _prompt_username(owners: list[str]) -> str:
@@ -269,8 +253,10 @@ def cmd_token_create(args: argparse.Namespace) -> int:
     label = args.label or "api"
     token, _ = accounts.issue_token(user, kind="api", label=label)
     if args.write_delegate_file:
+        from infra.api_token_file import write_secret_file
+
         path = _delegate_token_path()
-        _write_secret_file(path, token)
+        write_secret_file(path, token)
         print(f"API token for '{user}' written to {path} (label '{label}').")
         return 0
     print(f"API token for '{user}', label '{label}' — shown once:", file=sys.stderr)

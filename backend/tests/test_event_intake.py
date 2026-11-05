@@ -10,7 +10,7 @@ import pytest
 
 from automation import script_runner, script_schedules
 from automation.script_readings import RunReport
-from events import intake, rule_authoring
+from events import intake, intake_errors, rule_authoring
 from events.intake import admit_event
 from infra.database import get_db
 from infra.measure_registry import REGISTRY, sync
@@ -131,19 +131,19 @@ def test_record_only_type_is_refused_with_its_own_code_and_fix(intake_world):
     result = _admit(event_type="qa.record")
     assert result.refusal and result.refusal.code == "record_only"
     assert "use: record" in result.refusal.text and "qa.record" in result.refusal.text
-    rendered = intake.format_event_error(result.refusal.code, result.refusal.text)
+    rendered = intake_errors.format_event_error(result.refusal.code, result.refusal.text)
     assert rendered.count("use: route or both") == 1 and "measure_sync" in rendered
 
 
 def test_refusal_messages_state_the_problem_once_then_one_next_step(intake_world):
     big = _admit(facts={"code": "x" * (65 * 1024)}).refusal
-    too_large = intake.format_event_error(big.code, big.text)
+    too_large = intake_errors.format_event_error(big.code, big.text)
     worker = asyncio.run(admit_event(
         event_id="worker-once", origin="agent", producer=OWNER, event_type="worker.result", facts={},
     ))
 
     assert too_large.count("fewer or shorter facts") == 1 and too_large.startswith("too_large: facts exceed")
-    assert intake.format_event_error(worker.refusal.code, worker.refusal.text) == (
+    assert intake_errors.format_event_error(worker.refusal.code, worker.refusal.text) == (
         "reserved_type: worker events are produced by CORSIA only. Emit a type you declared instead."
     )
 
@@ -472,7 +472,7 @@ def test_script_event_lines_route_and_a_refusal_becomes_an_owner_error(intake_wo
     ))
 
     assert accepted.status == "ok" and both.status == "ok"
-    undeclared_fact = intake.format_event_error(
+    undeclared_fact = intake_errors.format_event_error(
         "undeclared_fact", "facts include a name not declared for this event type")
     assert refused.status == "error" and refused.error == f"event line refused: {undeclared_fact}"
     assert refused.signals[-1].kind == "error" and undeclared_fact in refused.signals[-1].summary
@@ -503,8 +503,8 @@ def test_a_script_run_with_many_refusal_kinds_names_two_with_their_fixes_and_cou
 
     assert report.status == "error"
     assert report.error.startswith("event line refused: bad_fact_kind: ")
-    assert intake._ERROR_FIXES["bad_fact_kind"] in report.error
-    assert intake._ERROR_FIXES["undeclared_fact"] in report.error
+    assert intake_errors._ERROR_FIXES["bad_fact_kind"] in report.error
+    assert intake_errors._ERROR_FIXES["undeclared_fact"] in report.error
     assert report.error.count("undeclared_fact:") == 1 and report.error.endswith(" and 1 more")
     assert "undeclared_type" not in report.error
     assert len(report.signals) == 1 and report.error in report.signals[0].summary

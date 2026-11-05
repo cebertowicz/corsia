@@ -37,6 +37,13 @@ def _db() -> sqlite3.Connection:
             "VALUES (?,?,?,?,?,?,200000,'t0','t0')",
             (model_id, harness, provider, model_id, model_id, model_id),
         )
+    # A Claude Code input starts a Turn only on a signed-in account that lists its model.
+    from connections.models import upsert_connection
+    from vendor_account_fixtures import signed_in_default
+
+    upsert_connection(type="cli", provider="claude-code", status="available",
+                      config={"binary": "/bin/synthetic"}, db=db)
+    signed_in_default("claude-code", db=db)
     return db
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from infra.db_async import run_in_db
+from infra.db_async import run_off_db
 
 
 #: The ``turn_complete`` terminal payload key that carries the receipt to the
@@ -27,6 +27,50 @@ class NativeIdleReceipt:
     rendered_input_tokens: int
     generation_id: str | None
     final_message_id: str | None = None
+    carried_tokens: int = 0
+
+
+def _fit_sections(state) -> dict:
+    return dict(state.context_usage.get("fit_section_tokens") or {})
+
+
+def fixed_input_tokens(state) -> int:
+    """The Turn's measured fixed prompt, as the initial render recorded it."""
+    return int(_fit_sections(state).get("fixed") or 0)
+
+
+def carried_input_tokens(state) -> int:
+    """The fixed prompt plus tool definitions: what every continuation carries."""
+    sections = _fit_sections(state)
+    return int(sections.get("fixed") or 0) + int(sections.get("tools") or 0)
+
+
+def last_carried_tokens(thread_id: str, target, db) -> int:
+    """A Native thread's fixed prompt plus tools from its last measured Turn.
+
+    For a checkpoint with no live Turn. The receipt on the last answer holds
+    the prompt sections the Turn partitions, less the continuity block; nothing
+    measured (no Turn yet, a new context epoch) is 0.
+    """
+    from infra.context_receipts import (
+        current_context_receipt_identity, latest_measured_context_receipt,
+    )
+
+    if target.harness != "native":
+        return 0
+    row = db.execute(
+        "SELECT runtime_context_epoch FROM threads WHERE id=?", (thread_id,),
+    ).fetchone()
+    identity = row and current_context_receipt_identity(
+        thread_id, harness="native", catalog_model_id=target.catalog_id,
+        runtime_context_epoch=int(row["runtime_context_epoch"]),
+    )
+    record = identity and latest_measured_context_receipt(thread_id, identity, db=db)
+    usage = record["context_usage"] if record else {}
+    return sum(
+        int(usage.get(field) or 0)
+        for field in ("system_tokens", "context_source_tokens", "tool_def_tokens")
+    )
 
 
 def effective_input_tokens(usage: dict | None) -> int | None:
@@ -64,6 +108,24 @@ def skip_optional_cold_fold(state, required: bool) -> None:
         raise OptionalCheckpointSkipped("no correlated receipt for a warm fold")
 
 
+async def maintain_native_boundary(boundary, *, overflow_retry: bool):
+    """Run the shared boundary; decide what a required fold with nothing newer means.
+
+    None means the overflow retry adopts nothing, so the Turn ends on the
+    refusal, handled. Otherwise the installed checkpoint plus its tail is what
+    cannot fit, and no fold can make it smaller.
+    """
+    from core.checkpoint_resume import CHECKPOINT_TAIL_TOO_LARGE, maintain_before_provider_call
+    from core.fork_types import NothingNewerToFold
+
+    try:
+        return await maintain_before_provider_call(boundary, must_adopt=overflow_retry)
+    except NothingNewerToFold as error:
+        if overflow_retry:
+            return None
+        raise boundary.unavailable(CHECKPOINT_TAIL_TOO_LARGE) from error
+
+
 def freeze_idle_receipt(state) -> NativeIdleReceipt | None:
     """Freeze the final call's receipt when the Turn ended on that call's answer.
 
@@ -88,6 +150,7 @@ def freeze_idle_receipt(state) -> NativeIdleReceipt | None:
         provider_input_tokens=provider_tokens,
         rendered_input_tokens=state.last_measured_rendered_input_tokens,
         generation_id=state.context_usage.get("checkpoint_generation_id"),
+        carried_tokens=carried_input_tokens(state),
     )
 
 
@@ -95,7 +158,7 @@ async def capture_native_checkpoint_source(
     thread_id, state, context, reasoning_effort,
 ):
     """Freeze exact live warmth only when its correlated receipt is present."""
-    from core.fork_native import capture_live_warm_source
+    from core.fork_native_warm import capture_live_warm_source
 
     if has_correlated_receipt(state):
         measured = effective_input_tokens(state.last_measured_call_usage)
@@ -116,7 +179,7 @@ async def capture_native_checkpoint_source(
 
 def build_native_cold_checkpoint_admission(
     checkpoint_id, thread_id, context, turn_identity, reasoning_effort,
-    trigger="pressure",
+    trigger, carried_tokens,
 ):
     """Build the existing Native cold request from one frozen DB context."""
     from core.checkpoint_cold_admission import build_checkpoint_admission
@@ -137,6 +200,7 @@ def build_native_cold_checkpoint_admission(
             reasoning_effort=reasoning_effort,
             binary=None,
             originating_turn_id=turn_identity.turn_id,
+            carried_tokens=carried_tokens,
             db=db,
         )
     finally:
@@ -151,6 +215,7 @@ async def prepare_native_checkpoint(
     source = await capture_native_checkpoint_source(
         thread_id, state, context, reasoning_effort,
     )
+    carried_tokens = carried_input_tokens(state)
     if source is not None:
         from dataclasses import replace
         from functools import partial
@@ -163,7 +228,7 @@ async def prepare_native_checkpoint(
             boundary=context.boundary,
             previous_generation_id=context.previous_generation_id,
             working_dir=context.working_dir, reasoning_effort=reasoning_effort,
-            binary=None, warm_source=source,
+            binary=None, warm_source=source, carried_tokens=carried_tokens,
         )
         # Warmth proved by a past receipt can still exceed the window on the
         # next call; carry this boundary's own cold admission so the fork can
@@ -173,14 +238,16 @@ async def prepare_native_checkpoint(
             provider_request=replace(
                 admission.provider_request,
                 same_model_cold=partial(
-                    run_in_db,
+                    run_off_db,
                     build_native_cold_checkpoint_admission,
                     checkpoint_id, thread_id, context, turn_identity,
-                    reasoning_effort, trigger,
+                    reasoning_effort, trigger, carried_tokens,
                 ),
             ),
         )
-    return await run_in_db(
+    # A local writer's cold count asks its own server; that wait holds no DB worker.
+    return await run_off_db(
         build_native_cold_checkpoint_admission,
         checkpoint_id, thread_id, context, turn_identity, reasoning_effort, trigger,
+        carried_tokens,
     )

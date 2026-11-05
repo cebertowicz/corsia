@@ -1,6 +1,6 @@
 ---
 name: movement-review
-description: Use when a `measurement.movement_digest` note or wake arrives, listing series that moved outside their normal range with the changes made before each. For the CORSIA agent (all series) and a project conductor (its own project's series only). Not for pulling dashboards on your own, or for reviewing a single agent's work.
+description: Use when a `measurement.movement_digest` note or wake arrives, listing series that moved outside their normal range with the changes made before each. For the CORSIA agent (all series), a project conductor (its own project's series only), or the agent that owns the moved series. Not for pulling dashboards on your own.
 ---
 
 # Movement review
@@ -8,6 +8,14 @@ description: Use when a `measurement.movement_digest` note or wake arrives, list
 The digest is built without a model and arrives as a note, or as a wake when a person-attention or cost series crossed its threshold. Each move names the series, its owner agent, the value, its own normal range, and `preceding_changes`: instruction, skill, workflow, model and roster changes that happened before it. A preceding change is context, never proof of cause.
 
 A project conductor works only the digest of its own project, against that project's objectives. Do not read other scopes' series.
+
+**If you own the moved series** (the digest's scope is `agent:<your thread id>` and every move's `owner_agent` is you), a KPI you declared in your `measures.yaml` settled worse than its `review` line. It wakes you when its `alert` is `wake`, and arrives as a note when it is `digest`. Each week is judged once, after its settle days; one report a day covers all your KPIs. Work it yourself, no `delegate_send`: steps 1 to 3 below on your own series, then the owner steps:
+
+- Read `measure_status` for dropped or refused rows before you trust the value: a drop explains a low count.
+- Change what you control (your skill, workflow, sources or your own `measures.yaml`) and sync it with `measure_sync`. A change to the declaration or its `review` line needs the reason in your plan; never move a line only to clear the alert.
+- Record the series and date on your plan. The next report, if it comes, shows whether the KPI is still past its line.
+
+A conductor that sees one of your moves in its project digest, listed with `owner_agent` set to you, treats it as routed to you and acts only if the same KPI is still out when its next week is judged.
 
 For each move, in order:
 

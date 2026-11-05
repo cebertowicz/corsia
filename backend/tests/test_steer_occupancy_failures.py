@@ -6,6 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("admitted_writes")  # write accounting, not account binding, is under test
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("harness", ["claude-code", "codex"])

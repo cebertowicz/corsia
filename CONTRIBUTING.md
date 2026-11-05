@@ -4,7 +4,9 @@ Thank you for contributing. Public contributions must contain only material you 
 
 ## Before you start
 
-Read [`AGENTS.md`](AGENTS.md) and the relevant parts of [`ARCHITECTURE.md`](ARCHITECTURE.md), [`BACKEND.md`](BACKEND.md), or [`FRONTEND.md`](FRONTEND.md). Work from a feature branch in a linked worktree based on `dev`; do not develop in a serving checkout or test against an operational database.
+Read [`AGENTS.md`](AGENTS.md) and the relevant parts of [`ARCHITECTURE.md`](ARCHITECTURE.md), [`BACKEND.md`](BACKEND.md), or [`FRONTEND.md`](FRONTEND.md). Work on a feature branch based on `dev`. You can make it in your CORSIA checkout at `~/.corsia` and edit there: `corsia restart` serves your edits, uncommitted ones included. Commit or stash them before **Settings → System → Update now**, which refuses while the checkout has uncommitted edits. Try a risky change, such as a migration, on a second checkout with its own data first (see the README's everyday commands). Never run tests against your real CORSIA's data.
+
+Try your change in the browser. The desktop app does not run your checkout's backend, even under `tauri dev`, and a desktop app that has taken over your source install stops it from serving your checkout.
 
 ## Contributor License Agreement
 
@@ -36,7 +38,7 @@ Search issues before filing. Add new evidence to an existing issue instead of op
 
 Open a public pull request to `dev` from your feature branch. Explain the user-visible or technical change, include focused tests, and keep the PR within its stated scope.
 
-If your PR changes what a person sees or does, add one plain-language line under `## Unreleased` in `CHANGELOG.md`, describing the change as a user would notice it. If it doesn't (tests, refactors, CI, internal docs), write `none` under **Release note** in the pull request description.
+If your PR changes what a person sees or does, add one plain-language line under `## Unreleased` in `CHANGELOG.md`, in its alphabetical place (not simply at the top or the end), describing the change as a user would notice it. If it doesn't (tests, refactors, CI, internal docs), write `none` under **Release note** in the pull request description.
 
 Before pushing, run the local gate:
 

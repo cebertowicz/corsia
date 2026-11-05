@@ -3,9 +3,13 @@ script that never started never reads as run or failed."""
 from __future__ import annotations
 
 import json
+from typing import get_args
+
+import pytest
 
 from automation import script_schedules
-from automation.script_sandbox import ScriptRun
+from automation.script_sandbox import ScriptRun, github_lock_reason
+from connections.github_agent import AgentAccountView, Cause
 from infra.database import get_db
 from tests.test_event_rules_run_script import (  # noqa: F401 - fixtures
     _START, OWNER, _emit, _explained, _outcomes, _rule, _script, _sweep, _tool, _write, runs, world,
@@ -45,3 +49,92 @@ def test_an_archived_creator_holds_a_script_rule_without_queueing(runs):
     assert runs["calls"] == [] and _outcomes(rule["id"]) == [("held", reason)]
     assert _explained(event_id) == [
         ("held", f"rule {rule['id']} held it from {OWNER}: {reason}")]
+
+
+_ACCOUNTS = {
+    "person": (AgentAccountView("wrong_account", "person_account", home="/h"),
+               "the agents' GitHub sign-in is the person's own GitHub account; sign it out and sign in as "
+               "the agents' own account"),
+    "unverified": (AgentAccountView("unverified", "own_login_unknown", home="/h"),
+                   "CORSIA doesn't know the person's own GitHub login, so it can't tell the agents' "
+                   "account from it; it checks again on a later run, and if the person isn't signed in "
+                   "to GitHub CLI on this computer, they need to sign in"),
+    "suspended": (AgentAccountView("needs_auth", "token_rejected", home="/h"),
+                  "GitHub rejected the sign-in for the agents' GitHub account; sign it out and in again"),
+    "absent": (AgentAccountView("not_installed", absent=True),
+               "there is no agents' GitHub account"),
+}
+
+
+@pytest.mark.parametrize("cause", get_args(Cause))
+def test_each_account_cause_has_its_own_line(cause):
+    assert github_lock_reason(AgentAccountView("needs_auth", cause)) != github_lock_reason(
+        AgentAccountView("needs_auth"))
+
+
+def test_no_two_account_causes_share_a_line():
+    lines = {github_lock_reason(AgentAccountView("needs_auth", cause)) for cause in get_args(Cause)}
+    assert len(lines) == len(get_args(Cause))
+
+
+def test_only_an_unanswered_verification_is_pending():
+    pending = {cause for cause in get_args(Cause) if AgentAccountView("unverified", cause).answer_pending}
+    assert pending == {"verifying"}
+
+
+@pytest.mark.parametrize("state", sorted(_ACCOUNTS))
+def test_a_failed_run_without_a_github_login_says_why(runs, state):
+    view, why = _ACCOUNTS[state]
+    _rule(_script(runs, "locked.sh"))
+    runs["outputs"]["locked.sh"] = ScriptRun(1, b"", b"", False, github_lock_reason(view))
+    event_id = _emit()
+    _sweep()
+
+    [(outcome, text)] = _explained(event_id)
+    assert outcome == "failed" and text.endswith(f"; scripts get no GitHub login: {why}")
+
+
+def test_a_run_that_worked_without_a_github_login_adds_no_line(runs):
+    view, _why = _ACCOUNTS["absent"]
+    rule = _rule(_script(runs, "local.sh"))
+    runs["outputs"]["local.sh"] = ScriptRun(0, b"", b"", False, github_lock_reason(view))
+    event_id = _emit()
+    _sweep()
+
+    assert _explained(event_id) == [("ran", f"rule {rule['id']} ran {OWNER}'s script with it")]
+
+
+def test_a_long_failure_and_its_login_note_fit_the_reason_limit(runs):
+    from events.rule_runs import _REASON_LIMIT
+
+    view, why = _ACCOUNTS["absent"]
+    rule = _rule(_script(runs, "long.sh"))
+    runs["outputs"]["long.sh"] = ScriptRun(1, b"", b"x" * 2000, False, github_lock_reason(view))
+    _emit()
+    _sweep()
+
+    [(outcome, reason)] = _outcomes(rule["id"])
+    assert outcome == "failed" and len(reason) <= _REASON_LIMIT
+    assert reason.endswith(f"; scripts get no GitHub login: {why}")
+
+
+def test_a_failed_locked_run_keeps_its_failure_and_names_the_missing_login(runs):
+    view, why = _ACCOUNTS["unverified"]
+    rule = _rule(_script(runs, "push.sh"))
+    runs["outputs"]["push.sh"] = ScriptRun(128, b"", b"push refused", False, github_lock_reason(view))
+    event_id = _emit()
+    _sweep()
+
+    [(outcome, text)] = _explained(event_id)
+    assert outcome == "failed" and "push refused" in text
+    assert text.endswith(f"; scripts get no GitHub login: {why}")
+
+
+def test_a_run_as_the_verified_account_adds_no_line(runs):
+    ready = AgentAccountView("ready", home="/h", login="agents-bot", user_id=1)
+    rule = _rule(_script(runs, "ready.sh"))
+    runs["outputs"]["ready.sh"] = ScriptRun(0, b"", b"", False, github_lock_reason(ready))
+    event_id = _emit()
+    _sweep()
+
+    assert _explained(event_id) == [("ran", f"rule {rule['id']} ran {OWNER}'s script with it")]

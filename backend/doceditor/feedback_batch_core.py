@@ -12,6 +12,8 @@ from infra.write_effects import after_commit
 AGENT_QUIET = 120
 USER_IDLE = 120
 IMMEDIATE_IDLE = 5
+# A person's typing pauses mid-thought for 5-15 s; a separate edit comes a minute or more later.
+EDIT_IDLE = 30
 IMMEDIATE = "immediate"
 DOCUMENT_HELD = "document-held"
 IMAGE_HELD = "image-held"
@@ -34,10 +36,13 @@ def _after(value: str, seconds: int) -> str:
     return (datetime.fromisoformat(value) + timedelta(seconds=seconds)).isoformat()
 
 
-def new_deadline(author_kind: str, delivery_policy: str, now: str) -> str:
+def new_deadline(author_kind: str, delivery_policy: str, now: str, *, edit: bool = False) -> str:
+    """When a batch closes: an immediate comment goes after a short idle, a person's edit once they pause typing."""
     if author_kind == "agent":
         return _after(now, AGENT_QUIET)
-    return _after(now, IMMEDIATE_IDLE if delivery_policy == IMMEDIATE else USER_IDLE)
+    if delivery_policy != IMMEDIATE:
+        return _after(now, USER_IDLE)
+    return _after(now, EDIT_IDLE if edit else IMMEDIATE_IDLE)
 
 
 def _validate_policy(author_kind: str, delivery_policy: str) -> str:
@@ -92,12 +97,13 @@ def touch_batch(
     delivery_policy: str,
     now: str,
     item_delta: int,
+    edit: bool = False,
 ) -> None:
     db.execute(
         """UPDATE doc_feedback_batches
            SET last_item_at=?,closes_at=?,closed_reason=NULL,
                item_count=item_count+?,updated_at=? WHERE id=?""",
-        (now, new_deadline(author_kind, delivery_policy, now), item_delta, now, batch_id)
+        (now, new_deadline(author_kind, delivery_policy, now, edit=edit), item_delta, now, batch_id)
     )
 
 

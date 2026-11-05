@@ -38,13 +38,13 @@
 	const projectId = $derived(conductor ? scopeTarget?.project_id ?? null : $activeThread?.project_id ?? null);
 	const agentScope = $derived(projectId ? 'project' : 'workspace');
 	// The workspace scope's designated thread is the CORSIA agent; a project's is a conductor.
-	const designatedName = $derived($uiScope ? 'Conductor' : 'CORSIA');
+	const designatedName = $derived(scopeTarget?.title || ($uiScope ? 'Conductor' : 'CORSIA'));
 </script>
 
 <div class="ts-scroll">
 	<div class="ts">
 		{#if conductor && !scopeTarget}
-			<p role="status">{conductorLoading ? `Loading ${designatedName === 'CORSIA' ? 'CORSIA' : 'conductor'} settings…` : `${designatedName} settings unavailable. Try reopening this view.`}</p>
+			<p role="status">{conductorLoading ? `Loading ${$uiScope ? 'conductor' : 'CORSIA'} settings…` : `${designatedName} settings unavailable. Try reopening this view.`}</p>
 		{:else}
 		<section class="sec">
 			<div class="sec-cap">Context files</div>

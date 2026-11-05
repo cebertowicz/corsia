@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from claude_controls import confined_claude_controls
+from infra.backend_git import git_argv
 
 _SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 _READER = Path(__file__).with_name("reviewer_read.py")
@@ -86,20 +87,12 @@ class ConfigStateScope:
 
 
 def claude_config_state_scope(env: dict[str, str], run_dir: str) -> ConfigStateScope:
-    """Resolve the config paths for a launch environment and run directory.
-
-    ``CLAUDE_CONFIG_DIR`` is absent for the default account, whose root is
-    ``~/.claude`` and whose global file is ``~/.claude.json``; a custom root
-    keeps the global file inside it.
-    """
-    custom = (env.get("CLAUDE_CONFIG_DIR") or "").strip()
-    if custom:
-        root = Path(custom).expanduser().resolve()
-        global_file = root / ".claude.json"
-    else:
-        home = Path(env.get("HOME") or Path.home()).expanduser()
-        root = (home / ".claude").resolve()
-        global_file = (home / ".claude.json").resolve()
+    """Resolve the explicit account config paths for the reviewer launch."""
+    configured = (env.get("CLAUDE_CONFIG_DIR") or "").strip()
+    if not configured:
+        raise ExactSourceError("reviewer account home is not configured")
+    root = Path(configured).expanduser().resolve()
+    global_file = root / ".claude.json"
     run_name = Path(run_dir).name
     if len(run_name) < _MIN_RUN_NAME or not run_name.isascii():
         raise ExactSourceError("reviewer run directory name is not unique enough")
@@ -223,7 +216,7 @@ def codex_exact_source_controls(review_dir: str, git_dir: str) -> list[str]:
 
 def _run_git(args: list[str], *, cwd: str, timeout: int = 30) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *args],
+        git_argv(*args),
         cwd=cwd,
         capture_output=True,
         text=True,

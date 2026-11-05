@@ -8,6 +8,8 @@ import pytest
 
 from codex_runtime_fixtures import _FenceSession, _active_live, _reset_runtime
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 @pytest.mark.asyncio
 async def test_transport_exit_preserves_durable_resume_identity(
     monkeypatch,

@@ -64,7 +64,7 @@ def test_live_process_keeps_launch_confinement(child_db):
     assert launch_confinement("child", live, child_db).add_dirs == ("/src",)
 
 
-def test_review_env_holds_no_credential_and_unconfined_env_is_unchanged(monkeypatch):
+def test_review_env_holds_no_credential_and_unconfined_env_is_unchanged(monkeypatch, tmp_path):
     from connections.github_agent_home import TOKEN_NAMES
     from subagents.cc_stream import CCStreamSession
 
@@ -72,9 +72,11 @@ def test_review_env_holds_no_credential_and_unconfined_env_is_unchanged(monkeypa
              "CORSIA_EVAL_TOKEN", "CORSIA_RESTART_CALLER_TOKEN")
     for name in names:
         monkeypatch.setenv(name, "secret")
+    home = str(tmp_path / "account-home")  # a launch's env names its account's home; there is no ambient root
     review = CCStreamSession(binary="claude", session_id="s", confinement="untrusted",
-                             add_dirs=("/src",), permission_mode=permission_mode_for("untrusted"))
-    plain = CCStreamSession(binary="claude", session_id="s")
+                             add_dirs=("/src",), permission_mode=permission_mode_for("untrusted"),
+                             claude_dir=home)
+    plain = CCStreamSession(binary="claude", session_id="s", claude_dir=home)
     assert not set(names) & set(review._build_env())
     assert set(names) <= set(plain._build_env())
 

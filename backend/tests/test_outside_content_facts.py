@@ -1,6 +1,7 @@
 """Outside-content classification and fact boundaries."""
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict
 from types import SimpleNamespace
@@ -58,11 +59,17 @@ def test_content_author_and_versions(kind, action, expected):
     facts = MANIFEST.extract_facts(raw, None)
     assert facts["author"] == "outside" and facts["author_origin"] == "outside"
     assert "BODY_CANARY" not in json.dumps(facts) and "TITLE_CANARY" not in json.dumps(facts)
-    version = "head123" if kind == "pr" and action in ("opened", "synchronize") else "42:2026-10-26T00:00:00Z" if action == "edited" else 7 if action == "opened" else 42
+    version = ("head123" if kind == "pr" and action in ("opened", "synchronize") else
+               "42:" + hashlib.sha256(b"BODY_CANARY").hexdigest()[:12] if kind == "review" and action == "edited" else
+               "42:2026-10-26T00:00:00Z" if action == "edited" else 7 if action == "opened" else 42)
     assert facts["item_version"] == version
     if action == "edited" or kind == "review":
         event = {"pr_comment": "issue_comment", "issue_comment": "issue_comment", "issue": "issues", "review": "pull_request_review"}[kind]
-        assert map_github_event(event, raw) is None
+        mapped = map_github_event(event, raw)
+        if kind == "issue":
+            assert mapped is None
+        else:
+            assert mapped == MANIFEST.decl(expected).routed_event
 
 
 def test_unknown_and_suppression_share_author():
@@ -98,7 +105,7 @@ def test_identity_view_once_per_delivery(monkeypatch, login, expected_calls):
     view = Mock(return_value=SimpleNamespace(ready=False))
     monkeypatch.setattr(github_agent, "view", view)
     monkeypatch.setattr(github_agent, "agent_login", lambda account: None)
-    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (True, True))
+    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (True, True, False))
     monkeypatch.setattr(github_rules.rule_reads, "unrouted_projects", lambda *args, **kwargs: frozenset({"p"}))
     monkeypatch.setattr(github_rules, "apply_webhook_rules_sync", lambda *args, **kwargs: None)
     raw = payload("pr", "opened", login)
@@ -114,7 +121,7 @@ def test_no_rule_reads_no_identity(monkeypatch):
     monkeypatch.setattr(github_content_facts, "is_own", github_ownership.is_own)
     view = Mock(return_value=SimpleNamespace(ready=False))
     monkeypatch.setattr(github_agent, "view", view)
-    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (False, False))
+    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (False, False, False))
     scope = github_rules.rule_scope("webhook.github.pr_opened", payload("pr", "opened"), None)
     assert not scope.any_rule and scope.envelope is None
     assert view.call_count == 0
@@ -166,7 +173,7 @@ async def test_delivery_identity_reads_by_author_and_declaration(main_db, monkey
     view = Mock(return_value=SimpleNamespace(ready=False))
     monkeypatch.setattr(github_agent, "view", view)
     monkeypatch.setattr(github_agent, "agent_login", lambda account: None)
-    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (True, True))
+    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (True, True, False))
     monkeypatch.setattr(github_rules.rule_reads, "unrouted_projects", lambda *args, **kwargs: frozenset({"p"}))
     monkeypatch.setattr(github_rules, "apply_webhook_rules_sync", lambda *args, **kwargs: None)
     deliver = AsyncMock(return_value=True)

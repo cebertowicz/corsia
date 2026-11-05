@@ -23,6 +23,9 @@ from api.project_scaffolding import (  # noqa: E402
     remove_linked_repo,
 )
 from auth_fixtures import OWNER_TOKEN  # noqa: E402
+from tests.backend_git_helpers import git_subcommand  # noqa: E402
+from infra.continuation_schema import AUTOMATION_SCHEDULES_SQL  # noqa: E402
+from infra.event_rule_schema import EVENT_RULE_SCHEMA_SQL  # noqa: E402
 
 _TOKEN = OWNER_TOKEN
 
@@ -94,7 +97,8 @@ def _policy_db(path: str | Path = ":memory:") -> sqlite3.Connection:
         """
         CREATE TABLE projects (
             id TEXT PRIMARY KEY,
-            doc_roots TEXT
+            doc_roots TEXT,
+            conductor_thread_id TEXT
         );
         CREATE TABLE project_repo_policies (
             project_id TEXT NOT NULL,
@@ -106,6 +110,7 @@ def _policy_db(path: str | Path = ":memory:") -> sqlite3.Connection:
         )
         """
     )
+    db.executescript(EVENT_RULE_SCHEMA_SQL + AUTOMATION_SCHEDULES_SQL)
     return db
 
 
@@ -149,7 +154,8 @@ def _configure_repo_api(monkeypatch, module, workspace: Path, db) -> None:
     monkeypatch.setattr(module, "_workspace_dir_for", lambda _id: workspace)
     monkeypatch.setattr(module, "run_in_db", _run_now)
     monkeypatch.setattr(module, "get_db", lambda: _NoClose(db))
-    monkeypatch.setattr(module, "_sync", lambda *_args: None)
+    monkeypatch.setattr(module, "sync_sources", lambda *_args: None)
+
 
 
 _HOST_LOAD_DEADLINE_S = 120
@@ -377,9 +383,9 @@ async def test_add_repo_response_failure_rolls_back_policy_and_source_link(
         "INSERT INTO projects (id, doc_roots) VALUES ('p1', 'before')"
     )
     db.commit()
-    real_sync = project_repos._sync
+    real_sync = project_repos.sync_sources
     _configure_repo_api(monkeypatch, project_repos, workspace, db)
-    monkeypatch.setattr(project_repos, "_sync", real_sync)
+    monkeypatch.setattr(project_repos, "sync_sources", real_sync)
     monkeypatch.setattr(
         project_repos,
         "_with_policy",
@@ -763,7 +769,7 @@ async def test_update_returns_retryable_error_when_git_status_times_out(
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_status(command, *args, **kwargs):
-        if command[:2] == ["git", "status"]:
+        if git_subcommand(command) == "status":
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
@@ -807,7 +813,7 @@ async def test_add_returns_retryable_error_when_git_status_times_out(
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_status(command, *args, **kwargs):
-        if command[:2] == ["git", "status"]:
+        if git_subcommand(command) == "status":
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
@@ -852,7 +858,7 @@ async def test_update_returns_conflict_when_git_status_fails(monkeypatch, tmp_pa
     real_run = project_repo_policy.subprocess.run
 
     def _failed_status(command, *args, **kwargs):
-        if command[:2] == ["git", "status"]:
+        if git_subcommand(command) == "status":
             return subprocess.CompletedProcess(command, 1, "", "status failed")
         return real_run(command, *args, **kwargs)
 
@@ -884,7 +890,7 @@ async def test_update_returns_retryable_error_when_recheck_git_status_times_out(
 
     def _timeout_recheck(command, *args, **kwargs):
         nonlocal status_calls
-        if command[:2] == ["git", "status"]:
+        if git_subcommand(command) == "status":
             status_calls += 1
             if status_calls == 2:
                 raise subprocess.TimeoutExpired(command, kwargs["timeout"])
@@ -913,7 +919,7 @@ async def test_add_returns_retryable_error_when_current_branch_times_out(monkeyp
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_current_branch(command, *args, **kwargs):
-        if command[:2] == ["git", "symbolic-ref"]:
+        if git_subcommand(command) == "symbolic-ref":
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
@@ -946,7 +952,7 @@ async def test_update_returns_retryable_error_when_pin_support_check_times_out(
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_pin_support(command, *args, **kwargs):
-        if command[:2] == ["git", "config"]:
+        if git_subcommand(command) == "config":
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
@@ -984,7 +990,7 @@ async def test_add_returns_retryable_error_when_pin_support_check_times_out(
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_pin_support(command, *args, **kwargs):
-        if command[:2] == ["git", "config"]:
+        if git_subcommand(command) == "config":
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
@@ -1029,7 +1035,7 @@ async def test_branch_list_returns_retryable_error_when_git_times_out(
     real_run = project_repo_policy.subprocess.run
 
     def _timeout_branch_list(command, *args, **kwargs):
-        if command[:2] == ["git", "for-each-ref"]:
+        if git_subcommand(command) == "for-each-ref":
             raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         return real_run(command, *args, **kwargs)
 
@@ -1303,7 +1309,8 @@ async def test_repo_mutations_for_same_project_are_serialized(
     monkeypatch.setattr(project_repos, "_workspace_dir_for", lambda _id: workspace)
     monkeypatch.setattr(project_repos, "run_in_db", _run_in_thread)
     monkeypatch.setattr(project_repos, "get_db", _connection)
-    monkeypatch.setattr(project_repos, "_sync", lambda *_args: None)
+    monkeypatch.setattr(project_repos, "sync_sources", lambda *_args: None)
+
     monkeypatch.setattr(project_repos, "link_repo_into_source", _controlled_link)
 
     first = asyncio.create_task(

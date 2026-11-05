@@ -36,6 +36,13 @@ def test_installer_default_matches_backend() -> None:
     )
 
 
+def test_desktop_source_install_default_matches_backend() -> None:
+    assert (
+        _shell_default("desktop/src-tauri/src/adoption.rs", r"^(?:pub\(crate\) |pub )?const SOURCE_DEFAULT_PORT: u16 = (\d+);$")
+        == DEFAULT_BACKEND_PORT
+    )
+
+
 def test_harbor_reserved_ports_name_the_backend_default() -> None:
     sys.path.insert(0, str(_REPO))
     from benchmarks.harbor.disposable import RESERVED_PORTS

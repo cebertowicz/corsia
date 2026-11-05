@@ -34,7 +34,7 @@ class ProjectDiscoveryListTool(Tool):
             "the step that is missing.\n\n"
             "During first run the no-id call returns setup_decisions instead, "
             "the ordered setup decisions CORSIA built from facts it read (raise "
-            "each unchanged, from its task_title's task), and "
+            "each per the first-run recipe: its source_node_id is its task_title's task, and never pass task_title), and "
             "setup_task_settlements. There the consent is the find-projects decision "
             "for 'Set up your first project': pass its id. "
             "Pass self_check_passed=false when corsia_api could not be reached."

@@ -9,6 +9,8 @@ import pytest
 from tools.recorded_call import CompletedToolFailure
 from core.checkpoint_fork_kind import CHECKPOINT_KIND
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fault", ["persistence", "projection", "step_done"])

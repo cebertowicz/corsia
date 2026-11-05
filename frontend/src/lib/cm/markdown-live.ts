@@ -162,9 +162,14 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
 						decos.push(Decoration.mark({ class: 'cm-md-link' }).range(node.from, node.to)); // a web URL shows as a link, never fetched
 						break;
 					case 'LinkMark':
-					case 'URL':
 						hide(node.from, node.to);
 						break;
+					case 'URL': {
+						// Only a link's or image's target is syntax; a bare address or `<...>` autolink is the text itself.
+						const parent = node.node.parent?.name;
+						if (parent === 'Link' || parent === 'Image') hide(node.from, node.to);
+						break;
+					}
 					case 'FencedCode': {
 						if (mermaidFence(node, doc) !== null) return false; // rendered as a block widget instead
 						const a = doc.lineAt(node.from).number;

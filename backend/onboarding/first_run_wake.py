@@ -14,16 +14,24 @@ import logging
 from dataclasses import replace
 from typing import Any
 
+from infra.settings import get_host_access_auto_approve
+from onboarding.first_run_instructions import (
+    APP_INLINE_SUMMARY,
+    APP_REFERENCE,
+    INLINE_SUMMARY,
+    anchored,
+    app_reference_served,
+    first_app_step,
+    instructions,
+)
+
 log = logging.getLogger(__name__)
 
-FIRST_RUN_REFERENCE = "skills/conductor-bootstrap/references/first-run.md"
-APP_REFERENCE = "skills/conductor-bootstrap/references/first-run-app.md"
-APP_START_REFERENCE = "skills/conductor-bootstrap/references/first-run-start.md"
 #: Fact reads share this budget; cancelled reads finish cleanup before the pick returns.
 FACTS_TIMEOUT_SECONDS = 5.0
 APP_FACT_KEYS = frozenset({
     "first_run_path", "harness_ready", "sources_missing", "agents_found", "local_download",
-    "tool_attempts", "pays_for", "bound_model", "web_search_ready", "web_search_key", "github_ready",
+    "local_eligible", "auto_approve", "tool_attempts", "pays_for", "bound_model", "web_search_ready", "web_search_key", "github_ready",
     "setup", "user_profile",
 })
 APP_PLAN_FACT_KEYS = APP_FACT_KEYS | {"connected_app_count", "email_calendar_ready"}
@@ -39,6 +47,8 @@ UNAVAILABLE_READS = {
     "sources_missing": "tool model_sources, once, without recheck",
     "agents_found": "none; skip the import step unless its consent decision is available",
     "local_download": "corsia_api GET /api/providers/local/setup",
+    "auto_approve": "none; corsia_api hides host-access fields, so say nothing about its state",
+    "local_eligible": "none; say nothing about local models",
     "setup_handoff": "setup progress handoff saved before model binding",
     "tool_attempts": "setup progress handoff saved before model binding",
     "setup_picks": "setup progress picks saved on the subscriptions screen",
@@ -47,38 +57,6 @@ UNAVAILABLE_READS = {
     "github_ready": "tool model_sources, once, without recheck",
     "user_profile": "preferred and full name read from the workspace profile",
 }
-
-INLINE_SUMMARY = (
-    "First run of a new install. Your instructions are below: skill "
-    "conductor-bootstrap's references/first-run.md. The Setup facts section "
-    "holds what its Preparation reads; do not load the skill or call those "
-    "tools for them. A fact marked unavailable names the one read that gets it."
-)
-APP_INLINE_SUMMARY = (
-    "First run of a new install. Your instructions are below: skill "
-    "conductor-bootstrap's references/first-run-start.md. The server has already "
-    "posted your opening and seeded your plan. Start the first applicable step."
-)
-
-
-def app_reference_served() -> bool:
-    """Whether the app-path instruction reference is present in this System package."""
-    from infra.system_package import system_resource_source
-    from onboarding.first_run_opening import OPENING_REFERENCE
-
-    return all(system_resource_source(path).is_file() for path in (APP_REFERENCE, APP_START_REFERENCE, OPENING_REFERENCE))
-
-
-def instructions(path: str = "script") -> str:
-    """The script instructions, or the app's compact first-turn instructions."""
-    from infra.system_package import system_resource_source
-
-    if path == "script":
-        return system_resource_source(FIRST_RUN_REFERENCE).read_text(encoding="utf-8").strip()
-    if path == "app":
-        return system_resource_source(APP_START_REFERENCE).read_text(encoding="utf-8").strip()
-    raise ValueError("first_run_path must be 'app' or 'script'")
-
 
 def _model_sources() -> dict[str, Any]:
     """What ``model_sources`` returns without a recheck."""
@@ -146,6 +124,10 @@ def _app_local_download() -> dict[str, Any]:
     from onboarding.local_download_state import current
 
     return current()
+
+
+def _app_local_eligible(snapshot: dict[str, Any]) -> bool:
+    return any(item.get("source") == "omlx" and (item.get("eligible") is True or item.get("state") == "ready") for item in snapshot["sources"])
 
 
 def _app_github_ready(snapshot: dict[str, Any]) -> bool:
@@ -234,6 +216,7 @@ async def _script_setup_facts(model: str, path: str) -> dict[str, Any]:
         "setup": lambda: setup_decisions.setup_plan(self_check_passed=True, probe_web_search=False),
         "host_access_reviewer": lambda: run_in_db(host_access_reviewer_status),
         "web_search_key": lambda: run_in_db(_web_search_key),
+        "auto_approve": lambda: run_in_db(get_host_access_auto_approve),
     })
     return {"first_run_path": path, **facts}
 
@@ -253,12 +236,15 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "setup_picks": lambda: run_in_db(_app_setup_picks),
         "setup": lambda: _app_setup(model),
         "user_profile": lambda: run_off_db(_app_user_profile),
+        "auto_approve": lambda: run_in_db(get_host_access_auto_approve),
     })
     snapshot = reads.pop("model_sources")
     harness_ready: list[str] | dict[str, str]
     github_ready: bool | dict[str, str]
+    local_eligible: bool | dict[str, str] = _unavailable("local_eligible")
     if isinstance(snapshot, dict) and "unavailable" not in snapshot:
         harness_ready = _app_harness_ready(snapshot)
+        local_eligible = _app_local_eligible(snapshot)
         sources_missing: dict[str, str] = _app_sources_missing(snapshot)
         github_ready = _app_github_ready(snapshot)
     else:
@@ -286,6 +272,8 @@ async def _app_setup_facts(model: str) -> dict[str, Any]:
         "sources_missing": sources_missing,
         "agents_found": reads["agents_found"],
         "local_download": reads["local_download"],
+        "local_eligible": local_eligible,
+        "auto_approve": reads["auto_approve"],
         "tool_attempts": tool_attempts,
         "pays_for": pays_for,
         "web_search_ready": reads["web_search_ready"],
@@ -314,38 +302,10 @@ def render(facts: dict[str, Any], instruction_text: str, summary: str = INLINE_S
     from infra.onboarding_events import FIRST_RUN_EVENT
 
     body = "\n\n".join((
-        instruction_text,
+        anchored(instruction_text),
         "## Setup facts\n\n" + json.dumps(facts, sort_keys=True, ensure_ascii=False, default=str),
     ))
     return format_event_input(FIRST_RUN_EVENT, summary, None, notice=body)
-
-
-def first_app_step(facts: dict[str, Any]) -> str:
-    """Inline only the first applicable numbered section; keep later steps on demand."""
-    import re
-
-    from infra.system_package import system_resource_source
-    from onboarding.app_first_run import applicable_steps
-
-    steps = applicable_steps(facts)
-    number = steps[0]["step_number"] if steps else 9
-    reference = system_resource_source(APP_REFERENCE).read_text(encoding="utf-8")
-    if number == 9:
-        return reference[reference.index("## Hand over to your agents"):].strip()
-    match = re.search(rf"(?ms)^{number}\. \*\*.*?(?=^\d+\. \*\*|^Silently,|\Z)", reference)
-    if match is None:
-        raise ValueError(f"The first-run app reference has no step {number}")
-    section = match.group().strip()
-    if number == 3:
-        # The first question needs no helper/connection instructions until answered.
-        section = section.split("   - **Quick**", 1)[0].strip()
-    elif number == 4:
-        web = system_resource_source("skills/conductor-bootstrap/references/web-search.md").read_text(encoding="utf-8")
-        section += "\n\n" + web.split("## 1. Explain, then ask", 1)[1].split("## 2.", 1)[0].strip()
-    elif number == 5:
-        lookup = system_resource_source("skills/conductor-bootstrap/references/look-up-the-person.md").read_text(encoding="utf-8")
-        section += "\n\n" + lookup.split("## Before anything: ask when search was already set up", 1)[1].split("## A.", 1)[0].strip()
-    return "## Your first step\n\n" + section
 
 
 async def render_for(model: str, path: str = "script", *, thread_id: str | None = None) -> str:
@@ -363,16 +323,16 @@ async def render_for(model: str, path: str = "script", *, thread_id: str | None 
         if facts is None:
             facts = await read_app_facts(model)
         else:
-            facts = {**facts, "bound_model": await run_in_db(_bound_model, model)}
-            # Consent names the person-selected provider, which was unknown in setup.
-            from onboarding import setup_decisions
+            # The snapshot predates the person's choices: re-read the Auto-approve switch they can change.
+            facts = {**facts, "bound_model": await run_in_db(_bound_model, model),
+                     **await _read_facts({"auto_approve": lambda: run_in_db(get_host_access_auto_approve)})}
+            from onboarding import setup_decisions  # consent names the provider picked after setup
             harness_ready = facts.get("harness_ready", [])
             ready = {"claude-code" if source == "claude_code" else source
                      for source in harness_ready} if isinstance(harness_ready, list) else set()
             setup = facts.get("setup")
             cached_decisions = setup.get("setup_decisions") if isinstance(setup, dict) else None
-            # An unavailable marker stays as it is: it sends the agent to the live read, and a
-            # partial list beside it would pass for the complete one.
+            # An unavailable marker stays as it is: a partial list beside it would pass for the complete one.
             if isinstance(cached_decisions, list):
                 card = await run_in_db(setup_decisions.import_card, model, ready)
                 decisions = [item for item in cached_decisions if item.get("title") != IMPORT_DECISION_TITLE]

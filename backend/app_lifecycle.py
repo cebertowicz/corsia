@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import time
+import app_startup_init
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -19,11 +19,10 @@ from app_startup_runtime import (
 from app_shutdown_native import remaining_native_owners, shutdown_native_turns
 import infra.app_loop as app_loop
 import infra.startup_progress as startup_progress
-from infra import key_store_values, state
+from infra import state
 from infra.db_async import run_in_db
-from infra.database import init_db, shutdown_pool
+from infra.database import shutdown_pool
 from llm.providers.omlx_supervisor import stop_watching as stop_watching_omlx
-from tools.private_runtime_files import sweep_at_startup as sweep_private_launch_files
 
 
 async def _discover_network_servers(logger) -> int:
@@ -87,43 +86,11 @@ async def _startup_network_discovery() -> None:
             f"network discovery startup: probed {len(servers)} server(s), "
             f"{online_count} online, discovery complete"
         )
+        from llm.providers.omlx_upgrade import upgrade_managed_omlx
+
+        await upgrade_managed_omlx()  # this startup task is retained and cancelled on shutdown
     except Exception as exc:
         logger.warning(f"network discovery startup failed: {exc}")
-
-
-def _initialize_startup(logger) -> None:
-    from app_startup_workspace import initialize_workspace
-    from connections.account_projection import repair_moved_projections
-    from core.project_path_conversion import convert_legacy_project_paths
-    from infra.config import LOGS_DIR, RUNTIME_DIR, UPLOADS_DIR, WORKSPACE, WORKSPACE_SELECTION
-    from infra import setup_progress
-    from infra.ignored_environment import drop_ignored_environment, note_ignored_environment
-    from infra.moved_state_paths import heal_moved_state_paths
-    from infra.startup_prerequisites import prepare_startup_prerequisites
-    from plans.public import sweep_owed_status
-    from registry.durable_writes import recover_write_intents
-    from registry.relocate import recover_interrupted_relocations
-
-    note_ignored_environment()
-    prepare_startup_prerequisites()
-    for directory in (UPLOADS_DIR, LOGS_DIR, RUNTIME_DIR):
-        directory.mkdir(parents=True, exist_ok=True)
-    phase_started = time.monotonic()
-    logger.info("startup phase: database initialization started")
-    init_db()
-    heal_moved_state_paths()
-    repair_moved_projections()
-    drop_ignored_environment()
-    setup_progress.release_marker_at_startup(logger)
-    key_store_values.sweep_at_startup()
-    sweep_private_launch_files()
-    convert_legacy_project_paths(WORKSPACE_SELECTION)
-    elapsed = time.monotonic() - phase_started
-    logger.info("startup phase: database initialization complete in {:.1f}s", elapsed)
-    recover_write_intents()
-    recover_interrupted_relocations()
-    sweep_owed_status()
-    initialize_workspace(WORKSPACE, logger)
 
 
 @asynccontextmanager
@@ -133,18 +100,30 @@ async def lifespan(app: FastAPI):
 
     configure_sqlite_fetch_switch_interval()
     with startup_progress.publishing():
-        _initialize_startup(logger)
+        app_startup_init.initialize_startup(logger)
     app_loop.capture(asyncio.get_running_loop())
+    from llm.live_cost_map import start_refresh
+
+    if not getattr(app.state, "litellm_cost_map_offline", False):
+        start_refresh()
     startup_tasks: list[asyncio.Task | None] = [None, None, None, None, None]
     body_cancel: asyncio.CancelledError | None = None
     try:
         from api.usage_rollup import schedule_refresh as schedule_usage_rollup_refresh
         from automation import restart_startup
         from doceditor.live_runtime import start_documents
+        from connections.account_leftovers import remove_startup_leftovers
         from llm.lifecycle import autostart_local_providers
         from tools.agent_shell_tools import start_prefetch
         from tools.mcp_runtime import start_connected_app_runtime
+        from host_access.browser_orphan import close_dead_sessions
+        from host_access.processes import PROCESS_OWNER
 
+        try:
+            await asyncio.to_thread(close_dead_sessions, PROCESS_OWNER.browser_sessions().socket_dir)
+        except Exception:
+            logger.warning("browser orphan cleanup failed; startup continues", exc_info=True)
+        await remove_startup_leftovers()
         start_prefetch()
         await start_connected_app_runtime()
 
@@ -158,8 +137,12 @@ async def lifespan(app: FastAPI):
         from infra.settings import get_devices_enabled, get_devices_outside_address
         enabled, outside_address = await asyncio.gather(run_in_db(get_devices_enabled), run_in_db(get_devices_outside_address))
         await devices_runtime.restore(app, enabled, outside_address)
+        await _start_otlp_listener()
         await start_documents()
         await resume_local_setup()
+        from events.reviewer_gate_recovery import recover_pending_reviews
+
+        await recover_pending_reviews(asyncio.get_running_loop())
         schedule_usage_rollup_refresh()
         from infra.usage_summary import record_current_install_week
 
@@ -318,6 +301,17 @@ def _validate_shutdown_owners(
     )
 
 
+async def _start_otlp_listener() -> None:
+    """Open the loopback measure receiver; tests start it only when CORSIA_OTLP_PORT names a port."""
+    import os
+
+    from infra.otlp_listener import PORT_ENV, listener
+
+    if os.environ.get("CORSIA_TEST_MODE") == "1" and PORT_ENV not in os.environ:
+        return
+    await listener.start()
+
+
 async def _shutdown_runtime_services(
     startup_tasks: list[asyncio.Task | None],
 ) -> None:
@@ -326,9 +320,9 @@ async def _shutdown_runtime_services(
 
     stop_watching_omlx()  # an oMLX exit during shutdown is never a crash
     pending_cancel = await _shutdown_owned_tasks(startup_tasks, _log_shutdown)
-    from app_shutdown_runtime import shutdown_devices
+    from app_shutdown_runtime import shutdown_listeners
 
-    devices_failure, pending_cancel = await shutdown_devices(
+    (devices_failure, otlp_failure), pending_cancel = await shutdown_listeners(
         _log_shutdown, pending_cancel, _run_cleanup_owner,
     )
     host_access_failure, host_access_cancel = await _shutdown_host_access(
@@ -388,7 +382,7 @@ async def _shutdown_runtime_services(
         (
             fork_failure, fork_count_failure, host_access_count_failure,
             process_count_failure, rollup_failure, refresh_failure, harness_failure,
-            process_failure, host_access_failure, devices_failure, mcp_failure, handoff_failure,
+            process_failure, host_access_failure, devices_failure, otlp_failure, mcp_failure, handoff_failure,
         ),
         process_failure=process_failure,
         pending_cancel=pending_cancel,

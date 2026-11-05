@@ -52,6 +52,28 @@ def capture_configured(settings: dict[str, Any], target: dict[str, Any]) -> None
         target["configured_enable_thinking"] = bool(settings["enable_thinking"])
 
 
+def apply_admin_model(canonical: dict[str, dict], model: dict) -> None:
+    """Enrich a discovered model with the admin endpoint's fields."""
+    from llm.model_metadata import extract_context_length
+
+    provider_model_id = model.get("id")
+    if not provider_model_id or provider_model_id not in canonical:
+        return
+    settings = model.get("settings") or {}
+    alias = (settings.get("model_alias") or "").strip()
+    if alias:
+        canonical[provider_model_id]["model_alias"] = alias
+    capture_configured(settings, canonical[provider_model_id])
+    capture_reported(model, canonical[provider_model_id])
+    if isinstance(model.get("config_model_type"), str):
+        canonical[provider_model_id]["config_model_type"] = model["config_model_type"]
+    if canonical[provider_model_id].get("context_length") is not None:
+        return
+    window = extract_context_length(model)
+    if window is not None:
+        canonical[provider_model_id]["context_length"] = window
+
+
 def apply_metadata(
     model: dict[str, Any],
     reasoning_shape: dict[str, Any] | None,

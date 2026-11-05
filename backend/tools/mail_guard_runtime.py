@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
-from tools.email_read import UNSCREENED, screened_message
+from tools.email_read import screened_message
 from tools.mail_guard import (FLAGGED, UNCHECKED, Message, Verdict, check_reply, evidence,
                               normalize_subject, same_sender)
 
@@ -18,14 +18,15 @@ async def _visible(backend: Any, account_id: str, message: Message) -> Message:
                              headers={"from": message.sender, "subject": message.subject,
                                       "date": message.date.isoformat()}, body=message.body)
     rendered = await screened_message(account_id, source)
-    if rendered.startswith("Error: "):  # the person reads this in the draft: say which, in their words
-        return replace(message, withheld=UNCHECKED if rendered == f"Error: {UNSCREENED}" else FLAGGED)
     try:
         payload = json.loads(rendered)
     except (TypeError, ValueError):
         return message
     if not isinstance(payload, dict) or not isinstance(payload.get("body"), str):
         return message
+    state = payload.get("screen", {}).get("state")
+    if state != "clean":
+        return replace(message, withheld=FLAGGED if state == "flagged" else UNCHECKED)
     return replace(message, visible_evidence=f"Subject: {payload.get('subject', '')}\n{payload['body']}")
 
 
@@ -46,7 +47,7 @@ async def guarded_reply(backend: Any, account: dict, target_id: str, body: str,
     verdict = check_reply(target, thread, sender, str(account["address"]), body, requested_to,
                           datetime.now(timezone.utc), count)
     verdict.evidence_ids = [{"message_id": m.message_id, "thread_id": m.thread_id} for m in screened.values()]
-    return verdict, await _visible(backend, account_id, target)
+    return verdict, target if target.own else await _visible(backend, account_id, target)
 
 
 async def new_arrival(backend: Any, account_id: str, target_id: str,

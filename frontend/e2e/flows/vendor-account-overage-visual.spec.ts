@@ -4,13 +4,14 @@ import { loginByUrl, openSettings } from '../support/corsia';
 
 // Synthetic accounts only: the disposable backend has no vendor CLI, so the
 // harness inventory and account list are served here and every write is observed.
+// The Defaults are converted Defaults that have been signed in again, so their usage rows show.
 const ACCOUNTS = [
-	{ id: 'codex-default', provider: 'codex', name: 'Default', is_default: true, state: 'legacy', revision: 0,
+	{ id: 'codex-default', provider: 'codex', name: 'Default', is_default: true, state: 'signed_in', revision: 1,
 		identity: {}, label: { name: 'Plus account 1', email: null, text: 'Plus account 1' }, duplicate_of: null, allow_overage: false,
 		usage: { state: 'limited', usable: false, reason: 'five_hour_limit', resets_at: null, windows: [], checking: false, check: { error: 'offline' } } },
 	{ id: 'codex-work', provider: 'codex', name: 'Work', is_default: false, state: 'signed_in', revision: 2,
 		identity: { email: 'work@example.test' }, label: { name: 'Work', email: 'work@example.test', text: 'Work · work@example.test' }, duplicate_of: null, allow_overage: true },
-	{ id: 'claude-default', provider: 'claude-code', name: 'Default', is_default: true, state: 'legacy', revision: 0,
+	{ id: 'claude-default', provider: 'claude-code', name: 'Default', is_default: true, state: 'signed_in', revision: 1,
 		identity: {}, label: { name: 'account 1', email: null, text: 'account 1' }, duplicate_of: null, allow_overage: false,
 		usage: { state: 'limited', usable: false, reason: 'five_hour_limit', resets_at: null, windows: [], checking: false, check: { error: 'offline' } } },
 ];

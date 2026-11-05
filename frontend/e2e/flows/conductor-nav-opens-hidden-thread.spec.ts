@@ -61,7 +61,7 @@ test.describe('@flow:conductor-nav @surface:navigation conductor nav opens the h
 		await expect(page.locator('.thread-item').filter({ hasText: condTitle })).toHaveCount(0);
 
 		const conductorRow = page.locator('.scoped-item.conductor');
-		const conductorButton = conductorRow.getByRole('button', { name: `Conductor. Latest update: ${summary}` });
+		const conductorButton = conductorRow.getByRole('button', { name: `${condTitle}. Latest update: ${summary}` });
 		await expect(conductorRow.locator('.update-summary')).toHaveText(summary);
 		await expect(conductorRow.locator('.update-summary')).toHaveAttribute('title', summary);
 		await expect(conductorRow.locator('.plan-state.failed')).toBeVisible();

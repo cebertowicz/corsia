@@ -13,8 +13,9 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 import e2e_mock_calls as mock_calls
+from e2e_mock_harnesses import connect_fixture_harnesses
 import e2e_pressure_fixture as pressure_fixture
-from e2e_mock_responses import _make_chunk, _make_non_streaming
+from e2e_mock_responses import _make_chunk, _make_non_streaming, _stream_tool_calls
 
 _mock_replies: list[dict] = []
 _mock_gates: dict[str, asyncio.Event] = {}
@@ -152,8 +153,8 @@ async def _streaming_iter(reply: dict):
         if mid > 0:
             yield _make_chunk(content=content[mid:])
 
-    if reply.get("tool_calls"):
-        yield _make_chunk(tool_calls=reply["tool_calls"])
+    async for chunk in _stream_tool_calls(reply):
+        yield chunk
 
     yield _make_chunk(finish_reason=reply.get("finish_reason", "stop"))
 
@@ -283,18 +284,7 @@ def seed_mock_catalog() -> None:
                 ) in harness_rows
             ),
         )
-    for harness, binary in fixture_binaries.items():
-        if binary is None:
-            continue
-        config = {"binary": binary}
-        if harness == "codex":
-            config["app_server"] = True
-        db.execute(
-            """INSERT OR REPLACE INTO connections
-               (id,type,provider,config,status,scope,created_at,updated_at)
-               VALUES (?, 'cli', ?, ?, 'available', 'global', ?, ?)""",
-            (f"mock-{harness}", harness, json.dumps(config), now, now),
-        )
+    connect_fixture_harnesses(db, fixture_binaries, harness_rows, now)
     db.commit()
     db.close()
 

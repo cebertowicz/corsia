@@ -69,7 +69,8 @@ def record_edit(
 
     An agent's save is immediate. A person's save takes the lane the owner of the document's thread has chosen
     ("Deliver immediately"), read here at write time, so a save that publishes after the editor's socket has closed
-    still lands in the lane the person had set. Suggestion accepts write through here and share it.
+    still lands in the lane the person had set. Suggestion accepts write through here and share it. In the immediate
+    lane each save restarts the EDIT_IDLE wait, so one stretch of typing reaches the owner as one batch.
     """
     if author_kind not in {"agent", "user"}:
         raise ValueError("edit feedback author_kind must be 'agent' or 'user'")
@@ -101,5 +102,6 @@ def record_edit(
         delivery_policy=lane,
         now=now,
         item_delta=item_delta,
+        edit=True,
     )
     return batch_id

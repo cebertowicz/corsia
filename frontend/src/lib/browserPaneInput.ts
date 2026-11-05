@@ -22,11 +22,12 @@ export function keyText(event: KeyboardEvent) {
 	return event.key === 'Enter' ? '\r' : event.key.length === 1 ? event.key : '';
 }
 
-type PointerPosition = { pointerId: number; pointerType: string; clientX: number; clientY: number };
+type PointerPosition = { pointerId: number; pointerType: string; clientX: number; clientY: number; button?: number };
 
 /** Mouse positions replace each other; touch wheel deltas preserve every drag movement. */
 export class BrowserPaneInput {
 	private pressed: number | null = null;
+	private pressedButton = 'left';
 	private touch: { start: PointerPosition; last: PointerPosition; point: PanePoint; dragging: boolean } | null = null;
 	private continuous = new AnimationFrameCoalescer<MouseInput>(message => {
 		if (message.eventType === 'mouseWheel') this.send(message);
@@ -38,7 +39,7 @@ export class BrowserPaneInput {
 	constructor(private send: (message: MouseInput) => void, private readonly onScroll: (delta: PanePoint) => void = () => {}) {}
 
 	private mouse(eventType: string, point: PanePoint): void {
-		this.send({ type: 'input_mouse', eventType, ...point, button: eventType === 'mouseMoved' && this.pressed === null ? 'none' : 'left', clickCount: eventType === 'mouseMoved' ? 0 : 1 });
+		this.send({ type: 'input_mouse', eventType, ...point, button: eventType === 'mouseMoved' && this.pressed === null ? 'none' : this.pressedButton, clickCount: eventType === 'mouseMoved' ? 0 : 1 });
 	}
 
 	press(event: PointerPosition, point: PanePoint): void {
@@ -49,6 +50,7 @@ export class BrowserPaneInput {
 			return;
 		}
 		this.mouse('mouseMoved', point);
+		this.pressedButton = event.button === 2 ? 'right' : event.button === 1 ? 'middle' : 'left';
 		this.pressed = event.pointerId;
 		this.mouse('mousePressed', point);
 	}
@@ -80,6 +82,7 @@ export class BrowserPaneInput {
 		if (event.pointerType === 'touch') {
 			if (!touch || event.pointerId !== touch.start.pointerId) return;
 			if (!touch.dragging && !cancelled) {
+				this.pressedButton = 'left';
 				this.mouse('mouseMoved', touch.point);
 				this.mouse('mousePressed', touch.point);
 				this.mouse('mouseReleased', point);

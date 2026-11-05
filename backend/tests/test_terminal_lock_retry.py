@@ -9,6 +9,8 @@ import pytest
 
 from infra.db_async import run_in_db
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 def _locked(code: int = sqlite3.SQLITE_BUSY, text: str = "database is locked"):
     error = sqlite3.OperationalError(text)

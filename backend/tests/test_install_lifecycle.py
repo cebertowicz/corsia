@@ -331,6 +331,31 @@ def test_source_summary_uses_a_service_token_and_leaves_no_api_token(account_env
     assert secret not in result.stdout + result.stderr
     assert _kinds(account_env) == ["service"]
     assert not (tmp_path / "home" / ".corsia" / ".api-token").exists()
+    assert not (tmp_path / "home" / ".corsia" / "credentials").exists()
+
+
+def test_writing_the_delegate_file_moves_an_earlier_token_into_the_token_folder(account_env, tmp_path):
+    home = tmp_path / "home"
+    legacy = home / ".corsia" / ".api-token"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("earlier-token")
+    legacy.chmod(0o644)
+
+    created = subprocess.run(
+        [sys.executable, "-m", "cli", "token", "create", "--write-delegate-file"],
+        cwd=BACKEND, env={**os.environ, **account_env, "CORSIA_API_TOKEN_FILE": ""},
+        text=True, capture_output=True, check=False,
+    )
+
+    assert created.returncode == 0, created.stderr
+    token = home / ".corsia" / "credentials" / "api-token"
+    value = token.read_text()
+    assert value and value != "earlier-token"
+    assert value not in created.stdout + created.stderr
+    assert not legacy.exists()
+    assert token.stat().st_mode & 0o777 == 0o600
+    assert token.parent.stat().st_mode & 0o777 == 0o700
+    assert sorted(path.name for path in token.parent.iterdir()) == ["api-token"]
 
 
 def test_scripts_no_longer_mint_an_install_api_token():

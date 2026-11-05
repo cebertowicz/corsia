@@ -14,22 +14,23 @@ from connections.vendor_accounts import get_account
 NOT_PERMITTED = 'account_project_denied'
 
 
-def _eligible(account, base, project, *, db):
-    """A destination runs the model by the one per-account decision, has a login to fence,
-    and its vendor has said it is allowed: a move never rests on unknown usage."""
+def _decision(account, base, project, *, db) -> dict | None:
+    """The account's one per-account decision for the model, or ``None`` with no login to fence.
+
+    A destination is ``ready`` and its vendor has said ``allowed``: a move never rests on unknown usage.
+    """
     from llm.account_catalog import account_model_status
 
     if base is None or account_receipt(account) is None:
-        return False
-    decision = account_model_status(account, base, project_ids=[project], db=db, move=True)
-    return decision['status'] == 'ready' and decision['usage']['state'] == 'allowed'
+        return None
+    return account_model_status(account, base, project_ids=[project], db=db, move=True)
 
 
 def rollover_order(provider: str, project: str | None, policy: dict, *, db) -> list[str] | None:
     """The one ordered list rollover moves along, or ``None`` when rollover is off.
 
     A saved order is used as saved. With none saved (every account permitted),
-    the order is every signed-in or legacy account, the built-in Default first,
+    the order is every signed-in account, the built-in Default first,
     then the rest by creation.
     """
     if not policy['rollover']:
@@ -37,7 +38,7 @@ def rollover_order(provider: str, project: str | None, policy: dict, *, db) -> l
     from connections.provider_policy import ordered_accounts
 
     return [item['id'] for item in ordered_accounts(provider, policy, db=db)
-            if item['state'] in ('legacy', 'signed_in')]
+            if item['state'] == 'signed_in']
 
 
 def rollover_destination(
@@ -56,7 +57,9 @@ def rollover_destination(
     Candidates are the order read from the top without the source (the order is
     a preference), so an account that has reset is reachable again. A source left
     out of a saved order is denied by the project and moves to the first usable
-    account in it.
+    account in it. With no destination, each candidate skipped only because its
+    usage is unread gets its vendor's usage read; one that reads allowed offers
+    the held heads again (``offer_destination``) and is the destination from then on.
     """
     from llm.model_status import USAGE_LIMITED
 
@@ -73,10 +76,18 @@ def rollover_destination(
         candidates = [identity for identity in order if identity != source_id]
     else:
         candidates = order
+    unread = []
     for identity in candidates:
-        destination = get_account(identity, db=db)
-        if _eligible(destination, base, project, db=db):
-            return destination['id']
+        decision = _decision(get_account(identity, db=db), base, project, db=db)
+        if decision is None or decision['status'] != 'ready':
+            continue
+        if decision['usage']['state'] == 'allowed':
+            return identity
+        unread.append(identity)
+    from connections.harness_usage_check import schedule_account_check
+
+    for identity in unread:
+        schedule_account_check(provider, identity)
     return None
 
 

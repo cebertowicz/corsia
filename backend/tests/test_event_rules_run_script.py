@@ -14,6 +14,7 @@ from automation.script_sandbox import ScriptRun
 from infra.database import get_db
 from infra.measure_registry import REGISTRY, sync
 from tests.event_routing_helpers import mk_session
+from tests.test_script_github_channel import spawned  # noqa: F401 - real sandbox path, process faked
 from tools.event_rules import EventRulesTool
 
 OWNER, OTHER = "run-owner", "run-other"
@@ -32,6 +33,10 @@ events:
     use: route
   qa.three:
     attributes: {code: id}
+    dedupe: [code]
+    use: route
+  qa.forged:
+    attributes: {code: id, repo: id}
     dedupe: [code]
     use: route
 """
@@ -64,7 +69,8 @@ def world(isolated_db, tmp_path: Path, monkeypatch):
 def runs(world, monkeypatch):
     """The sandboxed process: each script's stdout by file name, and every call's stdin."""
 
-    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None, trace=()):
+    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None, trace=(), rule_id=None,
+                   github_repo=None):
         world["calls"].append((path.name, json.loads(stdin) if stdin is not None else None))
         world["traces"].append(trace)
         return world["outputs"].get(path.name, ScriptRun(0, b"", b"", False))
@@ -139,7 +145,7 @@ def test_a_matching_rule_runs_the_script_once_with_the_event_and_explain_and_lis
     _sweep()  # nothing is left to run
 
     assert runs["calls"] == [("once.sh", {"type": "qa.route", "id": event_id, "rule_id": rule["id"],
-                                           "facts": {"code": "ok"}})]
+                                           "facts": {"code": "ok"}, "origin": "agent"})]
     assert _outcomes(rule["id"]) == [("ran", None)]
     explained = json.loads(_tool(OWNER, operation="explain", event_id=event_id))["decisions"]
     assert [(d["outcome"], d["explanation"]) for d in explained] == [
@@ -352,11 +358,241 @@ def test_the_sandbox_sets_the_chain_only_for_a_rule_run_and_never_inherits_one(m
     monkeypatch.setattr(script_sandbox, "execution_envelope_for_consumed_action", lambda *_a, **_k: None)
     monkeypatch.setattr(script_sandbox, "prepare_execution_envelope", prepare)
     monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda _thread: tmp_path)
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def channel(*_args):
+        yield tmp_path / "socket"
+
+    monkeypatch.setattr(script_sandbox, "github_channel", channel)
     monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
     script = tmp_path / "s.sh"
     for kwargs in ({}, {"stdin": b"{}", "trace": ("rule_a", "rule_b")}):
         asyncio.run(script_sandbox.run_script(OWNER, None, script, run_id="r", timeout_seconds=5, **kwargs))
     assert [env.get("CORSIA_EVENT_TRACE") for env in envs] == [None, '["rule_a", "rule_b"]']
+
+
+@pytest.mark.parametrize("stored, repo", [
+    (None, None),  # the agent's own qa event names no repository
+    ({"type": "github.pr.opened", "origin": "connector", "facts": {"repo": "o/r", "pr_number": 1}}, "o/r"),
+    # A worker result's repo is its claimed event's; the model's result text never names the scope.
+    ({"type": "worker.result", "origin": "platform",
+      "facts": {"repo": "o/r", "result": json.dumps({"repo": "x/y"})}}, "o/r"),
+    ({"type": "worker.result", "origin": "platform", "facts": {"result": json.dumps({"repo": "x/y"})}}, None),
+    ({"type": "github.pr.opened", "origin": "connector", "facts": {"repo": "o/r/../x"}}, None),
+    # An emitter's repo binds only when the owner's project registers it (tests below).
+    ({"type": "qa.forged", "origin": "emitter", "facts": {"repo": "o/r"}}, "o/r"),
+    ({"type": "qa.forged", "origin": "agent", "facts": {"repo": "o/r"}}, None),
+])
+def test_a_rule_run_reads_github_only_for_the_repository_its_stored_event_names(
+        world, spawned, monkeypatch, stored, repo):
+    from dataclasses import replace
+    from events import connectors, rule_runs
+
+    manifest = connectors.get_manifest("github")
+    monkeypatch.setitem(connectors._REGISTRY, "github", replace(
+        manifest, project_repositories=lambda _project: frozenset({"o/r"})))
+    rule = _rule(_script(world, "bound.sh"))
+    _emit()
+    if stored is not None:
+        real = rule_runs.start
+
+        def start(db, decision_id):
+            run_input = real(db, decision_id)
+            run_input["event"].update(stored)
+            return run_input
+
+        monkeypatch.setattr(rule_runs, "start", start)
+    _sweep()
+    assert _outcomes(rule["id"]) == [("ran", None)]
+    assert spawned["channels"] == ([(rule["id"], repo)] if repo else [])
+    assert len(spawned["commands"]) == 1
+    assert bool(spawned["envs"][0].get("CORSIA_SCRIPT_GITHUB_SOCKET")) is (repo is not None)
+
+
+@pytest.mark.parametrize("repositories", [None, frozenset({"other/repo"})])
+def test_unregistered_event_repository_starts_without_channel(world, spawned, monkeypatch, repositories):
+    from dataclasses import replace
+    from events import connectors, rule_runs
+
+    manifest = connectors.get_manifest("github")
+    monkeypatch.setitem(connectors._REGISTRY, "github", replace(
+        manifest, project_repositories=lambda _project: repositories))
+    rule = _rule(_script(world, "unbound.sh"))
+    _emit()
+    real = rule_runs.start
+
+    def start(db, decision_id):
+        run_input = real(db, decision_id)
+        run_input["event"].update({"type": "github.pr.opened", "origin": "connector", "facts": {"repo": "o/r"}})
+        return run_input
+
+    monkeypatch.setattr(rule_runs, "start", start)
+    _sweep()
+    assert _outcomes(rule["id"]) == [("ran", None)]
+    assert spawned["channels"] == []
+    assert len(spawned["commands"]) == 1
+    assert not spawned["envs"][0].get("CORSIA_SCRIPT_GITHUB_SOCKET")
+
+
+def test_a_script_cannot_open_a_channel_for_an_unregistered_repository_its_own_event_names(world, monkeypatch):
+    """Script A emits an event naming a repository the run's project does not register; rule B
+    runs a script on it. Neither run gets a channel. (A registered one does: see the test
+    below for an emitter event naming a registered repository.)"""
+    from contextlib import asynccontextmanager
+
+    from automation import script_sandbox
+    from host_access.processes import ForegroundProcessResult
+
+    channels, commands, envs = [], [], []
+    forged = json.dumps({"event": {"type": "qa.forged", "facts": {"code": "f", "repo": "other/private"}}})
+
+    async def nothing(*_a, **_k):
+        return None
+
+    async def cwd(*_a, **_k):
+        return str(world["tmp"]), None
+
+    async def prepare(command, *_a):
+        commands.append(command)
+        return None, ["true"]
+
+    async def spawn(_argv, **kwargs):
+        envs.append(kwargs["env"])
+        stdout = forged.encode() + b"\n" if "forger.sh" in commands[-1] else b""
+        return ForegroundProcessResult(None, stdout, b"", 0)
+
+    @asynccontextmanager
+    async def github_channel(*args, **kwargs):
+        channels.append((args, kwargs))
+        yield world["tmp"] / "socket"
+
+    monkeypatch.setattr(script_sandbox, "_checked_environment", nothing)
+    monkeypatch.setattr(script_sandbox, "load_shell_repo_policies", lambda *_a: ([], []))
+    monkeypatch.setattr(script_sandbox, "_resolve_execution_cwd", cwd)
+    monkeypatch.setattr(script_sandbox, "execution_envelope_for_consumed_action", lambda *_a, **_k: None)
+    monkeypatch.setattr(script_sandbox, "prepare_execution_envelope", prepare)
+    monkeypatch.setattr(script_sandbox, "corsia_temp_root_for_bind", lambda _thread: world["tmp"])
+    monkeypatch.setattr(script_sandbox, "github_channel", github_channel)
+    monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
+    first = _rule(_script(world, "forger.sh"))
+    second = _rule(_script(world, "reader.sh"), event_type="forged")
+    _emit()
+    _sweep()
+    assert _outcomes(first["id"]) == [("ran", None)] and _outcomes(second["id"]) == [("ran", None)]
+    assert ["reader.sh" in command for command in commands] == [False, True]
+    assert channels == []
+    assert all("CORSIA_SCRIPT_GITHUB_SOCKET" not in env for env in envs)
+
+
+def _emitter_run(world, monkeypatch, repo, *, registered, before_sweep=None):
+    """One rule run whose stored emitter event names ``repo``. ``registered`` maps project to
+    repositories and is read at the claim, so a test may change it or the owner first."""
+    from dataclasses import replace
+    from events import connectors, rule_runs
+
+    manifest = connectors.get_manifest("github")
+    monkeypatch.setitem(connectors._REGISTRY, "github", replace(
+        manifest, project_repositories=lambda project: frozenset(registered.get(project, ()))))
+    rule = _rule(_script(world, "emitted.sh"))
+    _emit()
+    real = rule_runs.start
+
+    def start(db, decision_id):
+        run_input = real(db, decision_id)
+        run_input["event"].update({"type": "qa.forged", "origin": "emitter", "facts": {"repo": repo}})
+        return run_input
+
+    monkeypatch.setattr(rule_runs, "start", start)
+    if before_sweep:
+        before_sweep()
+    _sweep()
+    assert _outcomes(rule["id"]) == [("ran", None)]
+    return rule
+
+
+@pytest.mark.parametrize("repo", ["o/unregistered", "x/y", "fork-owner/r"])
+def test_an_emitter_event_naming_an_unregistered_repository_opens_no_channel(world, spawned, monkeypatch, repo):
+    """Not registered in the owner's project; registered only in another project (x/y);
+    a fork's head repository."""
+    _emitter_run(world, monkeypatch, repo, registered={"project-a": {"o/r"}, "project-b": {"x/y"}})
+    assert spawned["channels"] == []
+    assert not spawned["envs"][0].get("CORSIA_SCRIPT_GITHUB_SOCKET")
+
+
+def test_an_emitter_event_naming_a_registered_repository_opens_a_channel_limited_to_it(
+        world, spawned, monkeypatch):
+    from automation import script_github_channel as channel
+    from connections.github_broker import GithubReadRefused
+
+    rule = _emitter_run(world, monkeypatch, "o/r", registered={"project-a": {"o/r"}})
+    assert spawned["channels"] == [(rule["id"], "o/r")]
+    assert spawned["envs"][0].get("CORSIA_SCRIPT_GITHUB_SOCKET")
+    channel._bound_request(["repos/o/r/pulls/1"], "o/r")
+    with pytest.raises(GithubReadRefused):
+        channel._bound_request(["repos/o/other/pulls/1"], "o/r")
+
+
+def test_a_workspace_scoped_script_binds_nothing(world, spawned, monkeypatch):
+    """A workspace owner's script has no project; the resolver is never asked, even one
+    that would answer for the workspace scope."""
+    def to_workspace():
+        _write("UPDATE threads SET project_id=NULL WHERE id=?", OWNER)
+        _write("UPDATE automation_schedules SET scope_id='__workspace__'")
+
+    _emitter_run(world, monkeypatch, "o/r", before_sweep=to_workspace,
+                 registered={"project-a": {"o/r"}, "__workspace__": {"o/r"}, None: {"o/r"}})
+    assert spawned["channels"] == []
+
+
+def test_removing_the_repository_before_the_claim_leaves_no_channel(world, spawned, monkeypatch):
+    registered = {"project-a": {"o/r"}}
+    _emitter_run(world, monkeypatch, "o/r", registered=registered, before_sweep=registered.clear)
+    assert spawned["channels"] == []
+
+
+@pytest.mark.parametrize("registered_in, bound", [("project-a", "o/r"), ("project-b", None)])
+def test_an_owner_that_moved_projects_keeps_its_script_s_project_for_every_part_of_the_run(
+        world, monkeypatch, registered_in, bound):
+    """The binding, the stdin context and the staging root all read the script's project, the
+    one the sandbox's repository policies and staging cleanup read; the owner's later move to
+    another project changes none of them."""
+    from dataclasses import replace
+    from automation import schedules, script_rule_runs, worker_inputs
+    from automation.script_rule_runs import RuleRun
+    from events import connectors
+
+    manifest = connectors.get_manifest("github")
+    monkeypatch.setitem(connectors._REGISTRY, "github", replace(
+        manifest, project_repositories=lambda project: frozenset({"o/r"} if project == registered_in else ())))
+    roots: list[str | None] = []
+
+    def owner_root(owner, project_id, _db):
+        roots.append(project_id)
+        return world["tmp"] / str(project_id)
+
+    monkeypatch.setattr(worker_inputs, "owner_root", owner_root)
+    script_id = _script(world, "producer.sh")
+    _write("UPDATE threads SET project_id='project-b' WHERE id=?", OWNER)
+    db = get_db()
+    try:
+        schedule = replace(schedules.get(script_id, db=db), payload={"event_type": "qa.route"})
+    finally:
+        db.close()
+    assert schedule.scope_id == "project-a"
+    stdin, repository = script_rule_runs.execution_input(
+        schedule, RuleRun(1, "rule", json.dumps({"id": "e"}).encode(), (), github_repo="o/r"))
+    context = json.loads(stdin)["context"]
+    assert repository == bound and context["github_repo"] == bound
+    assert context["project_id"] == "project-a" and roots == ["project-a"]
+    assert context["staging_root"] == str(world["tmp"] / "project-a" / "staging")
+
+
+def test_a_scheduled_run_gets_no_repository(world, spawned):
+    _script(world, "scheduled.sh", cadence=300)
+    _sweep(_START + timedelta(minutes=6))
+    assert spawned["channels"] == [] and len(spawned["commands"]) == 1
+    assert "CORSIA_SCRIPT_GITHUB_SOCKET" not in spawned["envs"][0]
 
 
 def test_a_rules_queue_is_capped_and_a_skip_shows_in_explain_and_list(runs, monkeypatch):

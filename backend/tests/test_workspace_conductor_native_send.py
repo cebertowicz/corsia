@@ -27,6 +27,8 @@ from tests.project_ref_helpers import (
     write_project_context,
 )
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 _CONDUCTOR = "workspace-conductor"
 _AGENT_A = "agent-a"
 

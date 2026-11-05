@@ -30,7 +30,7 @@ QUOTE_CHARS = 160
 # Several comment or answer notes can arrive in one digest (a round of review); each of those asks for one triage.
 TRIAGE_TOGETHER = (
     "If several correction notes reach you together, triage them as one: look for one general cause "
-    "and re-check the whole artifact or decision, not each comment separately."
+    "and re-check the whole artifact, reply or decision, not each comment separately."
 )
 
 
@@ -79,6 +79,8 @@ def _source_note_text(candidate: CorrectionCandidate) -> str:
     if candidate.source_kind == "doc_comment":
         where = f"artifact {candidate.about} (comment {candidate.source_id}, sent {clock})"
         note = _note(where, candidate.quote or "", "comment")
+    elif candidate.source_kind == "chat_comment":
+        note = _note(f"work (chat comment {candidate.source_id}, sent {clock})", candidate.quote or "", "comment")
     else:
         note = _note(f'plan decision "{candidate.about}" (answered {clock})', candidate.quote or "", "answer")
     return note + "\n" + TRIAGE_TOGETHER

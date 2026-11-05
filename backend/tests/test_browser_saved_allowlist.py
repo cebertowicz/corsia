@@ -13,6 +13,7 @@ from tests.browser_process_fixture import synthetic_browser  # noqa: F401
     ['open', 'about:blank'], ['snapshot'], ['snapshot', '-i'], ['click', '#a'],
     ['fill', '#a', 'value'], ['wait', '#a'], ['wait', '100'],
     ['wait', '--load', 'networkidle'], ['screenshot', '/tmp/a.png'],
+    ['screenshot', '--full', '/tmp/a.png'],
     ['get', 'title'], ['get', 'url'], ['reload'],
 ])
 def test_public_agent_shapes(args):
@@ -40,12 +41,22 @@ def test_public_pane_shapes(args):
     ['cookies'], ['get', 'cdp-url'], ['unknown'], ['plugins', 'add', 'x'],
     ['fill', '#a', '--headers'], ['fill', '#a', '-p'], ['fill', '#a', '-v'],
     ['fill', '#a', '-q'], ['eval', 'document.cookie'],
+    ['screenshot', '--full'], ['screenshot', '--full', '--headers'],
+    ['screenshot', '--full', '/tmp/a.png', 'x'], ['screenshot', '--headers', '/tmp/a.png'],
 ])
 async def test_saved_public_path_refuses_other_shapes(synthetic_browser, monkeypatch, args):
     monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
     with pytest.raises(Exception, match='unavailable in a browser session|not available to agents|verified local Chrome/CDP mode'):
         await synthetic_browser.owner.run('a', args)
     assert not synthetic_browser.calls
+    await synthetic_browser.owner.shutdown()
+
+
+async def test_saved_session_takes_full_page_screenshot(synthetic_browser, monkeypatch, tmp_path):
+    monkeypatch.setattr(browser_launch, '_owner_key', lambda _: 'owner')
+    await synthetic_browser.owner.run('a', ['open', 'about:blank'])
+    await synthetic_browser.owner.run('a', ['screenshot', '--full', str(tmp_path / 'a.png')])
+    assert synthetic_browser.calls[-1][-3:] == ('screenshot', '--full', str(tmp_path / 'a.png'))
     await synthetic_browser.owner.shutdown()
 
 

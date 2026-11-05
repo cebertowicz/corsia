@@ -21,6 +21,7 @@ vi.mock('$lib/stores/viewport', async () => {
 });
 
 import ImageCommentLightbox from './ImageCommentLightbox.svelte';
+import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
 import { docComments } from '$lib/stores/docComments';
 import { prefersReducedMotion } from '$lib/stores/viewport';
 
@@ -56,9 +57,10 @@ beforeEach(() => {
 	define('clientWidth', () => 548);
 	define('clientHeight', () => 400);
 	Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
-	// Tags are placed against the layer's measured size, which jsdom reports as zero.
+	// jsdom reports zero sizes: give the image layer and its clipping canvas realistic bounds.
 	const measured = HTMLElement.prototype.getBoundingClientRect;
 	vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+		if (this.classList.contains('layout')) return new DOMRect(0, 0, 800, 600);
 		return this.hasAttribute('data-image-regions') ? new DOMRect(24, 50, 500, 250) : measured.call(this);
 	});
 	docComments.set({});
@@ -81,6 +83,27 @@ afterEach(() => {
 });
 
 describe('ImageCommentLightbox', () => {
+	it('shows the document reply chip for replies arriving while its image is open', async () => {
+		const step = vi.fn();
+		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
+			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0 },
+			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
+			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn() },
+			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: step,
+		} });
+		await settle();
+		const img = host.querySelector<HTMLImageElement>('.pad img')!;
+		img.dispatchEvent(new Event('load'));
+		await settle();
+		expect(host.querySelector('[data-doc-reply-chip]')).toBeNull();
+		docComments.update((current) => ({ ...current, 'art-img': current['art-img'].map((item, index) => index === 1 ? { ...item, newReplyIds: ['new-reply'] } : item) }));
+		await settle();
+		const chip = host.querySelector<HTMLButtonElement>('[data-doc-reply-chip] button');
+		expect(chip?.textContent).toContain('1 new reply');
+		chip!.click();
+		expect(step).toHaveBeenCalledOnce();
+	});
+
 	it('reads the image\'s comments, counts them on the pill and numbers their tags on the image', async () => {
 		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
 		expect(mocks.fetchComments).toHaveBeenCalledWith('art-img');
@@ -253,6 +276,17 @@ describe('ImageCommentLightbox', () => {
 			tag(1).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
 			await settle();
 			expect(document.activeElement?.classList.contains('ct-input')).toBe(true);
+		});
+
+		it('does not focus a reply whose anchor is outside the canvas', async () => {
+			await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
+			const root = host.querySelector<HTMLElement>('.layout')!;
+			Object.defineProperty(root, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect(0, 0, 20, 20) });
+			tag(1).focus();
+			tag(1).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+			await settle();
+			expect(document.body.querySelector('[data-popover]')?.getAttribute('aria-hidden')).toBe('true');
+			expect(document.activeElement?.classList.contains('ct-input')).toBe(false);
 		});
 
 		it('opens the drawer by growing its track, sized to leave the image its fitted height', async () => {

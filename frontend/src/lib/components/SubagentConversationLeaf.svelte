@@ -116,10 +116,10 @@
 	});
 </script>
 
-<div class="subagent-conversation" data-drop-composer-surface aria-label="Subagent conversation">
+<div class="subagent-conversation" data-drop-composer-surface aria-label="Agent chat">
 	{#if failed && !hasRows}
 		<div class="leaf-state" role="alert">
-			<strong>This subagent conversation couldn’t load.</strong>
+			<strong>This agent chat couldn’t load. Try again.</strong>
 			<Button size="sm" variant="secondary" onclick={() => load()}>Retry</Button>
 		</div>
 	{:else}

@@ -71,6 +71,17 @@ def clear_account_usage(provider: str, account_id: str, *, db=None) -> None:
         connection.execute("UPDATE vendor_accounts SET usage_json=NULL WHERE id=?", (identity,))
 
 
+def _refused_elsewhere(candidate: dict[str, Any], current: dict[str, Any] | None) -> bool:
+    """True when ``candidate`` allows one named window while another window's refusal is still active."""
+    window = candidate.get("window")
+    if candidate.get("state") != "allowed" or not window or not isinstance(current, dict):
+        return False
+    if current.get("state") != "limited" or current.get("reason") == f"{window}_limit":
+        return False
+    reset = parse_time(current.get("resets_at"))
+    return reset is None or reset > _now()
+
+
 def _merge_usage(
     usage: dict[str, Any], *, windows: Sequence[dict[str, Any]] = (), facts: dict[str, Any] | None = None,
     verdict: dict[str, Any] | None = None, check_error: str | None = None,
@@ -109,7 +120,8 @@ def _merge_usage(
         candidate_verdict = dict(verdict)
         candidate_verdict["observed_at"] = str(verdict.get("observed_at") or stamp)
         candidate_verdict["scope_model"] = None if key == ACCOUNT_SCOPE else key
-        if newer(candidate_verdict, verdict_map.get(key)):
+        current_verdict = verdict_map.get(key)
+        if newer(candidate_verdict, current_verdict) and not _refused_elsewhere(candidate_verdict, current_verdict):
             verdict_map[key] = candidate_verdict
         merged["vendor_verdicts"] = verdict_map
     if check_error is not None:
@@ -150,7 +162,7 @@ def record_usage(
         from connections.vendor_accounts import get_account
 
         account = get_account(identity, db=connection)
-        runtime_effects = account['source_home'] is None or readiness_reason(account) is None
+        runtime_effects = readiness_reason(account) is None
         key = scope_key(verdict.get("scope_model")) if isinstance(verdict, dict) else None
         current_verdict = verdicts(usage).get(key) if isinstance(usage, dict) and key else None
         if observed_before is not None and isinstance(current_verdict, dict):

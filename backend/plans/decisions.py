@@ -33,6 +33,8 @@ from plans.decision_writes import (
     _create,
     _perform,
     _touch_plan,
+    create_raised,
+    raise_decision,
 )
 from registry import attention
 
@@ -43,7 +45,7 @@ read = decision_projection.read
 
 __all__ = [
     "MUTABLE_STATES", "REVIEW_DOD", "TYPE", "answer", "draft", "invalidate",
-    "parent_review", "raise_to_user", "read", "reorder", "update",
+    "parent_review", "raise_offer", "raise_to_user", "read", "reorder", "update",
 ]
 
 
@@ -96,6 +98,28 @@ def draft(plan_id: str, *, source_node_id, mutation_id: str, actor, provenance,
             drives=drives,
         )
     return notifications.DeferredMutation(result, ())
+
+
+def raise_offer(db, *, plan_id: str, source_node_id: str, content: dict, provenance: str) -> dict:
+    """Raise one decision to the user for CORSIA itself, skipping the author and reviewer steps.
+
+    Server-internal, called only by ``plans.gate_handoff``: no tool or route reaches
+    it, and it grants no actor a permission. The decision records no actor.
+    """
+    return create_raised(db, plan_id, source_node_id, content, provenance)["decision"]
+
+
+#: Why a handoff offer is withdrawn: a correction broke the record it was offered on. The person or
+#: the agent may have made it, so the reason names neither.
+OFFER_VOIDED = "This work was corrected, so you keep reviewing it"
+
+
+def withdraw_offer(db, decision_id: str, *, provenance: str) -> bool:
+    """Withdraw an open offer ``raise_offer`` made; server-internal like it. Returns whether it changed."""
+    row = decision_projection.identity_row(db, decision_id)
+    if row is None:
+        return False
+    return decision_lifecycle._withdraw(db, row, reason=OFFER_VOIDED, actor_id=None, provenance=provenance)
 
 
 def update(decision_id: str, *, expected_revision, mutation_id, actor, provenance,
@@ -169,19 +193,7 @@ def raise_to_user(decision_id: str, *, expected_revision, mutation_id, actor,
         authz.require_reviewer(db, plan, source, bound)
         authz.require_revision(decision, expected_revision)
         authz.require_state(decision, ("parent_reviewed",))
-        node = service._node_row(db, decision["node_id"])
-        if node["state"] == "pending":
-            service.transition_node(
-                node["id"], "active", actor_id=bound.audit_id,
-                provenance=provenance, db=db,
-            )
-        service.transition_node(
-            decision["node_id"], "review_requested", actor_id=bound.audit_id,
-            provenance=provenance, db=db,
-        )
-        attention.raise_attention(decision["artifact_id"], db=db)
-        body = _body_from(decision, state="raised", raised_at=service._now())
-        return _commit(db, decision, body, "decision_raised", bound, provenance)
+        return raise_decision(db, decision, bound, provenance)
 
     return _perform(decision_id, "decision_raise", {}, mutation_id=mutation_id,
                     actor=actor, provenance=provenance, db=db, apply=apply)
@@ -255,6 +267,7 @@ def answer(decision_id: str, *, option_id=None, option_ids=None, other_text=None
         _note_answered_after_commit(
             db, decision["node_id"], decision_fields.answer_label(decision, chosen),
         )
+        _write_community_answer_after_commit(db, decision, chosen)
         return result
 
     params = {"option_id": option_id, "other_text": other_text}
@@ -297,6 +310,30 @@ def _answer_evidence(decision: dict, chosen: dict) -> str:
     if chosen["text"]:
         evidence += f" · Note: {json.dumps(chosen['text'], ensure_ascii=False)}"
     return evidence
+
+
+def _write_community_answer_after_commit(db, decision: dict, chosen: dict) -> None:
+    """Record the community decision's answer in the profile once it commits; never breaks the answer."""
+    import logging
+
+    try:
+        from infra import config
+        from infra.community_answer import community_answer, write_profile_lines
+        from infra.corsia_agent import get_corsia_agent
+        from infra.write_effects import after_commit
+        from plans.onboarding_reads import decision_owner_id
+
+        answer = community_answer(decision, chosen)
+        if answer is None:
+            return
+        agent_id = get_corsia_agent(db=db)
+        if agent_id is None or decision_owner_id(db, node_id=decision["node_id"]) != agent_id:
+            return
+        after_commit(db, lambda: write_profile_lines(config.WORKSPACE, answer))
+    except Exception:  # noqa: BLE001 - the profile line is not worth the answer
+        logging.getLogger(__name__).warning(
+            "community answer not scheduled for the user profile", exc_info=True,
+        )
 
 
 def _note_answered_after_commit(db, node_id: str, option_id: str) -> None:

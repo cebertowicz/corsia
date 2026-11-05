@@ -78,7 +78,7 @@ SOURCE_MARKED_DONE = "The agent marked the task this decision was about done"
 WITHDRAWN = "Decision withdrawn"
 
 
-def _close_review_node(db, node_id: str, *, actor_id: str, provenance: str) -> None:
+def _close_review_node(db, node_id: str, *, actor_id: str | None, provenance: str) -> None:
     """Close the review node, tolerating one that is already terminal.
 
     The boundary now refuses generic settlement of a lane-owned node, so this
@@ -99,7 +99,7 @@ def _close_review_node(db, node_id: str, *, actor_id: str, provenance: str) -> N
 
 
 def _withdraw(
-    db, row, *, reason: str, actor_id: str, provenance: str, readmit: bool = True,
+    db, row, *, reason: str, actor_id: str | None, provenance: str, readmit: bool = True,
 ) -> bool:
     """Settle one outstanding decision terminally. Returns whether it changed.
 

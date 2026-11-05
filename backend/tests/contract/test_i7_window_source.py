@@ -44,6 +44,7 @@ CATALOG_DISCOVERY_WRITERS = {
     "llm/catalog_cloud.py",
     "llm/catalog_network_models.py",
     "llm/external_provider.py",
+    "llm/harness_catalog.py",
 }
 
 _STORED_WINDOW_READ = re.compile(

@@ -62,16 +62,22 @@ def resolve_upload(external_id: str, db=None) -> dict | None:
             _db.close()
 
 
+def select_upload_path(path: str, *, active_only: bool, db):
+    """Select the preferred upload identity by path, optionally in any state."""
+    state_filter = " AND state='active'" if active_only else ""
+    return db.execute(
+        "SELECT integration, type, external_id FROM artifact_identities "
+        "WHERE integration='upload' AND type IN (?, ?) AND path=?"
+        + state_filter + " ORDER BY type='image' DESC LIMIT 1",
+        (*UPLOAD_IDENTITY_TYPES, path),
+    ).fetchone()
+
+
 def resolve_upload_path(path: str, db=None) -> dict | None:
     """Resolve an active upload identity by its canonical local path."""
     _db = db or get_db()
     try:
-        identity = _db.execute(
-            "SELECT integration, type, external_id FROM artifact_identities "
-            "WHERE integration='upload' AND type IN (?, ?) AND path=? "
-            "AND state='active' ORDER BY type='image' DESC LIMIT 1",
-            (*UPLOAD_IDENTITY_TYPES, path),
-        ).fetchone()
+        identity = select_upload_path(path, active_only=True, db=_db)
         if identity is None:
             return None
         return resolve_normalized_owner(

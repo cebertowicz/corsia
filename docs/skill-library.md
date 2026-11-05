@@ -1,17 +1,19 @@
 # The skill library
 
-Agents can install reviewed skills from the public [CORSIA library](https://github.com/cebertowicz/corsia-library) instead of writing their own. You don't need to do anything: an agent searches the library when none of its own skills fits the task, installs what it needs, and keeps the copy current.
+Agents can install skills from the public [CORSIA library](https://github.com/cebertowicz/corsia-library) instead of writing their own. The library stays off until you [agree to use community improvements](#community-improvements-consent). Once it's on, an agent searches the library when none of its own skills fits the task, installs what it needs without asking you, and decides when to update its copy.
 
 ## What is in it
 
-Each item is an [Agent Skills](https://agentskills.io) folder (`SKILL.md` and the files it needs), pinned to an exact commit and reviewed before it is listed. The library records a SHA-256 hash for every file in it, along with the item's version and license. It can also withdraw an item and record why.
+Each item is an [Agent Skills](https://agentskills.io) folder (`SKILL.md` and the files it needs). The library's own items follow its `main` branch; items from other repositories are pinned to an exact commit. The library records a SHA-256 hash for every file in it, along with the item's version and license. It can also withdraw an item and record why.
+
+No review checklist for library items is published. The hashes are read from `main` too, so they catch a file that doesn't match the index, not a change by someone who can push to the library. A skill is instructions and can include scripts, so an installed skill can tell an agent to do anything that agent can already do. See [Supply chain](security/supply-chain.md#shared-skills-and-setups).
 
 ## How an agent uses it
 
 Agents do this through the `skill_library` tool:
 
 - **Search** is for when none of the agent's own skills fits. Each result shows whether the agent already has that item, and whether a newer version exists. If nothing in the library fits either, the agent writes its own skill.
-- **Install** fetches the item at its pinned commit and checks every file against its recorded hash before writing anything. It puts a copy in the agent's own skills, and the agent can load it right away. A temporary agent's install goes to the agent that started it. Install is refused when the item is withdrawn, or when the agent already has a skill with that name.
+- **Install** fetches the item and checks every file against its recorded hash before writing anything. It puts a copy in the agent's own skills, and the agent can load it right away. A temporary agent's install goes to the agent that started it. Install is refused when the item is withdrawn, or when the agent already has a skill with that name.
 - **Updates** never happen on their own. The library is checked daily. When an installed item changes or is withdrawn, the agent that owns the copy gets a notice and decides whether to `update` or `remove` it. A withdrawn item stays in place until its owner removes it.
 
 If the library can't be reached, search uses the last copy it fetched and says how old that is. Install and update stop and say to try again later.

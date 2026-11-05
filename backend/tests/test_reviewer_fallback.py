@@ -5,7 +5,9 @@ from unittest.mock import patch
 
 import pytest
 
-from llm_reviewer_fixtures import _reviewer_catalog  # noqa: F401
+from llm_reviewer_fixtures import _reviewer_catalog, reviewer_accounts  # noqa: F401
+
+pytestmark = pytest.mark.usefixtures('reviewer_accounts')
 
 
 @pytest.fixture(autouse=True)

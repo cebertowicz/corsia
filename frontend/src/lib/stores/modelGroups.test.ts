@@ -420,4 +420,15 @@ describe('groupModels', () => {
 		// With no marked account (a vendor with one account) nothing names an account.
 		expect(rowNote(absent)).toEqual({ text: 'unavailable', level: 'normal' });
 	});
+
+	it('notes a model whose selected account is signed out, with or without a marked account', () => {
+		const [group] = groupModels([
+			row({ id: 'opus' }),
+			row({ id: 'out', status: 'unavailable', status_reason: 'account_signed_out' }),
+		]);
+		const out = group.rows.find((m) => m.id === 'out')!;
+		const marked = account([], { label: { name: 'Personal', email: null, text: 'Personal', custom: null } });
+		expect(rowNote(out, marked)).toEqual({ text: 'signed out', level: 'normal' });
+		expect(rowNote(out)).toEqual({ text: 'signed out', level: 'normal' });
+	});
 });

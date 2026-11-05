@@ -1,40 +1,39 @@
-"""GitHub connector manifest (declared data).
+"""GitHub manifest and source-owned fact extraction.
 
-Reuses the single GitHub artifact-id format source — ``events.identity`` —
-so there is no parallel derivation of a PR's identity (replace-don't-preserve):
-the legacy router and the new envelope path resolve a PR to the *same*
-``repo#N`` external id.
+The router and envelope share ``events.identity`` for each ``repo#N`` artifact id.
 """
 
 from __future__ import annotations
 
-import json
-import re
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal
 
+from events.connector_workflows import ShippedResultContract, ShippedWorkflowDecl
 from events.connectors import (
     ConnectorManifest,
     EventTypeDecl,
-    ObservedArtifactDecl,
-    ShippedObserveRuleDecl,
     register,
 )
 if TYPE_CHECKING:
     from events.envelope import EventEnvelope
 from events.identity import (
     GITHUB_INTEGRATION,
+    ISSUE_TYPE,
     PR_TYPE,
     RoutingIdentity,
     check_suite_pr_metadata_from_event,
     pr_external_id,
 )
+from events.connectors.github_artifacts import pr_artifact_in_result
 from events.connectors.github_label_events import IDENTITY, change_event
 from events.connectors.github_ownership import declaration_facts
+from events.connectors.github_pr_facts import HEAD_FACTS, PAYLOAD_FACTS, READ_FACTS, pull_facts
+from events.connectors.github_observe_rules import GITHUB_OBSERVE_RULES
 from events.connectors.github_content_facts import content_facts, content_kind, repository_name
+from events.connectors.github_reply_facts import REPLY_FILTERABLE, REPLY_TYPES, reply_facts
 from events.connectors.github_receiver import GITHUB_RECEIVER
+from events.connectors.github_screen.workflow import triage_capture, triage_validate, triage_version, triage_workflow
 from events.identity_formula import MalformedEventError, RelationshipDecl
-from infra.webhook_delivery_log import comment_object_key
 
 _CHECK_TO_PR = RelationshipDecl("check_suite", "check_to_pull_request", "pull-request")
 
@@ -53,12 +52,19 @@ GITHUB_ROUTED_EVENTS = {
     "pr.synchronize": "webhook.github.pr_synchronize",
     "pr.ready_for_review": "webhook.github.pr_ready_for_review",
     "pr.labeled": "webhook.github.pr_labeled",
+    "pr.unlabeled": "webhook.github.pr_unlabeled",
     "pr.merged": "webhook.github.pr_merged",
     "pr.closed": "webhook.github.pr_closed",
     "check.completed": "webhook.github.check_suite_completed",
     "issue.opened": "webhook.github.issue_opened",
+    "issue.labeled": "webhook.github.issue_labeled",
+    "issue.unlabeled": "webhook.github.issue_unlabeled",
     "issue_comment.created": "webhook.github.issue_comment",
     "pr_comment.created": "webhook.github.pr_comment",
+    "issue_comment.edited": "webhook.github.issue_comment_edited",
+    "pr_comment.edited": "webhook.github.pr_comment_edited",
+    "review.submitted": "webhook.github.review_submitted",
+    "review.edited": "webhook.github.review_edited",
 }
 
 # Each consumer maps PrEnd into its own vocabulary; the rule itself is never
@@ -107,62 +113,6 @@ def pr_end_state(payload: Mapping[str, Any]) -> PrEnd | None:
     return None
 
 
-_PR_URL_RE = re.compile(
-    r"https://github\.com/([^/\s?#]+/[^/\s?#]+)/pull/([1-9]\d*)"
-)
-_FAILED_EXIT_RE = re.compile(r"^Exit code: [1-9]\d*$")
-
-
-def _pr_artifact_in_output(result_text: str) -> ObservedArtifactDecl | None:
-    """Return the one canonical PR URL named by a successful command's output."""
-    lines = [line.strip() for line in result_text.splitlines() if line.strip()]
-    if any(_FAILED_EXIT_RE.fullmatch(line) for line in lines):
-        return None
-    matches = [
-        match
-        for line in lines
-        if (match := _PR_URL_RE.fullmatch(line)) is not None
-    ]
-    if len(matches) != 1:
-        return None
-    repo, number_text = matches[0].groups()
-    number = int(number_text)
-    return ObservedArtifactDecl(
-        integration=GITHUB_INTEGRATION,
-        type=PR_TYPE,
-        external_id=pr_external_id(repo, number),
-        title=f"PR #{number}",
-        path=f"https://github.com/{repo}/pull/{number}",
-    )
-
-
-def _pr_artifact_in_result(result_text: str) -> ObservedArtifactDecl | None:
-    """Read a GitHub MCP created object's URL field, or the shell's PR URL line."""
-    try:
-        result = json.loads(result_text)
-    except (TypeError, ValueError):
-        return _pr_artifact_in_output(result_text)
-    if not isinstance(result, dict):
-        return None
-    item = result.get("comment", result)
-    if not isinstance(item, dict):
-        return None
-    url, object_id = item.get("url"), item.get("id")
-    if not isinstance(url, str) or not isinstance(object_id, str) or not object_id.isdigit():
-        return None
-    match = re.fullmatch(_PR_URL_RE.pattern + r"(?:#issuecomment-([1-9]\d*))?", url)
-    if match is None:
-        return None
-    repo, number, comment_id = match.groups()
-    if ("comment" in result and comment_id is None) or (comment_id is not None and comment_id != object_id):
-        return None
-    return ObservedArtifactDecl(
-        integration=GITHUB_INTEGRATION, type=PR_TYPE,
-        external_id=pr_external_id(repo, number), title=f"PR #{number}",
-        created_event_ids=(comment_object_key("issue_comment", comment_id),) if comment_id else (),
-    )
-
-
 def _classify(raw: dict[str, Any]) -> str:
     if raw.get("check_suite"):
         return "check.completed"
@@ -199,18 +149,20 @@ def _extract_facts(raw: dict[str, Any], resolved: Mapping[str, Any] | None = Non
     facts: dict[str, Any] = {"repo": repository_name(raw)}
     pr = raw.get("pull_request") or {}
     content = content_facts(raw) if any(raw.get(k) for k in ("pull_request", "issue", "comment", "review")) else {}
-    if pr:
-        user = _json_object(pr, "user")
+    is_reply = content_kind(raw) in REPLY_TYPES
+    if pr and not is_reply:
         facts.update({
             "pr_number": pr.get("number"), "action": raw.get("action"),
             "merged": pr.get("merged"),
             "branch": (pr.get("base") or {}).get("ref"),
-            "sha": (pr.get("head") or {}).get("sha"), "author": user.get("login"),
+            "sha": (pr.get("head") or {}).get("sha"), **pull_facts(pr),
         })
     kind = "pull_request" if pr else "issues" if raw.get("issue") else None
     change = change_event(kind, raw) if kind else None
     facts.update(change.facts if change else {})
     facts.update(content)
+    if is_reply:
+        facts.update(reply_facts(raw))
     if (pr and not raw.get("comment") and not raw.get("review")
             and content.get("author_origin") == "inside" and pr.get("title") is not None):
         facts["title"] = pr["title"]
@@ -233,11 +185,15 @@ def _check_suite_facts(cs: Mapping[str, Any], selected_pr: Mapping[str, Any] | N
 
 def _artifact_ref(event_type: str, facts: dict, raw: dict) -> dict | None:
     number = facts.get("pr_number")
+    artifact_type = PR_TYPE
+    if number is None:
+        issue = _json_object(raw, "issue")
+        number = issue.get("number")
+        artifact_type = PR_TYPE if issue.get("pull_request") else ISSUE_TYPE
     if number is None:
         return None
-    repo = facts.get("repo")
-    return {"integration": GITHUB_INTEGRATION, "type": PR_TYPE,
-            "external_id": pr_external_id(repo, number)}
+    return {"integration": GITHUB_INTEGRATION, "type": artifact_type,
+            "external_id": pr_external_id(facts.get("repo"), number)}
 
 
 def _relationships(event_type: str, facts: dict, raw: dict) -> tuple[dict, ...]:
@@ -248,6 +204,36 @@ def _relationships(event_type: str, facts: dict, raw: dict) -> tuple[dict, ...]:
         return ()
     return ({"edge": _CHECK_TO_PR.edge, "to_type": _CHECK_TO_PR.to_type,
              "to_ref": pr_external_id(facts.get("repo"), number)},)
+
+
+def _capture_screen(staging):
+    from events.connectors.github_screen.result import capture_floor
+
+    return capture_floor(staging)
+
+
+def _apply_screen(payload, record):
+    from events.connectors.github_screen.result import validate_captured_result
+
+    return validate_captured_result(payload, record)
+
+
+def _screen_instructions():
+    from core.injection_rules import injection_rule_text
+
+    return "List every matching injection sign in injection_signs; use [] when none match:\n" + injection_rule_text()
+
+
+def _screen_version():
+    from events.connectors.github_screen.workflow import version
+
+    return version()
+
+
+def _screen_workflow(project_id: str):
+    from events.connectors.github_screen.workflow import workflow
+
+    return workflow(project_id)
 
 
 def _project_repositories(project_id: str) -> frozenset[str] | None:
@@ -273,13 +259,13 @@ def _repository_projects(repository: str) -> frozenset[str] | None:
         return None
 
 
-_PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author", "author_origin", "item_version")
-# A label change adds the one name changed, the item's names after it, who did it and when.
-_PR_LABEL_FILTERABLE = (*_PR_FILTERABLE, "label", "labels", "actor", "at")
+_PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author", "author_origin", "item_version", *PAYLOAD_FACTS)
+# READ_FACTS are read only when a rule tests one. A label change adds the name changed, who did it and when.
+_PR_LABEL_FILTERABLE = (*_PR_FILTERABLE, *READ_FACTS, "label", "actor", "at")
 _ISSUE_FILTERABLE = ("repo", "issue_number", "label", "labels", "actor", "at",
                      "minutes_since_opened", "state_reason", "author", "author_origin", "item_version")
 _CONTENT_FILTERABLE = ("repo", "author", "author_origin", "item_version")
-_HEAD_CHECKS_FILTERABLE = ("repo", "head_sha", "head_branch", "pr_number", "conclusion")
+_HEAD_CHECKS_FILTERABLE = ("repo", "head_sha", "head_branch", "pr_number", "conclusion", *HEAD_FACTS)
 _CHECK_FILTERABLE = ("repo", "branch", "head_sha", "check_suite_id", "conclusion")
 
 MANIFEST = register(ConnectorManifest(
@@ -288,16 +274,16 @@ MANIFEST = register(ConnectorManifest(
     version="1",
     event_types={
         "pr.opened": EventTypeDecl(
-            "pr.opened", ("repo", "pr_number", "action"), _PR_FILTERABLE,
+            "pr.opened", ("repo", "pr_number", "action"), (*_PR_FILTERABLE, *READ_FACTS),
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
             event_class="actionable", routed_event=GITHUB_ROUTED_EVENTS["pr.opened"]),
         "pr.synchronize": EventTypeDecl(
-            "pr.synchronize", ("repo", "pr_number", "action", "sha"), _PR_FILTERABLE,
+            "pr.synchronize", ("repo", "pr_number", "action", "sha"), (*_PR_FILTERABLE, *READ_FACTS),
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
             event_class="actionable", routed_event=GITHUB_ROUTED_EVENTS["pr.synchronize"]),
         "pr.ready_for_review": EventTypeDecl(
             "pr.ready_for_review", ("repo", "pr_number", "action", "sha"),
-            _PR_FILTERABLE, artifact_type=PR_TYPE,
+            (*_PR_FILTERABLE, *READ_FACTS), artifact_type=PR_TYPE,
             artifact_integration=GITHUB_INTEGRATION, event_class="informational",
             routed_event=GITHUB_ROUTED_EVENTS["pr.ready_for_review"]),
         "pr.labeled": EventTypeDecl(
@@ -307,11 +293,12 @@ MANIFEST = register(ConnectorManifest(
             routed_event=GITHUB_ROUTED_EVENTS["pr.labeled"]),
         "pr.unlabeled": EventTypeDecl(
             "pr.unlabeled", IDENTITY["pr.unlabeled"], _PR_LABEL_FILTERABLE,
-            artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION),
+            artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION, event_class="informational",
+            routed_event=GITHUB_ROUTED_EVENTS["pr.unlabeled"]),
         **{suffix: EventTypeDecl(suffix, facts, _ISSUE_FILTERABLE,
                                  routed_event=GITHUB_ROUTED_EVENTS.get(suffix))
            for suffix, facts in IDENTITY.items() if suffix.startswith("issue.")},
-        **{name: EventTypeDecl(name, ("repo", "item_version"), _CONTENT_FILTERABLE,
+        **{name: EventTypeDecl(name, ("repo", "item_version"), (*REPLY_FILTERABLE, *PAYLOAD_FACTS, *READ_FACTS) if name in REPLY_TYPES else _CONTENT_FILTERABLE,
                                 routed_event=GITHUB_ROUTED_EVENTS.get(name))
            for name in ("issue.edited", "issue_comment.created", "issue_comment.edited",
                         "pr_comment.created", "pr_comment.edited", "review.submitted", "review.edited")},
@@ -337,11 +324,24 @@ MANIFEST = register(ConnectorManifest(
     classify=_classify,
     extract_facts=_extract_facts,
     build_artifact_ref=_artifact_ref,
-    artifact_extractors={PR_TYPE: _pr_artifact_in_result},
+    artifact_extractors={PR_TYPE: pr_artifact_in_result},
     app_identities=frozenset({"https://api.githubcopilot.com", "ghcr.io/github/github-mcp-server"}),
-    shipped_observe_rules=(ShippedObserveRuleDecl(
-        id="ruleset_github_pr_create", tool="bash", argv_prefix=("gh", "pr", "create"), item_type=PR_TYPE,
-    ),),
+    shipped_observe_rules=GITHUB_OBSERVE_RULES,
+    shipped_workflows={"github-pr-screen": ShippedWorkflowDecl(
+        load=_screen_workflow,
+        result=ShippedResultContract(
+            source="outside", kind="pull request", item_fields=("repo", "pr_number", "item_version"),
+            version=_screen_version, instructions=_screen_instructions,
+            capture=_capture_screen, validate=_apply_screen,
+        ),
+    ), "github-outside-triage": ShippedWorkflowDecl(
+        load=triage_workflow,
+        result=ShippedResultContract(
+            source="outside", kind="triage", item_fields=("repo", "number", "item_version"),
+            version=triage_version, instructions=_screen_instructions,
+            capture=triage_capture, validate=triage_validate,
+        ),
+    )},
     resolve_relationships=_relationships,
     repository_fact="repo",
     project_repositories=_project_repositories,

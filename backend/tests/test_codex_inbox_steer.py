@@ -5,6 +5,9 @@ from __future__ import annotations
 import pytest
 
 from subagents.codex_inbox_batch import deliver_live_inbox_batch
+from vendor_account_fixtures import signed_in_default
+
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
 
 
 def _seed_live_turn(thread_id: str):
@@ -448,6 +451,7 @@ async def test_image_steer_forwards_projection_and_public_effects(
             "UPDATE models SET supports_vision=1 WHERE id='codex/gpt-5-codex'"
         )
         db.commit()
+        signed_in_default("codex", db=db)  # the Default lists the model with image input
     monkeypatch.setattr(config, "WORKSPACE", tmp_path)
     image_path = tmp_path / ".threads" / thread_id / "uploads" / "image" / "x.png"
     image_path.parent.mkdir(parents=True)

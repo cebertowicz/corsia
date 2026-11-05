@@ -1,6 +1,6 @@
 # Spawn policy
 
-System spawn rules (classifying work, tier defaults, failure and admission guards) ship with CORSIA and always apply. This file holds this workspace's lineup: the models you can dispatch to and their limits.
+System spawn rules (classifying work, tier defaults, failure and admission guards) ship with CORSIA in skill `plans-and-workers`; load it before you dispatch a worker. This file holds this workspace's lineup: the models you can dispatch to and their limits.
 
 > **Template.** Replace every `<…>` placeholder with this workspace's real
 > lineup, and delete rows for providers you have not configured. An unfilled

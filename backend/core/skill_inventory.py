@@ -32,7 +32,8 @@ def with_skill_tokens(
     """Return ``metadata`` with a ``prompt_tokens`` on each listed skill.
 
     A skill whose text is not in ``content`` gets none: its cost is unknown,
-    not zero. A names-only skill is charged for its own ``name (path)`` entry;
+    not zero. A names-only skill is charged for its own entry (its bare name under a
+    root header, ``name (path)`` off the pattern);
     the overflow lead-in and the block's notes stay in the remainder.
     """
     skills = metadata.get("skills")

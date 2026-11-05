@@ -60,7 +60,7 @@
 			{/if}
 		</div>
 	{/snippet}
-	{#if onOpenSource}
+	{#if onOpenSource && source.actionLabel}
 		<button
 			type="button"
 			class="ctx-source-row actionable"

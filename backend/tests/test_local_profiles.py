@@ -197,6 +197,9 @@ def _fake_new_omlx(monkeypatch, download, disk=lambda *_args: None, optimal=None
     async def discover(server_id):
         return {"ok": True}
 
+    async def keep_loaded(_server_id, _model, **_kwargs):
+        return {"status": "loaded"}
+
     async def registered_key(host, port):
         return "k"
 
@@ -205,7 +208,6 @@ def _fake_new_omlx(monkeypatch, download, disk=lambda *_args: None, optimal=None
 
     import infra.state.ws
     import llm.catalog_network_models
-    from llm.local_model import OMLX_PIN
 
     monkeypatch.setattr(local_setup, "require_free_disk", disk)
     monkeypatch.setattr(downloads, "download_dir", model_dir)
@@ -219,6 +221,7 @@ def _fake_new_omlx(monkeypatch, download, disk=lambda *_args: None, optimal=None
     monkeypatch.setattr(local_setup, "_wait_for_download", download)
     monkeypatch.setattr(flow, "configure_model_settings", model_settings)
     monkeypatch.setattr(flow, "apply_optimal_settings", apply_optimal)
+    monkeypatch.setattr(flow, "keep_loaded", keep_loaded)
     monkeypatch.setattr(llm.catalog_network_models, "discover_network_models", discover)
     monkeypatch.setattr(infra.state.ws, "notify_models_changed", lambda: None)
     return wrote

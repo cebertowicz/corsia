@@ -27,7 +27,7 @@
 		onLoadAnyway?: () => void;
 		/** A download in progress: a standard row with its switch off-limits until the model is on disk. */
 		downloading?: boolean;
-		/** On a downloading row: whether the switch will be on once the model is kept loaded. */
+		/** Whether the model will be kept loaded when the download completes. */
 		downloadingOn?: boolean;
 		/** A local model loading into memory: its switch is on, since the switch is the keep-loaded pin, and off-limits until it loads. */
 		loadingOn?: boolean;
@@ -69,6 +69,7 @@
 		if (id === 'delete-download') onDeleteDownload?.();
 	}
 	const metaClass = $derived(
+		downloading ? 'download' :
 		state === 'loading' ? 'loading' :
 		state === 'cache_warming' ? 'warming' :
 		state === 'error' ? 'error' :
@@ -77,7 +78,7 @@
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex: focused group exposes the row-menu keyboard handler for ContextMenu and Shift+F10. -->
-<div class="mr" class:dl-row={downloading} class:has-warn={!!warning || !!note} style="--p: {progress}%" role={onDeleteDownload ? 'group' : undefined} aria-label={onDeleteDownload ? `Actions for ${name}` : undefined} tabindex={onDeleteDownload ? 0 : undefined} {...menu.rowHandlers(name)}>
+<div class="mr" class:has-warn={!!warning || !!note} role={onDeleteDownload ? 'group' : undefined} aria-label={onDeleteDownload ? `Actions for ${name}` : undefined} tabindex={onDeleteDownload ? 0 : undefined} {...menu.rowHandlers(name)}>
 	<span class="mr-toggle-wrap">
 		{#if downloading || loadingOn}
 			{@const on = downloading ? downloadingOn : loadingOn}
@@ -155,8 +156,7 @@
 <style>
 	/* A nested Settings list row under its provider: it starts on the provider's name column and ends
 	   on the content edge, flat on the pane, with space alone between rows. State is the switch, the
-	   status text (which carries load and warm progress) and the puck, never a fill or a bar; the one
-	   exception is a download's hairline. */
+	   status text carries load, warm and download progress; there is no row progress bar. */
 	.mr {
 		display: grid;
 		/* The name keeps a floor, so a long status line wraps instead of squeezing it to nothing. */
@@ -168,8 +168,6 @@
 		padding: var(--space-1) var(--space-2) var(--space-1) calc(var(--space-2) + var(--project-mark-size) + var(--space-3));
 		border-radius: var(--radius-sm);
 		transition: background var(--dur-tight) var(--ease-snap);
-		/* The download hairline is absolutely placed, so the row anchors it. */
-		position: relative;
 	}
 	.mr-toggle-wrap { grid-area: toggle; }
 	.mname { grid-area: name; }
@@ -210,6 +208,7 @@
 		flex-shrink: 0;
 	}
 	.meta.loading { color: var(--text-secondary); }
+	.meta.download { color: var(--accent-text); }
 	.meta.warming { color: var(--sky); }
 	.meta.error   { color: var(--red-text); }
 	.link-btn { border: 0; background: transparent; padding: 0; margin-left: var(--space-1); color: var(--accent-text); font: inherit; cursor: pointer; }
@@ -229,12 +228,6 @@
 	.cap[data-cap="reasoning"] { background: var(--purple-bg); color: var(--purple-text); box-shadow: inset 0 0 0 1px var(--purple-line); }
 	.cap[data-cap="tools"]     { background: var(--teal-bg);   color: var(--teal);   box-shadow: inset 0 0 0 1px var(--teal-line); }
 
-	/* A download is a standard row: its neutral bar spans the row, edge to edge. */
-	.mr.dl-row::after {
-		content: '';
-		position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
-		background: linear-gradient(90deg, var(--text-tertiary) 0%, var(--text-tertiary) var(--p, 0%), transparent var(--p, 0%));
-	}
 	.tg:disabled { opacity: 0.5; cursor: not-allowed; }
 	.tg {
 		--w: 30px; --h: 17px;

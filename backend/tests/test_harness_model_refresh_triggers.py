@@ -218,7 +218,7 @@ async def test_session_list_batches_saved_unknown_selectors_without_rewriting(mo
     monkeypatch.setattr(sessions, "authenticate", lambda _token: {"id": "u"})
 
     async def _run_in_db(_fn):
-        return rows
+        return rows, []
 
     def _schedule(models):
         calls.append(list(models))
@@ -229,4 +229,4 @@ async def test_session_list_batches_saved_unknown_selectors_without_rewriting(mo
     result = await sessions.list_threads("token")
 
     assert calls == [[row["model"] for row in rows]]
-    assert result == {"threads": rows}
+    assert result == {"threads": rows, "coordination": []}

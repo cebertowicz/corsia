@@ -99,3 +99,19 @@ async def test_completed_setup_reuses_snapshot_but_builds_provider_specific_impo
     assert "Bring over what your other tools know" in wake
     assert snapshot["setup"]["setup_decisions"] == []  # keep committed snapshot immutable
     assert "Never write the opening or create the setup plan" in wake
+
+
+@pytest.mark.asyncio
+async def test_cached_snapshot_reports_the_live_auto_approve_value(monkeypatch):
+    from onboarding import app_first_run, setup_decisions
+
+    snapshot = facts(auto_approve=True)
+    monkeypatch.setattr(app_first_run, "read_cached_app_facts", lambda _thread: snapshot)
+    monkeypatch.setattr(first_run_wake, "_bound_model", lambda model: {"model": model, "source": "omlx"})
+    monkeypatch.setattr(setup_decisions, "import_card", lambda model, ready: None)
+    monkeypatch.setattr(first_run_wake, "get_host_access_auto_approve", lambda: False)
+
+    wake = await first_run_wake.render_for("test-local", "app", thread_id="test-conductor")
+
+    assert '"auto_approve": false' in wake
+    assert snapshot["auto_approve"] is True

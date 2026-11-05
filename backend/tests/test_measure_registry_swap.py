@@ -57,7 +57,7 @@ def database(tmp_path: Path):
     sync(seed, owner_thread_id="agent-b", path=own("agent-b"), text=MEASURES.replace("namespace: mail", "namespace: shop").replace("mail.triaged", "shop.triaged"))
     assert set(REGISTRY.events) == {"mail.triaged", "shop.triaged"}
     spec = json.dumps({"attributes": {"message_ref": "id"}, "dedupe": ["message_ref"]})
-    seed.execute("INSERT INTO measure_definitions VALUES ('agent-a','event','mail.late',1,?,?,'sha','t',0)", (spec, own("agent-a")))
+    seed.execute("INSERT INTO measure_definitions (owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at,removed) VALUES ('agent-a','event','mail.late',1,?,?,'sha','t',0)", (spec, own("agent-a")))
     seed.commit()
     yield path, seed
     seed.close()
@@ -78,7 +78,7 @@ def test_a_settle_during_a_rebuild_sees_the_old_complete_registry_then_the_new_o
     assert reached.wait(WAIT)  # the rebuild has read one declaration and is mid-read
     try:
         assert set(REGISTRY.events) == {"mail.triaged", "shop.triaged"}  # whole old state: nothing emptied, nothing half-filled
-        admitted = admit(seed, owner_thread_id="agent-a", event_name="mail.triaged", attributes={"message_ref": "m1", "action": "replied"}, run_id="r")
+        admitted = admit(seed, source="agent", provenance="agent_recorded", owner_thread_id="agent-a", event_name="mail.triaged", attributes={"message_ref": "m1", "action": "replied"}, run_id="r")
         assert admitted.refusal is None and admitted.result and admitted.result.inserted
         assert seed.execute("SELECT coalesce(sum(n),0) FROM outcome_event_counters WHERE counter='name_undeclared'").fetchone()[0] == 0
     finally:

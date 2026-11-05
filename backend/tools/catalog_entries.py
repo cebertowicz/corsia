@@ -9,7 +9,9 @@ from tools.catalog_host_entries import HOST_ACCESS_CATALOG_ENTRIES
 from tools.catalog_library_entries import LIBRARY_CATALOG_ENTRIES
 from tools.catalog_mailhost_entries import MAILHOST_CATALOG_ENTRIES
 from tools.catalog_measurement_entries import MEASUREMENT_CATALOG_ENTRIES
+from tools.catalog_messages_entries import MESSAGES_CATALOG_ENTRIES
 from tools.catalog_microsoft_entries import MICROSOFT_CATALOG_ENTRIES
+from tools.workspace_git import WORKSPACE_GIT_CATALOG_ENTRIES
 
 _Entry = ToolCatalogEntry
 
@@ -127,7 +129,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Checking presence",
     ),
     "post_update": _Entry(
-        "history",
+        "history", core=True,
         summary=POST_UPDATE_SUMMARY,
         activity="Posting update",
     ),
@@ -145,6 +147,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         summary="Register a Git repository with this project",
         activity="Registering repository",
     ),
+    **WORKSPACE_GIT_CATALOG_ENTRIES,
     "conversation_set_project": _Entry(
         "projects", status="substrate", authority="project-scope",
         summary="Attach this conversation to a project, or detach it",
@@ -184,7 +187,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "browser", summary="Click a page element", activity="Clicking",
     ),
     "browser_fill": _Entry("browser", summary="Fill a text input", activity="Filling"),
-    "browser_run_steps": _Entry("browser", summary="Run named server-owned browser setup steps", activity="Running setup"),
+    "browser_run_steps": _Entry("browser", summary="Run setup steps from a System or installed skill", activity="Running setup"),
     "browser_screenshot": _Entry(
         "browser", summary="Save a page screenshot", activity="Taking screenshot",
     ),
@@ -248,7 +251,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
     ),
     "email_read": _Entry(
         "email", status="active", authority="conductor-api", account_bound=True,
-        summary="Read one email after the local screen; a flagged message returns no body",
+        summary="Read one email as untrusted data, with a notice if flagged or unscreened",
         activity="Reading mail",
     ),
     "google_connect": _Entry(
@@ -285,6 +288,11 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         "email", status="active", authority="conductor-api", serious_effect=True, account_bound=True,
         summary="Send a saved invite draft after the person says to send it; attendees get emails",
         activity="Sending invite",
+    ),
+    "google_workspace": _Entry(
+        "google_workspace", status="active", authority="conductor-api", account_bound=True,
+        summary="Run one Google Workspace CLI (gws) command on a connected Google account: Docs, Sheets, Drive and Calendar",
+        activity="Using Google Workspace",
     ),
     "plan_read": _Entry(
         "plans", status="substrate", authority="plan-read", core=True,
@@ -386,7 +394,7 @@ TOOL_CATALOG: dict[str, ToolCatalogEntry] = {
         activity="Releasing artifact",
     ),
     **HOST_ACCESS_CATALOG_ENTRIES,
-    **MICROSOFT_CATALOG_ENTRIES, **MAILHOST_CATALOG_ENTRIES,
+    **MICROSOFT_CATALOG_ENTRIES, **MAILHOST_CATALOG_ENTRIES, **MESSAGES_CATALOG_ENTRIES,
     **LIBRARY_CATALOG_ENTRIES,
     **CONSENT_CATALOG_ENTRIES,
 }

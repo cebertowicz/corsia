@@ -5,6 +5,7 @@ import { checkpointsBelowProvider, humanCtx } from './providerModelUtils';
 import { type Model } from './models';
 import { readWorkspaceModels } from './modelsLoad';
 import { HARNESSES, settingsHarnessModelIds } from './harnessMembership';
+import { modelAvailability } from './modelTurn';
 import type { ModelState, ProviderModel } from './providerModels';
 
 // Claude Code and Codex run on the user's own CLI sign-in: nothing to configure,
@@ -17,7 +18,7 @@ export interface HarnessSummary {
 	name: string;
 	label: string;
 	total: number;
-	/** Rows the chat picker can offer now: public catalog status `ready`, the picker's own rule. */
+	/** Rows that can run now on an account: `modelAvailability` ready, the picker's own rule. */
 	ready: number;
 }
 
@@ -36,7 +37,7 @@ export function harnessSummaries(settingsRows: CatalogRow[], catalog: Model[]): 
 	const catalogById = new Map(catalog.map((model) => [model.id, model]));
 	return HARNESSES.map(({ name, label }) => {
 		const ids = settingsHarnessModelIds(settingsRows, name, catalog);
-		return { name, label, total: ids.length, ready: ids.filter((id) => catalogById.get(id)?.status === 'ready').length };
+		return { name, label, total: ids.length, ready: ids.filter((id) => { const model = catalogById.get(id); return !!model && modelAvailability(model).status === 'ready'; }).length };
 	}).filter((summary) => summary.total > 0);
 }
 

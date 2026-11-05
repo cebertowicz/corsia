@@ -20,7 +20,7 @@ from connections.account_policy import chosen_account_id, select_account, set_po
 from connections.account_receipts import capture_receipt
 from connections.models import upsert_connection
 from connections.vendor_accounts import add_account, list_accounts, set_account_state
-from vendor_account_fixtures import accounts, default_receipt  # noqa: F401
+from vendor_account_fixtures import accounts, default_receipt, signed_in_default  # noqa: F401
 
 VENDORS = ("codex", "claude-code")
 LIMIT = dict(reason="usage_limit", resets_at="2099-01-01T00:00:00+00:00", source="rate_limit_update")
@@ -41,6 +41,7 @@ def _vendor(db, provider):
     db.execute("INSERT INTO threads(id,user_id,model,project_id,created_at,updated_at) "
                "VALUES (?,'user',?,'destination-project','t','t')", (thread, model))
     db.commit()
+    signed_in_default(provider, db=db, models=(model,))  # the workspace Default, an account like the others
     first, second = (set_account_state(add_account(provider, name)["id"], "signed_in", expected_revision=0)
                      for name in ("First", "Second"))
     if provider == 'codex':
@@ -235,6 +236,38 @@ def test_picker_does_not_roll_over_when_policy_is_off(accounts, provider):  # no
         "unavailable", "usage_limited", default["id"])
     assert bind_model_account(v.thread, v.model, db=db) == default["id"]
 
+
+@pytest.mark.parametrize("unread", ("never_read", "expired_limit"))
+@pytest.mark.parametrize("provider", VENDORS)
+def test_rollover_with_no_destination_asks_an_unread_account_and_moves_once_it_reads_allowed(
+        accounts, monkeypatch, provider, unread):  # noqa: F811
+    """A move never rests on unknown usage, so the rollover that finds no destination asks each
+    account it skipped for that reason; the read that says allowed makes it the destination."""
+    from connections.vendor_accounts import default_account
+    from llm.model_status import scoped_status_rows
+
+    db = accounts[0]
+    v = _vendor(db, provider)
+    _discover(db, provider, v.first, v.model)
+    if unread == "expired_limit":
+        harness_usage.record_limited(provider=provider, db=db, receipt=capture_receipt(provider, account_id=v.first["id"], db=db),
+                                     **(LIMIT | {"resets_at": "2000-01-01T00:00:00+00:00"}))
+    default = default_account(provider, db=db)
+    harness_usage.record_limited(provider=provider, receipt=default_receipt(provider, db=db), **LIMIT)
+    set_policy("destination-project", provider, rollover=True,
+               order=[default["id"], v.first["id"]], disabled=[v.second["id"]], expected_revision=0, db=db)
+    checks = []
+    monkeypatch.setattr("connections.harness_usage_check.schedule_account_check",
+                        lambda provider, account_id: checks.append((provider, account_id)))
+
+    row = _selected({item["id"]: item for item in scoped_status_rows(thread_id=v.thread)}[v.model])
+    assert (row["status_reason"], row["account_id"]) == ("usage_limited", default["id"])
+    assert set(checks) == {(provider, v.first["id"])}
+
+    harness_usage.record_allowed(provider=provider, source="rate_limit_update", db=db,
+                                 receipt=capture_receipt(provider, account_id=v.first["id"], db=db))
+    row = _selected({item["id"]: item for item in scoped_status_rows(thread_id=v.thread)}[v.model])
+    assert (row["status"], row["account_id"]) == ("ready", v.first["id"])
 
 
 @pytest.mark.parametrize("provider", VENDORS)

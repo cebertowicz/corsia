@@ -114,13 +114,15 @@ export function createProviderPolicyState(projectId?: string | (() => string | u
 			: null, `unit:${provider.provider_key}:${unitId}`);
 	}
 
-	function move(provider: ProviderEntry, unitId: string, direction: -1 | 1) {
+	function move(provider: ProviderEntry, unitId: string, direction: -1 | 1, visibleIds?: string[]) {
 		void save(provider, (current) => {
 			const order = current.units.map((unit) => unit.id);
-			const index = order.indexOf(unitId);
+			const visible = visibleIds ? order.filter((id) => visibleIds.includes(id)) : order;
+			const index = visible.indexOf(unitId);
 			const destination = index + direction;
-			if (index < 0 || destination < 0 || destination >= order.length) return null;
-			[order[index], order[destination]] = [order[destination], order[index]];
+			if (index < 0 || destination < 0 || destination >= visible.length) return null;
+			const from = order.indexOf(unitId), to = order.indexOf(visible[destination]);
+			[order[from], order[to]] = [order[to], order[from]];
 			return { order };
 		}, `order:${provider.provider_key}:${unitId}`);
 	}

@@ -26,6 +26,8 @@ from codex_runtime_fixtures import (
     _reset_runtime,
 )
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 
 class _OwnerProbe:
     """What an external observer of the runtime handles sees, sampled often.

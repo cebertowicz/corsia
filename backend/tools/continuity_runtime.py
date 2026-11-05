@@ -20,7 +20,7 @@ def next_actions_refusal(checkpoint_id: str | None) -> str:
         "A next step belongs on the plan: use plan_update to add or change it.",
         "Name the step in progress and the exact next action in your narrative.",
     )
-    return "Error: next_actions takes no new entries. " + home[bool(checkpoint_id)] + " Drop a finished one here."
+    return "Error: next_actions takes no new entries. " + home[bool(checkpoint_id)]
 
 
 def epoch(db: Any, thread_id: str) -> int:

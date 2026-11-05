@@ -80,6 +80,13 @@ class TestReviewerPrompt:
         prompt = build_reviewer_prompt(diff="", context_text="")
         assert "JSON array" in prompt
 
+    def test_prompt_keeps_exploit_steps_out_of_security_findings(self):
+        """Published findings name the weakness, never a route to exploit it."""
+        from prompts.reviewer import build_reviewer_prompt
+        prompt = build_reviewer_prompt(diff="", context_text="")
+        assert "never write step-by-step exploitation" in prompt
+        assert "credential-capture routes" in prompt
+
     def test_prompt_reports_defects_without_designing_repairs(self):
         """Review-process policy comes from the injected canonical contract."""
         from prompts.reviewer import build_reviewer_prompt

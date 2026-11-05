@@ -1,15 +1,16 @@
-"""Capture the FULL model tools array, including hosted tools, on the pinned CLI.
+"""Capture the full model tools array on every admitted Codex version.
 
-No subscription, API key, external service, or production state is used. CI may
-lack the optional Codex binary; a release claiming this version must run this
-capture on its supported binary. See codex_confinement.CAPTURED_CODEX_VERSION.
+No subscription, API key, external service, or production state is used.
 """
 from __future__ import annotations
 
 import base64
 import json
+import os
 import shutil
+import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -70,12 +71,21 @@ def definitions():
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-@pytest.mark.skipif(shutil.which("codex") is None, reason="optional installed Codex binary required")
-async def test_pinned_binary_full_tools_cold_start_and_process_resume(tmp_path, monkeypatch):
+@pytest.mark.parametrize("version", sorted(confinement.CAPTURED_CODEX_VERSIONS))
+async def test_pinned_binary_full_tools_cold_start_and_process_resume(tmp_path, monkeypatch, version):
     from infra import config
 
+    root = os.environ.get("CORSIA_CODEX_CAPTURE_ROOT")
+    if root is not None:
+        binary = str(Path(root) / version.removeprefix("codex-cli ") / "node_modules" / ".bin" / "codex")
+        assert Path(binary).is_file(), f"Missing capture binary: {binary}"
+        assert subprocess.check_output([binary, "--version"], text=True).strip() == version
+    else:
+        binary = shutil.which("codex")
+        if binary is None or subprocess.check_output([binary, "--version"], text=True).strip() != version:
+            pytest.skip(f"Optional installed Codex {version} required")
+
     monkeypatch.delenv("CODEX_ACCESS_TOKEN", raising=False)
-    binary = shutil.which("codex")
     await confinement.verify_version(binary)
     monkeypatch.setattr(config, "RUNTIME_DIR", tmp_path / "runtime")
     staging = tmp_path / "attacker-repo" / "stage"
@@ -151,5 +161,6 @@ async def test_pinned_binary_full_tools_cold_start_and_process_resume(tmp_path, 
     print("built-in openai, ChatGPT auth; unexpected/auth/proxy requests: []")
     print("loopback workspace checks:", endpoint.account_checks,
           "; optional local services:", sorted(set(endpoint.local_services)))
-    print("codex-cli 0.162.1 cold and process-resume full tools: " +
+    version = subprocess.check_output([binary, "--version"], text=True).strip()
+    print(f"{version} cold and process-resume full tools: " +
           json.dumps(endpoint.requests[0]["tools"], sort_keys=True))

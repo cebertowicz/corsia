@@ -16,6 +16,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from events.connector_workflows import ShippedWorkflowDecl
 from events.connectors.receiver import ReceiverDecl
 from events.identity_formula import RelationshipDecl
 
@@ -44,6 +45,8 @@ class EventTypeDecl:
     # The name the platform's own router gives this event (a webhook's internal
     # event), when one routes it; agent-written rules on that path read this type.
     routed_event: str | None = None
+    # "none": rule 0 adds no owner target; only the declaring rule set's rules deliver it.
+    default_delivery: str = "owner"
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,7 @@ class ConnectorManifest:
     artifact_extractors: Mapping[str, Callable[[str], ObservedArtifactDecl | None]] = field(
         default_factory=dict)
     shipped_observe_rules: tuple[ShippedObserveRuleDecl, ...] = ()
+    shipped_workflows: Mapping[str, ShippedWorkflowDecl] = field(default_factory=dict)
     app_identities: frozenset[str] = frozenset()
     resolve_relationships: Callable[[str, dict, dict], tuple[dict, ...]] = (
         lambda event_type, facts, raw: ()

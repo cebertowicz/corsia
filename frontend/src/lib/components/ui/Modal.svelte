@@ -5,11 +5,14 @@
 	import type { Snippet } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import { updateScreenVisible } from '$lib/update/screenStore';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import IconButton from './IconButton.svelte';
 
 	interface Props {
 		title?: string;
 		size?: 'sm' | 'md' | 'lg';
+		/** A solid sheet in place of glass, for a task sheet read over busy content (as AdaptiveDrawer's `opaque`). */
+		opaque?: boolean;
 		role?: 'dialog' | 'alertdialog';
 		closeOnEscape?: boolean;
 		closeOnBackdrop?: boolean;
@@ -22,7 +25,7 @@
 	}
 
 	const {
-		title, size = 'md', role = 'dialog',
+		title, size = 'md', opaque = false, role = 'dialog',
 		closeOnEscape = true, closeOnBackdrop = true,
 		ariaLabel, ariaLabelledBy,
 		onClose, head, foot, children,
@@ -117,7 +120,8 @@
 	<!-- svelte-ignore a11y_click_events_have_key_events -->
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="bg" onclick={onBackdropClick} transition:fade={{ duration: 120 }}></div>
-	<div class="modal-frame {size}" transition:modalRise={motion}>
+	<!-- Svelte runs transitions as Web Animations, which app.css's reduced-motion rule can't reach: with reduced motion the card only fades (DESIGN-SYSTEM 2.7.5). -->
+	<div class="modal-frame {size}" class:opaque transition:modalRise={{ ...motion, y: $prefersReducedMotion ? 0 : 12 }}>
 		<div class="modal-glass-clip">
 			<div class="modal-glass" transition:fade={motion}></div>
 		</div>
@@ -190,6 +194,7 @@
 	.modal-frame.sm { max-width: 480px; }
 	.modal-frame.md { max-width: 640px; }
 	.modal-frame.lg { max-width: 800px; }
+	.modal-frame.opaque .modal-glass { background: var(--bg-secondary); backdrop-filter: none; -webkit-backdrop-filter: none; }
 	/*
 		Trims the glass back to the card's rounded box. `overflow: clip` rather than a
 		clip-path on the glass: a clip-path there makes the glass hang past the screen edge

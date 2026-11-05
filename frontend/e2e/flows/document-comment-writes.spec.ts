@@ -22,7 +22,7 @@ async function seedCommentedDocument({ page, request }: { page: Page; request: A
 	const artifactId = (await seeded.json()).artifact.id;
 	const commentUrl = `/api/artifacts/${artifactId}/comments?token=${token}`;
 	const created = await request.post(commentUrl, {
-		data: { body: 'Review this sentence.', anchor_text: 'Anchor', from_off: 7, to_off: 13 },
+		data: { body: 'Review this sentence.', anchor_text: 'Anchor', from_off: 7, to_off: 13, delivery_policy: 'immediate' },
 	});
 	expect(created.ok(), await created.text()).toBeTruthy();
 	const commentId = (await created.json()).comment.id;
@@ -35,7 +35,7 @@ async function seedCommentedDocument({ page, request }: { page: Page; request: A
 			} }, splitWidth: 420,
 		}));
 	}, { threadId, docPath, title });
-	return { title, commentUrl, commentId };
+	return { title, commentUrl, commentId, artifactId, threadId };
 }
 
 test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves moved anchors', async ({ page, request }, testInfo) => {
@@ -52,9 +52,15 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	await openComments();
 	const comment = page.getByRole('region', { name: /^Comment by / });
 	await expect(comment).toContainText('Review this sentence.');
-	await (await replyField(comment)).fill('Reply persisted.');
+	const field = await replyField(comment);
+	const oneLine = (await field.boundingBox())!.height;
+	const reply = 'Reply persisted.\nOn several\nlines.\nAs a person types it.';
+	await field.fill(reply);
+	await expect.poll(async () => (await field.boundingBox())!.height).toBeGreaterThan(oneLine);
 	await comment.getByRole('button', { name: 'Send reply' }).click();
 	await expect(comment).toContainText('Reply persisted.');
+	// The sent reply leaves the field empty and one line tall again, not held at the height of the text it held.
+	await expect.poll(async () => (await (await replyField(comment)).boundingBox())!.height).toBe(oneLine);
 	await comment.getByRole('button', { name: 'Agree', exact: true }).click();
 	await expect(comment).toContainText('Agreed');
 	await expect(await replyField(comment)).toBeVisible();
@@ -81,7 +87,7 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 		expect(response.ok()).toBeTruthy();
 		return (await response.json()).comments.find((row: { id: string }) => row.id === commentId);
 	}).toMatchObject({ resolved: 0, acked: 1, from_off: 14, to_off: 20,
-		replies: [expect.objectContaining({ body: 'Reply persisted.' })] });
+		replies: [expect.objectContaining({ body: reply })] });
 	await expectQuietSave(page);
 	await page.reload();
 	await page.getByText(title, { exact: true }).first().click();
@@ -89,6 +95,46 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	await expect(comment).toContainText('Agreed');
 	await expect(editor).toContainText('Prefix Before Anchor sentence.');
 	await saveEvidenceScreenshot(page, testInfo, 'document-comment-persisted', { fullPage: false });
+});
+
+test('@flow:resolved-reply a person can reply to an agent on a resolved thread', async ({ page, request }, testInfo) => {
+	const mobile = testInfo.project.name.includes('mobile');
+	await page.setViewportSize({ width: mobile ? 393 : 1440, height: mobile ? 852 : 900 });
+	await page.emulateMedia({ colorScheme: 'light' });
+	const { title, commentUrl, commentId, threadId } = await seedCommentedDocument({ page, request });
+	const params = { token: TEST_TOKEN };
+	let result = await request.post('/api/delegation/docs/comments', { params, data: { as_session_id: threadId, parent_id: commentId, body: 'Agent reply before resolution' } });
+	expect(result.ok(), await result.text()).toBeTruthy();
+	result = await request.patch(`/api/delegation/docs/comments/${commentId}`, { params, data: { as_session_id: threadId, resolved: true } });
+	expect(result.ok(), await result.text()).toBeTruthy();
+	await loginByUrl(page);
+	if (mobile) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+	await page.getByText(title, { exact: true }).first().click();
+	await page.getByRole('button', { name: /^0 open threads\b/ }).click();
+	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
+	await drawer.getByRole('button', { name: /Filter comments:/ }).click();
+	await drawer.getByRole('menuitemradio', { name: 'Resolved', exact: true }).click();
+	const resolved = drawer.getByRole('region', { name: /^Resolved comment by / });
+	await resolved.getByRole('button', { name: 'Resolved · 2 messages' }).click();
+	await expect(resolved).toContainText('Agent reply before resolution');
+	const input = resolved.getByRole('textbox', { name: 'Reply' });
+	await expect(input).toBeVisible();
+	await saveEvidenceScreenshot(page, testInfo, 'resolved-open', { fullPage: false });
+	await input.click(); await page.keyboard.type('Hello');
+	await expect(input).toBeFocused();
+	await input.evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(2, 2));
+	await page.keyboard.type('X');
+	await expect(input).toHaveValue('HeXllo'); await expect(input).toBeFocused();
+	await saveEvidenceScreenshot(page, testInfo, 'resolved-typing', { fullPage: false });
+	await resolved.getByRole('button', { name: 'Send reply' }).click();
+	await expect(resolved).toContainText('HeXllo');
+	await expect(resolved.getByRole('button', { name: 'Re-open', exact: true })).toBeVisible();
+	await expect.poll(async () => {
+		const response = await request.get(commentUrl);
+		const rows = (await response.json()).comments;
+		return rows.find((row: { id: string }) => row.id === commentId);
+	}).toMatchObject({ resolved: 1, replies: [expect.objectContaining({ body: 'Agent reply before resolution' }), expect.objectContaining({ body: 'HeXllo', author_kind: 'user' })] });
+	await saveEvidenceScreenshot(page, testInfo, 'resolved-sent', { fullPage: false });
 });
 
 test('@flow:document-comment-highlight a resolved comment loses its highlight, shows it again only while picked in the drawer, and re-opening restores it', async ({ page, request }, testInfo) => {

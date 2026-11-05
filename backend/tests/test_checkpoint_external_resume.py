@@ -12,6 +12,9 @@ from core.turn_core import TurnIdentity
 from external_harness_usage_helpers import persist_turn
 from llm.resolution import ExecutionTarget
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {'claude-code': ('claude-code/test',), 'codex': ('codex/test',)}
+
 
 def _target(harness: str) -> ExecutionTarget:
     return ExecutionTarget(
@@ -1114,7 +1117,7 @@ async def test_external_tool_boundary_uses_fresh_checkpoint_state(
 
     target = _target(harness)
     identity = TurnIdentity(f"turn-{harness}", 2)
-    winner = SimpleNamespace(id="checkpoint-installed")
+    winner = SimpleNamespace(id="checkpoint-installed", adopted_input_tokens=None)
     first = bridge.ExternalCheckpointContext(
         thread_row={},
         target=target,
@@ -1213,7 +1216,7 @@ async def test_external_tool_boundary_adopts_winner_seen_by_fresh_read(
 
     target = _target(harness)
     identity = TurnIdentity(f"turn-{harness}", 2)
-    winner = SimpleNamespace(id="checkpoint-installed")
+    winner = SimpleNamespace(id="checkpoint-installed", adopted_input_tokens=None)
     first = bridge.ExternalCheckpointContext(
         thread_row={},
         target=target,
@@ -1826,7 +1829,7 @@ async def test_external_tool_boundary_carries_provider_checkpoint_identity(
         tail_tokens=12_000,
         minimum_tail_tokens=1_000,
         active_checkpoint=None,
-        installed_checkpoint=SimpleNamespace(id="checkpoint-new"),
+        installed_checkpoint=SimpleNamespace(id="checkpoint-new", adopted_input_tokens=None),
         registered_checkpoint_id="checkpoint-old",
         previous=SimpleNamespace(id="checkpoint-new"),
     )
@@ -1994,7 +1997,7 @@ async def test_external_tool_boundary_uses_the_context_that_seeded_its_handle(
     identity = TurnIdentity(f"turn-{harness}", 3)
     target = _target(harness)
     checkpoint_tail = object()
-    installed = SimpleNamespace(id="checkpoint-current", status="installed")
+    installed = SimpleNamespace(id="checkpoint-current", status="installed", adopted_input_tokens=None)
     newer = (
         SimpleNamespace(id="checkpoint-next", status="running")
         if has_newer

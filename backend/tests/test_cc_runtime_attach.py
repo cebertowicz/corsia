@@ -239,11 +239,10 @@ class TestArtifactRegistration:
         monkeypatch.setattr("infra.thread_execution.drive_thread", AsyncMock())
         monkeypatch.setattr(cm, "get_connection",
                             lambda provider, db=None: {"config": {"binary": fake_claude}})
-        # rt.feed() (used below for the resume) has no claude_dir passthrough;
-        # it only reaches subagents.cc_sessions.resolve_claude_dir() via
-        # CLAUDE_CONFIG_DIR. Isolate it there too, or the resume install
-        # falls back to the developer's real ~/.claude.
-        monkeypatch.setenv("CLAUDE_CONFIG_DIR", fake_claude_home)
+        # Spawn and resume must use the same account-owned home.
+        child_db.execute("UPDATE vendor_accounts SET source_home=? WHERE is_default=1 AND connection_id='test-cc'",
+                         (fake_claude_home,))
+        child_db.commit()
         _seed_parent(child_db)
         child_id = await _spawn(
             "parent", "task", binary=fake_claude,
@@ -1921,6 +1920,30 @@ class TestContextUsage:
         meta = insert.call_args.args[3]
         assert meta["cause"] == "context_window_exceeded"
         assert meta["repair_owner"] == "ctx-stability"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("queued", [True, False])
+    async def test_prompt_too_long_leaves_its_rerun_and_no_notice(self, queued):
+        from core.stop_causes import ContextOverflowEnd
+        from core.turn_core import TurnTerminalResult
+        from subagents.cc_runtime_events import _make_on_event
+        from subagents.cc_runtime_state import _Live
+
+        live = _Live(session=None, parent_thread_id=None, name="cc")
+        live.turn_active = True
+        claim = AsyncMock(return_value=SimpleNamespace(result=TurnTerminalResult.APPLIED))
+
+        with patch("subagents.cc_event_result.insert_message", return_value="msg-id") as insert, \
+                patch("subagents.cc_event_result.claim_terminal", new=claim), \
+                patch("subagents.cc_event_terminal_error.rerun_queued", return_value=queued):
+            on_event = _make_on_event(live, "cc-sid", lambda sid, m: None, db=None)
+            await on_event({"kind": "result", "is_error": True, "result": "Prompt is too long",
+                            "stop_reason": "error"})
+
+        error = claim.await_args.args[2]
+        assert isinstance(error, ContextOverflowEnd) and str(error) == "Prompt is too long"
+        # The re-run answers instead; without one the refusal still ends visibly.
+        assert insert.called is not queued
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("result", [

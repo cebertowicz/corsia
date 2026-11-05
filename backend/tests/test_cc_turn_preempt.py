@@ -1198,6 +1198,7 @@ class TestHardPreempt:
         assert old_seed.exists(), "normal send must not retire the active process"
 
 
+@pytest.mark.usefixtures("signed_in_defaults")  # a launch names its account: no ambient login
 class TestTerminateDrains:
     @pytest.mark.asyncio
     async def test_reader_failure_cannot_skip_process_reap(
@@ -1218,6 +1219,7 @@ class TestTerminateDrains:
             raise RuntimeError("reader failed during terminate")
 
         monkeypatch.setattr(session, "_read_loop", reader_failure)
+        session.catalog_model_id = "claude-code/opus"  # a launch names its model
         await session.start()
         terminate_task = asyncio.create_task(session.terminate())
         await asyncio.sleep(0)
@@ -1265,6 +1267,7 @@ class TestTerminateDrains:
         session = CCStreamSession(
             binary=str(script), session_id="cancelled-caller", on_event=on_event,
         )
+        session.catalog_model_id = "claude-code/opus"  # a launch names its model
         await session.start()
         try:
             # A hang guard, not a latency bound: the child interpreter's startup
@@ -1297,6 +1300,7 @@ class TestTerminateDrains:
         )
         script.chmod(script.stat().st_mode | stat.S_IEXEC)
         session = CCStreamSession(binary=str(script), session_id="cancelled-reader")
+        session.catalog_model_id = "claude-code/opus"  # a launch names its model
         await session.start()
         assert session._reader is not None
         session._reader.cancel()
@@ -1343,6 +1347,7 @@ class TestTerminateDrains:
         session = CCStreamSession(
             binary=str(script), session_id="drain-test", on_event=on_event,
         )
+        session.catalog_model_id = "claude-code/opus"  # a launch names its model
         await session.start()
         # Let the process EXIT on its own (returncode set) while its output
         # may still be buffered/pumping.

@@ -41,7 +41,6 @@ from ws.turn_unavailable import report_model_unavailable
 from ws.turn_types import _PreparedTurn, TurnBroadcast, TurnIngress
 from ws.turn_helpers import (
     NativeTurnRequest,
-    build_agent_content,
     emit_terminal_product_event,
     handle_turn_error,
     make_deferred_send,
@@ -56,7 +55,6 @@ from ws.turn_helpers import (
 async def _setup_turn(
     thread_id: str,
     content: str,
-    attachments: list[dict],
     *,
     target: ExecutionTarget,
     media_projection=None,
@@ -77,7 +75,6 @@ async def _setup_turn(
     if ingress == "event" and broadcast is None:
         raise ValueError("event ingress requires an owner broadcast")
     deferred_send, send_cell = make_deferred_send()
-    agent_content, _image_paths = build_agent_content(content, attachments)
     handler = StepHandler(
         thread_id=thread_id,
         model_info={
@@ -117,7 +114,7 @@ async def _setup_turn(
         identity,
         (deferred_send, send_cell),
         handler,
-        agent_content,
+        content,
         media_projection,
         unbind,
         effective_effort,
@@ -258,7 +255,6 @@ async def _execute_turn(request: NativeTurnRequest) -> bool:
             *await _setup_turn(
                 request.thread_id,
                 request.content,
-                request.attachments,
                 target=request.target,
                 media_projection=request.media_projection,
                 turn_id=request.turn_id,

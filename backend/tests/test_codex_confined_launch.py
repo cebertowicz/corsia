@@ -24,11 +24,24 @@ from test_codex_confined_capture import definitions
     {"type": "function", "name": "clock"},
 ])
 def test_full_surface_refuses_any_extra_native_or_hosted_tool(extra):
-    with pytest.raises(ConfinementRefused, match="Choose another model"):
+    with pytest.raises(ConfinementRefused) as error:
         confinement.assert_tools([*definitions(), extra])
+    assert str(error.value) == (
+        "Couldn’t start this read-only agent on Codex: "
+        "it couldn’t be limited to reading files. Choose another model."
+    )
 
 
-@pytest.mark.parametrize("version", ["codex-cli 0.162.0", "codex-cli 0.163.0", ""])
+def test_missing_tool_refusal_has_same_message():
+    with pytest.raises(ConfinementRefused) as error:
+        confinement.assert_tools(definitions()[:-1])
+    assert str(error.value) == (
+        "Couldn’t start this read-only agent on Codex: "
+        "it couldn’t be limited to reading files. Choose another model."
+    )
+
+
+@pytest.mark.parametrize("version", ["codex-cli 0.162.0", "codex-cli 0.166.0", ""])
 @pytest.mark.asyncio
 async def test_unknown_version_refuses_before_worker_or_auth_access(tmp_path, monkeypatch, version):
     binary = tmp_path / "fake-codex"
@@ -40,9 +53,24 @@ async def test_unknown_version_refuses_before_worker_or_auth_access(tmp_path, mo
     session = CodexAppServerSession(binary=str(binary), task="review", corsia_thread_id="worker",
                                     dynamic_tools=definitions())
     monkeypatch.setattr(session, "build_env", lambda: pytest.fail("auth must not be projected"))
-    with pytest.raises(ConfinementRefused, match="choose another model"):
+    with pytest.raises(ConfinementRefused) as error:
         await session.start()
+    display_version = version.removeprefix("codex-cli ") or "(version unknown)"
+    assert str(error.value) == (
+        f"Couldn’t start this read-only agent on Codex {display_version}: "
+        "read-only agents work only on Codex 0.162.1, 0.163.0, 0.164.0 and 0.165.0. "
+        "Switch Codex to one of those, or choose another model."
+    )
     assert session._proc is None
+
+
+@pytest.mark.parametrize("version", sorted(confinement.CAPTURED_CODEX_VERSIONS))
+@pytest.mark.asyncio
+async def test_captured_versions_are_admitted(tmp_path, version):
+    binary = tmp_path / "fake-codex"
+    binary.write_text(f"#!{sys.executable}\nprint({version!r})\n")
+    binary.chmod(0o700)
+    await confinement.verify_version(str(binary))
 
 
 @pytest.mark.asyncio
@@ -79,17 +107,31 @@ def test_live_handle_cannot_restore_an_unconfined_surface():
 @pytest.mark.asyncio
 async def test_confined_fork_refuses_and_cleans_its_home(isolated_db, tmp_path, monkeypatch):
     from dataclasses import replace
-    from connections.account_runtime import LaunchHomes
+    from connections.account_receipts import capture_receipt
+    from connections.account_runtime import launch_homes
     from core import fork_codex
+    from infra.database import get_db
     from core.checkpoint_fork_kind import CHECKPOINT_KIND
     from core.fork_fit import ColdFoldInput
     from core.fork_types import ProviderForkRejected
     from test_checkpoint_provider_adapters import _request, _target
     from test_confined_reads import _seed_thread
+    from vendor_account_fixtures import signed_in_default
 
     _seed_thread(isolated_db, "thread-1", tmp_path)
-    request = replace(_request(None), target=_target("codex"), binary="unused",
-                      working_dir=str(tmp_path), vendor_launch=LaunchHomes(None, False, warm_home=str(tmp_path)))
+    target = _target("codex")
+    def sign_in():
+        account = signed_in_default("codex", models=(target.catalog_id,))
+        db = get_db()
+        try:
+            return account, capture_receipt("codex", account_id=account["id"], db=db), launch_homes(account["id"], db=db)
+        finally:
+            db.close()
+
+    account, receipt, launch = await asyncio.to_thread(sign_in)
+    request = replace(_request(None), target=target, binary="unused", working_dir=str(tmp_path),
+                      vendor_account_id=account["id"], vendor_account_bound=True,
+                      vendor_account_receipt=receipt, vendor_launch=launch)
     monkeypatch.setattr(fork_codex, "admit_fork", lambda value: value)
     monkeypatch.setattr(fork_codex, "_fit_cold_request", lambda value, *a, **k: (value, ColdFoldInput((), 1, None, 0)))
     monkeypatch.setattr(fork_codex, "_fork_tools", lambda *a, **k: (object(), ()))

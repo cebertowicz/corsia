@@ -12,6 +12,14 @@ def digest(text: str | None) -> str | None:
     return None if text is None else hashlib.sha256(text.encode()).hexdigest()
 
 
+def is_empty_git_dir(path: Path) -> bool:
+    """Whether ``path`` is the empty ``.git`` a Linux shell launch leaves where it could not init; Git discovery skips it."""
+    try:
+        return path.is_dir() and not path.is_symlink() and not any(path.iterdir())
+    except OSError:
+        return False
+
+
 def history_git(workspace: Path, *args: str, ok: tuple[int, ...] = (0,)) -> bytes:
     """Run one read-only Git command in the workspace's own guidance history; a fault raises."""
     from infra.guidance_git import GitFault, _git_bytes, workspace_repository
@@ -20,6 +28,18 @@ def history_git(workspace: Path, *args: str, ok: tuple[int, ...] = (0,)) -> byte
     if repo is None:
         raise GitFault(why or "workspace guidance history unavailable")
     return _git_bytes(repo, *args, ok=ok)
+
+
+def commit_parent(workspace: Path, sha: str) -> str | None:
+    """The first parent of one recorded guidance commit; None for a root commit."""
+    out = history_git(workspace, "rev-parse", "--verify", "-q", f"{sha}^", ok=(0, 1))
+    return out.decode().strip() or None
+
+
+def committed_bytes(workspace: Path, commit: str, rel: str) -> bytes | None:
+    """One workspace-relative path's exact bytes at a recorded commit; None when it has none."""
+    oid = history_git(workspace, "rev-parse", "--verify", "-q", f"{commit}:{rel}", ok=(0, 1))
+    return history_git(workspace, "cat-file", "blob", oid.decode().strip()) if oid.strip() else None
 
 
 def find_commit(repo: Path, trailer: str, path: Path) -> str | None:

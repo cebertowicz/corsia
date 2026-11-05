@@ -6,6 +6,7 @@ import type {
 	AttentionQueueItem,
 	DecisionDetail,
 	ExternalReviewDetail,
+	HeldReplyDetail,
 } from '$lib/api/attentionQueue';
 
 export const SOURCE = {
@@ -115,4 +116,20 @@ export function withEmptyAttentionQueue(fetchImpl: typeof fetch): typeof fetch {
 		}
 		return fetchImpl(input, init);
 	}) as typeof fetch;
+}
+
+export function heldReplyItem(over: Partial<HeldReplyDetail> = {}): AttentionQueueItem {
+	const detail: HeldReplyDetail = {
+		id: 'held-1',
+		thread_id: 'child',
+		title: "Send Sender Thread's reply to the Researcher agent on Anthropic?",
+		text: 'First line of the reply.\n\n  Indented second paragraph.',
+		recipient: 'the Researcher agent',
+		provider: 'Anthropic',
+		error: null,
+		raised_at: '2026-08-02T10:00:00+00:00',
+		source: { ...SOURCE, thread_label: 'Sender Thread' },
+		...over,
+	};
+	return { external_id: detail.id, renderer: 'held-reply', detail };
 }

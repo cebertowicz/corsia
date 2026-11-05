@@ -6,6 +6,8 @@ import pytest
 
 from shared_send_fixtures import _insert_session, _thread_row
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 @pytest.mark.parametrize(
     ("harness", "model"),

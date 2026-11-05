@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -10,7 +10,7 @@ import pytest
 from automation.plan_liveness_terminal import on_thread_turn_complete
 from automation.turn_end_effects import record_turn_end
 from doc_feedback_helpers import add_comment, add_person_comment, batches, linked_comment_ids, seed_document, seed_thread
-from doceditor import comment_notifications, feedback_batch_edits, feedback_batches
+from doceditor import comment_notifications, feedback_batch_core, feedback_batch_edits, feedback_batches
 import infra.database as database
 from infra.database import get_db, write_transaction
 
@@ -245,11 +245,57 @@ def test_user_edit_delivers_at_its_persisted_immediate_deadline(isolated_db):
         assert (
             datetime.fromisoformat(open_batch["closes_at"])
             - datetime.fromisoformat(open_batch["last_item_at"])
-        ).total_seconds() == feedback_batches.IMMEDIATE_IDLE
+        ).total_seconds() == feedback_batch_core.EDIT_IDLE
 
         feedback_batches.close_due(open_batch["closes_at"], db=db)
         [delivered] = batches(db)
         assert delivered["closed_reason"] == "idle"
+    finally:
+        db.close()
+
+
+def test_a_paragraph_typed_with_short_pauses_reaches_the_owner_as_one_task(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner", name="paragraph.md")
+        start = datetime.fromisoformat("2026-10-29T22:44:17+00:00")
+        text = b""
+        # Mid-thought pauses measured on a real paragraph ran 5-15 s.
+        for offset in (0, 12, 26, 33):
+            at = (start + timedelta(seconds=offset)).isoformat()
+            # The due sweep runs before each save, as it would while the person types.
+            feedback_batches.close_due(at, db=db)
+            before, text = text, text + b"more words "
+            with write_transaction(db, scope="test_paragraph") as connection:
+                feedback_batch_edits.record_edit(
+                    connection, artifact_id=artifact_id, recipient_id="owner", author_kind="user",
+                    author_id=feedback_batches.USER_AUTHOR_ID, actor_display="Steve",
+                    path=Path("/workspace/shared/paragraph.md"), before=before, after=text, at=at,
+                )
+        last = start + timedelta(seconds=33)
+
+        feedback_batches.close_due((last + timedelta(seconds=feedback_batch_core.EDIT_IDLE - 1)).isoformat(), db=db)
+        assert [row["state"] for row in batches(db)] == ["open"]
+
+        feedback_batches.close_due((last + timedelta(seconds=feedback_batch_core.EDIT_IDLE)).isoformat(), db=db)
+        [delivered] = batches(db)
+        assert (delivered["state"], delivered["closed_reason"]) == ("delivered", "idle")
+        assert delivered["delivered_node_id"] is not None
+    finally:
+        db.close()
+
+
+def test_a_person_comment_carries_their_pending_edit_without_waiting_for_the_pause(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner", name="edit-then-comment.md")
+        add_user_edit(db, artifact_id)
+        add_person_comment(db, artifact_id)
+
+        [delivered] = batches(db)
+        assert delivered["state"] == "delivered"
     finally:
         db.close()
 

@@ -1,7 +1,7 @@
 """Period offers kept in SQLite render what origin/dev's in-memory list rendered, including paging and fingerprint.
 
-Origin/dev is the oracle, frozen as digests. A review-less fixture is deterministic, so its whole report
-(snapshot fingerprint and cursors included) is frozen. Reviews mint ids and timestamps, so a review-bearing
+Origin/dev is the oracle, frozen as digests. A review-less fixture is deterministic, so its historical report
+(snapshot fingerprint and cursors included) is frozen after projecting away delivery evidence. Reviews mint ids and timestamps, so a review-bearing
 fixture freezes only the offer-derived shape: indexed counts, reference kinds and offers, reference count and
 the next cursor's offset. Regenerate by running ``_digest`` over the same helpers on an origin/dev checkout.
 """
@@ -107,17 +107,37 @@ def _walk(db, project, **options):
             return pages
 
 
-def test_a_review_less_report_equals_origin_dev_byte_for_byte(db):
+def test_a_review_less_report_equals_origin_dev_byte_for_byte(db, monkeypatch):
     _seed(db)
     current = source()
     options = dict(sources=[current])
-    _expect("full-list", _report(db, **options))
-    _expect("full-preview", _report(db, preview=True, **options))
-    _expect("full-subject-a", _walk(db, lambda page: page, lesson_id="subject", version="a" * 64, **options))
-    _expect("full-other-b", _walk(db, lambda page: page, lesson_id="other", version="b" * 64, **options))
-    _expect("full-subject", _walk(db, lambda page: page, lesson_id="subject", **options))
-    _expect("full-current", _walk(db, lambda page: page, lesson_id=current["id"], version=current["version"], **options))
-    # The fingerprint is the old digest of the old structure, not a new value.
+    new_report = _report(db, **options)
+    assert all(row["delivered"] == 0 for row in new_report["rows"])
+    assert new_report["snapshot"] == _report(db, lesson_id="subject", **options)["snapshot"]
+
+    # Reconstruct the historical fingerprint, including the snapshot embedded in cursors;
+    # the new fingerprint's delivery sensitivity is tested with real receipts separately.
+    fingerprint = module.snapshot_fingerprint
+    def historical_fingerprint(snapshot, canonical):
+        assert snapshot["deliveries"] == []
+        return fingerprint({key: value for key, value in snapshot.items() if key != "deliveries"}, canonical)
+    monkeypatch.setattr(module, "snapshot_fingerprint", historical_fingerprint)
+
+    def historical(page):
+        for row in page.get("rows", []):
+            assert row.pop("delivered") == 0
+        if page.get("detail"):
+            assert page["detail"].pop("delivered") == 0
+        return page
+
+    old_report = historical(_report(db, **options))
+    assert new_report["snapshot"] != old_report["snapshot"]
+    _expect("full-list", old_report)
+    _expect("full-preview", historical(_report(db, preview=True, **options)))
+    _expect("full-subject-a", _walk(db, historical, lesson_id="subject", version="a" * 64, **options))
+    _expect("full-other-b", _walk(db, historical, lesson_id="other", version="b" * 64, **options))
+    _expect("full-subject", _walk(db, historical, lesson_id="subject", **options))
+    _expect("full-current", _walk(db, historical, lesson_id=current["id"], version=current["version"], **options))
     assert _report(db)["snapshot"] == _report(db, lesson_id="subject")["snapshot"]
 
 

@@ -14,10 +14,15 @@ from doceditor.comment_action_errors import CommentActionError
 from doceditor.comment_anchoring import anchored_threads
 
 
+def is_open_thread(row: dict[str, Any]) -> bool:
+    """A thread nobody has decided or resolved."""
+    return not row.get("decision") and not row.get("resolved")
+
+
 def is_open_suggestion(row: dict[str, Any]) -> bool:
     """A top-level suggestion nobody has decided or resolved, whoever wrote it."""
     return (row.get("replacement") is not None and not row.get("parent_id")
-            and not row.get("decision") and not row.get("resolved"))
+            and is_open_thread(row))
 
 
 def suggestions_overlap(first: dict, first_span: tuple[int, int], second: dict, second_span: tuple[int, int]) -> bool:

@@ -3,7 +3,7 @@
 	import { backOut } from 'svelte/easing';
 	import { tick } from 'svelte';
 	import { paletteOpen } from '$lib/stores/palette';
-	import { threads } from '$lib/stores/threads';
+	import { everyThread } from '$lib/stores/everyThread';
 	import { projects as projectsStore, loadProjects, type ProjectPick } from '$lib/stores/projects';
 	import { createProjectOpen } from '$lib/stores/overlays';
 	import { projectAccent } from '$lib/utils/projectColors';
@@ -33,7 +33,8 @@
 		q ? activeProjects.filter((p) => p.name.toLowerCase().includes(q)) : activeProjects
 	);
 	const filteredConversations = $derived(
-		$threads
+		[...$everyThread]
+			.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime())
 			.filter((s) => !q || (s.title ?? '').toLowerCase().includes(q))
 			.slice(0, q ? 25 : 8)
 	);
@@ -93,7 +94,7 @@
 	<div class="palette" transition:fly={{ y: -10, duration: 380, easing: backOut }}>
 		<div class="search">
 			<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-			<input bind:this={inputEl} bind:value={query} oninput={resetSel} placeholder="Search projects, conversations, docs — or run an action…" />
+			<input bind:this={inputEl} bind:value={query} oninput={resetSel} placeholder="Search or run an action…" />
 			<button class="pal-close" onclick={close} aria-label="Close search">
 				<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 5l14 14M19 5L5 19"/></svg>
 			</button>
@@ -139,9 +140,9 @@
 				{/each}
 			{/if}
 
-			<div class="g-label">Conversations</div>
+			<div class="g-label">Chats</div>
 			{#if filteredConversations.length === 0}
-				<div class="res-empty">{q ? 'No matching conversations.' : 'No conversations yet.'}</div>
+				<div class="res-empty">{q ? 'No matching chats.' : 'No chats.'}</div>
 			{:else}
 				{#each filteredConversations as c, i (c.id)}
 					<button class="res" class:sel={sel === convBase + i} onmouseenter={() => (sel = convBase + i)} onclick={() => pickConversation(c.id)}>
@@ -154,11 +155,6 @@
 						{/if}
 					</button>
 				{/each}
-			{/if}
-
-			{#if !q}
-				<div class="g-label">Documents</div>
-				<div class="res-empty">Documents arrive with the registry.</div>
 			{/if}
 		</div>
 	</div>

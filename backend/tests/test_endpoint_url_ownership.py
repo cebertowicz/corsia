@@ -506,8 +506,22 @@ def test_the_catalog_fetch_uses_the_one_composition(monkeypatch) -> None:
     router = _Router({("GET", "/v1/models"): _resp(200, {"data": [{"id": "qwen-max"}]})})
     _patch_httpx(monkeypatch, router)
 
-    assert asyncio.run(fetch_external_models(_OPENAI_BASE, "openai", None)) == ["qwen-max"]
+    assert asyncio.run(fetch_external_models(_OPENAI_BASE, "openai", None)) == {"qwen-max": None}
     assert [url for _m, url, _h in router.calls] == [models_probe_url(_OPENAI_BASE)]
+
+
+def test_the_catalog_fetch_keeps_each_reported_window(monkeypatch) -> None:
+    from llm.external_provider import fetch_external_models
+
+    listing = {"data": [{"id": "served", "object": "model", "max_model_len": 32768},
+                        {"id": "id-only", "object": "model"},
+                        {"id": "trained", "object": "model", "max_position_embeddings": 131072,
+                         "meta": {"n_ctx_train": 131072}}]}
+    _patch_httpx(monkeypatch, _Router({("GET", "/v1/models"): _resp(200, listing)}))
+
+    assert asyncio.run(fetch_external_models(_OPENAI_BASE, "openai", None)) == {
+        "served": 32768, "id-only": None, "trained": None,
+    }
 
 
 def test_parameter_resolution_uses_the_openai_base_from_the_owner(monkeypatch) -> None:

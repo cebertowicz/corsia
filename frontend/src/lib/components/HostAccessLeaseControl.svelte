@@ -411,7 +411,7 @@
 			</button>
 			{#key currentPending.id}
 				<AdaptiveDrawer
-					ariaLabel="Review temporary host access"
+					ariaLabel="Review temporary host access" flushBottom
 					open={pendingOpen}
 					onClose={closePendingDrawer}
 				>

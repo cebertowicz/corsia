@@ -119,3 +119,8 @@ def seed_vendor_checkpoint_thread(targets, *, thread_id: str = "thread-1") -> No
         db.commit()
     finally:
         db.close()
+    # The paid launch is admitted on a signed-in account whose discovery lists each target.
+    from vendor_account_fixtures import signed_in_default
+
+    for provider in ("claude-code", "codex"):
+        signed_in_default(provider, models=tuple(t.catalog_id for t in targets if t.harness == provider))

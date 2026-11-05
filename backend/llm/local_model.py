@@ -1,12 +1,8 @@
-"""The local model CORSIA sets up: the one oMLX's own recommender picks for this Mac.
+"""Local model recommendations shared by setup and the Add model sheet.
 
-There is no hand-kept model list. CORSIA's managed oMLX answers
-``GET /admin/api/hf/recommendations`` (first shipped in oMLX 0.7.1rc1), and
-CORSIA orders its rows itself: what fits the memory free now first, by quality
-then speed, then what needs more. Setup's pick and the Add model sheet's
-Recommended row are that list's first row, with at least CORSIA's agent minimum
-of context. Under 24 GiB of memory there is no local model at all. This module
-is the one owner of that rule; every other reader goes through it.
+The sheet's Recommended is recommend(): oMLX's first "best" build that fits the
+computer's total room. Setup's pick_for_setup() passes the room free now because
+it loads at once, and falls back to oMLX's other sections, then the smallest.
 """
 
 from __future__ import annotations
@@ -15,21 +11,23 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-#: The oMLX release CORSIA reads the recommender from. The desktop bundle ships
-#: exactly this release (``desktop/scripts/build-macos-bundle.sh``), and a managed
-#: oMLX older than it has no recommender; a test fails if the two disagree.
-OMLX_PIN = "0.7.1rc1"
+#: The oldest oMLX release whose recommender CORSIA reads, the one the test
+#: recording comes from; an oMLX older than it has no recommender. The bundle
+#: ships ``omlx_release.OMLX_VERSION``, which must be this release or newer.
+#: 0.7.3's ``admin/model_recommender.py`` is byte-identical to this release's.
+OMLX_RECOMMENDER_MIN = "0.7.1rc1"
 
 GIB = 1024**3
 # RAM is compared in GiB because Apple sells memory in binary units: a Mac sold
-# as "24 GB" reports 24 GiB. Below it there is no local model (agent work runs
-# on the cloud; the corrections classifier still runs locally).
-MIN_RAM_GIB = 24
+# as "32 GB" reports 32 GiB. Below it setup does not pick a local model.
+# Exclude 24 GB until a model passes the first-run check there.
+MIN_RAM_GIB = 32
 #: CORSIA's agent minimum, and oMLX's own "comfortable" bar.
 MIN_CONTEXT = 32_768
 MAX_CONTEXT = 262_144
@@ -58,6 +56,9 @@ class LocalModel:
     #: oMLX's quality estimate (0.5-5 dots) and estimated decode speed; the sort's keys.
     smarts_level: float | None = field(default=None, compare=False)
     tokens_per_second: float | None = field(default=None, compare=False)
+    smarts: float | None = field(default=None, compare=False)
+    table_on_ssd: bool = field(default=False, compare=False)
+    table_bytes: int = field(default=0, compare=False)
 
     @property
     def model(self) -> str:
@@ -100,6 +101,11 @@ class LocalModel:
             result["smarts_level"] = self.smarts_level
         if self.tokens_per_second is not None:
             result["tokens_per_second"] = self.tokens_per_second
+        if self.smarts is not None:
+            result["smarts"] = self.smarts
+        if self.table_on_ssd:
+            result["table_on_ssd"] = True
+            result["table_bytes"] = self.table_bytes
         return result
 
 
@@ -109,11 +115,11 @@ def memory_allows_local(ram_bytes: int) -> bool:
 
 
 def omlx_has_recommender(version: str | None) -> bool:
-    """Whether an installed oMLX version serves the recommender (``OMLX_PIN`` or newer)."""
+    """Whether an installed oMLX version serves the recommender (``OMLX_RECOMMENDER_MIN`` or newer)."""
     from packaging.version import InvalidVersion, Version
 
     try:
-        return version is not None and Version(version) >= Version(OMLX_PIN)
+        return version is not None and Version(version) >= Version(OMLX_RECOMMENDER_MIN)
     except InvalidVersion:
         return False
 
@@ -140,6 +146,8 @@ def from_recommendation(raw: object) -> LocalModel | None:
     resident = raw.get("resident_bytes")
     smarts = raw.get("smarts_level")
     speed = raw.get("tokens_per_second")
+    raw_smarts = raw.get("smarts")
+    table_bytes = raw.get("table_bytes")
     return LocalModel(
         repository, size, min(context, MAX_CONTEXT), name if isinstance(name, str) and name.strip() else None,
         float(level) if isinstance(level, (int, float)) and not isinstance(level, bool) else None,
@@ -148,6 +156,9 @@ def from_recommendation(raw: object) -> LocalModel | None:
         resident if isinstance(resident, int) and not isinstance(resident, bool) and resident > 0 else None,
         float(smarts) if isinstance(smarts, (int, float)) and not isinstance(smarts, bool) else None,
         float(speed) if isinstance(speed, (int, float)) and not isinstance(speed, bool) else None,
+        float(raw_smarts) if isinstance(raw_smarts, (int, float)) and not isinstance(raw_smarts, bool) else None,
+        raw.get("table_on_ssd") is True,
+        table_bytes if isinstance(table_bytes, int) and not isinstance(table_bytes, bool) and table_bytes > 0 else 0,
     )
 
 
@@ -169,6 +180,11 @@ def to_record(model: LocalModel) -> dict:
         record["smarts_level"] = model.smarts_level
     if model.tokens_per_second is not None:
         record["tokens_per_second"] = model.tokens_per_second
+    if model.smarts is not None:
+        record["smarts"] = model.smarts
+    if model.table_on_ssd:
+        record["table_on_ssd"] = True
+        record["table_bytes"] = model.table_bytes
     return record
 
 
@@ -219,48 +235,52 @@ async def ask_recommender(server_id: str) -> LocalModel | None:
     return pick_for_setup(sections, model_room_bytes())
 
 
-def fits_now(model: LocalModel, room_bytes: int) -> bool:
-    """host_resources' "fits now" rule for one row; a row without oMLX's loaded size counts as fitting."""
-    from infra.host_resources import GIB, fits_now as fits
+def fits(model: LocalModel, room_bytes: int) -> bool:
+    """Compare a row with the supplied room; an unknown loaded size counts as fitting."""
+    from infra.host_resources import GIB, fits_now
 
-    return model.resident_bytes is None or fits(model.resident_bytes / GIB, room_bytes / GIB)
-
-
-def _by_quality_then_speed(model: LocalModel) -> tuple[float, float]:
-    return (-(model.smarts_level or 0.0), -(model.tokens_per_second or 0.0))
+    return model.resident_bytes is None or fits_now(model.resident_bytes / GIB, room_bytes / GIB)
 
 
-def _in_omlx_order(sections: dict[str, list[LocalModel]]) -> list[LocalModel]:
-    """oMLX's rows, "best" first, each model once; ``unlock`` rows need more memory than this Mac has."""
+def _omlx_rows(sections: dict[str, list[LocalModel]]) -> list[tuple[str, LocalModel]]:
+    """oMLX's rows with their section, "best" first, each model once; ``unlock`` rows need more memory than this Mac has."""
     seen: set[str] = set()
     rows = []
-    for models in (sections.get("best", []),
-                   *(models for name, models in sections.items() if name not in ("best", "unlock"))):
-        for model in models:
+    for name in ("best", *(name for name in sections if name not in ("best", "unlock"))):
+        for model in sections.get(name, []):
             if model.repository not in seen:
                 seen.add(model.repository)
-                rows.append(model)
+                rows.append((name, model))
     return rows
 
 
-def order_models(sections: dict[str, list[LocalModel]], room_bytes: int) -> list[LocalModel]:
-    """The one list CORSIA offers: setup's pick on top, the rest that fit ``room_bytes``, then what needs more.
+def omlx_sections(sections: dict[str, list[LocalModel]]) -> dict[str, str]:
+    """Each repository's oMLX section, by the same precedence as the list order and the badge."""
+    return {model.repository: name for name, model in _omlx_rows(sections)}
 
-    After the pick, each group runs by oMLX's quality level, then its estimated
-    speed. oMLX's section names are dropped. Setup's pick and the Add model
-    sheet's Recommended row are both this list's first fitting row.
-    """
-    pick = pick_for_setup(sections, room_bytes)
-    rows = sorted(_in_omlx_order(sections), key=_by_quality_then_speed)
-    if pick is not None and fits_now(pick, room_bytes):
-        rows = [pick, *(m for m in rows if m is not pick)]
-    return [*(m for m in rows if fits_now(m, room_bytes)), *(m for m in rows if not fits_now(m, room_bytes))]
+
+def _in_omlx_order(sections: dict[str, list[LocalModel]]) -> list[LocalModel]:
+    return [model for _name, model in _omlx_rows(sections)]
+
+
+def fitting_models(sections: dict[str, list[LocalModel]], room_bytes: int) -> list[LocalModel]:
+    """Return each fitting repository once, in oMLX order."""
+    return [model for model in _in_omlx_order(sections) if fits(model, room_bytes)]
+
+
+def recommend(
+    sections: dict[str, list[LocalModel]], room_bytes: int,
+    obtainable: Callable[[LocalModel], bool] | None = None,
+) -> LocalModel | None:
+    """Return oMLX's first fitting and obtainable "best" model; another section never takes the badge."""
+    return next((model for model in fitting_models({"best": sections.get("best", [])}, room_bytes)
+                 if obtainable is None or obtainable(model)), None)
 
 
 def pick_for_setup(sections: dict[str, list[LocalModel]], room_bytes: int) -> LocalModel | None:
     """oMLX's own ranking: its first row that fits ``room_bytes``, "best" first; when none fits, the smallest."""
     rows = _in_omlx_order(sections)
-    fitting = next((model for model in rows if fits_now(model, room_bytes)), None)
+    fitting = next(iter(fitting_models(sections, room_bytes)), None)
     if fitting is not None or not rows:
         return fitting
     return min(rows, key=lambda model: model.resident_bytes or 0)

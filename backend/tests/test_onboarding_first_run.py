@@ -23,6 +23,8 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from tests.plan_writer_authorizer import raw_plan_seed
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 SECRET_ENOUGH = "long-enough-passphrase"
 SETUP_TITLES = [
     "Getting started",

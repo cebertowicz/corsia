@@ -1,5 +1,6 @@
-import { threads } from '../stores/threads';
+import { threads, coordinationThreads, type Thread } from '../stores/threads';
 import { acceptThreadModelTruth, seedThreadModelTruth } from '../stores/models';
+import { patchHeldSwitch } from '../stores/threadModelTruth';
 import { patchSubagentThread, registerSubagent } from '../stores/subagents';
 import { acceptsThreadAccountFrame, threadAccountFields } from '../stores/threadVendorAccounts';
 import { threadFrameFields, threadSwitchFields } from './threadFrameFields';
@@ -28,7 +29,8 @@ export function handleSessionUpdated(data: any) {
 		)) return;
 	}
 	patchSubagentThread(data.thread_id, threadSwitchFields(data));
-	threads.update(ss => {
+	patchHeldSwitch(data.thread_id, threadSwitchFields(data));
+	const updateRows = (ss: Thread[]) => {
 		const updated = ss.map(s => {
 			if (s.id !== data.thread_id) return s;
 			return {
@@ -50,7 +52,9 @@ export function handleSessionUpdated(data: any) {
 			});
 		}
 		return updated;
-	});
+	};
+	threads.update(updateRows);
+	coordinationThreads.update(updateRows);
 }
 
 /**

@@ -74,7 +74,7 @@ def test_ensure_scope_conductor_designates_project_thread(isolated_db):
         assert get_project_conductor("project-a", db=db) == thread_id
         assert dict(row) == {
             "user_id": "newcomer",
-            "title": "Conductor",
+            "title": "Project A Conductor",
             "model": None,
             "project_id": "project-a",
         }
@@ -102,7 +102,7 @@ def test_backfill_coordination_scopes_heals_missing_workspace_and_project(isolat
         assert get_corsia_agent(db=db) is not None
         assert get_project_conductor("project-a", db=db) is not None
         assert db.execute("SELECT COUNT(*) FROM threads WHERE title='CORSIA'").fetchone()[0] == 1
-        assert db.execute("SELECT COUNT(*) FROM threads WHERE title='Conductor'").fetchone()[0] == 1
+        assert db.execute("SELECT COUNT(*) FROM threads WHERE title='Project A Conductor'").fetchone()[0] == 1
     finally:
         db.close()
 

@@ -46,6 +46,11 @@ def _cold_start_db(tmp_path, monkeypatch):
 
     setup = _make_conn()
     setup.executescript(_SCHEMA)
+    from tests.conftest import _seed_test_model_catalog
+    from vendor_account_fixtures import seed_signed_in_defaults
+
+    _seed_test_model_catalog(setup)
+    seed_signed_in_defaults(setup)  # no ambient login: each harness has a signed-in Default
     setup.commit()
     setup.close()
 

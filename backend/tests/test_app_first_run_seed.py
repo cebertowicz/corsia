@@ -369,7 +369,7 @@ def test_scripted_google_safe_miss_retains_and_moves_the_seeded_email_task(
             row["workflow_step"]: dict(row)
             for row in db.execute(
                 "SELECT id, workflow_step, state, description, revision, order_key "
-                "FROM plan_nodes WHERE plan_id=? AND workflow_ref='first-run-app'",
+                "FROM plan_nodes WHERE plan_id=? AND workflow_ref='first-run-app' AND parent_id IS NULL",
                 (listing["plan"]["id"],),
             )
         }
@@ -460,7 +460,7 @@ async def test_app_facts_omit_bound_model_before_the_person_picks_one(monkeypatc
         },
         "agents_found": ["openclaw"], "local_download": {}, "web_search_ready": False,
         "web_search_key": False, "setup_handoff": None, "setup_picks": None, "setup": {"setup_decisions": []},
-        "user_profile": {"name": None, "full_name": None},
+        "user_profile": {"name": None, "full_name": None}, "auto_approve": True,
     }))
 
     facts = await first_run_wake._app_setup_facts("")
@@ -666,7 +666,7 @@ def test_named_apps_are_children_and_preserve_visible_onboarding_steps(fresh_ins
             )
         final = public.read_current_plan(actor=actor, include_folded=True, db=db)
     children = [node for node in final["nodes"] if node["parent_id"] == connect["id"]]
-    assert {node["title"] for node in children} == {"Connect Slack", "Connect Notes"}
+    assert {node["title"] for node in children} == {"Name the apps you work in", "Connect Slack", "Connect Notes"}
     top_level = {node["title"] for node in final["nodes"] if node["parent_id"] is None}
     assert top_level == {step["title"] for step in applicable_steps(facts)}
     assert "Hand over to your agents" in top_level

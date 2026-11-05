@@ -84,7 +84,7 @@ async def test_native_live_warm_source_freezes_correlated_provider_receipt(monke
         captured["kwargs"] = kwargs
         return object()
 
-    monkeypatch.setattr("core.fork_native.capture_live_warm_source", capture)
+    monkeypatch.setattr("core.fork_native_warm.capture_live_warm_source", capture)
 
     result = await checkpoint_native_admission.capture_native_checkpoint_source(
         "thread-1", state, context, "high",
@@ -166,7 +166,7 @@ async def test_native_initial_pressure_falls_back_to_cold_checkpoint(monkeypatch
 
     built = object()
 
-    async def run_in_db(function, *args):
+    async def run_off_db(function, *args):
         assert function is checkpoint_native_admission.build_native_cold_checkpoint_admission
         assert args[0] == "checkpoint-1"
         return built
@@ -174,12 +174,12 @@ async def test_native_initial_pressure_falls_back_to_cold_checkpoint(monkeypatch
     monkeypatch.setattr(
         checkpoint_native_admission, "capture_native_checkpoint_source", capture,
     )
-    monkeypatch.setattr(checkpoint_native_admission, "run_in_db", run_in_db)
+    monkeypatch.setattr(checkpoint_native_admission, "run_off_db", run_off_db)
 
     result = await checkpoint_native_admission.prepare_native_checkpoint(
         "checkpoint-1",
         "thread-1",
-        object(),
+        SimpleNamespace(context_usage={}),
         SimpleNamespace(),
         SimpleNamespace(turn_id="turn-1"),
         None,
@@ -269,7 +269,7 @@ async def test_native_adopts_each_new_installed_generation_once(monkeypatch):
     selection = SimpleNamespace(tail=SimpleNamespace(messages=()))
 
     async def maintain(boundary, **options):
-        assert options == {}
+        assert options == {"must_adopt": False}
         adopted = boundary.adopted_checkpoint_id
         assert boundary.installed_checkpoint.id == current["id"]
         observed.append(adopted)
@@ -316,7 +316,7 @@ async def test_native_adopts_each_new_installed_generation_once(monkeypatch):
         return function(*args)
 
     monkeypatch.setattr("llm.resolution.resolve_locality_permitted",
-                        lambda _model, **_k: SimpleNamespace(context_window=100_000))
+                        lambda _model, **_k: SimpleNamespace(context_window=100_000, context_window_source="provider"))
     monkeypatch.setattr(turn_iteration_context, "run_in_db", checkpoint_snapshot)
     state = SimpleNamespace(
         messages=[{"role": "user", "content": "continue"}],
@@ -330,6 +330,7 @@ async def test_native_adopts_each_new_installed_generation_once(monkeypatch):
         active_boundary_input=None,
         last_measured_call_usage=None,
         last_measured_rendered_input_tokens=None,
+        overflow_retry_pending=False,
     )
     cancel = SimpleNamespace(checkpoint_wait_scope=CheckpointWaitScope())
 

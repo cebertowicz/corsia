@@ -21,7 +21,7 @@
 
 	const { folder, defaultFolder, notice = null, changing = false, onChange, onUseDefault, onKeepFolder }: Props = $props();
 	function folderWarningNotice(folder: FolderWarning): string {
-		const safety = 'Agents open anything in the work folder without asking; outside it, CORSIA asks you first.';
+		const safety = 'Agents open anything in the work folder without asking. Outside it, access needs approval.';
 		if (folder.kind === 'personal_folder') return `Your ${folder.folder} folder holds personal files. macOS may ask to let CORSIA use it. ${safety}`;
 		if (folder.kind === 'contains_personal_folder') return `This folder contains your ${folder.folder} folder. macOS may ask to let CORSIA use that folder. ${safety}`;
 		return `This folder already holds files. ${safety}`;

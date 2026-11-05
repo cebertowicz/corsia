@@ -946,8 +946,10 @@ def test_install_is_atomic_with_concurrent_canonical_writers(
     assert observer.execute(
         "SELECT 1 FROM plans WHERE owner_kind='thread' AND owner_id='thread-1'"
     ).fetchone() is not None
+    from infra.thread_confinement import Reader
+
     assert [hit["checkpoint_id"] for hit in search_checkpoints(
-        observer, "atomic", caller_thread_id="thread-1",
+        observer, "atomic", reader=Reader.agent("thread-1"),
     )] == [checkpoint.id]
     installer.close()
     observer.close()

@@ -19,7 +19,10 @@ from core.lesson_report_inventory import build_inventory
 from core.lesson_report_offers import PAGE_SIZE, DeferredOffers, DetailRequest, snapshot_fingerprint
 from core.lesson_report_reads import read_bodies
 from core.lesson_report_receipts import offer_counts, read_offer_evidence
+from core.lesson_trial_receipts import read_trial_deliveries
 from core.lesson_trials import parse_instant
+from core.workflow_verdict_looks import LOOK_MULTIPLES, look_confidence
+from core.workflow_verdict_types import FrozenPlan
 from plans import public as plans
 
 # A stale watch is omitted from list reads, never retired or otherwise mutated.
@@ -92,7 +95,7 @@ def _cursor(fingerprint: str, query: dict[str, Any], offset: int) -> str:
     })).decode()
 
 
-def _summary(row: dict[str, Any], offers: DeferredOffers, body_reads: int) -> dict[str, Any]:
+def _summary(row: dict[str, Any], offers: DeferredOffers, body_reads: int, delivered: int) -> dict[str, Any]:
     """One row summary from its period offers and in-period body-read count."""
     summary = {key: row[key] for key in (
         "kind", "id", "version", "name", "activated", "state", "source_status", "owner_ids",
@@ -101,7 +104,7 @@ def _summary(row: dict[str, Any], offers: DeferredOffers, body_reads: int) -> di
     )} | {"indexed": offer_counts(offers, (row["id"], row["version"])),
           "source_scope": (row["current_source"] or {}).get("source_scope"),
           "source_scope_reason": "recorded source scope unavailable" if not row["current_source"] else None,
-          "body_reads": body_reads,
+          "body_reads": body_reads, "delivered": delivered,
           "next_call": (
         f"lesson_report(lesson_id={json.dumps(row['id'])}, version={json.dumps(row['version'])})"
     )}
@@ -114,10 +117,12 @@ def _summary(row: dict[str, Any], offers: DeferredOffers, body_reads: int) -> di
 
 
 def _page_summaries(page: list[dict[str, Any]], period: dict[str, Any],
-                    reads: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Summaries for one page only, grouping reads by exact identity once."""
+                    reads: list[dict[str, Any]], deliveries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Summaries for one page only, grouping evidence by exact identity once."""
     reads_by_identity = Counter((read["id"], read["version"]) for read in reads) if page else Counter()
-    return [_summary(row, period["offers"], reads_by_identity[(row["id"], row["version"])]) for row in page]
+    deliveries_by_identity = Counter((receipt["lesson_id"], receipt["behavioral_sha256"]) for receipt in deliveries) if page else Counter()
+    return [_summary(row, period["offers"], reads_by_identity[(row["id"], row["version"])],
+                     deliveries_by_identity[(row["id"], row["version"])]) for row in page]
 
 
 def _correction_inventory(
@@ -181,6 +186,8 @@ def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
                                  from_ts=scope.from_ts, to_ts=scope.to_ts,
                                  cancellation_event=cancellation_event)
     period = offers["period"]
+    deliveries = read_trial_deliveries(db, user_id=scope.user_id, thread_ids=scope.thread_ids,
+                                      from_ts=scope.from_ts, to_ts=scope.to_ts)
     if detail is not None:
         # A row lists only reviews from this history, each node once, ahead of its offers.
         period["offers"].prefetch(db, detail, reviews_at_most=len(history))
@@ -189,14 +196,16 @@ def collect_report(db, *, scope: ReportScope, sources: list[dict[str, Any]],
                          facts=sources + retained)
     from core.lesson_corrections import correction_facts, placement_check_counts, source_subjects
     from core.lesson_gate import gate_counts
+    from core.workflow_verdict_read import recorded_lesson_plans
 
     # The adapter passes no sources here and joins corrections after reading lesson files.
     subjects = source_subjects(sources)
     return {"history": history, "missing_owners": missing_owners, "boundaries": boundaries,
-            "retained": retained, "period": period, "bodies": bodies,
+            "retained": retained, "period": period, "bodies": bodies, "deliveries": deliveries,
             "correction_facts": correction_facts(db, subjects),
             "placement_checks": placement_check_counts(db, scope.thread_ids),
-            "lesson_gate": gate_counts(db, scope.thread_ids, scope.from_ts, scope.to_ts)}
+            "lesson_gate": gate_counts(db, scope.thread_ids, scope.from_ts, scope.to_ts),
+            "trial_plans": recorded_lesson_plans(db, detail.lesson_id) if detail is not None else {}}
 
 
 def detail_request(lesson_id: str | None, version: str | None, cursor: str | None,
@@ -208,11 +217,15 @@ def detail_request(lesson_id: str | None, version: str | None, cursor: str | Non
 
 
 def _detail_page(result: dict[str, Any], *, row: dict[str, Any], period: dict[str, Any],
-                 reads: list[dict[str, Any]], boundaries: list[dict[str, Any]], offset: int,
-                 fingerprint: str, query: dict[str, Any]) -> dict[str, Any]:
+                 reads: list[dict[str, Any]], boundaries: list[dict[str, Any]],
+                 deliveries: list[dict[str, Any]], offset: int,
+                 fingerprint: str, query: dict[str, Any], trial_plans: dict[str, FrozenPlan]) -> dict[str, Any]:
     """Page references for one exact behavior without expanding the list surface."""
     offers, identity = period["offers"], (row["id"], row["version"])
+    plan = trial_plans.get(row["version"])
     reviews = [{"kind": "review", "value": review} for review in row["reviews"]]
+    delivered = [{"kind": "delivered", "value": receipt} for receipt in deliveries
+                 if (receipt["lesson_id"], receipt["behavioral_sha256"]) == identity]
     bodies = [{"kind": "body_read", "value": read} for read in reads
               if (read["id"], read["version"]) == identity]
     installed = [{"kind": "installed_boundary", "value": fact} for fact in boundaries
@@ -222,6 +235,7 @@ def _detail_page(result: dict[str, Any], *, row: dict[str, Any], period: dict[st
         return [{"kind": "indexed", "value": offer} for offer in offers.page(identity, start, end)]
 
     segments = [(len(reviews), lambda start, end: reviews[start:end]), (offers.total(identity), indexed),
+                (len(delivered), lambda start, end: delivered[start:end]),
                 (len(bodies), lambda start, end: bodies[start:end]),
                 (len(installed), lambda start, end: installed[start:end])]
     total = sum(length for length, _page in segments)
@@ -234,9 +248,10 @@ def _detail_page(result: dict[str, Any], *, row: dict[str, Any], period: dict[st
         if end > start:
             page.extend(fetch(start, end))
         position += length
-    result["detail"] = _summary(row, offers, len(bodies)) | {
+    result["detail"] = _summary(row, offers, len(bodies), len(delivered)) | {
         "current_source": row["current_source"],
         **({"correction_facts": row["correction_facts"]} if "correction_facts" in row else {}),
+        **({"verdict_plan": _verdict_plan(plan)} if plan is not None and row["state"] == "trial" else {}),
         "references": page,
         "reference_count": total, "source_bytes": None,
         "carrying_cost": {"descriptor_tokens": None, "body_tokens": None,
@@ -245,6 +260,13 @@ def _detail_page(result: dict[str, Any], *, row: dict[str, Any], period: dict[st
     }
     result["next_cursor"] = _cursor(fingerprint, query, offset + PAGE_SIZE) if offset + PAGE_SIZE < total else None
     return result
+
+
+def _verdict_plan(plan: FrozenPlan) -> dict[str, Any]:
+    """What a trial's verdict will judge: the confidence each look is judged at and each measure's MDC (null: unknown)."""
+    return {"confidence": plan.confidence,
+            "look_confidence": [look_confidence(plan.confidence, look) for look in LOOK_MULTIPLES],
+            "mdc": {name: list(values) for name, values in plan.mdc.items()}}
 
 
 def _cursor_offset(cursor: Any) -> int:
@@ -305,6 +327,7 @@ def read_report(
     correction_facts = data["correction_facts"]
     placement_checks = data["placement_checks"]
     lesson_gate = data.get("lesson_gate")
+    deliveries = data["deliveries"]
     bodies = data["bodies"]
     bodies = bodies | {"reads": identify_recorded_reads(bodies["reads"], blob_reader, sources)}
     reads = [read for read in bodies["reads"] if scope.from_ts <= read["created_at"] < scope.to_ts]
@@ -318,7 +341,7 @@ def read_report(
     if lesson_gate and any(lesson_gate.values()):
         coverage["lesson_gate"] = lesson_gate
     coverage.update(source_coverage or {})
-    snapshot = {"rows": inventory, "period": period, "reads": reads, "coverage": coverage}
+    snapshot = {"rows": inventory, "period": period, "reads": reads, "deliveries": deliveries, "coverage": coverage}
     fingerprint = snapshot_fingerprint(snapshot, _canonical)
     query = {**scope.__dict__, "lesson_id": lesson_id, "version": version,
              "preview": preview, "evidence": evidence} | ({"state": state} if state else {})
@@ -344,12 +367,12 @@ def read_report(
                            "next_call": "lesson_report(scope=\"all\")"})
             return result
         return _detail_page(result, row=selected[0], period=period, reads=reads, boundaries=boundaries,
-                            offset=offset, fingerprint=fingerprint, query=query)
+                            deliveries=deliveries, offset=offset, fingerprint=fingerprint, query=query, trial_plans=data.get("trial_plans", {}))
     visible_inventory = _list_inventory(inventory, now, state)
     limit = 5 if preview else 20
     if offset > len(visible_inventory):
         raise ValueError("invalid report position; refresh the report")
-    result["rows"] = _page_summaries(visible_inventory[offset:offset + limit], period, reads)
+    result["rows"] = _page_summaries(visible_inventory[offset:offset + limit], period, reads, deliveries)
     result["known_versions"] = len(visible_inventory)
     result["next_cursor"] = (_cursor(fingerprint, query, offset + limit)
                              if offset + limit < len(visible_inventory) else None)

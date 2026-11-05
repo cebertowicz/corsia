@@ -137,7 +137,7 @@ async def test_checkpoint_native_tool_loop_failure_keeps_cause(monkeypatch, capl
     request = SimpleNamespace(thread_id="thread-1", fork_id="checkpoint-1")
     fits_calls = 0
 
-    async def failing_fits(_request, _messages, _tools):
+    async def failing_fits(_request, _messages, _tools, *_room):
         nonlocal fits_calls
         fits_calls += 1
         if fits_calls == 1:

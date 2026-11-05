@@ -8,11 +8,10 @@ from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
-from core.turn_core import TurnIdentity, drive_turn_settlement
+from core.turn_core import TurnIdentity
 from llm.resolution import ExecutionTarget
 from subagents.cc_accept import (
-    TerminalSettlement,
-    accept_reconstructed_input,
+    TerminalSettlement, accept_reconstructed_input,
     require_owned_accept_db,
 )
 from subagents.cc_destination import build_cc_user_frame
@@ -21,6 +20,7 @@ from subagents.cc_runtime_errors import CCLiveTurnBusy
 from subagents.cc_runtime_helpers import _default_broadcast
 from subagents.cc_runtime_state import Broadcast, _LIVE, _Live
 from subagents.cc_process_exit import _CommittedTerminalFailure
+from subagents.cc_stream_control import start_terminal_driver
 from subagents.child_thread import record_user_frame
 
 if TYPE_CHECKING:
@@ -329,7 +329,8 @@ async def ensure_live_then_feed(
         async with transition.held_lock:
             return await _accept_under_lock(transition, acceptance)
     except _CommittedTerminalFailure as failure:
-        await drive_turn_settlement(failure.settlement)
+        live = _LIVE.get(thread_id)
+        start_terminal_driver(live.session if live else None, failure.settlement)
         raise failure.publication_error
 
 

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from core.skill_validation import is_skill_file
-from core.workspace_context_sources import is_workspace_context_path
+from core.workspace_context_sources import is_read_only_context_path
 from doceditor.comment_actions import DocumentWriter
 from doceditor.document_scope import (
     MAX_TEXT_BYTES,
@@ -154,12 +154,12 @@ def _validate_document_write(body: DocumentSave, user_id: str) -> Path:
             resolved = path.resolve(strict=not body.create)
         except OSError as exc:
             raise DocumentSaveError("no_such_file", f"No such file: {exc}") from exc
-        # Workspace context files are injected into every system prompt.
+        # Workspace context and System projection files are injected into every prompt.
         # They remain read-only through the document API so this endpoint
         # cannot become a system-prompt-injection vector.
-        if is_workspace_context_path(resolved, config.WORKSPACE, db=db):
+        if is_read_only_context_path(resolved, config.WORKSPACE, db=db):
             raise DocumentSaveError(
-                "context_read_only", "Workspace context file is read-only via the doc API"
+                "context_read_only", "Context file is read-only via the doc API"
             )
         if not path_write_allowed(resolved, bases):
             raise DocumentSaveError("outside_scope", "Path is outside this scope's roots")

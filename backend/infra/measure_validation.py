@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 
+from core.agent_kpi_formula import unfit
 from infra.outcome_event_attributes import ATTRIBUTE_ALLOWLISTS
 
 _NAMESPACE = re.compile(r"[a-z][a-z0-9_]{0,31}\Z")
@@ -125,8 +126,8 @@ def _event_items(data: dict[str, Any], namespace: str, lines: Lines) -> list[Ite
         path = ("events", name)
         if not isinstance(name, str) or not name.startswith(namespace + "."):
             raise fail(lines, path, f"event {name} is outside namespace {namespace}; declare only {namespace}.* events.")
-        if not isinstance(spec, dict) or set(spec) - {"attributes", "dedupe", "corroborate", "keep_days", "use", "since"}:
-            raise fail(lines, path, f"event {name} has an unknown field; use attributes, dedupe, corroborate, keep_days, use or since.")
+        if not isinstance(spec, dict) or set(spec) - {"attributes", "dedupe", "corroborate", "keep_days", "use", "since", "default_delivery", "event_class"}:
+            raise fail(lines, path, f"event {name} has an unknown field; use attributes, dedupe, corroborate, keep_days, use, since, default_delivery or event_class.")
         _check_event(name, spec, lines)
         items.append(("event", name, spec))
     return items
@@ -154,6 +155,13 @@ def _check_event(name: str, spec: dict[str, Any], lines: Lines) -> None:
         raise fail(lines, path + ("keep_days",), f"event {name} {exc}; the default is {KEEP_DAYS_DEFAULT}.") from None
     if spec.get("use", "record") not in {"record", "route", "both"}:
         raise fail(lines, path + ("use",), f"event {name} use must be record, route or both.")
+    if spec.get("default_delivery", "owner") not in {"owner", "none"}:
+        raise fail(lines, path + ("default_delivery",), f"event {name} default_delivery must be owner or none.")
+    if spec.get("event_class", "informational") not in {"actionable", "informational"}:
+        raise fail(lines, path + ("event_class",), f"event {name} event_class must be actionable or informational.")
+    routing = next((field for field in ("default_delivery", "event_class") if field in spec), None)
+    if routing is not None and spec.get("use", "record") == "record":
+        raise fail(lines, path + (routing,), f"event {name} is use: record, which is never routed; {routing} needs use: route or both.")
     # A routed type's facts reach other agents' wakes, so no person's login; a record stays in the
     # owner's store. num may ride along: rules can't match on it (enforced at rule create).
     if spec.get("use") in ("route", "both"):
@@ -192,6 +200,24 @@ def _check_since(name: str, spec: dict[str, Any], events: dict[str, dict[str, An
         raise fail(lines, path + ("as",), f"event {name} since.as must name a num or count attribute of the end event.")
 
 
+def _check_where(name: str, operand: dict[str, Any], path: tuple[Any, ...], context: _Context) -> None:
+    where = operand.get("where")
+    if where is None:
+        return
+    if not isinstance(where, dict) or len(where) > 2:
+        raise fail(context.lines, path + ("where",), f"kpi {name} where needs at most two conditions.")
+    for event in _event_names(operand):
+        attrs = _attributes(event, context.events) or {}
+        for key, value in where.items():
+            kind = attrs.get(key, "id" if event in context.events and key in ("run_id", "workflow_ref") else None)
+            kind = getattr(kind, "kind", kind)
+            is_enum = kind == "enum" or isinstance(kind, dict) and "enum" in kind
+            if kind != "id" and not is_enum:
+                raise fail(context.lines, path + ("where", key), f"kpi {name} where needs an id or enum attribute on every event.")
+            if is_enum and value in ("present", "absent"):
+                raise fail(context.lines, path + ("where", key), f"kpi {name} where present and absent are allowed only on id attributes.")
+
+
 def _check_operand_keys(name: str, spec: dict[str, Any], context: _Context) -> None:
     coverage = spec.get("coverage")
     operands: list[tuple[tuple[str, ...], Any]] = [((key,), spec.get(key)) for key in ("num", "den")]
@@ -200,6 +226,11 @@ def _check_operand_keys(name: str, spec: dict[str, Any], context: _Context) -> N
     for position, operand in operands:
         if not isinstance(operand, dict):
             continue
+        path = ("kpis", name) + position
+        _check_where(name, operand, path, context)
+        for index, clause in enumerate(operand.get("match", [])):
+            if isinstance(clause, dict):
+                _check_where(name, clause, path + ("match", index), context)
         for field in ("latest", "first"):
             if field not in operand:
                 continue
@@ -216,6 +247,8 @@ def _check_operand_keys(name: str, spec: dict[str, Any], context: _Context) -> N
                 attrs = _attributes(event, context.events)
                 for key in keys:
                     kind = attrs.get(key) if attrs is not None and isinstance(key, str) else None
+                    if event in context.events and key in ("run_id", "workflow_ref"):
+                        kind = "id"
                     kind = getattr(kind, "kind", kind)
                     if kind != "id" and kind != "enum" and not (isinstance(kind, dict) and "enum" in kind):
                         raise fail(context.lines, path, f"kpi {name} {field} needs id or enum attributes declared on every event.")
@@ -269,6 +302,8 @@ def _operand_events(spec: dict[str, Any]) -> list[str]:
 def _check_kpi(name: str, spec: dict[str, Any], context: _Context) -> None:
     """The ``can_decide`` sync test (§4.2): each check is a field check, with its §5 refusal."""
     path = ("kpis", name)
+    if problem := unfit(spec):
+        raise fail(context.lines, path, f"kpi {name} {problem}.")
     deciding, decides_as = spec.get("can_decide", False), spec.get("decides_as")
     if not isinstance(deciding, bool):
         raise fail(context.lines, path + ("can_decide",), f"kpi {name} can_decide must be true or false.")

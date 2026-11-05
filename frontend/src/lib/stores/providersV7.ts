@@ -6,7 +6,7 @@ import { fetchCatalogInventory, harnessProviderModels, harnessSummaries, type Ha
 import { HARNESSES } from './harnessMembership';
 import { seedProviderModels } from './providerModels';
 import { readWorkspaceModels } from './modelsLoad';
-import { vendorAccounts } from './vendorAccounts';
+import { vendorAccounts, visibleVendorAccounts } from './vendorAccounts';
 
 const BASE = '';
 const t = () => get(token) || '';
@@ -49,12 +49,17 @@ export interface HostGroup {
 	providers: HostProvider[];
 }
 
+// The one Agent CLIs group definition; the view shows it empty while only a vendor's setup row exists.
+export function agentCliGroup(providers: HostProvider[] = []): HostGroup {
+	return { key: 'agent-clis', name: 'Agent CLIs', subname: 'Run by the CLI on this computer', netKind: 'localhost', providers };
+}
+
 // Network/resources/inventory loading owns this snapshot. `hostGroups` below is the canonical display
 // owner: harness card text follows accounts, and each server row is read live from `networkServers`.
 export const hostGroupSnapshot = writable<HostGroup[]>([]);
 export const hostGroups = derived([hostGroupSnapshot, vendorAccounts, networkServers], ([$snapshot, $accounts, $servers]) =>
 	$snapshot.map((group) => ({ ...group, providers: group.providers.map((provider) => {
-		const live = provider.server ? { ...provider, server: $servers.find((row) => row.id === provider.server?.id) ?? provider.server } : provider;
+		const live = provider.server ? _serverProvider($servers.find((row) => row.id === provider.server?.id) ?? provider.server, [provider.raw], provider.type) : provider;
 		return live.type === 'harness' && live.harnessModelCount != null
 			? { ...live, subline: _harnessSubline(live.name, live.harnessModelCount, $accounts) } : live;
 	}) })),
@@ -81,13 +86,13 @@ function _modelCountLabel(count: number): string {
 }
 
 function _harnessSubline(name: string, modelCount: number, accounts = get(vendorAccounts)): string {
-	const accountCount = accounts.filter((account) => account.provider === name && account.state !== 'removed').length;
+	const accountCount = visibleVendorAccounts(accounts, name, []).length;
 	return accountCount > 0 ? `${accountCount} account${accountCount === 1 ? '' : 's'} · ${_modelCountLabel(modelCount)}` : _modelCountLabel(modelCount);
 }
 
 function _statusDotForServer(s: NetworkServer): HostProvider['statusDot'] {
+	if (s.restarting || s.status === 'offline') return 'idle';
 	if (s.status === 'online') return 'online';
-	if (s.status === 'offline') return 'idle';
 	if (s.status === 'disabled') return 'disabled';
 	return 'idle';
 }
@@ -216,21 +221,15 @@ export function groupByHost(
 	}
 
 	if (harnesses.length) {
-		groups.push({
-			key: 'agent-clis',
-			name: 'Agent CLIs',
-			subname: 'Run by the CLI on this computer',
-			netKind: 'localhost',
-			providers: harnesses.map(h => ({
-				name: h.name,
-				label: h.label,
-				type: 'harness',
-				statusDot: h.ready > 0 ? 'online' : 'idle',
-				subline: _harnessSubline(h.name, h.total),
-				harnessModelCount: h.total,
-				raw: { name: h.name, label: h.label, type: 'harness' } as ProviderEntry,
-			})),
-		});
+		groups.push(agentCliGroup(harnesses.map(h => ({
+			name: h.name,
+			label: h.label,
+			type: 'harness',
+			statusDot: h.ready > 0 ? 'online' : 'idle',
+			subline: _harnessSubline(h.name, h.total),
+			harnessModelCount: h.total,
+			raw: { name: h.name, label: h.label, type: 'harness' } as ProviderEntry,
+		}))));
 	}
 
 	return groups;
@@ -248,6 +247,7 @@ function _remoteHostSubname(s: NetworkServer): string {
 }
 
 function _networkSubline(s: NetworkServer): string {
+	if (s.restarting) return 'Restarting…';
 	if (s.kind === 'external') {
 		// Registered by URL: the URL is the address; a port says nothing here.
 		const url = s.api_base || '';
@@ -255,8 +255,8 @@ function _networkSubline(s: NetworkServer): string {
 	}
 	const port = s.port ? `port ${s.port}` : '';
 	if (s.status !== 'online') return ['off', port].filter(Boolean).join(' · ');
-	const used = s.memory_used_mb ? `${(s.memory_used_mb / 1024).toFixed(0)} GiB used` : '';
-	return [port, used].filter(Boolean).join(' · ');
+	// Memory in use is shown once, by the host section; not repeated per server.
+	return port;
 }
 
 function _cloudSubline(p: ProviderEntry): string {

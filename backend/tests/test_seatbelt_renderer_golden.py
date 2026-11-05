@@ -36,7 +36,8 @@ def render_baseline(monkeypatch: MonkeyPatch) -> dict[str, str]:
     monkeypatch.setattr(shell_guard, 'agent_account_deny_rule', lambda *_: None)
     monkeypatch.setattr(
         shell_guard, 'current_protected_host_path_policy',
-        lambda **kwargs: ProtectedHostPathPolicy(home, Path('/golden/state'), **kwargs),
+        # The caller's fence is pinned in test_project_fence_renders; the golden stays fence-free.
+        lambda thread_id=None, **kwargs: ProtectedHostPathPolicy(home, Path('/golden/state'), **kwargs),
     )
     policy = RepoPolicy('project', 'repo', repo, 'main', True)
     path_policy = ProtectedHostPathPolicy(

@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import Literal
 
-from llm.context_window import WindowFacts, resolve_window_facts
+from llm.context_window import WindowFacts, cap_to_memory_fit, resolve_window_facts
 
 
 class ModelUnavailableError(Exception):
@@ -46,6 +46,9 @@ class ExecutionTarget:
     discovered_context_window: int | None = None
     #: Which rule produced ``context_window``; see ``WindowFacts.source``.
     context_window_source: str = "provider"
+    #: ``context_window`` before a live memory fit capped it: what refusal
+    #: settlement compares, read from the same row.
+    configured_context_window: int | None = None
 
     @property
     def windows(self) -> WindowFacts:
@@ -58,8 +61,10 @@ class ExecutionTarget:
 
 def _target_row(model: str, *, db) -> dict | None:
     exact = db.execute("SELECT * FROM models WHERE id = ?", (model,)).fetchone()
+    from llm.harness_catalog import account_rows, project_stored_rows
+
     if exact:
-        return dict(exact)
+        return project_stored_rows([exact], db=db)[0]
     matches = db.execute(
         "SELECT * FROM models WHERE litellm_model = ?", (model,)
     ).fetchall()
@@ -73,7 +78,11 @@ def _target_row(model: str, *, db) -> dict | None:
             ).fetchall()
     if len(matches) > 1:
         raise ValueError(f"ambiguous model transport identity: {model}")
-    return dict(matches[0]) if matches else None
+    if matches:
+        return project_stored_rows(matches[:1], db=db)[0]
+    if model.startswith(('claude-code/', 'codex/')):
+        return account_rows(db=db, provider=model.partition('/')[0]).get(model)
+    return None
 
 
 def catalog_row(model: str, *, db) -> dict | None:
@@ -100,11 +109,10 @@ def _resolve_non_native_target(
     harness: str, row: dict, metadata: dict, available: bool, connection
 ) -> tuple[bool, str | None, str, str | None]:
     """Resolve a harness-backed row's availability and transport identity."""
-    connection_row = connection.execute(
-        "SELECT status FROM connections WHERE provider = ?", (harness,)
-    ).fetchone()
+    from connections.models import provider_may_run
+
     reason: str | None = None
-    if not connection_row or connection_row["status"] != "available":
+    if not provider_may_run(harness, db=connection):
         available = False
         reason = "connection_unavailable"
     elif not available:
@@ -183,7 +191,8 @@ def resolve_execution_target(
                 row, available
             )
 
-        windows = resolve_window_facts(row, db=connection)
+        configured = resolve_window_facts(row, db=connection)
+        windows = cap_to_memory_fit(configured, row)
         preserve_thinking_default = metadata.get("preserve_thinking_default")
         if not isinstance(preserve_thinking_default, bool):
             preserve_thinking_default = None
@@ -197,6 +206,7 @@ def resolve_execution_target(
             context_window=windows.effective,
             discovered_context_window=windows.discovered,
             context_window_source=windows.source,
+            configured_context_window=configured.effective,
             available=available,
             availability_reason=reason,
             display_name=str(row.get("display_name") or row["id"]),
@@ -303,9 +313,14 @@ def resolve_harness_selector(
         if len(rows) > 1:
             raise ValueError(f"ambiguous {harness} selector: {exact}")
         if not rows:
-            raise ModelUnavailableError(
-                exact, f"Model selector '{exact}' not found in catalog"
-            )
+            from llm.harness_catalog import harness_row
+
+            projected = harness_row(f'{harness}/{exact}', db=connection)
+            if projected is None:
+                raise ModelUnavailableError(
+                    exact, f"Model selector '{exact}' not found in catalog"
+                )
+            return resolve_execution_target(projected['id'], db=connection)
         return resolve_execution_target(rows[0]["id"], db=connection)
     finally:
         if close:

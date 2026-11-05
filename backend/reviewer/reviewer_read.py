@@ -24,6 +24,15 @@ import sys
 
 _SHA_RE = re.compile(r"[0-9a-f]{40}\Z")
 _DIFF = ("diff", "--no-ext-diff", "--no-textconv", "--no-color")
+# Same options as ``infra.backend_git.GIT_CONFIG_ARGS``. This script is standard
+# library only and runs under ``python -I``, so it cannot import them; a test keeps
+# the two equal.
+_GIT_CONFIG_ARGS = (
+    "-c", "core.hooksPath=/dev/null",
+    "-c", "core.fsmonitor=false",
+    "-c", "protocol.ext.allow=never",
+    "-c", "submodule.recurse=false",
+)
 _USAGE = "usage: reviewer_read.py GIT_DIR BASE_SHA HEAD_SHA {stat|names|diff|show|grep} [ARG ...]"
 
 
@@ -42,7 +51,7 @@ def git_argv(git_dir: str, base: str, head: str, mode: str, args: list[str]) -> 
     for label, sha in (("base", base), ("head", head)):
         if not _SHA_RE.fullmatch(sha):
             raise ReadRefused(f"{label} must be a 40-character lowercase SHA")
-    git = ["git", f"--git-dir={git_dir}", "-c", "core.fsmonitor=false"]
+    git = ["git", f"--git-dir={git_dir}", *_GIT_CONFIG_ARGS]
     revision_range = f"{base}...{head}"
     if mode in ("stat", "names"):
         if args:

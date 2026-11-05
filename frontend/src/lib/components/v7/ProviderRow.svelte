@@ -3,7 +3,7 @@
 	import { quintOut } from 'svelte/easing';
 	import type { Snippet } from 'svelte';
 	import { providerEnabled, type HostProvider } from '$lib/stores/providersV7';
-	import { Toggle } from '$lib/components/ui';
+	import { Spinner, Toggle } from '$lib/components/ui';
 
 	interface Props {
 		provider: HostProvider;
@@ -16,6 +16,10 @@
 		/** The local setup row replaces settings and enable controls with one existing setup action or its refusal. */
 		setupLabel?: string;
 		onSetup?: () => void;
+		/** A setup row's work is under way: a spinner takes the action's place. */
+		spinning?: boolean;
+		/** Setup rows only: what the row still has to say (a reference, a second action) under its line. */
+		footer?: Snippet;
 	}
 
 	const {
@@ -28,8 +32,11 @@
 		body,
 		setupLabel,
 		onSetup,
+		spinning = false,
+		footer,
 	}: Props = $props();
 
+	const isSetup = $derived(setupLabel !== undefined);
 	const enabled = $derived(providerEnabled(provider));
 	// Harness cards have account settings, but the provider-wide enable hold is not
 	// implemented yet. Keep its switch hidden until that state has a real owner.
@@ -54,8 +61,8 @@
 	class:expanded
 	class:has-loaded={hasLoaded}
 >
-	<div class="pr-head" class:setup={Boolean(setupLabel)}>
-		{#if setupLabel}
+	<div class="pr-head" class:setup={isSetup}>
+		{#if isSetup}
 			<div class="pr-setup-summary">
 				<span class="dot-wrap"><span class="dot {provider.statusDot}"></span></span>
 				<span class="pr-info"><span class="name-row"><span class="name">{provider.label}</span></span><span class="meta">{provider.subline}</span></span>
@@ -74,10 +81,11 @@
 			</button>
 		{/if}
 
-		{#if setupLabel}
+		{#if isSetup}
+			{#if spinning}<span class="setup-spinner"><Spinner size={14} /></span>{/if}
 			{#if onSetup}
 				<button type="button" class="setup-action" onclick={onSetup}>{setupLabel}</button>
-			{:else}
+			{:else if setupLabel}
 				<span class="setup-refusal">{setupLabel}</span>
 			{/if}
 		{:else}
@@ -97,6 +105,10 @@
 			{/if}
 		{/if}
 	</div>
+
+	{#if isSetup && footer}
+		<div class="pr-footer">{@render footer()}</div>
+	{/if}
 
 	{#if discoveryWarning}
 		<p class="discovery-warning" role="status">{discoveryWarning}</p>
@@ -164,6 +176,9 @@
 	}
 	.setup-action:hover { color: var(--text-primary); }
 	.setup-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
+	.setup-spinner { grid-column: 3; grid-row: 1; justify-self: end; }
+	/* Indented to the name column, like the discovery line. */
+	.pr-footer { margin: 0 var(--space-2) var(--space-1) calc(var(--space-2) + var(--project-mark-size) + var(--space-3)); font-size: var(--text-caption); color: var(--text-secondary); }
 	.setup-refusal { max-width: 16rem; color: var(--text-tertiary); font-size: var(--text-footnote); text-align: right; }
 
 	.dot-wrap { display: flex; justify-content: center; }

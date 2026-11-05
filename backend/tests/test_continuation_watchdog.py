@@ -209,6 +209,30 @@ async def test_post_delivery_crash_recovers_trigger_and_watchdog_audit_atomicall
 
 
 @pytest.mark.asyncio
+async def test_a_watchdog_spread_by_startup_is_delivered_once_it_falls_due():
+    db = _db()
+    _plan, _node = _active_node(db)
+    delivery = _LandedDelivery()
+
+    # A startup sweep spreads the new trigger past `now`, so it is not due yet.
+    await runner.sweep(
+        "2000-01-01T00:01:01+00:00",
+        db=db, sources=[WatchdogSource()], deliver=delivery, startup_jitter_seconds=600,
+    )
+    assert delivery.calls == 0
+
+    await runner.sweep(
+        "2000-01-01T01:00:00+00:00",
+        db=db, sources=[WatchdogSource()], deliver=delivery,
+    )
+
+    assert delivery.calls == 1
+    assert [tuple(row) for row in db.execute(
+        "SELECT state, attempt FROM continuation_triggers WHERE kind='t1_watchdog'"
+    )] == [("delivered", 1)]
+
+
+@pytest.mark.asyncio
 async def test_watchdog_keeps_waking_past_three_cycles_with_one_trigger_each():
     db = _db()
     _plan, node = _active_node(db)

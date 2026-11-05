@@ -1,0 +1,8 @@
+{
+  "body": null,
+  "dry_run": true,
+  "is_multipart_upload": true,
+  "method": "POST",
+  "query_params": [],
+  "url": "https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send"
+}

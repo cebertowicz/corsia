@@ -14,8 +14,7 @@ import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException
 
 from connections import harness_usage
-from connections.models import get_connection
-from connections.source_state import HARNESS_PROVIDERS, check_harness_source, row_state
+from connections.source_state import HARNESS_PROVIDERS, check_harness_source, harness_state
 from infra.auth import require_user, require_user_header_only
 from infra.db_async import run_in_db, run_off_db
 from llm import local_sources, network_discovery
@@ -53,7 +52,7 @@ def _default_limit(provider: str) -> dict[str, Any] | None:
 
 def _harness_source(provider: str) -> dict[str, Any]:
     name, install, login = _HARNESS_SOURCES[provider]
-    view = row_state(get_connection(provider))
+    view = harness_state(provider)
     fix = {"not_installed": install, "needs_auth": login,
            "unverified": CHECK_AGAIN}.get(view["state"])
     from connections.corsia_agent_account import source_account_view
@@ -110,7 +109,7 @@ async def _recheck() -> None:
         return {"ok": await run_off_db(refresh_github_connection, keep_row_on_failed_probe=True)}
 
     results = await asyncio.gather(
-        *(check_harness_source(provider, rediscover=True) for provider in HARNESS_PROVIDERS),
+        *(check_harness_source(provider) for provider in HARNESS_PROVIDERS),
         sweep_omlx(),
         refresh_github(),
         *(check_external_server(s["id"], s) for s in live if s.get("kind") == "external"),
@@ -122,8 +121,7 @@ async def _recheck() -> None:
     from api.provider_cli_link import cache_invisible_binary
 
     for provider in HARNESS_PROVIDERS:
-        row = await run_in_db(get_connection, provider)
-        if row_state(row)["state"] == "not_installed":
+        if (await run_in_db(harness_state, provider))["state"] == "not_installed":
             await asyncio.to_thread(cache_invisible_binary, provider)
 
 

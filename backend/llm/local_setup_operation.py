@@ -45,6 +45,9 @@ class Operation:
     resident_bytes: int | None = None
     smarts_level: float | None = None
     tokens_per_second: float | None = None
+    smarts: float | None = None
+    table_on_ssd: bool = False
+    table_bytes: int = 0
 
     @classmethod
     def for_model(cls, model: LocalModel | None, kind: str, task_id: str | None = None, *, onboarding: bool = False) -> Operation:
@@ -55,7 +58,8 @@ class Operation:
             model.repository, model.download_size_bytes, model.context_window, kind, task_id,
             model.name, model.level, model.fp16, model.relative_speed, onboarding,
             resident_bytes=model.resident_bytes, smarts_level=model.smarts_level,
-            tokens_per_second=model.tokens_per_second,
+            tokens_per_second=model.tokens_per_second, smarts=model.smarts,
+            table_on_ssd=model.table_on_ssd, table_bytes=model.table_bytes,
         )
 
     @property
@@ -71,7 +75,7 @@ class Operation:
         return LocalModel(
             self.repository, self.download_size_bytes, self.context_window, self.name,
             self.level, self.fp16, self.relative_speed, self.resident_bytes,
-            self.smarts_level, self.tokens_per_second,
+            self.smarts_level, self.tokens_per_second, self.smarts, self.table_on_ssd, self.table_bytes,
         )
 
 

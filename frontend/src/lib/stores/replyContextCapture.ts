@@ -22,6 +22,8 @@ export interface ReplyComment {
 	anchor_prefix: string;
 	anchor_suffix: string;
 	note: string;
+	root_user_message_id?: string;
+	root_cid?: string;
 }
 
 export interface ReplyContext {

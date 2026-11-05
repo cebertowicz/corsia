@@ -7,6 +7,8 @@ from typing import Any, NamedTuple
 
 from infra.github_pr_identity import GITHUB_INTEGRATION, PR_TYPE
 
+ISSUE_TYPE = "issue"
+
 log = logging.getLogger(__name__)
 
 
@@ -23,7 +25,7 @@ class PrResolutionError(RuntimeError):
 
 
 def pr_external_id(repo: str, pr_number: int | str) -> str:
-    """Canonical PR artifact external_id: ``<owner>/<repo>#<number>``."""
+    """GitHub PR external id; issues share the same ``<owner>/<repo>#<number>`` shape."""
     return f"{repo}#{pr_number}"
 
 

@@ -172,7 +172,7 @@ function ensureClientSetup(): void {
 		const code = btn.parentElement?.querySelector('code');
 		if (!code) return;
 		void navigator.clipboard.writeText(code.textContent ?? '').then(() => {
-			btn.textContent = 'Copied!';
+			btn.textContent = 'Copied';
 			setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
 		});
 	});

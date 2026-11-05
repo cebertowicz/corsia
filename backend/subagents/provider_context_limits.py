@@ -17,10 +17,26 @@ def _flatten(value: Any) -> str:
         return str(value)
 
 
+# oMLX refuses a prompt whose prefill cannot fit in memory: "oMLX prefill memory
+# guard rejected this prompt: ...", whichever of its guards refused. Anchored on
+# the refusal verb so a settings label such as "Memory Guard: aggressive" does
+# not classify.
+_OMLX_GUARD_MARKER = "prefillmemoryguardrejected"
+
+
+def _normalized(value: Any) -> str:
+    normalized = _flatten(value).lower().replace("_", "").replace("-", "")
+    return "".join(normalized.split())
+
+
+def is_omlx_guard_refusal(value: Any) -> bool:
+    """Return true for an oMLX prefill memory-guard refusal, in any of its wordings."""
+    return _OMLX_GUARD_MARKER in _normalized(value)
+
+
 def is_provider_context_limit(value: Any) -> bool:
     """Return true for provider errors that mean the prompt exceeded context."""
-    normalized = _flatten(value).lower().replace("_", "").replace("-", "")
-    normalized = "".join(normalized.split())
+    normalized = _normalized(value)
     markers = (
         "contextwindowexceeded",
         "contextlengthexceeded",
@@ -30,6 +46,7 @@ def is_provider_context_limit(value: Any) -> bool:
         # mention ("a maximum context length of N tokens"), which must not
         # classify.
         "maximumcontextlengthis",
+        _OMLX_GUARD_MARKER,
         "promptistoolong",
         "prompttoolong",
         "ranoutofroom",

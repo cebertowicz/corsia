@@ -43,6 +43,21 @@ def test_managed_version_uses_the_bundled_binary_not_path(monkeypatch):
     assert commands == [[bundled, "--version"]]
 
 
+def test_private_source_version_uses_relocatable_module(tmp_path, monkeypatch):
+    from llm import managed_omlx_binary
+
+    environment = tmp_path / "moved" / "runtime"
+    executable = str(environment / "bin" / "omlx")
+    commands = []
+    monkeypatch.setattr(managed_omlx_binary, "source_omlx_environment", lambda: environment)
+    monkeypatch.setattr(local_setup_auth, "managed_omlx_executable", lambda: executable)
+    monkeypatch.setattr(local_setup_auth.subprocess, "run", lambda command, **_kwargs: (
+        commands.append(command) or subprocess.CompletedProcess(command, 0, stdout="0.7.1rc1")
+    ))
+    assert local_setup_auth.omlx_version() == "0.7.1rc1"
+    assert commands == [[str(environment / "bin" / "python"), "-m", "omlx.cli", "--version"]]
+
+
 def test_an_unqueryable_omlx_version_fails_closed(monkeypatch):
     monkeypatch.setattr(
         local_setup_auth.subprocess, "run",

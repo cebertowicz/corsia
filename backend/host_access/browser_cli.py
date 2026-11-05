@@ -229,6 +229,14 @@ def render_model_result(result: CommandResult, *, redactions: dict[str, str]) ->
     return _bounded(rendered, redactions)
 
 
+def rendered_field(rendered: str, key: str) -> str | None:
+    """Read one value back from render_model_result's output: the `data` object, unwrapped."""
+    if rendered.startswith("Error:"):
+        return None
+    value = json_object(rendered).get(key)
+    return value if isinstance(value, str) else rendered
+
+
 def _bounded(rendered: str, redactions: dict[str, str]) -> str:
     for private_value, label in redactions.items():
         if private_value:

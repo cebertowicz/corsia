@@ -36,7 +36,7 @@ describe('SetupWorkFolder', () => {
 		] as const) {
 			render({ state: 'ready', path, folder_warning });
 			button('Change').click(); await settle();
-			expect(host.textContent).toContain('Agents open anything in the work folder without asking;');
+			expect(host.textContent).toContain('Agents open anything in the work folder without asking.');
 			expect(button('Use ~/CORSIA')).toBeTruthy();
 			expect(button('Keep this folder')).toBeTruthy();
 			await unmount(component!); component = null; host.remove();

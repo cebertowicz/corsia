@@ -150,10 +150,13 @@ def set_use_workspace(project_id: str, *, use_workspace: bool, expected_revision
         return policy_payload(project_id, db=connection)
 
 
-def ordered_accounts(provider_key: str, policy: dict, *, selection_only: bool = False, db) -> list[dict]:
-    accounts = (list_account_selection_facts(provider_key, db=db) if selection_only
-                else list_accounts(provider=provider_key, db=db))
-    return _in_saved_order([account for account in accounts if account["id"] not in policy["disabled"]], policy["order"])
+def ordered_accounts(provider_key: str, policy: dict, *, selection_only: bool = False, db,
+                     accounts: list[dict] | None = None) -> list[dict]:
+    if accounts is None:
+        accounts = (list_account_selection_facts(provider_key, db=db) if selection_only
+                    else list_accounts(provider=provider_key, db=db))
+    return _in_saved_order([account for account in accounts if account['provider'] == provider_key
+                            and account['state'] != 'removed' and account['id'] not in policy['disabled']], policy['order'])
 
 
 def _in_saved_order(accounts: list[dict], order) -> list[dict]:

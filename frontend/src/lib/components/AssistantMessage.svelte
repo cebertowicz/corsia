@@ -171,8 +171,8 @@
 
 	<ChatCommentThreads messageId={msg.id} threadId={msg.thread_id} comments={msg.chat_comments ?? []} />
 
-	{#if msg.cards?.length || msg.cards_more || browserChip}
-		<MessageArtifactCards cards={msg.cards ?? []} more={msg.cards_more ?? 0} browser={browserChip} threadId={msg.thread_id} {hiddenHolds} {renderedAsks} />
+	{#if msg.cards?.length || browserChip}
+		<MessageArtifactCards cards={msg.cards ?? []} browser={browserChip} threadId={msg.thread_id} {hiddenHolds} {renderedAsks} />
 	{/if}
 
 		<div class="msg-footer">

@@ -96,6 +96,14 @@ afterEach(async () => {
 });
 
 describe('SubagentConversationLeaf', () => {
+	it('shows a retry message when the agent chat fails to load', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500 })));
+		component = mount(SubagentConversationLeaf, { target: host, props: { threadId: 'child-error' } });
+		flushSync();
+		await vi.waitFor(() => expect(host.textContent).toContain('This agent chat couldn’t load. Try again.'));
+		expect(host.querySelector('[aria-label="Agent chat"]')).not.toBeNull();
+	});
+
 	it('claims the child, loads it into the shared store once, and reloads on reconnect', async () => {
 		activeThreadId.set('parent-thread');
 		vi.stubGlobal('fetch', withOpenTime(vi.fn(async () => response([{

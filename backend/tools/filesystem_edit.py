@@ -10,6 +10,7 @@ import difflib
 from pathlib import Path
 from typing import Any
 
+from eval.tool_allowlist import carry_in_hides
 from infra.db_async import run_off_db
 from infra.guidance_targets import guidance_target
 from tools.base import Tool
@@ -377,6 +378,8 @@ class ListDirTool(Tool):
             entries = await asyncio.to_thread(list_bound_directory, authorized.resolved)
             items = []
             for name, is_dir in sorted(entries):
+                if carry_in_hides(authorized.resolved / name):
+                    continue
                 prefix = "d " if is_dir else "f "
                 items.append(f"{prefix}{name}")
 

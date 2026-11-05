@@ -19,6 +19,9 @@ from core.fork_types import (
 from core.checkpoint_types import CheckpointRequest
 from llm.resolution import ExecutionTarget
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {"claude-code": ("openai/test-checkpoint",), "codex": ("openai/test-checkpoint",)}
+
 
 def _target() -> ExecutionTarget:
     return ExecutionTarget(
@@ -700,6 +703,11 @@ async def test_cold_invoke_adds_frozen_continuity_index_after_creation(
     assert json.dumps({"facts": [entry_id]}, separators=(",", ":")) in instruction
     # The frozen index names no body; only the review below it offers one.
     assert "SECRET BODY" not in instruction.split("[CORSIA saved-entry review]", 1)[0]
+    # The index comes first, so the writer reads the instruction last, not the index.
+    assert instruction.startswith("[CORSIA frozen continuity index]\n")
+    assert instruction.split("[CORSIA saved-entry review]", 1)[0].rstrip().endswith(
+        "Write one checkpoint.",
+    )
 
 
 @pytest.mark.asyncio

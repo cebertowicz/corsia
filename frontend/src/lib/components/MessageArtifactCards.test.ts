@@ -8,7 +8,6 @@ import MessageArtifactCards from './MessageArtifactCards.svelte';
 import type { MessageCard } from '$lib/api/messageCards';
 import { threadWorkspaces } from '$lib/stores/artifactWorkspace';
 import { token } from '$lib/stores/auth';
-import { paneOpen } from '$lib/stores/paneOpen';
 import { answerSubmissionFailed, answerSubmitted, submittedAnswers } from '$lib/stores/cardAnswers';
 import { focusPlanNode } from '$lib/planNodeFocus';
 import UpdateCard from './UpdateCard.svelte';
@@ -32,7 +31,6 @@ const tiles = () => [...host.querySelectorAll<HTMLElement>('.tile')];
 beforeEach(() => {
 	host = document.createElement('div');
 	document.body.appendChild(host);
-	paneOpen.set(false);
 	threadWorkspaces.set({});
 	submittedAnswers.set({});
 });
@@ -44,6 +42,19 @@ afterEach(() => {
 });
 
 describe('MessageArtifactCards', () => {
+	it('renders distinct unregistered files and opens the selected path', () => {
+		const cards = Array.from({ length: 11 }, (_, i) => ask({
+			kind: 'artifact', artifact_id: null, hold_id: undefined, state: undefined,
+			title: `file${i}.md`, name: `file${i}.md`, path: `/workspace/file${i}.md`,
+		}));
+		render({ cards });
+		expect(tiles()).toHaveLength(11);
+		tiles()[10].click();
+		const tab = get(threadWorkspaces).t1.tabs[0];
+		expect(tab.path).toBe('/workspace/file10.md');
+		expect(tab.artifactId).toBeNull();
+	});
+
 	it('names each tile by title, type and round state, and opens the artifact on click', () => {
 		render({ cards: [ask()] });
 
@@ -170,13 +181,10 @@ describe('MessageArtifactCards', () => {
 		expect(host.querySelector('ul')).toBeNull();
 	});
 
-	it('ends the row with a "+N more" tile that opens the artifact pane', () => {
-		render({ cards: [ask({ state: undefined, kind: 'artifact', hold_id: undefined })], more: 3 });
-
-		const last = tiles().at(-1)!;
-		expect(last.textContent).toBe('+3 more');
-		last.click();
-		expect(get(paneOpen)).toBe(true);
+	it('renders every supplied file card in the strip', () => {
+		const cards = Array.from({ length: 9 }, (_, i) => ask({ state: undefined, kind: 'artifact', hold_id: undefined, artifact_id: `a${i}`, title: `file${i}.md` }));
+		render({ cards });
+		expect(tiles().map((tile) => tile.querySelector('.title')?.textContent)).toEqual(cards.map((card) => card.title));
 	});
 
 	it('uses no selected style on a tile', () => {
@@ -231,7 +239,6 @@ describe('MessageArtifactCards', () => {
 		strip.dispatchEvent(new Event('scroll'));
 		expect(strip.hasAttribute('data-before')).toBe(false);
 	});
-
 });
 
 describe('UpdateCard ask row', () => {

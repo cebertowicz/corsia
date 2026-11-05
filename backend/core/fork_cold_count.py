@@ -1,8 +1,10 @@
 """One owner for counting cold fork input, by the writer's tokenizer.
 
-The cold admission, its send-time capacity check, and every harness fork must
-agree on what "input tokens" means, or an admitted fold overflows or a possible
-fold is refused. Counting serialized bytes (the prior bound) overcounts real
+The cold admission and every harness fork must agree on what "input tokens"
+means, or an admitted fold overflows or a possible fold is refused. The
+send-time capacity check passes a bare model id and so keeps the byte bound for
+local writers: it may refuse a cap the fork would fit, never admit one it
+cannot. Counting serialized bytes (the prior bound) overcounts real
 prompts by roughly 2x for Claude and 4x for the Codex surface, which refuses
 folds that would have fit.
 
@@ -15,8 +17,14 @@ Families, and why each bound is sound:
   5/3 bounds the observed range; byte-level BPE can never emit more tokens than
   UTF-8 bytes, so the byte length caps it for dense or multilingual text where
   the ratio would otherwise overshoot.
-- **Unknown** writers keep the byte bound, the only count proved without a
-  tokenizer.
+- **Local** writers of no known family (an oMLX or other OpenAI-compatible
+  server) are counted by that server's own vLLM-style ``/tokenize``: the
+  model's own tokenizer, so the count is exact. Bytes overcount these models
+  2-4x on prose and code, which refused every cold fold on a small local
+  window once the person pasted a document.
+- **Unknown** writers, and a local server that cannot answer ``/tokenize``,
+  keep the byte bound, the only count proved without a tokenizer. No fixed
+  divisor is safe: numeric text measures about one byte per token.
 
 This owner counts cold input only. Warm forks are counted by the provider's own
 reported occupancy, and live send preflight keeps its own estimator.
@@ -25,6 +33,12 @@ reported occupancy, and live send preflight keeps its own estimator.
 from __future__ import annotations
 
 import json
+
+from loguru import logger
+
+# One count is a tokenizer pass on the writer's own machine; a server slower
+# than this to answer is counted in bytes, as it was before it could answer.
+TOKENIZE_TIMEOUT_SECONDS = 5.0
 
 # Recorded Claude-5 cold receipts peaked at 1.663 provider tokens per o200k
 # token; 5/3 covers that range without inventing a new margin.
@@ -84,6 +98,58 @@ def _o200k_tokens(text: str) -> int | None:
     return len(encoding.encode(text, disallowed_special=()))
 
 
+def _tokenize_route(writer: object) -> tuple[str, str, str | None] | None:
+    """The writer's own local OpenAI-compatible server, model id and key.
+
+    Only an execution target is asked. A bare model id comes from the send-time
+    cap check, which runs inside the send and must not call a provider; it
+    keeps the byte bound it always used.
+    """
+    from llm.local_backends import find_backend
+
+    model = None if isinstance(writer, str) else getattr(writer, "transport_model", None)
+    backend = find_backend(model or "")
+    if backend is None:
+        return None
+    try:
+        params = backend.make_provider_params(str(model))
+    except ValueError:
+        # No reachable endpoint: the fork cannot run there either.
+        return None
+    wire, base = str(params.get("model") or ""), params.get("api_base")
+    if not wire.startswith("openai/") or not isinstance(base, str) or not base:
+        return None
+    # vLLM serves /tokenize at the root only; oMLX serves it at both.
+    root = base.rstrip("/").removesuffix("/v1")
+    return f"{root}/tokenize", wire.removeprefix("openai/"), params.get("api_key")
+
+
+def _server_tokens(text: str, writer: object) -> int | None:
+    """Count with the writer's own local server, or None when it cannot answer."""
+    route = _tokenize_route(writer)
+    if route is None:
+        return None
+    import httpx
+
+    url, model, key = route
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    try:
+        response = httpx.post(
+            url, json={"model": model, "prompt": text}, headers=headers,
+            timeout=TOKENIZE_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        body = response.json()
+    except (httpx.HTTPError, ValueError) as error:
+        logger.info("cold count: {} cannot tokenize ({}); counting bytes", url, error)
+        return None
+    count = body.get("count") if isinstance(body, dict) else None
+    if type(count) is not int or count < 0:
+        logger.info("cold count: {} returned no token count; counting bytes", url)
+        return None
+    return count
+
+
 def cold_input_tokens(payload: object, writer: object) -> int:
     """Count one cold payload as its writer's transport will tokenize it.
 
@@ -95,7 +161,8 @@ def cold_input_tokens(payload: object, writer: object) -> int:
     byte_bound = len(text.encode("utf-8"))
     family = tokenizer_family(writer)
     if family == UNKNOWN_FAMILY:
-        return byte_bound
+        served = _server_tokens(text, writer)
+        return byte_bound if served is None else served
     exact = _o200k_tokens(text)
     if exact is None:
         # The bundled encoding is the reason a family is claimed at all; without

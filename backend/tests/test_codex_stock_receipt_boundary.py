@@ -109,7 +109,7 @@ async def test_ci_budget_tolerates_controlled_process_exit_delay(monkeypatch):
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("scenario", ["fresh", "warm", "resume", "fork", "code_mode"])
-async def test_stock_direct_barrier_and_code_mode_bypass(tmp_path, monkeypatch, scenario):
+async def test_stock_direct_barrier_and_code_mode_bypass(tmp_path, monkeypatch, isolated_db, scenario):
     code_mode = scenario == "code_mode"
     binary = shutil.which("codex")
     assert binary, "stock Codex CLI is required for this explicitly selected integration test"
@@ -149,11 +149,25 @@ async def test_stock_direct_barrier_and_code_mode_bypass(tmp_path, monkeypatch, 
             declare_codex_tool_step(session, event["id"], persist=False)
 
     monkeypatch.setattr("subagents.harness_tool_bridge.execute_tool", execute)
-    # A paid launch admits the Default account of a real thread, whose home is
-    # this isolated environment's Codex home.
+    # A paid launch admits the account of a real thread: a signed-in Default whose
+    # runtime home is this isolated Codex home and whose login lives in its own source home.
     from infra.database import get_db
+    from vendor_account_fixtures import signed_in_default
 
-    monkeypatch.setattr("subagents.codex_env._default_app_server_home", lambda: Path(env["CODEX_HOME"]))
+    account = signed_in_default("codex")
+    (tmp_path / "codex-source").mkdir()
+
+    def stage_runtime_home(runtime_home):
+        staged = get_db()
+        try:
+            staged.execute("UPDATE vendor_accounts SET source_home=?, runtime_home=? WHERE id=?",
+                           (str(tmp_path / "codex-source"), runtime_home, account["id"]))
+            staged.commit()
+        finally:
+            staged.close()
+        signed_in_default("codex", models=("codex/gpt-5.4",))  # re-reads the homes just staged
+
+    stage_runtime_home(env["CODEX_HOME"])
 
     db = get_db()
     try:
@@ -197,6 +211,8 @@ async def test_stock_direct_barrier_and_code_mode_bypass(tmp_path, monkeypatch, 
                     )
                     env["CODEX_HOME"] = str(fork_home)
                     session_options["codex_home"] = str(fork_home)
+                    # The fork launches unbound, so admission requires the account's own runtime home.
+                    stage_runtime_home(str(fork_home))
                 session = StockSession(**session_options, codex_thread_id=provider_id)
                 await start_with_ci_budget(session)
             events.clear()

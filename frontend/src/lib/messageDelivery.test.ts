@@ -91,9 +91,11 @@ describe('deliveryPresentation', () => {
 		delivery_state: 'queued', write_outcome: 'proved_no_write', active_turn_id: null, delivery_error, metadata: {},
 	});
 	const SIGN_IN_AGAIN = 'Your message is saved and will send as soon as you sign in again in Settings › Providers.';
+	const SIGN_IN_AGAIN_IN_CHAT = 'Your message is saved and will send as soon as you sign in again.';
 	const SIGN_IN_MISSING = `CORSIA can’t find this chat’s account sign-in on this computer. ${SIGN_IN_AGAIN}`;
 	it.each([
-		['account_signed_out', `This chat’s account is signed out. ${SIGN_IN_AGAIN}`],
+		['account_signed_out', `This chat’s account is signed out. ${SIGN_IN_AGAIN_IN_CHAT}`],
+		['account_not_configured', 'No account is signed in for this chat’s provider. Your message is saved and will send as soon as you sign one in under Settings › Providers.'],
 		['account_login_unverified', `CORSIA couldn’t confirm this chat’s account is still signed in. ${SIGN_IN_AGAIN}`],
 		['account_home_mismatch', SIGN_IN_MISSING],
 		['codex_auth_source_missing', SIGN_IN_MISSING],

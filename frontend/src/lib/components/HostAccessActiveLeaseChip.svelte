@@ -59,7 +59,7 @@
 		<span class="countdown" aria-hidden="true">{remaining(lease, nowMs)}</span>
 	</button>
 	{#key lease.id}
-		<AdaptiveDrawer ariaLabel={`Host access — ${owner(lease)}`} {open} onClose={onClose}>
+		<AdaptiveDrawer ariaLabel={`Host access — ${owner(lease)}`} flushBottom {open} onClose={onClose}>
 			<HostAccessActiveLeaseDrawer
 				{lease}
 				{nowMs}

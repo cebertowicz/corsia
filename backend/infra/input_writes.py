@@ -303,13 +303,18 @@ def settle_unwritten_turn_inputs(
     if not rows:
         return ()
     from connections.account_policy import AccountAdmissionError
+    from infra.thread_recovery import RESTART_TURN_ERROR
 
     if outcome == "error" and isinstance(error, AccountAdmissionError):
         return settle_account_refusal(db, rows, error)
     if outcome == "error" and isinstance(error, CheckpointUnavailable):
         return settle_checkpoint_refusal(db, rows, error)
-    # A plan-limit Stop returns its inputs to the queue at their original seq.
-    if outcome == "completed" or (outcome == "cancelled" and isinstance(error, PlanLimitStop)):
+    # A plan-limit Stop, a restart, or an error after this Turn wrote input returns them to
+    # the queue at their original seq; a Turn that never wrote fails its own, so they fail once.
+    if outcome == "completed" or (outcome == "cancelled" and isinstance(error, PlanLimitStop)) or (
+            outcome == "error" and (str(error) == RESTART_TURN_ERROR or db.execute(
+                "SELECT 1 FROM messages WHERE active_turn_id=? AND write_outcome IN ('accepted','ambiguous')",
+                (turn_id,)).fetchone())):
         db.execute(
             f"UPDATE messages SET metadata={without_login_sql()},active_turn_id=NULL WHERE active_turn_id=? "
             "AND delivery_state='queued'",

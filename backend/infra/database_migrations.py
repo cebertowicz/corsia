@@ -217,7 +217,21 @@ from infra.migration_156_to_157_rehome_repair import migrate_156_to_157
 from infra.migration_157_to_158_error_cause_kinds import migrate_157_to_158
 from infra.migration_158_to_159_unconfine_main_agents import migrate_158_to_159
 from infra.migration_159_to_160_untrusted_confinement import migrate_159_to_160
-from infra.migration_160_to_161_reviewer_gate_pending import migrate_160_to_161
+from infra.migration_160_to_161_self_caused import migrate_160_to_161
+from infra.migration_161_to_162_trial_receipts import migrate_161_to_162
+from infra.migration_162_to_163_coordination_titles import migrate_162_to_163
+from infra.migration_163_to_164_chat_comment_roots import migrate_163_to_164
+from infra.migration_164_to_165_version_attr import migrate_164_to_165
+from infra.migration_165_to_166_retried_comments import migrate_165_to_166
+from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
+from infra.migration_167_to_168_measure_keys import migrate_167_to_168
+from infra.migration_168_to_169_checkpoint_adopted_tokens import migrate_168_to_169
+from infra.migration_169_to_170_trial_crossover import migrate_169_to_170
+from infra.migration_170_to_171_worker_profile import migrate_170_to_171
+from infra.migration_171_to_172_message_drafts import migrate_171_to_172
+from infra.migration_172_to_173_workflow_ref_index import migrate_172_to_173
+from infra.migration_173_to_174_held_replies import migrate_173_to_174
+from infra.migration_174_to_175_reviewer_gate_pending import migrate_174_to_175
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -867,6 +881,20 @@ MIGRATIONS[157] = migrate_157_to_158
 MIGRATIONS[158] = migrate_158_to_159
 MIGRATIONS[159] = migrate_159_to_160
 MIGRATIONS[160] = migrate_160_to_161
+MIGRATIONS[161] = migrate_161_to_162
+MIGRATIONS[162] = migrate_162_to_163
+MIGRATIONS[163] = migrate_163_to_164
+MIGRATIONS[164] = migrate_164_to_165
+MIGRATIONS[165] = migrate_165_to_166
+MIGRATIONS[166] = migrate_166_to_167
+MIGRATIONS[167] = migrate_167_to_168
+MIGRATIONS[168] = migrate_168_to_169
+MIGRATIONS[169] = migrate_169_to_170
+MIGRATIONS[170] = migrate_170_to_171
+MIGRATIONS[171] = migrate_171_to_172
+MIGRATIONS[172] = migrate_172_to_173
+MIGRATIONS[173] = migrate_173_to_174
+MIGRATIONS[174] = migrate_174_to_175
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

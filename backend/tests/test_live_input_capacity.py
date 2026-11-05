@@ -2,6 +2,8 @@
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 
 @pytest.mark.asyncio
 async def test_cc_only_the_last_held_reply_owner_writes_the_steer(isolated_db, monkeypatch):

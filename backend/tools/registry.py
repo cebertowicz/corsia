@@ -5,7 +5,8 @@ from dataclasses import replace
 import logging
 from typing import Any
 
-from host_access.credential_sanitizer import CredentialSafeText, sanitize_credential_text
+from host_access.credential_sanitizer import sanitize_credential_text
+from tools.result_sanitizer import sanitize_result
 from infra.tool_result_errors import is_error_result
 from tools.base import Tool
 from tools.mcp_stamp import ConnectedAppResult, restamp, with_connected_app_stamp
@@ -84,9 +85,12 @@ class ToolRegistry:
     ) -> str:
         """Execute a tool with optional backend-owned review scope."""
         try:
-            result = self._sanitize_result(await self._execute_unredacted(
+            result = sanitize_result(await self._execute_unredacted(
                 name, params, review_request_id=review_request_id,
             ))
+            if isinstance(result, ConnectedAppResult):
+                from registry.tool_result_observation import observe_in_db
+                result = await observe_in_db(result, resolve_dispatch(name, params)[1])
             # The reminder only touches plain text, so a stamped result earns it as text.
             plain = str(result) if isinstance(result, ConnectedAppResult) else result
             result = restamp(result, await remind_current_turn(plain, name, params))
@@ -98,29 +102,12 @@ class ToolRegistry:
                 replace(
                     call,
                     name=name if dispatched else call.name,
-                    result=self._sanitize_result(call.result),
+                    result=sanitize_result(call.result),
                 )
                 for call in failure.completed
             )
             raise
         return result
-
-    @staticmethod
-    def _sanitize_result(result: Any) -> Any:
-        """Apply the text/media boundary; read_file's CredentialSafeText is pre-redacted."""
-        if isinstance(result, CredentialSafeText):
-            return str(result)
-        if not isinstance(result, str):
-            return result
-        redacted = restamp(result, sanitize_credential_text(result))
-        media = getattr(result, "media", None)
-        if media is None:
-            return redacted
-        # Redaction rewrites text; it must not strip the media reference the
-        # provider boundary needs to resolve bytes.
-        from core.media_reads import MediaToolResult
-
-        return MediaToolResult(redacted, media)
 
     async def _authorized_execute(
         self,

@@ -211,15 +211,31 @@ def test_install_writes_the_description_that_was_shown(home):
     assert len(shown) <= 500
 
 
-def test_an_upstream_sidecar_is_dropped_and_only_origin_is_written(home):
+def test_import_keeps_workflow_but_drops_upstream_handler(home):
     roots, workspace = home
     folder = _skill(roots.codex / "skills" / "with-handler", "with-handler", "carries a handler")
     (folder / "corsia.yaml").write_text("handler:\n  kind: cli\n  command: rm\nworkflow:\n  steps: []\n")
 
     assert _install(home, _ids(_offers(home), "with-handler"))[0]["outcome"] == "installed"
     sidecar = yaml.safe_load((workspace / "skills" / "with-handler" / "corsia.yaml").read_text())
-    assert list(sidecar) == ["origin"]
+    assert set(sidecar) == {"origin", "workflow"}
+    assert sidecar["workflow"] == {"steps": []}
     assert sidecar["origin"]["sha256"] == hashlib.sha256((folder / "SKILL.md").read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize(("text", "detail"), [
+    ("workflow:\n  extra: value\n", "corsia.workflow.extra is an unknown key"),
+    ("workflow: [first]\n", "corsia.workflow must be a mapping"),
+])
+def test_import_with_an_invalid_workflow_fails_with_its_reason_and_writes_nothing(home, text, detail):
+    roots, workspace = home
+    folder = _skill(roots.codex / "skills" / "bad-flow", "bad-flow", "carries a bad workflow")
+    (folder / "corsia.yaml").write_text(text)
+
+    result = _install(home, _ids(_offers(home), "bad-flow"))[0]
+    assert (result["outcome"], result["reason"]) == ("failed", "invalid_sidecar")
+    assert detail in result["detail"]
+    assert not (workspace / "skills" / "bad-flow").exists()
 
 
 def test_a_save_that_stops_partway_leaves_nothing_and_can_be_retried(home, monkeypatch):

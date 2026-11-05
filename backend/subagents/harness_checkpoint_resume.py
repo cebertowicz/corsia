@@ -90,6 +90,7 @@ async def _prepare_external_checkpoint(
             reasoning_effort=context.reasoning_effort,
             binary=context.binary,
             warm_source=warm_source,
+            carried_tokens=0,
         )
         # Only the provider knows whether this fork can hold its own input.
         # Carry the cold admission this boundary would otherwise have built so

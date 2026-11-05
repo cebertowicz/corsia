@@ -75,6 +75,12 @@ async def read_designation(user: dict, scope: str) -> dict:
             # The thread list omits the designated thread; this is the server
             # time that orders its model against a later committed switch.
             "updated_at": thread_row.get("updated_at"),
+            # Its switch state, as a listed row carries it, so a reload or a
+            # missed frame still shows a pending or failed model switch.
+            "pending_model": thread_row.get("pending_model"),
+            "switch_status": thread_row.get("switch_status"),
+            "switch_error": thread_row.get("switch_error"),
+            "switch_operation_id": thread_row.get("switch_operation_id"),
             **truth,
         },
     }

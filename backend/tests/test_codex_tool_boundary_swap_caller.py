@@ -18,20 +18,9 @@ from core import fork_runtime
 
 from core.turn_core import TurnIdentity
 from codex_process_fixtures import bind_process_group
-from test_checkpoint_hold_install_resume import _RPCProcess, _seed, _start_checkpoint
+from test_checkpoint_hold_install_resume import _RPCProcess, _default_account, _seed, _start_checkpoint
 
-
-def _codex_home(tmp_path, monkeypatch) -> None:
-    home = tmp_path / "codex-source"
-    home.mkdir()
-    (home / "auth.json").write_text(json.dumps({
-        "auth_mode": "chatgpt", "OPENAI_API_KEY": None,
-        "tokens": {"access_token": "synthetic-fixture-only"},
-    }))
-    (home / "models_cache.json").write_text(json.dumps({
-        "models": [{"slug": "gpt-5-codex", "multi_agent_version": None}],
-    }))
-    monkeypatch.setenv("CODEX_HOME", str(home))
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
 
 
 @pytest.mark.asyncio
@@ -47,10 +36,10 @@ async def test_codex_tool_boundary_swap_survives_its_callers_reader_cleanup(
     from subagents.harness_checkpoint_resume import maintain_external_tool_boundary
 
     target = replace(resolve_execution_target("codex/gpt-5-codex"), context_window=32768)
-    _codex_home(tmp_path, monkeypatch)
     monkeypatch.setattr("llm.resolution.resolve_execution_target", lambda *_a, **_k: target)
     monkeypatch.setattr("subagents.codex_runtime_support.resolve_working_dir", lambda *_: str(tmp_path))
     db = get_db()
+    _default_account(db, tmp_path, target.catalog_id)
     _seed(db, target.catalog_id)
     register_codex_thread("held-thread", "old-provider", checkpoint_generation_id="floor", db=db)
     db.commit()

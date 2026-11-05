@@ -29,7 +29,7 @@ def fetch_pack(item: dict[str, Any], thread_id: str, project_id: str | None, wor
     """Verify, publish and register the current indexed blueprint."""
     from core.skill_resolution import skill_scope_root
     from core.workspace_scaffolding import AtomicRenameUnavailableError
-    from library.items import LibraryIntegrityError, LibraryItemError, LibraryItemUnavailableError, fetch_bundle
+    from library.items import LibraryIntegrityError, LibraryItemError, LibraryItemUnavailableError, LibraryMainChangedError, fetch_bundle
     from library.pack_publish import publish_pack
     from library.pack_validation import validate_pack
     from registry.models import update_surfacing
@@ -46,6 +46,8 @@ def fetch_pack(item: dict[str, Any], thread_id: str, project_id: str | None, wor
         validate_pack(item, files)
     except LibraryItemUnavailableError as error:
         return {"error": "library_unreachable", "message": f"{error}; continue without the pack and try again later"}
+    except LibraryMainChangedError as error:
+        return {"error": "integrity", "message": f"{error}; nothing was saved"}
     except (LibraryIntegrityError, LibraryItemError) as error:
         return {"error": "integrity", "message": f"{error}; nothing was saved, so report it to the conductor and do not retry"}
     root = skill_scope_root(scope="thread", thread_id=thread_id, project_id=project_id, workspace=workspace, db=db)

@@ -20,12 +20,10 @@ from subagents.cc_event_context_usage import (
     consume_and_attach_terminal_context_usage,
 )
 from subagents.cc_event_steps import on_assistant_step
+from subagents.cc_event_terminal_error import rerun_owns_notice, terminal_error
 from subagents.cc_event_tool_settlement import settle_missing_tool_results
 from subagents.cc_event_usage import record_terminal_llm_usage
-from subagents.cc_runtime_errors import (
-    is_empty_text_block_rejection,
-    reconcile_expired_login,
-)
+from subagents.cc_runtime_errors import is_empty_text_block_rejection
 from subagents.terminal_marker_writer import insert_terminal_marker
 
 log = logging.getLogger("subagents.cc_runtime_events")
@@ -59,6 +57,12 @@ async def _flush_pending_reasoning(
     ctx.live.reasoning_provider_message_id = None
 
 
+def result_is_error(ev: dict) -> bool:
+    """Whether a CLI result ends its Turn in error."""
+    # An exhausted ``--max-turns`` is an error turn whatever ``is_error`` says: it returned no answer.
+    return bool(ev.get("is_error")) or ev.get("subtype") == "error_max_turns"
+
+
 def _result_metadata(
     ctx: CCEventContext,
     ev: dict,
@@ -66,7 +70,7 @@ def _result_metadata(
     identity: TurnIdentity,
     apply_now_interrupt_owns_result: bool,
 ) -> tuple[bool, dict]:
-    is_error = bool(ev.get("is_error"))
+    is_error = result_is_error(ev)
     metadata: dict = {
         "cc": True,
         "type": "result",
@@ -90,7 +94,11 @@ def _result_metadata(
         metadata["is_error"] = True
         if not ev.get("stop_reason"):
             metadata["stop_reason"] = "interrupted"
-    if is_error and (cause := auth_failure_kind("claude-code", ev.get("result"))):
+    from subagents.turn_account_error import login_answered
+
+    # A login that answered its check after the expired-login text is not expired.
+    answered = login_answered(ev.get("_corsia_login_verdict"))
+    if is_error and not answered and (cause := auth_failure_kind("claude-code", ev.get("result"))):
         metadata["cause"] = cause
     if tool_boundary._is_context_limit_result(ev):
         cc_trust.distrust(ctx.live)
@@ -101,6 +109,7 @@ def _result_metadata(
     if is_error and metadata.get("stop_reason") != "interrupted":
         metadata.update(cause_fields(
             "claude-code", metadata.get("cause"), ev.get("result"), None, ctx.live.model,
+            login_answered=answered,
         ))
     return is_error, metadata
 
@@ -229,10 +238,10 @@ async def _finish_result_postprocessing(
         })
 
 
-async def _record_plan_completion(ctx: CCEventContext) -> TurnEndEffects:
+async def _record_plan_completion(ctx: CCEventContext, *, turn_id: str) -> TurnEndEffects:
     """Commit and prepare plan effects through the canonical terminal owner."""
 
-    return await record_external_turn_end(ctx.child_id)
+    return await record_external_turn_end(ctx.child_id, turn_id=turn_id)
 
 
 async def _record_plan_error(
@@ -267,10 +276,10 @@ async def _handle_result_error(
 ) -> None:
     if not is_error:
         return
-    from subagents.turn_account_error import claude_turn_signed_out
+    from subagents.turn_account_error import sign_out_on_verdict
 
-    if not await claude_turn_signed_out(metadata.get("turn_id"), ev.get("result"), db=ctx.db):
-        reconcile_expired_login(ev.get("result"), log)
+    # on_event checked the login before taking event_lock, so a Stop or steer never waits on the CLI.
+    await sign_out_on_verdict(ev.get("_corsia_login_verdict"), db=ctx.db)
     if is_empty_text_block_rejection(ev.get("result")):
         await _retire_poisoned_session(ctx, metadata)
 
@@ -309,10 +318,8 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
     )
     outcome = _result_outcome(is_error, metadata)
     await _handle_result_error(ctx, ev, metadata, is_error=is_error)
-    settlement = await claim_terminal(
-        identity, outcome,
-        (ev.get("result") or "Claude Code turn failed") if outcome == "error" else None,
-    )
+    error = terminal_error(ev, metadata, outcome, stop_requested=ctx.live.checkpoint_wait_scope.stop_requested)
+    settlement = await claim_terminal(identity, outcome, error)
     if settlement.result is not TurnTerminalResult.APPLIED:
         log.debug(
             "cc_runtime: suppressed non-owning terminal for %s: %s",
@@ -322,7 +329,9 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
     ingress_event["_corsia_terminal_committed"] = True
     ingress_event["_corsia_terminal_settlement"] = settlement
     _clear_terminal_live_state(ctx)
-    marker_id, created_at = await _insert_result_marker(ctx, content, metadata)
+    marker_id, created_at = None, ""
+    if not await rerun_owns_notice(ctx, identity.turn_id, error):
+        marker_id, created_at = await _insert_result_marker(ctx, content, metadata)
     context_message_id = ctx.live.last_assistant_message_id or marker_id
     payload_body = {"type": "turn_complete", "thread_id": ctx.child_id}
     if context_message_id is not None:
@@ -348,7 +357,7 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
                     turn_id=identity.turn_id,
                 )
             else:
-                effects = await _record_plan_completion(ctx)
+                effects = await _record_plan_completion(ctx, turn_id=identity.turn_id)
     finally:
         if ctx.live.turn_terminal is not None:
             ctx.live.turn_terminal.set()

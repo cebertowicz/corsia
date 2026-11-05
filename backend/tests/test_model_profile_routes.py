@@ -32,6 +32,11 @@ def client(isolated_db, monkeypatch):
                 (model_id, harness, provider, name, model_id, name),
             )
         db.commit()
+        from vendor_account_fixtures import signed_in_default
+
+        # A harness model's discovered window is what a signed-in account lists.
+        for vendor in ("claude-code", "codex"):
+            signed_in_default(vendor, db=db)
     finally:
         db.close()
 

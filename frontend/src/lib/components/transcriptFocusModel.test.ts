@@ -35,6 +35,15 @@ describe('Focus transcript presentation', () => {
 		});
 	});
 
+	it.each(['held_reply.sent', 'held_reply.declined', 'held_reply.not_sent'])('shows %s as a standalone receipt', (eventType) => {
+		const entries = buildTranscriptPresentation([
+			assistant({ id: 'before' }),
+			{ id: 'receipt', thread_id: 'thread', role: 'system', content: 'agent text', metadata: { type: 'context_event', event_type: eventType, summary: 'Receipt' } },
+			assistant({ id: 'after' }),
+		], true);
+		expect(entries).toMatchObject([{ kind: 'fold' }, { kind: 'message', message: { id: 'receipt' } }, { kind: 'fold' }]);
+	});
+
 	it('hides activity rows and agent inputs with ordinary running work', () => {
 		const entries = buildTranscriptPresentation([
 			assistant({ id: 'before' }),

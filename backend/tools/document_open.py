@@ -22,12 +22,11 @@ _REQUESTED = (
     "Asked this thread's canvas to show it, on {count} screens where the user had "
     "this thread open. This is a request, not confirmation: a screen drops it if "
     "the user has just moved. Do not tell the user they have seen it. If you tell "
-    "them it is in their canvas, do it in a `post_update` (load it by name if it "
-    "is not listed)."
+    "them it is in their canvas, do it in a `post_update`."
 )
 _VIEW_LINK = (
     "You cannot open it in the user's view. Give the user this link in a "
-    "`post_update` (load it by name if it is not listed). Do not ask them to "
+    "`post_update`. Do not ask them to "
     "switch threads."
 )
 _CHILD_LINK = (

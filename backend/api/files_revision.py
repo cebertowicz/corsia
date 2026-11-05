@@ -17,7 +17,7 @@ from infra.auth import authenticate, may_access_artifact
 from infra import config
 from infra.database import get_db
 from infra.db_async import run_in_db, run_off_db
-from core.workspace_context_sources import is_workspace_context_path
+from core.workspace_context_sources import is_read_only_context_path
 from registry import models as registry_models
 from registry import service as registry_service
 from registry.file_types import image_media_type
@@ -30,12 +30,12 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 def _writable(path: Path, bases: list[Path], *, db=None) -> bool:
     """Whether the doc API would accept a write here.
 
-    Mirrors the two refusals ``PUT /content`` enforces: workspace context files
-    are read-only via this API, and everything must sit inside a write-allowed
+    Mirrors the two refusals ``PUT /content`` enforces: read-only context files
+    stay read-only via this API, and everything must sit inside a write-allowed
     scope root. Reporting it on read lets the editor open a tab as ``readonly``
     instead of discovering it only when the first autosave fails.
     """
-    if is_workspace_context_path(path, config.WORKSPACE, db=db):
+    if is_read_only_context_path(path, config.WORKSPACE, db=db):
         return False
     return path_write_allowed(path, bases)
 

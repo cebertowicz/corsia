@@ -103,7 +103,7 @@
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div class="scope-pills-backdrop" onclick={closeScopePills}></div>
-		<div class="scope-pills" role="menu" aria-label="Create chat in scope">
+		<div class="scope-pills" role="menu" aria-label="New chat in a project or workspace">
 			<div class="scope-pills-cap">New chat in…</div>
 			{#each scopeOptions as opt, i (opt.id ?? 'workspace')}
 				<button
@@ -130,7 +130,7 @@
 	<button
 		class="rail-newchat"
 		class:armed={scopePillsOpen}
-		title="New chat — hold to pick a scope"
+		title="New chat — hold to choose a project or workspace"
 		aria-label="New chat"
 		aria-haspopup="menu"
 		aria-expanded={scopePillsOpen}

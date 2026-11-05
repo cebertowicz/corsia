@@ -5,8 +5,14 @@ from infra.error_recovery import stamp_at_turn_start as stamp_recovered_errors
 from infra.vendor_login import read_turn_receipt, stamp_initial_claim, without_login_sql
 
 
-def assign_turn(db, thread_id: str, turn_id: str, rows, *, initial: bool = False):
-    """Preserve plan stamps; only an initial claim mints its own login anchor."""
+def assign_turn(
+    db, thread_id: str, turn_id: str, rows, *, initial: bool = False, held_error_id: str | None = None,
+):
+    """Preserve plan stamps; only an initial claim mints its own login anchor.
+
+    `held_error_id` is the error the thread's latest Turn left, read before this
+    Turn's row made it stale; the returned ids include it so it is re-published.
+    """
     from infra.human_reply import record_human_turn
     from plans.public import thread_paused_since
 
@@ -29,5 +35,7 @@ def assign_turn(db, thread_id: str, turn_id: str, rows, *, initial: bool = False
         receipt = stamp_initial_claim(db, turn_id, message_ids[0])
         # The agent moves past any turn-ending error here, in the claim that starts its turn.
         recovered = tuple(stamp_recovered_errors(db, thread_id, rows))
+        if held_error_id is not None and held_error_id not in recovered:
+            recovered = (*recovered, held_error_id)
     stamps = record_human_turn(db, thread_id, turn_id, rows, {'plan_paused_since': since})
     return stamps, receipt, recovered

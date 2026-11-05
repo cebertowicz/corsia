@@ -18,8 +18,11 @@ from core import fork_cc_commands
 from core.checkpoint_types import CheckpointProviderForkRequest
 from history.types import HistoryBoundary
 from llm.resolution import ExecutionTarget
-from vendor_account_fixtures import default_receipt, seed_turn_on_default
+from vendor_account_fixtures import default_home, default_receipt, seed_turn_on_default
 from native_checkpoint_fixtures import cold_source, seed_vendor_checkpoint_thread
+
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {'claude-code': ('catalog-claude-code',), 'codex': ('catalog-codex',)}
 
 
 def _target(harness: str) -> ExecutionTarget:
@@ -788,7 +791,7 @@ async def test_cc_preserves_launch_and_accepts_error_envelope_body(
         transcript.stat().st_size,
         hashlib.sha256(transcript.read_bytes()).hexdigest(),
         invocation,
-        None,
+        default_home("claude-code"),
         vendor_account_receipt=default_receipt("claude-code"),
     )
     record = {
@@ -1333,7 +1336,7 @@ async def test_codex_durable_capture_and_exact_rollout_resume(tmp_path, monkeypa
     """Codex resumes a frozen durable rollout after its process was evicted."""
     from core import fork_codex as codex
 
-    home = tmp_path / "codex-home"
+    home = Path(default_home("codex"))  # a session resumes from its own account home
     monkeypatch.setattr("llm.codex_rollout_files.default_codex_sessions_root", lambda: home / "sessions")
     rollout = home / "sessions" / "2026" / "08" / "26" / "rollout-source.jsonl"
     rollout.parent.mkdir(parents=True)
@@ -1553,7 +1556,7 @@ async def test_codex_checkpoint_uses_callback_capable_app_server(
     from core import fork_codex as codex
     from infra.provider_usage import TokenUsage
 
-    home = tmp_path / "home"
+    home = Path(default_home("codex"))
     monkeypatch.setattr("llm.codex_rollout_files.default_codex_sessions_root", lambda: home / "sessions")
     rollout = home / "sessions" / "rollout.jsonl"
     rollout.parent.mkdir(parents=True)
@@ -1707,7 +1710,7 @@ async def test_checkpoint_cancel_terminates_exact_provider_handle(
             transcript.stat().st_size,
             hashlib.sha256(transcript.read_bytes()).hexdigest(),
             invocation,
-            None,
+            default_home("claude-code"),
             vendor_account_receipt=default_receipt("claude-code"),
         )
         request = _request(_target("claude-code"), source, binary="harness")
@@ -1721,7 +1724,7 @@ async def test_checkpoint_cancel_terminates_exact_provider_handle(
     else:
         from core import fork_codex as module
 
-        home = tmp_path / "home"
+        home = Path(default_home("codex"))
         monkeypatch.setattr("llm.codex_rollout_files.default_codex_sessions_root", lambda: home / "sessions")
         rollout = home / "sessions" / "rollout.jsonl"
         rollout.parent.mkdir(parents=True)

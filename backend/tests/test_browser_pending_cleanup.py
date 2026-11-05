@@ -142,7 +142,7 @@ def test_exit_torn_read_type_is_emitted_only_for_specific_missing_reads(tmp_path
     with pytest.raises(identity.BrowserExitTornRead):
         identity.artifact_stamp(tmp_path / 'missing')
     with pytest.raises(identity.BrowserExitTornRead):
-        identity._read_regular_sidecar(tmp_path / 'missing', 64)
+        identity.read_regular_sidecar(tmp_path / 'missing', 64)
     with pytest.raises(identity.BrowserIdentityError) as malformed:
         identity.artifact_stamp(tmp_path)
     assert not isinstance(malformed.value, identity.BrowserExitTornRead)
@@ -256,7 +256,7 @@ async def test_pid_sidecar_removed_mid_read_after_ack_is_an_exit_torn_read(synth
     runtime = owner._sessions['thread']
     runtime.close_task = asyncio.create_task(owner._request_close(runtime))
     await runtime.close_task
-    read, removed = identity._read_regular_sidecar, []
+    read, removed = identity.read_regular_sidecar, []
 
     def exiting(path, limit):
         if not removed and path.suffix == '.pid':
@@ -265,7 +265,7 @@ async def test_pid_sidecar_removed_mid_read_after_ack_is_an_exit_torn_read(synth
             fake.release_exit(runtime.record.session)
         return read(path, limit)
 
-    monkeypatch.setattr(identity, '_read_regular_sidecar', exiting)
+    monkeypatch.setattr(identity, 'read_regular_sidecar', exiting)
     await owner.close_thread('thread')
     assert removed and owner.live_count() == 0 and runtime.record.terminal_state == 'closed'
 

@@ -663,11 +663,14 @@ async def test_failed_cc_start_cleans_early_live_and_config(
 
 def _registered_transcript(monkeypatch, tmp_path) -> None:
     """Put registered session cc-1 where its launch resumes it, so Claude is what rejects it."""
+    from vendor_account_fixtures import point_default_home
+
     root = tmp_path / ".claude"
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(root))
     transcript = root / "projects" / "-registered" / "cc-1.jsonl"
     transcript.parent.mkdir(parents=True)
     transcript.write_text("{}\n")
+    point_default_home("claude-code", root)  # the launch resumes from the account's own home
 
 
 @pytest.mark.asyncio

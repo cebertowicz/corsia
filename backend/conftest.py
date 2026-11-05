@@ -77,6 +77,21 @@ def pytest_runtest_call(item):
     return result
 
 
+@pytest.fixture(scope="session")
+def _browser_sweep_test_root(tmp_path_factory):
+    """Keep startup recovery away from every real browser socket directory."""
+    return tmp_path_factory.mktemp("browser-sweep")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_browser_startup_sweep(monkeypatch, _browser_sweep_test_root):
+    from functools import partial
+    from host_access import browser_orphan
+
+    monkeypatch.setattr(browser_orphan, "close_dead_sessions",
+                        partial(browser_orphan.close_dead_sessions, root=_browser_sweep_test_root))
+
+
 @pytest.fixture
 def local_model_host(monkeypatch):
     """Pin the local-model host gate, including its imported alias."""
@@ -157,7 +172,6 @@ def _init_isolated_db_schema():
     with pytest.MonkeyPatch.context() as seed_probe:
         seed_probe.setattr(shutil, "which", lambda name, *_a, **_k: name)
         seed_probe.setattr(connections, "_gh_status", lambda _binary: (True, None))
-        seed_probe.setattr(connections, "_codex_sign_in_state", lambda _binary: "ready")
         init_db()
     # A token authenticates only if it is a row, so the session database needs
     # the accounts the suite signs in as before any authenticated route is
@@ -168,19 +182,10 @@ def _init_isolated_db_schema():
 
 
 @pytest.fixture(autouse=True)
-def _no_host_harness_sign_in_check(monkeypatch):
-    """Startup's sign-in check never runs a host harness CLI in a unit test.
-
-    Its result would depend on whichever codex or claude the host has and is
-    signed in to. Tests of the check itself call ``connections.source_state``
-    directly with their own stubs. GitHub's ``gh auth status``, which the
-    seed and the model-source recheck run, reads signed in unless a test
-    patches it.
+def _no_host_github_sign_in_check(monkeypatch):
+    """GitHub's ``gh auth status``, which the seed and the model-source recheck run,
+    reads signed in unless a test patches it, so no unit test depends on the host's gh.
     """
-    async def _skip(_provider, *, rediscover=False):
-        return None
-
-    monkeypatch.setattr("connections.startup.check_harness_source", _skip)
     monkeypatch.setattr("connections._gh_status", lambda _binary: (True, None))
 
 
@@ -265,13 +270,14 @@ def integration_client(integration_workspace):
     import automation.restart_startup as restart_startup
     import connections
     import llm.network_discovery as network_discovery
+    import llm.live_cost_map as live_cost_map
     import ws.presence_control as presence_control
     import infra.bulletin_live as bulletin_live
     from main import app
     from fastapi.testclient import TestClient
     from unittest.mock import patch
 
-    async def _skip_external_harness_discovery() -> list[dict]:
+    async def _skip_startup_network_refreshes() -> list[dict]:
         return []
 
     async def _suspend_forever(*_args) -> None:
@@ -303,7 +309,12 @@ def integration_client(integration_workspace):
         suspended.enter_context(patch.object(
             app_lifecycle,
             "_startup_harness_discovery",
-            _skip_external_harness_discovery,
+            _skip_startup_network_refreshes,
+        ))
+        # A cloud discovery waiting on the startup map can otherwise resume
+        # after a per-test database reset has begun.
+        suspended.enter_context(patch.object(
+            app_lifecycle, "_startup_cloud_discovery", _skip_startup_network_refreshes,
         ))
         # Startup's init_db would re-seed the session database's CLI rows from
         # whatever this host has installed, undoing the deterministic rows
@@ -314,6 +325,7 @@ def integration_client(integration_workspace):
         # The session app cannot refresh mutable rollup caches while per-test
         # fixtures repeatedly replace the active isolated database.
         suspended.enter_context(patch.object(usage_rollup, "schedule_refresh", lambda: None))
+        suspended.enter_context(patch.object(live_cost_map, "_refresh", _skip_startup_network_refreshes))
         for module, loop_name in _BACKGROUND_LOOPS:
             suspended.enter_context(
                 patch.object(module, loop_name, _suspend_forever)

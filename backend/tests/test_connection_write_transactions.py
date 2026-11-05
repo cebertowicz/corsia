@@ -29,26 +29,23 @@ def catalog(isolated_db):
     return isolated_db
 
 
-def _change(operation, *, db=None):
-    from connections.models import set_connection_status, upsert_connection
+def _change(*, db=None):
+    from connections.models import upsert_connection
 
-    if operation == "upsert":
-        return upsert_connection(
-            type="cli", provider="codex", status="needs_auth",
-            config={"binary": "test-codex"}, db=db,
-        )
-    return set_connection_status("codex", "needs_auth", db=db)
+    return upsert_connection(
+        type="cli", provider="codex", status="needs_auth",
+        config={"binary": "test-codex"}, db=db,
+    )
 
 
-@pytest.mark.parametrize("operation", ["upsert", "status"])
-def test_standalone_connector_write_preserves_unknown_owner(catalog, operation):
+def test_standalone_connector_write_preserves_unknown_owner(catalog):
     from infra.database import TransactionOwnershipError, get_db
 
     db = get_db()
     db.execute("UPDATE connections SET config='{}' WHERE provider='claude-code'")
     try:
         with pytest.raises(TransactionOwnershipError):
-            _change(operation)
+            _change()
         assert db.in_transaction
         assert _read(catalog, "SELECT config FROM connections WHERE provider='claude-code'") == [(None,)]
         db.commit()
@@ -59,21 +56,19 @@ def test_standalone_connector_write_preserves_unknown_owner(catalog, operation):
         db.close()
 
 
-@pytest.mark.parametrize("operation", ["upsert", "status"])
-def test_outer_rollback_reverts_connector_and_projection(catalog, operation):
+def test_outer_rollback_reverts_connector_and_projection(catalog):
     from infra.database import write_transaction
 
     with pytest.raises(ValueError, match="abort outer"):
         with write_transaction(None, scope="test_connection_owner") as db:
-            _change(operation, db=db)
+            _change(db=db)
             raise ValueError("abort outer")
     assert _read(catalog, "SELECT status FROM connections WHERE provider='codex'") == [("available",)]
     assert _read(catalog, "SELECT id FROM models WHERE harness='codex'") == []
     _writer_available(catalog)
 
 
-@pytest.mark.parametrize("operation", ["upsert", "status"])
-def test_projection_collision_preserves_outer_work(catalog, operation):
+def test_projection_collision_preserves_outer_work(catalog):
     from infra.database import write_transaction
 
     with closing(sqlite3.connect(str(catalog))) as db:
@@ -86,7 +81,7 @@ def test_projection_collision_preserves_outer_work(catalog, operation):
     with write_transaction(None, scope="test_connection_owner") as db:
         db.execute("UPDATE connections SET config='{}' WHERE provider='claude-code'")
         with pytest.raises(ValueError, match="legacy fallback collision"):
-            _change(operation, db=db)
+            _change(db=db)
         assert db.in_transaction
         assert db.execute("SELECT config FROM connections WHERE provider='claude-code'").fetchone()[0] == "{}"
     assert _read(catalog, "SELECT status FROM connections WHERE provider='codex'") == [("available",)]
@@ -94,8 +89,7 @@ def test_projection_collision_preserves_outer_work(catalog, operation):
     assert _read(catalog, "SELECT config FROM connections WHERE provider='claude-code'") == [("{}",)]
 
 
-@pytest.mark.parametrize("operation", ["upsert", "status"])
-def test_failed_connector_commit_closes_its_connection(catalog, monkeypatch, operation):
+def test_failed_connector_commit_closes_its_connection(catalog, monkeypatch):
     from connections import models
     from infra import database
 
@@ -115,7 +109,7 @@ def test_failed_connector_commit_closes_its_connection(catalog, monkeypatch, ope
     monkeypatch.setattr(models, "get_db", lambda: db)
     try:
         with pytest.raises(sqlite3.OperationalError, match="forced connector commit failure"):
-            _change(operation)
+            _change()
         assert db.closed
         assert _read(catalog, "SELECT status FROM connections WHERE provider='codex'") == [("available",)]
         assert _read(catalog, "SELECT id FROM models WHERE harness='codex'") == []
@@ -124,9 +118,8 @@ def test_failed_connector_commit_closes_its_connection(catalog, monkeypatch, ope
         db.close()
 
 
-@pytest.mark.parametrize("operation", ["upsert", "status"])
-def test_standalone_connector_commits_its_projection_before_return(catalog, operation):
-    row = _change(operation)
+def test_standalone_connector_commits_its_projection_before_return(catalog):
+    row = _change()
     assert (row["id"], row["type"], row["provider"], row["status"]) == (
         "test-codex", "cli", "codex", "needs_auth",
     )
@@ -137,17 +130,20 @@ def test_standalone_connector_commits_its_projection_before_return(catalog, oper
 
 
 @pytest.mark.parametrize("provider,selector", [("codex", "gpt-5-codex"), ("claude-code", "opus")])
-def test_available_connector_keeps_its_referenced_model(catalog, provider, selector):
-    from connections.models import set_connection_status
+def test_discovered_connector_keeps_its_referenced_model(catalog, provider, selector):
+    from connections.harness_model_rows import CACHE_KEY
+    from connections.models import upsert_connection
 
     model_id = f"{provider}/{selector}"
-    set_connection_status(provider, "needs_auth")
+    config = {"binary": f"test-{provider}"}
+    upsert_connection(type="cli", provider=provider, status="needs_auth", config=config)
     with closing(sqlite3.connect(str(catalog))) as db:
         db.execute("INSERT INTO settings (key,value,updated_at) VALUES ('agents',?,'t')", (
             json.dumps({"defaults": {"reviewer_model": model_id}}),
         ))
         db.commit()
-    row = set_connection_status(provider, "available")
+    row = upsert_connection(type="cli", provider=provider, status="available",
+                            config={**config, CACHE_KEY: {}})
     assert row["status"] == "available"
     with closing(sqlite3.connect(str(catalog))) as db:
         assert db.execute(
@@ -168,9 +164,8 @@ def test_startup_connector_probes_run_outside_writes(catalog, monkeypatch):
 
     monkeypatch.setattr(shutil, "which", probe)
     monkeypatch.setattr(connections, "_gh_status", lambda _binary: (bool(probe("gh-auth")), None))
-    monkeypatch.setattr(connections, "_codex_sign_in_state", lambda binary: "ready" if probe("codex-auth") else "needs_auth")
     assert connections.seed_builtin_connections() == 3
-    assert observed == ["claude", "gh", "gh-auth", "codex", "codex-auth"]
+    assert observed == ["claude", "gh", "gh-auth", "codex"]
     assert _read(catalog, "SELECT provider,status FROM connections ORDER BY provider") == [
         ("claude-code", "available"), ("codex", "available"), ("github", "available"),
     ]

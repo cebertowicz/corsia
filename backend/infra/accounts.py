@@ -29,10 +29,11 @@ from __future__ import annotations
 import hashlib
 import secrets
 import sqlite3
+from collections.abc import Callable
 from datetime import timedelta
 
 import infra.setup_marker as setup_marker  # mypy resolves a new submodule only this way
-from infra import user_profile
+from infra import settings as settings_store, user_profile
 from infra.account_validation import AccountError, FirstAccountExists, normalize_username, require_password
 from infra.database import get_db, write_transaction
 from infra.passwords import hash_password, verify_password
@@ -42,6 +43,7 @@ from infra.time import utc_now, utc_now_iso
 TOKEN_KINDS = ("session", "api", "service")
 SESSION_TTL = timedelta(days=30)
 SERVICE_TTL = timedelta(hours=1)
+AccountWrites = Callable[[sqlite3.Connection], None]  # database writes made inside the account transaction
 
 
 _UNKNOWN_ACCOUNT_HASH: str | None = None
@@ -146,6 +148,7 @@ def _create_account(
                 f"'{name}' owns none of the existing data. Create the first "
                 f"account as one of: {', '.join(owners)}. Add others after."
             )
+        settings_store.default_host_access_auto_approve_on(conn, fresh=require_first and not owners)
         if conn.execute("SELECT 1 FROM users WHERE id = ?", (name,)).fetchone():
             raise AccountError(f"An account named '{name}' already exists. Choose a different username.")
         conn.execute(
@@ -185,7 +188,7 @@ def _create_account(
                     seed_initial(conductor_id, name, db=conn)
                 woke = enqueue_first_run_wake(conductor_id, first_run_path=first_run_path, db=conn)
         if before_commit is not None:
-            before_commit()
+            before_commit(conn)
 
     def announce() -> None:
         if had_users:
@@ -207,43 +210,43 @@ def create_user(
 ) -> str:
     """Create an account and return its id. Raises if the name is taken.
 
-    The first account also gets the CORSIA agent; ``first_run_wake``
-    queues that agent's first-run wake in the same transaction. Only a
-    caller with no person waiting on the CORSIA agent (the eval harness)
-    passes False. ``require_first`` atomically refuses if another account
-    already exists. Callers that create the install's first account on behalf of
-    a person use :func:`create_first_account`, which also enforces the
-    data-owner rule.
+    The first account also gets the CORSIA agent; ``first_run_wake`` queues that agent's first-run wake in the same
+    transaction. Only a caller with no person waiting on the CORSIA agent (the eval harness) passes False.
+    ``require_first`` atomically refuses if another account already exists. Callers that create the install's first
+    account on behalf of a person use :func:`create_first_account`, which also enforces the data-owner rule.
     """
     name, encoded = _credentials(username, password)
     _create_account(name, encoded, db=db, first_run_wake=first_run_wake)()
     return name
 
 
-def _publish_profile(staged: user_profile.StagedProfile, first_run_path: str):
-    """The account transaction's last step: publish the staged profile.
+def _last_steps(staged: user_profile.StagedProfile | None, first_run_path: str, with_account: AccountWrites | None):
+    """The account transaction's last steps: ``with_account``'s database writes, then the staged profile's publish.
 
     The app's setup first tells the shell's unfinished-setup marker about a profile it creates, so a relaunch
     removes it. A marker that cannot be written refuses the account before the file exists.
     """
-    def publish() -> None:
-        if first_run_path == "app" and staged.created_sha256:
+    def last_steps(conn: sqlite3.Connection) -> None:
+        if with_account is not None:
+            with_account(conn)
+        if staged and first_run_path == "app" and staged.created_sha256:
             setup_marker.record_created_file(user_profile.PROFILE_RELATIVE_PATH.as_posix(), staged.created_sha256)
-        staged.publish()
+        if staged:
+            staged.publish()
 
-    return publish
+    return last_steps
 
 
 def create_first_account(
-    username: str, password: str, *, full_name: str | None = None, email: str = "",
-    first_run_wake: bool = True, first_run_path: str = "script",
+    username: str, password: str, *, full_name: str | None = None, email: str = "", first_run_wake: bool = True,
+    first_run_path: str = "script", with_account: AccountWrites | None = None,
 ) -> str:
     """Create the install's first account: the one owner behind ``corsia user add`` and setup.
 
-    Refuses atomically (:class:`FirstAccountExists`) once any account exists, and
-    refuses a name outside the existing data owners. With ``full_name`` it also
-    writes the workspace profile: staged before the transaction, published as
-    its last step, undone if the commit fails. A blank ``full_name`` is refused
+    Refuses atomically (:class:`FirstAccountExists`) once any account exists, and refuses a name outside the existing
+    data owners. ``with_account`` runs inside the account transaction, before the profile publish, and does only
+    database writes on the connection it is given. With ``full_name`` it also writes the workspace profile: staged
+    before the transaction, published as its last step, undone if the commit fails. A blank ``full_name`` is refused
     first; an unwritable profile folder raises ``OSError`` with no account made.
     """
     from infra import config
@@ -252,14 +255,11 @@ def create_first_account(
     name, encoded = _credentials(username, password)
     staged = None
     if full_name is not None:
-        staged = user_profile.stage_user_profile(
-            config.WORKSPACE, full_name, user_profile.mac_timezone(), email,
-        )
+        staged = user_profile.stage_user_profile(config.WORKSPACE, full_name, user_profile.mac_timezone(), email)
     try:
         announce = _create_account(
-            name, encoded, db=None, first_run_wake=first_run_wake, require_first=True,
-            first_run_path=first_run_path, claim_data_owner=True,
-            before_commit=_publish_profile(staged, first_run_path) if staged else None,
+            name, encoded, db=None, first_run_wake=first_run_wake, require_first=True, first_run_path=first_run_path,
+            claim_data_owner=True, before_commit=_last_steps(staged, first_run_path, with_account),
         )
     except BaseException:
         if staged:

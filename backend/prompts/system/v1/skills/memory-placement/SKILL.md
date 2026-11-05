@@ -9,7 +9,7 @@ Put a lesson where its next reader already looks. Prefer the existing canonical 
 
 ## 1. Extract the lesson
 
-Apply the core causal-lesson check. Preserve incident evidence in the reference, but place the transferable rule separately. If the cause is unclear, record the uncertainty and retain the entry.
+Apply "You didn't learn" in the always-loaded "How to work here". Preserve incident evidence in the reference, but place the transferable rule separately. If the cause is unclear, record the uncertainty and retain the entry.
 
 ## 2. Answer two questions
 

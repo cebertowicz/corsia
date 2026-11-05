@@ -24,6 +24,8 @@ from test_cc_tool_failure_fence import _live_with_result_step
 from test_cc_tool_result_echo_binding import _seed_thread
 from tools.recorded_call import CompletedToolCall, CompletedToolFailure
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 REAL = "REAL-RESULT-BYTES-OF-THE-REFUSED-UNIT"
 
 

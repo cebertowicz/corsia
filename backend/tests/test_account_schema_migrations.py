@@ -49,6 +49,7 @@ def _shape(db, table):
     return columns, foreign_keys, indexes
 
 
+_LADDER_END = 166  # the last step before 166 -> 167, which converts every ambient account to account-owned homes
 _LEGACY_POLICY_TABLES = ("project_vendor_accounts", "thread_vendor_account_holds")
 _CURRENT_POLICY_TABLES = ("provider_policies", "project_policy_overrides", "thread_vendor_account_holds")
 
@@ -306,10 +307,19 @@ def _metadata(db: sqlite3.Connection) -> dict[str, str | None]:
     return dict(db.execute("SELECT id, metadata FROM messages"))
 
 
+def _converted_source(db: sqlite3.Connection) -> None:
+    # 166 -> 167 leaves no account signed in, which is what makes the source need sign-in;
+    # the connection row itself is left as it was.
+    status, config = db.execute("SELECT status,config FROM connections").fetchone()
+    assert (status, json.loads(config)) == ("available", {"binary": "/bin/synthetic"})
+    assert db.execute("SELECT COUNT(*) FROM vendor_accounts WHERE state='signed_in'").fetchone() == (0,)
+
+
 def _accounts_adopted(db: sqlite3.Connection) -> None:
-    assert json.loads(db.execute("SELECT usage_json FROM vendor_accounts").fetchone()[0]) == _USAGE
+    # The uniform sign-in upgrade (166 -> 167) clears an adopted row's usage with its comparison and discovery.
+    assert db.execute("SELECT usage_json FROM vendor_accounts").fetchone() == (None,)
     assert db.execute("SELECT auth_cleanup_json FROM vendor_accounts").fetchall() == [(None,)]
-    assert json.loads(db.execute("SELECT config FROM connections").fetchone()[0]) == {"binary": "/bin/synthetic"}
+    _converted_source(db)
     assert db.execute("SELECT vendor_account_id FROM llm_usage WHERE id='u'").fetchone() == (None,)
     for table in _CURRENT_POLICY_TABLES:
         assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
@@ -336,8 +346,8 @@ def test_full_startup_78_to_current_parity_once_and_r1_usage_survives(tmp_path):
         db.commit()
     with closing(sqlite3.connect(path)) as db, closing(sqlite3.connect(":memory:")) as fresh:
         db.row_factory = sqlite3.Row
-        result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 78, SCHEMA_VERSION)
+        result = migrate_to_current(db, _LADDER_END)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 78, _LADDER_END)
         assert MIGRATIONS[80] is migrate_80_to_81
         initialize_schema(fresh)
         billing_objects = {
@@ -368,11 +378,21 @@ def test_full_startup_78_to_current_parity_once_and_r1_usage_survives(tmp_path):
         assert "usage" in json.loads(db.execute("SELECT config FROM connections WHERE provider='github'").fetchone()[0])
         assert db.execute("SELECT model FROM threads WHERE id='legacy'").fetchone()[0] == "claude-code/opus"
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
-        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
+        assert not migrate_to_current(db, _LADDER_END).migrated
         assert [tuple(row) for row in db.execute("SELECT id,connection_id,state,source_home,runtime_home FROM vendor_accounts ORDER BY connection_id")] == accounts
         with pytest.raises(sqlite3.IntegrityError):
             db.execute("INSERT INTO vendor_accounts(id,connection_id,name,is_default,state,created_at,updated_at) "
                        "VALUES ('duplicate','c','Default',1,'legacy','t0','t0')")
+        db.rollback()
+        # The upgrade keeps the row that carried a login fact, signed out on its own homes; the never-used row goes.
+        upgraded = migrate_to_current(db, SCHEMA_VERSION)
+        assert (upgraded.migrated, upgraded.from_version, upgraded.to_version) == (True, _LADDER_END, SCHEMA_VERSION)
+        rows = {row[0]: row for row in db.execute(
+            "SELECT connection_id,state,source_home,usage_json FROM vendor_accounts")}
+        assert rows["c"][1:3] == ("removed", None)
+        assert rows["claude-code"][1] == "signed_out" and rows["claude-code"][2]
+        assert all(row[3] is None for row in rows.values())
+        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
 
 
 def test_empty_fresh_schema_does_not_invent_vendor_connections():
@@ -426,28 +446,6 @@ def test_empty_fresh_schema_has_no_policy_or_hold_rows():
             assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
 
 
-def test_160_to_161_creates_pending_reviewer_table():
-    with closing(sqlite3.connect(":memory:")) as db:
-        db.execute("PRAGMA user_version=160")
-        result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 160, 161)
-        columns, foreign_keys, indexes = _shape(db, "reviewer_gate_pending")
-        assert columns == [
-            ("head_sha", "TEXT", 1, None, 2),
-            ("internal_event", "TEXT", 1, None, 0),
-            ("pr_key", "TEXT", 1, None, 1),
-        ]
-        assert foreign_keys == []
-        assert indexes == [("sqlite_autoindex_reviewer_gate_pending_1", 1, "pk", 0)]
-        db.execute(
-            "INSERT INTO reviewer_gate_pending VALUES ('owner/repo#42', 'head-1', 'check_suite')"
-        )
-        assert db.execute(
-            "SELECT pr_key, head_sha, internal_event FROM reviewer_gate_pending"
-        ).fetchone() == ("owner/repo#42", "head-1", "check_suite")
-        assert not migrate_to_current(db, SCHEMA_VERSION).migrated
-
-
 def test_genuine88_upgrade_maps_legacy_policy_to_fresh89_and_is_idempotent():
     with canonical82() as db:
         populated_policy(db)
@@ -459,13 +457,16 @@ def test_genuine88_upgrade_maps_legacy_policy_to_fresh89_and_is_idempotent():
         migrate_to_current(db, 88)
         db.execute("UPDATE project_vendor_accounts SET switch_on_limit=1")
         db.commit()
-        unrelated = unrelated_rows(db)
+        unrelated = unrelated_rows(db)['projects']
         result = migrate_to_current(db, SCHEMA_VERSION)
         assert (result.migrated, result.from_version, result.to_version) == (True, 88, SCHEMA_VERSION)
         assert 'project_vendor_accounts' not in _tables(db)
         assert [tuple(row) for row in db.execute('SELECT project_id,provider_key,rollover,order_json,disabled_json,revision FROM provider_policies')] == [('p', 'codex', 1, '["a", "b"]', '[]', 7)]
         assert [tuple(row) for row in db.execute('SELECT project_id,revision FROM project_policy_overrides')] == [('p', 7)]
-        assert unrelated_rows(db) == unrelated
+        assert unrelated_rows(db)['projects'] == unrelated
+        # 166 -> 167 signs the ambient accounts out and leaves the connection row as it was.
+        assert tuple(db.execute("SELECT status FROM connections").fetchone()) == ('available',)
+        assert db.execute("SELECT COUNT(*) FROM vendor_accounts WHERE state='signed_in'").fetchone()[0] == 0
         assert db.execute('PRAGMA foreign_key_check').fetchall() == []
         with sqlite3.connect(':memory:') as fresh:
             initialize_schema(fresh)
@@ -500,7 +501,8 @@ def test_88_to_89_preserves_allowlist_default_rollover_turn_and_denial_fixture()
         assert db.execute("SELECT default_account_id FROM project_vendor_accounts WHERE project_id='p'").fetchone()[0] == 'a'
         migrate_to_current(db, SCHEMA_VERSION)
 
-        assert turn_account('codex', thread_id='turn', db=db) == ('a', None)
+        # The upgrade keeps the referenced account a on its own homes, signed out until a person signs in.
+        assert turn_account('codex', thread_id='turn', db=db) == ('a', 'account_signed_out')
         with pytest.raises(AccountAdmissionError, match='account_project_denied'):
             select_account('turn', 'codex', account_id='denied', db=db)
 
@@ -637,8 +639,8 @@ def test_genuine_frozen_canonical78_startup_matches_every_fresh81_table(tmp_path
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
         assert db.execute("SELECT model FROM threads WHERE id='t'").fetchone() == (None,)
         assert db.execute("SELECT vendor_account_id FROM llm_usage WHERE id='u'").fetchone() == (None,)
-        assert json.loads(db.execute("SELECT usage_json FROM vendor_accounts").fetchone()[0]) == {"version": 1, "facts": {"plan": "p"}}
-        assert json.loads(db.execute("SELECT config FROM connections").fetchone()[0]) == {"binary": "/bin/synthetic"}
+        assert db.execute("SELECT usage_json FROM vendor_accounts").fetchone() == (None,)  # cleared by 166 -> 167
+        _converted_source(db)
         once = list(db.iterdump())
         assert initialize_schema(db) is False
         assert list(db.iterdump()) == once
@@ -750,9 +752,9 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         identity = db.execute("SELECT * FROM system_bulletin_identity").fetchall()
         setting = db.execute("SELECT * FROM settings WHERE key='system_bulletins_enabled'").fetchall()
 
-        result = migrate_to_current(db, SCHEMA_VERSION)
+        result = migrate_to_current(db, _LADDER_END)
 
-        assert (result.migrated, result.from_version, result.to_version) == (True, 80, SCHEMA_VERSION)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 80, _LADDER_END)
         assert (_ledger(db), _ddl(db, _BULLETIN_TABLES)) == (ledger, ddl)
         assert db.execute("SELECT * FROM system_bulletin_identity").fetchall() == identity
         assert db.execute("SELECT * FROM settings WHERE key='system_bulletins_enabled'").fetchall() == setting
@@ -769,9 +771,34 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         for table in _CURRENT_POLICY_TABLES:
             assert db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] == 0
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+        # 167 -> 168 changes shape only (measure keys), so apply it before comparing with the current schema.
+        from infra.migration_167_to_168_measure_keys import migrate_167_to_168
+        migrate_167_to_168(db)
+        # 168 -> 169 only adds a nullable column (checkpoints.adopted_input_tokens).
+        from infra.migration_168_to_169_checkpoint_adopted_tokens import migrate_168_to_169
+        migrate_168_to_169(db)
+        # 170 -> 171 rebuilds event_rules with a nullable worker_profile column; 169 -> 170 is data only.
+        from infra.migration_170_to_171_worker_profile import migrate_170_to_171
+        # 171 -> 172 only widens action_drafts.kind to admit texts.
+        from infra.migration_171_to_172_message_drafts import migrate_171_to_172
+        migrate_170_to_171(db)
+        migrate_171_to_172(db)
+        # 172 -> 173 adds a partial index on plan_nodes.workflow_ref.
+        from infra.migration_172_to_173_workflow_ref_index import migrate_172_to_173
+        migrate_172_to_173(db)
+        # 173 -> 174 only adds the held-reply table.
+        from infra.migration_173_to_174_held_replies import migrate_173_to_174
+        migrate_173_to_174(db)
+        # 174 -> 175 only adds the reviewer gate's pending-run table.
+        from infra.migration_174_to_175_reviewer_gate_pending import migrate_174_to_175
+        migrate_174_to_175(db)
+        db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
             assert _whole_database_shape(db) == _whole_database_shape(fresh)
+        # The upgrade keeps the bound row, signed out on its own homes, with its usage cleared.
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == SCHEMA_VERSION
+        assert db.execute("SELECT state,usage_json FROM vendor_accounts").fetchall() == [("signed_out", None)]
         once = list(db.iterdump())
         again = migrate_to_current(db, SCHEMA_VERSION)
         assert (again.migrated, again.from_version, again.to_version) == (False, SCHEMA_VERSION, SCHEMA_VERSION)
@@ -896,8 +923,10 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_80_to_81_vendor_accounts import migrate_80_to_81
     from infra.migration_81_to_82_vendor_policy import migrate_81_to_82
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
+    from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 160
+    assert SCHEMA_VERSION == 175
+    assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83
     assert max(MIGRATIONS) == SCHEMA_VERSION - 1

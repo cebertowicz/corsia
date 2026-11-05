@@ -55,13 +55,15 @@ workflow:
             blocking: {type: boolean, default: false}
 """
 
-# Answers each input with the reply file: HANG answers nothing, CRASH exits.
+# Answers each input with the reply file: HANG answers nothing, CRASH exits, MAX_TURNS_ERROR and
+# MAX_TURNS_QUIET end the run on an exhausted turn cap (is_error true or false).
 _FAKE = textwrap.dedent(
     '''\
     #!{python}
     import sys, json
     def emit(o):
         sys.stdout.write(json.dumps(o) + "\\n"); sys.stdout.flush()
+    open({reply!r} + ".argv", "w").write(json.dumps(sys.argv))
     emit({{"type":"system","subtype":"init","session_id":"fake","model":"m","tools":[],"mcp_servers":[],"cwd":"."}})
     for line in sys.stdin:
         if not line.strip():
@@ -71,6 +73,9 @@ _FAKE = textwrap.dedent(
             continue
         if reply == "CRASH":
             sys.exit(3)
+        if reply.startswith("MAX_TURNS"):
+            emit({{"type":"result","subtype":"error_max_turns","is_error":reply == "MAX_TURNS_ERROR","num_turns":3}})
+            continue
         emit({{"type":"assistant","message":{{"content":[{{"type":"text","text":reply}}]}}}})
         emit({{"type":"result","subtype":"success","is_error":False,"result":reply,"total_cost_usd":0.0,"num_turns":1,"stop_reason":"end_turn"}})
     '''
@@ -82,7 +87,7 @@ def fenced(payload: object) -> str:
 
 
 @pytest.fixture
-def world(isolated_db, tmp_path, monkeypatch, _cc_runtime_cleanup):
+def world(signed_in_defaults, tmp_path, monkeypatch, _cc_runtime_cleanup):
     """The project, owner, skill, declarations and fake binary; yields its handles."""
     import connections.models as cm
     from automation import script_runner, worker_runner
@@ -120,7 +125,6 @@ def world(isolated_db, tmp_path, monkeypatch, _cc_runtime_cleanup):
     binary = tmp_path / "fake_claude"
     binary.write_text(_FAKE.format(python=sys.executable, reply=str(reply)))
     binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / ".claude"))
     monkeypatch.setattr(cm, "get_connection", lambda provider, db=None: {"config": {"binary": str(binary)}})
     driven: list[str] = []
 
@@ -195,8 +199,9 @@ def owner_script(world, monkeypatch, name: str) -> str:
 
     world.setdefault("script_inputs", [])
 
-    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None, trace=()):
+    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, stdin=None, trace=(), rule_id=None, github_repo=None):
         world["script_inputs"].append(json.loads(stdin) if stdin is not None else None)
+        world.setdefault("script_repos", []).append(github_repo)
         return ScriptRun(0, b"", b"", False)
 
     monkeypatch.setattr(script_runner, "run_script", fake)

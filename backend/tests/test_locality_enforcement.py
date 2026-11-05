@@ -58,7 +58,7 @@ def world(accounts, monkeypatch):  # noqa: F811
 
 
 def _row(**fields):
-    return {"status": "ready", "status_reason": None, "is_local": False, "litellm_model": fields["id"], **fields}
+    return {"status": "ready", "status_reason": None, "is_local": False, "litellm_model": fields["id"], "capabilities": {}, **fields}
 
 
 @pytest.mark.parametrize(("thread_local_only", "cloud_off", "expected"), [
@@ -208,6 +208,19 @@ def test_cloud_models_off_round_trips_and_rejects_a_non_bool(client):
     for bad in ("true", 1, None):
         assert client.put(path, json={"cloud_models_off": bad}, headers=_h(SESSION)).status_code == 422
     assert client.get(path, headers=_h(SESSION)).json()["cloud_models_off"] is True
+
+
+def test_a_changed_switch_relaunches_local_apps_and_a_repeated_one_does_not(client, monkeypatch):
+    relaunches = []
+
+    async def refresh():
+        relaunches.append("relaunch")
+
+    monkeypatch.setattr("tools.connected_apps_runtime.refresh_local_app_fences", refresh)
+    path = f"/api/projects/{CLOUD_ON}/cloud-models-off"
+    for value in (True, True, False):
+        assert client.put(path, json={"cloud_models_off": value}, headers=_h(SESSION)).status_code == 200
+    assert relaunches == ["relaunch", "relaunch"]
 
 
 def test_cloud_models_off_on_an_unknown_project_uses_the_policy_error_shape(client, monkeypatch):

@@ -46,7 +46,7 @@ async function seedArtifact(request: APIRequestContext, baseTitle: string, image
 	return { threadId, title, name, path: artifactPath, artifactId: (await saved.json()).artifact.id as string };
 }
 
-/** Nine registered references on one message exercise the real card cap, desktop wrap, and phone scroll cue. */
+/** Nine registered references on one message exercise desktop wrap and the phone scroll cue. */
 async function seedChipArtifacts(request: APIRequestContext, baseTitle: string): Promise<Artifact> {
 	const title = `${baseTitle} ${Math.random().toString(36).slice(2, 7)}`;
 	const threadId = await createSession(request, title);
@@ -227,7 +227,6 @@ for (const theme of ['light', 'dark'] as const) {
 
 			await page.setViewportSize({ width: 1440, height: 900 });
 			await expect(chips.locator('li')).toHaveCount(9);
-			await expect(chips.getByRole('button', { name: '+1 more' })).toBeVisible();
 			await screenshot(page, `chat-chips-1440-${theme}-wrapped`);
 		});
 

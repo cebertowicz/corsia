@@ -13,7 +13,8 @@ def seed_identity_catalog(db) -> None:
 
     The shared test catalog already holds the ``claude-code/opus`` alias row,
     which resolves to ``claude-opus-4-8`` today. Its name carries that version,
-    as the real catalog's does.
+    as the real catalog's does. A signed-in Default lists the rows, since a
+    harness row's identity is what an account lists.
     """
     db.execute("UPDATE models SET display_name='Opus 4.8' WHERE id='claude-code/opus'")
     db.execute(
@@ -24,6 +25,9 @@ def seed_identity_catalog(db) -> None:
         "'Opus listed','harness','discovered',1,1,?,'t','t')",
         (LOCAL_ID, LOCAL_MODEL, json.dumps({"resolved_identity": "claude-opus-4-8"})),
     )
+    from vendor_account_fixtures import signed_in_default
+
+    signed_in_default("claude-code", db=db)
 
 
 def seed_manifest(db, manifest_id: str, harness: str, resolved: str | None, source: str | None) -> None:

@@ -20,7 +20,7 @@ _ATTACHMENT_KEYS = (
 )
 
 
-def _registered_upload_path(
+def registered_upload_path(
     file_id: object,
     thread_id: object,
     *,
@@ -75,7 +75,7 @@ def attachments(
             raise PortableHistoryError(
                 f"message {message_id!r} attachment has no portable identity"
             )
-        upload_path = _registered_upload_path(
+        upload_path = registered_upload_path(
             stable.get("file_id"),
             thread_id,
             db=db,

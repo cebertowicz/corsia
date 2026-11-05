@@ -82,7 +82,7 @@ const APPROVED_WELCOME = {
 	rows: [
 		'CORSIA handles: the setup steps for connecting your tools, and checking work against what you asked before it reaches you.',
 		'You decide: what gets done. When a choice is yours to make, agents bring it to you with a recommendation.',
-		'Asks you first: sending or posting as you, spending money, and opening files outside your work folder.',
+		'Asks you first: sending or posting as you, and spending money.',
 	],
 };
 const flat = (text: string | null | undefined) => (text ?? '').replace(/\s+/g, ' ').trim();
@@ -174,11 +174,28 @@ describe('SetupScreen', () => {
 		expect(host.querySelector('#setup-email')?.closest('.field')?.querySelector('.hint')?.textContent).toBe('Used only to sign you up for services you choose, such as web search.');
 	});
 
-	it('labels the name field Full name and still prefills the username from the whole name', async () => {
+	it('labels the name field Full name and prefills the username from the first name', async () => {
 		await settle(); button('Continue')?.click(); await settle();
 		expect(host.querySelector('label[for="setup-name"]')?.textContent?.trim()).toBe('Full name');
 		setInput('setup-name', 'Ada Lovelace'); await settle();
-		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada-lovelace');
+		expect((host.querySelector('#setup-username') as HTMLInputElement).value).toBe('ada');
+	});
+
+	it('leaves a cleared or edited username alone when the name changes', async () => {
+		await settle(); button('Continue')?.click(); await settle();
+		const username = () => (host.querySelector('#setup-username') as HTMLInputElement).value;
+		setInput('setup-name', 'Ada Lovelace'); await settle();
+		setInput('setup-username', ''); await settle();
+		expect(username()).toBe('');
+		setInput('setup-name', 'Ada King'); await settle();
+		expect(username()).toBe('');
+		// Clearing the name too makes the suggestion empty; the cleared username still stays cleared.
+		setInput('setup-name', ''); await settle();
+		setInput('setup-name', 'Grace Hopper'); await settle();
+		expect(username()).toBe('');
+		setInput('setup-username', 'countess'); await settle();
+		setInput('setup-name', 'Augusta King'); await settle();
+		expect(username()).toBe('countess');
 	});
 
 	it('creates the account when Continue is pressed on the form with its work folder, then opens provider rows', async () => {
@@ -262,7 +279,151 @@ describe('SetupScreen', () => {
 		// The answer is kept in setup progress, where the first chat reads which subscriptions they pay for.
 		expect(progressBodies.map((body) => JSON.parse(body))).toContainEqual({ picks: { claude: true, chatgpt: false } });
 		expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
-		expect(button('Sign in')).toBeTruthy();
+		expect(button('Sign in')).toBeUndefined();
+	});
+
+	it('installs only the chosen CLI after its delayed detection', async () => {
+		await passFolder();
+		button('Claude')?.click(); await settle();
+		expect(calls.filter((call) => call.method === 'POST' && call.url.includes('/install'))).toEqual([]);
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'unverified' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		window.dispatchEvent(new Event('focus')); await settle();
+		expect(calls.some((call) => call.url.includes('/install') && call.method === 'POST')).toBe(false);
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		window.dispatchEvent(new Event('focus')); await settle();
+		expect(calls.filter((call) => call.method === 'POST' && call.url.includes('/install'))).toEqual([{ url: '/api/providers/cli/claude-code/install', method: 'POST' }]);
+	});
+
+	it('polls for the chosen CLI without a source event and starts its install', async () => {
+		await passFolder();
+		vi.useFakeTimers();
+		try {
+			button('Claude')?.click(); flushSync();
+			sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }];
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			expect(calls.filter((call) => call.method === 'POST' && call.url === '/api/providers/cli/claude-code/install')).toHaveLength(1);
+		} finally { vi.useRealTimers(); }
+	});
+
+	it('starts the chosen install when an unrelated source check fails', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'unverified' }];
+		const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+		// The recheck writes Claude Code's row, then fails on another source's check.
+		vi.mocked(fetch).mockImplementation(async (input, init) => {
+			if (!String(input).includes('/sources/recheck')) return originalFetch(input, init);
+			sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }];
+			return new Response('{}', { status: 503 });
+		});
+		await passFolder();
+		vi.useFakeTimers();
+		try {
+			button('Claude')?.click(); flushSync();
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			expect(calls.filter((call) => call.method === 'POST' && call.url === '/api/providers/cli/claude-code/install')).toHaveLength(1);
+		} finally { vi.useRealTimers(); }
+	});
+
+	it('shows Retry if detection fails while an unchecked source is present', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'unverified' }];
+		await passFolder();
+		const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+		vi.mocked(fetch).mockImplementation(async (input, init) => String(input).includes('/sources/recheck') ? new Response('{}', { status: 500 }) : originalFetch(input, init));
+		vi.useFakeTimers();
+		try {
+			button('Claude')?.click(); flushSync();
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			const row = host.querySelector('section[aria-label="Claude Code"]');
+			expect(row?.textContent).toContain('Couldn’t check Claude Code.');
+			expect(row?.textContent).not.toContain('Retry');
+			expect(row?.querySelector('.spinner')).toBeNull();
+			expect([...host.querySelectorAll('button')].filter((item) => item.textContent?.trim() === 'Retry')).toHaveLength(1);
+		} finally { vi.useRealTimers(); }
+	});
+
+	it.each([
+		{ vendor: 'claude-code', name: 'Claude Code', choice: 'Claude', succeeds: true },
+		{ vendor: 'claude-code', name: 'Claude Code', choice: 'Claude', succeeds: false },
+		{ vendor: 'codex', name: 'Codex', choice: 'ChatGPT', succeeds: true },
+		{ vendor: 'codex', name: 'Codex', choice: 'ChatGPT', succeeds: false },
+	])('shows $name source retry pending and returns to success=$succeeds', async ({ vendor, name, choice, succeeds }) => {
+		sources = [{ source: vendor, name, state: 'unverified' }];
+		await passFolder();
+		const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+		let resolveRetry!: (response: Response) => void;
+		let rechecks = 0;
+		vi.mocked(fetch).mockImplementation(async (input, init) => {
+			const url = String(input);
+			if (url.includes('/sources/recheck')) {
+				rechecks++;
+				if (rechecks === 1) return new Response('{}', { status: 500 });
+				if (rechecks > 2) return json({ sources });
+				return new Promise<Response>((resolve) => { resolveRetry = resolve; });
+			}
+			if (url.includes('/models') && sources[0]?.state === 'ready') return json({ models: [{ connection: vendor, status: 'ready', runs_on: [{ selected: true, status: 'ready' }] }] });
+			return originalFetch(input, init);
+		});
+		vi.useFakeTimers();
+		try {
+			button(choice)?.click(); flushSync();
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			const row = () => host.querySelector(`section[aria-label="${name}"]`);
+			const error = 'CORSIA couldn’t check your model sources. Try again.';
+			const checking = 'Checking which models are ready…';
+			expect(row()?.textContent).toContain(`Couldn’t check ${name}.`);
+			expect(host.textContent).toContain(error);
+			expect([...host.querySelectorAll('button')].filter((item) => item.textContent?.trim() === 'Retry')).toHaveLength(1);
+			button('Retry')!.click(); await tick();
+			expect(row()?.querySelector('.spinner')).toBeTruthy();
+			expect(host.querySelector('section[aria-label="' + checking + '"] .spinner')).toBeTruthy();
+			expect(host.textContent).not.toContain(error);
+			expect(button('Retry')?.disabled).toBe(true);
+			button('Retry')?.click(); expect(rechecks).toBe(2);
+			window.dispatchEvent(new Event('focus')); await vi.advanceTimersByTimeAsync(0); await tick();
+			expect(row()?.querySelector('.spinner')).toBeTruthy();
+			expect(host.querySelector('section[aria-label="' + checking + '"] .spinner')).toBeTruthy();
+			expect(host.textContent).not.toContain(error);
+			expect(button('Retry')?.disabled).toBe(true);
+			if (succeeds) sources = [{ source: vendor, name, state: 'ready' }];
+			resolveRetry(succeeds ? json({ sources }) : new Response('{}', { status: 500 }));
+			await vi.advanceTimersByTimeAsync(0); await tick();
+			if (succeeds) {
+				expect(host.textContent).not.toContain(error);
+				expect(row()?.textContent).toContain('Ready');
+			} else {
+				expect(row()?.textContent).toContain(`Couldn’t check ${name}.`);
+				expect(host.textContent).toContain(error);
+				expect(button('Retry')?.disabled).toBe(false);
+			}
+			expect(row()?.querySelector('.spinner')).toBeNull();
+		} finally { vi.useRealTimers(); }
+	});
+
+	it('keeps an unrelated provider error visible during a source retry', async () => {
+		sources = [
+			{ source: 'claude-code', name: 'Claude Code', state: 'unverified' },
+			{ source: 'codex', name: 'Codex', state: 'ready', limited: true } as never,
+		];
+		await passFolder();
+		const originalFetch = vi.mocked(fetch).getMockImplementation()!;
+		let resolveRetry!: (response: Response) => void;
+		let rechecks = 0;
+		vi.mocked(fetch).mockImplementation(async (input, init) => {
+			if (!String(input).includes('/sources/recheck')) return originalFetch(input, init);
+			if (++rechecks === 1) return new Response('{}', { status: 500 });
+			return new Promise<Response>((resolve) => { resolveRetry = resolve; });
+		});
+		vi.useFakeTimers();
+		try {
+			(button('Yes') ?? button('Both'))!.click(); flushSync();
+			await vi.advanceTimersByTimeAsync(3000); await tick();
+			const codex = () => host.querySelector('section[aria-label="Codex"]');
+			expect(codex()?.textContent).toContain('usage limit');
+			button('Retry')!.click(); await tick();
+			expect(codex()?.textContent).toContain('usage limit');
+			expect(codex()?.querySelector('.spinner')).toBeNull();
+			resolveRetry(new Response('{}', { status: 500 }));
+			await vi.advanceTimersByTimeAsync(0); await tick();
+		} finally { vi.useRealTimers(); }
 	});
 
 	describe('the Local model row by host', () => {
@@ -279,7 +440,7 @@ describe('SetupScreen', () => {
 			localEligible = false; macosSupported = true;
 			await providersStep();
 			expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
-			expect(host.textContent).toContain('Local models need at least 24 GB of memory');
+			expect(host.textContent).toContain('Adding a local model through CORSIA needs at least 32 GB of memory');
 		});
 
 		it('lists no Local model row, and no memory reason, on a server that is not macOS', async () => {
@@ -294,6 +455,16 @@ describe('SetupScreen', () => {
 			localEligible = false; macosSupported = true;
 			await providersStep([{ source: 'omlx', name: 'Local model', state: 'needs_setup', never_local: true } as never]);
 			expect(rowNames()).not.toContain('Local model');
+		});
+
+		it.each([
+			{ host: 'a server that is not macOS', supported: null, extra: [] },
+			{ host: 'a host that never runs one, with a failed local row', supported: true, extra: [{ source: 'omlx', name: 'Local model', state: 'needs_setup', never_local: true, local_state: 'failed' }] },
+		])('keeps the footer off the hidden Local model row on $host', async ({ supported, extra }) => {
+			localEligible = true; macosSupported = supported;
+			await providersStep(extra as never);
+			expect(rowNames()).not.toContain('Local model');
+			expect(host.querySelector('.footer-note')?.textContent).toBe('Set up a subscription or add an API provider to continue.');
 		});
 	});
 
@@ -316,23 +487,17 @@ describe('SetupScreen', () => {
 		await unmount(component!); component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn() } }); flushSync();
 		await passFolder();
 		expect(host.textContent).toContain('Claude Code and Codex are the apps you’ll sign in to next.');
-		expect(host.textContent).toContain('No subscription? The free model downloading to this computer works too, or add an API key.');
+		expect(host.textContent).toContain('No subscription? Choose Neither and the free model downloads to this computer, or add an API key.');
 		expect(host.textContent).not.toContain('Add an API key on the next screen.');
 	});
 
-	it('explains the ChatGPT question when Claude Code is signed in, and the Claude question when Codex is', async () => {
-		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+	it.each([['Claude Code', 'claude-code'], ['Codex', 'codex']])('asks the same four-answer question when %s is signed in', async (_name, signedIn) => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: signedIn === 'claude-code' ? 'ready' : 'not_installed' }, { source: 'codex', name: 'Codex', state: signedIn === 'codex' ? 'ready' : 'not_installed' }];
 		await passFolder();
 		expect(host.querySelector('.lede')?.textContent).toBe('CORSIA’s agents can work through a Claude or ChatGPT subscription you already pay for.');
-		expect(host.textContent).toContain('A ChatGPT subscription uses Codex (a Claude subscription uses Claude Code). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Claude Code is enough to continue.');
-		expect(host.textContent).not.toContain('No subscription?');
-	});
-
-	it('explains the Claude question when Codex is signed in', async () => {
-		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'not_installed' }, { source: 'codex', name: 'Codex', state: 'ready' }];
-		await passFolder();
-		expect(host.textContent).toContain('A Claude subscription uses Claude Code (a ChatGPT subscription uses Codex). If you pay, CORSIA installs it now and you sign in on the next screen. If not, Codex is enough to continue.');
-		expect(host.textContent).not.toContain('No subscription?');
+		expect(host.textContent).toContain('Which do you pay for?');
+		expect([...host.querySelectorAll('.choices button')].map((choice) => choice.textContent?.trim())).toEqual(['Claude', 'ChatGPT', 'Both', 'Neither']);
+		expect(host.textContent).toContain('Claude Code and Codex are the apps you’ll sign in to next.');
 	});
 
 	it('says what the work folder is for beside its row on the account form', async () => {
@@ -340,12 +505,11 @@ describe('SetupScreen', () => {
 		expect(host.textContent).toContain('Your projects and files live here.');
 	});
 
-	it('asks only about the other subscription when one tool is signed in', async () => {
+	it('asks the four-answer question when one tool is signed in, and Claude alone leaves Claude Code on the models screen', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
 		await passFolder();
-		expect(host.textContent).toContain('Claude Code is signed in.');
-		expect(host.textContent).toContain('Do you also pay for ChatGPT?');
-		button('No')?.click(); await settle();
+		expect(host.textContent).toContain('Which do you pay for?');
+		button('Claude')?.click(); await settle();
 		expect(rowNames()).toEqual(['Claude Code', 'Local model', 'API provider']);
 	});
 
@@ -381,10 +545,29 @@ describe('SetupScreen', () => {
 		expect(rowNames()).toContain('Codex');
 	});
 
-	it('skips the subscriptions screen when both tools are signed in, and Back returns to the account', async () => {
+	it('keeps the saved subscription answer in a resumed setup: the declined tool stays hidden and Back shows the answer', async () => {
+		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'not_installed' }];
+		const base = vi.mocked(fetch).getMockImplementation()!;
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (String(input) === '/api/setup/progress' && (init?.method ?? 'GET') === 'GET') return json({ setup_completed: false, picks: { claude: true, chatgpt: false }, status: { local_eligible: false, work_folder: '~/CORSIA' } });
+			return base(input, init);
+		}));
+		await unmount(component);
+		token.set('setup-token');
+		component = mount(SetupScreen, { target: host, props: { onExistingAccount: vi.fn(), onAccountCreated: vi.fn(), onFinished: vi.fn(), resume: true } });
+		flushSync(); await settle(); await settle();
+		expect(rowNames()).toContain('Claude Code');
+		expect(rowNames()).not.toContain('Codex');
+		button('Back')?.click(); await settle();
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
+		expect(button('Claude')?.getAttribute('aria-description')).toBe('Your earlier answer');
+		expect(button('ChatGPT')?.hasAttribute('aria-description')).toBe(false);
+	});
+
+	it('asks the subscription question even when both tools are signed in, and Back returns to the account', async () => {
 		sources = [{ source: 'claude-code', name: 'Claude Code', state: 'ready' }, { source: 'codex', name: 'Codex', state: 'ready' }];
 		await passFolder();
-		expect(host.querySelector('h1')?.textContent).toBe('Providers & models');
+		expect(host.querySelector('h1')?.textContent).toBe('Your subscriptions');
 		button('Back')?.click(); await settle();
 		expect(host.querySelector('h1')?.textContent).toBe('Your account');
 		expect(host.querySelector('[data-testid="setup-folder-made"]')?.textContent).toContain('CORSIA keeps your work in');

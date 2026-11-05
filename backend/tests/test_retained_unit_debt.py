@@ -27,6 +27,8 @@ from subagents.child_thread import persist_assistant_step, persist_tool_result
 from tests import native_tool_result_lab as tray
 from tools.recorded_call import CompletedToolCall, CompletedToolFailure
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 REAL = "REAL-RESULT-BYTES-OF-THE-REFUSED-UNIT"
 KEPT = "REAL-RESULT-BYTES-OF-THE-PERSISTED-UNIT"
 SAME = {"command": "true"}

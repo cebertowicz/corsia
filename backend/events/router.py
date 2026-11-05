@@ -11,20 +11,19 @@ from loguru import logger
 
 from events import dead_letter, delivery, guard
 from events.identity import (
-    CHECK_SUITE_COMPLETED_EVENTS,
-    PrResolutionError,
-    check_suite_pr_metadata_from_event,
-    resolve_identity,
+    CHECK_SUITE_COMPLETED_EVENTS, PrResolutionError,
+    check_suite_pr_metadata_from_event, resolve_identity,
 )
 from events.resolve import resolve_targets
 from events.connectors import github_pr_notice
+from events.connectors.github_content_facts import content_facts
 from events.connectors.github import (
+    GITHUB_ROUTED_EVENTS,
     github_event_class as _github_event_class,
     github_routing_envelope,
     identity_from_check_pr_metadata,
 )
-from events.github_mapper import pr_terminal_state
-from events.routing_inputs import structured_tag
+from events.github_mapper import pr_terminal_state, unruled_reason
 from events.connectors.github_route_preparation import (
     _chip_line, prepare_route_ordered, settle_routed_delivery, summary_facts,
 )
@@ -74,9 +73,7 @@ def _dead_letter_result(
             "dead_letter_id": dl_id,
         },
     )
-    return RouteResult(
-        RouteOutcome.DEAD_LETTERED, external_id=external_id, reason=reason
-    )
+    return RouteResult(RouteOutcome.DEAD_LETTERED, external_id=external_id, reason=reason)
 
 
 def _record_passive_change(
@@ -88,7 +85,6 @@ def _record_passive_change(
     summary: str,
     chip: str,
     wake_reason: str,
-    tag_provenance: dict[str, str] | None,
 ) -> None:
     identity = routing_state.get("identity")
     if not identity:
@@ -97,8 +93,6 @@ def _record_passive_change(
         "wake_thread_id": wake_thread_id,
         "wake_reason": wake_reason,
     }
-    if tag_provenance:
-        provenance["tag_provenance"] = tag_provenance
     registry_models.record_artifact_change(
         artifact_id=identity["id"],
         internal_event=internal_event,
@@ -206,7 +200,6 @@ def _select_route(
     payload: dict[str, Any],
     identity,
     external_id: str | None,
-    tag: dict[str, str] | None,
     selected_pr: dict[str, Any] | None,
 ) -> tuple[tuple[str, str] | RouteResult, dict[str, Any]]:
     """The routed thread and why, or the result when there is none, with the
@@ -214,19 +207,11 @@ def _select_route(
     routing_state: dict[str, Any] = {
         "identity": None, "owner": None, "subscribers": [], "triage": None,
     }
-    if tag is not None and identity is not None:
-        routing_state = registry_models.routing_registrations(*identity)
-        thread_id = tag["thread_id"]
-        if not delivery.thread_exists_and_active(thread_id):
-            logger.warning(
-                "event-routing: structured tag target {} inactive/missing for {}",
-                thread_id, internal_event,
-            )
-            return _dead_letter_result(
-                internal_event, payload, "invalid_tag_target", external_id,
-            ), routing_state
-        return (thread_id, "tag"), routing_state
-
+    if (internal_event in {GITHUB_ROUTED_EVENTS[k] for k in ("issue_comment.edited", "pr_comment.edited",
+                                                              "review.submitted", "review.edited")}
+        or (internal_event in {GITHUB_ROUTED_EVENTS[k] for k in ("issue_comment.created", "pr_comment.created")}
+            and content_facts(payload)["author_origin"] == "outside")):
+        return RouteResult(RouteOutcome.PARKED, external_id=external_id, reason="rule_only"), routing_state
     target = resolve_targets(
         github_routing_envelope(internal_event, identity, payload),
     )[0]
@@ -234,6 +219,8 @@ def _select_route(
     if target.thread is not None:
         reason = "triage" if target.relationship == "triage" else "owner"
         return (str(target.thread), reason), routing_state
+    if unruled := unruled_reason(internal_event, identity, payload):
+        return RouteResult(RouteOutcome.PARKED, external_id=external_id, reason=unruled), routing_state
     if target.reason == "owner_inactive":
         return _dead_letter_result(
             internal_event, payload, "owner_inactive", external_id,
@@ -243,8 +230,6 @@ def _select_route(
             and routing_state.get("triage") is None):
         return _unowned_check_result(
             internal_event, payload, external_id, selected_pr), routing_state
-    if identity is None and internal_event == "webhook.github.issue_opened":  # only rules route it
-        return RouteResult(RouteOutcome.PARKED, reason="issue_opened_unruled"), routing_state
     reason = "no_artifact" if identity is None else (target.reason or "no_owner")
     return _dead_letter_result(internal_event, payload, reason, external_id), routing_state
 
@@ -271,6 +256,7 @@ async def route_event(
         payload,
         identity,
         selected_pr,
+        delivery_id=delivery_id,
     )
 
     if prepared.result is not None:
@@ -368,10 +354,6 @@ def _summarize(
         author = (comment.get("user") or {}).get("login", "?")
         details.update({"author": author, "url": comment.get("html_url")})
         summary = f"{external_id} comment from {author}"
-        if facts and facts.get("author_origin") == "inside":
-            body = (comment.get("body") or "")[:280]
-            details["comment"] = body
-            summary += f": {body[:100]}"
         return summary, details
 
     if pr:

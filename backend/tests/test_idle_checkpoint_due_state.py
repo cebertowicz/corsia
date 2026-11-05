@@ -7,6 +7,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from vendor_account_fixtures import signed_in_default
+
 # Native-harness threads idle-fold warm from their Turn's receipt or skip; a
 # shared-local-model thread stays excluded at the producer, like a child or
 # archived thread.
@@ -35,6 +37,11 @@ def _db() -> sqlite3.Connection:
             "(?, ?, ?, ?, ?, ?, 200000, 't0', 't0')",
             (model_id, "native", provider, model_id, model_id, model_id),
         )
+    from connections.models import upsert_connection
+
+    upsert_connection(type="cli", provider="claude-code", status="available", config={"binary": "/bin/test"}, db=db)
+    db.commit()
+    signed_in_default("claude-code", db=db)  # an input is admitted only on a signed-in account
     return db
 
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Any
 
 from connections.connected_accounts import ConnectedAccountError
@@ -19,11 +18,10 @@ from tools.action_drafts import DraftError
 from tools.reviewed_drafts import DraftStorageRefused, open_draft, save_draft
 from tools.action_gate import Approved, check_action
 from tools.base import Tool
+from tools.email_read import marked_message
 from tools.microsoft_account import _designated
 
 log = logging.getLogger(__name__)
-CLOSE_TAG = re.compile(r"</untrusted-email", re.I)
-UNSCREENED = "This message hasn't been screened yet because the local model isn't available. Try again later."
 ACCOUNT_PARAM = {"type": "string", "description": "The Microsoft account_id returned by microsoft_status."}
 
 
@@ -84,7 +82,7 @@ class MicrosoftMailSearchTool(Tool):
                 entry: dict[str, Any] = {
                     "message_id": item.message_id, "thread_id": thread_key(account, item.thread_id),
                     "from": email_screen.sender_for_screen(item.headers.get("from", ""), screen),
-                    "date": item.headers.get("date", ""),
+                    "date": email_screen.date_for_screen(item.headers.get("date", ""), screen),
                 }
                 if screen is not None and screen.clean:
                     entry["subject"] = item.headers.get("subject", "")
@@ -98,19 +96,15 @@ class MicrosoftMailSearchTool(Tool):
 class MicrosoftMailReadTool(Tool):
     self_describing_errors = True
     name = "microsoft_mail_read"
-    description = "Read one Microsoft message after the local email screen passes it."
+    description = "Read a Microsoft message as untrusted data, with a notice if flagged or unscreened."
     parameters = {"type": "object", "additionalProperties": False, "required": ["account_id", "message_id"], "properties": {"account_id": ACCOUNT_PARAM, "message_id": {"type": "string"}}}
     async def execute(self, **kwargs: Any) -> str:
         try:
             account = await _account(kwargs)
             message = await mail.fetch(account, kwargs.get("message_id"))
             screen = await email_screen.screen_message(account, message.message_id, message.headers, message.body)
-            if screen.flagged:
-                return "Error: This message was flagged as a possible prompt injection. Its body is withheld."
-            if not screen.clean:
-                return f"Error: {UNSCREENED}"
-            body = CLOSE_TAG.sub("&lt;/untrusted-email", message.body[:20_000])
-            return json.dumps({"message_id": message.message_id, "thread_id": thread_key(account, message.thread_id), **message.headers, "body": f"<untrusted-email>\n{body}\n</untrusted-email>"})
+            return marked_message(message.message_id, thread_key(account, message.thread_id), message.headers,
+                                  message.body, screen)
         except (MicrosoftError, ConnectedAccountError) as exc:
             return _error(exc)
 

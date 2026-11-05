@@ -12,7 +12,10 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from core import turn_iteration_context as iteration_context
-from core import turn_provider_call, turns_steps
+from core import turn_measured_usage, turn_provider_call, turns_steps
+from core.turn_provider_error import (
+    TurnProviderError, check_provider_error, end_if_overflow_unchanged, terminal_payload as _terminal_payload,
+)
 from core.checkpoint_native_admission import IDLE_RECEIPT_KEY, freeze_idle_receipt
 from core.native_context_prefix import CONTEXT_WINDOW_UNSET, _freeze_tool_definitions
 import tools.confined_reads as confined_reads
@@ -23,14 +26,9 @@ from core.turns_util import _log_llm_usage, usage_call_fields
 from plans.public import binding_at_call_start
 from infra import state as runtime_state
 from infra.db_async import run_in_db
-from llm.error_cause import response_error_fields
 
 if TYPE_CHECKING:
     from core.media_projection import ValidatedMediaProjection
-
-
-class TurnProviderError(RuntimeError):
-    """Provider-reported turn failure already surfaced by the step handler."""
 
 
 class ProviderDeliverySettlementError(RuntimeError):
@@ -63,6 +61,9 @@ class _IterationState:
     active_boundary_input: NativeSafeBoundaryInput | None = None
     boundary_write_started: bool = False
     restart_resume_registered: bool = False
+    # The one overflow response this Turn sends back to the boundary.
+    overflowed: Any = None
+    overflow_retry_pending: bool = False
 
 
 async def _prepare_iteration_state(
@@ -108,13 +109,6 @@ async def _settle_provider_delivery(state: _IterationState, on_provider_response
 async def _provider_step(state, on_provider_response, on_step, kind: str, payload: dict):
     await _settle_provider_delivery(state, on_provider_response)
     return await on_step(kind, payload)
-
-
-def _terminal_payload(state: _IterationState, **fields) -> dict:
-    fields["context_usage"] = iteration_context._context_usage_from_latest_call(state.context_usage, state.last_measured_call_usage)
-    if state.context_identity is not None:
-        fields["_context_usage_identity"] = state.context_identity
-    return fields
 
 
 async def _stop_at_restart_boundary(state: _IterationState, cancel_event: asyncio.Event, turn_identity, thread_id: str) -> bool:
@@ -173,7 +167,7 @@ async def _call_provider(
             state.last_measured_rendered_input_tokens = int(
                 state.fit_ledger.rendered_input_tokens
             )
-        usage = iteration_context._context_usage_from_latest_call(
+        usage = turn_measured_usage.context_usage_from_latest_call(
             state.context_usage, state.last_measured_call_usage,
             include_context_details=False)
         await provider_on_step("context_usage", {"context_usage": usage, "_context_usage_identity": state.context_identity})
@@ -184,28 +178,6 @@ async def _call_provider(
                                 getattr(response, "effort_sent", None)),
     )
     return response, tools_already_streamed
-
-
-async def _check_provider_error(state, response, turn_model, thread_id, provider_on_step):
-    if response.finish_reason != "error":
-        return
-    turn = getattr(runtime_state._current_turn_identity.get(None), "turn_id", None)
-    logger.warning("run_turn_with_steps: LLM returned error for session {} turn {} kind={}: {}",
-                   thread_id, turn, getattr(response, "error_kind", None), response.content)
-    state.terminal_effect_emitted = True
-    if getattr(response, "error_kind", None) == "provider_context_overflow":
-        # The provider's raw sentence is not the handled I7 transition copy.
-        message = (
-            "The provider rejected this turn for size, so the context window "
-            f"for {turn_model} was re-measured and refreshed. Retry the send; the next turn is "
-            "fit against the live window.")
-    else:
-        message = response.content or (
-            "The model call failed without a diagnostic message. Retry, or "
-            "switch models if it persists.")
-    await provider_on_step("error", _terminal_payload(
-        state, message=message, **response_error_fields(response)))
-    raise TurnProviderError(message)
 
 
 async def _run_tool_phase(
@@ -305,13 +277,16 @@ async def _run_loop(
             )
             if prepared is not None:
                 iteration_context.adopt_native_context(state, prepared)
+            await end_if_overflow_unchanged(state, prepared, turn_model, provider_on_step)
             state.iteration += 1
             result = await _call_provider(agent, state, turn_model, provider_params,
                 thread_id, cancel_event, provider_on_step, reasoning_effort, on_provider_response)
             if result is None:
                 break
             response, tools_already_streamed = result
-            await _check_provider_error(state, response, turn_model, thread_id, provider_on_step)
+            if await check_provider_error(
+                    state, response, turn_model, thread_id, provider_on_step, state.iteration < agent.max_iterations):
+                continue
             await turns_steps.emit_reasoning(response, provider_on_step,
                 was_streamed=provider_params.get("uses_streaming", False))
             if response.has_tool_calls:

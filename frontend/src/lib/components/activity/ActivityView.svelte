@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { threads } from '$lib/stores/threads';
+	import { everyThread } from '$lib/stores/everyThread';
 	import { threadActivity } from '$lib/stores/activity';
 	import {
 		projects,
@@ -72,14 +72,14 @@
 	const hasPayload = $derived(query.payload != null);
 	const offline = $derived($connectionState !== 'connected' && hasPayload);
 	const resumeThreads = $derived(buildResumeThreads(
-		$threads,
+		$everyThread,
 		$threadActivity,
 		projectId ? { projectId, projects: $projects } : { projects: $projects },
 	));
 	let orderingNow = $state(Date.now());
 	const groups = $derived(buildActivityGroups(
 		query.payload?.plans ?? [],
-		$threads,
+		$everyThread,
 		$projects,
 		projectId ? { projectId, now: orderingNow } : { now: orderingNow },
 	));
@@ -176,6 +176,7 @@
 			{#if scopeStateKind}
 				<ActivityScopeState
 					kind={scopeStateKind}
+					scopeNoun={projectId === null ? 'workspace' : 'project'}
 					canGoWorkspace={projectId !== null}
 					onRetry={() => query.retry()}
 					{onGoWorkspace}
@@ -195,6 +196,7 @@
 				{#if groups.length === 0}
 					<ActivityScopeState
 						kind="empty"
+						scopeNoun={projectId === null ? 'workspace' : 'project'}
 						onRetry={() => query.retry()}
 						{onGoWorkspace}
 					/>

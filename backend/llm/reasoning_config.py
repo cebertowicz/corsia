@@ -22,20 +22,16 @@ import sqlite3
 from typing import Any
 
 
-def reasoning_shape_from_discovery(
-    model: dict[str, Any], *, managed_effort: str | None = None,
-) -> dict[str, Any] | None:
+def reasoning_shape_from_discovery(model: dict[str, Any]) -> dict[str, Any] | None:
     """Build a reasoning descriptor from what an oMLX server reported.
 
     Three outcomes, in order:
 
     * discrete levels the template validates → an ``effort_levels`` picker,
-      opening on whatever level the server is currently configured to use.
-      ``managed_effort`` is CORSIA's level for its own server
-      (``local_profiles.MANAGED_REASONING_EFFORT``): when that server sets no
-      level and the model lists it, the picker opens on it and
-      ``send_when_unset`` names it, since only a level on the wire overrides
-      the template's default;
+      opening on the level the server is configured to use. When the server
+      sets none, the model's own template default runs and the picker opens on
+      Auto: oMLX does not report which level that default is, and its
+      ``reasoning_effort_default`` is only its settings menu's starting value;
     * a thinking toggle but no levels → a ``boolean`` control, opening on the
       server's current setting;
     * no thinking support, or a server too old to report any of this → None,
@@ -55,20 +51,9 @@ def reasoning_shape_from_discovery(
     if efforts:
         levels = [str(level) for level in efforts]
         configured = model.get("configured_reasoning_effort")
-        if configured not in levels and managed_effort in levels:
-            return {
-                "type": "effort_levels",
-                "values": levels,
-                "default": managed_effort,
-                "send_when_unset": managed_effort,
-            }
-        declared = model.get("reasoning_effort_default")
-        default = configured if configured in levels else declared
-        return {
-            "type": "effort_levels",
-            "values": levels,
-            "default": default if default in levels else levels[0],
-        }
+        if configured in levels:
+            return {"type": "effort_levels", "values": levels, "default": configured}
+        return {"type": "effort_levels", "values": levels, "default": None, "supports_auto": True}
 
     thinking_default = model.get("thinking_default")
     if thinking_default is None:
@@ -141,15 +126,14 @@ def effective_reasoning_effort(raw: str | None, model: str) -> str | None:
     dispatch, cache warm, checkpoints and the picker agree by construction.
 
     * ``None``, ``auto`` and ``none`` are returned as they are, without a
-      catalog read; an unset level on the managed oMLX is filled where the
-      request is shaped (``wire_reasoning_effort``);
+      catalog read;
     * no reported vocabulary (older server, free-form template, toggle-only
       model): the value passes through and the server validates it;
     * a level the model's vocabulary contains: itself;
     * a level it does not contain: the shape's default, which is the level the
       picker shows for exactly this case; or, for a shape with an "auto" mode
-      (an External model's published levels), None, so the provider's own
-      default runs.
+      (an External model's published levels, or a local model whose server
+      sets no level), None, so the provider's or model's own default runs.
     """
     if raw is None:
         return None

@@ -117,7 +117,7 @@ def test_a_project_agent_is_refused_before_anything_is_read(monkeypatch):
 
 
 def test_contract_catalog_and_registration():
-    from core.agent import _register_project_creation_tools
+    from core.agent import _register_project_and_workspace_tools
     from tools.catalog import TOOL_CATALOG
 
     tool = tool_module.AgentImportTool()
@@ -125,7 +125,7 @@ def test_contract_catalog_and_registration():
     assert "references/agent-import.md" in tool.description
     assert TOOL_CATALOG["agent_import"].category == "memory"
     registered = []
-    _register_project_creation_tools(SimpleNamespace(tools=SimpleNamespace(register=registered.append)))
+    _register_project_and_workspace_tools(SimpleNamespace(tools=SimpleNamespace(register=registered.append)))
     assert [t.name for t in registered].count("agent_import") == 1
 
 
@@ -284,6 +284,21 @@ def test_installs_from_that_read_for_one_hour_only(wired, monkeypatch):
     assert "that hour has passed" in expired
 
 
+def test_a_failed_install_keeps_its_reason_in_the_receipt(wired, monkeypatch):
+    from onboarding import agent_import_skills
+
+    decision_id = _consent(wired)
+    item_id = json.loads(asyncio.run(_execute(consent_decision_id=decision_id)))["skills"][0]["item_id"]
+    failed = {"item_id": item_id, "name": "rfc-writer", "sha256": "a" * 64, "outcome": "failed",
+              "reason": "invalid_sidecar", "detail": "corsia.workflow.extra is an unknown key"}
+    monkeypatch.setattr(agent_import_skills, "install_skills", lambda *_args, **_kwargs: [failed])
+    done = json.loads(asyncio.run(_execute(consent_decision_id=decision_id, mode="install", item_ids=[item_id])))
+
+    assert done["results"] == [failed]
+    assert _receipt(wired, tool_module.INSTALL_OPERATION)["items"] == [
+        {key: failed[key] for key in ("item_id", "sha256", "outcome", "reason", "detail")}]
+
+
 def test_install_needs_a_finished_read(wired):
     decision_id = _consent(wired)
     refused = asyncio.run(_execute(consent_decision_id=decision_id, mode="install", item_ids=["x"]))
@@ -332,7 +347,7 @@ def test_first_run_raises_the_card_first_and_the_reference_carries_appendix_a():
     app = (skill / "references/first-run-app.md").read_text(encoding="utf-8")
     steps = app.split("## The steps, in this order", 1)
     assert "`references/agent-import.md`" in steps[1].split("3. **Where your work lives,**", 1)[0]
-    assert "Raise it unchanged" in steps[1]
+    assert "Raise it as **Raising a decision** in `references/first-run.md` says" in steps[1]
     connected = (skill / "references/agent-import.md").read_text(encoding="utf-8").split("## Their connected apps", 1)[1]
     assert "only for the tools whose connected apps the consent card named" in connected
     assert "OpenClaw and Hermes Agent can be among them" in connected

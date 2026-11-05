@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from core.lesson_files import TrialFile
 from core.role_context_sources import RoleName
 
 SkillScope = Literal["workspace", "project", "thread", "system"]
@@ -28,6 +29,9 @@ class SkillRow:
     role: RoleName | None = None
     # CORSIA data (handler, workflow) from the sidecar or legacy block; see SkillValidation.
     corsia: dict[str, Any] | None = None
+    trial: TrialFile | None = None
+    raw_sha256: str | None = None
+    source_data: bytes | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return the API-safe dictionary projection for this skill row."""

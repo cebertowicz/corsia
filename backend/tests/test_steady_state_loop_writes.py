@@ -23,6 +23,7 @@ from codex_runtime_fixtures import _admit_active_turn, _seed_runtime_sessions, l
 from infra import database
 from infra.db_loop_guard import LOOP_WRITE_STRICT_ENV
 from subagents import cc_runtime_resume
+from tests.vendor_account_fixtures import signed_in_default
 from tests.test_plan_event_wait_boundary import (  # noqa: F401
     OPENED, REPO, _armed, _identity, _owner, _watching,
 )
@@ -104,6 +105,7 @@ async def test_codex_cold_spawn_persists_its_install_off_the_event_loop(
     thread_id = "main-1"
     turn_id = "cold-turn"
     _seed_runtime_sessions(thread_id)
+    signed_in_default("codex", db=child_db)  # the input is admitted on the signed-in Default
     _admit_active_turn(thread_id, turn_id=turn_id, content="literal boundary")
     with closing(sqlite3.connect(str(database.DB_PATH), timeout=0.05)) as reader:
         reader.row_factory = sqlite3.Row

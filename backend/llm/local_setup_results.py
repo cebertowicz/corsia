@@ -10,13 +10,14 @@ from fastapi import HTTPException
 
 #: The one command that sets up, resumes or retries local setup; oMLX's recommender picks the model.
 SETUP_COMMAND = "corsia local setup"
-CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "memory", "other", "own_omlx_upgrade_required"})
+CAUSES = frozenset({"connection", "damaged_bundle", "disk_full", "load_failed", "load_refused", "memory", "other", "own_omlx_upgrade_required"})
+LOAD_FAILURE_CAUSES = frozenset({"load_refused", "load_failed"})
 # Sentences say "try again"; "Retry" names only the button.
 RETRY_IN_APP = "try again."
 RETRY_IN_TERMINAL = f"run `{SETUP_COMMAND}` again."
 
 
-def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN_APP) -> str:
+def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN_APP, *, verdict: object = None, neighbour: object = None) -> str:
     """Return the one cause-specific recovery line for setup, sources, wakes and the CLI."""
     if cause == "damaged_bundle":
         return f"The CORSIA app is damaged because its bundled oMLX executable is missing. Download CORSIA again, replace this app, then {retry}"
@@ -28,6 +29,16 @@ def setup_fix(cause: object, bytes_to_free: object = None, retry: str = RETRY_IN
         return f"Check your internet connection, then {retry}"
     if cause == "memory":
         return "Choose a subscription or API provider instead."
+    if cause == "load_failed":
+        action = "Press Retry." if retry == RETRY_IN_APP else retry[0].upper() + retry[1:]
+        return f"CORSIA couldn’t load the model. {action}"
+    if cause == "load_refused":
+        action = "press Retry." if retry == RETRY_IN_APP else retry
+        if verdict == "no_room":
+            other = neighbour if isinstance(neighbour, str) and neighbour.strip() else "another model"
+            return (f"CORSIA couldn’t load the model while {other} is loaded. "
+                    f"Unload it in oMLX or quit the app using it, then {action}")
+        return f"CORSIA couldn’t load the model because there isn’t enough free memory. Close other apps, then {action}"
     if cause == "own_omlx_upgrade_required":
         # Only a source run without the bundled oMLX reaches this (ensure_omlx).
         if retry == RETRY_IN_APP:
@@ -58,8 +69,24 @@ def task_from_payload(payload: object, task_id: str) -> dict | None:
                  if isinstance(task, dict) and task.get("task_id") == task_id), None)
 
 
+class LoadRefused(RuntimeError):
+    """A memory check refused the load, with the catalog line when available."""
+
+    def __init__(self, verdict: str, line: str | None, neighbour: str | None = None) -> None:
+        self.verdict = verdict
+        self.line = line
+        self.neighbour = neighbour
+        super().__init__(line or "")
+
+
+class LoadFailed(RuntimeError):
+    """The model failed to load; detail is logged with the setup reference."""
+
+
 def failure_message(exc: Exception) -> str:
     """A cause the CLI and sources panel can show for any setup failure."""
+    if isinstance(exc, LoadFailed):
+        return ""
     if isinstance(exc, HTTPException):
         return str(exc.detail)
     if isinstance(exc, ValueError):
@@ -74,6 +101,10 @@ def failure_cause(exc: Exception) -> str:
     from llm.local_setup_disk import DiskSpaceError
     from llm.local_setup_executable import OwnOmlxUpgradeRequired
 
+    if isinstance(exc, LoadRefused):
+        return "load_refused"
+    if isinstance(exc, LoadFailed):
+        return "load_failed"
     if isinstance(exc, OwnOmlxUpgradeRequired):
         return "own_omlx_upgrade_required"
     if isinstance(exc, DiskSpaceError):

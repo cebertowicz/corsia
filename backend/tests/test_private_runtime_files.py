@@ -200,7 +200,7 @@ def test_backend_startup_empties_the_private_launch_directories(state_root, isol
     for directory in ("UPLOADS_DIR", "LOGS_DIR", "RUNTIME_DIR"):
         monkeypatch.setattr(config, directory, tmp_path / directory)
     monkeypatch.setattr(prerequisites, "prepare_startup_prerequisites", lambda *_a, **_k: None)
-    monkeypatch.setattr(app_lifecycle, "init_db", lambda: None)
+    monkeypatch.setattr(app_lifecycle.app_startup_init, "init_db", lambda: None)
     monkeypatch.setattr(conversion, "convert_legacy_project_paths", lambda *_a, **_k: None)
     monkeypatch.setattr(durable_writes, "recover_write_intents", lambda *_a, **_k: None)
     monkeypatch.setattr(relocate, "recover_interrupted_relocations", lambda *_a, **_k: None)
@@ -213,7 +213,7 @@ def test_backend_startup_empties_the_private_launch_directories(state_root, isol
         def info(self, *_args: object) -> None:
             pass
 
-    app_lifecycle._initialize_startup(QuietLogger())
+    app_lifecycle.app_startup_init.initialize_startup(QuietLogger())
 
     assert not stale.exists()
 

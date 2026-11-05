@@ -42,7 +42,7 @@ def listing(monkeypatch):
         assert api_base == _CLOUD_BASE
         if listed["error"] is not None:
             raise listed["error"]
-        return list(listed["ids"])
+        return dict.fromkeys(listed["ids"])
 
     async def _no_image_probe(server_id):
         return False

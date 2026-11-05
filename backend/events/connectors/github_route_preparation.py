@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -88,6 +88,13 @@ def _preparation_gate() -> asyncio.Lock:
     return gate
 
 
+def _no_routed_wake(target: Any, _db: Any) -> str | None:
+    """Hold a rule-only label from the thread routing chose, never from one a rule adds."""
+    from events.github_mapper import LABEL_RULE_ONLY
+
+    return None if target.relationship == "rule" else LABEL_RULE_ONLY
+
+
 def _prepare_route(
     unit: _Preparation,
     internal_event: str,
@@ -95,12 +102,13 @@ def _prepare_route(
     identity: Any,
     selected_pr: dict[str, Any] | None,
     scope: RuleScope | None = None,
+    delivery_id: str | None = None,
 ) -> None:
     """Perform each canonical write in the original noninterleaved stage order."""
     from events import router
     from events.connectors.github_rules import apply_routed_rules
+    from events.github_mapper import label_wakes_nobody
     from events.identity import PrResolutionError
-    from events.routing_inputs import structured_tag
 
     if not unit.begin():
         return
@@ -112,39 +120,47 @@ def _prepare_route(
         return
     if identity is not None and router._record_source_facts_db(internal_event, identity, payload):
         prepared.reap_payload = payload
-    suppressed = router._self_authored_result(internal_event, payload)
+    rule_only_label = label_wakes_nobody(internal_event, payload)
+    suppressed = None if rule_only_label else router._self_authored_result(internal_event, payload)
     if suppressed is not None:
         prepared.result = suppressed
         return
     external_id = identity.external_id if identity else None
-    tag_provenance = structured_tag(payload)
     selected, routing_state = router._select_route(
-        internal_event, payload, identity, external_id, tag_provenance, selected_pr,
+        internal_event, payload, identity, external_id, selected_pr,
     )
+    target_filter = None
+    if delivery_id and internal_event in ("webhook.github.pr_comment", "webhook.github.issue_comment"):
+        from events.connectors.github_self_caused import SelfCausedFilter
+
+        target_filter = SelfCausedFilter(delivery_id)
     if isinstance(selected, router.RouteResult):
         prepared.result = selected
-        # Routing chose no thread; rules may still add recipients, never change this result.
+        # Rules may add recipients or settle an otherwise unhandled rule-only item.
         apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state,
-                           scope=scope)
+                           scope=scope, target_filter=target_filter)
         return
     thread_id, wake_reason = selected
+    if rule_only_label:
+        # Rules still resolve in the routed thread's project; that thread just isn't woken.
+        prepared.thread_id, prepared.identity = thread_id, identity
+        apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state, wake_reason,
+                           scope, _no_routed_wake)
+        return
     facts = scope.envelope.facts if scope and scope.envelope else None
     summary, details = router._summarize(internal_event, payload, external_id, facts)
-    if tag_provenance:
-        details["tag_provenance"] = tag_provenance
     chip = router._chip_line(payload, external_id, summary)
     router._record_passive_change(
         routing_state=routing_state, wake_thread_id=thread_id,
         internal_event=internal_event, external_id=external_id,
         summary=summary, chip=chip, wake_reason=wake_reason,
-        tag_provenance=tag_provenance,
     )
     prepared.thread_id, prepared.identity = thread_id, identity
     prepared.summary, prepared.details, prepared.chip = summary, details, chip
     prepared.notice = router.github_pr_notice.notice_for_routed_event(thread_id, identity)
     # Routing has decided; agent-written rules add recipients or drop or annotate this one.
     apply_routed_rules(prepared, internal_event, payload, selected_pr, routing_state, wake_reason,
-                       scope)
+                       scope, target_filter)
 
 
 async def release_notice_off_loop(thread_id: str, identity: Any) -> None:
@@ -176,9 +192,11 @@ async def prepare_route_ordered(
     payload: dict[str, Any],
     identity: Any,
     selected_pr: dict[str, Any] | None,
+    *, delivery_id: str | None = None,
 ) -> PreparedRoute:
     """Join the exact DB unit and recover committed effects before leaving its gate."""
     from events import router
+    from events.connectors import github_pr_facts as pr_facts
     from events.connectors.github_rules import rule_scope
     from infra.db_async import run_in_db
     from subagents.runtime_guard import join_task_through_cancellation
@@ -186,10 +204,13 @@ async def prepare_route_ordered(
     # Like the check suite's pull request, read before the gate: the projects
     # tracking the repository run git, which must never hold every webhook's turn.
     scope = await asyncio.to_thread(rule_scope, internal_event, payload, selected_pr)
+    # Read before the gate too: a rule that names the PR's live head or checks asked for it.
+    if scope.reads_head:
+        scope = replace(scope, envelope=await pr_facts.enriched(scope.envelope))
     async with _preparation_gate():
         unit = _Preparation()
         preparation = asyncio.create_task(run_in_db(
-            _prepare_route, unit, internal_event, payload, identity, selected_pr, scope,
+            _prepare_route, unit, internal_event, payload, identity, selected_pr, scope, delivery_id,
         ))
         cancellation = None
         try:

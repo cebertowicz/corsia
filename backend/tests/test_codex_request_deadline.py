@@ -15,6 +15,8 @@ from subagents import codex_app_server
 from subagents.codex_app_server import CodexAppServerSession
 from subagents.codex_app_server_errors import CodexAppServerError
 
+pytestmark = pytest.mark.usefixtures("admitted_writes")  # the transport is under test, not account binding
+
 
 @asynccontextmanager
 async def _unread_pipe_session():

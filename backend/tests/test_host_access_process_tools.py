@@ -3,12 +3,15 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import threading
 from types import SimpleNamespace
 
 import pytest
+
+from infra.backend_git import git_argv
 
 
 def test_process_action_descriptors_are_typed_and_fresh_permit_gated(
@@ -315,7 +318,7 @@ async def test_controlled_git_subcommand_uses_the_same_owned_process_group(
         from tools import linux_shell
 
         def linux_argv(command, cwd, **kwargs):
-            assert command == "git -c core.hooksPath=/dev/null rev-parse HEAD"
+            assert command == shlex.join(git_argv("rev-parse", "HEAD"))
             assert cwd == repo
             assert kwargs["controlled_policy"] == policy
             assert kwargs["controlled_operation"] == "query"
@@ -369,10 +372,9 @@ async def test_controlled_git_subcommand_uses_the_same_owned_process_group(
         {
             "argv": ([
                 "bwrap", "--", "/bin/bash", "-lc",
-                "git -c core.hooksPath=/dev/null rev-parse HEAD",
+                shlex.join(git_argv("rev-parse", "HEAD")),
             ] if sys.platform == "linux" else [
-                "safehouse", "--profile", "profile.sb", "--", "git", "-c",
-                "core.hooksPath=/dev/null", "rev-parse", "HEAD",
+                "safehouse", "--profile", "profile.sb", "--", *git_argv("rev-parse", "HEAD"),
             ]),
             "thread_id": "thread-a",
             "turn_id": "turn-a",

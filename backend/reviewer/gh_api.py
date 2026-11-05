@@ -13,10 +13,16 @@ log = logging.getLogger(__name__)
 def run_gh(
     args: list[str], *, input_text: str | None = None, timeout: float = 30.0,
 ) -> subprocess.CompletedProcess[str]:
-    """Run one ``gh`` command; callers own all result and failure policy."""
+    """Run one ``gh`` command as the agents' GitHub account when there is one.
+
+    Callers own all result and failure policy.
+    """
+    from connections import github_agent
+
+    binary, env, _account = github_agent.backend_gh_now()
     return subprocess.run(
-        ["gh", *args], input=input_text, capture_output=True, text=True,
-        timeout=timeout, check=False,
+        [binary, *args], input=input_text, capture_output=True, text=True,
+        timeout=timeout, check=False, env=env,
     )
 
 

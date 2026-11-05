@@ -24,7 +24,7 @@
 		return element ? EditorView.findFromDOM(element) : null;
 	}
 	function locate(from: number, to: number) {
-		const view = editor(), clip = root?.querySelector('.doc-main')?.getBoundingClientRect();
+		const view = editor(), clip = root?.querySelector('.ed-wrap')?.getBoundingClientRect();
 		return view && clip ? locateDocumentActivity(view, clip, from, to) : null;
 	}
 	function measure() {
@@ -88,7 +88,7 @@
 </script>
 
 {#if viewing && pill}
-	<div class="activity-pill" data-doc-activity-pill style:top="{top}px" style:right="{right}px">
+	<div class="activity-pill" data-doc-activity-pill data-direction={pill.direction} style:top="{top}px" style:right="{right}px">
 		<Button size="sm" ariaLabel={`${pill.count} new ${pill.direction}, go to nearest`} onclick={() => { if (pill) onJump(pill.span); }}>
 			{pill.count} new {pill.direction}
 			<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d={pill.direction === 'above' ? 'M12 19V5m-6 6 6-6 6 6' : 'M12 5v14m-6-6 6 6 6-6'} /></svg>

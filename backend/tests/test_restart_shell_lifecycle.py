@@ -413,7 +413,7 @@ service_domain() { printf 'gui/501'; }
 service_label() { printf 'com.corsia.prod'; }
 drain_and_wait() { printf 'unexpected drain\\n' >> "$LAUNCHCTL_TRACE"; }
 launchctl_bootout_wait() {
-    printf 'bootout --wait %s bound=%s\\n' "$1" "$SERVICE_PID_EXIT_WAIT_SECONDS" \
+    printf 'bootout %s bound=%s\\n' "$1" "$SERVICE_PID_EXIT_WAIT_SECONDS" \
         >> "$LAUNCHCTL_TRACE"
 }
 service_stop
@@ -426,5 +426,5 @@ service_stop
 
     assert result.returncode == 0, result.stderr
     assert trace.read_text().splitlines() == [
-        "bootout --wait gui/501/com.corsia.prod bound=125",
+        "bootout gui/501/com.corsia.prod bound=125",
     ]

@@ -70,7 +70,7 @@ STUBS = {
         'if [ "$1" = -c ]; then exec "$STUB_PYTHON" -c "import sqlite3\n'
         'sqlite3.sqlite_version_info = ${STUB_SQLITE_INFO:-(3, 50, 4)}\n$2"; fi; '
         'if [ "$1" = -m ] && [ "$2" = venv ]; then mkdir -p "$3/bin"; '
-        "printf '#!/bin/bash\\nexit 0\\n' > \"$3/bin/python\"; chmod +x \"$3/bin/python\"; fi"
+        'cp "$STUB_VENV_PYTHON" "$3/bin/python"; chmod +x "$3/bin/python"; fi'
     ),
     # macOS `open`: record the URL instead of launching the real browser.
     "open": 'echo "open $*" >> "$STUB_LOG"',
@@ -107,7 +107,9 @@ def env(tmp_path: Path) -> dict[str, str]:
     checkout = home / ".corsia"
     (checkout / "scripts").mkdir(parents=True)
     (checkout / "backend").mkdir()
-    shutil.copy2(INSTALL, checkout / "scripts" / "install.sh")
+    installer = INSTALL.read_text().replace("/opt/homebrew/bin/brew", str(tmp_path / "arm-brew"))
+    installer = installer.replace("/usr/local/bin/brew", str(tmp_path / "intel-brew"))
+    (checkout / "scripts" / "install.sh").write_text(installer)
     (checkout / "backend" / "requirements.lock").write_text("")
     corsia = checkout / "scripts" / "corsia"
     corsia.write_text(
@@ -122,6 +124,20 @@ def env(tmp_path: Path) -> dict[str, str]:
     # What `npm install -g agent-browser@0.31` leaves behind, whatever was installed before.
     browser_source.write_text(f"#!/bin/bash\nset -eu\nSTUB_BROWSER_VERSION=0.31.2\n{BROWSER_CLI}\n")
     browser_source.chmod(0o755)
+    venv_python = tmp_path / "venv-python"
+    venv_python.write_text(
+        '#!/bin/bash\nset -eu\n'
+        'if [ "${1:-}" = -c ] && [[ "${2:-}" = *has_users* ]]; then\n'
+        '  [ "${STUB_HAS_ACCOUNT:-0}" = 1 ]; exit $?\n'
+        'fi\n'
+        'if [ "${1:-} ${2:-} ${3:-}" = "-m cli init" ]; then\n'
+        '  [ "$#" = 7 ] && [ "$4" = --path ] && [ "$5" = "$HOME/corsia" ]\n'
+        '  [ "$6" = --setup ] && [ "$7" = local ]\n'
+        '  echo "workspace init local defaults" >> "$STUB_LOG"\n'
+        '  [ "${STUB_INIT_FAIL:-0}" = 0 ] || exit 1\n'
+        '  printf \'{"existing":"preserved"}\\n\' > "$HOME/.corsia/config.json"\n'
+        'fi\n'
+    )
     answers = tmp_path / "answers"
     answers.write_text("terminal-answer\n")
 
@@ -132,6 +148,7 @@ def env(tmp_path: Path) -> dict[str, str]:
         "STUB_BIN": str(stub_bin),
         "STUB_LOG": str(log),
         "STUB_PYTHON": sys.executable,
+        "STUB_VENV_PYTHON": str(venv_python),
         "STUB_SAFEHOUSE": str(safehouse),
         "STUB_BROWSER_SOURCE": str(browser_source),
         "STUB_BREW": str(brew),
@@ -209,50 +226,61 @@ def test_macos_15_and_later_pass_the_platform_check(env, version):
 
 
 FRESH_INSTALL_CALLS = [
-    "corsia local setup --before-start --if-no-subscription stdin=terminal-answer",
+    "workspace init local defaults",
     "corsia start stdin=none",
-    "corsia sources --install-summary stdin=none",
-    "corsia agent warm stdin=none",
     f"open http://localhost:{DEFAULT_BACKEND_PORT}",
 ]
-def test_a_failed_agent_warm_never_stops_the_install(env):
-    result = _run(env, STUB_WARM_STATUS="1")
+
+
+def test_a_failed_agent_warm_never_stops_an_existing_accounts_install(env):
+    result = _run(env, STUB_WARM_STATUS="1", STUB_HAS_ACCOUNT="1")
     assert result.returncode == 0, result.stderr
-    assert _calls(env) == FRESH_INSTALL_CALLS
+    assert _calls(env) == [
+        *FRESH_INSTALL_CALLS[:2],
+        "corsia sources --install-summary stdin=none",
+        "corsia agent warm stdin=none",
+        FRESH_INSTALL_CALLS[-1],
+    ]
 
 
 OPENING_LINE = "Opening CORSIA at http:" f"//localhost:{DEFAULT_BACKEND_PORT}"
 
 
-def test_the_model_source_is_ready_before_corsia_starts_then_it_opens(env):
-    result = _run(env)
+def test_source_install_opens_browser_setup_without_terminal_input(env):
+    result = _run(env, CORSIA_INSTALL_TTY="/nonexistent/no-terminal")
     assert result.returncode == 0, result.stderr
-    assert "2/8  Using CORSIA test-version (commit test-sha) in ~/.corsia" in result.stdout
+    assert "2/4  Using CORSIA test-version (commit test-sha) in ~/.corsia" in result.stdout
     assert "To update, use Settings › Update." not in result.stdout
     assert not any("brew" in call for call in _calls(env))
     assert _calls(env) == FRESH_INSTALL_CALLS
     assert OPENING_LINE in result.stdout.splitlines()
 
 
-def test_a_failed_model_setup_starts_nothing_and_says_to_run_the_install_again(env):
-    result = _run(env, STUB_BEFORE_START_STATUS="2")
+def test_a_failed_workspace_init_does_not_start_or_open(env):
+    result = _run(env, STUB_INIT_FAIL="1")
 
     assert result.returncode == 1
     assert _calls(env) == FRESH_INSTALL_CALLS[:1]
-    assert result.stderr.strip() == "Run the install command again to retry."
-    assert "corsia local setup" not in result.stdout + result.stderr
-    assert "corsia open" not in result.stdout + result.stderr
     assert OPENING_LINE not in result.stdout
 
 
-def test_a_mac_that_needs_a_sign_in_starts_nothing_and_adds_no_retry_line(env):
-    # The model-source step has already said how to sign in; a retry alone can't work.
+def test_a_mac_without_a_model_can_open_browser_setup(env):
     result = _run(env, STUB_BEFORE_START_STATUS="3")
 
-    assert result.returncode == 1
-    assert _calls(env) == FRESH_INSTALL_CALLS[:1]
-    assert result.stderr.strip() == ""
-    assert OPENING_LINE not in result.stdout
+    assert result.returncode == 0, result.stderr
+    assert _calls(env) == FRESH_INSTALL_CALLS
+    assert OPENING_LINE in result.stdout
+
+
+def test_configured_workspace_is_preserved_on_stopped_install(env):
+    config = Path(env["HOME"]) / ".corsia" / "config.json"
+    config.write_text('{"workspace":"existing","setup":"server"}')
+
+    result = _run(env)
+
+    assert result.returncode == 0, result.stderr
+    assert config.read_text() == '{"workspace":"existing","setup":"server"}'
+    assert _calls(env) == FRESH_INSTALL_CALLS[1:]
 
 
 def test_running_install_shows_the_update_hint_without_restarting(env):
@@ -266,12 +294,26 @@ def test_running_install_shows_the_update_hint_without_restarting(env):
 def test_running_install_with_local_flag_runs_the_shared_local_setup(env):
     result = subprocess.run(
         ["/bin/bash", str(_script(env)), "--local"],
-        cwd=_script(env).parents[1], env={**env, "STUB_RUNNING": "1"}, input="", text=True,
+        cwd=_script(env).parents[1],
+        env={**env, "STUB_RUNNING": "1", "STUB_HAS_ACCOUNT": "1"}, input="", text=True,
         capture_output=True, check=False, timeout=30,
     )
 
     assert result.returncode == 0, result.stderr
     assert _calls(env) == ["corsia local setup --automatic --start-only stdin=none"]
+
+
+def test_running_install_with_local_flag_without_account_explains_browser_setup(env):
+    result = subprocess.run(
+        ["/bin/bash", str(_script(env)), "--local"],
+        cwd=_script(env).parents[1],
+        env={**env, "STUB_RUNNING": "1"}, input="", text=True,
+        capture_output=True, check=False, timeout=30,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert f"Finish setup at http://localhost:{DEFAULT_BACKEND_PORT} and choose Local there." in result.stdout
+    assert not any(call.startswith("corsia") for call in _calls(env))
 
 
 def test_installer_leaves_the_assistant_google_tool_to_the_assistant(env):
@@ -348,6 +390,29 @@ def test_a_failed_browser_setup_stops_the_install(env):
     assert not any(call.startswith("corsia") for call in _calls(env))
 
 
+@pytest.mark.parametrize("finder", ["find_brew", "find_installed_brew"])
+@pytest.mark.parametrize("available", ["arm", "intel", "both", "none"])
+def test_brew_finders_return_the_first_installed_path(env, tmp_path, finder, available):
+    arm = tmp_path / "arm-brew"
+    intel = tmp_path / "intel-brew"
+    for path, kind in ((arm, "arm"), (intel, "intel")):
+        if available in (kind, "both"):
+            path.write_text("#!/bin/bash\nexit 0\n")
+            path.chmod(0o755)
+    script = _script(env)
+
+    result = subprocess.run(
+        ["/bin/bash", "-c", 'source "$1"; ' + finder, "test", str(script)],
+        env={**env, "CORSIA_INSTALL_SOURCE_ONLY": "1", "CORSIA_INSTALL_BREW": ""},
+        text=True, capture_output=True, check=False, timeout=10,
+    )
+
+    assert result.returncode == (1 if available == "none" else 0), result.stderr
+    expected = "" if available == "none" else str(intel if available == "intel" else arm) + "\n"
+    assert result.stdout == expected
+    assert all(Path(found).resolve().is_relative_to(tmp_path.resolve()) for found in result.stdout.splitlines())
+
+
 def test_homebrew_uses_the_documented_installer_url():
     source = INSTALL.read_text()
     assert "https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh" in source
@@ -412,7 +477,7 @@ def test_missing_brew_is_installed_then_used_for_missing_items(env):
     ]
 
 
-def test_installer_local_flag_bypasses_only_the_subscription_skip(env):
+def test_fresh_install_with_local_flag_keeps_before_start_setup(env):
     result = subprocess.run(
         ["/bin/bash", str(_script(env)), "--local"],
         cwd=_script(env).parents[1], env=env, input="", text=True,
@@ -421,7 +486,9 @@ def test_installer_local_flag_bypasses_only_the_subscription_skip(env):
 
     assert result.returncode == 0, result.stderr
     assert _calls(env) == [
-        "corsia local setup --before-start stdin=terminal-answer", *FRESH_INSTALL_CALLS[1:],
+        FRESH_INSTALL_CALLS[0],
+        "corsia local setup --before-start stdin=none",
+        *FRESH_INSTALL_CALLS[1:],
     ]
 
 

@@ -55,14 +55,15 @@ def test_discovery_carries_selected_effort(monkeypatch, fresh_db, managed):
         shape = json.loads(row["metadata_json"])["reasoning_shape"]
         selected = "low" if managed else "medium"
         prepared = asyncio.run(turn._setup_turn(
-            "thread", "hello", [], target=target, turn_id="turn", ingress="ws",
+            "thread", "hello", target=target, turn_id="turn", ingress="ws",
             reasoning_effort=selected,
         ))
         assert wire_reasoning_effort(prepared.reasoning_effort, shape) == selected
         unset = asyncio.run(turn._setup_turn(
-            "thread", "hello", [], target=target, turn_id="unset", ingress="ws",
+            "thread", "hello", target=target, turn_id="unset", ingress="ws",
         ))
-        assert wire_reasoning_effort(unset.reasoning_effort, shape) == ("medium" if managed else None)
+        # No level picked: none goes on the wire, so the model's own default runs.
+        assert wire_reasoning_effort(unset.reasoning_effort, shape) is None
         flags = dict(db.execute("SELECT provider_model_id, supports_reasoning FROM models"))
         assert flags == {"effort": 1, "toggle": 1, "plain": 0}
         # Simulate an existing stale catalog row; rediscovery must repair it.

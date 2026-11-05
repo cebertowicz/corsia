@@ -665,3 +665,201 @@ async def test_stop_commit_cancels_the_plan_liveness_wake(main_db):
         "SELECT status FROM plan_liveness_wakes WHERE thread_id=?", ("main-1",),
     ).fetchone()
     assert row["status"] == "cancelled"
+
+
+def _queue_message(main_db, content: str, *, role="user", continuation=None) -> str:
+    import uuid
+
+    from infra.thread_driver import admit_input
+
+    message_id = uuid.uuid4().hex
+    admit_input(
+        "main-1", role=role, content=content, intent="apply_now",
+        message_id=message_id, turn_id=uuid.uuid4().hex, boot_epoch="test-boot",
+        admitted_at="t", continuation=continuation, db=main_db,
+    )
+    main_db.commit()
+    return message_id
+
+
+def _arm_work_and_queue_liveness_wake(main_db) -> str:
+    """Open plan work, an armed due wake row, and its wake queued in the FIFO."""
+    from datetime import datetime, timedelta, timezone
+
+    from automation import plan_liveness
+    from automation.continuation.execution import event_for
+    from automation.continuation.sources.liveness import LivenessSource
+    from automation.continuation.validity import condition_for_event
+    from plans import boundary, service
+
+    plan = service.ensure_plan("thread", "main-1", db=main_db)
+    node = service.add_node(
+        plan.id, kind="task", title="Continue the selected work",
+        acceptance_criteria="The selected work finishes", db=main_db,
+    )
+    boundary.mutate(
+        plan.id, "activate",
+        {"node_id": node.id, "expected_revision": node.revision},
+        actor=boundary.PlanActor("main-1", "steve", None),
+        provenance="test.stop_receipts", mutation_id="activate", db=main_db,
+    )
+    plan_liveness.on_turn_complete("main-1", db=main_db)
+    main_db.execute(
+        "UPDATE plan_liveness_wakes SET deadline=? WHERE thread_id='main-1'",
+        ((datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),),
+    )
+    main_db.commit()
+    due = datetime.now(timezone.utc).isoformat()
+    request = LivenessSource().due(due, db=main_db)[0]
+    _event, _summary, details = event_for(request)
+    condition = condition_for_event("plan.liveness_wake", details)
+    assert condition is not None
+    return _queue_message(
+        main_db, "Actionable structured plan work remains.",
+        role="system", continuation=condition,
+    )
+
+
+def _wake_state(main_db, wake_id: str) -> tuple[str, str | None, str | None]:
+    row = main_db.execute(
+        "SELECT delivery_state,delivery_error,active_turn_id FROM messages WHERE id=?",
+        (wake_id,),
+    ).fetchone()
+    return row["delivery_state"], row["delivery_error"], row["active_turn_id"]
+
+
+def _running_turns(main_db) -> int:
+    return main_db.execute(
+        "SELECT COUNT(*) AS n FROM active_turns WHERE thread_id='main-1' "
+        "AND status='running'",
+    ).fetchone()["n"]
+
+
+@pytest.mark.asyncio
+async def test_one_stop_leaves_a_queued_liveness_wake_unclaimed(main_db):
+    """Stop means stop: the wake queued behind the Turn is dropped, not run."""
+    from ws.stop_control import _commit_stop_terminal
+
+    identity, _event = _active_turn(main_db, "turn-stop-queued-wake")
+    wake_id = _arm_work_and_queue_liveness_wake(main_db)
+
+    status, applied = _commit_stop_terminal(
+        "steve", "main-1", identity.turn_id, db=main_db,
+    )
+
+    assert status == "cancelled" and applied is not None
+    assert applied[1].successor is None
+    assert _running_turns(main_db) == 0
+    assert _wake_state(main_db, wake_id) == ("cancelled", "stale_plan_wake", None)
+    row = main_db.execute(
+        "SELECT status FROM plan_liveness_wakes WHERE thread_id='main-1'",
+    ).fetchone()
+    assert row["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_stop_drops_a_liveness_wake_but_runs_the_person_behind_it(main_db):
+    from ws.stop_control import _commit_stop_terminal
+
+    identity, _event = _active_turn(main_db, "turn-stop-fifo")
+    wake_id = _arm_work_and_queue_liveness_wake(main_db)
+    person_id = _queue_message(main_db, "Please carry on")
+
+    _status, applied = _commit_stop_terminal(
+        "steve", "main-1", identity.turn_id, db=main_db,
+    )
+
+    assert applied is not None and applied[1].successor is not None
+    assert _wake_state(main_db, wake_id)[:2] == ("cancelled", "stale_plan_wake")
+    state, _error, turn = _wake_state(main_db, person_id)
+    assert state == "queued" and turn is not None
+    assert _running_turns(main_db) == 1
+
+
+@pytest.mark.asyncio
+async def test_stop_runs_a_queued_person_message_with_no_wake(main_db):
+    from ws.stop_control import _commit_stop_terminal
+
+    identity, _event = _active_turn(main_db, "turn-stop-person")
+    person_id = _queue_message(main_db, "Next thing")
+
+    _status, applied = _commit_stop_terminal(
+        "steve", "main-1", identity.turn_id, db=main_db,
+    )
+
+    assert applied is not None and applied[1].successor is not None
+    assert _wake_state(main_db, person_id)[2] is not None
+
+
+@pytest.mark.asyncio
+async def test_plan_limit_stop_keeps_a_queued_liveness_wake(main_db):
+    from core.stop_causes import PlanLimitStop
+    from ws.stop_control import _commit_stop_terminal
+
+    identity, _event = _active_turn(main_db, "turn-limit-wake")
+    wake_id = _arm_work_and_queue_liveness_wake(main_db)
+
+    _commit_stop_terminal(
+        "steve", "main-1", identity.turn_id, db=main_db,
+        cause=PlanLimitStop(),
+    )
+
+    assert _wake_state(main_db, wake_id)[0] == "queued"
+    row = main_db.execute(
+        "SELECT status FROM plan_liveness_wakes WHERE thread_id='main-1'",
+    ).fetchone()
+    assert row["status"] == "armed"
+
+
+@pytest.mark.asyncio
+async def test_a_stop_that_does_not_apply_leaves_the_wake_untouched(main_db):
+    from ws.stop_control import _commit_stop_terminal
+
+    identity, _event = _active_turn(main_db, "turn-stop-noop")
+    wake_id = _arm_work_and_queue_liveness_wake(main_db)
+    main_db.execute(
+        "UPDATE active_turns SET status='completed' WHERE id=?", (identity.turn_id,),
+    )
+    main_db.commit()
+
+    status, applied = _commit_stop_terminal(
+        "steve", "main-1", identity.turn_id, db=main_db,
+    )
+
+    assert status == "completed" and applied is None
+    assert _wake_state(main_db, wake_id)[0] == "queued"
+    row = main_db.execute(
+        "SELECT status FROM plan_liveness_wakes WHERE thread_id='main-1'",
+    ).fetchone()
+    assert row["status"] == "armed"
+
+
+@pytest.mark.asyncio
+async def test_a_stop_held_by_a_restart_still_never_runs_its_queued_wake(
+    main_db, monkeypatch,
+):
+    """A held claim leaves the wake queued; the re-armed row must not revive it."""
+    import uuid
+
+    from automation import plan_liveness, self_restart
+    from infra.thread_inputs import start_idle_turn
+    from ws.stop_control import _commit_stop_terminal
+
+    identity, _event = _active_turn(main_db, "turn-stop-held")
+    wake_id = _arm_work_and_queue_liveness_wake(main_db)
+    monkeypatch.setattr(self_restart, "restart_holds_new_work", lambda db=None: True)
+
+    _status, applied = _commit_stop_terminal(
+        "steve", "main-1", identity.turn_id, db=main_db,
+    )
+
+    assert applied is not None and applied[1].successor is None
+    monkeypatch.undo()
+    plan_liveness.on_turn_complete("main-1", db=main_db)
+    main_db.commit()
+    assert start_idle_turn(
+        "main-1", turn_id=uuid.uuid4().hex, boot_epoch="test-boot",
+        started_at="t", db=main_db,
+    ) is None
+    assert _running_turns(main_db) == 0
+    assert _wake_state(main_db, wake_id) == ("cancelled", "stale_plan_wake", None)

@@ -22,6 +22,8 @@ from tests.event_routing_helpers import pr_payload as _pr_payload
 from tests.event_routing_helpers import register_pr as _register_pr
 from tests.event_routing_helpers import route as _route
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 
 async def _accept_cc_bound_turn(*_args, **kwargs):
     await kwargs["persist_input_once"]()

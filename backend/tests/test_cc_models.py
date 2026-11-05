@@ -37,6 +37,10 @@ def cc_db():
         "VALUES ('cc','cli','claude-code','available','t','t')"
     )
     db.commit()
+    from vendor_account_fixtures import signed_in_default
+
+    # A harness row's identity and window are what a signed-in account lists.
+    signed_in_default("claude-code", db=db)
     yield db
     db.close()
 

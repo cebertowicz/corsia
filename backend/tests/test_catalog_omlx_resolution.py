@@ -312,7 +312,7 @@ def test_alias_change_updates_display_name_not_pmid(monkeypatch, fresh_db):
 
 
 @pytest.mark.parametrize("managed", [True, False])
-def test_discovery_applies_medium_only_to_corsia_managed_omlx(
+def test_discovery_opens_every_omlx_on_auto_when_no_level_is_set(
     monkeypatch, fresh_db, managed,
 ):
     from llm import network_discovery as nd
@@ -346,5 +346,6 @@ def test_discovery_applies_medium_only_to_corsia_managed_omlx(
     ).fetchone()
     conn.close()
     shape = json.loads(row[0])["reasoning_shape"]
-    assert shape["default"] == ("medium" if managed else "low")
-    assert shape.get("send_when_unset") == ("medium" if managed else None)
+    assert shape["default"] is None
+    assert shape["supports_auto"] is True
+    assert "send_when_unset" not in shape

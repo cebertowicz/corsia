@@ -337,6 +337,8 @@ def init_db():
 
     from events.observe_rules import sync_shipped_rules
     sync_shipped_rules(get_db())
+    from events.connectors.github_screen.install import sync as sync_github_screen
+    sync_github_screen(get_db())
 
     from infra.subagent_caps import seed_subagent_caps
     seed_subagent_caps()

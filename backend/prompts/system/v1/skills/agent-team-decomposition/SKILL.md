@@ -22,7 +22,7 @@ Cut vertically: one owner carries a domain end to end, from deciding what to do 
 
 ## One accountable owner per deliverable
 
-Core context says who the owner is by default. Contributors keep authority over their own domains and constraints. For consequential cross-owner work, state in one line who drives, who approves, and who contributes. An unowned aggregate outcome is a gap for the conductor to assign; owning it grants accountability within the commission, not authority to start new work.
+The default owner is set in skill `plans-and-workers`. Contributors keep authority over their own domains and constraints. For consequential cross-owner work, state in one line who drives, who approves, and who contributes. An unowned aggregate outcome is a gap for the conductor to assign; owning it grants accountability within the commission, not authority to start new work.
 
 ## New agents and projects
 
@@ -33,7 +33,7 @@ Core context says who the owner is by default. Contributors keep authority over 
 
 ## Delegate only separable work
 
-Keep work inline when it is tightly coupled to your reasoning, needs continuous user alignment, no suitable worker is available, or a brief and independent verification would cost more than doing it. Otherwise delegate a self-contained step whose result can be checked without redoing it; System context's delegation rule sets when. You remain accountable.
+Keep work inline when it is tightly coupled to your reasoning, needs continuous user alignment, no suitable worker is available, or a brief and independent verification would cost more than doing it. Otherwise delegate a self-contained step whose result can be checked without redoing it; skill `plans-and-workers` sets when. You remain accountable.
 
 - Coupled mutable work has one writer. Keep or substantively review the plan; do not delegate planning and execution and forward the answer.
 - Fan out only over independent pieces (no shared files, state, or owner), no wider than you can inspect and integrate. Related or exploratory problems get one worker.

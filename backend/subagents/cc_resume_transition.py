@@ -6,7 +6,7 @@ import asyncio
 import logging
 
 from core.checkpoint_wait import CheckpointWaitScope
-from core.turn_core import TurnIdentity, drive_turn_settlement
+from core.turn_core import TurnIdentity
 from llm.resolution import ExecutionTarget
 from subagents.cc_handle_close import emit_logical_close, finalize
 from subagents.cc_process_exit import _CommittedTerminalFailure, finish_process_exit
@@ -203,6 +203,7 @@ async def resume_same_turn_after_checkpoint(
         raise RuntimeError("Claude Code checkpoint resume is missing its prepared selection")
     anchor = resume_anchor_text(prepared_context.replay.tail.resume_presence_line)
     lock = _LIVE.lock(thread_id)
+    replacement = None
     try:
         async with lock:
             replacement, frame, identity = await replace_same_turn_after_checkpoint_locked(
@@ -214,7 +215,9 @@ async def resume_same_turn_after_checkpoint(
                 bcast=_default_broadcast, preadmitted_turn=identity,
             )
     except _CommittedTerminalFailure as failure:
-        await drive_turn_settlement(failure.settlement)
+        from subagents.cc_stream_control import start_terminal_driver
+
+        start_terminal_driver((replacement or expected_live).session, failure.settlement)
         raise failure.publication_error
 
 

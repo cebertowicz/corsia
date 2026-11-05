@@ -12,14 +12,13 @@ import json
 
 
 def _raw_row(selector: str, db) -> tuple[dict | None, str | None]:
-    row = db.execute("SELECT * FROM models WHERE id = ?", (selector,)).fetchone()
-    if row is not None:
-        return dict(row), None
-    rows = db.execute(
+    from llm.harness_catalog import project_stored_rows
+
+    rows = db.execute("SELECT * FROM models WHERE id = ?", (selector,)).fetchall() or db.execute(
         "SELECT * FROM models WHERE litellm_model = ?", (selector,)
     ).fetchall()
     if len(rows) == 1:
-        return dict(rows[0]), None
+        return project_stored_rows(rows, db=db)[0], None
     if len(rows) > 1:
         return None, "ambiguous"
     return None, "unknown"

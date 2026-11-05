@@ -201,7 +201,7 @@ def _find_local(name: str, owner_id: str, project_id: str | None, db):
 
 def _install(name: str, owner_id: str, project_id: str | None, db) -> dict[str, Any]:
     from infra.skill_install import install_skill_bundle, origin_metadata
-    from library.items import LibraryIntegrityError, LibraryItemUnavailableError, fetch_bundle, item_manifest
+    from library.items import LibraryIntegrityError, LibraryItemUnavailableError, LibraryMainChangedError, fetch_bundle, item_manifest
 
     index, item = _item(name)
     if item is None:
@@ -223,6 +223,8 @@ def _install(name: str, owner_id: str, project_id: str | None, db) -> dict[str, 
         return _error("name_taken", f"{name} is already provided at {conflict.path}; the library item was not installed")
     try:
         bundle = fetch_bundle(item)
+    except LibraryMainChangedError as error:
+        return _error("integrity", str(error))
     except LibraryIntegrityError as error:
         return _error("integrity", f"{error}; report it to the conductor and do not retry")
     except LibraryItemUnavailableError as error:
@@ -248,7 +250,7 @@ def _update(
 ) -> dict[str, Any]:
     from infra.skill_install import origin_metadata, update_skill_bundle
     from library.installed import local_bundle, local_edits
-    from library.items import LibraryIntegrityError, LibraryItemUnavailableError, fetch_bundle, item_manifest
+    from library.items import LibraryIntegrityError, LibraryItemUnavailableError, LibraryMainChangedError, fetch_bundle, item_manifest
 
     _index_result, item = _item(name)
     if item is None:
@@ -279,6 +281,8 @@ def _update(
             return _discard_confirmation(owner_id, name, folder, local_paths, local_edits_token)
     try:
         bundle = fetch_bundle(item)
+    except LibraryMainChangedError as error:
+        return _error("integrity", str(error))
     except LibraryIntegrityError as error:
         return _error("integrity", f"{error}; report it to the conductor and do not retry")
     except LibraryItemUnavailableError as error:

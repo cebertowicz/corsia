@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from infra.packed_rows import fetch_all
-from infra.turn_usage_remainder import pending_measurement_counts
+from infra.turn_usage_remainder import owes_settled_measurement, pending_measurement_counts
 from plans import service, usage_cost
 from plans.node_cost import settle_known, sum_known
 
@@ -19,7 +19,6 @@ FAILED_RELEASES = frozenset({"failed", "review_rejected"})
 #: third leaves one normal retry before interrupting the parent
 #: (``plans.delegation_notice``, matrix rows C1-C3).
 FRICTION_WAKE_ATTEMPTS = 3
-_SETTLED_TURNS = frozenset({"completed", "error"})
 
 
 def _parse(value: str) -> datetime:
@@ -91,15 +90,9 @@ def _unmeasured_rows(turns, usage, pending: dict[str, int]) -> int:
     as one.
     """
     measured = {row["turn_id"] for row in usage if row["turn_id"] is not None}
-    unknown = sum(pending.values())
-    for row in turns:
-        if (
-            str(row["id"]) not in pending
-            and row["id"] not in measured
-            and row["status"] in _SETTLED_TURNS
-        ):
-            unknown += 1
-    return unknown
+    return sum(pending.values()) + sum(
+        owes_settled_measurement(str(row["id"]), row["status"], measured, pending) for row in turns
+    )
 
 
 def _load(

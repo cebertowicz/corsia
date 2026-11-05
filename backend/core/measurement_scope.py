@@ -35,7 +35,7 @@ def is_workspace_scope(project: str, agent: str | None) -> bool:
 
 @dataclass(frozen=True)
 class MeasurementScope:
-    """The only Measurement scope: an optional active agent inside a project."""
+    """The only Measurement scope: an optional agent thread inside a project; request filters are validated active by validate_scope."""
 
     project: str
     agent: str | None
@@ -81,8 +81,9 @@ def validate_scope(db, user_id: str, project: str, agent: str | None) -> Measure
 def scope_cte() -> str:
     """The existing same-user root/descendant closure, shared by all consumers.
 
-    Project/all filters start at top-level threads. A selected active agent may
-    itself have a parent. Orphan subtrees are unreachable; no owner history is
+    Project/all filters start at top-level threads. A selected agent thread may
+    itself have a parent; whether it must be an active agent is the caller's
+    check (validate_scope for request filters), not the closure's. Orphan subtrees are unreachable; no owner history is
     recovered by scanning a deleted parent's descendants.
     """
     return """
@@ -91,9 +92,7 @@ def scope_cte() -> str:
           WHERE t.user_id=:user_id
             AND (:scope_project='all' OR t.project_id=:scope_project)
             AND (:scope_agent IS NULL AND t.parent_thread_id IS NULL
-                 OR t.id=:scope_agent
-                 AND COALESCE(t.agent_enabled,0)=1
-                 AND COALESCE(t.agent_status,'active')='active')
+                 OR t.id=:scope_agent)
         ), scope_threads(id, root_id) AS (
           SELECT id,id FROM scope_roots
           UNION ALL

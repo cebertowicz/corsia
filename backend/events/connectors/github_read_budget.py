@@ -1,11 +1,18 @@
-"""One process-wide GitHub read budget, rebuilt from response headers.
+"""One GitHub read budget per account, rebuilt from response headers.
 
-The two event pollers (notifications and the quiet-PR sweep) read through
-``github_notifications_feed.gh_get``, which feeds each response here, asks
-before each call and takes this budget's verdict on whether a response was a
-rate limit. A limit one of them sees backs off both. Other GitHub callers (the
-reviewer's ``gh_api``, for example) do not consult it. Nothing is stored: a
-restart relearns the budget from the next response.
+GitHub's limit belongs to the account a read runs as, so each login keeps its
+own: ``budget`` for the agents' GitHub account (and the locked reads made while
+it is not ready) and ``person_budget`` for the person's own ``gh`` login, which
+the default broker also spends while there is no agents' account. A reader
+carries the budget of the login it last read as (``budget_of`` picks it); the
+default broker switches budget at the read after the agents' account is added
+or removed, so that one read is asked against the old budget. The event pollers
+read through ``github_notifications_feed.gh_get``; script reads use
+``automation.script_github_channel``. Both ask before each call and feed
+response headers here. A limit one account sees backs off only that account's
+reads. Script reads and the quiet-PR sweep stay out of the reserve. Other
+GitHub callers (the reviewer's ``gh_api``, for example) do not consult it.
+Nothing is stored: a restart relearns the budget from the next response.
 """
 
 from __future__ import annotations
@@ -42,9 +49,10 @@ class ReadBudget:
             self._retry_until = 0.0
 
     def reserve(self) -> int:
-        """5% of the account's hourly limit, kept for the notifications poller:
-        the lower-priority quiet-PR sweep must not spend it, and an account
-        with a different limit (say 15,000) keeps the same proportion."""
+        """5% of the account's hourly limit, kept for its normal reads (the
+        notifications poller's, on the person's): low-priority reads must not
+        spend it, and an account with a different limit (say 15,000) keeps the
+        same proportion."""
         return self._limit // 20
 
     def record(self, status: int, headers: Mapping[str, str], body: Any = None) -> bool:
@@ -132,3 +140,9 @@ def _iso(moment: float | None) -> str | None:
 
 
 budget = ReadBudget()
+person_budget = ReadBudget()
+
+
+def budget_of(runner: Any) -> ReadBudget:
+    """The budget of the account ``runner`` reads as; a runner that doesn't say reads as the agents'."""
+    return getattr(runner, "read_budget", None) or budget

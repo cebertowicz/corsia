@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -12,34 +11,16 @@ from uuid import uuid4
 
 from loguru import logger
 
-from events import rule_declarations, rule_reads, rules
+from events import intake_routing, rule_declarations, rule_reads, rules
 from events.connectors import EventTypeDecl
-from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope
 from events.platform import deliver_envelope_sync
-from events.resolve import Target, resolve_targets
+from events.resolve import resolve_targets
 from infra.database import get_db, write_transaction
 from infra.measure_admission import admit as admit_measure
 from infra.measure_admission import count_unversioned
 
 _MAX_FACT_BYTES = 64 * 1024
-_UNAVAILABLE = ("database is locked", "database is busy", "unable to open database", "disk i/o error")
-_DECLARE_IT = "declare it with use: route or both in your measures.yaml and run measure_sync"
-# Shared by the CLI, the agent tool and scripts, so no fix names one surface's flags.
-_ERROR_FIXES = {
-    "facts_not_object": "Pass the facts as a JSON object.",
-    "bad_json": "Pass the facts as valid JSON.",
-    "too_large": "Send fewer or shorter facts.",
-    "undeclared_type": f"Check the type name, or {_DECLARE_IT}.",
-    "undeclared_fact": "Use only facts declared for this event type.",
-    "bad_fact_kind": "Match each declared fact kind.",
-    "record_only": f"To route it, {_DECLARE_IT}.",
-    "not_your_namespace": f"Emit only a type you declared; to add one, {_DECLARE_IT}.",
-    "reserved_type": "Emit a type you declared instead.",
-    "intake_unreachable": "Retry with the same event id.",
-    "internal_error": "This is a CORSIA defect and was logged; report it instead of retrying.",
-    "record_refused": "Fix the record as the text says; the event was not routed.",
-}
 
 
 @dataclass(frozen=True)
@@ -69,12 +50,16 @@ class _ResolvedEvent:
 
 @dataclass(frozen=True)
 class MeasureStamps:
-    """The runner's stamps for a both type's record, so an event line dedupes like a measure line."""
+    """The producer's stamps for a both type's record, so an event line dedupes like a measure line."""
 
+    source: str
+    provenance: str
     run_id: str | None = None
     workflow_ref: str | None = None
     workflow_version: str | None = None
     project_id: str | None = None
+    ts: str | None = None  # the record's own time, when the producer gave one
+    subject_key: str | None = None
     unversioned: bool = False  # the schedule names a workflow its stamp has no version for
 
 
@@ -87,20 +72,6 @@ def emitted_event_id(event_type: str, identity: str | None) -> str:
     if not identity:
         return uuid4().hex
     return hashlib.sha256(f"{event_type}\0{identity}".encode()).hexdigest()
-
-
-def failure_code(exc: Exception) -> str:
-    """``intake_unreachable`` for a database or OS that can't be reached (retry); else ``internal_error`` (a defect)."""
-    if isinstance(exc, sqlite3.OperationalError):
-        unreachable = any(text in str(exc).lower() for text in _UNAVAILABLE)
-    else:
-        unreachable = isinstance(exc, OSError)
-    return "intake_unreachable" if unreachable else "internal_error"
-
-
-def format_event_error(code: str, text: str, fix: str | None = None) -> str:
-    """Render the common caller-facing error copy without exposing event facts."""
-    return f"{code}: {text.rstrip('.')}. {fix or _ERROR_FIXES.get(code, 'Correct the event and try again.')}"
 
 
 def _refusal(code: str, text: str) -> IntakeResult:
@@ -136,14 +107,16 @@ def resolve_event_type(conn, event_type: str) -> tuple[EventTypeDecl, Any | None
         return None
 
 
-def _facts_problem(facts: Any) -> IntakeResult | None:
+def _facts_problem(facts: Any, origin: str) -> IntakeResult | None:
     if not isinstance(facts, dict):
         return _refusal("facts_not_object", "facts must be a JSON object")
     try:
         size = len(json.dumps(facts, separators=(",", ":"), ensure_ascii=False).encode())
     except (TypeError, ValueError):
         return _refusal("bad_fact_kind", "facts must contain JSON values of their declared kinds")
-    if size > _MAX_FACT_BYTES:
+    # A platform event is composed by CORSIA from bounded inputs plus the worker's schema-validated
+    # answer, and refusing one loses a result, so only outside producers meet the size limit.
+    if size > _MAX_FACT_BYTES and origin != "platform":
         return _refusal("too_large", "facts exceed the 64 KB event limit")
     return None
 
@@ -189,7 +162,23 @@ def _connector_event(conn, event_type: str, facts: dict[str, Any], producer: str
     )
 
 
-def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str, origin: str) -> _ResolvedEvent:
+def _rule_run_artifact(conn, decision_id: int | None, producer: str) -> dict[str, str] | None:
+    """Read the triggering artifact from this script's running rule decision only."""
+    if decision_id is None or not producer.startswith("script:"):
+        return None
+    row = conn.execute(
+        "SELECT d.artifact_integration, d.artifact_type, d.artifact_external_id "
+        "FROM event_route_decisions d JOIN event_rules r ON r.id=d.rule_id "
+        "WHERE d.id=? AND d.outcome='running' AND r.script_id=?",
+        (decision_id, producer.removeprefix("script:")),
+    ).fetchone()
+    if row is None or not all(row):
+        return None
+    return {"integration": row[0], "type": row[1], "external_id": row[2]}
+
+
+def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str, origin: str,
+                    artifact_ref: dict[str, str] | None = None) -> _ResolvedEvent:
     split = _split_type(event_type)
     resolved = resolve_event_type(conn, event_type)
     if split is None or resolved is None:
@@ -212,8 +201,8 @@ def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str,
     return _ResolvedEvent(
         EventEnvelope(
             event_id="", type=suffix, connector=namespace, facts=facts, relationships=(),
-            artifact_ref=None, provenance={"source": namespace, "ingested_at": _now(), "rule_trace": []},
-            event_class="informational", ownerless_ok=False, origin=origin,
+            artifact_ref=artifact_ref, provenance={"source": namespace, "ingested_at": _now(), "rule_trace": []},
+            event_class=entry.event_class, ownerless_ok=False, origin=origin,
         ),
         None,
         owner,
@@ -225,21 +214,6 @@ def _declared_event(conn, event_type: str, facts: dict[str, Any], producer: str,
 def _owner_project(conn, owner: str) -> str | None:
     row = conn.execute("SELECT project_id FROM threads WHERE id=?", (owner,)).fetchone()
     return row["project_id"] if row and row["project_id"] else None
-
-
-def _registered_owner_targets(owner: str, envelope: EventEnvelope, conn) -> list[Target]:
-    """Routing for a declared type: its declaring thread is the registered owner, so
-    rules read that owner from the routing state whether it is live or dead-lettered."""
-    from events.delivery import thread_exists_and_active
-
-    state = {"owner": {"parent_thread_id": owner}}
-    if thread_exists_and_active(owner, db=conn):
-        return [Target(
-            owner, "declared_owner", "owner", routing_state=state,
-            disposition=delivery_disposition("owner", envelope.event_class),
-        )]
-    return [Target(None, "dead_letter", "none", reason="owner_inactive", routing_state=state,
-                   disposition="dead_letter")]
 
 
 def _unrouted_projects(event_type: str, facts: dict[str, Any]) -> frozenset[str] | None:
@@ -295,11 +269,13 @@ def record_refusal(*, event_id: str, event_type: str, origin: Literal["emitter",
 def _store(conn, event_type: str, facts: dict[str, Any], owner: str, event_id: str,
            stamps: MeasureStamps | None) -> IntakeResult | None:
     """Record a both type through the one measure admission; its refusal refuses the event."""
-    stamps = stamps or MeasureStamps()
+    stamps = stamps or MeasureStamps(source="agent", provenance="agent_recorded")
     admission = admit_measure(
         conn, owner_thread_id=owner, event_name=event_type, attributes=facts,
+        source=stamps.source, provenance=stamps.provenance,
         project_id=stamps.project_id or _owner_project(conn, owner), run_id=stamps.run_id or event_id,
         workflow_ref=stamps.workflow_ref, workflow_version=stamps.workflow_version,
+        ts=stamps.ts, subject_key=stamps.subject_key,
     )
     if admission.refusal is not None:
         return _refusal("record_refused", admission.refusal)
@@ -310,8 +286,19 @@ def _store(conn, event_type: str, facts: dict[str, Any], owner: str, event_id: s
     return None
 
 
+def _routing(owner: str | None, envelope: EventEnvelope):
+    """Rule 0's routing: a connector's by its artifact; a declared type's to its declarer,
+    or, when a rule's run emitted it on an artifact, to that artifact's registered owner."""
+    if owner is None:
+        return lambda db: resolve_targets(envelope, db=db)
+    if envelope.artifact_ref:
+        return lambda db: intake_routing.artifact_targets(owner, envelope, db)
+    return lambda db: intake_routing.declarer_targets(owner, envelope, db)
+
+
 def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: str, event_id: str,
-                stamps: MeasureStamps | None = None, trace: tuple[str, ...] = ()) -> IntakeResult:
+                stamps: MeasureStamps | None = None, trace: tuple[str, ...] = (),
+                rule_decision_id: int | None = None) -> IntakeResult:
     # A declared type always has its declaring thread as owner; only a connector's can be unrouted.
     projects = _unrouted_projects(event_type, facts) if origin == "connector" else frozenset()
     with write_transaction(None, scope="admit_event") as conn:
@@ -327,7 +314,8 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
         resolved = (
             _connector_event(conn, event_type, facts, producer, origin)
             if origin in ("connector", "platform")
-            else _declared_event(conn, event_type, facts, producer, origin)
+            else _declared_event(conn, event_type, facts, producer, origin,
+                                 _rule_run_artifact(conn, rule_decision_id, producer))
         )
         if resolved.refusal is not None:
             return IntakeResult(False, False, resolved.refusal, 0)
@@ -342,18 +330,19 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
             refused = _store(conn, event_type, facts, owner, event_id, stamps)
             if refused is not None:
                 return refused
-        target_filter = None
         # Only the emit tool knows its sender; a CLI emit names a session, which a hook or script may also claim.
+        target_filter = None
         if origin == "agent":
             target_filter = lambda target, _db: (
                 rules.OWN_EMIT if target.thread == producer else None)
         deliveries, plan = deliver_envelope_sync(
             envelope, resolved.declaration,
-            (lambda db: _registered_owner_targets(owner, envelope, db)) if owner
-            else (lambda db: resolve_targets(envelope, db=db)),
+            _routing(owner, envelope),
             target_filter=target_filter,
             repository_projects=projects, db=conn,
         )
+        if envelope.artifact_ref and owner:
+            intake_routing.resolve_delivered_watches(conn, envelope, deliveries)
         matched = _rules_matched(plan)
         _record_acceptance(
             conn, event_id=event_id, event_type=event_type, origin=origin,
@@ -365,7 +354,7 @@ def _admit_sync(event_type: str, facts: dict[str, Any], origin: str, producer: s
 
 async def admit_event(*, event_type: str, facts: dict, origin: Literal["connector", "emitter", "agent", "platform"],
                       producer: str, event_id: str, stamps: MeasureStamps | None = None,
-                      trace: tuple[str, ...] = ()) -> IntakeResult:
+                      trace: tuple[str, ...] = (), rule_decision_id: int | None = None) -> IntakeResult:
     """Validate, deduplicate, evaluate and deliver one declared event without trusting producer input.
 
     A use: both type is also recorded as a measure in the same transaction, before routing.
@@ -375,9 +364,9 @@ async def admit_event(*, event_type: str, facts: dict, origin: Literal["connecto
     An emitter or agent refusal is retained here, the one owner of that receipt; failing to
     retain it only logs and never changes the result.
     """
-    problem = _facts_problem(facts)
+    problem = _facts_problem(facts, origin)
     result = problem if problem is not None else await asyncio.to_thread(
-        _admit_sync, event_type, facts, origin, producer, event_id, stamps, trace,
+        _admit_sync, event_type, facts, origin, producer, event_id, stamps, trace, rule_decision_id,
     )
     if result.refusal is not None and origin in ("emitter", "agent"):
         try:

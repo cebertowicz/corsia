@@ -1,7 +1,9 @@
 """The daily movement report: typed payload, validator, and routing to its owner.
 
-A report producer (Self-Improvement's, which reads the dashboard series) hands
-the platform one report per scope per day through :func:`deliver_movement_report`.
+A report producer hands the platform one report per scope per day through
+:func:`deliver_movement_report`. Today that is ``jobs.kpi_thresholds`` alone; the
+person-attention, cost and verdict cases below are the contract for moves a later
+producer adds to that same report, never a second report on the same key.
 Nothing else is needed to route it. The report goes to the scope's conductor
 as a passive digest note, or as a wake when ``breach`` is true. The workspace
 scope reaches the CORSIA agent; a project scope reaches that project's
@@ -9,20 +11,34 @@ conductor. The owner is resolved from the current designation at delivery
 time (a designation rule), never from a stored thread id, so a designation
 move reaches the new owner with the next report.
 
+An ``agent:<thread id>`` scope goes straight to that thread (a direct target,
+no designation rule) and every move's ``owner_agent`` must be that thread. An
+owner that is inactive or deleted at delivery is dead-lettered as
+``owner_inactive``.
+
 Payload contract (all keys required; any other shape raises
 :class:`MalformedMovementReport`)::
 
     {
-      "scope": "workspace" | "<project id>",
+      "scope": "workspace" | "<project id>" | "agent:<thread id>",
       "report_date": "YYYY-MM-DD",
-      "breach": bool,        # true only when a person-attention or cost series
-                             # crossed its threshold; wakes the owner
+      "breach": bool,        # true wakes the recipient. In an agent: scope it is
+                             # true when any KPI move has alert: wake or any move
+                             # is a Revert, or a Retire: didn't help, verdict. In a
+                             # project or workspace report it is true for
+                             # person-attention or cost moves, plus a Revert verdict
+                             # (or a lesson's Retire: didn't help) whose owner is
+                             # none, stopped or retired (a paused owner is held,
+                             # not routed). Other agent KPI moves are listed there
+                             # with breach false, so a KPI breach never wakes the
+                             # conductor too.
       "moves": [             # empty on a no-move day
         {
           "series_id": str,
           "owner_agent": str,          # thread id of the series' owner
           "value": number,             # the reading that moved
-          "normal_range": [low, high], # the series' own range, low <= high
+          "normal_range": [low, high], # the series' own range, low <= high;
+                                       # high null: no upper limit
           "preceding_changes": [       # changes in the window before the move
             {"kind": "instruction"|"skill"|"workflow"|"model"|"roster",
              "ref": str,               # path or id
@@ -48,7 +64,7 @@ from typing import Any
 from events import report_payload
 from events.connectors.measurement import MOVEMENT_DIGEST_EVENT
 from events.platform import PlatformDelivery
-from events.report_delivery import deliver_measurement_report_sync
+from events.report_delivery import deliver_direct_report_sync, deliver_measurement_report_sync
 from infra.db_async import run_in_db_unless_owned
 
 CHANGE_KINDS = ("instruction", "skill", "workflow", "model", "roster")
@@ -56,6 +72,14 @@ CHANGE_KINDS = ("instruction", "skill", "workflow", "model", "roster")
 
 class MalformedMovementReport(ValueError):
     """A report that does not meet the payload contract; nothing is delivered."""
+
+
+AGENT_SCOPE_PREFIX = "agent:"
+
+
+def agent_scope_thread(scope: str) -> str | None:
+    """The thread id an ``agent:<thread id>`` scope names, or None for any other scope."""
+    return scope[len(AGENT_SCOPE_PREFIX):] if scope.startswith(AGENT_SCOPE_PREFIX) else None
 
 
 def _text(value: Any, what: str) -> str:
@@ -103,7 +127,7 @@ class Move:
     series_id: str
     owner_agent: str
     value: float
-    normal_range: tuple[float, float]
+    normal_range: tuple[float, float | None]
     preceding_changes: tuple[PrecedingChange, ...]
 
     @classmethod
@@ -114,8 +138,8 @@ class Move:
         if not isinstance(bounds, (list, tuple)) or len(bounds) != 2:
             raise MalformedMovementReport("normal_range must be [low, high]")
         low = _number(bounds[0], "normal_range low")
-        high = _number(bounds[1], "normal_range high")
-        if low > high:
+        high = None if bounds[1] is None else _number(bounds[1], "normal_range high")
+        if high is not None and low > high:
             raise MalformedMovementReport("normal_range low exceeds high")
         changes = raw["preceding_changes"]
         if not isinstance(changes, (list, tuple)):
@@ -157,7 +181,14 @@ class MovementReport:
         moves = tuple(Move.parse(m) for m in raw["moves"])
         if raw["breach"] and not moves:
             raise MalformedMovementReport("a breach report needs at least one move")
-        return cls(_text(raw["scope"], "scope"), day, raw["breach"], moves)
+        scope = _text(raw["scope"], "scope")
+        owner = agent_scope_thread(scope)
+        if owner is not None:
+            stray = sorted({m.owner_agent for m in moves if m.owner_agent != owner})
+            if stray:
+                raise MalformedMovementReport(
+                    f"an agent report holds only its own agent's moves; {stray} are not {owner}")
+        return cls(scope, day, raw["breach"], moves)
 
     @property
     def report_key(self) -> str:
@@ -182,8 +213,13 @@ def validated(report: MovementReport | Mapping[str, Any]) -> MovementReport:
 def deliver_movement_report_sync(
     report: MovementReport | Mapping[str, Any], *, db: sqlite3.Connection | None = None,
 ) -> list[PlatformDelivery]:
-    """Validate, bind the scope's conductor, and deliver one report."""
+    """Validate, then deliver one report: to the agent an ``agent:`` scope names, else to the scope's conductor."""
     parsed = validated(report)
+    if (thread := agent_scope_thread(parsed.scope)) is not None:
+        return deliver_direct_report_sync(
+            thread_id=thread, event_type=MOVEMENT_DIGEST_EVENT,
+            payload=parsed.as_event_payload(),
+            transaction_scope="deliver_movement_report", db=db)
     return deliver_measurement_report_sync(
         scope=parsed.scope, event_type=MOVEMENT_DIGEST_EVENT,
         payload=parsed.as_event_payload(),

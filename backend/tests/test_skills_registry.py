@@ -295,7 +295,7 @@ def test_context_sources_include_index_and_omitted_rows(tmp_path):
         "you MUST load that skill's SKILL.md before responding."
         in (index.prompt_content or "")
     )
-    assert "Load the listed SKILL.md path with your file-read tool" in (
+    assert "or else in its group's header with <name> replaced by the skill's name. Load it with your file-read tool" in (
         index.prompt_content or ""
     )
     assert "generic CORSIA tool" in (index.prompt_content or "")

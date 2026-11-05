@@ -6,6 +6,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from core.lesson_files import trial_from_validation
 from core.role_context_sources import RoleName, RoleScopeRoot
 from core.skill_registry_types import SkillRow, SkillScope
 from core.skill_validation import validate_skill_file
@@ -47,6 +48,9 @@ def scan_scope(
                     status="included",
                     role=role,
                     corsia=validation.corsia,
+                    trial=trial_from_validation(validation),
+                    raw_sha256=validation.raw_sha256,
+                    source_data=validation.source_data,
                 )
             )
         else:
@@ -114,6 +118,9 @@ def mark_duplicate_scope_errors(rows: list[SkillRow]) -> list[SkillRow]:
                 ],
                 role=row.role,
                 corsia=row.corsia,
+                trial=row.trial,
+                raw_sha256=row.raw_sha256,
+                source_data=row.source_data,
             )
         )
     return marked
@@ -155,6 +162,9 @@ def omitted_row(row: SkillRow, reason: str, overrides: str | None = None) -> Ski
         overrides=overrides,
         role=row.role,
         corsia=row.corsia,
+        trial=row.trial,
+        raw_sha256=row.raw_sha256,
+        source_data=row.source_data,
     )
 
 

@@ -36,6 +36,8 @@ RUNTIME_LOOP_TASKS: tuple[tuple[str, str], ...] = (
     ("presence sweep", "_presence_sweep_task"),
     ("cc idle retirement", "_cc_idle_retirement_task"),
     ("github notifications", "_github_notifications_task"),
+    ("github head checks re-arm", "_head_checks_rearm_task"),
+    ("github agents notifications", "_github_notifications_agents_task"),
     ("mail poller", "_mail_poller_task"),
     ("library refresh", "_library_refresh_task"),
     ("pr quiet watch", "_pr_quiet_watch_task"),
@@ -75,16 +77,12 @@ async def resume_local_setup() -> None:
             if label in {"record an earlier setup's model", "resume local setup", "resume local download notice"}:
                 record_resume_failure(ref)
 
-    from events.reviewer_gate_recovery import recover_pending_reviews
-
-    recover_pending_reviews(asyncio.get_running_loop())
-
 
 async def _startup_harness_discovery() -> list[dict]:
-    """Re-ask Claude/Codex for their catalogs and sign-in once at backend startup."""
-    from connections.startup import startup_harness_discovery
+    """Re-ask Claude/Codex for every signed-in account's catalog once at backend startup."""
+    from connections.startup import reask_harness_catalogs
 
-    return await startup_harness_discovery()
+    return await reask_harness_catalogs()
 
 
 async def _cleanup_terminal_lease_processes(lease: dict) -> None:
@@ -227,6 +225,10 @@ async def _start_runtime_services() -> None:
     state._presence_sweep_task = asyncio.create_task(presence_sweep_loop())
     state._cc_idle_retirement_task = asyncio.create_task(idle_retirement_loop())
     state._github_notifications_task = asyncio.create_task(notifications_poll_loop())
+    state._github_notifications_agents_task = asyncio.create_task(notifications_poll_loop(agents=True))
+    from events.connectors.github_head_checks import rearm_pending_heads
+
+    state._head_checks_rearm_task = asyncio.create_task(rearm_pending_heads())
     # TODO(99e36462316848ccb9dbe2e8299ed066): wire repo-activity polling after lifecycle approval.
     state._mail_poller_task = asyncio.create_task(mail_poll_loop())
     state._library_refresh_task = asyncio.create_task(library_refresh_loop())

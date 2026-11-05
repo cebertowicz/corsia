@@ -9,6 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from api import provider_sources as provider_sources_api  # noqa: E402
@@ -16,7 +17,7 @@ from api import setup as setup_api  # noqa: E402
 from infra import accounts, setup_progress  # noqa: E402
 from infra.default_port import DEFAULT_BACKEND_PORT  # noqa: E402
 
-pytestmark = pytest.mark.usefixtures("mac_local_model_host")
+pytestmark = pytest.mark.usefixtures("mac_local_model_host", "signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
 
 BASE = "http:" + f"//127.0.0.1:{DEFAULT_BACKEND_PORT}"
 HOST = {"Host": f"127.0.0.1:{DEFAULT_BACKEND_PORT}"}

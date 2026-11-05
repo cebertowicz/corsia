@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 CANARY = "TRANSCRIPT-CANARY-7f3a"
 
 

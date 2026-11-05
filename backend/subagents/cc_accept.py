@@ -287,7 +287,7 @@ async def _report_prewrite_failure(
     outcome = "cancelled" if isinstance(error, asyncio.CancelledError) else "error"
     barrier = live.turn_terminal
     terminal = await claim_terminal(
-        live, outcome, str(error), identity=identity, defer_drive=True,
+        live, outcome, terminal_error_detail(error), identity=identity, defer_drive=True,
     )
     assert isinstance(terminal, TurnSettlement)
     try:

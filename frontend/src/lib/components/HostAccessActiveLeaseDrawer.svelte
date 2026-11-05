@@ -86,7 +86,8 @@
 		z-index: 2;
 		display: flex;
 		justify-content: flex-end;
-		padding-top: var(--space-3);
+		/* Flush-bottom sheet: the footer carries the bottom inset itself. */
+		padding: var(--space-3) 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
 		background: var(--glass-thick);
 		backdrop-filter: var(--glass-blur);
 		-webkit-backdrop-filter: var(--glass-blur);

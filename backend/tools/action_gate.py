@@ -26,7 +26,7 @@ NOT_PERSON = (
 )
 NO_DRAFT = "Not sent: there is no open draft with that id in this conversation."
 ALREADY_DONE = "Not sent: that draft was already sent or discarded."
-DRAFT_TOOL_BY_KIND = {"email": "email_draft", "invite": "calendar_draft_invite"}
+DRAFT_TOOL_BY_KIND = {"email": "email_draft", "invite": "calendar_draft_invite", "message": "messages_draft"}
 
 
 def _changed_outside(kind: str) -> str:

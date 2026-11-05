@@ -17,6 +17,11 @@ import psutil
 
 from host_access import browser_launch, browser_ports
 
+LISTENER_UNVERIFIED = "managed browser listener ownership could not be verified"
+ENDPOINT_MISMATCH = "managed browser endpoint did not match its reserved listener"
+CHROME_EXITED = "managed Chrome exited during startup"
+CHROME_NOT_STARTED = "managed Chrome did not start its reserved listener"
+
 # agent-browser 0.31.2 native Chrome defaults, captured from a normal launch.
 # Keep the normal flags here: managed sessions attach rather than launching again.
 CHROME_FLAGS = (
@@ -45,14 +50,14 @@ def require_listener(pid: int, port: int) -> None:
     connections = psutil.Process(pid).net_connections(kind="tcp")
     if not any(item.status == psutil.CONN_LISTEN and item.laddr.port == port
                and item.laddr.ip in {"127.0.0.1", "::1"} for item in connections):
-        raise RuntimeError("managed browser listener ownership could not be verified")
+        raise RuntimeError(LISTENER_UNVERIFIED)
 
 
 def browser_endpoint(port: int) -> str:
     with urlopen(f"http://127.0.0.1:{port}/json/version", timeout=0.3) as response:
         endpoint = json.load(response).get("webSocketDebuggerUrl")
     if not isinstance(endpoint, str) or not endpoint.startswith(f"ws://127.0.0.1:{port}/"):
-        raise RuntimeError("managed browser endpoint did not match its reserved listener")
+        raise RuntimeError(ENDPOINT_MISMATCH)
     return endpoint
 
 
@@ -95,14 +100,14 @@ class ChromeProcess:
             owned = cls(child, cdp_port, stream_port, stream, temporary)
             for _ in range(100):
                 if child.returncode is not None:
-                    raise RuntimeError("managed Chrome exited during startup")
+                    raise RuntimeError(CHROME_EXITED)
                 try:
                     await asyncio.to_thread(require_listener, child.pid, cdp_port)
                     owned.endpoint = await asyncio.to_thread(browser_endpoint, cdp_port)
                     return owned
                 except (OSError, ValueError, RuntimeError, psutil.Error):
                     await asyncio.sleep(0.1)
-            raise RuntimeError("managed Chrome did not start its reserved listener")
+            raise RuntimeError(CHROME_NOT_STARTED)
         except BaseException:
             cdp.close()
             stream.close()

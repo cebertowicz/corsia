@@ -24,7 +24,7 @@ describe('FolderRow', () => {
 
 		expect(host.textContent).toContain('Work folder');
 		expect(host.textContent).toContain('~/Documents/corsia');
-		expect(host.textContent).toContain('This folder already holds files. Agents open anything in the work folder without asking; outside it, CORSIA asks you first.');
+		expect(host.textContent).toContain('This folder already holds files. Agents open anything in the work folder without asking. Outside it, access needs approval.');
 		(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Use ~/CORSIA') as HTMLButtonElement).click();
 		(Array.from(host.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Keep this folder') as HTMLButtonElement).click();
 		expect(useDefault).toHaveBeenCalledOnce();

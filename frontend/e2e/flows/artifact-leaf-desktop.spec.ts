@@ -91,7 +91,7 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		expect(appBox!.height).toBe(page.viewportSize()!.height);
 
 		const tab = page.getByRole('tab', { name: fileName });
-		const divider = page.getByRole('separator', { name: 'Resize artifact panel' });
+		const divider = page.getByRole('separator', { name: 'Resize Files panel' });
 		const assertHeaderTracksArtifactWidth = async () => {
 			// The split's ResizeObserver follows the pane transition; wait for the
 			// actual minimum-width contract instead of sampling its first layout frame.
@@ -103,7 +103,7 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 			})).toBeGreaterThanOrEqual(420);
 			const geometry = await page.evaluate(() => {
 				const title = document.querySelector<HTMLElement>('.h-title')?.getBoundingClientRect();
-				const divider = document.querySelector<HTMLElement>('[aria-label="Resize artifact panel"]')?.getBoundingClientRect();
+				const divider = document.querySelector<HTMLElement>('[aria-label="Resize Files panel"]')?.getBoundingClientRect();
 				const leaf = document.querySelector<HTMLElement>('.leaf-col')?.getBoundingClientRect();
 				const split = document.querySelector<HTMLElement>('.split')?.getBoundingClientRect();
 				const main = document.querySelector<HTMLElement>('.main');
@@ -130,7 +130,7 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 
 		await page.setViewportSize({ width: 1440, height: 900 });
 		const measurement = page.getByRole('button', { name: `Measurement for ${sessionTitle}`, exact: true });
-		const settings = page.getByRole('button', { name: 'Thread settings', exact: true });
+		const settings = page.getByRole('button', { name: 'Chat settings', exact: true });
 		const panelToggle = page.getByRole('button', { name: 'Toggle panel', exact: true });
 		const strip = page.locator('.canvas-header-strip');
 		const drawer = page.locator('aside.pane');
@@ -248,7 +248,7 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await sidebarThread(page, sessionTitle).click();
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await expect(page.getByRole('tab', { name: fileName })).toBeVisible();
-		await expect(page.getByRole('button', { name: 'Thread settings', exact: true })).toBeVisible();
+		await expect(page.getByRole('button', { name: 'Chat settings', exact: true })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Toggle panel', exact: true })).toBeVisible();
 		expect(await page.getByRole('button', { name: `Measurement for ${sessionTitle}`, exact: true }).count()).toBe(0);
 		await expect.poll(async () => await page.evaluate(() => {

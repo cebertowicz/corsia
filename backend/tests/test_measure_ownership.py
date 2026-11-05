@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -15,12 +16,13 @@ from infra.measure_registry import REGISTRY, sync
 from infra.outcome_events_schema import OUTCOME_EVENTS_SCHEMA_SQL
 from tests.skill_sidecar_helpers import POINTER
 from tests.test_measure_registry import MEASURES, OWNER, deciding, own, small
-from tools import workflow_task_fields
+from tools import workflow_owners as owners_module, workflow_task_fields
 from tools.workflow_owners import workflow_owners
 
 OTHER = "agent-evil"
 PROJECT = "proj-1"
 STEPS = "  steps:\n    - {id: review, title: Review it, required: true, check: reviewed}\n"
+WORKER = "  worker: {effort: high}\n  result: {type: object, properties: {finding: {type: string}}}\n"
 
 
 def db() -> sqlite3.Connection:
@@ -37,12 +39,12 @@ def definitions(connection: sqlite3.Connection) -> int:
     return connection.execute("SELECT count(*) FROM measure_definitions").fetchone()[0]
 
 
-def skill(root: Path, name: str, measures: str, *, owner: str | None = None, steps: bool = True) -> Path:
+def skill(root: Path, name: str, measures: str, *, owner: str | None = None, steps: bool = True, worker: bool = False) -> Path:
     """A workflow skill under ``root``/skills whose steps live in its corsia.yaml sidecar."""
     folder = root / "skills" / name
     folder.mkdir(parents=True, exist_ok=True)
     (folder / "SKILL.md").write_text(f"---\nname: {name}\ndescription: A workflow.\n{POINTER}---\n# {name}\n")
-    sidecar = "workflow:\n" + (f"  owner: {owner}\n" if owner else "") + (STEPS if steps else "  notes: none\n")
+    sidecar = "workflow:\n" + (f"  owner: {owner}\n" if owner else "") + (WORKER if worker else STEPS if steps else "  notes: none\n")
     (folder / "corsia.yaml").write_text(sidecar)
     (folder / "measures.yaml").write_text(measures)
     return folder / "measures.yaml"
@@ -52,7 +54,9 @@ def skill(root: Path, name: str, measures: str, *, owner: str | None = None, ste
 def effective(monkeypatch: pytest.MonkeyPatch):
     """Set the caller's effective skills to the scanned scopes the test lists."""
     scopes: list = []
-    monkeypatch.setattr(workflow_task_fields, "resolve_effective_skills", lambda **_: SkillResolution([row for scope in scopes for row in scope], [], []))
+    resolve = lambda **_: SkillResolution([row for scope in scopes for row in scope if row.status == "included"], [], [])  # noqa: E731
+    monkeypatch.setattr(workflow_task_fields, "resolve_effective_skills", resolve)
+    monkeypatch.setattr(owners_module, "resolve_effective_skills", resolve, raising=False)
     return scopes
 
 
@@ -69,6 +73,22 @@ def test_a_thread_scope_workflow_syncs_for_the_thread_it_belongs_to(tmp_path: Pa
     effective.append(scan_scope(root, "thread", OWNER))
     connection = db()
     assert sync_as(connection, OWNER, path, TEXT)["namespace"] == "qa"
+
+
+def test_worker_workflow_sync_and_boundaries(tmp_path: Path, effective: list) -> None:
+    root = tmp_path / ".threads" / OWNER
+    path = skill(root, "llm-pr-review", TEXT, worker=True)
+    effective.append(scan_scope(root, "thread", OWNER))
+    assert effective[0][0].status == "included"
+    connection = db()
+    assert sync_as(connection, OWNER, path, TEXT)["namespace"] == "qa"
+    with pytest.raises(ValueError, match="syncs only from beside its SKILL"):
+        sync_as(connection, OWNER, tmp_path / "elsewhere" / "measures.yaml", TEXT)
+    with pytest.raises(ValueError, match="owned by another agent"):
+        sync_as(connection, OTHER, path, TEXT)
+    assert "llm-pr-review" not in workflow_task_fields.effective_workflows(
+        SimpleNamespace(thread_id=OWNER, project_id=PROJECT), connection
+    )
 
 
 def test_a_sidecar_defined_project_workflow_syncs_for_the_owner_its_corsia_yaml_names(tmp_path: Path, effective: list) -> None:
@@ -127,6 +147,16 @@ def test_a_skill_without_workflow_steps_is_not_a_workflow(tmp_path: Path, effect
         sync_as(db(), OWNER, path, TEXT)
 
 
+def test_an_invalid_worker_workflow_is_not_owned(tmp_path: Path, effective: list) -> None:
+    root = tmp_path / ".threads" / OWNER
+    path = skill(root, "llm-pr-review", TEXT, worker=True)
+    (path.parent / "corsia.yaml").write_text("workflow:\n  worker: {effort: 42}\n  result: {type: object}\n")
+    effective.append(scan_scope(root, "thread", OWNER))
+    assert effective[0][0].status == "error"
+    with pytest.raises(ValueError, match="is not one of your workflow skills"):
+        sync_as(db(), OWNER, path, TEXT)
+
+
 def test_a_workflow_file_must_sit_beside_its_skill(tmp_path: Path, effective: list) -> None:
     root = tmp_path / ".threads" / OWNER
     skill(root, "llm-pr-review", TEXT)
@@ -174,7 +204,8 @@ def test_a_departed_holders_namespace_is_taken_over_and_only_its_events_there_re
     else:
         connection.execute("UPDATE threads SET lifecycle_state=?, archived_reason=? WHERE id=?", (state, reason, OWNER))
     connection.execute(
-        "INSERT INTO measure_definitions VALUES (?, 'event', 'shop.triaged', 1, ?, '/elsewhere', 'sha', 't', 0)",
+        "INSERT INTO measure_definitions (owner_thread_id,kind,name,version,spec_json,file_path,file_sha256,synced_at,removed) "
+        "VALUES (?, 'event', 'shop.triaged', 1, ?, '/elsewhere', 'sha', 't', 0)",
         (OWNER, '{"attributes":{"message_ref":"id"},"dedupe":["message_ref"]}'),
     )
     result = sync(connection, owner_thread_id=OTHER, path=own(OTHER), text=MEASURES)

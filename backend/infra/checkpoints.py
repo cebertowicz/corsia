@@ -78,6 +78,7 @@ def checkpoint_record(row: sqlite3.Row) -> CheckpointRecord:
         captured_at=row["captured_at"],
         installed_at=row["installed_at"],
         ended_at=row["ended_at"],
+        adopted_input_tokens=row["adopted_input_tokens"],
     )
 
 
@@ -202,12 +203,12 @@ def admit_cold_input(
 def adopt_cold(
     checkpoint_id: str, *, db: sqlite3.Connection | None = None,
 ) -> None:
-    """Correct one pressure row from warm to cold before any provider write.
+    """Abandon a refused warm attempt and start this pressure row's cold one.
 
-    An over-window warm fork produced no generation, so this is the same
-    operation finding its only usable path, not a second attempt. The guard
-    keeps that true: the row must still be the running warm pressure row that
-    has written nothing.
+    The warm fork wrote no narrative but may have paid for calls and staged
+    edits. Paid calls stay recorded; staged edits are discarded, so the row
+    installs only what the cold fork staged. The row must still be the running
+    warm pressure row with no narrative captured.
     """
     with write_transaction(db, scope="checkpoint_adopt_cold") as connection:
         changed = connection.execute(
@@ -220,6 +221,9 @@ def adopt_cold(
             raise CheckpointTransitionError(
                 "checkpoint is no longer a running warm pressure operation"
             )
+        connection.execute(
+            "DELETE FROM checkpoint_staged_edits WHERE checkpoint_id=?", (checkpoint_id,),
+        )
 
 
 def capture(

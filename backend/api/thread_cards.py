@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from api.files_roots import scope_bases
+from api.files_roots import scope_roots
 from infra.queries import get_thread_for_user
 from registry.chat_cards import ask_cards
 from registry.path_access import FileLookup
@@ -145,33 +145,31 @@ def _ask_cards_by_message(
 
 
 def attach_cards(db, thread_id: str, user_id: str, thread_row, messages: list[dict]) -> None:
-    """Add ``cards`` (and ``cards_more``) to the assistant rows that carry artifacts."""
+    """Add ``cards`` to assistant rows that carry artifacts."""
     if not messages:
         return
     asks, asked_in_turn = _ask_cards_by_message(db, thread_id, messages)
     bases: list[Path] | None = None
     lookup_memo: dict[str, FileLookup] = {}
+    origin: Path | None = None
     for row in messages:
         if row.get("role") != "assistant":
             continue
         cards = list(asks.get(row["id"], []))
         text = row.get("content")
-        more = 0
         if isinstance(text, str) and text:
             if bases is None:
-                bases = scope_bases(thread_row["project_id"], db)
+                origin, bases = scope_roots(thread_row["project_id"], db)
             # An artifact asked in a Turn is covered by that ask: the reference is marked, never dropped.
             turn_id = _loads(row.get("metadata")).get("turn_id")
             asked_here = asked_in_turn.get(turn_id, {}) if isinstance(turn_id, str) else {}
             covered = {artifact: set(holds) for artifact, holds in asked_here.items()}
             for card in cards:
                 covered.setdefault(card["artifact_id"], set()).add(card["hold_id"])
-            refs, more = reference_cards(db, text, bases, user_id, covered=covered, lookup_memo=lookup_memo)
+            refs = reference_cards(db, text, bases, user_id, covered=covered, lookup_memo=lookup_memo, origin=origin)
             cards.extend(refs)
         if cards:
             row["cards"] = cards
-            if more:
-                row["cards_more"] = more
 
 
 def attach_result_cards(db, thread_id: str, user_id: str, result) -> None:

@@ -35,7 +35,7 @@
 {#if clamped}<button class="ct-more" onclick={(e) => { e.stopPropagation(); toggle(); }}>{open ? 'Show less' : 'Show more'}</button>{/if}
 
 <style>
-	.ct-markdown-reveal { --ct-expanded-height: 4lh; max-height: 4lh; overflow: hidden; transition: max-height var(--dur-standard) var(--ease-entrance); }
+	.ct-markdown-reveal { flex-shrink: 0; --ct-expanded-height: 4lh; max-height: 4lh; overflow: hidden; transition: max-height var(--dur-standard) var(--ease-entrance); }
 	.ct-markdown-reveal.clamped { -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 1lh), transparent); mask-image: linear-gradient(to bottom, black calc(100% - 1lh), transparent); }
 	.ct-markdown-reveal.open { max-height: var(--ct-expanded-height); }
 	.ct-markdown { font-size: var(--text-subhead); line-height: var(--lh-snug); color: var(--text-primary); }

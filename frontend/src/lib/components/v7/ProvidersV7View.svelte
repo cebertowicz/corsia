@@ -3,6 +3,7 @@
 	import { get } from 'svelte/store';
 	import { SvelteSet } from 'svelte/reactivity';
 	import {
+		agentCliGroup,
 		harnessInventoryError,
 		hostGroups,
 		hostGroupsLoading,
@@ -29,7 +30,6 @@
 	import { retryLocalSetup } from '$lib/stores/localPickerStatus';
 	import { LOW_MEMORY_LOCAL_MODEL_SENTENCE } from '$lib/setupLocalPick.svelte';
 	import { on } from '$lib/ws/events';
-	import SetupAiRows from '../SetupAiRows.svelte';
 	import { createSetupConnect, POLL_MS, VENDOR_COPY } from '$lib/setupConnect.svelte';
 	import { withReportAction } from '$lib/setupReport';
 	import { HARNESSES } from '$lib/stores/harnessMembership';
@@ -143,7 +143,7 @@
 		await loadHostGroups();
 		groupsRead = true;
 		loadModels();
-		stopLocalSourceUpdates = on('models_updated', () => { void refreshSources(); if (cliRows.length) void loadHostGroups(); });
+		stopLocalSourceUpdates = on('models_updated', (event) => { void refreshSources(); if (event?.server_id) void loadNetworkServers(); if (cliRows.length) void loadHostGroups(); });
 	});
 	onDestroy(() => stopLocalSourceUpdates?.());
 
@@ -163,7 +163,10 @@
 	});
 
 	const groups = $derived.by<HostGroup[]>(() => {
-		const base = baseGroups;
+		// A vendor with no models yet (not signed in, or still setting up) is a row of Agent CLIs too.
+		const base = cliRows.length && !baseGroups.some((group) => group.key === 'agent-clis')
+			? [...baseGroups, agentCliGroup()]
+			: baseGroups;
 		if (!localSetupRow) return base;
 		const local = base.find((group) => group.key === 'this-mac');
 		if (local) return base.map((group) => group.key === 'this-mac'
@@ -197,6 +200,16 @@
 		if (!target || !provider) return;
 		openProvider = provider;
 		void tick().then(tick).then(() => document.querySelector<HTMLElement>(`[data-billing-account="${target.id}"] [data-settings-anchor]`)?.focus());
+	});
+
+	// A link to one account (`#account-<id>`, as an error in chat writes it) opens the settings of the provider
+	// that holds it; that provider's account list lands on the row and clears the request.
+	$effect(() => {
+		const anchor = $settingsNavigation.anchor;
+		if (!anchor?.startsWith('account-')) return;
+		const account = $vendorAccounts.find((entry) => `account-${entry.id}` === anchor && entry.state !== 'removed');
+		const provider = account && groups.flatMap((g) => g.providers).find((p) => p.type === 'harness' && p.name === account.provider);
+		if (provider && openProvider?.name !== provider.name) openProvider = provider;
 	});
 </script>
 
@@ -246,11 +259,24 @@
 					{/snippet}
 				</ProviderRow>
 			{/each}
+			{#if group.key === 'agent-clis'}
+				{#each cliRows as row (row.key)}
+					<ProviderRow
+						provider={{ name: row.key, label: row.name, type: 'harness', statusDot: row.error ? 'error' : 'idle', subline: row.meta, raw: { name: row.key, label: row.name, type: 'harness' } as ProviderEntry }}
+						setupLabel={row.action?.label ?? ''}
+						spinning={row.spinning}
+						onSetup={row.action && !row.action.loading ? row.action.run : undefined}
+					>
+						{#snippet footer()}
+							{#if row.reference}<p class="cli-note">Reference: {row.reference}</p>{/if}
+							{#if row.confirm ?? row.more}<div class="cli-actions">{#each row.confirm ?? row.more ?? [] as item (item.label)}<Button variant="chip" size="sm" onclick={item.run}>{item.label}</Button>{/each}</div>{/if}
+						{/snippet}
+					</ProviderRow>
+				{/each}
+			{/if}
 		</HostSection>
 	{/each}
 {/if}
-
-{#if cliRows.length}<SetupAiRows rows={cliRows} />{/if}
 
 {#if openProvider}
 	<ProviderSettingsModal
@@ -274,6 +300,9 @@
 		margin-bottom: var(--space-5);
 	}
 	.page-head h2.page-title { margin: 0; }
+
+	.cli-note { margin: 0; }
+	.cli-actions { display: flex; gap: var(--space-2); margin-top: var(--space-1); }
 
 	.error { margin: 0 0 var(--space-4); padding: 0 var(--space-2); font-size: var(--text-footnote); color: var(--red-text); }
 

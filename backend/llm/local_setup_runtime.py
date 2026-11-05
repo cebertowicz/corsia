@@ -12,7 +12,7 @@ from typing import Any, Callable
 import httpx
 
 from llm.local_model import LocalModel
-from llm.local_profiles import MODEL_SETTINGS, OMLX_GLOBAL_SETTINGS, thinking_recommendation
+from llm.local_profiles import MODEL_SETTINGS, thinking_recommendation
 from llm.local_setup_auth import SKIP_AUTH_SETTING, UPDATE_OMLX_MESSAGE, _omlx_supports_loopback_auth, omlx_version, secure_local_omlx
 from llm.local_setup_executable import ensure_omlx, omlx_log_detail
 from llm.managed_omlx_binary import MANAGED_INSTANCE_ID, reserve_managed_omlx_port
@@ -130,11 +130,12 @@ def rename_managed_server() -> bool:
 
 
 async def configure_global(server_id: str) -> None:
-    """Write oMLX's server-wide settings and loopback-only auth flag."""
+    """Write oMLX's server-wide settings, keeping any it saved, and the loopback-only auth flag."""
     from llm.providers.omlx_settings import save_global_settings
+    from llm.providers.omlx_supervisor_config import managed_global_settings
 
     result = await save_global_settings(
-        {"server_id": server_id}, {**OMLX_GLOBAL_SETTINGS, SKIP_AUTH_SETTING: True},
+        {"server_id": server_id}, {**managed_global_settings(), SKIP_AUTH_SETTING: True},
     )
     if not result.get("ok"):
         raise RuntimeError(str(result.get("message", "oMLX could not save global settings.")))

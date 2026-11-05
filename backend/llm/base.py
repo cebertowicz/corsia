@@ -7,7 +7,6 @@ Used for the managed engine (oMLX) and External openai-dialect providers
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
 from typing import Any
 
 import json_repair
@@ -93,9 +92,10 @@ def sanitize_empty_content(messages: list[dict[str, Any]]) -> list[dict[str, Any
     for msg in messages:
         content = msg.get("content")
 
-        if isinstance(content, str) and not content:
+        assistant_tool_call = msg.get("role") == "assistant" and msg.get("tool_calls")
+        if isinstance(content, str) and (not content or (assistant_tool_call and not content.strip())):
             clean = dict(msg)
-            clean["content"] = None if (msg.get("role") == "assistant" and msg.get("tool_calls")) else "(empty)"
+            clean["content"] = None if assistant_tool_call else "(empty)"
             result.append(clean)
             continue
 
@@ -289,10 +289,6 @@ async def base_completion(
     retry_transient_errors: bool = True,
 ) -> "LLMResponse":
     """Generic litellm transport after provider-specific shaping."""
-    preflight_error = await _omlx_loaded_only_preflight(api_key, api_base, model, omlx_server_id)
-    if preflight_error is not None:
-        return preflight_error
-
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": sanitize_messages(sanitize_empty_content(messages)),
@@ -331,7 +327,7 @@ async def base_completion(
         on_reasoning_chunk=on_reasoning_chunk,
         on_content_chunk=on_content_chunk,
         on_tool_call_chunk=on_tool_call_chunk, on_response_started=on_response_started,
-        retry_transient_errors=retry_transient_errors,
+        retry_transient_errors=retry_transient_errors, omlx_server_id=omlx_server_id,
     )
 
 
@@ -343,7 +339,7 @@ async def _completion_with_retries(
     on_reasoning_chunk: Any,
     on_content_chunk: Any,
     on_tool_call_chunk: Any, on_response_started: Any,
-    retry_transient_errors: bool,
+    retry_transient_errors: bool, omlx_server_id: str | None = None,
 ) -> "LLMResponse":
     """Dispatch with transient retries and the I7 overflow discovery re-entry.
 
@@ -357,24 +353,25 @@ async def _completion_with_retries(
         overflow_disposition,
     )
     from llm.router import _is_transient_error, provider_error_response
+    from llm.providers.omlx_supervisor import request_slot
 
     transient_attempts = _MAX_RETRIES if retry_transient_errors else 1
     attempt = 0
     overflow_retried = False
     while True:
         try:
-            if use_streaming:
-                return await _streaming_completion(
-                    kwargs, model, on_reasoning_chunk, on_content_chunk,
-                    on_tool_call_chunk, on_response_started,
-                )
-            response = await acompletion(**kwargs)
-            # Read the endpoint from the request actually sent, not from an
-            # outer variable: it decides how the response's cache counts are
-            # interpreted, so it has to be the value the provider saw.
-            return parse_response(
-                response, model=model, api_base=kwargs.get("api_base"),
-            )
+            async with request_slot(omlx_server_id):
+                error = await _omlx_loaded_only_preflight(kwargs.get("api_key"), kwargs.get("api_base"), model, omlx_server_id)
+                if error is not None:
+                    return error
+                if use_streaming:
+                    return await _streaming_completion(
+                        kwargs, model, on_reasoning_chunk, on_content_chunk,
+                        on_tool_call_chunk, on_response_started,
+                    )
+                response = await acompletion(**kwargs)
+                # Cache counts use the endpoint actually sent.
+                return parse_response(response, model=model, api_base=kwargs.get("api_base"))
         except Exception as e:
             disposition = await overflow_disposition(
                 e,
@@ -382,7 +379,7 @@ async def _completion_with_retries(
                 messages=kwargs.get("messages") or [],
                 tools=kwargs.get("tools"),
                 max_tokens=kwargs.get("max_tokens"),
-                already_retried=overflow_retried,
+                already_retried=overflow_retried, omlx_server_id=omlx_server_id,
             )
             if disposition is OverflowDisposition.RETRY:
                 overflow_retried = True

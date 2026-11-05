@@ -19,9 +19,6 @@
 		<div class="row"><span class="l">Server</span><span class="v">{provider.server.status}</span></div>
 		<div class="row"><span class="l">Port</span><span class="v">{provider.server.port}</span></div>
 		<div class="row"><span class="l">Active host</span><span class="v"><code>{provider.server.active_host ?? '-'}</code></span></div>
-		{#if provider.server.memory_total_mb}
-			<div class="row"><span class="l">Reported RAM</span><span class="v">{(provider.server.memory_total_mb / 1024).toFixed(0)} GiB total · {((provider.server.memory_used_mb ?? 0) / 1024).toFixed(0)} GiB used</span></div>
-		{/if}
 	{/if}
 </div>
 

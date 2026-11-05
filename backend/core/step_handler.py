@@ -6,14 +6,14 @@ import logging
 import uuid
 from typing import Any, Awaitable, Callable
 
+from infra.chat_comment_answers import strip_answer_tags
 from infra.database import get_db, write_transaction
 from infra.time import utc_now_iso
 from infra.db_async import run_in_db
 from infra.context_receipts import attach_delivered_context_to_latest_assistant as _attach_delivered_context_to_latest_assistant
 from infra.context_receipts import (
     ContextReceiptIdentity,
-    context_usage_receipt,
-    context_usage_summary, live_context_usage_payload,
+    context_usage_receipt, context_usage_summary, live_context_usage_payload,
 )
 from core.turn_error_surface import persist_llm_error
 from infra.queries import insert_message
@@ -372,7 +372,7 @@ class StepHandler:
                     "type": "session_updated",
                     "thread_id": self.thread_id,
                     "title": row["title"],
-                    "last_message": row["last_message"],
+                    "last_message": strip_answer_tags(row["last_message"]),
                     "updated_at": row["updated_at"],
                 })
         except Exception as e:
@@ -383,7 +383,7 @@ class StepHandler:
         # the turn boundary instead of dying. Never break turn completion on it.
         await record_turn_end_logged(
             self.thread_id, "plan-liveness arm after turn completion failed",
-            "parent drive after turn completion failed",
+            "parent drive after turn completion failed", turn_id=self.turn_id,
         )
 
     async def _handle_error(self, payload: dict):

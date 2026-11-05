@@ -14,6 +14,7 @@ from statistics import median
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 GAP = "required-step definitions not persisted; missing required steps not computed"
+ACCEPTED_STATES = {"accepted", "accepted_with_followup"}
 
 
 def connect(path: str) -> sqlite3.Connection:
@@ -70,13 +71,14 @@ def _corrections(db: sqlite3.Connection, ids: list[str]) -> dict[str, int]:
 
 
 def _revision_children(db: sqlite3.Connection) -> dict[str, list[str]]:
-    """Return only rejection revisions, never ordinary accept-with-follow-up work."""
+    """Return every further round of a step: rejection revisions and follow-ups that count as the step."""
     rows = db.execute(
         """SELECT n.id AS child_id,n.follow_up_of AS parent_id
-           FROM plan_nodes n JOIN plan_node_events e
-             ON e.node_id=n.id AND e.event='revision_created'
-           WHERE n.follow_up_of IS NOT NULL AND json_valid(e.payload_json)
-             AND json_extract(e.payload_json,'$.source_node_id')=n.follow_up_of"""
+           FROM plan_nodes n JOIN plan_nodes s ON s.id=n.follow_up_of
+           LEFT JOIN plan_node_events e
+             ON e.node_id=n.id AND e.event='revision_created' AND json_valid(e.payload_json)
+             AND json_extract(e.payload_json,'$.source_node_id')=n.follow_up_of
+           WHERE e.id IS NOT NULL OR (n.workflow_ref=s.workflow_ref AND n.workflow_step=s.workflow_step)"""
     ).fetchall()
     children: dict[str, list[str]] = defaultdict(list)
     for row in rows:
@@ -111,7 +113,7 @@ def _chain_attempts(counts: dict[str, int], ids: list[str], final_state: str) ->
     """Count attempts on precisely the nodes that make up one step revision chain."""
     attempts = sum(counts.get(node_id, 0) for node_id in ids)
     return {"total": attempts,
-            "first_accepted": len(ids) == 1 and attempts == 1 and final_state in {"accepted", "accepted_with_followup"}}
+            "first_accepted": len(ids) == 1 and attempts == 1 and final_state in ACCEPTED_STATES}
 
 
 def _sum_amounts(amounts: list[dict]) -> dict:
@@ -228,6 +230,8 @@ def report(db: sqlite3.Connection, workflow: str | None = None) -> dict:
         mismatch = (sum(row["tokens"] or 0 for row in rows) != (own_tokens["known"] or 0)
                     or sum(row["unknown_tokens"] for row in rows) != own_tokens["unknown_rows"])
         final = chain[-1]
+        # An agent may close a follow-up it no longer needs; the step it followed stays accepted.
+        accepted = any(node["state"] in ACCEPTED_STATES for node in chain)
         attempt = _chain_attempts(attempt_counts, chain_ids, final["state"])
         records.append({"task_id": root["id"], "chain_node_ids": chain_ids, "run_id": _run_id(root, by_id),
                         "workflow_ref": root["workflow_ref"], "workflow_version": root["workflow_version"],
@@ -239,7 +243,7 @@ def report(db: sqlite3.Connection, workflow: str | None = None) -> dict:
                         "corrections": sum(corrections.get(node_id, 0) for node_id in chain_ids),
                         "revisions": len(chain) - 1,
                         "rework_tokens": _sum_amounts([costs[node["plan_id"]][node["id"]]["rolled"]["tokens"] for node in chain[1:]]),
-                        "failed_or_closed_without_completion": final["state"] in {"failed", "closed"},
+                        "failed_or_closed_without_completion": final["state"] == "failed" or (final["state"] == "closed" and not accepted),
                         "attribution": rows, "attribution_mismatch": mismatch})
         siblings[root["workflow_ref"], root["workflow_version"]].add(root["workflow_step"])
     groups: dict[tuple, list[dict]] = defaultdict(list)

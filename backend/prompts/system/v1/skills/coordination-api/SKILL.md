@@ -1,6 +1,6 @@
 ---
 name: coordination-api
-description: Use when the CORSIA agent or a project conductor needs to inspect or change CORSIA through corsia_api, create or promote an agent, install its responsibility file, thread skill or supporting scripts, or add, fix or remove connected apps (tool servers, MCP servers, connected tools). Covers route boundaries, retry safety and next-turn delivery. Not for human authentication or host-access authority.
+description: Use when the CORSIA agent or a project conductor needs to inspect or change CORSIA through corsia_api, create or promote an agent, install its responsibility file, thread skill or supporting scripts, add, fix or remove connected apps (tool servers, MCP servers, connected tools), or CORSIA is slow (attribute CPU use by thread). Not for human authentication or host-access authority.
 ---
 
 # Coordination API and agent setup
@@ -46,6 +46,10 @@ Agents use these keys but never read them. `GET /api/keys` returns each entry's 
 1. Read the profile: `corsia_api(method="GET", path="/api/models/codex/gpt-5.6-terra/profile")`.
 2. After confirming the user-requested profile value and the current schema, write it: `corsia_api(method="PATCH", path="/api/models/codex/gpt-5.6-terra/profile", body={"context_window": 128000})`.
 3. Read the same profile back and verify the requested value. A successful HTTP status alone does not prove the setup outcome.
+
+## CORSIA is slow
+
+The CPU profiler setting (off by default) attributes CPU use by thread. Turn it on with `corsia_api(method="PATCH", path="/api/settings", body={"features": {"cpu_profiler": true}})`, read `log_read(logger="infra.cpu_sampler")` alongside `GET /api/system/perf/routes`, and turn it off (`false`) when done.
 
 ## Create or promote an agent
 

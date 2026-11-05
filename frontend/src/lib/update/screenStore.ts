@@ -4,7 +4,7 @@ import { shellInfo } from '$lib/remoteShell';
 import { toasts } from '$lib/stores/toast';
 import { failureCopy, failureFromOperation, failureFromVerdict, type FailureCopy } from './failureCopy';
 import { isFailedOperation, isInFlight, isResolvedFailure, type UpdateFailureCode, type UpdateOperation } from './model';
-import { CREEP_STALE_MS, drainCount, NO_PROCESS_WINDOW_MS, ProgressModel, remoteEstimate, STEP_LABEL, TAKING_LONGER_MS, type ProgressInput, type StepId } from './screenProgress';
+import { CREEP_STALE_MS, drainCount, NO_PROCESS_WINDOW_MS, PHASE_SECONDS, ProgressModel, remoteEstimate, STEP_LABEL, TAKING_LONGER_MS, type ProgressInput, type StepId } from './screenProgress';
 import { markOutcomeSeen } from './outcome';
 import type { ScreenHandoff } from './shellHandoff';
 import { startupProgress, type StartupProgress } from './startupProgress';
@@ -19,7 +19,7 @@ export interface UpdateScreenView {
 	label: string;
 	/** The real percentage; the screen counts a whole number up to it and the bar follows that number. */
 	percent: number;
-	/** A remote client's time-based guess; the screen adds a line saying progress shows on the main computer. */
+	/** A remote client's time-based guess while the main computer's service is down. */
 	estimated: boolean;
 	fromVersion: string | null;
 	toVersion: string | null;
@@ -31,6 +31,9 @@ export interface UpdateScreenView {
 
 /** After the new version is confirmed the screen stays this long at 100%, then leaves. */
 export const EXIT_HOLD_MS = 1_000;
+/** A paired computer with no usual time allows twice the longest expected outage (a restart with a data upgrade), as it allows twice a known usual time. */
+export const NO_HISTORY_LONGER_MS = 2_000 * (PHASE_SECONDS.restarting + PHASE_SECONDS.backing_up + PHASE_SECONDS.upgrading
+	+ PHASE_SECONDS.checking_data + PHASE_SECONDS.starting);
 export const updateScreenView = writable<UpdateScreenView | null>(null);
 export const updateScreenVisible = derived(updateScreenView, (view) => view !== null);
 
@@ -47,6 +50,7 @@ interface Latch {
 	seqChangedAt: number | null;
 	lastSeq: number | null;
 	lastPid: number | null;
+	lateReading: { pid: number; seq: number } | null;
 	estimateFrom: number | null;
 	failure: { code: UpdateFailureCode | null; detail: string | null; verdict: boolean } | null;
 	doneAt: number | null;
@@ -93,19 +97,34 @@ function readSources(now: number, l: Latch, operation: UpdateOperation | null, u
 		l.downAt = null;
 		l.lastSeq = null;
 		l.seqChangedAt = null;
+		l.lateReading = null;
 		l.estimateFrom = null;
 		const step = httpStep(operation);
 		const drain = step === 'waiting' ? drainCount(operation?.drain_total, operation?.blocking) : null;
-		return { input: { step, count: drain, alive: true }, longer: false, estimated: false };
+		return { input: { step, count: drain, alive: true, drainRemaining: step === 'waiting' ? operation?.hard_cap_remaining ?? null : null }, longer: false, estimated: false };
 	}
 	l.downAt ??= now;
 	if (readError) return { input: { step: 'restarting', count: null, alive: false }, longer: false, estimated: false };
 	if (shellInfo()?.mode !== 'local') {
-		if (l.usualSeconds === null) return { input: { step: 'restarting', count: null, alive: false }, longer: false, estimated: false };
+		if (l.usualSeconds === null) return { input: { step: 'restarting', count: null, alive: false }, longer: now - l.downAt >= NO_HISTORY_LONGER_MS, estimated: false };
 		l.estimateFrom ??= l.model.shown;
 		const elapsed = now - l.downAt;
-		l.model.lift(remoteEstimate(l.estimateFrom, elapsed, l.usualSeconds));
+		l.model.lift(remoteEstimate(l.estimateFrom, elapsed));
 		return { input: { step: 'restarting', count: null, alive: false }, longer: elapsed >= l.usualSeconds * 2_000, estimated: true };
+	}
+	// A still-running old service can report serving as HTTP goes away. Its PID is valid, but it says nothing about
+	// the replacement. Only accept its late startup phases after an earlier phase from that same PID was observed.
+	const latePhase = file?.phase === 'recovering' || file?.phase === 'serving';
+	if (file && latePhase && file.pid !== l.lastPid) {
+		if (l.lastPid === null && file.seq !== l.lastSeq) {
+			l.lastSeq = file.seq;
+			l.seqChangedAt = now;
+		} else if (l.lastPid !== null) {
+			if (l.lateReading?.pid === file.pid && l.lateReading.seq !== file.seq) l.seqChangedAt = now;
+			l.lateReading = { pid: file.pid, seq: file.seq };
+		}
+		const frozen = now - (l.seqChangedAt ?? now);
+		return { input: { step: 'restarting', count: null, alive: frozen < CREEP_STALE_MS }, longer: frozen >= TAKING_LONGER_MS, estimated: false };
 	}
 	if (file && file.phase !== 'failed') {
 		if (file.seq !== l.lastSeq || file.pid !== l.lastPid) {
@@ -153,7 +172,7 @@ export function tickUpdateScreen(now = Date.now()): void {
 		latch = {
 			operationId: operation.operation_id, model: new ProgressModel(),
 			fromVersion: status?.current_version ?? null, toVersion: operation.target_version ?? status?.target_version ?? null,
-			downAt: null, seqChangedAt: null, lastSeq: null, lastPid: null, estimateFrom: null, failure: null, doneAt: null,
+			downAt: null, seqChangedAt: null, lastSeq: null, lastPid: null, lateReading: null, estimateFrom: null, failure: null, doneAt: null,
 				usualSeconds: typeof status?.usual_seconds === 'number' && Number.isFinite(status.usual_seconds) && status.usual_seconds > 0 ? status.usual_seconds : null,
 		};
 	}
@@ -224,7 +243,7 @@ function adoptHandoff(operation: UpdateOperation | null): void {
 		operationId: screen.operationId, model: ProgressModel.restore(screen.model),
 		fromVersion: screen.fromVersion, toVersion: screen.toVersion,
 		downAt: screen.downAt, seqChangedAt: screen.seqChangedAt, lastSeq: screen.lastSeq, lastPid: screen.lastPid,
-		estimateFrom: null, failure: screen.failure && { code: screen.failure.code, detail: null, verdict: screen.failure.verdict },
+		lateReading: null, estimateFrom: null, failure: screen.failure && { code: screen.failure.code, detail: null, verdict: screen.failure.verdict },
 		doneAt: null, usualSeconds: screen.usualSeconds,
 	};
 }

@@ -377,22 +377,12 @@ describe('context sheet group expansion resets', () => {
 		expect(groups().every((el) => !el.open)).toBe(true);
 	});
 
-	it('starts every group collapsed after a source detail visit', async () => {
+	it('renders a generated history source without a button', async () => {
 		const fetches = deferredFetches();
 		mountControls();
 		await loadFirstPreview(fetches);
-		await openGroup('Project');
 		await openGroup('History');
-
-		// The history row has no owner settings surface, so it opens its detail here.
-		host.querySelector<HTMLButtonElement>('button[aria-label$="for Recent history"]')?.click();
-		flushSync();
-		expect(host.querySelector('.context-source-back')).not.toBeNull();
-		expect(groups()).toHaveLength(0);
-
-		host.querySelector<HTMLButtonElement>('.context-source-back')?.click();
-		flushSync();
-		expect(groups().length).toBeGreaterThan(0);
-		expect(groups().every((el) => !el.open)).toBe(true);
+		expect(group('History').textContent).toContain('Recent history');
+		expect(group('History').querySelector('button.ctx-source-row')).toBeNull();
 	});
 });

@@ -48,7 +48,7 @@ describe('syncCanvasHeader — compact artifact', () => {
 		const h = get(canvasHeader);
 		expect(h?.title).toBe('Design.md');
 		expect(h?.backLabel).toBe('Chat');
-		expect(h?.actions?.[0]).toMatchObject({ id: 'artifact-tabs', label: 'Tabs (2)', active: false });
+		expect(h?.actions?.[0]).toMatchObject({ id: 'artifact-tabs', label: 'Files (2)', title: 'Show open files', active: false });
 		h?.onBack?.();
 		expect(onBack).toHaveBeenCalledOnce();
 		h?.actions?.[0].onClick();
@@ -65,7 +65,7 @@ describe('syncCanvasHeader — compact artifact', () => {
 
 	it('yields to true modal takeovers', () => {
 		syncCanvasHeader(makeInput({ compactArtifact: compact(), threadSettingsOpen: true }));
-		expect(get(canvasHeader)?.title).toBe('Thread settings');
+		expect(get(canvasHeader)?.title).toBe('Chat settings');
 	});
 
 	it('is absent while chat is the active surface', () => {
@@ -118,7 +118,7 @@ describe('syncCanvasHeader — no doc', () => {
 		}));
 		const h = get(canvasHeader);
 		expect(h?.title).toBe('Documents');
-		expect(h?.backLabel).toBe('Thread settings');
+		expect(h?.backLabel).toBe('Chat settings');
 		h?.onBack?.();
 		expect(closeDocuments).toHaveBeenCalledOnce();
 	});
@@ -191,7 +191,7 @@ describe('syncCanvasHeader — no doc', () => {
 			closeThreadSettings,
 		}));
 		const h = get(canvasHeader);
-		expect(h?.title).toBe('Thread settings');
+		expect(h?.title).toBe('Chat settings');
 		expect(h?.backLabel).toBe('CTX stability review');
 		h?.onBack?.();
 		expect(closeThreadSettings).toHaveBeenCalledOnce();

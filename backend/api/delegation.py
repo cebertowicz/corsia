@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from infra.time import utc_now_iso
 
+from functools import partial
+
 from fastapi import APIRouter, HTTPException
 from loguru import logger
 
@@ -19,7 +21,9 @@ from infra.fresh_threads import (
     SpawnVisibilityRejected,
     create_visible_fresh_thread,
 )
-from infra.local_only import LocalityRefused, send_confirmation_error
+import infra.held_replies as held_replies
+from infra.held_reply_messages import announce_hold, hold_response
+from infra.local_only import LocalityRefused, send_needs_hold
 from infra.product_events import emit_product_event
 from infra.queries import get_thread_for_user
 from infra.runtime_truth import read_runtime_truth
@@ -94,12 +98,16 @@ async def _calling_agent(from_thread_id: str | None, user_id: str) -> str | None
     return from_thread_id
 
 
-async def _require_send_confirmation(sender: dict, recipient: dict, body: dict) -> None:
-    error = await run_in_db(
-        send_confirmation_error, sender, recipient, body.get("no_sensitive_content"),
-    )
-    if error:
-        raise HTTPException(409, error)
+async def _hold_send(user_id: str, sender_id: str, recipient_id: str, text: str, body: dict) -> dict:
+    """Store the send for the person's approval, tell the asker and their pages once, and answer the sender."""
+    held = await run_in_db(partial(
+        held_replies.hold,
+        user_id=user_id, sender_thread_id=sender_id, recipient_thread_id=recipient_id,
+        text=text, via="api", idempotency_key=body.get("idempotency_key"),
+    ))
+    if not held["duplicate"]:
+        await announce_hold(held)
+    return await hold_response(held)
 
 
 @router.post("/threads")
@@ -285,20 +293,33 @@ async def send_turn(thread_id: str, token: str, body: dict):
         raise HTTPException(404, "Thread not found")
     thread_row = target_payload["thread_row"]
 
-    target_project_id = thread_row["project_id"] or None
+    check_send_scope(thread_id, sender, target_payload, body.get("target_scope_id"))
+
+    if await run_in_db(send_needs_hold, sender, thread_row):
+        return await _hold_send(user["id"], from_thread_id, thread_id, message, body)
+
+    return await deliver_send(thread_id, target_payload, message, user, sender, agent_meta,
+                              body.get("idempotency_key"), body.get("target_scope_id"))
+
+
+def check_send_scope(thread_id: str, sender: dict, target_payload: dict, requested_scope: str | None) -> None:
+    """Reject an API send that cannot reach its target scope."""
     scope_check = validate_send_target_scope(
-        source_project_id=sender["project_id"],
-        target_project_id=target_project_id,
-        target_thread_id=thread_id,
-        requested_target_scope_id=body.get("target_scope_id"),
+        source_project_id=sender.get("project_id") or None,
+        target_project_id=target_payload["thread_row"].get("project_id") or None,
+        target_thread_id=thread_id, requested_target_scope_id=requested_scope,
         target_authority=target_payload["target_authority"],
     )
     if not scope_check["ok"]:
         raise HTTPException(409, scope_check["detail"])
 
-    await _require_send_confirmation(sender, thread_row, body)
 
-    target_kind = "subagent" if is_subagent(thread_row) else "chat"
+async def deliver_send(thread_id: str, target_payload: dict, message: str, user: dict,
+                       sender: dict, agent_meta: dict, idempotency_key: str | None,
+                       requested_scope: str | None = None) -> dict:
+    """Validate and admit an API send with its original attribution and receipt effects."""
+    check_send_scope(thread_id, sender, target_payload, requested_scope)
+    thread_row = target_payload["thread_row"]
     try:
         result = await send_thread_input(
             thread_id,
@@ -306,13 +327,13 @@ async def send_turn(thread_id: str, token: str, body: dict):
             message,
             user=user,
             metadata=agent_meta,
-            idempotency_key=body.get("idempotency_key"),
+            idempotency_key=idempotency_key,
             native_mode="delegation",
             accepted_effects={
                 "send_ref": {
                     "sender_thread_id": agent_meta["from_thread"],
                     "target_title": thread_row["title"] or "Untitled thread",
-                    "target_kind": target_kind,
+                    "target_kind": "subagent" if is_subagent(thread_row) else "chat",
                 }
             },
         )
@@ -344,36 +365,17 @@ async def thread_status(thread_id: str, token: str, messages: int = 5):
 
     n = max(0, min(messages, 50))
 
-    def _query():
-        db = get_db()
-        thread_row = get_thread_for_user(thread_id, user["id"], db=db)
-        if not thread_row:
-            db.close()
-            return None
-        active = db.execute(
-            "SELECT id, status, started_at FROM active_turns "
-            "WHERE thread_id = ? AND status='running' "
-            "ORDER BY started_at DESC LIMIT 1",
-            (thread_id,),
-        ).fetchone()
-        recent = db.execute(
-            "SELECT id, role, content, created_at FROM messages "
-            "WHERE thread_id = ? ORDER BY created_at DESC LIMIT ?",
-            (thread_id, n),
-        ).fetchall() if n else []
-        conductor_scopes = get_coordination_scopes(thread_id, db=db)
-        db.close()
-        return dict(thread_row), (dict(active) if active else None), \
-            conductor_scopes, \
-            [dict(r) for r in reversed(recent)]
+    from infra.delegation_status import read_delegate_status
+    from infra.thread_confinement import Reader, read_runtime_for
 
-    result = await run_in_db(_query)
+    reader = Reader.from_user(user)
+    result = await run_in_db(read_delegate_status, thread_id, user["id"], n, reader, person_messages=True)
     if result is None:
         raise HTTPException(404, "Thread not found")
-    thread_row, active, conductor_scopes, recent = result
+    thread_row, active, conductor_scopes, recent, _checkpoint = result
 
-    truth = await read_runtime_truth(
-        thread_id, thread_row,
+    truth = await read_runtime_for(
+        reader, thread_id, thread_row,
         active_turn=active,
         conductor_scopes=conductor_scopes,
     )

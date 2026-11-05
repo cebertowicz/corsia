@@ -12,6 +12,8 @@ from core.continuity_accounting import ContinuityAccounting
 
 from external_harness_usage_helpers import persist_turn
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 class _Registry:
     def __init__(self, live) -> None:

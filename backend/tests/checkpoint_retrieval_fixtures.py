@@ -37,7 +37,7 @@ def fresh_db():
     db.row_factory = sqlite3.Row
     db.execute(
         "CREATE TABLE threads (id TEXT PRIMARY KEY, user_id TEXT, title TEXT,"
-        " history_epoch INTEGER NOT NULL DEFAULT 0)"
+        " history_epoch INTEGER NOT NULL DEFAULT 0, confinement TEXT)"
     )
     db.executescript(CHECKPOINT_SCHEMA_SQL)
     db.executescript(CONTINUITY_SCHEMA_SQL)

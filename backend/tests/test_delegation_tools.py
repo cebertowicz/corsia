@@ -13,9 +13,11 @@ from delegation_fixtures import deleg_db  # noqa: F401
 def _sync_tool_db(monkeypatch):
     """Run tool DB closures synchronously under the delegated sqlite fixture."""
     import tools.delegation as delegation_tools
+    import tools.delegation_completion as completion_tools
 
     runner = AsyncMock(side_effect=lambda fn, *a, **k: fn(*a, **k))
     monkeypatch.setattr(delegation_tools, "run_in_db", runner)
+    monkeypatch.setattr(completion_tools, "run_in_db", runner)
     return runner
 
 
@@ -161,6 +163,9 @@ async def test_available_cache_row_supersedes_obsolete_cc_delist(deleg_db, monke
          '{"resolved_identity":"claude-fable-5"}', "t", "t"),
     )
     deleg_db.commit()
+    from vendor_account_fixtures import signed_in_default
+
+    signed_in_default("claude-code", db=deleg_db)  # the Default's current discovery lists fable
     from tools.delegate_task import DelegateTaskTool
     import connections.models as cm
     import subagents.cc_runtime as rt

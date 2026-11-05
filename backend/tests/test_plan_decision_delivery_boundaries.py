@@ -15,6 +15,8 @@ from tests.test_plan_decision_answer import (
     db,
 )
 
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
+
 
 def _answer_rows(connection, decision_id):
     return connection.execute(

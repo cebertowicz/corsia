@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -107,6 +108,7 @@ def _run_startup_release(
     head_sha: str,
     before_ensure: str = "",
     build: str = "printf 'UNEXPECTED_BUILD\\n' >> \"$TRACE\"; return 1",
+    dirty: bool = False,
     ownership: str = """
 service_installed() { return 1; }
 service_is_loaded() { return 1; }
@@ -131,7 +133,9 @@ git() {
         *"rev-parse --is-inside-work-tree"*) echo true ;;
         *"rev-parse --absolute-git-dir"*) echo "$GIT_DIR" ;;
         *"rev-parse HEAD"*) echo "$HEAD_SHA" ;;
+        *"status --porcelain"*) [ "$DIRTY" = true ] && echo ' M frontend/source' ;;
     esac
+    return 0
 }
 redeploy_build() {
 """
@@ -147,9 +151,194 @@ ensure_current_frontend_release
             "CHECKOUT": str(checkout),
             "GIT_DIR": str(git_dir),
             "HEAD_SHA": head_sha,
+            "DIRTY": str(dirty).lower(),
             "TRACE": str(trace),
         },
     )
+
+
+def test_dirty_source_startup_rebuilds_again_after_subsequent_edit(tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout"
+    frontend = checkout / "frontend"
+    git_dir = tmp_path / "git-dir"
+    git_dir.mkdir()
+    (frontend / "node_modules").mkdir(parents=True)
+    _write_frontend_build(frontend / "dist", "old-sha", "old build")
+    source = frontend / "source"
+    trace = tmp_path / "trace.log"
+    build = """
+    stage="$CHECKOUT/frontend/node_modules/.corsia-dist-stage"
+    mkdir -p "$stage"
+    cp "$CHECKOUT/frontend/source" "$stage/index.html"
+    printf '{"full_hash":"%s","dirty":true}' "$HEAD_SHA" > "$stage/build-info.json"
+    touch "$stage.prepared"
+    """
+    for content in ("first edit", "later edit"):
+        source.write_text(content)
+        result = _run_startup_release(
+            checkout, git_dir, trace, head_sha="new-sha", dirty=True, build=build,
+        )
+        assert result.returncode == 0, trace.read_text()
+        assert (frontend / "dist" / "index.html").read_text() == content
+        assert json.loads((frontend / "dist" / "build-info.json").read_text())["dirty"] is True
+
+
+@pytest.mark.parametrize("dirty", [True, False], ids=["still-dirty", "now-clean"])
+@pytest.mark.parametrize("interruption", ["prepared", "backup", "absent", "activated"])
+def test_startup_recovers_interrupted_dirty_source_build(
+    tmp_path: Path, interruption: str, dirty: bool,
+) -> None:
+    checkout = tmp_path / "checkout"
+    frontend = checkout / "frontend"
+    stage = frontend / "node_modules" / ".corsia-dist-stage"
+    backup = frontend / "node_modules" / ".corsia-dist-previous"
+    git_dir = tmp_path / "git-dir"
+    git_dir.mkdir()
+    _write_frontend_build(stage, "new-sha", "interrupted build")
+    (stage / "build-info.json").write_text(json.dumps({"full_hash": "new-sha", "dirty": True}))
+    Path(f"{stage}.prepared").touch()
+    if interruption == "prepared":
+        _write_frontend_build(frontend / "dist", "old-sha", "old build")
+    elif interruption in ("backup", "activated"):
+        _write_frontend_build(backup, "old-sha", "old build")
+    else:
+        Path(f"{backup}.absent").touch()
+    if interruption == "activated":
+        stage.rename(frontend / "dist")
+    # The interrupted assets predate either another edit or a revert to HEAD.
+    source = frontend / "source"
+    source.write_text("later source edit" if dirty else "original HEAD source")
+    trace = tmp_path / "trace.log"
+    result = _run_startup_release(
+        checkout, git_dir, trace, head_sha="new-sha", dirty=dirty,
+        build="""
+        stage="$CHECKOUT/frontend/node_modules/.corsia-dist-stage"
+        mkdir -p "$stage"
+        cp "$CHECKOUT/frontend/source" "$stage/index.html"
+        printf '{"full_hash":"%s","dirty":%s}' "$HEAD_SHA" "$DIRTY" > "$stage/build-info.json"
+        touch "$stage.prepared"
+        """,
+    )
+    assert result.returncode == 0, trace.read_text()
+    assert (frontend / "dist" / "index.html").read_text() == source.read_text()
+    assert json.loads((frontend / "dist" / "build-info.json").read_text())["dirty"] is dirty
+    assert not stage.exists()
+    assert not backup.exists()
+    assert not Path(f"{stage}.prepared").exists()
+    assert not Path(f"{backup}.absent").exists()
+
+
+def test_strict_activation_recovers_with_dirty_source_backup(tmp_path: Path) -> None:
+    frontend = tmp_path / "checkout" / "frontend"
+    stage = frontend / "node_modules" / ".corsia-dist-stage"
+    backup = frontend / "node_modules" / ".corsia-dist-previous"
+    _write_frontend_build(stage, "new-sha", "update build")
+    _write_frontend_build(backup, "old-sha", "source build")
+    (backup / "build-info.json").write_text(json.dumps({"full_hash": "old-sha", "dirty": True}))
+    Path(f"{stage}.prepared").touch()
+    result = _run_bash("""
+fail() { printf '%s\\n' "$*" >&2; }
+PYTHON=.venv/bin/python
+source scripts/corsia.d/runtime.sh
+activate_prepared_frontend "$CHECKOUT" new-sha
+""", env={"CHECKOUT": str(frontend.parent)})
+    assert result.returncode == 0, result.stderr
+    assert (frontend / "dist" / "index.html").read_text() == "update build"
+    assert (backup / "index.html").read_text() == "source build"
+
+
+def test_strict_activation_refuses_dirty_target_even_with_valid_backup(tmp_path: Path) -> None:
+    frontend = tmp_path / "checkout" / "frontend"
+    stage = frontend / "node_modules" / ".corsia-dist-stage"
+    backup = frontend / "node_modules" / ".corsia-dist-previous"
+    _write_frontend_build(stage, "new-sha", "dirty target")
+    _write_frontend_build(backup, "old-sha", "old build")
+    (stage / "build-info.json").write_text(json.dumps({"full_hash": "new-sha", "dirty": True}))
+    Path(f"{stage}.prepared").touch()
+    result = _run_bash("""
+fail() { printf '%s\\n' "$*" >&2; }
+PYTHON=.venv/bin/python
+source scripts/corsia.d/runtime.sh
+activate_prepared_frontend "$CHECKOUT" new-sha
+""", env={"CHECKOUT": str(frontend.parent)})
+    assert result.returncode != 0
+    assert (stage / "index.html").read_text() == "dirty target"
+    assert (backup / "index.html").read_text() == "old build"
+    assert not (frontend / "dist").exists()
+
+
+def test_source_startup_after_real_commit_and_uncommitted_edits(tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout"
+    frontend = checkout / "frontend"
+    frontend.mkdir(parents=True)
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            ["git", "-C", str(checkout), *args], text=True, stderr=subprocess.DEVNULL,
+        ).strip()
+
+    git("init")
+    (checkout / ".gitignore").write_text("frontend/dist/\nfrontend/node_modules/\n")
+    source = frontend / "source"
+    source.write_text("old")
+    git("add", ".")
+    git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "old")
+    old_sha = git("rev-parse", "HEAD")
+    _write_frontend_build(frontend / "dist", old_sha, "old")
+    source.write_text("committed")
+    git("add", "frontend/source")
+    git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "new")
+    (frontend / "node_modules").mkdir()
+    script = """
+    warn() { :; }
+    ok() { :; }
+    fail() { printf '%s\\n' "$*" >&2; }
+    PYTHON=.venv/bin/python
+    source scripts/corsia.d/runtime.sh
+    SELF_CHECKOUT="$CHECKOUT"
+    is_backend_running() { return 1; }
+    acquire_fd_mutex() { :; }
+    redeploy_build() {
+        stage="$CHECKOUT/frontend/node_modules/.corsia-dist-stage"
+        mkdir -p "$stage"
+        cp "$CHECKOUT/frontend/source" "$stage/index.html"
+        printf '{"full_hash":"%s","dirty":true}' "$(git -C "$CHECKOUT" rev-parse HEAD)" > "$stage/build-info.json"
+        touch "$stage.prepared"
+    }
+    ensure_current_frontend_release
+    """
+    for content in ("first edit", "later edit"):
+        source.write_text(content)
+        result = _run_bash(script, env={"CHECKOUT": str(checkout)})
+        assert result.returncode == 0, result.stderr
+        assert (frontend / "dist" / "index.html").read_text() == content
+        info = json.loads((frontend / "dist" / "build-info.json").read_text())
+        assert info == {"full_hash": git("rev-parse", "HEAD"), "dirty": True}
+
+
+def test_dirty_checkout_consumes_prepared_release_before_rebuilding(tmp_path: Path) -> None:
+    checkout = tmp_path / "checkout"
+    frontend = checkout / "frontend"
+    stage = frontend / "node_modules" / ".corsia-dist-stage"
+    git_dir = tmp_path / "git-dir"
+    git_dir.mkdir()
+    _write_frontend_build(frontend / "dist", "old-sha", "old build")
+    _write_frontend_build(stage, "new-sha", "prepared build")
+    Path(f"{stage}.prepared").touch()
+    trace = tmp_path / "trace.log"
+    result = _run_startup_release(
+        checkout, git_dir, trace, head_sha="new-sha", dirty=True,
+        build="""
+        stage="$CHECKOUT/frontend/node_modules/.corsia-dist-stage"
+        mkdir -p "$stage"
+        printf 'working tree' > "$stage/index.html"
+        printf '{"full_hash":"%s","dirty":true}' "$HEAD_SHA" > "$stage/build-info.json"
+        touch "$stage.prepared"
+        """,
+    )
+    assert result.returncode == 0, trace.read_text()
+    assert (frontend / "dist" / "index.html").read_text() == "working tree"
+    assert not Path(f"{stage}.prepared").exists()
 
 
 def test_startup_rebuilds_backend_only_sha_mismatch_despite_newer_dist(
@@ -458,12 +647,12 @@ unset -f mv
                     backup.exists(), absent.exists()))
 
 
-@pytest.mark.parametrize("state", ["foreign", "missing", "dirty", "inconsistent"])
+@pytest.mark.parametrize("state", ["foreign", "missing", "inconsistent"])
 def test_startup_preserves_ambiguous_interrupted_activation(
     tmp_path: Path,
     state: str,
 ) -> None:
-    """Only exact, complete rollback evidence permits activation recovery."""
+    """Only exact, complete rollback evidence permits activation recovery; source startup accepts a same-head dirty stage."""
     checkout = tmp_path / "checkout"
     frontend = checkout / "frontend"
     stage = frontend / "node_modules" / ".corsia-dist-stage"
@@ -474,10 +663,6 @@ def test_startup_preserves_ambiguous_interrupted_activation(
     if state != "missing":
         _write_frontend_build(
             stage, "other-sha" if state == "foreign" else "new-sha", "new build",
-        )
-    if state == "dirty":
-        (stage / "build-info.json").write_text(
-            json.dumps({"full_hash": "new-sha", "dirty": True})
         )
     Path(f"{stage}.prepared").touch()
     if state == "inconsistent":

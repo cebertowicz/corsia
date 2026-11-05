@@ -1,3 +1,4 @@
+import type { SetupStep } from '$lib/components/SetupShell.svelte';
 import { localHostRefusal } from './localHostRefusal';
 
 type LocalStartResponse = { result: 'started' | 'failed'; reference?: string; fix?: string };
@@ -22,3 +23,13 @@ export async function requestLocalStart(session: string | null): Promise<LocalSt
 export function accountRefusal(detail: unknown): string | null { return typeof detail === 'string' && detail.trim() ? detail.trim() : null; }
 
 export function passwordConfirmationError(password: string, confirmation: string): string { return confirmation && password !== confirmation ? 'Passwords don’t match.' : ''; }
+
+/** The setup progress rail for every page except the remote-connect one, which brings its own steps. */
+export function setupSteps(page: string, signedIn: boolean): SetupStep[] {
+	return [
+		{ label: 'Getting started', icon: 'computer', state: ['checking', 'welcome', 'hard-stop'].includes(page) || (page === 'error' && !signedIn) ? 'current' : 'done' },
+		{ label: 'Account & workspace', icon: 'person', state: page === 'account' ? 'current' : ['subscriptions', 'models'].includes(page) || (page === 'error' && signedIn) ? 'done' : 'todo' },
+		{ label: 'Your subscriptions', icon: 'card', state: page === 'subscriptions' ? 'current' : page === 'models' ? 'done' : 'todo' },
+		{ label: 'Providers & models', icon: 'chip', state: page === 'models' ? 'current' : 'todo' },
+	];
+}

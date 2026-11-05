@@ -11,9 +11,9 @@ from contextlib import closing
 from connections.harness_usage import stored_usage
 from infra.database import initialize_schema
 from infra.database_migrations import migrate_to_current
-from infra.schema import SCHEMA_VERSION
 from vendor_account_fixtures import default_id
 
+_LADDER_END = 166  # the step before 166 -> 167, which removes a never-used ambient account
 OLDER = "2026-09-29T00:00:00+00:00"
 NEWER = "2026-09-30T00:00:00+00:00"
 
@@ -37,9 +37,9 @@ def _migrate(tmp_path, configs: dict[str, dict]) -> tuple[dict[str, dict], dict[
         db.commit()
     with closing(sqlite3.connect(path)) as db:
         db.row_factory = sqlite3.Row
-        result = migrate_to_current(db, SCHEMA_VERSION)
+        result = migrate_to_current(db, _LADDER_END)
         assert (result.migrated, result.from_version, result.to_version) == (
-            True, 75, SCHEMA_VERSION,
+            True, 75, _LADDER_END,
         )
         persisted_configs = {
             provider: json.loads(config)

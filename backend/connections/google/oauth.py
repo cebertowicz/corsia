@@ -53,7 +53,8 @@ IDENTITY_SCOPES = ("openid",)
 SCOPES = REQUIRED_SCOPES + OPTIONAL_SCOPES + IDENTITY_SCOPES
 PUBLISHED_REQUIRED_SCOPES = ("https://www.googleapis.com/auth/gmail.modify", "https://www.googleapis.com/auth/calendar")
 PUBLISHED_OPTIONAL_SCOPES = OPTIONAL_SCOPES[:2]
-PUBLISHED_SCOPES = PUBLISHED_REQUIRED_SCOPES + PUBLISHED_OPTIONAL_SCOPES
+# The published relay drops the ID token, so the subject comes from tokeninfo, which has it only with openid.
+PUBLISHED_SCOPES = PUBLISHED_REQUIRED_SCOPES + PUBLISHED_OPTIONAL_SCOPES + IDENTITY_SCOPES
 PUBLISHED_CLIENT_ID = "338689075775-o75k922vn5fdl18qergr96rp8g63e4d7.apps.googleusercontent.com"
 PUBLISHED_URL = client.PUBLISHED_URL
 PENDING_SECONDS = 600

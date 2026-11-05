@@ -53,8 +53,9 @@ def announce_after_commit(
 
     A rolled-back write announces nothing. The frame is looked up and sent on
     the thread that committed, which for every adapter is a database worker.
-    A new agent comment names itself (``comment_id``, ``author_thread_id``) so a
-    canvas can hold it for its presence lane before it reloads the list.
+    A new top-level agent comment or suggestion names itself (``comment_id``,
+    ``author_thread_id``) so a canvas can hold it for its presence lane before
+    it reloads the list; replies and user comments do not.
     """
     after_commit(
         connection,

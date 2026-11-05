@@ -10,6 +10,7 @@ content is never guidance.
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import shutil
 import subprocess
@@ -690,6 +691,86 @@ def test_an_enclosing_repository_is_never_adopted(isolated_db, tmp_path):
     assert result.outcome == "history-off" and "enclosing repository" in result.line
     assert _history(workspace).read_text() == "x\n"
     assert not (workspace / ".git").exists()
+
+
+def _unborn_workspace(tmp_path, name: str, *bootloader_files: str) -> Path:
+    """A workspace whose repository exists but has no commit yet, as a Linux shell launch leaves it."""
+    workspace = tmp_path / name
+    workspace.mkdir()
+    _git(["init", "--quiet"], cwd=workspace)
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)",
+            ("workspace_context", json.dumps({"bootloader_files": [f"context/{n}.md" for n in bootloader_files]}), "now"),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return workspace
+
+
+def test_an_unborn_repository_reads_as_no_history_yet(isolated_db, tmp_path):
+    """Every reader of the workspace repository must survive a repo with no commit and invent none."""
+    from infra.guidance_git import (
+        GitFault, file_version, find_commit, recorded_blob_reader, startup_sweep, workspace_repository,
+    )
+    from infra.guidance_history_paths import history_git
+
+    workspace = _unborn_workspace(tmp_path, "unborn", "demo", "shell")
+    assert startup_sweep(workspace) is None
+    assert _git(["rev-list", "--all", "--count"], cwd=workspace).strip() == "0"
+    assert workspace_repository(workspace) == (workspace.resolve(), None)
+    assert history_git(workspace, "rev-parse", "--verify", "-q", "HEAD", ok=(0, 1)) == b""
+    assert find_commit(workspace, "Reason: unrecorded", _history(workspace)) is None
+    reader, reason = recorded_blob_reader(workspace)
+    assert reason is None and reader is not None
+    try:
+        assert reader("0" * 40, "0" * 64)[0] is None
+    finally:
+        reader.close()
+    with pytest.raises(GitFault):
+        file_version(workspace.resolve(), _history(workspace))
+
+
+def test_an_outside_edit_on_an_unborn_repository_is_recorded_unrecorded_at_startup(isolated_db, tmp_path):
+    """The sweep makes the first commit with honest authorship; the agent's own save follows it."""
+    from infra.guidance_git import startup_sweep
+
+    workspace = _unborn_workspace(tmp_path, "unborn-sweep", "demo", "shell")
+    shell = _history(workspace, "shell")
+    shell.parent.mkdir(parents=True)
+    shell.write_text("from a shell\n")
+
+    startup_sweep(workspace)
+
+    assert _count(workspace) == 1
+    assert _git(["show", "HEAD:context/shell.md"], cwd=workspace) == "from a shell\n"
+    assert _git(["log", "-1", "--format=%an <%ae>"], cwd=workspace).strip() == "Unknown editor <outside-edit@corsia.local>"
+    result = _save(workspace, _history(workspace), "saved\n")
+    assert result.outcome == "written" and _count(workspace) == 2
+    assert _git(["show", "HEAD:context/demo.md"], cwd=workspace) == "saved\n"
+
+
+def test_a_guidance_save_works_with_the_control_placeholders(isolated_db, tmp_path):
+    """A save on the repository a Linux shell launch prepares records its bytes with the ``.`` commondir in place."""
+    from tools.linux_workspace_git import prepare_workspace_git
+
+    workspace = _unborn_workspace(tmp_path, "placeholder", "demo")
+    assert prepare_workspace_git(workspace)
+    git_dir = workspace / ".git"
+    assert (git_dir / "commondir").read_text() == ".\n"
+    assert (git_dir / "config.worktree").read_bytes() == b""
+    assert _git(["rev-parse", "--show-toplevel"], cwd=workspace).strip() == str(workspace.resolve())
+    assert _git(["rev-parse", "--git-common-dir"], cwd=workspace).strip() == str(git_dir)
+
+    result = _save(workspace, _history(workspace), "saved\n")
+
+    assert result.outcome == "written" and _count(workspace) == 1
+    assert _git(["show", "HEAD:context/demo.md"], cwd=workspace) == "saved\n"
+    assert _git(["status", "--porcelain"], cwd=workspace).strip() == ""
 
 
 def test_an_ignored_guidance_path_reports_history_off(history_scope):

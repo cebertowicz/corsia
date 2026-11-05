@@ -27,7 +27,7 @@ def test_first_run_keeps_mcp_import_and_maps_the_first_step_options():
         assert f"`{status}`" in result_lines or f'"{status}"' in result_lines
     assert "`Approve them in [Settings › Connected apps](/settings/connected-apps).`" in result_lines
     assert "Raise the decision whose `task_title` is this task." in first_run
-    assert "CORSIA builds every setup decision: raise it unchanged; never write or reword one." in first_run
+    assert "CORSIA builds every setup decision: raise per **Raising a decision**; never write or reword one." in first_run
     assert "Point me to a folder, or describe your work in a sentence or two." in first_run
     assert "You can see those numbers on the Measurement dashboard." in first_run.split("## Wrap-up", 1)[1]
 

@@ -5,7 +5,8 @@ come from ``detect_reasoning_effort`` run against the checkpoint template at
 https://huggingface.co/Jundot/Qwen3.8-27B-oQ4e-mtp/tree/04dc5509edd8670fc78cc8c2f74bf9b77b1f2acc.
 """
 
-from llm.catalog_network_models import _apply_admin_model, _parse_omlx_status
+from llm.catalog_network_models import _parse_omlx_status
+from llm.omlx_capabilities import apply_admin_model
 from llm.reasoning_config import reasoning_shape_from_discovery
 
 
@@ -55,7 +56,7 @@ _RC1_QWEN_ADMIN = {
 def _shape_from(status_entry: dict, admin_entry: dict | None) -> dict | None:
     canonical = _parse_omlx_status(_Response({"models": [status_entry]}))
     if admin_entry is not None:
-        _apply_admin_model(canonical, admin_entry)
+        apply_admin_model(canonical, admin_entry)
     return reasoning_shape_from_discovery(canonical[status_entry["id"]])
 
 
@@ -133,19 +134,21 @@ def test_rc1_shape_maps_saved_high_and_max_before_sending(monkeypatch):
     assert rc.effective_reasoning_effort("max", "qwen38") == "xhigh"
 
 
-def test_declared_levels_become_an_effort_picker():
+def test_declared_levels_become_an_effort_picker_opening_on_auto():
+    """oMLX's ``reasoning_effort_default`` is its menu's starting value, not the template's default."""
     shape = reasoning_shape_from_discovery(
         {
             "id": "qwen38",
             "reasoning_efforts": ["xhigh", "medium", "low"],
-            "reasoning_effort_default": "xhigh",
+            "reasoning_effort_default": "low",
             "thinking_default": True,
         }
     )
     assert shape == {
         "type": "effort_levels",
         "values": ["xhigh", "medium", "low"],
-        "default": "xhigh",
+        "default": None,
+        "supports_auto": True,
     }
 
 
@@ -169,14 +172,8 @@ def test_configured_level_outside_the_vocabulary_is_ignored():
             "configured_reasoning_effort": "bogus",
         }
     )
-    assert shape["default"] == "low"
-
-
-def test_falls_back_to_first_level_when_no_default_is_usable():
-    shape = reasoning_shape_from_discovery(
-        {"reasoning_efforts": ["low", "high"], "reasoning_effort_default": None}
-    )
-    assert shape["default"] == "low"
+    assert shape["default"] is None
+    assert shape["supports_auto"] is True
 
 
 def test_thinking_without_levels_becomes_a_toggle():
@@ -210,45 +207,7 @@ def test_levels_win_over_the_toggle():
     assert shape["type"] == "effort_levels"
 
 
-def test_managed_omlx_sends_medium_for_an_unset_effort():
-    from llm.providers.omlx_thinking import wire_reasoning_effort
-
-    shape = reasoning_shape_from_discovery(
-        {
-            "reasoning_efforts": ["low", "medium", "xhigh"],
-            "reasoning_effort_default": "low",
-        },
-        managed_effort="medium",
-    )
-
-    assert shape == {
-        "type": "effort_levels",
-        "values": ["low", "medium", "xhigh"],
-        "default": "medium",
-        "send_when_unset": "medium",
-    }
-    assert wire_reasoning_effort(None, shape) == "medium"
-    assert wire_reasoning_effort("low", shape) == "low"
-    assert wire_reasoning_effort("auto", shape) is None
-
-
-def test_managed_omlx_never_sends_medium_when_the_model_does_not_list_it():
-    shape = reasoning_shape_from_discovery(
-        {
-            "reasoning_efforts": ["low", "xhigh"],
-            "reasoning_effort_default": "low",
-        },
-        managed_effort="medium",
-    )
-
-    assert shape == {
-        "type": "effort_levels",
-        "values": ["low", "xhigh"],
-        "default": "low",
-    }
-
-
-def test_personal_omlx_keeps_an_unset_effort_unset():
+def test_unset_effort_sends_no_level_so_the_model_default_runs():
     from llm.providers.omlx_thinking import wire_reasoning_effort
 
     shape = reasoning_shape_from_discovery(
@@ -258,15 +217,12 @@ def test_personal_omlx_keeps_an_unset_effort_unset():
         }
     )
 
-    assert shape == {
-        "type": "effort_levels",
-        "values": ["low", "medium", "xhigh"],
-        "default": "low",
-    }
     assert wire_reasoning_effort(None, shape) is None
+    assert wire_reasoning_effort("auto", shape) is None
+    assert wire_reasoning_effort("low", shape) == "low"
 
 
-def test_managed_omlx_configured_effort_wins_over_medium():
+def test_configured_effort_opens_the_picker_and_is_not_resent():
     """The server applies its own configured level, so none is sent for it."""
     from llm.providers.omlx_thinking import wire_reasoning_effort
 
@@ -275,8 +231,7 @@ def test_managed_omlx_configured_effort_wins_over_medium():
             "reasoning_efforts": ["low", "medium", "xhigh"],
             "reasoning_effort_default": "low",
             "configured_reasoning_effort": "xhigh",
-        },
-        managed_effort="medium",
+        }
     )
 
     assert shape == {

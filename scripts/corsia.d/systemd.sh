@@ -138,6 +138,7 @@ service_stop() {
     local drain_attempted=false
     service_installed || { fail "$(foreign_loaded_service_guidance "$(service_label)" "$(service_definition_path)")"; return 1; }
     if ! service_is_loaded; then
+        _corsia_update_stopping=1
         [ "${STOP_LOCAL_MODEL:-false}" != true ] || echo "No local model runs on Linux; only the server is stopped."
         return 0
     fi
@@ -154,6 +155,7 @@ service_stop() {
         drain_attempted=true
         DRAIN_FAILURE_ACTION=hold drain_and_wait "service stop" "$BACKEND_PORT" || warn "Drain did not complete; stopping anyway"
     fi
+    _corsia_update_stopping=1
     if ! systemctl --user stop "$(service_label).service"; then
         [ "$drain_attempted" = false ] || cancel_failed_drain "$(current_drain_url "$BACKEND_PORT")" "$CORSIA_RESTART_OPERATION_ID" || :
         fail "Couldn’t stop the systemd service; check its status and try again"

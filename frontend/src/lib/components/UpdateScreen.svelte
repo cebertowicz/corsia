@@ -5,12 +5,13 @@
 	import { ms } from '$lib/popoverMotion';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { onStartupShellPage, recoverLocalService, shellInfo, type RecoveryIntent } from '$lib/remoteShell';
+	import { agentsSafe } from '$lib/update/model';
 	import { countUp } from '$lib/update/percentCountUp';
 	import { restartToFinishUpdate } from '$lib/update/restartToFinish';
 	import { dismissUpdateScreen, handOverScreen, updateScreenView } from '$lib/update/screenStore';
 	import { currentTheme, encodeHandoff, keepScreenInAddress, keptReturnRoute, moveWindow, returnUrl, SHELL_UPDATE_PAGE } from '$lib/update/shellHandoff';
 	import { launchReadyUrl, startupProgress } from '$lib/update/startupProgress';
-	import { retryUpdate, updateStarting } from '$lib/update/store';
+	import { retryUpdate, updateStarting, updateStatus } from '$lib/update/store';
 	import Button from './ui/Button.svelte';
 	import LivingMark from './LivingMark.svelte';
 
@@ -34,8 +35,9 @@
 	let startActionEl: HTMLButtonElement | undefined = $state();
 	let screenEl: HTMLElement | undefined = $state();
 
+	const paused = $derived(view?.mode === 'progress' && view.step === 'waiting' && !view.serviceDown && $updateStatus?.operation?.operation_id === view.operationId ? agentsSafe($updateStatus.operation) : null);
 	const longer = $derived(view?.mode === 'longer');
-	const recovery = $derived(longer || view?.startupProgressUnavailable === true || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown) || (!localDesktop && view?.serviceDown === true));
+	const recovery = $derived(longer || view?.startupProgressUnavailable === true || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown));
 	// The percentage on screen counts up to the real one; under reduced motion it steps straight to it.
 	const target = $derived(view === null ? null : view.mode === 'done' ? 100 : view.percent);
 	let shown = $state(0);
@@ -199,6 +201,7 @@
 					<p class="detail">{view.failure.body}</p>
 				{:else if view.mode !== 'done'}
 					<p class="step-label">{view.label}</p>
+					{#if paused}<p class="step-label">{paused.safe} of {paused.total} {paused.total === 1 ? 'agent' : 'agents'} paused</p>{/if}
 				{/if}
 			</div>
 			<div class="percent" data-state={view.mode} aria-hidden="true">{wholePercent}%</div>
@@ -215,7 +218,7 @@
 						<Button variant="ghost" onclick={dismiss}>Dismiss</Button>
 					</div>
 				{:else if view.mode === 'done'}
-					<p class="detail">CORSIA comes back by itself. You can keep this window open.</p>
+					<p class="detail">Your agents will resume where they left off after the update.</p>
 				{:else if recovery}
 					{#if longer}<p class="detail strong">This is taking longer than usual.</p>{/if}
 					{#if localDesktop}
@@ -235,16 +238,13 @@
 								<Button variant="primary" onclick={() => (onShell ? void startCorsia('manual') : handOver(true))} loading={starting} bind:el={startActionEl}>Start CORSIA</Button>
 							</div>
 						{/if}
-					{:else if hostName}
-						<p class="detail">Open CORSIA on {hostName}.</p>
-						<p class="detail">Progress shows on your main computer, {hostName}.</p>
+					{:else if view.mode === 'start_failed' || view.mode === 'failed'}
+						<p class="detail">Open CORSIA on {hostName ?? 'your main computer'}.</p>
 					{:else}
-						<p class="detail">Open CORSIA on your main computer.</p>
-						<p class="detail">Progress shows on your main computer.</p>
+						<p class="detail">If CORSIA doesn’t come back, open it on {hostName ?? 'your main computer'}.</p>
 					{/if}
 				{:else}
-					<p class="detail">CORSIA comes back by itself. You can keep this window open.</p>
-					{#if view.estimated}<p class="detail">Progress shows on your main computer{hostName ? `, ${hostName}` : ''}.</p>{/if}
+					<p class="detail">Your agents will resume where they left off after the update.</p>
 				{/if}
 			</div>
 		</div>

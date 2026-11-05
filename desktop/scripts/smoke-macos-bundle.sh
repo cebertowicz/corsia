@@ -32,7 +32,6 @@ else
   else
     "$ROOT/desktop/scripts/build-macos-bundle.sh"
   fi
-  "$ROOT/desktop/scripts/sign-macos-bundle.sh" - "$SOURCE_APP"
 fi
 if ! "$skip_dmg"; then
   mkdir -p "$DMG_DIR"
@@ -179,6 +178,7 @@ while IFS= read -r git_dir; do
 done < <(sed -n 's/.*trace: resolved executable dir: //p' "$TEMP_ROOT/service-git-trace.log" | sort -u)
 "$RESOURCES/bin/omlx" --version
 "$RESOURCES/bin/agent-browser" --version
+"$RESOURCES/libexec/gws" --version | head -1
 # The bundled sandbox really confines a shell that reaches the bundled Python read-only. This
 # runner is not itself inside a sandbox, so the nested run is real; it is what every agent shell is.
 "$RESOURCES/bin/safehouse" --version

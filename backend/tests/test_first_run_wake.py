@@ -18,6 +18,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 SECRET_ENOUGH = "long-enough-passphrase"
 FACTS = {"your_model": {"display_name": "Sonnet", "local": False}, "setup": {"tasks": []}}
 
@@ -67,10 +69,10 @@ async def _new_install_picks(model: str) -> str:
 class TestRender:
     def test_instructions_are_the_served_reference_whole(self):
         from infra.system_package import system_resource_source
-        from onboarding import first_run_wake
+        from onboarding import first_run_instructions, first_run_wake
 
         text = first_run_wake.instructions()
-        reference = system_resource_source(first_run_wake.FIRST_RUN_REFERENCE).read_text()
+        reference = system_resource_source(first_run_instructions.FIRST_RUN_REFERENCE).read_text()
         assert text == reference.strip()
 
     def test_the_same_facts_render_the_same_bytes(self):
@@ -89,6 +91,41 @@ class TestRender:
         assert first_run_wake.INLINE_SUMMARY in wake
         assert wake.index("Do the steps.") < wake.index("## Setup facts")
         assert wake.endswith(json.dumps(FACTS, sort_keys=True, ensure_ascii=False))
+
+    def test_inlined_references_name_their_workspace_path(self):
+        from onboarding import first_run_wake
+
+        wake = first_run_wake.render(FACTS, (
+            "Follow `references/look-up-the-person.md`, then `references/about-you-doc.md`. "
+            "Then skill `github` › `references/agent-account.md`; "
+            "see `.corsia/skills/conductor-bootstrap/references/web-search.md`."
+        ))
+
+        projection = ".corsia/skills/conductor-bootstrap/references/"
+        assert f"`{projection}look-up-the-person.md`" in wake
+        assert f"`{projection}about-you-doc.md`" in wake
+        assert "skill `github` › `.corsia/skills/github/references/agent-account.md`" in wake
+        assert f"`{projection}web-search.md`" in wake
+        assert ".corsia/.corsia/" not in wake
+
+    def test_an_unserved_reference_stays_as_written(self):
+        from onboarding import first_run_instructions
+
+        text = "See `references/no-such-file.md` and skill `github` › `references/no-such-file.md`."
+        assert first_run_instructions.anchored(text) == text
+
+    @pytest.mark.parametrize("reference", ["FIRST_RUN_REFERENCE", "APP_REFERENCE", "APP_START_REFERENCE"])
+    def test_every_skill_reference_an_instruction_names_is_projected(self, reference):
+        import re
+
+        from infra.system_package import system_resource_source
+        from onboarding import first_run_instructions as wake_text
+
+        text = wake_text.anchored(system_resource_source(getattr(wake_text, reference)).read_text())
+        named = set(re.findall(r"\.corsia/(skills/[\w-]+/references/[\w.-]+\.md)", text))
+        assert named
+        assert all(system_resource_source(path).is_file() for path in named)
+        assert not re.findall(r"(?<![\w./-])references/[\w.-]+\.md", text)
 
 
 class TestFirstModelChoice:
@@ -109,12 +146,12 @@ class TestFirstModelChoice:
     @pytest.mark.asyncio
     async def test_the_served_file_is_embedded_whole(self, fresh_install):
         from infra.system_package import system_resource_source
-        from onboarding import first_run_wake
+        from onboarding import first_run_instructions
 
         await _new_install_picks("claude-code/sonnet")
 
-        reference = system_resource_source(first_run_wake.FIRST_RUN_REFERENCE).read_text().strip()
-        assert reference in _wake_row()["content"]
+        reference = system_resource_source(first_run_instructions.FIRST_RUN_REFERENCE).read_text().strip()
+        assert first_run_instructions.anchored(reference) in _wake_row()["content"]
 
     @pytest.mark.asyncio
     async def test_an_escaping_error_fails_the_pick_instead_of_changing_the_wake(
@@ -147,7 +184,7 @@ class TestFirstModelChoice:
 
         facts = await first_run_wake.setup_facts("claude-code/sonnet")
 
-        assert set(facts) == {"first_run_path", "your_model", "model_sources", "mcp_sources", "setup", "host_access_reviewer", "web_search_key"}
+        assert set(facts) == {"first_run_path", "your_model", "model_sources", "mcp_sources", "setup", "host_access_reviewer", "web_search_key", "auto_approve"}
         assert facts["host_access_reviewer"] == {
             "unavailable": first_run_wake.UNAVAILABLE_READS["host_access_reviewer"],
         }
@@ -208,10 +245,10 @@ class TestFirstModelChoice:
 
     def test_every_unavailable_read_is_named_in_the_reference(self):
         from infra.system_package import system_resource_source
-        from onboarding import first_run_wake
+        from onboarding import first_run_instructions
 
-        reference = system_resource_source(first_run_wake.FIRST_RUN_REFERENCE).read_text()
-        assert all(f"`{name}`" in reference for name in ("your_model", "model_sources", "mcp_sources", "setup", "host_access_reviewer", "web_search_key"))
+        reference = system_resource_source(first_run_instructions.FIRST_RUN_REFERENCE).read_text()
+        assert all(f"`{name}`" in reference for name in ("your_model", "model_sources", "mcp_sources", "setup", "host_access_reviewer", "web_search_key", "auto_approve"))
 
 
 class TestOnlyAnUnreadWakeChanges:
@@ -265,7 +302,7 @@ class TestAppPath:
 
         app_facts = {
             "first_run_path": "app", "harness_ready": ["codex"], "sources_missing": {},
-            "agents_found": ["hermes"], "local_download": {"state": "stopped"},
+            "agents_found": ["hermes"], "local_download": {"state": "stopped"}, "local_eligible": False, "auto_approve": True,
             "tool_attempts": {"claude_code": {"attempt": "none"}, "codex": {"attempt": "none"}},
             "pays_for": [],
             "bound_model": None,
@@ -312,10 +349,12 @@ class TestAppPath:
             "sources": [
                 {"source": "claude-code", **source_rows[0]},
                 {"source": "codex", **source_rows[1]},
+                {"source": "omlx", "state": "needs_setup", "eligible": True},
             ],
             "github": {"state": "not_installed"}, "github_agent": {"state": "not_installed"},
         })
         monkeypatch.setattr("llm.local_setup.setup_status", lambda: status)
+        monkeypatch.setattr(first_run_wake, "get_host_access_auto_approve", lambda: False)
         monkeypatch.setattr(first_run_wake, "_app_setup_handoff", lambda: {
             "tools": {"claude-code": {"attempt": "none"}, "codex": {"attempt": "install_failed", "cause": "download_unavailable"}},
         })
@@ -329,6 +368,8 @@ class TestAppPath:
 
         assert facts["sources_missing"] == expected_missing
         assert facts["local_download"] == expected_download
+        assert facts["local_eligible"] is True
+        assert facts["auto_approve"] is False
         assert facts["tool_attempts"] == {
             "claude_code": {"attempt": "none"},
             "codex": {"attempt": "install_failed", "cause": "download_unavailable"},
@@ -337,6 +378,20 @@ class TestAppPath:
         assert facts["bound_model"] is None
         assert facts["agents_found"] == ["openclaw"]
         assert set(facts) == first_run_wake.APP_FACT_KEYS
+
+    @pytest.mark.parametrize(("omlx_row", "expected"), [
+        ({"source": "omlx", "eligible": False, "state": "not_installed"}, False),
+        ({"source": "omlx", "eligible": False}, False),
+        ({"source": "omlx"}, False),
+        ({"source": "omlx", "eligible": False, "state": "ready"}, True),
+        ({"source": "omlx", "eligible": True, "state": "not_installed"}, True),
+        (None, False),
+    ])
+    def test_a_computer_reads_eligible_when_it_can_run_a_local_model_or_already_runs_one(self, omlx_row, expected):
+        from onboarding import first_run_wake
+
+        rows = [omlx_row] if omlx_row else [{"source": "codex", "eligible": True}]
+        assert first_run_wake._app_local_eligible({"sources": rows}) is expected
 
     @pytest.mark.parametrize("present, expected", [
         ((), []),
@@ -449,8 +504,9 @@ class TestAppPath:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("failed, expected", [
-        ("model_sources", ("harness_ready", "sources_missing", "github_ready")),
+        ("model_sources", ("harness_ready", "sources_missing", "github_ready", "local_eligible")),
         ("local_download", ("local_download",)),
+        ("auto_approve", ("auto_approve",)),
         ("setup_handoff", ("tool_attempts",)),
         ("setup_picks", ("pays_for",)),
         ("web_search_ready", ("web_search_ready",)),
@@ -476,6 +532,8 @@ class TestAppPath:
             monkeypatch.setattr(first_run_wake, "_model_sources", fail)
         elif failed == "local_download":
             monkeypatch.setattr(first_run_wake, "_app_local_download", fail)
+        elif failed == "auto_approve":
+            monkeypatch.setattr(first_run_wake, "get_host_access_auto_approve", fail)
         elif failed == "web_search_ready":
             monkeypatch.setattr("onboarding.setup_decisions.web_search_works", AsyncMock(side_effect=OSError("unavailable")))
         elif failed == "setup_handoff":

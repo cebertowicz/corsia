@@ -18,6 +18,8 @@ from tests.unavailable_model_support import (
     set_model_available,
 )
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 @pytest.fixture
 def driven(monkeypatch):
@@ -162,6 +164,7 @@ async def test_connection_unavailable_fails_visibly_and_is_not_held(
     import infra.thread_execution as execution
     from infra.send_target import TargetUnavailable
     from infra.send_types import DeliveryFailureSide
+    from vendor_account_fixtures import signed_in_default
 
     db = get_db()
     try:
@@ -173,8 +176,9 @@ async def test_connection_unavailable_fails_visibly_and_is_not_held(
             "'claude-code/test','Test','cc',1,1,32768,'t0','t0')"
         )
         db.execute(
-            "UPDATE connections SET status='needs_auth' WHERE provider='claude-code'"
+            "UPDATE connections SET status='not_installed' WHERE provider='claude-code'"
         )
+        signed_in_default("claude-code", db=db, models=("claude-code/test",))
         db.commit()
     finally:
         db.close()

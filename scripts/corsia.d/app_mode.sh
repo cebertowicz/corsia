@@ -81,6 +81,9 @@ if (app_dir / SERVICE_FILE).is_file():
         echo "CORSIA refused to run: $config_error, so no other state folder was opened" >&2
         return 1
     fi
+    if [ -n "${CORSIA_WORKSPACE:-}" ]; then
+        export CORSIA_STATE_DIR="${CORSIA_STATE_DIR:-$_corsia_app_state_root}"
+    fi
 }
 
 # While the app moves the data folder (CORSIA/state-move.json exists), nothing
@@ -348,7 +351,7 @@ app_mode_restart_prepared() {
 }
 
 app_mode_swap_staged_update() {
-    local staged="$1" drain_attempted=false swap_status
+    local staged="$1" drain_attempted=false swap_status reason
     local operation_id="${CORSIA_RESTART_OPERATION_ID:-update}"
     require_owned_service_definition || return 1
     if service_is_loaded; then
@@ -360,12 +363,14 @@ app_mode_swap_staged_update() {
     fi
     # Held through the stop, the swap and the new app's proof, or the rollback.
     if ! app_mode_hold_update_lock; then
-        fail "Update stopped: another update or start of CORSIA is in progress, so the staged update was kept at $staged and CORSIA was left as it was"
+        reason="Update stopped: another update or start of CORSIA is in progress, so the staged update was kept at $staged and CORSIA was left as it was"
+        fail "$reason"
         return 1
     fi
     if [ "$FORCE" = "false" ]; then
         if ! is_backend_running; then
-            fail "Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The staged update was kept at $staged; recover the running service, or explicitly use --force if interruption is intended."
+            reason="Safe update refused: the current backend is not healthy, so drain ownership cannot be proven. The staged update was kept at $staged; recover the running service, or explicitly use --force if interruption is intended."
+            fail "$reason"
             return 1
         fi
         drain_attempted=true
@@ -373,6 +378,7 @@ app_mode_swap_staged_update() {
             "update and restart" "$BACKEND_PORT" legacy-settings-update \
             || warn "Drain did not complete; updating anyway"
     fi
+    _corsia_update_stopping=1
     if service_is_loaded \
         && ! bootout_service_and_wait "$(service_domain)" "$(service_label)"; then
         if service_is_loaded; then
@@ -630,6 +636,7 @@ app_mode_install_overrides() {
     service_restart() { app_mode_service_restart; }
     service_install() { app_mode_refuse_registration install; }
     service_uninstall() { app_mode_refuse_registration uninstall; }
+    redeploy_self() { fail "corsia redeploy is for a source checkout; update CORSIA using the app"; return 1; }
     prepare_redeploy() { app_mode_stage_update; }
     discard_redeploy_build() { app_mode_discard_staged; }
     ensure_current_frontend_release() { :; }

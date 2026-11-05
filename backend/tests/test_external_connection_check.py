@@ -112,7 +112,7 @@ def test_a_failed_discovery_receipt_is_not_hidden_by_old_saved_metadata(
         "base_url": _BASE, "discovery": {"models": 9, "error": None}})
     monkeypatch.setattr(external_provider, "_external_discovery_config",
                         lambda _sid: (_SERVER, _BASE, None, {}))
-    monkeypatch.setattr("llm.external_declared_models.discoverable_model_ids", models)
+    monkeypatch.setattr("llm.external_declared_models.discoverable_models", models)
     monkeypatch.setattr("llm.server_observation.observe_discovery", observe)
     monkeypatch.setattr(external_discovery_result, "record_external_discovery", cannot_save)
     if aggregate:

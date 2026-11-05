@@ -26,15 +26,19 @@ _SENSITIVE_ENV_NAME_RE = re.compile(
     re.IGNORECASE,
 )
 _ENV_CONTROL_NAMES = frozenset({"BASH_ENV", "ENV", "CDPATH"})
+# A program Git asks for a credential; the name matches no credential word above.
+_CREDENTIAL_NAMES = frozenset({"GIT_ASKPASS"})
 # The backend's own identities Safehouse may pass into a child, in argv order.
 # TRACE_ENV is set only by the script runner for a run an event rule started.
 _SHELL_PASS_NAMES = ("CORSIA_THREAD_ID", "CORSIA_PROCESS_OWNER_MARKER", "CORSIA_TOOL_INVOCATION_ID",
-                     "AGENT_BROWSER_ARGS", *agent_shell_tools.CACHE_ENV_NAMES, TRACE_ENV)
+                     "AGENT_BROWSER_ARGS", *agent_shell_tools.CACHE_ENV_NAMES, TRACE_ENV,
+                     "CORSIA_SCRIPT_GITHUB_SOCKET")
 
 
 def is_credential_env_name(name: str) -> bool:
     """Whether a variable carries a credential or a GitHub or Git identity no child inherits."""
-    return bool(_SENSITIVE_ENV_NAME_RE.search(name)) or is_host_identity_name(name)
+    return (bool(_SENSITIVE_ENV_NAME_RE.search(name)) or name in _CREDENTIAL_NAMES
+            or is_host_identity_name(name))
 
 
 def shell_env_pass_names() -> str:
@@ -93,7 +97,7 @@ def safehouse_subprocess_env(
             and not is_credential_env_name(name)
             and name not in {
                 "CORSIA_THREAD_ID", "CORSIA_PROCESS_OWNER_MARKER",
-                "CORSIA_TOOL_INVOCATION_ID", TRACE_ENV,
+                "CORSIA_TOOL_INVOCATION_ID", TRACE_ENV, "CORSIA_SCRIPT_GITHUB_SOCKET",
             }
         )
     }
@@ -106,7 +110,7 @@ def safehouse_subprocess_env(
         env["AGENT_BROWSER_ARGS"] = "--no-sandbox"
     elif sys.platform == "linux":
         env.pop("AGENT_BROWSER_ARGS", None)
-    env.update(agent_shell_tools.shell_environment(env.get("PATH", ""), thread_id))
+    env.update(agent_shell_tools.shell_environment(env.get("PATH", "")))
     return env
 
 

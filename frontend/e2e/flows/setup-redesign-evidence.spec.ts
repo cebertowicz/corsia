@@ -21,6 +21,7 @@ const fixtures: Fixture[] = [
 	{ name: 'subscriptions', screen: 'subscriptions', cli: 'ready', element: 'Your subscriptions: Claude Code signed in, the ChatGPT question, Back and Continue' },
 	{ name: 'welcome', screen: 'welcome', element: 'Getting started: the Welcome copy and Continue, with the living mark beside it from 1280 wide' },
 	{ name: 'account-early-download-failed', screen: 'account', local: 'connection', element: 'Local model rail job: Couldn’t download' },
+	{ name: 'account-background-download', screen: 'account', local: 'downloading', element: 'Local model rail job: accent Downloading 42% · 12 min left, no hairline' },
 	{ name: 'account-invalid', screen: 'invalid', element: 'Use up to 32 lowercase letters, numbers, dashes or underscores.' },
 	{ name: 'account-short-password', screen: 'short-password', element: 'Use at least 8 characters.' },
 	{ name: 'account-mismatch', screen: 'mismatch', element: 'Passwords don’t match.' },
@@ -260,7 +261,7 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.screen === 'mismatch') { await expect(text('Passwords don’t match.')).toBeVisible(); return; }
 	if (fixture.screen === 'account-exists') { await expect(text('This computer already has a CORSIA account. Sign in instead.')).toBeVisible(); return; }
 	if (fixture.screen === 'protected') {
-		await expect(text('Your Documents folder holds personal files. macOS may ask to let CORSIA use it. Agents open anything in the work folder without asking; outside it, CORSIA asks you first.')).toBeVisible();
+		await expect(text('Your Documents folder holds personal files. macOS may ask to let CORSIA use it. Agents open anything in the work folder without asking. Outside it, access needs approval.')).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Use ~/CORSIA', exact: true })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Keep this folder', exact: true })).toBeVisible();
 		await expect(page.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled();
@@ -286,7 +287,7 @@ async function assertState(page: Page, fixture: Fixture) {
 	if (fixture.local) {
 		const row = page.getByRole('region', { name: 'Local model' });
 		const expected = fixture.local === 'ready' ? 'Ready'
-			: fixture.local === 'memory' ? 'Local models need at least 24 GB of memory, and this computer has less. Smaller models and future updates may bring them to 16 GB computers. Connect a subscription or an API provider.'
+			: fixture.local === 'memory' ? 'Adding a local model through CORSIA needs at least 32 GB of memory. Smaller models and future updates may bring local models to computers with less memory. Connect a subscription or an API provider.'
 			: fixture.local === 'downloading' ? 'Downloading 42%'
 			: fixture.local === 'paused' ? 'Download paused. It continues when the connection returns.'
 			: fixture.local === 'starting' ? 'Starting the local model…'

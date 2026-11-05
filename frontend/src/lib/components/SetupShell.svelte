@@ -8,7 +8,7 @@
 	import LivingMark from './LivingMark.svelte';
 
 	export type SetupStep = { label: string; icon: 'sparkle' | 'person' | 'chip' | 'computer' | 'code' | 'card'; state: 'current' | 'todo' | 'done' };
-	export type SetupJob = { label: string; state: 'busy' | 'done' | 'error'; meta?: string; progress?: number; action?: { label: string; onclick: () => void } };
+	export type SetupJob = { label: string; state: 'busy' | 'done' | 'error'; meta?: string; accentMeta?: boolean; progress?: number; action?: { label: string; onclick: () => void } };
 
 	interface Props {
 		steps: SetupStep[];
@@ -267,7 +267,9 @@
 	.body:global([data-above='true']) { --cue-top: var(--space-4); }
 	.body:global([data-more='true']) { --cue-bottom: var(--space-4); }
 	/* Bottom-aligned and as tall as the pill (--space-7 + --space-2) whether or not a primary or a note renders, so Back and Continue sit in the same place on every step. */
-	footer { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); min-height: calc(var(--space-7) + var(--space-2)); }
+	footer { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-4); min-height: calc(var(--space-7) + var(--space-2)); padding-top: var(--space-2); border-top: 1px solid transparent; }
+	/* Content cut off under the dock: the dock's top edge shows, so the cut reads as more below. The edge is always laid out, so showing it never moves anything. */
+	.pane:has(.body:global([data-more='true'])) footer { border-top-color: var(--border-subtle); }
 	footer > div { display: flex; align-items: center; gap: var(--space-1); min-height: calc(var(--space-7) + var(--space-2)); }
 	.primary-action { display: flex; align-items: center; gap: var(--space-3); }
 	.error-footer .secondary-actions { order: -1; }

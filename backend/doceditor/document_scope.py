@@ -51,15 +51,18 @@ def resolve_project(project_id: str, db) -> tuple[Path | None, list[tuple[str, P
     return (planning if planning.is_dir() else None), repos
 
 
-def scope_bases(project_id: str | None, db) -> list[Path]:
+def scope_roots(project_id: str | None, db) -> tuple[Path | None, list[Path]]:
+    """Return the relative-path origin and ordered roots for document access."""
     if project_id:
-        bases: list[Path] = []
         planning, repos = resolve_project(project_id, db)
-        bases.extend(path for _, path in repos)
-        if planning:
-            bases.append(planning.resolve())
-        return bases
-    return [config.WORKSPACE.resolve()]
+        origin = planning.resolve() if planning else None
+        return origin, [path for _, path in repos] + ([origin] if origin else [])
+    origin = config.WORKSPACE.resolve()
+    return origin, [origin]
+
+
+def scope_bases(project_id: str | None, db) -> list[Path]:
+    return scope_roots(project_id, db)[1]
 
 
 def path_write_allowed(path: Path, bases: list[Path]) -> bool:

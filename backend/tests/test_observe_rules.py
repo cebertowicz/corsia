@@ -16,7 +16,7 @@ import pytest
 from events import connectors
 from infra.database import get_db
 from registry import models
-from registry.observer import CommandArtifactRegistrationError, observe_command_result
+from registry.observer import ToolResultArtifactRegistrationError, observe_tool_result
 from tests.event_routing_helpers import mk_session
 from tests.registry_helpers import make_session
 from tests.test_shell_pr_registration import _URL, _direct_shell_context, _stub_process
@@ -30,6 +30,7 @@ SHIP = ["ship-pr", "--fast"]
 OTHER_URL = "https://github.com/owner/repo/pull/43"
 FOREIGN_URL = "https://github.com/elsewhere/repo/pull/7"
 FOREIGN = "elsewhere/repo#7"
+MCP_SHIPPED = {"tool": "create_pull_request"}
 
 
 
@@ -73,7 +74,7 @@ async def _observe_rule(thread_id: str, **kwargs):
 
 def _run(thread_id: str, command: str, output: str = _URL + "\n", **kwargs):
     told: list[str] = []
-    artifact = observe_command_result(thread_id, "bash", {"command": command}, output, told=told, **kwargs)
+    artifact = observe_tool_result(thread_id, "bash", {"command": command}, output, told=told, **kwargs)
     return artifact, told
 
 
@@ -134,8 +135,8 @@ async def test_create_refuses_what_an_observe_row_cannot_do(isolated_db):
     _agent("a")
     _agent("w", temporary_of="a")
     connected = await _observe_rule("a", tool="mcp__github__create_pull_request")
-    assert connected.startswith("Refused: Observe rules can't watch a connected app's actions.")
-    assert "bash" in connected and "yet" not in connected and "stamp" not in connected
+    assert connected.startswith("Refused: For a connected app, give the upstream tool name")
+    assert "upstream tool name" in connected and "bash" in connected and "argv_prefix" in connected
     unknown = await _observe_rule("a", item_type="calendar-event")
     assert unknown.startswith("Refused: no connector reports on 'calendar-event'")
     assert "pull-request" in unknown
@@ -168,7 +169,8 @@ async def test_shipped_list_stats_are_scoped_to_each_project(isolated_db):
                now, f"skip-{thread}", thread)
     for thread, expected, skips in (("a", "2026-01-01T00:00:00+00:00", 1),
                                     ("b", "2026-02-01T00:00:00+00:00", 2)):
-        [row] = (await _tool(thread, operation="list"))["rule_sets"]
+        [row] = [r for r in (await _tool(thread, operation="list"))["rule_sets"]
+                 if r["id"] == "ruleset_github_pr_create"]
         assert (row["last_fired"], row["skips_24h"]) == (expected, skips)
         assert len((await _tool(thread, operation="explain", artifact=PR))["decisions"]) == (thread == "a")
 
@@ -200,7 +202,7 @@ def test_the_shipped_rule_registers_gh_pr_create_for_every_caller(isolated_db):
         artifact, told = _run(thread, "gh pr create --title x", url + "\n")
         assert artifact["parent_thread_id"] == thread == _owner(external_id)
         assert told == [f"Registered pull request {external_id} to you."]
-    [shipped] = _rows("SELECT * FROM event_rules WHERE origin LIKE 'rule_set:%'")
+    [shipped] = _rows("SELECT * FROM event_rules WHERE id='ruleset_github_pr_create'")
     assert (shipped["id"], shipped["scope"], shipped["kind"], shipped["connector"], shipped["tool"]) == (
         "ruleset_github_pr_create", "global", "observe", "github", "bash")
     assert (json.loads(shipped["argv_prefix"]), shipped["item_type"]) == (["gh", "pr", "create"], "pull-request")
@@ -250,7 +252,7 @@ def test_the_outcome_is_written_through_the_callers_open_transaction(isolated_db
     db.execute("UPDATE threads SET title='mid-transaction' WHERE id='a'")
     assert db.in_transaction
     told: list[str] = []
-    artifact = observe_command_result("a", "bash", {"command": "gh pr create"}, _URL + "\n", db=db, told=told)
+    artifact = observe_tool_result("a", "bash", {"command": "gh pr create"}, _URL + "\n", db=db, told=told)
     assert artifact["parent_thread_id"] == "a" and told == ["Registered pull request owner/repo#42 to you."]
     rows = db.execute("SELECT outcome, thread_id FROM event_route_decisions WHERE artifact_external_id=?",
                       (PR,)).fetchall()
@@ -308,7 +310,7 @@ def test_a_follower_gets_the_pane_refresh_through_the_shell_tool(isolated_db, mo
     rival = make_session(get_db(), prefix="rival", user_id="user-1")
     _run("owner", "gh pr create")
     notified: list[dict] = []
-    monkeypatch.setattr("tools.shell.notify_changed", notified.append)
+    monkeypatch.setattr("registry.tool_result_observation.notify_changed", notified.append)
     _stub_process(monkeypatch, stdout=_URL + "\n")
     result = asyncio.run(BashTool().execute("gh pr create --title t", **_direct_shell_context(rival)))
     assert "Registered" not in result and _owner() == "owner"
@@ -334,7 +336,7 @@ def test_shell_notifies_each_registration_even_if_a_later_one_fails(isolated_db,
         return original_register(*args, **kwargs)
     monkeypatch.setattr(observer, "register_observed_artifact", register)
     notified = []
-    monkeypatch.setattr("tools.shell.notify_changed", notified.append)
+    monkeypatch.setattr("registry.tool_result_observation.notify_changed", notified.append)
     _stub_process(monkeypatch, stdout=_URL + "\n")
     result = asyncio.run(BashTool().execute("gh pr create", **_direct_shell_context(thread)))
     assert [item["external_id"] for item in notified] == ([PR] if fail_second else [PR, "owner/repo#43"])
@@ -394,8 +396,11 @@ async def test_list_explain_and_types_show_both_kinds(isolated_db):
     assert sorted(rule["kind"] for rule in listed["rules"]) == ["observe", "route"]
     [route] = [rule for rule in listed["rules"] if rule["kind"] == "route"]
     assert route["event_type"] == "pr.merged"
-    assert [rule["id"] for rule in listed["rule_sets"]] == ["ruleset_github_pr_create"]
-    assert listed["rule_sets"][0]["argv_prefix"] == ["gh", "pr", "create"]
+    shipped = {rule["id"]: rule for rule in listed["rule_sets"]}
+    assert set(shipped) == {"ruleset_github_pr_create", "ruleset_github_mcp_pr_create"}
+    assert shipped["ruleset_github_pr_create"]["argv_prefix"] == ["gh", "pr", "create"]
+    assert shipped["ruleset_github_mcp_pr_create"]["tool"] == MCP_SHIPPED["tool"]
+    assert "argv_prefix" not in shipped["ruleset_github_mcp_pr_create"]
 
     _run("a", "ship-pr --fast")
     [why] = (await _tool("a", operation="explain", artifact=PR))["decisions"]
@@ -407,7 +412,8 @@ async def test_list_explain_and_types_show_both_kinds(isolated_db):
     [github] = [item for item in (await _tool("a", operation="types", connector="github"))["connectors"]]
     [pull] = [item for item in github["artifact_types"] if item["item_type"] == "pull-request"]
     assert pull["extractor"] is True
-    assert pull["shipped_commands"] == [{"tool": "bash", "argv_prefix": ["gh", "pr", "create"]}]
+    assert {json.dumps(item, sort_keys=True) for item in pull["shipped_commands"]} == {
+        json.dumps(item, sort_keys=True) for item in [{"tool": "bash", "argv_prefix": ["gh", "pr", "create"]}, MCP_SHIPPED]}
     assert any(item["event_type"] == "pr.merged" and "pr_number" in item["filterable_fields"]
                for item in github["event_types"])
     assert (await _tool("a", operation="types", connector="nope")).startswith("Refused: no connector")
@@ -455,11 +461,13 @@ async def test_types_shows_exactly_the_enabled_shipped_rows(isolated_db):
         [github] = (await _tool("a", operation="types", connector="github"))["connectors"]
         return [command for item in github["artifact_types"] for command in item["shipped_commands"]]
 
-    assert await shown() == [{"tool": "bash", "argv_prefix": ["gh", "pr", "create"]}]
+    assert {json.dumps(item, sort_keys=True) for item in await shown()} == {
+        json.dumps(item, sort_keys=True) for item in [{"tool": "bash", "argv_prefix": ["gh", "pr", "create"]}, MCP_SHIPPED]}
     _write("UPDATE event_rules SET enabled=0 WHERE id='ruleset_github_pr_create'")
-    assert await shown() == []  # the row is the only home: nothing declared elsewhere remains
-    _write("UPDATE event_rules SET enabled=1, argv_prefix='[\"gh\",\"pr\",\"new\"]' WHERE origin LIKE 'rule_set:%'")
-    assert await shown() == [{"tool": "bash", "argv_prefix": ["gh", "pr", "new"]}]
+    assert await shown() == [MCP_SHIPPED]
+    _write("UPDATE event_rules SET enabled=1, argv_prefix='[\"gh\",\"pr\",\"new\"]' WHERE id='ruleset_github_pr_create'")
+    assert {json.dumps(item, sort_keys=True) for item in await shown()} == {
+        json.dumps(item, sort_keys=True) for item in [{"tool": "bash", "argv_prefix": ["gh", "pr", "new"]}, MCP_SHIPPED]}
     assert _run("a", "gh pr new", OTHER_URL + "\n")[0]["parent_thread_id"] == "a"  # the observer applies that row
 
 
@@ -469,7 +477,7 @@ def test_a_registration_the_registry_refuses_is_recorded_and_raised(isolated_db)
     mk_session("owner")
     _write("UPDATE threads SET user_id='steve' WHERE id='owner'")
     assert _run("owner", "gh pr create")[0] is not None
-    with pytest.raises(CommandArtifactRegistrationError):
+    with pytest.raises(ToolResultArtifactRegistrationError):
         _run("a", "gh pr create")
     [why] = _rows("SELECT outcome, reason FROM event_route_decisions WHERE thread_id='a'")
     assert why["outcome"] == "not_registered" and why["reason"]

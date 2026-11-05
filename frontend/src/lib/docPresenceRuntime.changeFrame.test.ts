@@ -122,7 +122,11 @@ describe('the hold started by a comment change frame', () => {
 		expect(shown()).toEqual(['c1']);
 	});
 
-	it('releases the comment after five seconds when no activity frame comes', async () => {
+	it.each([
+		['comment', null],
+		['suggestion', 'a longer replacement'],
+	])('releases the %s after five seconds when no activity frame comes', async (_kind, replacement) => {
+		wire.rows = [{ ...serverComment('c1'), replacement } as ServerComment];
 		reloadOnChange();
 		cleanups.push(startDocPresence());
 		attach();

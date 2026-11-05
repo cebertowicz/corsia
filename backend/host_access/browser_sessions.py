@@ -6,14 +6,14 @@ import logging
 from dataclasses import replace
 import socket
 import secrets
-import sys
 import time
 from typing import Literal, Sequence, TypeAlias
 
 from host_access import (
-    browser_cli, browser_identity as identity, browser_reporting,
+    browser_cli, browser_identity as identity, browser_orphan, browser_reporting,
     browser_session_commands, browser_session_launch as launch,
 )
+from host_access.browser_session_io import BrowserSessionIO
 from host_access.browser_session_state import (
     BrowserRuntime, BrowserSessionCleanupError as BrowserSessionCleanupError,
     BrowserSessionError as BrowserSessionError, BrowserSessionRecord,
@@ -33,7 +33,7 @@ _EXECUTABLE_CHANGED = (
 
 # Session state and errors are defined in browser_session_state.
 
-class BrowserSessionOwner:
+class BrowserSessionOwner(BrowserSessionIO):
     """Serialize admission, observation and producer-mediated close per session."""
 
     def __init__(self, *, namespace: str, binary: str = "agent-browser",
@@ -46,6 +46,7 @@ class BrowserSessionOwner:
         self.binary = binary
         self.socket_dir = identity.socket_dir_for_namespace(namespace, instance_key)
         self.close_timeout = max(0.01, float(close_timeout))
+        self._lifetime_lock: int | None = None
         self._native: browser_cli.NativeExecutable | None = None
         self._native_source: tuple[str, str] | None = None
         self._chrome: str | None = None
@@ -142,8 +143,9 @@ class BrowserSessionOwner:
                                 isinstance(exc, BrowserSessionCleanupError) and runtime.record.terminal_state != "running"):
                 raise  # Admission rejection has no new session effects.
             if launching and await self._close_one(runtime) is None:
+                logger.warning("managed browser startup failed: %s: %s", type(exc).__name__, browser_orphan.startup_message(exc))
                 detail = "; saved sign-in could not be restored" if isinstance(exc, launch.CopyRestoreError) else ""
-                raise BrowserSessionError(f"managed browser startup failed; its processes were closed{detail}") from exc
+                raise BrowserSessionError(str(exc) if isinstance(exc, browser_orphan.BrowserProfileInUse) else f"managed browser startup failed; its processes were closed{detail}") from exc
             async with runtime.command_lock:
                 if self._sessions.get(runtime.record.thread_id) is runtime:
                     raise await self._record_failure(runtime, exc) from exc
@@ -380,20 +382,7 @@ class BrowserSessionOwner:
             runtimes = tuple(self._sessions.values())
         failures = await asyncio.gather(*(self._close_one(runtime) for runtime in runtimes))
         browser_session_commands.raise_cleanup_failures(failures)
-
-    def _model_result(self, result: CommandResult, record: BrowserSessionRecord) -> str:
-        return browser_cli.render_model_result(result, redactions={
-            str(self.socket_dir): "[browser-runtime]", record.session: "[browser-session]",
-            record.thread_id: "[browser-thread]", record.lease_id or "": "[browser-lease]",
-        })
-
-    async def _invoke(self, argv: Sequence[str], *, timeout: float) -> CommandResult:
-        session = argv[argv.index("--session") + 1] if "--session" in argv else None
-        runtime = next((item for item in self._sessions.values() if item.record.session == session), None)
-        options = {"stream_port": runtime.chrome.stream_port} if runtime and runtime.chrome else {}
-        if sys.platform == "linux":
-            return await browser_cli.invoke(argv, socket_dir=self.socket_dir, timeout=timeout,
-                                            config_path=self.socket_dir / "config.json",
-                                            linux_chrome=self._chrome, **options)
-        return await browser_cli.invoke(argv, socket_dir=self.socket_dir, timeout=timeout,
-                                        config_path=self.socket_dir / "config.json", **options)
+        if self._lifetime_lock is not None:
+            from host_access.browser_owner_lock import release
+            release(self._lifetime_lock)
+            self._lifetime_lock = None

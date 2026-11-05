@@ -31,8 +31,8 @@ export function resolveReasoningEffort(
 		return config.default ? 'medium' : 'none';
 	}
 	if (config.type === 'effort_levels') {
-		// Without a provider "auto" mode there is no unset state to fall back to:
-		// an untouched picker shows the level the server is configured to use.
+		// Without an "auto" mode there is no unset state to fall back to: an
+		// untouched picker shows the level the server is configured to use.
 		const unset = config.supports_auto ? null : config.default;
 		if (raw === null || raw === undefined) return unset;
 		if (raw === 'none') return config.supports_off === false ? unset : 'none';
@@ -70,8 +70,8 @@ export function reasoningSegments(config: ReasoningConfig | null): ReasoningSegm
 	}
 	if (config.type === 'effort_levels') {
 		const base: ReasoningSegment[] = [
-			// Only offered by providers that actually have an auto mode; a local
-			// model opens on its server-configured level instead.
+			// Only offered where an unset level has a meaning: the provider's own
+			// pick, or a local model's template default when its server sets none.
 			...(config.supports_auto ? [{ value: null, label: 'Auto' }] : []),
 			...(config.supports_off === false ? [] : [{ value: 'none', label: 'Off' }]),
 		];

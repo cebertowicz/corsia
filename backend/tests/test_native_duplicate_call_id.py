@@ -22,6 +22,8 @@ import pytest
 from tests import native_tool_result_lab as tray
 from tools.base import Tool
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 class _Effect(Tool):
     name = "lab_effect"

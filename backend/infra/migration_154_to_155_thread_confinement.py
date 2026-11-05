@@ -8,7 +8,7 @@ import sqlite3
 # records only; its newest review record is copied onto its row, so no other harness
 # can launch it unconfined. Empty read dirs copy as ``[]``, which reads as damaged.
 _REVIEW_RECORD = """
-    FROM artifact_identities i JOIN artifact_registrations r ON r.artifact_id=i.id
+    FROM artifact_registrations r CROSS JOIN artifact_identities i ON r.artifact_id=i.id
     WHERE r.parent_thread_id=threads.id AND i.integration='claude-code'
       AND i.type='session' AND json_valid(i.metadata)
       AND json_extract(i.metadata, '$.claude_invocation.confinement')='review'
@@ -41,12 +41,15 @@ def migrate_154_to_155(conn: sqlite3.Connection) -> None:
     tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     if not {"artifact_identities", "artifact_registrations"} <= tables:
         return
+    # Each lookup starts at the thread's own registrations (CROSS JOIN fixes the
+    # order, so idx_artifact_registrations_thread serves it); joining from
+    # artifact_identities first made this quadratic on large databases.
     # A damaged session could have been the review record. Preserve the old
     # fail-closed behavior even when another valid record exists for the thread.
     conn.execute(
         "UPDATE threads SET confinement='review', confined_read_dirs='[]' "
         "WHERE confinement IS NULL AND spawned_by IS NOT NULL AND EXISTS ("
-        "SELECT 1 FROM artifact_identities i JOIN artifact_registrations r ON r.artifact_id=i.id "
+        "SELECT 1 FROM artifact_registrations r CROSS JOIN artifact_identities i ON r.artifact_id=i.id "
         "WHERE r.parent_thread_id=threads.id AND i.integration='claude-code' "
         f"AND i.type='session' AND ({_DAMAGED_RECORD}))"
     )

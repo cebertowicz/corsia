@@ -27,6 +27,7 @@ from infra import accounts, config, setup_progress
 from infra.auth import authenticate, is_person_session, require_user, token_from_request
 from infra.db_async import run_in_db
 from infra.local_connection import is_direct_loopback
+from infra.settings import usage_sharing_default
 from onboarding.app_first_run import SetupOwnerError
 
 router = APIRouter(prefix="/api/setup", tags=["setup"])
@@ -114,31 +115,32 @@ def _required_username() -> str | None:
 
 
 def _ready_ai() -> str | None:
-    """The name of a CLI source that the startup check already found Ready, else None.
+    """The name of a CLI source whose accounts already read Ready, else None.
 
-    Only the stored check result is read, so nothing runs before an account exists. A
+    Only stored account discoveries are read, so nothing runs before an account exists. A
     stale "ready" is harmless: the account step rechecks with a session before it skips.
     """
     from connections.account_profiles import profile_for
-    from connections.models import get_connection
-    from connections.source_state import HARNESS_PROVIDERS, row_state
+    from connections.source_state import HARNESS_PROVIDERS, harness_state
 
     for provider in HARNESS_PROVIDERS:
-        if row_state(get_connection(provider))["state"] == "ready":
+        if harness_state(provider)["state"] == "ready":
             return profile_for(provider).label
     return None
 
 
 def _ai_check_pending() -> bool:
-    """Whether the startup check has not yet recorded a result for Claude Code or Codex.
+    """Whether a signed-in Claude Code or Codex account has no discovery result yet.
 
     Welcome waits briefly on this before it asks which subscription the person has, so a
     tool that is already installed is found first rather than asked about.
     """
-    from connections.models import get_connection
-    from connections.source_state import HARNESS_PROVIDERS, row_state
+    from connections.source_state import HARNESS_PROVIDERS, harness_state
 
-    return any(row_state(get_connection(provider))["checked_at"] is None for provider in HARNESS_PROVIDERS)
+    return any(
+        (view := harness_state(provider))["state"] == "unverified" and view["checked_at"] is None
+        for provider in HARNESS_PROVIDERS
+    )
 
 
 def _setup_status() -> dict:
@@ -147,7 +149,7 @@ def _setup_status() -> dict:
 
     apple_silicon = not host_never_runs_local() and platform.machine().lower() in {"arm64", "aarch64"}
     macos_supported = _macos_supported()
-    # Only the 24 GiB gate: which model fits is the managed oMLX's pick (GET /local-model).
+    # Only the 32 GiB gate: which model fits is the managed oMLX's pick (GET /local-model).
     memory_ok = local_memory_ok()
     try:
         free_disk_gb = round(shutil.disk_usage(config.STATE_ROOT).free / 1000**3, 1)
@@ -164,6 +166,8 @@ def _setup_status() -> dict:
         "classifier": classifier_state(CLASSIFIER_DOWNLOAD.status()),
         "ready_ai": _ready_ai(),
         "ai_check_pending": _ai_check_pending(),
+        # The account step's switch starts here; the account doesn't exist yet to read the setting.
+        "usage_sharing_default": usage_sharing_default(),
     }
 
 

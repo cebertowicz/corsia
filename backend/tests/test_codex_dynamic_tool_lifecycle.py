@@ -28,6 +28,8 @@ from core.turn_core import (
 from shared_send_fixtures import _insert_session
 from subagents import codex_runtime, codex_runtime_events, codex_runtime_state
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 _TEST_HANG_TIMEOUT_S = 30
 

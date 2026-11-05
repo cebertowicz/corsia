@@ -92,6 +92,9 @@ def archive_node(node_id: str, *, actor_id: str | None = None,
         if expected_revision is not None:
             errors.require_node_revision(node, expected_revision)
         _require_no_children(connection, node_id)
+        from plans.workflow_fields import refuse_required_skip
+
+        refuse_required_skip(connection, node_id)
         # Order is load-bearing: when the child is still working, that is the
         # actionable message. The delegation refusal is reserved for the case
         # where the child is genuinely finished and only the verdict is missing.
@@ -128,6 +131,10 @@ def archive_node(node_id: str, *, actor_id: str | None = None,
             causal_event_id=event_id,
         )
         settle_watches(connection, node_id)
+        from plans import run_end
+
+        # Archiving an open optional step skips it (a required one is refused above).
+        run_end.record_if_ended(connection, node_id, "archived")
         return service._node_from_row(
             connection, service._node_row(connection, node_id),
         )

@@ -8,6 +8,7 @@
  */
 import type { AttentionQueueItem, DecisionDetail } from "$lib/api/attentionQueue";
 import { isFocusVisible, isHumanMessage } from "$lib/components/transcriptRowKinds";
+import { parseWsTimestamp } from "$lib/time";
 
 /** `anchor` is the newest `raised_at` (ms) already accounted for in `threadId`. */
 let view: { threadId: string; anchor: number | null; seen: Map<number, number> } | null = null;
@@ -19,7 +20,7 @@ export function forgetAutoOpen(): void {
 
 function raisedAt(item: AttentionQueueItem): number | null {
   if (item.renderer !== "decision") return null;
-  const ms = Date.parse((item.detail as DecisionDetail).raised_at ?? "");
+  const ms = parseWsTimestamp((item.detail as DecisionDetail).raised_at);
   return Number.isNaN(ms) ? null : ms;
 }
 
@@ -88,7 +89,7 @@ export function readingHoldAfterRaise(
     const message = messages[i];
     if (message.thread_id !== threadId) continue;
     if (isHumanMessage(message)) break;
-    const at = Date.parse(message.created_at);
+    const at = parseWsTimestamp(message.created_at);
     if (message.role !== "assistant" || !isFocusVisible(message) || Number.isNaN(at) || at > raisedAtMs) continue;
     unread.unshift({ at, words: message.content.split(/\s+/).filter(Boolean).length });
   }

@@ -41,7 +41,7 @@ export function watchChatCommentThreads(pageSize: number): () => void {
 			const answers = await read(threadId, bearer, answerIds);
 			const cids = new Set(answers.rows.flatMap(row => row.chat_answer_cids ?? []));
 			const contextComments = rows.flatMap(row => row.metadata?.reply_context?.comments ?? []);
-			const changedTargets = rows.filter(row => row.role === 'assistant' && (comments.some(c => c.seq === row.seq) || contextComments.some(c => c.seq === row.seq && cids.has(c.cid)) || row.chat_comments?.some(c => cids.has(c.cid))));
+			const changedTargets = rows.filter(row => row.role === 'assistant' && (comments.some(c => c.seq === row.seq) || contextComments.some(c => c.seq === row.seq && cids.has(c.cid)) || row.chat_comments?.some(c => cids.has(c.cid) || c.answers.some(answer => answer.cid && cids.has(answer.cid)))));
 			const targetRows = await read(threadId, bearer, changedTargets.map(row => row.id));
 			const refreshed = [...answers.rows, ...targetRows.rows];
 			if (current !== generation || get(activeThreadId) !== threadId) return;

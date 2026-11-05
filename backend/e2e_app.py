@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager, nullcontext
 import os
+from unittest.mock import patch
 
 from fastapi import FastAPI
 
@@ -31,7 +32,10 @@ except FaultConfigurationError:
 async def _lifespan(_: FastAPI):
     checkpoint_hook = (_live_fault_controller.install_checkpoint_hook()
                        if _live_fault_controller is not None else nullcontext())
-    with mock_engine(), checkpoint_hook:
+    # The Focus nudge starts a Turn of its own, which would take the next scripted
+    # reply; no E2E or matrix cell models it (its own tests cover it).
+    no_nudge = patch("infra.reply_not_visible_wake._focus_on", lambda _db: False)
+    with mock_engine(), checkpoint_hook, no_nudge:
         async with production_app.router.lifespan_context(production_app):
             from loguru import logger
             logger.info("E2E test roots: state_dir={} db_path={}", STATE_ROOT, DB_PATH)

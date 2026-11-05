@@ -98,7 +98,7 @@ def test_wrapper_perf_routes_authenticates_with_the_delegate_token_file(tmp_path
     token_file.write_text("file-token")
     token_file.chmod(0o600)
     env = {
-        "HOME": os.environ["HOME"],
+        "HOME": str(tmp_path),
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "CORSIA_DIR": str(REPO_ROOT),
         "CORSIA_WORKSPACE": str(tmp_path / "workspace"),

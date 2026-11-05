@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from auth_fixtures import OWNER_SESSION_TOKEN, OWNER_TOKEN
+
+pytestmark = pytest.mark.usefixtures('signed_in_defaults')
 
 
 def _client() -> TestClient:

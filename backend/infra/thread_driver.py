@@ -5,9 +5,8 @@ from __future__ import annotations
 import logging
 import sqlite3
 
-from core.stop_causes import PlanLimitStop
 from infra.database import write_transaction
-from infra.plan_limit_continue import queue_limit_refusal_continue, queue_plan_limit_continue
+from infra.plan_limit_continue import queue_terminal_continue
 from infra.completed_tool_results import (
     persist_completed_tool_results,
     persist_completed_tool_results_in_transaction as _persist_completed_tool_results,
@@ -121,18 +120,15 @@ def _parent_completion(
     ).fetchone()
     if existing is not None:
         return None
-    answer = db.execute(
-        "SELECT content FROM messages WHERE thread_id=? AND role='assistant' "
-        "AND json_valid(metadata) AND json_extract(metadata,'$.turn_id')=? "
-        "AND length(trim(content))>0 ORDER BY seq DESC,rowid DESC LIMIT 1",
-        (child_id, turn_id),
-    ).fetchone()
+    from infra.thread_confinement import ChildOutput
+
+    answer = ChildOutput.read(db, child_id).final_reply(db, turn_id=turn_id)
     # The wrapper carries the child's result. A Turn that produced none has
     # nothing to deliver, and waking the parent for it is a model call per
     # blank Turn — a legitimately unchanged wait would never be quiet.
     if answer is None:
         return None
-    content = f"{PARENT_COMPLETION_HEADING}\n\n{str(answer['content']).strip()}"
+    content = f"{PARENT_COMPLETION_HEADING}\n\n{answer['content']}"
     from infra.passive_changes import materialize_pending_digest
 
     materialize_pending_digest(db, str(parent))
@@ -171,20 +167,18 @@ def _terminal_duplicate(
     return TerminalSettlement(result, str(row["thread_id"]))
 
 
-def _end_turn_previews(turn_id: str, outcome: str) -> None:
-    """The backstop for every harness: no streamed edit preview outlives its Turn."""
+def _end_turn_process_state(turn_id: str, outcome: str) -> None:
+    """The backstop for every harness: no streamed edit preview or memory cap outlives its Turn."""
     from doceditor.live_preview import turn_ended
+    from llm.memory_fit import end_turn as end_memory_fit
 
     turn_ended(turn_id, {"completed": "turn_ended", "cancelled": "stopped"}.get(outcome, "failed"))
+    end_memory_fit(turn_id)
 
 
 def finish_turn(
-    turn_id: str,
-    *,
-    outcome: str,
-    ended_at: str,
-    successor_turn_id: str,
-    boot_epoch: str,
+    turn_id: str, *, outcome: str, ended_at: str,
+    successor_turn_id: str, boot_epoch: str,
     error: str | BaseException | None = None,
     db: sqlite3.Connection | None = None,
     mark_idle_checkpoint: bool = True,
@@ -198,6 +192,9 @@ def finish_turn(
     """
     if outcome not in {"completed", "cancelled", "error"}:
         raise ValueError(f"invalid Turn terminal outcome: {outcome}")
+    from connections.account_policy import AccountAdmissionError
+
+    lift_account = not (outcome == "error" and isinstance(error, AccountAdmissionError))
     with usage_settlement(db) as usage, write_transaction(db, scope="finish_turn") as connection:
         row = connection.execute(
             "SELECT thread_id,status FROM active_turns WHERE id=?", (turn_id,),
@@ -228,10 +225,10 @@ def finish_turn(
             connection, turn_id, outcome=outcome, error=error,
         )
         parent = _parent_completion(connection, turn_id, thread_id) if outcome == "completed" else None
-        if outcome == "cancelled" and isinstance(error, PlanLimitStop):
-            queue_plan_limit_continue(connection, turn_id, thread_id)
-        elif outcome == "error" and isinstance(limits.limit, Recorded):
-            queue_limit_refusal_continue(connection, turn_id, thread_id)
+        _show_reply_on_nudge_stop(connection, thread_id, turn_id, outcome)
+        queue_terminal_continue(
+            connection, turn_id, thread_id, outcome=outcome, error=error,
+            limit_recorded=isinstance(limits.limit, Recorded))
         successor, switch_transition, switch_request, idle = _claim_after_terminal(
             connection,
             thread_id=thread_id,
@@ -242,9 +239,9 @@ def finish_turn(
             boot_epoch=boot_epoch,
             mark_idle_checkpoint=mark_idle_checkpoint,
             hold_expired_limit_at_startup=hold_expired_limit_at_startup,
-            fail_closed=limits.fail_closed,
+            fail_closed=limits.fail_closed, lift_account=lift_account,
         )
-    _end_turn_previews(turn_id, outcome)
+    _end_turn_process_state(turn_id, outcome)
     wakes = () if parent is None else (parent,)
     return TerminalSettlement(
         TerminalResult.APPLIED,
@@ -260,6 +257,15 @@ def finish_turn(
     )
 
 
+def _show_reply_on_nudge_stop(connection, thread_id: str, turn_id: str, outcome: str) -> None:
+    """A stopped nudged Turn still shows the reply it was woken about."""
+    if outcome != "cancelled":
+        return
+    from infra.reply_not_visible_wake import show_reply_on_nudge_stop
+
+    show_reply_on_nudge_stop(connection, thread_id, turn_id)
+
+
 def _claim_after_terminal(
     connection: sqlite3.Connection,
     *,
@@ -272,6 +278,7 @@ def _claim_after_terminal(
     mark_idle_checkpoint: bool,
     hold_expired_limit_at_startup: bool,
     fail_closed: str | None = None,
+    lift_account: bool = True,
 ):
     """Claim switch/successor work and derive its idle-marker consequence.
 
@@ -298,14 +305,20 @@ def _claim_after_terminal(
         successor = None
         held_input = bool(idle_threads_with_held_input(connection, thread_id))
     else:
-        successor = start_idle_turn(
-            thread_id,
-            turn_id=successor_turn_id,
-            boot_epoch=boot_epoch,
-            started_at=ended_at,
-            db=connection,
-            hold_expired_limit_at_startup=hold_expired_limit_at_startup,
-        )
+        from connections.fact_memo import fact_reads
+
+        # The claim updates bindings and holds, but not the shared account,
+        # catalog, or policy facts reused by its admission checks.
+        with fact_reads():
+            successor = start_idle_turn(
+                thread_id,
+                turn_id=successor_turn_id,
+                boot_epoch=boot_epoch,
+                started_at=ended_at,
+                db=connection,
+                hold_expired_limit_at_startup=hold_expired_limit_at_startup,
+                lift_account=lift_account,
+            )
     idle = _write_idle_marker(connection, idle_marker_due(
         connection, turn_id, outcome=outcome,
         successor_claimed=isinstance(successor, ClaimedBatch),

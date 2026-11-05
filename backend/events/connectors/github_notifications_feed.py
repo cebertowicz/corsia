@@ -20,7 +20,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any, Callable
 
 from connections.github_read_request import GithubReadRefused
-from events.connectors.github_read_budget import budget
+from events.connectors.github_read_budget import budget_of
 
 GhRunner = Callable[..., subprocess.CompletedProcess]
 log = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ class GhSignedOut(FeedError):
         super().__init__("gh_signed_out")
 
 
-def _remotes(policy: Any) -> set[str]:
+def github_repositories_for_policy(policy: Any) -> set[str]:
     """The GitHub repositories one registered source repository's remotes name."""
     from infra.worktree_reaper_probe import github_remote_full_name
 
@@ -85,7 +85,7 @@ def tracked_github_repositories(project_id: str | None = None) -> frozenset[str]
     from infra.worktree_reaper_probe import ReaperGitError
 
     try:
-        return frozenset(repo for policy in _policies(project_id) for repo in _remotes(policy))
+        return frozenset(repo for policy in _policies(project_id) for repo in github_repositories_for_policy(policy))
     except ReaperGitError as exc:
         raise FeedError("repo_scope_unavailable") from exc
 
@@ -98,7 +98,7 @@ def projects_tracking_github_repository(repository: str) -> frozenset[str]:
     wanted = repository.lower()
     try:
         return frozenset(policy.project_id for policy in _policies()
-                         if wanted in _remotes(policy))
+                         if wanted in github_repositories_for_policy(policy))
     except ReaperGitError as exc:
         raise FeedError("repo_scope_unavailable") from exc
 
@@ -152,11 +152,12 @@ def gh_get(
 ) -> GhResponse:
     """Run one GET through ``gh``; raise ``FeedError`` unless it is 2xx or 304.
 
-    The shared read budget is asked first: while core is exhausted, or under a
-    Retry-After, GitHub is not called. A ``low_priority`` read also stays out
-    of the budget's reserve. The budget also decides what counts as a rate limit.
+    The read budget of the account ``runner`` reads as is asked first: while
+    core is exhausted, or under a Retry-After, GitHub is not called. A
+    ``low_priority`` read also stays out of the budget's reserve. The budget
+    also decides what counts as a rate limit.
     """
-    if budget.blocked_until(low_priority=low_priority) is not None:
+    if budget_of(runner).blocked_until(low_priority=low_priority) is not None:
         raise FeedError("rate_limited", "shared read budget")
     args = ["api", "--method", "GET", "-i"]
     for name, value in (headers or {}).items():
@@ -172,7 +173,8 @@ def gh_get(
     response = _parse(result.stdout or "")
     if response is None:
         raise FeedError("gh_error", (result.stderr or "")[:200])
-    rate_limited = budget.record(response.status, response.headers, response.body)
+    # Told after: the read may have just learned which login it ran as.
+    rate_limited = budget_of(runner).record(response.status, response.headers, response.body)
     if response.status == 401:
         raise GhSignedOut()
     if rate_limited:

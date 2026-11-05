@@ -116,6 +116,12 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await expect(pill).toBeVisible();
 	await pill.focus();
 	await expect(pill).toBeFocused();
+	// The notice never covers document text: the editor ends above it at every width (#1703).
+	await expect.poll(async () => {
+		const editor = await page.locator('.doc .ed-wrap').boundingBox();
+		const notice = await pill.boundingBox();
+		return !!editor && !!notice && editor.y + editor.height <= notice.y + 0.5;
+	}, { message: 'editor text clears the below activity notice' }).toBe(true);
 	await saveEvidenceScreenshot(page, testInfo, 'canvas-offscreen-pill', { fullPage: false });
 	await pill.click();
 	await expect(page.locator('.cm-comment-anchor').filter({ hasText: quote })).toBeInViewport();

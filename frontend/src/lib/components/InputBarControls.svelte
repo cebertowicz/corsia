@@ -1,6 +1,5 @@
 <script lang="ts">
 	import ContextSheet from './ContextSheet.svelte';
-	import ContextSourceDetail from './ContextSourceDetail.svelte';
 	import InputBarActionRow from './InputBarActionRow.svelte';
 	import InputBarModelSheet from './InputBarModelSheet.svelte';
 	import InputBarThinkingSheet from './InputBarThinkingSheet.svelte';
@@ -24,7 +23,7 @@
 	import { subagentMeta } from '$lib/stores/subagents';
 	import { reasoningEffortLabel, resolveReasoningEffort } from './inputBarReasoning';
 	import { token } from '$lib/stores/auth';
-	import { contextSourceOwnerTarget } from '$lib/contextSourceNavigation';
+	import { contextSourceFilePath, contextSourceOwnerTarget } from '$lib/contextSourceNavigation';
 	import { openArtifactAndShowThread } from '$lib/openArtifactInThread';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { uiScope } from '$lib/stores/uiScope';
@@ -93,15 +92,14 @@
 	// Defaults to the active thread so a caller that predates the subagent
 	// leaf (#1949) keeps its existing behavior unchanged.
 	const boundThreadId = $derived(threadId ?? $activeThreadId);
-	const boundThread = $derived($threads.find((thread) => thread.id === boundThreadId));
 	// A failed model switch is durable server state until another choice; otherwise the thread
 	// and selected account provide the two existing in-progress facts for the composer chip.
 	const switchState = $derived.by((): 'model' | 'account' | 'failed' | null => {
-		if (boundThread?.switch_status === 'failed') return 'failed';
-		if (boundThread?.pending_model) return 'model';
+		if (selection.switching?.switch_status === 'failed') return 'failed';
+		if (selection.switching?.pending_model) return 'model';
 		return activeModel?.runs_on?.find((entry) => entry.selected)?.pending === true ? 'account' : null;
 	});
-	const switchError = $derived(switchState === 'failed' ? boundThread?.switch_error ?? null : null);
+	const switchError = $derived(switchState === 'failed' ? selection.switching?.switch_error ?? null : null);
 	// Context usage and the next-turn preview are keyed by the bound thread
 	// (#2269), so every composer inspects its own thread: the active thread with
 	// the selected model, a subagent leaf (#1949) with the worker's own model.
@@ -135,7 +133,6 @@
 		if (!supportsReasoning) return '';
 		return reasoningEffortLabel(reasoningConfig, resolvedEffort);
 	});
-	let contextSourceDetail = $state<ContextSheetSourceRow | null>(null);
 	// The opened source groups of the context view now on screen. This component
 	// stays mounted across preview refreshes, which can leave the sheet with no
 	// snapshot for a moment, so the record lives here, not in the list. It starts
@@ -217,7 +214,6 @@
 		sheetWasOpen = sheetOpen;
 		// The always-mounted sheets instance is the one reader per composer.
 		if (surface !== 'sheets' || !boundThreadId || !canInspectContext || !t || !ids) return;
-		if (opening) contextSourceDetail = null;
 		if (!sheetOpen) {
 			// Closed, the preview is read only so the donut is not empty: once the
 			// thread's first page is read and holds no usable receipt (a reading
@@ -240,7 +236,7 @@
 		toggleSheet(view);
 	}
 	function documentName(source: ContextSheetSourceRow): string {
-		const parts = source.stableReference.split(/[\\/]/).filter(Boolean);
+		const parts = contextSourceFilePath(source).split(/[\\/]/).filter(Boolean);
 		return parts.at(-1) ?? source.label ?? 'Document';
 	}
 
@@ -257,18 +253,12 @@
 			requestSettingsSection('providers');
 		} else if (target === 'system') {
 			requestSettingsSection('system');
-		} else if (target === 'runtime-details' || target === null) {
-			// A row with no owner surface to open still explains itself.
-			// A detail visit is not part of the refresh the record survives.
-			expandedGroups = {};
-			contextSourceDetail = source;
-			return;
 		} else if (target === 'document') {
 			openArtifactAndShowThread(
-				{ path: source.stableReference, title: documentName(source) },
+				{ path: contextSourceFilePath(source), title: documentName(source) },
 				boundThreadId,
 			);
-		}
+		} else return;
 		toggleSheet('context');
 	}
 
@@ -333,10 +323,7 @@
 
 {#if sheetView === 'context'}
 	<div class="action-sheet context-sheet" role="group" aria-label={`Context for ${contextThreadName}`}>
-		{#if contextSourceDetail}
-			<ContextSourceDetail source={contextSourceDetail} onBack={() => { contextSourceDetail = null; }} />
-		{/if}
-			{#if !contextSourceDetail && (sheetUsage || checkpointState)}
+			{#if sheetUsage || checkpointState}
 				<ContextSheet
 					usage={sheetUsage} loading={contextPreviewLoading}
 					refreshFailed={contextPreviewError}
@@ -348,9 +335,9 @@
 					{expandedGroups}
 					onToggleGroup={toggleGroup}
 				/>
-			{:else if !contextSourceDetail && contextPreviewLoading}
+			{:else if contextPreviewLoading}
 				<div class="sheet-empty">Loading context...</div>
-			{:else if !contextSourceDetail}
+			{:else}
 				<div class="sheet-empty">{contextPreviewError || 'No context available'}</div>
 			{/if}
 	</div>

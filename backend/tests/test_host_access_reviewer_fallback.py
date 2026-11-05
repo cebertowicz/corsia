@@ -7,6 +7,8 @@ from datetime import datetime
 
 import pytest
 
+from tests.vendor_account_fixtures import signed_in_default
+
 RESET = "2026-10-14T08:08:00+00:00"
 OUT = "claude-code/opus"
 REQUESTER = "claude-code/sonnet"
@@ -69,6 +71,7 @@ class _Outage:
 
 @pytest.fixture
 def outage(isolated_db, monkeypatch) -> _Outage:
+    signed_in_default("claude-code")
     _insert_thread("root")
     return _Outage(monkeypatch)
 
@@ -629,6 +632,7 @@ def cloud_off(isolated_db, monkeypatch) -> _Outage:
 
     Both reviewer candidates start as cloud models, and one local model is ready.
     """
+    signed_in_default("claude-code")
     _project(CLOUD_OFF, cloud_models_off=True)
     _local_model()
     _insert_thread("root", project=CLOUD_OFF)
@@ -638,6 +642,7 @@ def cloud_off(isolated_db, monkeypatch) -> _Outage:
 @pytest.fixture
 def ordinary(isolated_db, monkeypatch) -> _Outage:
     """The same reviewer in a project with no locality policy in force."""
+    signed_in_default("claude-code")
     _project(ORDINARY)
     _insert_thread("root", project=ORDINARY)
     return _Outage(monkeypatch)

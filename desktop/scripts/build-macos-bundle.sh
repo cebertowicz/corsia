@@ -9,16 +9,18 @@ readonly PYTHON_VERSION="3.11.17+20261013"
 readonly PYTHON_ARCHIVE="cpython-${PYTHON_VERSION}-aarch64-apple-darwin-install_only.tar.gz"
 readonly PYTHON_URL="https://github.com/astral-sh/python-build-standalone/releases/download/20261013/cpython-3.11.17%2B20261013-aarch64-apple-darwin-install_only.tar.gz"
 readonly PYTHON_SHA256="d81d757a9785850393cd695a9a686c765a6370fbdc83738589ef2ecd3e5c44b3"
-# Must equal OMLX_PIN in backend/llm/local_model.py: the first release with the model recommender.
-readonly OMLX_VERSION="0.7.1rc1"
+# Shared with source setup; this file is valid both as shell and Python.
+source "$ROOT/backend/llm/omlx_release.py"
+readonly OMLX_VERSION OMLX_SHA256
 readonly OMLX_WHEEL="omlx-${OMLX_VERSION}-cp311-cp311-macosx_15_0_universal2.whl"
 readonly OMLX_URL="https://github.com/jundot/omlx/releases/download/v${OMLX_VERSION}/${OMLX_WHEEL}"
-readonly OMLX_SHA256="5b1487bd09fd85da6e7566cd94f0e4b30be03277e49a9250811cf05addc9b26e"
 # Build Git from its upstream release instead of copying Apple's CLT binary. Runtime
 # prefix discovery makes helpers and templates follow the executable after CORSIA.app moves.
 readonly GIT_VERSION="2.53.0"
 readonly GIT_ARCHIVE="git-${GIT_VERSION}.tar.xz"
-readonly GIT_URL="https://mirrors.edge.kernel.org/pub/software/scm/git/${GIT_ARCHIVE}"
+# kernel.org's CDN, not mirrors.edge: that name resolves to one regional mirror, which can
+# stop answering for minutes; the CDN serves the same signed tarball from many locations.
+readonly GIT_URL="https://cdn.kernel.org/pub/software/scm/git/${GIT_ARCHIVE}"
 readonly GIT_SHA256="5818bd7d80b061bbbdfec8a433d609dc8818a05991f731ffc4a561e2ca18c653"
 readonly GIT_SOURCE="$BUILD_ROOT/git-${GIT_VERSION}"
 # The browser tool's CLI: the upstream native arm64 build. The version must stay inside
@@ -35,6 +37,12 @@ readonly SAFEHOUSE_URL="https://github.com/eugene1g/agent-safehouse/releases/dow
 readonly SAFEHOUSE_SHA256="dd96f92d77aebf142e0ee33f38754b6dc6c6f7a1245129b715f7deea488e3d78"
 readonly SAFEHOUSE_LICENSE_URL="https://raw.githubusercontent.com/eugene1g/agent-safehouse/v${SAFEHOUSE_VERSION}/LICENSE"
 readonly SAFEHOUSE_LICENSE_SHA256="cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+# The Google Workspace CLI behind the gws tool, in libexec: agents reach it only through that
+# tool, never from a shell PATH. Shared with the runtime pins; valid both as shell and Python.
+source "$ROOT/backend/tools/gws_release.py"
+readonly GWS_VERSION GWS_MAC_ARM64_SHA256
+readonly GWS_ARCHIVE="google-workspace-cli-aarch64-apple-darwin.tar.gz"
+readonly GWS_URL="https://github.com/googleworkspace/cli/releases/download/v${GWS_VERSION}/${GWS_ARCHIVE}"
 
 skip_dmg=false
 for argument in "$@"; do
@@ -71,6 +79,17 @@ fetch_safehouse() {
   printf 'agent-safehouse %s\n%s\nsha256 %s\n' "$SAFEHOUSE_VERSION" "$SAFEHOUSE_URL" "$SAFEHOUSE_SHA256" > "$BUNDLE_ROOT/licenses/safehouse/SOURCE"
   [ "$("$BUNDLE_ROOT/bin/safehouse" --version | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" = "$SAFEHOUSE_VERSION" ] \
     || fail "bundled safehouse does not report version $SAFEHOUSE_VERSION"
+}
+fetch_gws() {
+  local download="$BUILD_ROOT/downloads/$GWS_ARCHIVE" unpacked="$BUILD_ROOT/gws"
+  fetch_verified "$GWS_URL" "$download" "$GWS_MAC_ARM64_SHA256"
+  mkdir -p "$unpacked" "$BUNDLE_ROOT/libexec" "$BUNDLE_ROOT/licenses/gws"
+  tar -xzf "$download" -C "$unpacked"
+  install -m 0755 "$unpacked/gws" "$BUNDLE_ROOT/libexec/gws"
+  install -m 0644 "$unpacked/LICENSE" "$BUNDLE_ROOT/licenses/gws/LICENSE"
+  printf 'gws %s\n%s\nsha256 %s\n' "$GWS_VERSION" "$GWS_URL" "$GWS_MAC_ARM64_SHA256" > "$BUNDLE_ROOT/licenses/gws/SOURCE"
+  [ "$("$BUNDLE_ROOT/libexec/gws" --version | head -1)" = "gws $GWS_VERSION" ] \
+    || fail "bundled gws does not report version $GWS_VERSION"
 }
 build_git_runtime() {
   local archive="$BUILD_ROOT/downloads/$GIT_ARCHIVE"
@@ -175,6 +194,7 @@ PYTHONPATH="$BUNDLE_ROOT/python/omlx-packages" "$PYTHON" -m pip check
 build_git_runtime
 fetch_agent_browser
 fetch_safehouse
+fetch_gws
 rsync -a --delete --exclude '__pycache__' --exclude '*.pyc' "$ROOT/backend/" "$BUNDLE_ROOT/backend/"
 (
   cd "$ROOT/frontend"
@@ -217,6 +237,9 @@ install -m 0644 "$ROOT/desktop/launchd/ai.corsia.service.plist" \
   "$APP/Contents/Library/LaunchAgents/ai.corsia.service.plist"
 "$ROOT/desktop/scripts/check-bundle-launch-agent.sh" "$APP"
 "$ROOT/desktop/scripts/test-bundled-python-immutability.sh" "$APP"
+# Seal the finished source build so ServiceManagement can register its agent.
+# This uses no certificate; release signing replaces the ad-hoc signature later.
+"$ROOT/desktop/scripts/sign-macos-bundle.sh" - "$APP"
 if ! "$skip_dmg"; then
   mkdir -p "$DMG_DIR"
   rm -f "$DMG"

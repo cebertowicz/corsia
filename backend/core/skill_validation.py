@@ -6,9 +6,10 @@ resolution.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path, PureWindowsPath
 from typing import Any
@@ -52,6 +53,8 @@ class SkillValidation:
     errors: list[str] = field(default_factory=list)
     # The CORSIA data (handler, workflow): the sidecar's, or a lesson block's.
     corsia: dict[str, Any] | None = None
+    raw_sha256: str | None = None
+    source_data: bytes | None = None
 
 
 def _lesson_block(meta: dict[str, Any]) -> dict[str, Any] | None:
@@ -286,6 +289,28 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     return dict(parsed), text[body_start:]
 
 
+def instruction_section(body: str, heading: str) -> str | None:
+    """The heading's section: from it through the line before the next heading of its level or higher.
+
+    ``body`` is a SKILL.md body with its frontmatter removed; headings inside code fences don't count.
+    """
+    wanted = heading.strip()
+    level = len(wanted) - len(wanted.lstrip("#"))
+    lines = body.splitlines()
+    start, fenced = None, False
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        hashes = 0 if fenced else len(line) - len(line.lstrip("#"))
+        if not hashes or line[hashes:hashes + 1] not in (" ", ""):
+            continue
+        if start is None and level and line.strip() == wanted:
+            start = index
+        elif start is not None and hashes <= level:
+            return "\n".join(lines[start:index]).strip()
+    return None if start is None else "\n".join(lines[start:]).strip()
+
+
 def declares_sidecar(skill_md: str) -> bool:
     """True when the frontmatter declares a ``corsia.yaml`` pointer; unreadable text declares none."""
     import yaml
@@ -308,9 +333,12 @@ def validate_skill_file(path: Path) -> SkillValidation:
     Read and parse errors are reported as validation errors.
     """
     try:
-        text = path.read_text(encoding="utf-8")
+        data = path.read_bytes()
         sidecar, problem = read_sidecar(path.parent)
-        return _validate(text, bundle=True, sidecar=sidecar, problem=problem)
+        return replace(
+            _validate(data.decode("utf-8"), bundle=True, sidecar=sidecar, problem=problem),
+            raw_sha256=hashlib.sha256(data).hexdigest(), source_data=data,
+        )
     except OSError as exc:
         return SkillValidation(
             ok=False,

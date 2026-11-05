@@ -1,6 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 
 import { toasts } from '$lib/stores/toast';
+import { coordinationThreads } from '$lib/stores/threads';
 
 interface User {
 	id: string;
@@ -13,7 +14,14 @@ export const token = writable<string | null>(
 export const user = writable<User | null>(null);
 export const isAuthenticated = derived(user, $u => $u !== null);
 
+/** Clear the browser identity after its session is no longer valid. */
+export function clearExpiredSession(): void {
+	token.set(null);
+	user.set(null);
+}
+
 token.subscribe(t => {
+	if (!t) coordinationThreads.set([]);
 	if (typeof localStorage !== 'undefined') {
 		if (t) localStorage.setItem('corsia_token', t);
 		else localStorage.removeItem('corsia_token');

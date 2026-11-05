@@ -28,7 +28,11 @@ from infra.vendor_login import without_login_sql
 def _recovery_changed(
     db: sqlite3.Connection, rows: list[sqlite3.Row], error: CheckpointUnavailable,
 ) -> bool:
-    """Whether an actual install or cap change outran this refusal."""
+    """Whether an actual install or cap change outran this refusal.
+
+    Both sides are the configured window: a live memory fit ends with the Turn
+    it served, and its absence here is no change to recover on.
+    """
     from infra.checkpoint_queries import current_installed
     from llm.context_window import resolve_window_for_row
     from llm.resolution import _target_row

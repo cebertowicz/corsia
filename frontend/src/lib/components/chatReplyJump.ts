@@ -6,42 +6,65 @@ import type { AttentionDestination } from '$lib/api/attentionQueue';
 import type { PagerState } from '$lib/messagePager';
 import type { RunLoad, RunStub } from '$lib/focusRuns';
 
-type JumpPort = {
+export type JumpPort = {
 	pager: () => PagerState;
 	runs: () => readonly RunStub[];
 	loads: () => Record<string, RunLoad>;
 	loadOlder: () => Promise<void>;
 	loadRun: (run: RunStub) => Promise<void>;
 	element: () => HTMLElement | undefined;
+	generation: () => number;
 };
 
+type Item = { destination: AttentionDestination; threadId: string; generation: number; version: number };
+
 export function createChatReplyJumper(port: JumpPort) {
-	return async (destination: AttentionDestination) => {
-		const threadId = get(activeThreadId);
-		if (!threadId || !destination.cid || typeof destination.seq !== 'number') return;
-		const target = { threadId, messageId: destination.id, seq: destination.seq, cid: destination.cid };
-		const loaded = () => get(messages).some(row => row.thread_id === threadId && row.id === target.messageId);
-		const stub = () => port.runs().find(run => run.firstSeq <= target.seq && target.seq <= run.lastSeq);
-		while (!loaded() && !stub() && port.pager().hasMore && !port.pager().error && !port.pager().loading && get(activeThreadId) === threadId) {
+	let pending: Item | null = null;
+	let version = 0;
+	let running = false;
+	const current = (item: Item) =>
+		item.version === version && item.threadId === get(activeThreadId) && item.generation === port.generation();
+	const loadedFor = (item: Item) => get(messages).some(row => row.thread_id === item.threadId && row.id === item.destination.id);
+	const stubFor = (item: Item) => port.runs().find(run => run.firstSeq <= item.destination.seq! && item.destination.seq! <= run.lastSeq);
+	/** A page or Focus run read the jump needs is in flight or failed; its settling resumes the jump. */
+	const waiting = (item: Item) => {
+		if (port.pager().loading || port.pager().error) return true;
+		const run = loadedFor(item) ? undefined : stubFor(item);
+		const state = run && port.loads()[run.lastId];
+		return !!(state?.loading || state?.error);
+	};
+
+	async function run(item: Item): Promise<boolean> {
+		const { destination, threadId } = item;
+		const target = { threadId, messageId: destination.id, seq: destination.seq!, cid: destination.cid! };
+		const loaded = () => loadedFor(item);
+		const stub = () => stubFor(item);
+		while (!loaded() && !stub() && port.pager().hasMore && !port.pager().error && !port.pager().loading && current(item)) {
 			const before = port.pager().oldestId;
 			await port.loadOlder();
 			if (port.pager().oldestId === before) break;
 		}
+		if (!current(item)) return false;
+		if (waiting(item)) return true;
 		const run = stub();
-		while (!loaded() && run && get(activeThreadId) === threadId) {
-			const state = port.loads()[run.lastId];
-			if (state?.loading || state?.error || state?.hasMore === false) break;
+		while (!loaded() && run && current(item)) {
+			if (waiting(item)) return true;
+			if (port.loads()[run.lastId]?.hasMore === false) break;
 			await port.loadRun(run);
 		}
-		if (!loaded() || get(activeThreadId) !== threadId) return;
+		if (!loaded() || !current(item)) return false;
 		chatReplyJump.set(target);
 		await tick();
 		await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+		if (!current(item)) {
+			if (get(chatReplyJump) === target) chatReplyJump.set(null);
+			return false;
+		}
 		const element = port.element();
 		const row = element?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(target.messageId)}"]`);
 		const card = row?.querySelector<HTMLElement>(`[data-chat-comment="${CSS.escape(target.cid)}"]`);
 		chatReplyJump.set(null);
-		if (!card) return;
+		if (!card) return false;
 		const mark = [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids]') ?? [])]
 			.find(item => item.dataset.commentIds?.split(',').includes(card.dataset.commentUuid ?? ''));
 		const focus = mark ?? card;
@@ -60,5 +83,31 @@ export function createChatReplyJumper(port: JumpPort) {
 			element?.addEventListener('scroll', clear, { once: true });
 			card.addEventListener('pointerdown', clear, { once: true });
 		} else window.setTimeout(clear, 2000);
+		return false;
+	}
+
+	function resume(): void {
+		if (!pending || running) return;
+		if (!current(pending)) { pending = null; return; }
+		if (waiting(pending)) return;
+		const item = pending;
+		running = true;
+		void run(item).then((deferred) => {
+			if (pending === item && !deferred) pending = null;
+		}).finally(() => {
+			running = false;
+			if (pending && !waiting(pending)) resume();
+		});
+	}
+
+	return {
+		jump(destination: AttentionDestination) {
+			const threadId = get(activeThreadId);
+			if (!threadId || !destination.cid || typeof destination.seq !== 'number') return;
+			pending = { destination, threadId, generation: port.generation(), version: ++version };
+			resume();
+		},
+		resume,
+		cancel() { ++version; pending = null; },
 	};
 }

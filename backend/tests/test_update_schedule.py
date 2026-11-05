@@ -233,9 +233,10 @@ def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
     from unittest.mock import AsyncMock
 
     from api import restart_shell, settings_restart, system_admin
-    from infra import accounts, product_events, token_admin
+    from infra import accounts, config, product_events, token_admin
     from infra.database import get_db
 
+    monkeypatch.setattr(config, "LOGS_DIR", tmp_path)
     restart_log = tmp_path / "restart.log"
     emitted_events = []
     minted_tokens = []
@@ -292,7 +293,7 @@ def test_scheduled_launch_keeps_lifecycle_token_out_of_observable_output(
     assert row is not None
     assert token not in " ".join(str(value) for value in row)
     assert token not in repr(emitted_events)
-    assert token.encode() not in restart_log.read_bytes()
+    assert token.encode() not in settings_restart._update_log_path(operation_id).read_bytes()
 
 
 def test_drain_cap_and_service_token_cover_the_full_authenticated_shell_span(monkeypatch):

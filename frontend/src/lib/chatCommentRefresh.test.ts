@@ -55,6 +55,21 @@ it('refreshes a loaded target that did not yet have its comment when the answer 
   stop();
 });
 
+it('refreshes a root when a reply answer arrives after its sending message has left the page', async () => {
+  const comment = { id: 'root', cid: 'c1.1', user_message_id: 'sender', quote: 'text', note: '', from_off: 0, to_off: 4, created_at: 't', answers: [{ author_kind: 'user', user_message_id: 'reply-sender', cid: 'c2.1', text: 'reply', created_at: 't', unread: false }] };
+  messages.set([row('target', 1, { chat_comments: [comment] }), row('answer', 3)] as never);
+  const batches: string[][] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, options: RequestInit) => {
+    const ids = JSON.parse(String(options.body)).message_ids as string[];
+    batches.push(ids);
+    return { ok: true, json: async () => ({ messages: ids.map(id => id === 'answer' ? { id, chat_answer_cids: ['c2.1'] } : { id, chat_comments: [comment] }) }) };
+  }));
+  const stop = watchChatCommentThreads(50);
+  await state.handlers.get('turn_complete')!({ thread_id: 'thread', step_ids: ['answer'] });
+  expect(batches).toEqual([['answer'], ['target']]);
+  stop();
+});
+
 it('refreshes only a newly commented target on input', async () => {
   messages.set([row('target', 1), row('other', 2)]);
   const batches: string[][] = [];

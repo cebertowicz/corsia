@@ -11,6 +11,7 @@ import sqlite3
 from loguru import logger as log
 
 from infra.db_fts import fts5_escape
+from infra.thread_confinement import Reader, hidden_clause
 from memory.checkpoint_entry_rows import entry_hits as _entry_hits
 from memory.checkpoint_entry_rows import entry_rows_matching
 from memory.checkpoint_search_entries import (
@@ -29,7 +30,7 @@ UNAVAILABLE_MESSAGE = (
 )
 
 
-def caller_user_id(db: sqlite3.Connection, caller_thread_id: str) -> str | None:
+def caller_user_id(db: sqlite3.Connection, caller_thread_id: str | None) -> str | None:
     """Resolve the calling thread's owner, failing closed when unknown."""
     if not caller_thread_id:
         return None
@@ -67,11 +68,12 @@ def _entry_rows(
     thread_id: str | None,
     candidate_limit: int,
     per_thread: int,
+    reader: Reader,
 ) -> list[dict]:
     """Return bounded entry-FTS matches with lifecycle and checkpoint pointers."""
     return entry_rows_matching(
         db, fts5_escape(query, prefix=True), user_id, thread_id,
-        candidate_limit, per_thread,
+        candidate_limit, per_thread, reader,
     )
 
 
@@ -82,6 +84,7 @@ def _narrative_rows(
     thread_id: str | None,
     candidate_limit: int,
     per_thread: int,
+    reader: Reader,
 ) -> list[dict]:
     """Return bounded narrative-only FTS matches without rebuilding entries."""
     params: list[object] = [f"raw_result : ({fts5_escape(query, prefix=True)})"]
@@ -89,7 +92,8 @@ def _narrative_rows(
     if thread_id is not None:
         scope = "AND checkpoint.thread_id = ? "
         params.append(thread_id)
-    params.extend((user_id, max(1, per_thread) * 20, candidate_limit))
+    visible, identity = hidden_clause(reader, "thread")
+    params.extend((user_id, *identity, max(1, per_thread) * 20, candidate_limit))
     rows = db.execute(
         "WITH scored AS ("
         "  SELECT checkpoint.id, checkpoint.thread_id, checkpoint.through_seq, "
@@ -105,6 +109,7 @@ def _narrative_rows(
         "  WHERE checkpoints_fts MATCH ? "
         f"    {scope}"
         "    AND checkpoint.status = 'installed' AND thread.user_id = ?"
+        f"    AND {visible}"
         "), ranked AS ("
         "  SELECT *, ROW_NUMBER() OVER (PARTITION BY thread_id "
         "      ORDER BY relevance ASC, generation_order DESC) AS thread_rank "
@@ -133,7 +138,7 @@ def search_checkpoints(
     db: sqlite3.Connection,
     query: str,
     *,
-    caller_thread_id: str,
+    reader: Reader,
     thread_id: str | None = None,
     limit: int = 5,
     per_thread: int = 1,
@@ -152,7 +157,7 @@ def search_checkpoints(
     if not (query or "").strip():
         _log_search("no_terms", [])
         return []
-    user_id = caller_user_id(db, caller_thread_id)
+    user_id = caller_user_id(db, reader.thread_id)
     if user_id is None:
         _log_search("unresolved_caller", [])
         return []
@@ -167,10 +172,10 @@ def search_checkpoints(
         MAX_CANDIDATE_ENTRIES, max(50, bounded * keep * 20)
     )
     entry_hits = _entry_hits(
-        _entry_rows(db, query, user_id, thread_id, candidate_limit, keep)
+        _entry_rows(db, query, user_id, thread_id, candidate_limit, keep, reader)
     )
     narrative_hits = _narrative_hits(
-        _narrative_rows(db, query, user_id, thread_id, candidate_limit, keep)
+        _narrative_rows(db, query, user_id, thread_id, candidate_limit, keep, reader)
     )
     hits: list[dict] = []
     per_thread_count: dict[str, int] = {}
@@ -201,22 +206,23 @@ def recent_checkpoints(
     db: sqlite3.Connection,
     thread_id: str,
     *,
-    caller_thread_id: str,
+    reader: Reader,
     limit: int = 3,
 ) -> list[dict]:
     """Return a thread's newest installed current-epoch generation summaries."""
-    user_id = caller_user_id(db, caller_thread_id)
+    user_id = caller_user_id(db, reader.thread_id)
     if user_id is None:
         return []
+    visible, identity = hidden_clause(reader, "t")
     bounded = max(1, min(int(limit or 3), 10))
     rows = db.execute(
         "SELECT c.id, c.thread_id, c.through_seq, c.installed_at, c.captured_at, "
         "       c.raw_result, c.history_epoch, 0 AS historical FROM checkpoints c "
         "JOIN threads t ON t.id = c.thread_id "
         "WHERE c.thread_id = ? AND c.status = 'installed' "
-        "  AND c.history_epoch = t.history_epoch AND t.user_id = ? "
+        f"  AND c.history_epoch = t.history_epoch AND t.user_id = ? AND {visible} "
         "ORDER BY c.generation_order DESC LIMIT ?",
-        (thread_id, user_id, bounded),
+        (thread_id, user_id, *identity, bounded),
     ).fetchall()
     return [generation_summary(dict(row)) for row in rows]
 
@@ -225,7 +231,7 @@ def get_checkpoint(
     db: sqlite3.Connection,
     checkpoint_id: str,
     *,
-    caller_thread_id: str,
+    reader: Reader,
     offset_bytes: int = 0,
     limit_bytes: int = DEFAULT_PAGE_BYTES,
 ) -> dict:
@@ -234,15 +240,16 @@ def get_checkpoint(
     Ownership still resolves from the backend-injected caller. An unavailable
     read deliberately remains indistinguishable from a missing id.
     """
-    user_id = caller_user_id(db, caller_thread_id)
+    user_id = caller_user_id(db, reader.thread_id)
+    visible, identity = hidden_clause(reader, "t")
     row = None if user_id is None else db.execute(
         "SELECT c.id, c.thread_id, c.through_seq, c.installed_at, c.captured_at, "
         "       c.raw_result, c.continuity_snapshot_json, c.history_epoch, "
         "       CASE WHEN c.history_epoch != t.history_epoch THEN 1 ELSE 0 END "
         "           AS historical FROM checkpoints c "
         "JOIN threads t ON t.id = c.thread_id "
-        "WHERE c.id = ? AND c.status = 'installed' AND t.user_id = ?",
-        (checkpoint_id, user_id),
+        f"WHERE c.id = ? AND c.status = 'installed' AND t.user_id = ? AND {visible}",
+        (checkpoint_id, user_id, *identity),
     ).fetchone()
     if row is None:
         return {

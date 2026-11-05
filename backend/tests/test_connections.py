@@ -165,17 +165,6 @@ class TestConnectionModels:
         assert len(available) == 1
         assert available[0]["provider"] == "claude-code"
 
-    def test_set_connection_status(self, connections_db):
-        from connections.models import (
-            ConnectionStatus, ConnectionType, connection_available,
-            set_connection_status, upsert_connection,
-        )
-        upsert_connection(type=ConnectionType.CLI, provider="claude-code",
-                          status=ConnectionStatus.AVAILABLE, db=connections_db)
-        set_connection_status("claude-code", ConnectionStatus.NEEDS_AUTH, db=connections_db)
-        assert connection_available("claude-code", db=connections_db) is False
-
-
 
 class TestRegisterIfAvailable:
     def test_registers_when_available(self, connections_db):
@@ -278,33 +267,21 @@ class TestSeedBuiltinConnections:
         assert row is not None
         assert row["status"] == "available"
 
-    def test_codex_needs_auth_when_present_but_unauthed(self, connections_db, monkeypatch):
+    def test_codex_present_is_installed_without_ambient_auth_probe(self, connections_db, monkeypatch):
         import shutil
-        import connections as conn_pkg
+        import subprocess
         from connections import seed_builtin_connections
         from connections.models import get_connection
+        from connections.source_state import NEEDS_AUTH, harness_state
 
         monkeypatch.setattr(shutil, "which",
                             lambda b: "/usr/local/bin/codex" if b == "codex" else None)
-        monkeypatch.setattr(conn_pkg, "_codex_sign_in_state", lambda _binary: "needs_auth")
-        seed_builtin_connections(db=connections_db)
-        row = get_connection("codex", db=connections_db)
-        assert row is not None
-        assert row["status"] == "needs_auth"
-
-    def test_codex_available_when_authed(self, connections_db, monkeypatch):
-        import shutil
-        import connections as conn_pkg
-        from connections import seed_builtin_connections
-        from connections.models import get_connection
-
-        monkeypatch.setattr(shutil, "which",
-                            lambda b: "/usr/local/bin/codex" if b == "codex" else None)
-        monkeypatch.setattr(conn_pkg, "_codex_sign_in_state", lambda _binary: "ready")
+        monkeypatch.setattr(subprocess, "run", lambda *_a, **_k: pytest.fail("ambient auth probe"))
         seed_builtin_connections(db=connections_db)
         row = get_connection("codex", db=connections_db)
         assert row is not None
         assert row["status"] == "available"
+        assert harness_state("codex", db=connections_db)["state"] == NEEDS_AUTH
 
     def test_seed_idempotent(self, connections_db, monkeypatch):
         import shutil

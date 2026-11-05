@@ -101,7 +101,7 @@ def test_startup_migration_heals_scopes_with_membership_safe_owner(tmp_path):
             (conductor,),
         ).fetchone()
         assert dict(row) == dict(
-            user_id="member", title="Conductor", project_id="project-owned"
+            user_id="member", title="Owned Conductor", project_id="project-owned"
         )
         from infra.queries import user_in_project
 

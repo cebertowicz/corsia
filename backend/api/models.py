@@ -128,6 +128,9 @@ async def update_model_profile(model_id: str, body: dict):
             model = db.execute("SELECT * FROM models WHERE id=?", (model_id,)).fetchone()
             if model is None:
                 raise HTTPException(404, f"Unknown model: {model_id}")
+            from llm.harness_catalog import project_stored_rows
+
+            model = project_stored_rows([model], db=db)[0]
             before = resolve_window_for_row(model, db=db)
             existing = db.execute("SELECT model_id FROM model_profiles WHERE model_id = ?", (model_id,)).fetchone()
             if existing:

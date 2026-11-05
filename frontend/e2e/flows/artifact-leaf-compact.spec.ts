@@ -82,7 +82,7 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await expect(back).toBeVisible();
 		await expect(page.getByText('Compact first')).toBeVisible();
 		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeHidden();
-		const tabsAction = page.getByRole('button', { name: /Tabs \(2\)/ });
+		const tabsAction = page.getByRole('button', { name: /Files \(2\)/ });
 		await expect(tabsAction).toBeVisible();
 		// Compact replaces the desktop strip rather than stacking both.
 		await expect(page.getByRole('tablist', { name: 'Open side panel items' })).toHaveCount(0);
@@ -108,12 +108,12 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await sheet.getByRole('button', { name: names[1], exact: true }).click();
 		await expect(sheet).toBeHidden();
 		await expect(page.getByText('Compact second')).toBeVisible();
-		await expect(page.getByRole('button', { name: /Tabs \(2\)/ })).toBeVisible();
+		await expect(page.getByRole('button', { name: /Files \(2\)/ })).toBeVisible();
 
 		// AC5 — Back returns to chat and keeps every tab.
 		await back.click();
 		await expect(page.getByRole('textbox', { name: 'Message CORSIA' })).toBeVisible();
-		await expect(page.getByRole('button', { name: /Tabs \(/ })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: /Files \(/ })).toHaveCount(0);
 		const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('corsia:artifactWorkspace:v1')!));
 		expect(Object.values(stored.threads)[0]).toMatchObject({ activeSurface: 'chat' });
 		expect((Object.values(stored.threads)[0] as { tabs: unknown[] }).tabs).toHaveLength(2);
@@ -173,7 +173,7 @@ test.describe('@flow:artifact-leaf @surface:chat @surface:documents artifact lea
 		await sidebarThread(page, sessionTitle).click();
 		await expect(page.getByText('Back stack')).toBeVisible();
 
-		await page.getByRole('button', { name: /Tabs \(1\)/ }).click();
+		await page.getByRole('button', { name: /Files \(1\)/ }).click();
 		const sheet = page.getByRole('dialog', { name: 'Open side panel items' });
 		await expect(sheet).toBeVisible();
 

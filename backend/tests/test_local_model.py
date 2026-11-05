@@ -7,7 +7,6 @@ v0.7.1rc1 recommender output and replaces every install, start and download.
 from __future__ import annotations
 
 import asyncio
-import re
 from pathlib import Path
 
 import httpx
@@ -24,10 +23,10 @@ _REPO = Path(__file__).resolve().parents[2]
 SAMPLING = {"temperature", "top_p", "top_k", "min_p", "presence_penalty", "repetition_penalty", "chat_template_kwargs"}
 
 # What setup picks at each memory size (GiB) from the recorded recommender: oMLX's own
-# ranking, first that fits. Stated here so a re-recorded fixture shows its change. Under 24 GiB there is no local model.
+# ranking, first that fits. Stated here so a re-recorded fixture shows its change. Under 32 GiB setup picks no local model.
 PICKS = {
     16: None,
-    24: ("Jundot/gemma-4-26B-A4B-it-oQ3.5e-mtp", 90_890, "Gemma 4 26B A4B"),
+    24: None,
     32: ("Jundot/Qwen3.8-27B-oQ4e-mtp", 81_651, "Qwen3.8 27B"),
     48: ("Jundot/Qwen3.8-27B-oQ4e-mtp", 262_144, "Qwen3.8 27B"),
     64: ("Jundot/Qwen3.8-27B-oQ4e-mtp", 262_144, "Qwen3.8 27B"),
@@ -57,11 +56,17 @@ async def _flown(**kwargs) -> dict:
 
 
 def test_every_oMLX_pin_site_names_the_same_release():
+    from llm import local_setup_executable, omlx_release
+
     script = (_REPO / "desktop" / "scripts" / "build-macos-bundle.sh").read_text()
-    bundled = re.search(r'^(?:readonly )?OMLX_VERSION="([^"]+)"', script, re.MULTILINE).group(1)
-    assert bundled == local_model.OMLX_PIN
-    assert FIXTURE["tag"] == f"v{local_model.OMLX_PIN}"
-    assert local_model.omlx_has_recommender(local_model.OMLX_PIN)
+    assert 'source "$ROOT/backend/llm/omlx_release.py"' in script
+    assert 'readonly OMLX_VERSION OMLX_SHA256' in script
+    assert 'fetch_verified "$OMLX_URL" "$BUILD_ROOT/downloads/$OMLX_WHEEL" "$OMLX_SHA256"' in script
+    assert local_setup_executable.OMLX_VERSION == omlx_release.OMLX_VERSION
+    assert local_setup_executable.OMLX_SHA256 == omlx_release.OMLX_SHA256
+    assert FIXTURE["tag"] == f"v{local_model.OMLX_RECOMMENDER_MIN}"
+    assert local_model.omlx_has_recommender(local_model.OMLX_RECOMMENDER_MIN)
+    assert local_model.omlx_has_recommender(omlx_release.OMLX_VERSION)
     assert not local_model.omlx_has_recommender("0.7.0") and not local_model.omlx_has_recommender(None)
 
 
@@ -88,6 +93,18 @@ def test_welcome_shows_the_recommenders_pick_for_each_memory_size(monkeypatch, g
     assert view == {"state": "picked", "message": None, "model": model.view()}
     # Welcome only picks: it asks once and downloads nothing.
     assert mac.omlx.asks() == 1 and mac.downloads == [] and mac.omlx.puts() == []
+
+
+def test_get_started_keeps_failure_when_fake_load_fails(monkeypatch):
+    mac = _mac(monkeypatch, 32)
+    mac.keep_outcome = {"status": "failed", "detail": "fake load failed"}
+    monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
+    asyncio.run(_prepared())
+
+    result = asyncio.run(_flown())
+
+    assert not result["ok"] and result["cause"] == "load_failed"
+    assert local_setup.setup_status()["state"] == "start_failed"
 
 
 @pytest.mark.parametrize("gib", FITTING)
@@ -139,6 +156,7 @@ def test_recommender_metadata_survives_in_the_structured_settings_view():
         "context_window": row["max_context"], "quantization_bits": row["level"],
         "relative_speed": row["relative_speed"], "resident_bytes": row["resident_bytes"],
         "smarts_level": row["smarts_level"], "tokens_per_second": row["tokens_per_second"],
+        "smarts": row["smarts"],
     }
     restored = local_model.from_recommendation(local_model.to_record(model))
     assert restored == model and restored.view() == model.view()
@@ -368,8 +386,8 @@ def test_the_local_row_says_a_host_that_is_not_macos_never_runs_a_local_model(mo
         assert "settings_download" not in source
 
 
-@pytest.mark.parametrize("gib, allowed", [(23.9, False), (24, True)])
-def test_the_24_gib_gate_decides_whether_there_is_a_local_model(monkeypatch, gib, allowed):
+@pytest.mark.parametrize("gib, allowed", [(16, False), (24, False), (31.9, False), (32, True)])
+def test_the_32_gib_gate_decides_whether_setup_picks_a_local_model(monkeypatch, gib, allowed):
     mac = _mac(monkeypatch, gib)
     monkeypatch.setattr(local_sources, "get_servers", lambda **_kwargs: [])
 

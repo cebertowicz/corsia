@@ -91,7 +91,7 @@ describe('ProviderSettingsModal remove', () => {
 	it('opens a harness provider on Accounts with its canonical name and email label', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ accounts: [{
 			id: 'codex-default', provider: 'codex', name: 'Default', is_default: true,
-			state: 'legacy', revision: 1, identity: {},
+			state: 'signed_in', revision: 1, identity: {},
 			label: { name: 'Personal', email: 'person@example.test', text: 'Personal · person@example.test' },
 		}] })));
 		component = mount(ProviderSettingsModal, {

@@ -16,12 +16,16 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from tests.cc_runtime_fixtures import cc_target, settle_test_input
+from tests.vendor_account_fixtures import point_default_home
 
 
 @pytest.fixture(autouse=True)
-def _default_claude_root(monkeypatch, tmp_path):
+def _default_claude_root(monkeypatch, tmp_path, request):
     """The Default account's root, which renders and launches here resolve to."""
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cc-home"))
+    if "main_db" in request.fixturenames:
+        request.getfixturevalue("main_db")
+        point_default_home("claude-code", tmp_path / "cc-home")
 
 
 def _register_live_provider(main_db, provider_session_id: str) -> str:
@@ -262,6 +266,7 @@ async def _feed_main(
     async def persist_input_once() -> None:
         return None
 
+    point_default_home("claude-code", claude_dir)  # an account launches only in its own home
     with patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": claude_dir}):
         await cc_runtime.feed_main(
             "main-1",

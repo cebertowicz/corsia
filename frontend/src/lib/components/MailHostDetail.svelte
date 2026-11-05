@@ -27,7 +27,7 @@
 	let busy = $state(false);
 	let passwordError = $state('');
 	let formError = $state('');
-	const reaches = $derived(account.capabilities.map((capability) => ({ mail: 'Email', calendar: 'Calendar', files: 'Files' }[capability])).join(', '));
+	const reaches = $derived(account.capabilities.map((capability) => ({ mail: 'Email', calendar: 'Calendar', files: 'Files', messages: 'Texts' }[capability])).join(', '));
 	const manageUrl = $derived(account.mailhost?.manage_url ?? '');
 	const product = $derived(account.mailhost?.product_name ?? '');
 	/** The body is text, and `link` is the words that go to the host's page when it has one: where the person must go next. */

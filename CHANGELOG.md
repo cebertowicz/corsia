@@ -1,106 +1,267 @@
 # Changelog
 
-Shipped behavior, newest first. When a later entry changes an earlier design,
-the later entry describes the current behavior.
+Shipped behavior, releases newest first. When a later entry changes an earlier
+design, the later entry describes the current behavior; under Unreleased, edit
+the earlier line instead of adding another.
 
 ## Unreleased
 
-_Changes merged since the last release. Each PR that changes what you see or do adds a line here._
+_Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
-- Update settings show the changes for the update currently on offer.
+- A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
+- A pull request review that a restart cut off now picks up again when CORSIA starts, instead of waiting for the next push (thanks @mikemikimike).
+- A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.
+- After this update, every chat that runs on your existing Claude Code or Codex account waits until you sign that account in again in CORSIA, automations and reviewers included; if many agents share that account, they all wait until then. Each Claude Code and Codex account now has its own CORSIA sign-in, so signing in or out of `claude` or `codex` in a terminal no longer changes the account CORSIA uses.
+- Agents can now read email attachments in Gmail and in mail accounts connected with a password: an agent reading an email sees its attachments and can save them into its workspace. Agents can now read PDFs, those attachments and any PDF in your workspace: the text page by page, a form's filled-in values, and a page as a picture when its text isn't enough.
+- A comment on selected document text still posts when an agent edits inside that text before you press Comment, and is anchored on what remains; you are asked to select again only when the agent removed all of it.
+- Agents can now work in Google Docs, Sheets, Drive and Calendar on a connected Google account: create, read and edit documents, spreadsheets, files and events. Deleting a Drive file moves it to the trash. Before an event is deleted or cancelled, a repeating event's schedule is changed, or a calendar is cleared or deleted, the events it removes are saved so they can be recreated; for a repeating event, that includes occurrences that were changed. Any other delete that can't be undone is refused. This doesn't include email: agents keep reading and sending it the way they already do.
+- Commenting on an image in a document keeps the document at its reading position while you post, reply, and return from the image. On a phone, the image toolbar keeps all its controls on one row when Send appears.
+- Email and web addresses written as plain text in a document, such as an email draft's From and To lines, no longer disappear when you view it.
+- If the first setup chat ends without a visible reply, CORSIA now gives the agent one more chance to send it.
+- In the desktop app, Sign in and Open the page again on a connected app or account now open the sign-in page in your default browser; before, a connected app's page didn't open and you had to copy its link.
+- Local models now follow each model's own defaults: a chat with no thinking level chosen runs at the model's default level (the picker reads Auto), and setup and model downloads no longer set a reply-length limit. Existing reply-length limits, including those earlier setup runs set, remain until changed in oMLX.
+- Local models now run on oMLX 0.7.3: several chats running at once on a local model use less memory and reply faster, and oMLX no longer gets stuck refusing every prompt for lack of memory after two prompts overlap. After an app update, CORSIA updates its running local model server once requests finish and reloads the same models; Settings shows “Restarting…” until they are loaded.
+- On a local model that runs short of memory partway through a reply, the context meter now measures the chat against what still fits in memory for the rest of that reply, the same limit CORSIA checks before each call, instead of showing it far emptier than it is.
+- On a paired computer, the update screen no longer tells you to open CORSIA on your main computer during a normal restart; it says so only if the restart takes longer than usual.
+- Restart in oMLX's own dashboard now restarts CORSIA's local model server and loads the models it had loaded again, instead of saying the server isn't running under a supervisor. It takes effect once the local model server has been stopped and started since this update.
+- Selecting text in a table cell works across the whole cell: you can drag over any part of it, and its comment button appears when you let go.
+- Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
+- Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.
+- The update screen's percentage now moves in step with the real time each stage takes, from waiting for agents through the restart, instead of sitting near 12% and then racing to 100%. Watched from a paired computer, it keeps counting through the restart and startup and no longer leaps when the main computer answers.
+- With an agents' GitHub account connected, comments on the agents' own pull requests now reach the owning chat without a repository webhook.
+- With "Roll over when an account hits its limit" on, a chat held on a limited account no longer asks you to move it: CORSIA checks your other accounts and moves the chat itself once one has room. Switch model is still there as a way out.
+- Your About you doc now gets each fact as its own suggestion, so you can accept or reject them one at a time, and its headings are left alone.
 
-- Email drafts describe the conversation in plain sentences, say why a message’s text is withheld, and say when your usual font couldn’t be read. A message that arrives while a reply draft is being saved now stops the send.
-- In phone chat, the scroll-to-bottom arrow lines up with the plan control, with notices above and the conversation visible around them.
-- On a new chat you can pick which account it runs on before the first message.
-- A paused task, review or decision you owe, including a document review, still reads Needs you in the plan, and so does the task above it; while it is paused it is not flagged or counted anywhere else.
-- Email replies check for newer messages and support attachments and your usual font.
-- Mail that is flagged or not yet screened shows only the sender's address in search results.
-- The reasoning level you pick for a local model is now the level it runs at.
-- Setup now offers to bring over skills you made on claude.ai, even if you only use the Claude app.
-- When every account for a vendor is at its limit, the model picker's "first back" time is now the soonest of them, matching the line above the composer.
-- Answers to your chat comments appear on the commented messages, and a reply notice takes you to unread answers.
-- Agents see your mail, calendar and file actions as a short count until they need one, which keeps each agent's context smaller.
-- Connecting Google takes one Allow with no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service.
-- Your comment draft stays open when the document reconnects, and closing the comment box clears the text selection, so typing can't replace your text.
-- The context sheet no longer flickers between readings while it refreshes, and its bar and the context ring grow smoothly to each new reading.
-- The shared browser no longer asks you for a password on pages that only display a hidden secret.
-- Shared documents leave Files when the work that touched them finishes; pin one to keep it there. The document itself is never deleted.
-- The shared browser follows new tabs, can show you a page an agent is already working on, and passes your pointer to captchas without lag.
-- You stay signed in to a site after the shared browser closes, even when you signed in while another agent was also using the shared browser.
-- Chat comments can be sent on their own while an agent is replying, and the New mark on reply chips lines up with its text.
-- In the shared browser, an agent's click on a button's own text or icon reaches the button.
-- When an added Claude Code account loses its sign-in, CORSIA signs out that account so you can sign it in again, and no longer marks the provider's other accounts as signed out.
-- After you sign in to Claude Code, setup now shows it's checking your Claude models instead of asking you to sign in again.
-- Plan and decision messages use clearer, consistent wording.
-- Measurement labels and messages are clearer about what is shown.
-- Provider and model settings use clearer wording for connection, account and usage states.
-- Clearer wording for sign-in, saved keys, host access and project errors.
-- Agents can suggest individual additions to a document without replacing the text they follow.
-- In Focus, tasks assigned to you appear in the chat where they were requested and show a receipt when finished.
-- Context, skills and settings screens now say “chat” instead of thread or conversation, and their messages are clearer.
-- On a local model, if Google setup stops partway, CORSIA asks the rest of the setup questions first and comes back to Google at the end.
-- Agent replies to your document comments now show as one notice above the message box until you read them.
-- Select text in chat to add comments to your next message.
-- When connecting to another computer, CORSIA explains what happens and lets you return to this computer from sign-in.
-- First-chat setup reads more clearly and at your pace: a decision card waits until you've had time to read what came before it, GitHub profiles are read through GitHub's public data, the import ends in one short line, the GitHub step is one message and one choice, and you sign up for the agents' GitHub account in your own browser.
-- First-chat setup now says your About you answers become your profile, which every agent and chat loads and agents add to, and where to edit it; a skill or app that can't come over says what to ask next, and the permissions and GitHub text uses one name for each thing.
-- On Linux, CORSIA starts again after the computer restarts.
-- A local model is no longer shown as ready after its server exits, until it has loaded again.
-- After updating from an older CORSIA, Codex accounts you added work again without signing in.
-- On Linux, CORSIA no longer offers to set up a local model; you can connect a provider instead.
-- A local model that fails to reload now gives retry instructions that match whether it is kept loaded.
-- The local model server keeps your server-wide settings when CORSIA starts it again.
-- Chat titles use more of the available header space when Local only is off.
-- Claude Code accounts you added keep working when CORSIA's data moves.
-- Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
-- When CORSIA can't find a chat's account sign-in on this computer, the message waits until you sign in again instead of repeatedly trying to send.
-- A signed-in app in Connected apps now reads "Figma — you@example.com" on its row, with the account shortening first on a narrow screen, and a link in chat can open an app waiting for approval with its Approve button ready.
-- Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.
-- A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
-- The "Bring over what your other tools know" step no longer shows twice in the setup plan.
-- If the local model server CORSIA started stops unexpectedly, CORSIA starts it again and loads the models that were loaded, up to three times in ten minutes. A server you stop in CORSIA, or one that is stopped when you quit CORSIA, stays stopped, and so does a server that exits normally on its own (code 0), including one CORSIA took over after an update or restart. A server you end from outside CORSIA, such as with Force Quit, is started again: CORSIA cannot tell that from a crash.
-- When an agent starts a Google or Microsoft sign-in, it is told once how it ended (you finished it, cancelled it, or it expired) and carries on, instead of waiting for you to tell it you signed in.
-- CORSIA now keeps its data in `~/Library/Application Support/CORSIA`. An install that took over an earlier one moves its data there once, as soon as the update that brings this finishes or on the next launch, without copying it; if anything still uses the old folder, CORSIA leaves the data where it is and says why.
-- On a connected app that fails to sign in, a refused sign-in now says so and shows no button that can't help, Reconnect no longer freezes the row, and Remove works while the app is still trying to connect.
-- Settings no longer offers an update after it finishes.
-- During an update restart, CORSIA shows a full-window progress screen and offers recovery if it takes longer than expected.
-- You can choose to send document comments immediately or hold them until you finish reviewing the document or image.
-- On Activity, an agent that is working reads Working even while one of its tasks is set aside, and each row's count says how many tasks are left.
-- In Chrome and other Chromium browsers, page text behind a dialog is now blurred on narrow screens too, instead of showing through the card.
-- An update on a large database now waits while CORSIA upgrades its data instead of giving up after a minute and going back to a version that can no longer open it, and an update nobody confirms no longer leaves a restart pending.
-- On a phone, a long tool step in a chat and a long model name in Settings' Host access review no longer make the screen scroll sideways.
-- Reopening an unchanged document while disconnected now says your changes stay on this device, instead of warning that they aren't saved.
-- Posting a document comment makes it appear right away and clears the box; the agent still gets it.
-- Setup keeps CORSIA’s own work folder as the default offer after you choose another folder.
+## v0.4.2 — Google sign-in works again, a shorter first chat, and steadier local models
+
+Released 2026-10-31.
+
+### Sign-in
+
+- Connecting a Google account works again: it no longer fails with “Google did not provide an account identity”.
+
+### First run and setup
+
+- New installs start with Auto-approve on, and setup and Settings describe it in the same words.
+- The first chat no longer mentions web search when search already works, and asks whether to look you up before it brings up search.
+- The first chat’s files step is shorter, and it mentions local models only on a Mac that can run one.
+- The first chat’s community step says what keeping your own version means.
+- The About you review says that Approve also accepts every suggestion you haven’t rejected.
+- Setup suggests a username from your first name and never fills it back in after you clear it.
+- Setup keeps the local model’s download progress, and whether it finished or couldn’t load, up to date on every step, without a reload.
+- Setup stops saying it failed, in the model picker and in your first chat, once the local model it couldn’t load has loaded.
+
+### Local models
+
+- A long pasted message on a local model no longer makes every later checkpoint fail and stop the chat.
+- Long chats on a local model with a small context window keep going: the checkpoint of earlier conversation now fits the window, and one cut off at its length limit says so.
+- When no other local model is loaded, a model kept loaded loads as soon as setup or Add model finishes downloading it, even with less free memory to spare than CORSIA usually keeps. If it still can’t load, setup says there isn’t enough free memory, and Settings says the model couldn’t load.
+- The local model server keeps your server-wide settings when you download a model or run setup again.
+
+### Upgrading
+
+- Take over now waits for an earlier install that runs without a background service, including one set up on its own port, to stop serving before it moves any of its data, and moves nothing if it doesn’t.
+- Start fresh now stops an earlier install that runs without a background service, including one set up on its own port, and points the `corsia` command at CORSIA, as Take over does.
+- Taking over or starting fresh from an earlier CORSIA install that you set up from source now works on macOS 15, where the earlier install couldn’t be stopped.
+
+### Documents
+
+- On iPhone, a comment reply is marked read once you’ve seen it.
+- Document comment and reply boxes stay open, in place and focused while you type, whatever else happens in the document.
+- Each thread in a document’s Comments panel is its own card, with space between cards.
+
+### Workflows and event rules
+
+- A workflow installed or updated from CORSIA’s community keeps its parts, instead of arriving as plain skill text.
+- When a phase in a plan picks a workflow, CORSIA adds one task for each part of the workflow, in order, each with its own instructions and check.
+- Each of those tasks can name who closes it, and keeps its rules when it is split or sent back.
+- Event rules can react to a label being added to or removed from a pull request or issue.
+
+### Security
+
+- Agents can no longer change your workspace repository’s Git settings, from a shell or a file tool, even with access you approved for them.
+- Cleaning up an agent’s finished copy of a repository no longer runs a program the agent could have named.
+- The credential the `corsia` command uses to sign in to CORSIA now lives in its own folder that no agent can open, and agents can’t move the folders above your saved credentials.
+
+### Command line and documentation
+
+- CORSIA’s `corsia` terminal command now supports status, logs, restart and other service commands in the app. CORSIA updates an existing link where it can; it does not add the command to your PATH.
+- A `corsia` command that can’t sign in to CORSIA says so and what to do, instead of failing with an error trace.
+- New security and how-it-works documentation, with diagrams that read on a phone.
+
+## v0.4.1 — A signed Mac app, guided setup, easier Google sign-in and steadier local models
+
+Released 2026-10-30.
+
+### Packaged Mac app
+
+- The Mac app is signed and notarized by Apple, so macOS opens it without an unidentified-developer warning.
 - Quitting the Mac app now also stops the local model server CORSIA started, so it no longer holds memory after you quit.
-- If you quit partway through first-run setup, the next launch starts setup fresh; downloaded models are kept.
+- Links in a chat open in your browser from the desktop app.
+
+### Upgrading
+
+- CORSIA now keeps its data in `~/Library/Application Support/CORSIA`. An install that took over an earlier one moves its data there once, as soon as the update that brings this finishes or on the next launch, without copying it; if anything still uses the old folder, CORSIA leaves the data where it is and says why.
+- On macOS 15, if you have any earlier 0.4.1 dev build, install this version once from the disk image. Updates work after that.
+- Claude Code accounts you added keep working when CORSIA's data moves.
+- After updating from an older CORSIA, Codex accounts you added work again without signing in.
+
+### First run and setup
+
+- Setup opens with a Getting started page and four steps in the side rail, with Back on every step after the first, and you can edit your account from Back.
+- On a Mac with less than 32 GB of memory, setup no longer recommends or downloads a local model and Settings no longer offers to add one; CORSIA uses a connected provider (a subscription such as Claude or ChatGPT, or an API key) instead. A local model that is already installed stays in Settings. No tested local model handles CORSIA's first-run work reliably on 24 GB.
 - When the app finds an earlier CORSIA install, Start fresh moves it into a dated folder under CORSIA backups in your home folder, then begins a clean setup.
 - After Start fresh backs up an earlier install, setup begins right away, and taking over an earlier install is labeled Take over.
 - Start fresh now shows what it will back up on the first choice and starts in one step.
-- Setup opens with a Getting started page and four steps in the side rail, with Back on every step after the first, and you can edit your account from Back.
+- First-chat setup now says your About you answers become your profile, which every agent and chat loads and agents add to, and where to edit it; a skill or app that can't come over says what to ask next, and the permissions and GitHub text uses one name for each thing.
+- First-chat setup reads more clearly and at your pace: a decision card waits until you've had time to read what came before it, GitHub profiles are read through GitHub's public data, the import ends in one short line, the GitHub step is one message and one choice, and you sign up for the agents' GitHub account in your own browser.
+- If you quit partway through first-run setup, the next launch starts setup fresh; downloaded models are kept.
 - Pressing Download in setup always starts the download with progress, or says why it didn't and offers Retry.
-- A Claude Code or Codex sign-in that never returns from the browser now stops after five minutes and says what to do, instead of waiting forever.
-- If a signed-in Claude or ChatGPT account has no models for Claude Code or Codex, setup and Settings say so and offer another account or turning that tool off.
-- After you sign in to Claude Code, its models reach the model picker, and the row no longer stays stuck on Sign in.
-- Sign-in pages during setup stay in CORSIA's browser pane, and Google setup no longer creates a second project.
+- A local model that cannot load during setup now says why and lets you try again.
 - The local model chosen in setup stays loaded afterwards.
+- After you sign in to Claude Code, setup now shows it's checking your Claude models instead of asking you to sign in again.
+- An added Claude Code or Codex account whose model check failed during setup can become ready when you sign in again.
+- A Claude Code you only just signed in to is no longer offered for import: only skills and notes you made there are brought over.
+- Setup can continue when a provider added by address has a model that is ready to use.
+- Setup keeps CORSIA’s own work folder as the default offer after you choose another folder.
+- Setup now offers to bring over skills you made on claude.ai, even if you only use the Claude app.
+- Setup now opens in a normal-sized window in the middle of the screen, and the app grows to fill the screen when setup finishes.
+- Setup shows when it is retrying a failed model source check.
+- Sign-in pages during setup stay in CORSIA's browser pane, and Google setup no longer creates a second project.
+- The "Bring over what your other tools know" step no longer shows twice in the setup plan.
+- On a local model, if Google setup stops partway, CORSIA asks the rest of the setup questions first and comes back to Google at the end.
+
+### Connected apps, Google and mail
+
+- Connecting Google takes one Allow with no Google Cloud project. Sign-in and token renewal go through Google's Workspace extension sign-in service.
+- Google and Microsoft setup say what access sign-in grants before asking "Go ahead?", and the approval toggle is called Auto-approve in Settings, as in the chat.
+- When an agent starts a Google or Microsoft sign-in, it is told once how it ended (you finished it, cancelled it, or it expired) and carries on, instead of waiting for you to tell it you signed in.
+- Agents can now read mail that is flagged or not yet screened. It arrives marked as untrusted, and the agent's read result says why it was flagged or not screened.
+- Mail that is flagged or not yet screened shows only the sender's address in search results.
+- A signed-in app in Connected apps now reads "Figma — you@example.com" on its row, with the account shortening first on a narrow screen, and a link in chat can open an app waiting for approval with its Approve button ready.
+- On a connected app that fails to sign in, a refused sign-in now says so and shows no button that can't help, Reconnect no longer freezes the row, and Remove works while the app is still trying to connect.
+- An agent still waits for your yes before a newly connected command-line tool's first change, even when you asked for that change.
+- Agents see your mail, calendar and file actions as a short count until they need one, which keeps each agent's context smaller.
+- Email drafts describe the conversation in plain sentences, say why a message’s text is withheld, and say when your usual font couldn’t be read. A message that arrives while a reply draft is being saved now stops the send.
+- Email replies check for newer messages and support attachments and your usual font.
+
+### Providers
+
+- If the local model server CORSIA started stops unexpectedly, CORSIA starts it again and loads the models that were loaded, up to three times in ten minutes. A server you stop in CORSIA, or one that is stopped when you quit CORSIA, stays stopped, and so does a server that exits normally on its own (code 0), including one CORSIA took over after an update or restart. A server you end from outside CORSIA, such as with Force Quit, is started again: CORSIA cannot tell that from a crash.
+- Signing in to an added Claude Code or Codex account makes its discovered models available during setup and in the model picker.
+- Compare local model builds that fit this computer, see which are already on this computer, and download a build directly.
+- After you sign in to Claude Code, its models reach the model picker, and the row no longer stays stuck on Sign in.
+- A Claude Code or Codex sign-in that never returns from the browser now stops after five minutes and says what to do, instead of waiting forever.
+- A Codex chat no longer stays stuck on running when Codex stops partway through receiving a message; your next message runs.
+- A local model is no longer shown as ready after its server exits, until it has loaded again.
+- A local model that fails to reload now gives retry instructions that match whether it is kept loaded.
+- A model on your own server that reports its context window, such as one served by vLLM, can be used as soon as you add the server.
 - CORSIA's own local model defaults to medium reasoning effort unless you chose another.
 - CORSIA's own local model server handles two requests at once, and its group in the model picker is named CORSIA instead of Local.
+- If a signed-in Claude or ChatGPT account has no models for Claude Code or Codex, setup and Settings say so and offer another account or turning that tool off.
+- On a new chat you can pick which account it runs on before the first message.
+- Provider and model settings use clearer wording for connection, account and usage states.
 - Sending to a local model that isn't loaded yet waits until it loads, and Stop cancels a message still waiting on its model.
-- A Codex chat no longer stays stuck on running when Codex stops partway through receiving a message; your next message runs.
-- Agents can search the web with no search key while CORSIA's own local model is running.
-- Links in a chat open in your browser from the desktop app.
-- When an agent opens a page in the shared browser, the chat shows a chip with that site; clicking it reopens the browser there.
-- The host-access request card now says what host access is before asking you to approve it.
-- Google and Microsoft setup say what access sign-in grants before asking "Go ahead?", and the approval toggle is called Auto-approve in Settings, as in the chat.
-- Connections from paired devices work again.
-- An agent still waits for your yes before a newly connected command-line tool's first change, even when you asked for that change.
-- When a plan isn't moving, its note names each wait that is overdue.
-- Right-clicking CORSIA or Conductor in the left rail now opens a menu with Agent settings, plus Mark read or Mark unread when it applies, instead of an empty one.
-- A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
+- Sign an added Claude Code or Codex account in again from its row in Provider settings.
+- Signing in again with the same account after its model check fails keeps only the original account.
+- Switching the model in a project's agent chat or the CORSIA agent chat shows the switching icon next to the model name until the switch finishes or fails, including after you reload.
+- The local model server keeps your server-wide settings when CORSIA starts it again.
+- The reasoning level you pick for a local model is now the level it runs at.
+- When an added Claude Code account loses its sign-in, CORSIA signs out that account so you can sign it in again, and no longer marks the provider's other accounts as signed out.
+- When CORSIA can't find a chat's account sign-in on this computer, the message waits until you sign in again instead of repeatedly trying to send.
+- When every account for a vendor is at its limit, the model picker's "first back" time is now the soonest of them, matching the line above the composer.
+
+### Updates
+
+- An update on a large database now waits while CORSIA upgrades its data instead of giving up after a minute and going back to a version that can no longer open it, and an update nobody confirms no longer leaves a restart pending.
+- An update no longer says it didn't start when it has started but its connection drops.
+- During an update restart, CORSIA shows a full-window progress screen and offers recovery if it takes longer than expected.
+- On macOS 15, Update no longer stops with "CORSIA did not stop", and restarting or stopping the CORSIA service works again.
+- Settings no longer offers an update after it finishes.
+- The update screen shows how many agents have paused while it waits for them.
+- Update notices wait until setup is finished, when Updates can be opened.
+- Update refusals show their reason and the update's own log in Settings.
+- Update settings show the changes for the update currently on offer.
+- Updates show the data upgrade step while your data is being upgraded.
+- When an update fails before CORSIA restarts, your agents' paused work usually picks back up right away instead of staying paused until the next restart.
+
+### Shared browser
+
 - When an agent hands you a page in the shared browser, such as an account choice or a phone prompt, it appears in your attention list and the agent carries on once you finish.
+- The shared browser follows new tabs, can show you a page an agent is already working on, and passes your pointer to captchas without lag.
+- The shared browser keeps filling its pane after you switch tabs, and you can copy, cut and paste between a page and your own clipboard.
+- The shared browser no longer asks you for a password on pages that only display a hidden secret.
+- When an agent opens a page in the shared browser, the chat shows a chip with that site; clicking it reopens the browser there.
+- You stay signed in to a site after the shared browser closes, even when you signed in while another agent was also using the shared browser.
+- In the shared browser, an agent's click on a button's own text or icon reaches the button.
+- Browser addresses no longer need `https://` typed in; local loopback addresses use `http://` by default.
+- Shared browsers left running when CORSIA quits unexpectedly now close the next time it starts.
+
+### Documents and collaboration
+
+- A document shows a notice when agents reply to your comments, including comments on its images, and the notice takes you straight to the next unread reply.
+- A file an agent names by its path in the workspace or a repository shows as a document chip you can open, and a reply shows a chip for every file it names, however many.
+- Agent replies to your document comments now show as one notice above the message box until you read them.
+- An agent's reply to your document comment stays marked New until you have actually seen it, including while you are looking at an image from that document.
+- Agents can suggest individual additions to a document without replacing the text they follow.
+- A replaced image now shows right away in a document that is open, and when it is reopened, even if it has comments.
+- Numbered comment icons in a document open the comment beside its text, or in the comment sheet on a phone.
+- Links in document comments open from the document's folder, as links in the document itself do, so `notes.md` opens the file beside the document. A link written from the workspace root, such as `shared/x.md`, no longer opens from a comment.
+- Posting a document comment makes it appear right away and clears the box; the agent still gets it.
+- Relative links inside a document's table cells open the linked file instead of saying the document is missing.
+- Reopening an unchanged document while disconnected now says your changes stay on this device, instead of warning that they aren't saved.
+- Shared documents leave Files when the work that touched them finishes; pin one to keep it there. The document itself is never deleted.
+- The reply box on a document comment no longer stays tall after you send a multi-line reply; it goes back to one line.
+- When you type into an agent's document, the agent gets your edit as one change once you pause for 30 seconds, instead of a fragment every few seconds of typing.
+- You can choose to send document comments immediately or hold them until you finish reviewing the document or image.
+- Your comment draft stays open when the document reconnects, and closing the comment box clears the text selection, so typing can't replace your text.
+
+### Chat and interface
+
+- Answers to your chat comments appear on the commented messages, and a reply notice takes you to unread answers.
+- Reply to a chat comment in its thread and edit the reply from its highlighted text before sending.
+- Select text in chat to add comments to your next message.
+- A message you send with chat comments shows them right away, including when you send comments with no text, and the commented message keeps their marks.
+- Chat comments can be sent on their own while an agent is replying, and the New mark on reply chips lines up with its text.
+- Open any file a chat's agent was given, straight from the chat.
+- Open files mentioned in chat, including files in your workspace.
 - CORSIA now reconnects within a couple of seconds after every dropped connection instead of waiting up to 30 seconds.
+- Connections from paired devices work again.
+- Find the CORSIA agent and project conductors in search and Activity, with each conductor named for its project.
+- When connecting to another computer, CORSIA explains what happens and lets you return to this computer from sign-in.
+- Right-clicking CORSIA or Conductor in the left rail now opens a menu with Agent settings, plus Mark read or Mark unread when it applies, instead of an empty one.
+- Chat titles use more of the available header space when Local only is off.
+- Chat, Files, and project and workspace messages use clearer, consistent names.
+- Clearer wording for sign-in, saved keys, host access and project errors.
+- Context, skills and settings screens now say “chat” instead of thread or conversation, and their messages are clearer.
+- In Chrome and other Chromium browsers, page text behind a dialog is now blurred on narrow screens too, instead of showing through the card.
+- In phone chat, the scroll-to-bottom arrow lines up with the plan control, with notices above and the conversation visible around them.
+- On a phone, a long tool step in a chat and a long model name in Settings' Host access review no longer make the screen scroll sideways.
 - Status banners such as Reconnecting no longer cover the tabs in the right pane.
+- The Approve and Reject buttons in a host-access request sheet, and Revoke in an active one, now sit at the bottom edge of the sheet instead of floating above a strip of scrolling text.
+- The context sheet no longer flickers between readings while it refreshes, and its bar and the context ring grow smoothly to each new reading.
+- The host-access request card now says what host access is before asking you to approve it.
+
+### Agents and plans
+
+- In Focus, tasks assigned to you appear in the chat where they were requested and show a receipt when finished.
+- A paused task, review or decision you owe, including a document review, still reads Needs you in the plan, and so does the task above it; while it is paused it is not flagged or counted anywhere else.
+- On Activity, an agent that is working reads Working even while one of its tasks is set aside, and each row's count says how many tasks are left.
+- When a plan isn't moving, its note names each wait that is overdue.
+- Plan and decision messages use clearer, consistent wording.
+- Agents can search the web with no search key while CORSIA's own local model is running.
+
+### Source and Linux installs
+
+- On macOS, installing from source opens browser setup for your account and model choices, and the desktop app can take over that install.
+- Source installs use the same local model server release as the app and show the cause if installation fails.
+- Source updates explain how to fix a branch with no tracking branch or a branch that has diverged from its tracked branch.
+- On Linux, CORSIA no longer offers to set up a local model; you can connect a provider instead.
+- On Linux, CORSIA starts again after the computer restarts.
+
+### Measurement
+
+- Measurement labels and messages are clearer about what is shown.
 
 ## v0.4.0 — A self-starting Mac app, updates you control, a shared browser, connected apps, and steadier plans
 
@@ -158,6 +319,7 @@ Released 2026-10-16.
 
 - MCP servers imported from your other AI tools arrive as connected apps waiting for your approval. Settings › Connected apps lets you approve, decline, reconnect or remove each one and choose which projects it works in.
 - Connected apps that CORSIA runs on your Mac are sandboxed away from CORSIA's private state and stored keys.
+- Settings › Keys lists the keys your connected apps use, and you can set or replace one there; saving reconnects that app (thanks @dealcoach).
 - Google sign-in is held by CORSIA itself and gives agents email and calendar tools. An agent sends an email or invite only from the exact draft open in its document, and only after your latest message.
 - CORSIA sets up your own private Google project in a browser you can watch; you only sign in and click Allow. Sign-in also asks for Drive, Docs and Sheets now, so you won’t need to sign in again when CORSIA’s tools for them arrive.
 - With Google connected, CORSIA screens new Inbox mail every few minutes and passes it to your agents. It starts from the moment you connect and never replays older mail.

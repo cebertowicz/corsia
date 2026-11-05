@@ -268,6 +268,7 @@ async def test_renderer_seam_attaches_exactly_one_ledger(
         return function(*args, **kwargs)
 
     monkeypatch.setattr("infra.db_async.run_in_db", immediate)
+    monkeypatch.setattr("infra.db_async.run_off_db", immediate)
     if provider == "native":
         prepared_native = SimpleNamespace(
             messages=[{"role": "system", "content": "fixed"}, "FIFO_HEAD"],
@@ -282,10 +283,6 @@ async def test_renderer_seam_attaches_exactly_one_ledger(
         monkeypatch.setattr(
             "core.turn_context.prepare_native_context_payload",
             AsyncMock(return_value=prepared_native),
-        )
-        monkeypatch.setattr(
-            "ws.turn_helpers.build_agent_content",
-            lambda content, _attachments: (content, None),
         )
     elif provider == "cc":
         destination = SimpleNamespace(

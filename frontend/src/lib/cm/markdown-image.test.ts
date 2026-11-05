@@ -8,6 +8,8 @@ import { cursorCharLeft, cursorCharRight, deleteCharBackward, deleteCharForward 
 import { commentMarks, setCommentRanges } from './comment-marks';
 import { commentRail } from './comment-rail';
 import { markdownLivePreview } from './markdown-live';
+import { installLinkTargetResolver } from '$lib/linkTargetResolver';
+import { placeTop } from '$lib/documentReadingPlace';
 import {
 	FAILED_IMAGE, imageContext, imageOpener, imageRequestAt, MISSING_IMAGE, NOT_AN_IMAGE, refreshMarkdownImages, resolveImagePath, UNAVAILABLE_IMAGE,
 	type ImageContext, type OpenImageRequest,
@@ -202,7 +204,8 @@ describe('markdown images in the live preview', () => {
 			expect(down.defaultPrevented).toBe(true);
 			expect(open).toHaveBeenCalledTimes(1);
 			const request: OpenImageRequest = open.mock.calls[0][0];
-			expect(request).toMatchObject({ alt: 'Mock screen', from: at, to: at + IMAGE.length, scrollTop: 0, top: 0 });
+			// Its place is its line's, read the way the document's place is read, so Back holds that line.
+			expect(request).toMatchObject({ alt: 'Mock screen', from: at, to: at + IMAGE.length, scrollTop: 0, top: placeTop(view, at) });
 			expect(imagePath(Object.assign(new Image(), { src: request.src }))).toBe('/ws/notes/shots/a.png');
 			expect(view.state.selection.main.empty).toBe(true);
 			expect(view.dom.querySelector('.cm-md-image-selected')).toBeNull();
@@ -398,5 +401,39 @@ describe('images in a rendered table', () => {
 		expect(mount(web, 0).dom.querySelector('.cm-md-table img')).toBeNull();
 		expect(mount(web, 0).dom.querySelector('.cm-md-table .cm-md-link')?.textContent).toBe('remote');
 		expect(cells(mount(TABLE_DOC, 0, null))).toEqual([]);
+	});
+});
+
+describe('links in a rendered table', () => {
+	const LINK_DOC = ['| Step | Where |', '| - | - |', '| Up | [Steps](../onboarding/steps.md#top) |', '| Here | [Same](same%20dir.md) |', '| Web | [Site](https://example.com/a) |', '| Abs | [Abs](/ws/other/b.md) |', ''].join('\n');
+	const hrefs = (view: EditorView) => [...view.dom.querySelectorAll<HTMLAnchorElement>('.cm-md-table a')].map((a) => a.getAttribute('href'));
+
+	it('points a relative cell link at the document folder, as a link in the text does', () => {
+		expect(hrefs(mount(LINK_DOC, 0))).toEqual(['/ws/onboarding/steps.md', '/ws/notes/same%20dir.md', 'https://example.com/a', '/ws/other/b.md']);
+	});
+
+	it('opens the folder-relative file when the cell link is clicked', async () => {
+		const fetchRevision = vi.fn().mockResolvedValue({ exists: true, path: '/ws/onboarding/steps.md', revision: 'r', size: 1, writable: true, artifact_id: null });
+		const openArtifact = vi.fn();
+		const showError = vi.fn();
+		const deps = {
+			activeThreadId: () => 't1', projectId: () => 'p1',
+			fetchTree: vi.fn().mockResolvedValue([{ id: 'ws', label: 'Workspace', kind: 'workspace' as const, path: '/ws', nodes: [], capped: false }]),
+			fetchRevision, openArtifact, showError, openExternal: vi.fn(), isTauri: () => true, origin: () => 'http://corsia.test',
+			openSettings: vi.fn(), openThread: vi.fn(),
+		};
+		const cleanup = installLinkTargetResolver(document, () => deps);
+		try {
+			mount(LINK_DOC, 0).dom.querySelector<HTMLAnchorElement>('.cm-md-table a')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+			await vi.waitFor(() => expect(openArtifact).toHaveBeenCalledWith('t1', { artifactId: null, path: '/ws/onboarding/steps.md', title: 'steps.md' }));
+			expect(fetchRevision).toHaveBeenCalledWith('/ws/onboarding/steps.md', 'p1');
+			expect(showError).not.toHaveBeenCalled();
+		} finally {
+			cleanup();
+		}
+	});
+
+	it('leaves a cell link as written when the document has no path', () => {
+		expect(hrefs(mount(LINK_DOC, 0, null))[0]).toBe('../onboarding/steps.md#top');
 	});
 });

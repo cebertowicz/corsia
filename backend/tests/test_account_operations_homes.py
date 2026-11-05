@@ -49,6 +49,7 @@ from vendor_account_fixtures import (  # noqa: F401
     ready,
     receipt_of,
     seed_turn_on_default,
+    signed_in_default,
     vendors,
 )
 
@@ -57,12 +58,13 @@ MEASURED = {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
 
 
 def _seed(provider, db):
-    upsert_connection(type="cli", provider=provider, status="available", config={}, db=db)
+    upsert_connection(type="cli", provider=provider, status="available",
+                      config={"harness_model_cache": {}}, db=db)
     model = provider + "/account-test"
     db.execute("""INSERT INTO models
         (id,harness,provider,provider_model_id,litellm_model,display_name,created_at,updated_at)
         VALUES (?,?,?,?,?,?,'t0','t0')""", (model, provider, provider, "account-test", model, "Test"))
-    return model, default_account(provider, db=db)["id"]
+    return model, signed_in_default(provider, db=db, models=(model,))["id"]
 
 
 def _metered_session(db, account):
@@ -80,22 +82,23 @@ def db(isolated_db):
     from infra.database import get_db
 
     upsert_connection(type='cli', provider='codex', status='available', config={'binary': '/bin/test'})
-    default_account('codex')
+    signed_in_default('codex')
     connection = get_db()
     yield connection
     connection.close()
 
 
 def _launch(db, receipt):
+    from connections.account_runtime import homes_for
+
     account = get_account(default_id('codex', db=db), db=db)
-    validate_launch(account, launch=LaunchHomes(account['id'], False), receipt=receipt, model='codex/test', db=db)
+    validate_launch(account, launch=homes_for(account), receipt=receipt, model='codex/test', db=db)
 
 
-def _observe_login_sequence(db, login=1):
+def _sign_in_again(db):
+    """The account's next login: a new login sequence under the same row."""
     identity = default_id('codex', db=db)
-    db.execute('UPDATE vendor_accounts SET identity_json=? WHERE id=?', (json.dumps({'default_comparison': {
-        'facts': {'account_fp': 'synthetic'}, 'auth_state': 'known', 'observation_seq': login, 'login_seq': login}}),
-        identity))
+    set_account_state(identity, 'signed_in', expected_revision=get_account(identity, db=db)['revision'], db=db)
     db.commit()
 
 
@@ -133,13 +136,6 @@ def _launched_session(vendors, provider, tmp_path):
         session = CodexAppServerSession(binary='/synthetic/codex', task=None, corsia_thread_id='destination', model='test', catalog_model_id=model)
     session.corsia_turn_identity = SimpleNamespace(turn_id='frozen')
     return db, row, session
-
-
-def _observe(db, facts, token=None):
-    from connections.account_observation import begin_default_observation, commit_default_observation
-
-    token = token or begin_default_observation('codex', db=db)
-    return commit_default_observation('codex', facts, token=token, schedule_usage_check=False, db=db)
 
 
 def _target(provider):
@@ -190,7 +186,7 @@ def test_turn_receipt_ignores_later_binding_and_supplied_plan_account(isolated_d
     assert start_idle_turn("worker", turn_id="turn", boot_epoch="boot", started_at="t1", db=db)
     assert db.execute("SELECT vendor_account_id FROM active_turns WHERE id='turn'").fetchone()[0] == first
     db.execute("UPDATE thread_vendor_accounts SET account_id=? WHERE thread_id='worker'", (second,))
-    set_account_state(first, "removed", expected_revision=0, db=db)
+    set_account_state(first, "removed", expected_revision=get_account(first, db=db)["revision"], db=db)
     db.commit()
     record_llm_usage("worker", model, MEASURED, turn_id="turn", usage_key="paid:1",
                      binding={**dict.fromkeys(PLAN_FIELDS), "vendor_account_id": second}, vendor_account_id=second)
@@ -252,7 +248,7 @@ async def test_cross_vendor_checkpoint_freezes_actual_writer_not_source_turn(iso
     bound = await bind_usage(request)
     second = add_account("codex", "Later", db=db)["id"]
     db.execute("INSERT INTO thread_vendor_accounts(thread_id,provider,account_id) VALUES ('worker','codex',?)", (second,))
-    set_account_state(writer, "removed", expected_revision=0, db=db)
+    set_account_state(writer, "removed", expected_revision=get_account(writer, db=db)["revision"], db=db)
     db.commit()
     await bound.on_usage("paid:1", writer_model, MEASURED)
     row = db.execute("SELECT turn_id,vendor_account_id FROM llm_usage WHERE source='checkpoint'").fetchone()
@@ -311,7 +307,7 @@ def test_direct_held_usage_keeps_actual_account_after_removal(isolated_db, monke
     with monkeypatch.context() as patch:
         patch.setattr(llm_usage, "_write_direct_usage", broken)
         llm_usage.record_llm_usage("worker", model, MEASURED, vendor_account_id=account)
-    set_account_state(account, "removed", expected_revision=0, db=db)
+    set_account_state(account, "removed", expected_revision=get_account(account, db=db)["revision"], db=db)
     db.commit()
     with usage_settlement(None) as settlement:
         with write_transaction(None, scope="test_settle_direct_usage") as tx:
@@ -401,7 +397,7 @@ async def test_actual_execute_freezes_before_cold_await_and_spend_stays_on_write
                 models={'claude-code/test': {'available': True}}, db=db)
             db.commit()
         elif change == 'binding':
-            default = resolve_account_id('claude-code', db=db)
+            default = signed_in_default('claude-code', db=db)['id']
             db.execute("UPDATE thread_vendor_accounts SET account_id=? WHERE thread_id='destination' AND provider='claude-code'", (default,))
             db.commit()
         return SimpleNamespace(provider_request=replace(request, warm_source=None, cold_source=object()))
@@ -490,35 +486,25 @@ async def test_late_old_session_callbacks_and_unbound_frames_have_no_new_login_e
     assert usage.stored_usage(provider='codex', account_id=custom['id'], db=db) == before
 
 
-def test_an_unobserved_default_launches_with_or_without_a_receipt(db):
-    login_zero = default_receipt('codex', db=db)
-    assert login_zero is not None and login_zero.login_seq == 0
-    _launch(db, None)
-    _launch(db, login_zero)
-
-
 @pytest.mark.parametrize('receipt', ['missing', 'before-observation', 'other-revision'])
-def test_an_observed_default_launches_only_on_its_current_login(db, receipt):
-    login_zero = default_receipt('codex', db=db)
-    _observe_login_sequence(db)
+def test_a_default_launches_only_on_its_current_login(db, receipt):
+    first_login = default_receipt('codex', db=db)
+    _sign_in_again(db)
     current = default_receipt('codex', db=db)
-    assert current is not None and current.login_seq == 1
+    assert current is not None and current.login_seq == first_login.login_seq + 1
+    from connections.account_projection import ensure_projection
+    from connections.account_runtime import homes_for
+    ensure_projection(current, home=Path(homes_for(get_account(current.account_id, db=db)).codex_runtime), kind='live', db=db)
     _launch(db, current)
-    stale = {'missing': None, 'before-observation': login_zero,
-             'other-revision': ReceiptFence(current.account_id, current.account_revision + 1, 1)}[receipt]
+    stale = {'missing': None, 'before-observation': first_login,
+             'other-revision': ReceiptFence(current.account_id, current.account_revision + 1, current.login_seq)}[receipt]
     with pytest.raises(AccountAdmissionError, match='account_login_unverified'):
         _launch(db, stale)
 
 
-def test_an_unobserved_default_still_refuses_a_receipt_from_another_revision(db):
-    login_zero = default_receipt('codex', db=db)
-    with pytest.raises(AccountAdmissionError, match='account_login_unverified'):
-        _launch(db, ReceiptFence(login_zero.account_id, login_zero.account_revision + 1, 0))
-
-
 @pytest.mark.parametrize('lost_anchor', [False, True])
 def test_factual_usage_survives_new_login_and_lost_anchor_without_capacity_release(accounts, lost_anchor):
-    from connections.vendor_accounts import record_default_identity
+    from vendor_account_fixtures import record_default_identity
     from connections import harness_usage
     from infra.llm_usage import record_llm_usage
     from infra.vendor_login import read_turn_receipt
@@ -591,60 +577,30 @@ async def test_codex_replacement_auth_file_is_a_link_change_and_cannot_write(ven
     assert writes == [] and session._pending == {}
 
 
-def test_equal_timestamp_observations_have_monotonic_cas_and_old_read_cannot_land(accounts, monkeypatch):
-    from connections.account_observation import begin_default_observation
-    from connections.vendor_accounts import get_account
-
-    db, default, _, _ = accounts
-    monkeypatch.setattr('connections.account_observation.utc_now_iso', lambda: 'same-clock')
-    first = begin_default_observation('codex', db=db)
-    second = begin_default_observation('codex', db=db)
-    accepted = _observe(db, {'account_fp': 'A'}, first)
-    assert accepted.accepted
-    assert not _observe(db, {'account_fp': 'B'}, second).accepted
-    repeated = _observe(db, {'account_fp': 'A'})
-    assert repeated.accepted and not repeated.login_changed
-    stored = get_account(default['id'], db=db)['identity']['default_comparison']
-    assert (stored['observation_seq'], stored['login_seq'], stored['at']) == (2, 1, 'same-clock')
-    assert stored['facts'] == {'account_fp': 'A'}
-    assert get_account(default['id'], db=db)['revision'] == 0
-
-
-def test_unknown_gap_blocks_old_and_gap_receipts_without_erasing_restrictive_verdict(accounts):
-    from connections.account_receipts import capture_receipt, receipt_is_current
+def test_later_logins_never_reuse_a_prior_login_generation_and_clear_the_prior_login_usage(accounts):
     from connections.account_evidence import mark_discovery
+    from connections.account_receipts import capture_receipt, receipt_is_current
     from connections.harness_usage import record_limited, stored_usage
+    from vendor_account_fixtures import signed_in_default
 
     db, default, _, _ = accounts
-    _observe(db, {'account_fp': 'A'})
+    default = signed_in_default('codex', db=db)
     old = capture_receipt('codex', account_id=default['id'], db=db)
-    record_limited(provider='codex', receipt=receipt_of('codex', default['id'], db=db), reason='plan', resets_at=None, source='synthetic', db=db)
+    record_limited(provider='codex', receipt=old, reason='plan', resets_at=None, source='synthetic', db=db)
     limited = stored_usage(provider='codex', account_id=default['id'], db=db)
-    unknown = _observe(db, {})
-    assert unknown.accepted and unknown.login_changed
-    assert capture_receipt('codex', account_id=default['id'], db=db) is None
+    seen = [old.login_seq]
+    for _ in range(2):  # A, then B, then A again: each sign-in is a new generation
+        set_account_state(default['id'], 'signed_out', expected_revision=get_account(default['id'], db=db)['revision'], db=db)
+        assert capture_receipt('codex', account_id=default['id'], db=db) is None
+        set_account_state(default['id'], 'signed_in', expected_revision=get_account(default['id'], db=db)['revision'], db=db)
+        seen.append(capture_receipt('codex', account_id=default['id'], db=db).login_seq)
+    new = capture_receipt('codex', account_id=default['id'], db=db)
+    assert seen == sorted(set(seen)) and new.login_seq > old.login_seq
     assert not receipt_is_current(old, db=db)
     assert not mark_discovery(default['id'], receipt=old, status='ready', models={'codex/test': {}}, db=db)
-    assert stored_usage(provider='codex', account_id=default['id'], db=db)['vendor_verdicts'] == limited['vendor_verdicts']
-    _observe(db, {'account_fp': 'A'})
-    new = capture_receipt('codex', account_id=default['id'], db=db)
-    assert new.login_seq > old.login_seq
-    assert not receipt_is_current(old, db=db)
+    assert limited['vendor_verdicts']
+    assert not (stored_usage(provider='codex', account_id=default['id'], db=db) or {}).get('vendor_verdicts')  # a sign-in supersedes it
     assert mark_discovery(default['id'], receipt=new, status='ready', models={'codex/test': {}}, db=db)
-
-
-def test_detected_A_B_A_never_reuses_prior_login_generation(accounts):
-    from connections.account_receipts import capture_receipt, receipt_is_current
-    from connections.vendor_accounts import get_account
-
-    db, default, _, _ = accounts
-    _observe(db, {'account_fp': 'A'})
-    old = capture_receipt('codex', account_id=default['id'], db=db)
-    _observe(db, {'account_fp': 'B'})
-    _observe(db, {'account_fp': 'A'})
-    assert not receipt_is_current(old, db=db)
-    record = get_account(default['id'], db=db)['identity']['default_comparison']
-    assert record['facts'] == {'account_fp': 'A'} and record['login_seq'] == 3
 
 
 def test_new_explicit_custom_login_clears_receipt_and_retains_projection_cleanup(accounts):
@@ -679,15 +635,17 @@ def test_new_explicit_custom_login_clears_receipt_and_retains_projection_cleanup
         'phase': 'pending', 'at': projection['stale'][0]['at']}]
 
 
-def test_observation_rollback_changes_no_generation_or_evidence(accounts):
+def test_sign_in_rollback_changes_no_generation_or_evidence(accounts):
     from infra.database import write_transaction
     from connections.vendor_accounts import get_account
+    from vendor_account_fixtures import signed_in_default
 
     db, default, _, _ = accounts
+    signed_in_default('codex', db=db)
     before = get_account(default['id'], db=db)
     with pytest.raises(RuntimeError, match='rollback'):
-        with write_transaction(db, scope='test_observation_rollback'):
-            _observe(db, {'account_fp': 'A'})
+        with write_transaction(db, scope='test_sign_in_rollback'):
+            set_account_state(default['id'], 'signed_in', expected_revision=before['revision'], db=db)
             raise RuntimeError('rollback')
     assert get_account(default['id'], db=db) == before
 
@@ -1186,18 +1144,16 @@ async def test_actual_runtime_stop_cancels_turn_after_concrete_home_failure(vend
 
 
 @pytest.mark.parametrize('provider', ['codex', 'claude-code'])
-@pytest.mark.parametrize('destination,source', [('default','custom'), ('custom','default'), ('x','y')])
+@pytest.mark.parametrize('destination,source', [('custom','default'), ('x','y')])
 def test_cross_account_warm_home_refuses_before_copy(tmp_path, provider, destination, source):
     expected = str(tmp_path / destination)
-    custom = destination != 'default'
-    launch = LaunchHomes(None if not custom else destination, custom,
-        claude_dir=expected if provider == 'claude-code' and custom else None,
+    launch = LaunchHomes(destination,
+        claude_dir=expected if provider == 'claude-code' else None,
         # An added Codex account logs in on ``codex_source`` and transcripts on
         # ``codex_runtime``, and ``homes_for`` refuses them equal: only the
         # transcript home can hold its warm rollout.
-        codex_source=str(tmp_path / destination / 'login') if provider == 'codex' and custom else None,
-        codex_runtime=expected if provider == 'codex' and custom else None,
-        warm_home=expected if not custom else None)
+        codex_source=str(tmp_path / destination / 'login') if provider == 'codex' else None,
+        codex_runtime=expected if provider == 'codex' else None)
     request = SimpleNamespace(warm_source=object(), vendor_launch=launch)
     with pytest.raises(WarmForkUnusable, match='warm_fork_home_mismatch'):
         require_same_operation_home(request, str(tmp_path / source))
@@ -1222,7 +1178,7 @@ def test_added_account_warm_home_is_where_its_own_transcript_lives(vendors, tmp_
     request = admit_fork(CheckpointProviderForkRequest('checkpoint', 'destination', _target(provider),
         'instruction', None, str(tmp_path), warm_source=SimpleNamespace(vendor_account_receipt=receipt),
         vendor_account_id=row['id'], vendor_account_bound=True))
-    assert request.vendor_launch.custom and request.vendor_account_receipt == receipt
+    assert request.vendor_account_receipt == receipt
     # Claude has one explicit config home; Codex transcripts under its runtime home.
     transcript = row['source_home'] if provider == 'claude-code' else row['runtime_home']
     foreign = row['runtime_home'] if provider == 'claude-code' else row['source_home']
@@ -1317,36 +1273,15 @@ async def test_added_account_warm_checkpoint_reaches_a_disposable_launch(vendors
 
 
 @pytest.mark.parametrize('provider', ['codex', 'claude-code'])
-def test_legacy_ambient_warm_home_is_captured_once(vendors, tmp_path, monkeypatch, provider):
-    from connections.account_operation import admit_operation
-    from core.checkpoint_types import CheckpointProviderForkRequest
-
-    home = tmp_path / 'ambient'
-    if provider == 'claude-code':
-        monkeypatch.setattr('subagents.cc_sessions.resolve_claude_dir', lambda: str(home))
-    else:
-        monkeypatch.setattr('llm.codex_rollout_files.default_codex_sessions_root', lambda: home / 'sessions')
-    from vendor_account_fixtures import default_receipt
-
-    source = SimpleNamespace(vendor_account_receipt=default_receipt(provider))
-    request = admit_operation(provider, provider + '/test', CheckpointProviderForkRequest(
-        'checkpoint', 'destination', _target(provider), 'instruction', None, str(tmp_path), warm_source=source))
-    assert request.vendor_launch.custom is False
-    assert request.vendor_launch.warm_home == str(home)
-    assert request.vendor_launch.claude_dir is None
-    require_same_operation_home(request, None)
-    with pytest.raises(WarmForkUnusable):
-        require_same_operation_home(request, str(tmp_path / 'other'))
-
-
-@pytest.mark.parametrize('provider', ['codex', 'claude-code'])
 def test_a_warm_source_stays_warm_only_on_the_login_its_thread_last_ran_on(isolated_db, provider):
     from infra.database import get_db
     from infra.vendor_login import thread_login
     from native_checkpoint_fixtures import seed_vendor_checkpoint_thread
-    from vendor_account_fixtures import default_receipt, seed_turn_on_default
+    from connections.account_runtime import homes_for
+    from vendor_account_fixtures import default_receipt, seed_turn_on_default, signed_in_default
 
     seed_vendor_checkpoint_thread([_target(provider)])
+    signed_in_default(provider, models=(provider + '/test',))
     written = seed_turn_on_default('thread-1', provider + '/test')
     other = 'claude-code' if provider == 'codex' else 'codex'
     db = get_db()
@@ -1355,8 +1290,12 @@ def test_a_warm_source_stays_warm_only_on_the_login_its_thread_last_ran_on(isola
         assert thread_login('thread-1', other, db=db) is None
     finally:
         db.close()
-    home = '/synthetic/default-home'
-    launch = LaunchHomes(None, False, warm_home=home)
+    db = get_db()
+    try:
+        launch = homes_for(get_account(written.account_id, db=db))
+    finally:
+        db.close()
+    home = launch.claude_dir or launch.codex_runtime
     request = SimpleNamespace(warm_source=SimpleNamespace(vendor_account_receipt=written), vendor_launch=launch,
                               vendor_account_receipt=default_receipt(provider))
     require_same_operation_home(request, home)
@@ -1369,9 +1308,8 @@ def test_a_warm_source_stays_warm_only_on_the_login_its_thread_last_ran_on(isola
 @pytest.mark.parametrize('provider', ['claude-code', 'codex'])
 async def test_registered_old_login_source_refuses_new_default_before_copy_or_spawn(vendors, tmp_path, monkeypatch, provider):
     from connections.account_evidence import mark_discovery
-    from connections.account_observation import begin_default_observation, commit_default_observation
     from connections.account_receipts import capture_receipt
-    from connections.vendor_accounts import resolve_account_id
+    from vendor_account_fixtures import signed_in_default
     from core.fork_account import admit_fork
     from core.fork_types import (
         ProviderForkRequest,
@@ -1381,15 +1319,15 @@ async def test_registered_old_login_source_refuses_new_default_before_copy_or_sp
     from registry.models import register_artifact
 
     db, _ = vendors
-    identity = resolve_account_id(provider, db=db)
-    home = tmp_path / 'ambient'
+    default = signed_in_default(provider, db=db)
+    identity = default['id']
+    home = Path(default['source_home'] if provider == 'claude-code' else default['runtime_home'])
     provider_id = '11111111-1111-4111-8111-111111111111'
     model = provider + '/test'
     if provider == 'claude-code':
         from core import fork_cc as adapter
         from subagents.cc_invocation import ClaudeInvocation, claude_invocation_metadata
 
-        monkeypatch.setattr('subagents.cc_sessions.resolve_claude_dir', lambda *_args: str(home))
         path = home / 'projects' / 'synthetic' / (provider_id + '.jsonl')
         seed, mcp = tmp_path / 'seed.txt', tmp_path / 'mcp.json'
         seed.write_text('seed')
@@ -1403,7 +1341,6 @@ async def test_registered_old_login_source_refuses_new_default_before_copy_or_sp
     else:
         from core import fork_codex as adapter
 
-        monkeypatch.setattr('llm.codex_rollout_files.default_codex_sessions_root', lambda: home / 'sessions')
         path = home / 'sessions' / ('rollout-' + provider_id + '.jsonl')
         metadata = {'rollout_path': str(path), 'reasoning_effort': ''}
         artifact_type = 'thread'
@@ -1411,24 +1348,25 @@ async def test_registered_old_login_source_refuses_new_default_before_copy_or_sp
     path.write_text(json.dumps({'type': 'session_meta', 'payload': {'id': provider_id, 'cwd': str(tmp_path)}}) + '\n')
     db.execute("UPDATE threads SET model=? WHERE id='destination'", (model,))
     db.commit()
-    def observe(label):
-        facts = {'account_fp': label} if provider == 'codex' else {'email': label + '@synthetic.invalid', 'org_id': 'synthetic'}
-        observation = begin_default_observation(provider, db=db)
-        assert commit_default_observation(provider, facts, token=observation, schedule_usage_check=False, db=db).accepted
-    observe('A')
+    def observe(_label):
+        set_account_state(identity, 'signed_in', expected_revision=get_account(identity, db=db)['revision'], db=db)
+        db.commit()
     old = capture_receipt(provider, account_id=identity, db=db)
     register_artifact(integration=provider, type=artifact_type, external_id=provider_id,
         parent_thread_id='destination', path=str(path), metadata=metadata, db=db)
+    from vendor_account_fixtures import seed_turn_on_default
+    db.commit()
+    assert seed_turn_on_default('destination', model) == old  # the transcript was written under login A
+    # The registry and transcript owners find A's durable source while A is current.
+    source = await adapter.capture_warm_source('destination', HistoryBoundary(
+        thread_id='destination', history_epoch=0, seq=1, message_id='synthetic'),
+        target=_target(provider), binary='/synthetic/vendor')
+    assert source is not None
     observe('B')
     current = capture_receipt(provider, account_id=identity, db=db)
     assert current.login_seq > old.login_seq
     assert mark_discovery(identity, receipt=current, status='ready', models={model: {'available': True}}, db=db)
     db.commit()
-    # Actual registry/transcript owners still find A's durable source AFTER B was observed.
-    source = await adapter.capture_warm_source('destination', HistoryBoundary(
-        thread_id='destination', history_epoch=0, seq=1, message_id='synthetic'),
-        target=_target(provider), binary='/synthetic/vendor')
-    assert source is not None
     request = admit_fork(CheckpointProviderForkRequest('checkpoint', 'destination', _target(provider),
         'instruction', None, str(tmp_path), binary='/synthetic/vendor', warm_source=source))
     assert request.vendor_account_receipt == current
@@ -1455,11 +1393,15 @@ def test_initial_claim_stamp_is_private_and_retry_remains_identical(accounts):
     receipt = read_turn_receipt("T1", db=db)
     assert receipt is not None
     assert receipt.account_id == default["id"]
-    assert (receipt.account_revision, receipt.login_seq) == (0, 1)
+    from connections.account_receipts import generation_revision
+    from connections.vendor_accounts import get_account
+
+    revision = generation_revision(get_account(default["id"], db=db))  # the Default was signed in, so not row revision 0
+    assert (receipt.account_revision, receipt.login_seq) == (revision, 1)
     assert batch.vendor_receipt == receipt
     assert batch.items[0].metadata == {"visible": "kept"}
     assert json.loads(db.execute("SELECT metadata FROM messages WHERE id='m'").fetchone()[0])[KEY] == {
-        "turn_id": "T1", "account_revision": 0, "login_seq": 1}
+        "turn_id": "T1", "account_revision": revision, "login_seq": 1}
     assert _accept(db, "m", {"visible": "kept"}).duplicate
     public = project_input_message(read_input_broadcast_row("m", db=db))
     assert KEY not in public.get("metadata", {})

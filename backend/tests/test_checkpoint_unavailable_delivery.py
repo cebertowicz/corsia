@@ -16,6 +16,8 @@ from core.checkpoint_types import CheckpointRecord
 from core.checkpoint_wait import CheckpointWaitScope
 from core.turn_core import TurnIdentity
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+
 
 def _boundary(turn: TurnIdentity, *, tokens: int, prepare=None, active=None):
     async def no_installed_context(_record):

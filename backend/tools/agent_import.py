@@ -302,7 +302,7 @@ async def _install(thread_id, thread, decision_id, card, item_ids) -> dict[str, 
                                _workspace(), item_ids, now=now, author_thread_id=thread_id,
                                consent_decision_id=decision_id)
     await _in_plan(lambda db: consent.record_receipt(db, used, INSTALL_OPERATION, {
-        "items": [{key: row[key] for key in ("item_id", "sha256", "outcome") if key in row} for row in results],
+        "items": [{key: row[key] for key in ("item_id", "sha256", "outcome", "reason", "detail") if key in row} for row in results],
     }, {"item_ids": sorted(item_ids)}))
     for row in results:
         _emit_event(thread_id, "install", outcome=str(row["outcome"]), count=1)

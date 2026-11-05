@@ -8,14 +8,6 @@ _IN_FLIGHT: set[tuple[str, str]] = set()
 _IN_FLIGHT_LOCK = threading.Lock()
 
 
-def _ensure_pending_table(conn) -> None:
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS reviewer_gate_pending ("
-        "pr_key TEXT NOT NULL, head_sha TEXT NOT NULL, "
-        "internal_event TEXT NOT NULL, PRIMARY KEY (pr_key, head_sha))"
-    )
-
-
 def get_reviewed_sha(pr_key: str) -> str | None:
     """Return the last reviewed SHA for this PR key, or None."""
     from infra.database import get_db
@@ -36,7 +28,6 @@ def mark_reviewed(pr_key: str, head_sha: str) -> None:
     from infra.database import write_transaction
 
     with write_transaction(None, scope="mark_reviewed") as conn:
-        _ensure_pending_table(conn)
         conn.execute(
             "INSERT OR REPLACE INTO reviewer_gate_state (pr_key, reviewed_sha) "
             "VALUES (?, ?)",
@@ -53,7 +44,6 @@ def record_pending(pr_key: str, head_sha: str, internal_event: str) -> None:
     from infra.database import write_transaction
 
     with write_transaction(None, scope="record_pending_review") as conn:
-        _ensure_pending_table(conn)
         conn.execute(
             "INSERT OR REPLACE INTO reviewer_gate_pending "
             "(pr_key, head_sha, internal_event) VALUES (?, ?, ?)",
@@ -67,10 +57,9 @@ def get_pending() -> list[tuple[str, str, str]]:
 
     conn = get_db()
     try:
-        _ensure_pending_table(conn)
-        return list(conn.execute(
+        return [(row[0], row[1], row[2]) for row in conn.execute(
             "SELECT pr_key, head_sha, internal_event FROM reviewer_gate_pending"
-        ).fetchall())
+        ).fetchall()]
     finally:
         conn.close()
 
@@ -80,7 +69,6 @@ def clear_pending(pr_key: str, head_sha: str) -> None:
     from infra.database import write_transaction
 
     with write_transaction(None, scope="clear_pending_review") as conn:
-        _ensure_pending_table(conn)
         conn.execute(
             "DELETE FROM reviewer_gate_pending WHERE pr_key = ? AND head_sha = ?",
             (pr_key, head_sha),

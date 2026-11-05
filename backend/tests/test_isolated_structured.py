@@ -9,6 +9,9 @@ from typing import Any
 
 import pytest
 
+pytestmark = pytest.mark.usefixtures("signed_in_defaults")  # a harness turn needs a signed-in Default: no ambient login
+DISCOVERED_MODELS = {'claude-code': ('claude-code/reviewer',), 'codex': ('codex/reviewer',)}
+
 
 def _target(harness: str = "native"):
     from llm.resolution import ExecutionTarget
@@ -101,10 +104,10 @@ def test_session_limit_is_unavailable_before_rate_limit_retry() -> None:
     )
 
 
-def test_claude_structured_env_removes_default_config_override() -> None:
+def test_claude_structured_env_binds_the_explicit_account_root_over_an_inherited_override(tmp_path) -> None:
     from llm import isolated_structured
 
-    default = str((Path.home() / ".claude").resolve())
+    account_root = str((tmp_path / "account-home").resolve())
     request = isolated_structured.IsolatedStructuredRequest(
         system_prompt="policy",
         user_prompt="payload",
@@ -118,10 +121,11 @@ def test_claude_structured_env_removes_default_config_override() -> None:
             "CLAUDE_CONFIG_DIR": "/inherited/custom-claude-root",
             "PATH": "/bin",
         },
-        claude_dir=default,
+        claude_dir=account_root,
     )
 
-    assert "CLAUDE_CONFIG_DIR" not in env
+    # There is no ambient Default root to leave unset: every launch names its account's home.
+    assert env["CLAUDE_CONFIG_DIR"] == account_root
 
 
 def _patch_native(monkeypatch, module, response: object) -> None:
@@ -579,20 +583,30 @@ async def test_claude_host_review_disables_retries_and_terminal_title(
         return _ClaudeProcess(envelope)
 
     monkeypatch.setattr(isolated_structured.asyncio, "create_subprocess_exec", spawn)
+    from loguru import logger
 
-    result = await isolated_structured._invoke_claude_code_structured(
-        _target("claude-code"),
-        isolated_structured.IsolatedStructuredRequest(
-            system_prompt="fixed policy",
-            user_prompt="{}",
-            output_schema={"type": "object"},
-            max_output_tokens=100,
-        ),
-        binary="claude",
-        clean_env=lambda: {"PATH": "/bin"},
-    )
+    lines: list[str] = []
+    sink = logger.add(lambda message: lines.append(str(message)), level="INFO", format="{message}")
+    try:
+        result = await isolated_structured._invoke_claude_code_structured(
+            _target("claude-code"),
+            isolated_structured.IsolatedStructuredRequest(
+                system_prompt="fixed policy",
+                user_prompt="{}",
+                output_schema={"type": "object"},
+                max_output_tokens=100,
+            ),
+            binary="claude",
+            clean_env=lambda: {"PATH": "/bin"},
+        )
+    finally:
+        logger.remove(sink)
 
     assert result == {"verdict": "allow"}
+    from vendor_account_fixtures import default_id
+
+    assert [line for line in lines if line.startswith("Claude control process started")] == [
+        f"Claude control process started: account={default_id('claude-code')} operation=structured\n"]
     argv, kwargs = spawned[0]
     schema_arg = argv[argv.index("--json-schema") + 1]
     assert json.loads(schema_arg) == {
@@ -602,11 +616,14 @@ async def test_claude_host_review_disables_retries_and_terminal_title(
         "type": "object",
     }
     assert argv[-2:] == ("--max-turns", "2")
+    from vendor_account_fixtures import default_home
+
     assert kwargs["env"] == {
         "PATH": "/bin",
         "CLAUDE_CODE_DISABLE_BUNDLED_SKILLS": "1",
         "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1",
         "CLAUDE_CODE_MAX_RETRIES": "0",
+        "CLAUDE_CONFIG_DIR": str(Path(default_home("claude-code")).resolve()),
     }
 
 

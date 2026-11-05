@@ -142,7 +142,7 @@ async def test_setup_download_registers_then_forces_a_pin_and_read_back(flight, 
     from llm.local_model import LocalModel
 
     model = LocalModel("Jundot/new-model", 1_000_000, 32_768)
-    keep_loaded = AsyncMock()
+    keep_loaded = AsyncMock(return_value={"status": "loaded"})
     monkeypatch.setattr(flow.prepare, "join", AsyncMock())
     monkeypatch.setattr("llm.local_sources.local_server_for_install", AsyncMock(return_value=("server", 8210, False)))
     monkeypatch.setattr(flow.ls, "_record_model", lambda _model: None)

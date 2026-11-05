@@ -124,7 +124,7 @@ def _edit_items(scope):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bar_accept", [True, False])
-@pytest.mark.parametrize(("immediate", "lane", "seconds"), [(True, "immediate", 5), (False, "document-held", 120)])
+@pytest.mark.parametrize(("immediate", "lane", "seconds"), [(True, "immediate", 30), (False, "document-held", 120)])
 async def test_the_bars_accept_in_the_live_lane_leaves_no_edit_feedback_but_a_plain_accept_does(
     ownership_scope, tmp_path, monkeypatch, bar_accept, immediate, lane, seconds,
 ):

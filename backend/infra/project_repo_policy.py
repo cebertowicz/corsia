@@ -13,6 +13,7 @@ import time
 from collections.abc import Callable
 
 from core.project_context import resolve_project_paths
+from infra.backend_git import git_argv
 from infra.config import WORKSPACE
 from infra.database import get_db
 from infra.git_state_cache import cached_current_branch, cached_layout_error
@@ -216,11 +217,6 @@ def branch_pin_support_error(repo_path: Path) -> str | None:
             "directory; linked worktrees and submodules share Git metadata "
             "outside the registered checkout"
         )
-    if (git_dir / "commondir").exists():
-        return (
-            "branch pinning requires repository-local Git metadata; this checkout "
-            "uses a shared common Git directory"
-        )
     if (git_dir / "reftable").exists():
         return (
             "Git ref storage `reftable` is not supported by branch pinning; "
@@ -326,7 +322,7 @@ def _run_git(
     """Run one bounded Git command; a timeout raises the retryable RepoGitTimeout."""
     try:
         return subprocess.run(
-            ["git", *argv], cwd=str(repo), capture_output=True, text=True, timeout=timeout,
+            git_argv(*argv), cwd=str(repo), capture_output=True, text=True, timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
         raise RepoGitTimeout(f"{operation} timed out: {exc}") from exc
@@ -446,10 +442,8 @@ def repo_checkout_state(repo_path: Path) -> RepoCheckoutState:
 
 
 def _run_branch_mutation(repo: Path, args: list[str], *, operation: str) -> None:
-    """Run a direct-argv Git mutation with all repository hooks disabled."""
-    result = _run_git(
-        repo, ["-c", "core.hooksPath=/dev/null", *args], operation=operation, timeout=30,
-    )
+    """Run a direct-argv Git mutation (the shared options disable repository hooks)."""
+    result = _run_git(repo, args, operation=operation, timeout=30)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()[:240]
         raise ValueError(f"{operation} failed: {detail or 'git failed'}")
@@ -871,19 +865,20 @@ def load_project_repo_policy_snapshot(
     return rows, encoded, hashlib.sha256(hash_payload).hexdigest()
 
 
-def get_project_repo_policies(
-    project_id: str,
-    *,
-    db=None,
-) -> dict[str, RepoPolicy]:
+def get_project_repo_policies(project_id: str, *, db=None) -> dict[str, RepoPolicy]:
     """Return canonical persisted rows without granting unvalidated bindings."""
+    return {p.repo_name: p for p in repo_policies_by_project(db=db, project_id=project_id).get(project_id, [])}
+
+
+def repo_policies_by_project(*, db=None, project_id: str | None = None) -> dict[str, list[RepoPolicy]]:
+    """Canonical persisted rows by project, for one project or, in one read, for all."""
     owns_connection = db is None
     connection = db or get_db()
+    where, params = (" WHERE project_id = ?", (project_id,)) if project_id is not None else ("", ())
     try:
         rows = connection.execute(
-            "SELECT repo_name, repo_path, pinned_branch, protect_base_checkout "
-            "FROM project_repo_policies WHERE project_id = ?",
-            (project_id,),
+            "SELECT project_id, repo_name, repo_path, pinned_branch, protect_base_checkout "
+            "FROM project_repo_policies" + where, params,
         ).fetchall()
     except sqlite3.OperationalError as exc:
         detail = str(exc).lower()
@@ -893,12 +888,11 @@ def get_project_repo_policies(
     finally:
         if owns_connection:
             connection.close()
-    policies = (
-        policy
-        for row in rows
-        if (policy := _policy_from_row(project_id, row)) is not None
-    )
-    return {policy.repo_name: policy for policy in policies}
+    by_project: dict[str, list[RepoPolicy]] = {}
+    for row in rows:
+        if (policy := _policy_from_row(row["project_id"], row)) is not None:
+            by_project.setdefault(row["project_id"], []).append(policy)
+    return by_project
 
 
 def prepare_repo_policy(

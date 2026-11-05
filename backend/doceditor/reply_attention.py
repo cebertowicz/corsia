@@ -77,7 +77,8 @@ def chat_reply_items(db, user_id: str, thread_id: str) -> list[dict]:
     """Read unread chat replies only for the displayed thread."""
     params = (user_id, user_id, thread_id)
     rows = db.execute(f"""WITH unread AS (
-        SELECT a.thread_id,a.user_message_id,a.cid,a.answered_at,c.target_message_id,target.seq AS target_seq,
+        SELECT a.thread_id,COALESCE(c.root_user_message_id,a.user_message_id) AS user_message_id,
+               COALESCE(c.root_cid,a.cid) AS cid,a.answered_at,c.target_message_id,target.seq AS target_seq,
                ROW_NUMBER() OVER (PARTITION BY a.thread_id ORDER BY a.answered_at,a.user_message_id,a.cid) AS position,
                COUNT(*) OVER (PARTITION BY a.thread_id) AS unread_count,
                MAX(a.answered_at) OVER (PARTITION BY a.thread_id) AS newest_at

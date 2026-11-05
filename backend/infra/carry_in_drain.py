@@ -3,18 +3,27 @@
 ``core.carry_in_facts`` owns the append-only facts this reads. Each wake
 settles a claim no running wake owns, reaps finished eval threads, then either
 matches the oldest saved target or advances the oldest pending case.
-It runs only on the one ready local oMLX Native catalog row while ``infra.carry_in_capacity`` proves it idle; otherwise that oldest case
-shows ``no_ready_local_model`` and waits for the next save or restart. The
-same check, on the claimed model only, runs again just before every sample's
-provider call; failing it ends the claimed case in coverage, never a call.
+It runs only on the one ready local oMLX Native catalog row while ``infra.carry_in_capacity`` proves it idle.
+Before the claim it waits, up to the prefill-guard bound, for the seat's other
+clients to go quiet, proving idle once per try; a seat still busy leaves that oldest
+case at ``no_ready_local_model`` until the next save or restart. The same proof, on
+the claimed model only, runs again just before every sample's provider call.
+Refused there for a busy seat, the sample reruns on a fresh eval thread once the
+seat is quiet, within the same bound; only a seat that stays busy past it, or an
+unreadable or lost one, ends the claimed case in coverage, never a call. The wait
+sits outside the Turn, so its timeout never counts it.
 Samples are ordinary fresh eval Turns (``eval.endpoint.run_eval_turn``) under
 record-only tool isolation, so they cannot change anything they act on.
+A candidate sample of a ``trial`` lesson carries the lesson the way task start
+delivers it (``core.lesson_delivery``); a baseline sample carries none. Just
+before each provider call the Turn's own recorded input must match its side.
+A case whose two sides would get the same input retires as ``same_input``: it
+cannot show the lesson's effect.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -22,9 +31,16 @@ from typing import Any
 from loguru import logger
 
 from core import carry_in_facts as facts
-from core.carry_in_facts import CarryInFact, EligibleCase
-from infra import carry_in_capacity as capacity
+from core.carry_in_facts import CarryInFact
+from infra import carry_in_action, carry_in_capacity as capacity
+from infra.carry_in_arm import (
+    Arm as _Arm,
+    arms as _arms,
+    sample_prompt,
+    turn_input as _turn_input,
+)
 from infra.db_async import run_in_db, run_off_db
+from infra.guidance_history_paths import commit_parent, committed_bytes
 
 SAMPLES = 3
 NEEDED = 2
@@ -37,8 +53,8 @@ _running = False
 _again = False
 
 
-class _ManifestMismatch(RuntimeError):
-    """The fresh Turn's recorded context does not carry the lesson version under test."""
+class _DeliveryMismatch(RuntimeError):
+    """The fresh Turn's recorded input does not match its side: the lesson block is missing or present."""
 
 
 class _Unavailable(RuntimeError):
@@ -152,59 +168,53 @@ def _owner(db, thread_id: str) -> dict | None:
     return None if row is None or not row[0] else {"user_id": str(row[0]), "project_id": row[1]}
 
 
-def _manifest_carries(db, manifest_id: str | None, lesson_id: str, version: str) -> bool:
-    from core.guidance_manifest import SKILLS_INDEX_SOURCE_ID
+def _blobs(workspace: Path, fact: CarryInFact, delivered: bool) -> tuple[bytes | None, bytes] | None:
+    """The target before its commit (None when new, or when ``delivered``: not compared) and at it.
 
-    if not manifest_id:
-        return False
-    row = db.execute("SELECT entries_json FROM context_manifests WHERE id=?", (manifest_id,)).fetchone()
-    if row is None:
-        return False
-    for entry in json.loads(row[0]):
-        if entry.get("source_id") == SKILLS_INDEX_SOURCE_ID:
-            return {"id": lesson_id, "behavioral_sha256": version} in (entry.get("lessons") or [])
-    return False
-
-
-def _blobs(workspace: Path, fact: CarryInFact) -> tuple[bytes | None, bytes] | None:
-    """The target before its commit (None when new) and at it; None when its owner must act.
+    None when the case's owner must act.
 
     None means the commit holds no such file or a revision over ``MAX_TARGET_BYTES``.
     A Git fault reading the history raises ``GitFault``: that is no fact about the case.
     """
-    parent = facts.commit_parent(workspace, fact.target_commit)
-    before = facts.committed_bytes(workspace, parent, fact.target_path) if parent else None
-    after = facts.committed_bytes(workspace, fact.target_commit, fact.target_path)
+    parent = commit_parent(workspace, fact.target_commit)
+    before = None if delivered or not parent else committed_bytes(workspace, parent, fact.target_path)
+    after = committed_bytes(workspace, fact.target_commit, fact.target_path)
     if after is None or any(len(blob) > MAX_TARGET_BYTES for blob in (before or b"", after)):
         return None
     return before, after
 
 
-def sample_prompt(case: dict[str, Any], target_path: str, blob: bytes | None) -> str:
-    """The situation and the exact target revision; never the right call or its actions."""
-    lines = [str(case["what_happened"]).strip(), ""]
-    if blob is None:
-        lines.append(f"There is no file at `{target_path}` yet.")
-    else:
-        text = blob.decode("utf-8", errors="replace")
-        fence = "`" * max(3, _longest_backtick_run(text) + 1)
-        lines += [f"`{target_path}` reads:", fence, text.rstrip("\n"), fence]
-    return "\n".join(lines)
-
-
-def _longest_backtick_run(text: str) -> int:
-    longest = run = 0
-    for char in text:
-        run = run + 1 if char == "`" else 0
-        longest = max(longest, run)
-    return longest
-
-
 async def _sample(
-    fact: CarryInFact, owner: dict, model: str, actions: dict, prompt: str, label: str,
+    fact: CarryInFact, owner: dict, model: str, actions: dict, arm: _Arm, label: str,
     created: list[tuple[str, str]],
 ) -> bool:
-    """Run one isolated fresh Turn and score it; raise when it cannot be scored."""
+    """Score one sample, rerunning it while a busy seat goes quiet; raise when it cannot be scored.
+
+    A dispatch-time refusal made no provider call, so the sample waits for quiet
+    (:func:`capacity.ready_idle`, bounded overall by the prefill-guard bound) and reruns on a
+    fresh eval thread. Past the bound, or on a lost or unreadable seat, it ends the case.
+    """
+    from llm.provider_overflow import GUARD_QUIET_TIMEOUT_SECONDS
+
+    clock = asyncio.get_running_loop().time
+    deadline = clock() + GUARD_QUIET_TIMEOUT_SECONDS
+    attempt = 1
+    while True:
+        try:
+            return await _attempt(
+                fact, owner, model, actions, arm, label if attempt == 1 else f"{label}r{attempt}", created,
+            )
+        except _Unavailable:
+            if (left := deadline - clock()) <= 0 or await capacity.ready_idle(model, wait=left) is None:
+                raise
+            attempt += 1
+
+
+async def _attempt(
+    fact: CarryInFact, owner: dict, model: str, actions: dict, arm: _Arm, label: str,
+    created: list[tuple[str, str]],
+) -> bool:
+    """Run one isolated fresh Turn and score it."""
     from core.carry_in_scoring import sample_passes
     from eval.endpoint import open_eval_thread, run_eval_turn
     from eval.tool_allowlist import carry_in_tool_isolation
@@ -221,18 +231,23 @@ async def _sample(
     created.append((thread_id, owner["user_id"]))
     refused: list[RuntimeError] = []
 
-    async def before_dispatch(manifest_id: str | None) -> None:
-        """The last step before this sample's provider call: lesson in context, capacity still exact and idle."""
-        if not await run_in_db(_read, _manifest_carries, manifest_id, fact.lesson_id, fact.behavioral_sha256):
-            refused.append(_ManifestMismatch("context manifest does not carry the lesson version under test"))
+    async def before_dispatch(turn_id: str) -> None:
+        """The last step before this sample's provider call.
+
+        The Turn's own recorded input must hold exactly this side's delivery and
+        capacity must still be exact and idle.
+        """
+        recorded = await run_in_db(_read, _turn_input, thread_id, turn_id)
+        if not arm.carried_by(recorded):
+            refused.append(_DeliveryMismatch("the Turn's recorded input does not match its side's lesson delivery"))
         elif await capacity.ready_idle(model, exclude_thread=thread_id) is None:
             refused.append(_Unavailable(f"{model} is not the one ready, idle local model"))
         if refused:
             raise refused[0]
 
-    with carry_in_tool_isolation():
+    with carry_in_tool_isolation(arm.unseen):
         turn_id, failure = await run_eval_turn(
-            thread_id=thread_id, thread_row=row, prompt=prompt, model=model,
+            thread_id=thread_id, thread_row=row, prompt=arm.prompt, model=model,
             timeout_seconds=SAMPLE_TIMEOUT_SECONDS, after_manifest_before_dispatch=before_dispatch,
         )
     if refused:
@@ -247,49 +262,40 @@ async def _sample(
     return sample_passes(actions, result.tool_calls)
 
 
-async def _run_side(fact, owner, model, actions, prompt, side, created, completed) -> int:
+async def _run_side(fact, owner, model, actions, arm, side, created, completed) -> int:
     """Samples of one side until its outcome is decided; returns the pass count."""
     passes = fails = 0
     for index in range(1, SAMPLES + 1):
         if passes >= NEEDED or fails >= NEEDED:
             break
-        passed = await _sample(fact, owner, model, actions, prompt, f"{side}{index}", created)
+        passed = await _sample(fact, owner, model, actions, arm, f"{side}{index}", created)
         completed[0] += 1
         passes, fails = passes + passed, fails + (not passed)
     return passes
 
 
 async def _evaluate(
-    fact: CarryInFact, case: EligibleCase, owner: dict, model: str,
-    before: bytes | None, after: bytes,
+    fact: CarryInFact, actions: dict, owner: dict, model: str, baseline: _Arm, candidate: _Arm,
 ) -> None:
     """Sample and settle one claimed case; eval threads go once its terminal fact commits."""
     created: list[tuple[str, str]] = []
     completed = [0]
     terminal: dict[str, Any]
     try:
-        actions = case.actions
-        assert actions is not None
-        baseline_passes = await _run_side(
-            fact, owner, model, actions, sample_prompt(case.case, fact.target_path, before),
-            "b", created, completed,
-        )
+        baseline_passes = await _run_side(fact, owner, model, actions, baseline, "b", created, completed)
         baseline_failures = completed[0] - baseline_passes
         if baseline_failures < NEEDED:
             terminal = {"event": facts.RESULT, "verdict": "not_discriminating",
                         "baseline_failures": baseline_failures, "candidate_passes": 0}
         else:
-            candidate_passes = await _run_side(
-                fact, owner, model, actions, sample_prompt(case.case, fact.target_path, after),
-                "c", created, completed,
-            )
+            candidate_passes = await _run_side(fact, owner, model, actions, candidate, "c", created, completed)
             terminal = {
                 "event": facts.RESULT,
                 "verdict": "passed" if candidate_passes >= NEEDED else "failed",
                 "baseline_failures": baseline_failures, "candidate_passes": candidate_passes,
             }
-    except _ManifestMismatch:
-        terminal = {"event": facts.RETIRED, "reason": "manifest_mismatch"}
+    except _DeliveryMismatch:
+        terminal = {"event": facts.RETIRED, "reason": "delivery_mismatch"}
     except _Unavailable as lost:  # claimed identities never re-pend (spec item 6)
         logger.info("carry-in case {} lost local capacity: {}", fact.identity[:16], lost)
         terminal = {"event": facts.COVERAGE, "reason": UNAVAILABLE}
@@ -327,6 +333,8 @@ async def wake(workspace: Path) -> bool:
     """
     from core.turn_core import BOOT_EPOCH
     from infra.guidance_git import GitFault
+    from core.agent import get_agent
+    from llm.provider_overflow import GUARD_QUIET_TIMEOUT_SECONDS
 
     await run_in_db(partial(_write, _settle_interrupted, scope="carry_in_interrupted"))
     await _delete_threads(await run_in_db(_read, _stranded_threads))
@@ -342,21 +350,29 @@ async def wake(workspace: Path) -> bool:
         "owner_missing" if owner is None else
         "not_mechanically_executable" if case.actions is None else None
     )
+    if reason is None and not isinstance(case, str) and case.actions is not None:
+        if not case.actions["decisive_action"]["params"]:
+            registry = (await get_agent()).tools
+            if carry_in_action.unparameterized(case.actions, registry):
+                reason = carry_in_action.UNPARAMETERIZED
     try:
-        blobs = None if reason is not None else await run_off_db(_blobs, workspace, fact)
+        blobs = None if reason is not None else await run_off_db(_blobs, workspace, fact, case.deliver)
     except GitFault as fault:  # the history, not the case, failed: it stays the oldest pending case
         logger.warning("carry-in case {} waits: guidance history unreadable: {}", fact.identity[:16], fault)
         await run_in_db(partial(
             _write, facts.record_waiting, fact, _now(), "history_unavailable", scope="carry_in_waiting",
         ))
         return False
-    if reason is not None or blobs is None:
+    arms = None if reason is not None or blobs is None else _arms(fact, case, *blobs)
+    if arms is not None and arms[0].prompt == arms[1].prompt:
+        reason = "same_input"
+    if reason is not None or arms is None:
         await run_in_db(partial(
             _write, facts.record_terminal, fact, _now(), facts.RETIRED,
             scope="carry_in_retired", reason=reason or "target_unavailable",
         ))
         return True
-    model = await capacity.ready_idle()
+    model = await capacity.ready_idle(wait=GUARD_QUIET_TIMEOUT_SECONDS)
     if model is None:
         await run_in_db(partial(
             _write, facts.record_waiting, fact, _now(), UNAVAILABLE, scope="carry_in_waiting",
@@ -366,7 +382,7 @@ async def wake(workspace: Path) -> bool:
         _write, facts.record_claim, fact, _now(), model, BOOT_EPOCH, scope="carry_in_claim",
     )):
         return True
-    await _evaluate(fact, case, owner, model, *blobs)
+    await _evaluate(fact, case.actions, owner, model, *arms)
     return True
 
 

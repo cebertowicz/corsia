@@ -58,7 +58,7 @@ for (const scenario of ['two-comments', 'comments-only', 'subagent'] as const) {
     await select(page, id, 'First selected phrase', 'First note');
     if (scenario === 'two-comments') await select(page, id, 'Second selected phrase', 'Second note');
     await seedMockResponses(request, [{ content: 'Received comments' }]);
-    const composer = scenario === 'subagent' ? page.getByLabel('Subagent conversation').getByRole('textbox', { name: 'Message CORSIA' }) : chatComposer(page);
+    const composer = scenario === 'subagent' ? page.getByLabel('Agent chat').getByRole('textbox', { name: 'Message CORSIA' }) : chatComposer(page);
     if (scenario !== 'comments-only') await composer.fill('Please address the comments');
     await composer.press('Enter');
     const count = scenario === 'two-comments' ? 2 : 1;

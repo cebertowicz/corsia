@@ -78,7 +78,7 @@ def _get(client: TestClient, path: str, project: str, agent: str) -> dict:
 
 
 @pytest.fixture
-def seeded(isolated_db):
+def seeded(isolated_db, signed_in_defaults):  # the workspace's account limits need an account
     _seed()
     return _client()
 

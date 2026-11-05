@@ -121,7 +121,7 @@ def lifecycle(monkeypatch, seat):
     def never_unload(*_a, **_k):
         raise AssertionError("a send must never unload a model")
 
-    def notify(server_id, model_id, _token):
+    def notify(server_id, model_id, generation):
         network_discovery._LOADED_BY_SERVER[server_id].add(model_id)
 
     monkeypatch.setattr("llm.providers.omlx_lifecycle.load_model", load_model)

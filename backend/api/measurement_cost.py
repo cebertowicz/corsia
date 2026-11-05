@@ -14,6 +14,8 @@ from typing import Any
 
 from fastapi import Depends, Query
 
+from connections import fact_memo
+
 from api.measurement_actual import build_actual
 from api.measurement_average import cost_average
 from api.measurement_breaks import source_started_period
@@ -101,6 +103,7 @@ def register_cost_route(router, *, require_user, resolve_grain) -> None:
         return await cost_read(project, agent, resolve_grain(grain, timezone_name, averaged=True), user)
 
 
+@fact_memo.fact_reads()
 def _usage_rows(db, params: dict[str, Any]) -> list[dict[str, Any]]:
     """One grouped ledger read. Counts are retained usage records; token sums include only admitted rows.
 

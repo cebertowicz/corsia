@@ -57,7 +57,7 @@ test('@surface:attention decision drawer stays above an open artifact leaf', asy
 	await openAppByUrl(page);
 	await page.locator('.thread-item').filter({ hasText: title }).click();
 	await expect(page.locator('.leaf-col')).toBeVisible();
-	const divider = page.getByRole('separator', { name: 'Resize artifact panel' });
+	const divider = page.getByRole('separator', { name: 'Resize Files panel' });
 	await expect(divider).toBeVisible();
 	const leftSidebar = page.locator('aside.sidebar:not(.collapsed)');
 	await expect(leftSidebar).toBeVisible();

@@ -51,7 +51,16 @@ def _patch_lookups(
             pass
 
     db_patch = patch("infra.database.get_db", return_value=_FakeDB())
-    return nullcontext(), db_patch
+    if not catalog_row or catalog_row.get("harness") not in ("claude-code", "codex"):
+        return nullcontext(), db_patch
+    # A harness row's window is what a signed-in account's discovery lists for it now.
+    catalog_row = {**catalog_row, "litellm_model": catalog_row["id"]}
+    listed = {catalog_row["id"]: {
+        "available": True, "context_window": catalog_row["context_window"], "supports_vision": 0,
+        "supports_reasoning": 0, "display_name": catalog_row["id"], "description": "", "last_error": None,
+        "metadata_json": "{}",
+    }}
+    return patch("llm.harness_catalog.account_rows", return_value=listed), db_patch
 
 
 

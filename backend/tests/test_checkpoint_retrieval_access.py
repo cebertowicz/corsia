@@ -17,6 +17,8 @@ reading, which is the vulnerability rather than the fix.
 
 from __future__ import annotations
 
+from infra.thread_confinement import Reader
+
 import asyncio
 
 from checkpoint_retrieval_fixtures import (  # noqa: F401
@@ -40,7 +42,7 @@ def test_search_excludes_another_users_generations(fresh_db):
         fresh_db, thread_id="t-foreign", narrative=FOREIGN_NARRATIVE
     )
 
-    hits = search_checkpoints(fresh_db, "chose", caller_thread_id="t1", limit=5)
+    hits = search_checkpoints(fresh_db, "chose", reader=Reader.agent("t1"), limit=5)
 
     assert [h["thread_id"] for h in hits] == ["t1"]
 
@@ -54,7 +56,7 @@ def test_search_scoped_to_a_foreign_thread_returns_nothing(fresh_db):
     )
 
     hits = search_checkpoints(
-        fresh_db, "vendor", caller_thread_id="t1", thread_id="t-foreign"
+        fresh_db, "vendor", reader=Reader.agent("t1"), thread_id="t-foreign"
     )
 
     assert hits == []
@@ -72,7 +74,7 @@ def test_search_logs_an_unavailable_thread_without_disclosing_it(fresh_db):
     sink = logger.add(records.append, level="INFO", format="{message}")
     try:
         hits = search_checkpoints(
-            fresh_db, "vendor", caller_thread_id="t1", thread_id="t-foreign"
+            fresh_db, "vendor", reader=Reader.agent("t1"), thread_id="t-foreign"
         )
     finally:
         logger.remove(sink)
@@ -92,7 +94,7 @@ def test_recent_refuses_another_users_thread(fresh_db):
     )
 
     assert recent_checkpoints(
-        fresh_db, "t-foreign", caller_thread_id="t1"
+        fresh_db, "t-foreign", reader=Reader.agent("t1")
     ) == []
 
 
@@ -108,9 +110,9 @@ def test_exact_read_refuses_another_users_generation(fresh_db):
         fresh_db, thread_id="t-foreign", narrative=FOREIGN_NARRATIVE
     )
 
-    got = get_checkpoint(fresh_db, cid, caller_thread_id="t1")
+    got = get_checkpoint(fresh_db, cid, reader=Reader.agent("t1"))
     missing = get_checkpoint(
-        fresh_db, "cp-does-not-exist", caller_thread_id="t1"
+        fresh_db, "cp-does-not-exist", reader=Reader.agent("t1")
     )
 
     assert got["error_code"] == "not_found"
@@ -131,9 +133,9 @@ def test_unknown_caller_thread_reads_nothing(fresh_db):
         fresh_db, thread_id="t1", narrative="We chose event routing."
     )
 
-    assert search_checkpoints(fresh_db, "chose", caller_thread_id="ghost") == []
-    assert recent_checkpoints(fresh_db, "t1", caller_thread_id="ghost") == []
-    assert get_checkpoint(fresh_db, cid, caller_thread_id="ghost")[
+    assert search_checkpoints(fresh_db, "chose", reader=Reader.agent("ghost")) == []
+    assert recent_checkpoints(fresh_db, "t1", reader=Reader.agent("ghost")) == []
+    assert get_checkpoint(fresh_db, cid, reader=Reader.agent("ghost"))[
         "error_code"
     ] == "not_found"
 
@@ -150,9 +152,9 @@ def test_owner_still_reads_their_own_generations(fresh_db):
         fresh_db, thread_id="t1", narrative="We chose event routing."
     )
 
-    assert len(search_checkpoints(fresh_db, "chose", caller_thread_id="t1")) == 1
-    assert len(recent_checkpoints(fresh_db, "t1", caller_thread_id="t1")) == 1
-    assert get_checkpoint(fresh_db, cid, caller_thread_id="t1")[
+    assert len(search_checkpoints(fresh_db, "chose", reader=Reader.agent("t1"))) == 1
+    assert len(recent_checkpoints(fresh_db, "t1", reader=Reader.agent("t1"))) == 1
+    assert get_checkpoint(fresh_db, cid, reader=Reader.agent("t1"))[
         "checkpoint_id"
     ] == cid
 

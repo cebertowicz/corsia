@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+from connections import fact_memo
 from core.cost_identity import IdentityResolver
 from api.measurement_join import joined_read
 from api.measurement_model_cost import materialize_chain, query_model_costs, query_recording_gaps
@@ -33,6 +34,7 @@ def window_params(scope_params: dict[str, Any], grain: Grain) -> dict[str, Any]:
     return {**scope_params, "grain": two_windows(grain)}
 
 
+@fact_memo.fact_reads()
 def chain_costs(db, scope_params: dict[str, Any], grain: Grain) -> dict[str, Any]:
     """Every accepted task's classified usage and recording gaps over the two windows.
 

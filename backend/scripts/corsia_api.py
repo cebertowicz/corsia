@@ -11,13 +11,24 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+# The standalone CLIs share the token location with the backend's shell floor.
+_BACKEND = str(Path(__file__).resolve().parents[1])
+if _BACKEND not in sys.path:
+    sys.path.insert(0, _BACKEND)
+
+from infra.api_token_file import api_token_file, move_legacy_token  # noqa: E402
+
 DEFAULT_PORT = 1956  # held equal to infra.default_port by tests/test_default_port.py
 DEFAULT_BASE = f"http://127.0.0.1:{DEFAULT_PORT}"
 
-TOKEN_FILE = Path(
-    os.environ.get("CORSIA_API_TOKEN_FILE")
-    or Path.home() / ".corsia" / ".api-token"
-)
+# An override is the person's own choice of file and lies outside the shell floor.
+_OVERRIDE = os.environ.get("CORSIA_API_TOKEN_FILE")
+TOKEN_FILE = Path(_OVERRIDE or api_token_file(Path.home()))
+
+
+def settle_token_file() -> None:
+    """Move a token left at an earlier location into the token folder."""
+    move_legacy_token(Path.home(), Path(_OVERRIDE) if _OVERRIDE else None)
 
 
 def resolve_token(explicit: str | None) -> str:
@@ -27,17 +38,31 @@ def resolve_token(explicit: str | None) -> str:
     env = os.environ.get("CORSIA_API_TOKEN")
     if env and env.strip():
         return env.strip()
-    if TOKEN_FILE.exists():
-        import stat
+    # Read the file directly rather than asking whether it exists: a closed
+    # folder must say so, and Path.exists either raises or answers False there
+    # depending on the Python version.
+    try:
+        settle_token_file()
         mode = TOKEN_FILE.stat().st_mode
+        tok = TOKEN_FILE.read_text().strip()
+    except (FileNotFoundError, NotADirectoryError):
+        tok = ""
+    except PermissionError as exc:
+        sys.stderr.write(
+            f"Can't read the API token: permission denied ({exc.filename or TOKEN_FILE}).\n"
+            "  Agent shells can't reach the token folder, even under a host-access lease.\n"
+            "  Agents reach CORSIA through its own tools instead.\n"
+        )
+        sys.exit(2)
+    else:
+        import stat
         if mode & (stat.S_IRGRP | stat.S_IWGRP | stat.S_IROTH | stat.S_IWOTH):
             sys.stderr.write(
                 f"WARNING: {TOKEN_FILE} is group/world-readable "
                 f"(mode {oct(mode & 0o777)}). Run: chmod 600 {TOKEN_FILE}\n"
             )
-        tok = TOKEN_FILE.read_text().strip()
-        if tok:
-            return tok
+    if tok:
+        return tok
     sys.stderr.write(
         f"No API token found.\n"
         f"  The credential file {TOKEN_FILE} is missing or empty.\n"

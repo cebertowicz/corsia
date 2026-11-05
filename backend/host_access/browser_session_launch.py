@@ -29,10 +29,24 @@ _COOKIE_TIMEOUT = 5.0
 _COOKIE_PARAMS = ("name", "value", "domain", "path", "secure", "httpOnly", "sameSite", "expires",
                   "priority", "sourceScheme", "sourcePort", "partitionKey")
 _SIGNIN_MISSED = "Saved sign-in wasn't used this time. This browser starts signed out."
+STREAM_MISMATCH = "managed browser stream did not use its reserved listener"
 
 
 class CopyRestoreError(RuntimeError):
     """The copied sign-in could not be restored before the first action."""
+
+
+async def _acquire_owner_lock(owner: Any) -> None:
+    from host_access.browser_owner_lock import acquire
+
+    task = asyncio.create_task(asyncio.to_thread(acquire, owner.socket_dir, create=True))
+    try:
+        owner._lifetime_lock = await asyncio.shield(task)
+    except asyncio.CancelledError:
+        owner._lifetime_lock = await task
+        raise
+    if owner._lifetime_lock is None:
+        raise identity.BrowserIdentityError("browser owner lock is unavailable")
 
 
 async def pin_native(owner: Any, *, changed_message: str) -> None:
@@ -50,6 +64,8 @@ async def pin_native(owner: Any, *, changed_message: str) -> None:
                 path = await asyncio.to_thread(browser_executables.private_native, path)
             path, fingerprint = await asyncio.to_thread(browser_cli.resolve_native, path)
             owner.socket_dir = await asyncio.to_thread(identity.ensure_private_dir, owner.socket_dir)
+            if owner._lifetime_lock is None:
+                await _acquire_owner_lock(owner)
             from host_access.browser_environment import prepare_config
             await asyncio.to_thread(prepare_config, owner.socket_dir)
             result = await owner._invoke((path, "--version"), timeout=5.0)
@@ -83,9 +99,18 @@ async def start_chrome(owner: Any, runtime: Any) -> None:
     from host_access.browser_download import is_private_download
     if not await asyncio.to_thread(is_private_download, owner._chrome):
         await asyncio.to_thread(browser_executables.verify_google, owner._chrome)
+    if runtime.record.profile:
+        from host_access.browser_orphan import close_orphans
+        owned = frozenset(item.chrome.process.pid for item in owner._sessions.values()
+                          if item.chrome is not None and not item.chrome.closed)
+        await asyncio.to_thread(close_orphans, runtime.record.profile, owned)
     runtime.chrome = await ChromeProcess.launch(
         owner._chrome, profile=runtime.record.profile,
         headless=not runtime.record.show_window, ua=owner._user_agent)
+    # A crash between spawn and this record can leak Chrome, but cannot signal an unrelated process.
+    from host_access.browser_owner_lock import record_launched_chrome
+    await asyncio.to_thread(record_launched_chrome, owner.socket_dir, runtime.record.session,
+                            runtime.chrome, runtime.record.profile)
     runtime.chrome.release_stream()
     if runtime.record.profile:
         await apply_kept_signins(runtime)
@@ -113,7 +138,7 @@ async def verify_stream(owner: Any, runtime: Any, result: Any = None) -> None:
     except (ValueError, AttributeError):
         actual = None
     if result.returncode or result.timed_out or result.completion != "exited" or actual != runtime.chrome.stream_port:
-        raise RuntimeError("managed browser stream did not use its reserved listener")
+        raise RuntimeError(STREAM_MISMATCH)
     await asyncio.to_thread(require_listener, runtime.record.binding.pid, actual)
 
 

@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from auth_fixtures import create_accounts_tables, seed_test_accounts  # noqa: E402
 from infra.key_store_schema import KEY_STORE_SCHEMA_SQL  # noqa: E402
+from infra.vendor_account_schema import VENDOR_ACCOUNT_SCHEMA_SQL  # noqa: E402
 
 
 def _resp(status: int, body: Any = None) -> httpx.Response:
@@ -182,6 +183,7 @@ def fresh_db(tmp_path, monkeypatch):
     # server key through its key store row, so they are not optional here.
     create_accounts_tables(conn)
     conn.executescript(KEY_STORE_SCHEMA_SQL)
+    conn.executescript(VENDOR_ACCOUNT_SCHEMA_SQL)
     conn.commit()
     conn.close()
     seed_test_accounts()

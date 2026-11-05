@@ -4,6 +4,7 @@ from pathlib import Path
 
 from core.lesson_index import LessonPartition, TRIAL_MARK, index_line, line_tokens
 from core.skill_registry_types import SkillResolution, SkillRow
+from tests.test_lesson_index import db as lesson_db, workspace as lesson_workspace  # noqa: F401
 
 
 def _row(
@@ -125,7 +126,7 @@ def test_non_system_descriptions_are_bounded_but_system_descriptions_are_not(mon
 
     content = index.prompt_content or ""
     assert f"- system: {long_description}" in content
-    assert f"- workspace: {'x' * 500} (" in content
+    assert content.endswith(f"- workspace: {'x' * 500}")
     assert f"- workspace: {long_description}" not in content
 
 
@@ -162,13 +163,23 @@ def _trial_record(row: SkillRow) -> dict:
     }
 
 
-def test_trial_uses_the_same_bounded_line_as_its_lesson_record(monkeypatch):
-    trial = _trial("trial", "x" * 501)
-    index = _index(monkeypatch, [trial], lessons=[_trial_record(trial)])
-    delivered_line = _trial_record(trial)["index_line"]
+def test_trial_uses_the_same_bounded_line_as_its_lesson_record(monkeypatch, lesson_db, lesson_workspace):
+    from core.lesson_delivery import start_trials
+    from tests import test_lesson_index as lessons
 
-    assert delivered_line in (index.prompt_content or "").splitlines()
-    assert index.metadata["lessons"][0]["index_line"] == delivered_line
+    original = lessons._trial_text
+    monkeypatch.setattr(lessons, "_trial_text", lambda *args, **kwargs: original(*args, **kwargs).replace(
+        "Use when reporting a check result on a pull request.", "x" * 501,
+    ))
+    lessons._activate(lesson_db, lesson_workspace)
+    [lesson] = lessons._task_offers(lesson_db, lesson_workspace)
+    node = lesson_db.execute("SELECT node_id FROM guidance_loads WHERE variant='with'").fetchone()[0]
+    [offer] = start_trials(lesson_db, thread_id="owner", node_id=node)
+    delivered_line = offer["guidance"]
+
+    assert delivered_line == lesson["index_line"]
+    assert "x" * 500 in delivered_line
+    assert "x" * 501 not in delivered_line
 
 
 def test_trial_after_the_ordinary_limit_stays_full(monkeypatch):
@@ -193,3 +204,31 @@ def test_trial_token_estimate_uses_its_delivered_line(monkeypatch):
     skill = inventory["metadata"]["skills"][0]
 
     assert skill["prompt_tokens"] == line_tokens(_trial_record(trial)["index_line"])
+
+
+def _odd_row(scope: str, scope_id: str) -> SkillRow:
+    row = _row("odd", scope, scope_id)
+    return SkillRow(**{**row.__dict__, "path": Path("/elsewhere/renamed/SKILL.md")})
+
+
+def test_rows_sharing_a_root_state_it_once_and_an_odd_path_keeps_its_own(monkeypatch):
+    rows = [_row("first", "workspace", "workspace"), _row("second", "workspace", "workspace"), _odd_row("system", "v1")]
+    lines = (_index(monkeypatch, rows).prompt_content or "").splitlines()
+
+    header = "Skills in /workspace/workspace/ (read /workspace/workspace/<name>/SKILL.md):"
+    assert lines.count(header) == 1
+    assert "- first: Use this skill." in lines
+    assert "- second: Use this skill." in lines
+    assert "- odd: Use this skill. (/elsewhere/renamed/SKILL.md)" in lines
+    assert not any("/first/SKILL.md" in line for line in lines)
+
+
+def test_overflow_names_share_a_root_header_and_an_odd_path_keeps_its_own(monkeypatch):
+    rows = [_row(f"extra-{number:02}", "project", "project") for number in range(40)]
+    rows += [_row("first", "workspace", "workspace"), _row("second", "workspace", "workspace"), _odd_row("workspace", "workspace")]
+    overflow = (_index(monkeypatch, rows).prompt_content or "").splitlines()[-1]
+
+    assert overflow.startswith("Also installed, listed by name only")
+    assert "Skills in /workspace/workspace/ (read /workspace/workspace/<name>/SKILL.md): " in overflow
+    assert "odd (/elsewhere/renamed/SKILL.md)" in overflow
+    assert "/first/SKILL.md" not in overflow

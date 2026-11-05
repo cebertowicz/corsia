@@ -27,11 +27,13 @@ from typing import Any
 
 from loguru import logger
 
+from automation import review_intent
 from core.workflow_result import ResultInvalid, check_result
-from events import worker_starts
+from events import rule_runs, worker_starts
 from events.connectors import worker as worker_events
-from events.rule_outcomes import INVALID, NO_RESULT, QUEUED, REFUSED, RETURNED
+from events.rule_outcomes import INVALID, NO_RESULT, REFUSED, RETURNED
 from infra.database import write_transaction
+from infra.github_pr_identity import GITHUB_INTEGRATION
 from infra.db_async import run_in_db
 from infra.product_events import emit_product_event
 
@@ -39,6 +41,7 @@ from infra.product_events import emit_product_event
 MAX_RESULT = 48 * 1024
 #: How a refusal reads in the owner's ``worker.no_result`` reason.
 REFUSAL_PREFIX = "refused: "
+NO_RESULT_NEXT = "The run ends without a result; a later event starts a new one."
 _ENDED = ("completed", "cancelled", "error")
 #: A turn error the owner may read as is: a short code, never free text.
 _ERROR_CODE = re.compile(r"[A-Za-z][\w.:-]{0,63}\Z")
@@ -56,6 +59,7 @@ class Settle:
     facts: dict[str, Any]
     trace: tuple[str, ...]
     waited: bool = False  # whether the start waited for a free Claude Code slot
+    staging_path: str | None = None
 
 
 def last_turn(db: sqlite3.Connection, worker: str) -> Mapping[str, Any] | None:
@@ -73,22 +77,22 @@ def last_turn(db: sqlite3.Connection, worker: str) -> Mapping[str, Any] | None:
 
 
 def final_message(db: sqlite3.Connection, worker: str, turn_id: str) -> str | None:
-    row = db.execute(
-        "SELECT content FROM messages WHERE thread_id=? AND role='assistant' "
-        "AND json_valid(metadata) AND json_extract(metadata,'$.turn_id')=? "
-        "AND length(trim(content))>0 ORDER BY seq DESC, rowid DESC LIMIT 1",
-        (worker, turn_id),
-    ).fetchone()
+    """Read the same completed answer as delegation before checking its result schema."""
+    from infra.thread_confinement import ChildOutput
+
+    row = ChildOutput.read(db, worker).answer(db, turn_id=turn_id)
     return None if row is None else str(row["content"])
 
 
-def verdict(turn: Mapping[str, Any], text: str | None, schema: dict[str, Any]
-            ) -> tuple[str, dict[str, Any]]:
+def verdict(turn: Mapping[str, Any], text: str | None, schema: dict[str, Any],
+            check: Mapping[str, Any] | None = None) -> tuple[str, dict[str, Any]]:
     """The start's outcome and the facts that say it, for one ended turn."""
     if turn["status"] == "cancelled":
         return NO_RESULT, {"reason": "the agent was stopped"}
     if turn["status"] != "completed":
         error = str(turn["error"] or "")
+        if error == "error_max_turns":  # the CLI's code for an exhausted turn cap
+            return NO_RESULT, {"reason": "the agent reached its turn limit"}
         if _ERROR_CODE.match(error):
             return NO_RESULT, {"reason": f"the agent's turn failed ({error})"}
         logger.warning("rule-started agent turn {} failed: {}", turn["id"], error)
@@ -96,12 +100,31 @@ def verdict(turn: Mapping[str, Any], text: str | None, schema: dict[str, Any]
     if text is None:
         return NO_RESULT, {"reason": "the agent returned no final message"}
     try:
-        payload = json.dumps(check_result(text, schema), ensure_ascii=False, separators=(",", ":"))
+        result = check_result(text, schema)
+        signs = None
+        if check and check.get("result_context"):
+            result = _validate_declared_result(result, check["result_context"])
+            signs = result["injection_signs"]
+            result = result["payload"]
+        payload = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
     except ResultInvalid as exc:
         return INVALID, {"reason": "invalid", "detail": str(exc)[:500]}
+    except Exception:  # noqa: BLE001 - a CORSIA defect must release, not consume, the identity
+        logger.exception("CORSIA could not validate the worker result")
+        return NO_RESULT, {"reason": f"Couldn’t validate the workflow result. {NO_RESULT_NEXT}"}
     if len(payload.encode()) > MAX_RESULT:
         return INVALID, {"reason": "invalid", "detail": f"the result is over {MAX_RESULT} bytes"}
-    return RETURNED, {"result": payload}
+    return RETURNED, {"result": payload, **({"injection_signs": signs} if signs is not None else {})}
+
+
+def _validate_declared_result(payload: dict, context: Mapping[str, Any]) -> dict:
+    """The connector owns validation; identity never comes back from this call."""
+    from events.connector_workflows import resolve_shipped_workflow
+
+    resolved = resolve_shipped_workflow(context["origin"], context["name"])
+    if resolved is None or resolved.error or context["record"] is None:
+        raise RuntimeError("the shipped result contract or captured record is unavailable")
+    return resolved.declaration.result.validate(payload, context["record"])
 
 
 def ready(db: sqlite3.Connection, decision_ids: set[int] | None = None) -> list[Settle]:
@@ -115,16 +138,17 @@ def ready(db: sqlite3.Connection, decision_ids: set[int] | None = None) -> list[
             continue
         check = json.loads(row["run_input"] or "{}")
         outcome, said = verdict(turn, final_message(db, row["worker_thread_id"], turn["id"]),
-                                check.get("schema") or {})
-        settles.append(settlement(row, check, outcome, said))
+                                check.get("schema") or {}, check)
+        settles.append(settlement(row, check, outcome, said, db))
     return settles
 
 
 def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
-               said: Mapping[str, Any]) -> Settle:
+               said: Mapping[str, Any], db: sqlite3.Connection | None = None) -> Settle:
     """The event one start settles with: the envelope (source, item and version, workflow,
-    run, validity) around the payload or the reason."""
+    run, validity, the model its worker was spawned on) around the payload or the reason."""
     kind = worker_events.RESULT if outcome == RETURNED else worker_events.NO_RESULT
+    context = check.get("result_context")
     facts = {
         worker_events.REQUESTER_FACT: row["thread_id"], "rule_id": row["rule_id"],
         "request_event": row["event_id"], "request_identity": row["request_identity"],
@@ -132,10 +156,33 @@ def settlement(row: Mapping[str, Any], check: Mapping[str, Any], outcome: str,
         "source": f"{row['connector']}.{row['event_type']}", "item": row["artifact_external_id"],
         "item_version": check.get("item_version"), "artifact_integration": row["artifact_integration"],
         "artifact_type": row["artifact_type"], "valid": outcome == RETURNED, **said,
+        # The start's own record of what it spawned; a start that never spawned has none.
+        "model": (check.get("settings") or {}).get("model"),
+        # The worker it ran, so a reader can price the run by its thread; a refused start has none.
+        "worker_thread": row["worker_thread_id"],
+        # The repository a script on this event may read (``script_github_channel``).
+        "repo": _artifact_repository(row),
+        # Without a connection the revision read opens its own; the stamp is never left out.
+        **(review_intent.stamp(check.get("intent"), db=db) if outcome == RETURNED else {}),
     }
+    if context:
+        facts.update(source=context["source"], kind=context["kind"], **context["item"],
+                     injection_signs=said.get("injection_signs"))
+    clean_facts = {k: v for k, v in facts.items() if v is not None or (context and k == "injection_signs")}
     return Settle(row["id"], row["thread_id"], outcome, f"{worker_events.NAMESPACE}.{kind}",
-                  f"worker:{row['id']}:{kind}", {k: v for k, v in facts.items() if v is not None},
-                  tuple(check.get("trace") or ()), bool(check.get("waited")))
+                  f"worker:{row['id']}:{kind}", clean_facts,
+                  tuple(check.get("trace") or ()), bool(check.get("waited")),
+                  context["staging_path"] if context else None)
+
+
+def _artifact_repository(row: Mapping[str, Any]) -> str | None:
+    """The ``owner/name`` of the start's GitHub artifact, or None for any other artifact."""
+    from events.connectors.github_pr_notice import parse_pr_external_id
+
+    if row["artifact_integration"] != GITHUB_INTEGRATION or not row["artifact_external_id"]:
+        return None
+    parsed = parse_pr_external_id(str(row["artifact_external_id"]))
+    return parsed[0] if parsed else None
 
 
 async def settle(item: Settle) -> None:
@@ -169,6 +216,7 @@ def _end(item: Settle, reason: str | None, event_refused: bool,
     """Settle the row and, when nothing usable came back, wake its owner once: the outcome
     and whether it woke, or ``None`` when the row was already settled."""
     from events.delivery import enqueue_event_wake
+    from events.worker_labels import labelled_summary
 
     outcome = NO_RESULT if event_refused and item.outcome != REFUSED else item.outcome
     # A refused start's row says only the cause: its outcome already reads "did not start".
@@ -176,23 +224,15 @@ def _end(item: Settle, reason: str | None, event_refused: bool,
     with write_transaction(db, scope="worker_settle") as conn:
         if not worker_starts.end(conn, item.decision_id, outcome, stored):
             return None
-        if outcome == RETURNED or _owner_took(conn, item):
+        if outcome == RETURNED or rule_runs.took(conn, item.event_id, item.owner):
             return outcome, False
         workflow = item.facts.get("workflow") or "a workflow"
         said = (f"A rule couldn’t start {workflow}: {stored}" if outcome == REFUSED
                 else f"The agent a rule started for {workflow} returned no result: {reason}")
         enqueue_event_wake(
-            item.owner, item.event_type, said,
-            {"run_id": str(item.decision_id), "rule_id": item.facts.get("rule_id"),
-             "request_event": item.facts.get("request_event")},
+            item.owner, item.event_type, labelled_summary(said, item.facts),
+            item.facts,
             message_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia:{item.event_id}:wake")), db=conn,
         )
         return outcome, True
 
-
-def _owner_took(conn: sqlite3.Connection, item: Settle) -> bool:
-    """Whether one of the owner's own rules queued a run with the event (R24)."""
-    return conn.execute(
-        "SELECT 1 FROM event_route_decisions WHERE event_id=? AND thread_id=? AND outcome=? LIMIT 1",
-        (item.event_id, item.owner, QUEUED),
-    ).fetchone() is not None

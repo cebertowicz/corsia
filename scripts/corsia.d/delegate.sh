@@ -1,6 +1,9 @@
 # Delegate/doc CLI credential guard (#385).
 
-API_TOKEN_FILE="${CORSIA_API_TOKEN_FILE:-$CORSIA_DIR/.api-token}"
+# Only an override is checked here. Without one, the Python CLI reads the token
+# from its own folder (backend/infra/api_token_file.py), moving a token left at
+# an earlier location there first, and gives the same guidance when none exists.
+API_TOKEN_FILE="${CORSIA_API_TOKEN_FILE:-}"
 
 delegate_has_explicit_token() {
     local a
@@ -22,6 +25,7 @@ ensure_delegate_token() {
     done
     [ -n "${CORSIA_API_TOKEN:-}" ] && return 0
     delegate_has_explicit_token "$@" && return 0
+    [ -z "$API_TOKEN_FILE" ] && return 0
 
     if [ -s "$API_TOKEN_FILE" ]; then
         return 0

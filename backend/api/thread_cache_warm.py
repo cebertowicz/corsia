@@ -6,7 +6,7 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 from api.thread_cache_warm_probe import (
-    probe_is_memory_hot,
+    probe_is_memory_hot, shape_warm_messages,
     probe_progress,
     warm_transport_identity,
 )
@@ -150,7 +150,7 @@ async def _build_warm_prefix(
         f"trimmed={prefix_info['was_trimmed']}, "
         f"opening={pending_opening is not None})"
     )
-    messages = sanitize_messages(sanitize_empty_content(messages))
+    messages = sanitize_messages(sanitize_empty_content(shape_warm_messages(messages, target)))
     prompt_shape = make_prompt_extra_body(
         messages,
         reasoning_effort,

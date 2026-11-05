@@ -16,9 +16,9 @@ from core.corrections_recording import (
     LABEL_CORRECTION,
     SOURCE_KIND_DECISION_ANSWER,
     SOURCE_KIND_DOC_COMMENT,
+    SOURCE_KIND_CHAT_COMMENT,
     SOURCE_KIND_MESSAGE,
 )
-from core import workflow_verdict_evaluator
 from core.workflow_verdict_read import PLANNED_EVENT, REACHED_EVENT
 from core.lesson_report_receipts import read_offer_evidence
 from events.learning_report import deliver_learning_report_sync
@@ -31,6 +31,7 @@ MAX_REFS = 50
 PERSON_CORRECTION_SOURCES = (
     SOURCE_KIND_MESSAGE,
     SOURCE_KIND_DOC_COMMENT,
+    SOURCE_KIND_CHAT_COMMENT,
     SOURCE_KIND_DECISION_ANSWER,
 )
 _PERSON_CORRECTION_SOURCE_PLACEHOLDERS = ", ".join("?" for _ in PERSON_CORRECTION_SOURCES)
@@ -185,14 +186,10 @@ def build_report(db: sqlite3.Connection, *, scope: str, report_date: str, report
     for row in corrections:
         correction_refs[str(row["source_kind"])].append(str(row["subject_key"]))
     lessons, lesson_agents = _lessons(db, scope, report_date)
-    experiments = (
-        {
-            "started": _experiment_count(db, scope, report_date, PLANNED_EVENT),
-            "decided": _experiment_count(db, scope, report_date, REACHED_EVENT),
-        }
-        if workflow_verdict_evaluator.VERDICT_WRITES_ENABLED
-        else {"started": None, "decided": None}
-    )
+    experiments = {
+        "started": _experiment_count(db, scope, report_date, PLANNED_EVENT),
+        "decided": _experiment_count(db, scope, report_date, REACHED_EVENT),
+    }
     items = {
         "corrections": {source: _count(refs) for source, refs in sorted(correction_refs.items())},
         "lessons": lessons,

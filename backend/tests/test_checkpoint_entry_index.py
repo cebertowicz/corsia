@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from infra.thread_confinement import Reader
+
 import json
 
 from checkpoint_retrieval_fixtures import (  # noqa: F401
@@ -41,7 +43,7 @@ def test_non_ascii_words_are_found(fresh_db):
         continuity=[_entry(1, "The café menu is pinned.")],
     )
 
-    hits = search_checkpoints(fresh_db, "café", caller_thread_id="t1")
+    hits = search_checkpoints(fresh_db, "café", reader=Reader.agent("t1"))
 
     assert [hit["kind"] for hit in hits] == ["continuity_entry"]
     assert _index_rows(fresh_db) == [(1, 1, "The café menu is pinned.")]
@@ -85,7 +87,7 @@ def test_entry_without_a_revision_is_indexed(fresh_db):
     from memory.checkpoint_search import search_checkpoints
 
     assert _index_rows(fresh_db) == [(1, 0, "Legacy.")]
-    hits = search_checkpoints(fresh_db, "legacy", caller_thread_id="t1")
+    hits = search_checkpoints(fresh_db, "legacy", reader=Reader.agent("t1"))
     assert [hit["kind"] for hit in hits] == ["continuity_entry"]
 
 
@@ -148,7 +150,7 @@ def test_hits_merge_by_relevance_with_generation_order_as_tiebreak(
     ])
 
     hits = search.search_checkpoints(
-        fresh_db, "anything", caller_thread_id="t1", limit=5, per_thread=5
+        fresh_db, "anything", reader=Reader.agent("t1"), limit=5, per_thread=5
     )
 
     assert [h["name"] for h in hits] == [
@@ -171,7 +173,7 @@ def test_stale_index_row_is_dropped_with_a_distinct_log_reason(fresh_db):
     messages: list[str] = []
     sink = logger.add(lambda m: messages.append(str(m)), level="WARNING")
     try:
-        hits = search_checkpoints(fresh_db, "ghostword", caller_thread_id="t1")
+        hits = search_checkpoints(fresh_db, "ghostword", reader=Reader.agent("t1"))
     finally:
         logger.remove(sink)
 
@@ -285,11 +287,11 @@ def test_duplicate_keys_in_one_batch_match_row_by_row_upsert(fresh_db):
         (2, 1, "facts", "First new duplicate.", duplicate_order, duplicate_order),
     ]
     assert [hit["kind"] for hit in search_checkpoints(
-        fresh_db, "original", caller_thread_id="t1"
+        fresh_db, "original", reader=Reader.agent("t1")
     )] == ["continuity_entry"]
     assert search_checkpoints(
-        fresh_db, "replacement", caller_thread_id="t1"
+        fresh_db, "replacement", reader=Reader.agent("t1")
     ) == []
     assert [hit["kind"] for hit in search_checkpoints(
-        fresh_db, "new", caller_thread_id="t1"
+        fresh_db, "new", reader=Reader.agent("t1")
     )] == ["continuity_entry"]

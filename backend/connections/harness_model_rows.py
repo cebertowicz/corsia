@@ -184,3 +184,15 @@ def normalize_codex_models(
                 )
         models.append(row)
     return models
+
+
+def retain_discovered_context(row: dict, previous: dict | None) -> dict:
+    """Keep exact-identity context evidence when this refresh could not re-observe it."""
+    result = dict(row)
+    if (result.get('context_window') is None and previous
+            and result.get('resolved_identity')
+            and result.get('resolved_identity') == previous.get('resolved_identity')):
+        result['context_window'] = previous.get('context_window')
+        if isinstance(previous.get('context_observation'), dict):
+            result['context_observation'] = previous['context_observation']
+    return result

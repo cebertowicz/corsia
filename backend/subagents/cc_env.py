@@ -29,7 +29,6 @@ every long turn into a stream of status lines.
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 _STRIP_PREFIXES = ("CLAUDE_CODE_",)
 _STRIP_EXACT = frozenset({"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"})
@@ -57,21 +56,7 @@ def apply_claude_config_dir(
     env: dict[str, str],
     claude_dir: str | None,
 ) -> None:
-    """Bind a custom Claude root without disabling default macOS Keychain auth.
+    """Bind the explicit account root used by transcript discovery and launch."""
+    from subagents.cc_sessions import resolve_claude_dir
 
-    Claude Code changes credential stores whenever ``CLAUDE_CONFIG_DIR`` is
-    present, even when it merely names the normal ``~/.claude`` directory.
-    The default root therefore must be represented by an absent variable. A
-    genuinely custom root remains explicit so transcript discovery and the
-    spawned process stay on the same root.
-    """
-    if claude_dir is None:
-        return
-
-    resolved = Path(claude_dir).expanduser().resolve()
-    default = (Path.home() / ".claude").resolve()
-    if resolved == default:
-        env.pop("CLAUDE_CONFIG_DIR", None)
-        return
-
-    env["CLAUDE_CONFIG_DIR"] = str(resolved)
+    env["CLAUDE_CONFIG_DIR"] = resolve_claude_dir(claude_dir)
