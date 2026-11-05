@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+
 from check_docs_drift import citation_verify as verify
 
 
@@ -38,6 +40,36 @@ def test_missing_paths_still_reports_missing_when_absent_from_both_locations(tmp
     missing = verify.missing_paths({"infra/ghost.py"}, tmp_path, fallback_dir="backend")
 
     assert missing == ["infra/ghost.py"]
+
+
+def test_glob_citations_are_not_treated_as_literal_paths(tmp_path):
+    assert verify.missing_paths({"docs/*.md", "docs/a?.md", "docs/[ab].md"}, tmp_path) == []
+
+
+def test_git_control_paths_are_not_repository_file_citations(tmp_path):
+    assert verify.missing_paths({".git/config", ".git/commondir"}, tmp_path) == []
+
+
+def test_line_suffix_is_removed_for_existence_checks(tmp_path):
+    (tmp_path / "source.py").write_text("")
+    paths = {"source.py:47", "source.py:47-52", "missing.py:3"}
+    assert verify.missing_paths(paths, tmp_path) == ["missing.py:3"]
+
+
+def test_git_ignored_paths_are_checked_in_one_batch(tmp_path, monkeypatch):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    (tmp_path / ".gitignore").write_text("*.local\n")
+    calls = []
+    run = subprocess.run
+
+    def record(*args, **kwargs):
+        calls.append(args[0])
+        return run(*args, **kwargs)
+
+    monkeypatch.setattr(verify.subprocess, "run", record)
+    paths = {"one.local", "two.local", "missing.txt"}
+    assert verify.missing_paths(paths, tmp_path) == ["missing.txt"]
+    assert calls == [["git", "check-ignore", "--stdin", "-z"]]
 
 
 def _write_api_file(api_dir, name: str, text: str) -> None:

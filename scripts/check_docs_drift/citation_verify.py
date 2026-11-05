@@ -23,6 +23,7 @@ soundness compromise, not a completeness one.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 _ROUTE_DECORATOR_RE = re.compile(r'@router\.[a-z]+\(\s*["\']([^"\']*)["\']')
@@ -67,14 +68,28 @@ def missing_paths(candidates: set[str], repo_root: Path, fallback_dir: str | Non
     exist only under `backend/`, and the bare `infra/` top-level directory
     is unrelated (CI tooling only).
     """
-    missing = []
-    for candidate in sorted(candidates):
-        if (repo_root / candidate).exists():
-            continue
-        if fallback_dir and (repo_root / fallback_dir / candidate).exists():
-            continue
-        missing.append(candidate)
-    return missing
+    paths = {candidate: re.sub(r":\d+(?:-\d+)?$", "", candidate) for candidate in candidates}
+    paths = {c: p for c, p in paths.items() if not any(ch in p for ch in "*?[") and not p.startswith(".git/")}
+    missing = {
+        c: p for c, p in paths.items()
+        if not (repo_root / p).exists()
+        and not (fallback_dir and (repo_root / fallback_dir / p).exists())
+    }
+    ignored = _ignored_paths(set(missing.values()), repo_root)
+    return sorted(c for c, path in missing.items() if path not in ignored)
+
+
+def _ignored_paths(paths: set[str], repo_root: Path) -> set[str]:
+    """Ask Git once for all missing paths; ignored local files are valid citations."""
+    if not paths or not (repo_root / ".git").exists():
+        return set()
+    result = subprocess.run(
+        ["git", "check-ignore", "--stdin", "-z"], cwd=repo_root,
+        input="\0".join(sorted(paths)) + "\0", text=True, capture_output=True,
+    )
+    if result.returncode not in (0, 1):
+        raise RuntimeError(f"git check-ignore failed: {result.stderr.strip()}")
+    return set(result.stdout.split("\0")) - {""}
 
 
 def _normalize_route(route: str) -> str:

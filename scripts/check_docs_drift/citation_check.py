@@ -99,13 +99,19 @@ def _cited_python_version(repo_root: Path) -> str | None:
 
 
 def _check_paths(repo_root: Path, top_level: set[str], result: CitationResult) -> None:
+    by_doc = {}
     for doc in (*PATH_CHECK_DOCS, *sorted((repo_root / "docs").rglob("*.md"))):
         full = repo_root / doc
         if full.exists():
-            candidates = extract.extract_path_candidates(full.read_text(encoding="utf-8"), top_level)
-            result.checked_paths += len(candidates)
-            missing = verify.missing_paths(candidates, repo_root, fallback_dir="backend")
-            result.missing_paths.extend(f"{full.relative_to(repo_root)}: {path}" for path in missing)
+            by_doc[full.relative_to(repo_root)] = extract.extract_path_candidates(
+                full.read_text(encoding="utf-8"), top_level
+            )
+    candidates = set().union(*by_doc.values())
+    result.checked_paths = len(candidates)
+    missing = set(verify.missing_paths(candidates, repo_root, fallback_dir="backend"))
+    result.missing_paths = [
+        f"{doc}: {path}" for doc, paths in by_doc.items() for path in sorted(paths & missing)
+    ]
 
 
 def _check_routes_and_subcommands(repo_root: Path, result: CitationResult) -> None:

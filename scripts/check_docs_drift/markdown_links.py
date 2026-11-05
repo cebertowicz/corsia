@@ -1,4 +1,4 @@
-"""Check relative Markdown links in the documentation tree using stdlib only."""
+"""Check inline and explicit reference Markdown links in docs using stdlib only."""
 
 from __future__ import annotations
 
