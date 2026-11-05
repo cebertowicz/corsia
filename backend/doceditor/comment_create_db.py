@@ -90,6 +90,18 @@ def _image(db, request: CommentInput, quote: str | None) -> tuple[str | None, st
     return str(image), image_regions.image_revision(image)
 
 
+def _record_tags(connection, request: CommentInput, row: dict) -> None:
+    """Store a new comment's tags and mentions, and count a tagged post once it commits."""
+    comment_recipients.save_tags(connection, row, request.tagged_agent_ids)
+    comment_recipients.save_mentions(connection, row, request.tagged_agent_mentions)
+    if request.tagged_agent_ids:
+        tags = {"tag_count": len(set(request.tagged_agent_ids)), "reply": bool(request.parent_id),
+                "author_kind": request.author_kind}
+        after_commit(connection, lambda: live_events.emit("comment_tagged", **tags))
+    if request.author_thread_id:
+        comment_recipients.reset_action(connection, row, request.author_thread_id)
+
+
 def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, receipt: CreateReceipt):
     """The commit receipt belongs to the outer transaction that creates row and feedback."""
     db = get_db()
@@ -130,14 +142,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 region=request.region, image_rev=image_rev, image_src=image_src, announce=request.author_kind != "user", db=connection,
             )
             if created:
-                comment_recipients.save_tags(connection, row, request.tagged_agent_ids)
-                comment_recipients.save_mentions(connection, row, request.tagged_agent_mentions)
-                if request.tagged_agent_ids:
-                    tags = {"tag_count": len(set(request.tagged_agent_ids)), "reply": bool(request.parent_id),
-                            "author_kind": request.author_kind}
-                    after_commit(connection, lambda: live_events.emit("comment_tagged", **tags))
-                if request.author_thread_id:
-                    comment_recipients.reset_action(connection, row, request.author_thread_id)
+                _record_tags(connection, request, row)
             comment_recipients.tags_for_comments(connection, [row])
             if request.review_request_id is not None:
                 review_lifecycle.admit_feedback(
