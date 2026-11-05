@@ -116,7 +116,7 @@ async def test_refused_read_stops_after_one_attempt_with_reason(monkeypatch, cap
 
 
 @pytest.mark.asyncio
-async def test_four_held_reads_drop_and_clear_state(monkeypatch, caplog):
+async def test_four_held_reads_keep_pending_and_clear_memory(monkeypatch, caplog):
     calls, sink = [], Sink()
 
     async def read(*_args):
@@ -130,8 +130,10 @@ async def test_four_held_reads_drop_and_clear_state(monkeypatch, caplog):
         await finish(agg)
     assert len(calls) == 4 and not sink.events
     assert not agg._tasks and not agg._facts
-    drops = [r for r in caplog.records if "dropped after retries" in r.message]
-    assert len(drops) == 1 and drops[0].levelno == logging.WARNING
+    kept = [r for r in caplog.records if "kept for restart after retries" in r.message]
+    assert len(kept) == 1 and kept[0].levelno == logging.WARNING
+    assert [entry["head_sha"] for entry in await checks.pending.pending()] == ["abc"]
+    await checks.pending.forget("o/r", "abc")
 
 
 @pytest.mark.asyncio
@@ -145,6 +147,8 @@ async def test_many_settled_and_failed_heads_leave_no_state(monkeypatch):
         agg.observe(payload(f"{'bad' if n % 2 else 'good'}{n}"))
     await finish(agg)
     assert not agg._tasks and not agg._facts
+    for n in range(1, 20, 2):
+        await checks.pending.forget("o/r", f"bad{n}")
 
 
 @pytest.mark.asyncio
@@ -162,6 +166,7 @@ async def test_sink_failure_is_logged_and_clears_both_maps(monkeypatch, caplog):
     await finish(agg)  # never escapes the task
     assert "could not admit settled head" in caplog.text
     assert not agg._tasks and not agg._facts
+    await checks.pending.forget("o/r", "abc")
 
 
 @pytest.mark.asyncio
@@ -178,6 +183,7 @@ async def test_refusal_logged_without_optional_none_facts(monkeypatch, caplog):
     assert sink.events[0]["facts"] == {"repo": "o/r", "head_sha": "abc", "conclusion": "success"}
     assert "code=unknown_type" in caplog.text and "private details" not in caplog.text
     assert sink.events[0]["origin"] == "connector"
+    assert len(sink.events) == 1
 
 
 @pytest.mark.asyncio
@@ -279,15 +285,16 @@ def test_event_identity_depends_on_suites_not_delivery():
     assert checks._event_id("o/r", "abc", suites) != checks._event_id("o/r", "abc", [{**suites[0], "updated_at": "later"}])
 
 
-def test_hook_requires_both_switches(monkeypatch):
-    monkeypatch.setenv(checks.ENABLE_ENV, "1")
-    monkeypatch.setenv("CORSIA_TEST_MODE", "1")
-    assert checks.hook_disabled_reason() == "test_mode"
+def test_hook_defaults_on_except_test_mode_or_explicit_disable(monkeypatch):
+    monkeypatch.delenv(checks.ENABLE_ENV, raising=False)
     monkeypatch.setenv("CORSIA_TEST_MODE", "0")
     monkeypatch.setenv(poller.DISABLE_ENV, "1")
     assert checks.hook_disabled_reason() is None
-    monkeypatch.delenv(checks.ENABLE_ENV)
+    monkeypatch.setenv(checks.ENABLE_ENV, "0")
     assert checks.hook_disabled_reason() == "not_enabled"
+    monkeypatch.setenv(checks.ENABLE_ENV, "1")
+    monkeypatch.setenv("CORSIA_TEST_MODE", "1")
+    assert checks.hook_disabled_reason() == "test_mode"
 
 
 async def _settled(monkeypatch, read, number=7):
