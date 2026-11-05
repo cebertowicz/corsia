@@ -18,9 +18,10 @@ export { seedThreadModelTruth, threadModelFor, threadModelVersion } from './thre
 export type { PendingThreadModelSaveResult } from './threadModelSwitch';
 
 export type ReasoningConfig =
-	// `supports_auto` marks a provider that has its own "pick for me" mode, which
-	// external harnesses and cloud providers do. Local models do not: we know the
-	// level the server is configured to use, so the picker opens on that value.
+	// `supports_auto` marks a model whose unset level means something: a
+	// provider's own "pick for me" mode, or a local model whose server sets no
+	// level, so its template default runs. A local model whose server does set a
+	// level has no Auto and opens on that level.
 	// An External model's levels come from its provider's published list, with
 	// no known default (`default: null`) and no "Off" unless the list has one
 	// (`supports_off: false`).
