@@ -76,9 +76,7 @@ class Failed:
 
 @dataclass(frozen=True)
 class AgentAccountView:
-    """One read of the agents' account; ``absent`` is the only state that leaves shells alone.
-
-    A rule-started script is locked even then (``script_env``)."""
+    """One read of the agents' account; ``absent`` leaves ordinary shells alone."""
 
     state: str  # not_installed | needs_auth | unverified | wrong_account | ready
     cause: Cause | None = None
@@ -308,14 +306,6 @@ def shell_env(account: AgentAccountView) -> dict[str, str]:
     return {} if account.absent else _identity_env(account)
 
 
-def script_env(account: AgentAccountView) -> dict[str, str]:
-    """A rule-started script's GitHub identity: a shell's, but locked with no account too.
-
-    No person is at the keyboard to own a fallback to their own login, so an absent
-    account gets the locked state rather than the person's setup.
-    """
-    return _identity_env(account)
-
 
 def _identity_env(account: AgentAccountView) -> dict[str, str]:
     entries = _git_config(account)
@@ -326,6 +316,25 @@ def _identity_env(account: AgentAccountView) -> dict[str, str]:
         env[f"GIT_CONFIG_VALUE_{index}"] = value
     assert set(env) == set(BOT_ENV_NAMES)
     return env
+
+
+def script_forwarder_credential(account: AgentAccountView) -> str:
+    """Read the agents' credential for the script forwarder only; never return it to a script."""
+    import yaml
+
+    if not account.ready or not account.home:
+        raise ValueError("agents' GitHub account is not ready")
+    try:
+        document = yaml.safe_load((Path(account.home) / "hosts.yml").read_text())
+        host = document["github.com"]
+        value = host.get("oauth_token")
+        if value is None and account.login:
+            value = host.get("users", {}).get(account.login, {}).get("oauth_token")
+        if not isinstance(value, str) or not value:
+            raise ValueError("agents' GitHub credential is unavailable")
+        return value
+    except (OSError, KeyError, TypeError, yaml.YAMLError) as exc:
+        raise ValueError("agents' GitHub credential is unavailable") from exc
 
 
 def backend_gh(account: AgentAccountView) -> tuple[str, dict[str, str] | None]:

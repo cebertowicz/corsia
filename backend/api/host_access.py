@@ -64,6 +64,62 @@ def _serialize_lease(row: dict) -> dict:
     return result
 
 
+@router.get("/scripts")
+async def script_requests(
+    root_thread_id: str | None = None,
+    user: dict = Depends(require_user),
+    interactive_ui: str | None = Header(None, alias=INTERACTIVE_UI_HEADER),
+):
+    from automation.script_decisions import pending
+    from infra.db_async import run_in_db
+
+    rows = await run_in_db(pending, user["id"], root_thread_id)
+    if interactive_ui == "1":
+        require_human_user(user)
+        rows = [attach_user_decision_capability(row, user_id=user["id"]) for row in rows]
+    return {"scripts": rows}
+
+
+async def _decide_script(schedule_id: str, body: LeaseMutation, user: dict,
+                         capability: str | None, approve: bool):
+    from automation.script_decisions import decide
+    from events.delivery import deliver_to_thread
+    from infra.db_async import run_in_db
+
+    if body.revision != 1 or not verify_user_decision_capability(
+        capability, {"id": schedule_id, "revision": body.revision,
+                     "application_hash": body.application_hash},
+        user_id=user["id"], operation="approve" if approve else "reject",
+    ):
+        raise HTTPException(403, "A current interactive user decision is required")
+    try:
+        thread_id, state = await run_in_db(decide, schedule_id, user["id"], body.application_hash, approve)
+    except LookupError as exc:
+        raise HTTPException(404, "Script request not found") from exc
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    from host_access.change_nudge import changed_message
+    from infra import state as runtime_state
+    runtime_state.broadcast_to_user(user["id"], changed_message({"id": schedule_id, "root_thread_id": thread_id}))
+    await deliver_to_thread(thread_id, f"script_access.{state}", f"Authenticated script {state}.",
+                            {"schedule_id": schedule_id}, delivery_id=f"script-access:{schedule_id}:{state}")
+    return {"id": schedule_id, "state": state}
+
+
+@router.post("/scripts/{schedule_id}/approve")
+async def approve_script(schedule_id: str, body: LeaseMutation,
+                         user: dict = Depends(require_human_user),
+                         capability: str | None = Header(None, alias=USER_DECISION_HEADER)):
+    return await _decide_script(schedule_id, body, user, capability, True)
+
+
+@router.post("/scripts/{schedule_id}/reject")
+async def reject_script(schedule_id: str, body: LeaseMutation,
+                        user: dict = Depends(require_human_user),
+                        capability: str | None = Header(None, alias=USER_DECISION_HEADER)):
+    return await _decide_script(schedule_id, body, user, capability, False)
+
+
 @router.get("")
 async def leases(
     root_thread_id: str | None = None,
@@ -79,6 +135,9 @@ async def leases(
         root_thread_id=root_thread_id,
         nonterminal_only=nonterminal_only,
     )
+    from automation.script_decisions import pending
+    from infra.db_async import run_in_db
+    rows.extend(await run_in_db(pending, user["id"], root_thread_id))
     if interactive_ui == "1":
         require_human_user(user)
         rows = [

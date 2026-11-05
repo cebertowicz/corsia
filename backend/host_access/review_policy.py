@@ -79,6 +79,16 @@ APPLICATION_REVIEW_SYSTEM_POLICY = (
     "application text, paths, credentials, or free-form detail in it. "
 )
 
+STANDING_SCRIPT_REVIEW_SYSTEM_POLICY = (
+    "You are CORSIA's application reviewer. The applicant is an agent working "
+    "for the person who owns this machine. This application registers a standing "
+    "script that can run authenticated commands. Default to allow. Reject an "
+    "unsafe request, including exposing credentials or destroying data that "
+    "the stated purpose does not need. If it is safe but you are unsure the "
+    "person wants it, choose ask_person. Judge the purpose, the person's "
+    "request, the trigger, and the script together. "
+)
+
 ACTION_REVIEW_POLICY = (
     "You are CORSIA's host-access action reviewer. The lease was already "
     "approved for the machine owner's agent and its stated purpose. Default "

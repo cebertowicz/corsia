@@ -27,10 +27,12 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from automation.script_github_channel import SOCKET_ENV, github_channel
+from automation.script_github_channel import SOCKET_ENV as GITHUB_READ_SOCKET_ENV, github_channel
+from automation.script_github_proxy import github_proxy
+from automation.script_tool_channel import SOCKET_ENV, tool_channel
 from connections import github_agent
 from connections.github_agent import AgentAccountView, Cause
-from connections.github_agent_home import default_home
+from connections.github_agent_home import configured_root, default_home
 from events.trace_env import TRACE_ENV
 from events.trace_env import encode as encode_trace
 from host_access.processes import PROCESS_OWNER, ForegroundProcessResult
@@ -54,7 +56,7 @@ from tools.shell_guard import (
 from tools.shell_policy import load_shell_repo_policies
 from tools.sandbox_git import sandbox_literal
 import tools.shell_sandbox as shell_sandbox
-from tools.unix_socket_policy import corsia_temp_root_for_bind
+from tools.unix_socket_policy import corsia_temp_root, corsia_temp_root_for_bind
 
 #: Stdout the runner will read. One extra byte is kept so a longer stream is seen.
 STDOUT_CAP_BYTES = 64 * 1024
@@ -121,6 +123,7 @@ async def run_script(
     trace: tuple[str, ...] = (),
     rule_id: str | None = None,
     github_repo: str | None = None,
+    authenticated: bool = False,
 ) -> ScriptRun:
     """Run ``script`` in the owner's protected envelope and return its capped output.
 
@@ -133,7 +136,7 @@ async def run_script(
     await _checked_environment()
     if stdin is None:
         return await _run(thread_id, project_id, script, run_id, timeout_seconds, None, trace,
-                          rule_id, github_repo)
+                          rule_id, github_repo, authenticated)
     try:
         fd, name = tempfile.mkstemp(prefix="rule-input-", suffix=".json",
                                     dir=corsia_temp_root_for_bind(thread_id))
@@ -143,7 +146,7 @@ async def run_script(
         with os.fdopen(fd, "wb") as handle:
             handle.write(stdin)
         return await _run(thread_id, project_id, script, run_id, timeout_seconds, Path(name), trace,
-                          rule_id, github_repo)
+                          rule_id, github_repo, authenticated)
     finally:
         Path(name).unlink(missing_ok=True)
 
@@ -151,35 +154,67 @@ async def run_script(
 async def _run(
     thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
     stdin: Path | None, trace: tuple[str, ...], rule_id: str | None, github_repo: str | None,
+    authenticated: bool,
 ) -> ScriptRun:
-    if github_repo is None:
+    view = await run_in_db(github_agent.view)
+    if view.answer_pending:
+        view = await run_off_db(github_agent.verify_now)
+    if not authenticated:
+        if github_repo is not None:
+            async with _legacy_github_client(thread_id, run_id, rule_id, github_repo) as (socket, client):
+                return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
+                                               stdin, trace, None, None, None, client, view,
+                                               github_read_socket=socket)
         return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
-                                       stdin, trace, None, None)
-    async with _github_client(thread_id, run_id, rule_id, github_repo) as (socket_path, client_dir):
+                                       stdin, trace, None, None, None, None, view)
+    async with _authenticated_client(thread_id, view) as (socket_dir, tool_socket, config_dir, client_dir):
         return await _run_with_channel(thread_id, project_id, script, run_id, timeout_seconds,
-                                       stdin, trace, socket_path, client_dir)
+                                       stdin, trace, socket_dir, tool_socket, config_dir, client_dir, view)
 
 
 @asynccontextmanager
-async def _github_client(thread_id: str, run_id: str, rule_id: str | None, repo: str):
-    """The run's channel socket and a directory holding its ``corsia`` client.
-
-    Only a failure to set these up is reported as the channel's; the run's own
-    failures keep their cause.
-    """
+async def _legacy_github_client(thread_id: str, run_id: str, rule_id: str | None, repo: str):
+    """Preserve the repository-scoped read channel for rule-started scripts."""
     stack = AsyncExitStack()
     try:
-        socket_path = await stack.enter_async_context(github_channel(thread_id, run_id, rule_id, repo=repo))
-        client_dir = Path(stack.enter_context(tempfile.TemporaryDirectory(
+        socket = await stack.enter_async_context(github_channel(thread_id, run_id, rule_id, repo=repo))
+        directory = Path(stack.enter_context(tempfile.TemporaryDirectory(
             prefix="github-client-", dir=corsia_temp_root_for_bind(thread_id))))
-        client = client_dir / "corsia"
+        client = directory / "corsia"
         client.write_bytes((Path(__file__).resolve().parents[1] / "cli_github.py").read_bytes())
         client.chmod(0o700)
     except OSError as exc:
         await stack.aclose()
         raise ScriptSandboxError(f"script GitHub channel unavailable: {type(exc).__name__}: {exc}") from exc
     async with stack:
-        yield socket_path, client_dir
+        yield socket, directory
+
+
+@asynccontextmanager
+async def _authenticated_client(thread_id: str, view: AgentAccountView):
+    """Run-private sockets and a script-readable configuration containing no credential."""
+    async with AsyncExitStack() as stack:
+        socket_dir = Path(stack.enter_context(tempfile.TemporaryDirectory(prefix="r", dir=corsia_temp_root())))
+        tool_socket = socket_dir / "t"
+        await stack.enter_async_context(tool_channel(tool_socket, thread_id))
+        client_dir = Path(stack.enter_context(tempfile.TemporaryDirectory(
+            prefix="script-client-", dir=corsia_temp_root_for_bind(thread_id))))
+        client = client_dir / "corsia"
+        client.write_bytes((Path(__file__).resolve().parents[1] / "cli_github.py").read_bytes())
+        client.chmod(0o700)
+        config_dir = None
+        if view.ready:
+            github_socket = socket_dir / "g"
+            await stack.enter_async_context(github_proxy(
+                github_socket, lambda: github_agent.script_forwarder_credential(view),
+            ))
+            config_dir = client_dir / "gh"
+            config_dir.mkdir(mode=0o700)
+            (config_dir / "config.yml").write_text(f"http_unix_socket: {github_socket}\n")
+            (config_dir / "hosts.yml").write_text(
+                "github.com:\n    user: script\n    oauth_" + "token: placeholder\n"
+            )
+        yield socket_dir, tool_socket, config_dir, client_dir
 
 
 #: One line per account cause: what is wrong, and who fixes it or what CORSIA does next.
@@ -216,41 +251,50 @@ def github_lock_reason(view: AgentAccountView) -> str | None:
 
 
 def _script_gh_homes(view: AgentAccountView) -> set[Path]:
-    """The ``gh`` homes a run may not touch: the person's always, the agents' unless verified."""
+    """The person's and agents' ``gh`` homes are hidden from every run."""
     paths = {default_home(), Path.home() / ".config" / "gh"}
     if os.environ.get("XDG_CONFIG_HOME"):
         paths.add(Path(os.environ["XDG_CONFIG_HOME"]) / "gh")
-    if view.home and not view.ready:
+    if view.home:
         paths.add(Path(view.home))
+    if root := configured_root():
+        paths.add(root)
     return {path.resolve(strict=False) for path in paths}
 
 
-def _script_profile(view: AgentAccountView):
+def _script_profile(view: AgentAccountView, socket_dir: Path | None = None):
     hidden = _script_gh_homes(view)
 
     def build(*args, **kwargs) -> str:
         profile = execution_envelope_profile(*args, **kwargs)
         for path in hidden:
             profile += f'(deny file-read* file-write* (subpath "{sandbox_literal(path)}"))\n'
+        if socket_dir is not None:
+            root = sandbox_literal(socket_dir.resolve())
+            profile += f'(allow file-read* (subpath "{root}"))\n'
+            profile += f'(allow network-outbound (remote unix-socket (subpath "{root}")))\n'
         return profile
     return build
 
 
 async def _run_with_channel(
     thread_id: str, project_id: str | None, script: Path, run_id: str, timeout_seconds: int,
-    stdin: Path | None, trace: tuple[str, ...], socket_path: Path | None, client_dir: Path | None,
+    stdin: Path | None, trace: tuple[str, ...], socket_dir: Path | None, socket_path: Path | None,
+    config_dir: Path | None, client_dir: Path | None, view: AgentAccountView,
+    *, github_read_socket: Path | None = None,
 ) -> ScriptRun:
     env = safehouse_subprocess_env(thread_id)
-    # The one read of the agents' account; the env, the grant and the denies below all use it.
-    # A rule run is never replayed, so when no answer is cached yet (after a restart, say) it
-    # waits, bounded and off the DB pool, for the verification instead of running locked.
-    view = await run_in_db(github_agent.view)
-    if view.answer_pending:
-        view = await run_off_db(github_agent.verify_now)
-    env.update(github_agent.script_env(view))
+    # Keep the shell's locked Git configuration, without exposing either gh home.
+    env.update(github_agent.shell_env(replace(view, state="needs_auth", absent=False)))
     env.pop(SOCKET_ENV, None)
+    env.pop(GITHUB_READ_SOCKET_ENV, None)
+    if github_read_socket is not None:
+        env[GITHUB_READ_SOCKET_ENV] = str(github_read_socket)
     if socket_path is not None:
         env[SOCKET_ENV] = str(socket_path)
+    if config_dir is not None:
+        env["GH_CONFIG_DIR"] = str(config_dir)
+        env["GH_PROMPT_DISABLED"] = "1"
     if trace:
         env[TRACE_ENV] = encode_trace(trace)
     try:
@@ -270,12 +314,15 @@ async def _run_with_channel(
         raise ScriptSandboxError(denial)
     envelope = execution_envelope_for_consumed_action(
         None, leased=False, thread_id=thread_id, grant_policies=grant_policies,
-        policies=policies, agent_account=view, env=env,
-        build_profile=_script_profile(view), build_argv=safehouse_argv,
+        policies=policies, agent_account=replace(view, state="needs_auth", absent=False), env=env,
+        build_profile=_script_profile(view, socket_dir), build_argv=safehouse_argv,
     )
+    if socket_dir is not None and envelope is None:
+        raise ScriptSandboxError("authenticated script sandbox is unavailable")
     if envelope is not None and not envelope.profile_required:
         envelope = replace(envelope, argv_options={**envelope.argv_options,
-                                                  "extra_hidden_roots": _script_gh_homes(view)})
+                                                  "extra_hidden_roots": _script_gh_homes(view),
+                                                  "extra_socket_roots": [socket_dir] if socket_dir else []})
     profile_path, argv = await prepare_execution_envelope(
         script_command(script, stdin, client_dir=client_dir), cwd, envelope,
     )

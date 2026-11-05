@@ -329,9 +329,13 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
     try:
         stdin, repository = (await run_off_db(script_rule_runs.execution_input, schedule, rule_run)
                              if rule_run else (None, None))
+        authentication = (schedule.payload or {}).get("authentication") or {}
+        approved = (authentication.get("state") == "approved"
+                    and authentication.get("approved_sha256") == schedule.script_sha256)
         run = await run_script(
             schedule.thread_id, project, path,
             run_id=run_id, timeout_seconds=int(schedule.timeout_seconds or 0),
+            **({"authenticated": True} if approved else {}),
             **({"stdin": stdin, "trace": rule_run.trace, "rule_id": rule_run.rule_id,
                 "github_repo": repository} if rule_run is not None else {}),
         )

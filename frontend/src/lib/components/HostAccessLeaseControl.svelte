@@ -398,20 +398,20 @@
 			<button
 				type="button"
 				class="pending-request-trigger"
-				aria-label="Review temporary host access"
+				aria-label={currentPending.kind === 'script' ? 'Review authenticated script' : 'Review temporary host access'}
 				aria-haspopup="dialog"
 				aria-expanded={pendingOpen}
 				bind:this={pendingTriggerEl}
 				onclick={openPendingDrawer}
 			>
-				<span class="eyebrow">Temporary host access</span>
-				<span class="pending-owner">{owner(currentPending)}</span>
-				<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : duration(currentPending.requested_duration_seconds)} size="sm" />
+				<span class="eyebrow">{currentPending.kind === 'script' ? 'Authenticated script' : 'Temporary host access'}</span>
+				<span class="pending-owner">{currentPending.kind === 'script' ? currentPending.script_name : owner(currentPending)}</span>
+				<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : (currentPending.kind === 'script' ? 'Review' : duration(currentPending.requested_duration_seconds))} size="sm" />
 				<span class="pending-action">Review →</span>
 			</button>
 			{#key currentPending.id}
 				<AdaptiveDrawer
-					ariaLabel="Review temporary host access" flushBottom
+					ariaLabel={currentPending.kind === 'script' ? 'Review authenticated script' : 'Review temporary host access'} flushBottom
 					open={pendingOpen}
 					onClose={closePendingDrawer}
 				>

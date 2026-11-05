@@ -86,7 +86,8 @@ def _listed(thread_id: str, project_id: str | None, items: list) -> list[dict]:
     return listed
 
 
-def _script_schedule(thread_id: str, scope_id: str, params: dict, project_id: str | None = None) -> dict:
+def _script_schedule(thread_id: str, scope_id: str, params: dict, project_id: str | None = None,
+                     reviewed=None) -> dict:
     """Register one model-free script run for the current thread."""
     from infra.config import WORKSPACE
 
@@ -95,9 +96,11 @@ def _script_schedule(thread_id: str, scope_id: str, params: dict, project_id: st
     series = script_schedules.parse_series(params.get("series", []))
     if params.get("workflow") is not None:
         _check_workflow(thread_id, project_id, params["workflow"])
-    path, sha256 = script_schedules.pin_script(
-        str(params["script_path"]), workspace=WORKSPACE,
-    )
+    if reviewed is None:
+        path, sha256 = script_schedules.pin_script(str(params["script_path"]), workspace=WORKSPACE)
+        authentication = None
+    else:
+        path, sha256, authentication = reviewed
     schedule = script_schedules.create_script(
         thread_id,
         scope_id,
@@ -109,17 +112,18 @@ def _script_schedule(thread_id: str, scope_id: str, params: dict, project_id: st
             "timeout_seconds", script_schedules.DEFAULT_TIMEOUT_SECONDS,
         ),
         workflow=params.get("workflow"),
+        authentication=authentication,
         now=datetime.now(timezone.utc).isoformat(),
         db=None,
     )
     return {"schedule": _listed(thread_id, project_id, [schedule])[0]}
 
 
-def _operate(thread_id, actor_row, operation: str, params: dict):
+def _operate(thread_id, actor_row, operation: str, params: dict, reviewed=None):
     if operation == "schedule":
         scope_id = actor_row["project_id"] or "__workspace__"
         if params.get("kind") == script_schedules.SCRIPT_KIND:
-            return _script_schedule(thread_id, scope_id, params, actor_row["project_id"])
+            return _script_schedule(thread_id, scope_id, params, actor_row["project_id"], reviewed)
         for name in ("spec", "max_runs"):
             if params.get(name) is None:
                 raise ValueError(f"{name} is required for a clock or cadence schedule")
@@ -171,9 +175,25 @@ async def _execute(kwargs: dict[str, Any], operation: str) -> str:
         if not key.startswith("_")
     }
     try:
+        reviewed = None
+        if operation == "schedule" and params.get("kind") == "script" and params.get("authenticated"):
+            from automation.script_access import review_script
+            reviewed = await review_script(thread_id, params)
         result = await run_in_db(
-            partial(_operate, thread_id, actor_row, operation, params)
+            partial(_operate, thread_id, actor_row, operation, params, reviewed)
         )
+        if reviewed is not None:
+            from host_access.change_nudge import changed_message
+            from infra import state
+            schedule_id = result["schedule"]["id"]
+            state.broadcast_to_user(actor_row["user_id"], changed_message({
+                "id": schedule_id, "root_thread_id": thread_id,
+            }))
+            if reviewed[2]["state"] == "approved":
+                from events.delivery import deliver_to_thread
+                await deliver_to_thread(thread_id, "script_access.approved", "Authenticated script approved.",
+                                        {"schedule_id": schedule_id},
+                                        delivery_id=f"script-access:{schedule_id}:approved")
         return json.dumps(result, sort_keys=True)
     except ValueError as exc:
         return f"Error: {exc}"
@@ -207,7 +227,9 @@ class AutomationScheduleTool(Tool):
             "cadence_seconds for a script only rules start: it never runs on its own "
             "and never reports no data. A script schedule "
             "has no expiry: cancel it with "
-            "automation_cancel. Check its last_status with automation_list."
+            "automation_cancel. Check its last_status with automation_list. "
+            "For authenticated commands set authenticated=true, purpose, and user_request quoting "
+            "the person's request. Once approved, call your tools with corsia tool and GitHub with corsia github."
         )
 
     @property
@@ -231,6 +253,15 @@ class AutomationScheduleTool(Tool):
                     "description": "Required for clock and cadence; not used by script.",
                 },
                 "payload": {"type": "object"},
+                "authenticated": {
+                    "type": "boolean", "description": "Request authenticated commands for a script run."
+                },
+                "purpose": {
+                    "type": "string", "description": "Required when authenticated: why the script needs access."
+                },
+                "user_request": {
+                    "type": "string", "description": "Required when authenticated: quote the person's request."
+                },
                 "script_path": {
                     "type": "string",
                     "description": (

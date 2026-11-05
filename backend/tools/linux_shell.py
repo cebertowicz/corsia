@@ -72,7 +72,7 @@ def _repo_mounts(policies, controlled_policy=None, controlled_operation=None):
 
 def shell_argv(command: str, cwd: Path, _profile=None, *, thread_id: str, policies: list[Any],
                env: dict[str, str], agent_account=None, controlled_policy=None,
-               controlled_operation=None, extra_hidden_roots=()) -> list[str]:
+               controlled_operation=None, extra_hidden_roots=(), extra_socket_roots=()) -> list[str]:
     from connections import github_agent
     from infra.config import WORKSPACE
     from infra.project_repo_policy import list_unsupported_pinned_repos
@@ -81,7 +81,7 @@ def shell_argv(command: str, cwd: Path, _profile=None, *, thread_id: str, polici
     repo_ro, repo_rw, overlays = _repo_mounts(policies, controlled_policy, controlled_operation)
     rw = [*get_sandbox_add_dirs_rw(thread_id, policies=policies), *repo_rw]
     ro = [*get_allowed_dirs_ro(policies=policies), *agent_account_ro_dirs(agent_account),
-          *agent_tool_ro_dirs(), *repo_ro]
+          *agent_tool_ro_dirs(), *repo_ro, *extra_socket_roots]
     workspace_git = prepare_workspace_git(path_policy.workspace)
     if workspace_git:
         marker, config, _lock, worktree_config, commondir, hooks = workspace_git

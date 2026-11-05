@@ -279,7 +279,7 @@ async def test_script_cli_reads_broker(sandbox, monkeypatch):
 @pytest.mark.parametrize("github_repo", [None, "o/r"])
 @pytest.mark.parametrize("state", ["absent", "person", "ready"])
 async def test_script_cannot_read_person_gh_or_token_variables(sandbox, monkeypatch, state, github_repo):
-    """The person's gh home is hidden in every state; the agents' home is readable only once verified."""
+    """Neither the person's nor the agents' gh home is exposed to scripts."""
     from tools import sandbox_config
 
     home = Path(os.environ["HOME"])
@@ -297,8 +297,7 @@ async def test_script_cannot_read_person_gh_or_token_variables(sandbox, monkeypa
     agent_hosts = shlex.quote(str(agent_home / "hosts.yml"))
     # The home sits inside a granted folder, so only the run's own deny can hide it.
     agent_probe = {
-        "ready": (f'test "$GH_CONFIG_DIR" = {shlex.quote(str(agent_home))} || exit 4\n'
-                  f'cat {agent_hosts} >/dev/null || exit 5\n'),
+        "ready": f'if cat {agent_hosts} >/dev/null 2>&1; then exit 5; fi\n',
         "person": f'if cat {agent_hosts} >/dev/null 2>&1; then exit 6; fi\n',
         "absent": "",  # no agents' account, so no home of its own to hide
     }[state]
@@ -332,4 +331,77 @@ async def test_other_thread_cannot_connect_to_channel(sandbox):
                  "sys.exit(1)\n")
         path = _script(sandbox, "other.py", probe)
         run = await run_script(other, None, path, run_id="other-run", timeout_seconds=20)
+        assert run.returncode == 0, run.stderr
+
+
+@pytest.mark.asyncio
+async def test_authenticated_script_gh_uses_private_forwarder(sandbox, monkeypatch):
+    """Exercise the real script sandbox and gh client against a fake upstream."""
+    from contextlib import asynccontextmanager
+    import httpx
+    from automation import script_sandbox
+    from connections import github_agent
+
+    _account(monkeypatch, "ready", Path(os.environ["HOME"]) / "agent-gh")
+    monkeypatch.setattr(github_agent, "script_forwarder_credential", lambda view: "synthetic-secret")
+    seen = []
+
+    async def upstream(request):
+        seen.append(request.headers.get("authorization"))
+        return httpx.Response(200, json={"login": "fake"})
+
+    original = script_sandbox.github_proxy
+
+    @asynccontextmanager
+    async def proxy(path, credential):
+        async with original(path, credential, transport=httpx.MockTransport(upstream)):
+            yield
+
+    monkeypatch.setattr(script_sandbox, "github_proxy", proxy)
+    path = _script(sandbox, "authenticated.sh", 'gh api user\n')
+    run = await run_script(THREAD_ID, None, path, run_id="auth-gh", timeout_seconds=30, authenticated=True)
+    assert run.returncode == 0, run.stderr
+    assert b'"login":"fake"' in run.stdout
+    assert seen == ["token synthetic-secret"]
+    assert b"synthetic-secret" not in run.stdout + run.stderr
+
+
+@pytest.mark.asyncio
+async def test_agent_shell_cannot_connect_to_authenticated_run_socket(sandbox, monkeypatch, tmp_path):
+    from automation import script_sandbox
+    from connections.github_agent import AgentAccountView
+    from tools import shell_guard
+
+    async with script_sandbox._authenticated_client(THREAD_ID, AgentAccountView("needs_auth")) as (_, socket_path, _, _):
+        code = ("import socket; s=socket.socket(socket.AF_UNIX); "
+                f"s.connect({str(socket_path)!r}); print('connected')")
+        command = f"python3 -c {shlex.quote(code)}"
+        profile = tmp_path / "shell.sb"
+        profile.write_text(shell_guard.execution_envelope_profile(
+            command, sandbox, profile, leased=False, thread_id=THREAD_ID,
+        ))
+        process = await asyncio.create_subprocess_exec(
+            *shell_guard.safehouse_argv(command, sandbox, profile, thread_id=THREAD_ID),
+            cwd=sandbox, env=shell_guard.safehouse_subprocess_env(THREAD_ID),
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await process.communicate()
+        assert process.returncode not in (0, 126), stderr
+        assert b"connected" not in stdout
+        assert b"Operation not permitted" in stderr, stderr
+
+
+@pytest.mark.asyncio
+async def test_another_script_cannot_connect_to_authenticated_run_socket(sandbox, monkeypatch):
+    from automation import script_sandbox
+    from connections.github_agent import AgentAccountView
+
+    async with script_sandbox._authenticated_client(THREAD_ID, AgentAccountView("needs_auth")) as (_, socket_path, _, _):
+        probe = ("import socket,sys\n"
+                 "s=socket.socket(socket.AF_UNIX)\n"
+                 f"try: s.connect({str(socket_path)!r})\n"
+                 "except OSError: sys.exit(0)\n"
+                 "sys.exit(1)\n")
+        path = _script(sandbox, "other-auth.py", probe)
+        run = await _run(path)
         assert run.returncode == 0, run.stderr

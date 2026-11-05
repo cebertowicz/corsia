@@ -54,6 +54,10 @@ export type HostAccessPolicyException =
 
 export interface HostAccessLease {
 	id: string;
+	kind?: 'script';
+	script_name?: string;
+	trigger?: { cadence_seconds: number | null };
+	user_request?: string;
 	root_thread_id: string;
 	root_thread_title: string | null;
 	state: HostAccessLeaseState;
@@ -147,12 +151,12 @@ export async function decideHostAccessLease(
 	token: string,
 	lease: Pick<
 		HostAccessLease,
-		'id' | 'revision' | 'application_hash' | 'decision_capability'
+		'id' | 'revision' | 'application_hash' | 'decision_capability' | 'kind'
 	>,
 	decision: HostAccessLeaseDecision,
 ): Promise<HostAccessLease> {
 	const response = await fetch(
-		`/api/host-access/leases/${encodeURIComponent(lease.id)}/${decision}`,
+		`/api/host-access/leases/${lease.kind === 'script' ? 'scripts/' : ''}${encodeURIComponent(lease.id)}/${decision}`,
 		{
 			method: 'POST',
 			headers: {

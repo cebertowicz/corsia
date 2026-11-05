@@ -70,6 +70,25 @@
 	<p class="explainer">This agent is asking for temporary access to parts of this computer it can’t normally reach. It cannot use that access unless you approve, and you can revoke it at any time.</p>
 {/snippet}
 
+{#if lease.kind === 'script'}
+	<div class="pending-drawer">
+		<header class="decision-head">
+			<div><div class="eyebrow">Authenticated script</div><h2>{lease.script_name}</h2></div>
+			<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : 'Review'} />
+		</header>
+		<div class="decision-body">
+			<section><span class="label">Trigger</span><p>{lease.trigger?.cadence_seconds == null ? 'Event rules' : `Every ${lease.trigger.cadence_seconds} seconds`}</p></section>
+			<section class="purpose"><span class="label">Purpose</span><p>{lease.purpose}</p></section>
+			<section><span class="label">Your request</span><p>{lease.user_request}</p></section>
+			{#if stale || !ready}<div class="approval-blocked" role="status"><strong>Approval is unavailable.</strong><Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
+		</div>
+		<footer class="decision-actions">
+			<Button variant="danger" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Deny</Button>
+			<span class="decision-spacer"></span>
+			{#if ready}<Button variant="primary" loading={deciding} disabled={approveDisabled} onclick={onApprove}>Approve</Button>{/if}
+		</footer>
+	</div>
+{:else}
 <div class="pending-drawer">
 	<header class="decision-head">
 		<div>
@@ -192,6 +211,7 @@
 		{/if}
 	</footer>
 </div>
+{/if}
 
 <style>
 	.pending-drawer {
