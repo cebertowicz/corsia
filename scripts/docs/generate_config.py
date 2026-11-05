@@ -31,6 +31,7 @@ DOCUMENTED = {
     "CODEX_HOME": "Selects the Codex home directory.",
     "CORSIA_AGENT_BROWSER_VERSION_RANGE": "Sets the accepted agent-browser version range.",
     "CORSIA_ALLOW_HOME_WORKSPACE_IN_CI": "Allows a home workspace in CI or tests.",
+    "CORSIA_CPU_SAMPLER": "Enables process CPU sampling when set to 1.",
     "CORSIA_CORRECTIONS_ASSET_BASE_URL": "Sets the download URL for correction assets.",
     "CORSIA_DB_LOOP_WRITE_STRICT": "Makes database writes on the event loop raise an error.",
     "CORSIA_EVAL_TOKEN": "Supplies the API token used for evaluation.",
@@ -106,7 +107,9 @@ DOCUMENTED = {
     "XDG_CONFIG_HOME": "Selects the XDG configuration directory.",
 }
 INTERNAL = {
-    "CORSIA_AGENT_RESTART_ALLOWED",
+    "CORSIA_AGENT_RESTART_ALLOWED", "CORSIA_EVENT_TRACE", "CORSIA_LOG_CAPTURE_TEST_ENABLE",
+    "CORSIA_PROCESS_OWNER_MARKER", "CORSIA_RESTART_CURL", "CORSIA_SYSTEMD_SERVICE",
+    "CORSIA_TOOL_INVOCATION_ID",
     "CORSIA_GITHUB_NOTIFICATIONS_TEST_ENABLE", "CORSIA_GITHUB_REPO_ACTIVITY_TEST_ENABLE",
     "CORSIA_HARBOR_BRIDGE_SOCKET", "CORSIA_MAIL_POLLER_TEST_ENABLE",
     "CORSIA_SCRIPT_GITHUB_SOCKET", "CORSIA_SOURCES_SERVICE_TOKEN",
@@ -117,6 +120,10 @@ INTERNAL = {
     "CORSIA_SERVICE_GENERATION", "CORSIA_TOKEN", "SPIKE_CC_MODEL",
 }
 
+NOT_SETTINGS = {
+    "CORSIA_ADMISSION_NESTED", "CORSIA_ADMISSION_TIMEOUT",
+    "CORSIA_REDACTED_VALUE", "CORSIA_TOOL_RESULT_PREVIEW",
+}
 
 STANDARD = {"PATH", "HOME", "SHELL", "TZ", "LANG", "LC_ALL", "APPDATA", "LOCALAPPDATA",
             "XDG_CONFIG_HOME", "GH_CONFIG_DIR", "TIKTOKEN_CACHE_DIR", "CUSTOM_TIKTOKEN_CACHE_DIR"}
@@ -127,89 +134,28 @@ MODEL = {"OMLX_BASE_URL", "CLAUDE_BIN", "CODEX_BIN", "CODEX_HOME"}
 def add(found, name, path, default):
     if isinstance(name, str):
         found[name][0].add(path.relative_to(ROOT).as_posix())
-        found[name][1].add(default)
+        if default is not None:
+            found[name][1].add(default)
 
 
-def module_tables(paths):
-    tables = {}
-    for path in paths:
-        module = ".".join(path.relative_to(ROOT / "backend").with_suffix("").parts)
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        constants, imports = {}, {}
-        for node in tree.body:
-            if isinstance(node, (ast.Assign, ast.AnnAssign)):
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                if isinstance(node.value, ast.Constant):
-                    for target in targets:
-                        if isinstance(target, ast.Name):
-                            constants[target.id] = node.value.value
-            elif isinstance(node, ast.ImportFrom):
-                base = module.split(".")[:-node.level] if node.level else []
-                source = ".".join(base + ([node.module] if node.module else []))
-                for alias in node.names:
-                    imports[alias.asname or alias.name] = (source, alias.name)
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    imports[alias.asname or alias.name.split(".")[0]] = (alias.name, None)
-        tables[module] = (tree, constants, imports)
-    return tables
-
-
-def python_reads(path, found, tables):
-    module = ".".join(path.relative_to(ROOT / "backend").with_suffix("").parts)
-    tree, constants, imports = tables[module]
-
-    def resolve(node):
-        if isinstance(node, ast.Constant):
-            return node.value
-        if isinstance(node, ast.Name):
-            if node.id in constants:
-                return constants[node.id]
-            source, name = imports.get(node.id, (None, None))
-        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-            source, imported = imports.get(node.value.id, (None, None))
-            if imported is not None:
-                source = f"{source}.{imported}"
-            name = node.attr
-        else:
-            return None
-        return tables.get(source, (None, {}, {}))[1].get(name)
-
-    functions = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
-    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
-    enclosing = {child: function for function in functions for child in ast.walk(function)}
+def python_reads(path, found):
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     for node in ast.walk(tree):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if re.fullmatch(r"CORSIA_[A-Z0-9_]+", node.value):
+                add(found, node.value, path, None)
         key = None
-        default = "unset"
+        default = None
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             if ast.unparse(node.func) in {"os.environ.get", "os.getenv"} and node.args:
                 key = node.args[0]
-                if len(node.args) > 1:
-                    value = resolve(node.args[1])
-                    default = repr(value) if value is not None or isinstance(node.args[1], ast.Constant) else "computed"
+                if len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
+                    default = repr(node.args[1].value)
         elif isinstance(node, ast.Subscript) and ast.unparse(node.value) == "os.environ":
             if isinstance(node.ctx, ast.Load):
                 key = node.slice
-        if key is None:
-            continue
-        function = enclosing.get(node)
-        params = function.args.posonlyargs + function.args.args if function else []
-        params += function.args.kwonlyargs if function else []
-        names = []
-        if isinstance(key, ast.Name) and key.id in [param.arg for param in params]:
-            positional = function.args.posonlyargs + function.args.args
-            index = next((i for i, param in enumerate(positional) if param.arg == key.id), None)
-            for call in calls:
-                if isinstance(call.func, ast.Name) and call.func.id == function.name:
-                    arg = call.args[index] if index is not None and index < len(call.args) else next(
-                        (kw.value for kw in call.keywords if kw.arg == key.id), None)
-                    if arg is not None:
-                        names.append(resolve(arg))
-        else:
-            names.append(resolve(key))
-        for name in names:
-            if isinstance(name, str):
-                add(found, name, path, default)
+        if isinstance(key, ast.Constant) and isinstance(key.value, str):
+            add(found, key.value, path, default)
 
 
 def shell_reads(path, found):
@@ -217,28 +163,31 @@ def shell_reads(path, found):
     for match in re.finditer(pattern, path.read_text(encoding="utf-8")):
         suffix = match.group(2)
         default = suffix[2:] if suffix.startswith(":-") else None
-        if default is None:
-            default = "unset"
-        elif any(char in default for char in "$`{}"):
-            default = "computed"
-        else:
-            default = repr(default)
+        if default is not None:
+            default = None if any(char in default for char in "$`{}") else repr(default)
         add(found, match.group(1), path, default)
 
 
 def discover():
     found = defaultdict(lambda: (set(), set()))
-    paths = sorted((ROOT / "backend").rglob("*.py"))
-    tables = module_tables(paths)
-    for path in paths:
+    paths = []
+    for path in sorted((ROOT / "backend").rglob("*.py")):
         relative = path.relative_to(ROOT / "backend")
         if "tests" in relative.parts or relative == Path("conftest.py"):
             continue
         if len(relative.parts) == 1 and path.name.startswith("e2e_"):
             continue
-        python_reads(path, found, tables)
+        paths.append(path)
+        python_reads(path, found)
     for path in [ROOT / "scripts/corsia", *sorted((ROOT / "scripts/corsia.d").glob("*.sh"))]:
         shell_reads(path, found)
+    missing = {name for name in DOCUMENTED if not name.startswith("CORSIA_")} - set(found)
+    if missing:
+        for path in paths:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in missing:
+                    add(found, node.value, path, None)
     return found
 
 
@@ -260,26 +209,26 @@ def area(name):
 
 def render():
     found = discover()
-    classified = set(DOCUMENTED) | INTERNAL
-    if set(DOCUMENTED) & INTERNAL or set(found) != classified:
+    groups = (set(DOCUMENTED), INTERNAL, NOT_SETTINGS)
+    classified = set.union(*groups)
+    overlap = {name for name in classified if sum(name in group for group in groups) > 1}
+    if overlap or set(found) != classified:
         raise ValueError(f"Unclassified: {sorted(set(found) - classified)}; "
-                         f"stale: {sorted(classified - set(found))}; "
-                         f"overlap: {sorted(set(DOCUMENTED) & INTERNAL)}")
-    lines = ["# Configuration reference", "", "This page lists names fixed at environment reads in code, including constants passed to a local function one call away. Dynamic names are omitted. "
-             "Generate it with `python scripts/docs/generate_config.py`; add `--check` to compare the page.", "",
-             "Defaults show fallbacks at read sites. `unset` means no fallback is given; "
-             "`computed` means the fallback is an expression. Multiple values come from different read sites.", ""]
+                         f"stale: {sorted(classified - set(found))}; overlap: {sorted(overlap)}")
+    lines = ["# Configuration reference", "", "This page lists CORSIA names found in code and other variables read by name. "
+             "Defaults show literal fallbacks; a dash means any default is set in code in the listed files.", "",
+             "Generate it with `python scripts/docs/generate_config.py`; add `--check` to compare the page.", ""]
     for section in ("CORSIA settings", "Models, browser and review", "Evaluation",
                     "Development and testing", "Standard variables CORSIA reads"):
         names = sorted(name for name in DOCUMENTED if area(name) == section)
         if not names:
             continue
-        lines.extend([f"## {section}", "", "| Variable | Default | What it does | Read in |", "|---|---|---|---|"])
+        lines.extend([f"## {section}", "", "| Variable | Default | What it does | Named in |", "|---|---|---|---|"])
         for name in names:
             paths, defaults = found[name]
             locations = ", ".join(f"`{cell(p)}`" for p in sorted(paths))
             values = ", ".join(
-                f"`{cell('empty' if d == repr('') else d)}`" for d in sorted(defaults))
+                f"`{cell('empty' if d == repr('') else d)}`" for d in sorted(defaults)) or "—"
             lines.append(f"| `{cell(name)}` | {values} | {cell(DOCUMENTED[name])} | {locations} |")
         lines.append("")
     lines.extend(["", "## Internal and test variables", "", "These variables are used internally or for tests.", ""])
