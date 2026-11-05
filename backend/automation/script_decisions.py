@@ -4,8 +4,9 @@ This module owns standing-script approvals: a lasting grant for one file at one
 hash, kept on its schedule until the file changes or the schedule is cancelled.
 Host-access leases (``api.host_access``) are a different concept: a time-boxed
 grant of host resources, owned there. The two share only the person's approval
-surface, so a script application is served in the lease list as ``kind: 'script'``;
-that field is the one place the surface branches.
+surface, so a script application is served in the lease list as ``kind: 'script'``,
+and every reader of that list (the lease serializer, the pending-request drawer and
+trigger, the decision route) branches on that field.
 """
 from __future__ import annotations
 
