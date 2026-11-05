@@ -60,7 +60,12 @@ def workspace_git_history_paths(workspace: Path | None) -> tuple[Path, ...]:
         _pointer_forms(marker, marker.parent, "gitdir:", fallback=marker)
         if marker.is_file() else (marker, marker.resolve(strict=False))
     )
-    common_forms = _pointer_forms(git_forms[-1] / "commondir", git_forms[-1], fallback=git_forms[-1])
+    git_dir = git_forms[-1]
+    common_file = git_dir / "commondir"
+    common_forms = (
+        _pointer_forms(common_file, git_dir, fallback=git_dir)
+        if git_dir.is_dir() and common_file.is_file() else (git_dir,)
+    )
     return tuple(dict.fromkeys((marker, marker.resolve(strict=False), *git_forms, *common_forms)))
 
 
