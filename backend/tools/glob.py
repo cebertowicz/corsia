@@ -9,12 +9,8 @@ from tools.filesystem_effects import match_relative_glob, walk_bound_files
 from tools.filesystem_gate import resolve_path, _resolve_path_for_action
 from tools.glob_result import other_thread_result, render_glob_result
 from tools.glob_walk import Traversal, select_matches
+from tools.search_fence import SearchFence
 from tools.search_scope import SearchScope, keep_path, pattern_components, scoped_match, search_identity
-
-
-def _glob_scope(search_dir: Path, current_thread_id: str | None, all_threads: bool) -> SearchScope:
-    """Glob's scope: the shared rules, and ``.env`` files are listed."""
-    return SearchScope(current_thread_id, all_threads, root_name=search_dir.name, lists_env=True)
 
 
 class GlobTool(Tool):
@@ -87,29 +83,24 @@ class GlobTool(Tool):
                 allowed_dir=self._allowed_dir,
                 thread_id=current_thread_id,
                 project_id=kwargs.get("_thread_project_id"),
+                fence=kwargs.get("_host_access_fence"),
             )
             search_dir = authorized.resolved
+            fence = await asyncio.to_thread(SearchFence, search_dir, current_thread_id, authorized.fence)
             current_thread_id, all_threads = search_identity(search_dir, current_thread_id, all_threads)
             if not keep_path(search_dir, current_thread_id, all_threads):
-                return other_thread_result(pattern, search_dir)
+                return fence.notice(other_thread_result(pattern, search_dir))
 
             if authorized.reviewed:
-                return await asyncio.to_thread(
-                    self._glob_reviewed,
-                    pattern,
-                    search_dir,
-                    current_thread_id,
-                    all_threads,
+                result = await asyncio.to_thread(
+                    self._glob_reviewed, pattern, search_dir, current_thread_id, all_threads, fence,
                 )
+                return fence.notice(result)
 
-            return await asyncio.to_thread(
-                self._glob_unreviewed,
-                pattern,
-                search_dir,
-                path,
-                current_thread_id,
-                all_threads,
+            result = await asyncio.to_thread(
+                self._glob_unreviewed, pattern, search_dir, path, current_thread_id, all_threads, fence, authorized.fence,
             )
+            return fence.notice(result)
 
         except PermissionError as e:
             return f"Error: {e}"
@@ -123,6 +114,8 @@ class GlobTool(Tool):
         requested_path: str | None,
         current_thread_id: str | None,
         all_threads: bool,
+        fence: SearchFence | None = None,
+        project_fence=None,
     ) -> str:
         """Traverse an authorized ordinary path outside the server event loop."""
         path = requested_path
@@ -132,17 +125,21 @@ class GlobTool(Tool):
             if not search_dir.is_dir():
                 return f"Error: Not a directory: {path or str(self._workspace)}"
 
-            scope = _glob_scope(search_dir, current_thread_id, all_threads)
+            scope = SearchScope(current_thread_id, all_threads, root_name=search_dir.name, lists_env=True, fence=fence)
             traversal = Traversal(scope)
             matches: list[tuple[str, Path]] = []
             # The walk never selects a path outside the search scope.
             for relative in select_matches(search_dir, pattern, traversal):
                 match = search_dir.joinpath(*relative)
+                if fence and fence.excludes(match):
+                    continue
                 resolved_match = match.resolve(strict=False)
                 if not resolved_match.is_relative_to(search_dir):
                     try:
                         resolved_match = resolve_path(
-                            str(match), self._workspace, self._allowed_dir
+                            str(match), self._workspace, self._allowed_dir,
+                            thread_id=fence.thread_id if fence else current_thread_id,
+                            fence=project_fence,
                         )
                     except PermissionError:
                         continue
@@ -166,8 +163,9 @@ class GlobTool(Tool):
         search_dir: Path,
         current_thread_id: str | None,
         all_threads: bool,
+        fence: SearchFence | None = None,
     ) -> str:
-        scope = _glob_scope(search_dir, current_thread_id, all_threads)
+        scope = SearchScope(current_thread_id, all_threads, root_name=search_dir.name, lists_env=True, fence=fence)
         traversal = Traversal(scope, components=pattern_components(pattern))
         matches: list[tuple[Path, float]] = []
         with walk_bound_files(

@@ -60,11 +60,21 @@ def resolution_touches(root: Path, path: Path, *, loop_touches: bool = True) -> 
     return contains(root, current)
 
 
+def containment_key(path: Path) -> str:
+    """Normalize a path for the shared case- and composition-insensitive boundary."""
+    return unicodedata.normalize("NFC", str(Path(path))).casefold()
+
+
+def key_contains(root: str, path: str) -> bool:
+    """Compare normalized keys at a path-component boundary."""
+    if root == ".":
+        return not path.startswith(os.sep)
+    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+
+
 def contains(root: Path, path: Path) -> bool:
     """Return whether ``path`` is ``root`` or below it, ignoring case and Unicode composition."""
-    normalized_path = unicodedata.normalize("NFC", str(path)).casefold()
-    normalized_root = unicodedata.normalize("NFC", str(root)).casefold()
-    return Path(normalized_path).is_relative_to(normalized_root)
+    return key_contains(containment_key(root), containment_key(path))
 
 
 # macOS reports a sandbox refusal as ``<prog>: <path>: Operation not permitted``.

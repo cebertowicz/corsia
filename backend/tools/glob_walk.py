@@ -166,6 +166,8 @@ def _pattern_parts(pattern: str) -> Relative | None:
 def _select(
     directory: str, relative: Relative, parts: Relative, traversal: Traversal,
 ) -> Iterator[Relative]:
+    if traversal.scope.fence and traversal.scope.fence.excludes(Path(directory)):
+        return
     if not parts:
         yield relative
         return
@@ -198,6 +200,8 @@ def _select_wildcard(
         name = entry.name
         if not traversal.matches(parent, name, part):
             continue
+        if traversal.scope.fence and traversal.scope.fence.excludes(Path(entry.path)):
+            continue
         if rest and not _is_directory(entry, follow_symlinks=True):
             continue
         yield from _select(entry.path, relative + (name,), rest, traversal)
@@ -210,6 +214,8 @@ def _select_recursive(
     stack = [(directory, relative)]
     while stack:
         current, current_relative = stack.pop()
+        if traversal.scope.fence and traversal.scope.fence.excludes(Path(current)):
+            continue
         entries = _scan(current, traversal)
         yield from _select_below(current, current_relative, entries, rest, traversal)
         parent = _parent(current_relative, traversal)

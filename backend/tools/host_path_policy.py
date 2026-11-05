@@ -15,6 +15,7 @@ import shutil
 import sys
 from typing import Iterable
 
+
 from tools.host_path_resolution import (
     canonical,
     contains,
@@ -334,6 +335,7 @@ def current_protected_host_path_policy(
     write_roots: Iterable[Path] = (),
     granted_roots: Iterable[Path] = (),
     thread_id: str | None = None,
+    fence: Fence | None = None,
 ) -> ProtectedHostPathPolicy:
     """Build the live policy, with the caller's fenced project roots, without caching."""
     from infra.config import STATE_ROOT, WORKSPACE
@@ -352,7 +354,7 @@ def current_protected_host_path_policy(
         write_roots=(application_cache_root(), *write_roots),
         workspace=WORKSPACE,
         granted_roots=tuple(granted_roots),
-        fence=fence_for_thread(thread_id),
+        fence=fence if fence is not None else fence_for_thread(thread_id),
     )
 
 
@@ -360,32 +362,13 @@ def ordinary_host_path_denial(
     path: Path,
     *,
     for_write: bool,
+    fence: Fence | None = None,
 ) -> str | None:
     """Apply protected-execution denial before any lease permit is consumed."""
-    return current_protected_host_path_policy().ordinary_denial(
+    return current_protected_host_path_policy(fence=fence).ordinary_denial(
         path,
         for_write=for_write,
     )
-
-
-def path_review_classification(
-    *paths: Path,
-    for_write: bool,
-) -> tuple[bool, str | None]:
-    """Classify the lexical and resolved forms of one host action path.
-
-    Returns ``(needs_review, hard_floor_denial)``. A hard-floor denial wins and
-    is never lease-eligible; otherwise ``needs_review`` says whether any form
-    is refused in protected mode and so needs a reviewed lease.
-    """
-    forms = tuple(dict.fromkeys(paths))
-    policy = current_protected_host_path_policy()
-    for form in forms:
-        if message := policy.hard_floor_denial(form):
-            return True, message
-    return any(
-        ordinary_host_path_denial(form, for_write=for_write) for form in forms
-    ), None
 
 
 def denial_guidance_for_output(text: str, thread_id: str | None = None, cwd: Path | None = None) -> str | None:

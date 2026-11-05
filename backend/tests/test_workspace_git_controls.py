@@ -218,6 +218,7 @@ def test_workspace_git_rules_keep_odd_paths_inside_the_profile():
 def test_file_tools_cannot_write_workspace_git_controls(tmp_path, monkeypatch):
     from tools import host_path_policy
     from tools.host_path_policy import ProtectedHostPathPolicy
+    from tools.host_path_classification import path_review_classification
 
     repo = tmp_path / 'workspace'
     init(repo)
@@ -229,7 +230,7 @@ def test_file_tools_cannot_write_workspace_git_controls(tmp_path, monkeypatch):
              repo / '.GIT' / 'CONFIG', repo / '.git' / 'Hooks' / 'pre-commit')
     for path in paths:
         assert 'No host-access lease' in policy.ordinary_denial(path, for_write=True)
-        assert 'No host-access lease' in host_path_policy.path_review_classification(path, for_write=True)[1]
+        assert 'No host-access lease' in path_review_classification(path, for_write=True)[1]
         assert 'No host-access lease' in policy.ordinary_denial(path, for_write=False)
     assert policy.ordinary_denial(git / 'index', for_write=True)
     assert policy.ordinary_denial(repo / 'notes.md', for_write=True) is None

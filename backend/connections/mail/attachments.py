@@ -27,7 +27,7 @@ def inspect(thread_id: str, paths: Any, limit: int | None) -> list[dict[str, Any
     total = 0
     for value in paths:
         try:
-            path = resolve_path(value, root)
+            path = resolve_path(value, root, thread_id=thread_id)
             if not path.is_relative_to(root) or not path.is_file():
                 raise OSError
             size = path.stat().st_size
@@ -55,7 +55,7 @@ def add(thread_id: str, message: EmailMessage, entries: list[dict[str, Any]]) ->
     root = working_root(thread_id).resolve()
     for entry in entries:
         try:
-            path = resolve_path(str(entry["path"]), root)
+            path = resolve_path(str(entry["path"]), root, thread_id=thread_id)
             size = entry["size"]
             if not path.is_relative_to(root) or not isinstance(size, int) or size < 0 or not path.is_file():
                 raise OSError
