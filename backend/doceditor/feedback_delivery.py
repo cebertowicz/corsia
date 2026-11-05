@@ -174,19 +174,20 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
             remaining = [item for item in items if item not in refused]
             document = (artifact.get("path") or artifact.get("title") or str(_value(batch, "artifact_id"))) if artifact else str(_value(batch, "artifact_id"))
             comment_ids = ", ".join(str(item["id"]) for item in refused)
-            problem = f"Comment not delivered: {document}, comment {comment_ids}. {refusal}"
-            if remaining:
-                undelivered_note(db, batch, problem, items=refused, final=True)
-                for item in refused:
-                    db.execute("DELETE FROM doc_feedback_batch_items WHERE batch_id=? AND comment_id=?",
-                               (_value(batch, "id"), item["id"]))
-                db.execute("UPDATE doc_feedback_batches SET item_count=item_count-? WHERE id=?",
-                           (len(refused), _value(batch, "id")))
-                items = remaining
-                problem = None
+            # A Local only refusal can't clear on retry, so the author hears it once and the refused rows
+            # leave the batch; a batch left with nothing settles as empty instead of waiting for a retry.
+            undelivered_note(db, batch, f"Comment not delivered: {document}, comment {comment_ids}. {refusal}",
+                             items=refused, final=True)
+            for item in refused:
+                db.execute("DELETE FROM doc_feedback_batch_items WHERE batch_id=? AND comment_id=?",
+                           (_value(batch, "id"), item["id"]))
+            db.execute("UPDATE doc_feedback_batches SET item_count=item_count-? WHERE id=?",
+                       (len(refused), _value(batch, "id")))
+            if not remaining:
+                return DeliveryResult(outcome="empty")
+            items = remaining
     if problem is not None:
-        # A Local only refusal can't clear on retry, so it is sent whole rather than as the retry note.
-        undelivered_note(db, batch, problem, items=items, final=bool(refused))
+        undelivered_note(db, batch, problem, items=items)
         return DeliveryResult(reason=problem)
     image_regions.annotate_delivery(
         db, items, path=artifact["path"] if artifact else None, reader_thread_id=recipient,

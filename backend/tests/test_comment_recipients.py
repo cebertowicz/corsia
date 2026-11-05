@@ -351,6 +351,15 @@ def test_disabling_legacy_exemption_holds_owner(isolated_db, monkeypatch):
     db.close()
 
 
+def assert_refused_batch_settled(db, batch, comment_id):
+    """A refusal that can't clear on retry settles the batch empty instead of leaving it retryable."""
+    state = db.execute("SELECT state,delivery_outcome,undelivered_reason FROM doc_feedback_batches WHERE id=?",
+                       (batch,)).fetchone()
+    assert tuple(state) == ("delivered", "empty", None)
+    assert not db.execute("SELECT 1 FROM doc_feedback_batch_items WHERE batch_id=? AND comment_id=?",
+                          (batch, comment_id)).fetchone()
+
+
 def test_pending_reply_to_other_agent_rechecks_locality(isolated_db):
     db = get_db()
     for name in ("owner", "cloud", "local"):
@@ -365,8 +374,7 @@ def test_pending_reply_to_other_agent_rechecks_locality(isolated_db):
     db.execute("UPDATE threads SET local_only=1 WHERE id='local'")
     db.commit()
     feedback_batches.close_batch(db, batch, "send")
-    state = db.execute("SELECT state,undelivered_reason FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()
-    assert state[0] == "undelivered" and reply["id"] in state[1]
+    assert_refused_batch_settled(db, batch, reply["id"])
     db.close()
 
 
@@ -384,8 +392,7 @@ def test_pending_reply_from_deleted_agent_is_not_delivered(isolated_db):
     db.execute("DELETE FROM threads WHERE id='local'")
     db.commit()
     feedback_batches.close_batch(db, batch, "send")
-    state = db.execute("SELECT state,undelivered_reason FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()
-    assert state[0] == "undelivered" and reply["id"] in state[1]
+    assert_refused_batch_settled(db, batch, reply["id"])
     db.close()
 
 
@@ -410,6 +417,10 @@ def test_agent_local_only_tag_is_refused_but_person_tag_is_not(isolated_db, monk
     assert row["id"] in result["tag_refusals"][0] and "recipient is cloud-bound" in result["tag_refusals"][0]
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches WHERE recipient_id='recipient'").fetchone()[0] == 0
     assert events == [("comment_local_only_refused", {"comment_id": row["id"], "reply": False})]
+    with write_transaction(db, scope="test_local_tag_replay") as connection:
+        replay = feedback_batches.record_comment(connection, row, created=False)
+    assert replay["tag_refusals"] == result["tag_refusals"]
+    assert len(events) == 1
     with write_transaction(db, scope="test_person_tag") as connection:
         row, created = comments.create_with_status(aid, body="Person", author="User", author_kind="user", db=connection)
         comment_recipients.save_tags(connection, row, ["recipient"])
@@ -439,9 +450,7 @@ def test_pending_agent_tag_rechecks_locality_before_delivery(isolated_db, monkey
         "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0] == "recipient")
     monkeypatch.setattr(local_only, "send_needs_hold", lambda sender, recipient, db, **kwargs: True)
     feedback_batches.close_batch(db, batch, "send")
-    state = db.execute("SELECT state,undelivered_reason FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()
-    assert state[0] == "undelivered"
-    assert "recipient is cloud-bound or has no model selected" in state[1]
+    assert_refused_batch_settled(db, batch, row["id"])
     db.close()
 
 

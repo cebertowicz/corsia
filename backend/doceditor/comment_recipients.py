@@ -74,8 +74,10 @@ def save_mentions(db, comment: dict, mentions: list[dict]) -> None:
     )
 
 
-def locality_disposition(db, comment: dict, recipient_id: str, sender, owner_id: str | None) -> tuple[str | None, bool]:
-    """Return the locality refusal and whether the pre-tag recipient path is exempt."""
+def locality_disposition(
+    db, comment: dict, recipient_id: str, sender, owner_id: str | None, *, emit: bool = True,
+) -> tuple[str | None, bool]:
+    """Return the locality refusal and whether the pre-tag recipient path is exempt; `emit` counts a refusal."""
     from infra.local_only import send_needs_hold
 
     root = db.execute("SELECT author_kind,author_thread_id FROM doc_comments WHERE id=?",
@@ -98,7 +100,7 @@ def locality_disposition(db, comment: dict, recipient_id: str, sender, owner_id:
         refusal = (f"{name} is cloud-bound or has no model selected, and Local only applies to this chat or project, "
                    "so the comment wasn't delivered. Send it with delegate_send, which holds it for the person's approval, "
                    "or send it to a local agent.")
-        if not legacy_exempt:
+        if emit and not legacy_exempt:
             from doceditor import live_events
             from infra.write_effects import after_commit
 

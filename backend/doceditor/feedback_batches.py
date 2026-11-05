@@ -86,8 +86,9 @@ def record_comment(
         sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id=?",
                             (comment["author_thread_id"],)).fetchone()
         for recipient in recipients:
+            # A replayed client_id returns the same refusal but counts it only once.
             refusal, legacy_exempt = comment_recipients.locality_disposition(
-                db, comment, recipient, sender, owner_id,
+                db, comment, recipient, sender, owner_id, emit=created,
             )
             if refusal and not legacy_exempt:
                 refused.add(recipient)
