@@ -14,6 +14,7 @@ class AuthorizedPath:
 
     resolved: Path
     reviewed: bool
+    fence: Any = None
 
 
 def _join_relative_to_workspace(path: str, workspace: Path | None) -> Path:
@@ -64,6 +65,7 @@ def resolve_path(
     *,
     for_write: bool = False,
     thread_id: str | None = None,
+    fence: Any = None,
 ) -> Path:
     """Resolve path against workspace (if relative) and enforce directory restriction.
 
@@ -80,7 +82,7 @@ def resolve_path(
     if thread_id:
         from tools.project_fence import fence_for_thread
 
-        if refusal := fence_for_thread(thread_id).refusal(p):
+        if refusal := (fence if fence is not None else fence_for_thread(thread_id)).refusal(p):
             raise PermissionError(refusal)
     confined_reads.check(p, resolved, for_write=for_write)
     if not for_write and carry_in_hides(resolved, reading=True):
@@ -166,11 +168,13 @@ async def _resolve_path_for_action(
                 allowed_dir,
                 for_write=for_write,
                 thread_id=thread_id,
+                fence=fence,
             ),
             reviewed=False,
+            fence=fence,
         )
 
     execution_path = consumed.resolved_path
     if execution_path is None:
         raise PermissionError("Host action path is unavailable.")
-    return AuthorizedPath(resolved=execution_path, reviewed=True)
+    return AuthorizedPath(resolved=execution_path, reviewed=True, fence=fence)

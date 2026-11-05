@@ -28,14 +28,18 @@ def _forms(path: Path) -> tuple[Path, ...]:
 class SearchFence:
     """The fenced roots below an already-authorized search root."""
 
-    def __init__(self, root: Path, thread_id: str | None):
+    def __init__(self, root: Path, thread_id: str | None, fence: project_fence.Fence | None = None):
         self.root = root
         self.thread_id = thread_id
         search_forms = _forms(root)
-        fence = project_fence.fence_for_thread(thread_id)
+        fence = fence if fence is not None else project_fence.fence_for_thread(thread_id)
         self.roots = tuple(
             fenced for fenced in fence.roots
             if not any(_contains(form, search) for form in fenced.forms for search in search_forms)
+        )
+        self._root_keys = tuple(
+            unicodedata.normalize("NFC", str(form)).casefold().rstrip(os.sep) or os.sep
+            for fenced in self.roots for form in fenced.forms
         )
         self.pruned = False
         self.has_exclusions = any(
@@ -45,7 +49,28 @@ class SearchFence:
 
     def excludes(self, path: Path) -> bool:
         """Refuse paths in an excluded root, in written or resolved form."""
-        excluded = project_fence.Fence(self.roots, self.thread_id).matching_root(path) is not None
+        if not self._root_keys:
+            return False
+        forms = (os.path.abspath(path.expanduser()), str(path.expanduser().resolve(strict=False)))
+        keys = (unicodedata.normalize("NFC", form).casefold() for form in forms)
+        excluded = any(
+            key == root or key.startswith(root.rstrip(os.sep) + os.sep)
+            for key in keys for root in self._root_keys
+        )
+        self.pruned |= excluded
+        return excluded
+
+    def excludes_ripgrep(self, path: Path) -> bool:
+        """Filter a no-follow ripgrep record below the authorized resolved root."""
+        try:
+            relative = path.relative_to(self.root)
+            if ".." in relative.parts:
+                raise ValueError("ripgrep path escapes its search root")
+        except ValueError:
+            self.pruned = True
+            return True
+        key = unicodedata.normalize("NFC", str(self.root / relative)).casefold()
+        excluded = any(key == root or key.startswith(root.rstrip(os.sep) + os.sep) for root in self._root_keys)
         self.pruned |= excluded
         return excluded
 
@@ -55,8 +80,11 @@ class SearchFence:
             return result
         from host_access.credential_sanitizer import CredentialSafeText
 
-        text = f"{result}\n{NOTICE}"
-        return CredentialSafeText(text) if isinstance(result, CredentialSafeText) else text
+        if isinstance(result, CredentialSafeText):
+            from tools.grep_content import with_notice
+
+            return with_notice(result, NOTICE)
+        return f"{result}\n{NOTICE}"
 
     def ripgrep_globs(self, root: Path) -> list[str]:
         """Find physical spellings of excluded directories without entering them."""

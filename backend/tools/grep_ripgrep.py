@@ -23,7 +23,6 @@ from pathlib import Path
 import re
 
 from core.workspace_layout import THREADS_DIR, thread_tray_owners
-from host_access.credential_sanitizer import CredentialSafeText
 from tools.filesystem_effects import expanded_globs
 from tools.grep_content import SEPARATOR, GrepLine, SourceLines, read_source, render
 from tools.search_scope import (
@@ -114,7 +113,7 @@ def _render(
     if not lines:
         return f"No matches for pattern '{pattern}'"
     lines = lines[:max_results]
-    prefix = f"{search_dir}/"
+    prefix = _display(f"{search_dir}/")
     if output_mode == "count" and search_dir.is_file():
         rendered = "\n".join(line.rpartition(":")[2] for line in lines)
     else:
@@ -125,7 +124,7 @@ def _render(
             + f"\n\n... (output truncated at {output_cap:,} chars. Narrow your search "
             "with glob filters or use 'files' mode.)"
         )
-    return _display(rendered)
+    return rendered
 
 
 async def _run(command: list[str], *, cwd: Path | None = None) -> _Ripgrep:
@@ -266,7 +265,11 @@ def _render_content(
             safe.extend(None for _line in lines)
         else:
             safe.extend(source.substitute(Path(path).suffix, partial(read_source, Path(path)), lines))
-    return _display(render([line for _path, line in parsed], safe, output_cap, header))
+    displayed = [
+        SEPARATOR if line is SEPARATOR else GrepLine(_display(line.prefix), _display(line.text), line.number)
+        for _path, line in parsed
+    ]
+    return render(displayed, [None if text is None else _display(text) for text in safe], output_cap, _display(header))
 
 
 def _content_lines(
@@ -343,7 +346,7 @@ def _records(output: str, scope: SearchScope, mode: str):
         try:
             candidate = Path(path)
             allowed = keep_path(candidate, scope.current_thread_id, scope.all_threads)
-            if scope.fence and scope.fence.excludes(candidate):
+            if scope.fence and scope.fence.excludes_ripgrep(candidate):
                 allowed = False
         except Exception:
             _mark_pruned(scope)
@@ -353,13 +356,12 @@ def _records(output: str, scope: SearchScope, mode: str):
 
 
 def _display(text: str) -> str:
-    displayed = text.encode("utf-8", errors="backslashreplace").decode("utf-8")
-    return CredentialSafeText(displayed) if isinstance(text, CredentialSafeText) else displayed
+    return text.encode("utf-8", errors="backslashreplace").decode("utf-8")
 
 
 def _kept_lines(output: str, scope: SearchScope, mode: str) -> list[str]:
     """Render only records whose complete path passed the scope checks."""
-    return [path + (f":{rest}" if mode == "count" else "")
+    return [_display(path + (f":{rest}" if mode == "count" else ""))
             for path, rest in _records(output, scope, mode) if path is not None]
 
 

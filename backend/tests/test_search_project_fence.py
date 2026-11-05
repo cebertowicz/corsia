@@ -30,6 +30,24 @@ def fenced_workspace(tmp_path, monkeypatch):
     return ws, private
 
 
+@pytest.mark.parametrize("pattern", ["public/linked/*.txt", "public/**/*.txt"])
+async def test_glob_omits_symlinked_directory_into_fenced_root(fenced_workspace, pattern):
+    ws, private = fenced_workspace
+    (ws / "public" / "linked").symlink_to(private, target_is_directory=True)
+    result = await GlobTool(workspace=ws).execute(pattern, _thread_id="caller")
+    assert "secret.txt" not in result
+    assert NOTICE in result
+
+
+async def test_glob_omits_file_symlink_into_fenced_root(fenced_workspace):
+    ws, private = fenced_workspace
+    (ws / "public" / "alias.txt").symlink_to(private / "secret.txt")
+    result = await GlobTool(workspace=ws).execute("**/*.txt", _thread_id="caller")
+    assert "visible.txt" in result
+    assert "alias.txt" not in result
+    assert NOTICE in result
+
+
 @pytest.mark.parametrize("tool", ["glob", "grep-rg", "grep-python"])
 async def test_fence_prunes_and_notifies(fenced_workspace, monkeypatch, tool):
     from tools import grep
@@ -288,6 +306,24 @@ def test_allowed_non_utf8_name_is_transport_safe(monkeypatch, mode):
         result = _render_content("needle", root, output, 50, scope, 1000, "")
     else:
         result = _render("needle", root, output, 50, scope, 1000, mode)
+    assert r"visible\udcff.txt" in result
+    result.encode("utf-8")
+
+
+def test_non_utf8_content_path_keeps_safe_marker(monkeypatch):
+    import os
+    from host_access.credential_sanitizer import CredentialSafeText
+    from tools import project_fence
+    from tools.grep_ripgrep import _render_content
+    from tools.search_fence import SearchFence
+    from tools.search_scope import SearchScope
+
+    root = Path("/search")
+    monkeypatch.setattr(project_fence, "fence_for_thread", lambda thread_id: Fence())
+    scope = SearchScope("caller", False, fence=SearchFence(root, "caller"))
+    output = os.fsdecode(b"/search/visible\xff.txt\0" + b"1:needle\n")
+    result = _render_content("needle", root, output, 50, scope, 1000, "")
+    assert isinstance(result, CredentialSafeText)
     assert r"visible\udcff.txt" in result
     result.encode("utf-8")
 

@@ -120,7 +120,7 @@ class GrepTool(Tool):
         except PermissionError as exc:
             return f"Error: {exc}"
         search_dir = authorized.resolved
-        fence = await asyncio.to_thread(SearchFence, search_dir, kwargs.get("_thread_id"))
+        fence = await asyncio.to_thread(SearchFence, search_dir, kwargs.get("_thread_id"), authorized.fence)
         current_thread_id, all_threads = search_identity(search_dir, kwargs.get("_thread_id"), all_threads)
         if not keep_path(search_dir, current_thread_id, all_threads):
             return fence.notice(f"No matches for pattern '{pattern}'\n{THREADS_NOTICE}")

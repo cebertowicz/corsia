@@ -85,7 +85,7 @@ class GlobTool(Tool):
                 project_id=kwargs.get("_thread_project_id"),
             )
             search_dir = authorized.resolved
-            fence = await asyncio.to_thread(SearchFence, search_dir, current_thread_id)
+            fence = await asyncio.to_thread(SearchFence, search_dir, current_thread_id, authorized.fence)
             current_thread_id, all_threads = search_identity(search_dir, current_thread_id, all_threads)
             if not keep_path(search_dir, current_thread_id, all_threads):
                 return fence.notice(other_thread_result(pattern, search_dir))
