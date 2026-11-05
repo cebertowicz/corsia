@@ -6,16 +6,16 @@ import logging
 import uuid
 from typing import Any, Awaitable, Callable
 
+from infra.chat_comment_answers import strip_answer_tags
 from infra.database import get_db, write_transaction
 from infra.time import utc_now_iso
 from infra.db_async import run_in_db
 from infra.context_receipts import attach_delivered_context_to_latest_assistant as _attach_delivered_context_to_latest_assistant
 from infra.context_receipts import (
     ContextReceiptIdentity,
-    context_usage_receipt,
-    context_usage_summary, live_context_usage_payload,
+    context_usage_receipt, context_usage_summary, live_context_usage_payload,
 )
-from core.turn_error_surface import persist_llm_error
+from core.turn_error_surface import broadcast_llm_error, persist_llm_error
 from infra.queries import insert_message
 from llm.error_cause import error_fields
 from core.plan_turn_end import record_turn_end_logged
@@ -372,7 +372,7 @@ class StepHandler:
                     "type": "session_updated",
                     "thread_id": self.thread_id,
                     "title": row["title"],
-                    "last_message": row["last_message"],
+                    "last_message": strip_answer_tags(row["last_message"]),
                     "updated_at": row["updated_at"],
                 })
         except Exception as e:
@@ -383,7 +383,7 @@ class StepHandler:
         # the turn boundary instead of dying. Never break turn completion on it.
         await record_turn_end_logged(
             self.thread_id, "plan-liveness arm after turn completion failed",
-            "parent drive after turn completion failed",
+            "parent drive after turn completion failed", turn_id=self.turn_id,
         )
 
     async def _handle_error(self, payload: dict):
@@ -395,13 +395,11 @@ class StepHandler:
             self.model_info.get("model"), self.turn_id, err_id, err_now, err_content,
             error_fields(payload),
         )
-
         await record_turn_end_logged(
             self.thread_id, "plan-liveness error wake failed; parent may wait",
             "parent drive after turn error failed; parent may wait",
             level="ERROR", outcome="error", error=err_content, turn_id=self.turn_id,
         )
-
         await self._emit({
             "type": "error",
             "thread_id": self.thread_id,
@@ -409,6 +407,8 @@ class StepHandler:
             **err_fields,
             **terminal_context,
         })
+        # The frame carries the saved row's reference, so the client draws only this row.
+        await broadcast_llm_error(self.thread_id, err_id, self.broadcast)
 
     async def _handle_turn_cancelled(self, payload: dict):
         effect_type = (

@@ -3,6 +3,21 @@
 from __future__ import annotations
 
 import logging
+import os
+
+# An operator's LITELLM_LOCAL_MODEL_COST_MAP=true keeps the cost map offline. Otherwise
+# LiteLLM's import-time fetch is turned off and the lifespan refreshes it after startup.
+# CORSIA's own value lasts only for the import, so a process this backend starts (its
+# in-app restart included) inherits the operator's setting, never CORSIA's.
+_OPERATOR_COST_MAP = os.environ.get("LITELLM_LOCAL_MODEL_COST_MAP")
+_COST_MAP_OFFLINE = (_OPERATOR_COST_MAP or "").lower() == "true"
+os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "true"
+import litellm  # noqa: E402,F401  (reads the setting once, here)
+
+if _OPERATOR_COST_MAP is None:
+    del os.environ["LITELLM_LOCAL_MODEL_COST_MAP"]
+else:
+    os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = _OPERATOR_COST_MAP
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exception_handlers import http_exception_handler
@@ -14,8 +29,10 @@ from app_lifecycle import lifespan
 
 from infra import config  # noqa: F401
 from infra.access_log import install_access_log_redaction
+from infra.log_locals import drop_traceback_locals
 from infra.json_gzip import JsonGZipMiddleware
 from infra.config import FRONTEND_DIR
+from infra.failure_reference import ReferencedHTTPException
 from infra.product_events import emit_product_event
 from infra.request_timing import RequestTimingMiddleware
 from ws import websocket_endpoint
@@ -72,6 +89,7 @@ from api import (
     plans_folded_router,
 )
 from api.attention import router as attention_router
+from api.held_replies import router as held_replies_router
 from api.system_perf import router as system_perf_router
 from api.registry import router as registry_router
 from api.registry_pane import router as registry_pane_router
@@ -80,13 +98,16 @@ from api.doc_reviews import router as doc_reviews_router
 from api.cli_install import router as cli_install_router
 from api.google import router as google_router
 from api.microsoft import router as microsoft_router
+from api.messages import router as messages_router
 from api.keys import router as keys_router
 
 
 logger = logging.getLogger(__name__)
 
 install_access_log_redaction()
+drop_traceback_locals()
 app = FastAPI(title="CORSIA UI", lifespan=lifespan)
+app.state.litellm_cost_map_offline = _COST_MAP_OFFLINE
 
 app.add_middleware(
     CORSMiddleware,
@@ -105,12 +126,14 @@ def _emit_error_reference(
     *,
     status: int,
     error_message: str,
+    reference: str | None = None,
 ) -> str:
     """Log and instrument an API failure under one opaque reference."""
     from infra.failure_reference import new_error_reference
     from infra.internal_principal import current_internal_user
 
-    reference = new_error_reference()
+    if reference is None:
+        reference = new_error_reference()
     logger.error(
         "API error reference=%s method=%s path=%s status=%s detail=%s",
         reference,
@@ -145,6 +168,7 @@ async def _emit_http_error_api(request: Request, exc: StarletteHTTPException):
         exc,
         status=exc.status_code,
         error_message=str(exc.detail)[:200],
+        reference=exc.reference if isinstance(exc, ReferencedHTTPException) else None,
     )
     return _ErrorJSONResponse(
         status_code=exc.status_code,
@@ -173,6 +197,7 @@ app.include_router(system_perf_router)
 app.include_router(keys_router)
 app.include_router(google_router)
 app.include_router(microsoft_router)
+app.include_router(messages_router)
 app.include_router(uploads_router)
 app.include_router(turns_router)
 app.include_router(drain_router)
@@ -210,6 +235,7 @@ app.include_router(registry_router)
 app.include_router(registry_pane_router)
 app.include_router(registry_ownership_router)
 app.include_router(attention_router)
+app.include_router(held_replies_router)
 app.include_router(cc_attach_router)
 app.include_router(conductor_router)
 app.include_router(corsia_agent_router)

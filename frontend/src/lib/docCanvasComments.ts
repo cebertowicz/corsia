@@ -28,9 +28,11 @@ export function canvasCommentScrollTarget(comments: DocComment[], text: string, 
 	return range ? { ...range, commentId: id, focus, origin } : null;
 }
 
-/** Preserve a concrete target for the same focus, otherwise build explicit navigation. */
+/** Preserve an explicit target; image-region focus belongs to the image viewer, while text focus navigates the document. */
 export function canvasFocusedCommentScrollTarget(current: CanvasScrollTarget | null, comments: DocComment[], text: string, id: string, focus: boolean): CanvasScrollTarget | null {
-	return current?.commentId === id ? current : canvasCommentScrollTarget(comments, text, id, focus, 'navigation');
+	if (current?.commentId === id) return current;
+	if (comments.find((comment) => comment.id === id)?.region) return null;
+	return canvasCommentScrollTarget(comments, text, id, focus, 'navigation');
 }
 
 /** A suggestion is drawn inline only while it is open: a decided, resolved or stale one has no marks. */

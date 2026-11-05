@@ -11,6 +11,9 @@ import pytest
 from events.connectors import github_head_checks as checks
 from events.connectors import github_repo_activity as poller
 from events.connectors.github_notifications_feed import GhResponse
+from tests.test_github_pr_facts import _rule
+
+CHECK_STATE = {"field": "check_state", "op": "present"}
 
 
 def payload(sha="abc"):
@@ -113,7 +116,7 @@ async def test_refused_read_stops_after_one_attempt_with_reason(monkeypatch, cap
 
 
 @pytest.mark.asyncio
-async def test_four_held_reads_drop_and_clear_state(monkeypatch, caplog):
+async def test_four_held_reads_keep_pending_and_clear_memory(monkeypatch, caplog):
     calls, sink = [], Sink()
 
     async def read(*_args):
@@ -127,8 +130,10 @@ async def test_four_held_reads_drop_and_clear_state(monkeypatch, caplog):
         await finish(agg)
     assert len(calls) == 4 and not sink.events
     assert not agg._tasks and not agg._facts
-    drops = [r for r in caplog.records if "dropped after retries" in r.message]
-    assert len(drops) == 1 and drops[0].levelno == logging.WARNING
+    kept = [r for r in caplog.records if "kept for restart after retries" in r.message]
+    assert len(kept) == 1 and kept[0].levelno == logging.WARNING
+    assert [entry["head_sha"] for entry in await checks.pending.pending()] == ["abc"]
+    await checks.pending.forget("o/r", "abc")
 
 
 @pytest.mark.asyncio
@@ -142,10 +147,12 @@ async def test_many_settled_and_failed_heads_leave_no_state(monkeypatch):
         agg.observe(payload(f"{'bad' if n % 2 else 'good'}{n}"))
     await finish(agg)
     assert not agg._tasks and not agg._facts
+    for n in range(1, 20, 2):
+        await checks.pending.forget("o/r", f"bad{n}")
 
 
 @pytest.mark.asyncio
-async def test_sink_failure_clears_both_maps(monkeypatch):
+async def test_sink_failure_is_logged_and_clears_both_maps(monkeypatch, caplog):
     async def read(*_args):
         return response(), None
 
@@ -156,9 +163,10 @@ async def test_sink_failure_clears_both_maps(monkeypatch):
     monkeypatch.setattr(poller, "gated_read", read)
     agg = aggregator(FailingSink())
     agg.observe(payload())
-    with pytest.raises(RuntimeError, match="intake unavailable"):
-        await finish(agg)
+    await finish(agg)  # never escapes the task
+    assert "could not admit settled head" in caplog.text
     assert not agg._tasks and not agg._facts
+    await checks.pending.forget("o/r", "abc")
 
 
 @pytest.mark.asyncio
@@ -175,6 +183,7 @@ async def test_refusal_logged_without_optional_none_facts(monkeypatch, caplog):
     assert sink.events[0]["facts"] == {"repo": "o/r", "head_sha": "abc", "conclusion": "success"}
     assert "code=unknown_type" in caplog.text and "private details" not in caplog.text
     assert sink.events[0]["origin"] == "connector"
+    assert len(sink.events) == 1
 
 
 @pytest.mark.asyncio
@@ -276,12 +285,126 @@ def test_event_identity_depends_on_suites_not_delivery():
     assert checks._event_id("o/r", "abc", suites) != checks._event_id("o/r", "abc", [{**suites[0], "updated_at": "later"}])
 
 
-def test_hook_requires_both_switches(monkeypatch):
-    monkeypatch.setenv(checks.ENABLE_ENV, "1")
-    monkeypatch.setenv("CORSIA_TEST_MODE", "1")
-    assert checks.hook_disabled_reason() == "test_mode"
+def test_hook_defaults_on_except_test_mode_or_explicit_disable(monkeypatch):
+    monkeypatch.delenv(checks.ENABLE_ENV, raising=False)
     monkeypatch.setenv("CORSIA_TEST_MODE", "0")
     monkeypatch.setenv(poller.DISABLE_ENV, "1")
     assert checks.hook_disabled_reason() is None
-    monkeypatch.delenv(checks.ENABLE_ENV)
+    monkeypatch.setenv(checks.ENABLE_ENV, "0")
     assert checks.hook_disabled_reason() == "not_enabled"
+    monkeypatch.setenv(checks.ENABLE_ENV, "1")
+    monkeypatch.setenv("CORSIA_TEST_MODE", "1")
+    assert checks.hook_disabled_reason() == "test_mode"
+
+
+async def _settled(monkeypatch, read, number=7):
+    monkeypatch.setattr(poller, "gated_read", read)
+    sink = Sink()
+    agg = aggregator(sink)
+    agg.observe(payload(), {"number": number})
+    await finish(agg)
+    return sink.events[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timed_out", [False, True])
+async def test_a_held_suite_arrives_as_action_required_whatever_else_failed(isolated_db, monkeypatch, timed_out):
+    _rule("head.checks_completed", [CHECK_STATE])
+    found = [{"id": 2, "updated_at": "t", "status": "completed", "conclusion": "action_required",
+              "latest_check_runs_count": 0},
+             {"id": 3, "updated_at": "t", "status": "completed", "conclusion": "success",
+              "latest_check_runs_count": 0}]
+    runs = []
+    if timed_out:  # one suite held, another timed out
+        found.append({"id": 4, "updated_at": "t", "status": "completed", "conclusion": "timed_out",
+                      "latest_check_runs_count": 1})
+        runs = [{"name": "ci", "status": "completed", "conclusion": "timed_out", "id": 1}]
+    paths = []
+
+    async def read(_runner, _repo, path):
+        paths.append(path)
+        if path.endswith("check-suites"):
+            return GhResponse(200, {}, {"check_suites": found}), None
+        if "/pulls/" in path:
+            return GhResponse(200, {}, {"head": {"sha": "abc"}, "base": {"ref": "dev"}, "mergeable": None}), None
+        return GhResponse(200, {}, {"total_count": len(runs), "check_runs": runs}), None
+
+    facts = (await _settled(monkeypatch, read))["facts"]
+    # check_state is state_of the head's one ranked conclusion, so the two can't disagree.
+    assert facts["check_state"] == "action_required" and facts["conclusion"] == "action_required"
+    assert facts["pr_number"] == 7 and facts["mergeable"] == "UNKNOWN" and facts["head_sha"] == "abc"
+    assert facts["current_head"] == "abc" and len(paths) == 2  # suites once, then the PR; no runs read
+
+
+@pytest.mark.asyncio
+async def test_a_head_whose_pull_request_moved_on_is_still_named_by_its_settled_head(isolated_db, monkeypatch):
+    _rule("head.checks_completed", [CHECK_STATE])
+    failed = response()
+    failed.body["check_suites"][0]["conclusion"] = "failure"
+    paths = []
+
+    async def read(_runner, _repo, path):
+        paths.append(path)
+        if path.endswith("check-suites"):
+            return failed, None
+        if "/pulls/" in path:  # a push landed after the suites settled on abc
+            return GhResponse(200, {}, {"head": {"sha": "new"}, "base": {"ref": "dev"}, "mergeable": True}), None
+        runs = [{"name": "ci", "status": "completed", "conclusion": "failure", "id": 1}]
+        return GhResponse(200, {}, {"total_count": 1, "check_runs": runs}), None
+
+    event = await _settled(monkeypatch, read)
+    assert event["facts"]["head_sha"] == "abc" and event["facts"]["conclusion"] == "failure"
+    assert event["facts"]["current_head"] == "new" and event["facts"]["check_state"] == "failing"
+    assert paths == ["repos/o/r/commits/abc/check-suites", "repos/o/r/pulls/7"]
+    assert event["event_id"] == checks._event_id("o/r", "abc", failed.body["check_suites"])
+
+
+@pytest.mark.asyncio
+async def test_no_rule_testing_a_read_fact_means_no_read_beyond_the_suites(isolated_db, monkeypatch):
+    _rule("head.checks_completed", [{"field": "repo", "op": "eq", "value": "o/r"}])  # tests no read fact
+    paths = []
+
+    async def read(_runner, _repo, path):
+        paths.append(path)
+        return response(), None
+
+    facts = (await _settled(monkeypatch, read))["facts"]
+    assert paths == ["repos/o/r/commits/abc/check-suites"]
+    assert facts == {"repo": "o/r", "head_sha": "abc", "conclusion": "success", "pr_number": 7}
+
+
+def _reads_with_a_pull_request(pull):
+    async def read(_runner, _repo, path):
+        if "/pulls/" in path:
+            return GhResponse(200, {}, pull), None
+        if path.endswith("check-suites"):
+            return response(), None
+        runs = [{"name": "ci", "status": "completed", "conclusion": "success", "id": 1}]
+        return GhResponse(200, {}, {"total_count": 1, "check_runs": runs}), None
+
+    return read
+
+
+@pytest.mark.asyncio
+async def test_a_rule_naming_a_read_fact_and_a_read_populated_one_fires_after_the_read(isolated_db, monkeypatch):
+    from events.rule_match import test_matches
+
+    match = [{"field": "check_state", "op": "eq", "value": "green"},
+             {"field": "draft", "op": "eq", "value": False},
+             {"field": "author_origin", "op": "eq", "value": "outside"}]
+    _rule("head.checks_completed", match)
+    pull = {"head": {"sha": "abc"}, "base": {"ref": "dev"}, "draft": False, "mergeable": True,
+            "user": {"login": "someone"}}
+    facts = (await _settled(monkeypatch, _reads_with_a_pull_request(pull)))["facts"]
+    assert all(test_matches(test, facts) for test in match), facts
+
+
+@pytest.mark.asyncio
+async def test_a_failed_rule_probe_reads_anyway_and_the_head_still_settles(isolated_db, monkeypatch):
+    def broken(*_args):
+        raise OSError("database is locked")
+
+    monkeypatch.setattr("events.rule_reads.type_rules", broken)
+    pull = {"head": {"sha": "abc"}, "base": {"ref": "dev"}, "mergeable": True, "user": {"login": "someone"}}
+    event = await _settled(monkeypatch, _reads_with_a_pull_request(pull))
+    assert event["facts"]["check_state"] == "green" and event["facts"]["current_head"] == "abc"

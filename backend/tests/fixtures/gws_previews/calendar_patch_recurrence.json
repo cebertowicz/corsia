@@ -1,0 +1,12 @@
+{
+  "body": {
+    "recurrence": [
+      "RRULE:FREQ=WEEKLY;UNTIL=20261201T000000Z"
+    ]
+  },
+  "dry_run": true,
+  "is_multipart_upload": false,
+  "method": "PATCH",
+  "query_params": [],
+  "url": "https://www.googleapis.com/calendar/v3/calendars/primary/events/S1"
+}

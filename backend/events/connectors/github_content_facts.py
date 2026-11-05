@@ -29,13 +29,17 @@ def content_kind(raw: dict[str, Any]) -> str | None:
     return None
 
 
+def author_origin(login: str | None) -> str:
+    """``inside`` for CORSIA's own author, ``outside`` for anyone else or no one."""
+    return "inside" if login and is_own(login) else "outside"
+
+
 def content_facts(raw: dict[str, Any]) -> dict[str, Any]:
     """Facts about the authored item, without its title or body."""
     author = event_author(raw)
     login = author.get("login")
     login = login if isinstance(login, str) and login else None
-    origin = "inside" if login and is_own(login) else "outside"
-    facts: dict[str, Any] = {"author_origin": origin}
+    facts: dict[str, Any] = {"author_origin": author_origin(login)}
     if login:
         facts["author"] = login
     item: dict[str, Any] = next((raw[k] for k in ("comment", "review", "pull_request", "issue")
@@ -44,9 +48,10 @@ def content_facts(raw: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(container, dict):
         container = {}
     if raw.get("issue") and not raw.get("pull_request"):
+        # A PR conversation comment keeps its number for staging; its PR labels come from the read.
         facts["issue_number"] = container.get("number")
-    if isinstance(container.get("labels"), list):
-        facts["labels"] = label_names(container["labels"])
+        if not container.get("pull_request") and isinstance(container.get("labels"), list):
+            facts["labels"] = label_names(container["labels"])
     if link := item.get("html_url"):
         facts["link"] = link
     if isinstance(item.get("body"), str):

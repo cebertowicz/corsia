@@ -13,7 +13,7 @@ from infra.input_render import PreparedBatch
 from infra.input_writes import ProviderWriteEvidence, dispatch_fenced_batch, settle_batch_write
 from infra.plan_dispatch_events import report_terminal_unknown
 from infra.queries import message_transcript_seq
-from infra.send_broadcast import broadcast_claimed_batch, broadcast_newest_error
+from infra.send_broadcast import announce_successor_turn, broadcast_claimed_batch, broadcast_newest_error
 from infra.send_types import InboxQueuedInput, InputReceipt, SendResult
 from infra.thread_input_types import ClaimedBatch, batch_option
 from infra.time import utc_now_iso
@@ -140,9 +140,9 @@ async def _dispatch_prepared(
         persist_prepared_installed_context,
         batch.thread_id, prepared.prepared_context,
     )
-    manifest_id = await run_in_db(record_dispatch_manifest, batch.thread_id, batch.turn_id, prepared)
+    await run_in_db(record_dispatch_manifest, batch.thread_id, batch.turn_id, prepared)
     if after_manifest_before_dispatch is not None:  # refusing here leaves no provider write
-        await after_manifest_before_dispatch(manifest_id)
+        await after_manifest_before_dispatch(batch.turn_id)
     context = _dispatch_context(
         send_dispatch,
         batch,
@@ -175,11 +175,13 @@ async def execute_claimed_batch(
     ws=None,
     dispatch_content: str | None = None,
     after_persist_before_dispatch=None,
-    after_manifest_before_dispatch=None,
+    after_manifest_before_dispatch=None, announce_claim: bool = False,
 ) -> SendResult | InboxQueuedInput:
-    """Prepare and hand one claimed FIFO batch to its exact provider."""
+    """Prepare and hand one claimed FIFO batch; ``announce_claim``: no sender shows it working."""
     del dispatch_content
     await _broadcast_batch(batch)
+    if announce_claim:
+        await announce_successor_turn(batch)
     evidence = ProviderWriteEvidence()
     try:
         return await _execute_claimed_batch(
@@ -300,10 +302,8 @@ async def drive_claimed_batch(
     if isinstance(resolved, InboxQueuedInput):
         return resolved
     return await execute_claimed_batch(
-        batch,
-        thread_row=thread_row,
-        target=resolved,
-        user={"id": str(thread_row.get("user_id") or "")},
+        batch, thread_row=thread_row, target=resolved,
+        user={"id": str(thread_row.get("user_id") or "")}, announce_claim=True,
     )
 
 
@@ -392,8 +392,8 @@ async def drive_terminal_settlement(settlement) -> None:
     if settlement.successor is not None:
         await drive_turn_admission(settlement.successor)
     elif settlement.probe_outcome in ("error", "limited") and settlement.thread_id:
-        # The live error frame was sent while the Turn still ran ('failed');
-        # an input left queued behind it now makes it 'held'.
+        # The live error frame was sent while the Turn still ran, with no next_step;
+        # this is the re-publish that carries the real one ('held' with an input queued).
         await broadcast_newest_error(settlement.thread_id)
     for thread_id in settlement.wake_thread_ids:
         await drive_thread(thread_id)

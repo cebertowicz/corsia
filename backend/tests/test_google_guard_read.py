@@ -71,3 +71,23 @@ async def test_guard_searches_both_windows_and_uses_only_sequential_metadata(mon
     assert all(params['format'] == 'metadata' for _, params in calls if 'format' in params)
     assert max_active == 1
     assert len(queries) == 4  # address-only searches for arrivals and the separate count
+
+
+@pytest.mark.asyncio
+async def test_sent_label_marks_own_mail_and_skips_sender_searches(monkeypatch):
+    calls = []
+
+    async def request(method, url, *, account_id, params):
+        calls.append(url)
+        raw = {'id': 'sent', 'threadId': 't', 'internalDate': '1793059200000', 'labelIds': ['SENT'],
+               'payload': {'headers': [{'name': 'From', 'value': 'Me <me@example.org>'},
+                                       {'name': 'To', 'value': 'Pat <pat@example.org>'}]}}
+        return {'messages': [raw]} if url.endswith('/threads/t') else raw
+
+    monkeypatch.setattr(guard_read.client, 'request_json', request)
+    target, thread, sender, count = await guard_read.guard_data('account', 'sent')
+    assert target.own and target.to == 'Pat <pat@example.org>'
+    assert sender == [] and count == 0 and not any(u.endswith('/messages') for u in calls)
+    forged = guard_read._message({'id': 'x', 'internalDate': '0', 'payload': {'headers': [
+        {'name': 'From', 'value': 'Me <me@example.org>'}]}})
+    assert not forged.own

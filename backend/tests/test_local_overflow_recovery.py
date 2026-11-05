@@ -1,6 +1,6 @@
-"""A prompt the Mac cannot prefill goes back to the boundary once, then ends handled.
+"""A prompt the Mac cannot prefill goes back to the boundary; a retry refused again ends handled.
 
-Covers the Turn half of the local-overflow recovery: the loop's one retry after a
+Covers the Turn half of the local-overflow recovery: the loop's one retry per
 provider size refusal, and the futile optional fold with its system-prompt floor.
 """
 
@@ -97,6 +97,26 @@ async def test_overflow_twice_in_one_turn_ends_as_before(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_an_overflow_after_the_retry_made_progress_gets_its_own_checkpoint_and_retry(monkeypatch):
+    # A Turn that keeps working grows again; each refusal after a successful step folds and retries.
+    async def tool_phase(*_args, **_kwargs):
+        return False
+
+    monkeypatch.setattr(turn_iteration, "_run_tool_phase", tool_phase)
+    step = LLMResponse("", tool_calls=[SimpleNamespace(id="c1", name="read_file", arguments={})])
+    adopted: list[object] = []
+    frames, boundaries, error, state = await _run(
+        monkeypatch, [OVERFLOW, step, OVERFLOW, ANSWER],
+        windows=[40_000, 28_672, 28_672, 28_672], adopted=adopted,
+    )
+
+    assert error is None
+    assert adopted == [CHECKPOINTED, CHECKPOINTED]
+    assert "error" not in frames and frames[-1] == "turn_complete"
+    assert state.iteration == 4
+
+
+@pytest.mark.asyncio
 async def test_a_retry_boundary_that_adopts_no_checkpoint_ends_handled_without_a_second_call(monkeypatch):
     frames, boundaries, error, state = await _run(
         monkeypatch, [OVERFLOW, ANSWER], windows=[40_000, 28_672], checkpoints=False,
@@ -170,7 +190,7 @@ async def _folds_at_boundary(monkeypatch, *, window, rendered, usage, sections) 
     async def run_in_db(function, *_args):
         if function is snapshot:
             return None, None, None
-        return SimpleNamespace(context_window=window)
+        return SimpleNamespace(context_window=window, context_window_source="provider")
 
     async def prepare(checkpoint_id, *_args, **_kwargs):
         started.append(checkpoint_id)
@@ -323,7 +343,7 @@ async def _boundary_call(monkeypatch, *, retry, installed_id, adopted_id="ck-1")
     async def run_in_db(function, *_args):
         if function is iteration_context.provider_boundary_snapshot:
             return None, installed, None
-        return SimpleNamespace(context_window=28_672)
+        return SimpleNamespace(context_window=28_672, context_window_source="provider")
 
     async def maintain(boundary, *, must_adopt=False):
         seen.update(must_adopt=must_adopt, installed=boundary.installed_checkpoint)

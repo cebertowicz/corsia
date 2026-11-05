@@ -166,7 +166,7 @@ def _quoted(connection: sqlite3.Connection, quote: str, recipient: str) -> tuple
     Candidates are chosen by their words alone; ``person_input.load`` is the one
     reader of the person's words and ``source_reaches_thread`` the one scope rule.
     """
-    from memory.node_start_recall import source_reaches_thread
+    from memory.source_scope import source_reaches_thread
     from plans import person_input
 
     wanted = _normal(quote)
@@ -248,11 +248,12 @@ def document_comment_words(items: Iterable[dict[str, Any]]) -> list[dict[str, st
     ]
 
 
-def document_comment_intent(items: Iterable[dict[str, Any]]) -> str:
-    """Make one bounded task reading from loaded person document comments."""
-    comments = [str(item["body"]) for item in items if item["kind"] == "comment" and str(item["body"]).strip()]
+def document_comment_intent(items: Iterable[dict[str, Any]], document: str) -> str:
+    """Name the work the person's document comments ask for; their words are the origin quotes."""
+    count = len(document_comment_words(items))
     return validate_intent(bounded_text(
-        "User document feedback: " + "\n".join(comments), MAX_INTENT_BYTES,
+        f"Answer the person's {count} comment{'s' if count != 1 else ''} on {document}",
+        MAX_INTENT_BYTES,
     ))
 
 
@@ -269,11 +270,6 @@ def turn_origin(connection: sqlite3.Connection, turn_id: str | None) -> sqlite3.
         return person[0] if len(person) == 1 else None
     agents = [row for row in rows if _is_agent_message(row)]
     return agents[0] if len(agents) == 1 else None
-
-
-def has_person_origin(connection: sqlite3.Connection, turn_id: str | None) -> bool:
-    row = turn_origin(connection, turn_id)
-    return row is not None and _is_person_message(row)
 
 
 def capture_origin(connection: sqlite3.Connection, node_id: str, *, turn_id: str | None, revision: int) -> bool:

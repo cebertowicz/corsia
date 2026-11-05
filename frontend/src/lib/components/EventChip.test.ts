@@ -158,8 +158,8 @@ describe('EventChip', () => {
 		expect(chip.querySelector('.ev-summary')?.textContent).toBe('Context saved');
 	});
 
-	it('labels the wake for a reply an error stopped as Error', () => {
-		const summary = 'An error stopped the reply to your message, so the agent is trying again';
+	it('shows an unpaired retry without a label', () => {
+		const summary = 'The agent tried once more.';
 		const chip = renderChip({
 			...RESTART_WAKE_MSG,
 			id: 'unanswered-wake-1',
@@ -170,7 +170,7 @@ describe('EventChip', () => {
 				summary,
 			},
 		});
-		expect(chip.querySelector('.ev-label')?.textContent).toBe('Error');
+		expect(chip.querySelector('.ev-label')).toBeNull();
 		expect(chip.querySelector('.ev-summary')?.textContent).toBe(summary);
 	});
 

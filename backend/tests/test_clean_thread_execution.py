@@ -164,7 +164,7 @@ async def test_cc_admitted_failure_keeps_one_owner_and_drives_after_unlock(
         if failure_stage == "publication" and payload["type"] == "turn_complete":
             raise RuntimeError("publication failure")
 
-    async def accept(_transition, acceptance):
+    async def accept(_transition, _live, acceptance):
         return await cc_accept.accept_reconstructed_input(
             "thread-1", live, SimpleNamespace(turn_text="hello"),
             turn_id=batch.turn_id, bcast=bcast,
@@ -207,7 +207,14 @@ async def test_cc_admitted_failure_keeps_one_owner_and_drives_after_unlock(
     monkeypatch.setattr(execution, "drive_terminal_settlement", drive)
     monkeypatch.setattr(dispatch, "dispatch", send)
     monkeypatch.setattr(writes, "_settle_evidence", reject_outer)
-    monkeypatch.setattr(cc_feed, "_accept_under_lock", accept)
+    monkeypatch.setattr(cc_feed.CCFeedTransition, "require_idle", AsyncMock(return_value=live))
+    monkeypatch.setattr(cc_feed.CCFeedTransition, "require_direct_fit", lambda _: None)
+    monkeypatch.setattr(cc_feed.CCFeedTransition, "replace_quarantined", AsyncMock(return_value=live))
+    monkeypatch.setattr(cc_feed.CCFeedTransition, "refresh_once", AsyncMock())
+    monkeypatch.setattr(cc_feed.CCFeedTransition, "consume_cold_transition", AsyncMock(return_value=live))
+    monkeypatch.setattr(cc_feed, "_settle_terminal_boundary", AsyncMock())
+    monkeypatch.setattr(cc_feed, "replace_if_required", AsyncMock(return_value=live))
+    monkeypatch.setattr(cc_feed, "_accept_confirming_resume", accept)
     monkeypatch.setattr(cc_accept, "_prepare_live_turn", prepare_frame)
     try:
         raised_detail = "publication failure" if failure_stage == "publication" else detail
@@ -215,6 +222,7 @@ async def test_cc_admitted_failure_keeps_one_owner_and_drives_after_unlock(
             await asyncio.wait_for(execution.execute_claimed_batch(
                 batch, thread_row=prepared.thread_row, target=target,
             ), timeout=HANG_GUARD_SECONDS)
+        await asyncio.wait_for(live.session._terminal_driver, timeout=HANG_GUARD_SECONDS)
         assert observed_owners == [True]
         assert len(events) == 1
         db = get_db()
@@ -373,9 +381,12 @@ async def test_codex_admitted_failure_keeps_one_owner_and_drives_after_unlock(
     monkeypatch.setattr(execution, "drive_terminal_settlement", drive)
     monkeypatch.setattr(dispatch, "dispatch", send)
     monkeypatch.setattr(writes, "_settle_evidence", reject_outer)
+    async def reusable(_id):
+        return session
+
     monkeypatch.setattr(runtime, "_prepare_dispatch_context", prepare_context)
     monkeypatch.setattr(runtime, "_dispatch_prepared_codex", spawn_locked)
-    monkeypatch.setattr(runtime, "_reusable_app_session", lambda _id: session)
+    monkeypatch.setattr(runtime, "_reusable_app_session", reusable)
     monkeypatch.setattr(runtime, "_resolve_app_server_tools", resolve_tools)
     monkeypatch.setattr("llm.resolution.resolve_execution_target", lambda _model, **_kwargs: target)
     monkeypatch.setattr(runtime, "_configure_spec_app_server_input", configure)
@@ -925,8 +936,11 @@ async def test_codex_checkpoint_stop_transfers_no_write_before_stop_terminal(
     monkeypatch.setattr(execution, "_broadcast_batch", maybe_fail_terminal_publication)
     monkeypatch.setattr(execution, "run_in_db", maybe_fail_input_settlement)
     monkeypatch.setattr(input_writes, "_settle_evidence", reject_outer_settlement)
+    async def reusable(_id):
+        return session
+
     monkeypatch.setattr(send_dispatch, "dispatch", dispatch_codex)
-    monkeypatch.setattr(codex_runtime, "_reusable_app_session", lambda _id: session)
+    monkeypatch.setattr(codex_runtime, "_reusable_app_session", reusable)
     monkeypatch.setattr(
         codex_runtime,
         "_resolve_spawn_payload",

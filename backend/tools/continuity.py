@@ -144,12 +144,20 @@ def _run(
     operation: str,
     params: dict[str, Any],
     checkpoint_id: str | None = None,
+    registry: Any = None,
 ) -> str:
     """Apply one transaction, returning individual refusals as tool results."""
     if operation == "add" and params.get("field") == "next_actions":
         return continuity_runtime.next_actions_refusal(checkpoint_id)
     db = get_db()
     try:
+        if operation in {"place", "review"}:
+            from infra.carry_in_action import validate_placement
+
+            try:
+                validate_placement(params.get("placement"), registry)
+            except ValueError as invalid:
+                raise ContinuityError(str(invalid)) from invalid
         if checkpoint_id and operation in {"place", "triage", "outcome"}:
             return f"Error: {operation} records an in-turn fact; use it outside a checkpoint"
         if not checkpoint_id and operation == "review":
@@ -213,6 +221,9 @@ def _execution_error(operation: Any, params: dict[str, Any]) -> str | None:
 class ContinuityEditTool(Tool):
     """Record and retire the continuity that survives compaction."""
 
+    def __init__(self, registry: Any = None) -> None:
+        self._registry = registry
+
     @property
     def name(self) -> str:
         return "continuity_edit"
@@ -271,7 +282,7 @@ class ContinuityEditTool(Tool):
         params = {key: value for key, value in kwargs.items() if not key.startswith("_")}
         checkpoint_id = kwargs.get("_checkpoint_id") or current_checkpoint_id()
         result = await run_in_db(
-            partial(_run, thread_id, operation, params, checkpoint_id)
+            partial(_run, thread_id, operation, params, checkpoint_id, self._registry)
         )
         if operation == "place" and _queued(params) and not result.startswith("Error"):
             from core import placement_worker

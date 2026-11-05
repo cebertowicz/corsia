@@ -15,6 +15,14 @@ async def apply_connected_app_runtime(action: RuntimeAction, app_id: str) -> dic
     return await apply(action, app_id)
 
 
+async def refresh_local_app_fences() -> None:
+    """Relaunch each running local app, whose Safehouse profile renders the Local only fence at launch."""
+    from tools.mcp_runtime import local_app_ids
+
+    for app_id in await local_app_ids():
+        await restart_after_saved_write(app_id)
+
+
 async def restart_after_saved_write(app_id: str) -> dict[str, object]:
     """Restart the app on a write a person just saved, so the change reaches it now or reads as failed.
 

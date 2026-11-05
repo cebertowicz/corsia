@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import replace
 from typing import Any
 
+from llm.error_cause import MODEL_NOT_LOADED, SERVER_UNREACHABLE
 from subagents.provider_context_limits import is_provider_context_limit
 
 from core.fork_native_warm import NativeWarmSource
@@ -17,11 +18,13 @@ from core.fork_native_tools import (
     input_room,
     measured_input,
     run_tool_calls as _run_tool_calls,
+    yield_to_turn_call,
 )
 from core.fork_pressure import soft_pressure_remaining
 from core.fork_runtime import ForkKind, ForkStepLimitError, ForkStepLimitReached
 from core.fork_failures import ForkCredentialsUnavailable
 from core.fork_types import (
+    ForkInputExhausted,
     ProviderForkRejected,
     WarmForkUnusable,
     ProviderForkRequest,
@@ -39,10 +42,9 @@ from core.fork_types import (
 # still covers the largest local checkpoint call measured (7,336 tokens).
 SMALL_WINDOW_OUTPUT_DIVISOR = 5
 
-COLD_CLOSING_TURN = {
-    "role": "user",
-    "content": "Carry out the system instruction now, using the conversation above as its source.",
-}
+# Failures decided before any request reached a model (connect refused, model
+# not loaded): no usage exists to record.
+_NEVER_SENT = frozenset({SERVER_UNREACHABLE, MODEL_NOT_LOADED})
 
 
 def _window_output(request: ProviderForkRequest) -> ProviderForkRequest:
@@ -86,14 +88,18 @@ def _provider_params(model: str) -> dict[str, Any]:
 def _fit_cold_input(
     request: ProviderForkRequest, tools: list[dict[str, Any]],
 ) -> Any:
-    """Count the tool surface and fit the cold input; blocking, run off the loop."""
+    """Count the tool surface and fit the cold input; blocking, run off the loop.
+
+    The round trip is never less than the loop's first-call reserve: an
+    allowance halved below it fitted input that first call then refused.
+    """
     from core.fork_cold_count import cold_input_tokens
     from core.fork_render import fit_cold_fork_input
 
     return fit_cold_fork_input(
         request,
         provider_surface_tokens=cold_input_tokens(tools, request.target),
-        round_trip_tokens=request.max_output_tokens,
+        round_trip_tokens=max(request.max_output_tokens, FORK_TOOL_ROUND_TRIP_TOKENS),
     )
 
 
@@ -129,19 +135,16 @@ async def _messages_and_tools(
 def cold_messages(
     instruction: str, source: tuple[dict[str, Any], ...] | list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Frame a cold source so the fork's next turn answers the instruction.
+    """Close a cold source on the instruction itself, as the warm branch does.
 
-    The source quotes history in its own roles. One that ends on an assistant
-    reply (a manual, idle or model-switch checkpoint) left the system text as
-    the last instruction, and a model echoed its frozen continuity index
-    instead of writing; the warm branch already closes with a user turn.
+    The source quotes history in its own roles. With the instruction in a
+    system message ~14k tokens back, a local model either echoed its frozen
+    continuity index (source ending on a reply) or, given only a closing
+    pointer to it, wrote a turn-ending note in the agent's voice.
     """
     from history.adapters import merge_checkpoint_source_blocks
 
-    return [
-        {"role": "system", "content": instruction},
-        *merge_checkpoint_source_blocks([*source, COLD_CLOSING_TURN]),
-    ]
+    return merge_checkpoint_source_blocks([*source, {"role": "user", "content": instruction}])
 
 
 async def warm_input_fits(
@@ -195,7 +198,9 @@ async def _truncated_result(
             "\n".join(bodies), {"calls": usage_calls}, FORK_CONTEXT_TRUNCATED,
         )
     room = await asyncio.to_thread(input_room, request, messages, tools, 0, measured)
-    raise ProviderForkRejected(
+    # A reply cut off at its output cap ran out of output, not input: no cold route is shown to help.
+    refusal = ProviderForkRejected if path == "iv_output_cap" else ForkInputExhausted
+    raise refusal(
         f"{FORK_CONTEXT_TRUNCATED}: path={path} iteration={iteration} "
         f"counted={room.counted} bound={room.bound} unusable={room.unusable} "
         f"finish_reason={getattr(response, 'finish_reason', None)} "
@@ -297,9 +302,11 @@ async def invoke_fork(
                     partial_bodies, usage_calls, "i_loop_input_over_bound", _iteration,
                     request, messages, tools, response, measured,
                 )
+            await yield_to_turn_call(request, cancel_event)
             response = await _complete(request, messages, tools, model, provider, cancel_event)
             usage_calls.append(dict(response.usage or {}))
-            if request.on_usage is not None:
+            # A call that never connected spent nothing; any other unmeasured call is a defect.
+            if request.on_usage is not None and (usage_calls[-1] or response.error_kind not in _NEVER_SENT):
                 await request.on_usage(str(_iteration), model, usage_calls[-1])
             if response.finish_reason == "error":
                 if (response.error_kind == "provider_context_overflow"

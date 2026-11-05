@@ -4,8 +4,8 @@ import { token } from '$lib/stores/auth';
 import { toasts } from '$lib/stores/toast';
 import { clearStartupProgress, refreshStartupProgress, startupProgress } from './startupProgress';
 import { countUp, FLOOR_RATE, GAP_RATE } from './percentCountUp';
-import { CREEP_STALE_MS, REMOTE_ESTIMATE_CEILING } from './screenProgress';
-import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
+import { CREEP_STALE_MS, PHASE_SECONDS, remoteCeiling } from './screenProgress';
+import { continueHandedOverScreen, dismissUpdateScreen, EXIT_HOLD_MS, handOverScreen, NO_HISTORY_LONGER_MS, startUpdateScreen, stopUpdateScreen, tickUpdateScreen, updateScreenView } from './screenStore';
 import { loadUpdateStatus, resetUpdateStoreForTests, updateConfirmed, updateStatus, updateUnreachable, type UpdateStatus } from './store';
 import type { UpdateOperation } from './model';
 
@@ -223,14 +223,23 @@ describe('update screen store', () => {
 		warning.mockRestore();
 	});
 
-	it('does not invent a remote estimate without history and retains a known usual time', () => {
+	it('does not invent a remote estimate without history, still says when it is taking longer, and retains a known usual time', () => {
 		const shell = window as ShellWindow;
 		shell.__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio Mac' };
 		updateStatus.set(status(inFlight(), null));
 		tickUpdateScreen(0);
 		updateUnreachable.set(true);
-		tickUpdateScreen(120_000);
+		tickUpdateScreen(1_000);
 		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', estimated: false });
+		// A normal restart and one with a data upgrade both stay in progress, with no instructions.
+		const plain = (PHASE_SECONDS.restarting + PHASE_SECONDS.starting + PHASE_SECONDS.verifying) * 1_000;
+		const upgrade = plain + (PHASE_SECONDS.backing_up + PHASE_SECONDS.upgrading + PHASE_SECONDS.checking_data) * 1_000;
+		tickUpdateScreen(1_000 + plain);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', estimated: false });
+		tickUpdateScreen(1_000 + upgrade);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'progress', estimated: false });
+		tickUpdateScreen(1_000 + NO_HISTORY_LONGER_MS);
+		expect(get(updateScreenView)).toMatchObject({ mode: 'longer', estimated: false });
 
 		stopUpdateScreen();
 		updateScreenView.set(null);
@@ -243,6 +252,41 @@ describe('update screen store', () => {
 		expect(get(updateScreenView)).toMatchObject({ estimated: true });
 	});
 
+	for (const answer of ['verifying', 'resuming'] as const) it(`paired computer: the host is down for a real restart and answers in ${answer} with no jump`, () => {
+		const shell = window as ShellWindow;
+		shell.__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio Mac' };
+		const op = (phase: UpdateOperation['phase']): UpdateOperation => ({ ...inFlight(`update-paired-${answer}`), phase });
+		const seen: number[] = [];
+		const read = (second: number) => {
+			vi.setSystemTime(second * 1_000);
+			tickUpdateScreen(second * 1_000);
+			const view = get(updateScreenView);
+			seen.push(view?.mode === 'done' ? 100 : view?.percent ?? 0);
+		};
+		updateStatus.set(status(op('draining'), 45));
+		for (let second = 0; second <= 8; second += 1) read(second);
+		vi.setSystemTime(9_000);
+		updateStatus.set(status(op('restarting'), 45));
+		read(9);
+		updateUnreachable.set(true);
+		// restart ~14 s, then ~17 s of startup, then the host answers
+		for (let second = 10; second <= 41; second += 1) read(second);
+		vi.setSystemTime(42_000);
+		updateUnreachable.set(false);
+		updateStatus.set(status(op(answer), 45));
+		for (let second = 42; second <= 45; second += 1) read(second);
+		vi.setSystemTime(46_000);
+		updateStatus.set(status(op('verifying'), 45));
+		for (let second = 46; second <= 49; second += 1) read(second);
+		updateConfirmed.set({ operationId: `update-paired-${answer}`, version: '2026.10.13' });
+		read(50);
+		expect(seen.at(-1)).toBe(100);
+		// Each reading is a second apart; the largest step the screen is asked to count up, reaching done included.
+		const steps = seen.slice(1).map((value, i) => value - seen[i]);
+		expect(Math.max(...steps)).toBeLessThanOrEqual(5);
+		for (let i = 1; i < seen.length; i += 1) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1]);
+	});
+
 	it('counts a remote screen up across the restart and the handoff to real steps, never back and never in a jump', () => {
 		const shell = window as ShellWindow;
 		shell.__CORSIA_SHELL__ = { mode: 'remote', name: 'Studio Mac' };
@@ -252,7 +296,7 @@ describe('update screen store', () => {
 		const read = (at: number) => { tickUpdateScreen(at); seen.push(get(updateScreenView)?.mode === 'done' ? 100 : get(updateScreenView)?.percent ?? 0); };
 		updateUnreachable.set(true);
 		for (let at = 1_000; at <= 120_000; at += 1_000) read(at);
-		expect(Math.max(...seen)).toBeLessThanOrEqual(REMOTE_ESTIMATE_CEILING);
+		expect(Math.max(...seen)).toBeLessThanOrEqual(remoteCeiling(0));
 		updateUnreachable.set(false);
 		updateStatus.set(status({ ...inFlight('update-remote'), phase: 'resuming' }, 45));
 		for (let at = 121_000; at <= 131_000; at += 1_000) read(at);

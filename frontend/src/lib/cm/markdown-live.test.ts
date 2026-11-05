@@ -109,3 +109,23 @@ describe('markdown live preview — marks never reveal raw source on focus', () 
 		expect(text).not.toContain('**bold**');
 	});
 });
+
+describe('markdown live preview — addresses written in the text', () => {
+	it('shows a bare email address and a bare web address', () => {
+		const view = mount('From: pat.lee@example.com\n\nThe reply will go to pat.lee@example.com, see https://example.org/help.\n');
+		const text = view.contentDOM.textContent ?? '';
+		expect(text).toContain('From: pat.lee@example.com');
+		expect(text).toContain('The reply will go to pat.lee@example.com, see https://example.org/help.');
+	});
+
+	it('shows an autolink address without its angle brackets', () => {
+		const text = mount('Write to <pat.lee@example.com> or <https://example.org>.\n').contentDOM.textContent ?? '';
+		expect(text).toContain('Write to pat.lee@example.com or https://example.org.');
+	});
+
+	it('still hides the target of a link and of an image', () => {
+		const text = mount('Read [the guide](https://example.org/guide) and ![chart](https://example.org/c.png).\n').contentDOM.textContent ?? '';
+		expect(text).toContain('Read the guide and chart.');
+		expect(text).not.toContain('example.org');
+	});
+});

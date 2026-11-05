@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -109,7 +109,6 @@ def _prepare_route(
     from events.connectors.github_rules import apply_routed_rules
     from events.github_mapper import label_wakes_nobody
     from events.identity import PrResolutionError
-    from events.routing_inputs import structured_tag
 
     if not unit.begin():
         return
@@ -127,9 +126,8 @@ def _prepare_route(
         prepared.result = suppressed
         return
     external_id = identity.external_id if identity else None
-    tag_provenance = structured_tag(payload)
     selected, routing_state = router._select_route(
-        internal_event, payload, identity, external_id, tag_provenance, selected_pr,
+        internal_event, payload, identity, external_id, selected_pr,
     )
     target_filter = None
     if delivery_id and internal_event in ("webhook.github.pr_comment", "webhook.github.issue_comment"):
@@ -151,14 +149,11 @@ def _prepare_route(
         return
     facts = scope.envelope.facts if scope and scope.envelope else None
     summary, details = router._summarize(internal_event, payload, external_id, facts)
-    if tag_provenance:
-        details["tag_provenance"] = tag_provenance
     chip = router._chip_line(payload, external_id, summary)
     router._record_passive_change(
         routing_state=routing_state, wake_thread_id=thread_id,
         internal_event=internal_event, external_id=external_id,
         summary=summary, chip=chip, wake_reason=wake_reason,
-        tag_provenance=tag_provenance,
     )
     prepared.thread_id, prepared.identity = thread_id, identity
     prepared.summary, prepared.details, prepared.chip = summary, details, chip
@@ -201,6 +196,7 @@ async def prepare_route_ordered(
 ) -> PreparedRoute:
     """Join the exact DB unit and recover committed effects before leaving its gate."""
     from events import router
+    from events.connectors import github_pr_facts as pr_facts
     from events.connectors.github_rules import rule_scope
     from infra.db_async import run_in_db
     from subagents.runtime_guard import join_task_through_cancellation
@@ -208,6 +204,9 @@ async def prepare_route_ordered(
     # Like the check suite's pull request, read before the gate: the projects
     # tracking the repository run git, which must never hold every webhook's turn.
     scope = await asyncio.to_thread(rule_scope, internal_event, payload, selected_pr)
+    # Read before the gate too: a rule that names the PR's live head or checks asked for it.
+    if scope.reads_head:
+        scope = replace(scope, envelope=await pr_facts.enriched(scope.envelope))
     async with _preparation_gate():
         unit = _Preparation()
         preparation = asyncio.create_task(run_in_db(

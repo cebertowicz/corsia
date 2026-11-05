@@ -8,9 +8,32 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
+- A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
+- A pull request review that a restart cut off now picks up again when CORSIA starts, instead of waiting for the next push (thanks @mikemikimike).
+- A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.
 - After this update, every chat that runs on your existing Claude Code or Codex account waits until you sign that account in again in CORSIA, automations and reviewers included; if many agents share that account, they all wait until then. Each Claude Code and Codex account now has its own CORSIA sign-in, so signing in or out of `claude` or `codex` in a terminal no longer changes the account CORSIA uses.
+- Agents can now read email attachments in Gmail and in mail accounts connected with a password: an agent reading an email sees its attachments and can save them into its workspace. Agents can now read PDFs, those attachments and any PDF in your workspace: the text page by page, a form's filled-in values, and a page as a picture when its text isn't enough.
+- A comment on selected document text still posts when an agent edits inside that text before you press Comment, and is anchored on what remains; you are asked to select again only when the agent removed all of it.
+- Agents can now work in Google Docs, Sheets, Drive and Calendar on a connected Google account: create, read and edit documents, spreadsheets, files and events. Deleting a Drive file moves it to the trash. Before an event is deleted or cancelled, a repeating event's schedule is changed, or a calendar is cleared or deleted, the events it removes are saved so they can be recreated; for a repeating event, that includes occurrences that were changed. Any other delete that can't be undone is refused. This doesn't include email: agents keep reading and sending it the way they already do.
+- Commenting on an image in a document keeps the document at its reading position while you post, reply, and return from the image. On a phone, the image toolbar keeps all its controls on one row when Send appears.
+- Email and web addresses written as plain text in a document, such as an email draft's From and To lines, no longer disappear when you view it.
+- GitHub rules for completed checks now work by default when a repository webhook is connected, and temporary failures get another chance to deliver the event.
+- If the first setup chat ends without a visible reply, CORSIA now gives the agent one more chance to send it.
+- In the desktop app, Sign in and Open the page again on a connected app or account now open the sign-in page in your default browser; before, a connected app's page didn't open and you had to copy its link.
+- Jumping to a comment in a wide table now brings its cell into view sideways as well as its row.
+- Local models now follow each model's own defaults: a chat with no thinking level chosen runs at the model's default level (the picker reads Auto), and setup and model downloads no longer set a reply-length limit. Existing reply-length limits, including those earlier setup runs set, remain until changed in oMLX.
+- Local models now run on oMLX 0.7.3: several chats running at once on a local model use less memory and reply faster, and oMLX no longer gets stuck refusing every prompt for lack of memory after two prompts overlap. After an app update, CORSIA updates its running local model server once requests finish and reloads the same models; Settings shows “Restarting…” until they are loaded.
+- Messages in Connected apps now says Enable and Turn off, and explains what Full Disk Access allows before you enable it.
+- On a local model that runs short of memory partway through a reply, the context meter now measures the chat against what still fits in memory for the rest of that reply, the same limit CORSIA checks before each call, instead of showing it far emptier than it is.
+- On a paired computer, the update screen no longer tells you to open CORSIA on your main computer during a normal restart; it says so only if the restart takes longer than usual.
+- Restart in oMLX's own dashboard now restarts CORSIA's local model server and loads the models it had loaded again, instead of saying the server isn't running under a supervisor. It takes effect once the local model server has been stopped and started since this update.
+- Selecting text in a table cell works across the whole cell: you can drag over any part of it, and its comment button appears when you let go.
 - Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
 - Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.
+- The update screen's percentage now moves in step with the real time each stage takes, from waiting for agents through the restart, instead of sitting near 12% and then racing to 100%. Watched from a paired computer, it keeps counting through the restart and startup and no longer leaps when the main computer answers.
+- With an agents' GitHub account connected, comments on the agents' own pull requests now reach the owning chat without a repository webhook.
+- With "Roll over when an account hits its limit" on, a chat held on a limited account no longer asks you to move it: CORSIA checks your other accounts and moves the chat itself once one has room. Switch model is still there as a way out.
 - Your About you doc now gets each fact as its own suggestion, so you can accept or reject them one at a time, and its headings are left alone.
 
 ## v0.4.2 — Google sign-in works again, a shorter first chat, and steadier local models

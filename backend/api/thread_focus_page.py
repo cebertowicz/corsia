@@ -48,7 +48,13 @@ _RUN_COLUMNS = (
     "THEN json_extract(metadata, '$.browser_chip') END AS chip, "
     "CASE WHEN json_valid(metadata) AND json_type(metadata, '$.turn_id') = 'text' "
     "AND json_extract(metadata, '$.turn_id') != '' "
-    "THEN json_extract(metadata, '$.turn_id') END AS turn_id"
+    "THEN json_extract(metadata, '$.turn_id') END AS turn_id, "
+    "CASE WHEN role='system' AND json_valid(metadata) "
+    "AND json_extract(metadata, '$.event_type')='system.turn.unanswered_input' "
+    "THEN json_extract(metadata, '$.failed_turn_id') END AS retry_for, "
+    "CASE WHEN role='system' AND json_valid(metadata) "
+    "AND json_extract(metadata, '$.type') IN ('llm_error','cc_error') "
+    "THEN json_extract(metadata, '$.turn_id') END AS error_turn"
 )
 
 
@@ -84,7 +90,7 @@ scanned AS (
     SELECT *, ROW_NUMBER() OVER (ORDER BY seq DESC) AS rn FROM anchors
 ),
 bounded AS (
-    SELECT id, seq, vis, weight, row_kind, turn_id, chip, rn,
+    SELECT id, seq, vis, weight, row_kind, turn_id, chip, rn, retry_for, error_turn,
         COALESCE(SUM(vis) OVER (ORDER BY seq DESC
             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING), 0) AS seg,
         CASE WHEN turn_id IS NOT NULL
@@ -123,7 +129,10 @@ run_turns AS (
     GROUP BY seg, run_no
 )
 SELECT 'run' AS kind, MIN(ends.seq) AS first_seq, MAX(ends.seq) AS last_seq,
-    COUNT(*) AS count, SUM(ends.weight) AS weight,
+    SUM(CASE WHEN ends.retry_for IS NOT NULL AND EXISTS (
+        SELECT 1 FROM ends AS notice WHERE notice.seg=ends.seg AND notice.run_no=ends.run_no
+            AND notice.error_turn=ends.retry_for
+    ) THEN 0 ELSE 1 END) AS count, SUM(ends.weight) AS weight,
     MAX(ends.oldest_id) AS first_id, MAX(ends.newest_id) AS last_id,
     COALESCE(MAX(run_turns.turn_ids), '[]') AS turn_ids,
     json_group_array(DISTINCT ends.row_kind) AS kinds,

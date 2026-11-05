@@ -32,6 +32,7 @@ def test_pre_v51_node_creation_refuses_size_and_workflow_fields():
     with closing(sqlite3.connect(":memory:")) as db:
         db.row_factory = sqlite3.Row
         initialize_schema(db)
+        db.execute("DROP INDEX idx_plan_nodes_workflow_ref")
         for column in ("size", "workflow_ref", "workflow_version", "workflow_step", "difficulty"):
             db.execute(f"ALTER TABLE plan_nodes DROP COLUMN {column}")
         db.commit()

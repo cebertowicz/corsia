@@ -8,7 +8,7 @@
  */
 
 import type { UpdateFailureCode } from './model';
-import type { BandMode, ProgressSnapshot, StepId } from './screenProgress';
+import type { ProgressSnapshot, StepId } from './screenProgress';
 
 export const HANDOFF_KEY = 'corsia-update';
 /** The longest fragment either page reads; anything longer is ignored. */
@@ -35,7 +35,6 @@ export interface ScreenHandoff {
 }
 
 const STEPS: readonly StepId[] = ['waiting', 'restarting', 'backing_up', 'upgrading', 'checking_data', 'starting', 'verifying'];
-const MODES: readonly BandMode[] = ['migration', 'plain'];
 const CODES: readonly UpdateFailureCode[] = [
 	'disk_space', 'fetch_failed', 'build_failed', 'launch_failed', 'rolled_back', 'version_unverified', 'wrong_version_running',
 	'drain_cancelled', 'drain_failed', 'update_timed_out', 'prepare_failed', 'index_locked', 'checkout_detached', 'checkout_dirty',
@@ -61,12 +60,24 @@ export function safeReturnRoute(value: unknown): string | null {
 	}
 }
 
+/** A snapshot from another version may lack the phase; it then restarts from the current value instead of failing. */
+function parsePhase(raw: unknown): ProgressSnapshot['phase'] | undefined {
+	if (raw === undefined || raw === null) return null;
+	if (!isRecord(raw)) return undefined;
+	const { from, to, expected, elapsed } = raw;
+	if (!percent(from) || !percent(to) || to < from || typeof expected !== 'number' || !(expected > 0) || !Number.isFinite(expected)) return undefined;
+	if (typeof elapsed !== 'number' || !Number.isFinite(elapsed) || elapsed < 0) return undefined;
+	return { from, to, expected, elapsed };
+}
+
 function parseModel(raw: unknown, now: number): ProgressSnapshot | null {
 	if (!isRecord(raw)) return null;
-	const { value, step, mode, lifted, visitedMigration, lastAt } = raw;
+	const { value, step, lifted, visitedMigration, lastAt } = raw;
 	if (!percent(value) || !percent(lifted) || typeof visitedMigration !== 'boolean' || !clock(lastAt, now)) return null;
-	if (!STEPS.includes(step as StepId) || !MODES.includes(mode as BandMode)) return null;
-	return { value, step: step as StepId, mode: mode as BandMode, lifted, visitedMigration, lastAt };
+	if (!STEPS.includes(step as StepId)) return null;
+	const phase = parsePhase(raw.phase);
+	if (phase === undefined) return null;
+	return { value, step: step as StepId, lifted, visitedMigration, lastAt, phase };
 }
 
 function parseFailure(raw: unknown): ScreenHandoff['failure'] | undefined {

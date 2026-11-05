@@ -67,6 +67,7 @@ vi.mock('$lib/stores/docComments', async () => ({
 	resolveComment: mocks.resolveComment,
 	ackComment: mocks.ackComment,
 	flushPositions: vi.fn(),
+	onCommentsReloaded: () => () => {},
 }));
 
 vi.mock('$lib/documentImagePlace', async (importOriginal) => ({

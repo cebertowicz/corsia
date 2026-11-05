@@ -603,6 +603,25 @@ class TestCauseMap:
         assert "ctx-limit-sess" not in codex_runtime._DEAD
         assert self._last_insert_meta["cause"] == "context_window_exceeded"
 
+    @pytest.mark.parametrize("queued", [True, False])
+    def test_context_window_failure_leaves_its_rerun_and_no_notice(self, queued):
+        from core.stop_causes import ContextOverflowEnd
+        from subagents import codex_runtime, codex_runtime_events
+
+        live = codex_runtime._LiveCodex(
+            codex_thread_id="thread_test", session=None, parent_thread_id=None, name="test",
+        )
+        commit = AsyncMock(wraps=codex_runtime_events.commit_turn_terminal)
+        with patch("subagents.codex_runtime_events.insert_message", return_value="msg-id") as insert, \
+                patch("subagents.codex_runtime_events.commit_turn_terminal", new=commit), \
+                patch("subagents.codex_runtime_events.rerun_queued", return_value=queued):
+            on_event = codex_runtime._make_on_event(live, "ctx-rerun-sess", MagicMock())
+            _run_terminal_event(on_event, live, {"kind": "turn_failed", "cause": "context_window_exceeded"})
+
+        assert isinstance(commit.await_args.args[2], ContextOverflowEnd)
+        # The re-run answers instead; without one the refusal still ends visibly.
+        assert insert.called is not queued
+
 
 class TestResultMarkers:
     def setup_method(self):

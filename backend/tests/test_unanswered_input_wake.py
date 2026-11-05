@@ -137,6 +137,7 @@ async def test_excluded_causes_queue_nothing(db, kind, error) -> None:
     "Not logged in · Please run /login",
     "Failed to authenticate: OAuth session expired and could not be refreshed",
     "You've hit your usage limit",
+    "error_max_turns",
 ])
 @pytest.mark.asyncio
 async def test_a_claude_code_signed_out_or_limited_exit_queues_nothing(db, error) -> None:

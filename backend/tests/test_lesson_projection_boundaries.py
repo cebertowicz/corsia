@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from core.turn_context import _context_usage
-from core.turn_iteration_context import _context_usage_from_latest_call
+from core.turn_measured_usage import context_usage_from_latest_call
 from infra.context_receipts import context_usage_for_boundary, context_usage_summary
 from infra.context_usage_attribution import merge_context_usage_with_snapshot
 from test_lesson_usage_projection import SOURCE, lesson, snapshot
@@ -80,7 +80,7 @@ def test_native_measured_and_unmeasured_terminal_snapshot_invariant(call_usage, 
     original = copy.deepcopy(frozen)
     preflight = native_preflight(frozen)
     assert_projection(preflight, frozen)
-    terminal = _context_usage_from_latest_call(
+    terminal = context_usage_from_latest_call(
         preflight, call_usage, include_context_details=details,
     )
     assert ("context_snapshot" in terminal) == details

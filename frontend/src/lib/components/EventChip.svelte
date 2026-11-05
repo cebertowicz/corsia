@@ -39,7 +39,9 @@
 			? passiveContextEventLabel(msg)
 			: (msg.metadata?.summary as string) || msg.content || '',
 	);
-	const summaryIsLong = $derived(isLongMessageText(summary));
+	/** A held reply's outcome: status word and a wrapping line, never clipped. */
+	const heldReceipt = $derived(eventType.startsWith('held_reply.'));
+	const summaryIsLong = $derived(!heldReceipt && isLongMessageText(summary));
 	const summaryCollapsed = $derived(summaryIsLong && !summaryExpanded);
 
 	const rawUrl = $derived((msg.metadata?.url as string) || null);
@@ -65,8 +67,8 @@
 		if (type.startsWith('plan.')) return 'Plan';
 		if (type.startsWith('checkpoint.')) return 'Checkpoint';
 		if (type === 'context.digest') return 'Context';
+		if (type === 'held_reply.not_sent') return 'Not sent';
 		if (type.startsWith('system.restart.')) return 'Restart';
-		if (type === 'system.turn.unanswered_input') return 'Error';
 		if (type.includes('review')) return 'Review';
 		if (type.includes('comment')) return 'PR comment';
 		if (type.includes('check')) return 'Check';
@@ -116,18 +118,18 @@
 			{:else if digestState === 'delivered'}
 				<svg class="ev-state delivered" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
 			{/if}
-			<span class="ev-label">{label(eventType)}</span>
+			{#if eventType !== 'system.turn.unanswered_input'}<span class="ev-label">{label(eventType)}</span>{/if}
 			<span class="ev-summary long-message-body" class:collapsed={summaryCollapsed} class:expanded={summaryIsLong && summaryExpanded}>{summary}</span>
 			<span class="ev-link" aria-hidden="true">↗</span>
 		</a>
 	{:else}
-		<div class="ev-chip" data-context-digest={digestState}>
+		<div class="ev-chip" class:held={heldReceipt} data-context-digest={digestState}>
 			{#if digestState === 'pending'}
 				<svg class="ev-state" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
 			{:else if digestState === 'delivered'}
 				<svg class="ev-state delivered" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
 			{/if}
-			<span class="ev-label">{label(eventType)}</span>
+			{#if eventType !== 'system.turn.unanswered_input'}<span class="ev-label">{label(eventType)}</span>{/if}
 			<span class="ev-summary long-message-body" class:collapsed={summaryCollapsed} class:expanded={summaryIsLong && summaryExpanded}>{summary}</span>
 		</div>
 	{/if}
@@ -210,6 +212,9 @@
 		overflow: hidden;
 		text-decoration: none;
 	}
+	.ev-chip.held { align-items: baseline; border-left: 0; padding-left: 0; }
+	.ev-chip.held .ev-label { border: 0; background: none; padding: 0; font-weight: var(--fw-semibold); }
+	.ev-chip.held .ev-summary { overflow: visible; white-space: normal; text-overflow: clip; }
 	.ev-state {
 		width: 14px;
 		height: 14px;

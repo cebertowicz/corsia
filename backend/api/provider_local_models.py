@@ -13,7 +13,7 @@ from infra.db_async import run_in_db
 from infra.host_resources import pin_room_bytes
 from llm import local_downloads, local_setup_operation
 from llm.local_model import (
-    OMLX_PIN, LocalModel, PickUnavailable, ask_recommendations, fitting_models, omlx_has_recommender, omlx_sections,
+    OMLX_RECOMMENDER_MIN, LocalModel, PickUnavailable, ask_recommendations, fitting_models, omlx_has_recommender, omlx_sections,
     recommend,
 )
 from llm.local_setup_auth import omlx_version
@@ -50,7 +50,7 @@ async def _recommendations() -> tuple[dict[str, Any], dict[str, list[LocalModel]
     if not omlx_has_recommender(await asyncio.to_thread(omlx_version)):
         return {
             "state": "update_required",
-            "message": f"Update oMLX to {OMLX_PIN} or later to add a local model.",
+            "message": f"Update oMLX to {OMLX_RECOMMENDER_MIN} or later to add a local model.",
             "models": [],
         }, {}
     if status is None:

@@ -46,6 +46,7 @@ def surface_exit_error(
     insert_message_fn: Callable,
     logger,
     account=None,
+    login_answered: bool = False,
 ) -> str | None:
     if code in (0, None) and not (stderr or "").strip():
         return None
@@ -65,7 +66,7 @@ def surface_exit_error(
             "type": "cc_error",
             "event_type": "harness.error",
             "harness": "claude-code",
-            **cause_fields("claude-code", "process_exited", stderr),
+            **cause_fields("claude-code", "process_exited", stderr, login_answered=login_answered),
         }
         if account and account["state"] == "signed_out":
             meta["account_id"] = account["id"]
@@ -75,12 +76,6 @@ def surface_exit_error(
             msg_id=str(uuid.uuid4()), db=db,
         )
         broadcast_stored_message(thread_id, mid, db=db, broadcast=bcast)
-        if turn_identity is not None:
-            bcast(thread_id, {
-                "type": "turn_complete",
-                "thread_id": thread_id,
-                **turn_identity.frame_fields(),
-            })
         return mid
     except Exception as exc:
         logger.error("cc_runtime: failed to surface CC exit error: %s", exc)

@@ -703,6 +703,11 @@ async def test_cold_invoke_adds_frozen_continuity_index_after_creation(
     assert json.dumps({"facts": [entry_id]}, separators=(",", ":")) in instruction
     # The frozen index names no body; only the review below it offers one.
     assert "SECRET BODY" not in instruction.split("[CORSIA saved-entry review]", 1)[0]
+    # The index comes first, so the writer reads the instruction last, not the index.
+    assert instruction.startswith("[CORSIA frozen continuity index]\n")
+    assert instruction.split("[CORSIA saved-entry review]", 1)[0].rstrip().endswith(
+        "Write one checkpoint.",
+    )
 
 
 @pytest.mark.asyncio

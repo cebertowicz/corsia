@@ -16,6 +16,9 @@ const ACTIVITY_SYSTEM_TYPES = new Set([
 // System rows the transcript never draws: a `seed` is a session's starting context.
 // One is not visible, so it never closes a block, and no block holds or counts it.
 const NEVER_DRAWN_SYSTEM_TYPES = new Set(['seed']);
+// Events the transcript never draws: the continue input that re-runs a Turn its
+// provider refused for size is the agent's, and the checkpoint row already shows it.
+const NEVER_DRAWN_EVENT_TYPES = new Set(['context_overflow.continue']);
 
 // Rows that end a turn with an error. One stays a notice until the agent's next turn
 // starts with nothing to read in between; that start writes `recovered: true` on it.
@@ -23,13 +26,44 @@ const ERROR_SYSTEM_TYPES = new Set([
 	'llm_error', 'cc_error', 'tool_boundary_violation', 'tool_bridge_unavailable',
 ]);
 
+/** Pair a retry with the failed Turn's notice before transcript rows are grouped. */
+export function pairUnansweredInput(rows: TranscriptMessage[]): TranscriptMessage[] {
+	const notices = new Map<string, TranscriptMessage>();
+	const key = (row: TranscriptMessage, turn: string) => `${row.thread_id}\0${turn}`;
+	for (const row of rows) {
+		const turn = row.metadata?.turn_id;
+		if (row.role === 'system' && ['llm_error', 'cc_error'].includes(systemType(row))
+			&& typeof turn === 'string' && turn) notices.set(key(row, turn), row);
+	}
+	const paired = new Set<TranscriptMessage>();
+	const hidden = new Set<TranscriptMessage>();
+	for (const row of rows) {
+		const turn = row.metadata?.failed_turn_id;
+		if (row.role !== 'system' || row.metadata?.event_type !== 'system.turn.unanswered_input'
+			|| typeof turn !== 'string' || !turn) continue;
+		const notice = notices.get(key(row, turn));
+		if (notice) { paired.add(notice); hidden.add(row); }
+	}
+	return rows.filter((row) => !hidden.has(row)).map((row) => paired.has(row)
+		? { ...row, content: withRetrySentence(row.content ?? '') }
+		: row);
+}
+
+/** End a provider's error text as a sentence, then say the agent tried once more. */
+function withRetrySentence(notice: string): string {
+	const text = notice.trimEnd();
+	if (!text) return 'The agent tried once more.';
+	return `${/[.!?…]$/.test(text) ? text : `${text}.`} The agent tried once more.`;
+}
+
 export function systemType(message: TranscriptMessage): string {
 	return String(message.metadata?.type ?? '');
 }
 
 /** The one frontend test for a never-drawn row; the twin of the backend's `NEVER_DRAWN_FILTER`. */
 export function isNeverDrawn(message: TranscriptMessage): boolean {
-	return message.role === 'system' && NEVER_DRAWN_SYSTEM_TYPES.has(systemType(message));
+	return message.role === 'system' && (NEVER_DRAWN_SYSTEM_TYPES.has(systemType(message))
+		|| NEVER_DRAWN_EVENT_TYPES.has(String(message.metadata?.event_type ?? '')));
 }
 
 /** Whether an error row carries the stamp that moves it inside its block. */
@@ -41,6 +75,7 @@ export function isRecoveredError(message: TranscriptMessage): boolean {
 export function isSystemNotice(message: TranscriptMessage): boolean {
 	if (message.role !== 'system') return false;
 	const type = systemType(message);
+	if (type === 'context_event' && String(message.metadata?.event_type ?? '').startsWith('held_reply.')) return true;
 	if (ERROR_SYSTEM_TYPES.has(type)) return message.metadata?.recovered !== true;
 	// A provider result splits only as an error with something to read.
 	if (type === 'result') return message.metadata?.is_error === true && Boolean(message.content);
@@ -76,6 +111,7 @@ export function rowKind(message: TranscriptMessage): RowKind {
 	}
 	if (message.role !== 'system') return 'other';
 	const type = systemType(message);
+	if (isSystemNotice(message)) return 'other';
 	if (ERROR_SYSTEM_TYPES.has(type)) return isRecoveredError(message) ? 'error_recovered' : 'other';
 	if (type === 'context_event') return 'context_update';
 	if (type === 'account_switch') return 'account_move';

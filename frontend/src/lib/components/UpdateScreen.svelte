@@ -37,7 +37,7 @@
 
 	const paused = $derived(view?.mode === 'progress' && view.step === 'waiting' && !view.serviceDown && $updateStatus?.operation?.operation_id === view.operationId ? agentsSafe($updateStatus.operation) : null);
 	const longer = $derived(view?.mode === 'longer');
-	const recovery = $derived(longer || view?.startupProgressUnavailable === true || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown) || (!localDesktop && view?.serviceDown === true));
+	const recovery = $derived(longer || view?.startupProgressUnavailable === true || view?.mode === 'start_failed' || (view?.mode === 'failed' && view.serviceDown));
 	// The percentage on screen counts up to the real one; under reduced motion it steps straight to it.
 	const target = $derived(view === null ? null : view.mode === 'done' ? 100 : view.percent);
 	let shown = $state(0);
@@ -238,16 +238,13 @@
 								<Button variant="primary" onclick={() => (onShell ? void startCorsia('manual') : handOver(true))} loading={starting} bind:el={startActionEl}>Start CORSIA</Button>
 							</div>
 						{/if}
-					{:else if hostName}
-						<p class="detail">Open CORSIA on {hostName}.</p>
-						<p class="detail">Progress shows on your main computer, {hostName}.</p>
+					{:else if view.mode === 'start_failed' || view.mode === 'failed'}
+						<p class="detail">Open CORSIA on {hostName ?? 'your main computer'}.</p>
 					{:else}
-						<p class="detail">Open CORSIA on your main computer.</p>
-						<p class="detail">Progress shows on your main computer.</p>
+						<p class="detail">If CORSIA doesn’t come back, open it on {hostName ?? 'your main computer'}.</p>
 					{/if}
 				{:else}
 					<p class="detail">Your agents will resume where they left off after the update.</p>
-					{#if view.estimated}<p class="detail">Progress shows on your main computer{hostName ? `, ${hostName}` : ''}.</p>{/if}
 				{/if}
 			</div>
 		</div>

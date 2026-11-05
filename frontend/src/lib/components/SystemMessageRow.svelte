@@ -43,6 +43,8 @@
 	const activityReceipt = $derived(isActivityReceipt(msg));
 	const artifactRemovalEvent = $derived(isArtifactRemovalEvent(msg));
 	const subagentDone = $derived(msg.role === 'system' && msg.metadata?.type === 'subagent_done');
+	/** The asker's note while a held reply waits: the person's line is the summary, the content is what the agent reads. */
+	const heldNote = $derived(msg.role === 'system' && msg.metadata?.type === 'held_reply_note');
 	const signInExpired = $derived(msg.metadata?.cause === 'sign_in_expired');
 	/** Existing error text identifies the account recovery journey; unrelated account links still navigate to Settings. */
 	const PROVIDERS_LINK_TEXT = 'Settings › Providers';
@@ -102,12 +104,13 @@
 		void readAccountsOnce(() => loadVendorAccounts()).then(done, done);
 	});
 	const quietRow = $derived(
-		passiveContextEvent || activityReceipt || artifactRemovalEvent || subagentDone,
+		passiveContextEvent || activityReceipt || artifactRemovalEvent || subagentDone || heldNote,
 	);
 
 	/** The single line a quiet context row shows: the row's own content, never new copy. */
 	function quietLabel(): string {
 		if (artifactRemovalEvent) return artifactRemovalEventLabel(msg);
+		if (heldNote) return String(msg.metadata?.summary ?? '');
 		if (passiveContextEvent) return passiveContextEventLabel(msg);
 		return String(msg.content ?? '');
 	}
@@ -123,7 +126,7 @@
 	<AccountSwitchReceipt {msg} />
 {:else}
 	<div class="system-event-wrap" class:context-event-row={quietRow}>
-		{#if artifactRemovalEvent || passiveContextEvent || subagentDone}
+		{#if artifactRemovalEvent || passiveContextEvent || subagentDone || heldNote}
 			<div class="message-content context-event">
 				<span class="context-event-label">{quietLabel()}</span>
 			</div>

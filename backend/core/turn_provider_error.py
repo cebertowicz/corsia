@@ -6,7 +6,7 @@ from typing import Any
 
 from loguru import logger
 
-from core import turn_iteration_context as iteration_context
+from core.turn_measured_usage import context_usage_from_latest_call
 from infra import state as runtime_state
 from llm.error_cause import response_error_fields
 
@@ -17,18 +17,22 @@ class TurnProviderError(RuntimeError):
 
 def terminal_payload(state, **fields) -> dict:
     """The terminal step payload carrying the latest measured context usage."""
-    fields["context_usage"] = iteration_context._context_usage_from_latest_call(state.context_usage, state.last_measured_call_usage)
+    fields["context_usage"] = context_usage_from_latest_call(state.context_usage, state.last_measured_call_usage)
     if state.context_identity is not None:
         fields["_context_usage_identity"] = state.context_identity
     return fields
 
 
 async def check_provider_error(state, response, turn_model, thread_id, provider_on_step, retry_available: bool) -> bool:
-    """End the Turn on a provider error; True when a first overflow goes back to the boundary.
+    """End the Turn on a provider error; True when an overflow goes back to the boundary.
 
-    ``retry_available`` is whether an iteration remains for the retry: without one the refusal ends the Turn here.
+    Each overflow gets one checkpoint and retry; a successful call since the last
+    retry earns the next refusal its own, since the Turn grew again rather than the
+    fold failing. ``retry_available`` is whether an iteration remains for the retry:
+    without one the refusal ends the Turn here.
     """
     if response.finish_reason != "error":
+        state.overflowed = None
         return False
     turn = getattr(runtime_state._current_turn_identity.get(None), "turn_id", None)
     logger.warning("run_turn_with_steps: LLM returned error for session {} turn {} kind={}: {}",

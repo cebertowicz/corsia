@@ -24,6 +24,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import wait as wait_for
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal
 
 from connections import agent_binary_from_config
 from connections.github_agent_home import (
@@ -46,6 +47,13 @@ FRESH_SECONDS = 15 * 60.0
 # A failed or due verification starts again no sooner than this.
 RETRY_SECONDS = 60.0
 VERIFY_SECONDS = 10.0
+
+#: Every cause a view can name; readers that word causes cover all of these.
+Cause = Literal[
+    "read_failed", "multiple_accounts", "github_executable_missing", "signed_out",
+    "credential_missing", "token_not_in_home", "token_rejected", "verify_failed", "verifying",
+    "own_login_unknown", "person_account",
+]
 _ROWS = """SELECT a.id, a.source_home, a.state, a.revision, c.config
            FROM vendor_accounts a JOIN connections c ON c.id=a.connection_id
            WHERE c.provider=? AND a.state!='removed' AND a.source_home IS NOT NULL"""
@@ -62,16 +70,18 @@ class Verified:
 @dataclass(frozen=True)
 class Failed:
     definite: bool
-    cause: str
+    cause: Cause
     at: float
 
 
 @dataclass(frozen=True)
 class AgentAccountView:
-    """One read of the agents' account; ``absent`` is the only state that leaves shells alone."""
+    """One read of the agents' account; ``absent`` is the only state that leaves shells alone.
+
+    A rule-started script is locked even then (``script_env``)."""
 
     state: str  # not_installed | needs_auth | unverified | wrong_account | ready
-    cause: str | None = None
+    cause: Cause | None = None
     absent: bool = False
     account_id: str | None = None
     home: str | None = None
@@ -82,6 +92,14 @@ class AgentAccountView:
     @property
     def ready(self) -> bool:
         return self.state == "ready"
+
+    @property
+    def answer_pending(self) -> bool:
+        """No verification answer yet; a caller that must not act locked waits on ``verify_now``.
+
+        ``own_login_unknown`` is not pending: the person's login comes from a background probe
+        that ``verify_now`` does not wait for, so waiting cannot settle it."""
+        return self.cause == "verifying"
 
 
 # key -> result, and key -> in-flight verification. A key is an immutable fact:
@@ -266,6 +284,9 @@ def _git_config(account: AgentAccountView) -> list[tuple[str, str]]:
         ("credential.https://github.com.helper", helper),
         ("url.https://github.com/.insteadOf", "git@github.com:"),
         ("url.https://github.com/.insteadOf", "ssh://git@github.com/"),
+        # Keeps a push to an HTTPS GitHub URL on HTTPS when an insteadOf rule rewrites it to SSH:
+        # Git uses a matching push rule before any insteadOf for a push.
+        ("url.https://github.com/.pushInsteadOf", "https://github.com/"),
         ("user.name", name),
         ("user.email", email),
         ("user.useConfigOnly", "true"),
@@ -278,11 +299,25 @@ def shell_env(account: AgentAccountView) -> dict[str, str]:
     """An agent shell's GitHub identity: nothing without an account, the bot's once ready, else locked.
 
     Locked means ``gh`` points at an absent home, Git has no credential helper and an
-    empty identity, and SSH remotes go over HTTPS, so a push fails rather than falls
-    back to the person's own login.
+    empty identity, and GitHub SSH remotes, and HTTPS ones a Git rewrite turns into SSH,
+    push over HTTPS, so a push fails rather than falls back to the person's own login.
+    SSH itself is untouched, so the person's key still reaches GitHub through an SSH host
+    alias, the person's own ``pushInsteadOf`` to SSH, or a command that sets its own SSH
+    command.
     """
-    if account.absent:
-        return {}
+    return {} if account.absent else _identity_env(account)
+
+
+def script_env(account: AgentAccountView) -> dict[str, str]:
+    """A rule-started script's GitHub identity: a shell's, but locked with no account too.
+
+    No person is at the keyboard to own a fallback to their own login, so an absent
+    account gets the locked state rather than the person's setup.
+    """
+    return _identity_env(account)
+
+
+def _identity_env(account: AgentAccountView) -> dict[str, str]:
     entries = _git_config(account)
     env = {"GH_CONFIG_DIR": account.home if account.ready and account.home else LOCKED_HOME,
            "GIT_CONFIG_COUNT": str(len(entries))}
@@ -291,6 +326,30 @@ def shell_env(account: AgentAccountView) -> dict[str, str]:
         env[f"GIT_CONFIG_VALUE_{index}"] = value
     assert set(env) == set(BOT_ENV_NAMES)
     return env
+
+
+def backend_gh(account: AgentAccountView) -> tuple[str, dict[str, str] | None]:
+    """How the backend runs ``gh`` for CORSIA's own GitHub writes: executable and environment.
+
+    The host's own ``gh`` and environment (None) when there is no agents' account; as
+    the account once ready; locked like a shell otherwise, so a write fails rather than
+    lands under the person's own login.
+    """
+    if account.absent:
+        return "gh", None
+    home = account.home if account.ready and account.home else LOCKED_HOME
+    return account.binary or "gh", clean_env() | {"GH_CONFIG_DIR": home, "GH_PROMPT_DISABLED": "1"}
+
+
+def backend_gh_now() -> tuple[str, dict[str, str] | None, AgentAccountView]:
+    """``backend_gh`` for the account as it is now, with that account: every backend read and write runs ``gh`` this way.
+
+    The first call after a restart finds the account still verifying and waits once for the answer.
+    """
+    account = view()
+    if account.cause == "verifying":
+        account = verify_now()
+    return (*backend_gh(account), account)
 
 
 def sandbox_ro_dirs(account: AgentAccountView) -> list[Path]:

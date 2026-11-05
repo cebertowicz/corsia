@@ -38,6 +38,13 @@ def visible_answer_content(text: str, placed_cids: list[str]) -> str:
     return result.strip()
 
 
+def strip_answer_tags(text: str | None) -> str | None:
+    """Drop the comment tags that open answer sections, keeping their text."""
+    if not text:
+        return text
+    return _TAGGED.sub(lambda match: match.group(0)[:match.start(1) - match.start(0)], text)
+
+
 def has_comment_cid(metadata: str | None, cid: str) -> bool:
     try:
         value = json.loads(metadata or "{}")
@@ -84,6 +91,11 @@ def delete_thread_chat_comment_index_rows(db: sqlite3.Connection, thread_id: str
 
 # All projections compose this source and predicate so that missing comments,
 # messages, and viewed answers have the same meaning everywhere.
+# An answer shows in its comment thread only while its comment, sender and target rows exist.
+SHOWN_ANSWERS_FROM = """FROM chat_comment_answers a
+JOIN chat_comments c ON c.user_message_id=a.user_message_id AND c.cid=a.cid AND c.thread_id=a.thread_id
+JOIN messages sender ON sender.id=a.user_message_id AND sender.thread_id=a.thread_id
+JOIN messages target ON target.id=c.target_message_id AND target.thread_id=a.thread_id"""
 UNREAD_FROM = """FROM chat_comment_answers a
 JOIN threads t ON t.id=a.thread_id AND t.user_id=?
 JOIN chat_comments c ON c.thread_id=a.thread_id AND c.user_message_id=a.user_message_id AND c.cid=a.cid

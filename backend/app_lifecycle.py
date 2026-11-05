@@ -86,6 +86,9 @@ async def _startup_network_discovery() -> None:
             f"network discovery startup: probed {len(servers)} server(s), "
             f"{online_count} online, discovery complete"
         )
+        from llm.providers.omlx_upgrade import upgrade_managed_omlx
+
+        await upgrade_managed_omlx()  # this startup task is retained and cancelled on shutdown
     except Exception as exc:
         logger.warning(f"network discovery startup failed: {exc}")
 
@@ -99,6 +102,10 @@ async def lifespan(app: FastAPI):
     with startup_progress.publishing():
         app_startup_init.initialize_startup(logger)
     app_loop.capture(asyncio.get_running_loop())
+    from llm.live_cost_map import start_refresh
+
+    if not getattr(app.state, "litellm_cost_map_offline", False):
+        start_refresh()
     startup_tasks: list[asyncio.Task | None] = [None, None, None, None, None]
     body_cancel: asyncio.CancelledError | None = None
     try:
@@ -133,6 +140,9 @@ async def lifespan(app: FastAPI):
         await _start_otlp_listener()
         await start_documents()
         await resume_local_setup()
+        from events.connectors.github_reviewer_gate_recovery import recover_pending_reviews
+
+        await recover_pending_reviews(asyncio.get_running_loop())
         schedule_usage_rollup_refresh()
         from infra.usage_summary import record_current_install_week
 

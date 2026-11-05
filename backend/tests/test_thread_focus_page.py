@@ -96,6 +96,19 @@ def _live(conn, turn_id: str, status: str = "running") -> None:
 
 
 class TestVisibilityParity:
+    def test_held_reply_receipt_is_visible_in_python_and_sql(self):
+        meta = json.dumps({"type": "context_event", "event_type": "held_reply.sent"})
+        row = {"role": "system", "content": "receipt", "metadata": meta}
+        assert is_focus_visible(row)
+        assert row_kind(row) == "other"
+        conn = _db()
+        conn.execute(
+            "INSERT INTO messages (id,thread_id,role,content,metadata,created_at) "
+            "VALUES ('m',?,'system','receipt',?,'t')", (_SID, meta),
+        )
+        assert conn.execute(f"SELECT {FOCUS_VISIBLE_SQL} FROM messages").fetchone()[0] == 1
+        assert conn.execute(f"SELECT {focus_kind_sql(ACTIVITY_WEIGHT_SQL)} FROM messages").fetchone()[0] == "other"
+
     @pytest.mark.parametrize("case", _FIXTURE["cases"], ids=lambda case: case["name"])
     def test_python_and_sql_rules_agree_with_the_fixture(self, case):
         row = {k: case[k] for k in ("role", "content")} | {"metadata": case["metadata_raw"]}
@@ -119,6 +132,20 @@ class TestVisibilityParity:
 
 
 class TestStubsAndCounts:
+    @pytest.mark.parametrize("paired, expected", [(True, 1), (False, 2)])
+    def test_retry_counts_only_when_unpaired(self, paired, expected):
+        conn = _db()
+        t = _Thread(conn)
+        t.add("u")
+        t.add("c", "T1", meta={"type": "llm_error", "recovered": True})
+        t.add("c", meta={"event_type": "system.turn.unanswered_input",
+                         "failed_turn_id": "T1" if paired else "other"})
+        t.add("s", "T2")
+        conn.commit()
+
+        (stub,) = page_focus(conn, _SID, 10, None)["runs"]
+        assert stub["count"] == expected
+
     def test_hidden_rows_between_visible_ones_become_one_stub_each(self):
         conn = _db()
         t = _Thread(conn)
@@ -189,6 +216,18 @@ class TestStubsAndCounts:
         (stub,) = page["runs"]
         assert (stub["count"], stub["weight"], stub["kinds"]) == (2, 2, ["steps"])
         assert "starting context" not in json.dumps(page)
+
+    def test_an_overflow_continue_is_neither_counted_in_a_run_nor_sent(self):
+        conn = _db()
+        t = _Thread(conn)
+        first = t.add("u")
+        t.add("c", meta={"event_type": "context_overflow.continue"}, content="Continue the work")
+        said = t.add("s", "T2")
+        conn.commit()
+        page = page_focus(conn, _SID, 10, None)
+        assert [m["id"] for m in page["messages"]] == [first, said]
+        assert page["runs"] == []
+        assert "Continue the work" not in json.dumps(page)
 
     def test_a_run_of_only_a_seed_yields_no_stub(self):
         conn = _db()

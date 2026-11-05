@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
-from plans import admission, artifact_links, intent_words, review_requests, service
+from core.corrections_recording import SOURCE_KIND_DOC_COMMENT
+from plans import admission, artifact_links, feedback_join, intent_words, person_input, review_requests, service
 from plans.feedback_items import (
     artifact_name, artifact_row, batch_value, feedback_display, feedback_item_counts, feedback_kind_counts,
     load_feedback_items,
@@ -64,11 +65,15 @@ class EmptyFeedbackBatchError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class FeedbackNodeResult:
-    """The idempotent node plus any executor newly selected by its admission."""
+    """The idempotent node plus any executor newly selected by its admission.
+
+    ``woke`` when the batch joined a task its owner is working and that owner was woken with it.
+    """
 
     node_id: str
     selected_threads: tuple[str, ...]
     created: bool
+    woke: bool = False
 
 
 def _comment_phrases(items: list[dict[str, Any]]) -> list[str]:
@@ -128,6 +133,13 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
         blocks.append(
             USER_FRAMING if batch_value(batch, "author_kind") == "user" else AGENT_FRAMING
         )
+    blocks.append(item_blocks(batch, items))
+    return "\n\n".join(blocks)
+
+
+def item_blocks(batch: Any, items: list[dict[str, Any]]) -> str:
+    """Render a batch's items as its task description lists them, without the framing."""
+    blocks: list[str] = []
     # One marked-up copy per image, set by delivery on the batch's region comments.
     # It leads, so a handoff cap that cuts the tail never drops it.
     marked = (str(item["marked_image_line"]) for item in items if item.get("marked_image_line"))
@@ -186,8 +198,11 @@ def _existing(db, recipient_thread_id: str, batch_id: str, provenance: str = PRO
 
 
 def settle_feedback_node(db, recipient_thread_id: str, batch_id: str, *, evidence: str) -> None:
-    """Record the evidence and accept a batch's task once, atomically; a finished task stays as it is and a stopped one gets a note."""
-    node_id = _existing(db, recipient_thread_id, batch_id)
+    """Record the evidence and accept a batch's task once, atomically; a finished task stays as it is and a stopped one gets a note.
+
+    The batch's delivered task is the one record of it, so a batch that joined another's task settles that task.
+    """
+    node_id = feedback_join.delivered_task(db, batch_id) or _existing(db, recipient_thread_id, batch_id)
     if node_id is None:
         return
     with transaction(db) as connection:
@@ -205,10 +220,16 @@ def create_feedback_node(
     *,
     items: list[dict[str, Any]] | None = None,
 ) -> FeedbackNodeResult:
-    """Create one queued recipient-plan task, idempotently keyed by batch id."""
+    """Create one queued recipient-plan task, idempotently keyed by batch id.
+
+    A batch of replies whose comment thread already has an open task joins that
+    task instead (``plans.feedback_join``). Joining a task its owner is working
+    adds no intent words, so the owner keeps its selection, and wakes the owner
+    with the reply instead.
+    """
     batch_id = str(batch_value(batch, "id"))
     artifact_id = str(batch_value(batch, "artifact_id"))
-    existing = _existing(db, recipient_thread_id, batch_id)
+    existing = feedback_join.delivered_task(db, batch_id) or _existing(db, recipient_thread_id, batch_id)
     if existing is not None:
         return FeedbackNodeResult(existing, (), False)
     loaded = items if items is not None else load_feedback_items(db, batch)
@@ -220,11 +241,26 @@ def create_feedback_node(
         if batch_value(batch, "author_kind") == "user"
         else ()
     )
+    joined = feedback_join.open_thread_task(db, recipient_thread_id, batch, loaded)
+    if joined is not None:
+        held = feedback_join.earlier_items(db, joined.node_id, batch) + loaded
+        blocks = item_blocks(batch, loaded)
+        feedback_join.join(
+            db, joined.node_id, title=_title(author, document, held),
+            blocks=blocks, words=() if joined.working else words, provenance=PROVENANCE,
+        )
+        woke = joined.working and person_input.joined_reply(
+            db, joined.node_id,
+            person_input.Source(SOURCE_KIND_DOC_COMMENT, str(loaded[0]["id"]), (blocks,),
+                                str(loaded[0]["sort_at"]), recipient_thread_id, None),
+            [str(item["id"]) for item in loaded],
+        ) is not None
+        return FeedbackNodeResult(joined.node_id, (), False, woke)
     return _create_linked_node(
         db, recipient_thread_id, artifact_id, batch_id, PROVENANCE,
         title=_title(author, document, loaded), acceptance=_acceptance(loaded),
         description=_description(batch, loaded),
-        intent=intent_words.document_comment_intent(loaded) if words else None, words=words,
+        intent=intent_words.document_comment_intent(loaded, document) if words else None, words=words,
     )
 
 

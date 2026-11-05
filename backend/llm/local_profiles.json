@@ -4,7 +4,6 @@
     "prefill_priority": "context"
   },
   "model_settings": {
-    "max_tokens": 16384,
     "turboquant_kv_enabled": true,
     "turboquant_kv_bits": 8,
     "turboquant_skip_last": true,

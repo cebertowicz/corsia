@@ -278,8 +278,8 @@ def checkpoint_pane_rows(db, thread_id: str) -> list[dict]:
     updated, so a cut keeps the rows the owner pinned — selected for the
     checkpoint snapshot
     (#1602). One addition the live pane's public shape does not carry:
-    ``origin_plan_node_id``, read only in this capture path per the in-lane
-    decision, so ``public_row_from_normalized`` and the pane stay unchanged.
+    ``origin_plan_node_id``, which ``public_row_from_normalized`` never
+    reads, so the pane stays unchanged.
     """
     where, where_params = _pane_visible_where()
     owned = ",".join("?" for _ in OWNER_REGISTRATION_STATES)

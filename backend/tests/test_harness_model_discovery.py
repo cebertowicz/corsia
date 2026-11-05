@@ -104,7 +104,7 @@ def _account(prior=None):
     """The account a discovery runs for: there is no ambient home."""
     from types import SimpleNamespace
 
-    return SimpleNamespace(source_home="/nonexistent/claude-account", prior_discovery=prior)
+    return SimpleNamespace(account_id="acct-1", source_home="/nonexistent/claude-account", prior_discovery=prior)
 
 
 def _codex_context():

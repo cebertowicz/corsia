@@ -269,7 +269,7 @@ def running(db, nodes) -> list[tuple]:
 
 
 def _wake(db, source: Source, picked: list[tuple]) -> list[str]:
-    from memory.node_start_recall import source_reaches_thread
+    from memory.source_scope import source_reaches_thread
     from plans import admission_projection, plan_wake
 
     woken: list[str] = []
@@ -280,11 +280,7 @@ def _wake(db, source: Source, picked: list[tuple]) -> list[str]:
         # The person's words reach an owner only by the scope rule Context & Memory applies to the same words.
         if not source_reaches_thread(db, source.thread_id, recipient):
             continue
-        wake = plan_wake.append(
-            db, recipient=recipient, kind=plan_wake.INTENT_INPUT, subject_id=str(node["id"]),
-            revision=source.kind, about=source.id, plan_id=str(node["plan_id"]),
-            open_node_id=str(node["id"]), content=_content(db, node, source, recipient),
-        )
+        wake = _append(db, source, node, recipient)
         if wake is not None:
             woken.append(wake)
         if len(woken) == MAX_WAKES:
@@ -292,7 +288,31 @@ def _wake(db, source: Source, picked: list[tuple]) -> list[str]:
     return woken
 
 
-def _content(db, node, source: Source, recipient: str) -> str:
+def joined_reply(db, node_id: str, source: Source, comment_ids: list[str]) -> str | None:
+    """Wake the owner working a task a person's reply just joined; return the wake id.
+
+    The reply was delivered to that owner, so no scope or same-thread check
+    applies. ``source`` names the first reply, so the wake shares its identity
+    with any wake ``hear`` sends for the same comment.
+    """
+    from plans import admission_projection
+
+    node = service._node_row(db, node_id)
+    recipient = admission_projection.executor_of(node, service._plan_row(db, node["plan_id"]))
+    return None if recipient is None else _append(db, source, node, recipient, answer=comment_ids)
+
+
+def _append(db, source: Source, node, recipient: str, *, answer: list[str] | None = None) -> str | None:
+    from plans import plan_wake
+
+    return plan_wake.append(
+        db, recipient=recipient, kind=plan_wake.INTENT_INPUT, subject_id=str(node["id"]),
+        revision=source.kind, about=source.id, plan_id=str(node["plan_id"]),
+        open_node_id=str(node["id"]), content=_content(db, node, source, recipient, answer or []),
+    )
+
+
+def _content(db, node, source: Source, recipient: str, answer: list[str]) -> str:
     from plans import plan_wake
     from plans.close_next_bounds import bounded
     from prompts import plan_wakes as wakes
@@ -301,7 +321,10 @@ def _content(db, node, source: Source, recipient: str) -> str:
     revision = int(node["requirements_revision"])
     return plan_wake.with_next(
         db, service.ensure_plan("thread", recipient, db=db).id, recipient,
-        wakes.WAKE_INTENT_INPUT.format(title=title, requirements_revision=revision),
+        " ".join([
+            wakes.WAKE_INTENT_INPUT.format(title=title, requirements_revision=revision),
+            *(wakes.INTENT_INPUT_ANSWER_REPLY.format(comment_id=comment_id) for comment_id in answer),
+        ]),
         intent_input={
             "node_id": str(node["id"]), "requirements_revision": revision, "title": title,
             "source_kind": source.kind, "said_at": source.said_at,

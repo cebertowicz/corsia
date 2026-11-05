@@ -175,6 +175,19 @@ def test_auth_status_failure_is_not_mislabeled_signed_out(caplog):
     assert "TimeoutExpired" in caplog.text
 
 
+def test_each_feed_names_itself_in_its_state_log(caplog, monkeypatch):
+    """The two feeds' state lines are told apart in the log."""
+    from events.connectors import github_notifications as poller
+
+    monkeypatch.setattr(poller, "_agents_status", {**poller._status})
+    caplog.set_level("INFO", logger=poller.log.name)
+    poller._set_state("failing", "http_500", agents=True)
+    poller._set_state("enabled")
+
+    assert "github-notifications (agents): failing (http_500)" in caplog.text
+    assert "github-notifications: enabled" in caplog.text
+
+
 def test_only_the_active_account_decides_signed_in():
     """A failing second stored account must not turn the poller off."""
     from events.connectors import github_notifications as poller

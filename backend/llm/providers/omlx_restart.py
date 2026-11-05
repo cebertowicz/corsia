@@ -14,6 +14,10 @@ exit, not clean     restart it (bounded)        that restart is cancelled and   
                                                 a new one begins
 exit, code 0        logged, not restarted       -                                no restart
                     (an exit with no readable status is treated as unexpected)
+exit, code 0 after  restarted, bound reset      -                                no restart
+oMLX's own Restart  (its dashboard asked)
+exit, code 0 with   logged and emitted as unknown, -
+the log unreadable  not restarted
 stop (the person,   exit watch dropped, never   restart cancelled and awaited;   -
 CORSIA, Quit)       restarted                   what it spawned is then stopped
 stop fails          stop flag cleared: a later  -                                -
@@ -36,8 +40,10 @@ import asyncio
 import logging
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from infra.product_events import emit_product_event
@@ -47,6 +53,8 @@ log = logging.getLogger("llm.providers.omlx.restart")
 
 MAX_RESTARTS = 3
 RESTART_WINDOW_S = 600.0
+# What oMLX logs when its own Restart is pressed, before it exits 0 for its supervisor to respawn it.
+RESTART_REQUESTED = "Server restart requested (supervisor=corsia)"
 
 
 @dataclass
@@ -56,7 +64,9 @@ class Life:
     unwatch: Callable[[], None] | None = None
     stopping: bool = False  # a stop was asked for: the exit it causes is not a crash
     restart: asyncio.Task | None = None
+    hold_requests: bool = False  # only an upgrade drains calls before replacing the process
     restarts: deque[float] = field(default_factory=deque)  # when each restart in the window began
+    requests: set[asyncio.Future[None]] = field(default_factory=set)  # admitted provider calls, not whole Turns
 
     def watch(self, pid: int, on_exit: Callable[[tuple[str, bool] | None], None]) -> None:
         """The server is up and wanted running: have the OS tell us when ``pid`` exits.
@@ -86,6 +96,25 @@ class Life:
         if self.restart:
             self.restart.cancel()
         return self.restart
+
+
+@asynccontextmanager
+async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIterator[None]:
+    """Keep concurrent calls admitted before replacement alive; later calls wait through restoration."""
+    life = lives.get(server_id or "")
+    while life is not None and life.hold_requests and life.restart is not None:
+        await asyncio.wait({life.restart})  # caller cancellation must not cancel the restart
+        life = lives.get(server_id or "")
+    if life is None:
+        yield  # unmanaged and other providers have no supervisor admission
+        return
+    finished = asyncio.get_running_loop().create_future()
+    life.requests.add(finished)  # no await between observing the restart and claiming admission
+    try:
+        yield
+    finally:
+        life.requests.remove(finished)
+        finished.set_result(None)
 
 
 async def stop(
@@ -118,6 +147,16 @@ def restarting(lives: dict[str, Life]) -> set[str]:
     return {server_id for server_id, life in lives.items() if life.restart}
 
 
+def restart_logged_from_now(runtime_dir: Path, server_id: str) -> Callable[[], bool | None]:
+    """Whether the server's log gains oMLX's restart line after this call: an earlier process's never counts.
+
+    None when the log can't be read, which is not an answer: the caller says so rather than calling it a plain exit.
+    CORSIA launches oMLX with ``OMLX_SUPERVISED=corsia``, so oMLX's own Restart logs that line and exits 0.
+    """
+    offset = process.log_size(runtime_dir, server_id)
+    return lambda: process.logged_since(runtime_dir, server_id, offset, RESTART_REQUESTED)
+
+
 def emit(server_id: str, action: str, **properties: Any) -> None:
     emit_product_event("model_server", action, properties={"provider": "omlx", "server_id": server_id, **properties})
 
@@ -125,9 +164,9 @@ def emit(server_id: str, action: str, **properties: Any) -> None:
 def on_exit(
     server_id: str, life: Life, pid: int,
     start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
-    observed: tuple[str, bool] | None = None,
+    observed: tuple[str, bool] | None = None, restart_requested: Callable[[], bool | None] = lambda: False,
 ) -> None:
-    """Restart the server unless the exit was asked for or was a clean exit 0."""
+    """Restart the server unless CORSIA stopped it, or it exited 0 without oMLX's own Restart asking."""
     from llm.server_observation import forget_loaded_on_exit
 
     life.unwatch = None
@@ -137,19 +176,44 @@ def on_exit(
         log.info("oMLX %s (pid %s) stopped as asked; not restarting", server_id, pid)
         return
     if clean:
-        log.info("oMLX %s (pid %s) exited with code 0 without being asked; not restarting", server_id, pid)
-        return
-    emit(server_id, "exit.unexpected", status=status, loaded_models=len(loaded))
+        asked = restart_requested()
+        if asked is None:  # the log is unreadable, so the seat stays down and the reason is said out loud
+            log.warning("oMLX %s (pid %s) exited with code 0 and its log could not be read; "
+                      "whether oMLX's own Restart asked for it is unknown, so it is not restarted", server_id, pid)
+            emit(server_id, "exit.intent_unknown")
+            return
+        if not asked:
+            log.info("oMLX %s (pid %s) exited with code 0 without being asked; not restarting", server_id, pid)
+            return
+        status = "restart requested in oMLX"  # a person's restart, like a person's start, resets the bound
+        life.restarts.clear()
+        emit(server_id, "restart.requested", loaded_models=len(loaded))
+    else:
+        emit(server_id, "exit.unexpected", status=status, loaded_models=len(loaded))
     if life.restart:  # it exited again while a restart was running
         life.restart.cancel()
-    task = asyncio.get_running_loop().create_task(_restart(server_id, life, status, loaded, start, tail_log))
+    schedule(server_id, life, _restart(server_id, life, status, loaded, start, tail_log))
+
+
+def schedule(server_id: str, life: Life, operation: Coroutine[Any, Any, Any], *, hold_requests: bool = False) -> asyncio.Task:
+    """Own one restart through the same Life, so Stop and shutdown can cancel and await it."""
+    from infra.state.ws import broadcast_all
+
+    task = asyncio.get_running_loop().create_task(operation)
     life.restart = task
+    life.hold_requests = hold_requests
     task.add_done_callback(lambda done: _done(server_id, life, done))
+    broadcast_all({"type": "models_updated", "server_id": server_id})  # lifecycle change without admitting held work
+    return task
 
 
 def _done(server_id: str, life: Life, task: asyncio.Task) -> None:
+    from infra.state.ws import notify_models_changed
+
     if life.restart is task:
         life.restart = None
+        life.hold_requests = False
+        notify_models_changed(server_id=server_id)
     error = None if task.cancelled() else task.exception()
     if error is not None:
         log.error("oMLX restart stopped on an error", exc_info=error)
@@ -162,21 +226,33 @@ async def _restart(
 ) -> None:
     from llm.local_keep_loaded import reload_after_restart
 
+    if await start_with_recovery(server_id, life, status, start, tail_log):
+        await reload_after_restart(server_id, loaded)
+        emit(server_id, "restart.completed", attempt=len(life.restarts))
+
+
+async def start_with_recovery(
+    server_id: str, life: Life, status: str,
+    start: Callable[[dict], Awaitable[dict[str, Any]]], tail_log: Callable[[str], str],
+) -> bool:
+    """The same bounded startup recovery after a crash or an intentional upgrade stop."""
     while life.restarts and time.monotonic() - life.restarts[0] > RESTART_WINDOW_S:
         life.restarts.popleft()
-    log.warning("oMLX server %s exited unexpectedly: %s; %d restarts in the last 10 minutes",
-                server_id, status, len(life.restarts))
+    if status == "upgrade":
+        log.info("oMLX server %s starting after upgrade stop", server_id)
+    else:
+        log.warning("oMLX server %s exited (%s); %d restarts in the last 10 minutes",
+                    server_id, status, len(life.restarts))
     while len(life.restarts) < MAX_RESTARTS:
         life.restarts.append(time.monotonic())
         emit(server_id, "restart.attempted", attempt=len(life.restarts), status=status)
         result = await start({"server_id": server_id})
         if life.stopping:
-            return
+            return False
         if result.get("ok"):
-            emit(server_id, "restart.completed", attempt=len(life.restarts))
-            await reload_after_restart(server_id, loaded)
-            return
+            return True
         log.warning("oMLX server %s restart failed: %s", server_id, result.get("message"))
     emit(server_id, "restart.gave_up", status=status, restarts=len(life.restarts))
     log.error("oMLX server %s not restarted again: %d restarts in 10 minutes (last exit %s). Last log lines:\n%s",
               server_id, len(life.restarts), status, tail_log(server_id) or "(empty log)")
+    return False

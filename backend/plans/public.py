@@ -94,6 +94,7 @@ from plans.activity_projection import (
     read_project as read_activity_project,
     read_workspace as read_activity_workspace,
 )
+from plans.held_attention import queue_rows as held_reply_queue_rows
 from plans.user_ask import (
     ASKABLE_TYPES,
     ASK_ENDINGS,
@@ -126,8 +127,11 @@ from plans.operator_projection import (
 from plans.pane_views import delete_thread as delete_pane_view
 from plans.review_evidence import latest as latest_review_evidence
 
+# The ``selected.how`` values meaning a plan operation started the task (core/lesson_delivery).
+from plans.close_next import _CRITERIA_HOWS as TASK_STARTED_HOWS
 # The thin status a checkpoint freezes (infra/checkpoint_snapshots).
 from plans.close_next_bounds import bounded as bounded_label
+from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES
 from plans.status import cut_rows
 from plans.status_context import render as render_status
 # The status a plan write left owed: drained before a digest (infra/passive_changes)
@@ -136,7 +140,7 @@ from plans.status_drain import drain_for_digest as drain_status_for_digest, swee
 # The person's new words, matched against running tasks off-path (jobs/corrections_recording).
 from plans.person_input import arrived as person_words_arrived
 from plans.intent_words import message_words as person_message_words
-# The node holding a task's intent, itself unless inherited (memory/node_text).
+# The node holding a task's intent, itself unless inherited.
 from plans.intent_words import canonical as canonical_intent_node
 
 
@@ -213,6 +217,8 @@ from plans.watch_resolution import resolve_delivered_event
 
 # Document feedback and shared-document ownership tasks (doceditor/, registry/).
 from plans.artifact_links import link as link_node_artifact
+# The task a PR's review starts from (Agent Substrate's review start, with intent_of).
+from plans.artifact_links import linked_node_for_artifact
 from plans.user_step_instructions import read_for_artifact as person_step_instructions
 from plans.feedback_items import feedback_display, feedback_item_counts, load_feedback_items
 from plans.feedback_nodes import create_feedback_node, create_review_node, settle_feedback_node
@@ -293,3 +299,5 @@ from plans.aggregates_rebuild import rebuild as rebuild_plan_aggregates
 from plans.aggregates_recount import stored_mismatches as plan_aggregate_mismatches
 from plans.node_states import is_container_sql as container_sql
 from plans.writer_context import sanctioned_write as sanctioned_plan_write
+# What one or more nodes, commitments or plans cost in dollars, priced from their usage rows.
+from plans.usage_cost import usage_dollars

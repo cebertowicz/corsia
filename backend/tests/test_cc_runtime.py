@@ -1024,9 +1024,10 @@ class TestLockLifecycle:
         lock = rt._LIVE.lock(thread_id)
         await lock.acquire()  # hold the lock — simulates a wedged spawn
         try:
+            # Far above the patched bound so a starved loop can't trip it, far below the 30 s default.
             result = await asyncio.wait_for(
                 rt.stop(thread_id, expected_turn_id="turn-timeout"),
-                timeout=0.1,
+                timeout=5.0,
             )
             assert result is False
         finally:

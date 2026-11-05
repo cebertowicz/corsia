@@ -139,7 +139,7 @@ def test_receipt_reads_use_the_lesson_index(db, build):
         migrate_161_to_162(db)
 
     plan = " ".join(
-        row["detail"] for row in db.execute(f"EXPLAIN QUERY PLAN {RECEIPTS_SQL}", ('[["l","s"]]', "n", "t", "t"))
+        row["detail"] for row in db.execute(f"EXPLAIN QUERY PLAN {RECEIPTS_SQL}", ('[["l","s"]]', "n"))
     )
     assert "USING INDEX idx_guidance_loads_lesson_node" in plan
 
@@ -225,16 +225,14 @@ def test_target_matching_never_reuses_another_owners_trial(tmp_path, monkeypatch
     assert retired == []
 
 
-def test_plan_start_delivers_trial_even_when_prior_words_are_disabled(db, monkeypatch):
+def test_plan_start_delivers_trial(db, monkeypatch):
     from types import SimpleNamespace
-    from memory import node_start_recall
     from plans import public
     from tools import plans as plan_tools
 
     node_id = _node("with")
     _resolved(monkeypatch, [_trial()])
     monkeypatch.setattr(public, "attributed_selection", lambda *_: {"node_id": node_id})
-    monkeypatch.setattr(node_start_recall, "DELIVERY_ON", False)
     result = {"node": {"id": node_id, "kind": "task"}}
     class Connection:
         def __getattr__(self, name):
@@ -290,10 +288,10 @@ def test_start_trials_records_both_halves_once_per_task(db, monkeypatch):
 
     assert [len(run) for run in returned["with"]] == [1, 1]
     assert returned["without"] == [[], []]
-    rows = db.execute("SELECT node_id,variant,delivered_sha256 FROM guidance_loads ORDER BY variant").fetchall()
-    # The without task follows a with task on the same thread, so it is a crossover.
+    rows = db.execute("SELECT node_id,variant,delivered_sha256 FROM guidance_loads ORDER BY variant DESC").fetchall()
+    # Delivery records the raw draw; excluding a task that follows a with on its thread is the verdict read's call.
     assert [tuple(row) for row in rows] == [
-        (halves["without"], "crossover", hashlib.sha256(b"").hexdigest()),
+        (halves["without"], "without", hashlib.sha256(b"").hexdigest()),
         (halves["with"], "with", hashlib.sha256(trial.payload.encode()).hexdigest()),
     ]
 
@@ -310,14 +308,14 @@ def test_overlapping_starts_of_one_task_record_one_receipt(db, monkeypatch):
     def stale_first_read(*args, **kwargs):
         # The second start read before the first one wrote.
         reads.append(1)
-        return ({}, set()) if len(reads) == 1 else real(*args, **kwargs)
+        return {} if len(reads) == 1 else real(*args, **kwargs)
 
     monkeypatch.setattr(lesson_delivery, "_receipts", stale_first_read)
     assert len(start_trials(db, thread_id="thread", node_id=node_id)) == 1
     assert db.execute("SELECT COUNT(*) FROM guidance_loads WHERE node_id=?", (node_id,)).fetchone()[0] == 1
 
 
-def test_a_without_draw_is_recorded_and_a_crossover_needs_the_same_thread(db, monkeypatch):
+def test_a_without_draw_is_recorded_as_drawn_whatever_the_thread_already_had(db, monkeypatch):
     _resolved(monkeypatch, [_trial()])
     with_node = _node("with")
     without_node = _node("without")
@@ -328,7 +326,7 @@ def test_a_without_draw_is_recorded_and_a_crossover_needs_the_same_thread(db, mo
 
     rows = db.execute("SELECT thread_id,variant FROM guidance_loads ORDER BY created_at, id").fetchall()
     assert sorted(tuple(row) for row in rows) == [
-        ("other-thread", "without"), ("thread", "crossover"), ("thread", "with"),
+        ("other-thread", "without"), ("thread", "with"), ("thread", "without"),
     ]
     assert db.execute(
         "SELECT delivered_sha256 FROM guidance_loads WHERE variant='without'"

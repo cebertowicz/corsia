@@ -41,11 +41,11 @@ describe('pending comment highlight', () => {
 		expect(marked()).toBe('beta');
 	});
 
-	it('goes away when a remote edit inside the range changes the quoted text', () => {
+	it('follows a remote edit inside the range, which the comment still anchors on', () => {
 		const { view, selection, insert, marked } = mount();
 		view.dispatch({ effects: setPendingComment.of(selection) });
 		insert(8, 'Z');
-		expect(marked()).toBe('');
+		expect(marked()).toBe('beZta');
 	});
 
 	it('clears on cancel and on post, when the draft drops its selection', () => {

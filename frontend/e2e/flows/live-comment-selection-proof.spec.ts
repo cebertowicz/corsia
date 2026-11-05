@@ -3,7 +3,7 @@ import { expect, type BrowserContext } from '@playwright/test';
 import { holdRequest, openLivePair, textDigest, watchPlacementReports } from '../support/liveConcurrency';
 import { seedLiveDocument, serverText } from '../support/liveDocument';
 import {
-	beginComment, commentWire, expectCorrelation, expectOneComment, expectToastLayout, insertPrefix,
+	beginComment, commentWire, expectCorrelation, expectOneComment, insertPrefix,
 	observeCreates, openTwoDocuments, outsideClose, selectLine, storedComments, submitButton, switchDocument,
 	type CommentWire,
 } from '../support/liveCommentProof';
@@ -154,10 +154,10 @@ for (const [width, height, project] of layouts) for (const theme of ['light', 'd
 		} finally { hold?.release(); await pair.close(); }
 	});
 
-	test(`@surface:live-document @comment-proof a remote edit inside the reserved text refuses the create with its toast and stores nothing at ${label}`, async ({ browser, request }, testInfo) => {
+	test(`@surface:live-document @comment-proof a remote edit inside the reserved text still posts, anchored on the text now there, with no refusal at ${label}`, async ({ browser, request }, testInfo) => {
 		test.skip(testInfo.project.name !== project, 'Matching Chromium layout only.');
 		test.setTimeout(120_000);
-		const stamp = `${width}-${theme}-${Date.now()}`, quote = `inside target ${stamp}`, body = `Refused body ${stamp}`;
+		const stamp = `${width}-${theme}-${Date.now()}`, quote = `inside target ${stamp}`, body = `Edited-inside body ${stamp}`;
 		const document = await seedLiveDocument(request, `inside-proof-${stamp}`, `lead ${stamp}\n${quote}\ntail ${stamp}\n`);
 		let wire!: CommentWire;
 		const pair = await openLivePair(browser, document, width, height, async context => { wire = await prepare(context, theme); });
@@ -178,17 +178,17 @@ for (const [width, height, project] of layouts) for (const theme of ['light', 'd
 			const edited = quote.slice(0, 3) + 'ZZ' + quote.slice(3);
 			await expect.poll(() => serverText(request, document), { timeout: 20_000 }).toBe(document.body.replace(quote, edited));
 			await expect(reader.locator('.cm-content')).toContainText(edited);
-			const refused = reader.waitForResponse(response => new URL(response.url()).pathname === `/api/artifacts/${document.artifactId}/comments` && response.request().method() === 'POST');
+			const posted = reader.waitForResponse(response => new URL(response.url()).pathname === `/api/artifacts/${document.artifactId}/comments` && response.request().method() === 'POST');
 			hold.release();
-			expect((await refused).status(), 'the reserved range no longer holds the selected text').toBe(409);
-			const toast = reader.getByRole('status').filter({ hasText: refusalText });
-			await expect(toast).toBeVisible();
-			await expectToastLayout(reader, toast);
-			await expect(reader.getByPlaceholder('Comment…')).toHaveValue(body);
-			expect(await storedComments(request, document)).toEqual([]);
+			expect((await posted).status(), 'the reserved range anchors on the text now in it').toBe(200);
+			await expect(reader.getByPlaceholder('Comment…')).toHaveCount(0);
+			await expect(reader.getByRole('status').filter({ hasText: refusalText })).toHaveCount(0);
+			const file = await serverText(request, document), from = file.indexOf(edited);
+			await expect.poll(() => storedComments(request, document)).toEqual([
+				expect.objectContaining({ id: creates[0].client_id, anchor_text: edited, body, from_off: from, to_off: from + edited.length })]);
 			expect(creates).toHaveLength(1);
 			expectCorrelation(wire, creates[0], document.artifactId);
-			await reader.screenshot({ path: testInfo.outputPath(`reservation-refusal-toast-${width}-${theme}.png`), animations: 'disabled' });
+			await reader.screenshot({ path: testInfo.outputPath(`reservation-edit-inside-${width}-${theme}.png`), animations: 'disabled' });
 		} finally { hold?.release(); await pair.close(); }
 	});
 

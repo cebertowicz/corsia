@@ -121,7 +121,9 @@ async def finish_tool_failure(
             if not finalized:
                 raise RuntimeError(f"Claude tool failure did not retire its exact handle: {child_thread_id}")
     except _CommittedTerminalFailure as failure:
-        await drive_turn_settlement(failure.settlement)
+        from subagents.cc_stream_control import start_terminal_driver
+
+        start_terminal_driver(live.session, failure.settlement)
         raise failure.publication_error
     if settlement is not None:
         await drive_turn_settlement(settlement)

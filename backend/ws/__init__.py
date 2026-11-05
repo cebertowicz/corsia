@@ -41,7 +41,6 @@ from ws.stop_control import (
     resolve_active_turn_id as _resolve_active_turn_id,
 )
 from ws.subagent_control import (
-    cc_attachment_block as _cc_attachment_block_impl,
     handle_subagent_stop as _handle_subagent_stop_impl,
 )
 
@@ -309,7 +308,6 @@ async def _handle_cc_main_message(
         requested_model_id=requested_model_id,
         target=target,
         send_thread_input_fn=send_thread_input,
-        cc_attachment_block_fn=_cc_attachment_block,
     )
 
 
@@ -374,10 +372,6 @@ async def _owned_thread(user: dict, thread_id: str):
 async def _owns_thread(user: dict, thread_id: str) -> bool:
     """True if the user owns the session (incl. delegated child sessions)."""
     return await _owned_thread(user, thread_id) is not None
-
-
-def _cc_attachment_block(attachments: list, user_id: str) -> str:
-    return _cc_attachment_block_impl(attachments, user_id)
 
 
 async def _handle_subagent_stop(

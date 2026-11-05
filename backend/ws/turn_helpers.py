@@ -9,7 +9,6 @@ from fastapi import WebSocket, WebSocketDisconnect
 from loguru import logger
 
 from infra import state
-from infra.config import DOCUMENT_MIME_TYPES
 from infra.state.ws import CROSS_TAB_EVENTS
 from infra.time import utc_now
 from core.turn_core import (
@@ -96,38 +95,6 @@ async def settle_preadmitted_failure(
         resolve_future(request.provider_acceptance, False)
         reject_future(request.start_ack, error)
         raise terminal_failure from error
-
-
-def build_agent_content(content: str, attachments: list[dict]) -> tuple[str, list[str]]:
-    """Build attachment notes; validated image bytes travel separately."""
-    if not attachments:
-        return content, []
-
-    image_paths: list[str] = []
-    attachment_notes: list[str] = []
-
-    for att in attachments:
-        mime = att.get("mime_type")
-        fname = att.get("filename", "file")
-        mime = mime if isinstance(mime, str) else ""
-
-        if mime.startswith("image/"):
-            attachment_notes.append(f"[Image attached: {fname}]")
-        elif mime in DOCUMENT_MIME_TYPES:
-            attachment_notes.append(f"[Document attached: {fname}]")
-        else:
-            attachment_notes.append(f"[File attached: {fname}]")
-
-    if attachment_notes:
-        agent_content = (
-            (content + "\n\n" + "\n".join(attachment_notes))
-            if content
-            else "\n".join(attachment_notes)
-        )
-    else:
-        agent_content = content
-
-    return agent_content, image_paths
 
 
 def make_deferred_send() -> tuple[

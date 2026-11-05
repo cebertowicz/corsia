@@ -4,4 +4,6 @@ CORSIA runs agents on your own computer, as your user, with a shell, file tools,
 
 ## Reporting a vulnerability
 
-There is no private reporting route yet. Don't post vulnerability details anywhere public: not in an issue, a pull request, a discussion or a comment. Instead, open an issue that asks for a private contact and contains no details of the vulnerability.
+Report it privately through GitHub: open the repository's [Security tab](https://github.com/cebertowicz/corsia/security) and choose **Report a vulnerability**, or go straight to the [private report form](https://github.com/cebertowicz/corsia/security/advisories/new). Only you and the maintainers can see the report. Include what you did, what happened, and the version or commit you ran.
+
+Don't post vulnerability details anywhere public: not in an issue, a pull request, a discussion or a comment.

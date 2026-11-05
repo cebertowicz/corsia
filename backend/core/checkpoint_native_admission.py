@@ -108,6 +108,24 @@ def skip_optional_cold_fold(state, required: bool) -> None:
         raise OptionalCheckpointSkipped("no correlated receipt for a warm fold")
 
 
+async def maintain_native_boundary(boundary, *, overflow_retry: bool):
+    """Run the shared boundary; decide what a required fold with nothing newer means.
+
+    None means the overflow retry adopts nothing, so the Turn ends on the
+    refusal, handled. Otherwise the installed checkpoint plus its tail is what
+    cannot fit, and no fold can make it smaller.
+    """
+    from core.checkpoint_resume import CHECKPOINT_TAIL_TOO_LARGE, maintain_before_provider_call
+    from core.fork_types import NothingNewerToFold
+
+    try:
+        return await maintain_before_provider_call(boundary, must_adopt=overflow_retry)
+    except NothingNewerToFold as error:
+        if overflow_retry:
+            return None
+        raise boundary.unavailable(CHECKPOINT_TAIL_TOO_LARGE) from error
+
+
 def freeze_idle_receipt(state) -> NativeIdleReceipt | None:
     """Freeze the final call's receipt when the Turn ended on that call's answer.
 

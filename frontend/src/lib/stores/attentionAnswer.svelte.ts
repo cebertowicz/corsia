@@ -114,12 +114,13 @@ export async function submitAnswer(decision: DecisionDetail): Promise<void> {
  * Returns an answer that was shown as recorded. The decision comes back at the
  * front and reopens so the error and Retry are visible immediately.
  */
-function rollBack(
+export function rollBack(
   decisionId: string,
   kind: Extract<AnswerState, { state: "failed" }>["kind"],
   message: string,
+  reference?: string,
 ): void {
-  setAnswer(decisionId, { state: "failed", kind, message });
+  setAnswer(decisionId, { state: "failed", kind, message, reference });
   activeId.set(decisionId);
   expandedId.set(decisionId);
 }

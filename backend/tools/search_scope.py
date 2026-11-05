@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from core.workspace_layout import THREADS_DIR, thread_tray_owners
+from eval.tool_allowlist import carry_in_hides
 from tools.filesystem_effects import expanded_globs, match_relative_glob
 
 SKIPPED_NAMES = frozenset({"node_modules", "__pycache__", "venv"})
@@ -45,10 +46,10 @@ def search_identity(path: Path, thread_id: str | None, all_threads: bool) -> tup
 
 
 def keep_path(path: Path, current_thread_id: str | None, all_threads: bool) -> bool:
-    """Whether a search may return ``path``: it lies in no other thread's folder."""
-    return all_threads or all(
+    """Whether a search may return ``path``: it lies in no other thread's folder and a carry-in sample sees it."""
+    return not carry_in_hides(path) and (all_threads or all(
         owner == current_thread_id for owner in thread_tray_owners(path)
-    )
+    ))
 
 
 def _skipped(name: str) -> bool:

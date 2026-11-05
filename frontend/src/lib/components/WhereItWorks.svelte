@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { projects, loadProjects } from '$lib/stores/projects';
+	import { accountName } from '$lib/accountAddress';
 	import { Button, Modal } from '$lib/components/ui';
 	import { ALL_PROJECTS_REACH, approveConnectedApp, isOnlyCorsia, saveAccountReach, saveConnectedAppReach, type ConnectedAppsRow } from '$lib/api/connectedApps';
 
 	let { app, approve = false, onClose, onSaved }: { app: ConnectedAppsRow; approve?: boolean; onClose: () => void; onSaved: (app: ConnectedAppsRow) => void } = $props();
-	const appName = $derived(app.kind === 'account' ? `Google — ${app.address}` : app.name);
+	const appName = $derived(app.kind === 'account' ? accountName(app) : app.name);
 	/** Only CORSIA is its own reach; the sheet names it before anything is chosen, and a save always replaces it. */
 	const onlyCorsia = $derived(isOnlyCorsia(app.reach));
 	let mode = $state<'all' | 'selected'>(app.reach.mode === 'all' ? 'all' : 'selected');

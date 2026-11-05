@@ -104,7 +104,7 @@ def test_migrating_admits_closed_and_preserves_every_row() -> None:
         fresh.executescript(SCHEMA_SQL)
         result = migrate_to_current(migrated, 27)
 
-        assert SCHEMA_VERSION == 168
+        assert SCHEMA_VERSION == 175
         assert result.migrated is True
         assert (result.from_version, result.to_version) == (26, 27)
 
@@ -116,7 +116,7 @@ def test_migrating_admits_closed_and_preserves_every_row() -> None:
         from infra.plan_aggregates_schema import NODE_AGGREGATE_INDEXES, TOUCH_INDEXES
 
         skipped = {
-            "plan_nodes", "bump_plan_revision_node_update", "idx_plan_nodes_intent_node",
+            "plan_nodes", "bump_plan_revision_node_update", "idx_plan_nodes_intent_node", "idx_plan_nodes_workflow_ref",
             *NODE_AGGREGATE_INDEXES, *TOUCH_INDEXES,
         }
         fresh_objects = _plan_nodes_objects(fresh)

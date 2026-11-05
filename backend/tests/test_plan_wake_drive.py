@@ -280,8 +280,8 @@ async def test_a_childs_empty_plan_turn_end_drives_the_parent_it_woke(
     delegated(lineage, with_worker_node=False)
     ctx = SimpleNamespace(child_id="worker", db=None)
 
-    effects = await cc_event_result._record_plan_completion(ctx)
-    repeated = await cc_event_result._record_plan_completion(ctx)
+    effects = await cc_event_result._record_plan_completion(ctx, turn_id="turn-1")
+    repeated = await cc_event_result._record_plan_completion(ctx, turn_id="turn-1")
     for effect in (effects, repeated):
         deliver_turn_end_invalidations(effect)
         await notifications.drive_threads(effect.drives)

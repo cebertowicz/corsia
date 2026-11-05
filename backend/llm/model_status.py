@@ -168,8 +168,7 @@ def _capabilities_for_row(
                 "values": levels,
                 "default": default if default in levels else levels[0],
                 # These harnesses own an "auto" mode that picks per turn, so the
-                # selector keeps offering it. Local models resolve to a concrete
-                # server-configured level instead.
+                # selector keeps offering it.
                 "supports_auto": True,
             }
         capabilities["context_window_max"] = context_window
@@ -179,9 +178,8 @@ def _capabilities_for_row(
         provider, row.get("provider_model_id", ""), row.get("litellm_model"),
     )
     # Cloud providers apply their own default when no effort is sent, so the
-    # selector keeps its "auto" option for them. Local models report the level
-    # they are configured to use, so the picker shows that instead of an unset
-    # state.
+    # selector keeps its "auto" option for them. Local shapes already carry
+    # supports_auto and show a configured server level or Auto when unset.
     if rc is not None and provider in ("openai", "anthropic"):
         rc = {**rc, "supports_auto": True}
     capabilities = {

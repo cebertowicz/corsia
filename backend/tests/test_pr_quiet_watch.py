@@ -37,14 +37,24 @@ class FakeGitHub:
 
     def __init__(self) -> None:
         self.bodies: dict[str, Any] = {}
+        self.failures: dict[str, str] = {}
         self.reads: list[str] = []
         self.auth_ok = True
         self.workflows(1)
 
+    def rules(self, contexts: list[str] | None, base: str = "main") -> None:
+        """The base branch's merge gate; None leaves the read a 404."""
+        path = f"repos/{REPO}/rules/branches/{base}"
+        if contexts is None:
+            self.bodies.pop(path, None)
+        else:
+            self.bodies[path] = [{"type": "required_status_checks", "parameters": {
+                "required_status_checks": [{"context": c} for c in contexts]}}]
+
     def pr(self, number: int, head: str = H, *, state: str = "open",
            draft: bool = False, mergeable: bool | None = True) -> None:
         self.bodies[f"repos/{REPO}/pulls/{number}"] = {
-            "state": state, "head": {"sha": head}, "draft": draft,
+            "state": state, "head": {"sha": head}, "base": {"ref": "main"}, "draft": draft,
             "mergeable": mergeable, "html_url": f"https://github.com/{REPO}/pull/{number}",
         }
 
@@ -60,10 +70,13 @@ class FakeGitHub:
     def workflows(self, count: int) -> None:
         self.bodies[f"repos/{REPO}/actions/workflows?per_page=1"] = {"total_count": count}
 
-    def reviewer(self, head: str, state: str) -> None:
-        self.bodies[f"repos/{REPO}/commits/{head}/status"] = {
-            "statuses": [{"context": "qa/llm-reviewer", "state": state}],
-        }
+    def reviewer(self, head: str, state: str, *, present: str | None = None) -> None:
+        """The head's reviewer statuses and a merge gate requiring the reviewer."""
+        self.rules(["qa/llm-reviewer-present"])
+        statuses = [{"context": "qa/llm-reviewer", "state": state}]
+        if present:
+            statuses.append({"context": "qa/llm-reviewer-present", "state": present})
+        self.bodies[f"repos/{REPO}/commits/{head}/status"] = {"statuses": statuses}
 
     def __call__(self, args: list[str], timeout: float = 30.0) -> subprocess.CompletedProcess:
         assert timeout > 0, "every gh call is bounded"
@@ -72,7 +85,7 @@ class FakeGitHub:
         path = args[-1]
         self.reads.append(path)
         body = self.bodies.get(path)
-        status = "200 OK" if body is not None else "404 Not Found"
+        status = self.failures.get(path) or ("200 OK" if body is not None else "404 Not Found")
         stdout = f"HTTP/2.0 {status}\nEtag: W/\"{len(self.reads)}\"\n\n{json.dumps(body or {})}"
         return subprocess.CompletedProcess(args, 0, stdout, "")
 
@@ -112,6 +125,7 @@ def _received(head: str, at: datetime = T0, repo: str = REPO, *, suite: int = 1)
 @pytest.fixture()
 def gh(isolated_db, monkeypatch):
     watch._etags.clear()
+    watch._review_required.clear()
     watch._status.update({"fired_count": 0})
     _received("0" * 40, T0 - timedelta(days=30), suite=0)  # the log has recorded suites for a month
     return FakeGitHub()
@@ -156,13 +170,6 @@ def _logged_without_suite_id(at: datetime) -> None:
             "status,created_at) VALUES (?,'check_suite','completed',?,'h','dispatched',?)",
             (f"legacy-{at.isoformat()}", f"legacy-{at.isoformat()}", _z(at)),
         )
-
-
-def _reviewer_runs_here() -> None:
-    from infra.database import write_transaction
-
-    with write_transaction(None, scope="test_seed_reviewer") as db:
-        db.execute("INSERT INTO reviewer_gate_state VALUES ('o/r#999', 'old')")
 
 
 def _owner(number: int, tag: str = "owner") -> str:
@@ -363,7 +370,6 @@ async def test_a_failed_wake_releases_its_claim_for_the_next_sweep(gh, wakes, pa
 @pytest.mark.asyncio
 async def test_review_missing_fires_after_45_minutes(gh, wakes, parked, monkeypatch):
     _webhook()
-    _reviewer_runs_here()
     _owner(4)
     gh.pr(4)
     gh.runs(H, run("success"))
@@ -373,10 +379,12 @@ async def test_review_missing_fires_after_45_minutes(gh, wakes, parked, monkeypa
     await _sweep(gh, T0 + timedelta(minutes=44), monkeypatch)
     assert wakes.await_count == 0
     await _sweep(gh, T0 + timedelta(minutes=46), monkeypatch)
+    status_reads = gh.reads.count(f"repos/o/r/commits/{H}/status")
     await _sweep(gh, T0 + timedelta(minutes=51), monkeypatch)
 
     assert _reasons(wakes) == [reasons.REVIEW_MISSING]
-    assert gh.reads.count(f"repos/o/r/commits/{H}/status") == 1, "a fired reason is not re-read"
+    assert gh.reads.count(f"repos/o/r/commits/{H}/status") == status_reads, (
+        "a fired reason is not re-read")
     summary = wakes.await_args.args[2]
     assert summary == (
         f"PR o/r#4: CI passed for head {H[:7]} 46 min ago, but the reviewer has not "
@@ -388,7 +396,6 @@ async def test_review_missing_fires_after_45_minutes(gh, wakes, parked, monkeypa
 @pytest.mark.asyncio
 async def test_review_missing_names_a_finished_reviewer_verdict(gh, wakes, parked, monkeypatch):
     _webhook()
-    _reviewer_runs_here()
     _owner(5)
     gh.pr(5)
     gh.runs(H, run("success"))
@@ -404,29 +411,108 @@ async def test_review_missing_names_a_finished_reviewer_verdict(gh, wakes, parke
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case", ["draft", "conflicting", "reviewed", "reviewer_never_ran"])
+@pytest.mark.parametrize(
+    "case", ["draft", "conflicting", "reviewed", "override_skipped", "not_required", "no_rules"],
+)
 async def test_review_missing_is_silent(gh, wakes, parked, monkeypatch, case):
-    from events.reviewer_gate_state import mark_reviewed
-
     _webhook()
-    if case != "reviewer_never_ran":
-        _reviewer_runs_here()
     _owner(6)
     gh.pr(6, draft=case == "draft", mergeable=False if case == "conflicting" else True)
     gh.runs(H, run("success"))
-    gh.reviewer(H, "pending")
+    present = {"reviewed": "success", "override_skipped": "failure"}.get(case)
+    gh.reviewer(H, "success" if case == "reviewed" else "pending", present=present)
+    if case == "not_required":
+        gh.rules(["Backend unit tests"])
+    elif case == "no_rules":
+        gh.rules(None)  # the rules read answers 404
     _received(H)
-    if case == "reviewed":
-        mark_reviewed("o/r#6", H)
 
     await _sweep(gh, T0 + timedelta(hours=3), monkeypatch)
     assert wakes.await_count == 0
+    assert parked == []
+
+
+@pytest.mark.asyncio
+async def test_an_override_skipped_head_settles(gh, wakes, parked, monkeypatch):
+    """``qa/override-reviewer`` posts ``-present`` failure and marks the head reviewed
+    (``reviewer_gate``): the reviewer is done with it, so the watch settles it.
+    """
+    _webhook()
+    _owner(17)
+    gh.pr(17)
+    gh.runs(H, run("success"))
+    gh.reviewer(H, "pending", present="failure")
+    _received(H)
+
+    await _sweep(gh, T0 + timedelta(minutes=46), monkeypatch)
+    gh.reads.clear()
+    await _sweep(gh, T0 + timedelta(hours=5), monkeypatch)
+    assert gh.reads == [f"repos/{REPO}/pulls/17"]
+    assert wakes.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_merge_gate_leaves_the_head_unsettled(gh, wakes, parked, monkeypatch):
+    """A failed rules read other than a 404 is not 'not required': the head stays
+    open, and the next sweep that reads the gate still wakes the owner.
+    """
+    _webhook()
+    _owner(18)
+    gh.pr(18)
+    gh.runs(H, run("success"))
+    gh.reviewer(H, "pending")
+    gh.failures[f"repos/{REPO}/rules/branches/main"] = "502 Bad Gateway"
+    _received(H)
+
+    await _sweep(gh, T0 + timedelta(minutes=46), monkeypatch)
+    assert wakes.await_count == 0
+    gh.failures.clear()
+    await _sweep(gh, T0 + timedelta(minutes=50), monkeypatch)
+    assert _reasons(wakes) == [reasons.REVIEW_MISSING]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("webhook", [True, False])
+async def test_review_missing_wakes_when_nothing_ever_posted_on_the_head(
+    gh, wakes, parked, monkeypatch, webhook,
+):
+    """E12: the gate requires the reviewer, the trigger was lost so no status was
+    ever posted, and CI finished 46 min ago. The clock needs no webhook.
+    """
+    _webhook(webhook)
+    _owner(14)
+    gh.rules(["qa/llm-reviewer-present"])
+    gh.bodies[f"repos/{REPO}/commits/{H}/status"] = {"statuses": []}
+    gh.pr(14)
+    gh.runs(H, run("success"))
+    if webhook:
+        _received(H)
+
+    await _sweep(gh, T0 + timedelta(minutes=44), monkeypatch)
+    assert wakes.await_count == 0
+    await _sweep(gh, T0 + timedelta(minutes=46), monkeypatch)
+
+    assert _reasons(wakes) == [reasons.REVIEW_MISSING]
+    assert wakes.await_args.args[3]["reviewer_state"] == "pending"  # nothing posted: not finished
+
+
+@pytest.mark.asyncio
+async def test_the_merge_gate_is_read_once_per_repo_and_base_per_sweep(gh, wakes, parked,
+                                                                       monkeypatch):
+    _webhook()
+    for number, head in ((15, H), (16, H2)):
+        _owner(number)
+        gh.pr(number, head)
+        gh.runs(head, run("success"))
+        _received(head)
+
+    await _sweep(gh, T0 + timedelta(minutes=10), monkeypatch)
+    assert gh.reads.count(f"repos/{REPO}/rules/branches/main") == 1
 
 
 @pytest.mark.asyncio
 async def test_review_missing_counts_from_ready_for_a_draft(gh, wakes, parked, monkeypatch):
     _webhook()
-    _reviewer_runs_here()
     _owner(13)
     gh.pr(13, draft=True)
     gh.runs(H, run("success"))
@@ -534,8 +620,8 @@ async def test_a_new_head_resets_the_reasons(gh, wakes, parked, monkeypatch):
 
 def test_due_reasons_leave_out_what_already_fired_for_the_head():
     view = reasons.PrView(REPO, 1, H, False, "MERGEABLE", "u")
-    facts = reasons.LocalFacts(webhook=True, ci_received_at=T0, log_answers_from=T0,
-                               reviewed_sha=None, reviewer_ran=True)
+    facts = reasons.HeadFacts(webhook=True, ci_received_at=T0, log_answers_from=T0,
+                               reviewer_statuses={"qa/llm-reviewer": "pending"})
     ci = reasons.CiState(True, T0, "cancelled", (("Backend", 7),), ((7, T0),), "a1")
     later = T0 + timedelta(hours=1)
     assert reasons.due_reasons(view, ci, facts, fired=[], first_seen=T0, now=later) == [
@@ -553,9 +639,8 @@ def test_due_reasons_leave_out_what_already_fired_for_the_head():
 
 
 @pytest.mark.asyncio
-async def test_no_webhook_turns_off_ci_event_and_review_reasons(gh, wakes, parked, monkeypatch):
+async def test_no_webhook_turns_off_the_ci_event_reason_only(gh, wakes, parked, monkeypatch):
     _webhook(False)
-    _reviewer_runs_here()
     _owner(10)
     gh.pr(10, H2)
     gh.runs(H2)
@@ -566,8 +651,8 @@ async def test_no_webhook_turns_off_ci_event_and_review_reasons(gh, wakes, parke
     gh.runs(H, run("success"))
     gh.reviewer(H, "pending")
     await _sweep(gh, T0 + timedelta(hours=5), monkeypatch)
-    assert _reasons(wakes) == [reasons.CI_NOT_STARTED]
-    assert wakes.await_args.args[3]["head_sha"] == H2
+    assert _reasons(wakes) == [reasons.REVIEW_MISSING, reasons.CI_NOT_STARTED]
+    assert [c.args[3]["head_sha"] for c in wakes.await_args_list] == [H, H2]
 
 
 # -- Test 8: ended and settled PRs cost one read and never wake --
@@ -590,15 +675,13 @@ async def test_ended_pr_reads_only_its_pull_and_drops_its_rows(gh, wakes, parked
 @pytest.mark.asyncio
 async def test_settled_head_stays_silent_for_days_on_pulls_reads_alone(gh, wakes, parked,
                                                                        monkeypatch):
-    from events.reviewer_gate_state import mark_reviewed
 
     _webhook()
-    _reviewer_runs_here()
     _owner(12)
     gh.pr(12)
     gh.runs(H, run("success"))
     _received(H)
-    mark_reviewed("o/r#12", H)
+    gh.reviewer(H, "success", present="success")
 
     await _sweep(gh, T0 + timedelta(minutes=20), monkeypatch)
     assert get_setting("pr_quiet:o/r#12")["settled"] == {"draft": False, "conflicting": False}
@@ -765,7 +848,6 @@ async def test_first_head_review_lost_in_an_outage_wakes_and_reports(gh, wakes, 
     """The CI event arrived, then CORSIA went down before the reviewer finished;
     the sweep first sees the PR days later."""
     _webhook()
-    _reviewer_runs_here()
     _owner(31)
     gh.pr(31)
     gh.runs(H, run("success"))
@@ -782,14 +864,12 @@ async def test_first_head_review_lost_in_an_outage_wakes_and_reports(gh, wakes, 
 async def test_ci_received_before_ownership_is_silent_and_settles(gh, wakes, parked, monkeypatch):
     """The PR #1536 shape: CI finished and its event reached CORSIA long before
     anyone owned the PR; owning it now is not a lost event."""
-    from events.reviewer_gate_state import mark_reviewed
 
     _webhook()
-    _reviewer_runs_here()
     gh.pr(32)
     gh.runs(H, run("success", at=T0 - timedelta(days=15)))
     _received(H, T0 - timedelta(days=15))
-    mark_reviewed("o/r#32", H)
+    gh.reviewer(H, "success", present="success")
     _owner(32)
 
     await _sweep(gh, T0, monkeypatch)
@@ -828,7 +908,6 @@ async def test_a_log_that_never_received_a_check_suite_still_judges(gh, wakes, p
     with write_transaction(None, scope="test_empty_log") as db:
         db.execute("DELETE FROM webhook_deliveries")
     _webhook()
-    _reviewer_runs_here()
     _owner(40)
     gh.pr(40)
     gh.runs(H, run("success"))
@@ -899,6 +978,14 @@ def test_a_cancelled_run_without_a_successor_is_not_a_pass():
     assert reasons.ci_state(body).conclusion == "failure", "a real failure outranks a cancel"
 
 
+def test_ci_conclusion_uses_shared_worst_first_ranking():
+    for first, second, expected in (("timed_out", "failure", "timed_out"),
+                                    ("startup_failure", "stale", "startup_failure")):
+        ci = reasons.ci_state({"workflow_runs": [run(first, id=1, workflow_id=1),
+                                                  run(second, id=2, workflow_id=2)]})
+        assert ci.conclusion == expected
+
+
 def test_a_cancelled_run_superseded_by_a_newer_run_drops_out():
     body = {"workflow_runs": [
         run("success", workflow_id=2, id=12),
@@ -916,7 +1003,6 @@ async def test_cancelled_ci_wakes_to_rerun_and_never_blames_the_reviewer(gh, wak
                                                                          monkeypatch):
     """#2383: a job cancelled at its timeout with every other workflow green."""
     _webhook()
-    _reviewer_runs_here()
     _owner(34)
     gh.pr(34)
     gh.runs(H, run("success"), run("cancelled", name="Backend unit tests", id=36095294877))
@@ -973,7 +1059,6 @@ async def test_a_lost_rerun_completion_is_lost_not_a_reviewer_fault(gh, wakes, p
     logged, the green rerun's was not. That is a lost CI event, never review_missing.
     """
     _webhook()
-    _reviewer_runs_here()
     _owner(37)
     gh.pr(37)
     gh.reviewer(H, "pending")
@@ -996,7 +1081,6 @@ async def test_a_failed_head_rerun_green_on_the_same_head_arms_the_reviewer(gh, 
                                                                            monkeypatch):
     """#2493 E2: a red head must not settle, or its green rerun is never read."""
     _webhook()
-    _reviewer_runs_here()
     _owner(43)
     gh.pr(43)
     gh.reviewer(H, "pending")
@@ -1022,7 +1106,6 @@ async def test_the_last_workflow_lost_is_lost_not_a_reviewer_fault(gh, wakes, pa
     the last workflow B's was lost. The reviewer clock never starts from A.
     """
     _webhook()
-    _reviewer_runs_here()
     _owner(38)
     gh.pr(38)
     gh.reviewer(H, "pending")
@@ -1035,20 +1118,19 @@ async def test_the_last_workflow_lost_is_lost_not_a_reviewer_fault(gh, wakes, pa
 
 
 @pytest.mark.asyncio
-async def test_the_review_clock_starts_at_the_last_ci_delivery(gh, wakes, parked, monkeypatch):
+async def test_the_review_clock_starts_when_the_last_ci_run_finished(gh, wakes, parked, monkeypatch):
     _webhook()
-    _reviewer_runs_here()
     _owner(39)
     gh.pr(39)
     gh.reviewer(H, "pending")
     gh.runs(H, run("success", id=1, at=T0 - timedelta(minutes=30)), run("success", id=2))
     _received(H, T0 - timedelta(minutes=30), suite=1)
-    _received(H, T0, suite=2)
+    _received(H, T0 + timedelta(minutes=3), suite=2)  # delivered after the run finished
 
     await _sweep(gh, T0 + timedelta(minutes=44), monkeypatch)
-    assert wakes.await_count == 0, "45 min from the last delivery, not the first"
+    assert wakes.await_count == 0, "45 min from the last run's finish, not the first run's"
     await _sweep(gh, T0 + timedelta(minutes=46), monkeypatch)
-    assert _reasons(wakes) == [reasons.REVIEW_MISSING]
+    assert _reasons(wakes) == [reasons.REVIEW_MISSING], "from the run's finish, not its delivery"
 
 
 def test_runs_of_one_workflow_from_two_triggers_both_count():
@@ -1067,7 +1149,6 @@ def test_runs_of_one_workflow_from_two_triggers_both_count():
 @pytest.mark.asyncio
 async def test_cancelled_then_rerun_green_reads_green(gh, wakes, parked, monkeypatch):
     _webhook()
-    _reviewer_runs_here()
     _owner(35)
     gh.pr(35)
     gh.runs(H, run("success"), run("cancelled", workflow_id=2, id=5),

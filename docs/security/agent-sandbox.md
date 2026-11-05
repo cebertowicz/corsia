@@ -60,7 +60,7 @@ Shell commands run under [Agent Safehouse](https://github.com/eugene1g/agent-saf
 
 ## Linux
 
-The same path inventory drives a [bubblewrap](https://github.com/containers/bubblewrap) sandbox (`backend/tools/linux_sandbox.py`, [`docs/linux-sandbox.md`](../linux-sandbox.md)). The command runs in its own user, PID, IPC and UTS namespaces. Your home folder is replaced by an empty in-memory folder with the workspace, package caches and allowed settings mounted into it; `~/.gitconfig` is read-only; shell startup and autostart files are hidden; each thread gets its own `/tmp`; the SSH agent socket is passed through; a fresh keyring is used. There is **no network namespace**: network access is the same as on macOS. Without bubblewrap the shell refuses to run.
+The same path inventory drives a [bubblewrap](https://github.com/containers/bubblewrap) sandbox (`backend/tools/linux_sandbox.py`, [`docs/linux-sandbox.md`](../linux-sandbox.md)). The command runs in its own user, PID, IPC and UTS namespaces. Your home folder is replaced by an empty in-memory folder with the workspace, package caches and allowed settings mounted into it; `~/.gitconfig` is read-only; shell startup and autostart files are hidden; each thread gets its own `/tmp`; the SSH agent socket is passed through; a fresh keyring is used. There is **no network namespace**: network access is the same as on macOS. Other projects' folders are hidden from the shell ([details](../linux-sandbox.md)). Without bubblewrap the shell refuses to run.
 
 The Linux behavior on this page is read from code and its tests, not run for this page.
 

@@ -190,10 +190,11 @@ async def _connect_app(action: str, app_id: str) -> dict[str, object]:
             await stack.aclose()
             _app_servers.pop(app_id, None)
             failure = getattr(error, "failure_class", "protocol_error")
+            own_state = failure in {"needs_sign_in", "token_rejected"}
             result = {
-                "state": "needs_sign_in" if failure == "needs_sign_in" else "failed",
+                "state": failure if own_state else "failed",
                 "state_since": utc_now_iso(), "tool_count": 0,
-                "failure_class": None if failure == "needs_sign_in" else failure,
+                "failure_class": None if own_state else failure,
             }
         else:
             names = {
@@ -246,6 +247,16 @@ async def start_connected_app_runtime() -> dict[str, dict[str, object]]:
 def connected_app_state(app_id: str) -> dict[str, object]:
     """Return bounded live state for the Connected Apps management route."""
     return _app_states.get(app_id, {"state": "disconnected", "state_since": None, "tool_count": 0, "failure_class": None})
+
+
+async def local_app_ids() -> list[str]:
+    """The running apps launched as local processes, each under its launch-time Safehouse profile.
+
+    Read under the runtime lock, so a connect already rendering its profile is counted once it
+    finishes, and any connect queued after this read renders from the current settings.
+    """
+    async with _lock:
+        return [app_id for app_id, (_name, config) in _app_configs.items() if config.get("command")]
 
 
 def register_mcp_tools(registry: ToolRegistry) -> None:

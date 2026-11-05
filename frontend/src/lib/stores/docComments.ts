@@ -4,7 +4,7 @@ import {
 } from '$lib/api/docs';
 import { trackPlacements } from './docCommentPlacement';
 import { fromServer, type CommentAuthor, type DocComment } from './docCommentProjection';
-import { withhold } from './docCommentHolds';
+import { heldIds, withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
 
 export { fromServer, hasNewReplies, regionFromServer } from './docCommentProjection';
@@ -86,6 +86,14 @@ function startLoad(artifactId: string): Promise<CommentFeedback> {
 	return load;
 }
 
+type ReloadListener = (artifactId: string, unseen: DocComment[]) => void;
+const reloadListeners = new Set<ReloadListener>();
+/** Told of every reload that succeeds, before it shows anything, with the rows it found that this canvas never showed. */
+export function onCommentsReloaded(listener: ReloadListener): () => void {
+	reloadListeners.add(listener);
+	return () => reloadListeners.delete(listener);
+}
+
 async function fetchAndShow(artifactId: string): Promise<CommentFeedback> {
 	// A refresh of comments already shown (a change frame from any canvas or
 	// agent) stays 'ready': only a first load, or a retry after an error, reads
@@ -95,7 +103,14 @@ async function fetchAndShow(artifactId: string): Promise<CommentFeedback> {
 	}
 	try {
 		const { comments, feedback } = await fetchComments(artifactId);
-		placements.show(artifactId, withhold(artifactId, comments.map(fromServer)));
+		const rows = comments.map(fromServer);
+		// What this canvas already showed stays through a failed load, so a retry after one still finds what is new.
+		const shown = get(docComments)[artifactId];
+		if (shown) {
+			const known = new Set([...shown.map((row) => row.id), ...heldIds(artifactId)]);
+			reloadListeners.forEach((listener) => listener(artifactId, rows.filter((row) => !known.has(row.id))));
+		}
+		placements.show(artifactId, withhold(artifactId, rows));
 		commentLoads.update((all) => ({ ...all, [artifactId]: { state: 'ready', owner: feedback.owner_label } }));
 		return feedback;
 	} catch (error) {

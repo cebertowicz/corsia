@@ -118,6 +118,7 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow, actor)
         workflow_version, workflow_steps = workflow
         created, resolved_words = intent_creation.prepare(
             db, plan_id, params, workflow_version=workflow_version, operation=operation, actor=actor,
+            run=bool(workflow_steps),
         )
         node = service.add_node(plan_id, **created, **common) if operation == "add" else mutations.insert_node(plan_id, **created, **common)
         user_step_instructions.link_requested(node.id, params, actor, db=db)
@@ -238,7 +239,7 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
     # settlement touches learns about it.
     acting = actor.thread_id if actor.kind == "thread" else None
     from plans import workflow_fields
-    workflow_fields.refuse_reviewer_self_close(db, node_id, operation)
+    workflow_fields.refuse_unready_close(db, node_id, operation)
     if operation == "mark_done":
         return _mark_done(params, actor, common, db)
     if operation == "request_review":

@@ -97,6 +97,12 @@ class ProjectRepoRegisterTool(Tool):
                 "Project settings to add a non-repository folder."
             )
 
+        from tools.project_fence import fence_for_thread
+
+        # A repo inside another project's fence would otherwise turn shared and open once registered here.
+        if refusal := (await run_in_db(lambda: fence_for_thread(thread_id))).refusal(target):
+            return f"Error: {refusal}"
+
         body = RepoAdd(mode="link", path=str(target), name=name)
         try:
             repo = await run_in_db(

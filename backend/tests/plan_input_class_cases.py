@@ -42,6 +42,7 @@ from tests.plan_writer_authorizer import raw_plan_seed
 
 def _workflow_fields_before_migration(db, scene):
     """A mid-ladder database cannot persist the v51 workflow columns yet."""
+    db.execute("DROP INDEX idx_plan_nodes_workflow_ref")
     db.execute("ALTER TABLE plan_nodes DROP COLUMN workflow_ref")
     db.commit()
     return partial(
@@ -61,6 +62,7 @@ def _negative_order_key(db, scene):
 
 def _size_before_migration(db, scene):
     """A pre-v51 plan-node table cannot persist a declared size yet."""
+    db.execute("DROP INDEX idx_plan_nodes_workflow_ref")
     for column in ("size", "workflow_ref", "workflow_version", "workflow_step", "difficulty"):
         db.execute(f"ALTER TABLE plan_nodes DROP COLUMN {column}")
     db.commit()
@@ -534,13 +536,6 @@ def _missing_task_size_and_intent(db, scene):
     }, _mid())
 
 
-def _missing_authority_quote(db, scene):
-    return partial(_mutate, db, scene.plan_id, "add", {
-        "title": "Intent", "acceptance_criteria": "Recorded", "size": "unknown",
-        "intent": "Keep the request aligned",
-    }, _mid())
-
-
 def _person_step(extra: dict):
     return _operation("add", {
         "kind": "task", "title": "Do setup", "acceptance_criteria": "Ready",
@@ -613,7 +608,6 @@ _CASES = {
     ("intent_words.py", "QUOTE_NOT_FOUND"): _missing_intent_word,
     ("intent_words.py", '"person quotes must be recorded from the agent\'s own thread"'): _person_quote_without_thread,
     # --- plans/boundary_dispatch.py ---
-    ("intent_creation.py", '"task creation needs intent_words with an exact person quote and role: authority"'): _missing_authority_quote,
     # --- plans/boundary_fields.py ---
     ("boundary_fields.py", '"task creation requires size and intent"'): _missing_task_size_and_intent,
     ("boundary_fields.py", '"task creation requires intent"'): _missing_task_intent,

@@ -2,9 +2,9 @@
 
 Route and ``corsia`` subcommand citations are extracted from the repository
 README. Path citations are additionally checked in ``ARCHITECTURE.md``,
-``BACKEND.md``, ``FRONTEND.md``, and ``SECURITY.md`` -- the deliverable's
-minimum bar for those four ("paths and commands they cite must still
-resolve") without inventing route/subcommand extraction for them.
+``BACKEND.md``, ``FRONTEND.md``, ``SECURITY.md``, and every Markdown page
+under ``docs/``, without inventing route/subcommand extraction for them.
+Relative Markdown links in ``docs/`` are also checked.
 ``CHANGELOG.md`` is deliberately excluded from all of this (see the comment
 by ``PATH_CHECK_DOCS`` below): it is an append-only historical record whose
 past entries cite paths that have since moved or been removed by design.
@@ -29,6 +29,7 @@ from pathlib import Path
 from . import citation_extract as extract
 from . import citation_verify as verify
 from .discovery import top_level_names
+from .markdown_links import check_links, docs_pages
 
 PRIMARY_DOCS = (Path("README.md"),)
 # CHANGELOG.md is deliberately excluded here even though the deliverable
@@ -51,6 +52,7 @@ PATH_CHECK_DOCS = PRIMARY_DOCS + (
 @dataclass
 class CitationResult:
     missing_paths: list[str] = field(default_factory=list)
+    missing_links: list[str] = field(default_factory=list)
     missing_routes: list[str] = field(default_factory=list)
     missing_subcommands: list[str] = field(default_factory=list)
     python_version_mismatches: list[str] = field(default_factory=list)
@@ -62,6 +64,7 @@ class CitationResult:
     def ok(self) -> bool:
         return not (
             self.missing_paths
+            or self.missing_links
             or self.missing_routes
             or self.missing_subcommands
             or self.python_version_mismatches
@@ -73,6 +76,7 @@ def check_citations(repo_root: Path) -> CitationResult:
     result = CitationResult()
     top_level = top_level_names(repo_root)
     _check_paths(repo_root, top_level, result)
+    result.missing_links = check_links(repo_root)
     _check_routes_and_subcommands(repo_root, result)
     cited_version = _cited_python_version(repo_root)
     if cited_version is not None:
@@ -95,14 +99,19 @@ def _cited_python_version(repo_root: Path) -> str | None:
 
 
 def _check_paths(repo_root: Path, top_level: set[str], result: CitationResult) -> None:
-    candidates: set[str] = set()
-    for doc in PATH_CHECK_DOCS:
+    by_doc = {}
+    for doc in (*PATH_CHECK_DOCS, *docs_pages(repo_root)):
         full = repo_root / doc
         if full.exists():
-            text = full.read_text(encoding="utf-8")
-            candidates |= extract.extract_path_candidates(text, top_level)
+            by_doc[full.relative_to(repo_root)] = extract.extract_path_candidates(
+                full.read_text(encoding="utf-8"), top_level
+            )
+    candidates = set().union(*by_doc.values())
     result.checked_paths = len(candidates)
-    result.missing_paths = verify.missing_paths(candidates, repo_root, fallback_dir="backend")
+    missing = set(verify.missing_paths(candidates, repo_root, fallback_dir="backend"))
+    result.missing_paths = [
+        f"{doc}: {path}" for doc, paths in by_doc.items() for path in sorted(paths & missing)
+    ]
 
 
 def _check_routes_and_subcommands(repo_root: Path, result: CitationResult) -> None:

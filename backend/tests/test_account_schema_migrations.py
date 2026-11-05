@@ -774,6 +774,24 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 167 -> 168 changes shape only (measure keys), so apply it before comparing with the current schema.
         from infra.migration_167_to_168_measure_keys import migrate_167_to_168
         migrate_167_to_168(db)
+        # 168 -> 169 only adds a nullable column (checkpoints.adopted_input_tokens).
+        from infra.migration_168_to_169_checkpoint_adopted_tokens import migrate_168_to_169
+        migrate_168_to_169(db)
+        # 170 -> 171 rebuilds event_rules with a nullable worker_profile column; 169 -> 170 is data only.
+        from infra.migration_170_to_171_worker_profile import migrate_170_to_171
+        # 171 -> 172 only widens action_drafts.kind to admit texts.
+        from infra.migration_171_to_172_message_drafts import migrate_171_to_172
+        migrate_170_to_171(db)
+        migrate_171_to_172(db)
+        # 172 -> 173 adds a partial index on plan_nodes.workflow_ref.
+        from infra.migration_172_to_173_workflow_ref_index import migrate_172_to_173
+        migrate_172_to_173(db)
+        # 173 -> 174 only adds the held-reply table.
+        from infra.migration_173_to_174_held_replies import migrate_173_to_174
+        migrate_173_to_174(db)
+        # 174 -> 175 only adds the reviewer gate's pending-run table.
+        from infra.migration_174_to_175_reviewer_gate_pending import migrate_174_to_175
+        migrate_174_to_175(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
@@ -907,7 +925,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 168
+    assert SCHEMA_VERSION == 175
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83

@@ -34,7 +34,7 @@ from subagents.codex_runtime_errors import (
 )
 from subagents.codex_runtime_support import require_owned_accept_db
 from subagents.codex_runtime_events import record_terminal_marker
-from subagents.codex_shutdown_error import record_backend_shutdown_marker as _record_backend_shutdown_marker
+from subagents.codex_shutdown_error import record_and_broadcast_shutdown_marker
 from subagents.codex_retirement import retire_if_current
 from subagents.codex_runtime_event_delivery import (
     arm_delivery_event_barrier as _arm_delivery_event_barrier,
@@ -743,7 +743,7 @@ async def _finish_failed_app_server_spawn(
     _discard_delivery_event_barrier(live)
     terminal = None
     if terminalize:
-        detail = _UNVERIFIED_INPUT_DELIVERY_DETAIL if live.input_delivery_unproven else str(exc)
+        detail = _UNVERIFIED_INPUT_DELIVERY_DETAIL if live.input_delivery_unproven else turn_core.terminal_error_detail(exc)
         try:
             terminal = await _end_owned_turn(
                 thread_id, live, live.corsia_turn, outcome,
@@ -777,7 +777,7 @@ async def _accept_spec_app_server_input(
 async def _run_app_server_turn(spec: _AppServerTurnSpec) -> TurnIdentity | None:
     require_owned_accept_db(spec.db)
     bcast = spec.broadcast or _default_broadcast
-    session = _reusable_app_session(spec.thread_id)
+    session = await _reusable_app_session(spec.thread_id)
     tool_registry, dynamic_tools = _resolve_app_server_tools(
         session, working_dir=spec.working_dir, tool_registry=spec.tool_registry,
         dynamic_tools=spec.dynamic_tools,
@@ -2235,7 +2235,7 @@ async def _shutdown_live_owner(
     if not cleaned:
         raise RuntimeError(f"Codex exact live survived shutdown: {thread_id}")
     if terminal is TurnTerminalResult.APPLIED:
-        await run_in_db(_record_backend_shutdown_marker, thread_id, turn_id)
+        await record_and_broadcast_shutdown_marker(thread_id, turn_id)
 
 
 async def _shutdown_idle_app_owner(thread_id: str) -> None:

@@ -6,6 +6,9 @@ import { token } from '$lib/stores/auth';
 import { signInStateLine } from '$lib/appSignIn';
 import type { ConnectedApp } from '$lib/api/connectedApps';
 
+const openUrl = vi.hoisted(() => vi.fn(async (_href: string) => undefined));
+vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl }));
+
 const reach = { mode: 'all' as const, project_ids: [], outside_projects: true };
 const linear = (patch: Partial<ConnectedApp> = {}): ConnectedApp => ({
 	id: 'linear', name: 'Linear', state: 'needs_sign_in', revision: 1, reach, sign_in: { status: 'idle', signed_in: false }, ...patch,
@@ -23,6 +26,8 @@ afterEach(() => {
 	if (component) unmount(component);
 	component = null;
 	host.remove();
+	delete document.documentElement.dataset.shell;
+	openUrl.mockReset();
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
 	token.set(null);
@@ -75,13 +80,40 @@ describe('AppSignInPanel', () => {
 		const writeText = vi.fn(async () => {});
 		vi.stubGlobal('navigator', { clipboard: { writeText } });
 		const view = $state({ app: linear() });
-		component = mount(AppSignInPanel, { target: host, props: { get app() { return view.app; }, signInHere: true, onChange: (patch: Partial<ConnectedApp>) => { view.app = { ...view.app, ...patch }; }, onRefresh: vi.fn(), onSignedOut: vi.fn() } });
+		component = mount(AppSignInPanel, { target: host, props: { get app() { return view.app; }, signInHere: true, confirmOut: false, onConfirmOut: vi.fn(), onChange: (patch: Partial<ConnectedApp>) => { view.app = { ...view.app, ...patch }; }, onRefresh: vi.fn(), onSignedOut: vi.fn() } });
 		button('Sign in')!.click();
 		await vi.waitFor(() => expect(host.textContent).toContain("Your browser didn't open."));
 		expect(host.textContent).not.toContain(LINK);
 		button('Copy sign-in link')!.click();
 		await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith(LINK));
 		await vi.waitFor(() => expect(button('Copied')).toBeTruthy());
+	});
+
+	it('hands the link to the default browser in the desktop app, which has no tabs', async () => {
+		document.documentElement.dataset.shell = 'tauri';
+		const open = vi.fn(() => null);
+		vi.stubGlobal('open', open);
+		vi.stubGlobal('fetch', vi.fn(async () => reply({ authorization_url: LINK, expires_at: 't', reopened: false })));
+		const view = $state({ app: linear() });
+		component = mount(AppSignInPanel, { target: host, props: { get app() { return view.app; }, signInHere: true, confirmOut: false, onConfirmOut: vi.fn(), onChange: (patch: Partial<ConnectedApp>) => { view.app = { ...view.app, ...patch }; }, onRefresh: vi.fn(), onSignedOut: vi.fn() } });
+		button('Sign in')!.click();
+		await vi.waitFor(() => expect(openUrl).toHaveBeenCalledWith(LINK));
+		await vi.waitFor(() => expect(button('Open the page again')).toBeTruthy());
+		expect(open).not.toHaveBeenCalled();
+		expect(host.textContent).not.toContain("Your browser didn't open.");
+		button('Open the page again')!.click();
+		await vi.waitFor(() => expect(openUrl).toHaveBeenCalledTimes(2));
+	});
+
+	it('offers the link to copy when the desktop app cannot reach the default browser', async () => {
+		document.documentElement.dataset.shell = 'tauri';
+		openUrl.mockRejectedValue(new Error('no handler'));
+		vi.stubGlobal('fetch', vi.fn(async () => reply({ authorization_url: LINK, expires_at: 't', reopened: false })));
+		const view = $state({ app: linear() });
+		component = mount(AppSignInPanel, { target: host, props: { get app() { return view.app; }, signInHere: true, confirmOut: false, onConfirmOut: vi.fn(), onChange: (patch: Partial<ConnectedApp>) => { view.app = { ...view.app, ...patch }; }, onRefresh: vi.fn(), onSignedOut: vi.fn() } });
+		button('Sign in')!.click();
+		await vi.waitFor(() => expect(host.textContent).toContain("Your browser didn't open."));
+		expect(button('Copy sign-in link')).toBeTruthy();
 	});
 
 	it('shows the waiting words with Open the page again and Cancel, and cancel calls the route', async () => {

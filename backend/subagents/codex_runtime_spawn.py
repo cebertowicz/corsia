@@ -20,7 +20,7 @@ from subagents.codex_runtime_state import (
     _LiveCodex,
 )
 from subagents.codex_compaction_retire import retire_compacting_handle
-from subagents.codex_runtime_support import codex_request_source_artifacts
+from subagents.codex_runtime_support import codex_request_source_artifacts, retire_stale_login_session
 
 log = logging.getLogger(__name__)
 InputTerminalSettlement = Callable[[str, str | BaseException | None], Awaitable[None]]
@@ -83,7 +83,9 @@ def checkpoint_replay_id(prepared_context) -> str | None:
     return getattr(getattr(prepared_context, "replay", None), "checkpoint_generation_id", None)
 
 
-def reusable_app_session(thread_id: str):
+async def reusable_app_session(thread_id: str):
+    """The stored app-server a Turn may reuse: not one that exited, nor one admitted on a login that is no longer current."""
+    await retire_stale_login_session(thread_id)
     session = _APP_SESSIONS.get(thread_id)
     if session is not None and getattr(session, "returncode", None) is not None:
         _APP_SESSIONS.pop(thread_id, None)

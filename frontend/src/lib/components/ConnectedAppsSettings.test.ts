@@ -8,6 +8,9 @@ import { projects } from '$lib/stores/projects';
 import { get } from 'svelte/store';
 import { requestConnectedApp, resetSettingsNavigation, settingsNavigation } from '$lib/stores/settingsNavigation';
 
+const openUrl = vi.hoisted(() => vi.fn(async (_href: string) => undefined));
+vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl }));
+
 const awaiting = { id: 'github', name: 'GitHub', state: 'awaiting_approval', revision: 1, reach: { mode: 'all', project_ids: [], outside_projects: false } };
 const googleAccount = { id: 'google-work', provider: 'google' as const, provider_display_name: 'Google', address: 'sam.work@example.com', capabilities: ['mail', 'calendar', 'files'] as ('mail' | 'calendar' | 'files')[], state: 'connected' as const, tenant_id: null, reach: { mode: 'corsia' as const, project_ids: [], outside_projects: false } };
 let host: HTMLElement;
@@ -25,6 +28,8 @@ afterEach(() => {
 	if (component) unmount(component);
 	component = null;
 	host.remove();
+	delete document.documentElement.dataset.shell;
+	openUrl.mockReset();
 	vi.restoreAllMocks();
 	vi.unstubAllGlobals();
 	token.set(null);
@@ -362,6 +367,91 @@ describe('ConnectedAppsSettings', () => {
 		flushSync();
 		const signIn = [...host.querySelector('[data-connected-account-id="google-work"]')!.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Sign in');
 		expect(signIn?.className).toContain('primary');
+	});
+
+	it('shows Messages as off and separates the Full Disk Access explanation when macOS blocks reading', async () => {
+		const step = 'macOS hasn’t given CORSIA Full Disk Access, so it can’t read Messages.\nFull Disk Access lets CORSIA, and commands agents run here after review, read any protected file on this computer, such as Mail and Photos.\nTo turn it on: System Settings › Privacy & Security › Full Disk Access, switch on CORSIA, reopen CORSIA, then press Enable. To undo it, switch CORSIA off there.';
+		const messages = { ...googleAccount, id: 'messages-row', provider: 'messages' as const, provider_display_name: 'Messages', address: 'This computer', capabilities: ['messages' as const], state: 'needs_sign_in' as const };
+		vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).includes('/api/messages/connect')
+			? { ok: false, status: 409, headers: new Headers(), json: async () => ({ detail: step }), text: async () => JSON.stringify({ detail: step }), clone() { return this; } }
+			: { ok: true, json: async () => ({ servers: [], accounts: [messages] }) }));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="messages-row"]')).not.toBeNull());
+		expect(host.textContent).toContain('Off ·');
+		// An address with no "@" closes as itself, with no stray domain mark.
+		expect(host.querySelector('[data-connected-account-id="messages-row"] .account-closed-name')?.textContent).toBe('Messages —This computer');
+		(host.querySelector('[data-connected-account-id="messages-row"] button') as HTMLButtonElement).click();
+		flushSync();
+		const signIn = [...host.querySelectorAll<HTMLButtonElement>('[data-connected-account-id="messages-row"] button')].find((button) => button.textContent?.trim() === 'Enable')!;
+		expect(signIn.className).toContain('primary');
+		signIn.click();
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="messages-row"] .error')?.textContent).toBe(step.split('\n')[0]));
+		for (const line of step.split('\n').slice(1)) expect(host.textContent).toContain(line);
+		expect(host.textContent).toContain('Off ·');
+	});
+
+	it('turns a signed-out Messages row back on in place when Enable answers with no link', async () => {
+		const messages = { ...googleAccount, id: 'messages-row', provider: 'messages' as const, provider_display_name: 'Messages', address: 'This computer', capabilities: ['messages' as const], state: 'signed_out' as const };
+		let on = false;
+		const open = vi.spyOn(window, 'open');
+		const fetch = vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).endsWith('/api/messages/connect') ? { url: '', account_id: 'messages-row' } : { servers: [], accounts: [{ ...messages, state: on ? 'connected' : 'signed_out' }], sign_in_here: true } }));
+		vi.stubGlobal('fetch', fetch);
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="messages-row"]')).not.toBeNull());
+		(host.querySelector('[data-connected-account-id="messages-row"] button') as HTMLButtonElement).click();
+		flushSync();
+		expect(host.textContent).toContain('Texts');
+		const signIn = [...host.querySelectorAll<HTMLButtonElement>('[data-connected-account-id="messages-row"] button')].find((button) => button.textContent?.trim() === 'Enable')!;
+		on = true;
+		signIn.click();
+		await vi.waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/messages/connect'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ account_id: 'messages-row' }) })));
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="messages-row"]')?.textContent).toContain('Turn off'));
+		expect(open).not.toHaveBeenCalledWith('', '_blank');
+	});
+
+	it('uses Messages wording in turn-off and remove confirmations', async () => {
+		const messages = { ...googleAccount, id: 'messages-row', provider: 'messages' as const, provider_display_name: 'Messages', address: 'This computer', capabilities: ['messages' as const], state: 'connected' as const };
+		vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ servers: [], accounts: [messages] }) })));
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="messages-row"]')).not.toBeNull());
+		expect(host.textContent).toContain('On ·');
+		(host.querySelector('[data-connected-account-id="messages-row"] button') as HTMLButtonElement).click();
+		flushSync();
+		[...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Turn off')!.click();
+		flushSync();
+		expect(document.body.textContent).toContain('Turn off Messages on this computer?');
+		expect(document.body.textContent).toContain('You can enable it again any time.');
+		[...document.body.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Cancel')!.click();
+		flushSync();
+		[...host.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Remove')!.click();
+		flushSync();
+		expect(document.body.textContent).toContain('Nothing in Messages on this computer is deleted.');
+	});
+
+	async function signInFromDesktop() {
+		document.documentElement.dataset.shell = 'tauri';
+		const signedOut = { ...googleAccount, state: 'signed_out' as const };
+		const open = vi.spyOn(window, 'open');
+		const fetch = vi.fn(async (input: RequestInfo | URL) => ({ ok: true, json: async () => String(input).includes('/api/google/connect') ? { url: 'https://accounts.example/auth', account_id: 'google-work' } : { servers: [], accounts: [signedOut], sign_in_here: true } }));
+		vi.stubGlobal('fetch', fetch);
+		component = mount(ConnectedAppsSettings, { target: host });
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="google-work"]')).not.toBeNull());
+		(host.querySelector('[data-connected-account-id="google-work"] button') as HTMLButtonElement).click();
+		flushSync();
+		[...host.querySelectorAll<HTMLButtonElement>('[data-connected-account-id="google-work"] button')].find((button) => button.textContent?.trim() === 'Sign in')!.click();
+		await vi.waitFor(() => expect(openUrl).toHaveBeenCalledWith('https://accounts.example/auth'));
+		return open;
+	}
+
+	it('opens an account sign-in in the default browser from the desktop app', async () => {
+		const open = await signInFromDesktop();
+		expect(open).not.toHaveBeenCalled();
+	});
+
+	it('says so when the desktop app cannot open the browser, instead of loading the sign-in in the app', async () => {
+		openUrl.mockRejectedValueOnce(new Error('no opener'));
+		await signInFromDesktop();
+		await vi.waitFor(() => expect(host.querySelector('[data-connected-account-id="google-work"]')?.textContent).toContain("Couldn't open your browser. Try again."));
 	});
 
 	it('renders Microsoft admin approval, cancellation, refresh and provider failure with the correct next actions', async () => {
@@ -744,6 +834,14 @@ describe('WhereItWorks', () => {
 		await vi.waitFor(() => expect(onSaved).toHaveBeenCalled());
 		const call = fetch.mock.calls.find(([input]) => String(input).includes('/reach'));
 		expect(JSON.parse(String(call?.[1]?.body)).reach).toEqual({ mode: 'all', project_ids: [], outside_projects: false });
+	});
+
+	it('names a non-Google account by its own provider', async () => {
+		const messages = { ...googleAccount, id: 'messages-row', provider: 'messages' as const, provider_display_name: 'Messages', address: 'This computer', capabilities: ['messages' as const], kind: 'account' as const };
+		component = mount(WhereItWorks, { target: host, props: { app: messages, onClose: vi.fn(), onSaved: vi.fn() } });
+		await settle();
+		expect(document.body.textContent).toContain('Where Messages — This computer works');
+		expect(document.body.textContent).not.toContain('Google');
 	});
 
 	it('saves an account reach through its account endpoint without an app revision', async () => {

@@ -21,6 +21,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from core.carry_in_target import canonical_target, owner_tray
+from core.lesson_delivery import OMIT_MISSING_SECTION, TrialDelivery, delivery_for_trial, target_omission
+from core.workflow_step_binding import declared_binding
+
 PENDING = "lesson.carry_in.pending"
 SAVED = "lesson.carry_in.saved"
 SAVED_PROCESSED = "lesson.carry_in.saved_processed"
@@ -34,8 +38,8 @@ TERMINAL_EVENTS = (RESULT, RETIRED, COVERAGE)
 #: Why a pending case left the work list without a scored result; its file owner acts.
 RETIRE_REASONS = (
     "lesson_unreadable", "lesson_retired", "version_changed", "case_changed",
-    "target_moved", "owner_missing", "manifest_mismatch", "not_mechanically_executable",
-    "target_unavailable",
+    "target_moved", "owner_missing", "delivery_mismatch", "not_mechanically_executable",
+    "target_unavailable", "same_input", "decisive_unparameterized", OMIT_MISSING_SECTION,
 )
 #: Why a claimed case ended without enough completed samples: the eval route's own
 #: failure kinds (``eval.endpoint.EVAL_FAILURES``), a restart, lost capacity, or
@@ -61,6 +65,9 @@ class CarryInFact:
     lesson_path: str
     target_path: str
     target_commit: str
+    #: What both sides would receive (``TrialDelivery.sha256``); not part of the identity.
+    #: A fact written before it existed has none and never matches :func:`has_case`.
+    delivery_sha256: str = ""
 
     @property
     def identity(self) -> str:
@@ -83,6 +90,7 @@ class CarryInFact:
             "behavioral_sha256": self.behavioral_sha256, "case_sha256": self.case_sha256,
             "owner_thread_id": self.owner_thread_id, "lesson_path": self.lesson_path,
             "target_path": self.target_path, "target_commit": self.target_commit,
+            "delivery_sha256": self.delivery_sha256,
         }
 
     @classmethod
@@ -91,7 +99,7 @@ class CarryInFact:
             fact = cls(**{key: str(attrs[key]) for key in (
                 "lesson_id", "behavioral_sha256", "case_sha256", "owner_thread_id",
                 "lesson_path", "target_path", "target_commit",
-            )})
+            )}, delivery_sha256=str(attrs.get("delivery_sha256") or ""))
         except (KeyError, TypeError):
             return None
         return fact if fact.identity == attrs.get("identity") else None
@@ -122,26 +130,12 @@ class SavedCommit:
 
 @dataclass(frozen=True)
 class EligibleCase:
-    """A pending fact's case as its lesson file holds it now."""
+    """A pending fact's case as its lesson file holds it now; ``deliver`` only for a ``trial`` lesson."""
 
     case: dict[str, Any]
     actions: dict[str, Any] | None
-
-
-def commit_parent(workspace: Path, sha: str) -> str | None:
-    """The first parent of one recorded guidance commit; None for a root commit."""
-    from infra.guidance_history_paths import history_git
-
-    out = history_git(workspace, "rev-parse", "--verify", "-q", f"{sha}^", ok=(0, 1))
-    return out.decode().strip() or None
-
-
-def committed_bytes(workspace: Path, commit: str, rel: str) -> bytes | None:
-    """One workspace-relative path's exact bytes at a recorded commit; None when it has none."""
-    from infra.guidance_history_paths import history_git
-
-    oid = history_git(workspace, "rev-parse", "--verify", "-q", f"{commit}:{rel}", ok=(0, 1))
-    return history_git(workspace, "cat-file", "blob", oid.decode().strip()) if oid.strip() else None
+    delivery: TrialDelivery
+    deliver: bool
 
 
 def case_sha256(case: dict[str, Any]) -> str:
@@ -150,57 +144,24 @@ def case_sha256(case: dict[str, Any]) -> str:
 
 
 def _read_lesson(path: Path):
+    """The parsed lesson and the exact bytes it was parsed from, or None."""
     from core.lesson_files import read_trial
 
     try:
-        return read_trial(path.read_text(encoding="utf-8"))
+        data = path.read_bytes()
+        trial = read_trial(data.decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError):
         return None
-
-
-def owner_tray(db: sqlite3.Connection, owner: str, trays: dict[str, Path | None] | None = None) -> Path | None:
-    """The owner's tray; ``trays`` memoizes it across one scan's lessons."""
-    from core.placement_answer import thread_place
-
-    if trays is not None and owner in trays:
-        return trays[owner]
-    tray = None
-    if owner and db.execute("SELECT 1 FROM threads WHERE id=?", (owner,)).fetchone() is not None:
-        tray = thread_place(db, owner).tray
-    if trays is not None:
-        trays[owner] = tray
-    return tray
-
-
-def canonical_target(tray: Path, workspace: Path, target: str, resolved_workspace: Path | None = None) -> str | None:
-    """A case target as a workspace-relative path, the way placement receipts resolve one.
-
-    The owner's scope root wins over the workspace root; a target outside the
-    workspace has no canonical form. ``resolved_workspace`` spares a scan one
-    resolve per lesson.
-    """
-    given = Path(target).expanduser()
-    roots = [tray.parent.parent, workspace]
-    candidates = [given] if given.is_absolute() else [root / given for root in roots]
-    resolved_workspace = resolved_workspace or workspace.resolve()
-    fallback = None
-    for candidate in candidates:
-        resolved = candidate.resolve()
-        if not resolved.is_relative_to(resolved_workspace):
-            continue
-        rel = resolved.relative_to(resolved_workspace).as_posix()
-        if resolved.is_file():
-            return rel
-        fallback = fallback or rel
-    return fallback
+    return None if trial is None else (trial, data)
 
 
 def _lesson_case(db, workspace: Path, lesson_path: str, trays: dict[str, Path | None] | None = None):
-    """``(trial, target rel, case)`` or a retirement reason."""
+    """``(trial, target rel, case, delivery)`` or a retirement reason; no target means the lesson file."""
     path = workspace / lesson_path
-    trial = _read_lesson(path)
-    if trial is None:
+    read = _read_lesson(path)
+    if read is None:
         return "lesson_unreadable"
+    trial, data = read
     if trial.lesson.state not in _ACTIVE_STATES:
         return "lesson_retired"
     tray = owner_tray(db, trial.lesson.owner, trays)
@@ -209,15 +170,18 @@ def _lesson_case(db, workspace: Path, lesson_path: str, trays: dict[str, Path | 
     case = trial.lesson.case_metadata.get("case")
     target = next((trial.lesson.case_metadata[key] for key in _TARGET_KEYS
                    if trial.lesson.case_metadata.get(key)), None)
-    if not isinstance(case, dict) or not target:
+    if not isinstance(case, dict):
         return "case_changed"
+    delivery = delivery_for_trial(trial, path, data, declared_binding(trial, {})[0])
+    if not target:
+        return trial, lesson_path, case, delivery
     try:
         rel = canonical_target(tray, workspace, str(target))
     except (OSError, RuntimeError, ValueError):
         return "target_moved"
     if rel is None:
         return "target_moved"
-    return trial, rel, case
+    return trial, rel, case, delivery
 
 
 def eligible_case(db: sqlite3.Connection, workspace: Path, fact: CarryInFact) -> EligibleCase | str:
@@ -225,7 +189,7 @@ def eligible_case(db: sqlite3.Connection, workspace: Path, fact: CarryInFact) ->
     found = _lesson_case(db, workspace, fact.lesson_path)
     if isinstance(found, str):
         return found
-    trial, rel, case = found
+    trial, rel, case, delivery = found
     if trial.lesson.id != fact.lesson_id or trial.lesson.owner != fact.owner_thread_id:
         return "lesson_unreadable"
     if trial.behavioral_sha256 != fact.behavioral_sha256:
@@ -234,29 +198,47 @@ def eligible_case(db: sqlite3.Connection, workspace: Path, fact: CarryInFact) ->
         return "case_changed"
     if rel != fact.target_path:
         return "target_moved"
-    return EligibleCase(case=case, actions=case.get("actions"))
+    deliver = trial.lesson.state == "trial"
+    if deliver and (reason := target_omission(delivery)):  # task start would never deliver it
+        return reason
+    return EligibleCase(case=case, actions=case.get("actions"), delivery=delivery, deliver=deliver)
 
 
 def committed_cases(db: sqlite3.Connection, workspace: Path, saved: SavedCommit) -> list[CarryInFact]:
-    """Current eligible cases whose canonical target is one saved target.
+    """Current eligible cases whose target, or whose own lesson file, is the saved target.
 
-    This is deliberately the one parser path: ``_lesson_case`` uses
-    ``lesson_files.read_trial``. Bad lesson files and unresolvable targets are
-    non-matches, never a failure of this saved work item.
+    The one parser path (``_lesson_case``, ``lesson_files.read_trial``): bad lesson
+    files and unresolvable targets are non-matches, never a failure of this item.
     """
     facts = []
     for path in workspace.glob(".threads/*/skills/*/SKILL.md"):
         lesson_path = path.relative_to(workspace).as_posix()
         found = _lesson_case(db, workspace, lesson_path)
-        if isinstance(found, str) or found[1] != saved.target_path:
+        if isinstance(found, str) or saved.target_path not in (found[1], lesson_path):
             continue
-        trial, rel, case = found
-        facts.append(CarryInFact(
+        trial, rel, case, delivery = found
+        fact = CarryInFact(
             lesson_id=trial.lesson.id, behavioral_sha256=trial.behavioral_sha256,
             case_sha256=case_sha256(case), owner_thread_id=trial.lesson.owner,
             lesson_path=lesson_path, target_path=rel, target_commit=saved.commit,
-        ))
+            delivery_sha256=delivery.sha256(trial.lesson.state == "trial", rel),
+        )
+        if saved.target_path == lesson_path and has_case(db, fact):
+            continue  # the lesson file alone changed nothing either side would receive
+        facts.append(fact)
     return facts
+
+
+def has_case(db: sqlite3.Connection, fact: CarryInFact) -> bool:
+    """Whether a pending fact for this lesson version, case and delivery exists, at any target commit."""
+    return db.execute(
+        """SELECT 1 FROM outcome_events WHERE event_name=? AND retracted_at IS NULL
+             AND json_extract(attributes, '$.lesson_id')=?
+             AND json_extract(attributes, '$.behavioral_sha256')=?
+             AND json_extract(attributes, '$.case_sha256')=?
+             AND json_extract(attributes, '$.delivery_sha256')=? LIMIT 1""",
+        (PENDING, fact.lesson_id, fact.behavioral_sha256, fact.case_sha256, fact.delivery_sha256),
+    ).fetchone() is not None
 
 
 def record_committed_save(workspace: Path, paths: list[Path], commit: str) -> None:

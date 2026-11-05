@@ -46,8 +46,9 @@ describe('upload limits are server-owned', () => {
 			return new Response(JSON.stringify(okUpload), { status: 200 });
 		});
 		vi.stubGlobal('fetch', fetchMock);
-		await loadUploadLimits();
-		expect(fetchMock).toHaveBeenCalledWith('/api/upload/limits');
+		await loadUploadLimits('test-token');
+		// The Devices listener admits an /api read only by its session header, so the preflight must be signed.
+		expect(fetchMock).toHaveBeenCalledWith('/api/upload/limits', { headers: { Authorization: 'Bearer test-token' } });
 
 		const { attachment, error } = await uploadInputFile(
 			fileOfSize(40 * 1024 * 1024),
@@ -74,7 +75,7 @@ describe('upload limits are server-owned', () => {
 			return new Response(JSON.stringify(okUpload), { status: 200 });
 		});
 		vi.stubGlobal('fetch', fetchMock);
-		await loadUploadLimits();
+		await loadUploadLimits('test-token');
 
 		const { attachment, error } = await uploadInputFile(
 			fileOfSize(51 * 1024 * 1024),

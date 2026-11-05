@@ -1,0 +1,10 @@
+{
+  "body": {
+    "status": "cancelled"
+  },
+  "dry_run": true,
+  "is_multipart_upload": false,
+  "method": "PATCH",
+  "query_params": [],
+  "url": "https://www.googleapis.com/calendar/v3/calendars/primary/events/EV1"
+}

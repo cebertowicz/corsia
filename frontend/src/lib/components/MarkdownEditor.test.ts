@@ -117,6 +117,17 @@ describe('MarkdownEditor edits', () => {
 			expect(view.state.doc.toString()).toBe('quick brown fox');
 		});
 
+		it('where cards open as the phone sheet, a caret in the struck text opens nothing but a press on the insert still does', () => {
+			const onAnchorFocus = vi.fn();
+			const view = open({ highlights: [suggestion('red')], onAnchorFocus, commentsAsSheet: true });
+			view.dispatch({ selection: { anchor: 8 } }); flushSync();
+			view.dispatch({ selection: { anchor: 9 } }); flushSync();
+			expect(onAnchorFocus).not.toHaveBeenCalled();
+			host.querySelector('.cm-suggestion-insert')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+			expect(onAnchorFocus).toHaveBeenLastCalledWith('sug', expect.anything(), true);
+			expect(view.state.doc.toString()).toBe('quick brown fox');
+		});
+
 		it('reports a caret in a plain comment as before, with no third argument', () => {
 			const onAnchorFocus = vi.fn();
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus });

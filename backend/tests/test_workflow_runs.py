@@ -82,7 +82,7 @@ class Run:
     async def start(self, workflow: str, mutation_id: str | None = None, **params):
         return await self.update("add", {
             "kind": "phase", "title": f"Run {workflow}", "acceptance_criteria": "Run recorded",
-            "workflow_ref": workflow, **params,
+            "workflow_ref": workflow, **{"size": "M", **params},
         }, mutation_id)
 
     def rows(self, sql: str, *args):

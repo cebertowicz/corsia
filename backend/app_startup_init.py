@@ -14,6 +14,7 @@ def initialize_startup(logger) -> None:
     from infra.config import LOGS_DIR, RUNTIME_DIR, UPLOADS_DIR, WORKSPACE, WORKSPACE_SELECTION
     from infra import setup_progress
     from infra.ignored_environment import drop_ignored_environment, note_ignored_environment
+    from infra.held_replies import recover_interrupted as recover_interrupted_held_replies
     from infra.moved_state_paths import heal_moved_state_paths
     from infra.startup_prerequisites import prepare_startup_prerequisites
     from plans.public import sweep_owed_status
@@ -38,5 +39,6 @@ def initialize_startup(logger) -> None:
     logger.info("startup phase: database initialization complete in {:.1f}s", elapsed)
     recover_write_intents()
     recover_interrupted_relocations()
+    recover_interrupted_held_replies()
     sweep_owed_status()
     initialize_workspace(WORKSPACE, logger)

@@ -21,6 +21,7 @@ from connections import (
     harness_usage_check as checks,
     usage_store,
 )
+from connections.account_receipts import ReceiptFence
 from connections.claude_usage import apply_rate_limit_event, usage_verdict
 from connections.usage_verdicts import (
     ACCOUNT_SCOPE,
@@ -515,6 +516,9 @@ def test_account_metadata_cannot_read_usage_column(isolated_db):
     [
         (_report({"five_hour": {"utilization": 100, "resets_at": 42}}), "limited"),
         (_report({"five_hour": {"utilization": 99}}), "allowed"),
+        (_report({"five_hour": {"utilization": 15, "status": "rejected"}}), "limited"),
+        (_report({"five_hour": {"utilization": 15, "status": "rejected"},
+                  "extra_usage": {"is_enabled": True, "utilization": 20}}), "allowed"),
         (_report({"five_hour": {"utilization": 100}, "extra_usage": {"is_enabled": True}}), "unknown"),
         (_report({"five_hour": {"utilization": 100}, "extra_usage": {"is_enabled": True, "utilization": 20}}), "allowed"),
         (_report({"five_hour": {"utilization": 100}, "extra_usage": {"is_enabled": True, "utilization": 100}}), "limited"),
@@ -625,6 +629,25 @@ def test_account_window_rejection_limits_the_account(isolated_db):
 
     projection = harness_usage.project_for_model(harness_usage.stored_usage(provider="claude-code", account_id=default_id("claude-code")))
     assert (projection["state"], projection["usable"], projection["reason"]) == ("limited", False, "seven_day_limit")
+
+
+def test_allowed_event_on_one_window_keeps_another_windows_refusal(isolated_db):
+    from connections import harness_usage
+    from connections.models import ConnectionStatus, ConnectionType, upsert_connection
+
+    upsert_connection(type=ConnectionType.CLI, provider="claude-code",
+                      status=ConnectionStatus.AVAILABLE, config={"binary": "/bin/test"})
+    receipt = default_receipt('claude-code')
+    apply_rate_limit_event({"status": "rejected", "rateLimitType": "five_hour", "resetsAt": 4102444800}, receipt=receipt)
+    apply_rate_limit_event({"status": "allowed_warning", "rateLimitType": "seven_day", "utilization": 0.99}, receipt=receipt)
+
+    usage = harness_usage.stored_usage(provider="claude-code", account_id=default_id("claude-code"))
+    projection = harness_usage.project_for_model(usage, model="claude-code/sonnet")
+    assert (projection["usable"], projection["reason"]) == (False, "five_hour_limit")
+
+    apply_rate_limit_event({"status": "allowed", "rateLimitType": "five_hour", "utilization": 0.02}, receipt=receipt)
+    usage = harness_usage.stored_usage(provider="claude-code", account_id=default_id("claude-code"))
+    assert harness_usage.project_for_model(usage, model="claude-code/sonnet")["usable"]
 
 
 def test_rate_limit_event_utilization_is_stored_as_percent(isolated_db):
@@ -1139,6 +1162,113 @@ async def test_indeterminate_claude_recheck_keeps_limit_and_marks_failed(monkeyp
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("response", "error", "expected"), [
+    (_usage_response({"rate_limits_available": True, "rate_limits": {"five_hour": {"utilization": 1}}}), "", "pass"),
+    (_usage_response({"rate_limits_available": True, "rate_limits": {"five_hour": {"utilization": 100}}}), "", "pass"),
+    (_usage_response({"rate_limits_available": True, "rate_limits": {}}), "", "fail"),
+    (None, "", "fail"),
+    (None, "bad", "error"),
+    (None, "timeout", "error"),
+], ids=("allowed", "limited", "unknown-usage", "no-answer", "cli-failed", "cli-timeout"))
+async def test_login_check_says_whether_the_login_answered(monkeypatch, response, error, expected, _checks_clean):
+    _seed("claude-code")
+    monkeypatch.setattr(checks, "_binary_for", lambda _p: asyncio.sleep(0, result="/bin/test"))
+    monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
+    process = _Process(response, error=error)
+    if error == "bad":
+        process.returncode = 1
+    async def spawn(*_args, **_kwargs): return process
+    monkeypatch.setattr(checks.asyncio, "create_subprocess_exec", spawn)
+    assert await checks.check_login("claude-code", default_receipt("claude-code")) == expected
+
+
+def test_login_check_outlasts_the_control_read_inside_the_live_close_bound():
+    """A slow read that still answers is waited for; a Stop during the wait still closes in time."""
+    from subagents.cc_runtime_state import _CLOSE_LIVE_TIMEOUT_S
+
+    assert 30 < checks._LOGIN_CHECK_SECONDS < _CLOSE_LIVE_TIMEOUT_S
+
+
+_LOGIN = ReceiptFence("account-1", 1, 1)
+_PRIOR_LOGIN, _NEXT_LOGIN = ReceiptFence("account-1", 1, 0), ReceiptFence("account-1", 2, 2)
+
+
+def _parked_read(monkeypatch):
+    """Replace the control read with one that waits for ``release``; returns (started, release)."""
+    started, release = [], asyncio.Event()
+    async def read(provider, account_id):
+        started.append(account_id)
+        await release.wait()
+        return "pass", _LOGIN
+    monkeypatch.setattr(checks, "_read", read)
+    monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
+    return started, release
+
+
+@pytest.mark.asyncio
+async def test_login_checks_join_the_running_read(monkeypatch, _checks_clean):
+    """One login gets one control process: login checks join the scheduled read already running."""
+    started, release = _parked_read(monkeypatch)
+    checks._schedule("claude-code", "account-1")
+    waiting = [asyncio.create_task(checks.check_login("claude-code", _LOGIN)) for _ in range(2)]
+    await asyncio.sleep(0)
+    release.set()
+    assert await asyncio.gather(*waiting) == ["pass", "pass"]
+    assert started == ["account-1"]
+
+
+@pytest.mark.asyncio
+async def test_login_check_is_bounded_and_its_read_stays_single_flight(monkeypatch, _checks_clean):
+    started, release = _parked_read(monkeypatch)
+    monkeypatch.setattr(checks, "_LOGIN_CHECK_SECONDS", 0.01)
+    assert await checks.check_login("claude-code", _LOGIN) == "error"
+    read = checks._CHECKS["account-1"]
+    checks._schedule("claude-code", "account-1")
+    release.set()
+    assert await read == ("pass", _LOGIN)
+    assert started == ["account-1"] and checks._CHECKS == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pending", [True, False], ids=("new-login-read-scheduled", "none-scheduled"))
+async def test_login_check_never_takes_another_logins_verdict(monkeypatch, pending, _checks_clean):
+    """A joined read of the prior login is waited out; the verdict is the Turn's login's own read."""
+    reads, release = iter([("fail", _PRIOR_LOGIN), ("pass", _LOGIN)]), asyncio.Event()
+    started = []
+    async def read(provider, account_id):
+        verdict = next(reads)
+        started.append(verdict[1])
+        if verdict[1] == _PRIOR_LOGIN:
+            await release.wait()
+        await asyncio.sleep(0.01)  # A control read spans more than one loop step.
+        return verdict
+    monkeypatch.setattr(checks, "_read", read)
+    monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
+    checks._schedule("claude-code", "account-1")
+    if pending:
+        checks._NEW_LOGIN_PENDING.add("account-1")
+    waiting = asyncio.create_task(checks.check_login("claude-code", _LOGIN))
+    await asyncio.sleep(0)
+    release.set()
+    assert await waiting == "pass"
+    assert started == [_PRIOR_LOGIN, _LOGIN] and checks._NEW_LOGIN_PENDING == set()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("current", [_NEXT_LOGIN, None], ids=("replaced", "signed-out"))
+async def test_login_check_of_a_replaced_login_fails(monkeypatch, current, _checks_clean):
+    """When every read finds another login, the Turn's own login is gone, whatever that login answered."""
+    started = []
+    async def read(provider, account_id):
+        started.append(account_id)
+        return "pass", current
+    monkeypatch.setattr(checks, "_read", read)
+    monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
+    assert await checks.check_login("claude-code", _LOGIN) == "fail"
+    assert started == ["account-1", "account-1"]
+
+
+@pytest.mark.asyncio
 async def test_scheduler_throttles_and_is_single_flight(monkeypatch, _checks_clean):
     started, release = [], asyncio.Event()
     async def check(provider, account_id):
@@ -1168,6 +1298,7 @@ async def test_a_new_login_during_the_prior_logins_read_is_read_when_it_ends(mon
         if receipt == "prior-login":
             prior_running.set()
             await release.wait()
+        return {"verdict": "allowed"}
     monkeypatch.setattr(checks, "_check_claude", read)
     monkeypatch.setattr("infra.state.ws.notify_models_changed", lambda: None)
     submitted = []

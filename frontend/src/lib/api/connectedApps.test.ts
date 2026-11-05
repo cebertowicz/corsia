@@ -80,6 +80,11 @@ describe('the account controls', () => {
 		await expect(startAccountSignIn(microsoft)).rejects.toThrow("Couldn't start Microsoft sign-in. Try again.");
 	});
 
+	it('uses the Messages enablement fallback when the request has no error detail', async () => {
+		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => null }));
+		await expect(startAccountSignIn({ ...account, provider: 'messages', provider_display_name: 'Messages' })).rejects.toThrow("Couldn't enable Messages. Try again.");
+	});
+
 	it('uses the supplied non-enum display label when an account sign-in cannot start', async () => {
 		vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => null }));
 		await expect(startAccountSignIn({ ...account, provider_display_name: 'Northwind mail' })).rejects.toThrow("Couldn't start Northwind mail sign-in. Try again.");

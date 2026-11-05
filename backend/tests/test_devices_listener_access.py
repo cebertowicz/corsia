@@ -240,6 +240,7 @@ async def test_devices_tls_listener_keeps_login_public_but_refuses_pairing_on_lo
         for method, path in (
             ("GET", "/api/models"),
             ("GET", "/api/models/not-a-model/profile"),
+            ("GET", "/api/upload/limits"),
             ("POST", "/api/upload"),
         ):
             refused = await remote.request(method, path)
@@ -249,6 +250,11 @@ async def test_devices_tls_listener_keeps_login_public_but_refuses_pairing_on_lo
         forwarded = await remote.get("/api/models", headers={"Authorization": f"Bearer {token}"})
         assert forwarded.status_code == 200
         assert forwarded.json() == direct_models.json()
+
+        # The composer's size preflight reads the ceilings with the session header, as the app now sends it.
+        limits = await remote.get("/api/upload/limits", headers={"Authorization": f"Bearer {token}"})
+        assert limits.status_code == 200
+        assert limits.json() == (await main_client.get("/api/upload/limits")).json()
 
 
 @pytest.mark.asyncio

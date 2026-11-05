@@ -65,7 +65,7 @@ def test_malformed_event_refuses_rule_with_visible_reason(monkeypatch):
     from events.connectors import github_rules
 
     warnings = []
-    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (True, False))
+    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (True, False, False))
     monkeypatch.setattr(github_rules.logger, "warning", lambda *args: warnings.append(args))
     raw = {"action": "opened", "repository": {"full_name": "o/r"}, "issue": {}}
     scope = github_rules.rule_scope("webhook.github.issue_opened", raw, None)

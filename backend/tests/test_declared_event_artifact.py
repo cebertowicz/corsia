@@ -28,7 +28,8 @@ def test_rule_run_artifact_is_resolved_from_running_server_record():
 
 def test_forged_artifact_fact_is_refused(monkeypatch):
     spec = SimpleNamespace(accepts=lambda value: isinstance(value, str))
-    entry = SimpleNamespace(owner="owner", use="route", declared={"code": "id"}, specs={"code": spec})
+    entry = SimpleNamespace(owner="owner", use="route", declared={"code": "id"}, specs={"code": spec},
+                            event_class="informational")
     monkeypatch.setattr(intake, "resolve_event_type", lambda *_: (object(), entry))
     monkeypatch.setattr(intake, "_script_owner", lambda *_: "owner")
     original = {"integration": "github", "type": "pr", "external_id": "a/b#3"}

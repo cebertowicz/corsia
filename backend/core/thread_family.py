@@ -67,6 +67,7 @@ def _delete_one_thread_rows(
     from infra.presence import delete_thread_presence
     from infra.thread_updates import delete_thread_updates
     from infra.thread_driver import delete_thread_turns
+    from infra.thread_history_cleanup import delete_thread_history
     from plans import public
     from registry import models as registry_models
     from registry.ownership import rehome_on_thread_end
@@ -105,7 +106,7 @@ def _delete_one_thread_rows(
         "DELETE FROM artifact_registrations WHERE parent_thread_id = ?", (thread_id,),
     )
     runtime_boundary.bump_history_epoch(db, thread_id)
-    db.execute("DELETE FROM messages WHERE thread_id = ?", (thread_id,))
+    delete_thread_history(db, thread_id)
     append_agent_roster_transition(
         db,
         before=thread,

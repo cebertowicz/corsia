@@ -36,8 +36,8 @@ const model = (entries: RunsOn[]): Model => ({
 	id: 'claude-code/opus', name: 'Opus', connection: 'claude-code', size: '', backend: 'harness', speed: '', status: 'ready', runs_on: entries,
 } as Model);
 
-function readPolicy(project: string | null, order: string[]) {
-	pickerPolicy.set({ 'claude-code': { rollover: true, order } });
+function readPolicy(project: string | null, order: string[], rollover = false) {
+	pickerPolicy.set({ 'claude-code': { rollover, order } });
 	pickerPolicyProject.set(project);
 }
 
@@ -85,6 +85,7 @@ describe('held line: continue on another account', () => {
 	const row = () => model([limited('personal', { selected: true }), entry('acme')]);
 
 	it('names the limited account and replaces "Switch model" with one action', () => {
+		readPolicy('project-1', ['personal', 'acme']);
 		const onSwitchModel = render(row());
 		expect(text()).toMatch(/^Personal Max · sam@example\.com is at its limit · back /);
 		expect(buttons()).toEqual(['Continue on Acme (Team) · sam@example.com']);
@@ -105,6 +106,7 @@ describe('held line: continue on another account', () => {
 
 	it('shows the pin\'s refusal inside the line, and takes another try', async () => {
 		vi.mocked(pinThreadAccount).mockResolvedValue({ ok: false, message: TURN_RUNNING });
+		readPolicy('project-1', ['personal', 'acme']);
 		render(row());
 		document.querySelector('button')!.click();
 		await settle();
@@ -130,7 +132,38 @@ describe('held line: continue on another account', () => {
 		expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/provider-policy'))).toHaveLength(0);
 	});
 
-	it('reads the rollover order when the accounts are already loaded but the policy is not', async () => {
+	it('keeps "Continue on" with the policy read and rollover off', () => {
+		readPolicy('project-1', ['personal', 'acme']);
+		render(row());
+		expect(text()).toMatch(/^Personal Max · sam@example\.com is at its limit · back /);
+		expect(buttons()).toEqual(['Continue on Acme (Team) · sam@example.com']);
+	});
+
+	it('with rollover on, keeps the account sentence and offers "Switch model", never the move', () => {
+		readPolicy('project-1', ['personal', 'acme'], true);
+		const onSwitchModel = render(row());
+		expect(text()).toMatch(/^Personal Max · sam@example\.com is at its limit · back /);
+		expect(buttons()).toEqual(['Switch model']);
+		document.querySelector('button')!.click();
+		expect(onSwitchModel).toHaveBeenCalledOnce();
+		expect(pinThreadAccount).not.toHaveBeenCalled();
+	});
+
+	it('on first view, before the policy is read, offers no move; rollover off then offers it', async () => {
+		fetchMock.mockImplementation(async (url: unknown) => String(url).startsWith('/api/provider-policy')
+			? new Response(JSON.stringify({ providers: [{
+				provider_key: 'claude-code', capabilities: { units: 'accounts', rollover: true },
+				rollover: false, order: ['personal', 'acme'], units: [],
+			}] }), { status: 200 })
+			: new Response('{}', { status: 404 }));
+		render(row());
+		expect(text()).toMatch(/^Personal Max · sam@example\.com is at its limit · back /);
+		expect(buttons()).toEqual(['Switch model']);
+		await settle();
+		expect(buttons()).toEqual(['Continue on Acme (Team) · sam@example.com']);
+	});
+
+	it('on first view with rollover on, never shows "Continue on", before or after the policy is read', async () => {
 		const third = account('third', 'Third · sam@example.com');
 		vendorAccounts.set([PERSONAL, ACME, third]);
 		fetchMock.mockImplementation(async (url: unknown) => String(url).startsWith('/api/provider-policy')
@@ -140,12 +173,12 @@ describe('held line: continue on another account', () => {
 			}] }), { status: 200 })
 			: new Response('{}', { status: 404 }));
 		render(model([limited('personal', { selected: true }), entry('acme'), entry('third')]));
-		expect(buttons()).toEqual(['Continue on Acme (Team) · sam@example.com']);
+		expect(buttons()).toEqual(['Switch model']);
 		await settle();
 		const policyCalls = fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/provider-policy'));
 		expect(policyCalls.map(([url]) => String(url))).toEqual(['/api/provider-policy?project_id=project-1']);
 		expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith('/api/vendor-accounts'))).toHaveLength(0);
-		expect(buttons()).toEqual(['Continue on Third · sam@example.com']);
+		expect(buttons()).toEqual(['Switch model']);
 	});
 
 	it('reads the thread\'s own project policy when the loaded one belongs to another project', async () => {
@@ -160,7 +193,7 @@ describe('held line: continue on another account', () => {
 		render(model([limited('personal', { selected: true }), entry('acme'), entry('third')]));
 		await settle();
 		expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual(['/api/provider-policy?project_id=project-1']);
-		expect(buttons()).toEqual(['Continue on Third · sam@example.com']);
+		expect(buttons()).toEqual(['Switch model']);
 	});
 
 	it('uses the newest policy read when an earlier project\'s read lands last', async () => {
@@ -169,8 +202,8 @@ describe('held line: continue on another account', () => {
 			{ id: 'thread-1', title: 'Held', project_id: 'project-1' } as never,
 			{ id: 'thread-2', title: 'Held 2', project_id: 'project-2' } as never,
 		]);
-		const reply = (order: string[]) => new Response(JSON.stringify({ providers: [{
-			provider_key: 'claude-code', capabilities: { units: 'accounts', rollover: true }, rollover: true, order, units: [],
+		const reply = (order: string[], rollover: boolean) => new Response(JSON.stringify({ providers: [{
+			provider_key: 'claude-code', capabilities: { units: 'accounts', rollover: true }, rollover, order, units: [],
 		}] }), { status: 200 });
 		const pending: Record<string, (response: Response) => void> = {};
 		fetchMock.mockImplementation((url: unknown) => String(url).startsWith('/api/provider-policy')
@@ -181,11 +214,12 @@ describe('held line: continue on another account', () => {
 		activeThreadId.set('thread-2');
 		await settle();
 		expect(Object.keys(pending)).toEqual(['project-1', 'project-2']);
-		pending['project-2'](reply(['third', 'acme', 'personal']));
+		pending['project-2'](reply(['third', 'acme', 'personal'], true));
 		await settle();
-		pending['project-1'](reply(['personal', 'acme', 'third']));
+		pending['project-1'](reply(['personal', 'acme', 'third'], false));
 		await settle();
-		expect(buttons()).toEqual(['Continue on Third · sam@example.com']);
+		// The older project-1 read is dropped: project-2's rollover still decides the line.
+		expect(buttons()).toEqual(['Switch model']);
 	});
 
 	it('clears a refusal when the active thread changes', async () => {

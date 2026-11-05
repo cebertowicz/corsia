@@ -208,7 +208,6 @@ def _fake_new_omlx(monkeypatch, download, disk=lambda *_args: None, optimal=None
 
     import infra.state.ws
     import llm.catalog_network_models
-    from llm.local_model import OMLX_PIN
 
     monkeypatch.setattr(local_setup, "require_free_disk", disk)
     monkeypatch.setattr(downloads, "download_dir", model_dir)

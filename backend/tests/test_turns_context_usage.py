@@ -617,6 +617,7 @@ async def test_native_provider_error_persists_last_successful_call_occupancy(mon
     monkeypatch.setattr(turn_iteration, "run_in_db", AsyncMock(return_value=None))
     monkeypatch.setattr(native_turn_runtime, "commit_turn_terminal", fake_terminal)
     monkeypatch.setattr(step_handler, "run_in_db", fake_handler_run_in_db)
+    monkeypatch.setattr(step_handler, "broadcast_llm_error", AsyncMock())
 
     with pytest.raises(turn_iteration.TurnProviderError, match="provider failed"):
         await native_turn_runtime.run_tracked_turn(native_turn_runtime.NativeTurn(

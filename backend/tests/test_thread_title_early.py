@@ -416,7 +416,6 @@ async def test_cc_defers_new_chat_title_until_send_acceptance(
         is_retry=False,
         is_edited=False,
         send_thread_input_fn=_fake_send,
-        cc_attachment_block_fn=lambda *_: "",
     )
 
     await asyncio.sleep(0)
@@ -466,7 +465,6 @@ async def test_cc_no_early_title_on_send_failure(isolated_db, monkeypatch):
         is_retry=False,
         is_edited=False,
         send_thread_input_fn=_reject,
-        cc_attachment_block_fn=lambda *_: "",
     )
 
     await asyncio.sleep(0)

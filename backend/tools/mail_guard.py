@@ -29,6 +29,8 @@ class Message:
     date: datetime
     body: str
     reply_to: str = ""
+    to: str = ""
+    own: bool = False
     unread: bool = False
     visible_evidence: str = ""
     withheld: str = ""
@@ -82,10 +84,14 @@ def check_reply(
     if not body.strip():
         result.stops.append("The message body is empty.")
     _, sender_address = _identity(target.sender)
-    recipients = reply_addresses(target.reply_to, target.sender)
+    if target.own:
+        # The account sent this message; a reply goes to whoever it was sent to.
+        recipients = [a for a in reply_addresses("", target.to) if a.casefold() != own_address.casefold()]
+    else:
+        recipients = reply_addresses(target.reply_to, target.sender)
     if not recipients:
         result.stops.append("The original message has no usable reply address. Send a new email to the correct address instead.")
-    elif not target.reply_to and _NO_REPLY.search(sender_address.split("@", 1)[0]):
+    elif not target.own and not target.reply_to and _NO_REPLY.search(sender_address.split("@", 1)[0]):
         result.stops.append(f"The sender {sender_address} is a no-reply address with no Reply-To. Send a new email to a working address instead.")
     else:
         result.recipients = recipients
@@ -111,5 +117,6 @@ def check_reply(
             result.stale.append(detail)
         else:
             result.warnings.append(detail)
-    result.info.append(f"{sender_count} emails from {target.sender} in the last 30 days.")
+    if not target.own:
+        result.info.append(f"{sender_count} emails from {target.sender} in the last 30 days.")
     return result

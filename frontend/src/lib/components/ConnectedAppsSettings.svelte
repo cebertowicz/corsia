@@ -9,6 +9,7 @@
 		type ConnectedAppsRow, isOnlyCorsia, needsManualAccountStep,
 	} from '$lib/api/connectedApps';
 	import { anyFirstSignIn, appAccount, hasSignInToShow, needsSignInAttention, SIGN_IN_LEDE } from '$lib/appSignIn';
+	import { pendingExternalPage } from '$lib/pendingExternalPage';
 	import AppSignInPanel from './AppSignInPanel.svelte';
 	import ConfirmDialog from './ConfirmDialog.svelte';
 	import SettingsRow from './SettingsRow.svelte';
@@ -63,6 +64,7 @@
 	const microsoftCause = (account: ConnectedAccount, cause: string) => isMicrosoft(account) && account.cause === cause;
 	function accountStateLine(account: ConnectedAccount): string {
 		if (account.provider === 'mailhost') return mailHostStateLine(account);
+		if (account.provider === 'messages') return account.state === 'connected' ? 'On' : 'Off';
 		if (microsoftCause(account, 'admin_approval_required')) return 'Needs admin approval';
 		if (microsoftCause(account, 'registration_misconfigured')) return 'Microsoft app needs fixing';
 		if (microsoftCause(account, 'provider_unavailable')) return 'Sign-in didn’t finish';
@@ -73,6 +75,7 @@
 		}
 	}
 	function tone(row: ConnectedAppsRow): 'quiet' | 'failed' | 'attention' {
+		if (isAccount(row) && row.provider === 'messages') return 'quiet';
 		if (isAccount(row) && row.provider === 'mailhost') { const problem = row.mailhost?.problem ?? null; return problem === null || problem === 'checking' ? 'quiet' : problem === 'waiting' ? 'attention' : 'failed'; }
 		if (isAccount(row)) return microsoftCause(row, 'provider_unavailable') || microsoftCause(row, 'registration_misconfigured') ? 'failed' : row.state === 'connected' || row.state === 'signed_out' ? 'quiet' : 'attention';
 		if (row.state === 'failed' || (row.sign_in?.status === 'failed' && !row.sign_in.signed_in)) return 'failed';
@@ -137,11 +140,13 @@
 	}
 	async function startSignIn(account: ConnectedAccount): Promise<void> {
 		actionId = account.id; errorId = account.id; actionError = '';
-		const page = signInHere ? window.open('', '_blank') : null;
+		// Messages has no page to open; Enable only checks access and answers with no link.
+		const page = signInHere && account.provider !== 'messages' ? pendingExternalPage() : null;
 		try {
 			const started = await startAccountSignIn(account);
-			if (page) { page.opener = null; page.location.href = started.url; }
-			else window.location.assign(started.url);
+			if (!started.url) { page?.close(); await refresh(); }
+			else if (page?.desktop) { if (!await page.open(started.url)) actionError = "Couldn't open your browser. Try again."; }
+			else if (!(page && await page.open(started.url))) window.location.assign(started.url);
 		} catch (cause) {
 			page?.close();
 			actionError = cause instanceof Error ? cause.message : "Couldn't start the sign-in. Try again.";
@@ -183,7 +188,7 @@
 		catch (cause) { actionError = cause instanceof Error ? cause.message : `Couldn't change this ${account.provider_display_name} account. Try again.`; }
 		finally { confirmingRemove = null; actionId = null; }
 	}
-	function capabilityLabels(account: ConnectedAccount): string { return account.capabilities.map((capability) => ({ mail: 'Email', calendar: 'Calendar', files: 'Files' }[capability])).join(', '); }
+	function capabilityLabels(account: ConnectedAccount): string { return account.capabilities.map((capability) => ({ mail: 'Email', calendar: 'Calendar', files: 'Files', messages: 'Texts' }[capability])).join(', '); }
 
 	function clearLinkedFocus(): void { linkedRowId = null; }
 	/** Retry and Edit server's Save close the row and its pressed button with it: focus goes to that row's header. */
@@ -254,15 +259,15 @@
 									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
 									<MailHostDetail account={row} {offline} onSetKey={() => requestAppKey({ name: row.provider_display_name, key_refs: row.mailhost?.key_refs }, true)} onWhere={() => { whereApprove = false; whereRow = row; }} onRemove={() => confirmingRemove = row} onChanged={() => closeRow(row.id)} />
 									{:else}
-									{#if errorId === row.id && actionError && actionId === null}<p class="error" role="alert">{actionError}</p>{/if}
+									{#if errorId === row.id && actionError && actionId === null}{#if row.provider === 'messages' && actionError.includes('\n')}{@const lines = actionError.split('\n')}<p class="error" role="alert">{lines[0]}</p>{#each lines.slice(1) as line}<p class="impact">{line}</p>{/each}{:else}<p class="error" role="alert">{actionError}</p>{/if}{/if}
 									<p class="capabilities"><span class="capability-label">Reaches</span><span>{capabilityLabels(row)}</span></p>
-									{#if microsoftCause(row, 'admin_approval_required')}<p class="impact">Your organization needs to approve CORSIA before it can connect this account. Send this to your IT admin, then press Sign in.</p>{:else if microsoftCause(row, 'consent_cancelled')}<p class="impact">Sign-in was cancelled. Press Sign in to try again.</p>{:else if microsoftCause(row, 'refresh_token_invalid')}<p class="impact">Microsoft signed you out, so agents can’t use this account until you sign in again.</p>{:else if microsoftCause(row, 'provider_unavailable')}<p class="impact">Microsoft had a problem with sign-in. Press Retry.</p>{:else if microsoftCause(row, 'registration_misconfigured')}<p class="impact">Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in.</p>{:else if row.state === 'needs_sign_in'}<p class="impact">{row.provider_display_name} signed you out, so agents can’t use this account until you sign in again.</p>{/if}
+									{#if microsoftCause(row, 'admin_approval_required')}<p class="impact">Your organization needs to approve CORSIA before it can connect this account. Send this to your IT admin, then press Sign in.</p>{:else if microsoftCause(row, 'consent_cancelled')}<p class="impact">Sign-in was cancelled. Press Sign in to try again.</p>{:else if microsoftCause(row, 'refresh_token_invalid')}<p class="impact">Microsoft signed you out, so agents can’t use this account until you sign in again.</p>{:else if microsoftCause(row, 'provider_unavailable')}<p class="impact">Microsoft had a problem with sign-in. Press Retry.</p>{:else if microsoftCause(row, 'registration_misconfigured')}<p class="impact">Your Microsoft app for CORSIA isn’t set up correctly. Ask CORSIA in chat to fix it, then press Sign in.</p>{:else if row.provider === 'messages' && row.state !== 'connected'}<p class="impact">Lets agents where this works read your texts and send texts you approve.</p>{:else if row.state === 'needs_sign_in'}<p class="impact">{row.provider_display_name} signed you out, so agents can’t use this account until you sign in again.</p>{/if}
 									{#if manualStep?.id === row.id}<AccountManualNotice account={manualStep} />{/if}
 									{#if offline}<p class="offline-action-note" role="status">Actions are unavailable while offline.</p>{/if}
 									<div class="actions account-actions">
-										{#if microsoftCause(row, 'admin_approval_required')}<span class="row-action"><Button variant="primary" size="sm" disabled={offline || !adminApprovalMessage(row)} onclick={() => void copyAdminMessage(row)}>Copy message for IT</Button></span><span class="row-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>Sign in</Button></span>{:else if accountNeedsSignIn(row)}<span class="row-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant={microsoftCause(row, 'registration_misconfigured') ? 'ghost' : 'primary'} size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>{microsoftCause(row, 'provider_unavailable') ? 'Retry' : 'Sign in'}</Button></span>{/if}
+										{#if microsoftCause(row, 'admin_approval_required')}<span class="row-action"><Button variant="primary" size="sm" disabled={offline || !adminApprovalMessage(row)} onclick={() => void copyAdminMessage(row)}>Copy message for IT</Button></span><span class="row-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>Sign in</Button></span>{:else if accountNeedsSignIn(row)}<span class="row-action" class:deep-link-focus={linkedRowId === row.id && !offline} data-chat-link-focus={linkedRowId === row.id && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant={microsoftCause(row, 'registration_misconfigured') ? 'ghost' : 'primary'} size="sm" disabled={offline} loading={actionId === row.id} onclick={() => { clearLinkedFocus(); void startSignIn(row); }}>{microsoftCause(row, 'provider_unavailable') ? 'Retry' : row.provider === 'messages' ? 'Enable' : 'Sign in'}</Button></span>{/if}
 										<span class="row-action" class:deep-link-focus={linkedRowId === row.id && !accountNeedsSignIn(row) && !offline} data-chat-link-focus={linkedRowId === row.id && !accountNeedsSignIn(row) && !offline || undefined} onfocusout={clearLinkedFocus}><Button variant="ghost" size="sm" disabled={offline} onclick={() => { clearLinkedFocus(); whereApprove = false; whereRow = row; }}>Where it works…</Button></span>
-										{#if row.state === 'connected'}<span class="row-action"><Button variant="ghost" size="sm" disabled={offline} onclick={() => confirmingOut = row}>Sign out</Button></span>{/if}
+										{#if row.state === 'connected'}<span class="row-action"><Button variant="ghost" size="sm" disabled={offline} onclick={() => confirmingOut = row}>{row.provider === 'messages' ? 'Turn off' : 'Sign out'}</Button></span>{/if}
 										<span class="danger-text row-action"><Button variant="ghost" size="sm" disabled={offline} loading={actionId === row.id} onclick={() => confirmingRemove = row}>Remove</Button></span>
 									</div>
 									{#if copiedAdminMessageId === row.id}<p class="copied" role="status">Message copied</p>{/if}
@@ -300,8 +305,8 @@
 {#if removedManualStep}<AccountManualNotice account={removedManualStep} removed onDismiss={() => removedManualStep = null} />{/if}
 {#if whereRow}<WhereItWorks app={whereRow} approve={whereApprove} onClose={() => whereRow = null} onSaved={(row) => { if (whereApprove && !isAccount(row)) approved(row); else replace(row); whereRow = null; }} />{/if}
 {#if connectAppOpen}<ConnectAppFlow onClose={() => connectAppOpen = false} onConnected={(app) => { rows = [...rows, { ...app, kind: 'hosted_app' }]; }} onSignIn={(app) => { openId = app.id; signInAfterApprove = app.id; }} />{/if}
-{#if confirmingOut}<ConfirmDialog open title={`Sign out of ${accountName(confirmingOut)}?`} description="Agents will no longer be able to use this account, including in chats already running. You can sign in again any time." confirmLabel="Sign out" onConfirm={() => signOut(confirmingOut!)} onCancel={() => confirmingOut = null} />{/if}
-{#if confirmingRemove}<ConfirmDialog open title={`Remove ${accountName(confirmingRemove)}?`} description={confirmingRemove.provider === 'mailhost' ? `Agents lose access to it. The app password still works until you delete it in your ${confirmingRemove.provider_display_name} account settings.` : confirmingRemove.provider === 'microsoft' ? 'Agents will no longer be able to use this account. CORSIA deletes its sign-in from this computer. Microsoft may still list CORSIA as allowed; remove it on Microsoft’s page.' : confirmingRemove.provider === 'google' ? 'Agents will no longer be able to use this account, including in chats already running. This signs CORSIA out and revokes CORSIA’s access to this Google account.' : ''} confirmLabel="Remove" destructive onConfirm={() => remove(confirmingRemove!)} onCancel={() => confirmingRemove = null} />{/if}
+{#if confirmingOut}<ConfirmDialog open title={confirmingOut.provider === 'messages' ? 'Turn off Messages on this computer?' : `Sign out of ${accountName(confirmingOut)}?`} description={confirmingOut.provider === 'messages' ? 'Agents will no longer read or send your texts, including in chats already running. You can enable it again any time.' : 'Agents will no longer be able to use this account, including in chats already running. You can sign in again any time.'} confirmLabel={confirmingOut.provider === 'messages' ? 'Turn off' : 'Sign out'} onConfirm={() => signOut(confirmingOut!)} onCancel={() => confirmingOut = null} />{/if}
+{#if confirmingRemove}<ConfirmDialog open title={`Remove ${accountName(confirmingRemove)}?`} description={confirmingRemove.provider === 'messages' ? 'Agents will no longer read or send your texts. Nothing in Messages on this computer is deleted.' : confirmingRemove.provider === 'mailhost' ? `Agents lose access to it. The app password still works until you delete it in your ${confirmingRemove.provider_display_name} account settings.` : confirmingRemove.provider === 'microsoft' ? 'Agents will no longer be able to use this account. CORSIA deletes its sign-in from this computer. Microsoft may still list CORSIA as allowed; remove it on Microsoft’s page.' : confirmingRemove.provider === 'google' ? 'Agents will no longer be able to use this account, including in chats already running. This signs CORSIA out and revokes CORSIA’s access to this Google account.' : ''} confirmLabel="Remove" destructive onConfirm={() => remove(confirmingRemove!)} onCancel={() => confirmingRemove = null} />{/if}
 
 <style>
 	.connected-apps { width: 100%; scroll-margin-top: var(--space-5); }

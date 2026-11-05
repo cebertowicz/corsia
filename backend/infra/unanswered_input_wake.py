@@ -18,7 +18,7 @@ from core.message_history import NON_HUMAN_MARKERS
 
 EVENT = "system.turn.unanswered_input"
 # The wake's texts live only here.
-SUMMARY = "An error stopped the reply to your message, so the agent is trying again"
+SUMMARY = "The agent tried once more."
 GUIDANCE = (
     "Your previous turn ended with an error before it answered the person's last message. "
     "Answer that message now. Verify current state first and do not repeat effects that turn "
@@ -48,7 +48,8 @@ def _excluded(db: sqlite3.Connection, thread_id: str, turn_id: str, error: str) 
         (thread_id, turn_id, *_EXCLUDED_KINDS),
     ).fetchone() is not None:
         return True
-    return bool(auth_failure_kind("claude-code", error)) or is_provider_usage_or_quota_limit(error)
+    return ("error_max_turns" in error or bool(auth_failure_kind("claude-code", error))
+            or is_provider_usage_or_quota_limit(error))
 
 
 def _unanswered_input(db: sqlite3.Connection, thread_id: str, turn_id: str) -> bool:

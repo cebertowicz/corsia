@@ -92,7 +92,6 @@ async def test_cc_main_handler_broadcasts_input_excluding_sender():
         msg_id="m1", now="2026-07-01T00:00:00",
         is_retry=False, is_edited=False,
         send_thread_input_fn=_fake_send,
-        cc_attachment_block_fn=lambda _a, _u: "",
     )
 
     assert captured.get("broadcast_input") is True, "CC main must broadcast the inbound row cross-client"
@@ -157,7 +156,6 @@ async def test_inbound_send_reaches_second_device_not_sender(
             msg_id="m1", now="2026-07-01T00:00:00",
             is_retry=False, is_edited=False,
             send_thread_input_fn=real_send,
-            cc_attachment_block_fn=lambda _a, _u: "",
         )
     elif handler == "codex":
         await message_dispatch.handle_codex_main_message(

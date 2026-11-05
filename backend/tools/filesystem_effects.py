@@ -21,7 +21,7 @@ from typing import IO
 from uuid import uuid4
 
 from core.workspace_scaffolding import atomic_rename_noreplace_at
-from tools.host_path_policy import skip_credential_roots
+from tools.host_sandbox_floor import skip_credential_roots
 
 
 class FilesystemBindingError(PermissionError):
@@ -204,17 +204,16 @@ def open_bound_text(
                 os.close(fd)
 
 
-def write_bound_text(path: Path, content: str) -> None:
-    """Create or replace text through a bound parent descriptor."""
+def write_bound_bytes(path: Path, data: bytes, *, mode: int = 0o666) -> None:
+    """Create or replace bytes through a bound parent descriptor; ``mode`` applies to a new file."""
     with bound_parent(path, create_parents=True) as parent:
         try:
             fd = parent.open_file(os.O_WRONLY)
         except FileNotFoundError:
-            fd = parent.open_file(os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+            fd = parent.open_file(os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode=mode)
         try:
             _validate_regular_file(fd, path, writable=True)
             os.ftruncate(fd, 0)
-            data = content.encode("utf-8")
             view = memoryview(data)
             while view:
                 written = os.write(fd, view)
