@@ -94,6 +94,9 @@ def reply_envelope_facts(raw: dict[str, Any], facts: dict[str, Any], content: di
     facts.update(content)
     kind = content_kind(raw)
     if kind in REPLY_TYPES:
+        if "author" not in content:
+            # A reply with no user names no one, never the pull request's author.
+            facts.pop("author", None)
         facts.update(reply_facts(raw))
         facts.pop("author_login", None)
         facts.pop("sha", None)

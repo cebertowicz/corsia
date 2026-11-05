@@ -47,6 +47,15 @@ def test_reply_facts_and_no_body(kind):
     assert ("base_sha" in facts) == (kind == "review")
 
 
+@pytest.mark.parametrize("kind", ["line", "review"])
+def test_reply_with_no_user_names_no_author(kind):
+    raw = payload(kind)
+    raw["review" if kind == "review" else "comment"]["user"] = None
+    facts = normalize("github", raw, "review.submitted" if kind == "review" else "pr_comment.created").facts
+    assert "author" not in facts and facts["author_origin"] == "outside"
+    assert facts["pr_author_login"] == "pr-author"
+
+
 @pytest.mark.parametrize("body,expected", [("review: release ABCDEF1\nmore", "abcdef1"), ("x\nreview: release abcdef1", None), ("review: release abcdef", None), ("review: release abcdef1 extra", None)])
 def test_release_first_line_only(body, expected):
     for kind in ("issue", "line"):

@@ -82,7 +82,7 @@ def review_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraft]:
         "repo": repo, "pr_number": str(shared["pr_number"]), "review_id": str(shared["review_id"]),
         **_pr_facts(review, pr, at, shared),
     }
-    if (state := _optional_text(review, "state")) is not None:
+    if _optional_text(review, "state") is not None:
         attrs["state"] = shared["state"]
     return [OutcomeDraft(
         f"github:pr_review:{repo}:{review_id}:{action}", f"github.pr.review.{action}",
@@ -102,7 +102,7 @@ def review_comment_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDra
         "repo": repo, "pr_number": str(shared["pr_number"]), "comment_id": str(shared["comment_id"]),
         **_pr_facts(comment, pr, at, shared),
     }
-    if (path := _optional_text(comment, "path")) is not None:
+    if _optional_text(comment, "path") is not None:
         attrs["path"] = shared["path"]
     if comment.get("in_reply_to_id") is not None:
         shape.number(comment["in_reply_to_id"])
