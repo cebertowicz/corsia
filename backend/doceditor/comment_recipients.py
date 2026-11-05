@@ -81,8 +81,12 @@ def locality_disposition(db, comment: dict, recipient_id: str, sender, owner_id:
     if legacy_exempt and not tagged:
         return None, True
     recipient = db.execute("SELECT id,model,pending_model,title FROM threads WHERE id=?", (recipient_id,)).fetchone()
-    if sender and recipient and send_needs_hold(dict(sender), dict(recipient), db=db, emit_hold_event=False):
-        name = recipient["title"] or recipient_id
+    name = (recipient["title"] if recipient else None) or recipient_id
+    if sender is None:
+        # The writing agent's row is gone, so its locality can't be read: fail closed.
+        return (f"The agent that wrote this comment no longer exists, so its Local only setting can't be checked "
+                f"and the comment wasn't delivered to {name}."), legacy_exempt
+    if recipient and send_needs_hold(dict(sender), dict(recipient), db=db, emit_hold_event=False):
         refusal = (f"{name} is cloud-bound or has no model selected, and Local only applies to this chat or project, "
                    "so the comment wasn't delivered. Send it with delegate_send, which holds it for the person's approval, "
                    "or send it to a local agent.")

@@ -333,6 +333,25 @@ def test_pending_reply_to_other_agent_rechecks_locality(isolated_db):
     db.close()
 
 
+def test_pending_reply_from_deleted_agent_is_not_delivered(isolated_db):
+    db = get_db()
+    for name in ("owner", "cloud", "local"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_kind="user", author_id=None)
+    add_comment(db, aid, author_id="cloud", parent_id=root["id"])
+    reply, result = add_comment(db, aid, author_id="local", parent_id=root["id"])
+    batch = next(batch_id for batch_id in result["batch_ids"] if db.execute(
+        "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,),
+    ).fetchone()[0] == "cloud")
+    db.execute("DELETE FROM threads WHERE id='local'")
+    db.commit()
+    feedback_batches.close_batch(db, batch, "send")
+    state = db.execute("SELECT state,undelivered_reason FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()
+    assert state[0] == "undelivered" and reply["id"] in state[1]
+    db.close()
+
+
 def test_agent_local_only_tag_is_refused_but_person_tag_is_not(isolated_db, monkeypatch):
     from infra import local_only
 

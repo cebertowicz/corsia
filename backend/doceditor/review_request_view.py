@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import sqlite3
 
+from loguru import logger
+
 from doceditor import comment_recipients, review_requests as reviews
 
 
@@ -50,7 +52,8 @@ def document_reviews(db, artifact_id: str, actor: reviews.ReviewActor) -> dict:
         )
     except comment_recipients.TagValidationError as exc:
         raise PermissionError(str(exc)) from exc
-    except (reviews.ReviewRosterError, sqlite3.OperationalError):
+    except (reviews.ReviewRosterError, sqlite3.OperationalError) as exc:
+        logger.warning("document reviews roster read failed for {}: {}", artifact_id, repr(exc.__cause__ or exc))
         result["reviewers_error"] = "roster_error"
         return result
     requested = {row["reviewer_thread_id"] for row in rows if row["outcome"] == "open"}

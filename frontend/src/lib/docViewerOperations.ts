@@ -11,7 +11,7 @@ import { withDraftArtifactId, existingDraft } from '$lib/stores/docSaveQueue';
 import { toasts } from '$lib/stores/toast';
 
 function commentFailure(error: unknown): string {
-	if (error instanceof Error && error.message.includes('A valid viewing thread_id is required to tag agents')) return 'A valid viewing thread is required to tag agents. Your draft is kept.';
+	if (error instanceof Error && error.message.includes('A valid viewing thread_id is required to tag agents')) return 'Open this document from a chat to tag agents. Your comment is still here.';
 	return "Couldn't post the comment — try again";
 }
 

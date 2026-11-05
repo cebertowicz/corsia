@@ -15,6 +15,7 @@ def migrate_177_to_178(conn):
         end_offset INTEGER NOT NULL,
         FOREIGN KEY (comment_id, agent_id) REFERENCES doc_comment_tags(comment_id, agent_id) ON DELETE CASCADE
     )""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_doc_comment_mentions_comment ON doc_comment_mentions(comment_id, agent_id)")
     conn.execute("""CREATE TABLE IF NOT EXISTS doc_comment_recipient_state (
         root_id TEXT NOT NULL REFERENCES doc_comments(id) ON DELETE CASCADE,
         agent_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,

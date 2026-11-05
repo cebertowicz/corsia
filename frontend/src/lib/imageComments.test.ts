@@ -67,7 +67,7 @@ describe('image comments', () => {
 		await comments.draw(BOX, rect);
 		comments.setDraftBody('@Agent');
 		await expect(comments.submit('@Agent', ['agent'])).rejects.toThrow();
-		expect(mocks.show).toHaveBeenCalledWith('A valid viewing thread is required to tag agents. Your draft is kept.', 'error');
+		expect(mocks.show).toHaveBeenCalledWith('Open this document from a chat to tag agents. Your comment is still here.', 'error');
 		expect(comments.draft?.body).toBe('@Agent');
 	});
 

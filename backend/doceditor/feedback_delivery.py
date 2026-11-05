@@ -148,6 +148,8 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
         db.execute("UPDATE doc_feedback_batches SET item_count=item_count-? WHERE id=?",
                    (len(removed), _value(batch, "id")))
     if not items:
+        # Every item was a reply to a thread the recipient left; their item rows are deleted above,
+        # so the batch settles as empty, the same as a batch that never had items.
         return DeliveryResult(outcome="empty")
     problem = recipient_problem(db, recipient)
     if problem is None and _value(batch, "author_kind") == "agent":
