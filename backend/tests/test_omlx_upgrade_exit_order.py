@@ -83,7 +83,8 @@ async def test_exit_during_version_read_cannot_bypass_upgrade_admission(monkeypa
         await asyncio.sleep(0)
         assert not waiter.done()
         finish_recovery.set()
-        assert await asyncio.wait_for(waiter, 2) == "admitted"
+        with pytest.raises(omlx_restart.UpgradeAdmissionError, match="determine which models were loaded"):
+            await asyncio.wait_for(waiter, 2)
     finally:
         release.set()
         state_release.set()

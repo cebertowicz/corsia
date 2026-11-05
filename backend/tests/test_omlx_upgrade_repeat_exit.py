@@ -121,7 +121,7 @@ async def test_exit_during_failed_snapshot_keeps_preexisting_models(isolated_db,
     monkeypatch.setattr(omlx_restart, "emit", lambda *_args, **_kwargs: None)
     owner = omlx_supervisor.schedule_startup_upgrade("seat", "old")
     try:
-        assert (await asyncio.wait_for(owner, 2))["restarted"]
+        assert (await asyncio.wait_for(owner, 2)) == {"restarted": False, "reason": "loaded_unknown"}
         assert ("reload", "seat", ["exact-model"]) in calls
         assert not any(call[0] == "stop" for call in calls)
     finally:

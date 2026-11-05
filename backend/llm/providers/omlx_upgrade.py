@@ -78,6 +78,7 @@ async def _prepare(
         rows = await read_loaded({"server_id": server_id})
     if rows is not None:
         context.models = sorted({row["identifier"] for row in rows})
+        context.complete = True
     if context.exited(life):
         return None
     if rows is None:

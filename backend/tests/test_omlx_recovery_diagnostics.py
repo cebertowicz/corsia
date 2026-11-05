@@ -60,7 +60,10 @@ async def test_exit_with_stage_exception_keeps_owner_models_and_diagnostics(isol
         owner = omlx_supervisor.schedule_startup_upgrade("seat", "old")
         try:
             result = await asyncio.wait_for(owner, 2)
-            assert result == {"restarted": True, "loaded": ["exact"]}
+            if stage == "prepare":
+                assert result == {"restarted": False, "reason": "loaded_unknown"}
+            else:
+                assert result == {"restarted": True, "loaded": ["exact"]}
             assert ("reload", "seat", ["exact"]) in calls
             assert failed
             assert len(life.restarts) == (1 if stage == "prepare" else 2)

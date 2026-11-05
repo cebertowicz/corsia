@@ -87,7 +87,11 @@ async def test_exit_at_preparation_boundary_skips_later_preparation(isolated_db,
         life.requests.add(pending)
     owner = omlx_supervisor.schedule_startup_upgrade("seat", None)
     try:
-        assert (await asyncio.wait_for(owner, 2))["restarted"]
+        result = await asyncio.wait_for(owner, 2)
+        if boundary in {"version", "drain", "idle"}:
+            assert result == {"restarted": False, "reason": "loaded_unknown"}
+        else:
+            assert result["restarted"]
         stages = ["version", "idle", "snapshot", "recheck"]
         expected = ["version", "drain"] if boundary == "drain" else stages[:stages.index(boundary) + 1]
         assert steps == expected

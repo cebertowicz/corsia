@@ -66,6 +66,7 @@ class Life:
     hold_requests: bool = False  # only an upgrade drains calls before replacing the process
     exit_generation: int = 0  # incremented for every observed exit during an operation
     exit_status: str = ""
+    exit_models: list[str] | None = None  # first observation carried to the current owner
     restarts: deque[float] = field(default_factory=deque)  # when each restart in the window began
     requests: set[asyncio.Future[None]] = field(default_factory=set)  # admitted provider calls, not whole Turns
 
@@ -125,6 +126,8 @@ async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIt
             raise UpgradeAdmissionError("Couldn’t upgrade the local model server because the upgrade was cancelled. Check the server in Settings. Restart CORSIA to retry the upgrade.")
         try:
             result = task.result()
+        except TimeoutError as exc:
+            raise UpgradeAdmissionError("Couldn’t upgrade the local model server because the upgrade timed out. Check the server in Settings. Restart CORSIA to retry the upgrade.") from exc
         except Exception as exc:
             raise UpgradeAdmissionError("Couldn’t upgrade the local model server. Check the server in Settings. Restart CORSIA to retry the upgrade.") from exc
         if isinstance(result, dict) and result.get("reason") != "already_current":
@@ -222,6 +225,8 @@ def on_exit(
         log.info("oMLX %s (pid %s) stopped as asked; not restarting", server_id, pid)
         return
     if life.restart is not None and not life.restart.done():
+        if life.exit_models is None:
+            life.exit_models = loaded
         life.exit_generation += 1
         life.exit_status = status
         return
@@ -249,6 +254,7 @@ def schedule(server_id: str, life: Life, operation: Coroutine[Any, Any, Any], *,
     """Own one restart through the same Life, so Stop and shutdown can cancel and await it."""
     from infra.state.ws import broadcast_all
 
+    life.exit_models = None
     task = asyncio.get_running_loop().create_task(operation)
     life.restart = task
     life.hold_requests = hold_requests
@@ -280,6 +286,7 @@ class Recovery:
     models: list[str]
     generation: int
     version: str | None = None
+    complete: bool = False
 
     def exited(self, life: Life) -> bool:
         return life.exit_generation != self.generation
@@ -301,7 +308,7 @@ async def recover(
     from llm.local_keep_loaded import reload_after_restart
     from llm.providers.omlx_lifecycle import read_loaded
 
-    context = Recovery(loaded, generation, version)
+    context = Recovery(loaded, generation, version, complete=prepare is None)
     if prepare is not None and not context.exited(life):
         try:
             result = await prepare(context)
@@ -313,6 +320,9 @@ async def recover(
         if not context.exited(life) and result is not None:
             return result
 
+    if context.exited(life) and not context.complete:
+        context.models = sorted(set(context.models) | set(life.exit_models or []))
+    life.exit_models = None
     while len(life.restarts) < MAX_RESTARTS and not life.stopping:
         if context.exited(life):
             context.generation = life.exit_generation
@@ -340,6 +350,9 @@ async def recover(
                 log.warning("oMLX recovery failed with an observed exit for %s", server_id, exc_info=True)
                 continue
             raise
+        if not context.complete:
+            emit(server_id, "restart.failed", status=status, reason="loaded_unknown")
+            return {"restarted": False, "reason": "loaded_unknown"}
         missing = sorted(set(context.models) - {row["identifier"] for row in restored or []})
         if restored is None or missing:
             missing = missing or context.models
