@@ -226,11 +226,14 @@ def test_native_error_step_writes_cause_kind_to_the_row_and_the_live_frame(monke
     async def _turn_end(*a, **kw):
         return None
 
+    async def _no_saved_row_broadcast(*a, **kw):
+        return None
+
     monkeypatch.setattr("core.step_handler.run_in_db", _run_in_db)
     monkeypatch.setattr("core.step_handler.write_transaction", lambda *a, **kw: _Tx())
     monkeypatch.setattr("core.step_handler.record_turn_end_logged", _turn_end)
     # This test stubs persistence; the real saved-row broadcast is covered separately.
-    monkeypatch.setattr("core.step_handler.broadcast_llm_error", _turn_end)
+    monkeypatch.setattr("core.step_handler.broadcast_llm_error", _no_saved_row_broadcast)
     monkeypatch.setattr(
         "core.step_handler.insert_message",
         lambda thread_id, role, content, meta, **kw: stored.append(meta),

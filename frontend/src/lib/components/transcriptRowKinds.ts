@@ -26,10 +26,6 @@ const ERROR_SYSTEM_TYPES = new Set([
 	'llm_error', 'cc_error', 'tool_boundary_violation', 'tool_bridge_unavailable',
 ]);
 
-export function isErrorSystemType(type: string): boolean {
-	return ERROR_SYSTEM_TYPES.has(type);
-}
-
 export function systemType(message: TranscriptMessage): string {
 	return String(message.metadata?.type ?? '');
 }
@@ -42,7 +38,7 @@ export function isNeverDrawn(message: TranscriptMessage): boolean {
 
 /** Whether an error row carries the stamp that moves it inside its block. */
 export function isRecoveredError(message: TranscriptMessage): boolean {
-	return message.role === 'system' && isErrorSystemType(systemType(message))
+	return message.role === 'system' && ERROR_SYSTEM_TYPES.has(systemType(message))
 		&& message.metadata?.recovered === true;
 }
 
@@ -50,7 +46,7 @@ export function isSystemNotice(message: TranscriptMessage): boolean {
 	if (message.role !== 'system') return false;
 	const type = systemType(message);
 	if (type === 'context_event' && String(message.metadata?.event_type ?? '').startsWith('held_reply.')) return true;
-	if (isErrorSystemType(type)) return message.metadata?.recovered !== true;
+	if (ERROR_SYSTEM_TYPES.has(type)) return message.metadata?.recovered !== true;
 	// A provider result splits only as an error with something to read.
 	if (type === 'result') return message.metadata?.is_error === true && Boolean(message.content);
 	return !ACTIVITY_SYSTEM_TYPES.has(type) && !NEVER_DRAWN_SYSTEM_TYPES.has(type);
@@ -86,7 +82,7 @@ export function rowKind(message: TranscriptMessage): RowKind {
 	if (message.role !== 'system') return 'other';
 	const type = systemType(message);
 	if (isSystemNotice(message)) return 'other';
-	if (isErrorSystemType(type)) return isRecoveredError(message) ? 'error_recovered' : 'other';
+	if (ERROR_SYSTEM_TYPES.has(type)) return isRecoveredError(message) ? 'error_recovered' : 'other';
 	if (type === 'context_event') return 'context_update';
 	if (type === 'account_switch') return 'account_move';
 	if (type === 'subagent_done') return 'subagent_finished';
