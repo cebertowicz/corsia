@@ -143,6 +143,13 @@ export function owner(lease: HostAccessItem): string {
 		: (text(lease.root_thread_id) ? lease.root_thread_id : 'Unknown chat');
 }
 
+/** The pending chip's and drawer's accessible name. */
+export function pendingLabel(request: HostAccessItem): string {
+	return request.kind === 'script'
+		? 'Review permission for this script to act as your agent and use the agents’ GitHub account'
+		: 'Review temporary host access';
+}
+
 export function duration(seconds: unknown): string {
 	if (!Number.isInteger(seconds) || (seconds as number) < 1 || (seconds as number) > 1_800) {
 		return 'Invalid duration';

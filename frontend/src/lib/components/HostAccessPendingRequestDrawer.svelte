@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { Button, StatePill } from '$lib/components/ui';
-	import { text, duration, cadence, policyLabel, approvalReady, owner } from '$lib/hostAccess/leaseFormat';
+	import HostAccessScriptRequestDrawer from './HostAccessScriptRequestDrawer.svelte';
+	import { text, duration, policyLabel, approvalReady, owner } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessItem } from '$lib/api/hostAccess';
 	let {
 		lease,
@@ -70,33 +71,7 @@
 {/snippet}
 
 {#if lease.kind === 'script'}
-	<!-- The script card draws the §0.1 roles: sentence-case section labels, status as coloured text, no boxes. -->
-	<div class="pending-drawer">
-		<header class="decision-head">
-			<div><div class="section-label">Allow this script to act as your agent and use the agents’ GitHub account</div><h2 title={lease.script_name}>{lease.script_name}</h2></div>
-			<span class="status" class:stale>{stale ? 'Not current' : 'Needs approval'}</span>
-		</header>
-		<div class="decision-body">
-			<section><span class="section-label">File</span><p>{lease.script_path}</p></section>
-			<section><span class="section-label">When it runs</span><p>{cadence(lease.trigger?.cadence_seconds ?? null)}</p></section>
-			<section class="purpose"><span class="section-label">Purpose</span><p>{lease.purpose}</p></section>
-			<section><span class="section-label">Request (as the agent quoted it)</span><p>{lease.user_request}</p></section>
-			<section><span class="section-label">Reviewer’s reason</span><p>{lease.reviewer_reason}</p></section>
-			{#if stale || !ready}
-				<div class="blocked-line" role="status">
-					<span>{stale
-						? 'Couldn’t check that this request is still current, so it can’t be approved yet.'
-						: 'This request arrived without everything needed to approve it. Retry to load it again.'}</span>
-					<Button variant="ghost" size="sm" onclick={onRetry}>Retry</Button>
-				</div>
-			{/if}
-		</div>
-		<footer class="decision-actions">
-			<Button variant="danger" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Deny</Button>
-			<span class="decision-spacer"></span>
-			{#if ready}<Button variant="primary" loading={deciding} disabled={approveDisabled} onclick={onApprove}>Approve</Button>{/if}
-		</footer>
-	</div>
+	<HostAccessScriptRequestDrawer request={lease} {stale} {deciding} {rejectDisabled} {approveDisabled} {onApprove} {onReject} {onRetry} />
 {:else}
 <div class="pending-drawer">
 	<header class="decision-head">
@@ -223,7 +198,9 @@
 {/if}
 
 <style>
-	.pending-drawer {
+	/* The sheet both request kinds share (HostAccessScriptRequestDrawer renders inside it too),
+	   so it is global under .pending-drawer. */
+	:global(.pending-drawer) {
 		display: flex;
 		flex-direction: column;
 		min-height: 0;
@@ -234,7 +211,7 @@
 	   through .drawer-body's max-height-capped flex item does not reliably
 	   resolve (verified empirically), so sticky is the robust fix, not a
 	   nested `.decision-body { overflow-y: auto }` region. */
-	.decision-head {
+	:global(.pending-drawer .decision-head) {
 		position: sticky;
 		top: 0;
 		z-index: 2;
@@ -247,8 +224,8 @@
 		backdrop-filter: var(--glass-blur);
 		-webkit-backdrop-filter: var(--glass-blur);
 	}
-	.decision-head > div { min-width: 0; }
-	.decision-head h2 {
+	:global(.pending-drawer .decision-head > div) { min-width: 0; }
+	:global(.pending-drawer .decision-head h2) {
 		margin: 4px 0 0;
 		overflow: hidden;
 		color: var(--text-primary);
@@ -257,6 +234,37 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+	:global(.pending-drawer .decision-body) {
+		display: grid;
+		gap: 18px;
+		min-width: 0;
+	}
+	:global(.pending-drawer .decision-body section) { min-width: 0; }
+	:global(.pending-drawer .decision-body p) {
+		margin: 5px 0 0;
+		color: var(--text-secondary);
+		line-height: 1.5;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+	:global(.pending-drawer .purpose p) { color: var(--text-primary); font-size: var(--text-body); }
+	:global(.pending-drawer .decision-actions) {
+		position: sticky;
+		bottom: 0;
+		z-index: 2;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		/* The sheet is flush-bottom, so the footer carries the bottom inset itself
+		   and sits on the scroller's edge instead of above a strip of padding the
+		   content scrolls through. */
+		padding: 14px 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
+		background: var(--glass-thick);
+		backdrop-filter: var(--glass-blur);
+		-webkit-backdrop-filter: var(--glass-blur);
+	}
+	:global(.pending-drawer .decision-spacer) { flex: 1; }
+
 	.eyebrow, .label {
 		color: var(--text-tertiary);
 		text-transform: uppercase;
@@ -264,21 +272,7 @@
 		font-size: var(--text-caption);
 		font-weight: 650;
 	}
-	.decision-body {
-		display: grid;
-		gap: 18px;
-		min-width: 0;
-	}
-	.decision-body section { min-width: 0; }
-	.decision-body p {
-		margin: 5px 0 0;
-		color: var(--text-secondary);
-		line-height: 1.5;
-		white-space: pre-wrap;
-		overflow-wrap: anywhere;
-	}
 	.decision-body .explainer { margin: 0; }
-	.purpose p { color: var(--text-primary); font-size: var(--text-body); }
 	ol {
 		margin: 7px 0 0;
 		padding-left: 22px;
@@ -366,54 +360,19 @@
 		font-size: var(--text-footnote);
 	}
 	.approval-blocked span { color: var(--text-secondary); }
-	.section-label {
-		color: var(--text-tertiary);
-		font-size: var(--text-footnote);
-		font-weight: var(--fw-semibold);
-	}
-	.status {
-		flex: none;
-		color: var(--amber-text);
-		font-size: var(--text-footnote);
-		font-weight: var(--fw-medium);
-	}
-	.status.stale, .blocked-line { color: var(--red-text); }
-	.blocked-line {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--text-footnote);
-	}
-	.blocked-line span { flex: 1; min-width: 0; }
-	.decision-actions {
-		position: sticky;
-		bottom: 0;
-		z-index: 2;
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		/* The sheet is flush-bottom, so the footer carries the bottom inset itself
-		   and sits on the scroller's edge instead of above a strip of padding the
-		   content scrolls through. */
-		padding: 14px 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
-		background: var(--glass-thick);
-		backdrop-filter: var(--glass-blur);
-		-webkit-backdrop-filter: var(--glass-blur);
-	}
-	.decision-spacer { flex: 1; }
 
 	@media (max-width: 720px) {
 		/* Keep the first requested exception above the sticky decision footer even
 		   when a non-Apple system font takes an extra line. The drawer remains the
 		   only scroll container; this only compacts existing sheet spacing. */
-		.decision-head { padding-bottom: var(--space-2); }
-		.decision-body { gap: var(--space-3); }
+		:global(.pending-drawer .decision-head) { padding-bottom: var(--space-2); }
+		:global(.pending-drawer .decision-body) { gap: var(--space-3); }
+		:global(.pending-drawer .decision-actions) { padding-top: var(--space-2); }
 		.policy-exceptions { padding: var(--space-2); }
 		.policy-exceptions .external-warning {
 			margin: var(--space-2) 0;
 			line-height: var(--lh-snug);
 		}
-		.decision-actions { padding-top: var(--space-2); }
 		.repo-policy-context li {
 			grid-template-columns: 1fr;
 			gap: 2px;

@@ -45,7 +45,8 @@
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import HostAccessPendingRequestDrawer from './HostAccessPendingRequestDrawer.svelte';
 	import HostAccessActiveLeaseChip from './HostAccessActiveLeaseChip.svelte';
-	import { decisionBlocked, duration, owner, text } from '$lib/hostAccess/leaseFormat';
+	import HostAccessPendingTrigger from './HostAccessPendingTrigger.svelte';
+	import { decisionBlocked, owner, pendingLabel, text } from '$lib/hostAccess/leaseFormat';
 	import {
 		focusRestoreIntentForDecision,
 		restoreComposerFocusAfterLeaseRemoval,
@@ -395,29 +396,16 @@
 		{/if}
 
 		{#if currentPending}
-			<button
-				type="button"
-				class="pending-request-trigger"
-				aria-label={currentPending.kind === 'script' ? 'Review permission for this script to act as your agent and use the agents’ GitHub account' : 'Review temporary host access'}
-				aria-haspopup="dialog"
-				aria-expanded={pendingOpen}
-				bind:this={pendingTriggerEl}
+			<HostAccessPendingTrigger
+				request={currentPending}
+				{stale}
+				open={pendingOpen}
+				bind:element={pendingTriggerEl}
 				onclick={openPendingDrawer}
-			>
-				{#if currentPending.kind === 'script'}
-					<span class="eyebrow sentence">Script approval</span>
-					<span class="pending-owner">{currentPending.script_name}</span>
-					<span class="pending-status" class:stale>{stale ? 'Not current' : 'Needs approval'}</span>
-				{:else}
-					<span class="eyebrow">Temporary host access</span>
-					<span class="pending-owner">{owner(currentPending)}</span>
-					<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : duration(currentPending.requested_duration_seconds)} size="sm" />
-				{/if}
-				<span class="pending-action">Review →</span>
-			</button>
+			/>
 			{#key currentPending.id}
 				<AdaptiveDrawer
-					ariaLabel={currentPending.kind === 'script' ? 'Review permission for this script to act as your agent and use the agents’ GitHub account' : 'Review temporary host access'} flushBottom
+					ariaLabel={pendingLabel(currentPending)} flushBottom
 					open={pendingOpen}
 					onClose={closePendingDrawer}
 				>
@@ -498,64 +486,6 @@
 		scrollbar-width: thin;
 		pointer-events: none;
 	}
-	.pending-request-trigger {
-		display: flex;
-		align-items: center;
-		gap: var(--space-3);
-		width: 100%;
-		min-height: 44px;
-		padding: var(--space-2) var(--space-3);
-		border: 1px solid var(--amber-line);
-		border-radius: var(--radius-sm);
-		background: color-mix(in srgb, var(--amber) 10%, var(--bg-secondary));
-		color: var(--text-primary);
-		font: inherit;
-		text-align: left;
-		cursor: pointer;
-		pointer-events: auto;
-	}
-	.pending-request-trigger:focus-visible {
-		outline: 2px solid var(--accent-line);
-		outline-offset: 2px;
-	}
-	.pending-owner {
-		flex: 1;
-		min-width: 0;
-		overflow: hidden;
-		font-size: var(--text-footnote);
-		font-weight: var(--fw-medium);
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.pending-request-trigger .eyebrow {
-		flex: none;
-		color: var(--amber);
-		text-transform: uppercase;
-		letter-spacing: 0.07em;
-		font-size: var(--text-caption);
-		font-weight: 650;
-	}
-	/* The script chip draws §0.1 roles: sentence-case label, status as coloured text. */
-	.pending-request-trigger .eyebrow.sentence {
-		color: var(--text-tertiary);
-		text-transform: none;
-		letter-spacing: normal;
-		font-size: var(--text-footnote);
-		font-weight: var(--fw-semibold);
-	}
-	.pending-status {
-		flex: none;
-		color: var(--amber-text);
-		font-size: var(--text-footnote);
-		font-weight: var(--fw-medium);
-	}
-	.pending-status.stale { color: var(--red-text); }
-	.pending-action {
-		flex: none;
-		color: var(--amber);
-		font-size: var(--text-footnote);
-		font-weight: var(--fw-medium);
-	}
 
 	@media (max-width: 720px) {
 		.thread-host-access {
@@ -573,8 +503,8 @@
 				+ 6px
 			);
 			max-height: var(--host-access-available-height);
+			--host-access-owner-wrap: normal;
+			--host-access-eyebrow-display: none;
 		}
-		.pending-owner { white-space: normal; }
-		.eyebrow { display: none; }
 	}
 </style>
