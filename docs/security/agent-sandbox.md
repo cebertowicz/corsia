@@ -48,7 +48,6 @@ On macOS and Linux the shell sandbox fences each agent out of projects that aren
 - **File tools.** `read_file`, `write_file`, `edit_file`, `grep`, `glob` and `list_dir` still reach every project in the workspace, including ones set to Local models only.
 - **Conversations.** An agent can read another project's conversations by id ([Accounts and access](accounts-and-access.md#how-agents-act)).
 - **The workspace's Git history.** A shell running `git` at the workspace root can read the committed versions of other projects' files.
-- **Linux, before a folder exists.** On Linux, a project folder or repository that doesn't exist yet isn't fenced until it exists ([Linux](#linux)).
 
 If two bodies of work must stay apart, give each its own workspace and CORSIA install.
 
