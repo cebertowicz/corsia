@@ -14,6 +14,8 @@ import sys
 import tempfile
 from collections import defaultdict
 
+from data_model_layout import connected_diagrams, module_group, regroup
+
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "docs/reference/data-model"
 CREATE_TABLE = re.compile(
@@ -21,7 +23,22 @@ CREATE_TABLE = re.compile(
     re.IGNORECASE,
 )
 SHADOW = re.compile(r"^(.*_fts)_(?:data|idx|docsize|config|content)$")
-MAX_DIAGRAM_TABLES = 4
+SUMMARIES = {
+    "Threads and messages": "These tables store threads, turns, messages, presence and related updates.",
+    "Plans": "These tables store plans, their nodes, events, dependencies and execution state.",
+    "Events and webhooks": "These tables store events, rules, watches, bulletins and webhook deliveries.",
+    "Documents and artifacts": "These tables store artifact registrations, identities, comments and document feedback.",
+    "Accounts and connections": "These tables store accounts, credentials, connections and connected apps.",
+    "Usage and measurement": "These tables store model usage, pricing and measurement data.",
+    "Context and memory": "These tables store checkpoints, continuity, context changes and extracted facts.",
+    "Settings and policy": "These tables store projects, settings and policies.",
+    "Host access": "These tables store host access leases and action reviews.",
+    "Providers and runtime": "These tables store provider, model, server and runtime process data.",
+    "Store internals": "These tables support SQLite sequences and full-text search indexes.",
+    "Document store": "These tables store a document's live updates, mirror and publication state.",
+    "Log store": "These tables store CORSIA log records and their schema metadata.",
+    "Analytics store": "These tables store product events and request timing data.",
+}
 
 
 def initialize_stores(root: Path):
@@ -65,7 +82,10 @@ def source_map():
     result = {}
     for path in sorted(paths):
         module = path.relative_to(ROOT).as_posix()
-        for table in CREATE_TABLE.findall(path.read_text()):
+        definitions = CREATE_TABLE.findall(path.read_text())
+        if module != "backend/infra/schema.py":
+            module_group(module)
+        for table in definitions:
             if table in result and result[table] != module:
                 raise ValueError(f"Ambiguous table source: {table}: {result[table]}, {module}")
             result[table] = module
@@ -154,13 +174,6 @@ def cell(value):
 def diagram(tables):
     lines = ["```mermaid", "erDiagram"]
     for name, info in tables.items():
-        lines.append(f"    {name} {{")
-        for column, kind, _, primary, _ in info["columns"]:
-            typename = re.sub(r"[^A-Za-z0-9_]", "_", kind or "ANY")
-            key = " PK" if primary else ""
-            lines.append(f"        {typename} {column}{key}")
-        lines.append("    }")
-    for name, info in tables.items():
         for column, target, _ in info["foreign"]:
             if target in tables:
                 required = next((required or primary for col, _, required, primary, _
@@ -176,7 +189,8 @@ def table_section(name, info):
     foreign = defaultdict(list)
     for column, target, reference in info["foreign"]:
         foreign[column].append(f"{target}.{reference}")
-    lines = [f"### `{name}`", "", "| Column | Type | Primary key | NOT NULL | Default | References |"
+    lines = [f"### `{name}`", "", f"Source: `{info['module']}`.", "",
+             "| Column | Type | Primary key | NOT NULL | Default | References |",
              "|---|---|---|---|---|---|"]
     for column, kind, required, primary, default in info["columns"]:
         lines.append(f"| `{cell(column)}` | {cell(kind)} | {'Yes' if primary else 'No'} | "
@@ -186,24 +200,21 @@ def table_section(name, info):
     return "\n".join(lines + ["", f"Indexes: {indexes}.", ""])
 
 
-def page(store, module, tables):
-    title = Path(module).stem.replace("_", " ").title() if module != "SQLite internal" else module
-    description = "Temporary tables on a primary database connection" if module.endswith(
-        "/measurement_prepared.py") else f"Tables in the {store} store"
-    lines = [f"# {title}", "", f"{description} created by `{module}`.", ""]
-    names = sorted(tables)
-    for start in range(0, len(names), MAX_DIAGRAM_TABLES):
-        batch = {name: tables[name] for name in names[start:start + MAX_DIAGRAM_TABLES]}
-        lines.extend(["## Tables " + str(start + 1) + "–" + str(start + len(batch)), "",
-                      diagram(batch), ""])
-        for name, info in batch.items():
-            lines.append(table_section(name, info))
+def page(group, tables):
+    lines = [f"# {group}", "", SUMMARIES[group], ""]
+    diagrams = connected_diagrams(tables)
+    if diagrams:
+        lines.extend(["## Relationships", ""])
+        for batch in diagrams:
+            lines.extend([diagram(batch), ""])
+    lines.extend(["## Tables", ""])
+    for name in sorted(tables):
+        lines.append(table_section(name, tables[name]))
     return "\n".join(lines).rstrip() + "\n"
 
 
-def filename(store, module):
-    stem = Path(module).stem.replace("_", "-").lower() if module != "SQLite internal" else "sqlite-internal"
-    return f"{store}-{stem}.md"
+def filename(group):
+    return group.lower().replace(" ", "-") + ".md"
 
 
 def render(groups):
@@ -217,20 +228,13 @@ def render(groups):
              "", "Historical migration tables are excluded: `checkpoints_new`, `connected_accounts_new`, "
              "`connected_account_audit_new`, `_usage_backfill_bound`, `_usage_backfill_unbound`, "
              "and `retired_worker_releases` are migration intermediates; `project_vendor_accounts` was retired.", ""]
-    for store in ("primary", "document", "logs", "analytics"):
-        lines.extend([f"## {store.title()} store", "", "| Schema module | Reference |", "|---|---|"])
-        for key in sorted(k for k in groups if k[0] == store):
-            _, module = key
-            path = filename(*key)
-            if path in files:
-                raise ValueError(f"Duplicate output page: {path}")
-            files[path] = page(store, module, groups[key])
-            lines.append(f"| `{module}` | [{Path(path).stem}]({path}) |")
-        lines.append("")
-    lines.extend(["## Table to schema module", "", "| Store | Table | Module |", "|---|---|---|"])
-    for (store, module), tables in sorted(groups.items()):
-        for name in sorted(tables):
-            lines.append(f"| {store} | `{name}` | `{module}` |")
+    subsystems, modules = regroup(groups)
+    lines.extend(["| Subsystem | Page | Source modules |", "|---|---|---|"])
+    for group in sorted(subsystems):
+        path = filename(group)
+        files[path] = page(group, subsystems[group])
+        sources = ", ".join(f"`{module}`" for module in sorted(modules[group]))
+        lines.append(f"| {group} | [{group}]({path}) | {sources} |")
     files["README.md"] = "\n".join(lines) + "\n"
     return files
 

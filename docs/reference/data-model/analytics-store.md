@@ -1,50 +1,15 @@
-# Analytics Db
+# Analytics store
 
-Tables in the analytics store created by `backend/infra/analytics_db.py`.
+These tables store product events and request timing data.
 
-## Tables 1–3
-
-```mermaid
-erDiagram
-    product_events {
-        TIMESTAMP ts
-        VARCHAR category
-        VARCHAR action
-        JSON properties
-        VARCHAR session_id
-        VARCHAR project_id
-    }
-    request_slow {
-        TIMESTAMP ts
-        VARCHAR method
-        VARCHAR route
-        INTEGER status
-        DOUBLE dur_ms
-        DOUBLE dbq_ms
-        DOUBLE db_ms
-        BIGINT response_bytes
-        DOUBLE dbq_read_ms
-        DOUBLE db_read_ms
-        DOUBLE dbq_bulk_ms
-        DOUBLE db_bulk_ms
-    }
-    request_timing_daily {
-        DATE day PK
-        VARCHAR method PK
-        VARCHAR route PK
-        VARCHAR status_class PK
-        BIGINT count
-        DOUBLE sum_ms
-        DOUBLE max_ms
-        BIGINT sum_bytes
-        BIGINT max_bytes
-        INTEGER__ buckets
-    }
-```
+## Tables
 
 ### `product_events`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/analytics_db.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `ts` | TIMESTAMP | No | Yes | — | — |
 | `category` | VARCHAR | No | Yes | — | — |
 | `action` | VARCHAR | No | Yes | — | — |
@@ -56,7 +21,10 @@ Indexes: `idx_pe_cat_act_ts` ([category, '"action"', ts]), `idx_pe_proj_ts` ([pr
 
 ### `request_slow`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/analytics_db.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `ts` | TIMESTAMP | No | Yes | — | — |
 | `method` | VARCHAR | No | Yes | — | — |
 | `route` | VARCHAR | No | Yes | — | — |
@@ -74,7 +42,10 @@ Indexes: `idx_request_slow_ts` ([ts]).
 
 ### `request_timing_daily`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/analytics_db.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `day` | DATE | Yes | Yes | — | — |
 | `method` | VARCHAR | Yes | Yes | — | — |
 | `route` | VARCHAR | Yes | Yes | — | — |

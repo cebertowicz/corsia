@@ -1,59 +1,166 @@
-# Plan Schema
+# Plans
 
-Tables in the primary store created by `backend/infra/plan_schema.py`.
+These tables store plans, their nodes, events, dependencies and execution state.
 
-## Tables 1–4
+## Relationships
 
 ```mermaid
 erDiagram
-    plan_ask_deferrals {
-        TEXT hold_id PK
-        TEXT deferred_at
-    }
-    plan_mutation_receipts {
-        TEXT plan_id PK
-        TEXT mutation_id PK
-        TEXT actor_id
-        TEXT operation
-        TEXT request_fingerprint
-        TEXT result_json
-        TEXT created_at
-    }
-    plan_node_artifact_links {
-        TEXT node_id PK
-        TEXT artifact_id PK
-        TEXT role PK
-        TEXT actor_id
-        TEXT provenance
-        TEXT source_event_id
-        TEXT created_at
-    }
-    plan_node_attempts {
-        TEXT id PK
-        TEXT plan_id
-        TEXT node_id
-        TEXT executor_thread_id
-        INTEGER requirements_revision
-        INTEGER attempt_ordinal
-        TEXT selected_by_actor_id
-        TEXT provenance
-        TEXT selected_at
-        TEXT released_at
-        TEXT release_reason
-    }
+    plan_node_holds ||--o| plan_ask_deferrals : references
+    plans ||--o{ plan_events : references
+    plan_nodes ||--o{ plan_node_artifact_links : references
+    plan_nodes ||--o| plan_node_attempts : references
+    plans ||--o{ plan_node_attempts : references
+    plan_node_events o|--o{ plan_node_events : references
+    plan_nodes ||--o{ plan_node_events : references
+    plan_node_events o|--o{ plan_node_holds : references
+    plan_nodes ||--o| plan_node_holds : references
+    plan_nodes ||--o{ plan_nodes : references
+    plan_nodes o|--o{ plan_nodes : references
+    plan_nodes o|--o{ plan_nodes : references
+    plan_nodes o|--o{ plan_nodes : references
+    plans ||--o{ plan_nodes : references
+    plans o|--o{ plans : references
 ```
+
+```mermaid
+erDiagram
+    plan_markdown_imports ||--o{ plan_markdown_import_issues : references
+```
+
+```mermaid
+erDiagram
+    plans ||--o{ plan_mutation_receipts : references
+    plans o|--o{ plans : references
+```
+
+```mermaid
+erDiagram
+    plan_nodes ||--o{ plan_node_dependencies : references
+    plan_nodes ||--o{ plan_node_dependencies : references
+    plan_nodes ||--o{ plan_node_intent_words : references
+    plan_nodes ||--o{ plan_nodes : references
+    plan_nodes o|--o{ plan_nodes : references
+    plan_nodes o|--o{ plan_nodes : references
+    plan_nodes o|--o{ plan_nodes : references
+```
+
+```mermaid
+erDiagram
+    plan_node_attempts ||--o{ plan_tool_dispatches : references
+```
+
+## Tables
 
 ### `plan_ask_deferrals`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/plan_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `hold_id` | TEXT | Yes | No | — | plan_node_holds.id |
 | `deferred_at` | TEXT | No | Yes | — | — |
 
 Indexes: `sqlite_autoindex_plan_ask_deferrals_1` (hold_id, unique).
 
+### `plan_events`
+
+Source: `backend/infra/plan_events_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `id` | TEXT | Yes | No | — | — |
+| `plan_id` | TEXT | No | Yes | — | plans.id |
+| `actor_id` | TEXT | No | No | — | — |
+| `provenance` | TEXT | No | Yes | — | — |
+| `event` | TEXT | No | Yes | — | — |
+| `prior_state` | TEXT | No | No | — | — |
+| `new_state` | TEXT | No | No | — | — |
+| `payload_json` | TEXT | No | No | — | — |
+| `created_at` | TEXT | No | Yes | — | — |
+
+Indexes: `idx_plan_events_plan` (plan_id, created_at), `sqlite_autoindex_plan_events_1` (id, unique).
+
+### `plan_liveness_wakes`
+
+Source: `backend/infra/plan_liveness_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `id` | TEXT | Yes | No | — | — |
+| `thread_id` | TEXT | No | Yes | — | — |
+| `status` | TEXT | No | Yes | 'armed' | — |
+| `deadline` | TEXT | No | Yes | — | — |
+| `provider_reset_at` | TEXT | No | No | — | — |
+| `provider_reset_turn_id` | TEXT | No | No | — | — |
+| `cycle` | INTEGER | No | Yes | 0 | — |
+| `last_open_count` | INTEGER | No | Yes | 0 | — |
+| `last_signal_hash` | TEXT | No | Yes | '' | — |
+| `last_settled_events` | INTEGER | No | Yes | 0 | — |
+| `wakes_in_window` | INTEGER | No | Yes | 0 | — |
+| `window_started_at` | TEXT | No | No | — | — |
+| `armed_at` | TEXT | No | Yes | — | — |
+| `fired_at` | TEXT | No | No | — | — |
+| `updated_at` | TEXT | No | Yes | — | — |
+
+Indexes: `idx_plan_liveness_thread_status` (thread_id, status), `sqlite_autoindex_plan_liveness_wakes_1` (id, unique), `sqlite_autoindex_plan_liveness_wakes_2` (thread_id, unique).
+
+### `plan_markdown_import_issues`
+
+Source: `backend/infra/plan_markdown_import_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `id` | TEXT | Yes | No | — | — |
+| `import_id` | TEXT | No | Yes | — | plan_markdown_imports.id |
+| `issue_order` | INTEGER | No | Yes | — | — |
+| `code` | TEXT | No | Yes | — | — |
+| `message` | TEXT | No | Yes | — | — |
+| `source_line` | INTEGER | No | No | — | — |
+| `detail_json` | TEXT | No | No | — | — |
+| `created_at` | TEXT | No | Yes | — | — |
+
+Indexes: `idx_plan_markdown_import_issues_import` (import_id, issue_order), `sqlite_autoindex_plan_markdown_import_issues_1` (id, unique), `sqlite_autoindex_plan_markdown_import_issues_2` (import_id, issue_order, unique).
+
+### `plan_markdown_imports`
+
+Source: `backend/infra/plan_markdown_import_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `id` | TEXT | Yes | No | — | — |
+| `artifact_id` | TEXT | No | Yes | — | artifact_identities.id |
+| `observed_owner_thread_id` | TEXT | No | No | — | — |
+| `owner_thread_id` | TEXT | No | No | — | threads.id |
+| `registration_id` | TEXT | No | No | — | — |
+| `plan_id` | TEXT | No | No | — | — |
+| `integration` | TEXT | No | Yes | — | — |
+| `artifact_type` | TEXT | No | Yes | — | — |
+| `external_id` | TEXT | No | Yes | — | — |
+| `source_path` | TEXT | No | Yes | — | — |
+| `artifact_updated_at` | TEXT | No | Yes | — | — |
+| `registration_updated_at` | TEXT | No | No | — | — |
+| `registration_state` | TEXT | No | No | — | — |
+| `source_sha256` | TEXT | No | No | — | — |
+| `parser_version` | TEXT | No | No | — | — |
+| `manifest_json` | TEXT | No | No | — | — |
+| `source_map_json` | TEXT | No | No | — | — |
+| `status` | TEXT | No | Yes | — | — |
+| `applied_plan_hash` | TEXT | No | No | — | — |
+| `wake_snapshot_json` | TEXT | No | No | — | — |
+| `discovered_at` | TEXT | No | Yes | — | — |
+| `updated_at` | TEXT | No | Yes | — | — |
+| `imported_at` | TEXT | No | No | — | — |
+| `rolled_back_at` | TEXT | No | No | — | — |
+
+Indexes: `idx_plan_markdown_imports_owner` (owner_thread_id, unique), `idx_plan_markdown_imports_status` (status), `sqlite_autoindex_plan_markdown_imports_1` (id, unique), `sqlite_autoindex_plan_markdown_imports_2` (artifact_id, unique), `sqlite_autoindex_plan_markdown_imports_3` (plan_id, unique).
+
 ### `plan_mutation_receipts`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/plan_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `plan_id` | TEXT | Yes | Yes | — | plans.id |
 | `mutation_id` | TEXT | Yes | Yes | — | — |
 | `actor_id` | TEXT | No | Yes | — | — |
@@ -66,7 +173,10 @@ Indexes: `sqlite_autoindex_plan_mutation_receipts_1` (plan_id, mutation_id, uniq
 
 ### `plan_node_artifact_links`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/plan_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `node_id` | TEXT | Yes | Yes | — | plan_nodes.id |
 | `artifact_id` | TEXT | Yes | Yes | — | artifact_identities.id |
 | `role` | TEXT | Yes | Yes | — | — |
@@ -79,7 +189,10 @@ Indexes: `idx_plan_node_artifact_links_artifact` (artifact_id, node_id), `sqlite
 
 ### `plan_node_attempts`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/plan_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `id` | TEXT | Yes | No | — | — |
 | `plan_id` | TEXT | No | Yes | — | plans.id |
 | `node_id` | TEXT | No | Yes | — | plan_nodes.id |
@@ -94,111 +207,12 @@ Indexes: `idx_plan_node_artifact_links_artifact` (artifact_id, node_id), `sqlite
 
 Indexes: `idx_plan_attempt_commitment` (node_id, selected_at), `idx_plan_attempt_open_executor` (plan_id, executor_thread_id, unique), `idx_plan_attempt_open_node` (node_id, unique), `idx_plan_node_attempts_released` (released_at), `idx_plan_node_attempts_selected` (selected_at), `sqlite_autoindex_plan_node_attempts_1` (id, unique), `sqlite_autoindex_plan_node_attempts_2` (node_id, attempt_ordinal, unique).
 
-## Tables 5–8
-
-```mermaid
-erDiagram
-    plan_node_dependencies {
-        TEXT node_id PK
-        TEXT depends_on_node_id PK
-        TEXT created_at
-    }
-    plan_node_events {
-        TEXT id PK
-        TEXT node_id
-        TEXT actor_id
-        TEXT provenance
-        TEXT event
-        TEXT prior_state
-        TEXT new_state
-        TEXT verification_result
-        TEXT causal_event_id
-        TEXT payload_json
-        TEXT created_at
-    }
-    plan_node_holds {
-        TEXT id PK
-        TEXT node_id
-        TEXT kind
-        TEXT reason_key
-        TEXT reason
-        TEXT owner_kind
-        TEXT owner_id
-        TEXT created_by_actor_id
-        TEXT provenance
-        TEXT created_at
-        TEXT cleared_by_actor_id
-        TEXT cleared_at
-        TEXT clearance_event_id
-    }
-    plan_nodes {
-        TEXT id PK
-        TEXT plan_id
-        TEXT parent_id
-        INTEGER order_key
-        TEXT kind
-        TEXT title
-        TEXT description
-        TEXT intent
-        TEXT intent_node_id
-        TEXT workflow_ref
-        TEXT workflow_version
-        TEXT workflow_step
-        TEXT difficulty
-        TEXT size
-        TEXT acceptance_criteria
-        INTEGER checkpoint_exception
-        TEXT state
-        TEXT assignee
-        TEXT spawn_kind
-        TEXT owner_thread_id
-        TEXT executor_thread_id
-        TEXT spawned_thread_id
-        TEXT follow_up_of
-        INTEGER requirements_revision
-        TEXT commitment_id
-        INTEGER watchdog_budget_seconds
-        INTEGER revision
-        TEXT created_at
-        TEXT updated_at
-        TEXT archived_at
-        INTEGER sent_back
-        TEXT own_last_changed
-        INTEGER listed
-        INTEGER child_in_work
-        INTEGER own_in_work
-        INTEGER sub_open
-        INTEGER sub_done
-        INTEGER sub_failed
-        INTEGER sub_closed
-        INTEGER sub_in_work
-        INTEGER prop_open
-        INTEGER prop_done
-        INTEGER prop_failed
-        INTEGER prop_closed
-        INTEGER prop_in_work
-        INTEGER folded
-        TEXT folded_at
-        TEXT fold_bucket
-        INTEGER child_folded_done
-        INTEGER child_folded_failed
-        INTEGER child_folded_closed
-    }
-    plan_nodes ||--o{ plan_node_dependencies : references
-    plan_nodes ||--o{ plan_node_dependencies : references
-    plan_node_events o|--o{ plan_node_events : references
-    plan_nodes ||--o{ plan_node_events : references
-    plan_node_events o|--o{ plan_node_holds : references
-    plan_nodes ||--o| plan_node_holds : references
-    plan_nodes ||--o{ plan_nodes : references
-    plan_nodes o|--o{ plan_nodes : references
-    plan_nodes o|--o{ plan_nodes : references
-    plan_nodes o|--o{ plan_nodes : references
-```
-
 ### `plan_node_dependencies`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/plan_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `node_id` | TEXT | Yes | Yes | — | plan_nodes.id |
 | `depends_on_node_id` | TEXT | Yes | Yes | — | plan_nodes.id |
 | `created_at` | TEXT | No | Yes | — | — |
@@ -207,7 +221,10 @@ Indexes: `idx_plan_node_dependencies_target` (depends_on_node_id), `sqlite_autoi
 
 ### `plan_node_events`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/plan_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `id` | TEXT | Yes | No | — | — |
 | `node_id` | TEXT | No | Yes | — | plan_nodes.id |
 | `actor_id` | TEXT | No | No | — | — |
@@ -224,7 +241,10 @@ Indexes: `idx_measurement_rejections_time` (created_at, node_id), `idx_plan_node
 
 ### `plan_node_holds`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/plan_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `id` | TEXT | Yes | No | — | — |
 | `node_id` | TEXT | No | Yes | — | plan_nodes.id |
 | `kind` | TEXT | No | Yes | — | — |
@@ -241,9 +261,29 @@ Indexes: `idx_measurement_rejections_time` (created_at, node_id), `idx_plan_node
 
 Indexes: `idx_plan_holds_active_node` (node_id, kind), `idx_plan_holds_one_pause` (node_id, unique), `sqlite_autoindex_plan_node_holds_1` (id, unique).
 
+### `plan_node_intent_words`
+
+Source: `backend/infra/plan_intent_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `node_id` | TEXT | No | Yes | — | plan_nodes.id |
+| `author` | TEXT | No | Yes | — | — |
+| `source_kind` | TEXT | No | Yes | — | — |
+| `source_id` | TEXT | No | Yes | — | — |
+| `quote` | TEXT | No | Yes | — | — |
+| `role` | TEXT | No | Yes | — | — |
+| `requirements_revision` | INTEGER | No | Yes | — | — |
+| `added_at` | TEXT | No | Yes | — | — |
+
+Indexes: `idx_plan_node_intent_words_node` (node_id).
+
 ### `plan_nodes`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/plan_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `id` | TEXT | Yes | No | — | — |
 | `plan_id` | TEXT | No | Yes | — | plans.id |
 | `parent_id` | TEXT | No | No | — | plan_nodes.id |
@@ -298,47 +338,36 @@ Indexes: `idx_plan_holds_active_node` (node_id, kind), `idx_plan_holds_one_pause
 
 Indexes: `idx_plan_nodes_commitment` (commitment_id, created_at), `idx_plan_nodes_executor_thread` (executor_thread_id), `idx_plan_nodes_folded` (plan_id, parent_id, folded_at, id), `idx_plan_nodes_follow_up` (follow_up_of), `idx_plan_nodes_intent_node` (intent_node_id), `idx_plan_nodes_last_changed` (parent_id, own_last_changed), `idx_plan_nodes_open` (plan_id, parent_id, order_key), `idx_plan_nodes_recent` (plan_id, own_last_changed), `idx_plan_nodes_spawned_thread` (spawned_thread_id), `idx_plan_nodes_stale` (plan_id), `idx_plan_nodes_tree` (plan_id, parent_id, order_key), `idx_plan_nodes_updated` (updated_at), `idx_plan_nodes_user_failed` (plan_id, own_last_changed), `idx_plan_nodes_workflow_ref` (workflow_ref), `sqlite_autoindex_plan_nodes_1` (id, unique).
 
-## Tables 9–10
+### `plan_pane_views`
 
-```mermaid
-erDiagram
-    plan_tool_dispatches {
-        TEXT id PK
-        TEXT attempt_id
-        TEXT turn_id
-        TEXT tool_name
-        TEXT started_at
-        TEXT settled_at
-        TEXT outcome
-        TEXT result_message_id
-    }
-    plans {
-        TEXT id PK
-        TEXT owner_kind
-        TEXT owner_id
-        TEXT parent_plan_id
-        TEXT state
-        INTEGER revision
-        TEXT created_at
-        TEXT updated_at
-        TEXT archived_at
-        INTEGER top_open
-        INTEGER top_done
-        INTEGER top_failed
-        INTEGER top_closed
-        INTEGER top_in_work
-        INTEGER top_roots
-        INTEGER top_folded_done
-        INTEGER top_folded_failed
-        INTEGER top_folded_closed
-        INTEGER settled_events
-    }
-    plans o|--o{ plans : references
-```
+Source: `backend/infra/plan_pane_views_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `user_id` | TEXT | Yes | Yes | — | — |
+| `thread_id` | TEXT | Yes | Yes | — | threads.id |
+| `seen_through` | TEXT | No | Yes | — | — |
+| `updated_at` | TEXT | No | Yes | — | — |
+
+Indexes: `sqlite_autoindex_plan_pane_views_1` (user_id, thread_id, unique).
+
+### `plan_status_dirty`
+
+Source: `backend/infra/plan_status_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `dirty_seq` | INTEGER | Yes | No | — | — |
+| `plan_id` | TEXT | No | Yes | — | — |
+
+Indexes: `sqlite_autoindex_plan_status_dirty_1` (plan_id, unique).
 
 ### `plan_tool_dispatches`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/plan_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `id` | TEXT | Yes | No | — | — |
 | `attempt_id` | TEXT | No | Yes | — | plan_node_attempts.id |
 | `turn_id` | TEXT | No | Yes | — | — |
@@ -350,9 +379,26 @@ erDiagram
 
 Indexes: `idx_plan_tool_dispatch_open_attempt` (attempt_id), `idx_plan_tool_dispatch_turn` (turn_id, started_at), `sqlite_autoindex_plan_tool_dispatches_1` (id, unique).
 
+### `plan_unattributed_dispatches`
+
+Source: `backend/infra/unattributed_dispatch_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `turn_id` | TEXT | Yes | No | — | — |
+| `thread_id` | TEXT | No | Yes | — | — |
+| `call_count` | INTEGER | No | Yes | — | — |
+| `plan_state` | TEXT | No | Yes | — | — |
+| `created_at` | TEXT | No | Yes | — | — |
+
+Indexes: `idx_plan_unattributed_dispatches_thread` (thread_id, created_at), `sqlite_autoindex_plan_unattributed_dispatches_1` (turn_id, unique).
+
 ### `plans`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/plan_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `id` | TEXT | Yes | No | — | — |
 | `owner_kind` | TEXT | No | Yes | — | — |
 | `owner_id` | TEXT | No | Yes | — | — |

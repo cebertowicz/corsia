@@ -1,63 +1,22 @@
-# Host Access Schema
+# Host access
 
-Tables in the primary store created by `backend/infra/host_access_schema.py`.
+These tables store host access leases and action reviews.
 
-## Tables 1–2
+## Relationships
 
 ```mermaid
 erDiagram
-    host_access_action_reviews {
-        TEXT id PK
-        TEXT lease_id
-        INTEGER lease_revision
-        TEXT thread_id
-        TEXT tool_name
-        TEXT action_hash
-        TEXT redacted_descriptor
-        TEXT reviewer_model
-        TEXT verdict
-        TEXT reason
-        TEXT permit_id
-        TEXT permit_expires_at
-        TEXT permit_consumed_at
-        TEXT created_at
-    }
-    host_access_leases {
-        TEXT id PK
-        TEXT root_thread_id
-        TEXT user_id
-        TEXT state
-        TEXT purpose
-        TEXT plan
-        INTEGER requested_duration_seconds
-        TEXT expected_resources
-        TEXT persistent_effects
-        TEXT rollback_plan
-        TEXT forbidden_effects
-        TEXT requesting_project_id
-        TEXT repo_policy_snapshot
-        TEXT repo_policy_hash
-        TEXT requested_policy_exceptions
-        TEXT application_hash
-        INTEGER revision
-        TEXT reviewer_model
-        TEXT application_review_result
-        TEXT application_reviewed_at
-        TEXT user_decision
-        TEXT user_decided_at
-        TEXT activated_at
-        TEXT activation_wake_delivered_at
-        TEXT expires_at
-        TEXT terminal_reason
-        TEXT created_at
-        TEXT updated_at
-    }
     host_access_leases ||--o{ host_access_action_reviews : references
 ```
 
+## Tables
+
 ### `host_access_action_reviews`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/host_access_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `id` | TEXT | Yes | No | — | — |
 | `lease_id` | TEXT | No | Yes | — | host_access_leases.id |
 | `lease_revision` | INTEGER | No | Yes | — | — |
@@ -77,7 +36,10 @@ Indexes: `idx_host_access_action_reviews_action` (lease_id, action_hash, created
 
 ### `host_access_leases`
 
-| Column | Type | Primary key | NOT NULL | Default | References ||---|---|---|---|---|---|
+Source: `backend/infra/host_access_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
 | `id` | TEXT | Yes | No | — | — |
 | `root_thread_id` | TEXT | No | Yes | — | threads.id |
 | `user_id` | TEXT | No | Yes | — | — |
