@@ -355,11 +355,9 @@ class TestSummaryBody:
 
         body = format_summary_body(findings, "Reviewer", 1, [], 0, 1)
 
-        assert "Do not patch the findings one-by-one" in body
-        assert body.splitlines()[0] == (
-            "## :no_entry_sign: STOP — APPROACH RESET REQUIRED"
-        )
-        assert "APPROACH RESET REQUIRED" in "\n".join(body.splitlines()[:4])
+        assert "Fix that cause, not each finding on its own" in body
+        assert body.splitlines()[0] == "## Review: this needs a different approach"
+        assert "STOP" not in body
         assert body.splitlines()[4] == "**LLM Code Review:** 2 block, 1 flag, 0 nit"
 
 

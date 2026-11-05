@@ -82,7 +82,7 @@ def format_status_summary(
     required_action: Literal["none", "approach_reset"] = (
         "approach_reset" if _requires_approach_reset(findings) else "none"
     )
-    prefix = "STOP: approach reset required -- " if required_action == "approach_reset" else ""
+    prefix = "Different approach needed -- " if required_action == "approach_reset" else ""
     summary = f"{prefix}{block_count} block, {flag_count} flag, {nit_count} nit -- reviewed by {model_label}"
     return required_action, summary, block_count, flag_count, nit_count
 
@@ -95,10 +95,10 @@ def _summary_header(
 ) -> list[str]:
     if _requires_approach_reset(findings):
         return [
-            "## :no_entry_sign: STOP — APPROACH RESET REQUIRED",
+            "## Review: this needs a different approach",
             "",
-            "**Do not patch the findings one-by-one. They are evidence, not "
-            "authority; regroup around the shared cause before revising.**",
+            "The findings share one cause. Fix that cause, not each finding "
+            "on its own, and rework the change around it before you push again.",
             "",
             f"**LLM Code Review:** {severity_summary}",
             "",

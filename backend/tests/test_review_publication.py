@@ -171,7 +171,7 @@ def test_approach_reset_groups_evidence_into_one_pull_comment():
     )
     assert poster.paths() == ["repos/owner/repo/pulls/42/comments"]
     assert poster.calls[0][1]["body"].startswith(
-        ":no_entry_sign: **STOP — APPROACH RESET REQUIRED**"
+        "**This needs a different approach**"
     )
     assert publication.deliveries[0].channel == CHANNEL_LINE
 

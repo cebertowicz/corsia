@@ -162,10 +162,8 @@ def test_approach_churn_thread_starts_with_stop_not_a_patchable_finding():
         category="review-process/approach-churn",
     ))
 
-    assert body.splitlines()[0] == (
-        ":no_entry_sign: **STOP — APPROACH RESET REQUIRED**"
-    )
-    assert "Do not patch the evidence below one-by-one" in body
+    assert body.splitlines()[0] == "**This needs a different approach**"
+    assert "Fix that cause, not each finding on its own" in body
 
 
 def test_extract_fingerprint_returns_none_for_no_marker():
