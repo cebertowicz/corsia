@@ -41,7 +41,7 @@ from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context
 from infra.auth import authenticate, may_access_artifact, require_user_header_only
 from infra.database import get_db, write_transaction
-from api.doc_comment_decisions import comment_action_status, decision_refusal
+from api.doc_comment_decisions import comment_action_status, decision_refusal, selection_refusal
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
 from infra.db_async import run_in_db
@@ -142,7 +142,9 @@ async def create_comment(
         raise HTTPException(404, str(exc)) from exc
     except CommentActionError as exc:
         raise HTTPException(400, exc.message) from exc
-    except (CommentSelectionChanged, AppLoopUnavailable) as exc:
+    except CommentSelectionChanged as exc:
+        return selection_refusal(exc)
+    except AppLoopUnavailable as exc:
         raise HTTPException(409, str(exc)) from exc
     except CrossArtifactIdError as exc:
         raise HTTPException(
@@ -329,8 +331,6 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
                 patch = reopen_fields(comment, moved)
             except CommentActionError as exc:
                 raise HTTPException(comment_action_status(exc), exc.message) from exc
-            except CommentSelectionChanged as exc:
-                raise HTTPException(409, str(exc)) from exc
             with write_transaction(db, scope="patch_user_comment") as connection:
                 row = update_comment(connection, comment_id, patch, user_name=user["name"])
                 apply_user_transition(connection, comment, patch, user, body.delivery_policy)
@@ -338,7 +338,10 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
         finally:
             db.close()
 
-    row = await run_in_db(_patch)
+    try:
+        row = await run_in_db(_patch)
+    except CommentSelectionChanged as exc:
+        return selection_refusal(exc)
     if row is None:
         raise HTTPException(404, "Comment not found")
     return {"comment": row}

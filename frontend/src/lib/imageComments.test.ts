@@ -6,6 +6,7 @@ vi.mock('$lib/stores/imageRegionComments', () => ({ addRegionComment: mocks.addR
 vi.mock('$lib/stores/toast', () => ({ toasts: { show: mocks.show, dismiss: mocks.dismiss } }));
 
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
+import { DocRequestError } from '$lib/api/docs';
 import { createImageComments, regionLabel } from './imageComments.svelte';
 
 const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
@@ -66,7 +67,7 @@ describe('image comments', () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		let source = 'old';
 		const post = vi.fn(async (_region, _text) => {
-			if (source === 'old') throw new Error('409 {"detail":"This diagram changed. Place the pin again; your draft is kept."}');
+			if (source === 'old') throw new DocRequestError('409 {"detail":"reworded","kind":"diagram_changed"}', 409, 'diagram_changed');
 			return 'new';
 		});
 		const refreshDiagram = vi.fn(async () => { source = 'new'; return true; });
@@ -82,6 +83,17 @@ describe('image comments', () => {
 		await comments.submit('Keep this');
 		expect(post).toHaveBeenLastCalledWith({ x: .6, y: .6, w: 0, h: 0 }, 'Keep this');
 		expect(comments.selectedId).toBe('new');
+	});
+
+	it('refreshes on the refusal kind, never on its wording', async () => {
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const post = vi.fn(async () => { throw new DocRequestError('409 {"detail":"This diagram changed."}', 409, 'selection_changed'); });
+		const refreshDiagram = vi.fn(async () => true);
+		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
+			restoreFocus: () => {}, post: () => ({ create: post }), refreshDiagram });
+		await comments.draw(BOX, rect);
+		await expect(comments.submit('Keep this')).rejects.toThrow('409');
+		expect(refreshDiagram).not.toHaveBeenCalled();
 	});
 
 	it('keeps the newly drawn pin visible while its move is saving, then shows its card', async () => {

@@ -31,11 +31,13 @@ def test_changed_diagram_refuses_new_and_moved_pins(integration_client, integrat
 
     rejected = integration_client.post(url, json={**body, 'body': 'Old snapshot'})
     assert rejected.status_code == 409
+    assert rejected.json()['kind'] == 'diagram_changed'
     assert 'This diagram changed. Place the pin again; your draft is kept.' in rejected.text
     assert set(_threads(integration_client, artifact)) == {pin['id']}
     rejected_move = integration_client.patch(_url(f"/api/comments/{pin['id']}"),
         json={'region': {'x': 0.8, 'y': 0.7}, 'diagram_source': old})
     assert rejected_move.status_code == 409
+    assert rejected_move.json()['kind'] == 'diagram_changed'
     assert 'This diagram changed. Place the pin again; your draft is kept.' in rejected_move.text
     unchanged = _threads(integration_client, artifact)[pin['id']]
     assert (unchanged['region_x'], unchanged['region_y'], unchanged['image_rev']) == (pin['region_x'], pin['region_y'], pin['image_rev'])

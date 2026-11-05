@@ -153,6 +153,6 @@ def _diagram_patch(comment: Mapping[str, Any], fields: dict[str, Any], doc_path:
     if current is None:
         raise CommentActionError("region_target", "the diagram this pin is on is no longer in the document.")
     if require_source and (source is None or diagram_pins.source_revision(source) != current):
-        from doceditor.comment_creation import CommentSelectionChanged
-        raise CommentSelectionChanged("This diagram changed. Place the pin again; your draft is kept.")
+        from doceditor.comment_creation import diagram_changed
+        raise diagram_changed()
     return move_fields_on(comment, fields, current)

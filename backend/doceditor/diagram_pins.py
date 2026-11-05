@@ -3,8 +3,8 @@
 A diagram has no file, so its pin is a text comment anchored on the block's opening fence line
 (```` ```mermaid ````), which edits to the diagram leave alone, as an image's markdown is left alone when its
 file changes. The revision a pin is placed on is the SHA-256 of the block's source then; the pin is stale when the
-block that opens at its anchor now differs (the images' "changed since this comment" state), and the agent is
-told which block it is on.
+block that opens at its anchor now differs or is gone (the images' "changed since this comment" state), and the
+agent is told which block it is on.
 """
 
 from __future__ import annotations
@@ -16,6 +16,10 @@ from markdown_it import MarkdownIt
 
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import _cp_at_u16
+
+
+#: How a delivery line for a diagram opens; ``plans.feedback_nodes`` puts these lines last, because they carry source.
+LINE_PREFIX = "Diagram"
 
 
 def _blocks(text: str) -> dict[int, tuple[int, int, str]]:
@@ -68,8 +72,8 @@ def mark_stale(group: Iterable[dict], path: str | None) -> None:
             line = _anchor_line(text, offset)
             block = blocks.get(line) if line is not None else None
             revisions[offset] = source_revision(block[2]) if block else None
-        current = revisions[offset]
-        row["region_stale"] = current is not None and row.get("image_rev") != current
+        # No mermaid block opens at the anchor any more (deleted, or its fence no longer says mermaid): changed.
+        row["region_stale"] = row.get("image_rev") != revisions[offset]
 
 
 def delivery_line(row: Mapping[str, Any], path: str | None) -> str:
@@ -78,8 +82,8 @@ def delivery_line(row: Mapping[str, Any], path: str | None) -> str:
     try:
         block = block_at(read_doc_text(path), row.get("from_off"))
     except (OSError, ValueError):
-        block = None
+        return f"{LINE_PREFIX}: the document could not be read, so this diagram's source is not shown."
     if block is None:
-        return "Diagram: its source block could not be read."
+        return f"{LINE_PREFIX}: the diagram is no longer where this comment was placed (no mermaid block starts there; it was deleted or changed)."
     first, last, source = block
-    return f"Diagram (mermaid block, lines {first} to {last} of {name}):\n```mermaid\n{source}\n```"
+    return f"{LINE_PREFIX} (mermaid block, lines {first} to {last} of {name}):\n```mermaid\n{source}\n```"

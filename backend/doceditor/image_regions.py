@@ -327,7 +327,7 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
             diagram_pins.mark_stale(group, path)
             for item in group:
                 item["region_line"] = describe_region(item, diagram=True)
-                item["marked_image_line"] = diagram_pins.delivery_line(item, path)
+                item["subject_line"] = diagram_pins.delivery_line(item, path)
             continue
         try:
             image = comment_image(db, group[0], path, bases)
@@ -346,7 +346,7 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
             line = f"Marked-up image (numbered boxes): {target} (open it with read_file to see each region)"
         for item in group:
             item["region_line"] = describe_region(item)
-            item["marked_image_line"] = line
+            item["subject_line"] = line
 
 
 def _draw_copy(image: Path, marks: list[Mark], target: Path, reader_thread_id: str) -> None:

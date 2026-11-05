@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from doceditor import comments, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, review_feedback, review_lifecycle
-from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
+from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt, diagram_changed
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
 from doceditor.suggestion_overlap import check_agent_suggestion_fits
@@ -86,7 +86,7 @@ def _image(db, request: CommentInput, quote: str | None, start: int | None) -> t
         revision = None
     if revision is not None:
         if request.browser and (request.diagram_source is None or diagram_pins.source_revision(request.diagram_source) != revision):
-            raise CommentSelectionChanged("This diagram changed. Place the pin again; your draft is kept.")
+            raise diagram_changed()
         return None, revision
     if request.artifact_id is not None:
         artifact = registry_models.get_artifact(request.artifact_id, db=db)

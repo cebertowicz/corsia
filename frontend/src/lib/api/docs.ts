@@ -14,14 +14,25 @@ function tok(): string {
 	return encodeURIComponent(get(token) ?? '');
 }
 
+/** A failed request whose body names the server's reason in `kind`, as a refused suggestion decision does. */
+export class DocRequestError extends Error {
+	constructor(message: string, readonly status: number, readonly kind: string | null) {
+		super(message);
+	}
+}
+
 export async function ok(res: Response) {
 	if (!res.ok) {
 		const detail = await res.text().catch(() => '');
-		let parsed: unknown;
-		try { parsed = JSON.parse(detail)?.detail; } catch { /* Non-JSON failures keep the HTTP status below. */ }
+		let parsed: unknown, kind: string | null = null;
+		try {
+			const body = JSON.parse(detail);
+			parsed = body?.detail;
+			if (typeof body?.kind === 'string') kind = body.kind;
+		} catch { /* Non-JSON failures keep the HTTP status below. */ }
 		const refusal = docOpenFailure(parsed);
 		if (refusal) throw refusal;
-		throw new Error(`${res.status} ${detail.slice(0, 200)}`);
+		throw new DocRequestError(`${res.status} ${detail.slice(0, 200)}`, res.status, kind);
 	}
 	return res.json();
 }

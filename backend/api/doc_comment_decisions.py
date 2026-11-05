@@ -3,6 +3,7 @@
 from fastapi.responses import JSONResponse
 
 from doceditor.comment_actions import CommentActionError
+from doceditor.comment_creation import CommentSelectionChanged
 
 
 COMMENT_ACTION_HTTP_STATUS = {
@@ -20,6 +21,11 @@ COMMENT_ACTION_HTTP_STATUS = {
 def comment_action_status(exc: CommentActionError) -> int:
     """Return the status shared by every refused document-comment action."""
     return COMMENT_ACTION_HTTP_STATUS.get(exc.kind, 409)
+
+
+def selection_refusal(exc: CommentSelectionChanged) -> JSONResponse:
+    """Render a 409 for a comment whose selection or diagram changed, with the kind the browser acts on."""
+    return JSONResponse({"detail": str(exc), "kind": exc.kind}, status_code=409)
 
 
 def decision_refusal(exc: CommentActionError) -> JSONResponse:

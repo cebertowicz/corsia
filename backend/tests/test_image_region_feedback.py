@@ -13,7 +13,7 @@ from PIL import Image
 
 import infra.database as db_mod
 from doc_feedback_helpers import batches, seed_thread
-from doceditor import comments, feedback_batches, image_regions
+from doceditor import comments, diagram_pins, feedback_batches, image_regions
 from infra.database import get_db, write_transaction
 from plans.feedback_nodes import PROVENANCE
 from registry import models as registry_models
@@ -252,7 +252,7 @@ def test_an_artifact_with_no_file_says_so(isolated_db, renders):
     finally:
         db.close()
 
-    assert items[0]["marked_image_line"] == "Marked-up image unavailable: the artifact has no image file."
+    assert items[0]["subject_line"] == "Marked-up image unavailable: the artifact has no image file."
     assert renders == []
 
 
@@ -266,7 +266,7 @@ def test_an_image_pillow_cannot_decode_names_no_copy(isolated_db, tmp_path, rend
     finally:
         db.close()
 
-    assert items[0]["marked_image_line"] == "Marked-up image unavailable: the image file could not be read."
+    assert items[0]["subject_line"] == "Marked-up image unavailable: the image file could not be read."
     assert items[0]["region_line"].startswith("Region 1: box at x 10%")
     assert renders == []
 
@@ -286,7 +286,7 @@ def test_a_reader_tray_that_cannot_be_resolved_still_delivers_the_text(isolated_
     finally:
         db.close()
 
-    assert items[0]["marked_image_line"] == (
+    assert items[0]["subject_line"] == (
         "Marked-up image unavailable: the reader's working folder could not be used (the working tray is a symlink)."
     )
     assert items[0]["region_line"].startswith("Region 1: box at x 10%")
@@ -304,7 +304,71 @@ def test_a_pin_on_a_diagram_in_a_document_names_its_block(isolated_db, tmp_path,
     finally:
         db.close()
 
-    assert item["marked_image_line"].startswith("Diagram (mermaid block, lines 3 to 6 of notes.md):")
-    assert "A --> B" in item["marked_image_line"]
+    assert item["subject_line"].startswith("Diagram (mermaid block, lines 3 to 6 of notes.md):")
+    assert "A --> B" in item["subject_line"]
     assert item['region_line'].endswith('(the diagram changed after this was placed)')
     assert renders == []
+
+
+def _diagram_pin_item(doc: Path, index: int, *, rev: str | None = None) -> dict:
+    text = doc.read_text()
+    anchor = text.index("```mermaid", text.index(f"# Diagram {index}"))
+    return {**_regional_item(), "id": f"c{index}", "region_number": index, "from_off": anchor,
+            "body": f"Person's words {index}", "image_rev": rev}
+
+
+def test_a_pin_on_a_deleted_diagram_is_stale_and_the_wake_line_says_so(isolated_db, tmp_path, renders):
+    doc = tmp_path / "notes.md"
+    doc.write_text("# Flow\n\n```mermaid\ngraph TD\n  A --> B\n```\n")
+    item = {**_regional_item(), "from_off": doc.read_text().index("```mermaid")}
+    item["image_rev"] = diagram_pins.revision(doc.read_text(), item["from_off"])
+    doc.write_text("# Flow\n\nThe diagram is gone.\n")
+    db = get_db()
+    try:
+        image_regions.annotate_delivery(db, [item], path=str(doc), reader_thread_id="owner", batch_id="b1")
+    finally:
+        db.close()
+
+    assert item["region_stale"] is True
+    assert item["region_line"].endswith("(the diagram changed after this was placed)")
+    assert "no longer" in item["subject_line"]
+
+
+def test_a_pin_on_a_fence_whose_info_string_changed_is_stale(isolated_db, tmp_path, renders):
+    doc = tmp_path / "notes.md"
+    doc.write_text("# Flow\n\n```mermaid\ngraph TD\n  A --> B\n```\n")
+    item = {**_regional_item(), "from_off": doc.read_text().index("```mermaid")}
+    item["image_rev"] = diagram_pins.revision(doc.read_text(), item["from_off"])
+    doc.write_text("# Flow\n\n```text\ngraph TD\n  A --> B\n```\n")
+    db = get_db()
+    try:
+        image_regions.annotate_delivery(db, [item], path=str(doc), reader_thread_id="owner", batch_id="b1")
+    finally:
+        db.close()
+
+    assert item["region_stale"] is True
+    assert "no longer" in item["subject_line"]
+
+
+def test_several_large_diagrams_never_push_the_persons_words_past_the_handoff_cap(isolated_db, tmp_path, renders):
+    from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES, json_bytes
+    from plans.feedback_nodes import item_blocks
+
+    source = "graph TD\n" + "".join(f"  N{n} --> N{n + 1}\n" for n in range(900))
+    doc = tmp_path / "notes.md"
+    doc.write_text("".join(f"# Diagram {i}\n\n```mermaid\n{source}```\n\n" for i in range(1, 6)))
+    items = [_diagram_pin_item(doc, i) for i in range(1, 6)]
+    db = get_db()
+    try:
+        image_regions.annotate_delivery(db, items, path=str(doc), reader_thread_id="owner", batch_id="b1")
+    finally:
+        db.close()
+    for item in items:
+        item.update(kind="comment", event=None)
+
+    description = item_blocks({"author_kind": "user"}, items)
+
+    assert json_bytes(description) > REVISION_BRIEF_MAX_BYTES, "the batch must exceed the cap to prove anything"
+    for i in range(1, 6):
+        end = description.index(f"Feedback: Person's words {i}") + len(f"Feedback: Person's words {i}")
+        assert json_bytes(description[:end]) <= REVISION_BRIEF_MAX_BYTES, f"feedback {i} falls past the cap"

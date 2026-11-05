@@ -28,6 +28,8 @@ from infra.host_resources import image_decode_pixel_budget
 
 # The longest side of the returned picture. A vision model downsamples anything
 # larger before it reads it, so a bigger render only costs tokens and bytes.
+# Keep equal to the 1600 in rasterBadgeTags in frontend/src/lib/imageGutter.ts. The picture is fitted again
+# after its gutter is added; that scales tags with it, so they keep their place and only shrink, by under 4%.
 MAX_RENDER_SIDE = 1600
 
 _DEFAULT_COLOR = "#7c3aed"

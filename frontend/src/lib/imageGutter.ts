@@ -27,8 +27,14 @@ function roundEven(value: number): number {
 	return value - floor === 0.5 ? floor + (floor % 2) : Math.round(value);
 }
 
-/** Use the delivered raster's geometry at every viewer zoom. Discs remain screen-sized. */
+/**
+ * Use the delivered raster's geometry at every viewer zoom. Discs remain screen-sized.
+ * The renderer fits the image to MAX_RENDER_SIDE before it places tags, which is what `fit` repeats.
+ * It fits once more after adding the gutter; that scales the whole picture, tags included, so each tag
+ * keeps its place on the image and only the discs and the gutter shrink, by less than 4%.
+ */
 export function rasterBadgeTags(regions: ImageRegion[], natural: Size, shown: Size): BadgeTag[] {
+	// Keep equal to MAX_RENDER_SIDE in backend/doceditor/image_markup.py.
 	const fit = Math.min(1, 1600 / Math.max(natural.width, natural.height));
 	const size = { width: Math.max(1, roundEven(natural.width * fit)), height: Math.max(1, roundEven(natural.height * fit)) };
 	const sx = shown.width / size.width, sy = shown.height / size.height;
@@ -66,7 +72,7 @@ export function gutterTags(regions: ImageRegion[], size: Size, radius: number, g
 			positions.push(Math.max(desired, positions.length ? positions[positions.length - 1] + spacing : lower));
 		}
 		for (let i = positions.length - 1; i >= 0; i--) positions[i] = Math.min(positions[i], i === positions.length - 1 ? upper : positions[i + 1] - spacing);
-		// If this edge cannot hold every tag, spread them evenly along it.
+		// Spaced back from the far end, the first tag starts before the edge's lower bound: space them evenly between the bounds instead.
 		if (positions.length && positions[0] < lower) {
 			positions.forEach((_, i) => positions[i] = lower + (upper - lower) * i / Math.max(1, positions.length - 1));
 		}

@@ -35,4 +35,4 @@ def test_listing_marks_each_diagram_against_its_own_revision(tmp_path):
         {'from_off': 0, 'image_rev': 'unknown'},
     ]
     diagram_pins.mark_stale(rows, str(path))
-    assert [row['region_stale'] for row in rows] == [False, True, False, True, False]
+    assert [row['region_stale'] for row in rows] == [False, True, False, True, True]

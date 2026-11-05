@@ -15,7 +15,19 @@ from infra.db_async import run_in_db
 
 
 class CommentSelectionChanged(ValueError):
-    """The selection a browser captured can no longer be anchored; its draft is kept and it selects again."""
+    """The selection a browser captured can no longer be anchored; its draft is kept and it selects again.
+
+    ``kind`` is the machine-readable reason the browser acts on, as ``CommentActionError.kind`` is.
+    """
+
+    def __init__(self, message: str, kind: str = "selection_changed"):
+        super().__init__(message)
+        self.kind = kind
+
+
+def diagram_changed() -> CommentSelectionChanged:
+    """The diagram a pin was drawn on is not the one the document holds now."""
+    return CommentSelectionChanged("This diagram changed. Place the pin again; your draft is kept.", "diagram_changed")
 
 
 @dataclass(frozen=True)

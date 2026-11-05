@@ -1,5 +1,6 @@
 import { tick } from 'svelte';
 import { fromStore } from 'svelte/store';
+import { DocRequestError } from '$lib/api/docs';
 import { createCommentSurfaceState, type CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 import { createCommentRetryToast, createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
 import { isPoint, type ImageRegion } from '$lib/imageRegions';
@@ -72,7 +73,7 @@ export function createImageComments(context: {
 		if (!boxMode) moving = null;
 	}
 	async function refreshAfterStale(error: unknown): Promise<boolean> {
-		return error instanceof Error && error.message.startsWith('409 ') && error.message.includes('This diagram changed.')
+		return error instanceof DocRequestError && error.kind === 'diagram_changed'
 			? await context.refreshDiagram?.() ?? false : false;
 	}
 	/** A box, point or whole-image region was drawn: it opens the composer, or moves the pin being moved. */
