@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DocComment } from '$lib/stores/docComments';
-import { commentsAtImage, groupRows, imageGroupKey, remapOccurrence, sharedImage } from './docImageComments';
+import { changedLabel, commentsAtImage, diagramAt, groupRows, imageGroupKey, remapOccurrence, sharedImage } from './docImageComments';
 
 const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
 function comment(id: string, extra: Partial<DocComment> = {}): DocComment {
@@ -44,5 +44,30 @@ describe('comments on images inside a document', () => {
 		const image = { from: 10, to: 24, src: 's' };
 		expect(remapOccurrence(image, (pos) => pos + 5)).toEqual({ from: 15, to: 29, src: 's' });
 		expect(remapOccurrence(image, (pos) => pos)).toBe(image);
+	});
+});
+
+describe('the drawer row of a diagram', () => {
+	const doc = '# Plan\n\nintro\n\n## Flow\n\n```mermaid\ngraph TD\n  A-->B\n```\n';
+	const at = (text: string) => text.indexOf('```mermaid');
+
+	it('is captioned with the nearest heading above the diagram, and carries its source', () => {
+		expect(diagramAt(doc, at(doc))).toEqual({ source: 'graph TD\n  A-->B', caption: 'Diagram in \u201cFlow\u201d' });
+	});
+
+	it('is captioned just Diagram when no heading is above it, and ignores a heading inside a code fence', () => {
+		const bare = 'text\n\n```mermaid\ngraph TD\n```\n';
+		expect(diagramAt(bare, at(bare))?.caption).toBe('Diagram');
+		const fenced = '```md\n# Not a heading\n```\n\n```mermaid\ngraph TD\n```\n';
+		expect(diagramAt(fenced, at(fenced))?.caption).toBe('Diagram');
+	});
+
+	it('is nothing when no diagram opens at that offset', () => {
+		expect(diagramAt(doc, 0)).toBeNull();
+	});
+
+	it('words the changed state by kind: a diagram changed, or an image changed', () => {
+		expect(changedLabel('```mermaid')).toBe('Diagram changed since this comment');
+		expect(changedLabel('![Mock](a.png)')).toBe('Image changed since this comment');
 	});
 });

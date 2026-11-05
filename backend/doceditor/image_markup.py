@@ -3,11 +3,9 @@
 An agent that places a box gets the image back with its box drawn, so it can
 check where the box landed; a delivered feedback batch carries the image with
 every region comment's numbered box. Both read the same picture the viewer
-shows: a box (or a point) in the author's colour with its number in a tag that
-never covers what the box points at. The tag tries, in order, left of the box's
-top-left corner, above it, then right of the box; only when the image edge clips
-all three does it sit inside the box's corner, over the box's padding. The
-viewer's ``imageRegions.ts`` places tags by the same rule.
+shows: a box (or a point) in the author's colour, joined to its numbered tag
+outside the nearest image edge. The viewer's ``imageGutter.ts`` uses the same
+placement rule.
 
 Rendering is local Pillow work on bytes the caller already read; nothing is
 fetched. Callers run it off the event loop.
@@ -127,10 +125,10 @@ def place_tag(
     """Return the tag's centre and the side it took, for a ``width`` x ``height`` image.
 
     A spot is usable only when the whole tag, its white ring included, lies on
-    the image. A box tries left of its top-left corner, above it, then right of
-    the box, and falls back to inside its corner. A point tries up-right, then
-    the other diagonals. A spot that would overlap a tag already centred at one
-    of ``avoid``, or one of ``marks``, is passed over while another spot fits;
+    the image. A box sits outside its top-left corner, then tries left of that
+    corner, above it, then right of the box, and falls back to inside its corner.
+    A point sits up-left of the point, then tries the other diagonals. A spot
+    that would overlap a tag already centred at one of ``avoid``, or one of ``marks``, is passed over while another spot fits;
     tags weigh more than marks.
     """
     r = radius + 2  # the white ring drawn around the tag
@@ -143,14 +141,15 @@ def place_tag(
     if region.is_point:
         reach = radius * 1.4
         spots: list[tuple[float, float, TagSide]] = [
-            (x0 + reach, y0 - reach, "up-right"),
             (x0 - reach, y0 - reach, "up-left"),
+            (x0 + reach, y0 - reach, "up-right"),
             (x0 + reach, y0 + reach, "down-right"),
             (x0 - reach, y0 + reach, "down-left"),
         ]
     else:
         x1 = x0 + region.w * width
         spots = [
+            (x0 - gap - r, y0 - gap - r, "up-left"),
             (x0 - gap - r, y0 + r, "left"),
             (x0 + r, y0 - gap - r, "above"),
             (x1 + gap + r, y0 + r, "right"),
@@ -212,6 +211,65 @@ def place_tags(
     return placed
 
 
+def gutter_tags(
+    regions: Sequence[Region], width: int, height: int, *, radius: float, gap: float,
+) -> list[tuple[float, float, str, float, float]]:
+    """Place tags outside the closest edge, in anchor order like the viewer."""
+    r = radius + 2
+    spacing = 2 * r + gap
+    tags: list[list] = []
+    for region in regions:
+        x0, y0 = region.x * width, region.y * height
+        x1, y1 = (region.x + region.w) * width, (region.y + region.h) * height
+        choices = [("left", x0), ("right", width - x1), ("above", y0), ("below", height - y1)]
+        side = min(choices, key=lambda item: item[1])[0]
+        if side == "left":
+            tags.append([-gap - r, y0, side, x0, y0])
+        elif side == "right":
+            tags.append([width + gap + r, y0, side, x1, y0])
+        elif side == "above":
+            tags.append([x0, -gap - r, side, x0, y0])
+        else:
+            tags.append([x0, height + gap + r, side, x0, y1])
+    for side in ("left", "right", "above", "below"):
+        vertical = side in ("left", "right")
+        extent, axis = (height, 1) if vertical else (width, 0)
+        lower, upper = min(r, extent / 2), max(extent - r, extent / 2)
+        entries = sorted((tag for tag in tags if tag[2] == side), key=lambda tag: tag[axis])
+        positions: list[float] = []
+        for tag in entries:
+            desired = max(lower, min(upper, tag[axis]))
+            positions.append(max(desired, positions[-1] + spacing if positions else lower))
+        for i in range(len(positions) - 1, -1, -1):
+            positions[i] = min(positions[i], upper if i == len(positions) - 1 else positions[i + 1] - spacing)
+        if positions and positions[0] < lower:
+            positions = [lower + (upper - lower) * i / max(1, len(positions) - 1) for i in range(len(positions))]
+        for tag, along in zip(entries, positions, strict=True):
+            tag[axis] = along
+    return [tuple(tag) for tag in tags]
+
+
+def badge_tags(
+    regions: Sequence[Region], width: int, height: int, *, radius: float, gap: float,
+) -> list[tuple[float, float, str, float | None, float | None]]:
+    """Keep ordinary positions on the picture; move overlapping badges outside."""
+    positions = [place_tags([region], width, height, radius=radius, gap=gap)[0] for region in regions]
+    inside: list[tuple[float, float]] = []
+    outside: list[int] = []
+    for index, (x, y, _) in enumerate(positions):
+        if any(math.hypot(x - ox, y - oy) < 2 * (radius + 2) for ox, oy in inside):
+            outside.append(index)
+        else:
+            inside.append((x, y))
+    result: list[tuple[float, float, str, float | None, float | None]] = [
+        (x, y, side, None, None) for x, y, side in positions
+    ]
+    edge = gutter_tags([regions[i] for i in outside], width, height, radius=radius, gap=gap)
+    for index, tag in zip(outside, edge, strict=True):
+        result[index] = tag
+    return result
+
+
 def _draw_region(draw: ImageDraw.ImageDraw, mark: Mark, img: Image.Image, scale: _Scale) -> None:
     color = _rgb(mark.color)
     region = mark.region
@@ -231,9 +289,10 @@ def _draw_tag(draw: ImageDraw.ImageDraw, mark: Mark, centre: tuple[float, float]
     color = _rgb(mark.color)
     r = scale.radius
     cx, cy = centre
-    draw.ellipse((cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2), fill="white")
-    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=color)
-    draw.text((cx, cy), str(mark.number), fill="white", font=scale.font, anchor="mm")
+    draw.ellipse((cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2), outline="white", width=2)
+    draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(*color, 204))
+    # Match the viewer's --image-region-ink token.
+    draw.text((cx, cy), str(mark.number), fill=(17, 17, 17), font=scale.font, anchor="mm")
 
 
 def _check_budget(source: Image.Image) -> None:
@@ -271,10 +330,17 @@ def render_marked_image(data: bytes, marks: Sequence[Mark]) -> bytes:
     scale = _scale_for(img)
     for mark in marks:
         _draw_region(draw, mark, img, scale)
-    tags = place_tags([mark.region for mark in marks], img.width, img.height,
-                      radius=scale.radius, gap=scale.stroke + 1)
-    for mark, (cx, cy, _side) in zip(marks, tags, strict=True):
-        _draw_tag(draw, mark, (cx, cy), scale)
+    gap = scale.stroke + 1
+    tags = badge_tags([mark.region for mark in marks], img.width, img.height, radius=scale.radius, gap=gap)
+    gutter = math.ceil(2 * (scale.radius + 2) + gap) if any(tag[3] is not None for tag in tags) else 0
+    expanded = Image.new("RGB", (img.width + 2 * gutter, img.height + 2 * gutter), "white")
+    expanded.paste(img, (gutter, gutter))
+    draw = ImageDraw.Draw(expanded, "RGBA")
+    for mark, (cx, cy, _side, ax, ay) in zip(marks, tags, strict=True):
+        if ax is not None and ay is not None:
+            draw.line((cx + gutter, cy + gutter, ax + gutter, ay + gutter), fill=_rgb(mark.color), width=1)
+        _draw_tag(draw, mark, (cx + gutter, cy + gutter), scale)
+    expanded = _fit(expanded)
     out = io.BytesIO()
-    img.save(out, format="PNG", optimize=True)
+    expanded.save(out, format="PNG", optimize=True)
     return out.getvalue()

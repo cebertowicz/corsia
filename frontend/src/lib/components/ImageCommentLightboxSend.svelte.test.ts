@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { flushSync, mount, unmount, type ComponentProps } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Writable } from 'svelte/store';
@@ -207,6 +208,27 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(sendIn(shown.target.querySelector('.bar')!)).toBeNull();
 		expect(doc.component.controller().documentHeld).toBe(1);
 		expect(footerIn(shown.target)).toBeNull();
+	});
+
+	it('keeps the comments pill beside a held Send, which takes its short wording in the bar on a phone', async () => {
+		const doc = documentStatus();
+		doc.component.sync('art-doc', pending(3, { doc: 1, image: 2 }));
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(3, { doc: 1, image: 2 }) });
+		flushSync();
+		const shown = await viewer({
+			src: SRC, alt: 'Mock', artifactId: 'art-doc', docName: 'notes.md', onBack: vi.fn(),
+			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
+		});
+		const bar = shown.target.querySelector('.bar')!;
+		// Both stand in the bar together: the count is never swapped out for the Send.
+		expect(bar.querySelector('[data-image-comments-pill]')).not.toBeNull();
+		const send = sendIn(bar)!;
+		expect(send.getAttribute('data-short')).toBe('Send 2');
+		// The short wording is the narrow bar's own rule (a phone width), not the document header's container; the count and Send are no longer one or the other.
+		const controls = readFileSync('src/lib/components/DocFeedbackControls.svelte', 'utf8');
+		expect(controls).toContain('.sending-now.compact > :global(.btn)::before { content: attr(data-short);');
+		expect(readFileSync('src/lib/components/ImageLightboxResponsive.css', 'utf8')).not.toContain('data-image-comments-pill');
+		expect(readFileSync('src/lib/components/ImageLightboxResponsive.css', 'utf8')).toContain('min-width: var(--touch-target)');
 	});
 
 	it('sends nothing when only the lightbox goes: leaving the image is the overlay\'s exit, not the viewer\'s unmount', async () => {

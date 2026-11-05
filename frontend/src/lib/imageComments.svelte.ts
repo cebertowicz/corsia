@@ -1,3 +1,4 @@
+import { tick } from 'svelte';
 import { fromStore } from 'svelte/store';
 import { createCommentSurfaceState, type CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 import { createCommentRetryToast, createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
@@ -23,7 +24,7 @@ export function createImageComments(context: {
 	/** Where focus goes when a card closes with nothing else to return to. */
 	restoreFocus: () => void;
 	/** Scroll a comment's region and its tag into view at the current zoom. */
-	reveal?: (id: string, region: ImageRegion) => void;
+	reveal?: (id: string, region: ImageRegion, fromList?: boolean) => void;
 	/** A comment or reply was posted, so the review status may change. */
 	onCreated?: () => void;
 	/**
@@ -44,6 +45,8 @@ export function createImageComments(context: {
 	let moving = $state<{ id: string; region?: ImageRegion } | null>(null);
 	/** Counts tags picked with the drawer open, so picking the selected one again still brings its card back. */
 	let listPicks = $state(0);
+	let listCandidates = $state<string[] | null>(null);
+	let listCandidateOrder = $state<string[] | null>(null);
 
 	function show(id: string, anchor: CommentAnchor) {
 		focusedDocComment.set(id);
@@ -51,6 +54,8 @@ export function createImageComments(context: {
 		ui.state = { kind: 'thread', id };
 	}
 	function close() {
+		listCandidates = null;
+		listCandidateOrder = null;
 		ui.close();
 		draftRegion = null;
 		draftBody = '';
@@ -103,20 +108,38 @@ export function createImageComments(context: {
 	 * selected there instead, so the drawer can bring its card into view.
 	 */
 	function pick(id: string, anchor: () => DOMRect | null, opener: HTMLElement) {
+		listCandidates = null;
 		draftRegion = null;
 		if (ui.state?.kind === 'list') { focusedDocComment.set(id); listPicks += 1; return; }
 		ui.focusMarker([id], opener, anchor);
 	}
-	/** Open a comment's card at its tag, as a pick would: the viewer was opened on it from the document. */
-	function select(id: string, tag: HTMLElement, region: ImageRegion | null | undefined) {
+	function openList(opener: HTMLElement) {
+		listCandidates = null;
+		listCandidateOrder = null;
+		ui.openList(opener);
+	}
+	/** Ambiguous touch or pen: use the existing list and mark all candidates in its number order. */
+	function pickCandidates(ids: string[], opener: HTMLElement) {
 		draftRegion = null;
-		if (region) context.reveal?.(id, region);
-		ui.focusMarker([id], tag, () => (tag.isConnected ? tag.getBoundingClientRect() : null));
+		if (ui.state?.kind !== 'list') ui.openList(opener);
+		listCandidates = ids;
+		listCandidateOrder = ids;
+		focusedDocComment.set(ids[0]);
+		listPicks += 1;
+	}
+	/** Open a comment's card beside its box, as a pick would: the viewer was opened on it from the document. */
+	function select(id: string, tag: HTMLElement, region: ImageRegion | null | undefined, anchor?: () => DOMRect | null) {
+		draftRegion = null;
+		ui.focusMarker([id], tag, anchor ?? (() => (tag.isConnected ? tag.getBoundingClientRect() : null)));
+		if (region) void tick().then(() => {
+			if (ui.state?.kind === 'thread' && ui.state.id === id) context.reveal?.(id, region);
+		});
 	}
 	/** A card in the drawer was selected: the drawer stays, the tag is picked and scrolled into view. */
 	function showFromList(id: string, region: ImageRegion | null | undefined) {
+		listCandidates = null;
 		focusedDocComment.set(id);
-		if (region) context.reveal?.(id, region);
+		if (region) context.reveal?.(id, region, true);
 	}
 	/** Move pin: the next box or point drawn becomes the comment's new place. */
 	function movePin(id: string) {
@@ -150,6 +173,8 @@ export function createImageComments(context: {
 		get movingRegion() { return moving?.region ?? null; },
 		get moveSaving() { return !!moving?.region; },
 		get listPicks() { return listPicks; },
+		get listCandidates() { return ui.state?.kind === 'list' ? listCandidates : null; },
+		get listCandidateOrder() { return ui.state?.kind === 'list' ? listCandidateOrder : null; },
 		get draftRegion() { return draftRegion; },
 		get selectedId() {
 			if (ui.state?.kind === 'thread') return ui.state.id;
@@ -162,7 +187,7 @@ export function createImageComments(context: {
 		get draft() { return draftRegion ? { text: '', label: regionLabel(draftRegion), body: draftBody } : null; },
 		setDraftBody(text: string) { draftBody = text; },
 		threads,
-		close, toggleBoxMode, draw, submit, pick, select, showFromList, movePin, onKeydownCapture,
+		close, openList, toggleBoxMode, draw, submit, pick, pickCandidates, select, showFromList, movePin, onKeydownCapture,
 	};
 }
 export type ImageComments = ReturnType<typeof createImageComments>;

@@ -107,7 +107,26 @@ describe('image comments', () => {
 		expect(comments.ui.state).toEqual({ kind: 'list' });
 		expect(get(focusedDocComment)).toBe('c2');
 		expect(comments.selectedId).toBe('c2');
-		expect(reveal).toHaveBeenCalledWith('c2', BOX);
+		expect(reveal).toHaveBeenCalledWith('c2', BOX, true);
+	});
+
+	it('marks ambiguous candidates in the existing drawer and clears them when a card is selected', () => {
+		const { comments } = controller();
+		const opener = document.createElement('button');
+		comments.pickCandidates(['c3', 'c4'], opener);
+		expect(comments.ui.state).toEqual({ kind: 'list' });
+		expect(comments.listCandidates).toEqual(['c3', 'c4']);
+		expect(comments.selectedId).toBe('c3');
+		comments.pickCandidates(['c4', 'c5'], opener);
+		expect(comments.ui.state).toEqual({ kind: 'list' });
+		expect(comments.listCandidates).toEqual(['c4', 'c5']);
+		comments.showFromList('c5', BOX);
+		expect(comments.listCandidates).toBeNull();
+		expect(comments.listCandidateOrder).toEqual(['c4', 'c5']);
+		expect(comments.selectedId).toBe('c5');
+		comments.close();
+		comments.openList(opener);
+		expect(comments.listCandidateOrder).toBeNull();
 	});
 
 	it('keeps the drawer open when a tag is picked, and selects that comment there', () => {
@@ -116,6 +135,20 @@ describe('image comments', () => {
 		comments.pick('c3', () => null, document.createElement('button'));
 		expect(comments.ui.state).toEqual({ kind: 'list' });
 		expect(comments.selectedId).toBe('c3');
+	});
+
+	it('opens a card the viewer was opened on beside the box it was given, not beside its tag', async () => {
+		const { comments, reveal } = controller();
+		const tag = document.createElement('button');
+		const box = () => new DOMRect(100, 100, 200, 120);
+		comments.select('c4', tag, BOX, box);
+		await vi.waitFor(() => expect(reveal).toHaveBeenCalledWith('c4', BOX));
+		expect(comments.selectedId).toBe('c4');
+		expect(comments.ui.anchor).toBe(box);
+		// With no box to give, the tag is the anchor, as before.
+		comments.select('c5', tag, BOX);
+		expect(comments.ui.anchor).not.toBe(box);
+		expect(comments.ui.anchor).toBeTypeOf('function');
 	});
 
 	it('draws and moves nothing for a reader who may not comment', async () => {

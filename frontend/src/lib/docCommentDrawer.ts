@@ -1,5 +1,22 @@
 import { get } from 'svelte/store';
+import type { DocComment } from '$lib/stores/docComments';
 import { prefersReducedMotion } from '$lib/stores/viewport';
+
+/** An image drawer follows the viewer's grid track; a document drawer appears at once. */
+export function imageDrawerMotion(_node: Element, { leaving }: { leaving: boolean }, isImage: boolean) {
+	if (!isImage) return { duration: 0 };
+	const token = (name: string) => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
+	const pace = leaving ? 0.7 : 1;
+	if (get(prefersReducedMotion)) return { duration: token('--dur-tight') * pace, css: (t: number) => `opacity: ${t}` };
+	return { duration: leaving ? token('--dur-drawer') * pace : 0 };
+}
+
+/** Authors with at least two open, placed suggestions can accept them together. */
+export function authorsWithOpenSuggestions(comments: DocComment[]) {
+	return Object.entries(comments.filter((comment) => !comment.resolved && !comment.orphaned && comment.replacement !== null && comment.replacement !== undefined)
+		.reduce<Record<string, DocComment[]>>((groups, comment) => ({ ...groups, [comment.author]: [...(groups[comment.author] ?? []), comment] }), {}))
+		.filter(([, suggestions]) => suggestions.length >= 2);
+}
 
 /** The grid owns the drawer's maximum; add this measured pinned footer before that cap so the list keeps its normal room when it can. */
 export function drawerFooterHeight(node: HTMLElement) {
@@ -107,10 +124,13 @@ export function onSheetMoved(panel: HTMLElement | null, reveal?: (opening: boole
 }
 
 /** Brings a card into view in the drawer's own list: smooth, or at once when asked or with reduced motion. */
-export function scrollListToCard(drawer: HTMLElement | undefined, id: string, instant: boolean) {
+export function scrollListToCard(drawer: HTMLElement | undefined, id: string, instant: boolean, candidateOrder = false) {
 	const list = drawer?.querySelector<HTMLElement>('.drawer-comments');
 	const card = list?.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
 	if (!list || !card) return;
-	const top = card.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop - 4;
+	const cardRect = card.getBoundingClientRect(), listRect = list.getBoundingClientRect();
+	// A visible candidate stays in place when chosen; another pick can still bring an offscreen card into view.
+	if (!instant && candidateOrder && cardRect.top >= listRect.top && cardRect.bottom <= listRect.bottom) return;
+	const top = cardRect.top - listRect.top + list.scrollTop - 4;
 	list.scrollTo({ top: Math.max(0, top), behavior: instant || get(prefersReducedMotion) ? 'instant' : 'smooth' });
 }

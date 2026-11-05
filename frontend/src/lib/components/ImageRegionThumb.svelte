@@ -4,9 +4,11 @@
 	// numbered, so the numbers below it can be found on it.
 	import { onMount } from 'svelte';
 	import type { DocComment } from '$lib/stores/docComments';
-	import { isPoint, placeTags, type ImageRegion } from '$lib/imageRegions';
+	import { isPoint, type ImageRegion } from '$lib/imageRegions';
+	import { rasterBadgeTags } from '$lib/imageGutter';
 
 	type Pinned = DocComment & { region: ImageRegion; regionNumber: number };
+	// The thumbnail uses the delivered image's placement rule at its natural size.
 	let { src, alt = '', caption = false, comments, colorOf, onOpen }: {
 		src: string;
 		alt?: string;
@@ -19,12 +21,13 @@
 	} = $props();
 
 	let frame = $state<HTMLElement>();
+	let image = $state<HTMLImageElement>();
 	let width = $state(0);
 	let height = $state(0);
 	const pinned = $derived(comments.filter((comment): comment is Pinned => !!comment.region && comment.regionNumber != null).sort((a, b) => a.regionNumber - b.regionNumber));
 	const marks = $derived.by(() => {
-		if (!width || !height) return [];
-		const positions = placeTags(pinned.map((comment) => comment.region), { width, height }, 7, 2);
+		if (!width || !height || !image?.naturalWidth || !image.naturalHeight) return [];
+		const positions = rasterBadgeTags(pinned.map((comment) => comment.region), { width: image.naturalWidth, height: image.naturalHeight }, { width, height });
 		return pinned.map((comment, index) => ({ comment, ...positions[index] }));
 	});
 	function measure() {
@@ -43,7 +46,7 @@
 
 <button type="button" class="thumb" data-region-thumb onclick={() => onOpen?.()} aria-label={`${alt ? `${alt}: ` : ''}image with comment${pinned.length === 1 ? '' : 's'} ${numbers}`} disabled={!onOpen}>
 	<span class="frame" bind:this={frame}>
-		<img {src} alt="" draggable="false" onload={measure} />
+		<img bind:this={image} {src} alt="" draggable="false" onload={measure} />
 		{#each pinned as comment (comment.id)}
 			{#if isPoint(comment.region)}
 				<span class="dot" style:left={pct(comment.region.x)} style:top={pct(comment.region.y)} style:--region-color={colorOf(comment)}></span>
@@ -51,7 +54,8 @@
 				<span class="box" class:stale={comment.regionStale} style:left={pct(comment.region.x)} style:top={pct(comment.region.y)} style:width={pct(comment.region.w)} style:height={pct(comment.region.h)} style:--region-color={colorOf(comment)}></span>
 			{/if}
 		{/each}
-		{#each marks as { comment, x, y } (comment.id)}
+		{#each marks as { comment, x, y, anchor } (comment.id)}
+			{#if anchor}<svg class="connector" aria-hidden="true"><line x1={x} y1={y} x2={anchor.x} y2={anchor.y} stroke={colorOf(comment)} stroke-width="1" /></svg>{/if}
 			<span class="num" class:stale={comment.regionStale} style:left="{x}px" style:top="{y}px" style:--region-color={colorOf(comment)} data-thumb-number={comment.regionNumber}>{comment.regionNumber}</span>
 		{/each}
 	</span>
@@ -59,21 +63,23 @@
 </button>
 
 <style>
-	.thumb { display: flex; align-items: flex-start; justify-content: flex-start; gap: var(--space-2); width: 100%; padding: 2px 0 6px; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
+	/* The top padding is the room above the image for a badge that stands outside its top edge: its 14px, its 2px gap and a little over. */
+	.thumb { display: flex; align-items: flex-start; justify-content: flex-start; gap: var(--space-2); width: 100%; padding: 18px 0 6px; border: 0; background: none; color: inherit; font: inherit; text-align: start; cursor: pointer; }
 	.caption {
 		flex: 1 1 0; min-width: 4em; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3;
 		color: var(--text-secondary); font-size: var(--text-caption); line-height: 1.35; overflow-wrap: anywhere;
 	}
 	.thumb:disabled { cursor: default; }
 	.thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
-	.frame { position: relative; display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 100%; line-height: 0; border-radius: var(--radius-2xs); box-shadow: 0 0 0 1px var(--border); }
+	.connector { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+	.frame { position: relative; display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 60%; line-height: 0; border-radius: var(--radius-2xs); box-shadow: 0 0 0 1px var(--border); }
 	img { display: block; max-width: 100%; max-height: 72px; width: auto; height: auto; border-radius: inherit; user-select: none; }
 	.box { position: absolute; box-sizing: border-box; border: 1.5px solid var(--region-color); box-shadow: 0 0 0 1px var(--image-region-halo); pointer-events: none; }
 	.box.stale { border-style: dashed; }
 	.dot { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: var(--region-color); box-shadow: 0 0 0 1px var(--image-region-halo); }
 	.num {
 		position: absolute; box-sizing: border-box; display: grid; place-items: center; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
-		background: var(--region-color); color: var(--image-region-ink); border: 1px solid color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge)); box-shadow: 0 0 0 1px var(--image-region-halo);
+		background: color-mix(in srgb, var(--region-color) 80%, transparent); color: var(--image-region-ink); border: 1px solid color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge)); box-shadow: 0 0 0 1px var(--image-region-halo);
 		font-size: var(--text-caption); font-weight: var(--fw-bold); line-height: 1; font-variant-numeric: tabular-nums;
 	}
 	.num.stale { border-style: dashed; }

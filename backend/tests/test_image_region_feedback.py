@@ -291,3 +291,19 @@ def test_a_reader_tray_that_cannot_be_resolved_still_delivers_the_text(isolated_
     )
     assert items[0]["region_line"].startswith("Region 1: box at x 10%")
     assert renders == []
+
+
+def test_a_pin_on_a_diagram_in_a_document_names_its_block(isolated_db, tmp_path, renders):
+    doc = tmp_path / "notes.md"
+    doc.write_text("# Flow\n\n```mermaid\ngraph TD\n  A --> B\n```\n")
+    anchor = doc.read_text().index("```mermaid")
+    item = {**_regional_item(), "from_off": anchor}
+    db = get_db()
+    try:
+        image_regions.annotate_delivery(db, [item], path=str(doc), reader_thread_id="owner", batch_id="b1")
+    finally:
+        db.close()
+
+    assert item["marked_image_line"].startswith("Diagram (mermaid block, lines 3 to 6 of notes.md):")
+    assert "A --> B" in item["marked_image_line"]
+    assert renders == []

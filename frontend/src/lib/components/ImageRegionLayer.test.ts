@@ -12,7 +12,7 @@ function comment(id: string, number: number, region: DocComment['region'], extra
 }
 function render(props: Record<string, unknown> = {}) {
 	host = document.createElement('div'); document.body.appendChild(host);
-	const handlers = { onPick: vi.fn(), onHover: vi.fn(), onDraw: vi.fn(), onDismiss: vi.fn() };
+	const handlers = { onPick: vi.fn(), onAmbiguous: vi.fn(), onHover: vi.fn(), onDraw: vi.fn(), onDismiss: vi.fn() };
 	component = mount(ImageRegionLayer, { target: host, props: { comments: [], colorOf: () => '#e5484d', draftColor: '#3e63dd', ...handlers, ...props } });
 	flushSync();
 	return { ...handlers, layer: host.querySelector<HTMLElement>('[data-image-regions]')! };
@@ -40,9 +40,9 @@ describe('ImageRegionLayer', () => {
 		expect(tags.map((tag) => tag.dataset.regionTag)).toEqual(['1', '2']);
 		expect(tags[0].classList.contains('faint')).toBe(true);
 		expect(tags[1].classList.contains('faint')).toBe(false);
-		// Left of the box's top-left corner, matching the server's marked-up copy.
+		// The badge stays on the picture just above and left of the box.
 		expect(tags[1].style.left).toBe('304px');
-		expect(tags[1].style.top).toBe('163px');
+		expect(tags[1].style.top).toBe('134px');
 		// Only the picked comment's box shows.
 		expect(host.querySelectorAll('[data-region-box].shown')).toHaveLength(1);
 		expect(tags[1].getAttribute('aria-label')).toBe('Comment 2 by you, box 20% wide, 20% tall at 40% across, 30% down');
@@ -115,6 +115,13 @@ describe('ImageRegionLayer', () => {
 		expect(tag.textContent).toBe('3Design QA');
 		expect(tag.classList.contains('stale')).toBe(true);
 		expect(tag.getAttribute('aria-label')).toContain('image changed since this comment');
+	});
+
+	it('words a pin on a changed diagram as a diagram, not an image', () => {
+		render({ comments: [comment('a', 1, { x: 0.1, y: 0.1, w: 0.2, h: 0.2 }, { anchor: '```mermaid', regionStale: true })] });
+		const label = host.querySelector<HTMLElement>('[data-region-tag]')!.getAttribute('aria-label') ?? '';
+		expect(label).toContain('diagram changed since this comment');
+		expect(label).not.toContain('image');
 	});
 
 	it('hides an agent name at rest only when it overlaps another tag, then reveals it on focus', () => {

@@ -3,6 +3,7 @@
 	// button that enters box mode, and the comments pill with its count, which
 	// opens the same comments drawer as the document's pill and is that pill.
 	import CommentsPill from './comments/CommentsPill.svelte';
+	import { isMobile } from '$lib/stores/viewport';
 
 	let { boxMode, ready = true, moving = false, savingMove = false, count, unsent = 0, loading = false, listOpen = false, readOnly = false, onToggle, onOpenList }: {
 		boxMode: boolean;
@@ -31,7 +32,7 @@
 		<span>{savingMove ? 'Moving pin…' : moving ? 'Move pin' : 'Comment'}</span>
 	</button>
 {/if}
-<CommentsPill class="control pill" data-image-comments-pill {count} {unsent} {loading} expanded={listOpen} disabled={loading} onOpen={onOpenList} />
+<CommentsPill class="control pill" data-image-comments-pill imageBadge={$isMobile} {count} {unsent} {loading} expanded={listOpen} disabled={loading} onOpen={onOpenList} />
 <span class="sr-only" role="status">{status}</span>
 
 <style>

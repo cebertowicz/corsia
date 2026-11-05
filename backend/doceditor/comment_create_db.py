@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from doceditor import comments, doc_images, feedback_batch_core, feedback_batches, image_regions, review_feedback, review_lifecycle
+from doceditor import comments, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, review_feedback, review_lifecycle
+from doceditor.comment_action_errors import CommentActionError
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
@@ -68,14 +69,21 @@ def _anchor(request: CommentInput, anchor: Anchor | None, duplicate: dict | None
     return request.quote, start, end, *(anchor_context(text, start, end, request.quote) or (None, None))
 
 
-def _image(db, request: CommentInput, quote: str | None) -> tuple[str | None, str]:
+def _image(db, request: CommentInput, quote: str | None, start: int | None) -> tuple[str | None, str]:
     """The (image_src, image_rev) a new region comment is placed on.
+
+    A pin on a mermaid diagram names no file: its revision is its block's source (``diagram_pins``).
 
     An image artifact is its own image; in a document it is the file the
     anchored markdown shows, resolved here and never taken from the client.
     """
     if image_regions.is_image_path(request.path):
         return None, image_regions.image_revision(image_regions.require_image(request.path))
+    if diagram_pins.is_fence_quote(quote):
+        revision = diagram_pins.revision(read_doc_text(request.path), start)
+        if revision is None:
+            raise CommentActionError("region_target", "a pin goes on a mermaid block, anchored on its opening line.")
+        return None, revision
     if request.artifact_id is not None:
         artifact = registry_models.get_artifact(request.artifact_id, db=db)
         owner = artifact["parent_thread_id"] if artifact else None
@@ -98,7 +106,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
         quote, start, end, prefix, suffix = _anchor(request, anchor, duplicate)
         image_src = image_rev = None
         if request.region is not None and duplicate is None:
-            image_src, image_rev = _image(db, request, quote)
+            image_src, image_rev = _image(db, request, quote, start)
         artifact_id = request.artifact_id
         registered = request.registration is not None
         if (request.author_kind == "agent" and request.replacement is not None and not request.parent_id

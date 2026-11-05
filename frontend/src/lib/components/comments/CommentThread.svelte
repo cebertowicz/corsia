@@ -32,6 +32,7 @@
 		regionNumber?: number | null;
 		regionStale?: boolean;
 	};
+	import { changedLabel } from '$lib/docImageComments';
 	import { userParticipant, resolveParticipant } from '$lib/stores/participants';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { agentColor } from '$lib/docPresence';
@@ -43,7 +44,7 @@
 	import CommentReplyList, { type CommentReplyData } from './CommentReplyList.svelte';
 	import { createReplyVisibility } from './replyVisibility';
 
-	let { comment, header, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
+	let { comment, header, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
 		comment: CommentThreadData;
 		header?: Snippet;
 		/** Keep resolved threads in the drawer's card presentation. */
@@ -69,6 +70,8 @@
 		leaving?: boolean;
 		/** Off where the caller scrolls its own list to the focused card. */
 		scrollOnFocus?: boolean;
+		/** A multi-selection may mark several cards without moving keyboard focus into each one. */
+		autoFocusSelection?: boolean;
 		onFocus?: () => void;
 		readOnly?: boolean;
 		onReply?: (commentId: string, text: string) => Promise<void>;
@@ -135,7 +138,7 @@
 		if (!replyId && stampTimer !== null) { window.clearTimeout(stampTimer); stampTimer = null; }
 	}
 
-	$effect(() => { if ((focusReply || (focused && selectable)) && !readOnly) replyField?.focus({ preventScroll: true }); });
+	$effect(() => { if ((focusReply || (focused && selectable && autoFocusSelection)) && !readOnly) replyField?.focus({ preventScroll: true }); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
 	// One reply's own observer calls this with that reply's id, so nothing carries over from another element.
 	function stamp(replyId: string) {
@@ -302,7 +305,7 @@
 			{#if comment.resolved}<div transition:clipFade><ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} /></div>{/if}
 			{#if comment.orphaned && !hideOrphan}<div class="ct-orphan">The text this comment was on has changed</div>{/if}
 			{#if comment.regionStale}
-				<div class="ct-orphan" data-region-stale>Image changed since this comment{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
+				<div class="ct-orphan" data-region-stale>{changedLabel(comment.anchor)}{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
 			{/if}
 			<CommentMarkdownBody text={comment.text} />
 		{/if}

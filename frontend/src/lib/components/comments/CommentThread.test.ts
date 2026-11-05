@@ -396,6 +396,16 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct-res-head .ct-num')?.textContent).toBe('3');
 	});
 
+	it('says when the diagram changed under a pin, with the same Move pin', () => {
+		const onMovePin = vi.fn();
+		render(thread({ anchor: '```mermaid', regionNumber: 1, regionStale: true }), false, { onMovePin });
+		const note = host.querySelector('[data-region-stale]')?.textContent ?? '';
+		expect(note).toContain('Diagram changed since this comment');
+		expect(note).not.toContain('Image');
+		button('[data-move-pin]').click();
+		expect(onMovePin).toHaveBeenCalledWith('c1');
+	});
+
 	it('says when the image changed under a pin and offers Move pin', () => {
 		const onMovePin = vi.fn();
 		render(thread({ anchor: '', regionNumber: 1, regionStale: true }), false, { onMovePin });

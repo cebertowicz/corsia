@@ -8,17 +8,43 @@ describe('placeTag', () => {
 	// Expected values come from backend/doceditor/image_markup.py place_tag with radius 11 and gap 3,
 	// so the viewer and the marked-up copy an agent reads put every tag in the same place.
 	it.each([
-		[{ x: 0.4, y: 0.3, w: 0.2, h: 0.2 }, { x: 304, y: 163, side: 'left' }],
+		[{ x: 0.4, y: 0.3, w: 0.2, h: 0.2 }, { x: 304, y: 134, side: 'up-left' }],
 		[{ x: 0, y: 0.3, w: 0.2, h: 0.2 }, { x: 13, y: 134, side: 'above' }],
 		[{ x: 0, y: 0, w: 0.3, h: 0.2 }, { x: 256, y: 13, side: 'right' }],
 		[{ x: 0, y: 0, w: 1, h: 0.5 }, { x: 14, y: 14, side: 'inside' }],
-		[{ x: 0.5, y: 0.5, w: 0, h: 0 }, { x: 415.4, y: 234.6, side: 'up-right' }],
+		[{ x: 0.5, y: 0.5, w: 0, h: 0 }, { x: 384.6, y: 234.6, side: 'up-left' }],
 		[{ x: 0.99, y: 0.01, w: 0, h: 0 }, { x: 776.6, y: 20.4, side: 'down-left' }],
 	])('matches the server renderer for %o', (region, expected) => {
 		const tag = placeTag(region, FRAME);
 		expect(tag.side).toBe(expected.side);
 		expect(tag.x).toBeCloseTo(expected.x, 6);
 		expect(tag.y).toBeCloseTo(expected.y, 6);
+	});
+
+	it('puts a box tag outside its top-left corner and a point tag up-left of the point', () => {
+		const box = placeTag({ x: 0.4, y: 0.3, w: 0.2, h: 0.2 }, FRAME);
+		expect(box.x).toBeLessThan(0.4 * 800);
+		expect(box.y).toBeLessThan(0.3 * 500);
+		const point = placeTag({ x: 0.5, y: 0.5, w: 0, h: 0 }, FRAME);
+		expect(point.x).toBeLessThan(0.5 * 800);
+		expect(point.y).toBeLessThan(0.5 * 500);
+	});
+
+	it('keeps the badge on the image at its edges by taking the next spot', () => {
+		// Box on the top edge: no room above-left, so left of the corner, still clear of the box.
+		expect(placeTag({ x: 0.4, y: 0, w: 0.2, h: 0.2 }, FRAME)).toMatchObject({ side: 'left', x: 304, y: 13 });
+		// Box on the left edge: no room left, so above.
+		expect(placeTag({ x: 0, y: 0.3, w: 0.2, h: 0.2 }, FRAME)).toMatchObject({ side: 'above', x: 13, y: 134 });
+		// Point on the left edge: up-right; on the top edge: down-right.
+		expect(placeTag({ x: 0, y: 0.5, w: 0, h: 0 }, FRAME)).toMatchObject({ side: 'up-right' });
+		expect(placeTag({ x: 0.5, y: 0, w: 0, h: 0 }, FRAME)).toMatchObject({ side: 'down-right' });
+		for (const region of [{ x: 0.4, y: 0, w: 0.2, h: 0.2 }, { x: 0, y: 0.5, w: 0, h: 0 }, { x: 0.5, y: 0, w: 0, h: 0 }, { x: 1, y: 1, w: 0, h: 0 }]) {
+			const tag = placeTag(region, FRAME);
+			expect(tag.x - (TAG_RADIUS + 2)).toBeGreaterThanOrEqual(-1e-9);
+			expect(tag.y - (TAG_RADIUS + 2)).toBeGreaterThanOrEqual(-1e-9);
+			expect(tag.x + (TAG_RADIUS + 2)).toBeLessThanOrEqual(800 + 1e-9);
+			expect(tag.y + (TAG_RADIUS + 2)).toBeLessThanOrEqual(500 + 1e-9);
+		}
 	});
 
 	it('never covers the box it points at unless every outside spot is clipped', () => {
@@ -69,6 +95,37 @@ describe('placeTags', () => {
 	it('lets a crowded tag overlap rather than leave the image', () => {
 		const tags = placeTags([{ x: 0, y: 0, w: 1, h: 0.5 }, { x: 0, y: 0, w: 1, h: 0.5 }], FRAME);
 		expect(tags.map((tag) => tag.side)).toEqual(['inside', 'inside']);
+	});
+});
+
+describe('placeTags with room outside the image', () => {
+	// A thumbnail is too small to hold a badge on the image: the badge stands up-left outside the box, the viewer's rule.
+	const THUMB = { width: 120, height: 75 };
+	it('puts a box tag up-left outside its corner, in pixels of the image', () => {
+		const [tag] = placeTags([{ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }], THUMB, 7, 2, undefined, 20);
+		expect(tag.side).toBe('up-left');
+		expect(tag.x).toBeLessThan(0.1 * THUMB.width);
+		expect(tag.y).toBeLessThan(0.1 * THUMB.height);
+		expect(tag.x).toBeGreaterThan(-20);
+		expect(tag.y).toBeGreaterThan(-20);
+	});
+
+	it('does the same for a point, offset up-left off the point', () => {
+		const [tag] = placeTags([{ x: 0.5, y: 0.5, w: 0, h: 0 }], THUMB, 7, 2, undefined, 20);
+		expect(tag.side).toBe('up-left');
+		expect(tag.x).toBeLessThan(0.5 * THUMB.width);
+		expect(tag.y).toBeLessThan(0.5 * THUMB.height);
+	});
+
+	it('with room only above, a tag at the left edge stays on the image rather than leave it to the left', () => {
+		const [tag] = placeTags([{ x: 0, y: 0.1, w: 0.3, h: 0.5 }], THUMB, 7, 2, undefined, { top: 18 });
+		expect(tag.x).toBeGreaterThanOrEqual(0);
+		expect(tag.y).toBeGreaterThan(-18);
+	});
+
+	it('is the plain placement when there is no room to give', () => {
+		const regions = [{ x: 0.4, y: 0.3, w: 0.2, h: 0.2 }, { x: 0.5, y: 0.5, w: 0, h: 0 }];
+		expect(placeTags(regions, FRAME, 11, 3, undefined, 0)).toEqual(placeTags(regions, FRAME, 11, 3));
 	});
 });
 

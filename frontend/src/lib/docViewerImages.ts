@@ -1,7 +1,8 @@
 import { get } from 'svelte/store';
 import { imageRequestAt, type OpenImageRequest } from '$lib/cm/markdown-image';
+import { widgetImageRequestAt } from '$lib/cm/widget-open';
 import { imageContentUrl } from '$lib/artifactImage';
-import { sharedImage, type ImageOccurrence } from '$lib/docImageComments';
+import { diagramAt, sharedImage, type ImageOccurrence } from '$lib/docImageComments';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
 import { liveFailureMessage } from '$lib/docViewerCommentDraft.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -56,7 +57,9 @@ interface DocViewerImagesOptions {
 export function createDocViewerImages(options: DocViewerImagesOptions) {
 	const projectId = () => options.target()?.projectId ?? null;
 	function open(request: OpenImageRequest, focus?: Focus) {
-		options.onOpenImage()?.({ ...request, focus });
+		const onOpenImage = options.onOpenImage();
+		if (onOpenImage) onOpenImage({ ...request, focus });
+		else if (request.src.startsWith('blob:')) URL.revokeObjectURL(request.src);
 	}
 	/** The comments of an image shown now, bound to this document as it is; none when it has no artifact to hold them. */
 	function comments(): DocumentImageComments | undefined {
@@ -75,7 +78,7 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 	async function openAt(image: ImageOccurrence, focus?: Focus): Promise<boolean> {
 		const root = options.root();
 		if (!options.onOpenImage() || !root) return false;
-		const request = await imageRequestAt(root, image);
+		const request = await imageRequestAt(root, image) ?? await widgetImageRequestAt(root, image);
 		if (!request) return false;
 		open(request, focus);
 		return true;
@@ -93,6 +96,8 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 	}
 	const groups = {
 		srcOf: (comment: DocComment) => (comment.imageSrc ? imageContentUrl({ path: comment.imageSrc, projectId: projectId(), token: get(token) ?? '', imageCacheKey: options.imageCacheKey() }) : null),
+		/** The diagram a pin is on, as the document has it now: its source to draw, and its drawer caption. */
+		diagramOf: (comment: DocComment) => (comment.from != null ? diagramAt(options.text(), comment.from) : null),
 		colorOf: (comment: DocComment) => regionColor(comment, projectId(), options.accent()),
 		onOpen: (comment: DocComment, focus?: Focus) => openOr([comment.id], focus, () => options.showInText(comment.id)),
 	};

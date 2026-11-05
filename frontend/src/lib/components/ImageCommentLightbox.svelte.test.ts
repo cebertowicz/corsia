@@ -23,6 +23,7 @@ vi.mock('$lib/stores/viewport', async () => {
 import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
 import { docComments } from '$lib/stores/docComments';
+import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 import { prefersReducedMotion } from '$lib/stores/viewport';
 
 const SRC = '/api/files/content?path=%2Fws%2Fshot.png&raw=true';
@@ -79,6 +80,7 @@ afterEach(() => {
 	delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
 	delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientHeight;
 	Object.defineProperty(window, 'innerWidth', { configurable: true, value: realWidth });
+	deliveryConfirmation.dismiss();
 	vi.restoreAllMocks();
 });
 
@@ -102,6 +104,21 @@ describe('ImageCommentLightbox', () => {
 		expect(chip?.textContent).toContain('1 new reply');
 		chip!.click();
 		expect(step).toHaveBeenCalledOnce();
+	});
+
+	it('keeps an earlier document confirmation out of the viewer but shows a new viewer confirmation', async () => {
+		deliveryConfirmation.show('art-img', 1);
+		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
+			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0 },
+			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
+			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn() },
+			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: vi.fn(),
+		} });
+		await settle();
+		expect(host.querySelector('[data-doc-bottom-band]')).toBeNull();
+		deliveryConfirmation.show('art-img', 2);
+		await settle();
+		expect(host.querySelector('.viewer-band [data-doc-bottom-band]')?.textContent).toContain('2 comments sent');
 	});
 
 	it('reads the image\'s comments, counts them on the pill and numbers their tags on the image', async () => {

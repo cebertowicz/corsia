@@ -8,16 +8,20 @@
 	import { flushSync, tick, type Snippet } from 'svelte';
 	import { FAILED_IMAGE, imageFailureReason } from '$lib/imageFailure';
 	import {
-		clampScale, distance, fitScale, fractionOnImage, isActualSize, midpoint, percentLabel, scrollToHold,
-		stepScale, wheelFactor, type Point, type Size,
+		clampScale, FIT_MARGIN, fitScale, fractionOnImage, isActualSize, percentLabel, readableOpen, scrollToHold,
+		stepScale, type Point, type Size,
 	} from '$lib/imageZoom';
 	import { isMobile, prefersReducedMotion } from '$lib/stores/viewport';
 	import { observeImageViewportPlace, resetImageViewportPlace, restoreImageViewportPlace } from '$lib/imageViewportPlace';
 	import type { ImageViewportPlace } from '$lib/artifactTabs';
+	import type { ImageRegion } from '$lib/imageRegions';
+	import { attachImageWheel, imageViewerPointer } from '$lib/imageViewerPointer';
 
-	let { src, alt, docName = '', onBack, barActions, overlay, place = null, onPlace, onLoaded, onFailed, onRetry }: {
+	let { src, alt, readableScale, docName = '', onBack, barActions, overlay, imageMargin = FIT_MARGIN, visibleBottom, pendingReveal = false, place = null, onPlace, onLoaded, onFailed, onRetry }: {
 		src: string;
 		alt: string;
+		/** A scale to open at instead of Fit, for an image that is readable there (a diagram); Fit when the whole image fits at it. */
+		readableScale?: number;
 		/** The document this image belongs to; with `onBack` the bar offers a way back to it. */
 		docName?: string;
 		onBack?: () => void;
@@ -25,6 +29,12 @@
 		barActions?: Snippet<[{ loaded: boolean }]>;
 		/** Drawn over the image in a frame of its exact size, so it follows zoom and scrolling as part of the image. */
 		overlay?: Snippet<[{ scale: number }]>;
+		/** Space around the image, including any overlay extending beyond its edges. */
+		imageMargin?: number;
+		/** Bottom of the unobscured area in client coordinates, when a sheet overlays the image. */
+		visibleBottom?: () => number | null;
+		/** Keep a from-card subject hidden until its first positioning is complete. */
+		pendingReveal?: boolean;
 		/** The in-session image camera, including user-chosen free zoom or Fit. */
 		place?: ImageViewportPlace | null;
 		onPlace?: (place: ImageViewportPlace) => void;
@@ -36,7 +46,7 @@
 
 	// Fallback for an image with no intrinsic size (an SVG with only a viewBox).
 	const UNSIZED: Size = { width: 800, height: 600 };
-	const FLING_FRICTION = 0.94;
+	// Touch momentum is handled by imageViewerPointer.
 
 	let viewportEl = $state<HTMLDivElement>();
 	let imgEl = $state<HTMLImageElement>();
@@ -46,13 +56,19 @@
 	let attempt = $state(0);
 	let free = $state<number | null>(null); // null is Fit and follows the viewport as it resizes.
 
-	const fit = $derived(natural ? fitScale(natural, viewportSize) : 1);
+	const fit = $derived(natural ? fitScale(natural, viewportSize, imageMargin) : 1);
 	const scale = $derived(free === null ? fit : clampScale(free, fit));
+	/** Fit is the state whenever the shown scale is Fit: `free` is null there, but a kept zoom the window has since outgrown clamps to Fit too. */
+	const atFit = $derived(Math.abs(scale - fit) < 1e-6);
 	const shown = $derived(natural ? { width: natural.width * scale, height: natural.height * scale } : null);
 	const loaded = $derived(natural !== null && failure === null);
 	let overflowing = $state(false);
+	/** Keep a revealed place centred through resize until the reader moves the view. */
+	let held: (Point & { width?: number; height?: number; scale?: number; subject?: ImageRegion; visible?: ImageRegion }) | null = null;
+	let heldViewport = $state<Size | null>(null);
+	let coveredHeight = $state(0);
 
-	// A new image starts over at Fit.
+	// A new image starts over at Fit, or at its readable scale when it has one and does not fit there.
 	$effect(() => {
 		src;
 		attempt;
@@ -67,6 +83,7 @@
 		const measure = () => {
 			viewportSize = { width: el.clientWidth, height: el.clientHeight };
 			overflowing = el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1;
+			if (held && !regionVisible()) settleReveal('auto');
 		};
 		measure();
 		if (typeof ResizeObserver === 'undefined') return;
@@ -92,10 +109,12 @@
 		natural = el.naturalWidth > 0 && el.naturalHeight > 0 ? { width: el.naturalWidth, height: el.naturalHeight } : UNSIZED;
 		await tick();
 		const saved = place;
-		if (saved) free = saved.scale ?? null;
+		free = saved ? saved.scale ?? null : readableOpen(readableScale, fit);
 		await tick();
 		if (saved && viewportEl) restoreImageViewportPlace(viewportEl, saved);
 		natural = { width: el.naturalWidth || UNSIZED.width, height: el.naturalHeight || UNSIZED.height, restored: true };
+		// The viewport stays hidden, which cannot take focus, until this update has drawn it.
+		await tick();
 		if (onBack) viewportEl?.focus({ preventScroll: true });
 		onLoaded?.();
 	}
@@ -137,133 +156,105 @@
 	export function imageBounds(): DOMRect | null { return imgEl?.isConnected ? imgEl.getBoundingClientRect() : null; }
 	/** The image's own pixel size once it has loaded, for a caller sizing the space around the viewer. */
 	export function naturalSize(): Size | null { return natural; }
-	/** Glides the given fraction of the image (0..1 on each axis) to the viewport's centre, keeping the zoom; at once with reduced motion. */
+	/** Fit a region and a small margin into the visible area before revealing it. */
+	export function revealRegion(x: number, y: number, width: number, height: number, subject?: ImageRegion) {
+		if (!viewportEl || !imgEl || !loaded) return;
+		held = { x: x + width / 2, y: y + height / 2, width, height, scale, subject };
+		heldViewport = { width: viewportEl.clientWidth, height: viewportEl.clientHeight };
+		settleReveal('auto');
+	}
+	/** Glides an image fraction to the centre, keeping its zoom. */
 	export function revealFraction(x: number, y: number) {
+		if (!viewportEl || !imgEl || !loaded) return;
+		heldViewport = null;
+		held = { x, y };
+		settleReveal($prefersReducedMotion ? 'auto' : 'smooth');
+	}
+	function regionVisible(): boolean {
+		const el = viewportEl;
+		const image = imgEl;
+		const target = held;
+		if (!el || !image || !target || target.width === undefined || target.height === undefined) return false;
+		const view = el.getBoundingClientRect();
+		const bounds = image.getBoundingClientRect();
+		const bottom = Math.min(view.bottom, visibleBottom?.() ?? view.bottom);
+		const margin = 12;
+		const visible = target.visible ?? { x: target.x - target.width / 2, y: target.y - target.height / 2, w: target.width, h: target.height };
+		const left = bounds.left + visible.x * bounds.width;
+		const right = bounds.left + (visible.x + visible.w) * bounds.width;
+		const top = bounds.top + visible.y * bounds.height;
+		const end = bounds.top + (visible.y + visible.h) * bounds.height;
+		return left >= view.left + margin && right <= view.right - margin && top >= view.top + margin && end <= bottom - margin;
+	}
+	function settleReveal(behavior: ScrollBehavior) {
+		const el = viewportEl;
+		const target = held;
+		if (!el || !target || !natural) return;
+		if (target.scale !== undefined) {
+			const view = el.getBoundingClientRect();
+			const bottom = Math.max(view.top, Math.min(view.bottom, visibleBottom?.() ?? view.bottom));
+			// Scroll offsets are quantized by the browser; leave the existing 12px visible margin intact.
+			const margin = 13;
+			const box = { x: target.x - (target.width ?? 0) / 2, y: target.y - (target.height ?? 0) / 2, w: target.width ?? 0, h: target.height ?? 0 };
+			const subject = target.subject ?? box;
+			const horizontal = subject.w ? Math.max(1, view.width - 2 * margin) / (natural.width * subject.w) : target.scale;
+			const vertical = subject.h ? Math.max(1, bottom - view.top - 2 * margin) / (natural.height * subject.h) : target.scale;
+			const next = Math.max(fit, Math.min(target.scale, horizontal, vertical));
+			free = Math.abs(next - fit) < 1e-6 ? null : next;
+			flushSync();
+			const availableWidth = Math.max(1, view.width - 2 * margin) / (natural.width * next);
+			const availableHeight = Math.max(1, bottom - view.top - 2 * margin) / (natural.height * next);
+			target.visible = subject;
+			const centre = (start: number, length: number, desired: number, available: number) => Math.max(start + length - available / 2, Math.min(start + available / 2, desired));
+			const x = centre(box.x, box.w, subject.x + subject.w / 2, availableWidth);
+			const y = centre(box.y, box.h, subject.y + subject.h / 2, availableHeight);
+			centreOn(x, y, behavior);
+			return;
+		}
+		centreOn(target.x, target.y, behavior);
+	}
+	function centreOn(x: number, y: number, behavior: ScrollBehavior) {
 		const el = viewportEl;
 		const image = imgEl;
 		if (!el || !image || !loaded) return;
 		const at = { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
 		const view = el.getBoundingClientRect();
-		const delta = scrollToHold(at, { x: view.left + view.width / 2, y: view.top + view.height / 2 }, image.getBoundingClientRect());
-		el.scrollTo({ left: el.scrollLeft + delta.x, top: el.scrollTop + delta.y, behavior: $prefersReducedMotion ? 'auto' : 'smooth' });
+		const bottom = Math.max(view.top, Math.min(view.bottom, visibleBottom?.() ?? view.bottom));
+		coveredHeight = view.bottom - bottom;
+		flushSync();
+		const delta = scrollToHold(at, { x: view.left + view.width / 2, y: view.top + (bottom - view.top) / 2 }, image.getBoundingClientRect());
+		el.scrollTo({ left: el.scrollLeft + delta.x, top: el.scrollTop + delta.y, behavior });
 	}
+	/** Re-check the subject when an overlay appears or disappears without resizing the viewport. */
+	export function refreshCoveredArea() { if (held && !regionVisible()) settleReveal('auto'); }
+	function releaseReveal() { held = null; heldViewport = null; }
+	/** The covering sheet has closed. */
+	export function clearSheet() { coveredHeight = 0; releaseReveal(); }
 	function toFit() {
+		releaseReveal();
 		free = null;
 		resetImageViewportPlace(viewportEl, free, onPlace);
 	}
-	const zoomIn = () => zoomTo(stepScale(scale, 1, fit));
-	const zoomOut = () => zoomTo(stepScale(scale, -1, fit));
+	const zoomIn = () => { releaseReveal(); zoomTo(stepScale(scale, 1, fit)); };
+	const zoomOut = () => { releaseReveal(); zoomTo(stepScale(scale, -1, fit)); };
 
 	// Wheel and WebKit gesture events must be able to cancel the page's own zoom, so they cannot be passive.
 	$effect(() => {
 		const el = viewportEl;
-		if (!el) return;
-		const onWheel = (event: WheelEvent) => {
-			if (!event.ctrlKey && !event.metaKey) return;
-			event.preventDefault();
-			if (loaded) zoomTo(scale * wheelFactor(event.deltaY, event.deltaMode), { x: event.clientX, y: event.clientY });
-		};
-		let gesture: { scale: number; at: Point } | null = null;
-		type GestureEvent = Event & { scale: number; clientX: number; clientY: number };
-		const gestureStart = (event: Event) => {
-			event.preventDefault();
-			const e = event as GestureEvent;
-			if (imgEl) gesture = { scale, at: fractionOnImage({ x: e.clientX, y: e.clientY }, imgEl.getBoundingClientRect()) };
-		};
-		const gestureChange = (event: Event) => {
-			event.preventDefault();
-			const e = event as GestureEvent;
-			if (gesture && loaded) placeScale(gesture.scale * e.scale, gesture.at, { x: e.clientX, y: e.clientY });
-		};
-		const gestureEnd = (event: Event) => { event.preventDefault(); gesture = null; };
-		el.addEventListener('wheel', onWheel, { passive: false });
-		el.addEventListener('gesturestart', gestureStart);
-		el.addEventListener('gesturechange', gestureChange);
-		el.addEventListener('gestureend', gestureEnd);
-		return () => {
-			el.removeEventListener('wheel', onWheel);
-			el.removeEventListener('gesturestart', gestureStart);
-			el.removeEventListener('gesturechange', gestureChange);
-			el.removeEventListener('gestureend', gestureEnd);
-		};
+		if (el) return attachImageWheel(el, {
+			releaseReveal, loaded: () => loaded, scale: () => scale, image: () => imgEl, zoomTo, placeScale,
+		});
 	});
 
-	// Touch has no scroll of its own here (touch-action is none, so one finger and two are ours to read).
-	const pointers = new Map<number, Point>();
-	let pinch: { distance: number; scale: number; at: Point } | null = null;
-	let drag: { last: Point; velocity: Point; time: number } | null = null;
-	let fling = 0;
 	let panning = $state(false);
-
-	const stopFling = () => { cancelAnimationFrame(fling); fling = 0; };
-	function startFling(velocity: Point) {
-		const el = viewportEl;
-		if (!el || $prefersReducedMotion || Math.hypot(velocity.x, velocity.y) < 0.3) return;
-		let v = velocity;
-		let previous = performance.now();
-		const step = (now: number) => {
-			const dt = Math.min(48, now - previous);
-			previous = now;
-			el.scrollLeft -= v.x * dt;
-			el.scrollTop -= v.y * dt;
-			v = { x: v.x * FLING_FRICTION ** (dt / 16), y: v.y * FLING_FRICTION ** (dt / 16) };
-			fling = Math.hypot(v.x, v.y) > 0.02 ? requestAnimationFrame(step) : 0;
-		};
-		fling = requestAnimationFrame(step);
-	}
-
-	function beginPinch() {
-		const [a, b] = [...pointers.values()];
-		if (!imgEl) return;
-		const mid = midpoint(a, b);
-		pinch = { distance: Math.max(1, distance(a, b)), scale, at: fractionOnImage(mid, imgEl.getBoundingClientRect()) };
-		drag = null;
-	}
-	function onPointerDown(event: PointerEvent) {
-		if (!loaded || (event.pointerType === 'mouse' && (event.button !== 0 || !overflowing))) return;
-		stopFling();
-		viewportEl?.setPointerCapture(event.pointerId);
-		pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-		if (pointers.size === 2) beginPinch();
-		else if (pointers.size === 1) {
-			drag = { last: { x: event.clientX, y: event.clientY }, velocity: { x: 0, y: 0 }, time: event.timeStamp };
-			panning = event.pointerType === 'mouse';
-		}
-	}
-	function onPointerMove(event: PointerEvent) {
-		const el = viewportEl;
-		if (!el || !pointers.has(event.pointerId)) return;
-		pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-		if (pinch && pointers.size >= 2) {
-			const [a, b] = [...pointers.values()];
-			placeScale(pinch.scale * (distance(a, b) / pinch.distance), pinch.at, midpoint(a, b));
-		} else if (drag) {
-			const here = { x: event.clientX, y: event.clientY };
-			const dx = here.x - drag.last.x;
-			const dy = here.y - drag.last.y;
-			el.scrollLeft -= dx;
-			el.scrollTop -= dy;
-			const dt = Math.max(1, event.timeStamp - drag.time);
-			drag = { last: here, velocity: { x: dx / dt, y: dy / dt }, time: event.timeStamp };
-		}
-	}
-	function onPointerEnd(event: PointerEvent) {
-		if (!pointers.delete(event.pointerId)) return;
-		panning = false;
-		if (pointers.size === 0) {
-			const flung = drag && event.pointerType === 'touch' && event.type === 'pointerup' ? drag.velocity : null;
-			pinch = null;
-			drag = null;
-			if (flung) startFling(flung);
-		} else if (pointers.size === 1) {
-			// One finger of a pinch lifts: the other carries on as a pan from where it is.
-			const [rest] = [...pointers.values()];
-			pinch = null;
-			drag = { last: rest, velocity: { x: 0, y: 0 }, time: event.timeStamp };
-		}
-	}
+	const pointer = imageViewerPointer({
+		viewport: () => viewportEl, image: () => imgEl, loaded: () => loaded,
+		overflowing: () => overflowing, reducedMotion: () => $prefersReducedMotion,
+		scale: () => scale, releaseReveal, placeScale, setPanning: (value) => { panning = value; },
+	});
 
 	function onKeydown(event: KeyboardEvent) {
+		releaseReveal();
 		if (event.ctrlKey || event.metaKey || event.altKey || !loaded) return;
 		if (event.key === '+' || event.key === '=') zoomIn();
 		else if (event.key === '-') zoomOut();
@@ -292,7 +283,7 @@
 		<span class="spacer"></span>
 		{@render barActions?.({ loaded })}
 		<div class="zoom" role="group" aria-label="Zoom">
-			<button type="button" class="control" aria-pressed={free === null} disabled={!loaded} onclick={toFit}>Fit</button>
+			<button type="button" class="control" aria-pressed={loaded && atFit} disabled={!loaded} onclick={toFit}>Fit</button>
 			{#if !$isMobile}
 				<button type="button" class="control" aria-pressed={loaded && isActualSize(scale)} disabled={!loaded} onclick={() => zoomTo(1)}>100%</button>
 				<button type="button" class="control icon" aria-label="Zoom out" disabled={!loaded || scale <= fit + 1e-6} onclick={zoomOut}>
@@ -320,18 +311,18 @@
 			class="viewport"
 			class:pannable={overflowing}
 			class:panning
-			class:pending={natural === null || !natural.restored}
+			class:pending={natural === null || !natural.restored || pendingReveal}
 			bind:this={viewportEl}
 			role="region"
 			aria-label={alt ? `Image: ${alt}` : 'Image'}
 			tabindex="0"
-			onpointerdown={onPointerDown}
-			onpointermove={onPointerMove}
-			onpointerup={onPointerEnd}
-			onpointercancel={onPointerEnd}
+			onpointerdown={pointer.down}
+			onpointermove={pointer.move}
+			onpointerup={pointer.end}
+			onpointercancel={pointer.end}
 			onkeydown={onKeydown}
 		>
-			<div class="pad">
+			<div class="pad" style:--image-margin="{imageMargin}px" style:--covered-height="{coveredHeight}px" style:--pad-min-width={heldViewport ? `${heldViewport.width}px` : '100%'} style:--pad-min-height={heldViewport ? `${heldViewport.height}px` : '100%'}>
 				<div class="frame" style={shown ? `width:${shown.width}px;height:${shown.height}px` : undefined}>
 					{#key attempt}
 						<img bind:this={imgEl} {src} {alt} draggable="false" onload={onImageLoad} onerror={onImageError} />
@@ -379,7 +370,7 @@
 	.viewport.pannable { cursor: grab; }
 	.viewport.panning { cursor: grabbing; user-select: none; }
 	/* Auto margins centre a smaller image and, unlike justify-content, never clip the start of a larger one. */
-	.pad { display: flex; box-sizing: border-box; width: max-content; min-width: 100%; min-height: 100%; padding: 24px; }
+	.pad { display: flex; box-sizing: border-box; width: max-content; min-width: var(--pad-min-width); min-height: var(--pad-min-height); padding: var(--image-margin); padding-bottom: calc(var(--image-margin) + var(--covered-height)); }
 	.frame {
 		position: relative; flex: none; margin: auto;
 		border-radius: 2px; box-shadow: 0 0 0 1px var(--border), 0 1px 4px color-mix(in srgb, #000 28%, transparent);

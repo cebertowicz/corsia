@@ -13,13 +13,13 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from functools import lru_cache, partial
+from functools import partial
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from PIL import Image
 
-from doceditor import live_events
+from doceditor import diagram_pins, live_events
 from doceditor.comment_action_errors import CommentActionError
 from doceditor.document_scope import ProjectNotFound, scope_bases
 from doceditor.image_markup import Mark, Region, check_markable, render_marked_image
@@ -28,7 +28,7 @@ from infra.passive_changes import append_thread_context_note
 from infra.write_effects import after_commit
 from registry import models as registry_models
 from registry.file_types import image_media_type
-from registry.identity_metadata import sha256_file
+from doceditor.image_revision import image_revision
 from registry.path_access import ReadRefused, checked_read
 
 # Mirrors the viewer's AGENT_COLORS and agentColor() (frontend/src/lib/docPresence.ts),
@@ -153,29 +153,19 @@ def _bases_for(db, groups: Iterable[list[dict]], thread_id: str | None) -> list[
     return reader_bases(db, thread_id) if any(group[0].get("image_src") for group in groups) else []
 
 
-def image_revision(path: Path) -> str:
-    """The revision a pin is placed on: the image file's SHA-256, hashed once per version of the file.
-
-    Every comment read judges each commented image's staleness (FR13.9), so a
-    file whose identity, size and times are unchanged keeps its last hash: a
-    stat per image per read, not a full read.
-    """
-    st = path.stat()
-    return _file_sha256(str(path), st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
-
-
-@lru_cache(maxsize=512)
-def _file_sha256(path: str, *version: int) -> str:
-    return sha256_file(Path(path))
-
-
+# Image revision caching is shared by pin creation and staleness checks.
 def move_fields(comment: Mapping[str, Any], fields: dict[str, Any], image: Path) -> dict[str, Any]:
     """Turn a patch's ``region`` into column updates; a moved pin is placed on ``image`` as it is now."""
+    return move_fields_on(comment, fields, image_revision(image))
+
+
+def move_fields_on(comment: Mapping[str, Any], fields: dict[str, Any], revision: str) -> dict[str, Any]:
+    """The same for a pin placed on what has ``revision`` now (an image's file, or a diagram's block)."""
     if comment.get("region_number") is None:
         raise CommentActionError("region_target", "only a comment placed on an image region can be moved.")
     x, y, w, h = parse_region(fields["region"])
     rest = {key: value for key, value in fields.items() if key != "region"}
-    return {**rest, "region_x": x, "region_y": y, "region_w": w, "region_h": h, "image_rev": image_revision(image)}
+    return {**rest, "region_x": x, "region_y": y, "region_w": w, "region_h": h, "image_rev": revision}
 
 
 def region_of(row: Mapping[str, Any]) -> Region | None:
@@ -210,6 +200,9 @@ def annotate_stale(db, threads: list[dict], path: str | None, reader_thread_id: 
     groups = list(_by_image(threads, path).values())
     bases = _bases_for(db, groups, reader_thread_id)
     for group in groups:
+        if not is_image_path(path) and diagram_pins.is_diagram_group(group, path):
+            diagram_pins.mark_stale(group, path)
+            continue
         try:
             image = comment_image(db, group[0], path, bases)
         except CommentActionError:
@@ -331,6 +324,12 @@ def annotate_delivery(db, items: list[dict], *, path: str | None, reader_thread_
         tray_problem = f"the reader's working folder could not be used ({exc})."
     bases = _bases_for(db, by_image.values(), reader_thread_id)
     for image_path, group in by_image.items():
+        if not is_image_path(path) and diagram_pins.is_diagram_group(group, path):
+            diagram_pins.mark_stale(group, path)
+            for item in group:
+                item["region_line"] = describe_region(item)
+                item["marked_image_line"] = diagram_pins.delivery_line(item, path)
+            continue
         try:
             image = comment_image(db, group[0], path, bases)
             problem = _unmarkable(str(image) if image else None)

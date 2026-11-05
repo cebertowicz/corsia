@@ -1,3 +1,4 @@
+import { plainQuote } from '$lib/plainQuote';
 import type { DocComment } from '$lib/stores/docComments';
 
 /**
@@ -41,11 +42,50 @@ export function imageAlt(comment: DocComment): string {
 	return /^!\[([^\]]*)\]/.exec(comment.anchor ?? '')?.[1].trim() ?? '';
 }
 
+const DIAGRAM_FENCE = /^\s*(?:`{3,}|~{3,})\s*mermaid\s*$/i;
+
+/** Whether a comment's anchor is a mermaid block's opening fence line, where a pin on a diagram is anchored (TDC-FR8). */
+export const isDiagramAnchor = (anchor: string | undefined | null): boolean => DIAGRAM_FENCE.test(anchor ?? '');
+
+/** A pin on a rendered diagram: a region comment with no image file, anchored on its block's opening fence line (TDC-FR8). */
+export function isDiagramPin(comment: DocComment): boolean {
+	return !!comment.region && !comment.imageSrc && isDiagramAnchor(comment.anchor);
+}
+
+/** What a pin's card says when what it is on changed after it was placed: the kind of thing it is on, then the one wording. */
+export const changedLabel = (anchor: string | undefined | null): string => `${isDiagramAnchor(anchor) ? 'Diagram' : 'Image'} changed since this comment`;
+
+/**
+ * The diagram whose opening fence line starts at `from` in the document `text`: its source, and the caption its drawer row
+ * carries, naming the nearest heading above it (`Diagram in “Flow”`, or `Diagram` with none). Null when no mermaid block opens there.
+ */
+export function diagramAt(text: string, from: number): { source: string; caption: string } | null {
+	const lines = text.split('\n');
+	let offset = 0, heading = '', fence: string | null = null, opening = -1;
+	for (let i = 0; i < lines.length; offset += lines[i].length + 1, i++) {
+		if (offset > from) break;
+		const marker = /^\s{0,3}(`{3,}|~{3,})/.exec(lines[i])?.[1];
+		if (offset === from) { if (!fence && DIAGRAM_FENCE.test(lines[i]) && marker) { opening = i; break; } return null; }
+		if (marker && (!fence || (marker[0] === fence[0] && marker.length >= fence.length && /^\s{0,3}[`~]+\s*$/.test(lines[i])))) { fence = fence ? null : marker; continue; }
+		if (!fence) heading = /^\s{0,3}#{1,6}\s+(.+?)(?:\s+#+)?\s*$/.exec(lines[i])?.[1] ?? heading;
+	}
+	if (opening < 0) return null;
+	const marker = /(`{3,}|~{3,})/.exec(lines[opening])![1];
+	const close = lines.findIndex((line, i) => i > opening && new RegExp(`^\\s{0,3}${marker[0]}{${marker.length},}\\s*$`).test(line));
+	const source = lines.slice(opening + 1, close < 0 ? lines.length : close).join('\n');
+	const name = plainQuote(heading);
+	return { source, caption: name ? `Diagram in \u201c${name}\u201d` : 'Diagram' };
+}
+
 /**
  * The drawer row a comment is listed under: one per image of the document, so its comments sit together under one
- * thumbnail. A comment whose image markdown is gone still groups by its file. Text comments have none.
+ * thumbnail, and one per diagram, under its name. A comment whose image markdown is gone still groups by its file. Text comments have none.
  */
 export function imageGroupKey(comment: DocComment): string | null {
+	if (isDiagramPin(comment)) {
+		const at = placed(comment);
+		return `diagram\u0000${at ? at.from : 'detached'}`;
+	}
 	if (!comment.region || !comment.imageSrc) return null;
 	const at = placed(comment);
 	return `${comment.imageSrc}\u0000${at ? at.from : 'detached'}`;

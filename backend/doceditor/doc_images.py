@@ -17,9 +17,11 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import unquote
 
+from doceditor import diagram_pins
 from doceditor.comment_action_errors import CommentActionError
+from doceditor.doc_text import read_doc_text
 from doceditor.image_regions import (
-    checked_image, comment_image, is_image_path, move_fields, reader_bases, require_image,
+    checked_image, comment_image, is_image_path, move_fields, move_fields_on, reader_bases, require_image,
 )
 from doceditor.quote_anchor import _cp_at_u16, _span16, anchor_context
 
@@ -49,7 +51,7 @@ def image_url(markdown: str) -> str | None:
 
 def check_image_quote(quote: str) -> None:
     """A region the browser places in a document quotes the image's markdown exactly."""
-    if image_url(quote) is None:
+    if image_url(quote) is None and not diagram_pins.is_fence_quote(quote):
         raise CommentActionError("region_target", NOT_AN_IMAGE)
 
 
@@ -120,6 +122,8 @@ def region_patch(db, comment: Mapping[str, Any], fields: dict[str, Any], *, doc_
     name that image; a moved pin is placed on the image as it is now.
     """
     image_src = comment.get("image_src")
+    if not image_src and not is_image_path(doc_path) and comment.get("region_number") is not None:
+        return _diagram_patch(comment, fields, doc_path)
     bases = reader_bases(db, owner_thread_id) if image_src else []
     if image_src and "anchor_text" in fields:
         named = image_file(db, doc_path=doc_path, markdown=fields["anchor_text"], bases=bases)
@@ -129,3 +133,13 @@ def region_patch(db, comment: Mapping[str, Any], fields: dict[str, Any], *, doc_
     if "region" not in fields:
         return fields
     return move_fields(comment, fields, require_image(comment_image(db, comment, doc_path, bases)))
+
+
+def _diagram_patch(comment: Mapping[str, Any], fields: dict[str, Any], doc_path: str | None) -> dict[str, Any]:
+    """A pin on a diagram has no file: a moved pin is placed on the block as it is now."""
+    if "region" not in fields:
+        return fields
+    current = diagram_pins.revision(read_doc_text(doc_path), comment.get("from_off"))
+    if current is None:
+        raise CommentActionError("region_target", "the diagram this pin is on is no longer in the document.")
+    return move_fields_on(comment, fields, current)

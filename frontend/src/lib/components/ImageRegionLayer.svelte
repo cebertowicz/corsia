@@ -8,9 +8,13 @@
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import type { DocComment } from '$lib/stores/docComments';
 	import {
-		crowdedNames, describeRegion, isPoint, nearestTarget, placeTags, regionFromDrag, regionRect, type ImageRegion, type Point,
+		crowdedNames, describeRegion, isPoint, regionFromDrag, regionRect, TAG_GAP, TAG_RADIUS, type ImageRegion, type Point,
 	} from '$lib/imageRegions';
+	import { badgeTags } from '$lib/imageGutter';
+	import { imageRegionPick, trackSpace } from '$lib/imageRegionPick';
+	import { observeRegionSize } from '$lib/imageRegionMeasure';
 	import { regionMotion } from '$lib/imageRegionMotion';
+	import { changedLabel } from '$lib/docImageComments';
 
 	/**
 	 * `movedFrom` is where a pin being moved was, while its new place saves.
@@ -19,7 +23,7 @@
 	type Pinned = DocComment & { region: ImageRegion; regionNumber: number; movedFrom?: ImageRegion; saves: number };
 	/** A box or point on the image: the pin itself, its new place while that saves, or its old place meanwhile. */
 	type Mark = { comment: Pinned; region: ImageRegion; role: 'pin' | 'pending' | 'leaving'; key: string };
-	let { comments, colorOf, draftColor, draft = null, moving = null, selectedId = null, hoveredId = null, boxMode = false, cardOpen = false, readOnly = false, scale = 1, onPick, onHover, onDraw, onDismiss }: {
+	let { comments, colorOf, draftColor, draft = null, moving = null, selectedId = null, hoveredId = null, boxMode = false, cardOpen = false, readOnly = false, scale = 1, onPick, onAmbiguous, onHover, onDraw, onDismiss }: {
 		/** Region comments to show; a resolved one shows only while it is selected. */
 		comments: DocComment[];
 		colorOf: (comment: DocComment) => string;
@@ -39,6 +43,7 @@
 		/** The viewer's zoom; the tags are placed again when it changes. */
 		scale?: number;
 		onPick: (id: string, anchor: () => DOMRect | null, opener: HTMLElement) => void;
+		onAmbiguous: (ids: string[], opener: HTMLElement) => void;
 		onHover: (id: string | null) => void;
 		onDraw: (region: ImageRegion, anchor: () => DOMRect | null) => void;
 		onDismiss: () => void;
@@ -95,7 +100,8 @@
 		if (!width || !height) return [];
 		resized = placedSize !== `${width}x${height}`;
 		placedSize = `${width}x${height}`;
-		const positions = placeTags(pinned.map((comment) => comment.region), size);
+		const regions = pinned.map((comment) => comment.region);
+		const positions = badgeTags(regions, size, TAG_RADIUS, TAG_GAP);
 		return pinned.map((comment, index) => ({ comment, key: `${comment.id}:${comment.saves}`, ...positions[index] }));
 	});
 	const { fade, glide } = regionMotion(() => resized || get(prefersReducedMotion));
@@ -128,21 +134,9 @@
 		if (rect) { width = rect.width; height = rect.height; }
 	}
 	$effect(() => { void scale; measure(); });
-	onMount(() => {
-		const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(measure) : null;
-		if (layer) observer?.observe(layer);
-		return () => observer?.disconnect();
-	});
+	onMount(() => observeRegionSize(layer, measure));
 
-	onMount(() => {
-		const down = (event: KeyboardEvent) => { if (event.code === 'Space') spaceHeld = true; };
-		const up = (event: KeyboardEvent) => { if (event.code === 'Space') spaceHeld = false; };
-		const blur = () => { spaceHeld = false; };
-		window.addEventListener('keydown', down);
-		window.addEventListener('keyup', up);
-		window.addEventListener('blur', blur);
-		return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur); };
-	});
+	onMount(() => trackSpace((held) => { spaceHeld = held; }));
 
 	/** Where a region is on screen now, for the card that pops over beside it. */
 	export function anchorFor(region: ImageRegion): () => DOMRect | null {
@@ -180,17 +174,25 @@
 		onDraw(region, anchorFor(region));
 	}
 
+	let tagPointerType = '';
 	function onTagDown(event: PointerEvent) {
+		// PointerEvent is present for pointerdown in both Chromium and WebKit, even where click is only a MouseEvent.
+		tagPointerType = event.pointerType;
 		// The tag takes its own press, so the viewer neither pans nor captures the pointer away from it.
 		event.stopPropagation();
 	}
 	function pick(event: MouseEvent, id: string) {
 		event.stopPropagation();
 		let chosen = id;
-		// Overlapping 44 px targets go to the nearer centre; a key press is on the focused tag.
+		const pointerType = tagPointerType;
+		tagPointerType = '';
+		// A keyboard click has detail zero, even after an earlier pointer interaction.
 		if (event.detail > 0 && layer) {
 			const box = layer.getBoundingClientRect();
-			chosen = nearestTarget(tags.map((tag) => ({ id: tag.comment.id, x: box.left + tag.x, y: box.top + tag.y })), { x: event.clientX, y: event.clientY }) ?? id;
+			const targets = tags.map((tag) => ({ id: tag.comment.id, x: box.left + tag.x, y: box.top + tag.y, moving: !!tag.comment.movedFrom }));
+			const result = imageRegionPick(targets, { x: event.clientX, y: event.clientY }, pointerType);
+			if (Array.isArray(result)) { onAmbiguous(result, event.currentTarget as HTMLElement); return; }
+			chosen = result ?? id;
 		}
 		const comment = pinned.find((item) => item.id === chosen);
 		// A pin saving at its new place is not picked: on a phone, the tap that placed it also lands on it as a click.
@@ -204,7 +206,7 @@
 	}
 
 	const pct = (value: number) => `${value * 100}%`;
-	const label = (comment: Pinned) => `Comment ${comment.regionNumber} by ${comment.authorKind === 'agent' ? comment.author : 'you'}, ${describeRegion(comment.region)}${comment.movedFrom ? ', moving here' : comment.regionStale ? ', image changed since this comment' : ''}`;
+	const label = (comment: Pinned) => `Comment ${comment.regionNumber} by ${comment.authorKind === 'agent' ? comment.author : 'you'}, ${describeRegion(comment.region)}${comment.movedFrom ? ', moving here' : comment.regionStale ? `, ${changedLabel(comment.anchor).toLowerCase()}` : ''}`;
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -260,6 +262,9 @@
 			<span class="box draft" style:left={pct(preview.x)} style:top={pct(preview.y)} style:width={pct(preview.w)} style:height={pct(preview.h)} style:--region-color={draftColor} aria-hidden="true" data-region-draft></span>
 		{/if}
 	{/if}
+	{#each tags as { comment, key, x, y, anchor } (key)}
+		{#if anchor}<svg class="connector" aria-hidden="true"><line x1={x} y1={y} x2={anchor.x} y2={anchor.y} stroke={colorOf(comment)} stroke-width="1" /></svg>{/if}
+	{/each}
 	{#each tags as { comment, key, x, y, side } (key)}
 		{@const agent = comment.authorKind === 'agent'}
 		<button
@@ -269,7 +274,7 @@
 			class:selected={comment.id === selectedId}
 			class:stale={!comment.movedFrom && comment.regionStale}
 			class:pending={!!comment.movedFrom}
-			class:leftward={side === 'left' || side === 'up-left' || side === 'down-left'}
+			class:leftward={side === 'left'}
 			style:left="{x}px"
 			style:top="{y}px"
 			style:--region-color={colorOf(comment)}
@@ -278,6 +283,7 @@
 			data-region-tag={comment.regionNumber}
 			data-comment-id={comment.id}
 			onpointerdown={onTagDown}
+			onpointercancel={() => { tagPointerType = ''; }}
 			onclick={(event) => pick(event, comment.id)}
 			onpointerenter={() => onHover(comment.id)}
 			onpointerleave={() => onHover(null)}
@@ -292,6 +298,7 @@
 
 <style>
 	.regions { position: absolute; inset: 0; z-index: 1; }
+	.connector { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
 	@media (pointer: fine) {
 		.regions.drawing { cursor: crosshair; }
 		.regions.drawing.space-held { cursor: grab; }
@@ -344,12 +351,12 @@
 	.tag:not(.faint) { z-index: 1; }
 	.tag.selected { z-index: 2; }
 	.tag.leftward { flex-direction: row-reverse; transform: translate(calc(-100% + 11px), -11px); }
-	/* An invisible 44 px target around the disc; overlapping ones go to the nearer centre. */
+	/* An invisible 44 px target around the disc. */
 	.tag::before { content: ''; position: absolute; left: -11px; top: -11px; width: 44px; height: 44px; }
 	.tag.leftward::before { left: auto; right: -11px; }
 	.disc {
 		position: relative; box-sizing: border-box; display: grid; place-items: center; width: 22px; height: 22px; border-radius: var(--radius-circle);
-		background: var(--region-color); color: var(--image-region-ink); border: 1.5px solid color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge));
+		background: color-mix(in srgb, var(--region-color) 80%, transparent); color: var(--image-region-ink); border: 1.5px solid color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge));
 		box-shadow: 0 0 0 1.5px var(--image-region-halo); font-size: var(--text-caption); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; line-height: 1;
 		transition: background var(--dur-tight) var(--ease-snap), border-color var(--dur-tight) var(--ease-snap), scale var(--dur-tight) var(--ease-snap);
 	}
@@ -378,9 +385,9 @@
 	.tag.stale .disc, .tag.stale .name, .tag.pending .disc, .tag.pending .name { border-color: transparent; background: color-mix(in srgb, var(--region-color) 80%, transparent); }
 	.tag.stale .disc::before, .tag.pending .disc::before { opacity: 1; }
 	.tag.stale .name, .tag.pending .name { outline-color: color-mix(in srgb, var(--region-color) 70%, var(--image-region-edge)); }
-	.tag:hover .disc, .tag:hover .name { background: var(--region-color); }
+	.tag:hover .name { background: var(--region-color); }
 	.tag:focus-visible { outline: none; }
-	.tag:focus-visible .disc { background: var(--region-color); outline: 2px solid var(--accent); outline-offset: 3px; }
+	.tag:focus-visible .disc { outline: 2px solid var(--accent); outline-offset: 3px; }
 	/* Held: the disc tints and compresses at once; last, so it wins over hover. */
 	.tag:active .disc { scale: 0.97; background: color-mix(in srgb, var(--region-color) 82%, var(--image-region-edge)); transition-duration: 0s; }
 	@media (prefers-reduced-motion: reduce) {

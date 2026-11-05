@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { leaveImageOnExit } from '$lib/docFeedbackLifecycle.svelte';
+	import { get } from 'svelte/store';
+	import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 	import ImageLightbox from './ImageLightbox.svelte';
 	import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 	import DocBottomBand from './DocBottomBand.svelte';
@@ -24,6 +26,17 @@
 	let sheetUp = $state(false);
 	let selectedThread = $state<string | null>(null);
 	let loaded = $state(false);
+	let bottomBand = $state<HTMLDivElement>();
+	let viewer = $state<ReturnType<typeof ImageCommentLightbox>>();
+	// A document confirmation already showing belongs to the document underneath this viewer.
+	const priorConfirmation = get(deliveryConfirmation)?.id ?? null;
+	$effect(() => {
+		const band = bottomBand;
+		if (!band || typeof ResizeObserver === 'undefined') return;
+		const observer = new ResizeObserver(() => viewer?.refreshCoveredArea());
+		observer.observe(band);
+		return () => observer.disconnect();
+	});
 	const unread = $derived(comments?.artifactId
 		? ($docComments[comments.artifactId] ?? []).filter((comment) => hasNewReplies(comment) && comment.id !== selectedThread)
 		: []);
@@ -39,8 +52,11 @@
 	{#key `${target.instanceId}\u0000${image.src}\u0000${image.focus?.id ?? ''}`}
 		{#if comments}
 			<ImageCommentLightbox
+				bind:this={viewer}
 				src={image.src}
 				alt={image.alt}
+				readableScale={image.readableScale}
+				diagramElements={image.diagramElements}
 				artifactId={comments.artifactId}
 				projectId={comments.projectId}
 				readOnly={comments.readOnly}
@@ -58,18 +74,23 @@
 				}}
 				focus={image.focus ?? null}
 				feedback={comments.feedback ?? null}
+				visibleBottom={() => bottomBand?.querySelector('[data-doc-bottom-band]')?.getBoundingClientRect().top ?? null}
 				{place}
 				{onPlace}
 			/>
 		{:else}
-			<ImageLightbox src={image.src} alt={image.alt} docName={target.name} {onBack} {place} {onPlace} />
+			<ImageLightbox src={image.src} alt={image.alt} readableScale={image.readableScale} docName={target.name} {onBack} {place} {onPlace} />
 		{/if}
 	{/key}
 	{#if comments}
-		<DocBottomBand artifactId={comments.artifactId} threads={unread} ready={loaded} covered={hasDraft} sheetModalOpen={sheetUp} onStep={() => onReplyStep(selectedThread ?? undefined)} />
+		<div class="viewer-band" bind:this={bottomBand}>
+			<DocBottomBand artifactId={comments.artifactId} threads={unread} ready={loaded} covered={hasDraft} sheetModalOpen={sheetUp} ignoreConfirmationId={priorConfirmation} onStep={() => onReplyStep(selectedThread ?? undefined)} />
+		</div>
 	{/if}
 </div>
 
 <style>
-	.image-overlay { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; padding: 8px 12px 12px; box-sizing: border-box; background: var(--bg-primary); }
+	.image-overlay { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; padding: var(--space-2) var(--space-3) var(--space-3); box-sizing: border-box; background: var(--bg-primary); }
+	.viewer-band { position: absolute; bottom: var(--space-3); left: var(--space-3); right: var(--space-3); pointer-events: none; }
+	.viewer-band :global([data-doc-bottom-band]) { pointer-events: auto; }
 </style>

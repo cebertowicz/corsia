@@ -54,7 +54,7 @@
 	],
 	"tag_placements": [
 		{
-			"case": "box with room on the left",
+			"case": "box with room takes outside its top-left corner",
 			"region": {
 				"x": 0.4,
 				"y": 0.4,
@@ -67,8 +67,8 @@
 			"gap": 3,
 			"expected": {
 				"x": 304.0,
-				"y": 213.0,
-				"side": "left"
+				"y": 184.0,
+				"side": "up-left"
 			}
 		},
 		{
@@ -138,9 +138,9 @@
 			"radius": 11,
 			"gap": 3,
 			"expected": {
-				"x": 415.4,
+				"x": 384.6,
 				"y": 234.6,
-				"side": "up-right"
+				"side": "up-left"
 			}
 		},
 		{
@@ -176,7 +176,61 @@
 			"expected": {
 				"x": 6.0,
 				"y": 6.0,
+				"side": "up-left"
+			}
+		},
+		{
+			"case": "box at the top edge takes left",
+			"region": {
+				"x": 0.4,
+				"y": 0.0,
+				"w": 0.2,
+				"h": 0.1
+			},
+			"width": 800,
+			"height": 500,
+			"radius": 11,
+			"gap": 3,
+			"expected": {
+				"x": 304.0,
+				"y": 13.0,
+				"side": "left"
+			}
+		},
+		{
+			"case": "point at the left edge takes up-right",
+			"region": {
+				"x": 0.0,
+				"y": 0.5,
+				"w": 0.0,
+				"h": 0.0
+			},
+			"width": 800,
+			"height": 500,
+			"radius": 11,
+			"gap": 3,
+			"expected": {
+				"x": 15.4,
+				"y": 234.6,
 				"side": "up-right"
+			}
+		},
+		{
+			"case": "point at the top edge takes down-right",
+			"region": {
+				"x": 0.5,
+				"y": 0.0,
+				"w": 0.0,
+				"h": 0.0
+			},
+			"width": 800,
+			"height": 500,
+			"radius": 11,
+			"gap": 3,
+			"expected": {
+				"x": 415.4,
+				"y": 15.4,
+				"side": "down-right"
 			}
 		}
 	],
@@ -216,24 +270,24 @@
 			"dot": 9,
 			"expected": [
 				{
-					"x": 514.0,
+					"x": 486.0,
+					"y": 486.0,
+					"side": "up-left"
+				},
+				{
+					"x": 524.0,
 					"y": 486.0,
 					"side": "up-right"
 				},
 				{
-					"x": 524.0,
-					"y": 514.0,
+					"x": 514.0,
+					"y": 524.0,
 					"side": "down-right"
 				},
 				{
-					"x": 486.0,
-					"y": 524.0,
-					"side": "down-left"
-				},
-				{
 					"x": 455.0,
-					"y": 502.0,
-					"side": "left"
+					"y": 475.0,
+					"side": "up-left"
 				}
 			]
 		},
@@ -335,9 +389,9 @@
 					"side": "up-right"
 				},
 				{
-					"x": 154.0,
+					"x": 123.2,
 					"y": 52.25,
-					"side": "up-right"
+					"side": "up-left"
 				},
 				{
 					"x": 156.2,
@@ -355,9 +409,9 @@
 					"side": "up-right"
 				},
 				{
-					"x": 256.3,
+					"x": 225.5,
 					"y": 154.75,
-					"side": "up-right"
+					"side": "up-left"
 				},
 				{
 					"x": 295.9,
@@ -365,9 +419,9 @@
 					"side": "down-right"
 				},
 				{
-					"x": 286.0,
+					"x": 255.2,
 					"y": 70.7,
-					"side": "up-right"
+					"side": "up-left"
 				},
 				{
 					"x": 41.8,
@@ -375,9 +429,9 @@
 					"side": "up-right"
 				},
 				{
-					"x": 154.0,
+					"x": 123.2,
 					"y": 144.5,
-					"side": "up-right"
+					"side": "up-left"
 				}
 			]
 		},
@@ -478,8 +532,8 @@
 				},
 				{
 					"x": 224.0,
-					"y": 188.0,
-					"side": "left"
+					"y": 159.0,
+					"side": "up-left"
 				}
 			]
 		}

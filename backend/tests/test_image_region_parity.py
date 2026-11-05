@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 from doceditor.doc_images import resolve_image_path
-from doceditor.image_markup import Region, place_tag, place_tags
+from doceditor.image_markup import Region, gutter_tags, place_tag, place_tags
 from doceditor.image_regions import _project_color, agent_color
 
 FIXTURE = (
@@ -58,6 +58,18 @@ def test_tag_sets_match_viewer(case):
     assert [side for _, _, side in placed] == [e["side"] for e in case["expected"]]
     for (x, y, _), expected in zip(placed, case["expected"], strict=True):
         assert (x, y) == (pytest.approx(expected["x"], abs=1e-3), pytest.approx(expected["y"], abs=1e-3))
+
+
+GUTTER_CASES = json.loads((FIXTURE.parent / "image-gutter-parity.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("case", GUTTER_CASES, ids=lambda c: c["name"])
+def test_gutter_tags_match_viewer(case):
+    regions = [Region(r["x"], r["y"], r["w"], r["h"]) for r in case["regions"]]
+    tags = gutter_tags(regions, case["width"], case["height"], radius=case["radius"], gap=case["gap"])
+    for (x, y, side, ax, ay), expected in zip(tags, case["expected"], strict=True):
+        assert side == expected["side"]
+        assert (x, y, ax, ay) == pytest.approx((expected["x"], expected["y"], expected["anchor"]["x"], expected["anchor"]["y"]))
 
 
 @pytest.mark.parametrize("case", CONTRACT["image_paths"], ids=lambda c: c["case"])
