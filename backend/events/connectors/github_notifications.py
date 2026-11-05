@@ -108,19 +108,24 @@ def poller_status(*, agents: bool = False) -> dict[str, Any]:
     }
 
 
+def _tag(agents: bool) -> str:
+    """Log prefix naming which account's feed a line comes from."""
+    return "github-notifications (agents)" if agents else "github-notifications"
+
+
 def _set_state(state: str, reason: str | None = None, *, agents: bool = False) -> None:
     status = _agents_status if agents else _status
     if (status["state"], status["reason"]) == (state, reason):
         return
     status["state"], status["reason"] = state, reason
     if state == "enabled":
-        log.info("github-notifications: enabled")
+        log.info("%s: enabled", _tag(agents))
     elif state == "disabled":
-        log.info("github-notifications: disabled (%s)", reason)
+        log.info("%s: disabled (%s)", _tag(agents), reason)
     elif state == "degraded":
-        log.warning("github-notifications: degraded (%s)", reason)
+        log.warning("%s: degraded (%s)", _tag(agents), reason)
     else:
-        log.warning("github-notifications: failing (%s)", reason)
+        log.warning("%s: failing (%s)", _tag(agents), reason)
 
 
 def _is_signed_out(result: subprocess.CompletedProcess) -> bool:
@@ -128,12 +133,22 @@ def _is_signed_out(result: subprocess.CompletedProcess) -> bool:
     return result.returncode != 0 and bool(SIGNED_OUT.search(f"{result.stdout}\n{result.stderr}"))
 
 
-def disabled_reason(runner: feed.GhRunner) -> str | None:
-    """Why the poller is off right now, or None when it should poll."""
+def _static_reason() -> str | None:
+    """The environment switches that turn the poller off without probing an account."""
     if os.environ.get("CORSIA_TEST_MODE") == "1" and os.environ.get(TEST_ENABLE_ENV) != "1":
         return "test_mode"
     if os.environ.get(DISABLE_ENV) == "1":
         return "config_off"
+    return None
+
+
+def disabled_reason(runner: feed.GhRunner) -> str | None:
+    """Why the poller is off right now, or None when it should poll."""
+    return _static_reason() or _auth_reason(runner)
+
+
+def _auth_reason(runner: feed.GhRunner) -> str | None:
+    """Why ``gh``'s sign-in keeps the poller off, or None when it is signed in."""
     try:
         result = runner(list(AUTH_PROBE), timeout=30.0)
     except FileNotFoundError:
@@ -214,9 +229,9 @@ async def _poll_thread(
         subject = (thread.get("subject") or {}).get("url")
         if exc.error_class in PERMANENT_THREAD_ERRORS:
             (_agents_status if agents else _status)["skipped_threads"] += 1
-            log.warning("github-notifications: skipping %s (%s)", subject, exc.error_class)
+            log.warning("%s: skipping %s (%s)", _tag(agents), subject, exc.error_class)
             return None, None
-        log.warning("github-notifications: holding for %s (%s)", subject, exc.error_class)
+        log.warning("%s: holding for %s (%s)", _tag(agents), subject, exc.error_class)
         return cursor, f"thread_{exc.error_class}"
     holds = [
         _parse_time(payload["comment"].get("created_at")) or cursor
@@ -256,23 +271,17 @@ async def run_cycle(runner: feed.GhRunner, failures: int = 0, *, agents: bool = 
     """Check enablement and poll once; return (sleep seconds or None to stop, failures)."""
     status = _agents_status if agents else _status
     # Static switches take precedence without probing either account.
-    reason: str | None
-    if os.environ.get("CORSIA_TEST_MODE") == "1" and os.environ.get(TEST_ENABLE_ENV) != "1":
-        reason = "test_mode"
-    elif os.environ.get(DISABLE_ENV) == "1":
-        reason = "config_off"
-    elif agents:
+    reason = _static_reason()
+    if reason is None and agents:
         from connections import github_agent
 
         try:
             reason = "no_agents_account" if (await asyncio.to_thread(github_agent.view)).absent else None
         except Exception as exc:  # noqa: BLE001 — keep account lookup failures visible and retryable
-            log.exception("github-notifications: agents' account lookup failed")
+            log.exception("%s: account lookup failed", _tag(True))
             return _record_failure(type(exc).__name__, failures, agents=True)
-        if reason is None:
-            reason = await asyncio.to_thread(disabled_reason, runner)
-    else:
-        reason = await asyncio.to_thread(disabled_reason, runner)
+    if reason is None:
+        reason = await asyncio.to_thread(_auth_reason, runner)
     if reason is not None:
         _set_state("disabled", reason, agents=agents)
         return (None if reason in _STATIC_REASONS else RECHECK_S), 0
@@ -284,7 +293,7 @@ async def run_cycle(runner: feed.GhRunner, failures: int = 0, *, agents: bool = 
     except feed.FeedError as exc:
         return _record_failure(exc.error_class, failures, agents=agents)
     except Exception as exc:  # noqa: BLE001 — a failing poller is visible, never silent
-        log.exception("github-notifications: cycle failed")
+        log.exception("%s: cycle failed", _tag(agents))
         return _record_failure(type(exc).__name__, failures, agents=agents)
     if result.degraded is not None:
         status["last_error"] = {"class": result.degraded, "at": feed.iso(_now())}
