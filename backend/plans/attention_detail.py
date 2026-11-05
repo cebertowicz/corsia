@@ -184,6 +184,11 @@ def annotate(items: list[dict], *, db) -> list[dict]:
     return annotated
 
 
+# A held reply holds another agent's message back right now, so it sorts above every decision;
+# -1 is below every `order_key >= 0`. Held replies sort among themselves by `raised_at`.
+HELD_REPLY_PRIORITY = -1
+
+
 def queue(annotated: list[dict]) -> list[dict]:
     """The canonical order the user works through, across every source."""
     typed = [

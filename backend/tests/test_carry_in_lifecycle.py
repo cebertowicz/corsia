@@ -901,6 +901,32 @@ async def test_ready_idle_keeps_the_bound_model_and_never_substitutes_another_ro
     assert probed == ["srv"]
 
 
+@pytest.mark.asyncio
+async def test_legacy_empty_decisive_action_retires_before_sampling(c1, monkeypatch):
+    from infra import carry_in_drain, state
+
+    action = {"tool": "read_file", "params": {}}
+    _write_lesson(c1, actions={"required_actions": [action], "forbidden_actions": [], "decisive_action": action})
+    _save(c1, "rule v1\n")
+    assert await carry_in_drain.wake(c1.workspace)  # create pending fact
+    monkeypatch.setattr(carry_in_drain.capacity, "ready_idle", lambda **_: pytest.fail("sample admitted"))
+    monkeypatch.setattr(state, "_agent", None)
+    assert await carry_in_drain.wake(c1.workspace)
+    assert state._agent is not None
+    assert _events("lesson.carry_in.retired")[-1]["reason"] == "decisive_unparameterized"
+    assert not _events("lesson.carry_in.waiting") and not _events("lesson.carry_in.result")
+
+
+@pytest.mark.parametrize(("actual", "expected"), [
+    ("/tmp/backend/core.py", True), ("/tmp/docs/core.py", False), (123, False),
+])
+def test_contains_matches_nested_string_values(actual, expected):
+    from core.carry_in_scoring import matches
+
+    action = {"tool": "read_file", "params": {"nested": {"path": {"$contains": "/backend/"}}}}
+    assert matches({"tool": "read_file", "params": {"nested": {"path": actual}}}, action) is expected
+
+
 # --- scoring ----------------------------------------------------------------
 
 

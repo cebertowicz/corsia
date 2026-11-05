@@ -108,6 +108,81 @@ def _place(env: Env, entry: int, answer: dict | None = None) -> str:
     )
 
 
+def test_empty_decisive_action_for_required_param_is_refused_at_save(env: Env) -> None:
+    action = {"tool": "read_file", "params": {}}
+    case = {"what_happened": "A call.", "right_call": "Read it.", "does_not_apply": "Never.",
+            "actions": {"required_actions": [action], "forbidden_actions": [], "decisive_action": action}}
+    from subagents.harness_tool_bridge import build_tool_registry
+
+    result = env.continuity._run(THREAD, "place", {
+        "entry_id": _entry(env), "verdict": "trial", "placement": _answer(case=case), **GATE_FIELDS,
+    }, registry=build_tool_registry())
+    assert "param that separates" in result and "$contains" in result
+    assert not _skill(env).exists()
+
+
+@pytest.mark.parametrize("tool, refused", [("read_file", True), ("grep", True), ("bash", True),
+                                           ("model_catalog", False), ("no_such_tool", False)])
+def test_empty_decisive_action_uses_tool_schema(tool, refused) -> None:
+    from infra.carry_in_action import unparameterized
+    from subagents.harness_tool_bridge import build_tool_registry
+
+    action = {"tool": tool, "params": {}}
+    assert unparameterized({"decisive_action": action}, build_tool_registry()) is refused
+
+
+def test_tool_uses_its_existing_registry_and_external_schemas_are_allowed() -> None:
+    from infra.carry_in_action import unparameterized
+    from subagents.harness_tool_bridge import build_tool_registry
+    from types import SimpleNamespace
+
+    registry = build_tool_registry()
+    assert registry.get("continuity_edit")._registry is registry
+    registry.register(SimpleNamespace(name="external_example", user_configured=True,
+                                      parameters={"required": ["value"]}))
+    assert not unparameterized({"decisive_action": {"tool": "external_example", "params": {}}}, registry)
+
+
+def test_failed_schema_lookup_allows_save() -> None:
+    from infra.carry_in_action import unparameterized
+
+    class BrokenRegistry:
+        def get(self, _name):
+            raise RuntimeError("schema unavailable")
+
+    assert not unparameterized({"decisive_action": {"tool": "read_file", "params": {}}}, BrokenRegistry())
+
+
+@pytest.mark.parametrize("value", ["", None, 4])
+def test_invalid_contains_is_refused(value) -> None:
+    from core.lesson_case import validate_metadata
+
+    action = {"tool": "read_file", "params": {"path": {"$contains": value}}}
+    case = {"what_happened": "x", "right_call": "y", "does_not_apply": "z",
+            "actions": {"required_actions": [action], "forbidden_actions": [], "decisive_action": action}}
+    with pytest.raises(ValueError):
+        validate_metadata({"case": case})
+
+
+def test_multiline_case_survives_metadata_and_prompt() -> None:
+    from core.lesson_case import validate_metadata
+    from core.lesson_files import read_trial, render_trial
+    from core.lesson_trials import Trial
+    from infra.carry_in_arm import sample_prompt
+
+    case = {"what_happened": "\n  first  \nsecond  \n\n", "right_call": "do\nthis", "does_not_apply": "no\ncase"}
+    cleaned = validate_metadata({"case": case})["case"]
+    assert cleaned == {"what_happened": "  first\nsecond", "right_call": "do this", "does_not_apply": "no case"}
+    text = render_trial(lesson_id="6f1c2a9e-3b7d-4c2e-9a1f-0d5e8b7c4a21", owner=THREAD,
+                        name="example", description="Use when testing.", text="Do it.",
+                        trial=Trial(kind="hypothesis", review_after="2099-01-01", state="trial"),
+                        source_refs=TURN, case_metadata={"case": cleaned})
+    loaded = read_trial(text)
+    assert loaded is not None
+    assert loaded.lesson.case_metadata["case"] == cleaned
+    assert sample_prompt(cleaned, "target", None).startswith("  first\nsecond\n")
+
+
 def test_trial_with_existing_target_section_is_refused_at_admission(env: Env) -> None:
     target = env.workspace / "context" / "rule.md"
     target.parent.mkdir(parents=True, exist_ok=True)

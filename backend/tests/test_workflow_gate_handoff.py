@@ -324,6 +324,11 @@ async def test_a_correction_withdraws_an_open_offer(isolated_db, tmp_path, monke
     finally:
         db.close()
     assert _run_db("SELECT DISTINCT actor_id FROM plan_node_events WHERE event='decision_invalidated'") == [{"actor_id": None}]
+    assert _run_db("SELECT actor_id FROM plan_node_events WHERE event='correction_created'")[0]["actor_id"] is not None
+    # The agent made this correction, so the reason the person reads names neither of them.
+    assert _run_db(
+        "SELECT json_extract(payload_json,'$.reason') AS reason FROM plan_node_events WHERE event='decision_invalidated'"
+    ) == [{"reason": "This work was corrected, so you keep reviewing it"}]
     state = _state()
     assert (state.kind, state.streak, state.open_offer, state.voided_offer) == ("person", 0, None, None)
     for _ in range(8):

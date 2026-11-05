@@ -75,7 +75,7 @@ def sample_prompt(
 
     ``show_file`` is False when the target is the lesson's own file: a baseline must never see it.
     """
-    lines = [str(case["what_happened"]).strip()]
+    lines = [str(case["what_happened"])]
     if show_file:
         lines.append("")
         if blob is None:

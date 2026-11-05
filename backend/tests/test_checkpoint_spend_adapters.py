@@ -41,6 +41,45 @@ async def test_native_reports_paid_call_before_tool_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("error_kind, usage_body, observed_calls", [
+    ("provider_stream_truncated", {}, 1),
+    ("provider_server_unreachable", {}, 0),
+    ("provider_model_not_loaded", {}, 0),
+    ("provider_server_unreachable", {"total_tokens": 40}, 1),
+])
+async def test_native_failed_call_skips_usage_only_when_never_sent(
+    monkeypatch, error_kind, usage_body, observed_calls,
+):
+    """A call that reached the provider records usage, unknown or not; only a
+    call refused before it connected has nothing to record."""
+    from core import fork_native as native
+    from llm.router import LLMResponse
+    from test_checkpoint_provider_adapters import _request, _source
+
+    observed = []
+
+    async def usage(key, model, measured):
+        observed.append(measured)
+
+    async def completion(**_kwargs):
+        return LLMResponse(
+            content="stream truncated", usage=usage_body, finish_reason="error",
+            error_kind=error_kind,
+        )
+
+    async def agent():
+        return SimpleNamespace(max_iterations=2, tools=SimpleNamespace(execute=None))
+
+    monkeypatch.setattr(native, "_get_agent", agent)
+    monkeypatch.setattr(native, "_chat_completion", completion)
+    monkeypatch.setattr(native, "_provider_params", lambda model: {"model": model})
+    request = replace(_request(_source(native)), on_usage=usage)
+    with pytest.raises(Exception, match="stream truncated"):
+        await native.invoke_fork(request, asyncio.Event(), kind=CHECKPOINT_KIND)
+    assert len(observed) == observed_calls
+
+
+@pytest.mark.asyncio
 async def test_cc_complete_usage_precedes_tool_and_excludes_aggregate():
     from core.fork_cc_io import _ToolBoundary
     from core.fork_cc_context import CCForkContext

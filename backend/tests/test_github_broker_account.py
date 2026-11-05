@@ -67,7 +67,7 @@ def test_every_poller_defaults_to_its_broker(monkeypatch) -> None:
         seen["activity"] = runner
         raise Stop
 
-    async def stop_cycle(runner, failures=0):
+    async def stop_cycle(runner, failures=0, *, agents=False):
         seen["notifications"] = runner
         return None, 0
 
@@ -90,7 +90,7 @@ def test_the_notifications_feed_is_read_as_the_person_never_the_agents_account(m
     def never(*_args):
         raise AssertionError("the person's feed never runs as the agents' account")
 
-    async def one_cycle(runner, failures=0):
+    async def one_cycle(runner, failures=0, *, agents=False):
         runner(["api", "--method", "GET", "-i", "notifications"], timeout=5)
         return None, 0
 

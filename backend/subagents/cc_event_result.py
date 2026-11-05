@@ -318,7 +318,8 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
     )
     outcome = _result_outcome(is_error, metadata)
     await _handle_result_error(ctx, ev, metadata, is_error=is_error)
-    settlement = await claim_terminal(identity, outcome, terminal_error(ev, metadata, outcome))
+    error = terminal_error(ev, metadata, outcome, stop_requested=ctx.live.checkpoint_wait_scope.stop_requested)
+    settlement = await claim_terminal(identity, outcome, error)
     if settlement.result is not TurnTerminalResult.APPLIED:
         log.debug(
             "cc_runtime: suppressed non-owning terminal for %s: %s",
@@ -329,7 +330,7 @@ async def on_result(ctx: CCEventContext, ev: dict) -> None:
     ingress_event["_corsia_terminal_settlement"] = settlement
     _clear_terminal_live_state(ctx)
     marker_id, created_at = None, ""
-    if not await rerun_owns_notice(ctx, identity.turn_id, metadata):
+    if not await rerun_owns_notice(ctx, identity.turn_id, error):
         marker_id, created_at = await _insert_result_marker(ctx, content, metadata)
     context_message_id = ctx.live.last_assistant_message_id or marker_id
     payload_body = {"type": "turn_complete", "thread_id": ctx.child_id}

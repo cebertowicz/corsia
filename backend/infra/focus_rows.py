@@ -63,6 +63,8 @@ def is_focus_visible(row: dict) -> bool:
         return meta.get("for_user") is True and bool(row.get("content"))
     if role == "system":
         kind = _system_type(meta)
+        if kind == "context_event" and str(meta.get("event_type") or "").startswith("held_reply."):
+            return True
         if kind in ERROR_SYSTEM_TYPES:
             return meta.get("recovered") is not True
         if kind == "result":
@@ -88,6 +90,8 @@ def row_kind(row: dict) -> str:
     if role != "system":
         return "other"
     kind = _system_type(meta)
+    if kind == "context_event" and str(meta.get("event_type") or "").startswith("held_reply."):
+        return "other"
     if kind in ERROR_SYSTEM_TYPES:
         return "error_recovered" if meta.get("recovered") is True else "other"
     if kind == "context_event":
@@ -134,6 +138,7 @@ CASE WHEN (CASE role
     WHEN 'assistant' THEN {_meta_json_type("$.for_user")} = 'true'
         AND COALESCE(content, '') != ''
     WHEN 'system' THEN CASE
+        WHEN {_TYPE_SQL} = 'context_event' AND substr({_meta_text('$.event_type')}, 1, 11) = 'held_reply.' THEN 1
         WHEN {_TYPE_SQL} IN ({_ERROR_TYPE_LIST}) THEN {_meta_json_type("$.recovered")} != 'true'
         WHEN {_TYPE_SQL} = 'result'
             THEN {_meta_json_type("$.is_error")} = 'true' AND COALESCE(content, '') != ''
@@ -156,6 +161,7 @@ CASE role
         THEN 'agent_message' ELSE 'other' END
     WHEN 'assistant' THEN CASE WHEN COALESCE({weight_sql}, 0) > 0 THEN 'steps' ELSE 'other' END
     WHEN 'system' THEN CASE
+        WHEN {_TYPE_SQL} = 'context_event' AND substr({_meta_text('$.event_type')}, 1, 11) = 'held_reply.' THEN 'other'
         WHEN {_TYPE_SQL} IN ({_ERROR_TYPE_LIST})
             THEN CASE WHEN {_meta_json_type("$.recovered")} = 'true'
                 THEN 'error_recovered' ELSE 'other' END

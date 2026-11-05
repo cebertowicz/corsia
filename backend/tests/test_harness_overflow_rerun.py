@@ -12,7 +12,7 @@ from core.stop_causes import CONTEXT_OVERFLOW_REASON, ContextOverflowEnd
 from infra.database import get_db
 from infra.input_admission import accept_thread_input
 import infra.thread_execution  # noqa: F401  # imported before the driver, so it binds the real one
-from infra.plan_limit_continue import overflow_continue_message_id, overflow_rerun_queued
+from infra.plan_limit_continue import rerun_message_id, rerun_queued
 from infra.thread_driver import finish_turn
 from infra.thread_input_types import ClaimedBatch
 from infra.thread_inputs import start_idle_turn
@@ -57,14 +57,14 @@ def test_a_size_refusal_starts_its_one_rerun_at_once(isolated_db) -> None:
     terminal = _refuse(db)
 
     assert isinstance(terminal.successor, ClaimedBatch)
-    assert [item.message_id for item in terminal.successor.items] == [overflow_continue_message_id("t1")]
+    assert [item.message_id for item in terminal.successor.items] == [rerun_message_id(CONTEXT_OVERFLOW_REASON, "t1")]
     event_type, cause, sender, stopped = db.execute(
         "SELECT json_extract(metadata,'$.event_type'),json_extract(metadata,'$.cause'),"
         "json_extract(metadata,'$.sender_kind'),json_extract(metadata,'$.stopped_turn_id') "
-        "FROM messages WHERE id=?", (overflow_continue_message_id("t1"),)).fetchone()
+        "FROM messages WHERE id=?", (rerun_message_id(CONTEXT_OVERFLOW_REASON, "t1"),)).fetchone()
     assert (event_type, cause, sender, stopped) == (
         CONTEXT_OVERFLOW_REASON, CONTEXT_OVERFLOW_REASON, "system", "t1")
-    assert overflow_rerun_queued("t1", db=db)
+    assert rerun_queued("t1", db=db)
     assert db.execute("SELECT error FROM active_turns WHERE id='t1'").fetchone()[0] == _REFUSAL
 
 
@@ -77,8 +77,8 @@ def test_a_refused_rerun_ends_visibly_and_starts_nothing(isolated_db) -> None:
     terminal = _refuse(db, rerun.turn_id)
 
     assert terminal.successor is None or not isinstance(terminal.successor, ClaimedBatch)
-    assert _reruns(db) == [overflow_continue_message_id("t1")]
-    assert not overflow_rerun_queued(rerun.turn_id, db=db)
+    assert _reruns(db) == [rerun_message_id(CONTEXT_OVERFLOW_REASON, "t1")]
+    assert not rerun_queued(rerun.turn_id, db=db)
 
 
 def test_real_queued_input_gets_no_rerun(isolated_db) -> None:
@@ -92,7 +92,7 @@ def test_real_queued_input_gets_no_rerun(isolated_db) -> None:
     assert isinstance(terminal.successor, ClaimedBatch)
     assert [item.message_id for item in terminal.successor.items] == ["real"]
     assert _reruns(db) == []
-    assert not overflow_rerun_queued("t1", db=db)
+    assert not rerun_queued("t1", db=db)
 
 
 def test_any_other_error_still_ends_with_no_rerun(isolated_db) -> None:
@@ -108,7 +108,7 @@ def test_any_other_error_still_ends_with_no_rerun(isolated_db) -> None:
 def _rerun_summary(db, turn: str = "t1"):
     import json
 
-    row = db.execute("SELECT metadata FROM messages WHERE id=?", (overflow_continue_message_id(turn),)).fetchone()
+    row = db.execute("SELECT metadata FROM messages WHERE id=?", (rerun_message_id(CONTEXT_OVERFLOW_REASON, turn),)).fetchone()
     return json.loads(row["metadata"]).get("summary")
 
 
@@ -148,7 +148,7 @@ def test_a_rerun_refused_before_it_runs_writes_the_notice_the_turn_held_back(iso
 
     failed = _fail_rerun_write(db, rerun)
 
-    assert overflow_continue_message_id("t1") in failed
+    assert rerun_message_id(CONTEXT_OVERFLOW_REASON, "t1") in failed
     assert _notices(db) == [("llm_error", "t1", _REFUSAL, "context_overflow")]
     from infra.focus_rows import is_focus_visible
 
@@ -193,5 +193,5 @@ def test_a_turn_a_wake_started_reruns_the_same_way(isolated_db) -> None:
 
     _refuse(db)
 
-    assert _reruns(db) == [overflow_continue_message_id("t1")]
+    assert _reruns(db) == [rerun_message_id(CONTEXT_OVERFLOW_REASON, "t1")]
     assert _rerun_summary(db) is None

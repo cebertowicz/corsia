@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.measurement_partial import grain_instant
 from api.measurement_scope import MeasurementScope, resolve_grain, validate_scope
-from core.agent_kpi_formula import evaluate, prepare, unfit
+from core.agent_kpi_formula import cost_ids, evaluate, prepare, unfit
 from core.agent_kpi_operands import Event, timestamp
 from core.agent_kpi_read import definitions, event_names, facts
 from core.correction_attribution import attributed_facts
+from core.kpi_thread_cost import thread_costs
 from core.workflow_builtin_operands import Value, prepare_builtin, read_builtin, scoped_runs
 from infra.auth import require_user
 from infra.database import get_db
@@ -123,10 +124,13 @@ def _read_scoped(db, user_id: str, scope: MeasurementScope, actual_project: str 
                                                     prepared=prepared[workflow])
                                  for name in wanted} for start, end in windows]
                      for workflow, wanted in workflow_names.items()}
+    selections = [prepare(item["spec"], events) if ok else {} for item, ok in zip(kpis, fit)]
+    # A cost_of operand's threads are priced once for every KPI and period.
+    costs = thread_costs(db, user_id, set().union(*(cost_ids(item["spec"], chosen)
+                                                    for item, chosen in zip(kpis, selections))))
     results = []
-    for item, ok in zip(kpis, fit):
+    for item, ok, selected in zip(kpis, fit, selections):
         spec = item["spec"]
-        selected = prepare(spec, events) if ok else {}
         file_events = {entry["name"] for entry in declarations
                        if entry["kind"] == "event" and entry["file_path"] == item["file_path"]}
         builtin_names = _builtins(spec) if ok else set()
@@ -141,13 +145,14 @@ def _read_scoped(db, user_id: str, scope: MeasurementScope, actual_project: str 
             builtin_results = {name: builtin_reads[item['workflow']][index][name] for name in builtin_names}
             value = evaluate(spec, events, start, end,
                              builtins={name: _builtin_value(result, None) for name, result in builtin_results.items()},
-                             selected=selected)
+                             selected=selected, thread_costs=costs)
             value["partial"] |= now < settles_at(end, spec)
             by_version = []
             for version in versions:
                 part = evaluate(spec, events, start, end, version["version"],
                                 builtins={name: _builtin_value(result, version['version'])
-                                          for name, result in builtin_results.items()}, selected=selected)
+                                          for name, result in builtin_results.items()}, selected=selected,
+                                thread_costs=costs)
                 part["partial"] |= now < settles_at(end, spec)
                 by_version.append({"version": version["version"], **part})
             periods.append({"period": period, **value, "versions": by_version})

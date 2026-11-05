@@ -66,7 +66,7 @@ def _register_continuity_tool(agent: CORSIAAgent) -> None:
     """Expose the one continuity editor on native and harness registries."""
     from tools.continuity import ContinuityEditTool
 
-    agent.tools.register(ContinuityEditTool())
+    agent.tools.register(ContinuityEditTool(agent.tools))
 
 
 def _register_tool_surface(agent: CORSIAAgent) -> None:
@@ -141,8 +141,8 @@ def _register_memory_tools(agent: CORSIAAgent) -> None:
     agent.tools.register(SkillLibraryTool())
 
 
-def _register_project_creation_tools(agent: CORSIAAgent) -> None:
-    """Register project creation and the consent-gated reads of the person's other tools.
+def _register_project_and_workspace_tools(agent: CORSIAAgent) -> None:
+    """Register project and workspace Git tools, and consent-gated reads.
 
     The registry is shared by every thread, so ``agent_import`` refuses at call
     time anyone but the CORSIA agent and a first-run thread.
@@ -150,7 +150,10 @@ def _register_project_creation_tools(agent: CORSIAAgent) -> None:
     from tools.agent_import import AgentImportTool
     from tools.project_discovery import ProjectDiscoveryListTool
     from tools.projects import CreateProjectTool
+    from tools.workspace_git import WorkspaceCommitTool, WorkspaceHistoryTool
 
+    agent.tools.register(WorkspaceCommitTool())
+    agent.tools.register(WorkspaceHistoryTool())
     agent.tools.register(CreateProjectTool())
     agent.tools.register(ProjectDiscoveryListTool())
     agent.tools.register(AgentImportTool())
@@ -352,7 +355,7 @@ def _register_tools(agent: CORSIAAgent, tool_cfg: dict, workspace: Path):
     from tools.worktrees import WorktreeCreateTool
 
     agent.tools.register(ReadToolResultTool())
-    _register_project_creation_tools(agent)
+    _register_project_and_workspace_tools(agent)
     agent.tools.register(WorktreeCreateTool())
     agent.tools.register(PlanReadTool())
     agent.tools.register(PlanEnsureTool())

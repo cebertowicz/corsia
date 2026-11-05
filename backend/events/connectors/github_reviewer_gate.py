@@ -11,9 +11,9 @@ from infra.transient_read import (
     TRANSIENT_READ_INTERVAL_S,
     retry_transient_read,
 )
+from events.connectors.github_pr_quiet_reasons import GREEN
 
 _REVIEWER_CHECK_NAME = "qa/llm-reviewer"
-_TERMINAL_GREEN_STATES = {"SUCCESS", "SKIPPED", "NEUTRAL"}
 _TRANSIENT_MERGEABLE = "UNKNOWN"
 
 
@@ -63,7 +63,7 @@ def checks_green(repo: str, pr_number: int, head_sha: str) -> bool | None:
 
     not_green = [
         check for check in non_reviewer_checks
-        if str(check.get("state") or "").upper() not in _TERMINAL_GREEN_STATES
+        if str(check.get("state") or "").lower() not in GREEN
     ]
     if not_green:
         log.info(

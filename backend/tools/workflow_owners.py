@@ -9,21 +9,26 @@ thread is a conflict; any other scope's skill is owned by its ``workflow.owner``
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
+from core.skills_registry import resolve_effective_skills
+from infra import config
 from infra.measure_registry import WorkflowOwner, workflow_problem
-from tools.workflow_task_fields import _workflow_version, effective_workflows
+from tools.workflow_task_fields import _workflow_version
 
 
 def workflow_owners(thread_id: str, project_id: str | None, db: Any) -> dict[str, WorkflowOwner]:
     """The agent's effective workflow skills, each with its owner under the rule above."""
-    workflows = effective_workflows(SimpleNamespace(thread_id=thread_id, project_id=project_id), db)
+    resolution = resolve_effective_skills(thread_id=thread_id, project_id=project_id, workspace=config.WORKSPACE, db=db)
     owners: dict[str, WorkflowOwner] = {}
-    for name, workflow in workflows.items():
-        skill = workflow.skill
+    for skill in resolution.included:
         data = skill.corsia.get("workflow") if isinstance(skill.corsia, dict) else None
-        key = data.get("owner") if isinstance(data, dict) else None
+        if not isinstance(data, dict) or not (
+            isinstance(data.get("steps"), list) or "result" in data or "worker" in data
+        ):
+            continue
+        name = skill.name
+        key = data.get("owner")
         key = str(key) if key not in (None, "") else None
         folder = Path(skill.path).parent
         if skill.scope == "thread":

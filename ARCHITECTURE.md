@@ -22,6 +22,9 @@ Two axes stay separate:
 
 Inbound user turns, delegated messages, and routed events converge on shared
 send and dispatch services before entering the selected execution provider.
+`infra/reply_not_visible_wake.py` owns the Focus reply nudge and its terminal
+fallback. It anchors on the newest person input, or the first-run event before
+any person input, using the same persisted nudge and settlement path for both.
 
 ## Code map
 
@@ -62,6 +65,23 @@ endpoint set. Public consumers carry that identity to request time; managed
 sweep and freshness recovery reuse `omlx_public_probe.py`. This path never uses
 a cfg host to authorize a stored key. Admin routes remain separately owned by
 `omlx_endpoints.admin_request` and its cookie session.
+
+### Managed oMLX replacement
+
+`omlx_supervisor` owns one `omlx_restart.Life` per adopted process. A version
+upgrade uses that Life's existing restart task as its inference admission
+boundary: `base.py` registers each concurrent provider call before preflight,
+and `omlx_lifecycle.warm_cache` registers before its loaded-model check.
+Replacement waits for both producers to finish and rechecks server idleness
+once; later calls wait through boot and exact-model restoration. If outside traffic
+makes that final proof busy, admission reopens before waiting for quiet again.
+Crash recovery and upgrade startup reuse the same bounded start-attempt owner;
+failed Stop and exhausted startup emit terminal lifecycle events. This boundary
+covers CORSIA dispatch; clients calling oMLX directly do not participate in it.
+Restart transitions tag the existing `models_updated` event with `server_id`,
+so Providers refreshes server state only for those transitions. Ordinary
+catalog events add no server-list read. `providersV7` owns the row's restart
+text and dot for every host-group consumer.
 
 ### System tier projection
 
@@ -537,6 +557,13 @@ status/log/list/stop tools, stall detection, and exactly four wake outcomes
 (`stalled`, `completed`, `failed`, `interrupted_by_restart`) are owned by
 `host_access/managed_lifecycle.py`, `automation/managed_process_events.py`,
 `automation/managed_process_recovery.py`, and `infra/managed_process_store.py`.
+
+Known limitation: a child that leaves its process group (for example with
+`start_new_session`) is found only by the inherited
+`CORSIA_PROCESS_OWNER_MARKER` environment variable. macOS can hide the
+environment of a same-user process, as it does for some hardened third-party
+binaries such as Tart, and the marker scan skips a process it cannot read. Such
+a detached child outlives its foreground call and any host lease, unowned.
 
 Explicit thread deletion remains coordinated by `api/thread_deletion.py` and
 uses `core/thread_family.py` as the canonical family writer. The process owner

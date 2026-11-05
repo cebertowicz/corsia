@@ -90,7 +90,8 @@ def test_f1_ordinary_error_never_suggests_a_model_switch(db):
 
 def test_f1_size_refusal_with_its_rerun_queued_never_wakes_the_parent(db):
     """A size refusal whose one re-run is already queued is not a failure the parent must act on."""
-    from infra.plan_limit_continue import overflow_continue_message_id
+    from core.stop_causes import CONTEXT_OVERFLOW_REASON
+    from infra.plan_limit_continue import rerun_message_id
 
     delegated(db)
     db.execute(
@@ -98,7 +99,7 @@ def test_f1_size_refusal_with_its_rerun_queued_never_wakes_the_parent(db):
            VALUES (?,'worker',
                    (SELECT COALESCE(MAX(seq),0)+1 FROM messages WHERE thread_id='worker'),
                    'system','continue','2000-01-01T00:00:01')""",
-        (overflow_continue_message_id("turn-1"),),
+        (rerun_message_id(CONTEXT_OVERFLOW_REASON, "turn-1"),),
     )
 
     delegation_child_lifecycle.notify_turn_error(

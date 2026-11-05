@@ -16,6 +16,14 @@ def test_checkpoint_contract_covers_continuation_without_an_output_schema() -> N
     assert "return only one json" not in lowered
 
 
+def test_checkpoint_contract_carries_the_files_the_next_step_follows() -> None:
+    from prompts.checkpoint import build_checkpoint_system_prompt
+
+    prompt = " ".join(build_checkpoint_system_prompt().split()).lower()
+    assert "name by path each skill or reference file" in prompt
+    assert "the next turn must re-read it before acting" in prompt
+
+
 @pytest.mark.parametrize(
     ("source", "prompt", "cache_read", "cache_creation", "expected"),
     [

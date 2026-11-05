@@ -86,6 +86,9 @@ async def _startup_network_discovery() -> None:
             f"network discovery startup: probed {len(servers)} server(s), "
             f"{online_count} online, discovery complete"
         )
+        from llm.providers.omlx_upgrade import upgrade_managed_omlx
+
+        await upgrade_managed_omlx()  # this startup task is retained and cancelled on shutdown
     except Exception as exc:
         logger.warning(f"network discovery startup failed: {exc}")
 

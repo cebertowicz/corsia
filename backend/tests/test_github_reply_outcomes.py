@@ -182,6 +182,18 @@ async def test_a_conversation_comment_on_a_plain_issue_is_an_issue_comment(main_
     assert map_github_outcomes(event_type, payload)[0].subject_key == f"github:issue:{REPO}#1"
 
 
+@pytest.mark.parametrize("fixture,parent_kind", [
+    ("pr_review_submitted", "pr"), ("pr_review_comment_created", "pr"),
+    ("issue_comment_created", "issue"),
+])
+def test_parent_association_is_stored_for_each_subject(fixture, parent_kind):
+    event_type, payload = delivery(fixture)
+    payload["pull_request" if parent_kind == "pr" else "issue"]["author_association"] = "MEMBER"
+    (draft,) = map_github_outcomes(event_type, payload)
+    assert draft.attributes[f"{parent_kind}_author_association"] == "MEMBER"
+    assert draft.attributes["author_association"] == "OWNER"
+
+
 async def test_a_comment_seen_twice_is_one_event(main_db):
     """The delivery log already keys a comment by its id; the event key is the second guard."""
     _, payload = delivery("pr_review_comment_created")

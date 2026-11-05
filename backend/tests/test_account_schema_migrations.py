@@ -786,6 +786,9 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 172 -> 173 adds a partial index on plan_nodes.workflow_ref.
         from infra.migration_172_to_173_workflow_ref_index import migrate_172_to_173
         migrate_172_to_173(db)
+        # 173 -> 174 only adds the held-reply table.
+        from infra.migration_173_to_174_held_replies import migrate_173_to_174
+        migrate_173_to_174(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
@@ -919,7 +922,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 173
+    assert SCHEMA_VERSION == 174
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83

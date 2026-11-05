@@ -614,7 +614,7 @@ class TestCauseMap:
         commit = AsyncMock(wraps=codex_runtime_events.commit_turn_terminal)
         with patch("subagents.codex_runtime_events.insert_message", return_value="msg-id") as insert, \
                 patch("subagents.codex_runtime_events.commit_turn_terminal", new=commit), \
-                patch("subagents.codex_runtime_events.overflow_rerun_queued", return_value=queued):
+                patch("subagents.codex_runtime_events.rerun_queued", return_value=queued):
             on_event = codex_runtime._make_on_event(live, "ctx-rerun-sess", MagicMock())
             _run_terminal_event(on_event, live, {"kind": "turn_failed", "cause": "context_window_exceeded"})
 

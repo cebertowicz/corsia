@@ -117,7 +117,7 @@ def test_a_project_agent_is_refused_before_anything_is_read(monkeypatch):
 
 
 def test_contract_catalog_and_registration():
-    from core.agent import _register_project_creation_tools
+    from core.agent import _register_project_and_workspace_tools
     from tools.catalog import TOOL_CATALOG
 
     tool = tool_module.AgentImportTool()
@@ -125,7 +125,7 @@ def test_contract_catalog_and_registration():
     assert "references/agent-import.md" in tool.description
     assert TOOL_CATALOG["agent_import"].category == "memory"
     registered = []
-    _register_project_creation_tools(SimpleNamespace(tools=SimpleNamespace(register=registered.append)))
+    _register_project_and_workspace_tools(SimpleNamespace(tools=SimpleNamespace(register=registered.append)))
     assert [t.name for t in registered].count("agent_import") == 1
 
 

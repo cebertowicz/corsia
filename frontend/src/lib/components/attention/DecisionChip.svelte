@@ -26,12 +26,15 @@
 		decision,
 		writesDisabled = false,
 		onSkip,
+		heldQueued = false,
 	}: {
 		decision: DecisionDetail;
 		/** True while the surface is offline or showing last-known data. */
 		writesDisabled?: boolean;
 		/** Present only when another decision waits: move on, keeping this one open. */
 		onSkip?: () => void;
+		/** A held reply waits in the queue: Skip sits at the row's left edge, as it does beside one. */
+		heldQueued?: boolean;
 	} = $props();
 
 	const draft = $derived(draftFor(decision.id));
@@ -296,13 +299,13 @@
 				</label>
 			{/if}
 			{/if}
-			<div class="decision-actions" bind:this={actionsEl}>
+			<div class="decision-actions" class:skip-left={heldQueued} bind:this={actionsEl}>
 				<p class="receipt" aria-live="polite">
 					{announcement || failure?.message || (pickAny ? pickAnyReceipt : answerReady ? 'Ready to send' : 'Choose an option')}
 				</p>
 				<div class="decision-buttons">
 				{#if onSkip}
-					<Button variant="secondary" size="sm" ariaLabel="Skip to next decision" onclick={onSkip}>Skip</Button>
+					<span class="skip"><Button variant="secondary" size="sm" ariaLabel={heldQueued ? 'Skip to next item' : 'Skip to next decision'} onclick={onSkip}>Skip</Button></span>
 				{/if}
 				<Button variant="primary" size="sm" disabled={!canAnswer} onclick={submit}>
 					{failure?.kind === 'error' ? 'Retry' : 'Answer'}
@@ -352,6 +355,10 @@
 	.decision-buttons { display: flex; flex: none; align-items: center; gap: var(--space-2); }
 	.decision-actions { position: sticky; bottom: 0; z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin: var(--space-2) 0 0; padding: var(--space-3) 0 max(var(--space-3), env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--border-subtle); background: var(--bg-secondary); color: var(--text-tertiary); font-size: var(--text-footnote); }
 	.receipt { flex: 1; min-width: 0; margin: 0; }
+	.skip-left { flex-wrap: wrap; }
+	.skip-left .receipt { flex-basis: 100%; }
+	.skip-left .decision-buttons { flex: 1; }
+	.skip-left .skip { margin-right: auto; }
 	.hint { margin: 0; color: var(--text-tertiary); font-size: var(--text-caption); }
 	fieldset.pick-any { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
 	fieldset.pick-any legend { padding: 0; margin-bottom: var(--space-2); color: var(--text-tertiary); font-size: var(--text-footnote); font-weight: var(--fw-semibold); }

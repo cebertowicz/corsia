@@ -8,6 +8,14 @@ from __future__ import annotations
 SIGN_IN_EXPIRED = "sign_in_expired"
 
 
+def claude_oauth_refresh_failure(detail: str | BaseException | None) -> bool:
+    """Whether the CLI reported its OAuth session could not be refreshed."""
+    text = str(detail or "").casefold()
+    return all(part in text for part in (
+        "failed to authenticate", "oauth session expired", "could not be refreshed",
+    ))
+
+
 def auth_failure_kind(provider: str, detail: str | BaseException | None) -> str | None:
     """Return the fixed, provider-specific auth failure kind, never infer from a bare 401.
 
@@ -20,9 +28,4 @@ def auth_failure_kind(provider: str, detail: str | BaseException | None) -> str 
     text = str(detail).casefold()
     if "not logged in · please run /login" in text:
         return SIGN_IN_EXPIRED
-    required = (
-        "failed to authenticate",
-        "oauth session expired",
-        "could not be refreshed",
-    )
-    return SIGN_IN_EXPIRED if all(part in text for part in required) else None
+    return SIGN_IN_EXPIRED if claude_oauth_refresh_failure(detail) else None

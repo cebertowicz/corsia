@@ -890,9 +890,7 @@ async def _invoke_claude_code_structured(
 ) -> object:
     """Run one isolated Claude Code print-mode structured-output invocation."""
     if target.harness != "claude-code":
-        raise IsolatedStructuredError(
-            "Claude isolated inference received another harness"
-        )
+        raise IsolatedStructuredError("Claude isolated inference received another harness")
     if not target.available:
         raise IsolatedStructuredUnavailableError(
             f"Claude Code target is unavailable: "
@@ -914,6 +912,8 @@ async def _invoke_claude_code_structured(
             limit=STDOUT_LIMIT,
             env=env,
         )
+        logger.info("Claude control process started: account={} operation=structured",
+                    cast(LaunchHomes, request.vendor_launch).account_id)
         # A timed-out, failed or cancelled call kills the CLI with a bounded
         # reap: a descendant holding its pipes must not strand the caller.
         try:

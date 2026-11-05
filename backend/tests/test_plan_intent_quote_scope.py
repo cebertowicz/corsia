@@ -149,7 +149,11 @@ def test_relays_events_and_blanks_are_not_the_persons_words_by_one_rule(words_db
 
     for message_id in rows:
         loaded = person_input.load(db, "message", message_id) is not None
-        assert loaded == intent_words.has_person_origin(db, f"turn-{message_id}") == (message_id == "plain")
+        origin = intent_words.turn_origin(db, f"turn-{message_id}")
+        captured_as_person = origin is not None and bool(intent_words.message_words(
+            role=origin["role"], content=origin["content"], metadata=origin["metadata"],
+        ))
+        assert loaded == captured_as_person == (message_id == "plain")
 
 
 def test_agent_words_are_a_plan_edit_by_the_acting_thread():

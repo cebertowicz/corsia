@@ -32,6 +32,7 @@ from infra.access_log import install_access_log_redaction
 from infra.log_locals import drop_traceback_locals
 from infra.json_gzip import JsonGZipMiddleware
 from infra.config import FRONTEND_DIR
+from infra.failure_reference import ReferencedHTTPException
 from infra.product_events import emit_product_event
 from infra.request_timing import RequestTimingMiddleware
 from ws import websocket_endpoint
@@ -88,6 +89,7 @@ from api import (
     plans_folded_router,
 )
 from api.attention import router as attention_router
+from api.held_replies import router as held_replies_router
 from api.system_perf import router as system_perf_router
 from api.registry import router as registry_router
 from api.registry_pane import router as registry_pane_router
@@ -124,12 +126,14 @@ def _emit_error_reference(
     *,
     status: int,
     error_message: str,
+    reference: str | None = None,
 ) -> str:
     """Log and instrument an API failure under one opaque reference."""
     from infra.failure_reference import new_error_reference
     from infra.internal_principal import current_internal_user
 
-    reference = new_error_reference()
+    if reference is None:
+        reference = new_error_reference()
     logger.error(
         "API error reference=%s method=%s path=%s status=%s detail=%s",
         reference,
@@ -164,6 +168,7 @@ async def _emit_http_error_api(request: Request, exc: StarletteHTTPException):
         exc,
         status=exc.status_code,
         error_message=str(exc.detail)[:200],
+        reference=exc.reference if isinstance(exc, ReferencedHTTPException) else None,
     )
     return _ErrorJSONResponse(
         status_code=exc.status_code,
@@ -230,6 +235,7 @@ app.include_router(registry_router)
 app.include_router(registry_pane_router)
 app.include_router(registry_ownership_router)
 app.include_router(attention_router)
+app.include_router(held_replies_router)
 app.include_router(cc_attach_router)
 app.include_router(conductor_router)
 app.include_router(corsia_agent_router)

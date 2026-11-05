@@ -260,7 +260,7 @@ def create_feedback_node(
         db, recipient_thread_id, artifact_id, batch_id, PROVENANCE,
         title=_title(author, document, loaded), acceptance=_acceptance(loaded),
         description=_description(batch, loaded),
-        intent=intent_words.document_comment_intent(loaded) if words else None, words=words,
+        intent=intent_words.document_comment_intent(loaded, document) if words else None, words=words,
     )
 
 

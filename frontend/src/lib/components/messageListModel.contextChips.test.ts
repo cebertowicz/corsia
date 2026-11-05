@@ -61,6 +61,12 @@ function detailSummaries(row: Record<string, any>): string[] {
 }
 
 describe('grouped context chips', () => {
+	it('keeps held reply receipts separate from surrounding context events', () => {
+		const receipt = { ...wake('held', 'Reply sent'), metadata: { type: 'context_event', event_type: 'held_reply.sent', summary: 'Reply sent' } };
+		const visible = buildVisibleMessages([wake('one', 'One'), receipt, wake('two', 'Two'), wake('three', 'Three')]);
+		expect(visible.some((row) => row.id === 'held')).toBe(true);
+	});
+
 	it('flattens backend digests one level: header count equals the detail rows', () => {
 		const rows = [
 			backendDigest('d1', [

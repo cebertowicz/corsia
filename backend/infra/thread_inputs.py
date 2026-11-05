@@ -19,8 +19,7 @@ from infra.thread_input_rows import starts_turn
 from infra.turn_errors import last_turn_error_id
 from infra.vendor_turn_binding import admitted_model_state, turn_account_id
 from infra.thread_input_types import (
-    ClaimedBatch,
-    ClaimedInput,
+    ClaimedBatch, ClaimedInput,
     FailedInputBatch,
     TurnAdmission,
     TurnIdentity,
@@ -210,6 +209,7 @@ def invalidate_markers_for_archive(db: sqlite3.Connection, thread_id: str) -> No
 
 def _claimable_prefix(
     connection: sqlite3.Connection, thread_id: str, *, movable: bool = False,
+    lift_account: bool = True,
 ) -> tuple[int, str, list[sqlite3.Row], frozenset[str], bool] | None:
     """The FIFO prefix an idle claim would take: epoch, model, rows, lifted holds, movable-held."""
     state = thread_admission_state(connection, thread_id, allow_unavailable=True)
@@ -225,7 +225,7 @@ def _claimable_prefix(
     from infra.send_target import lifted_hold_ids
 
     rows = still_claimable(connection, thread_id, rows)
-    lifted = lifted_hold_ids(rows, model, db=connection, thread_id=thread_id)
+    lifted = lifted_hold_ids(rows, model, db=connection, thread_id=thread_id, lift_account=lift_account)
     rows = _deliverable_prefix(rows, lifted)
     if not rows or not any(starts_turn(row) for row in rows):
         return None
@@ -269,6 +269,7 @@ def start_idle_turn(
     thread_id: str, *, turn_id: str, boot_epoch: str, started_at: str,
     db: sqlite3.Connection | None = None, connection_limit_probe=None,
     hold_expired_limit_at_startup: bool = False, connection_limit_subject=None,
+    lift_account: bool = True,
 ) -> TurnAdmission | None:
     """Atomically claim one FIFO prefix as a Turn or a visible Plans failure."""
     with write_transaction(db, scope="start_idle_turn") as connection:
@@ -279,7 +280,7 @@ def start_idle_turn(
             return None
         from connections.account_moves import apply_pending_accounts
         apply_pending_accounts(thread_id, db=connection)
-        prefix = _claimable_prefix(connection, thread_id, movable=True)
+        prefix = _claimable_prefix(connection, thread_id, movable=True, lift_account=lift_account)
         if prefix is None:
             return None
         epoch, model, rows, lifted, movable_held = prefix

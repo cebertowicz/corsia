@@ -7,6 +7,8 @@ import readingSource from './documentReadingPlace.ts?raw';
 import imageSource from './documentImagePlace.ts?raw';
 
 let root: HTMLElement;
+// Editors `pane` made. A live editor's resize timer asks for a frame after the test, when jsdom has none left to give.
+const views: EditorView[] = [];
 
 beforeEach(() => {
 	root = document.createElement('div');
@@ -16,6 +18,7 @@ afterEach(() => {
 	const rangeLayout = Range.prototype as Partial<Pick<Range, 'getClientRects' | 'getBoundingClientRect'>>;
 	delete rangeLayout.getClientRects;
 	delete rangeLayout.getBoundingClientRect;
+	for (const view of views.splice(0)) view.destroy();
 	root.remove();
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
@@ -56,6 +59,7 @@ function pane({ lines = 400, header = 49, height = 600, image }: { lines?: numbe
 		disconnect() { observers.splice(observers.indexOf(this), 1); }
 	});
 	const view = new EditorView({ doc: numbered(lines, image), parent: frameEl, dispatchTransactions: dispatchKeepingPlace });
+	views.push(view);
 	const scroller = view.scrollDOM;
 	const max = () => Math.max(0, view.contentHeight - (screen.height - screen.header));
 	Object.defineProperties(scroller, {

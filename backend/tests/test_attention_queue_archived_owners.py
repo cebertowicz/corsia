@@ -44,7 +44,18 @@ def test_queue_omits_a_decision_owned_in_an_archived_project(db, monkeypatch):
     assert body["current"]["external_id"] == live["id"]
 
 
+def _hold(db, sender: str, key: str | None = None) -> dict:
+    import infra.held_replies as held_replies
+
+    return held_replies.hold(
+        user_id="user-1", sender_thread_id=sender, recipient_thread_id="root",
+        text=f"reply from {sender}", via="tool", idempotency_key=key, db=db,
+    )
+
+
 def test_queue_count_and_activity_awaiting_count_agree(db, monkeypatch):
+    import infra.held_replies as held_replies
+
     raise_decision(db, "child", "child", title="Live question")
     raise_decision(db, "other-root", "other-root", title="Archived question")
     client = _attention_client(db, monkeypatch)
@@ -53,6 +64,40 @@ def test_queue_count_and_activity_awaiting_count_agree(db, monkeypatch):
     _archive_project_of(db, "other-root")
 
     assert client.get("/api/attention/queue").json()["count"] == _awaiting(db) == 1
+
+    held = _hold(db, "child")
+
+    assert client.get("/api/attention/queue").json()["count"] == _awaiting(db) == 2
+
+    held_replies.settle(held["id"], expect="held", state="declined", db=db)
+
+    assert client.get("/api/attention/queue").json()["count"] == _awaiting(db) == 1
+
+
+def test_held_replies_sort_first_then_by_raised_at(db, monkeypatch):
+    raise_decision(db, "child", "child", title="A decision")
+    later = _hold(db, "child", "later")
+    earlier = _hold(db, "other-root", "earlier")
+    db.execute("UPDATE held_replies SET created_at='2026-01-02' WHERE id=?", (later["id"],))
+    db.execute("UPDATE held_replies SET created_at='2026-01-01' WHERE id=?", (earlier["id"],))
+    db.commit()
+    client = _attention_client(db, monkeypatch)
+
+    items = client.get("/api/attention/queue").json()["items"]
+
+    assert [item["renderer"] for item in items] == ["held-reply", "held-reply", "decision"]
+    assert [item["external_id"] for item in items[:2]] == [earlier["id"], later["id"]]
+    assert all(item["detail"]["source"]["thread_id"] for item in items[:2])
+
+
+def test_a_held_reply_on_an_archived_owner_is_in_neither_the_queue_nor_activity(db, monkeypatch):
+    _hold(db, "other-root")
+    client = _attention_client(db, monkeypatch)
+    assert client.get("/api/attention/queue").json()["count"] == _awaiting(db) == 1
+
+    _archive_project_of(db, "other-root")
+
+    assert client.get("/api/attention/queue").json()["count"] == _awaiting(db) == 0
 
 
 def test_queue_shows_the_decision_again_once_its_project_is_active(db, monkeypatch):

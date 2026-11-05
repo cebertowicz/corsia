@@ -61,8 +61,7 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         **TEXT,
         "description": "Owned document with a person step's how-to.",
     },
-    # Runtime validation owns byte limits; publish the reusable quote item shape
-    # once so agents can construct an authority citation for an earlier source.
+    # Runtime validation owns byte limits; publish the optional quote item shape once.
     "intent": {"type": "string"},
     "intent_words": {"type": "array", "items": {"type": "object", "properties": {
         "quote": {"type": "string"}, "author": {"enum": ["person", "agent"]},

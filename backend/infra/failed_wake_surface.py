@@ -17,8 +17,8 @@ A producer whose wake was refused before the FIFO accepted it (an unavailable
 owner, a rejected send) has no row to settle, so it calls
 ``record_unaccepted_wake`` in its own settlement instead.
 
-A failed re-run of a size-refused Turn also writes the notice that Turn held
-back (``plan_limit_continue.record_unanswered_overflow``), so the person never
+A failed re-run of a size-refused or login-race Turn also writes the notice
+that Turn held back (``plan_limit_continue.record_unanswered_rerun``), so the person never
 sees an idle chat with nothing on it.
 
 After the commit the owning frame calls ``drive_failed_wake_owners``, which is
@@ -50,9 +50,9 @@ def record_failed_wakes(db: sqlite3.Connection, message_ids: Iterable[str]) -> N
         ).fetchone()
         if row is None or row["delivery_state"] != "failed":
             continue
-        from infra.plan_limit_continue import record_unanswered_overflow
+        from infra.plan_limit_continue import record_unanswered_rerun
 
-        record_unanswered_overflow(db, message_id)
+        record_unanswered_rerun(db, message_id)
         try:
             metadata = json.loads(row["metadata"] or "{}")
         except ValueError:
@@ -148,11 +148,11 @@ async def drive_failed_wake_owners(message_ids: Iterable[str]) -> None:
         return
     try:
         from infra.db_async import run_in_db
-        from infra.plan_limit_continue import unanswered_overflow_notices
+        from infra.plan_limit_continue import unanswered_rerun_notices
         from infra.send_broadcast import broadcast_message_rows
         from infra.thread_execution import drive_thread
 
-        for thread_id, notice_id in await run_in_db(unanswered_overflow_notices, ids):
+        for thread_id, notice_id in await run_in_db(unanswered_rerun_notices, ids):
             await broadcast_message_rows(thread_id, (notice_id,))
         for owner in await run_in_db(_owners_holding_reports, ids):
             await drive_thread(owner)

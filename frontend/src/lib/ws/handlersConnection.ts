@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
 import { isMachineCode, plainErrorText } from '../plainError';
-import { token, user } from '../stores/auth';
+import { clearExpiredSession, token, user } from '../stores/auth';
 import {
 	activeThreadId,
 	messages,
@@ -148,8 +148,7 @@ export function handleWsError(data: any) {
 		return;
 	}
 	if (data.message === 'Invalid or expired session') {
-		token.set(null);
-		user.set(null);
+		clearExpiredSession();
 		connectionState.set('error');
 		connectionError.set('Invalid or expired session');
 		emit('error', data);

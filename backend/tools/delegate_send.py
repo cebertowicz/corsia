@@ -10,7 +10,9 @@ from functools import partial
 import logging
 from typing import Any
 
-from infra.local_only import send_confirmation_error
+import infra.held_replies as held_replies
+from infra.held_reply_messages import announce_hold, hold_response
+from infra.local_only import send_needs_hold
 from infra.send_service import SendRejected
 from infra.send_types import InboxQueuedInput
 import tools.delegation as delegation
@@ -76,10 +78,6 @@ class DelegateSendTool(Tool):
                         "scope id when supplied; it does not authorize cross-scope sends."
                     ),
                 },
-                "no_sensitive_content": {
-                    "type": "boolean",
-                    "description": "Confirm this cloud-bound send contains no sensitive content.",
-                },
             },
             ["thread_id", "message"],
         )
@@ -109,14 +107,6 @@ class DelegateSendTool(Tool):
         )
         if scope_error:
             return scope_error
-        confirmation_error = await delegation.run_in_db(
-            send_confirmation_error,
-            current,
-            target,
-            kwargs.get("no_sensitive_content"),
-        )
-        if confirmation_error:
-            return confirmation_error
         intent = delegation._clean(kwargs.get("intent")) or "progress"
         if intent not in ("progress", "completion"):
             return "Error: intent must be 'progress' or 'completion'"
@@ -141,20 +131,40 @@ class DelegateSendTool(Tool):
             ))
         except public.PlanInputError as exc:
             return f"Error: invalid request, fix and resend - {exc}"
-        plan_task = await _prepare_plan_task(
-            step, thread_id, from_thread_id, current, requested,
-        )
-        if isinstance(plan_task, str):
-            return plan_task
         text = with_task_line(message.strip(), step, from_thread_id)
-        sent = await _send(thread_id, target, text, from_thread_id, current, kwargs)
-        if isinstance(sent, str):
-            return sent
-        if step is not None and step.already_attached:
-            sent.update(await _answer_needs(from_thread_id, thread_id, step.node_id, kwargs))
-        if plan_task is not None:
-            sent["plan_task"] = plan_task
-        return delegation._json(sent)
+        if await delegation.run_in_db(send_needs_hold, current, target):
+            held = await delegation.run_in_db(partial(
+                held_replies.hold,
+                user_id=current["user_id"], sender_thread_id=from_thread_id,
+                recipient_thread_id=thread_id, text=text, via="tool",
+                plan_node_id=requested, idempotency_key=kwargs.get("idempotency_key"),
+            ))
+            if not held["duplicate"]:
+                await announce_hold(held)
+            return delegation._json(await hold_response(held))
+        sent = await deliver(step, text, thread_id, target, from_thread_id, current, requested, kwargs)
+        return sent if isinstance(sent, str) else delegation._json(sent)
+
+
+async def deliver(
+    step, text: str, thread_id: str, target, from_thread_id: str, current, requested, kwargs,
+) -> dict[str, Any] | str:
+    """Hand over the named task, deliver ``text`` and clear the worker's needs; the receipt or an error.
+
+    The one tail both a direct send and an approved held reply run, so a held reply is delivered
+    exactly as a send would have been.
+    """
+    plan_task = await _prepare_plan_task(step, thread_id, from_thread_id, current, requested)
+    if isinstance(plan_task, str):
+        return plan_task
+    sent = await _send(thread_id, target, text, from_thread_id, current, kwargs)
+    if isinstance(sent, str):
+        return sent
+    if step is not None and step.already_attached:
+        sent.update(await _answer_needs(from_thread_id, thread_id, step.node_id, kwargs))
+    if plan_task is not None:
+        sent["plan_task"] = plan_task
+    return sent
 
 
 async def _answer_needs(from_thread_id: str, thread_id: str, node_id: str, kwargs) -> dict:

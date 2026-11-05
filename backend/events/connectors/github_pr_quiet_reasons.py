@@ -41,7 +41,22 @@ CI_START_GRACE = timedelta(minutes=30)
 #: the ``ci_cancelled`` wake that prompts a rerun comes 10 min after the cancel.
 CLOCK_SLACK = timedelta(seconds=60)
 
-_GREEN = frozenset({"success", "neutral", "skipped"})
+GREEN = frozenset({"success", "neutral", "skipped"})
+#: Conclusions ranked worst first; a held head waits for a maintainer first, whatever else failed.
+_RANKED = ("action_required", "timed_out", "startup_failure", "stale", "failure")
+
+
+def rank(conclusions: Any) -> str:
+    """The one conclusion for a set of completed checks: the worst in ``_RANKED``; then any other
+    one outside ``GREEN`` (unknown or missing) as ``failure``; then ``cancelled``; else ``success``."""
+    values = {str(value or "failure").lower() for value in conclusions}
+    for value in _RANKED:
+        if value in values:
+            return value
+    if values - GREEN - {"cancelled"}:
+        return "failure"
+    return "cancelled" if "cancelled" in values else "success"
+
 _CANCELLED = "cancelled"
 _REVIEWER_TERMINAL = frozenset({"success", "failure", "error"})
 
@@ -150,9 +165,7 @@ def ci_state(body: Any) -> CiState:
     suite_ids = [run.get("check_suite_id") for run in latest]
     if None in times or None in starts or not all(isinstance(s, int) for s in suite_ids):
         return CiState(started=True)
-    conclusions = {str(run.get("conclusion")) for run in latest}
-    failed = sorted(c for c in conclusions if c not in _GREEN and c != _CANCELLED)
-    conclusion = failed[0] if failed else _CANCELLED if _CANCELLED in conclusions else "success"
+    conclusion = rank(run.get("conclusion") for run in latest)
     cancelled = tuple(
         (str(run.get("name") or "workflow"), int(run.get("id") or 0))
         for run in latest if run.get("conclusion") == _CANCELLED

@@ -7,6 +7,7 @@ PLAN_LIMIT_REASON = "plan_limit_overage_off"
 VENDOR_LIMIT_REFUSAL_REASON = "vendor_usage_limit_refusal"
 #: A harness Turn the provider refused because its context outgrew the window.
 CONTEXT_OVERFLOW_REASON = "context_overflow.continue"
+CLAUDE_LOGIN_RACE_REASON = "claude_login_race"
 
 
 class PlanLimitStop(Exception):
@@ -26,6 +27,12 @@ class ContextOverflowEnd(Exception):
     """
 
     cause = CONTEXT_OVERFLOW_REASON
+
+
+class ClaudeLoginRaceEnd(Exception):
+    """A Claude login answered after the CLI reported its sign-in expired."""
+
+    cause = CLAUDE_LOGIN_RACE_REASON
 
 
 def frame_cause(error: object) -> dict[str, str]:

@@ -24,7 +24,6 @@ from events.connectors.github import (
     identity_from_check_pr_metadata,
 )
 from events.github_mapper import pr_terminal_state, unruled_reason
-from events.routing_inputs import structured_tag
 from events.connectors.github_route_preparation import (
     _chip_line, prepare_route_ordered, settle_routed_delivery, summary_facts,
 )
@@ -86,7 +85,6 @@ def _record_passive_change(
     summary: str,
     chip: str,
     wake_reason: str,
-    tag_provenance: dict[str, str] | None,
 ) -> None:
     identity = routing_state.get("identity")
     if not identity:
@@ -95,8 +93,6 @@ def _record_passive_change(
         "wake_thread_id": wake_thread_id,
         "wake_reason": wake_reason,
     }
-    if tag_provenance:
-        provenance["tag_provenance"] = tag_provenance
     registry_models.record_artifact_change(
         artifact_id=identity["id"],
         internal_event=internal_event,
@@ -204,7 +200,6 @@ def _select_route(
     payload: dict[str, Any],
     identity,
     external_id: str | None,
-    tag: dict[str, str] | None,
     selected_pr: dict[str, Any] | None,
 ) -> tuple[tuple[str, str] | RouteResult, dict[str, Any]]:
     """The routed thread and why, or the result when there is none, with the
@@ -217,19 +212,6 @@ def _select_route(
         or (internal_event in {GITHUB_ROUTED_EVENTS[k] for k in ("issue_comment.created", "pr_comment.created")}
             and content_facts(payload)["author_origin"] == "outside")):
         return RouteResult(RouteOutcome.PARKED, external_id=external_id, reason="rule_only"), routing_state
-    if tag is not None and identity is not None:
-        routing_state = registry_models.routing_registrations(*identity)
-        thread_id = tag["thread_id"]
-        if not delivery.thread_exists_and_active(thread_id):
-            logger.warning(
-                "event-routing: structured tag target {} inactive/missing for {}",
-                thread_id, internal_event,
-            )
-            return _dead_letter_result(
-                internal_event, payload, "invalid_tag_target", external_id,
-            ), routing_state
-        return (thread_id, "tag"), routing_state
-
     target = resolve_targets(
         github_routing_envelope(internal_event, identity, payload),
     )[0]
