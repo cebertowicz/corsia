@@ -28,18 +28,7 @@ Security is covered in its own section: [Security](../security/README.md). These
 
 ## Terms used throughout
 
-- **Workspace:** the top-level folder CORSIA manages. It holds shared context, shared skills, shared documents and every project.
-- **Project:** a body of work inside the workspace, such as a product or a household, with its own context, skills, documents and agents.
-- **Scope:** the level something belongs to: workspace, project or thread. Context and skills are resolved by scope.
-- **Thread:** one conversation with its own history and model, and optionally a plan. Agent turns run in threads.
-- **Agent:** an enabled persistent-agent thread, typically given a standing responsibility. A temporary worker is a thread created for a bounded task.
-- **Conductor:** the thread designated to coordinate a project. The workspace coordinator is called the CORSIA agent.
-- **Turn:** one run of a thread's agent loop, from an admitted input until it finishes.
-- **Harness:** the program that runs the agent loop for a turn. CORSIA has three: its own native loop, Claude Code and Codex.
-- **Checkpoint:** a summary that, when installed, replaces covered earlier history in the model's context.
-- **Plan:** a thread's or scope's structured record of tasks, with acceptance criteria, waits and decisions.
-- **Context source:** one file or generated block that is delivered to a model, such as a system rule, a project file or the skills index.
-- **State root:** the folder where CORSIA keeps its database and runtime files.
+See the [glossary](../reference/glossary.md) for terms used throughout the documentation.
 
 ## What these pages do not cover
 
