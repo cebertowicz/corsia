@@ -58,6 +58,8 @@ def test_person_reply_joins_the_open_task_of_its_thread(isolated_db):
         assert "1 comment on" in first["title"]
         assert joined.title == first["title"].replace("1 comment on", "2 comments on")
         assert joined.requirements_revision == first["requirements_revision"] + 1
+        assert first["intent"].startswith("Answer the person's 1 comment on ")
+        assert joined.intent == first["intent"].replace("1 comment on", "2 comments on")
         assert db.execute(
             "SELECT 1 FROM plan_node_events WHERE node_id=? AND event='node_restated'", (first["id"],),
         ).fetchone() is not None

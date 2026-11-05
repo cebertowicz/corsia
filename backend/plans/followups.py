@@ -40,7 +40,6 @@ def add_follow_up(
     description: str | None = None,
     spawn_kind: str | None = None,
     intent: str | None = None,
-
     step: workflow_fields.FollowUpStep = "none",
     db=None,
 ):
@@ -79,7 +78,6 @@ def add_follow_up(
             ),
             actor_id=actor_id, provenance=provenance, node_id=follow_up_id,
         )
-
         return follow_up
 
 
@@ -90,7 +88,6 @@ def accept_with_follow_up(
     acceptance_criteria: str,
     size: str | None = None,
     intent: str | None = None,
-
     actor_id: str | None = None,
     provenance: str = "plan_service",
     verification_result: str | None = None,

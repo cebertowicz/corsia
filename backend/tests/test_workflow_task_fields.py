@@ -24,7 +24,6 @@ from tools.workflow_task_fields import version_short_hash
 _MUTATION_IDS = itertools.count()
 _WORKFLOW_TASK_INTENT = {
     "intent": "Build the requested workflow task.",
-
 }
 
 
@@ -56,7 +55,6 @@ def _mutate(db, plan_id, operation, params, workflow_version=None):
         params = {
             **params,
             "intent": params.get("intent", "Build the requested workflow task."),
-
         }
     return mutate(
         plan_id,

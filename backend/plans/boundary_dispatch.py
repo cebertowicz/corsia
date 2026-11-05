@@ -122,7 +122,6 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow, actor)
         )
         node = service.add_node(plan_id, **created, **common) if operation == "add" else mutations.insert_node(plan_id, **created, **common)
         user_step_instructions.link_requested(node.id, params, actor, db=db)
-
         if "depends_on_node_id" in params:
             from plans import dependencies
 
@@ -148,7 +147,6 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow, actor)
             acceptance_criteria=fields.text(params, "acceptance_criteria"),
             description=params.get("description"), size=fields.require_task_size(params.get("size")),
             intent=params.get("intent"),
-
             **fields.expected(params), **common,
         )
     if operation == "reorder":
@@ -158,7 +156,6 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow, actor)
         params["node_id"], title=fields.text(params, "title"),
         acceptance_criteria=fields.text(params, "acceptance_criteria"),
         affected_nodes=params.get("affected_nodes"), intent=params.get("intent"),
-
         **fields.expected(params), **common,
     )
 
@@ -289,7 +286,6 @@ def _dispatch_settlement(operation: str, params: dict[str, Any], actor, common, 
         node_id, title=fields.text(params, "title"),
         acceptance_criteria=fields.text(params, "acceptance_criteria"),
         size=fields.require_task_size(params.get("size")), intent=params.get("intent"),
-
         verification_result="passed", verified_by=actor.audit_id,
         **expected, **common,
     )

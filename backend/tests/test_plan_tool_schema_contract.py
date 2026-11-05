@@ -351,14 +351,6 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
     )
 
 
-def test_task_schema_publishes_intent_without_stored_quotes():
-    from tools.plans import PlanUpdateTool
-
-    fields = PlanUpdateTool().parameters["properties"]["params"]["properties"]
-    assert fields["intent"]["type"] == "string"
-    assert "intent_words" not in fields
-
-
 #: Published definition bytes (#1939). At bd4c5d3c the two tools measured
 #: 18,569 bytes together, half of it conditional rules no model was shown. Raise
 #: a budget only with the reason in the same change. plan_update 8,100 -> 8,300

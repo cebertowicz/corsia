@@ -224,7 +224,8 @@ def create_feedback_node(
 
     A batch of replies whose comment thread already has an open task joins that
     task instead (``plans.feedback_join``). When its owner is working on that
-    task, the owner keeps its selection and receives a wake with the reply.
+    task, the owner keeps its selection and receives a wake with the reply;
+    otherwise the person's new comments restate the task's intent.
     """
     batch_id = str(batch_value(batch, "id"))
     artifact_id = str(batch_value(batch, "artifact_id"))
@@ -235,17 +236,15 @@ def create_feedback_node(
     if not loaded:
         raise EmptyFeedbackBatchError(f"feedback batch {batch_id} has no renderable items")
     author, document = feedback_display(db, batch, loaded)
-
     joined = feedback_join.open_thread_task(db, recipient_thread_id, batch, loaded)
     if joined is not None:
         held = feedback_join.earlier_items(db, joined.node_id, batch) + loaded
         blocks = item_blocks(batch, loaded)
+        restate = not joined.working and _person_comments(batch, loaded)
         feedback_join.join(
-            db, joined.node_id, title=_title(author, document, held),
-            blocks=blocks, requirements_revised=(
-                not joined.working and batch_value(batch, "author_kind") == "user"
-                and any(item["kind"] == "comment" and str(item["body"]).strip() for item in loaded)
-            ), provenance=PROVENANCE,
+            db, joined.node_id, title=_title(author, document, held), blocks=blocks,
+            intent=_document_comment_intent(_person_comments(batch, held), document) if restate else None,
+            provenance=PROVENANCE,
         )
         woke = joined.working and person_input.joined_reply(
             db, joined.node_id,
@@ -254,19 +253,26 @@ def create_feedback_node(
             [str(item["id"]) for item in loaded],
         ) is not None
         return FeedbackNodeResult(joined.node_id, (), False, woke)
+    count = _person_comments(batch, loaded)
     return _create_linked_node(
         db, recipient_thread_id, artifact_id, batch_id, PROVENANCE,
         title=_title(author, document, loaded), acceptance=_acceptance(loaded),
         description=_description(batch, loaded),
-        intent=(_document_comment_intent(loaded, document)
-                if batch_value(batch, "author_kind") == "user" and any(
-                    item["kind"] == "comment" and str(item["body"]).strip() for item in loaded
-                ) else None),
+        intent=_document_comment_intent(count, document) if count else None,
     )
 
 
-def _document_comment_intent(items, document: str) -> str:
-    count = sum(1 for item in items if item["kind"] == "comment" and str(item["body"]).strip())
+def _person_comments(batch, items) -> int:
+    """How many non-blank comments the person wrote among ``items``; none in an agent's batch."""
+    if batch_value(batch, "author_kind") != "user":
+        return 0
+    return sum(
+        1 for item in items
+        if item["kind"] == "comment" and item.get("author_kind", "user") == "user" and str(item["body"]).strip()
+    )
+
+
+def _document_comment_intent(count: int, document: str) -> str:
     text = f"Answer the person's {count} comment{'s' if count != 1 else ''} on {document}"
     return intent_creation.validate_intent(text.encode()[:intent_creation.MAX_INTENT_BYTES].decode(errors="ignore"))
 
@@ -279,7 +285,6 @@ def _create_linked_node(db, recipient_thread_id, artifact_id, source_id, provena
         description=description, intent=intent, intent_node_id=intent_node_id,
         actor_id=None, provenance=provenance, db=db,
     )
-
     service.transition_node(
         node.id, "active", actor_id=None, provenance=provenance, db=db,
     )

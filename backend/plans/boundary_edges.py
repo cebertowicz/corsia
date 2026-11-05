@@ -26,7 +26,6 @@ def dispatch(
             params["node_id"], title=fields.text(params, "title"),
             acceptance_criteria=fields.text(params, "acceptance_criteria"),
             size=fields.require_task_size(params.get("size")), intent=params.get("intent"),
-
             **fields.expected(params), **common,
         )
         return service.get_node(params["node_id"], db=db), created

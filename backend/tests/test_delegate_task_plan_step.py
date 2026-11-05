@@ -151,7 +151,6 @@ async def test_delegate_task_worker_gets_each_intent_revision_once(deleg_db, spa
     facts = json.loads(payload)["intent_revision"]
     assert facts["intent"] == expected_intent
     assert facts["acceptance_criteria"] == updated.acceptance_criteria
-    assert "intent_words" not in facts
 
 
 async def test_delegate_task_worker_is_not_woken_by_nonrequirements_edits_or_its_own_edit(deleg_db, spawned):

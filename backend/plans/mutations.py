@@ -119,7 +119,6 @@ def edit_node(
     description: str | None = None,
     acceptance_criteria: str | None = None,
     intent: str | None | object = _UNSET,
-    requirements_revised: bool = False,
     watchdog_budget_seconds: int | None | object = _UNSET,
     difficulty_rerated: dict[str, str] | None = None,
     size: str | None | object = _UNSET,
@@ -153,10 +152,10 @@ def edit_node(
             node, title, description, acceptance_criteria, intent, watchdog_budget_seconds, size,
         )
         size_changed = next_size != node["size"]
-        if not restated and not requirements_revised and difficulty_rerated is None and not size_changed:
+        if not restated and difficulty_rerated is None and not size_changed:
             return service._node_from_row(connection, node)
         requirements_changed = (
-            next_dod != node["acceptance_criteria"] or next_intent != node["intent"] or requirements_revised
+            next_dod != node["acceptance_criteria"] or next_intent != node["intent"]
         )
         if restated:
             service.touch_node(
@@ -175,7 +174,6 @@ def edit_node(
                 **({"size": next_size} if size_changed else {}),
             )
         updated = service._node_row(connection, node_id)
-
         if requirements_changed:
             from plans import admission, plan_wake
 
@@ -267,7 +265,6 @@ def split_node(
     description: str | None = None,
     size: str | None = None,
     intent: str | None = None,
-
     expected_revision: int | None = None,
     actor_id: str | None = None,
     provenance: str = "plan_mutation",
@@ -302,7 +299,6 @@ def split_node(
             actor_id=actor_id, provenance=provenance,
             node_id=service._id(),
         )
-
         service.touch_node(connection, node_id)
         service._event(
             connection, node_id, "node_split", actor_id=actor_id, provenance=provenance,

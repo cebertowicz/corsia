@@ -116,8 +116,6 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
     CREATE INDEX IF NOT EXISTS idx_plan_nodes_executor_thread ON plan_nodes(executor_thread_id);
     {NODE_AGGREGATE_INDEXES_SQL}
 
-
-
     CREATE TABLE IF NOT EXISTS plan_node_dependencies (
         node_id TEXT NOT NULL REFERENCES plan_nodes(id) ON DELETE CASCADE,
         depends_on_node_id TEXT NOT NULL

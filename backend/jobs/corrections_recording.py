@@ -141,7 +141,6 @@ def candidate_for_message(message_id: str) -> CorrectionCandidate | None:
     return replace(candidates[0], arrived=True) if candidates else None
 
 
-
 def notify_if_owner(accepted: Any, *, role: str, content: str, metadata: object) -> None:
     """Hand the corrections worker an admitted owner message; best effort, never failing the send.
 

@@ -61,7 +61,6 @@ def test_each_requirements_producer_wakes_the_live_worker_once(db, changes, expe
     assert payload["requirements_revision"] == 2
     assert payload["intent"] == expected
     assert payload["acceptance_criteria"] == updated.acceptance_criteria
-    assert "intent_words" not in payload
 
 
 def test_description_and_size_edits_do_not_wake(db):
