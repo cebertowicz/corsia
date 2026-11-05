@@ -269,6 +269,66 @@ async def test_an_agents_queued_input_does_not_replace_the_wake(db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_successor_that_fails_before_writing_queues_the_replaced_wake(db) -> None:
+    """The queued input settles failed, so no Turn sees m1; the wake its input replaced is owed."""
+    _take_in(db)
+    _queue(db)
+    await _end_claiming(db)
+    assert _wakes(db) == []
+
+    effects = await _end(db, turn="t2", error="provider exploded again")
+
+    assert db.execute("SELECT delivery_state FROM messages WHERE id='m2'").fetchone()[0] == "failed"
+    (wake,) = _wakes(db)
+    assert json.loads(wake["metadata"])["failed_turn_id"] == "t1"
+    assert effects.drives.count(_THREAD) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_owed_wake_is_owed_once(db) -> None:
+    from infra.unanswered_input_wake import _owed_earlier
+
+    _take_in(db)
+    _queue(db)
+    await _end_claiming(db)
+    assert _owed_earlier(db, _THREAD) == "t1"
+
+    await _end(db, turn="t2")
+
+    assert len(_wakes(db)) == 1
+    assert _owed_earlier(db, _THREAD) is None
+
+
+@pytest.mark.asyncio
+async def test_a_successor_failing_on_its_limit_owes_no_wake(db) -> None:
+    from infra.queries import insert_message
+
+    _take_in(db)
+    _queue(db)
+    await _end_claiming(db)
+    insert_message(_THREAD, "system", "limit", metadata={"turn_id": "t2", "cause_kind": "usage_limit"}, db=db)
+    db.commit()
+
+    await _end(db, turn="t2", error="You've hit your usage limit")
+
+    assert _wakes(db) == []
+
+
+@pytest.mark.asyncio
+async def test_a_queued_input_claimed_by_an_ended_turn_does_not_replace_the_wake(db) -> None:
+    """An orphaned claim starts no Turn, so the person's message would go unanswered."""
+    _take_in(db)
+    _queue(db)
+    db.execute("UPDATE messages SET active_turn_id='t-gone' WHERE id='m2'")
+    db.commit()
+
+    effects = await _end(db)
+
+    assert len(_wakes(db)) == 1
+    assert effects.drives.count(_THREAD) == 1
+
+
+@pytest.mark.asyncio
 async def test_a_turn_a_restart_registration_resumes_queues_nothing(db) -> None:
     """The restart's own recovery wake resumes the Turn; a second instruction would double it."""
     from infra.thread_recovery import RESTART_TURN_ERROR

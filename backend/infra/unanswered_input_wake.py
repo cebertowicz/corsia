@@ -73,12 +73,56 @@ def _unanswered_input(db: sqlite3.Connection, thread_id: str, turn_id: str) -> b
     ).fetchone() is None
 
 
+def _owed_earlier(db: sqlite3.Connection, thread_id: str) -> str | None:
+    """The errored Turn that took in the thread's newest person message, still unanswered and never woken.
+
+    A person's queued input replaces that Turn's wake, but the input's Turn can
+    fail before it writes: the input then settles ``failed``, no Turn sees the
+    earlier message, and its one wake is still owed. The earlier Turn's own
+    skips (excluded cause, restart registration, a wake it took in) still hold.
+    """
+    row = db.execute(
+        "SELECT seq, metadata, active_turn_id FROM messages WHERE thread_id=? AND role='user' "
+        "AND delivery_state='delivered' AND seq IS NOT NULL ORDER BY seq DESC LIMIT 1",
+        (thread_id,),
+    ).fetchone()
+    if row is None or not row["active_turn_id"] or not _is_person(row["metadata"]):
+        return None
+    earlier = str(row["active_turn_id"])
+    turn = db.execute("SELECT error FROM active_turns WHERE id=? AND status='error'", (earlier,)).fetchone()
+    if (
+        turn is None
+        or db.execute("SELECT 1 FROM messages WHERE id=?", (_wake_id(earlier),)).fetchone() is not None
+        or _took_in_wake(db, earlier)
+        or _restart_resumes(db, thread_id, earlier)
+        or _excluded(db, thread_id, earlier, str(turn["error"] or ""))
+    ):
+        return None
+    answered = db.execute(
+        "SELECT 1 FROM messages WHERE thread_id=? AND role='assistant' AND seq>? "
+        "AND TRIM(COALESCE(content,''))<>'' LIMIT 1",
+        (thread_id, row["seq"]),
+    ).fetchone()
+    return None if answered else earlier
+
+
 def _person_input_queued(db: sqlite3.Connection, thread_id: str) -> bool:
-    """Whether a person's queued input, claimed or not, will start a Turn that sees the message."""
+    """Whether a person's queued input will start, or after its hold lifts start, a Turn that sees the message.
+
+    A claim held by a Turn that is no longer running does not count, as in
+    ``thread_input_rows.liveness_wake_queued``.
+    """
     return any(_is_person(row["metadata"]) for row in db.execute(
-        "SELECT metadata FROM messages WHERE thread_id=? AND role='user' AND delivery_state='queued'",
+        "SELECT m.metadata FROM messages m WHERE m.thread_id=? AND m.role='user' "
+        "AND m.delivery_state='queued' AND m.input_order IS NOT NULL "
+        "AND (m.active_turn_id IS NULL OR EXISTS (SELECT 1 FROM active_turns t "
+        "WHERE t.id=m.active_turn_id AND t.status='running'))",
         (thread_id,),
     ))
+
+
+def _wake_id(turn_id: str) -> str:
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia-unanswered-input:{turn_id}"))
 
 
 def _took_in_wake(db: sqlite3.Connection, turn_id: str) -> bool:
@@ -107,15 +151,17 @@ def queue_unanswered_input_wake(
     resumes it; a plan backoff wake does not, since it neither fires soon nor
     names the person's message. A person's queued input replaces it too: its
     Turn answers with the message in history, and recovery may already have
-    claimed it, so the wake would be a second Turn after it.
+    claimed it, so the wake would be a second Turn after it. When that Turn
+    errors without answering, its end queues the replaced wake instead.
     """
     turn_id = outcome.get("turn_id")
     if outcome.get("outcome") != "error" or not turn_id:
         return
     if liveness_wake is not None and liveness_wake.provider_reset_at is not None:
         return
+    owed = turn_id if _unanswered_input(db, thread_id, turn_id) else _owed_earlier(db, thread_id)
     if (
-        not _unanswered_input(db, thread_id, turn_id)
+        owed is None
         or _excluded(db, thread_id, turn_id, str(outcome.get("error") or ""))
         or _took_in_wake(db, turn_id)
         or _restart_resumes(db, thread_id, turn_id)
@@ -128,8 +174,8 @@ def queue_unanswered_input_wake(
     try:
         enqueue_event_wake(
             thread_id, EVENT, SUMMARY, {"guidance": GUIDANCE},
-            metadata={"kind": "unanswered_input", "failed_turn_id": turn_id},
-            message_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"corsia-unanswered-input:{turn_id}")),
+            metadata={"kind": "unanswered_input", "failed_turn_id": owed},
+            message_id=_wake_id(owed),
             db=db,
         )
     # A thread being deleted refuses it (SendRejected); the Turn-end record still commits.
