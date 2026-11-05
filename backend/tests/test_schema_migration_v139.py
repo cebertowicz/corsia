@@ -126,7 +126,7 @@ def _v137() -> sqlite3.Connection:
     db.execute("DROP INDEX idx_plan_nodes_intent_node")
     db.execute("ALTER TABLE plan_nodes DROP COLUMN intent_node_id")
     db.execute("ALTER TABLE plan_nodes DROP COLUMN intent")
-    db.execute("DROP TABLE plan_node_intent_words")
+    db.execute("DROP TABLE IF EXISTS plan_node_intent_words")
     for table in ("event_route_decisions", "event_rules", "automation_schedules"):
         db.execute(f"DROP TABLE {table}")
     db.executescript(_V138)

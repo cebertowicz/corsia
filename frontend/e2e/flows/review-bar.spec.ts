@@ -36,7 +36,7 @@ function addPersonStep(threadId: string, artifactId: string): void {
 		'accept_thread_input(thread, role="user", content=intent, intent="apply_now", message_id=message_id, db=db)',
 		'db.execute("UPDATE messages SET active_turn_id=? WHERE id=?", (turn_id, message_id))',
 		'plan = service.ensure_plan("thread", thread, db=db)',
-		'params = {"kind": "task", "title": "Set up the workspace", "acceptance_criteria": "It is ready.", "size": "unknown", "assignee": "user", "description": "Follow the document. Already tried: I opened the instructions.", "instructions_artifact_id": artifact, "intent": intent, "intent_words": [{"quote": intent, "role": "authority"}]}',
+		'params = {"kind": "task", "title": "Set up the workspace", "acceptance_criteria": "It is ready.", "size": "unknown", "assignee": "user", "description": "Follow the document. Already tried: I opened the instructions.", "instructions_artifact_id": artifact, "intent": intent}',
 		'mutate(plan.id, "add", params, actor=PlanActor(thread, user, None, turn_id=turn_id), provenance="e2e.person_step", mutation_id=uuid.uuid4().hex, db=db)',
 		'db.commit()',
 	].join('\n'), threadId, artifactId], {

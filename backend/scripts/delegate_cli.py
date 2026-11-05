@@ -276,8 +276,7 @@ def _add_status_parser(sub: argparse._SubParsersAction) -> None:
     st.set_defaults(func=cmd_status)
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Parse CLI arguments and dispatch the requested delegate subcommand."""
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="corsia delegate",
         description="Coordinator delegation — create threads, send turns, read status.",
@@ -292,7 +291,12 @@ def main(argv: list[str] | None = None) -> int:
     _add_set_model_parser(sub)
     _add_status_parser(sub)
 
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Parse CLI arguments and dispatch the requested delegate subcommand."""
+    args = build_parser().parse_args(argv)
     return args.func(args)
 
 

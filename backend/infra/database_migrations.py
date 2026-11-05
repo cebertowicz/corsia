@@ -232,7 +232,7 @@ from infra.migration_171_to_172_message_drafts import migrate_171_to_172
 from infra.migration_172_to_173_workflow_ref_index import migrate_172_to_173
 from infra.migration_173_to_174_held_replies import migrate_173_to_174
 from infra.migration_174_to_175_reviewer_gate_pending import migrate_174_to_175
-from infra.migration_175_to_176_unread_comments import migrate_175_to_176
+from infra.migration_175_to_176_drop_plan_quotes import migrate_175_to_176
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 

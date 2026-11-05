@@ -241,7 +241,7 @@ _CLOSING_FIELDS = {
         "next_node_id",
     },
     "accept_with_follow_up": {
-        "node_id", "title", "acceptance_criteria", "size", "intent", "intent_words",
+        "node_id", "title", "acceptance_criteria", "size", "intent",
         "verification_result", "evidence", "expected_revision", "next_node_id",
     },
     # Bulk archive is the one closing body with no single node to describe, so
@@ -349,17 +349,6 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
         "missing required params.expected_revision" in error
         for error in tool.validate_params(activate)
     )
-
-
-def test_intent_words_publish_the_minimal_authority_quote_shape():
-    from tools.plans import PlanUpdateTool
-
-    words = PlanUpdateTool().parameters["properties"]["params"]["properties"]["intent_words"]
-
-    assert words["items"]["required"] == ["quote"]
-    assert words["items"]["properties"]["quote"] == {"type": "string"}
-    assert words["items"]["properties"]["author"]["enum"] == ["person", "agent"]
-    assert words["items"]["properties"]["role"]["enum"] == ["origin", "bears_on", "authority"]
 
 
 #: Published definition bytes (#1939). At bd4c5d3c the two tools measured
