@@ -1,6 +1,6 @@
 # Getting started
 
-How to go from nothing to a first project with a first agent doing work. These pages are for someone who has never run CORSIA and wants to use it, not change its code; to change the code, start at [Contributing to CORSIA](../contributing/README.md). For what CORSIA is and why it exists, read the repository [README](../../README.md) first. Each CORSIA term is explained where these pages first use it, and the [Glossary](../reference/glossary.md) lists them all.
+How to go from nothing to a first project with a first agent doing work. These pages are for someone who has never run CORSIA and wants to use it, not change its code; to change the code, start at [Contributing to CORSIA](../contributing/README.md). For what CORSIA is and why it exists, read the repository [README](../../README.md) first. Each CORSIA term is explained where these pages first use it, and the [Glossary](../reference/glossary.md) defines the main ones.
 
 ## Reading order
 

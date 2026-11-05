@@ -1,10 +1,12 @@
 # Your first project
 
-What you see in the browser after [installing CORSIA](install.md): the setup screens, the first chat with the CORSIA agent, and creating a project. A **project** is one body of work with its own context, skills and files, kept in its own folder in your workspace; see [Scopes](../how-it-works/scopes.md). The **CORSIA agent** is the assistant you talk to outside any project. The [Glossary](../reference/glossary.md) defines these and the other terms on this page, such as conductor, plan and agent.
+What you see in the browser after [installing CORSIA](install.md): the setup screens, the first chat with the CORSIA agent, and creating a project. A **project** is one body of work with its own context, skills and files, kept in its own folder in your workspace; see [Scopes](../how-it-works/scopes.md). The **CORSIA agent** is the assistant you talk to outside any project. The [Glossary](../reference/glossary.md) defines project, conductor, plan, agent and other terms this page uses.
 
 Control names below are the labels the app shows. This page was written from the app's source code and has not been walked through in a browser; if a screen differs from what you read, the screen is right and the page needs a fix.
 
 ## Setup screens
+
+These screens come with the desktop app and the Mac installer. On Linux, and after a [manual install](install.md#manual-install-and-requirements), Terminal creates your account, so you skip them: you sign in at `http://localhost:1956`, and once you pick a model for the CORSIA agent it takes you through setup in chat, with its own list of tasks.
 
 CORSIA opens at `http://localhost:1956` on a setup screen that shows four steps in a side list: **Getting started**, **Account & workspace**, **Your subscriptions** and **Providers & models**. Jobs that run in the background, such as a model download, are listed under **In the background**.
 
@@ -13,7 +15,7 @@ CORSIA opens at `http://localhost:1956` on a setup screen that shows four steps 
 3. **Your subscriptions.** The question is **Which do you pay for?**, answered with **Claude**, **ChatGPT**, **Both** or **Neither**; the screen adds that Claude Code and Codex are the apps you sign in to next. Picking Claude, ChatGPT or Both starts installing the matching tool right away. **Neither** is fine: it starts the local model's download if it isn't already running, or you add an API key on the next step.
 4. **Providers & models.** The page says CORSIA needs one working model to continue setup. Its rows are **Claude Code** and **Codex** (only for what you picked, or a tool already signed in inside CORSIA), **Local model** (with **Download**, **Check again** or **Retry**, depending on its state) and **API provider** (**Add provider**). A Claude Code or Codex row has its own **Sign in**, pressed once the tool is installed; it is needed even when you are already signed in to that tool in a terminal. A vendor password or sign-in code is typed only on the vendor's own page, never into a CORSIA chat. Get one row to work; the other rows can wait. [Models and harnesses](../how-it-works/models-and-harnesses.md) explains what each source is.
 
-**Start using CORSIA** stays disabled until at least one model works. A Mac with less than 32 GB of memory needs one of the cloud rows for agent work ([Know before you start](install.md#know-before-you-start)). On Linux there is no local model at all.
+**Start using CORSIA** stays disabled until at least one model works. A Mac with less than 32 GB of memory needs one of the cloud rows for agent work ([Know before you start](install.md#know-before-you-start)).
 
 ## The first chat and the setup plan
 
@@ -26,11 +28,11 @@ Pressing **Start using CORSIA** opens a chat with the CORSIA agent. Its first me
 
 The message also points to a **plan** for finishing setup, in the **Plan** section on the right. On a phone it is the button above the message box that shows how many tasks are left. A plan is a list of tasks, each with a stated end condition; see [Plans](../how-it-works/plans.md).
 
-The setup plan has up to nine tasks, in this order. A task that does not apply to you is skipped without a word.
+The setup plan's tasks come in this order. A task that does not apply to you is skipped without a word.
 
 | Task | What it does |
 |---|---|
-| Add your Claude or ChatGPT subscription | Only for a subscription you said you pay for and have not finished connecting |
+| Add your Claude subscription, Add your ChatGPT subscription | One task for each subscription you said you pay for and have not finished connecting |
 | Bring over what your other tools know | Asks first, with a **Read what your other tools know?** card; only when CORSIA found another tool's data |
 | Where your work lives | Asks which apps you use, such as a tracker or notes, and connects the quick ones |
 | Web search | Optional Brave key, so agents can search; Claude Code's and Codex's own search is off inside CORSIA |
