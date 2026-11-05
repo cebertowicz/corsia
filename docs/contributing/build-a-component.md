@@ -39,6 +39,6 @@ npm run test -- src/lib/components/ui/Field.test.ts
 npm run check
 ```
 
-Replace the test path with the test for the component you changed. At the checked revision, `npm run check` reports existing TypeScript errors, including test globals and `activityIndexDecode.ts`. Run the app in the project's development environment and exercise the actual surface as well; a unit test alone does not check its layout or interaction in context.
+Replace the test path with the test for the component you changed. Both checks should pass. Run the app in the project's development environment and exercise the actual surface as well; a unit test alone does not check its layout or interaction in context.
 
 Checked against the code at `7a8c55d84c75cbee7b8f26c8839f188fa466b559`.
