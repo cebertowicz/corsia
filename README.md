@@ -356,7 +356,7 @@ flowchart TB
 
 ## Contributing
 
-Read [`CONTRIBUTING.md`](CONTRIBUTING.md). Open pull requests to `dev` from feature branches, and keep private workspace material out of issues, commits, pull requests and screenshots.
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md), then the developer path in [`docs/contributing/`](docs/contributing/README.md). Open pull requests to `dev` from feature branches, and keep private workspace material out of issues, commits, pull requests and screenshots.
 
 ## License
 

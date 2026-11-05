@@ -269,7 +269,7 @@ def running(db, nodes) -> list[tuple]:
 
 
 def _wake(db, source: Source, picked: list[tuple]) -> list[str]:
-    from memory.node_start_recall import source_reaches_thread
+    from memory.source_scope import source_reaches_thread
     from plans import admission_projection, plan_wake
 
     woken: list[str] = []

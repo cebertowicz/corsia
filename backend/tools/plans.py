@@ -11,7 +11,6 @@ from core.lesson_delivery import attach_at_worker_read, attach_plan_result
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.state.context import running_call_ids
-from memory import node_start_recall
 from plans import public
 from plans.public import (
     read_current_status, PlanActor, ensure_current_plan, mutate, read_current_plan,
@@ -38,6 +37,9 @@ def _tool_schema(properties: dict[str, Any], required: list[str]) -> dict[str, A
         "properties": properties, "required": required,
     }
 
+
+#: Plan operations whose result ``node`` is the task they start.
+NODE_OPERATIONS = frozenset({"start", "activate", "add", "insert"})
 
 #: Author-side decision operations. The user's answer is a human HTTP action,
 #: never an agent tool call.
@@ -224,8 +226,7 @@ def _mutation_operation(
         )
         if operation in {"add", "insert"}:
             workflow_task_fields.append_add_notice(result.result, db, workflows)
-        attach_plan_result(db, result, thread_id, operation in node_start_recall.NODE_OPERATIONS)
-        node_start_recall.attach_to_result(db, operation, result, caller_thread_id=thread_id)
+        attach_plan_result(db, result, thread_id, operation in NODE_OPERATIONS)
         return result
     finally:
         db.close()
@@ -246,8 +247,7 @@ def _decision_operation(thread_id, actor_row, operation, plan_id, params, mutati
         if operation == "draft":
             return call(plan_id, **common, **params)
         result = call(params.pop("decision_id", None), **common, **params)
-        attach_plan_result(db, result, thread_id, operation in node_start_recall.NODE_OPERATIONS)
-        node_start_recall.attach_to_result(db, operation, result, caller_thread_id=thread_id)
+        attach_plan_result(db, result, thread_id, operation in NODE_OPERATIONS)
         return result
     finally:
         db.close()

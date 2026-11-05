@@ -95,8 +95,8 @@ def fetch_pr_info_awaiting_mergeability(
 
     That final check-suite event may be the last trigger for this head (BUG #574),
     so exhausting the bounded retry is necessary to avoid leaving a ready PR clean
-    but unreviewed. A draft is held without mergeability; polling it only wastes
-    worker time.
+    but unreviewed. A draft or closed PR is held without mergeability; polling it
+    only wastes worker time.
     """
     pr_info: dict[str, Any] | None = None
 
@@ -105,7 +105,7 @@ def fetch_pr_info_awaiting_mergeability(
         pr_info = fetch_pr_info(repo, pr_number)
         if pr_info is None:
             return None
-        if pr_info["isDraft"] or not mergeability_is_unknown(pr_info):
+        if pr_info["isDraft"] or pr_info.get("state") == "closed" or not mergeability_is_unknown(pr_info):
             return pr_info
         return None
 
