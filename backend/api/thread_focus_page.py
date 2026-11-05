@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from infra.focus_rows import FOCUS_VISIBLE_SQL, NEVER_DRAWN_FILTER, focus_kind_sql
+from infra.focus_rows import FOCUS_VISIBLE_SQL, NEVER_DRAWN_FILTER, RESULT_NOTICE_SQL, focus_kind_sql
 from api.thread_paging import (
     _DISPLAY_ANCHOR_FILTER,
     CursorNotFound,
@@ -53,7 +53,7 @@ _RUN_COLUMNS = (
     "AND json_extract(metadata, '$.event_type')='system.turn.unanswered_input' "
     "THEN json_extract(metadata, '$.failed_turn_id') END AS retry_for, "
     "CASE WHEN role='system' AND json_valid(metadata) "
-    "AND json_extract(metadata, '$.type') IN ('llm_error','cc_error') "
+    f"AND (json_extract(metadata, '$.type') IN ('llm_error','cc_error') OR {RESULT_NOTICE_SQL}) "
     "THEN json_extract(metadata, '$.turn_id') END AS error_turn"
 )
 
@@ -130,8 +130,7 @@ run_turns AS (
 )
 SELECT 'run' AS kind, MIN(ends.seq) AS first_seq, MAX(ends.seq) AS last_seq,
     SUM(CASE WHEN ends.retry_for IS NOT NULL AND EXISTS (
-        SELECT 1 FROM ends AS notice WHERE notice.seg=ends.seg AND notice.run_no=ends.run_no
-            AND notice.error_turn=ends.retry_for
+        SELECT 1 FROM bounded AS notice WHERE notice.error_turn=ends.retry_for
     ) THEN 0 ELSE 1 END) AS count, SUM(ends.weight) AS weight,
     MAX(ends.oldest_id) AS first_id, MAX(ends.newest_id) AS last_id,
     COALESCE(MAX(run_turns.turn_ids), '[]') AS turn_ids,

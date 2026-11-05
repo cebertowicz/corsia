@@ -32,8 +32,8 @@ export function pairUnansweredInput(rows: TranscriptMessage[]): TranscriptMessag
 	const key = (row: TranscriptMessage, turn: string) => `${row.thread_id}\0${turn}`;
 	for (const row of rows) {
 		const turn = row.metadata?.turn_id;
-		if (row.role === 'system' && ['llm_error', 'cc_error'].includes(systemType(row))
-			&& typeof turn === 'string' && turn) notices.set(key(row, turn), row);
+		const notice = ['llm_error', 'cc_error'].includes(systemType(row)) || isResultNotice(row);
+		if (row.role === 'system' && notice && typeof turn === 'string' && turn) notices.set(key(row, turn), row);
 	}
 	const paired = new Set<TranscriptMessage>();
 	const hidden = new Set<TranscriptMessage>();
@@ -54,6 +54,11 @@ function withRetrySentence(notice: string): string {
 	const text = notice.trimEnd();
 	if (!text) return 'The agent tried once more.';
 	return `${/[.!?…]$/.test(text) ? text : `${text}.`} The agent tried once more.`;
+}
+
+/** A provider result is a failed Turn's notice only as an error with something to read. */
+function isResultNotice(message: TranscriptMessage): boolean {
+	return systemType(message) === 'result' && message.metadata?.is_error === true && Boolean(message.content);
 }
 
 export function systemType(message: TranscriptMessage): string {
@@ -77,8 +82,7 @@ export function isSystemNotice(message: TranscriptMessage): boolean {
 	const type = systemType(message);
 	if (type === 'context_event' && String(message.metadata?.event_type ?? '').startsWith('held_reply.')) return true;
 	if (ERROR_SYSTEM_TYPES.has(type)) return message.metadata?.recovered !== true;
-	// A provider result splits only as an error with something to read.
-	if (type === 'result') return message.metadata?.is_error === true && Boolean(message.content);
+	if (type === 'result') return isResultNotice(message);
 	return !ACTIVITY_SYSTEM_TYPES.has(type) && !NEVER_DRAWN_SYSTEM_TYPES.has(type);
 }
 

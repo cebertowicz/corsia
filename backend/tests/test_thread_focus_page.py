@@ -146,6 +146,22 @@ class TestStubsAndCounts:
         (stub,) = page_focus(conn, _SID, 10, None)["runs"]
         assert stub["count"] == expected
 
+    def test_retry_after_a_failed_result_notice_counts_nothing(self):
+        # A Claude Code provider error is a visible `result` row, so its retry sits in the next run.
+        conn = _db()
+        t = _Thread(conn)
+        t.add("u")
+        notice = t.add("c", "T1", meta={"type": "result", "is_error": True}, content="API Error: 500")
+        t.add("c", meta={"event_type": "system.turn.unanswered_input", "failed_turn_id": "T1"})
+        t.add("w", "T2")
+        t.add("s", "T2")
+        conn.commit()
+
+        page = page_focus(conn, _SID, 10, None)
+        assert notice in [row["id"] for row in page["messages"]]
+        (stub,) = page["runs"]
+        assert stub["count"] == 1
+
     def test_hidden_rows_between_visible_ones_become_one_stub_each(self):
         conn = _db()
         t = _Thread(conn)
