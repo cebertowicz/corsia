@@ -84,7 +84,10 @@ def issue_comment_drafts(payload: dict[str, Any], repo: str) -> list[OutcomeDraf
     attrs = {"repo": repo, "comment_id": reply.id, **_author_facts(reply, issue, kind, at)}
     if kind == "pr":
         attrs["has_reviewer_marker"] = reply.has_reviewer_marker
+        subject = pr_subject(repo, reply.parent_number)
+    else:
+        subject = f"github:issue:{repo}#{reply.parent_number}"
     return [OutcomeDraft(
         f"github:{kind}_comment:{repo}:{reply.id}:created", f"github.{kind}.comment.created",
-        at, f"github:{kind}:{repo}#{reply.parent_number}", _stored(attrs),
+        at, subject, _stored(attrs),
     )]
