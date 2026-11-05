@@ -98,7 +98,15 @@ def _isolate_lifespan(monkeypatch) -> None:
     )
     monkeypatch.setattr("subagents.cc_runtime.shutdown_all", _noop)
     monkeypatch.setattr("subagents.codex_runtime.shutdown_all", _noop)
-    monkeypatch.setattr(processes, "PROCESS_OWNER", _NoopProcessOwner())
+    # Preserve the owner's identity: modules imported during lifespan may bind it
+    # for the rest of the test session, after monkeypatch restores its methods.
+    owner = processes.PROCESS_OWNER
+    stub = _NoopProcessOwner()
+    for name in (
+        "process_dir", "browser_sessions", "configure_transition_callback",
+        "configure_long_running_capacity_callback", "terminate_turn", "terminate_lease", "shutdown", "live_count",
+    ):
+        monkeypatch.setattr(owner, name, getattr(stub, name))
     monkeypatch.setattr("infra.product_events.flush", lambda: None)
     monkeypatch.setattr("infra.db_async.shutdown", lambda: None)
 
