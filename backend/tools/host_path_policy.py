@@ -12,12 +12,14 @@ import os
 from pathlib import Path
 import re
 import shutil
+import sys
 from typing import Iterable
 
 from tools.host_path_resolution import (
     canonical,
     contains,
     denied_paths_in,
+    linux_denied_paths_in,
     resolution_touches,
 )
 from tools.host_sandbox_floor import hard_floor_rules, stored_credential_roots
@@ -238,15 +240,18 @@ class ProtectedHostPathPolicy:
             return self._state_denial()
         return self.denial(candidate, for_write=for_write)
 
-    def denial_guidance_for_output(self, text: str) -> str | None:
+    def denial_guidance_for_output(self, text: str, cwd: Path | None = None) -> str | None:
         """Name the refused path from tool output and its lease eligibility.
 
         The shell sandbox reports only ``Operation not permitted``, which tells
         an agent nothing about whether to apply for a lease or stop trying. The
         policy already words both outcomes, so reuse those exact messages
-        rather than restating them.
+        rather than restating them. On Linux only a fenced project is named, from bwrap's ``Permission denied``.
         """
-        return self.denial_guidance_for_paths(denied_paths_in(text))
+        guidance = self.denial_guidance_for_paths(denied_paths_in(text))
+        if guidance or sys.platform != "linux" or cwd is None:
+            return guidance
+        return next(filter(None, map(self.fence.refusal, linux_denied_paths_in(text, cwd))), None)
 
     def denial_guidance_for_paths(self, paths: Iterable[Path]) -> str | None:
         """Name the first denied protected path from an already-parsed path list."""
@@ -383,12 +388,12 @@ def path_review_classification(
     ), None
 
 
-def denial_guidance_for_output(text: str, thread_id: str | None = None) -> str | None:
+def denial_guidance_for_output(text: str, thread_id: str | None = None, cwd: Path | None = None) -> str | None:
     """Explain a sandbox refusal found in ``text`` against the live policy."""
-    return current_protected_host_path_policy(thread_id=thread_id).denial_guidance_for_output(text)
+    return current_protected_host_path_policy(thread_id=thread_id).denial_guidance_for_output(text, cwd)
 
 
-def denial_guidance_prefix(text: str, thread_id: str | None = None) -> str:
+def denial_guidance_prefix(text: str, thread_id: str | None = None, cwd: Path | None = None) -> str:
     """Return that explanation as a block ready to prepend, or empty."""
-    guidance = denial_guidance_for_output(text, thread_id)
+    guidance = denial_guidance_for_output(text, thread_id, cwd)
     return f"{guidance}\n" if guidance else ""

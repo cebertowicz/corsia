@@ -53,6 +53,11 @@ def _system_type(meta: dict) -> str:
     return str("" if kind is None else kind)
 
 
+def is_result_notice(meta: dict, content: object) -> bool:
+    """Whether a provider `result` row is a failed Turn's notice: an error with something to read."""
+    return _system_type(meta) == "result" and meta.get("is_error") is True and bool(content)
+
+
 def is_focus_visible(row: dict) -> bool:
     """Whether Focus shows `row` as its own item (it closes a run)."""
     role = row.get("role")
@@ -68,8 +73,7 @@ def is_focus_visible(row: dict) -> bool:
         if kind in ERROR_SYSTEM_TYPES:
             return meta.get("recovered") is not True
         if kind == "result":
-            # A provider result splits only as an error with something to read.
-            return meta.get("is_error") is True and bool(row.get("content"))
+            return is_result_notice(meta, row.get("content"))
         return kind not in ACTIVITY_SYSTEM_TYPES and kind not in NEVER_DRAWN_SYSTEM_TYPES
     return False
 
@@ -130,6 +134,12 @@ _NEVER_DRAWN_EVENT_LIST = _sql_list(NEVER_DRAWN_EVENT_TYPES)
 _ERROR_TYPE_LIST = _sql_list(ERROR_SYSTEM_TYPES)
 _TYPE_SQL = _meta_text("$.type")
 
+# `is_result_notice` in SQL, for a row already known to be `role = 'system'`.
+RESULT_NOTICE_SQL = (
+    f"({_TYPE_SQL} = 'result' AND {_meta_json_type('$.is_error')} = 'true' "
+    "AND COALESCE(content, '') != '')"
+)
+
 # The same rule in SQL. `for_user`, `recovered` and `is_error` must be JSON `true`,
 # not merely truthy.
 FOCUS_VISIBLE_SQL = f"""
@@ -140,8 +150,7 @@ CASE WHEN (CASE role
     WHEN 'system' THEN CASE
         WHEN {_TYPE_SQL} = 'context_event' AND substr({_meta_text('$.event_type')}, 1, 11) = 'held_reply.' THEN 1
         WHEN {_TYPE_SQL} IN ({_ERROR_TYPE_LIST}) THEN {_meta_json_type("$.recovered")} != 'true'
-        WHEN {_TYPE_SQL} = 'result'
-            THEN {_meta_json_type("$.is_error")} = 'true' AND COALESCE(content, '') != ''
+        WHEN {_TYPE_SQL} = 'result' THEN {RESULT_NOTICE_SQL}
         ELSE {_TYPE_SQL} NOT IN ({_ACTIVITY_TYPE_LIST},{_NEVER_DRAWN_TYPE_LIST}) END
     ELSE 0 END) THEN 1 ELSE 0 END
 """

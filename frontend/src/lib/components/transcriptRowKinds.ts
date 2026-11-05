@@ -26,6 +26,41 @@ const ERROR_SYSTEM_TYPES = new Set([
 	'llm_error', 'cc_error', 'tool_boundary_violation', 'tool_bridge_unavailable',
 ]);
 
+/** Pair a retry with the failed Turn's notice before transcript rows are grouped. */
+export function pairUnansweredInput(rows: TranscriptMessage[]): TranscriptMessage[] {
+	const notices = new Map<string, TranscriptMessage>();
+	const key = (row: TranscriptMessage, turn: string) => `${row.thread_id}\0${turn}`;
+	for (const row of rows) {
+		const turn = row.metadata?.turn_id;
+		const notice = ['llm_error', 'cc_error'].includes(systemType(row)) || isResultNotice(row);
+		if (row.role === 'system' && notice && typeof turn === 'string' && turn) notices.set(key(row, turn), row);
+	}
+	const paired = new Set<TranscriptMessage>();
+	const hidden = new Set<TranscriptMessage>();
+	for (const row of rows) {
+		const turn = row.metadata?.failed_turn_id;
+		if (row.role !== 'system' || row.metadata?.event_type !== 'system.turn.unanswered_input'
+			|| typeof turn !== 'string' || !turn) continue;
+		const notice = notices.get(key(row, turn));
+		if (notice) { paired.add(notice); hidden.add(row); }
+	}
+	return rows.filter((row) => !hidden.has(row)).map((row) => paired.has(row)
+		? { ...row, content: withRetrySentence(row.content ?? '') }
+		: row);
+}
+
+/** End a provider's error text as a sentence, then say the agent tried once more. */
+function withRetrySentence(notice: string): string {
+	const text = notice.trimEnd();
+	if (!text) return 'The agent tried once more.';
+	return `${/[.!?…]$/.test(text) ? text : `${text}.`} The agent tried once more.`;
+}
+
+/** A provider result is a failed Turn's notice only as an error with something to read. */
+function isResultNotice(message: TranscriptMessage): boolean {
+	return systemType(message) === 'result' && message.metadata?.is_error === true && Boolean(message.content);
+}
+
 export function systemType(message: TranscriptMessage): string {
 	return String(message.metadata?.type ?? '');
 }
@@ -47,8 +82,7 @@ export function isSystemNotice(message: TranscriptMessage): boolean {
 	const type = systemType(message);
 	if (type === 'context_event' && String(message.metadata?.event_type ?? '').startsWith('held_reply.')) return true;
 	if (ERROR_SYSTEM_TYPES.has(type)) return message.metadata?.recovered !== true;
-	// A provider result splits only as an error with something to read.
-	if (type === 'result') return message.metadata?.is_error === true && Boolean(message.content);
+	if (type === 'result') return isResultNotice(message);
 	return !ACTIVITY_SYSTEM_TYPES.has(type) && !NEVER_DRAWN_SYSTEM_TYPES.has(type);
 }
 

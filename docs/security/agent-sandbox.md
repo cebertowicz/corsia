@@ -10,7 +10,7 @@ How CORSIA confines an agent's shell commands and file tools, on macOS and Linux
 |---|---|---|---|
 | File-tool gate | `read_file`, `write_file`, `edit_file`, `grep`, `glob`, `list_dir` | CORSIA code | `backend/tools/filesystem_gate.py`, `backend/tools/sandbox_config.py` |
 | Shell sandbox | Every `bash` command and everything it starts | Operating system | `backend/tools/shell_guard.py`, `backend/tools/shell_sandbox.py` |
-| Project fence | Other projects' folders and registered repositories, for the shell and for another AI agent's command-line tool started under a lease. Local tool servers and leased shell commands are fenced only from projects set to Local models only. On Linux it covers the shell only | Operating system | `backend/tools/project_fence.py`, `backend/tools/host_path_policy.py`, `backend/tools/linux_shell.py` |
+| Project fence | An OS rule keeping an agent's shell out of other projects' folders and registered repositories. It also covers another AI agent's command-line tool started under a lease. On macOS, local connected apps and leased shell commands are fenced only from projects set to Local models only. On Linux it covers the shell only; local connected apps [don't start](connected-apps.md#local-and-remote-connected-apps) | Operating system | `backend/tools/project_fence.py`, `backend/tools/host_path_policy.py`, `backend/tools/linux_shell.py` |
 | Command refusals | A list of commands refused before they run | CORSIA code | `backend/tools/shell_guard.py` (`check_command_safety`) |
 
 The file tools run inside the CORSIA server, so the OS sandbox doesn't apply to them; their own path check does. The shell runs in a separate sandboxed process.
@@ -19,7 +19,7 @@ The file tools run inside the CORSIA server, so the OS sandbox doesn't apply to 
 
 **Read and write:** the workspace (shared files, the agent's own project and working folder) and every registered repository, apart from what the [project fence](#projects) closes to the shell. A registered repository whose base checkout is protected keeps that main checkout read-only, with its verified worktrees under `.worktrees/` read and write; an unprotected repository is read and write throughout.
 
-**Writable outside the workspace, from the shell (macOS):** temporary folders (`/tmp` and the system temp folder, which holds each conversation's package caches), `~/.ssh/known_hosts`, and some developer-tool caches that Agent Safehouse allows, such as `~/.npm`, `~/.cargo` and `~/.rustup`. On Linux, each thread gets its own `/tmp` (below).
+**Writable outside the workspace, from the shell (macOS):** temporary folders (`/tmp` and the system temp folder, which holds each chat's package caches), `~/.ssh/known_hosts`, and some developer-tool caches that Agent Safehouse allows, such as `~/.npm`, `~/.cargo` and `~/.rustup`. On Linux, each thread gets its own `/tmp` (below).
 
 **Read only, from the shell:** system files such as `/etc`, and some tool settings in your home folder: `~/.gitconfig`, most of `~/.config`, most of `~/.cache`. The file tools don't reach these.
 
@@ -36,7 +36,7 @@ On macOS and Linux the shell sandbox fences each agent out of projects that aren
 | An agent in a project | Every other project's folder, the repositories and worktrees registered to those projects, and the working folders of agents outside any project |
 | An agent outside any project | Every project's folder and registered repositories |
 | The CORSIA agent | Only projects set to Local models only, and nothing while its own chat is Local only |
-| A local tool server | Only projects set to Local models only; it serves no single agent |
+| A local connected app | On macOS, only projects set to Local models only; it serves no single agent. On Linux, local connected apps [don't start](connected-apps.md#local-and-remote-connected-apps) |
 
 - A repository registered to two projects stays open to agents of both, unless one of them is set to Local models only and the agent reaches it only through the other.
 - A lease opens an ordinary fenced project to that agent's leased shell commands. Another AI agent's command-line tool started under a lease stays fenced from every project but its own. A project set to Local models only stays closed under every lease.
@@ -46,7 +46,7 @@ On macOS and Linux the shell sandbox fences each agent out of projects that aren
 **What the fence doesn't cover:**
 
 - **File tools.** `read_file`, `write_file`, `edit_file`, `grep`, `glob` and `list_dir` still reach every project in the workspace, including ones set to Local models only.
-- **Conversations.** An agent can read another project's conversations by id ([Accounts and access](accounts-and-access.md#how-agents-act)).
+- **Chats.** An agent can read another project's chats by id ([Accounts and access](accounts-and-access.md#how-agents-act)).
 - **The workspace's Git history.** A shell running `git` at the workspace root can read the committed versions of other projects' files.
 
 If two bodies of work must stay apart, give each its own workspace and CORSIA install.
@@ -56,7 +56,7 @@ If two bodies of work must stay apart, give each its own workspace and CORSIA in
 | Refused | Strength |
 |---|---|
 | The rest of your home folder: Documents, Desktop, Downloads, Pictures, Music, Movies, shell history and startup files, `~/Library` data (Mail, Messages, cookies, browser data, Keychains), `~/.ssh` private keys, `~/.aws`, `~/.docker`, `~/.kube`, `~/.gnupg`, `~/.netrc`, other AI tools' folders | Operating system |
-| CORSIA's state folder (database, logs, keys, the agents' browser profile, Claude Code and Codex sign-ins) and its checkout's private files | Operating system |
+| CORSIA's state folder (database, logs, keys, the shared browser profile, Claude Code and Codex sign-ins) and its checkout's private files | Operating system |
 | Other projects' folders and registered repositories, as listed under [Projects](#projects) | Operating system |
 | Writes outside the workspace and registered repositories, including your home folder and `/`, apart from the exceptions under [What's allowed](#whats-allowed) | Operating system |
 | CORSIA's startup items (`LaunchAgents`), its restart control files, the generated `.corsia/context` and `.corsia/skills` folders | Operating system |

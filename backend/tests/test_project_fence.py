@@ -263,6 +263,63 @@ def test_shell_output_denial_names_the_fenced_project(world):
     assert denial_guidance_prefix(f"cat: {path}: Operation not permitted", BETA_AGENT) == ""
 
 
+# Captured from a real bwrap mask (`--perms 0000 --tmpfs projects/B`, cwd projects/A) on Ubuntu 24.04.5,
+# bubblewrap 0.9.0, under LC_ALL=C and en_US.UTF-8.
+_BWRAP_DENIALS = {
+    "ls: cannot open directory '../B': Permission denied": "B",
+    "ls: cannot access '../B/dir': Permission denied": "B/dir",
+    "cat: ../B/file: Permission denied": "B/file",
+    "touch: cannot touch '../B/new': Permission denied": "B/new",
+    "mkdir: cannot create directory ‘../B/x’: Permission denied": "B/x",
+    "rm: cannot remove '../B/file': Permission denied": "B/file",
+    "mv: cannot stat '../B/a': Permission denied": "B/a",
+    "bash: line 1: ../B/f: Permission denied": "B/f",
+    "bash: line 1: cd: ../B: Permission denied": "B",
+    "fatal: cannot change to '../B': Permission denied": "B",
+    "head: cannot open '../B/file' for reading: Permission denied": "B/file",
+    "grep: ../B: Permission denied": "B",
+    "find: ‘../B’: Permission denied": "B",
+    "stat: cannot statx '../B/file': Permission denied": "B/file",
+    "ln: failed to create symbolic link '../B/l': Permission denied": "B/l",
+    "sed: can't read ../B/file: Permission denied": "B/file",
+    "tee: ../B/t: Permission denied": "B/t",
+    "PermissionError: [Errno 13] Permission denied: '../B/file'": "B/file",
+}
+
+
+def test_linux_denials_resolve_against_the_command_cwd(tmp_path):
+    from tools.host_path_resolution import linux_denied_paths_in
+
+    projects = (tmp_path / "projects").resolve()
+    for line, expected in _BWRAP_DENIALS.items():
+        assert linux_denied_paths_in(f"x\n{line}\n", projects / "A") == (projects / expected,), line
+    absolute = f"cat: {projects}/B/file: Permission denied"
+    assert linux_denied_paths_in(absolute, Path("/elsewhere")) == (projects / "B" / "file",)
+    # CPython's own wording: the apostrophe in "can't" must not open a quote.
+    script = f"python3: can't open file '{projects}/B/x.py': [Errno 13] Permission denied"
+    assert linux_denied_paths_in(script, projects / "A") == (projects / "B" / "x.py",)
+    assert linux_denied_paths_in("rm: cannot remove '../B': Device or resource busy", projects / "A") == ()
+
+
+def test_a_linux_denial_names_only_a_fenced_project(world, monkeypatch):
+    from tools import host_path_policy, project_fence
+
+    events = []
+    monkeypatch.setattr(project_fence, "_event", lambda action, caller, **props: events.append((action, caller)))
+    monkeypatch.setattr(host_path_policy.sys, "platform", "linux")
+    alpha = world.workspace / "projects" / "alpha"
+    beta = world.workspace / "projects" / "beta"
+    prefix = host_path_policy.denial_guidance_prefix("cat: ../beta/notes.md: Permission denied", ALPHA_AGENT, alpha)
+    assert prefix == f"`{(beta / 'notes.md').resolve()}` is in project `beta`, outside your scope. " \
+        "Ask the CORSIA agent, or use `request_host_access` for reviewed temporary access.\n"
+    assert events == [("refused", ALPHA_AGENT)]
+    # Outside every fenced root, and on macOS, the shell keeps its generic guidance.
+    assert host_path_policy.denial_guidance_prefix("cat: notes.md: Permission denied", ALPHA_AGENT, alpha) == ""
+    assert host_path_policy.denial_guidance_prefix("cat: ../beta/x: Permission denied", ALPHA_AGENT) == ""
+    monkeypatch.setattr(host_path_policy.sys, "platform", "darwin")
+    assert host_path_policy.denial_guidance_prefix("cat: ../beta/x: Permission denied", ALPHA_AGENT, alpha) == ""
+
+
 def test_private_thread_folder_has_no_project_copy(world):
     path = world.workspace / ".threads" / WORKSPACE_AGENT / "notes.md"
     assert _policy(ALPHA_AGENT).denial_guidance_for_paths([path]) is None

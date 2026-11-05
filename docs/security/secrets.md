@@ -6,7 +6,7 @@ Where CORSIA keeps keys, who can read them, how credential values are kept away 
 
 | What | Where | Readable by |
 |---|---|---|
-| Provider API keys, the web search key, connected-account tokens (Google, Microsoft, mail hosts), tool-server keys and their sign-in grants | The **key store**: one file, `keys/values.json`, in CORSIA's state folder | The CORSIA server process, and anything else running as your user outside CORSIA |
+| Provider API keys, the web search key, connected-account tokens (Google, Microsoft, mail hosts), connected app keys and their sign-in grants | The **key store**: one file, `keys/values.json`, in CORSIA's state folder | The CORSIA server process, and anything else running as your user outside CORSIA |
 | Names, labels and dates of those keys | CORSIA's database | The server; the person in **Settings → Keys** |
 | Claude Code and Codex sign-ins | One folder per account in CORSIA's state folder (`runtime/vendor-accounts/`), made when you sign that account in through CORSIA. Not in the key store | The CORSIA server and the tool it launches for that account; not agent shells; a leased command can, because the state folder isn't on the hard floor |
 | The agents' GitHub account token, if you set that account up | `hosts.yml` in the account's own folder, under `~/.config/corsia-gh-agent` by default (`CORSIA_GH_AGENT_CONFIG_DIR` moves it). Not in the key store | **Agent shells, read only**, so agents can use `gh` and `git` as that account; anything else running as your user |
@@ -17,7 +17,7 @@ The key store file is created with mode `0600` in a `0700` folder. **It is not e
 
 The agents' GitHub token is the one credential CORSIA stores that agent shells can read. Masking hides it in output, but a command can use it or send it anywhere, and no lease is needed. Give that account access only to the repositories agents need. Source: `backend/connections/github_agent_home.py`, `backend/tools/shell_environment.py`.
 
-Key store values never go into the database or the settings table, so a database backup or a settings read can't carry one. Code decides what uses each key: only fixed readers in the server (provider calls, connected accounts, tool-server launch) resolve a value, and nothing turns a key's name into its value for an agent.
+Key store values never go into the database or the settings table, so a database backup or a settings read can't carry one. Code decides what uses each key: only fixed readers in the server (provider calls, connected accounts, connected app launch) resolve a value, and nothing turns a key's name into its value for an agent.
 
 ## Who can't read them
 
@@ -65,7 +65,7 @@ If a key sits in a file inside the workspace (a `.env`, a config file):
 
 ## Sign-in tokens for connected apps
 
-Google, Microsoft and tool-server sign-ins store their tokens in the key store. Agents call those services through CORSIA's tools; the token never appears in the agent's context. For Google Docs, Sheets, Drive and Calendar, the `google_workspace` tool hands an access token only to the `gws` process it starts for that one command, and `gws` isn't on agent shells' path (`backend/tools/gws_run.py`). Messages needs no stored credential: CORSIA reads this computer's Messages history directly, which takes Full Disk Access ([Connected apps](connected-apps.md#messages)). A tool server you add gets its own keys in its environment when CORSIA starts it; see [Connected apps](connected-apps.md) for how tool servers are confined.
+Google, Microsoft and connected app sign-ins store their tokens in the key store. Agents call those services through CORSIA's tools; the token never appears in the agent's context. For Google Docs, Sheets, Drive and Calendar, the `google_workspace` tool hands an access token only to the `gws` process it starts for that one command, and `gws` isn't on agent shells' path (`backend/tools/gws_run.py`). Messages needs no stored credential: CORSIA reads this computer's Messages history directly, which takes Full Disk Access ([Connected apps](connected-apps.md#messages)). A connected app you add gets its own keys in its environment when CORSIA starts it; see [Connected apps](connected-apps.md) for how connected apps are confined.
 
 ## SSH keys
 

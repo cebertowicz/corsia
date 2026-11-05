@@ -685,14 +685,23 @@ paths or switch branches from a running process.
 ## Scoped audit reads and host-access refusals
 
 `backend/infra/audit_reads.py` owns the fixed state-database audit metrics and
-one caller-user/project predicate. The authenticated HTTP route and agent tool
+their scope: the caller's user and project for every metric except
+`seat_usage`, which is scoped to the caller's user alone because subscription
+accounts are shared across projects. The authenticated HTTP route and agent tool
 call that same service; the agent tool gets its current thread from the tool
 registry, never from model arguments. The service opens a dedicated SQLite
 `mode=ro`, `query_only` connection, binds actor and rows to one read snapshot,
 and bounds the time, rows, and response bytes.
-It returns aggregate checkpoint health, same-scope lease outcomes, or the top
-ten stored-message pressure rows with an explicit `rank_limit` of 10. All metrics and the caller use the canonical
-`thread_available_sql` predicate. Rows with an installed checkpoint take their
+It returns aggregate checkpoint health, same-scope lease outcomes, per-account
+subscription token use (`seat_usage`), or the top ten stored-message pressure
+rows with an explicit `rank_limit` of 10. `seat_usage` sums tokens under
+Measurement's priceable-token contract (`core/measurement_token_contract.py`),
+reports the rows that contract drops as `excluded_calls`, and splits
+unattributed Claude Code and Codex rows by harness. Every metric except an
+unwindowed pressure ranking needs a window of at most seven days. The caller
+and every metric except `seat_usage` use the canonical `thread_available_sql`
+predicate; `seat_usage` scopes by user only and counts archived threads,
+since a subscription account is shared across projects. Rows with an installed checkpoint take their
 current-epoch boundary from `checkpoint_queries.current_installed_through_seq`,
 which shares the exact selection rule with `current_installed`; rows without one
 are labeled `no_checkpoint` and count full stored history. These numeric sizes
@@ -770,4 +779,7 @@ second contract system.
 Use git history for deeper provenance. New rationale belongs in the current
 PRD/design and the code/tests that implement it.
 
-Checked against the code at `310115261`.
+Managed background processes, runtime and checkout isolation, scoped audit
+reads, and CORSIA's own logs: checked against the code at `7a8c55d84`.
+
+Reviewer and quality-gate sections: checked against the code at `310115261`.

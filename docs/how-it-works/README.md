@@ -21,6 +21,8 @@ These pages were last checked against the code at commit `43a8c7780`. A page tha
 | [Coordination models](coordination-models.md) | How a project's way of working is packaged and versioned |
 | [Measuring work](measuring-work.md) | What CORSIA counts, and what it refuses to claim |
 | [Learning from corrections](learning.md) | How corrections become lessons and how trials are judged |
+| [Desktop app](desktop-app.md) | How the macOS app installs, takes over a source install, updates and stores its state |
+| [Remote access](remote-access.md) | How your other devices reach CORSIA, and what each way exposes |
 
 Security is covered in its own section: [Security](../security/README.md). These pages mention security only where it changes how a part works, and link there instead of repeating it.
 

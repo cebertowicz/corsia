@@ -118,7 +118,7 @@
 			{:else if digestState === 'delivered'}
 				<svg class="ev-state delivered" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
 			{/if}
-			<span class="ev-label">{label(eventType)}</span>
+			{#if eventType !== 'system.turn.unanswered_input'}<span class="ev-label">{label(eventType)}</span>{/if}
 			<span class="ev-summary long-message-body" class:collapsed={summaryCollapsed} class:expanded={summaryIsLong && summaryExpanded}>{summary}</span>
 			<span class="ev-link" aria-hidden="true">↗</span>
 		</a>
@@ -129,7 +129,7 @@
 			{:else if digestState === 'delivered'}
 				<svg class="ev-state delivered" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
 			{/if}
-			<span class="ev-label">{label(eventType)}</span>
+			{#if eventType !== 'system.turn.unanswered_input'}<span class="ev-label">{label(eventType)}</span>{/if}
 			<span class="ev-summary long-message-body" class:collapsed={summaryCollapsed} class:expanded={summaryIsLong && summaryExpanded}>{summary}</span>
 		</div>
 	{/if}
