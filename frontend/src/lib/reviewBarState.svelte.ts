@@ -39,7 +39,7 @@ export function createReviewBarState() {
 	function setTarget(id: string | null): boolean {
 		if (id === artifactId) return false;
 		artifactId = id; generation += 1; loadSequence += 1; settledAsk = null;
-		read = null; phase = 'ask'; note = ''; failure = ''; receipt = null;
+		read = null; phase = 'ask'; note = ''; noteFor = 'changes_requested'; failure = ''; receipt = null;
 		return true;
 	}
 	async function load() {
@@ -89,6 +89,8 @@ export function createReviewBarState() {
 				phase = 'stale';
 				await load();
 			} else if (error instanceof ReviewRefusal && error.code === 'note_required') {
+				// The note opens for the verdict that was refused, so sending it records that verdict.
+				if (verdict !== 'approved') noteFor = verdict;
 				phase = 'noting'; failure = NOTE_NEEDED;
 			} else {
 				phase = from; failure = SEND_FAILED;

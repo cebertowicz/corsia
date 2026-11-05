@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createReviewBarState } from './reviewBarState.svelte';
 import { answerSubmitted, submittedAnswers } from './stores/cardAnswers';
-import type { ReviewBarRead } from './api/reviewBar';
+import { ReviewRefusal, type ReviewBarRead } from './api/reviewBar';
 
 const api = vi.hoisted(() => ({ fetchReviewBar: vi.fn(), answerReview: vi.fn() }));
 vi.mock('./api/reviewBar', async (importOriginal) => ({ ...(await importOriginal<object>()), ...api }));
@@ -45,5 +45,26 @@ describe('review-bar submission outcomes', () => {
 
 		expect(await outcome).toBe('sent');
 		expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved', feedback: feedback_counts } });
+	});
+
+	it('opens the note for the verdict the server refused, not one left from earlier', async () => {
+		api.fetchReviewBar.mockResolvedValue({ ...read, round_feedback_count: 1, round_feedback_counts: { comments: 1, suggestions: 0, edits: 0 } });
+		api.answerReview.mockRejectedValue(new ReviewRefusal('note_required', 'Add a note'));
+		const state = createReviewBarState();
+		state.setTarget('doc-1');
+		await state.load();
+		state.noteFor = 'changes_requested';
+
+		expect(await state.answer('approved_with_changes')).toBe('failed');
+		expect(state.phase).toBe('noting');
+		expect(state.noteFor).toBe('approved_with_changes');
+	});
+
+	it('starts each document with the default note verdict', () => {
+		const state = createReviewBarState();
+		state.setTarget('doc-1');
+		state.noteFor = 'approved_with_changes';
+		state.setTarget('doc-2');
+		expect(state.noteFor).toBe('changes_requested');
 	});
 });

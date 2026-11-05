@@ -9,11 +9,11 @@ def round_feedback(db, artifact_id: str, since: str | None) -> tuple[dict, dict]
     comments: list[str] = []
     suggestions: list[str] = []
     for row in db.execute(
-        "SELECT id, replacement FROM doc_comments "
+        "SELECT id, replacement IS NULL AS plain FROM doc_comments "
         "WHERE artifact_id=? AND author_kind='user' AND created_at>? ORDER BY created_at,id",
         (artifact_id, floor),
     ):
-        (comments if row["replacement"] is None else suggestions).append(row["id"])
+        (comments if row["plain"] else suggestions).append(row["id"])
     open_edits = list(db.execute(
         """SELECT b.id FROM doc_feedback_edit_items e
              JOIN doc_feedback_batches b ON b.id=e.batch_id
