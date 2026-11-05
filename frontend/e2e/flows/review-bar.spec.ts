@@ -433,7 +433,7 @@ journey('the review controls remain usable in the phone comments sheet', [['393 
 	raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
 	await comment(request, doc, 'Check the first step.', 1);
 	await open(page, doc, mode, theme);
-	await page.getByRole('button', { name: /^1 open thread\b/ }).click();
+	await page.getByRole('button', { name: /^1 thread\b/ }).click();
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	const approve = drawer.getByRole('button', { name: 'Approve', exact: true });
 	await expect(approve).toBeVisible();
@@ -460,7 +460,7 @@ test.describe('375px review sheet', () => {
 		}
 		await open(page, doc, 'phone', 'light');
 		await page.setViewportSize({ width: 375, height: 852 });
-		await page.getByRole('button', { name: /^\d+ open threads?\b/ }).click();
+		await page.getByRole('button', { name: /^\d+ threads?\b/ }).click();
 		const buttons = page.locator('[data-doc-comments-drawer] .review-bar .rb-actions .btn');
 		await expect(buttons).toHaveCount(3);
 		await expect(page.locator('[data-doc-comments-drawer]').getByRole('button', { name: 'Approve all', exact: true })).toBeVisible();
@@ -476,7 +476,7 @@ journey('a review note survives moving into and out of the phone comments sheet'
 	await open(page, doc, mode, theme);
 	await page.getByRole('button', { name: 'Reject', exact: true }).click();
 	await page.getByRole('textbox', { name: /^Note for / }).fill('Keep this note');
-	await page.getByRole('button', { name: /^1 open thread\b/ }).click();
+	await page.getByRole('button', { name: /^1 thread\b/ }).click();
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Keep this note');
 	await expect(page.getByRole('textbox', { name: /^Note for / })).toHaveCount(1);
@@ -500,7 +500,7 @@ journey('a pending review send survives moving through the phone comments sheet'
 	await page.getByRole('textbox', { name: /^Note for / }).fill('Please revise');
 	await page.getByRole('button', { name: 'Reject', exact: true }).click();
 	await sent;
-	await page.getByRole('button', { name: /^1 open thread\b/ }).click();
+	await page.getByRole('button', { name: /^1 thread\b/ }).click();
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer.getByText('Sending your review…')).toBeVisible();
 	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Please revise');

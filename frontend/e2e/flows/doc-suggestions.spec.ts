@@ -344,7 +344,7 @@ test('@flow:document-suggestions a document opens after the text a decided sugge
 	await expect(page.getByText(/^Couldn't open /)).toHaveCount(0);
 	await expect(page.locator('.cm-suggestion-del').filter({ hasText: 'stays' })).toHaveCount(1);
 	// The decided suggestion is closed, so it is neither counted open nor reported as a comment without a place.
-	const pill = page.getByRole('button', { name: /^1 open thread\b/ });
+	const pill = page.getByRole('button', { name: /^1 thread\b/ });
 	await expect(pill).not.toHaveAccessibleName(/couldn't be placed/);
 	await pill.click();
 	await expect(drawer).toBeVisible();
