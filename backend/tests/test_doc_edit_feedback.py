@@ -401,8 +401,8 @@ def test_edit_only_user_batch_uses_actor_display_and_applied_edit_framing(isolat
         assert "Comment " not in node.description
         assert node.intent is None
         assert db.execute(
-            "SELECT COUNT(*) FROM plan_node_intent_words WHERE node_id=?", (node.id,)
-        ).fetchone()[0] == 0
+            "SELECT 1 FROM plan_node_artifact_links WHERE node_id=? AND artifact_id=?", (node.id, artifact_id),
+        ).fetchone() is not None
     finally:
         db.close()
 

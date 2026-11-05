@@ -3,7 +3,7 @@
 	import ImageLightbox from './ImageLightbox.svelte';
 	import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 	import DocBottomBand from './DocBottomBand.svelte';
-	import { docComments, hasNewReplies } from '$lib/stores/docComments';
+	import { docComments, hasUnread } from '$lib/stores/docComments';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace } from '$lib/artifactTabs';
 	import type { DocumentImageComments } from '$lib/docViewerImages';
@@ -25,7 +25,7 @@
 	let selectedThread = $state<string | null>(null);
 	let loaded = $state(false);
 	const unread = $derived(comments?.artifactId
-		? ($docComments[comments.artifactId] ?? []).filter((comment) => hasNewReplies(comment) && comment.id !== selectedThread)
+		? ($docComments[comments.artifactId] ?? []).filter((comment) => hasUnread(comment) && comment.id !== selectedThread)
 		: []);
 
 	// Back, Escape, another tab, a collapsed canvas or another thread all end this overlay: each is this one send of

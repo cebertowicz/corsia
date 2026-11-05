@@ -38,7 +38,6 @@ erDiagram
 erDiagram
     plan_nodes ||--o{ plan_node_dependencies : depends_on_node_id
     plan_nodes ||--o{ plan_node_dependencies : node_id
-    plan_nodes ||--o{ plan_node_intent_words : node_id
     plan_nodes ||--o{ plan_nodes : commitment_id
     plan_nodes o|--o{ plan_nodes : follow_up_of
     plan_nodes o|--o{ plan_nodes : intent_node_id
@@ -260,23 +259,6 @@ Source: `backend/infra/plan_schema.py`.
 | `clearance_event_id` | TEXT | No | No | — | plan_node_events.id |
 
 Indexes: `idx_plan_holds_active_node` (node_id, kind), `idx_plan_holds_one_pause` (node_id, partial unique), `sqlite_autoindex_plan_node_holds_1` (id, unique).
-
-### `plan_node_intent_words`
-
-Source: `backend/infra/plan_intent_schema.py`.
-
-| Column | Type | Primary key | NOT NULL | Default | References |
-|---|---|---|---|---|---|
-| `node_id` | TEXT | No | Yes | — | plan_nodes.id |
-| `author` | TEXT | No | Yes | — | — |
-| `source_kind` | TEXT | No | Yes | — | — |
-| `source_id` | TEXT | No | Yes | — | — |
-| `quote` | TEXT | No | Yes | — | — |
-| `role` | TEXT | No | Yes | — | — |
-| `requirements_revision` | INTEGER | No | Yes | — | — |
-| `added_at` | TEXT | No | Yes | — | — |
-
-Indexes: `idx_plan_node_intent_words_node` (node_id).
 
 ### `plan_nodes`
 

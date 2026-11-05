@@ -1,12 +1,12 @@
 # Contributing to CORSIA
 
-The path from a fresh clone to a merged change, for developers who want to change CORSIA's code or docs. The rules for issues, claims, the Contributor License Agreement and pull requests are in [`CONTRIBUTING.md`](../../CONTRIBUTING.md); these pages cover how to do the work.
+The path from a fresh clone to a merged change, for developers who want to change CORSIA's code or docs. The rules for issues, the Contributor License Agreement and pull requests are in [`CONTRIBUTING.md`](../../CONTRIBUTING.md); these pages cover how to do the work.
 
 ## Reading order
 
 | Step | Read | To learn |
 |---|---|---|
-| 1 | [`CONTRIBUTING.md`](../../CONTRIBUTING.md) | Which issues are open to you, how to claim one, the CLA, and what a pull request needs |
+| 1 | [`CONTRIBUTING.md`](../../CONTRIBUTING.md) | Issues, the CLA, and what a pull request needs |
 | 2 | [Developer setup](dev-setup.md) | Running CORSIA from a checkout with its own data |
 | 3 | [Your first change](first-change.md) | The edit, check, fix loop, practised on a one-line docs edit, and the steps to a pull request |
 | 4 | [How CORSIA works](../how-it-works/README.md) | The parts of the system and the terms used everywhere else |

@@ -1,4 +1,4 @@
-import { hasNewReplies, rangeFor, type DocComment } from '$lib/stores/docComments';
+import { hasUnread, rangeFor, type DocComment } from '$lib/stores/docComments';
 import type { CommentRange, InlineSuggestion, ScrollOrigin } from '$lib/cm/comment-marks';
 import { agentColor } from '$lib/docPresence';
 
@@ -59,7 +59,7 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 			if (inline) inlineEnd = range.to;
 			suggestion = { quote: comment.insertAfter ? '' : comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
 		}
-		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasNewReplies(comment), onMarkerFocus, suggestion }];
+		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasUnread(comment), onMarkerFocus, suggestion }];
 	});
 }
 
@@ -72,7 +72,7 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
  */
 export function commentSurfaceStatus(comments: DocComment[]) {
 	return {
-		commentCount: comments.filter((comment) => !comment.resolved).length,
+		commentCount: comments.filter((comment) => !comment.resolved || hasUnread(comment)).length,
 		orphanedCount: comments.filter((comment) => comment.orphaned && !comment.resolved).length,
 		replaceableCount: comments.filter((comment) => comment.orphaned && !comment.resolved && !comment.detached).length,
 		placementReloading: comments.some((comment) => comment.placementReloading),

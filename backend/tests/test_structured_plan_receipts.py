@@ -66,7 +66,6 @@ def _add_params(title="Task"):
         "acceptance_criteria": f"{title} DOD",
         "size": "S",
         "intent": "Create the receipt-tested task.",
-        "intent_words": [{"quote": "Create the receipt-tested task.", "role": "authority"}],
     }
 
 

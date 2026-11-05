@@ -115,7 +115,7 @@ export const docTheme = EditorView.theme({
 		transition: 'background-color 0.12s'
 	},
 	// The count box is 18px, centred, at the button's top: centre the 6px dot on its top-right corner.
-	'.cm-comment-dot': { position: 'absolute', top: '-3px', left: 'calc(50% + 6px)', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'currentColor' },
+	'.cm-comment-dot': { position: 'absolute', top: '-3px', left: 'calc(50% + 6px)', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--accent)' },
 	'.cm-comment-marker:hover svg, .cm-comment-marker:hover .cm-comment-count': { backgroundColor: 'color-mix(in srgb, var(--amber) 16%, transparent)' },
 	'.cm-comment-marker:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
 	// The app's reduced-motion reset gives every element a 0.01ms transition on

@@ -7,10 +7,10 @@
       "sha256": "01f766a8d568c83815c1d577f03f99a490d73df3e37fb4df7ee95e819f5953f8"
     },
     {
-      "bytes": 7382,
+      "bytes": 7378,
       "kind": "context",
       "path": "context/10-HOW-TO-WORK.md",
-      "sha256": "3c05032c461f4b120dd2a8c7372c299e39e42b84393f9757be85443ddcf8a1e8"
+      "sha256": "ecda9c3656c9ac6d9bc0571ea8d36f5a186d3847a198e3c6cfd5915ac1ec8a7d"
     },
     {
       "bytes": 830,
@@ -160,10 +160,10 @@
       "sha256": "5bd2d7a201d94010d198f1626189b48164f2f5efa80acfdaa4f1ad7d110d3100"
     },
     {
-      "bytes": 6093,
+      "bytes": 6186,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/references/about-you-doc.md",
-      "sha256": "b15cde5158f78245bba8f8939cf500f08830522a4bcd5aa7334b5cd82045418b"
+      "sha256": "140dc196e0793a8ea76c933102583e0c393f556c65bc33f9c4472291f8d012fe"
     },
     {
       "bytes": 7093,
@@ -394,10 +394,10 @@
       "sha256": "a6cf9bc8558c748f61d1397990e88c7f46e202b206e2290ab866bfb96048c1c7"
     },
     {
-      "bytes": 7510,
+      "bytes": 7473,
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
-      "sha256": "eddb421e39148867e028200b917d5dce92c5385fe7feb3083d3a85d6e873d31d"
+      "sha256": "f2c3ccf9a25e4dba95ae7938361346e51b07f3e6283c0cd2904f70c5666c6061"
     },
     {
       "bytes": 10651,

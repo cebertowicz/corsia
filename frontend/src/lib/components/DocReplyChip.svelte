@@ -5,7 +5,7 @@
 	import { ms } from '$lib/popoverMotion';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import UnreadReplyChip from './comments/UnreadReplyChip.svelte';
-	import { unreadReplyCount } from '$lib/docReplyChip';
+	import { unreadCommentCount } from '$lib/docReplyChip';
 	import type { DocComment } from '$lib/stores/docComments';
 
 	// The document's notice uses the chat's attachment chip and New marker; its caller supplies the destination.
@@ -14,7 +14,7 @@
 		threads: DocComment[];
 		onStep: () => void;
 	} = $props();
-	const count = $derived(unreadReplyCount(threads));
+	const count = $derived(unreadCommentCount(threads));
 
 	// Arrives where it lands (fade, 4px rise) and leaves by fading at 70%; reduced motion crossfades only (motion.md).
 	function arrive(node: HTMLElement) {
@@ -28,7 +28,7 @@
 
 {#if count > 0}
 	<div class="doc-reply-chip" data-doc-reply-chip in:arrive|global out:leave|global>
-		<UnreadReplyChip {artifactId} {count} onOpen={onStep} />
+		<UnreadReplyChip {artifactId} {count} comments={threads.some((thread) => thread.newComment)} onOpen={onStep} />
 	</div>
 {/if}
 

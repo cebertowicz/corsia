@@ -214,7 +214,7 @@ class MicrosoftMailSendTool(Tool):
         draft_id, revision = kwargs.get("draft_id"), kwargs.get("revision")
         if not isinstance(draft_id, str) or not isinstance(revision, str):
             return "Error: Pass the draft_id and revision microsoft_mail_draft returned."
-        verdict = await check_action("email", draft_id, revision)
+        verdict = await check_action("email", draft_id, revision, draft_tool="microsoft_mail_draft")
         if not isinstance(verdict, Approved):
             return f"Error: {verdict.text}"
         try:

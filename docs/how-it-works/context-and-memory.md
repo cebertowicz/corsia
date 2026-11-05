@@ -63,7 +63,7 @@ A correction can become a lesson placed where the right audience will see it: a 
 
 ### Skills
 
-A skill is a folder with a `SKILL.md`. The skills index in context lists skills with descriptions; beyond the full-index limit, it lists additional skills by name only. The agent loads a skill when its description or name matches the task. Resolution across scopes is described in [Scopes](scopes.md). Reviewed skills can also be installed from a shared library; see [The skill library](../skill-library.md).
+A skill is a folder with a `SKILL.md`. The skills index in context lists skills with descriptions; beyond the full-index limit, it lists additional skills by name only. The agent loads a skill when its description or name matches the task. Resolution across scopes is described in [Scopes](scopes.md). Reviewed skills can also be installed from the skill library; see [The skill library](../skill-library.md).
 
 ## What can go wrong
 

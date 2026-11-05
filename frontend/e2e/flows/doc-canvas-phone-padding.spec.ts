@@ -57,7 +57,7 @@ for (const width of WIDTHS) {
 		if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 		await page.getByText(title, { exact: true }).first().click();
 		await expect(page.locator('.cm-content')).toContainText('Tail line here.');
-		await expect(page.getByRole('button', { name: /^1 open thread\b/ })).toBeEnabled();
+		await expect(page.getByRole('button', { name: /^1 thread\b/ })).toBeEnabled();
 		await expect(page.locator('.cm-comment-marker')).toHaveCount(1);
 
 		const measured = await page.evaluate(() => new Promise<{

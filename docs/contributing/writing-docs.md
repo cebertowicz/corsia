@@ -53,6 +53,8 @@ The commit is the one your branch is based on, since a commit can't name itself.
 
 If you checked only part of a page, name the part, for example "Product-event sections checked against the code at `<sha>`." Some section landing pages state one checked commit for the whole section. A page's own line overrides that statement. Generated pages carry no checked line, because a test fails when they differ from the code.
 
+A generator reads every fact from the code that owns it. Don't type a command, argument, table or variable into a generator by hand: the generator's `--check` would then compare the page with that copy, not with the code, and the page could go stale while its test still passes. If the code exposes no way to read a fact, change the code so it does, or leave that fact out of the generated page.
+
 ## Public content
 
 This repository is public. Leave out private data: people's names, local paths, hostnames, account IDs, tokens, and anything copied from a private workspace.

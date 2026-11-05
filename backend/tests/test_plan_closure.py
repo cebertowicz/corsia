@@ -418,7 +418,7 @@ def test_passing_the_budget_never_refuses_a_write(db):
     added = mutate(
         plan.id, "add",
         {"kind": "task", "title": "One more", "acceptance_criteria": "DOD", "size": "unknown",
-         "intent": intent, "intent_words": [{"quote": intent, "role": "authority"}]},
+         "intent": intent},
         actor=replace(OWNER, turn_id="budget-turn"), provenance="test", mutation_id=_mid(), db=db,
     ).result
 

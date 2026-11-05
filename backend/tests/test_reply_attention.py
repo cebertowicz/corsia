@@ -4,7 +4,7 @@ import asyncio
 
 from doc_feedback_helpers import add_comment, seed_document, seed_thread
 from doceditor.feedback_state import mark_thread_viewed
-from doceditor.reply_attention import unread_reply_items
+from doceditor.reply_attention import unread_items
 from infra.database import get_db, write_transaction
 
 
@@ -22,13 +22,13 @@ def test_unread_replies_group_by_thread_and_document_and_clear_on_read(isolated_
         second, _ = add_comment(db, artifact_id, author_kind="user", author_id=None)
         one, _ = add_comment(db, artifact_id, author_id="owner", parent_id=first["id"])
         add_comment(db, artifact_id, author_id="owner", parent_id=second["id"])
-        rows = unread_reply_items(db, "owner-token")
+        rows = unread_items(db, "owner-token")
         assert len(rows) == 1
         assert rows[0]["detail"]["unread_count"] == 2
         assert rows[0]["detail"]["destination"]["path"] == str(path)
-        assert set(rows[0]['detail']) == {'title', 'unread_count', 'newest_at', 'destination', 'source'}
+        assert set(rows[0]['detail']) == {'title', 'unread_count', 'new_comment_count', 'newest_at', 'destination', 'source'}
         assert set(rows[0]['detail']['source']) == {'thread_id'}
-        assert unread_reply_items(db, "foreign-user") == []
+        assert unread_items(db, "foreign-user") == []
         from api import attention
 
         async def immediate(fn):
@@ -37,7 +37,7 @@ def test_unread_replies_group_by_thread_and_document_and_clear_on_read(isolated_
         decision = {"external_id": "decision", "renderer": "decision", "detail": {}}
         monkeypatch.setattr(attention, "run_in_db", immediate)
         monkeypatch.setattr(attention, "_queue_for", lambda _: [decision])
-        monkeypatch.setattr(attention, "_reply_items_for", lambda user: unread_reply_items(db, user))
+        monkeypatch.setattr(attention, "_unread_items_for", lambda user: unread_items(db, user))
         response = asyncio.run(attention.get_queue({"id": "owner-token"}))
         assert response["current"] == decision
         assert response["count"] == 1
@@ -45,9 +45,9 @@ def test_unread_replies_group_by_thread_and_document_and_clear_on_read(isolated_
         assert response["reply_items"] == rows
         with write_transaction(db, scope="test_reply_attention_view") as connection:
             mark_thread_viewed(connection, "owner-token", artifact_id, first["id"], one["id"])
-        assert unread_reply_items(db, "owner-token")[0]["detail"]["unread_count"] == 1
+        assert unread_items(db, "owner-token")[0]["detail"]["unread_count"] == 1
         path.unlink()
-        assert unread_reply_items(db, "owner-token") == []
+        assert unread_items(db, "owner-token") == []
     finally:
         db.close()
 
@@ -69,7 +69,7 @@ def test_reply_sources_resolve_visible_root_and_preserve_groups(isolated_db, tmp
         root, _ = add_comment(db, artifact_id, author_kind='user', author_id=None)
         replies = [add_comment(db, artifact_id, author_id=author, parent_id=root['id'])[0]
                    for author in ('worker-a', 'worker-b', 'owner', 'orphan')]
-        rows = unread_reply_items(db, 'owner-token')
+        rows = unread_items(db, 'owner-token')
         assert len(rows) == 4
         sources = [row['detail']['source'] for row in rows]
         assert sources.count({'thread_id': 'owner'}) == 3
@@ -77,12 +77,12 @@ def test_reply_sources_resolve_visible_root_and_preserve_groups(isolated_db, tmp
         with write_transaction(db, scope='test_visible_root_read') as connection:
             newest = max(replies, key=lambda reply: (reply['created_at'], reply['id']))
             mark_thread_viewed(connection, 'owner-token', artifact_id, root['id'], newest['id'])
-        assert unread_reply_items(db, 'owner-token') == []
+        assert unread_items(db, 'owner-token') == []
     finally:
         db.close()
 
 
-def test_grouping_matches_original_unread_predicate(isolated_db, tmp_path):
+def test_grouping_combines_unread_replies_and_new_top_level_comments(isolated_db, tmp_path):
     db = get_db()
     try:
         seed_thread(db, 'owner')
@@ -98,19 +98,10 @@ def test_grouping_matches_original_unread_predicate(isolated_db, tmp_path):
             add_comment(db, artifact_id, author_kind='user', author_id=None, parent_id=agent_root['id'])
         for root in (user_root, agent_root, untouched):
             add_comment(db, artifact_id, author_id='owner', parent_id=root['id'])
-        original = db.execute('''SELECT root.artifact_id, reply.author_thread_id, COUNT(*) AS n
-            FROM doc_comments reply JOIN threads thread ON thread.id=reply.author_thread_id
-            JOIN doc_comments root ON root.id=reply.parent_id
-            LEFT JOIN doc_comment_thread_views view ON view.user_id=? AND view.root_id=root.id
-            WHERE reply.author_kind='agent' AND thread.user_id=? AND root.resolved=0
-              AND (root.author_kind='user' OR EXISTS (SELECT 1 FROM doc_comments touched
-                   WHERE touched.parent_id=root.id AND touched.author_kind='user'))
-              AND (reply.created_at>COALESCE(view.seen_at, '') OR
-                   (view.seen_at IS NOT NULL AND reply.created_at=view.seen_at AND reply.id>view.seen_reply_id))
-            GROUP BY root.artifact_id, reply.author_thread_id''', ('owner-token', 'owner-token')).fetchall()
-        rows = unread_reply_items(db, 'owner-token')
+        rows = unread_items(db, 'owner-token')
         assert [(row['detail']['destination']['id'], row['detail']['source']['thread_id'], row['detail']['unread_count'])
-                for row in rows] == [tuple(row) for row in original] == [(artifact_id, 'owner', 2)]
+                for row in rows] == [(artifact_id, 'owner', 4)]
+        assert rows[0]['detail']['new_comment_count'] == 2
     finally:
         db.close()
 
@@ -120,7 +111,7 @@ def test_reply_attention_frames_cover_resolution_and_read(isolated_db, tmp_path,
 
     frames = []
     monkeypatch.setattr(comment_notifications, 'broadcast_doc_comment_changed',
-                        lambda artifact_id, **kwargs: frames.append(kwargs.get('reply_attention_changed', False)))
+                        lambda artifact_id, **kwargs: frames.append(kwargs.get('unread_attention_changed', False)))
     db = get_db()
     try:
         seed_thread(db, 'owner')
@@ -132,18 +123,18 @@ def test_reply_attention_frames_cover_resolution_and_read(isolated_db, tmp_path,
         root, _ = add_comment(db, artifact_id, author_kind='user', author_id=None)
         add_comment(db, artifact_id, author_id='owner')
         reply, _ = add_comment(db, artifact_id, author_id='owner', parent_id=root['id'])
-        assert frames == [False, True]
-        assert unread_reply_items(db, 'owner-token')[0]['detail']['unread_count'] == 1
+        assert frames == [True, True]
+        assert unread_items(db, 'owner-token')[0]['detail']['unread_count'] == 2
         comments.update(root['id'], {'resolved': True}, db=db)
         assert frames[-1] is True
-        assert unread_reply_items(db, 'owner-token') == []
+        assert unread_items(db, 'owner-token')[0]['detail']['unread_count'] == 2
         comments.update(root['id'], {'resolved': False}, db=db)
         assert frames[-1] is True
-        assert unread_reply_items(db, 'owner-token')[0]['detail']['unread_count'] == 1
+        assert unread_items(db, 'owner-token')[0]['detail']['unread_count'] == 2
         comments.update(reply['id'], {'resolved': True}, db=db)
         assert frames[-1] is False
         assert comment_thread_views.mark_viewed('owner-token', artifact_id, root['id'], reply['id']) == []
         assert frames[-1] is True
-        assert unread_reply_items(db, 'owner-token') == []
+        assert unread_items(db, 'owner-token')[0]['detail']['unread_count'] == 1
     finally:
         db.close()
