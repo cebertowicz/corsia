@@ -14,10 +14,10 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from tools.host_path_resolution import canonical, contains
+from tools.host_path_resolution import canonical, containment_key, key_contains
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +34,10 @@ def _failed_closed(reason: str, subject: object) -> None:
 
 _ORDINARY_COPY = (
     "`{path}` is in project `{name}`, outside your scope. "
+    "Ask the CORSIA agent, or use `request_host_access` for reviewed temporary access."
+)
+_WORKSPACE_AGENT_COPY = (
+    "`{path}` is in a workspace agent's private folder, outside your scope. "
     "Ask the CORSIA agent, or use `request_host_access` for reviewed temporary access."
 )
 _LOCAL_ONLY_COPY = (
@@ -63,6 +67,12 @@ class Fence:
 
     roots: tuple[FencedRoot, ...] = ()
     caller: str | None = None
+    _root_keys: tuple[tuple[FencedRoot, tuple[str, ...]], ...] = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "_root_keys", tuple(
+            (root, tuple(containment_key(form) for form in root.forms)) for root in self.roots
+        ))
 
     def _rules(self, local_only: bool, quote: Callable[[Path], str]) -> list[str]:
         return [
@@ -79,18 +89,26 @@ class Fence:
         """Deny rules for every other fenced root."""
         return self._rules(False, quote)
 
+    def matching_root(self, path: Path) -> FencedRoot | None:
+        """Return the strongest fenced root containing either form of a path."""
+        if not self.roots:
+            return None
+        candidates = (Path(os.path.abspath(path.expanduser())), canonical(path))
+        keys = tuple(containment_key(candidate) for candidate in candidates)
+        matches = [
+            root for root, forms in self._root_keys
+            if any(key_contains(form, key) for form in forms for key in keys)
+        ]
+        return next((root for root in matches if root.local_only), matches[0] if matches else None)
+
     def refusal(self, path: Path) -> str | None:
         """The approved refusal naming a fenced project path, or None."""
-        candidate = canonical(path)
-        matches = [
-            root for root in self.roots
-            if root.project is not None and any(contains(form, candidate) for form in root.forms)
-        ]
-        # A Local only root inside an ordinary one still holds under a lease, so its copy wins.
-        root = next((root for root in matches if root.local_only), matches[0] if matches else None)
+        root = self.matching_root(path)
         if root is None:
             return None
         _event("refused", self.caller, local_only=root.local_only)
+        if root.project is None:
+            return _WORKSPACE_AGENT_COPY.format(path=path)
         if not root.local_only:
             return _ORDINARY_COPY.format(path=path, name=root.project)
         who = f" (`{root.conductor}`)" if root.conductor else ""

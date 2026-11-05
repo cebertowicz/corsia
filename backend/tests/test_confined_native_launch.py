@@ -92,6 +92,22 @@ async def test_a_local_review_refuses_a_read_its_parent_lacks(child_db, native_s
 
 
 @pytest.mark.asyncio
+async def test_local_review_refuses_another_project_before_creating_child(child_db, native_spawn, reviewed_dir, monkeypatch):
+    from tools import project_fence
+
+    _seed_parent(child_db)
+    fence = project_fence.Fence((project_fence.FencedRoot(Path(reviewed_dir), "other"),), "parent")
+    monkeypatch.setattr(project_fence, "fence_for_thread", lambda thread: fence if thread == "parent" else project_fence.Fence((), thread))
+    refused = await native_spawn.spawn(
+        "parent", {"user_id": "steve"}, "review",
+        {"model": _LOCAL, "confinement": "untrusted", "read_paths": [reviewed_dir]},
+    )
+    assert refused.startswith(f"Error: read path {reviewed_dir} refused: ")
+    native_spawn.sent.assert_not_awaited()
+    assert child_db.execute("SELECT COUNT(*) FROM threads").fetchone()[0] == 1
+
+
+@pytest.mark.asyncio
 async def test_codex_review_records_confinement_before_first_input(child_db, native_spawn, reviewed_dir, monkeypatch):
     from subagents import codex_confinement
     monkeypatch.setattr(codex_confinement, "verify_version", AsyncMock())

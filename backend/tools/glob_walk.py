@@ -169,6 +169,8 @@ def _select(
     if not parts:
         yield relative
         return
+    if traversal.scope.fence and traversal.scope.fence.excludes_directory(Path(directory)):
+        return
     part, rest = parts[0], parts[1:]
     if part == _RECURSIVE:
         yield from _select_recursive(directory, relative, rest, traversal)
@@ -183,6 +185,14 @@ def _select(
         path = os.path.join(directory, part)
         present = os.path.isdir(path) if rest else os.path.lexists(path)
         if present:
+            fence = traversal.scope.fence
+            if fence and os.path.islink(path):
+                target = fence.follow_symlink(Path(path))
+                if target is None:
+                    return
+                path = str(target)
+            elif fence and fence.has_file_exclusions and not rest and fence.excludes_file(Path(path)):
+                return
             yield from _select(path, relative + (part,), rest, traversal)
 
 
@@ -198,9 +208,18 @@ def _select_wildcard(
         name = entry.name
         if not traversal.matches(parent, name, part):
             continue
+        fence = traversal.scope.fence
+        path = entry.path
+        if fence and entry.is_symlink():
+            target = fence.follow_symlink(Path(path))
+            if target is None:
+                continue
+            path = str(target)
+        elif fence and fence.has_file_exclusions and not rest and fence.excludes_file(Path(path)):
+            continue
         if rest and not _is_directory(entry, follow_symlinks=True):
             continue
-        yield from _select(entry.path, relative + (name,), rest, traversal)
+        yield from _select(path, relative + (name,), rest, traversal)
 
 
 def _select_recursive(
@@ -210,6 +229,8 @@ def _select_recursive(
     stack = [(directory, relative)]
     while stack:
         current, current_relative = stack.pop()
+        if traversal.scope.fence and traversal.scope.fence.excludes_directory(Path(current)):
+            continue
         entries = _scan(current, traversal)
         yield from _select_below(current, current_relative, entries, rest, traversal)
         parent = _parent(current_relative, traversal)
@@ -236,6 +257,11 @@ def _select_below(
             parent = _parent(relative, traversal)
             for entry in entries:
                 if _is_directory(entry, follow_symlinks=False):
+                    continue
+                fence = traversal.scope.fence
+                if fence and entry.is_symlink() and fence.follow_symlink(Path(entry.path)) is None:
+                    continue
+                if fence and fence.has_file_exclusions and fence.excludes_file(Path(entry.path)):
                     continue
                 if traversal.lists(parent, entry.name):
                     yield relative + (entry.name,)

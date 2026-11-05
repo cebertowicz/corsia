@@ -2,7 +2,6 @@
 
 import asyncio
 from dataclasses import dataclass
-import re
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +13,7 @@ from infra.db_async import run_in_db, run_off_db
 from infra.guidance_targets import guidance_target
 from tools.base import Tool
 from tools.filesystem_binary import open_bound_binary
+from tools.file_write_receipt import write_success_path, write_success_result
 from tools.file_write_completion import (
     GUIDANCE_PARAMETERS,
     announce_published_write,
@@ -23,25 +23,6 @@ from tools.file_write_completion import (
 from tools.filesystem_gate import _resolve_path_for_action
 import tools.pdf_read as pdf_read
 from doceditor.live_tools import record_read_base, write_live
-
-_WRITE_SUCCESS = re.compile(
-    r"^Successfully wrote [0-9]+ bytes to (?P<path>.+)$",
-    re.DOTALL,
-)
-
-
-def write_success_result(path: Path, size: int) -> str:
-    """Return the canonical native write receipt consumed by the observer."""
-    return f"Successfully wrote {size} bytes to {path}"
-
-
-def write_success_path(result: str) -> Path | None:
-    """Read the effective absolute path from a canonical native write receipt."""
-    match = _WRITE_SUCCESS.fullmatch(result)
-    if match is None:
-        return None
-    path = Path(match.group("path")).expanduser()
-    return path if path.is_absolute() else None
 
 
 @dataclass(frozen=True)
@@ -198,6 +179,7 @@ class ReadFileTool(Tool):
                 allowed_dir=self._allowed_dir,
                 thread_id=kwargs.get("_thread_id"),
                 project_id=kwargs.get("_thread_project_id"),
+                fence=kwargs.get("_host_access_fence"),
             )
             outcome = await asyncio.to_thread(
                 self._read_authorized_file,
@@ -376,6 +358,7 @@ class WriteFileTool(Tool):
                 allowed_dir=self._allowed_dir,
                 thread_id=kwargs.get("_thread_id"),
                 project_id=kwargs.get("_thread_project_id"),
+                fence=kwargs.get("_host_access_fence"),
                 for_write=True,
             )
             file_path = authorized.resolved
