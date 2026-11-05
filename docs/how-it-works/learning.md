@@ -11,7 +11,7 @@ CORSIA records corrections and can try a proposed lesson on later work. This pag
 
 ## Why it exists
 
-An agent saying it learned from a correction is not evidence that it did. These records tie each correction to what the agent did about it, and a trial compares later work with and without a proposed lesson before the owner promotes it (`backend/core/correction_learning.py`, `backend/core/lesson_outcomes.py`, `backend/core/lesson_trial_verdicts.py`). An offer or read of guidance shows exposure, not that the guidance was applied or helped (`backend/core/lesson_outcomes.py`).
+An agent saying it learned from a correction is not evidence that it did. These records tie each correction to what the agent did in response, and a trial compares later work with and without a proposed lesson before the owner promotes it (`backend/core/correction_learning.py`, `backend/core/lesson_outcomes.py`, `backend/core/lesson_trial_verdicts.py`). An offer or read of guidance shows exposure, not that the guidance was applied or helped (`backend/core/lesson_outcomes.py`).
 
 ## How it works
 
@@ -43,7 +43,7 @@ A trial is marked unproven and cannot replace an ordinary skill of the same name
 
 At task start CORSIA deterministically assigns an eligible trial to a with or without half and records the draw. The with half receives task-local guidance; an omitted or unrecordable delivery is not counted as without. A task start admits at most 40 trials and 1,500 trial tokens (`backend/core/lesson_delivery.py`).
 
-The comparison excludes task revisions, prior exposure in the same checkpoint generation, late-open tasks and omitted deliveries. It groups tasks by workflow step and compares the two halves (`backend/core/lesson_trial_verdicts.py`).
+The comparison excludes task revisions, prior exposure in the same checkpoint generation, tasks in the without half that read the lesson's own file before they finished, and omitted deliveries. It groups tasks by workflow step and compares the two halves (`backend/core/lesson_trial_verdicts.py`).
 
 ### Verdicts
 
