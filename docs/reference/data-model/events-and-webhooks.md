@@ -36,7 +36,7 @@ Source: `backend/infra/event_intake_schema.py`.
 | `event_type` | TEXT | No | No | — | — |
 | `at` | TEXT | No | Yes | — | — |
 
-Indexes: `idx_event_intake_accepted` (event_id, unique), `idx_event_intake_type` (outcome, event_type, at).
+Indexes: `idx_event_intake_accepted` (event_id, partial unique), `idx_event_intake_type` (outcome, event_type, at).
 
 ### `event_route_decisions`
 
@@ -121,7 +121,7 @@ Source: `backend/infra/event_watch_schema.py`.
 | `created_at` | TEXT | No | Yes | — | — |
 | `updated_at` | TEXT | No | Yes | — | — |
 
-Indexes: `idx_watches_dedupe` (artifact_integration, artifact_type, artifact_external_id, owner_thread_id, condition_type, condition_value, expected_event, unique), `idx_watches_status` (status, condition_type), `sqlite_autoindex_expected_event_watches_1` (id, unique).
+Indexes: `idx_watches_dedupe` (artifact_integration, artifact_type, artifact_external_id, owner_thread_id, condition_type, condition_value, expected_event, partial unique), `idx_watches_status` (status, condition_type), `sqlite_autoindex_expected_event_watches_1` (id, unique).
 
 ### `self_caused_events`
 
@@ -187,4 +187,4 @@ Source: `backend/infra/webhook_delivery_schema.py`.
 | `object_key` | TEXT | No | No | — | — |
 | `check_suite_id` | INTEGER | No | No | — | — |
 
-Indexes: `idx_webhook_deliveries_check_suite` (check_suite_id, created_at), `idx_webhook_deliveries_event` (event_type, created_at), `idx_webhook_deliveries_object_key` (object_key, unique), `idx_webhook_deliveries_status` (status, created_at), `sqlite_autoindex_webhook_deliveries_1` (id, unique), `sqlite_autoindex_webhook_deliveries_2` (delivery_id, unique).
+Indexes: `idx_webhook_deliveries_check_suite` (check_suite_id, created_at), `idx_webhook_deliveries_event` (event_type, created_at), `idx_webhook_deliveries_object_key` (object_key, partial unique), `idx_webhook_deliveries_status` (status, created_at), `sqlite_autoindex_webhook_deliveries_1` (id, unique), `sqlite_autoindex_webhook_deliveries_2` (delivery_id, unique).

@@ -108,12 +108,19 @@ def sqlite_tables(connection, temporary=False):
         tables[name] = {
             "columns": [(r[1], r[2] or "", bool(r[3]), bool(r[5]), r[4]) for r in columns],
             "foreign": [(r[3], r[2], r[4]) for r in foreign],
-            "indexes": sorted((r[1], bool(r[2]), ", ".join(
+            "indexes": sorted((r[1], index_kind(r[2], r[4]), ", ".join(
                 str(c[2]) if c[2] is not None else "expression"
                 for c in connection.execute(f"PRAGMA {schema}index_info({quote(r[1])})").fetchall()
             )) for r in indexes),
         }
     return tables
+
+
+def index_kind(unique, partial=False):
+    """A partial unique index is unique only over some rows, so it does not make a relationship one-to-one."""
+    if not unique:
+        return ""
+    return "partial unique" if partial else "unique"
 
 
 def duck_tables(connection):
@@ -136,7 +143,7 @@ def duck_tables(connection):
             "columns": [(r[1], r[2] or "", bool(r[3]), bool(r[5]), r[4]) for r in columns],
             "foreign": [(col, target, ref) for cols, target, refs in foreign
                         for col, ref in zip(cols, refs)],
-            "indexes": indexes,
+            "indexes": [(name, index_kind(unique), columns) for name, unique, columns in indexes],
         }
     return result
 
@@ -179,7 +186,7 @@ def diagram(tables):
                 required = next((required or primary for col, _, required, primary, _
                                  in info["columns"] if col == column), False)
                 parent = "||" if required else "o|"
-                unique = any(is_unique and cols == column for _, is_unique, cols in info["indexes"])
+                unique = any(kind == "unique" and cols == column for _, kind, cols in info["indexes"])
                 child = "o|" if unique else "o{"
                 lines.append(f'    {target} {parent}--{child} {name} : {column}')
     return "\n".join(lines + ["```"])
@@ -195,8 +202,8 @@ def table_section(name, info):
     for column, kind, required, primary, default in info["columns"]:
         lines.append(f"| `{cell(column)}` | {cell(kind)} | {'Yes' if primary else 'No'} | "
                      f"{'Yes' if required else 'No'} | {cell(default)} | {cell(', '.join(foreign[column]) or None)} |")
-    indexes = ", ".join(f"`{name}` ({cell(columns)}" + (", unique)" if unique else ")")
-                        for name, unique, columns in info["indexes"]) or "None"
+    indexes = ", ".join(f"`{name}` ({cell(columns)}" + (f", {kind})" if kind else ")")
+                        for name, kind, columns in info["indexes"]) or "None"
     return "\n".join(lines + ["", f"Indexes: {indexes}.", ""])
 
 
@@ -224,10 +231,7 @@ def render(groups):
              "add `--check` to compare the generated pages. The backend's locked dependencies are required.",
              "", "SQLite full-text search creates shadow tables; SQLite creates `sqlite_sequence`. "
              "Relationships shown in a diagram connect tables in that diagram; column tables list all declared foreign keys. "
-             "The measurement tables are temporary and are created on a primary connection when needed.",
-             "", "Historical migration tables are excluded: `checkpoints_new`, `connected_accounts_new`, "
-             "`connected_account_audit_new`, `_usage_backfill_bound`, `_usage_backfill_unbound`, "
-             "and `retired_worker_releases` are migration intermediates; `project_vendor_accounts` was retired.", ""]
+             "The measurement tables are temporary and are created on a primary connection when needed.", ""]
     subsystems, modules = regroup(groups)
     lines.extend(["| Subsystem | Page | Source modules |", "|---|---|---|"])
     for group in sorted(subsystems):
@@ -249,6 +253,8 @@ def write_or_check(files, check):
             print(f"Out of date: {name}", file=sys.stderr)
         return bool(changed or stale)
     OUTPUT.mkdir(parents=True, exist_ok=True)
+    for name in stale:
+        (OUTPUT / name).unlink()
     for name, content in files.items():
         (OUTPUT / name).write_text(content)
     return False

@@ -89,7 +89,7 @@ Source: `backend/infra/checkpoint_schema.py`.
 | `through_at` | TEXT | No | No | — | — |
 | `adopted_input_tokens` | INTEGER | No | No | — | — |
 
-Indexes: `checkpoints_current` (thread_id, history_epoch, status, generation_order), `checkpoints_idle_boundary` (thread_id, history_epoch, through_message_id), `checkpoints_listing` (thread_id, generation_order), `checkpoints_one_live` (thread_id, unique), `sqlite_autoindex_checkpoints_1` (id, unique).
+Indexes: `checkpoints_current` (thread_id, history_epoch, status, generation_order), `checkpoints_idle_boundary` (thread_id, history_epoch, through_message_id), `checkpoints_listing` (thread_id, generation_order), `checkpoints_one_live` (thread_id, partial unique), `sqlite_autoindex_checkpoints_1` (id, unique).
 
 ### `context_bootloader_events`
 

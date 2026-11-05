@@ -9,12 +9,12 @@ erDiagram
     plan_node_holds ||--o| plan_ask_deferrals : hold_id
     plans ||--o{ plan_events : plan_id
     plan_nodes ||--o{ plan_node_artifact_links : node_id
-    plan_nodes ||--o| plan_node_attempts : node_id
+    plan_nodes ||--o{ plan_node_attempts : node_id
     plans ||--o{ plan_node_attempts : plan_id
     plan_node_events o|--o{ plan_node_events : causal_event_id
     plan_nodes ||--o{ plan_node_events : node_id
     plan_node_events o|--o{ plan_node_holds : clearance_event_id
-    plan_nodes ||--o| plan_node_holds : node_id
+    plan_nodes ||--o{ plan_node_holds : node_id
     plan_nodes ||--o{ plan_nodes : commitment_id
     plan_nodes o|--o{ plan_nodes : follow_up_of
     plan_nodes o|--o{ plan_nodes : intent_node_id
@@ -153,7 +153,7 @@ Source: `backend/infra/plan_markdown_import_schema.py`.
 | `imported_at` | TEXT | No | No | — | — |
 | `rolled_back_at` | TEXT | No | No | — | — |
 
-Indexes: `idx_plan_markdown_imports_owner` (owner_thread_id, unique), `idx_plan_markdown_imports_status` (status), `sqlite_autoindex_plan_markdown_imports_1` (id, unique), `sqlite_autoindex_plan_markdown_imports_2` (artifact_id, unique), `sqlite_autoindex_plan_markdown_imports_3` (plan_id, unique).
+Indexes: `idx_plan_markdown_imports_owner` (owner_thread_id, partial unique), `idx_plan_markdown_imports_status` (status), `sqlite_autoindex_plan_markdown_imports_1` (id, unique), `sqlite_autoindex_plan_markdown_imports_2` (artifact_id, unique), `sqlite_autoindex_plan_markdown_imports_3` (plan_id, unique).
 
 ### `plan_mutation_receipts`
 
@@ -205,7 +205,7 @@ Source: `backend/infra/plan_schema.py`.
 | `released_at` | TEXT | No | No | — | — |
 | `release_reason` | TEXT | No | No | — | — |
 
-Indexes: `idx_plan_attempt_commitment` (node_id, selected_at), `idx_plan_attempt_open_executor` (plan_id, executor_thread_id, unique), `idx_plan_attempt_open_node` (node_id, unique), `idx_plan_node_attempts_released` (released_at), `idx_plan_node_attempts_selected` (selected_at), `sqlite_autoindex_plan_node_attempts_1` (id, unique), `sqlite_autoindex_plan_node_attempts_2` (node_id, attempt_ordinal, unique).
+Indexes: `idx_plan_attempt_commitment` (node_id, selected_at), `idx_plan_attempt_open_executor` (plan_id, executor_thread_id, partial unique), `idx_plan_attempt_open_node` (node_id, partial unique), `idx_plan_node_attempts_released` (released_at), `idx_plan_node_attempts_selected` (selected_at), `sqlite_autoindex_plan_node_attempts_1` (id, unique), `sqlite_autoindex_plan_node_attempts_2` (node_id, attempt_ordinal, unique).
 
 ### `plan_node_dependencies`
 
@@ -259,7 +259,7 @@ Source: `backend/infra/plan_schema.py`.
 | `cleared_at` | TEXT | No | No | — | — |
 | `clearance_event_id` | TEXT | No | No | — | plan_node_events.id |
 
-Indexes: `idx_plan_holds_active_node` (node_id, kind), `idx_plan_holds_one_pause` (node_id, unique), `sqlite_autoindex_plan_node_holds_1` (id, unique).
+Indexes: `idx_plan_holds_active_node` (node_id, kind), `idx_plan_holds_one_pause` (node_id, partial unique), `sqlite_autoindex_plan_node_holds_1` (id, unique).
 
 ### `plan_node_intent_words`
 

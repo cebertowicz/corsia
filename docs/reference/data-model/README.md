@@ -6,8 +6,6 @@ Generate with `PYTHONPATH=backend .venv/bin/python scripts/docs/generate_data_mo
 
 SQLite full-text search creates shadow tables; SQLite creates `sqlite_sequence`. Relationships shown in a diagram connect tables in that diagram; column tables list all declared foreign keys. The measurement tables are temporary and are created on a primary connection when needed.
 
-Historical migration tables are excluded: `checkpoints_new`, `connected_accounts_new`, `connected_account_audit_new`, `_usage_backfill_bound`, `_usage_backfill_unbound`, and `retired_worker_releases` are migration intermediates; `project_vendor_accounts` was retired.
-
 | Subsystem | Page | Source modules |
 |---|---|---|
 | Accounts and connections | [Accounts and connections](accounts-and-connections.md) | `backend/infra/accounts_schema.py`, `backend/infra/action_drafts_schema.py`, `backend/infra/connected_accounts_schema.py`, `backend/infra/connected_apps_schema.py`, `backend/infra/connection_schema.py`, `backend/infra/email_screens_schema.py`, `backend/infra/key_store_schema.py`, `backend/infra/vendor_account_schema.py` |

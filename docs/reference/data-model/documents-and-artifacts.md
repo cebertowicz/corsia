@@ -190,7 +190,7 @@ Source: `backend/infra/doc_comments_schema.py`.
 | `decided_in_bulk` | INTEGER | No | No | — | — |
 | `insert_after` | INTEGER | No | Yes | 0 | — |
 
-Indexes: `idx_doc_comments_artifact` (artifact_id, created_at), `idx_doc_comments_decision_event` (decision_event_id), `idx_doc_comments_region_number` (artifact_id, expression, region_number, unique), `idx_doc_comments_user_created` (created_at, id), `sqlite_autoindex_doc_comments_1` (id, unique).
+Indexes: `idx_doc_comments_artifact` (artifact_id, created_at), `idx_doc_comments_decision_event` (decision_event_id), `idx_doc_comments_region_number` (artifact_id, expression, region_number, partial unique), `idx_doc_comments_user_created` (created_at, id), `sqlite_autoindex_doc_comments_1` (id, unique).
 
 ### `doc_feedback_batch_items`
 
@@ -232,7 +232,7 @@ Source: `backend/infra/doc_feedback_schema.py`.
 | `created_at` | TEXT | No | Yes | — | — |
 | `updated_at` | TEXT | No | Yes | — | — |
 
-Indexes: `idx_doc_feedback_batches_author` (author_kind, author_id, state, updated_at), `idx_doc_feedback_batches_due` (state, closes_at), `idx_doc_feedback_batches_open` (author_kind, author_id, artifact_id, recipient_id, delivery_policy, unique), `idx_doc_feedback_batches_recipient_open` (recipient_id, author_kind, author_id, delivery_policy, state), `sqlite_autoindex_doc_feedback_batches_1` (id, unique).
+Indexes: `idx_doc_feedback_batches_author` (author_kind, author_id, state, updated_at), `idx_doc_feedback_batches_due` (state, closes_at), `idx_doc_feedback_batches_open` (author_kind, author_id, artifact_id, recipient_id, delivery_policy, partial unique), `idx_doc_feedback_batches_recipient_open` (recipient_id, author_kind, author_id, delivery_policy, state), `sqlite_autoindex_doc_feedback_batches_1` (id, unique).
 
 ### `doc_feedback_edit_items`
 

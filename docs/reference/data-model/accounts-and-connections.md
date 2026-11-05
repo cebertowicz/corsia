@@ -24,10 +24,10 @@ erDiagram
 erDiagram
     vendor_accounts o|--o{ thread_vendor_accounts : pending_account_id
     vendor_accounts ||--o{ thread_vendor_accounts : account_id
-    vendor_account_billing_facts o|--o| vendor_account_billing_facts : supersedes_id
+    vendor_account_billing_facts o|--o{ vendor_account_billing_facts : supersedes_id
     vendor_accounts o|--o{ vendor_account_billing_facts : account_id
-    vendor_accounts o|--o| vendor_account_billing_revisions : account_id
-    connections ||--o| vendor_accounts : connection_id
+    vendor_accounts o|--o{ vendor_account_billing_revisions : account_id
+    connections ||--o{ vendor_accounts : connection_id
 ```
 
 ## Tables
@@ -305,7 +305,7 @@ Source: `backend/infra/vendor_account_schema.py`.
 | `supersedes_id` | TEXT | No | No | — | vendor_account_billing_facts.id |
 | `created_at` | TEXT | No | Yes | — | — |
 
-Indexes: `idx_vendor_account_billing_facts_account` (account_id, kind, start_date, end_date, created_at), `idx_vendor_account_billing_facts_server` (network_server_id, kind, start_date, end_date, created_at), `idx_vendor_account_billing_facts_supersedes` (supersedes_id, unique), `sqlite_autoindex_vendor_account_billing_facts_1` (id, unique).
+Indexes: `idx_vendor_account_billing_facts_account` (account_id, kind, start_date, end_date, created_at), `idx_vendor_account_billing_facts_server` (network_server_id, kind, start_date, end_date, created_at), `idx_vendor_account_billing_facts_supersedes` (supersedes_id, partial unique), `sqlite_autoindex_vendor_account_billing_facts_1` (id, unique).
 
 ### `vendor_account_billing_revisions`
 
@@ -317,7 +317,7 @@ Source: `backend/infra/vendor_account_schema.py`.
 | `network_server_id` | TEXT | No | No | — | network_servers.id |
 | `revision` | INTEGER | No | Yes | 0 | — |
 
-Indexes: `idx_vendor_account_billing_revisions_account` (account_id, unique), `idx_vendor_account_billing_revisions_server` (network_server_id, unique).
+Indexes: `idx_vendor_account_billing_revisions_account` (account_id, partial unique), `idx_vendor_account_billing_revisions_server` (network_server_id, partial unique).
 
 ### `vendor_accounts`
 
@@ -341,4 +341,4 @@ Source: `backend/infra/vendor_account_schema.py`.
 | `updated_at` | TEXT | No | Yes | — | — |
 | `removed_at` | TEXT | No | No | — | — |
 
-Indexes: `idx_vendor_accounts_connection` (connection_id, created_at), `idx_vendor_accounts_default` (connection_id, unique), `sqlite_autoindex_vendor_accounts_1` (id, unique).
+Indexes: `idx_vendor_accounts_connection` (connection_id, created_at), `idx_vendor_accounts_default` (connection_id, partial unique), `sqlite_autoindex_vendor_accounts_1` (id, unique).

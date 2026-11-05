@@ -6,7 +6,7 @@ These tables store threads, turns, messages, presence and related updates.
 
 ```mermaid
 erDiagram
-    threads ||--o| active_turns : thread_id
+    threads ||--o{ active_turns : thread_id
     threads ||--o{ automation_schedules : thread_id
     threads ||--o{ continuation_triggers : thread_id
     threads ||--o{ messages : thread_id
@@ -47,7 +47,7 @@ Source: `backend/infra/schema.py`.
 | `guidance_load_status` | TEXT | No | No | — | — |
 | `context_manifest_status` | TEXT | No | No | 'unbound' | — |
 
-Indexes: `idx_active_turns_idle_checkpoint_due` (ended_at, turn_order), `idx_active_turns_one_active` (thread_id, unique), `idx_active_turns_pending_usage` (turn_order), `idx_active_turns_plan_node` (plan_node_id), `idx_active_turns_session` (thread_id), `idx_active_turns_status` (status), `idx_active_turns_thread_status` (thread_id, status), `sqlite_autoindex_active_turns_1` (id, unique).
+Indexes: `idx_active_turns_idle_checkpoint_due` (ended_at, turn_order), `idx_active_turns_one_active` (thread_id, partial unique), `idx_active_turns_pending_usage` (turn_order), `idx_active_turns_plan_node` (plan_node_id), `idx_active_turns_session` (thread_id), `idx_active_turns_status` (status), `idx_active_turns_thread_status` (thread_id, status), `sqlite_autoindex_active_turns_1` (id, unique).
 
 ### `automation_schedules`
 
@@ -147,7 +147,7 @@ Source: `backend/infra/continuation_schema.py`.
 | `dispatched_at` | TEXT | No | No | — | — |
 | `settled_at` | TEXT | No | No | — | — |
 
-Indexes: `idx_continuation_triggers_live` (dedupe_key, unique), `idx_continuation_triggers_scope` (scope_id, created_at), `idx_continuation_triggers_state` (state, next_attempt_at), `sqlite_autoindex_continuation_triggers_1` (id, unique).
+Indexes: `idx_continuation_triggers_live` (dedupe_key, partial unique), `idx_continuation_triggers_scope` (scope_id, created_at), `idx_continuation_triggers_state` (state, next_attempt_at), `sqlite_autoindex_continuation_triggers_1` (id, unique).
 
 ### `held_replies`
 
@@ -170,7 +170,7 @@ Source: `backend/infra/held_replies_schema.py`.
 | `created_at` | TEXT | No | Yes | — | — |
 | `decided_at` | TEXT | No | No | — | — |
 
-Indexes: `idx_held_replies_idempotency` (sender_thread_id, recipient_thread_id, idempotency_key, unique), `idx_held_replies_user_state` (user_id, state, created_at), `sqlite_autoindex_held_replies_1` (id, unique).
+Indexes: `idx_held_replies_idempotency` (sender_thread_id, recipient_thread_id, idempotency_key, partial unique), `idx_held_replies_user_state` (user_id, state, created_at), `sqlite_autoindex_held_replies_1` (id, unique).
 
 ### `messages`
 
@@ -200,7 +200,7 @@ Source: `backend/infra/message_schema.py`.
 | `next_attempt_at` | TEXT | No | No | — | — |
 | `seq` | INTEGER | No | No | — | — |
 
-Indexes: `idx_measurement_human_messages_time` (thread_id, created_at, id), `idx_messages_active_turn` (active_turn_id, input_order), `idx_messages_checkpoint_hold` (thread_id, target_model, target_execution_epoch), `idx_messages_delivery_attempt` (delivery_attempt_id, input_order), `idx_messages_id_session` (id, thread_id, unique), `idx_messages_input_order` (thread_id, input_order, unique), `idx_messages_installed_boundaries` (thread_id, seq, id), `idx_messages_queued_inputs` (thread_id, delivery_state, input_order), `idx_messages_session` (thread_id, created_at), `idx_messages_session_seq` (thread_id, seq, unique), `idx_messages_tool_lineage` (thread_id, role, expression, expression), `idx_messages_turn_calls` (thread_id, role, expression), `sqlite_autoindex_messages_1` (id, unique).
+Indexes: `idx_measurement_human_messages_time` (thread_id, created_at, id), `idx_messages_active_turn` (active_turn_id, input_order), `idx_messages_checkpoint_hold` (thread_id, target_model, target_execution_epoch), `idx_messages_delivery_attempt` (delivery_attempt_id, input_order), `idx_messages_id_session` (id, thread_id, unique), `idx_messages_input_order` (thread_id, input_order, partial unique), `idx_messages_installed_boundaries` (thread_id, seq, id), `idx_messages_queued_inputs` (thread_id, delivery_state, input_order), `idx_messages_session` (thread_id, created_at), `idx_messages_session_seq` (thread_id, seq, unique), `idx_messages_tool_lineage` (thread_id, role, expression, expression), `idx_messages_turn_calls` (thread_id, role, expression), `sqlite_autoindex_messages_1` (id, unique).
 
 ### `presence_focus_rollup`
 

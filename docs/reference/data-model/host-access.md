@@ -32,7 +32,7 @@ Source: `backend/infra/host_access_schema.py`.
 | `permit_consumed_at` | TEXT | No | No | — | — |
 | `created_at` | TEXT | No | Yes | — | — |
 
-Indexes: `idx_host_access_action_reviews_action` (lease_id, action_hash, created_at), `idx_host_access_action_reviews_lease` (lease_id, created_at), `idx_host_access_action_reviews_permit` (permit_id, unique), `sqlite_autoindex_host_access_action_reviews_1` (id, unique).
+Indexes: `idx_host_access_action_reviews_action` (lease_id, action_hash, created_at), `idx_host_access_action_reviews_lease` (lease_id, created_at), `idx_host_access_action_reviews_permit` (permit_id, partial unique), `sqlite_autoindex_host_access_action_reviews_1` (id, unique).
 
 ### `host_access_leases`
 
@@ -69,4 +69,4 @@ Source: `backend/infra/host_access_schema.py`.
 | `created_at` | TEXT | No | Yes | — | — |
 | `updated_at` | TEXT | No | Yes | — | — |
 
-Indexes: `idx_host_access_leases_one_nonterminal` (root_thread_id, unique), `idx_host_access_leases_root_state` (root_thread_id, state), `idx_host_access_leases_state_expiry` (state, expires_at), `sqlite_autoindex_host_access_leases_1` (id, unique).
+Indexes: `idx_host_access_leases_one_nonterminal` (root_thread_id, partial unique), `idx_host_access_leases_root_state` (root_thread_id, state), `idx_host_access_leases_state_expiry` (state, expires_at), `sqlite_autoindex_host_access_leases_1` (id, unique).

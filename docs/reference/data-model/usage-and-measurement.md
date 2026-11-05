@@ -139,7 +139,7 @@ Source: `backend/infra/measurement_schema.py`.
 | `metric_group` | TEXT | Yes | No | — | — |
 | `reason` | TEXT | No | Yes | — | — |
 
-Indexes: `idx_measure_break_starts_group` (metric_group, unique), `idx_measure_breaks_identity` (period, kind, expression, unique), `sqlite_autoindex_measure_breaks_1` (period, kind, metric_group, unique).
+Indexes: `idx_measure_break_starts_group` (metric_group, partial unique), `idx_measure_breaks_identity` (period, kind, expression, unique), `sqlite_autoindex_measure_breaks_1` (period, kind, metric_group, unique).
 
 ### `measure_definitions`
 
@@ -315,4 +315,4 @@ Source: `backend/infra/outcome_events_schema.py`.
 | `attributes` | TEXT | No | Yes | — | — |
 | `retracted_at` | TEXT | No | No | — | — |
 
-Indexes: `idx_learning_loop_outcome_subject` (subject_key, unique), `idx_learning_loop_triage_subject` (subject_key, unique), `idx_measurement_size_rater` (expression, subject_key), `idx_outcome_events_agent_observed` (agent_thread_id, observed_ts, event_name), `idx_outcome_events_agent_ts` (agent_thread_id, ts), `idx_outcome_events_name_ts` (event_name, ts), `idx_outcome_events_project_ts` (project_id, ts), `idx_outcome_events_subject` (subject_key), `sqlite_autoindex_outcome_events_1` (id, unique), `sqlite_autoindex_outcome_events_2` (dedupe_key, unique).
+Indexes: `idx_learning_loop_outcome_subject` (subject_key, partial unique), `idx_learning_loop_triage_subject` (subject_key, partial unique), `idx_measurement_size_rater` (expression, subject_key), `idx_outcome_events_agent_observed` (agent_thread_id, observed_ts, event_name), `idx_outcome_events_agent_ts` (agent_thread_id, ts), `idx_outcome_events_name_ts` (event_name, ts), `idx_outcome_events_project_ts` (project_id, ts), `idx_outcome_events_subject` (subject_key), `sqlite_autoindex_outcome_events_1` (id, unique), `sqlite_autoindex_outcome_events_2` (dedupe_key, unique).
