@@ -92,6 +92,7 @@ describe('opening a delayed diagram from the keyboard', () => {
 		const view = mount(() => undefined, doc, true);
 		const diagram = view.dom.querySelector<HTMLElement>('.cm-md-mermaid')!;
 		expect(diagram).toBeTruthy();
+		expect(diagram.dataset.diagramSource).toBe('flowchart LR\n A --> B');
 		await new Promise<void>((resolve) => view.requestMeasure({ read: () => undefined, write: () => resolve() }));
 		expect(diagram.hasAttribute('tabindex')).toBe(false);
 		diagram.append(document.createElementNS('http://www.w3.org/2000/svg', 'svg'));

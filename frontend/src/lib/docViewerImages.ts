@@ -25,7 +25,7 @@ export interface DocumentImageComments {
 	projectId: string | null;
 	readOnly: boolean;
 	/** Post a region comment anchored on the image's markdown, where it is now. */
-	post: (from: number, to: number, region: ImageRegion, text: string) => Promise<string>;
+	post: (from: number, to: number, region: ImageRegion, text: string, diagramSource?: string) => Promise<string>;
 	/** What a failed post says. */
 	failure?: (error: unknown) => string;
 	/** The document's feedback batch: the viewer shows its pending-send status and Send (DCOL-FR13.12). */
@@ -66,7 +66,7 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 		const artifactId = options.artifactId();
 		return artifactId ? {
 			artifactId, projectId: projectId(), readOnly: options.readOnly(),
-			post: (from, to, region, body) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session() }, region, body),
+			post: (from, to, region, body, diagramSource) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session(), diagramSource }, region, body),
 			failure: options.session() ? liveFailureMessage : undefined, feedback: options.feedback(),
 		} : undefined;
 	}

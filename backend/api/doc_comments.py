@@ -133,7 +133,7 @@ async def create_comment(
         artifact_id=artifact_id, path=path, body=text, author=user["name"], author_kind="user", user_id=user["id"],
         parent_id=body.parent_id, review=body.review, replacement=body.replacement,
         quote=body.anchor_text, start=body.from_off, end=body.to_off, browser=True, live_capture=body.live_capture,
-        region=region,
+        region=region, diagram_source=body.diagram_source,
         delivery_policy=body.delivery_policy,
     )
     try:
@@ -293,6 +293,7 @@ class CommentPatch(BaseModel):
     delivery_policy: PersonDocumentLane | None = None
     # Moves an image comment's pin; the pin then counts as placed on the current image.
     region: dict | None = None
+    diagram_source: str | None = None
 
     @model_validator(mode="after")
     def _reopen_names_its_lane(self) -> "CommentPatch":
@@ -323,10 +324,13 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
                 check_user_text_edit(comment, fields)
                 artifact = registry_models.get_artifact(artifact_id, db=db) or {}
                 moved = doc_images.region_patch(
-                    db, comment, fields, doc_path=artifact.get("path"), owner_thread_id=artifact.get("parent_thread_id"))
+                    db, comment, fields, doc_path=artifact.get("path"), owner_thread_id=artifact.get("parent_thread_id"),
+                    require_diagram_source=True)
                 patch = reopen_fields(comment, moved)
             except CommentActionError as exc:
                 raise HTTPException(comment_action_status(exc), exc.message) from exc
+            except CommentSelectionChanged as exc:
+                raise HTTPException(409, str(exc)) from exc
             with write_transaction(db, scope="patch_user_comment") as connection:
                 row = update_comment(connection, comment_id, patch, user_name=user["name"])
                 apply_user_transition(connection, comment, patch, user, body.delivery_policy)

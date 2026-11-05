@@ -49,10 +49,14 @@ def _block_at(text: str, from16: int | None, lines: list[str]) -> tuple[int, int
     return None
 
 
+def source_revision(source: str) -> str:
+    return hashlib.sha256(source.strip().encode()).hexdigest()
+
+
 def revision(text: str, from16: int | None) -> str | None:
     """The revision a pin is placed on: the hash of the block's source as it is now."""
     block = block_at(text, from16)
-    return hashlib.sha256(block[2].strip().encode()).hexdigest() if block else None
+    return source_revision(block[2]) if block else None
 
 
 def is_diagram_group(group: list[dict], path: str | None) -> bool:
@@ -72,7 +76,7 @@ def mark_stale(group: Iterable[dict], path: str | None) -> None:
         offset = row.get("from_off")
         if offset not in revisions:
             block = _block_at(text, offset, lines)
-            revisions[offset] = hashlib.sha256(block[2].strip().encode()).hexdigest() if block else None
+            revisions[offset] = source_revision(block[2]) if block else None
         current = revisions[offset]
         row["region_stale"] = current is not None and row.get("image_rev") != current
 

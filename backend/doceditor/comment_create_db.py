@@ -42,6 +42,8 @@ class CommentInput:
     review_request_id: str | None = None
     # A checked (x, y, w, h) in fractions of the image (DCOL-FR13.3).
     region: tuple[float, float, float, float] | None = None
+    # Source used to draw the diagram the person placed the pin on.
+    diagram_source: str | None = None
     # An agent comment is always immediate (the batch layer enforces it); a person's caller names the lane.
     delivery_policy: str = feedback_batch_core.IMMEDIATE
 
@@ -83,6 +85,8 @@ def _image(db, request: CommentInput, quote: str | None, start: int | None) -> t
         revision = diagram_pins.revision(read_doc_text(request.path), start)
         if revision is None:
             raise CommentActionError("region_target", "a pin goes on a mermaid block, anchored on its opening line.")
+        if request.browser and (request.diagram_source is None or diagram_pins.source_revision(request.diagram_source) != revision):
+            raise CommentSelectionChanged("The text you selected changed or was removed. Select it again; your draft is kept.")
         return None, revision
     if request.artifact_id is not None:
         artifact = registry_models.get_artifact(request.artifact_id, db=db)

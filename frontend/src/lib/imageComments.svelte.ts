@@ -21,6 +21,7 @@ export function regionLabel(region: ImageRegion): string {
 export function createImageComments(context: {
 	artifactId: () => string | null;
 	readOnly: () => boolean;
+	diagramSource?: () => string | undefined;
 	/** Where focus goes when a card closes with nothing else to return to. */
 	restoreFocus: () => void;
 	/** Scroll a comment's region and its tag into view at the current zoom. */
@@ -77,7 +78,7 @@ export function createImageComments(context: {
 			// Keep the new location visible until the server accepts it or rejects it.
 			moving = { ...move, region };
 			try {
-				await submitDocumentComment(() => moveRegion(artifact, move.id, region), retryToast.remember, () => "Couldn't move the pin — try again");
+				await submitDocumentComment(() => moveRegion(artifact, move.id, region, context.diagramSource?.()), retryToast.remember, () => "Couldn't move the pin — try again");
 				retryToast.dismissAfterSuccess();
 				moving = null;
 				show(move.id, anchor);

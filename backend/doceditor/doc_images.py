@@ -115,15 +115,16 @@ def image_file(db, *, doc_path: str | None, markdown: str | None, bases: list[Pa
 
 
 def region_patch(db, comment: Mapping[str, Any], fields: dict[str, Any], *, doc_path: str | None,
-                 owner_thread_id: str | None) -> dict[str, Any]:
+                 owner_thread_id: str | None, require_diagram_source: bool = False) -> dict[str, Any]:
     """A patch to a comment, checked against the image it is placed on (FR13.5).
 
     A region's box is in its image's coordinates, so a new anchor must still
     name that image; a moved pin is placed on the image as it is now.
     """
+    source = fields.pop("diagram_source", None)
     image_src = comment.get("image_src")
     if not image_src and not is_image_path(doc_path) and comment.get("region_number") is not None:
-        return _diagram_patch(comment, fields, doc_path)
+        return _diagram_patch(comment, fields, doc_path, source, require_diagram_source)
     bases = reader_bases(db, owner_thread_id) if image_src else []
     if image_src and "anchor_text" in fields:
         named = image_file(db, doc_path=doc_path, markdown=fields["anchor_text"], bases=bases)
@@ -135,11 +136,15 @@ def region_patch(db, comment: Mapping[str, Any], fields: dict[str, Any], *, doc_
     return move_fields(comment, fields, require_image(comment_image(db, comment, doc_path, bases)))
 
 
-def _diagram_patch(comment: Mapping[str, Any], fields: dict[str, Any], doc_path: str | None) -> dict[str, Any]:
+def _diagram_patch(comment: Mapping[str, Any], fields: dict[str, Any], doc_path: str | None,
+                   source: str | None, require_source: bool) -> dict[str, Any]:
     """A pin on a diagram has no file: a moved pin is placed on the block as it is now."""
     if "region" not in fields:
         return fields
     current = diagram_pins.revision(read_doc_text(doc_path), comment.get("from_off"))
     if current is None:
         raise CommentActionError("region_target", "the diagram this pin is on is no longer in the document.")
+    if require_source and (source is None or diagram_pins.source_revision(source) != current):
+        from doceditor.comment_creation import CommentSelectionChanged
+        raise CommentSelectionChanged("The text you selected changed or was removed. Select it again; your draft is kept.")
     return move_fields_on(comment, fields, current)

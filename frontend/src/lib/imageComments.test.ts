@@ -69,7 +69,7 @@ describe('image comments', () => {
 		comments.movePin('pin');
 		expect(comments.boxMode).toBe(true);
 		const move = comments.draw({ x: 0.5, y: 0.5, w: 0, h: 0 }, rect);
-		expect(mocks.moveRegion).toHaveBeenCalledWith('image', 'pin', { x: 0.5, y: 0.5, w: 0, h: 0 });
+		expect(mocks.moveRegion).toHaveBeenCalledWith('image', 'pin', { x: 0.5, y: 0.5, w: 0, h: 0 }, undefined);
 		expect(comments.moving).toBe('pin');
 		expect(comments.movingRegion).toEqual({ x: 0.5, y: 0.5, w: 0, h: 0 });
 		expect(comments.moveSaving).toBe(true);

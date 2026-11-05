@@ -57,6 +57,7 @@
 				alt={image.alt}
 				readableScale={image.readableScale}
 				diagramElements={image.diagramElements}
+				diagramSource={image.diagramSource}
 				artifactId={comments.artifactId}
 				projectId={comments.projectId}
 				readOnly={comments.readOnly}
@@ -69,7 +70,7 @@
 				onLoaded={() => loaded = true}
 				inDocument={{
 					occurrence: { from: image.from, to: image.to },
-					post: (region, text) => comments.post(image.from, image.to, region, text),
+					post: (region, text) => comments.post(image.from, image.to, region, text, image.diagramSource),
 					failure: comments.failure,
 				}}
 				focus={image.focus ?? null}

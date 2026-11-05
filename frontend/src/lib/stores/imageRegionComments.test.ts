@@ -31,6 +31,17 @@ describe('a comment on part of an image inside a document', () => {
 		expect(get(docComments).doc[0]).toMatchObject({ id: 'c1', regionNumber: 1, imageSrc: '/ws/a.png' });
 	});
 
+	it('sends the displayed diagram source with a live capture and keeps no failed comment', async () => {
+		const session = { artifactId: 'live-doc', releaseReservation: vi.fn() } as unknown as LiveDocumentSession;
+		mocks.selectComment.mockReturnValue('selection');
+		mocks.captureComment.mockResolvedValue({ clientId: 'diagram-1', quote: '```mermaid', from: 0, to: 10 });
+		mocks.postComment.mockRejectedValueOnce(new Error('Changed'));
+		await expect(addDocImageComment({ artifactId: 'doc', from: 0, to: 10, text: '```mermaid', session, diagramSource: 'graph TD\n A-->B' }, BOX, 'Pin')).rejects.toThrow('Changed');
+		expect(mocks.postComment).toHaveBeenCalledWith('live-doc', expect.objectContaining({ diagram_source: 'graph TD\n A-->B', live_capture: true }));
+		expect(session.releaseReservation).toHaveBeenCalledWith('diagram-1');
+		expect(get(docComments)['live-doc']).toBeUndefined();
+	});
+
 	it('captures the image in a live document as it does a selected quote, and frees the capture when posting fails', async () => {
 		const session = { artifactId: 'live-doc', releaseReservation: vi.fn() } as unknown as LiveDocumentSession;
 		mocks.selectComment.mockReturnValue('selection');

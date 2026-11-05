@@ -146,7 +146,7 @@ export function diagramRequest(view: EditorView, el: HTMLElement): OpenImageRequ
 	const range = diagramAnchor(view, el), svg = el.querySelector('svg');
 	if (!range || !svg) return null;
 	const src = snapshotOf(svg);
-	return src ? { src, alt: 'Diagram', ...range, ...geometry(view, el), readableScale: readableScaleOf(svg), diagramElements: diagramElements(svg) } : null;
+	return src ? { src, alt: 'Diagram', ...range, ...geometry(view, el), readableScale: readableScaleOf(svg), diagramElements: diagramElements(svg), diagramSource: el.dataset.diagramSource } : null;
 }
 
 /** Opens the cell image or diagram a click landed on; false when it is not one that can open. */

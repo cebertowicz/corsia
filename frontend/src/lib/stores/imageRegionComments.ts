@@ -18,6 +18,7 @@ export interface DocImageAnchor {
 	to: number;
 	/** The document's text on screen; its markdown at `from`..`to` is the quote. */
 	text: string;
+	diagramSource?: string;
 	/** A live document tracks the range itself, as it does for a selected quote. */
 	session?: LiveDocumentSession;
 }
@@ -32,7 +33,7 @@ export async function addDocImageComment(image: DocImageAnchor, region: ImageReg
 	const { session } = image;
 	if (!session) {
 		const row = await postReconciled(image.artifactId, newClientId(), {
-			body, region, anchor_text: image.text.slice(image.from, image.to), from_off: image.from, to_off: image.to,
+			body, region, diagram_source: image.diagramSource, anchor_text: image.text.slice(image.from, image.to), from_off: image.from, to_off: image.to,
 			author: 'you', author_kind: 'user',
 		});
 		upsertTop(image.artifactId, row);
@@ -41,7 +42,7 @@ export async function addDocImageComment(image: DocImageAnchor, region: ImageReg
 	const captured = await captureComment(selectComment(session, image.from, image.to), ++captures, new AbortController().signal);
 	try {
 		const row = await postReconciled(session.artifactId, captured.clientId, {
-			body, region, anchor_text: captured.quote, from_off: captured.from, to_off: captured.to, live_capture: true,
+			body, region, diagram_source: image.diagramSource, anchor_text: captured.quote, from_off: captured.from, to_off: captured.to, live_capture: true,
 			author: 'you', author_kind: 'user',
 		});
 		upsertTop(session.artifactId, row);
@@ -53,8 +54,8 @@ export async function addDocImageComment(image: DocImageAnchor, region: ImageReg
 }
 
 /** Move a pin. The server places it on the image as it is now, so it is no longer stale. */
-export async function moveRegion(artifactId: string, commentId: string, region: ImageRegion): Promise<void> {
-	const row = await patchComment(commentId, { region });
+export async function moveRegion(artifactId: string, commentId: string, region: ImageRegion, diagramSource?: string): Promise<void> {
+	const row = await patchComment(commentId, { region, diagram_source: diagramSource });
 	docComments.update((all) => ({
 		...all,
 		[artifactId]: (all[artifactId] ?? []).map((c) => (c.id === commentId ? { ...c, ...regionFromServer(row) } : c))

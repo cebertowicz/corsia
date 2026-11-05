@@ -77,6 +77,7 @@ class MermaidWidget extends WidgetType {
 	toDOM() {
 		const el = document.createElement('div');
 		el.className = 'cm-md-mermaid';
+		el.dataset.diagramSource = this.code;
 		mermaidMounts.set(el, mountMermaid(el, this.code));
 		return el;
 	}

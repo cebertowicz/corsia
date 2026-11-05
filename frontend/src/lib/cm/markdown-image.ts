@@ -191,6 +191,8 @@ export interface OpenImageRequest {
 	readableScale?: number;
 	/** Diagram element bounds in image fractions, for framing a selected subject. */
 	diagramElements?: import('$lib/imageRegions').ImageRegion[];
+	/** Source rendered into this snapshot, used to reject pins on a changed diagram. */
+	diagramSource?: string;
 }
 
 /** Supplied by the editor's host; with none, an image is only selected and never opens. */

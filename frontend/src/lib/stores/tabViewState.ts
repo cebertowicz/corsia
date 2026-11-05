@@ -63,8 +63,8 @@ export function tabDocumentImage(threadId: string, instanceId: string): TabDocum
 
 /** Shows an image of the tab's document over it, at Fit: only where it is and what it opens on are kept, never the comments. */
 export function openTabDocumentImage(threadId: string, instanceId: string, request: DocumentImageRequest): void {
-	const { src, alt, from, to, scrollTop, top, focus, readableScale, diagramElements } = request;
-	setTabViewState(threadId, instanceId, (current) => ({ ...current, documentImage: { src, alt, from, to, scrollTop, top, focus, readableScale, diagramElements } }));
+	const { src, alt, from, to, scrollTop, top, focus, readableScale, diagramElements, diagramSource } = request;
+	setTabViewState(threadId, instanceId, (current) => ({ ...current, documentImage: { src, alt, from, to, scrollTop, top, focus, readableScale, diagramElements, diagramSource } }));
 	announceDocumentImages();
 }
 
