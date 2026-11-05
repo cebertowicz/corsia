@@ -327,7 +327,7 @@ def start_trials(
 
 def attach_plan_result(db, result: object, thread_id: str, direct_node: bool) -> None:
     """Attach trials to the task actually selected by a plan mutation."""
-    from memory.node_text import started_node_id
+    from memory.plan_started_task import started_node_id
 
     result = getattr(result, "result", result)
     if not isinstance(result, dict):

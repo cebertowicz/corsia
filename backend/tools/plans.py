@@ -11,7 +11,7 @@ from core.lesson_delivery import attach_at_worker_read, attach_plan_result
 from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.state.context import running_call_ids
-from memory.node_text import NODE_OPERATIONS
+from memory.plan_started_task import NODE_OPERATIONS
 from plans import public
 from plans.public import (
     read_current_status, PlanActor, ensure_current_plan, mutate, read_current_plan,
