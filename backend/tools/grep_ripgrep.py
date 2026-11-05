@@ -62,17 +62,19 @@ async def search_ripgrep(
     A ripgrep failure is never an empty result: with nothing found it is an error,
     and beside partial results it leads the output as ``INCOMPLETE``.
     """
+    cwd = (search_dir.parent if search_dir.name == THREADS_DIR else search_dir) if scope.fence and scope.fence.has_exclusions else None
     try:
         async with asyncio.timeout(TIMEOUT_SECONDS):
-            roots, listing = await _search_roots(search_dir, glob_filter, scope)
+            exclusions = await asyncio.to_thread(scope.fence.ripgrep_globs, cwd) if cwd and scope.fence else []
+            roots, listing = await _search_roots(search_dir, glob_filter, scope, cwd, exclusions)
             search = await _run([
                 *_RIPGREP,
                 "--no-heading",
                 *_mode_arguments(output_mode, case_insensitive, context),
-                *_glob_arguments(_search_globs(glob_filter)),
+                *_glob_arguments(_search_globs(glob_filter) + exclusions),
                 "-m", str(max_results * 5),
                 "-e", pattern, "--", *map(str, roots),
-            ]) if roots else _Ripgrep("")
+            ], cwd=cwd) if roots else _Ripgrep("")
     except TimeoutError:
         return f"Error: Search timed out after {TIMEOUT_SECONDS} seconds"
     except Exception as exc:
@@ -120,7 +122,7 @@ def _render(
     return rendered
 
 
-async def _run(command: list[str]) -> _Ripgrep:
+async def _run(command: list[str], *, cwd: Path | None = None) -> _Ripgrep:
     """Run one ripgrep command to completion; the process never outlives the call.
 
     ripgrep exits 0 when it finds something, 1 when it finds nothing, and 2 when
@@ -130,6 +132,7 @@ async def _run(command: list[str]) -> _Ripgrep:
         *command,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        cwd=cwd,
     )
     try:
         stdout, stderr = await process.communicate()
@@ -146,6 +149,7 @@ async def _run(command: list[str]) -> _Ripgrep:
 
 async def _search_roots(
     search_dir: Path, glob_filter: str | None, scope: SearchScope,
+    cwd: Path | None, exclusions: list[str],
 ) -> tuple[list[Path], _Ripgrep]:
     """``search_dir``, unless it is a ``.threads`` folder, and the allowed thread
     folders below it, with the listing run that found them."""
@@ -157,9 +161,9 @@ async def _search_roots(
     listing = await _run([
         *_RIPGREP,
         "--files",
-        *_glob_arguments(_thread_listing_globs(glob_filter, scope)),
+        *_glob_arguments(_thread_listing_globs(glob_filter, scope) + exclusions),
         "--", str(search_dir),
-    ])
+    ], cwd=cwd)
     folders = {
         folder
         for line in listing.output.splitlines()

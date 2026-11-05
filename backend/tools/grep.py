@@ -3,7 +3,7 @@
 import asyncio
 import re
 import subprocess
-from collections.abc import Iterator
+from copy import deepcopy
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
@@ -12,10 +12,12 @@ from typing import Any
 from infra.constants import GREP_OUTPUT_CHAR_CAP
 from tools.base import Tool
 from tools.filesystem_effects import bound_path_kind, open_bound_text, walk_bound_files
-from tools.filesystem_gate import resolve_path, _resolve_path_for_action
-from tools.glob_walk import select_grep_files
+from tools.filesystem_gate import _resolve_path_for_action
 from tools.grep_content import SEPARATOR, GrepLine, SourceLines, context_ranges, render
+from tools.grep_python import iter_python_files
 from tools.grep_ripgrep import search_ripgrep
+from tools.grep_schema import DESCRIPTION, PARAMETERS
+from tools.search_fence import SearchFence
 from tools.search_scope import (
     THREADS_NOTICE, SearchScope, included_filter, keep_path, pattern_components,
     reviewed_grep_reads, search_identity,
@@ -32,11 +34,6 @@ def _has_ripgrep() -> bool:
 
 _RG_AVAILABLE = _has_ripgrep()
 _MAX_SEARCH_FILE_BYTES = 10 * 1024 * 1024
-
-
-def _grep_scope(search_dir: Path, current_thread_id: str | None, all_threads: bool) -> SearchScope:
-    """Grep's scope: the shared rules; a ``.env`` file is read only when named."""
-    return SearchScope(current_thread_id, all_threads, root_name=search_dir.name)
 
 
 def _add_right_stripped(
@@ -62,75 +59,11 @@ class GrepTool(Tool):
 
     @property
     def description(self) -> str:
-        return (
-            "Search file contents using regex patterns. Built on ripgrep for speed.\n\n"
-            "Supports full regex syntax (e.g., 'log.*Error', 'function\\s+\\w+', 'TODO|FIXME').\n"
-            "Filter files with the glob parameter (e.g., '*.py', '**/*.ts').\n"
-            "Skips hidden files and folders (except your own thread's .threads folder), "
-            "node_modules, __pycache__ and venv unless the glob names them (for example "
-            "'.github/**/*.yml'); passing one as path also searches inside it.\n"
-            "Output is capped at ~20K characters. Use 'files' mode for broad searches, "
-            "'content' mode with glob filters for targeted results.\n\n"
-            "Output modes:\n"
-            "- 'content': shows matching lines with file path and line number\n"
-            "- 'files': shows only file paths that contain matches (default)\n"
-            "- 'count': shows match count per file\n\n"
-            "USE THIS when you need to:\n"
-            "- Find where a function, class, or variable is defined or used\n"
-            "- Search for specific strings or patterns across the codebase\n"
-            "- Find TODO/FIXME comments, error messages, or log patterns\n"
-            "- Locate imports or references to a module\n\n"
-            "DO NOT use this when:\n"
-            "- Finding files by name (use glob instead)\n"
-            "- Reading a specific file (use read_file instead)\n"
-            "- Listing directory contents (use list_dir instead)"
-        )
+        return DESCRIPTION
 
     @property
     def parameters(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "pattern": {
-                    "type": "string",
-                    "description": "Regex pattern to search for in file contents",
-                },
-                "path": {
-                    "type": "string",
-                    "description": "File or directory to search in. Defaults to workspace root.",
-                },
-                "glob": {
-                    "type": "string",
-                    "description": "Glob pattern to filter files (e.g., '*.py', '*.{ts,tsx}')",
-                },
-                "output_mode": {
-                    "type": "string",
-                    "enum": ["content", "files", "count"],
-                    "description": "Output mode: 'content' (matching lines), 'files' (file paths only, default), 'count' (match counts)",
-                },
-                "case_insensitive": {
-                    "type": "boolean",
-                    "description": "Case insensitive search. Default: false.",
-                },
-                "context": {
-                    "type": "integer",
-                    "description": "Number of context lines before and after each match. Only for 'content' mode.",
-                    "minimum": 0,
-                    "maximum": 10,
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return. Default: 50.",
-                    "minimum": 1,
-                    "maximum": 200,
-                },
-                "all_threads": {
-                    "type": "boolean",
-                    "description": "Also search other threads' .threads folders. Default: false — search covers shared files and your own thread's folder.",
-                },
-            },
-            "required": ["pattern"],
-        }
+        return deepcopy(PARAMETERS)
 
     async def execute(
         self,
@@ -167,16 +100,17 @@ class GrepTool(Tool):
         except PermissionError as exc:
             return f"Error: {exc}"
         search_dir = authorized.resolved
+        fence = await asyncio.to_thread(SearchFence, search_dir, kwargs.get("_thread_id"))
         current_thread_id, all_threads = search_identity(search_dir, kwargs.get("_thread_id"), all_threads)
         if not keep_path(search_dir, current_thread_id, all_threads):
-            return f"No matches for pattern '{pattern}'\n{THREADS_NOTICE}"
+            return fence.notice(f"No matches for pattern '{pattern}'\n{THREADS_NOTICE}")
 
         if authorized.reviewed:
             try:
                 # Off the event loop, exactly as ``glob`` already does. Both
                 # search paths below walk the filesystem synchronously, and
                 # `async def` makes the runtime assume they yield. They do not.
-                return await asyncio.to_thread(
+                result = await asyncio.to_thread(
                     self._search_reviewed,
                     pattern,
                     search_dir,
@@ -187,7 +121,9 @@ class GrepTool(Tool):
                     max_results,
                     current_thread_id,
                     all_threads,
+                    fence,
                 )
+                return fence.notice(result)
             except PermissionError as exc:
                 return f"Error: {exc}"
 
@@ -195,7 +131,7 @@ class GrepTool(Tool):
             return f"Error: Path not found: {path or str(self._workspace)}"
 
         if _RG_AVAILABLE:
-            return await search_ripgrep(
+            result = await search_ripgrep(
                 pattern,
                 search_dir,
                 glob,
@@ -203,9 +139,10 @@ class GrepTool(Tool):
                 case_insensitive,
                 context,
                 max_results,
-                _grep_scope(search_dir, current_thread_id, all_threads),
+                SearchScope(current_thread_id, all_threads, root_name=search_dir.name, fence=fence),
                 self.OUTPUT_CHAR_CAP,
             )
+            return fence.notice(result)
         else:
             # The fallback taken when ripgrep is absent. It walks the tree in
             # pure Python, and on 2026-08-15 it froze production twice — a
@@ -221,7 +158,7 @@ class GrepTool(Tool):
             #
             # Installing ripgrep only makes this path rarer. One agent's search
             # must never be able to stop the platform.
-            return await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 self._search_python,
                 pattern,
                 search_dir,
@@ -232,7 +169,9 @@ class GrepTool(Tool):
                 max_results,
                 current_thread_id,
                 all_threads,
+                fence,
             )
+            return fence.notice(result)
 
     def _search_reviewed(
         self,
@@ -245,6 +184,7 @@ class GrepTool(Tool):
         max_results: int,
         current_thread_id: str | None,
         all_threads: bool,
+        fence: SearchFence | None = None,
     ) -> str:
         """Search a reviewed host path through no-follow descriptors."""
         flags = re.IGNORECASE if case_insensitive else 0
@@ -294,7 +234,7 @@ class GrepTool(Tool):
                 relative.suffix, content, emitted, universal=True,
             ))
 
-        scope = _grep_scope(search_path, current_thread_id, all_threads)
+        scope = SearchScope(current_thread_id, all_threads, root_name=search_path.name, fence=fence)
         if kind == "file":
             if keep_path(search_path, current_thread_id, all_threads):
                 with open_bound_text(search_path) as (handle, file_stat):
@@ -351,6 +291,7 @@ class GrepTool(Tool):
         max_results: int,
         current_thread_id: str | None,
         all_threads: bool,
+        fence: SearchFence | None = None,
     ) -> str:
         """Fallback: pure Python regex search (slower, no .gitignore respect)."""
         flags = re.IGNORECASE if case_insensitive else 0
@@ -365,6 +306,7 @@ class GrepTool(Tool):
                 glob_filter,
                 current_thread_id,
                 all_threads,
+                fence,
             )
         )
 
@@ -425,31 +367,4 @@ class GrepTool(Tool):
                 return f"No matches for pattern '{pattern}'"
             return render(results, safe, self.OUTPUT_CHAR_CAP)
 
-    def _iter_python_files(
-        self,
-        search_dir: Path,
-        glob_filter: str | None,
-        current_thread_id: str | None,
-        all_threads: bool,
-    ) -> Iterator[tuple[Path, Path]]:
-        """Yield display paths with authorized resolved targets for fallback reads."""
-        scope = _grep_scope(search_dir, current_thread_id, all_threads)
-        candidates: Iterator[Path]
-        if search_dir.is_file():
-            candidates = iter((search_dir,))
-        else:
-            candidates = (
-                search_dir.joinpath(*relative)
-                for relative in select_grep_files(search_dir, glob_filter, scope)
-            )
-        for candidate in candidates:
-            resolved = candidate.resolve(strict=False)
-            if not resolved.is_relative_to(search_dir):
-                try:
-                    resolved = resolve_path(
-                        str(candidate), self._workspace, self._allowed_dir
-                    )
-                except PermissionError:
-                    continue
-            if resolved.is_file() and keep_path(resolved, current_thread_id, all_threads):
-                yield candidate, resolved
+    _iter_python_files = iter_python_files
