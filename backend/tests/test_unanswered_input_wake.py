@@ -230,15 +230,15 @@ def _queue(db, message="m2", **metadata) -> None:
     db.commit()
 
 
-async def _end_claiming(db, error: str = "provider exploded"):
-    """End t1 as every terminal does with input queued: its successor t2 claims it first."""
+async def _end_claiming(db, error: str = "provider exploded", turn="t1", successor="t2"):
+    """End a Turn as every terminal does with input queued: its successor claims it first."""
     from infra.thread_driver import finish_turn
 
-    finish_turn("t1", outcome="error", ended_at="t2", successor_turn_id="t2",
+    finish_turn(turn, outcome="error", ended_at=successor, successor_turn_id=successor,
                 boot_epoch="boot-1", error=error, db=db)
     db.commit()
     return await record_turn_end(
-        on_thread_turn_complete, _THREAD, outcome="error", error=error, turn_id="t1",
+        on_thread_turn_complete, _THREAD, outcome="error", error=error, turn_id=turn,
     )
 
 
@@ -284,19 +284,39 @@ async def test_a_successor_that_fails_before_writing_queues_the_replaced_wake(db
     assert effects.drives.count(_THREAD) == 1
 
 
-@pytest.mark.asyncio
-async def test_the_owed_wake_is_owed_once(db) -> None:
-    from infra.unanswered_input_wake import _owed_earlier
+def _carries(db, message="m2"):
+    from infra.unanswered_input_wake import CARRIED_KEY
 
+    return json.loads(db.execute("SELECT metadata FROM messages WHERE id=?", (message,)).fetchone()[0]
+                      or "{}").get(CARRIED_KEY)
+
+
+@pytest.mark.asyncio
+async def test_the_replacing_input_carries_the_wake_once(db) -> None:
     _take_in(db)
     _queue(db)
     await _end_claiming(db)
-    assert _owed_earlier(db, _THREAD) == "t1"
+    assert _carries(db) == "t1"
 
     await _end(db, turn="t2")
 
     assert len(_wakes(db)) == 1
-    assert _owed_earlier(db, _THREAD) is None
+    assert _carries(db) is None
+
+
+@pytest.mark.asyncio
+async def test_a_failed_carrier_hands_the_wake_to_the_next_persons_input(db) -> None:
+    """Another person's input still queued answers instead, so it carries the wake on."""
+    _take_in(db)
+    _queue(db)
+    await _end_claiming(db)
+    _queue(db, message="m3")
+
+    effects = await _end_claiming(db, turn="t2", successor="t3")
+
+    assert _wakes(db) == []
+    assert _THREAD not in effects.drives
+    assert (_carries(db), _carries(db, "m3")) == (None, "t1")
 
 
 @pytest.mark.asyncio

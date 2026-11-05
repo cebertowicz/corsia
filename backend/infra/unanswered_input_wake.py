@@ -26,6 +26,8 @@ GUIDANCE = (
 )
 #: Failure kinds a second Turn would meet the same way (``llm.error_cause.KINDS``).
 _EXCLUDED_KINDS = ("usage_limit", "sign_in_expired", "auth_rejected", "context_overflow")
+#: On a person's queued input: the errored Turn whose wake that input replaced.
+CARRIED_KEY = "carries_unanswered_wake_of"
 
 
 def _excluded(db: sqlite3.Connection, thread_id: str, turn_id: str, error: str) -> bool:
@@ -73,52 +75,43 @@ def _unanswered_input(db: sqlite3.Connection, thread_id: str, turn_id: str) -> b
     ).fetchone() is None
 
 
-def _owed_earlier(db: sqlite3.Connection, thread_id: str) -> str | None:
-    """The errored Turn that took in the thread's newest person message, still unanswered and never woken.
-
-    A person's queued input replaces that Turn's wake, but the input's Turn can
-    fail before it writes: the input then settles ``failed``, no Turn sees the
-    earlier message, and its one wake is still owed. The earlier Turn's own
-    skips (excluded cause, restart registration, a wake it took in) still hold.
-    """
+def _carried(db: sqlite3.Connection, turn_id: str) -> tuple[str, str] | None:
+    """``(input id, replaced Turn)`` of a carrying person input this Turn claimed and never wrote."""
+    path = f"$.{CARRIED_KEY}"
     row = db.execute(
-        "SELECT seq, metadata, active_turn_id FROM messages WHERE thread_id=? AND role='user' "
-        "AND delivery_state='delivered' AND seq IS NOT NULL ORDER BY seq DESC LIMIT 1",
-        (thread_id,),
+        "SELECT id, json_extract(metadata,?) AS owed FROM messages "
+        "WHERE active_turn_id=? AND role='user' AND delivery_state='failed' "
+        "AND write_outcome='proved_no_write' AND json_extract(metadata,?) IS NOT NULL "
+        "ORDER BY input_order LIMIT 1",
+        (path, turn_id, path),
     ).fetchone()
-    if row is None or not row["active_turn_id"] or not _is_person(row["metadata"]):
-        return None
-    earlier = str(row["active_turn_id"])
-    turn = db.execute("SELECT error FROM active_turns WHERE id=? AND status='error'", (earlier,)).fetchone()
-    if (
-        turn is None
-        or db.execute("SELECT 1 FROM messages WHERE id=?", (_wake_id(earlier),)).fetchone() is not None
-        or _took_in_wake(db, earlier)
-        or _restart_resumes(db, thread_id, earlier)
-        or _excluded(db, thread_id, earlier, str(turn["error"] or ""))
-    ):
-        return None
-    answered = db.execute(
-        "SELECT 1 FROM messages WHERE thread_id=? AND role='assistant' AND seq>? "
-        "AND TRIM(COALESCE(content,''))<>'' LIMIT 1",
-        (thread_id, row["seq"]),
-    ).fetchone()
-    return None if answered else earlier
+    return None if row is None else (str(row["id"]), str(row["owed"]))
 
 
-def _person_input_queued(db: sqlite3.Connection, thread_id: str) -> bool:
-    """Whether a person's queued input will start, or after its hold lifts start, a Turn that sees the message.
+def _queued_person_input(db: sqlite3.Connection, thread_id: str) -> str | None:
+    """The first person's queued input that will start, or after its hold lifts start, a Turn that sees the message.
 
     A claim held by a Turn that is no longer running does not count, as in
     ``thread_input_rows.liveness_wake_queued``.
     """
-    return any(_is_person(row["metadata"]) for row in db.execute(
-        "SELECT m.metadata FROM messages m WHERE m.thread_id=? AND m.role='user' "
+    return next((str(row["id"]) for row in db.execute(
+        "SELECT m.id, m.metadata FROM messages m WHERE m.thread_id=? AND m.role='user' "
         "AND m.delivery_state='queued' AND m.input_order IS NOT NULL "
         "AND (m.active_turn_id IS NULL OR EXISTS (SELECT 1 FROM active_turns t "
-        "WHERE t.id=m.active_turn_id AND t.status='running'))",
+        "WHERE t.id=m.active_turn_id AND t.status='running')) ORDER BY m.input_order",
         (thread_id,),
-    ))
+    ) if _is_person(row["metadata"])), None)
+
+
+def _set_carried(db: sqlite3.Connection, message_id: str, owed: str | None) -> None:
+    path = f"$.{CARRIED_KEY}"
+    if owed is None:
+        db.execute("UPDATE messages SET metadata=json_remove(metadata,?) WHERE id=?", (path, message_id))
+    else:
+        db.execute(
+            "UPDATE messages SET metadata=json_set(COALESCE(metadata,'{}'),?,?) WHERE id=?",
+            (path, owed, message_id),
+        )
 
 
 def _wake_id(turn_id: str) -> str:
@@ -151,22 +144,32 @@ def queue_unanswered_input_wake(
     resumes it; a plan backoff wake does not, since it neither fires soon nor
     names the person's message. A person's queued input replaces it too: its
     Turn answers with the message in history, and recovery may already have
-    claimed it, so the wake would be a second Turn after it. When that Turn
-    errors without answering, its end queues the replaced wake instead.
+    claimed it, so the wake would be a second Turn after it. That input carries
+    the replaced wake (``CARRIED_KEY``); if its Turn errors before writing it,
+    the input settles failed and that Turn's end owes the carried wake instead.
     """
     turn_id = outcome.get("turn_id")
     if outcome.get("outcome") != "error" or not turn_id:
         return
     if liveness_wake is not None and liveness_wake.provider_reset_at is not None:
         return
-    owed = turn_id if _unanswered_input(db, thread_id, turn_id) else _owed_earlier(db, thread_id)
+    if _unanswered_input(db, thread_id, turn_id):
+        owed: str | None = turn_id
+    else:
+        carrier, owed = _carried(db, turn_id) or (None, None)
+        if carrier is not None:
+            # Read once: whatever this end decides, the failed input carries nothing more.
+            _set_carried(db, carrier, None)
     if (
         owed is None
         or _excluded(db, thread_id, turn_id, str(outcome.get("error") or ""))
         or _took_in_wake(db, turn_id)
         or _restart_resumes(db, thread_id, turn_id)
-        or _person_input_queued(db, thread_id)
     ):
+        return
+    replacing = _queued_person_input(db, thread_id)
+    if replacing is not None:
+        _set_carried(db, replacing, owed)
         return
     from events.delivery import enqueue_event_wake
     from infra.send_types import SendRejected
