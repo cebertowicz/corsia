@@ -107,14 +107,14 @@ async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIt
         task = life.restart
         await asyncio.wait({task})  # caller cancellation must not cancel the restart
         if task.cancelled():
-            raise RuntimeError("Local model server upgrade was cancelled")
+            raise RuntimeError("Couldn’t upgrade the local model server because the upgrade was cancelled. Check the server in Settings and try again.")
         try:
             result = task.result()
         except Exception as exc:
-            raise RuntimeError("Local model server upgrade failed. Check the server in Settings and try again.") from exc
+            raise RuntimeError("Couldn’t upgrade the local model server. Check the server in Settings and try again.") from exc
         if isinstance(result, dict) and result.get("reason") != "already_current":
             if not result.get("restarted") or result.get("reason"):
-                raise RuntimeError("Local model server upgrade failed. Check the server in Settings and try again.")
+                raise RuntimeError("Couldn’t upgrade the local model server. Check the server in Settings and try again.")
         life = lives.get(server_id or "")
     if life is None:
         yield  # unmanaged and other providers have no supervisor admission

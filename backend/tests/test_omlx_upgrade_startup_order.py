@@ -163,7 +163,7 @@ async def test_never_ready_upgrade_fails_held_call_in_finite_time(isolated_db, m
                 pytest.fail("a call entered after the boot timed out")
 
         waiter = asyncio.create_task(request())
-        with pytest.raises(RuntimeError, match="upgrade failed"):
+        with pytest.raises(RuntimeError, match="Couldn’t upgrade the local model server"):
             await asyncio.wait_for(waiter, 2)
         assert upgrade.done()
     finally:
