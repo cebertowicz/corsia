@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { useLayoutCrossfade } from './layoutCrossfade.svelte';
+	import { settleHeight } from '$lib/actions/settleHeight';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import AgentOptions from '../reviews/AgentOptions.svelte';
 	import { agentOptionIndex } from '../reviews/agentOptionKeys';
 	import { hasMentionRoster, useMentionRoster } from './mentionContext';
@@ -71,10 +73,11 @@
 	});
 </script>
 {#if query !== null}
-	<!-- The children provide the keyboard controls; these handlers preserve the textarea and contain pointer clicks. -->
+	<!-- The children provide the keyboard controls; these handlers preserve the textarea and contain pointer clicks.
+	     Filtering eases the list to its new height (the composer popover has no height ease of its own); reduced motion cuts and crossfades instead. -->
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
-	<div class="mention-region" transition:transition onpointerdown={preserveCaret} onclick={(event) => event.stopPropagation()}><AgentOptions {id} label="Agents to tag" {matches} active={Math.min(active, matches.length - 1)} {choose} {status} retry={roster.load} /></div>
+	<div class="mention-region" transition:transition use:settleHeight={{ enabled: !$prefersReducedMotion }} onpointerdown={preserveCaret} onclick={(event) => event.stopPropagation()}><AgentOptions {id} label="Agents to tag" {matches} active={Math.min(active, matches.length - 1)} {choose} {status} retry={roster.load} /></div>
 {/if}
 <style>
-	.mention-region { padding-top: var(--space-2); }
+	.mention-region { padding-top: var(--space-2); overflow: clip; }
 </style>
