@@ -151,6 +151,11 @@ export function duration(seconds: unknown): string {
 	return `${seconds} seconds`;
 }
 
+export function cadence(seconds: number | null): string {
+	if (seconds == null) return 'When a matching event arrives';
+	return seconds === 1 ? 'Every second' : `Every ${seconds} seconds`;
+}
+
 export function remaining(lease: HostAccessLease, nowMs: number): string {
 	if (lease.expires_at === null) return 'activating';
 	if (!validTime(lease.expires_at)) return 'unknown';

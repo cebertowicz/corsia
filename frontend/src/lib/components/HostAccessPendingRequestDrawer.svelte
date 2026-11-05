@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { Button, StatePill } from '$lib/components/ui';
-	import { text, duration, policyLabel, approvalReady, owner } from '$lib/hostAccess/leaseFormat';
+	import { text, duration, cadence, policyLabel, approvalReady, owner } from '$lib/hostAccess/leaseFormat';
 	import type { HostAccessLease } from '$lib/api/hostAccess';
 
 	let {
@@ -73,14 +73,14 @@
 {#if lease.kind === 'script'}
 	<div class="pending-drawer">
 		<header class="decision-head">
-			<div><div class="eyebrow">Authenticated script</div><h2>{lease.script_name}</h2></div>
-			<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : 'Review'} />
+			<div><div class="eyebrow">Allow this script to use GitHub</div><h2>{lease.script_name}</h2></div>
+			<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Needs refresh' : 'Needs approval'} />
 		</header>
 		<div class="decision-body">
-			<section><span class="label">Trigger</span><p>{lease.trigger?.cadence_seconds == null ? 'Event rules' : `Every ${lease.trigger.cadence_seconds} seconds`}</p></section>
+			<section><span class="label">When it runs</span><p>{cadence(lease.trigger?.cadence_seconds ?? null)}</p></section>
 			<section class="purpose"><span class="label">Purpose</span><p>{lease.purpose}</p></section>
 			<section><span class="label">Your request</span><p>{lease.user_request}</p></section>
-			{#if stale || !ready}<div class="approval-blocked" role="status"><strong>Approval is unavailable.</strong><Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
+			{#if stale || !ready}<div class="approval-blocked" role="status"><strong>The request couldn't be verified. Try again.</strong><Button size="sm" onclick={onRetry}>Retry</Button></div>{/if}
 		</div>
 		<footer class="decision-actions">
 			<Button variant="danger" loading={deciding} disabled={rejectDisabled} onclick={onReject}>Deny</Button>

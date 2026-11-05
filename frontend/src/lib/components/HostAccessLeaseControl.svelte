@@ -398,20 +398,20 @@
 			<button
 				type="button"
 				class="pending-request-trigger"
-				aria-label={currentPending.kind === 'script' ? 'Review authenticated script' : 'Review temporary host access'}
+				aria-label={currentPending.kind === 'script' ? 'Review GitHub access for this script' : 'Review temporary host access'}
 				aria-haspopup="dialog"
 				aria-expanded={pendingOpen}
 				bind:this={pendingTriggerEl}
 				onclick={openPendingDrawer}
 			>
-				<span class="eyebrow">{currentPending.kind === 'script' ? 'Authenticated script' : 'Temporary host access'}</span>
+				<span class="eyebrow">{currentPending.kind === 'script' ? 'Allow this script to use GitHub' : 'Temporary host access'}</span>
 				<span class="pending-owner">{currentPending.kind === 'script' ? currentPending.script_name : owner(currentPending)}</span>
-				<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : (currentPending.kind === 'script' ? 'Review' : duration(currentPending.requested_duration_seconds))} size="sm" />
+				<StatePill state={stale ? 'error' : 'warning'} label={currentPending.kind === 'script' ? (stale ? 'Needs refresh' : 'Needs approval') : (stale ? 'Not current' : duration(currentPending.requested_duration_seconds))} size="sm" />
 				<span class="pending-action">Review →</span>
 			</button>
 			{#key currentPending.id}
 				<AdaptiveDrawer
-					ariaLabel={currentPending.kind === 'script' ? 'Review authenticated script' : 'Review temporary host access'} flushBottom
+					ariaLabel={currentPending.kind === 'script' ? 'Review GitHub access for this script' : 'Review temporary host access'} flushBottom
 					open={pendingOpen}
 					onClose={closePendingDrawer}
 				>

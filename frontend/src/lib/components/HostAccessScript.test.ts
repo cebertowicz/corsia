@@ -1,7 +1,7 @@
 import { flushSync, mount, unmount } from 'svelte';
 import { expect, it, vi } from 'vitest';
 import HostAccessPendingRequestDrawer from './HostAccessPendingRequestDrawer.svelte';
-import { approvalReady } from '$lib/hostAccess/leaseFormat';
+import { approvalReady, cadence } from '$lib/hostAccess/leaseFormat';
 import { externalLease } from '../../../e2e/fixtures/external-agent-lease';
 
 it('shows the script, trigger, purpose and request with approve and deny', async () => {
@@ -21,6 +21,9 @@ it('shows the script, trigger, purpose and request with approve and deny', async
 	} });
 	flushSync();
 	expect(target.textContent).toContain('task.py');
+	expect(target.textContent).toContain('Allow this script to use GitHub');
+	expect(target.textContent).toContain('Needs approval');
+	expect(target.textContent).toContain('When it runs');
 	expect(target.textContent).toContain('Every 600 seconds');
 	expect(target.textContent).toContain('Check the result');
 	expect(target.textContent).toContain('Please check the result');
@@ -31,4 +34,10 @@ it('shows the script, trigger, purpose and request with approve and deny', async
 	expect(deny).toHaveBeenCalledOnce();
 	await unmount(component);
 	target.remove();
+});
+
+it('says when a script runs in plain words', () => {
+	expect(cadence(null)).toBe('When a matching event arrives');
+	expect(cadence(1)).toBe('Every second');
+	expect(cadence(600)).toBe('Every 600 seconds');
 });
