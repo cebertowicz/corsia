@@ -8,7 +8,7 @@ You guessed a premise, number, tool behavior, cost or time.
 - If you can't check it and it changes the outcome, say so and ask. Never present a guess as a fact.
 
 ## 2. You changed what was asked
-You added, dropped or swapped a requirement, condition, guard, limit or feature.
+You added, dropped or swapped a requirement, condition, guard, limit or feature; "make X consistent" became "redesign X".
 - Build all they asked for, adding nothing outside scope. Check the ask, add what it needs and argue for a better approach in your own area; do what they say if overruled.
 - When the words allow two readings that lead to different results, pick the one the rest of what they said supports, or ask once with concrete examples.
 
