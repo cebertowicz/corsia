@@ -217,7 +217,7 @@ def _own_task(db, thread_id: str = "mid") -> None:
     added = boundary.mutate(
         plan["id"], "add",
         {"kind": "task", "title": "Worker task", "acceptance_criteria": "Done", "size": "unknown",
-         "intent": intent, "intent_words": [{"quote": intent, "role": "authority"}]},
+         "intent": intent},
         actor=replace(MID, turn_id=turn_id), provenance="test.pause_cascade", mutation_id=f"add-{thread_id}", db=db,
     ).result
     node = added.get("node", added)

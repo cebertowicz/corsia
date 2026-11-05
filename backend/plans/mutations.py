@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from plans import aggregates, errors, intent_words as intent_word_store, service, writer_context
+from plans import aggregates, errors, intent_creation, service, writer_context
 from plans.models import PlanNode
 
 _UNSET = object()
@@ -119,7 +119,6 @@ def edit_node(
     description: str | None = None,
     acceptance_criteria: str | None = None,
     intent: str | None | object = _UNSET,
-    intent_words: list[dict[str, str]] | None = None,
     watchdog_budget_seconds: int | None | object = _UNSET,
     difficulty_rerated: dict[str, str] | None = None,
     size: str | None | object = _UNSET,
@@ -129,7 +128,7 @@ def edit_node(
     db=None,
 ) -> PlanNode:
     """Amend durable node intent without replacing its stable identity."""
-    if all(value is None for value in (title, description, acceptance_criteria, difficulty_rerated, intent_words)) and intent is _UNSET and watchdog_budget_seconds is _UNSET and size is _UNSET:
+    if all(value is None for value in (title, description, acceptance_criteria, difficulty_rerated)) and intent is _UNSET and watchdog_budget_seconds is _UNSET and size is _UNSET:
         raise service.PlanInputError("edit requires at least one changed field")
     if size is not _UNSET:
         from plans.size_fields import validate_size
@@ -147,16 +146,16 @@ def edit_node(
 
             _user_step_description({"kind": node["kind"], "assignee": "user", "description": description})
         if intent is not _UNSET:
-            from plans.intent_words import validate_intent
+            from plans.intent_creation import validate_intent
             intent = validate_intent(intent)
         next_title, next_description, next_dod, next_intent, next_watchdog, next_size, restated = _next_edit_values(
             node, title, description, acceptance_criteria, intent, watchdog_budget_seconds, size,
         )
         size_changed = next_size != node["size"]
-        if not restated and not intent_words and difficulty_rerated is None and not size_changed:
+        if not restated and difficulty_rerated is None and not size_changed:
             return service._node_from_row(connection, node)
         requirements_changed = (
-            next_dod != node["acceptance_criteria"] or next_intent != node["intent"] or bool(intent_words)
+            next_dod != node["acceptance_criteria"] or next_intent != node["intent"]
         )
         if restated:
             service.touch_node(
@@ -175,9 +174,6 @@ def edit_node(
                 **({"size": next_size} if size_changed else {}),
             )
         updated = service._node_row(connection, node_id)
-        if intent_words:
-            from plans import intent_words as words
-            words.append(connection, node_id, intent_words, revision=updated["requirements_revision"])
         if requirements_changed:
             from plans import admission, plan_wake
 
@@ -269,7 +265,6 @@ def split_node(
     description: str | None = None,
     size: str | None = None,
     intent: str | None = None,
-    intent_words: list[dict[str, str]] | None = None,
     expected_revision: int | None = None,
     actor_id: str | None = None,
     provenance: str = "plan_mutation",
@@ -296,7 +291,7 @@ def split_node(
             order_key=source["order_key"] + 1, description=description,
             size=size, **step,
             intent=intent,
-            intent_node_id=(None if intent is not None else intent_word_store.canonical(connection, source["id"])["id"]),
+            intent_node_id=(None if intent is not None else intent_creation.canonical(connection, source["id"])["id"]),
             checkpoint_exception=False, assignee=source["assignee"],
             spawn_kind=source["spawn_kind"],
             watchdog_budget_seconds=source["watchdog_budget_seconds"],
@@ -304,9 +299,6 @@ def split_node(
             actor_id=actor_id, provenance=provenance,
             node_id=service._id(),
         )
-        if intent_words:
-            from plans import intent_words as words
-            words.append(connection, sibling.id, intent_words, revision=sibling.requirements_revision)
         service.touch_node(connection, node_id)
         service._event(
             connection, node_id, "node_split", actor_id=actor_id, provenance=provenance,

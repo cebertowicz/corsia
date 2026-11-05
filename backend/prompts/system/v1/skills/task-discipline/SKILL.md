@@ -9,7 +9,7 @@ This skill is how to align on a request, ground your work in what exists, and ve
 
 ## Alignment
 
-Before substantive work, record your reading on the task: `intent` holds the outcome, for whom, what done means, what is out, and how you settled what the request left open; `intent_words` quotes the request verbatim. Mark an inferred part of `intent` `ASSUMED:` with its source.
+Before substantive work, record your reading on the task: `intent` holds the agreed outcome, for whom, what done means, what is out, and how you settled what the request left open. Mark an inferred part of `intent` `ASSUMED:` with its source.
 
 ## Groundwork by work type
 

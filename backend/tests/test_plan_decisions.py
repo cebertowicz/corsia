@@ -151,12 +151,11 @@ def test_decision_review_task_references_its_source_intent(db):
 
     assert service.get_node(decision["node_id"], db=db).intent_node_id == source.id
     assert detail["intent"] is None
-    assert detail["intent_words"] == []
     assert detail["canonical_intent"]["node_id"] == source.id
     assert public.intent_of(decision["node_id"], db=db) == {
         "node_id": source.id, "title": source.title,
         "requirements_revision": 1, "intent": None,
-        "acceptance_criteria": "Implement decisions DOD", "intent_words": [],
+        "acceptance_criteria": "Implement decisions DOD",
     }
 
 

@@ -32,7 +32,6 @@ _CREATE = {
     "difficulty",
     "size",
     "intent",
-    "intent_words",
     "checkpoint_exception",
     "assignee",
     "spawn_kind",
@@ -69,7 +68,6 @@ OPERATION_FIELDS = {
         "description",
         "acceptance_criteria",
         "intent",
-        "intent_words",
         "watchdog_budget_seconds",
         "difficulty_rerated",
         "size",
@@ -82,7 +80,6 @@ OPERATION_FIELDS = {
         "description",
         "size",
         "intent",
-        "intent_words",
         "expected_revision",
     },
     "reorder": {"node_id", "order_key", "expected_revision"},
@@ -97,7 +94,6 @@ OPERATION_FIELDS = {
         "acceptance_criteria",
         "size",
         "intent",
-        "intent_words",
         "expected_revision",
     },
     "archive_node": {"node_id", "node_ids", "expected_revision"} | _NEXT,
@@ -138,14 +134,13 @@ OPERATION_FIELDS = {
         "acceptance_criteria",
         "size",
         "intent",
-        "intent_words",
         "verification_result",
         "evidence",
         "expected_revision",
     } | _NEXT,
     "add_correction": {
         "node_id", "title", "acceptance_criteria", "affected_nodes",
-        "intent", "intent_words", "expected_revision",
+        "intent", "expected_revision",
     },
     "arm_watch": {
         "node_id",
@@ -337,7 +332,6 @@ def node_fields(
         "difficulty": params.get("difficulty"),
         "size": size,
         "intent": params.get("intent"),
-        "intent_words": params.get("intent_words"),
         "checkpoint_exception": bool(params.get("checkpoint_exception", False)),
         "assignee": params.get("assignee"),
         "spawn_kind": params.get("spawn_kind"),
@@ -352,7 +346,7 @@ def edit_fields(params: dict[str, Any]) -> dict[str, Any]:
     fields: dict[str, Any] = {
         key: params[key]
         for key in (
-            "title", "description", "acceptance_criteria", "intent", "intent_words", "watchdog_budget_seconds",
+            "title", "description", "acceptance_criteria", "intent", "watchdog_budget_seconds",
         )
         if key in params
     }
