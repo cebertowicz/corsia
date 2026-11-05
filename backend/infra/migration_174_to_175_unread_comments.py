@@ -4,14 +4,24 @@ from __future__ import annotations
 import sqlite3
 
 
+def _has_table(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
+
+
 def migrate_174_to_175(conn: sqlite3.Connection) -> None:
     """Stamp old resolved replies and eligible root comments, keeping newer views."""
     if conn.execute("PRAGMA user_version").fetchone()[0] >= 175:
         return
+    if not all(_has_table(conn, name) for name in ('users', 'doc_comments', 'doc_comment_thread_views')):
+        return
+    owners = (
+        "UNION SELECT DISTINCT user_id FROM threads WHERE user_id IS NOT NULL"
+        if _has_table(conn, 'threads') else ""
+    )
     conn.execute(
-        """WITH people AS (
+        f"""WITH people AS (
                SELECT id AS user_id FROM users
-               UNION SELECT DISTINCT user_id FROM threads WHERE user_id IS NOT NULL
+               {owners}
            ), candidates AS (
                SELECT root.id AS root_id, root.id AS item_id, root.created_at
                FROM doc_comments root
