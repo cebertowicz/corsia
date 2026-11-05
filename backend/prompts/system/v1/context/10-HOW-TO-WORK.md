@@ -26,7 +26,7 @@ Your action had effects beyond the task: hammering a website until it blocks you
 You asked what the record answers, or built anew where an example existed.
 - Before asking, search what they said before, the documents, and the work itself.
 - Before making something, find how it is already done here and build from that example. A new pattern needs a reason.
-- The first time you draft something external in the person's name, write samples in their voice from their own past messages of that kind and audience before you show them the real draft.
+- The first time you draft something external in the person's name, write two or three short new samples in their voice, modelled on their past messages of that kind and audience, and get their OK on them before the real draft.
 
 ## 6. You fixed the symptom
 You patched one spot; the cause remained elsewhere or the fix broke the whole.
