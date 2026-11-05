@@ -57,24 +57,34 @@ _NESTED_DISPATCH_COMMANDS = frozenset({"service", "logs"})
 # is the one case found in practice, not a general filter.
 NON_CORSIA_ROUTES = frozenset({"/api/status"})
 
+# Cited files a person creates on their own machine, which no checkout
+# carries. A fixed list rather than `git check-ignore`, whose answer also
+# depends on each machine's `.git/info/exclude` and global excludes file, so
+# a dead citation could pass locally and fail in CI.
+LOCAL_ONLY_PATHS = frozenset({"frontend/.env"})
+
 
 def missing_paths(candidates: set[str], repo_root: Path, fallback_dir: str | None = None) -> list[str]:
     """Cited repo-relative paths that do not exist, checking one fallback dir.
 
+    A `:line` or `:start-end` suffix is stripped before the check. Glob
+    patterns, `.git/` paths and `LOCAL_ONLY_PATHS` are never reported.
     Some docs (ARCHITECTURE.md) cite backend-internal paths without the
     `backend/` prefix, e.g. `infra/thread_inputs.py` for
     `backend/infra/thread_inputs.py` -- evidenced, not assumed: both files
     exist only under `backend/`, and the bare `infra/` top-level directory
     is unrelated (CI tooling only).
     """
-    missing = []
-    for candidate in sorted(candidates):
-        if (repo_root / candidate).exists():
-            continue
-        if fallback_dir and (repo_root / fallback_dir / candidate).exists():
-            continue
-        missing.append(candidate)
-    return missing
+    paths = {candidate: re.sub(r":\d+(?:-\d+)?$", "", candidate) for candidate in candidates}
+    paths = {
+        c: p for c, p in paths.items()
+        if not any(ch in p for ch in "*?[") and not p.startswith(".git/") and p not in LOCAL_ONLY_PATHS
+    }
+    return sorted(
+        c for c, p in paths.items()
+        if not (repo_root / p).exists()
+        and not (fallback_dir and (repo_root / fallback_dir / p).exists())
+    )
 
 
 def _normalize_route(route: str) -> str:

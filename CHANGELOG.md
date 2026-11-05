@@ -21,6 +21,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - GitHub rules for completed checks now work by default when a repository webhook is connected, and temporary failures get another chance to deliver the event.
 - If the first setup chat ends without a visible reply, CORSIA now gives the agent one more chance to send it.
 - In the desktop app, Sign in and Open the page again on a connected app or account now open the sign-in page in your default browser; before, a connected app's page didn't open and you had to copy its link.
+- Jumping to a comment in a wide table now brings its cell into view sideways as well as its row.
 - Local models now follow each model's own defaults: a chat with no thinking level chosen runs at the model's default level (the picker reads Auto), and setup and model downloads no longer set a reply-length limit. Existing reply-length limits, including those earlier setup runs set, remain until changed in oMLX.
 - Local models now run on oMLX 0.7.3: several chats running at once on a local model use less memory and reply faster, and oMLX no longer gets stuck refusing every prompt for lack of memory after two prompts overlap. After an app update, CORSIA updates its running local model server once requests finish and reloads the same models; Settings shows “Restarting…” until they are loaded.
 - Messages in Connected apps now says Enable and Turn off, and explains what Full Disk Access allows before you enable it.

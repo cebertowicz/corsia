@@ -2,7 +2,7 @@
 
 `backend/scripts/size_rating_import.py` records offline size-class ratings of
 accepted outcomes as `measurement.size_rating` facts. Measurement's
-"Human-hours delivered per hour of your time (estimate)" headline reads them.
+"Work per hour of your attention" headline reads them.
 
 ## Targets are explicit
 
@@ -59,3 +59,5 @@ no estimated hours.
 
 The tests in `backend/tests/test_size_rating.py` build complete synthetic rows
 for a `fixture-owner` user; copy their shape rather than real data.
+
+Checked against the code at `7a8c55d84`.

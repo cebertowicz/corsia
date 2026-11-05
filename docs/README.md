@@ -38,6 +38,7 @@ Before reporting a vulnerability, read [`SECURITY.md`](../SECURITY.md).
 |---|---|
 | [`ARCHITECTURE.md`](../ARCHITECTURE.md) | Code map: where each part lives |
 | [`BACKEND.md`](../BACKEND.md) · [`FRONTEND.md`](../FRONTEND.md) | Module maps and rules for each side of the code |
+| [Data model](reference/data-model/README.md) | Tables and relationships in CORSIA's data stores, generated from the schema code |
 | [`CHANGELOG.md`](../CHANGELOG.md) | What has shipped |
 
 ## About this project

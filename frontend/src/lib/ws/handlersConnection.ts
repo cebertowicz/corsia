@@ -158,7 +158,7 @@ export function handleWsError(data: any) {
 		return;
 	}
 	if (identity !== null) {
-		if (handleTurnError(data)) appendVisibleError(data);
+		if (handleTurnError(data) && !data.reference) appendVisibleError(data);
 		emit('error', data);
 		return;
 	}

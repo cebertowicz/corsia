@@ -42,10 +42,29 @@ any person input, using the same persisted nudge and settlement path for both.
 | Transport | `backend/ws/` | WebSocket connection and message transport |
 | Evaluation | `backend/eval/`, `evals/` | scenario execution, scorers, and evaluation fixtures |
 | Frontend | `frontend/src/` | SvelteKit application, stores, API client, and UI primitives |
+| Desktop | `desktop/` | Tauri shell, packaged service, app updates, and macOS bundle |
+| Onboarding | `backend/onboarding/` | first-run setup and first-chat instructions |
+| Installation | `scripts/install.sh` | source installation and managed dependencies |
 | Operations | `scripts/` | supported start, dev, verification, and maintenance commands |
 
 Deeper callable maps live in `BACKEND.md` and `FRONTEND.md`. Visual work also
 follows `frontend/DESIGN-SYSTEM.md`.
+
+### Frontend composition
+
+See the [frontend component map](FRONTEND.md#component-map) for the app's
+composition root, shared controls, state, API clients, and WebSocket handlers.
+
+The attention dock is mounted in the thread chat slot above the composer.
+`components/attention/AttentionDock.svelte` renders the queue; the
+`attentionDock`, `attentionAnswerState`, and `attentionHeld` stores retain
+queue and answer state outside the transient drawer. A held-reply decision
+advances the visible queue while its request is in flight; a failed request
+returns the item for retry. `api/heldReplies.ts` calls the server for that
+operation. The dock is not mounted in documents or settings.
+
+This frontend composition section was checked against the code at
+`de2e414bce808912cf9b297650277cd0711b4676`.
 
 ### Connected apps and external events
 
@@ -63,7 +82,7 @@ head-check aggregator (`github_head_checks.py`) combines completed check suites
 into a per-head event. Its admission hook is on by default outside test mode;
 `CORSIA_GITHUB_HEAD_CHECKS_ENABLE=0` turns it off.
 
-Checked against the code at `7a8c55d84`.
+The other entries in this system map were checked against the code at `7a8c55d84`.
 
 ### Verified ONNX assets
 
@@ -101,6 +120,25 @@ so Providers refreshes server state only for those transitions. Ordinary
 catalog events add no server-list read. `providersV7` owns the row's restart
 text and dot for every host-group consumer.
 
+### Model and account resolution
+
+`backend/llm/account_catalog.py` projects each harness model's status for the
+accounts permitted in scope. The selected account's discovery supplies its
+identity and window when available; `backend/connections/account_rollover.py` owns an opt-in
+move to an eligible account before a queued input is claimed. The window
+resolver in `backend/llm/context_window.py` applies the saved profile and
+provider evidence. Managed oMLX memory refusals can add a temporary runtime
+cap shared by all turns using that model on that server. A later refusal
+replaces the observation; it is removed when the turn that recorded it ends
+(`backend/llm/memory_fit.py`). External server
+selectors carry both server identity and served model id; the External provider
+routes requests without managing the server's models
+(`backend/llm/external_provider.py`).
+
+The oMLX public authentication, managed oMLX replacement, and model and account
+resolution sections were checked against the code at
+`7a8c55d84c75cbee7b8f26c8839f188fa466b559`.
+
 ### System tier projection
 
 `backend/infra/system_package.py` locates immutable System source content. At
@@ -120,19 +158,19 @@ path, including symlink targets. The parent's tool surface is unchanged.
 Codex uses this same model-reachable tool boundary as native workers. Its
 app-server process is **not OS-sandboxed** by CORSIA, and this boundary does not
 restrict the process's network access. `subagents/codex_confinement.py` reads
-confinement through the canonical thread owner and admits only the captured
+confinement through the canonical thread owner and admits only a captured
 Codex version before spawning and again at app-server start. It disables native
 and hosted tool producers, uses a neutral empty working directory, and refuses
 forks at launch. Project instructions
 are disabled. The isolated Codex home projects subscription auth for the
 app-server, without importing the person's config, profiles or MCP servers;
-confined reads cannot reach that home. No model-invoked native tool can reach a
-TCC-granted capability.
+confined reads cannot reach that home.
 
-The pinned app-server has no full model-tool readback. The credential-free
+The admitted app-server versions have no full model-tool readback. The credential-free
 integration capture checks the entire outgoing model request's tools array,
-including hosted entries, on cold start and process resume. A new Codex version
-refuses confined launches until CORSIA updates and repeats that proof.
+including hosted entries, on cold start and process resume for each admitted
+version. An uncaptured Codex version refuses confined launches until CORSIA
+updates and repeats that proof (`backend/subagents/codex_versions.py`).
 
 ### Foreground shell invocation identity
 
@@ -171,8 +209,10 @@ without a manual start or another Turn. A delegated step's wait is read from
 its worker, so the worker's side reconciles the delegator: every worker-plan
 reconciliation and the worker's Turn end (`plans/delegated_selection.py`).
 The step taking its slot back is state; the parent hears about its
-worker only through the notification matrix. A closing mutation (request_review,
-fail, accept, accept_with_follow_up, archive_node) may start one task the caller
+worker only through the notification matrix. A closing or parking mutation
+(request_review, mark_done, fail, accept, accept_with_follow_up, close_node,
+archive_node, pause_node, block_node, arm_watch; the set is
+`plans/boundary_fields.NEXT_OPERATIONS`) may start one task the caller
 names through the same activate/start writers, after its own release and before
 reconciliation, and returns a bounded `next` block composed by
 `plans/close_next.py`, which reads the selection owners and is not one; nothing
@@ -330,7 +370,10 @@ attach path, but only for a task the caller names: a send is often just a
 question, so it never takes the caller's current task by default. The named
 task is checked before the message goes (the target must be the caller's own
 worker holding no other open task). Without `plan_node_id`, a send to such an
-idle worker carries a `plan_task` note saying its reply arrives as chat.
+idle worker carries a `plan_task` note saying its reply arrives as chat. When
+local-only policy requires a hold, the send is held for the person before task
+handover and delivery; approval resumes through the same delivery function
+(`backend/tools/delegate_send.py`).
 
 ### Reading and depending on another plan
 
@@ -415,6 +458,8 @@ node's own `waited_seconds` in the ages of running, review and waiting rows.
 unioned over that thread's own plan nodes and clipped to a window, for a run's
 open time (the caller passes descendant threads; there is no delegation walk).
 
+Checked against the code at `7a8c55d84`.
+
 ### User presence
 
 Whether the user is actually looking at a thread is state with one owner:
@@ -480,8 +525,9 @@ roster says why instead of omitting it.
 mutual exclusion between repository *effects* (any tool call that may read or
 touch a working repository) and repository *policy transitions* (attaching,
 detaching, pinning or checkout-protecting a repository). The fence is global on
-purpose; it is not scoped per repository, and effects, transitions and owned
-background processes stay mutually exclusive in every direction.
+purpose; it is not scoped per repository. A transition refuses while tool
+effects or owned processes are active, and tool effects refuse while a
+transition is active.
 
 `ToolRegistry._authorized_execute` wraps every tool call in `admit_repo_effect()`
 except the tools whose own execution enters the stronger transition:
@@ -501,9 +547,11 @@ the transition.
 
 ## Context and skills
 
-CORSIA composes context every turn:
+CORSIA composes context for each turn. Static sources and the responsibility map
+are retained until the next install boundary; other turn-specific context can change:
 
-- system context from the workspace `context/` directory;
+- packaged System context;
+- workspace context from the workspace `context/` directory;
 - project context from the project `context/` directory;
 - Agent and Conductor context selected from `context/roles/<role>/` at those
   existing scopes, with Conductors composing Agent context before their additive layer;
@@ -536,13 +584,12 @@ table and no second registry.
   scheduled for the review date. It takes no executor slot before that date.
   The owner retires, promotes, extends, or revises the trial; nothing does so
   automatically.
-- **Index membership.** `backend/core/lesson_index.py` decides, once per
-  skills-index install, which trials are offered: the file is in its owner's
-  own skills, says `trial`, its date is ahead, its owner holds an open review
-  of that exact version, no ordinary skill has its name, and the lesson index
-  budget has room. Anything else is listed as omitted with its reason. The
-  installed index records the offered lessons; the per-turn manifest keeps only
-  each lesson's id and behavioral hash.
+- **Task-start delivery.** `backend/core/lesson_index.py` checks trial eligibility,
+  including ownership, state, review date, review version and skill-name conflicts.
+  Trials do not enter the installed skills index. At task start,
+  `backend/core/lesson_delivery.py` assigns eligible trials to a with or without
+  group and returns applicable guidance to the with group. Count and token caps
+  can leave a trial out of both groups; receipts record the result.
 - **Evidence report.** `backend/core/lesson_report.py` projects existing review
   history, validated current files, installed boundaries, per-call manifests,
   and canonical read results. The deferred `lesson_report` tool and Measurement
@@ -552,14 +599,12 @@ table and no second registry.
   identity may establish a body read; ambiguous or missing lineage stays unknown.
   Current files and packaged System availability do not establish delivery;
   unresolved project roots, System projection and role-skill coverage are named.
-- **Context accounting.** `backend/infra/lesson_usage_attribution.py` annotates
-  the selected frozen Skills inventory through a usage-level estimate sibling.
-  It changes no installed bytes or hashes. Descriptor estimates remain part of
-  Skills; body reads remain history. The Context sheet and Measurement Learning
-  detail use existing document and review navigation.
-- **Limits.** The index is frozen at install, so a new, changed, or expired
-  trial takes effect at the next install and never in a running conversation.
-  Offers and supported reads do not establish opportunity, application or benefit.
+- **Context accounting.** `backend/infra/lesson_usage_attribution.py` can
+  project descriptor estimates from a retained Skills snapshot without changing
+  its bytes or hashes. Current trials are delivered at task start rather than
+  included in that snapshot.
+- **Limits.** A trial is delivered at task start, not in the installed index.
+  Delivery and supported reads do not establish application or benefit.
   Incomplete historical populations and per-version costs remain unavailable.
 
 ## Managed background processes
@@ -602,14 +647,14 @@ handle retention remains separate.
 
 ## Runtime and checkout isolation
 
-An instance is a checkout. `scripts/corsia` operates exactly the checkout it
+A source instance uses a checkout. `scripts/corsia` operates exactly the checkout it
 lives in: the script's own location resolves the backend, interpreter, env
 file, port, state root, and launchd job, so a copy running from a worktree
 cannot address another checkout's instance. There is no environment selector
 and nothing to choose between; a `CORSIA_DIR` naming a different directory is
 refused rather than honored.
 
-The ordinary machine has one serving checkout, one launchd service, and one set
+A source install normally has one serving checkout, one launchd service, and one set
 of operational databases under the platform state root (`corsia.db`,
 `analytics.duckdb`, `uploads/`). The serving checkout tracks whichever branch
 its owner has pointed it at. A checkout's launchd job is named by
@@ -632,7 +677,9 @@ and evals run against disposable state seeded into an explicit
 database. The backend log lives in that instance's state root, so two checkouts
 on one machine never write to, truncate, or tail one shared file.
 
-The supported lifecycle is through `scripts/corsia`. Do not infer checkout
+The source lifecycle is through `scripts/corsia`. The packaged app instead runs
+its bundled service and code; after takeover it retains the source install's state
+location. See [Desktop app](docs/how-it-works/desktop-app.md). Do not infer checkout
 paths or switch branches from a running process.
 
 ## Scoped audit reads and host-access refusals
@@ -717,8 +764,9 @@ work.
 
 ## Review authority
 
-The reviewer builds its request from the current diff plus the mapped approved
-PRD contract. GitHub trigger, review, comment, and check handling lives under
+The reviewer builds its request from the current diff and standards, plus any
+mapped approved PRD contracts. GitHub trigger and gate handling lives under
+`backend/events/`; review, comment, and status handling lives under
 `backend/reviewer/`.
 
 Author procedure, revised-head holds, and merge gates live in the project
@@ -731,7 +779,7 @@ second contract system.
 Use git history for deeper provenance. New rationale belongs in the current
 PRD/design and the code/tests that implement it.
 
-Scope of this check: managed background processes, runtime and checkout
-isolation, scoped audit reads, and CORSIA's own logs.
+Managed background processes, runtime and checkout isolation, scoped audit
+reads, and CORSIA's own logs: checked against the code at `7a8c55d84`.
 
-Checked against the code at `7a8c55d84`.
+Reviewer and quality-gate sections: checked against the code at `310115261`.
