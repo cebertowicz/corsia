@@ -690,8 +690,9 @@ work.
 
 ## Review authority
 
-The reviewer builds its request from the current diff plus the mapped approved
-PRD contract. GitHub trigger, review, comment, and check handling lives under
+The reviewer builds its request from the current diff and standards, plus any
+mapped approved PRD contracts. GitHub trigger and gate handling lives under
+`backend/events/`; review, comment, and status handling lives under
 `backend/reviewer/`.
 
 Author procedure, revised-head holds, and merge gates live in the project
@@ -703,3 +704,5 @@ second contract system.
 
 Use git history for deeper provenance. New rationale belongs in the current
 PRD/design and the code/tests that implement it.
+
+Checked against the code at `310115261`.

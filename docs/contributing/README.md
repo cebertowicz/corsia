@@ -10,6 +10,7 @@ The path from a fresh clone to a merged change, for developers who want to chang
 | 2 | [How CORSIA works](../how-it-works/README.md) | The parts of the system and the terms used everywhere else |
 | 3 | [`ARCHITECTURE.md`](../../ARCHITECTURE.md) | Where each part lives in the code |
 | 4 | [`BACKEND.md`](../../BACKEND.md) or [`FRONTEND.md`](../../FRONTEND.md) | Rules for the side you are changing |
-| 5 | [Writing docs](writing-docs.md) | Where a page goes, the format, and how to keep it current |
+| 5 | [Testing and review](testing.md) | How to test your change, the checks your pull request runs, and how to read the review |
+| 6 | [Writing docs](writing-docs.md) | Where a page goes, the format, and how to keep it current |
 
-Checked against the code at `7a8c55d84`.
+Checked against the code at `310115261`.
