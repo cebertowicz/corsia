@@ -173,12 +173,12 @@ manifest; it has no pinned Chrome version. There is no startup network freshness
 check: the private Chrome copy ages between agent-browser pin bumps. Periodic refresh
 remains follow-up work. Corrupt private app copies are replaced through staged,
 authenticated copies; setup failures do not publish a partially initialized owner.
+
 On Linux, Chromium uses its own sandbox, and CORSIA removes inherited switches
 that disable it. Where AppArmor restricts unprivileged user namespaces (Ubuntu
 23.10 and later), the installer adds the rule that sandbox needs; Debian needs
 none (see [Linux sandbox](linux-sandbox.md)). Linux uses the native
-browser launch without the macOS executable authentication described above; saved
-profiles are unavailable there.
+browser launch without the macOS executable authentication described above.
 
 ## Observation and attempt outcomes
 
