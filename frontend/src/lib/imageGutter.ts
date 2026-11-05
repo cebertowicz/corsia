@@ -1,6 +1,11 @@
-import { placeTags, type ImageRegion, type Point, type Size, type TagSide } from './imageRegions';
+import { placeTags, TAG_GAP, TAG_RADIUS, type ImageRegion, type Point, type Size, type TagSide } from './imageRegions';
 
 export type BadgeTag = Point & { side: TagSide | GutterSide; anchor?: Point };
+
+/** The viewer's fixed-size badges, in pixels of its displayed image. */
+export function viewerBadgeTags(regions: ImageRegion[], size: Size): BadgeTag[] {
+	return badgeTags(regions, size, TAG_RADIUS, TAG_GAP);
+}
 
 /** Keep the usual on-image positions; only badges that still overlap move to the edge. */
 export function badgeTags(regions: ImageRegion[], size: Size, radius: number, gap: number, dot?: number): BadgeTag[] {
@@ -26,12 +31,8 @@ function roundEven(value: number): number {
 export function rasterBadgeTags(regions: ImageRegion[], natural: Size, shown: Size): BadgeTag[] {
 	const fit = Math.min(1, 1600 / Math.max(natural.width, natural.height));
 	const size = { width: Math.max(1, roundEven(natural.width * fit)), height: Math.max(1, roundEven(natural.height * fit)) };
-	const longest = Math.max(size.width, size.height);
-	const radius = Math.max(10, roundEven(longest * 0.011));
-	const gap = Math.max(2, roundEven(longest * 0.0022)) + 1;
-	const dot = Math.max(5, roundEven(radius * 0.6)) + 2;
 	const sx = shown.width / size.width, sy = shown.height / size.height;
-	return badgeTags(regions, size, radius, gap, dot).map((tag) => ({
+	return badgeTags(regions, size, TAG_RADIUS, TAG_GAP).map((tag) => ({
 		...tag, x: tag.x * sx, y: tag.y * sy,
 		...(tag.anchor ? { anchor: { x: tag.anchor.x * sx, y: tag.anchor.y * sy } } : {}),
 	}));

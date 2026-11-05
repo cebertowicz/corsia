@@ -1,11 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { badgeTags } from './imageGutter';
+import { badgeTags, viewerBadgeTags } from './imageGutter';
 import parity from './__tests__/fixtures/image-badge-parity.json';
+import naturalParity from './__tests__/fixtures/image-natural-parity.json';
 
 const size = { width: 800, height: 500 };
 const region = { x: 0, y: 0, w: 1, h: 0.5 };
 
 describe('badge placement', () => {
+	it.each([
+		{ name: 'pair', regions: [{ x: 0.4, y: 0.4, w: 0.02, h: 0.02 }, { x: 0.42, y: 0.4, w: 0.02, h: 0.02 }], sides: naturalParity.pair },
+		{ name: 'hundred', regions: Array.from({ length: 100 }, (_, n) => { const i = n + 1; return { x: 0.15 + (i % 10) * 0.07, y: 0.2 + (i % 3) * 0.2, w: 0.02, h: 0.1 }; }), sides: naturalParity.hundred },
+	])('matches raster sides at natural size for $name without overlapping discs', ({ regions, sides }) => {
+		const tags = viewerBadgeTags(regions, { width: 1600, height: 1000 });
+		expect(tags.map((tag) => tag.side)).toEqual(sides);
+		for (let i = 0; i < tags.length; i++) for (let j = i + 1; j < tags.length; j++) {
+			expect(Math.hypot(tags[i].x - tags[j].x, tags[i].y - tags[j].y)).toBeGreaterThanOrEqual(22);
+		}
+	});
 	it('separates nearby badges at phone Fit and connects any moved outside', () => {
 		const shown = { width: 271, height: 169.375 };
 		const tags = badgeTags(parity[1].regions, shown, 11, 3);

@@ -91,18 +91,16 @@ def _stroke(longest: int) -> int:
     return max(2, round(longest * 0.0022))
 
 
-def tag_geometry(width: int, height: int) -> tuple[int, int]:
-    """The tag radius and its gap from the box, in pixels of the rendered image."""
-    longest = max(width, height)
-    return max(10, round(longest * 0.011)), _stroke(longest) + 1
+# Keep equal to TAG_RADIUS and TAG_GAP in frontend/src/lib/imageRegions.ts.
+TAG_RADIUS = 11
+TAG_GAP = 3
 
 
 def _scale_for(img: Image.Image) -> _Scale:
-    radius, _gap = tag_geometry(*img.size)
     return _Scale(
         stroke=_stroke(max(img.size)),
-        radius=radius,
-        font=_font(max(11, round(radius * 1.25))),
+        radius=TAG_RADIUS,
+        font=_font(max(11, round(TAG_RADIUS * 1.25))),
     )
 
 
@@ -330,9 +328,8 @@ def render_marked_image(data: bytes, marks: Sequence[Mark]) -> bytes:
     scale = _scale_for(img)
     for mark in marks:
         _draw_region(draw, mark, img, scale)
-    gap = scale.stroke + 1
-    tags = badge_tags([mark.region for mark in marks], img.width, img.height, radius=scale.radius, gap=gap)
-    gutter = math.ceil(2 * (scale.radius + 2) + gap) if any(tag[3] is not None for tag in tags) else 0
+    tags = badge_tags([mark.region for mark in marks], img.width, img.height, radius=scale.radius, gap=TAG_GAP)
+    gutter = math.ceil(2 * (scale.radius + 2) + TAG_GAP) if any(tag[3] is not None for tag in tags) else 0
     expanded = Image.new("RGB", (img.width + 2 * gutter, img.height + 2 * gutter), "white")
     expanded.paste(img, (gutter, gutter))
     draw = ImageDraw.Draw(expanded, "RGBA")

@@ -8,9 +8,9 @@
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import type { DocComment } from '$lib/stores/docComments';
 	import {
-		crowdedNames, describeRegion, isPoint, regionFromDrag, regionRect, TAG_GAP, TAG_RADIUS, type ImageRegion, type Point,
+		crowdedNames, describeRegion, isPoint, regionFromDrag, regionRect, type ImageRegion, type Point,
 	} from '$lib/imageRegions';
-	import { badgeTags } from '$lib/imageGutter';
+	import { viewerBadgeTags } from '$lib/imageGutter';
 	import { imageRegionPick, trackSpace } from '$lib/imageRegionPick';
 	import { observeRegionSize } from '$lib/imageRegionMeasure';
 	import { regionMotion } from '$lib/imageRegionMotion';
@@ -101,7 +101,7 @@
 		resized = placedSize !== `${width}x${height}`;
 		placedSize = `${width}x${height}`;
 		const regions = pinned.map((comment) => comment.region);
-		const positions = badgeTags(regions, size, TAG_RADIUS, TAG_GAP);
+		const positions = viewerBadgeTags(regions, size);
 		return pinned.map((comment, index) => ({ comment, key: `${comment.id}:${comment.saves}`, ...positions[index] }));
 	});
 	const { fade, glide } = regionMotion(() => resized || get(prefersReducedMotion));

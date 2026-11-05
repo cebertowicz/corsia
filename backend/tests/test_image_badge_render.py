@@ -1,6 +1,9 @@
 import io
 import json
+import math
 from pathlib import Path
+
+import pytest
 
 from PIL import Image
 
@@ -14,6 +17,37 @@ def test_badge_positions_match_viewer_contract():
         tags = badge_tags(regions, case['width'], case['height'], radius=case['radius'], gap=case['gap'])
         actual = [dict(x=x, y=y, side=side, **({'anchor': {'x': ax, 'y': ay}} if ax is not None else {})) for x, y, side, ax, ay in tags]
         assert actual == case['expected']
+
+
+@pytest.mark.parametrize('case', ['pair', 'hundred'])
+def test_actual_renderer_matches_viewer_natural_sides_without_overlapping_discs(case, monkeypatch):
+    from doceditor import image_markup
+
+    fixture = Path(__file__).resolve().parents[2] / 'frontend/src/lib/__tests__/fixtures/image-natural-parity.json'
+    expected = json.loads(fixture.read_text())[case]
+    regions = ([Region(.4, .4, .02, .02), Region(.42, .4, .02, .02)] if case == 'pair' else
+               [Region(.15 + (i % 10) * .07, .2 + (i % 3) * .2, .02, .1) for i in range(1, 101)])
+    actual = []
+    draw_radii = []
+    real_tags, real_draw = image_markup.badge_tags, image_markup._draw_tag
+
+    def capture_tags(*args, **kwargs):
+        assert kwargs == {'radius': 11, 'gap': 3}
+        actual.extend(real_tags(*args, **kwargs))
+        return actual
+
+    def capture_draw(draw, mark, centre, scale):
+        draw_radii.append(scale.radius)
+        return real_draw(draw, mark, centre, scale)
+
+    monkeypatch.setattr(image_markup, 'badge_tags', capture_tags)
+    monkeypatch.setattr(image_markup, '_draw_tag', capture_draw)
+    source = io.BytesIO()
+    Image.new('RGB', (1600, 1000), 'white').save(source, format='PNG')
+    render_marked_image(source.getvalue(), [Mark(i, region) for i, region in enumerate(regions, 1)])
+    assert [tag[2] for tag in actual] == expected
+    assert draw_radii == [11] * len(regions)
+    assert all(math.dist(a[:2], b[:2]) >= 22 for i, a in enumerate(actual) for b in actual[i + 1:])
 
 
 def test_single_badge_stays_on_picture_and_is_translucent():

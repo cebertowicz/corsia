@@ -11,7 +11,7 @@ from itertools import combinations
 import pytest
 from PIL import Image
 
-from doceditor.image_markup import MAX_RENDER_SIDE, Mark, Region, gutter_tags, place_tag, place_tags, render_marked_image, tag_geometry
+from doceditor.image_markup import MAX_RENDER_SIDE, TAG_GAP, TAG_RADIUS, Mark, Region, gutter_tags, place_tag, place_tags, render_marked_image
 
 
 def _png(width: int, height: int, color=(240, 240, 240)) -> bytes:
@@ -125,7 +125,7 @@ def test_render_draws_the_tag_outside_the_box_and_leaves_the_corner_clear():
     png = render_marked_image(data, [Mark(1, Region(0.5, 0.5, 0.25, 0.25), "#ef4444")])
     img = Image.open(io.BytesIO(png)).convert("RGB")
 
-    radius, gap = tag_geometry(800, 600)
+    radius, gap = TAG_RADIUS, TAG_GAP
     assert img.size == (800, 600)
     cx, cy, side = place_tag(Region(0.5, 0.5, 0.25, 0.25), 800, 600, radius=radius, gap=gap)
     assert side == "up-left"
