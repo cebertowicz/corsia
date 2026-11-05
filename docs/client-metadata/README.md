@@ -22,3 +22,5 @@ Providers key refresh tokens to the client ID. Changing the address signs every 
 - Loopback callbacks only: `127.0.0.1`, `localhost` and `[::1]` at `/callback`. The port is chosen at sign-in time; providers match loopback addresses on any port (RFC 8252 §7.3).
 
 `backend/tests/test_client_metadata_document.py` checks the file's shape.
+
+Checked against the code at `7a8c55d84`.

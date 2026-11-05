@@ -173,8 +173,9 @@ manifest; it has no pinned Chrome version. There is no startup network freshness
 check: the private Chrome copy ages between agent-browser pin bumps. Periodic refresh
 remains follow-up work. Corrupt private app copies are replaced through staged,
 authenticated copies; setup failures do not publish a partially initialized owner.
-Linux's existing
-unsandboxed, unauthenticated native launch remains a separate platform gap; saved
+On Linux, Chromium uses its own sandbox under the installer's AppArmor rule;
+CORSIA removes inherited switches that disable that sandbox. Linux uses the native
+browser launch without the macOS executable authentication described above; saved
 profiles are unavailable there.
 
 ## Observation and attempt outcomes
@@ -292,3 +293,5 @@ not reconstructed from stale sidecars after restart. Moving this code or changin
 an instance key is not an operational cleanup operation. Rollback also requires
 preserving unresolved ownership evidence and using the supported lifecycle
 procedure, never broad process killing.
+
+Checked against the code at `7a8c55d84`.
