@@ -25,7 +25,7 @@ def test_pending_review_survives_restart_and_is_cleared_by_verdict(isolated_db):
 
 
 def test_recovery_re_evaluates_each_pending_head_and_skips_a_malformed_key(_reload_gate):
-    from events import reviewer_gate_recovery
+    from events.connectors import github_reviewer_gate_recovery as reviewer_gate_recovery
 
     reviewer_gate_state.record_pending("owner/repo#42", "abc123def", "check_suite")
     reviewer_gate_state.record_pending("not-a-pr-key", "head-2", "check_suite")
