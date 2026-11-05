@@ -12,13 +12,32 @@ export function createReplyArrival(artifactId: () => string | null, mark: (artif
 		stamped.add(last);
 		void mark(artifact, thread.id, last).catch((err) => { stamped.delete(last); console.warn('Could not record the viewed reply', err); });
 	}
-	function whenShown(thread: DocComment, frames = 120) {
-		const shown = () => [...document.querySelectorAll<HTMLElement>('.drawer-comments [data-comment-id]')].filter((card) => card.dataset.commentId === thread.id).some((card) => {
-			const list = card.closest('.drawer-comments')!.getBoundingClientRect(), at = card.getBoundingClientRect();
-			return at.height > 0 && at.bottom > list.top && at.top < list.bottom;
+	let cancel = () => {};
+	let arrival = 0;
+	function whenShown(thread: DocComment) {
+		cancel();
+		const current = ++arrival;
+		void tick().then(() => {
+			if (current !== arrival) return;
+			const lists = [...document.querySelectorAll<HTMLElement>('.drawer-comments')];
+			if (!lists.length) return;
+			let card: HTMLElement | undefined;
+			const visibility = new IntersectionObserver((entries) => {
+				if (current === arrival && entries.some((entry) => entry.isIntersecting && entry.target.isConnected)) { cancel(); stamp(thread); }
+			});
+			const look = () => {
+				if (!lists.some((list) => list.isConnected)) { cancel(); return; }
+				const next = lists.flatMap((list) => [...list.querySelectorAll<HTMLElement>('[data-comment-id]')]).find((item) => item.dataset.commentId === thread.id);
+				if (next === card) return;
+				if (card) visibility.unobserve(card);
+				card = next;
+				if (card) visibility.observe(card);
+			};
+			const changes = new MutationObserver(look);
+			cancel = () => { visibility.disconnect(); changes.disconnect(); cancel = () => {}; };
+			changes.observe(document.body, { childList: true, subtree: true });
+			look();
 		});
-		const look = (left: number) => { if (shown()) stamp(thread); else if (left > 0) requestAnimationFrame(() => look(left - 1)); };
-		void tick().then(() => look(frames));
 	}
 	return { whenShown };
 }
