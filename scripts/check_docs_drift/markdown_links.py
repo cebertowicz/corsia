@@ -16,6 +16,17 @@ _INLINE_CODE = re.compile(r"(`+).*?\1")
 _REFERENCE = re.compile(r"^ {0,3}\[([^]]+)\]:\s*(?:<([^>]+)>|(\S+))")
 _REFERENCE_USE = re.compile(r"!?\[([^]\n]+)\]\[([^]\n]*)\]")
 
+# A historical catalog cites code as it was when each entry was written, so
+# "must still resolve" is the wrong bar for it (the reason citation_check
+# excludes CHANGELOG.md).
+HISTORICAL_DOCS = frozenset({Path("docs/standards/llm-anti-patterns.md")})
+
+
+def docs_pages(repo_root: Path) -> list[Path]:
+    """Return every living docs page, relative to the repository root."""
+    pages = (page.relative_to(repo_root) for page in sorted((repo_root / "docs").rglob("*.md")))
+    return [page for page in pages if page not in HISTORICAL_DOCS]
+
 
 def _prose(text: str) -> list[str]:
     """Discard fenced code; it describes examples, not rendered links/headings."""
@@ -88,7 +99,8 @@ def _destinations(lines: list[str]) -> list[str]:
 def check_links(repo_root: Path) -> list[str]:
     """Return source page, destination and cause for broken relative links."""
     failures = []
-    for doc in sorted((repo_root / "docs").rglob("*.md")):
+    for page in docs_pages(repo_root):
+        doc = repo_root / page
         lines = _prose(doc.read_text(encoding="utf-8"))
         for raw in _destinations(lines):
             destination = html.unescape(raw)
@@ -97,9 +109,14 @@ def check_links(repo_root: Path) -> list[str]:
                 continue
             target = (doc.parent / unquote(url.path)) if url.path else doc
             reason = None
-            if not target.is_file():
+            if not target.exists():
                 reason = "target file missing"
-            elif url.fragment and unquote(url.fragment) not in _anchors(target):
+            elif (
+                url.fragment
+                and target.suffix == ".md"
+                and target.is_file()
+                and unquote(url.fragment) not in _anchors(target)
+            ):
                 reason = "heading anchor missing"
             if reason:
                 failures.append(f"{doc.relative_to(repo_root)}: {destination}: {reason}")

@@ -29,7 +29,7 @@ from pathlib import Path
 from . import citation_extract as extract
 from . import citation_verify as verify
 from .discovery import top_level_names
-from .markdown_links import check_links
+from .markdown_links import check_links, docs_pages
 
 PRIMARY_DOCS = (Path("README.md"),)
 # CHANGELOG.md is deliberately excluded here even though the deliverable
@@ -100,7 +100,7 @@ def _cited_python_version(repo_root: Path) -> str | None:
 
 def _check_paths(repo_root: Path, top_level: set[str], result: CitationResult) -> None:
     by_doc = {}
-    for doc in (*PATH_CHECK_DOCS, *sorted((repo_root / "docs").rglob("*.md"))):
+    for doc in (*PATH_CHECK_DOCS, *docs_pages(repo_root)):
         full = repo_root / doc
         if full.exists():
             by_doc[full.relative_to(repo_root)] = extract.extract_path_candidates(
