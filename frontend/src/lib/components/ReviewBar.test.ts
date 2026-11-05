@@ -63,6 +63,15 @@ describe('ReviewBar', () => {
 		expect(button('Approve with changes')).toBeTruthy();
 	});
 
+	it.each([[1, 'Your 1 comment goes to Docs agent'], [2, 'Your 2 comments go to Docs agent']])(
+		'says where %i comment(s) go on Approve, with the verb agreeing',
+		async (comments, text) => {
+			api.fetchReviewBar.mockResolvedValue(read(comments));
+			await render();
+			expect(button('Approve')!.title).toBe(text);
+		},
+	);
+
 	it.each(['Reject', 'Approve with changes'])('returns focus to %s when its note is dismissed', async (label) => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		await render();

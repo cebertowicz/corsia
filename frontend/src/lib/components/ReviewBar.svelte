@@ -48,7 +48,7 @@
 		`${asker} asked for your review: ${ask}${others.length ? `. ${others.join(' and ')} also asked.` : ''}`,
 	);
 	const alsoSends = $derived(round > 0 ? `Also sends your ${pending} to ${asker}` : undefined);
-	const approveSends = $derived(round > 0 ? `Your ${pending} go to ${asker}` : undefined);
+	const approveSends = $derived(round > 0 ? `Your ${pending} ${round === 1 ? 'goes' : 'go'} to ${asker}` : undefined);
 	const receiptText = $derived.by(() => {
 		const receipt = bar.receipt;
 		if (!receipt) return [];
@@ -123,7 +123,7 @@
 		}
 		void settle('approved');
 	}
-	/** Approve with changes sends at once when the round has feedback; otherwise it needs a note, like Request changes. */
+	/** Approve with changes sends at once when the round has feedback; otherwise it needs a note, like Reject. */
 	async function approveWithChanges() {
 		if (blocked()) return;
 		if (round > 0) { void settle('approved_with_changes'); return; }

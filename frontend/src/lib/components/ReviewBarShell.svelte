@@ -144,7 +144,7 @@
 			{/if}
 		</span>
 		<span class="rb-row2">
-			<div class="rb-capsule" class:suppressed class:lifted={inSheet} class:insheet={inSheet} class:noting bind:this={capsuleEl} out:capsuleOut|global>
+			<div class="rb-capsule" class:suppressed class:insheet={inSheet} class:noting bind:this={capsuleEl} out:capsuleOut|global>
 				<!-- At a fine pointer the status keeps its height when empty, so the buttons never move when a status appears. On a phone it shows above the buttons inside the floating capsule, which grows upward. -->
 				<span class="rb-status" class:busy role="status">{status}</span>
 				{@render actions()}
@@ -255,7 +255,7 @@
 	}
 
 	/* Expanded, the ask text (`.rb-ask-full`) is its own grid item spanning every column under line 1, so it has the header's full width, not what the pill and Request review leave it. */
-	/* A narrow column, at any pointer, gives the note its own full-width row (up to four lines) above Cancel and Request changes, as the phone capsule does. */
+	/* A narrow column, at any pointer, gives the note its own full-width row (up to four lines) above Cancel and the note's send button, as the phone capsule does. */
 	/* There, a status takes its own row above the buttons too, rather than wrapping a word per line beside them. */
 	/* 37.5rem is the document canvas's 600px narrow breakpoint at the default root size. */
 	@container doc-canvas (max-width: 37.5rem) {
@@ -302,7 +302,7 @@
 			.rb-capsule.insheet.noting :global(.rb-actions .btn) { flex: 0 0 auto; min-width: max-content; }
 			.rb-capsule :global(.rb-actions) { flex: 1 1 auto; flex-wrap: wrap; margin-left: 0; }
 			.rb-capsule :global(.btn) { flex: 1 1 auto; min-width: 0; min-height: var(--rb-hit); }
-			/* Request changes: the capsule grows upward into two rows, the field across the full width (up to four lines), then Cancel and Request changes right-aligned (PE B3). */
+			/* Writing a note: the capsule grows upward into two rows, the field across the full width (up to four lines), then Cancel and the send button right-aligned (PE B3). */
 			.rb-capsule :global(.rb-note) { flex: 1 0 100%; min-height: var(--rb-hit); max-height: calc(4lh + 2 * var(--space-2)); padding: var(--space-2); font-size: var(--text-input); line-height: var(--lh-normal); }
 			.review-bar.noting .rb-capsule :global(.rb-actions) { flex: 1 0 100%; justify-content: flex-end; }
 			.review-bar.noting .rb-capsule :global(.rb-actions .btn) { flex: 0 0 auto; min-width: max-content; }
