@@ -40,6 +40,52 @@ async def test_crash_during_crash_recovery_keeps_original_owner_and_models(isola
         await _finish(owner, life.restart)
 
 
+async def test_exit_after_recovery_finishes_before_done_callback_starts_new_owner(isolated_db, monkeypatch):
+    calls, _ = _seat(monkeypatch, recorded="old")
+    life = omlx_supervisor._life["seat"]
+    entered, release, finish = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    loop = asyncio.get_running_loop()
+    observed = loop.create_future()
+    reads = 0
+
+    async def read(_cfg):
+        nonlocal reads
+        reads += 1
+        if reads == 1:
+            entered.set()
+            await release.wait()
+        else:
+            await finish.wait()
+        return [{"identifier": "exact-model"}]
+
+    monkeypatch.setattr(server_observation, "forget_loaded_on_exit", lambda _sid: ["exact-model"])
+    monkeypatch.setattr(omlx_lifecycle, "read_loaded", read)
+    omlx_restart.on_exit("seat", life, 123, omlx_supervisor._start_recovery, lambda _sid: "", ("exit", False))
+    owner = life.restart
+
+    def next_exit():
+        finished = owner.done()
+        omlx_restart.on_exit("seat", life, 124, omlx_supervisor._start_recovery, lambda _sid: "", ("exit", False))
+        observed.set_result((finished, life.restart))
+
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        release.set()  # Queue completion before the exit, whose callback precedes _done.
+        loop.call_soon(next_exit)
+        finished, successor = await asyncio.wait_for(observed, 2)
+        assert finished and not owner.cancelled()
+        assert successor is not owner
+        await asyncio.sleep(0)
+        assert life.restart is successor  # The old owner's done callback must leave it intact.
+        finish.set()
+        assert (await asyncio.wait_for(successor, 2))["loaded"] == ["exact-model"]
+        assert sum(call[0] == "start" for call in calls) == 2
+    finally:
+        release.set()
+        finish.set()
+        await _finish(owner, life.restart)
+
+
 async def test_crash_readback_shortfall_is_reported_without_completion(isolated_db, monkeypatch):
     _seat(monkeypatch, recorded="old")
     life = omlx_supervisor._life["seat"]

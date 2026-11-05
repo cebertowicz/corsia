@@ -200,7 +200,7 @@ def on_exit(
     if life.stopping:
         log.info("oMLX %s (pid %s) stopped as asked; not restarting", server_id, pid)
         return
-    if life.restart is not None:
+    if life.restart is not None and not life.restart.done():
         life.exit_generation += 1
         life.exit_status = status
         return

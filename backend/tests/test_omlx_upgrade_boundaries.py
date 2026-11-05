@@ -56,6 +56,8 @@ async def test_exit_at_preparation_boundary_skips_later_preparation(isolated_db,
         steps.append(stage)
         if boundary == stage:
             exited()
+        if boundary == "drain" and stage == "version":
+            asyncio.get_running_loop().call_soon(drained)
         return "old"
 
     async def idle(_sid, *, reads):
@@ -72,17 +74,23 @@ async def test_exit_at_preparation_boundary_skips_later_preparation(isolated_db,
             exited()
         return [{"identifier": "exact"}]
 
+    def drained():
+        steps.append("drain")
+        exited()
+        pending.set_result(None)
+
     monkeypatch.setattr(omlx_upgrade, "recorded_version", version)
     monkeypatch.setattr("infra.carry_in_capacity.omlx_state", idle)
     monkeypatch.setattr(omlx_lifecycle, "read_loaded", snapshot)
     if boundary == "drain":
         pending = asyncio.get_running_loop().create_future()
         life.requests.add(pending)
-        asyncio.get_running_loop().call_soon(lambda: (steps.append("drain"), exited(), pending.set_result(None)))
     owner = omlx_supervisor.schedule_startup_upgrade("seat", None)
     try:
         assert (await asyncio.wait_for(owner, 2))["restarted"]
-        assert steps[-1] == boundary
+        stages = ["version", "idle", "snapshot", "recheck"]
+        expected = ["version", "drain"] if boundary == "drain" else stages[:stages.index(boundary) + 1]
+        assert steps == expected
         assert not any(call[0] == "stop" for call in calls)
         assert ("reload", "seat", ["exact"]) in calls
     finally:
