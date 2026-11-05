@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from doc_feedback_helpers import seed_document
 from infra.database import get_db
-from plans import operator_chat_state, workflow_fields
+from plans import artifact_links, operator_chat_state, public, workflow_fields
 from plans.boundary import PlanActor
 from tests import test_workflow_runs as workflow_runs
 from tests.plan_execution_helpers import open_turn
@@ -39,6 +40,22 @@ async def test_a_workflow_person_step_names_its_run_in_its_card_and_chat_row(iso
     assert states[run.thread_id]["attention_items"] == [{
         "kind": "hold", "title": "Ship the 0.4.1 notes — Sign the release form", "node_id": sign,
     }]
+
+
+async def test_a_workflow_person_steps_instructions_bar_names_its_run(isolated_db, tmp_path, monkeypatch):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, _PERSON_FIRST)})
+    reply = await run.start("ship", title="Ship the 0.4.1 notes")
+    sign = reply["steps"][0]["id"]
+
+    db = get_db()
+    try:
+        document = seed_document(db, run.thread_id, name="sign-instructions.md")
+        artifact_links.link(sign, document, "input", actor_id=None, provenance="test", db=db)
+        db.commit()
+        bar = public.person_step_instructions(document, db=db)
+    finally:
+        db.close()
+    assert bar["node_title"] == "Ship the 0.4.1 notes — Sign the release form"
 
 
 async def test_a_plain_node_and_the_run_itself_keep_their_own_title(isolated_db, tmp_path, monkeypatch):

@@ -23,8 +23,6 @@ THREAD_STATE_LIMIT = 200
 # plan that is only waiting is not moving (stuck plans R9).
 _CHAT_WORD = {"active": "moving", "review_parent_agent": "moving", "paused": "paused"}
 _OWED_STATES = frozenset({"needs_input", "blocked_on_you"})
-#: Attention items that are plan nodes; access requests and held replies are not.
-_PLAN_ITEM_KINDS = frozenset({"hold", "review", "decision", "failed"})
 
 
 def chat_state(
@@ -128,7 +126,7 @@ def _access_requests(thread_ids: list[str], *, actor: PlanActor, db) -> dict[str
     return grouped
 
 
-def _plan_attention_items(presented: dict, *, db) -> list[dict]:
+def _plan_attention_items(presented: dict) -> list[dict]:
     """Every actionable plan ask, using the chat list's existing attention shape."""
     items = []
     work = node_states.work_ids(presented["nodes"])
@@ -153,10 +151,11 @@ def _name_runs(states: dict[str, dict], *, db) -> None:
 
     Read outside the plan tree, a workflow step names its run. A decision's
     review node already carries the decision's own question as its title.
+    Access requests and held replies are not plan nodes and carry no node id.
     """
     items = [
         item for row in states.values() for item in row["attention_items"]
-        if item["kind"] in _PLAN_ITEM_KINDS
+        if item["node_id"] is not None
     ]
     readers = workflow_fields.reader_titles(db, [item["node_id"] for item in items])
     for item in items:
@@ -258,7 +257,7 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
     seen = thread_updates.seen_by_thread(db, actor.user_id, attention_updates, visible_thread_ids)
     for plan_id, plan_row in plans_by_id.items():
         plan = presented_by_id.get(plan_id)
-        plan_items = _plan_attention_items(plan, db=db) if plan is not None else []
+        plan_items = _plan_attention_items(plan) if plan is not None else []
         user_items = [*plan_items, *access_by_thread.get(str(plan_row["owner_id"]), [])]
         state, label_key = _plan_word(plan_row, plan, owed=bool(user_items))
         # Your move outranks Failed; its list is whatever owed items were found.
