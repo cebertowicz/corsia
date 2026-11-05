@@ -19,7 +19,7 @@ Intake records accepted event IDs and recognizes a repeated accepted ID as a dup
 
 ## Event rules
 
-Event rules match declared event types and their filterable facts. A routing rule can deliver an event, drop delivery to its writer, start one of its writer's registered scripts, or start a worker using a reachable workflow that declares a result. Rule authoring validates the action and reports refusals. A script rule does not replace the event's normal route (`backend/events/rule_authoring.py`, `backend/events/rule_actions.py`). For workers and their threads, see [Agents and threads](agents-and-threads.md).
+Event rules match declared event types and their filterable facts. A routing rule can deliver an event, drop the event's deliveries to the rule's own writer, start one of its writer's registered scripts, or start a worker using a reachable workflow that declares a result. Rule authoring validates the action and reports refusals. A script rule does not replace the event's normal route (`backend/events/rule_authoring.py`, `backend/events/rule_actions.py`). For workers and their threads, see [Agents and threads](agents-and-threads.md).
 
 ## Schedules and watches
 
@@ -31,7 +31,7 @@ A watch records a condition and, when applicable, an expected event on an artifa
 
 An agent registers a readable file as a script schedule. Registration pins its SHA-256 hash and may set a cadence and declare the readings it can emit. A script without a cadence runs only when an event rule starts it. The registration tool does not itself request a separate human approval (`backend/tools/automations.py`, `backend/automation/script_schedules.py`).
 
-Before a run, the runner checks the file against the pinned hash. A mismatch stops the schedule and is reported. Runs use the owner's protected shell envelope without a host-access lease and do not require a model turn. A scheduled run receives no standard input; a rule-started run receives the matching event as JSON. The script can print JSON readings or declared measure events. Bounds, failures and timeouts can wake the owner; `automation_list` reports the last status (`backend/automation/script_runner.py`, `backend/automation/script_sandbox.py`, `backend/tools/automations.py`).
+Before a run, the runner checks the file against the pinned hash. A mismatch stops the schedule's runs and is reported. Runs use the owner's protected shell envelope without a host-access lease and do not require a model turn. A scheduled run receives no standard input; a rule-started run receives the matching event as JSON. The script can print JSON readings or declared measure events. Bounds, failures and timeouts can wake the owner; `automation_list` reports the last status (`backend/automation/script_runner.py`, `backend/automation/script_sandbox.py`, `backend/tools/automations.py`).
 
 ## What can go wrong
 

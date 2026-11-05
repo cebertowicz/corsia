@@ -707,5 +707,3 @@ second contract system.
 
 Use git history for deeper provenance. New rationale belongs in the current
 PRD/design and the code/tests that implement it.
-
-Checked against the code at `7a8c55d84`.
