@@ -58,8 +58,7 @@ def format_threaded_comment_body(finding: dict[str, Any]) -> str:
         lines.extend([
             "**This needs a different approach**",
             "",
-            "The findings below share one cause. Fix that cause, not each "
-            "finding on its own.",
+            "Fix the cause described below, not each finding on its own.",
             "",
         ])
     lines.extend([

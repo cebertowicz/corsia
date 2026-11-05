@@ -154,7 +154,7 @@ def test_format_threaded_body_omits_ref_when_no_cited_section():
     assert "Ref:" not in body
 
 
-def test_approach_churn_thread_starts_with_stop_not_a_patchable_finding():
+def test_approach_churn_thread_starts_with_different_approach_heading():
     body = format_threaded_comment_body(_finding(
         severity="block",
         file="",
@@ -163,7 +163,7 @@ def test_approach_churn_thread_starts_with_stop_not_a_patchable_finding():
     ))
 
     assert body.splitlines()[0] == "**This needs a different approach**"
-    assert "Fix that cause, not each finding on its own" in body
+    assert "Fix the cause described below, not each finding on its own" in body
 
 
 def test_extract_fingerprint_returns_none_for_no_marker():
