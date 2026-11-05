@@ -19,7 +19,7 @@ Apply "You didn't learn" in the always-loaded "How to work here". Preserve incid
 
 | Who ↓ · When → | Every turn | Task start | Looked up |
 |---|---|---|---|
-| Thread | continuity; place nothing | continuity | `working/` files (register as lasting if needed past a week) |
+| Thread | continuity; place nothing | continuity | `working/` files (register with durable retention if needed past a week) |
 | Agent | `.threads/<id>/context/` (`RESPONSIBILITY.md` for a persistent agent) | `.threads/<id>/skills/<name>/SKILL.md` | the agent's `shared/<domain>/` reference |
 | Project | project `context/` | project `skills/` | `shared/<category>/` |
 | Everywhere | workspace user profile | workspace `skills/` | workspace user reference |

@@ -136,10 +136,10 @@
       "sha256": "8c76c3448e68bb117d2fd018df1a0b2da0371b6cf03287ac4a6ddf102370641c"
     },
     {
-      "bytes": 3379,
+      "bytes": 3391,
       "kind": "skill",
       "path": "skills/asking-the-person/SKILL.md",
-      "sha256": "bb6e88bb3db14f5aea076da04c0becbb5bab1c0ab30b087c895791daf44c1e4c"
+      "sha256": "0eb7cb7cb946f68d62a27bb6c191b8850f4ad73ff2cb2041e09ea906fcaeff94"
     },
     {
       "bytes": 18740,
@@ -346,10 +346,10 @@
       "sha256": "555c420af73ca25223f147bcd40a2e471fc96fa97216c04861881bea2bc2377e"
     },
     {
-      "bytes": 8862,
+      "bytes": 8874,
       "kind": "skill",
       "path": "skills/memory-placement/SKILL.md",
-      "sha256": "9e1d7930b64a7d674bba8eeb9abd4daaaed343f3215e33ce5551070b00fd0530"
+      "sha256": "3ccb2ffc1ea17aaca9ad1fd4f5c5186469f9bf8e8474c4183d5cbfdd472dc1dc"
     },
     {
       "bytes": 5914,
