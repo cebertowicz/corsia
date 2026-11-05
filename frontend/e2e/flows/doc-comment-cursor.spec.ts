@@ -143,7 +143,7 @@ async function openDocument(page: Page, testInfo: TestInfo, motion: Motion, name
 }
 
 function commentsButton(count: number): RegExp {
-	return new RegExp(`^${count} open thread${count === 1 ? '' : 's'}\\b`);
+	return new RegExp(`^${count} thread${count === 1 ? '' : 's'}\\b`);
 }
 
 /**

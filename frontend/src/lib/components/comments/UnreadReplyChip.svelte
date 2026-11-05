@@ -3,16 +3,17 @@
 	import AttachmentRow from '$lib/components/AttachmentRow.svelte';
 
 	// One notice for unread replies in both the chat dock and document.
-	let { artifactId, count, where = null, type = 'document', onOpen }: {
+	let { artifactId, count, comments = false, where = null, type = 'document', onOpen }: {
 		artifactId: string;
 		count: number;
+		comments?: boolean;
 		/** What the chip adds after the count when the reader is not already in the document: its name, or "N documents". */
 		where?: string | null;
 		type?: 'chat' | 'document';
 		onOpen: () => void;
 	} = $props();
 
-	const label = $derived(`${count} new ${count === 1 ? 'reply' : 'replies'}${where ? ` · ${where}` : ''}`);
+	const label = $derived(`${count} new ${comments ? (count === 1 ? 'comment' : 'comments') : (count === 1 ? 'reply' : 'replies')}${where ? ` · ${where}` : ''}`);
 	const card = $derived<MessageCard>({
 		kind: 'artifact',
 		artifact_id: artifactId,
@@ -28,7 +29,7 @@
 </script>
 
 {#if count > 0}
-	<section class="reply-chip-notice" aria-label="Unread agent replies">
+	<section class="reply-chip-notice" aria-label={comments ? 'Unread agent comments' : 'Unread agent replies'}>
 		<AttachmentRow {card} threadId={null} variant="chip" chipWidth="content" newMarker onActivate={onOpen} />
 	</section>
 {/if}

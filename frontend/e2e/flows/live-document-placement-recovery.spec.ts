@@ -82,14 +82,14 @@ test('@slice1 @surface:live-document a refused placement reload at 393 preserves
 		});
 		const selectedRange = await editorSelection();
 		expect(selectedRange.text).toBe('keep');
-		await reader.getByRole('button', { name: /^2 open threads\b/ }).click();
+		await reader.getByRole('button', { name: /^2 threads\b/ }).click();
 		const comments = reader.getByRole('region', { name: 'Document comments', exact: true });
 		await expect(comments).toBeVisible();
 		const retainedCard = comments.locator('[data-comment-id]').filter({ hasText: `Keep ${stamp}` });
 		const retainedId = await retainedCard.getAttribute('data-comment-id');
 		expect(retainedId).toBeTruthy();
 		const openComments = async () => {
-			await reader.getByRole('button', { name: /open thread/ }).click();
+			await reader.getByRole('button', { name: /^\d+ threads?\b/ }).click();
 			await expect(comments).toBeVisible();
 		};
 		const closeComments = async () => {
