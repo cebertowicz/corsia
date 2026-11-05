@@ -34,8 +34,7 @@ def profile_root() -> Path:
 
 def profile_dir(thread_id: str) -> Path | None:
     """Resolve the instance's saved profile only for a thread with a valid owner."""
-    # Contributor workspaces run in separate instances with separate state roots; see
-    # docs/contributing/bootstrap/CROSS-WORKSPACE-PROTOCOL.md:19,92,120-126.
+    # Contributor workspaces run in separate instances with separate state roots.
     # Unknown owners fail closed to an ephemeral session.
     owner = _owner_key(thread_id)
     return profile_root() / owner if owner is not None else None
