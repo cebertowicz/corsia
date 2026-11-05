@@ -47,6 +47,7 @@ async def test_proxy_injects_account_credential_for_github():
     assert b"200" in response and b"ok" in response
     assert seen[0].url.host == "api.github.com"
     assert seen[0].headers["authorization"] == "token synthetic-value"
+    assert "transfer-encoding" not in seen[0].headers and seen[0].content == b""
 
 
 @pytest.mark.asyncio
