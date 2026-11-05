@@ -96,6 +96,18 @@ Source: `backend/infra/reviewer_gate_schema.py`.
 
 Indexes: `sqlite_autoindex_reviewer_gate_approval_1` (pr_key, unique).
 
+### `reviewer_gate_pending`
+
+Source: `backend/infra/reviewer_gate_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `pr_key` | TEXT | Yes | Yes | — | — |
+| `head_sha` | TEXT | Yes | Yes | — | — |
+| `internal_event` | TEXT | No | Yes | — | — |
+
+Indexes: `sqlite_autoindex_reviewer_gate_pending_1` (pr_key, head_sha, unique).
+
 ### `reviewer_gate_state`
 
 Source: `backend/infra/reviewer_gate_schema.py`.
