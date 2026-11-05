@@ -6,7 +6,7 @@ The CORSIA agent and designated project conductors can call application handlers
 
 The canonical HTTP owner remains `main.app` and its registered FastAPI handlers. `corsia_api` invokes that ASGI application in process; it does not duplicate services or create a network login. Existing handler ownership checks still use the actor's user ID. A revocable task-local principal carries the originating thread ID and stops authenticating inherited background contexts when the request exits.
 
-The route policy uses a method and path blocklist. Registered routes are open unless they match it; this includes newly registered routes. The blocklist covers authentication, credentials, host-access authority, recursive tool bridges, and specified handlers that record a human actor. Request fields cannot claim another sender, creator, or document author. Recognizable credential fields and values are rejected on input and sanitized on output. Private-file inputs preserve the existing host-path safety floor (`backend/tools/conductor_api_policy.py`, `backend/tools/conductor_api_identity.py`, `backend/tools/conductor_api_paths.py`).
+The route policy uses a method and path blocklist. Registered routes are open unless they match it; this includes newly registered routes. The blocklist covers signing in as the person and minting credentials, stored credentials and keys, host-access authority, answering the person's decisions, granting conductor or CORSIA agent authority, vendor-account sign-in, sign-out and removal, recursive tool bridges, webhooks, dismissing security alerts, approving or signing in to connected apps, and specified handlers that record the person as actor. It also refuses the `api_base` field on a provider update and linking a repository outside the workspace. The full list is `OFF_LIMITS_ROWS` and `BODY_FIELD_ROWS`. Request fields cannot claim another sender, creator, or document author. Recognizable credential fields and values are rejected on input and sanitized on output. Private-file inputs preserve the existing host-path safety floor (`backend/tools/conductor_api_policy.py`, `backend/tools/conductor_api_identity.py`, `backend/tools/conductor_api_paths.py`).
 
 Agent creation and promotion use `delegate_create_thread` and revisioned `agent_roster_update`. Instruction creation uses the guidance saver, bootloader attachment transaction, skills registry and lesson eligibility partition (`backend/tools/conductor_instruction_create.py`). It installs thread responsibility files or skills with support files, and reports resolution-set inclusion for the next turn. A fresh target turn remains the final delivery check.
 
@@ -38,18 +38,18 @@ The tests use disposable state and mock delegation; they do not prove delivery b
 
 ### Adds
 
-The broker module, route manifest, origin binding, path guard and redaction.
+The broker module, route blocklist, origin binding, path guard and redaction.
 
 ### Removes or collapses
 
-The broker invokes existing handlers (`backend/tools/corsia_api.py`).
+None. No per-feature conductor tools are replaced by this change.
 
 ### Ledger
 
-The broker sends requests to the application's registered handlers (`backend/tools/corsia_api.py`).
+Reusing the application's existing handlers keeps validation, authorization, audit, events and state ownership in one path. A second handler layer would duplicate those contracts and create another place for them to diverge (`backend/tools/corsia_api.py`).
 
 ### Falsification / removal condition
 
-The broker uses a revocable task-local principal and binds attribution to the acting thread (`backend/tools/corsia_api.py`, `backend/infra/internal_principal.py`).
+When scoped agent tokens land, agent calls authenticate as a scoped agent principal, and `bind_delegation_origin`, `attribution_matches` and the credential regex layers are deleted (`backend/tools/conductor_api_identity.py`, `backend/tools/conductor_api_policy.py`).
 
 Checked against the code at `7a8c55d84`.
