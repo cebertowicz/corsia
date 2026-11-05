@@ -7,10 +7,10 @@
       "sha256": "01f766a8d568c83815c1d577f03f99a490d73df3e37fb4df7ee95e819f5953f8"
     },
     {
-      "bytes": 7326,
+      "bytes": 7349,
       "kind": "context",
       "path": "context/10-HOW-TO-WORK.md",
-      "sha256": "97fc5cb92c3191e6f24e60d21cdf82d56927a9b418786365037c9809a7acad31"
+      "sha256": "16ec189198e4f5fb7cdb20b847ce23008747382f69a6b524749be78cc692cc88"
     },
     {
       "bytes": 830,
@@ -346,10 +346,10 @@
       "sha256": "555c420af73ca25223f147bcd40a2e471fc96fa97216c04861881bea2bc2377e"
     },
     {
-      "bytes": 8874,
+      "bytes": 9079,
       "kind": "skill",
       "path": "skills/memory-placement/SKILL.md",
-      "sha256": "3ccb2ffc1ea17aaca9ad1fd4f5c5186469f9bf8e8474c4183d5cbfdd472dc1dc"
+      "sha256": "71933120fce3543b026c4c05bb57113b1c82199835fa28431e379c9475573fbc"
     },
     {
       "bytes": 5914,
@@ -394,10 +394,10 @@
       "sha256": "a6cf9bc8558c748f61d1397990e88c7f46e202b206e2290ab866bfb96048c1c7"
     },
     {
-      "bytes": 7581,
+      "bytes": 7618,
       "kind": "skill",
       "path": "skills/task-discipline/SKILL.md",
-      "sha256": "f2096c1eb268f940f3816fa142e62187cd1cc72e0505021cf814627061f2c5a0"
+      "sha256": "7d5ddf63a8ad1b0761d1b098fc1d8e9dcf99599313d1c3395040e30e5766ed14"
     },
     {
       "bytes": 10491,
@@ -406,10 +406,10 @@
       "sha256": "b690043ae812a95106ecb7f351eadc453bc84c70bd1581ee31ca2c8ed024951b"
     },
     {
-      "bytes": 4487,
+      "bytes": 4537,
       "kind": "skill",
       "path": "skills/workflow-design/SKILL.md",
-      "sha256": "16b6832d2a76dfea1bcb567d54186b1a868bec5fc21388ccebddc25f088a5649"
+      "sha256": "837aface4e87a1817513dceca2819b70b0d49d532cbd8e370fa5931188a78e82"
     }
   ],
   "version": "v1"

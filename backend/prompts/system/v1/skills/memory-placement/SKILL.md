@@ -19,7 +19,7 @@ Apply "You didn't learn" in the always-loaded "How to work here". Preserve incid
 
 | Who ↓ · When → | Every turn | Task start | Looked up |
 |---|---|---|---|
-| Thread | continuity; place nothing | continuity | `working/` files (register with durable retention if needed past a week) |
+| Thread | continuity; place nothing | continuity | `working/` files (`artifact_register` with retention `durable` if needed past a week) |
 | Agent | `.threads/<id>/context/` (`RESPONSIBILITY.md` for a persistent agent) | `.threads/<id>/skills/<name>/SKILL.md` | the agent's `shared/<domain>/` reference |
 | Project | project `context/` | project `skills/` | `shared/<category>/` |
 | Everywhere | workspace user profile | workspace `skills/` | workspace user reference |
@@ -29,7 +29,7 @@ Apply "You didn't learn" in the always-loaded "How to work here". Preserve incid
 ## 3. Rules
 
 1. **Who writes.** You write the Thread and Agent rows for your own thread. Project and Everywhere rows belong to the conductor: `place` the entry `proposed` with the `placement` (rule 7). Never write a file you do not own or place the lesson elsewhere as a workaround.
-2. **Same turn.** Place corrections when they arrive. At checkpoint review, verdict each offered entry: `select` (rules 1 and 4), `already` (rule 3), `drop` with reason, or `reaffirm` with reason. Never reaffirm a lesson or select it with q1 `thread`. Retire a correction's lesson only with evidence it was used. No recorded offers or reads for its version means untested: extend it, never retire it for lack of exposure alone.
+2. **Same turn.** Place corrections when they arrive; a later review can't recover a correction you didn't record. At checkpoint review, verdict each offered entry: `select` (rules 1 and 4), `already` (rule 3), `drop` with reason, or `reaffirm` with reason. Never reaffirm a lesson or select it with q1 `thread`. Retire a correction's lesson only on evidence of its effect; `lesson_report`'s offers, deliveries and reads show only that it reached an agent. If its version has no recorded offer, delivery or read (an unavailable read is not a zero), it is untested: extend it, never retire it for lack of exposure alone.
 3. **Duplicates first.** Read the destination and earlier decisions. If a rule lives in another file, point to it; if already present, `place` `already` with its file and line. When merging, keep every source's record: dates in Thread or Agent rows, `source_refs` otherwise. An unfollowed rule is a delivery or execution problem (skill `context-stewardship`).
 4. **Widen deliberately.** In Thread and Agent rows the user's words may stay verbatim. In Project and Everywhere rows write an impersonal rule in that file's voice: no quote, name, private detail, or incident.
 5. **User provenance.** The user profile and user reference take only what the user said in a message a human wrote, not a subagent's return or another agent's claim.
