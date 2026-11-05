@@ -31,7 +31,7 @@ If the model a thread selected cannot run, the turn ends with a named reason. A 
 
 | Harness | How a turn runs |
 |---|---|
-| `native` | CORSIA's own loop, calling models through LiteLLM (`backend/llm/router.py`). Up to 200 tool iterations per turn by default (`backend/core/agent.py`, `backend/core/turn_iteration.py`). |
+| `native` | CORSIA's own loop, routing inference through provider clients or LiteLLM (`backend/llm/router.py`). Up to 200 tool iterations per turn by default (`backend/core/agent.py`, `backend/core/turn_iteration.py`). |
 | `claude-code` | The `claude` program in print mode with streaming JSON in and out. An ordinary managed launch uses CORSIA's tool bridge when configured and switches off Claude Code's auto memory, project instruction file, hooks and bundled skills; a confined launch instead uses its read-only native tools (`backend/subagents/cc_invocation.py`, `backend/subagents/managed_launch.py`). |
 | `codex` | `codex app-server` over standard I/O, with provider-native actions, skills, search and project docs disabled. It starts with `--strict-config`, so a Codex release that removes or renames a governed control makes startup fail visibly instead of silently restoring a native tool. A turn starts with `turn/start`, and later input joins the running turn with `turn/steer` (`backend/subagents/codex_launch_policy.py`, `backend/subagents/managed_launch.py`, `backend/subagents/codex_runtime_support.py`). |
 
