@@ -14,7 +14,6 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import stat
@@ -47,6 +46,7 @@ from host_access.supervisor import (
 )
 from infra.db_async import run_in_db
 from tools.host_access_errors import HostAccessBlocked, HostAccessGateError, HostAccessRequired
+from tools.host_action_values import _boolean, _integer, _number, _text
 from tools.host_access_external import (
     ExternalLaunchMismatch,
     classify_external_launch,
@@ -160,39 +160,6 @@ def _safe_params(params: Mapping[str, Any]) -> dict[str, Any]:
         for key, value in dict(params).items()
         if not str(key).startswith(_RESERVED_PREFIXES)
     }
-
-
-def _text(value: Any, field_name: str) -> str:
-    if not isinstance(value, str) or not value:
-        raise HostAccessBlocked(f"Host action {field_name} is invalid.")
-    return value
-
-
-def _boolean(value: Any, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if not isinstance(value, bool):
-        raise HostAccessBlocked("Host action parameters are invalid.")
-    return value
-
-
-def _integer(value: Any, default: int, *, minimum: int, maximum: int) -> int:
-    if value is None:
-        value = default
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise HostAccessBlocked("Host action parameters are invalid.")
-    if value < minimum:
-        raise HostAccessBlocked("Host action parameters are invalid.")
-    return min(value, maximum)
-
-
-def _number(value: Any, field_name: str, *, minimum: float = 0.0) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise HostAccessBlocked(f"Host action {field_name} is invalid.")
-    normalized = float(value)
-    if not math.isfinite(normalized) or normalized < minimum:
-        raise HostAccessBlocked(f"Host action {field_name} is invalid.")
-    return normalized
 
 
 def _tool_workspace(tool: Any) -> Path:
