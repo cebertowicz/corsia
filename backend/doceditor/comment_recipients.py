@@ -178,33 +178,53 @@ def thread_context(db, item: dict) -> str:
            WHERE id=? OR parent_id=? ORDER BY created_at,id""", (root, root),
     ).fetchall()
     root_row = next((row for row in rows if row["id"] == root), None)
-    lines = ["Thread so far (context, not new feedback):"]
+    header = ["Thread so far (context, not new feedback):"]
     if root_row and root_row["anchor_text"]:
-        lines.append(f'Highlighted: "{root_row["anchor_text"]}"')
+        header.append(f'Highlighted: "{root_row["anchor_text"]}"')
+    prior = []
     for row in rows:
         if row["id"] == item["id"]:
             break
-        lines.append(f'- {row["author"]}: {row["body"]}')
-    marker = f'… thread cut; read it all with doc_comments_list(comment_id="{root}")'
-    return bounded_text("\n".join(lines), WORDS_MAX_BYTES,
-                        measure=lambda value: len(value.encode("utf-8")), marker=marker)
+        prior.append(f'- {row["author"]}: {row["body"]}')
+    measure = lambda value: len(value.encode("utf-8"))
+    def marker(count: int) -> str:
+        return f'… {count} earlier comments not shown; read them all with doc_comments_list(comment_id="{root}")'
+
+    selected = []
+    for index in range(len(prior) - 1, -1, -1):
+        candidate = [prior[index], *selected]
+        dropped = index
+        lines = header + ([marker(dropped)] if dropped else []) + candidate
+        if measure("\n".join(lines)) <= WORDS_MAX_BYTES:
+            selected = candidate
+            continue
+        dropped = index + 1
+        while selected and measure("\n".join(header + [marker(dropped)] + selected)) > WORDS_MAX_BYTES:
+            selected.pop(0)
+            dropped += 1
+        return bounded_text("\n".join(header + [marker(dropped)] + selected), WORDS_MAX_BYTES,
+                            measure=measure, marker=marker(dropped))
+    return bounded_text("\n".join(header + selected), WORDS_MAX_BYTES,
+                        measure=measure, marker=marker(len(prior)))
 
 
 def prepare_notification(db, items: list[dict], agent_id: str) -> None:
     """Count one delivered batch per comment thread and attach any due hint."""
     roots = set()
+    context_roots = set()
     for item in items:
         if item.get("kind") != "comment":
             continue
         root = root_id(item)
-        tagged = item.get("event") != "reopened" and db.execute(
+        tagged = not item.get("suppress_tag") and item.get("event") != "reopened" and db.execute(
             "SELECT 1 FROM doc_comment_tags WHERE comment_id=? AND agent_id=?",
             (item["id"], agent_id),
         ).fetchone()
         if tagged:
             reinstate(db, item, agent_id)
-            if item.get("parent_id"):
+            if item.get("parent_id") and root not in context_roots:
                 item["thread_context"] = thread_context(db, item)
+                context_roots.add(root)
         if root in roots:
             continue
         roots.add(root)

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from doceditor import comment_recipients, image_regions
+from doceditor import comment_recipients, feedback_comments, image_regions
 from infra.passive_changes import append_thread_context_note
 from infra.send_types import SendRejected
 from infra.thread_inputs import thread_admission_state
@@ -134,6 +134,7 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
     if recipient == "ui":
         return DeliveryResult(outcome="ui")
     artifact = registry_models.get_artifact(str(_value(batch, "artifact_id")), db=db)
+    before_filter = items
     items = comment_recipients.filter_left_replies(
         db, items, recipient,
         person_owner=_value(batch, "author_kind") == "user" and bool(artifact)
@@ -141,6 +142,13 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
     )
     if not items:
         return DeliveryResult(outcome="empty")
+    removed = [item for item in before_filter if item not in items]
+    for item in removed:
+        db.execute("DELETE FROM doc_feedback_batch_items WHERE batch_id=? AND comment_id=?",
+                   (_value(batch, "id"), item["id"]))
+    if removed:
+        db.execute("UPDATE doc_feedback_batches SET item_count=item_count-? WHERE id=?",
+                   (len(removed), _value(batch, "id")))
     problem = recipient_problem(db, recipient)
     if problem is None and _value(batch, "author_kind") == "agent":
         tagged = any(item.get("kind") == "comment" and item.get("event") != "reopened" and db.execute(
@@ -149,15 +157,24 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
         if tagged:
             refusal = comment_recipients.tag_locality_refusal(db, str(_value(batch, "author_id")), recipient)
             if refusal:
-                refused = [item for item in items if item.get("kind") == "comment"
-                           and item.get("event") != "reopened" and db.execute(
-                               "SELECT 1 FROM doc_comment_tags WHERE comment_id=? AND agent_id=?",
-                               (item["id"], recipient),
-                           ).fetchone()]
+                tagged_items = [item for item in items if item.get("kind") == "comment"
+                                and item.get("event") != "reopened" and db.execute(
+                                    "SELECT 1 FROM doc_comment_tags WHERE comment_id=? AND agent_id=?",
+                                    (item["id"], recipient),
+                                ).fetchone()]
+                refused = []
+                for item in tagged_items:
+                    ordinary = feedback_comments.recipients(db, {**item, "tagged_agent_ids": []})
+                    if recipient in ordinary:
+                        item["suppress_tag"] = True
+                    else:
+                        refused.append(item)
                 remaining = [item for item in items if item not in refused]
-                problem = f"Tag not delivered: {refusal}"
+                document = (artifact.get("path") or artifact.get("title") or str(_value(batch, "artifact_id"))) if artifact else str(_value(batch, "artifact_id"))
+                comment_ids = ", ".join(str(item["id"]) for item in tagged_items)
+                problem = f"Tag not delivered: {document}, comment {comment_ids}. {refusal}"
                 if remaining:
-                    undelivered_note(db, batch, problem, items=refused)
+                    undelivered_note(db, batch, problem, items=tagged_items)
                     for item in refused:
                         db.execute("DELETE FROM doc_feedback_batch_items WHERE batch_id=? AND comment_id=?",
                                    (_value(batch, "id"), item["id"]))
@@ -166,15 +183,6 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
                     items = remaining
                     problem = None
     if problem is not None:
-        if _value(batch, "author_kind") == "agent" and not problem.startswith("Tag not delivered: "):
-            for item in items:
-                if item.get("kind") != "comment":
-                    continue
-                tag = db.execute("SELECT agent_name FROM doc_comment_tags WHERE comment_id=? AND agent_id=?",
-                                 (item["id"], recipient)).fetchone()
-                if tag:
-                    problem = f"Tag not delivered: {tag['agent_name']}: {problem.replace('_', ' ')}."
-                    break
         undelivered_note(db, batch, problem, items=items)
         return DeliveryResult(reason=problem)
     image_regions.annotate_delivery(

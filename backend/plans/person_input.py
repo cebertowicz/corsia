@@ -329,6 +329,7 @@ def _content(db, node, source: Source, recipient: str, answer: list[str], *, con
         intent_input={
             "node_id": str(node["id"]), "requirements_revision": revision, "title": title,
             "source_kind": source.kind, "said_at": source.said_at,
-            "words": (context + "\n\n" if context else "") + intent_words.bounded_text(source.words, WORDS_MAX_BYTES),
+            "words": intent_words.bounded_text(source.words, WORDS_MAX_BYTES),
         },
+        **({"thread_context": context} if context else {}),
     )

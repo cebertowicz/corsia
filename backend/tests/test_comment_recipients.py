@@ -22,7 +22,13 @@ def test_reply_routing_and_leaving(isolated_db):
     assert db.execute(
         "SELECT COUNT(*) FROM context_change_journal WHERE object_kind='artifact' AND object_id=? AND summary LIKE '%commented on%'",
         (aid,),
-    ).fetchone()[0] == 0
+    ).fetchone()[0] == 2
+    with write_transaction(db, scope="duplicate_comment") as connection:
+        feedback_batches.record_comment(connection, reply, created=False)
+    assert db.execute(
+        "SELECT COUNT(*) FROM context_change_journal WHERE object_kind='artifact' AND object_id=? AND summary LIKE '%commented on%'",
+        (aid,),
+    ).fetchone()[0] == 2
     assert set(feedback_comments.recipients(db, reply)) == {"owner", "first"}
     comment_recipients.leave(db, root, "first")
     db.commit()
@@ -195,6 +201,27 @@ def test_mixed_held_replies_only_deliver_explicit_tag_to_left_agent(isolated_db)
     db.close()
 
 
+def test_mixed_left_batch_persists_only_delivered_item_count(isolated_db):
+    db = get_db()
+    for name in ("owner", "agent", "writer"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="agent")
+    plain, first = add_comment(db, aid, author_id="writer", parent_id=root["id"])
+    with write_transaction(db, scope="mixed_left_tag") as connection:
+        tagged, created = comments.create_with_status(aid, body="Tagged", author="Writer", author_kind="agent", author_thread_id="writer", parent_id=root["id"], db=connection)
+        comment_recipients.save_tags(connection, tagged, ["agent"])
+        comment_recipients.tags_for_comments(connection, [tagged])
+        feedback_batches.record_comment(connection, tagged, created=created)
+        comment_recipients.leave(connection, root, "agent")
+    batch = next(batch_id for batch_id in first["batch_ids"] if db.execute(
+        "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0] == "agent")
+    feedback_batches.close_batch(db, batch, "send")
+    assert tuple(db.execute("SELECT state,item_count FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()) == ("delivered", 1)
+    assert [row[0] for row in db.execute("SELECT comment_id FROM doc_feedback_batch_items WHERE batch_id=?", (batch,))] == [tagged["id"]]
+    db.close()
+
+
 def test_failed_node_delivery_rolls_back_rejoin_and_notification(isolated_db, monkeypatch):
     from doceditor import feedback_delivery
 
@@ -239,7 +266,8 @@ def test_agent_local_only_tag_is_refused_but_person_tag_is_not(isolated_db, monk
         comment_recipients.save_tags(connection, row, ["recipient"])
         comment_recipients.tags_for_comments(connection, [row])
         result = feedback_batches.record_comment(connection, row, created=created)
-    assert result["tag_refusals"] == ["recipient is cloud-bound or has no model selected, and Local only applies to this chat or project, so the tag wasn't delivered. Send it with delegate_send, which holds it for the person's approval, or tag a local agent."]
+    assert len(result["tag_refusals"]) == 1
+    assert row["id"] in result["tag_refusals"][0] and "recipient is cloud-bound" in result["tag_refusals"][0]
     assert db.execute("SELECT COUNT(*) FROM doc_feedback_batches WHERE recipient_id='recipient'").fetchone()[0] == 0
     with write_transaction(db, scope="test_person_tag") as connection:
         row, created = comments.create_with_status(aid, body="Person", author="User", author_kind="user", db=connection)
@@ -293,7 +321,66 @@ def test_pending_tag_names_recipient_when_admission_fails(isolated_db, monkeypat
     monkeypatch.setattr(feedback_delivery, "recipient_problem", lambda db, recipient: "owner_archived")
     feedback_batches.close_batch(db, batch, "send")
     state = db.execute("SELECT state,undelivered_reason FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()
-    assert tuple(state) == ("undelivered", "Tag not delivered: recipient: owner archived.")
+    assert tuple(state) == ("undelivered", "owner_archived")
+    note = db.execute("SELECT summary FROM context_change_journal WHERE object_id='writer' AND summary LIKE '%doc_feedback_send%' ORDER BY rowid DESC LIMIT 1").fetchone()
+    assert note and aid in note[0] and "owner archived" in note[0]
+    db.close()
+
+
+def test_mixed_batch_admission_failure_keeps_standard_retry_note(isolated_db, monkeypatch):
+    from doceditor import feedback_delivery
+
+    db = get_db()
+    for name in ("owner", "writer"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    with write_transaction(db, scope="mixed_admission") as connection:
+        plain, created = comments.create_with_status(aid, body="Ordinary", author="Writer", author_kind="agent", author_thread_id="writer", db=connection)
+        result = feedback_batches.record_comment(connection, plain, created=created)
+        tagged, created = comments.create_with_status(aid, body="Tagged", author="Writer", author_kind="agent", author_thread_id="writer", db=connection)
+        comment_recipients.save_tags(connection, tagged, ["owner"])
+        comment_recipients.tags_for_comments(connection, [tagged])
+        feedback_batches.record_comment(connection, tagged, created=created)
+    batch = result["batch_ids"][0]
+    monkeypatch.setattr(feedback_delivery, "recipient_problem", lambda db, recipient: "owner_archived")
+    feedback_batches.close_batch(db, batch, "send")
+    note = db.execute("SELECT summary FROM context_change_journal WHERE object_id='writer' AND summary LIKE '%doc_feedback_send%' ORDER BY rowid DESC LIMIT 1").fetchone()[0]
+    assert "2 comments" in note and "owner archived" in note and aid in note
+    assert db.execute("SELECT COUNT(*) FROM doc_feedback_batch_items WHERE batch_id=?", (batch,)).fetchone()[0] == 2
+    db.close()
+
+
+@pytest.mark.parametrize("existing_role", ["owner", "participant"])
+@pytest.mark.parametrize("held_at_create", [True, False])
+def test_locality_preserves_existing_recipient_without_tag_effects(isolated_db, monkeypatch, existing_role, held_at_create):
+    from doceditor import feedback_delivery
+    from infra import local_only
+
+    db = get_db()
+    for name in ("owner", "writer", "recipient"):
+        seed_thread(db, name, model=None)
+    recipient = "owner" if existing_role == "owner" else "recipient"
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id=recipient)
+    monkeypatch.setattr(local_only, "send_needs_hold", lambda *args, **kwargs: held_at_create)
+    with write_transaction(db, scope="ordinary_recipient") as connection:
+        reply, created = comments.create_with_status(aid, body="Reply", author="Writer", author_kind="agent",
+                                                     author_thread_id="writer", parent_id=root["id"], db=connection)
+        comment_recipients.save_tags(connection, reply, [recipient])
+        comment_recipients.tags_for_comments(connection, [reply])
+        result = feedback_batches.record_comment(connection, reply, created=created)
+    batch = next(batch_id for batch_id in result["batch_ids"] if db.execute(
+        "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0] == recipient)
+    monkeypatch.setattr(local_only, "send_needs_hold", lambda *args, **kwargs: True)
+    seen = []
+    original = feedback_delivery.create_feedback_node
+    def capture(db, recipient_id, batch, *, items):
+        seen.extend(items)
+        return original(db, recipient_id, batch, items=items)
+    monkeypatch.setattr(feedback_delivery, "create_feedback_node", capture)
+    feedback_batches.close_batch(db, batch, "send")
+    assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == "delivered"
+    assert seen[0].get("suppress_tag") and "thread_context" not in seen[0]
     db.close()
 
 
@@ -318,18 +405,20 @@ def test_mixed_pending_batch_delivers_untagged_and_reports_refusal(isolated_db, 
     from infra import local_only
 
     db = get_db()
-    for name in ("writer", "recipient"):
+    for name in ("owner", "writer", "recipient"):
         seed_thread(db, name, model=None)
-    aid = seed_document(db, "recipient")
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="recipient")
     monkeypatch.setattr(local_only, "send_needs_hold", lambda *args, **kwargs: False)
     with write_transaction(db, scope="mixed_pending") as connection:
-        plain, created = comments.create_with_status(aid, body="Ordinary", author="Writer", author_kind="agent", author_thread_id="writer", db=connection)
+        plain, created = comments.create_with_status(aid, body="Ordinary", author="Writer", author_kind="agent", author_thread_id="writer", parent_id=root["id"], db=connection)
         result = feedback_batches.record_comment(connection, plain, created=created)
         tagged, created = comments.create_with_status(aid, body="Tagged", author="Writer", author_kind="agent", author_thread_id="writer", db=connection)
         comment_recipients.save_tags(connection, tagged, ["recipient"])
         comment_recipients.tags_for_comments(connection, [tagged])
         feedback_batches.record_comment(connection, tagged, created=created)
-    batch = result["batch_ids"][0]
+    batch = next(batch_id for batch_id in result["batch_ids"] if db.execute(
+        "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0] == "recipient")
     notes = []
     monkeypatch.setattr(feedback_delivery, "undelivered_note", lambda db, batch, reason, **kwargs: notes.append(reason))
     monkeypatch.setattr(local_only, "send_needs_hold", lambda *args, **kwargs: True)
@@ -363,14 +452,33 @@ def test_tagged_reply_context_is_bounded_and_not_an_item(isolated_db):
     rendered = item_blocks({"author_kind": "agent"}, [item])
     assert 'Highlighted: "Highlighted passage"' in rendered
     assert rendered.index('- First: Root text') < rendered.index('- Second: Earlier text') < rendered.index('Feedback: Actionable text')
-    assert 'thread cut' not in rendered
+    assert 'earlier comments not shown' not in rendered
     assert feedback_item_counts([item]) == (0, 1, 0)
     db.execute("UPDATE doc_comments SET body=? WHERE id=?", ("é" * 2000, prior["id"]))
     item.pop("thread_context")
     comment_recipients.prepare_notification(db, [item], "recipient")
     assert len(item["thread_context"].encode()) <= WORDS_MAX_BYTES
-    assert 'thread cut; read it all with doc_comments_list' in item["thread_context"]
+    assert '2 earlier comments not shown; read them all with doc_comments_list' in item["thread_context"]
+    assert '- Second:' not in item["thread_context"]
     assert 'Feedback: Actionable text' in item_blocks({"author_kind": "agent"}, [item])
+    db.close()
+
+
+def test_thread_context_keeps_newest_whole_comments_and_counts_omissions(isolated_db):
+    db = get_db()
+    for name in ("owner", "first", "second"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="first")
+    older, _ = add_comment(db, aid, author_id="second", parent_id=root["id"])
+    newer, _ = add_comment(db, aid, author_id="first", parent_id=root["id"])
+    reply, _ = add_comment(db, aid, author_id="second", parent_id=root["id"])
+    db.execute("UPDATE doc_comments SET body=? WHERE id=?", ("old " * 500, older["id"]))
+    db.execute("UPDATE doc_comments SET body='Newest full comment',author='Newest' WHERE id=?", (newer["id"],))
+    context = comment_recipients.thread_context(db, reply)
+    assert '2 earlier comments not shown; read them all with doc_comments_list' in context
+    assert '- Newest: Newest full comment' in context
+    assert 'old old' not in context
     db.close()
 
 

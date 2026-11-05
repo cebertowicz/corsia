@@ -146,10 +146,13 @@ def test_tagged_reply_wake_keeps_action_after_bounded_context(isolated_db):
             comment_recipients.save_tags(connection, reply, ["owner"])
         feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
         wake = db.execute("SELECT content FROM messages WHERE thread_id='owner' AND id LIKE 'plan-wake:intent_input:%'").fetchone()
-        words = json.loads(wake[0].split("\n", 1)[1])["intent_input"]["words"]
-        assert 'Highlighted: "The quote"' in words
-        assert '- Earlier author:' in words
-        assert 'thread cut; read it all with doc_comments_list' in words
+        payload = json.loads(wake[0].split("\n", 1)[1])
+        words = payload["intent_input"]["words"]
+        context = payload["thread_context"]
+        assert 'Highlighted: "The quote"' in context
+        assert '- Earlier author:' not in context
+        assert '1 earlier comments not shown; read them all with doc_comments_list' in context
+        assert 'Earlier author' not in words and 'prior prior' not in words
         assert 'Feedback: Actionable reply' in words
     finally:
         db.close()
