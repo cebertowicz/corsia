@@ -12,25 +12,6 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "docs/reference/configuration.md"
 
-# Dynamic keys intentionally excluded (file:function; repeated calls grouped):
-# app_startup_runtime.py:_start_current_corrections_classifier; cli_events.py:_trace
-# cli_github.py:read; cli_sources.py:_read_token; connections/github_broker.py:_scrub
-# core/corrections_asset_download.py:base_url; e2e_mock.py:seed_mock_catalog
-# eval/credentials.py:resolve_eval_token; eval/harbor_tools.py:execute,register_harbor_bridge_tools
-# eval/runner.py:_default_judge_model; eval/tool_allowlist.py:eval_tool_allowlist
-# events/connectors/github_head_checks.py:hook_disabled_reason
-# events/connectors/github_notifications.py:_static_reason
-# events/connectors/github_pr_quiet_watch.py:disabled_reason
-# events/connectors/github_repo_activity.py:disabled_reason
-# events/connectors/mail_poller.py:disabled_reason
-# host_access/browser_session_commands.py:_script_config
-# infra/db_loop_guard.py:guard_write_off_event_loop
-# infra/migration_106_to_107_key_store_credentials.py:_collect
-# infra/otlp_listener.py:_ports; infra/restart_authorization.py:agent_restart_allowed
-# llm/public_model_catalog.py:load_catalog; onboarding/agent_import.py:_managed_homes
-# reviewer/reviewer_runner.py:_resolve_model; subagents/stream_capture.py:capture_dir_for,_allowlist
-# tools/mcp_import_agents.py:_environment
-
 # Each entry is an explicit reviewed classification. Descriptions are kept here
 # so a new environment read must be classified before the page can be generated.
 DOCUMENTED = {
@@ -50,6 +31,25 @@ DOCUMENTED = {
     "CODEX_HOME": "Selects the Codex home directory.",
     "CORSIA_AGENT_BROWSER_VERSION_RANGE": "Sets the accepted agent-browser version range.",
     "CORSIA_ALLOW_HOME_WORKSPACE_IN_CI": "Allows a home workspace in CI or tests.",
+    "CORSIA_CORRECTIONS_ASSET_BASE_URL": "Sets the download URL for correction assets.",
+    "CORSIA_DB_LOOP_WRITE_STRICT": "Makes database writes on the event loop raise an error.",
+    "CORSIA_EVAL_TOKEN": "Supplies the API token used for evaluation.",
+    "CORSIA_EVAL_TOOL_ALLOWLIST": "Selects which tools are available during evaluation.",
+    "CORSIA_GH_AGENT_CONFIG_DIR": "Selects the agents' GitHub account directory; an empty value turns the account off.",
+    "CORSIA_GITHUB_HEAD_CHECKS_ENABLE": "Enables GitHub pull request head check events when set to 1.",
+    "CORSIA_GITHUB_REPO_ACTIVITY_DISABLE": "Disables GitHub repository activity polling when set to 1.",
+    "CORSIA_MAIL_POLLER_DISABLE": "Disables mail polling when set to 1.",
+    "CORSIA_MODEL_CATALOG_URL": "Sets the URL for a mirror of the public model catalog.",
+    "CORSIA_OTLP_PORT": "Sets the local port that receives measures from external tools.",
+    "CORSIA_PROVIDER_STREAM_CAPTURE_DIR": "Sets the directory for captured provider streams.",
+    "CORSIA_PROVIDER_STREAM_CAPTURE_THREADS": "Selects chats whose provider streams are captured.",
+    "CORSIA_PR_QUIET_WATCH_DISABLE": "Disables the GitHub pull request quiet watch when set to 1.",
+    "CORSIA_REVIEWER_MODEL": "Selects the primary review model.",
+    "CORSIA_REVIEWER_FALLBACK_MODEL": "Selects the fallback review model.",
+    "HERMES_HOME": "Selects the Hermes Agent directory for import.",
+    "OPENCLAW_CONFIG_PATH": "Selects the OpenClaw configuration file for import.",
+    "OPENCLAW_HOME": "Selects the OpenClaw home directory for import.",
+    "OPENCLAW_STATE_DIR": "Selects the OpenClaw state directory for import.",
     "CORSIA_ANALYTICS_DISABLE": "Disables product analytics when set to 1.",
     "CORSIA_ANALYTICS_PROJECT": "Sets the project identifier for product events.",
     "CORSIA_API_BASE": "Sets the CORSIA API base URL for CLI clients.",
@@ -61,33 +61,33 @@ DOCUMENTED = {
     "CORSIA_DB_POOL_WORKERS": "Sets the asynchronous database worker count.",
     "CORSIA_DEVICES_DISABLE": "Disables the devices listener when set to 1.",
     "CORSIA_DIR": "Specifies the launcher checkout, which must match the script checkout.",
-    "CORSIA_DRAIN_MAX_WAIT": "Sets the maximum wait for draining.",
+    "CORSIA_DRAIN_MAX_WAIT": "Sets how long shutdown waits for active work to reach a safe point, in seconds.",
     "CORSIA_ENV_FILE": "Selects the launcher environment file.",
     "CORSIA_EVAL_ENDPOINT": "Sets the evaluation endpoint.",
     "CORSIA_EVAL_JUDGE_MODEL": "Selects the evaluation judge model.",
     "CORSIA_EVAL_LOG_DIR": "Selects the evaluation log directory.",
-    "CORSIA_EVAL_MODE": "Controls evaluation-mode telemetry.",
+    "CORSIA_EVAL_MODE": "Enables evaluation measurements when set to 1.",
     "CORSIA_EVAL_SUT_MODEL": "Selects the model under evaluation.",
     "CORSIA_EVAL_TIMEOUT": "Sets the evaluation timeout.",
-    "CORSIA_GIT_LOCK_STALE_SECONDS": "Sets the age at which a Git lock may be considered stale.",
+    "CORSIA_GIT_LOCK_STALE_SECONDS": "Sets how many seconds old a Git lock must be before it may be removed.",
     "CORSIA_GITHUB_NOTIFICATIONS_DISABLE": "Disables GitHub notifications polling when set to 1.",
     "CORSIA_HEALTH_WAIT_SECONDS": "Sets the startup health wait in seconds.",
     "CORSIA_LAUNCHD_BOOTSTRAP_ATTEMPTS": "Sets the number of launchd bootstrap attempts.",
     "CORSIA_PRE_MIGRATION_BACKUPS_KEEP": "Sets how many pre-migration backups to keep.",
     "CORSIA_PYTHON": "Selects the Python executable used by the launcher.",
-    "CORSIA_RESTART_JITTER_SECONDS": "Sets restart jitter in seconds.",
+    "CORSIA_RESTART_JITTER_SECONDS": "Sets the random delay applied to restart timing, in seconds.",
     "CORSIA_REVIEWER_MAX_TURNS": "Sets the maximum reviewer turns.",
     "CORSIA_SERVICE_LABEL": "Sets the service label.",
     "CORSIA_SERVICE_MANAGER": "Selects the service manager.",
     "CORSIA_SERVICE_PATH": "Overrides the executable search path used for the service.",
-    "CORSIA_SILENT_CHILD_SECONDS": "Sets the threshold for a silent child in seconds.",
-    "CORSIA_STARTUP_CEILING_SECONDS": "Sets the startup ceiling in seconds.",
+    "CORSIA_SILENT_CHILD_SECONDS": "Sets how many seconds a delegated worker can go quiet before its parent is notified.",
+    "CORSIA_STARTUP_CEILING_SECONDS": "Sets the maximum startup wait in seconds.",
     "CORSIA_STARTUP_SECONDS_PER_GIB": "Sets the startup allowance per GiB in seconds.",
     "CORSIA_STATE_DIR": "Selects the runtime state directory.",
-    "CORSIA_T1_DEFAULT_BUDGET_SECONDS": "Sets the default continuation watchdog budget in seconds.",
+    "CORSIA_T1_DEFAULT_BUDGET_SECONDS": "Sets how many seconds an active task can run before its agent is prompted to check it.",
     "CORSIA_TEST_MODE": "Enables test-specific behavior when set to 1.",
-    "CORSIA_THREAD_ID": "Identifies the current thread for CLI calls.",
-    "CORSIA_VERDICT_OWED_SECONDS": "Sets the delegated verdict threshold in seconds.",
+    "CORSIA_THREAD_ID": "Identifies the current chat for CLI calls.",
+    "CORSIA_VERDICT_OWED_SECONDS": "Sets how many seconds a returned worker's result can await review before its parent is reminded.",
     "CORSIA_WORKFLOW_JUDGE_MODEL": "Selects the workflow quality judge model.",
     "CORSIA_WORKSPACE": "Selects the workspace directory.",
     "CUSTOM_TIKTOKEN_CACHE_DIR": "Selects a custom tokenization cache directory.",
@@ -106,6 +106,10 @@ DOCUMENTED = {
     "XDG_CONFIG_HOME": "Selects the XDG configuration directory.",
 }
 INTERNAL = {
+    "CORSIA_AGENT_RESTART_ALLOWED",
+    "CORSIA_GITHUB_NOTIFICATIONS_TEST_ENABLE", "CORSIA_GITHUB_REPO_ACTIVITY_TEST_ENABLE",
+    "CORSIA_HARBOR_BRIDGE_SOCKET", "CORSIA_MAIL_POLLER_TEST_ENABLE",
+    "CORSIA_SCRIPT_GITHUB_SOCKET", "CORSIA_SOURCES_SERVICE_TOKEN",
     "CORSIA_BROWSER_INSTANCE_KEY", "CORSIA_CC_TOOL_TOKEN", "CORSIA_CC_TOOL_URL",
     "CORSIA_FORK_ID", "CORSIA_FORK_TOOL_TOKEN",
     "CORSIA_GIT_LOCK_RECOVERY_FAILURE_PREFIX", "CORSIA_INSTALL_FLOW", "CORSIA_INSTALL_LINUX",
@@ -113,31 +117,6 @@ INTERNAL = {
     "CORSIA_SERVICE_GENERATION", "CORSIA_TOKEN", "SPIKE_CC_MODEL",
 }
 
-
-# Effective fallbacks whose read sites use constants or computed expressions.
-DEFAULTS = {
-    "AGENT_BROWSER_ENGINE": "Browser config engine; otherwise chrome",
-    "AGENT_BROWSER_PROVIDER": "Browser config provider; otherwise unset",
-    "BACKEND_LOG": "Source: $CORSIA_STATE_DIR/backend.log; desktop: $CORSIA_STATE_DIR/logs/service.log",
-    "BACKEND_PORT": "1956",
-    "CODEX_HOME": "~/.codex",
-    "CORSIA_AGENT_BROWSER_VERSION_RANGE": ">=0.27.0,<0.28.0 or >=0.31.0,<0.32.0",
-    "CORSIA_ANALYTICS_PROJECT": "corsia",
-    "CORSIA_API_BASE": "CLI: loopback on BACKEND_PORT (1956 by default); API script: local default port",
-    "CORSIA_DIR": "The launcher's checkout directory",
-    "CORSIA_BACKUP_FREE_FLOOR_BYTES": "10737418240",
-    "CORSIA_ENV_FILE": "The checkout's .env file",
-    "CORSIA_EVAL_ENDPOINT": "Local loopback URL on port 1956, path /api/eval/turn",
-    "CORSIA_EVAL_LOG_DIR": "~/.corsia/logs/eval",
-    "CORSIA_PYTHON": "The checkout's .venv/bin/python",
-    "CORSIA_SERVICE_PATH": "~/.local/bin, /opt/homebrew/bin, /usr/local/bin, /usr/bin, /bin, /usr/sbin, /sbin",
-    "CORSIA_STATE_DIR": "Bootstrap state root; without bootstrap, the platform default state root. "
-                        "A workspace different from the bootstrapped workspace requires an explicit state directory.",
-    "CORSIA_WORKSPACE": "Install bootstrap workspace; if no bootstrap exists, startup fails.",
-    "GH_CONFIG_DIR": "~/.config/gh",
-    "SHELL": "/bin/zsh for the login shell probe",
-    "XDG_CONFIG_HOME": "~/.config when HOME is set; otherwise empty (Git state cache)",
-}
 
 STANDARD = {"PATH", "HOME", "SHELL", "TZ", "LANG", "LC_ALL", "APPDATA", "LOCALAPPDATA",
             "XDG_CONFIG_HOME", "GH_CONFIG_DIR", "TIKTOKEN_CACHE_DIR", "CUSTOM_TIKTOKEN_CACHE_DIR"}
@@ -151,22 +130,86 @@ def add(found, name, path, default):
         found[name][1].add(default)
 
 
-def python_reads(path, found):
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+def module_tables(paths):
+    tables = {}
+    for path in paths:
+        module = ".".join(path.relative_to(ROOT / "backend").with_suffix("").parts)
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        constants, imports = {}, {}
+        for node in tree.body:
+            if isinstance(node, (ast.Assign, ast.AnnAssign)):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                if isinstance(node.value, ast.Constant):
+                    for target in targets:
+                        if isinstance(target, ast.Name):
+                            constants[target.id] = node.value.value
+            elif isinstance(node, ast.ImportFrom):
+                base = module.split(".")[:-node.level] if node.level else []
+                source = ".".join(base + ([node.module] if node.module else []))
+                for alias in node.names:
+                    imports[alias.asname or alias.name] = (source, alias.name)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    imports[alias.asname or alias.name.split(".")[0]] = (alias.name, None)
+        tables[module] = (tree, constants, imports)
+    return tables
+
+
+def python_reads(path, found, tables):
+    module = ".".join(path.relative_to(ROOT / "backend").with_suffix("").parts)
+    tree, constants, imports = tables[module]
+
+    def resolve(node):
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.Name):
+            if node.id in constants:
+                return constants[node.id]
+            source, name = imports.get(node.id, (None, None))
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            source, imported = imports.get(node.value.id, (None, None))
+            if imported is not None:
+                source = f"{source}.{imported}"
+            name = node.attr
+        else:
+            return None
+        return tables.get(source, (None, {}, {}))[1].get(name)
+
+    functions = [node for node in tree.body if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    enclosing = {child: function for function in functions for child in ast.walk(function)}
     for node in ast.walk(tree):
-        name = None
+        key = None
         default = "unset"
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             if ast.unparse(node.func) in {"os.environ.get", "os.getenv"} and node.args:
-                name = node.args[0]
-                if len(node.args) > 1 and isinstance(node.args[1], ast.Constant):
-                    value = node.args[1].value
-                    default = "loopback URL on port 10000" if value == "http://" + "localhost:10000" else repr(value)
+                key = node.args[0]
+                if len(node.args) > 1:
+                    value = resolve(node.args[1])
+                    default = repr(value) if value is not None or isinstance(node.args[1], ast.Constant) else "computed"
         elif isinstance(node, ast.Subscript) and ast.unparse(node.value) == "os.environ":
             if isinstance(node.ctx, ast.Load):
-                name = node.slice
-        if isinstance(name, ast.Constant) and isinstance(name.value, str):
-            add(found, name.value, path, default)
+                key = node.slice
+        if key is None:
+            continue
+        function = enclosing.get(node)
+        params = function.args.posonlyargs + function.args.args if function else []
+        params += function.args.kwonlyargs if function else []
+        names = []
+        if isinstance(key, ast.Name) and key.id in [param.arg for param in params]:
+            positional = function.args.posonlyargs + function.args.args
+            index = next((i for i, param in enumerate(positional) if param.arg == key.id), None)
+            for call in calls:
+                if isinstance(call.func, ast.Name) and call.func.id == function.name:
+                    arg = call.args[index] if index is not None and index < len(call.args) else next(
+                        (kw.value for kw in call.keywords if kw.arg == key.id), None)
+                    if arg is not None:
+                        names.append(resolve(arg))
+        else:
+            names.append(resolve(key))
+        for name in names:
+            if isinstance(name, str):
+                add(found, name, path, default)
 
 
 def shell_reads(path, found):
@@ -174,8 +217,10 @@ def shell_reads(path, found):
     for match in re.finditer(pattern, path.read_text(encoding="utf-8")):
         suffix = match.group(2)
         default = suffix[2:] if suffix.startswith(":-") else None
-        if default is None or any(char in default for char in "$`{}"):
+        if default is None:
             default = "unset"
+        elif any(char in default for char in "$`{}"):
+            default = "computed"
         else:
             default = repr(default)
         add(found, match.group(1), path, default)
@@ -183,18 +228,17 @@ def shell_reads(path, found):
 
 def discover():
     found = defaultdict(lambda: (set(), set()))
-    for path in sorted((ROOT / "backend").rglob("*.py")):
+    paths = sorted((ROOT / "backend").rglob("*.py"))
+    tables = module_tables(paths)
+    for path in paths:
         relative = path.relative_to(ROOT / "backend")
         if "tests" in relative.parts or relative == Path("conftest.py"):
             continue
         if len(relative.parts) == 1 and path.name.startswith("e2e_"):
             continue
-        python_reads(path, found)
+        python_reads(path, found, tables)
     for path in [ROOT / "scripts/corsia", *sorted((ROOT / "scripts/corsia.d").glob("*.sh"))]:
         shell_reads(path, found)
-    example = ROOT / ".env.example"
-    for name in re.findall(r"^\s*(?:#\s*)?(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=", example.read_text(), re.M):
-        add(found, name, example, "unset")
     return found
 
 
@@ -221,13 +265,10 @@ def render():
         raise ValueError(f"Unclassified: {sorted(set(found) - classified)}; "
                          f"stale: {sorted(classified - set(found))}; "
                          f"overlap: {sorted(set(DOCUMENTED) & INTERNAL)}")
-    stale_defaults = set(DEFAULTS) - set(found)
-    if stale_defaults:
-        raise ValueError(f"Stale default overrides: {sorted(stale_defaults)}")
-    lines = ["# Configuration reference", "", "This page lists environment variables read by name in code. "
+    lines = ["# Configuration reference", "", "This page lists names fixed at environment reads in code, including constants passed to a local function one call away. Dynamic names are omitted. "
              "Generate it with `python scripts/docs/generate_config.py`; add `--check` to compare the page.", "",
-             "Defaults show effective values where known; otherwise they show literal fallbacks at read sites. "
-             "`unset` means no literal fallback is given. Multiple values come from different read sites.", ""]
+             "Defaults show fallbacks at read sites. `unset` means no fallback is given; "
+             "`computed` means the fallback is an expression. Multiple values come from different read sites.", ""]
     for section in ("CORSIA settings", "Models, browser and review", "Evaluation",
                     "Development and testing", "Standard variables CORSIA reads"):
         names = sorted(name for name in DOCUMENTED if area(name) == section)
@@ -237,7 +278,7 @@ def render():
         for name in names:
             paths, defaults = found[name]
             locations = ", ".join(f"`{cell(p)}`" for p in sorted(paths))
-            values = cell(DEFAULTS[name]) if name in DEFAULTS else ", ".join(
+            values = ", ".join(
                 f"`{cell('empty' if d == repr('') else d)}`" for d in sorted(defaults))
             lines.append(f"| `{cell(name)}` | {values} | {cell(DOCUMENTED[name])} | {locations} |")
         lines.append("")
