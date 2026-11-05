@@ -63,6 +63,19 @@ it('stamps a chip arrival only after its card becomes visible, independent of ot
 	expect(onViewed).toHaveBeenCalledTimes(1);
 });
 
+it('keeps an arrival unread without an observer until the card is opened', async () => {
+	vi.stubGlobal('IntersectionObserver', undefined);
+	arrivedDocComments.set(new Set(['c']));
+	const host = document.createElement('div'); document.body.append(host);
+	const onViewed = vi.fn().mockResolvedValue(undefined);
+	component = mount(CommentThread, { target: host, props: { comment: { id: 'c', anchor: '', author: 'agent', text: 'note', at: '', resolved: false, replies: [], newComment: true }, onViewed } });
+	flushSync();
+	expect(onViewed).not.toHaveBeenCalled();
+	host.querySelector<HTMLElement>('.ct')!.click();
+	await Promise.resolve();
+	expect(onViewed).toHaveBeenCalledWith('c', 'c');
+});
+
 it('retries a failed stamp on the next opening', async () => {
 	vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} unobserve() {} });
 	const host = document.createElement('div'); document.body.append(host);

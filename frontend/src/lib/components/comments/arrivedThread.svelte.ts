@@ -15,7 +15,7 @@ export function observeArrivedThread(
 	let visibilityTick = $state(0);
 	$effect(() => {
 		const el = card();
-		if (!el || !enabled()) return;
+		if (!el || !enabled() || typeof IntersectionObserver === 'undefined') return;
 		const observer = new IntersectionObserver((entries) => { visible = entries.some((entry) => entry.isIntersecting); });
 		observer.observe(el);
 		return () => { observer.disconnect(); visible = false; };
