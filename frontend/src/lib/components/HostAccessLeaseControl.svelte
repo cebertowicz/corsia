@@ -404,9 +404,15 @@
 				bind:this={pendingTriggerEl}
 				onclick={openPendingDrawer}
 			>
-				<span class="eyebrow">{currentPending.kind === 'script' ? 'Script approval' : 'Temporary host access'}</span>
-				<span class="pending-owner">{currentPending.kind === 'script' ? currentPending.script_name : owner(currentPending)}</span>
-				<StatePill state={stale ? 'error' : 'warning'} label={currentPending.kind === 'script' ? (stale ? 'Not current' : 'Needs approval') : (stale ? 'Not current' : duration(currentPending.requested_duration_seconds))} size="sm" />
+				{#if currentPending.kind === 'script'}
+					<span class="eyebrow sentence">Script approval</span>
+					<span class="pending-owner">{currentPending.script_name}</span>
+					<span class="pending-status" class:stale>{stale ? 'Not current' : 'Needs approval'}</span>
+				{:else}
+					<span class="eyebrow">Temporary host access</span>
+					<span class="pending-owner">{owner(currentPending)}</span>
+					<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : duration(currentPending.requested_duration_seconds)} size="sm" />
+				{/if}
 				<span class="pending-action">Review →</span>
 			</button>
 			{#key currentPending.id}
@@ -529,6 +535,21 @@
 		font-size: var(--text-caption);
 		font-weight: 650;
 	}
+	/* The script chip draws §0.1 roles: sentence-case label, status as coloured text. */
+	.pending-request-trigger .eyebrow.sentence {
+		color: var(--text-tertiary);
+		text-transform: none;
+		letter-spacing: normal;
+		font-size: var(--text-footnote);
+		font-weight: var(--fw-semibold);
+	}
+	.pending-status {
+		flex: none;
+		color: var(--amber-text);
+		font-size: var(--text-footnote);
+		font-weight: var(--fw-medium);
+	}
+	.pending-status.stale { color: var(--red-text); }
 	.pending-action {
 		flex: none;
 		color: var(--amber);

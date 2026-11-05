@@ -59,6 +59,32 @@ it('names a stale script request as the lease names it', async () => {
 	flushSync();
 	expect(target.textContent).toContain('Not current');
 	expect(target.textContent).not.toContain('Needs refresh');
+	expect(target.textContent).toContain('Couldn’t check that this request is still current');
+	expect(target.querySelector('.pill')).toBeNull();
+	await unmount(component);
+	target.remove();
+});
+
+it('says an incomplete script request can be denied but not approved', async () => {
+	const lease = {
+		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
+		application_hash: 'a'.repeat(64), decision_capability: '',
+		script_name: 'task.py', script_path: '/workspace/task.py',
+		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
+		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
+		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+	} satisfies HostAccessScript;
+	const target = document.createElement('div');
+	document.body.appendChild(target);
+	const component = mount(HostAccessPendingRequestDrawer, { target, props: {
+		lease, stale: false, deciding: false, rejectDisabled: false, approveDisabled: true,
+		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
+	} });
+	flushSync();
+	expect(target.textContent).toContain('This request arrived without everything needed to approve it.');
+	const labels = [...target.querySelectorAll('button')].map((button) => button.textContent?.trim());
+	expect(labels).toContain('Deny');
+	expect(labels).not.toContain('Approve');
 	await unmount(component);
 	target.remove();
 });
