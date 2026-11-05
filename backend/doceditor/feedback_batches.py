@@ -80,14 +80,17 @@ def record_comment(
     recipients = feedback_comments.recipients(db, comment)
     refused = set()
     if comment["author_kind"] == "agent":
+        from registry.models import get_artifact
+        artifact = get_artifact(comment["artifact_id"], db=db)
+        owner_id = artifact.get("parent_thread_id") if artifact else None
+        sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id=?",
+                            (comment["author_thread_id"],)).fetchone()
         for recipient in recipients:
             refusal, legacy_exempt = comment_recipients.locality_disposition(
-                db, comment, recipient, str(comment["author_thread_id"]), str(comment["artifact_id"]),
+                db, comment, recipient, sender, owner_id,
             )
             if refusal and not legacy_exempt:
                 refused.add(recipient)
-                from registry.models import get_artifact
-                artifact = get_artifact(comment["artifact_id"], db=db)
                 document = (artifact.get("path") or artifact.get("title") or comment["artifact_id"]) if artifact else comment["artifact_id"]
                 tag_refusals.append(f"{document}, comment {comment['id']}: {refusal}")
     if created:

@@ -298,6 +298,22 @@ def test_local_only_reply_keeps_owner_and_root_author_exempt(isolated_db):
     db.close()
 
 
+def test_disabling_legacy_exemption_holds_owner(isolated_db, monkeypatch):
+    db = get_db()
+    seed_thread(db, "owner", model=None)
+    seed_thread(db, "local", model=None)
+    db.execute("UPDATE threads SET local_only=1 WHERE id='local'")
+    aid = seed_document(db, "owner")
+    monkeypatch.setattr(comment_recipients, "LEGACY_RECIPIENTS_SKIP_LOCALITY", False)
+    reply, result = add_comment(db, aid, author_id="local")
+    assert any("owner" in refusal for refusal in result.get("tag_refusals", []))
+    assert not db.execute(
+        "SELECT 1 FROM doc_feedback_batch_items i JOIN doc_feedback_batches b ON b.id=i.batch_id "
+        "WHERE i.comment_id=? AND b.recipient_id='owner'", (reply["id"],),
+    ).fetchone()
+    db.close()
+
+
 def test_pending_reply_to_other_agent_rechecks_locality(isolated_db):
     db = get_db()
     for name in ("owner", "cloud", "local"):
@@ -465,7 +481,8 @@ def test_tag_locality_does_not_emit_held_event(isolated_db, monkeypatch):
     db.execute("UPDATE threads SET local_only=1 WHERE id='writer'")
     events = []
     monkeypatch.setattr(local_only, "_emit", lambda *args: events.append(args))
-    refusal, exempt = comment_recipients.locality_disposition(db, comment, "recipient", "writer", aid)
+    sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id='writer'").fetchone()
+    refusal, exempt = comment_recipients.locality_disposition(db, comment, "recipient", sender, "owner")
     assert refusal and not exempt
     assert events == []
     assert local_only.send_needs_hold({"id": "writer", "local_only": 1}, {"id": "recipient", "model": None}, db=db)

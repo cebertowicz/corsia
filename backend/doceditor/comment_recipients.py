@@ -5,6 +5,9 @@ from core.agent_roster_queries import agent_rows
 from infra.queries import get_thread_for_user
 
 
+LEGACY_RECIPIENTS_SKIP_LOCALITY = True
+
+
 class TagValidationError(ValueError):
     """A tag is outside the authenticated viewer's visible roster."""
 
@@ -63,22 +66,20 @@ def save_mentions(db, comment: dict, mentions: list[dict]) -> None:
     )
 
 
-def locality_disposition(db, comment: dict, recipient_id: str, sender_id: str, artifact_id: str) -> tuple[str | None, bool]:
+def locality_disposition(db, comment: dict, recipient_id: str, sender, owner_id: str | None) -> tuple[str | None, bool]:
     """Return the locality refusal and whether the pre-tag recipient path is exempt."""
     from infra.local_only import send_needs_hold
-    from registry.models import get_artifact
 
-    artifact = get_artifact(artifact_id, db=db)
-    owner = str(artifact.get("parent_thread_id") or "") if artifact else ""
     root = db.execute("SELECT author_kind,author_thread_id FROM doc_comments WHERE id=?",
                       (comment.get("parent_id"),)).fetchone() if comment.get("parent_id") else None
-    legacy_recipients = {owner, str(root["author_thread_id"]) if root and root["author_kind"] == "agent" else "ui"}
-    legacy_exempt = recipient_id in legacy_recipients
+    legacy_recipients = {owner_id} if owner_id else set()
+    if root and root["author_kind"] == "agent" and root["author_thread_id"]:
+        legacy_recipients.add(str(root["author_thread_id"]))
+    legacy_exempt = LEGACY_RECIPIENTS_SKIP_LOCALITY and recipient_id in legacy_recipients
     tagged = bool(db.execute("SELECT 1 FROM doc_comment_tags WHERE comment_id=? AND agent_id=?",
                              (comment["id"], recipient_id)).fetchone()) and comment.get("event") != "reopened"
     if legacy_exempt and not tagged:
         return None, True
-    sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id=?", (sender_id,)).fetchone()
     recipient = db.execute("SELECT id,model,pending_model,title FROM threads WHERE id=?", (recipient_id,)).fetchone()
     if sender and recipient and send_needs_hold(dict(sender), dict(recipient), db=db, emit_hold_event=False):
         name = recipient["title"] or recipient_id

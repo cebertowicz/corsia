@@ -255,9 +255,14 @@ def create_feedback_node(
                                           for item in loaded])
         if len(contexts) > 1:
             from prompts.plan_tools import bounded_text
+            roots = dict.fromkeys(str(item["parent_id"]) for item in loaded if item.get("thread_context"))
+            marker = '… threads cut; read each with ' + ', '.join(
+                f'doc_comments_list(comment_id="{root}")' for root in roots
+            )
+            if len(marker.encode("utf-8")) > person_input.WORDS_MAX_BYTES:
+                marker = '… threads cut; read them with doc_comments_list per thread'
             contexts = [bounded_text("\n\n".join(contexts), person_input.WORDS_MAX_BYTES,
-                                     measure=lambda value: len(value.encode("utf-8")),
-                                     marker='… threads cut; read them with doc_comments_list per thread')]
+                                     measure=lambda value: len(value.encode("utf-8")), marker=marker)]
         woke = joined.working and person_input.joined_reply(
             db, joined.node_id,
             person_input.Source(SOURCE_KIND_DOC_COMMENT, str(loaded[0]["id"]), (wake_blocks,),

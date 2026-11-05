@@ -151,13 +151,16 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
         return DeliveryResult(outcome="empty")
     problem = recipient_problem(db, recipient)
     if problem is None and _value(batch, "author_kind") == "agent":
+        sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id=?",
+                            (_value(batch, "author_id"),)).fetchone()
+        owner_id = artifact.get("parent_thread_id") if artifact else None
         refused = []
         refusal = None
         for item in items:
             if item.get("kind") != "comment":
                 continue
             item_refusal, legacy_exempt = comment_recipients.locality_disposition(
-                db, item, recipient, str(_value(batch, "author_id")), str(_value(batch, "artifact_id")),
+                db, item, recipient, sender, owner_id,
             )
             if item_refusal and legacy_exempt:
                 item["suppress_tag"] = True
