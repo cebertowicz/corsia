@@ -42,7 +42,7 @@ def test_script_decision_user_binding_and_single_use(isolated_db, tmp_path, monk
     request = next(row for row in leases if row["kind"] == "script")
     assert request["script_path"] == str(path)
     assert request["reviewer_reason"] == "appropriate"
-    assert "revision" not in request and "state" not in request
+    assert request["state"] == "awaiting_user" and "revision" not in request
     payload = {"application_hash": request["application_hash"]}
     headers = {"X-CORSIA-User-Decision": request["decision_capability"]}
     person["id"] = "other"

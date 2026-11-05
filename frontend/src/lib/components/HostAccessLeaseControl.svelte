@@ -99,7 +99,7 @@
 	let pendingTriggerEl = $state<HTMLButtonElement | null>(null);
 
 	const currentPending = $derived(
-		leases.find((lease) => lease.kind === 'script' || lease.state === 'awaiting_user') ?? null,
+		leases.find((lease) => lease.state === 'awaiting_user') ?? null,
 	);
 	$effect(() => {
 		awaitingUser = !!currentPending;
@@ -116,9 +116,9 @@
 		pendingOpenFor = id;
 		pendingOpen = false;
 	});
-	const active = $derived(leases.filter((lease): lease is HostAccessLease => lease.kind !== 'script' && lease.state === 'active'));
+	const active = $derived(leases.filter((lease): lease is HostAccessLease => lease.state === 'active'));
 	const transitional = $derived(
-		leases.filter((lease): lease is HostAccessLease => lease.kind !== 'script' && (lease.state === 'reviewing' || lease.state === 'activating')),
+		leases.filter((lease): lease is HostAccessLease => lease.state === 'reviewing' || lease.state === 'activating'),
 	);
 	/**
 	 * Every shape that is not the compact chip is named once here and rendered

@@ -130,10 +130,7 @@ async def leases(
     if interactive_ui == "1":
         require_human_user(user)
         rows = [
-            ({**row, "decision_capability": attach_user_decision_capability(
-                {**row, "state": "awaiting_user"}, user_id=user["id"])["decision_capability"]}
-             if row.get("kind") == "script" else attach_user_decision_capability(row, user_id=user["id"]))
-            for row in rows
+            attach_user_decision_capability(row, user_id=user["id"]) for row in rows
         ]
     return {"leases": [_serialize_lease(row) for row in rows]}
 

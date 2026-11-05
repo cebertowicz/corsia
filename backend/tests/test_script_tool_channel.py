@@ -8,24 +8,7 @@ import sqlite3
 import pytest
 
 from automation.script_tool_channel import _serve
-
-
-class Writer:
-    def __init__(self):
-        self.data = bytearray()
-
-    def write(self, data):
-        self.data.extend(data)
-
-    async def drain(self):
-        pass
-
-    def close(self):
-        pass
-
-    async def wait_closed(self):
-        pass
-
+from test_script_github_proxy import Writer
 from test_tool_turn_identity_propagation import _CaptureTool
 from tools.registry import ToolRegistry
 

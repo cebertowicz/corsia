@@ -6,7 +6,7 @@ import type { HostAccessScript } from '$lib/api/hostAccess';
 
 it('shows the script, trigger, purpose and request with approve and deny', async () => {
 	const lease: HostAccessScript = {
-		id: 'script', kind: 'script', thread_id: 'owner', root_thread_id: 'owner',
+		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
 		application_hash: 'a'.repeat(64), decision_capability: 'capability',
 		script_name: 'task.py', script_path: '/workspace/task.py',
 		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',

@@ -84,6 +84,7 @@ export interface HostAccessLease {
 export interface HostAccessScript {
 	id: string;
 	kind: 'script';
+	state: 'awaiting_user';
 	thread_id: string;
 	root_thread_id: string;
 	application_hash: string;

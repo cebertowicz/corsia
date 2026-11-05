@@ -106,8 +106,9 @@ export function decisionBlocked(
 
 export function approvalReady(lease: HostAccessItem | null): boolean {
 	if (lease?.kind === 'script') {
-		return casReady(lease) && text(lease.script_name) && text(lease.purpose)
-			&& text(lease.user_request) && !!lease.trigger;
+		return lease.state === 'awaiting_user' && casReady(lease)
+			&& text(lease.script_name) && text(lease.purpose) && text(lease.user_request)
+			&& !!lease.trigger;
 	}
 	return !!lease
 		&& lease.state === 'awaiting_user'

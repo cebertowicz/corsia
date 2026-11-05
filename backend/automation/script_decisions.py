@@ -12,7 +12,7 @@ def _public(row) -> dict:
     payload = json.loads(row["payload_json"])
     auth = payload["authentication"]
     return {
-        "id": row["id"], "kind": "script", "thread_id": row["thread_id"],
+        "id": row["id"], "kind": "script", "state": "awaiting_user", "thread_id": row["thread_id"],
         "root_thread_id": row["thread_id"], "application_hash": auth["application_hash"],
         "script_name": Path(row["script_path"]).name, "script_path": row["script_path"],
         "trigger": auth["trigger"], "purpose": auth["purpose"],
