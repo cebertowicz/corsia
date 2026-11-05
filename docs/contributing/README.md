@@ -12,10 +12,4 @@ The path from a fresh clone to a merged change, for developers who want to chang
 | 4 | [`BACKEND.md`](../../BACKEND.md) or [`FRONTEND.md`](../../FRONTEND.md) | Rules for the side you are changing |
 | 5 | [Writing docs](writing-docs.md) | Where a page goes, the format, and how to keep it current |
 
-## Before you change anything
-
-- Work on a feature branch based on `dev`, and open your pull request to `dev`.
-- Never run tests or experiments against the data of a CORSIA you use. Use a second checkout with its own data.
-- Change the docs in the same pull request as the code they describe.
-
 Checked against the code at `7a8c55d84`.

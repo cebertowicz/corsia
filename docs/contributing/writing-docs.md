@@ -1,6 +1,6 @@
 # Writing docs
 
-How to write and change a page under `docs/`. The same files are read on GitHub and will be built into a documentation website without edits, so the format rules below are what keeps them working in both places.
+How to write and change a page under `docs/`. The format rules below keep each page readable on GitHub and usable unchanged by a static documentation site generator.
 
 ## Where a page goes
 
@@ -9,7 +9,7 @@ How to write and change a page under `docs/`. The same files are read on GitHub 
 | `docs/contributing/` | Getting a developer from a fresh clone to a merged change, and recipes for recurring contributor tasks | This page |
 | `docs/how-it-works/` | Concepts: what a part is, why it exists, how it works, what can go wrong, where it lives in the code | [Plans](../how-it-works/plans.md) |
 | `docs/security/` | The security model, one page per boundary | [Host access](../security/host-access.md) |
-| `docs/` (top level) | Feature pages written before these folders existed | [The skill library](../skill-library.md) |
+| `docs/` (top level) | Feature and internals pages that belong to none of the sections above | [The skill library](../skill-library.md) |
 
 Write facts once. If another page already explains something, link to it instead of repeating it.
 
@@ -49,7 +49,9 @@ Each page ends with one line saying which commit it was last checked against, fo
 Checked against the code at `7a8c55d84`.
 ```
 
-When you change code a page describes, update the page in the same pull request and move that line to your commit. Pages are rechecked before each release.
+The commit is the one your branch is based on, since a commit can't name itself. When you change code a page describes, update the page in the same pull request and set the line to your branch's base commit.
+
+Some section landing pages state one checked commit for the whole section. A page's own line overrides that statement.
 
 ## Public content
 

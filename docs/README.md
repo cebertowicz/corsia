@@ -4,12 +4,7 @@ Every section of the docs, in reading order; each section's first page lists the
 
 ## Contribute
 
-How to go from a fresh clone to a merged change. Start with [Contributing to CORSIA](contributing/README.md).
-
-| Page | What it covers |
-|---|---|
-| [Contributing to CORSIA](contributing/README.md) | The developer reading order and the ground rules |
-| [Writing docs](contributing/writing-docs.md) | Where a page goes, the format, and how to keep it current |
+How to go from a fresh clone to a merged change. Start with [Contributing to CORSIA](contributing/README.md), which lists every contributor page.
 
 The rules for issues, the Contributor License Agreement and pull requests are in [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
