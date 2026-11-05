@@ -25,7 +25,7 @@ No automated dependency-update service (Dependabot or Renovate) is configured.
 
 - The release workflow (`.github/workflows/release-macos.yml`) builds an **unsigned** app. Signing and notarization happen in a separate script run by hand (`desktop/scripts/sign-macos-bundle.sh`).
 - Nothing in the repository records whether a published download (such as the GitHub pre-release named `dev-channel`) was signed and notarized before upload. Check a download yourself before trusting it (below), or build from source.
-- Release tags `v0.1.0` to `v0.4.2` are annotated tags with no signature (`git verify-tag` answers "no signature found"). The `v0.4.1-dev.*` tags are lightweight: they name a commit and carry no signature of their own. Commits merged through GitHub's website carry GitHub's own signature; other commits aren't signed (checked for this page).
+- Release tags `v0.1.0` to `v0.4.2`, other than the `-dev` tags, are annotated tags with no signature (`git verify-tag` answers "no signature found"). The `v0.4.1-dev.*` tags are lightweight: they name a commit and carry no signature of their own. Commits merged through GitHub's website carry GitHub's own signature; other commits aren't signed (checked for this page).
 
 ## Updates
 

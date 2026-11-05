@@ -2,7 +2,7 @@
 
 How CORSIA confines an agent's shell commands and file tools, on macOS and Linux, without a lease. Leases are on [Host access](host-access.md).
 
-**In short:** agents run as your user. File tools reach only the workspace and registered repositories. Shell commands run inside an OS sandbox that lets them read and write the workspace, read a few tool-settings folders, and reach the network freely. The shell is also fenced out of other projects; file tools are not, so the workspace is still the boundary that holds for every tool.
+**In short:** agents run as your user. File tools reach only the workspace and registered repositories. Shell commands run inside an OS sandbox that lets them read and write the workspace, read a few tool-settings folders, and reach the network freely. A project agent's shell is also fenced out of other projects (the CORSIA agent's only out of ones set to Local models only); file tools are not, so the workspace is still the boundary that holds for every tool.
 
 ## Layers
 
