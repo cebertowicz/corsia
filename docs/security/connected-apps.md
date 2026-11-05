@@ -15,7 +15,7 @@ A **tool server** (an MCP server) gives agents extra tools. You add it in **Sett
 
 Treat a local tool server like any program you install: it can do what you can, apart from the refusals above. Add only ones you trust. Its keys come from the key store and are passed in its environment when CORSIA starts it ([Secrets](secrets.md)).
 
-On Linux, CORSIA starts local tool servers only through Agent Safehouse, which is macOS only, so they refuse to start (read from code, not run for this page).
+On Linux, CORSIA starts local tool servers and the Google Workspace tool only through Agent Safehouse, which is macOS only, so they refuse to start (read from code, not run for this page).
 
 **Results from any tool server reach the agent unscreened.** See [Untrusted content](untrusted-content.md).
 
