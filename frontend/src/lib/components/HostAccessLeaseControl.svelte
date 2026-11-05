@@ -406,7 +406,7 @@
 			>
 				<span class="eyebrow">{currentPending.kind === 'script' ? 'Script approval' : 'Temporary host access'}</span>
 				<span class="pending-owner">{currentPending.kind === 'script' ? currentPending.script_name : owner(currentPending)}</span>
-				<StatePill state={stale ? 'error' : 'warning'} label={currentPending.kind === 'script' ? (stale ? 'Needs refresh' : 'Needs approval') : (stale ? 'Not current' : duration(currentPending.requested_duration_seconds))} size="sm" />
+				<StatePill state={stale ? 'error' : 'warning'} label={currentPending.kind === 'script' ? (stale ? 'Not current' : 'Needs approval') : (stale ? 'Not current' : duration(currentPending.requested_duration_seconds))} size="sm" />
 				<span class="pending-action">Review →</span>
 			</button>
 			{#key currentPending.id}

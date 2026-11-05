@@ -41,6 +41,28 @@ it('shows the script, trigger, purpose and request with approve and deny', async
 	target.remove();
 });
 
+it('names a stale script request as the lease names it', async () => {
+	const lease: HostAccessScript = {
+		id: 'script', kind: 'script', state: 'awaiting_user', thread_id: 'owner', root_thread_id: 'owner',
+		application_hash: 'a'.repeat(64), decision_capability: 'capability',
+		script_name: 'task.py', script_path: '/workspace/task.py',
+		trigger: { cadence_seconds: 600 }, purpose: 'Check the result',
+		user_request: 'Please check the result', reviewer_reason: 'Matches the request',
+		created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z',
+	};
+	const target = document.createElement('div');
+	document.body.appendChild(target);
+	const component = mount(HostAccessPendingRequestDrawer, { target, props: {
+		lease, stale: true, deciding: false, rejectDisabled: false, approveDisabled: true,
+		onApprove: vi.fn(), onReject: vi.fn(), onRetry: vi.fn(),
+	} });
+	flushSync();
+	expect(target.textContent).toContain('Not current');
+	expect(target.textContent).not.toContain('Needs refresh');
+	await unmount(component);
+	target.remove();
+});
+
 it('says when a script runs in plain words', () => {
 	expect(cadence(null)).toBe('When a matching event arrives');
 	expect(cadence(1)).toBe('Every second');

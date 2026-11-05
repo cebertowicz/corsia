@@ -101,6 +101,35 @@ async def test_proxy_streams_request_body_before_it_is_complete():
 
 
 @pytest.mark.asyncio
+async def test_proxy_gives_budget_the_decoded_403_body_and_client_the_raw_one(monkeypatch):
+    import gzip
+    import json
+
+    import automation.script_github_proxy as proxy
+
+    recorded = []
+
+    class Budget:
+        def blocked_until(self, low_priority):
+            return None
+
+        def record(self, status, headers, body):
+            recorded.append((status, body))
+
+    monkeypatch.setattr(proxy, "budget", Budget())
+    message = {"message": "You have exceeded a secondary rate limit."}
+    raw = gzip.compress(json.dumps(message).encode())
+
+    def upstream(request):
+        return httpx.Response(403, headers={"content-encoding": "gzip", "content-type": "application/json"},
+                              stream=httpx.ByteStream(raw))
+
+    response = await _request("api.github.com", lambda: "synthetic-value", upstream)
+    assert recorded == [(403, message)]
+    assert raw in response
+
+
+@pytest.mark.asyncio
 async def test_proxy_returns_fixed_failure_without_credential():
     def fail():
         raise ValueError("synthetic-value")

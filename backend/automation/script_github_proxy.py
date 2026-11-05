@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -101,7 +100,7 @@ async def _serve(
             return
         headers = [(name, value) for name, value in request.headers
                    if name.lower() not in _HOP_HEADERS or name.lower() == b"content-length"]
-        headers.append((b"authorization", b"token " + credential().encode("utf-8")))
+        headers.append((b"authorization", b"token " + (await asyncio.to_thread(credential)).encode("utf-8")))
         url = "https://" + host.decode("ascii") + target
         async with httpx.AsyncClient(transport=transport, follow_redirects=False, trust_env=False) as client:
             async with client.stream(request.method.decode("ascii"), url, headers=headers,
@@ -118,8 +117,10 @@ async def _serve(
                     writer.write(conn.send(h11.Data(data=chunk)))
                     await writer.drain()
                 try:
-                    parsed_body = json.loads(forbidden_body) if forbidden_body else None
-                except (ValueError, UnicodeDecodeError):
+                    # The kept bytes are raw, so a gzip body is decoded by its own Content-Encoding first.
+                    parsed_body = httpx.Response(response.status_code, headers=response.headers,
+                                                 content=bytes(forbidden_body)).json() if forbidden_body else None
+                except (ValueError, httpx.DecodingError):
                     parsed_body = None
                 budget.record(response.status_code, dict(response.headers), parsed_body)
                 writer.write(conn.send(h11.EndOfMessage()))

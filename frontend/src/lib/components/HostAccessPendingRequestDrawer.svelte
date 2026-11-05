@@ -73,7 +73,7 @@
 	<div class="pending-drawer">
 		<header class="decision-head">
 			<div><div class="eyebrow">Allow this script to act as your agent and use the agents’ GitHub account</div><h2 title={lease.script_name}>{lease.script_name}</h2></div>
-			<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Needs refresh' : 'Needs approval'} />
+			<StatePill state={stale ? 'error' : 'warning'} label={stale ? 'Not current' : 'Needs approval'} />
 		</header>
 		<div class="decision-body">
 			<section><span class="label">File</span><p>{lease.script_path}</p></section>
