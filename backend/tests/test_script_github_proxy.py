@@ -48,6 +48,8 @@ async def test_proxy_injects_account_credential_for_github():
     assert seen[0].url.host == "api.github.com"
     assert seen[0].headers["authorization"] == "token synthetic-value"
     assert "transfer-encoding" not in seen[0].headers and seen[0].content == b""
+    # A slow GitHub call is bounded by the run's timeout, not httpx's 5-second default.
+    assert set(seen[0].extensions["timeout"].values()) == {None}
 
 
 @pytest.mark.asyncio

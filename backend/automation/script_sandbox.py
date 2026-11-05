@@ -8,11 +8,11 @@ one ``BashTool.execute`` calls, so the two cannot drift apart.
 
 A rule-started run whose stored event names a repository also gets a GitHub
 read channel for that repository (``script_github_channel``) and the
-``corsia github read`` client; every other run gets neither. The person's
-``gh`` homes stay hidden from every run.
+``corsia github read`` client. An approved authenticated run instead gets the
+``corsia`` client, the owner tool channel and a ``gh`` forwarder, so it acts
+with its agent's access; every other run gets none of these.
 
 Each run hides the person's and agents' GitHub homes from the script itself.
-Authenticated scripts use the owner tool channel to act as their agent.
 """
 
 from __future__ import annotations

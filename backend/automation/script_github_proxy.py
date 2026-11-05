@@ -102,7 +102,9 @@ async def _serve(
                    if name.lower() not in _HOP_HEADERS or name.lower() == b"content-length"]
         headers.append((b"authorization", b"token " + (await asyncio.to_thread(credential)).encode("utf-8")))
         url = "https://" + host.decode("ascii") + target
-        async with httpx.AsyncClient(transport=transport, follow_redirects=False, trust_env=False) as client:
+        # No per-request timeout, like `gh` itself: the run's own timeout cancels this task.
+        async with httpx.AsyncClient(transport=transport, follow_redirects=False, trust_env=False,
+                                     timeout=None) as client:
             async with client.stream(request.method.decode("ascii"), url, headers=headers,
                                      content=_request_body(reader, conn) if _has_body(request) else None) as response:
                 response_headers = [(name, value) for name, value in response.headers.raw
