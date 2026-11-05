@@ -4,7 +4,7 @@ Run focused tests and the local gate before pushing, then use the pull request c
 
 ## Before you push
 
-Run the smallest tests that cover the changed behavior. For backend tests, use the Python 3.11 `.venv` from the [README](../../README.md) setup and set both paths to fresh disposable directories, so the tests never touch a CORSIA installation you use, before running pytest from `backend/`:
+Run the smallest tests that cover the changed behavior. For backend tests, use the Python 3.11 `.venv` from [Developer setup](dev-setup.md) and set both paths to fresh disposable directories, so the tests never touch a CORSIA installation you use, before running pytest from `backend/`:
 
 ```bash
 export CORSIA_WORKSPACE="$(mktemp -d)"
