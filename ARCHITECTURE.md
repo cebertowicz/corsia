@@ -91,7 +91,9 @@ identity and window when available; `backend/connections/account_rollover.py` ow
 move to an eligible account before a queued input is claimed. The window
 resolver in `backend/llm/context_window.py` applies the saved profile and
 provider evidence. Managed oMLX memory refusals can add a temporary runtime
-cap for the recovering turn (`backend/llm/memory_fit.py`). External server
+cap shared by all turns using that model on that server. A later refusal
+replaces the observation; it is removed when the turn that recorded it ends
+(`backend/llm/memory_fit.py`). External server
 selectors carry both server identity and served model id; the External provider
 routes requests without managing the server's models
 (`backend/llm/external_provider.py`).
