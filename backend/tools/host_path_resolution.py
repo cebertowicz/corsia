@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import unicodedata
 from pathlib import Path
 
 
@@ -59,8 +60,10 @@ def resolution_touches(root: Path, path: Path, *, loop_touches: bool = True) -> 
 
 
 def contains(root: Path, path: Path) -> bool:
-    """Return whether ``path`` is ``root`` or under it, ignoring case as a default macOS volume does."""
-    return Path(str(path).casefold()).is_relative_to(str(root).casefold())
+    """Return whether ``path`` is ``root`` or below it, ignoring case and Unicode composition."""
+    normalized_path = unicodedata.normalize("NFC", str(path)).casefold()
+    normalized_root = unicodedata.normalize("NFC", str(root)).casefold()
+    return Path(normalized_path).is_relative_to(normalized_root)
 
 
 # macOS reports a sandbox refusal as ``<prog>: <path>: Operation not permitted``.

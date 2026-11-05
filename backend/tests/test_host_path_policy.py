@@ -5,6 +5,13 @@ from pathlib import Path
 import pytest
 
 
+def test_contains_recognizes_decomposed_fenced_root() -> None:
+    from tools.host_path_resolution import contains
+
+    assert contains(Path('/workspace/Café'), Path('/workspace/Cafe\u0301/file'))
+    assert not contains(Path('/workspace/Café'), Path('/workspace/Cafe\u0301-other/file'))
+
+
 def test_protected_policy_denies_sensitive_paths_but_preserves_safe_ssh_files(
     tmp_path,
 ) -> None:
