@@ -90,7 +90,7 @@ describe('ImageCommentLightbox', () => {
 		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
 			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0 },
 			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
-			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn() },
+			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), refreshDiagram: vi.fn(async () => null) },
 			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: step,
 		} });
 		await settle();
@@ -111,7 +111,7 @@ describe('ImageCommentLightbox', () => {
 		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
 			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0 },
 			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
-			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn() },
+			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), refreshDiagram: vi.fn(async () => null) },
 			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: vi.fn(),
 		} });
 		await settle();
