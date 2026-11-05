@@ -26,10 +26,13 @@ def is_fence_quote(quote: str | None) -> bool:
 
 def block_at(text: str, from16: int | None) -> tuple[int, int, str] | None:
     """(first line, last line, source) of the mermaid block whose opening fence line holds the UTF-16 offset."""
+    return _block_at(text, from16, text.split("\n"))
+
+
+def _block_at(text: str, from16: int | None, lines: list[str]) -> tuple[int, int, str] | None:
     start = _cp_at_u16(text, from16)
     if start is None:
         return None
-    lines = text.split("\n")
     position = 0
     for number, line in enumerate(lines):
         if position <= start <= position + len(line):
@@ -63,8 +66,14 @@ def mark_stale(group: Iterable[dict], path: str | None) -> None:
         text = read_doc_text(path)
     except (OSError, ValueError):
         return
+    lines = text.split("\n")
+    revisions: dict[int | None, str | None] = {}
     for row in group:
-        current = revision(text, row.get("from_off"))
+        offset = row.get("from_off")
+        if offset not in revisions:
+            block = _block_at(text, offset, lines)
+            revisions[offset] = hashlib.sha256(block[2].strip().encode()).hexdigest() if block else None
+        current = revisions[offset]
         row["region_stale"] = current is not None and row.get("image_rev") != current
 
 
