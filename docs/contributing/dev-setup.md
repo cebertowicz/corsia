@@ -34,7 +34,7 @@ cd ..
 
 ## Run the app
 
-The following example keeps the development workspace and application state in `~/corsia-dev-data`, outside the checkout so they can't be committed. Never point `CORSIA_WORKSPACE` or `CORSIA_STATE_DIR` at the CORSIA you use day to day. Pick unused ports if 43871 or 43872 is already in use.
+The following example keeps the development workspace and application state in `~/corsia-dev-data`, outside the checkout so they can't be committed. Never point `CORSIA_WORKSPACE` or `CORSIA_STATE_DIR` at the CORSIA you use day to day. They move the workspace, database, logs and state, but not everything: if CORSIA is installed on this computer, the development instance still reads that install's `~/.corsia/config.json`, so Settings shows that install's network setup. Pick unused ports if 43871 or 43872 is already in use.
 
 ```bash
 mkdir -p ~/corsia-dev-data/workspace ~/corsia-dev-data/state
@@ -43,7 +43,7 @@ cd backend
 ../.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 43871
 ```
 
-Before it serves, the backend builds the frontend if the checkout has no current build, so the first start prints build output and takes longer. Wait for `Application startup complete`.
+Before it serves, the backend builds the frontend if the checkout has no current build, so the first start prints build output and takes longer. While the checkout has uncommitted edits it has no current build, so every start rebuilds. Wait for `Application startup complete`.
 
 `BACKEND_PORT` must match `--port`. The backend uses it to address itself, so agent tool calls and sign-in callbacks reach this backend and not the default port, 1956, where your everyday CORSIA may be running.
 
