@@ -35,6 +35,7 @@
 	import { syncActiveDocumentEditor } from '$lib/docViewerEditorState';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { DocViewerProps } from '$lib/docViewerProps';
+	import type { TabLoadSignal } from '$lib/artifactTabs';
 	import {
 		withDraftArtifactId, existingDraft,
 		flushDraft,

@@ -259,10 +259,10 @@ describe('ReviewBar', () => {
 		expect(get(submittedAnswers)).toEqual({});
 	});
 
-	it('reconciles the submitted verdict and feedback with the server response after success', async () => {
+	it('reconciles feedback while retaining the chosen verdict after success', async () => {
 		api.fetchReviewBar.mockResolvedValue(read(0));
 		api.answerReview.mockResolvedValue({
-			verdict: 'approved_with_changes', note: null,
+			verdict: 'approved', note: null,
 			feedback_counts: { comments: 1, suggestions: 2, edits: 3 },
 		});
 		await render();
@@ -270,7 +270,7 @@ describe('ReviewBar', () => {
 		button('Approve')!.click();
 
 		await vi.waitFor(() => expect(get(submittedAnswers)).toEqual({
-			h1: { state: 'approved_with_changes', feedback: { comments: 1, suggestions: 2, edits: 3 } },
+			h1: { state: 'approved', feedback: { comments: 1, suggestions: 2, edits: 3 } },
 		}));
 	});
 
@@ -288,7 +288,7 @@ describe('ReviewBar', () => {
 	});
 
 	it('reconciles the original hold with the server response when the ReviewBar switches artifacts before a successful send resolves', async () => {
-		const response = { verdict: 'approved_with_changes' as const, note: null, feedback_counts: { comments: 1, suggestions: 2, edits: 3 } };
+		const response = { verdict: 'approved' as const, note: null, feedback_counts: { comments: 1, suggestions: 2, edits: 3 } };
 		api.fetchReviewBar.mockResolvedValueOnce(read(0)).mockResolvedValueOnce({ ...read(0), hold_ids: ['h2'] });
 		let succeed!: (value: typeof response) => void;
 		api.answerReview.mockReturnValue(new Promise<typeof response>((resolve) => { succeed = resolve; }));
@@ -303,7 +303,7 @@ describe('ReviewBar', () => {
 		await vi.waitFor(() => expect(api.fetchReviewBar).toHaveBeenCalledTimes(2));
 		succeed(response);
 
-		await vi.waitFor(() => expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved_with_changes', feedback: { comments: 1, suggestions: 2, edits: 3 } } }));
+		await vi.waitFor(() => expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved', feedback: { comments: 1, suggestions: 2, edits: 3 } } }));
 	});
 
 	it('clears the original hold overlay when the ReviewBar switches artifacts before a failed send resolves', async () => {

@@ -32,7 +32,7 @@ describe('review-bar submission outcomes', () => {
 	it('reconciles the original hold with the server verdict when an artifact switch happens before a successful send resolves', async () => {
 		api.fetchReviewBar.mockResolvedValue(read);
 		const feedback_counts = { comments: 1, suggestions: 2, edits: 3 };
-		let succeed!: (value: { verdict: 'approved_with_changes'; note: null; feedback_counts: typeof feedback_counts }) => void;
+		let succeed!: (value: { verdict: 'approved'; note: null; feedback_counts: typeof feedback_counts }) => void;
 		api.answerReview.mockReturnValue(new Promise((resolve) => { succeed = resolve; }));
 		const state = createReviewBarState();
 		state.setTarget('doc-1');
@@ -41,9 +41,9 @@ describe('review-bar submission outcomes', () => {
 		const outcome = startAnswer(state);
 		expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved', feedback: read.round_feedback_counts } });
 		state.setTarget('doc-2');
-		succeed({ verdict: 'approved_with_changes', note: null, feedback_counts });
+		succeed({ verdict: 'approved', note: null, feedback_counts });
 
 		expect(await outcome).toBe('sent');
-		expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved_with_changes', feedback: feedback_counts } });
+		expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved', feedback: feedback_counts } });
 	});
 });
