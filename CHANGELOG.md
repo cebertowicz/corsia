@@ -34,6 +34,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - The update screen's percentage now moves in step with the real time each stage takes, from waiting for agents through the restart, instead of sitting near 12% and then racing to 100%. Watched from a paired computer, it keeps counting through the restart and startup and no longer leaps when the main computer answers.
 - With an agents' GitHub account connected, comments on the agents' own pull requests now reach the owning chat without a repository webhook.
 - With "Roll over when an account hits its limit" on, a chat held on a limited account no longer asks you to move it: CORSIA checks your other accounts and moves the chat itself once one has room. Switch model is still there as a way out.
+- You can tag an agent in a document comment or reply. Agents hear about threads they are on and can leave a thread when they are no longer needed.
 - Your About you doc now gets each fact as its own suggestion, so you can accept or reject them one at a time, and its headings are left alone.
 
 ## v0.4.2 — Google sign-in works again, a shorter first chat, and steadier local models
