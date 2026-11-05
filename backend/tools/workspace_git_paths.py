@@ -12,15 +12,32 @@ from pathlib import Path
 from tools.sandbox_git import sandbox_literal
 
 
-def _git_pointer(path: Path, base: Path, prefix: str = "") -> Path:
-    """Resolve a Git pointer file against ``base``; with no usable file, ``base`` itself."""
+def _git_pointer(path: Path, base: Path, prefix: str = "") -> Path | None:
+    """Read a Git pointer relative to its base, or return None when invalid."""
     try:
         text = path.read_text().strip()
     except (OSError, UnicodeDecodeError):
-        return base
+        return None
     if not text.startswith(prefix):
-        return base
-    return (base / text.removeprefix(prefix).strip()).resolve(strict=False)
+        return None
+    value = text.removeprefix(prefix).strip()
+    if prefix and not value:
+        return None
+    return base / value
+
+
+def _workspace_git_locations(workspace: Path, *, invalid_marker: Path) -> tuple[Path, Path, Path]:
+    """Resolve Git locations once, using the consumer's invalid-marker fallback."""
+    marker = workspace.resolve(strict=False) / ".git"
+    if marker.is_file():
+        git_dir = _git_pointer(marker, marker.parent, "gitdir:")
+        git_dir = git_dir if git_dir is not None else invalid_marker
+    else:
+        git_dir = marker
+    resolved_git_dir = git_dir.resolve(strict=False)
+    common_file = resolved_git_dir / "commondir"
+    common = _git_pointer(common_file, resolved_git_dir) if common_file.is_file() else None
+    return marker, git_dir, common if common is not None else resolved_git_dir
 
 
 def workspace_git_paths(workspace: Path | None) -> tuple[Path, ...]:
@@ -32,44 +49,26 @@ def workspace_git_paths(workspace: Path | None) -> tuple[Path, ...]:
     """
     if workspace is None:
         return ()
-    marker = workspace.resolve(strict=False) / ".git"
-    git_dir = _git_pointer(marker, marker.parent, "gitdir:") if marker.is_file() else marker.resolve()
-    common = _git_pointer(git_dir / "commondir", git_dir)
+    marker, git_dir, common = _workspace_git_locations(
+        workspace, invalid_marker=workspace.resolve(strict=False),
+    )
+    git_dir, common = git_dir.resolve(strict=False), common.resolve(strict=False)
     return (marker, common / "config", common / "config.lock", git_dir / "config.worktree",
             git_dir / "commondir", common / "hooks")
-
-
-def _pointer_forms(path: Path, base: Path, prefix: str = "", *, fallback: Path) -> tuple[Path, Path]:
-    """Return a pointer's lexical and resolved target, or the fallback when invalid."""
-    try:
-        text = path.read_text().strip()
-    except (OSError, UnicodeDecodeError):
-        text = ""
-    value = text.removeprefix(prefix).strip() if text.startswith(prefix) else ""
-    target = base / value if value else fallback
-    lexical = Path(os.path.abspath(target))
-    return lexical, lexical.resolve(strict=False)
 
 
 def workspace_git_history_paths(workspace: Path | None) -> tuple[Path, ...]:
     """Return the marker, git directory and common directory, without invoking Git."""
     if workspace is None:
         return ()
-    marker = Path(os.path.abspath(workspace)) / ".git"
-    git_forms = (
-        _pointer_forms(marker, marker.parent, "gitdir:", fallback=marker)
-        if marker.is_file() else (marker, marker.resolve(strict=False))
-    )
-    git_dir = git_forms[-1]
-    common_file = git_dir / "commondir"
-    common_forms = (
-        _pointer_forms(common_file, git_dir, fallback=git_dir)
-        if git_dir.is_dir() and common_file.is_file() else (git_dir,)
-    )
-    return tuple(dict.fromkeys((marker, marker.resolve(strict=False), *git_forms, *common_forms)))
+    lexical_marker = Path(os.path.abspath(workspace)) / ".git"
+    marker, git_dir, common = _workspace_git_locations(workspace, invalid_marker=lexical_marker)
+    return tuple(dict.fromkeys((lexical_marker, marker, marker.resolve(strict=False),
+                               Path(os.path.abspath(git_dir)), git_dir.resolve(strict=False),
+                               Path(os.path.abspath(common)), common.resolve(strict=False))))
 
 
-def is_workspace_git_control(workspace: Path | None, path: Path) -> bool:
+def is_workspace_git_metadata(workspace: Path | None, path: Path) -> bool:
     """Return whether a path is in workspace Git metadata, ignoring case."""
     paths = [str(item).casefold() for item in workspace_git_history_paths(workspace)]
     name = str(path).casefold()

@@ -78,10 +78,32 @@ def test_pointer_and_common_directory_lexical_and_resolved_paths(tmp_path):
     assert {workspace / '.git', alias, actual, common} <= set(paths)
 
 
-def test_invalid_marker_does_not_deny_workspace(tmp_path):
-    from tools.workspace_git_paths import workspace_git_history_paths
+@pytest.mark.parametrize('contents', ['invalid', 'gitdir:'])
+def test_invalid_marker_preserves_consumer_fallbacks(tmp_path, contents):
+    from tools.workspace_git_paths import workspace_git_history_paths, workspace_git_paths
 
     workspace = tmp_path / 'workspace'
     workspace.mkdir()
-    (workspace / '.git').write_text('invalid')
-    assert workspace not in workspace_git_history_paths(workspace)
+    marker = workspace / '.git'
+    marker.write_text(contents)
+    assert set(workspace_git_history_paths(workspace)) == {marker.resolve()}
+    assert workspace_git_paths(workspace) == (
+        marker.resolve(), workspace / 'config', workspace / 'config.lock',
+        workspace / 'config.worktree', workspace / 'commondir', workspace / 'hooks',
+    )
+
+
+def test_worktree_pointer_without_commondir(tmp_path):
+    from tools.workspace_git_paths import workspace_git_history_paths, workspace_git_paths
+
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    git_dir = tmp_path / 'admin'
+    git_dir.mkdir()
+    marker = workspace / '.git'
+    marker.write_text(f'gitdir: {git_dir}\n')
+    assert workspace_git_paths(workspace) == (
+        marker, git_dir / 'config', git_dir / 'config.lock',
+        git_dir / 'config.worktree', git_dir / 'commondir', git_dir / 'hooks',
+    )
+    assert set(workspace_git_history_paths(workspace)) == {marker, git_dir}
