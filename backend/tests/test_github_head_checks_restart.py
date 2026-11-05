@@ -131,6 +131,70 @@ async def test_pr_read_error_is_logged_not_raised(monkeypatch, caplog):
 
 
 @pytest.mark.asyncio
+async def test_retryable_intake_refusal_retries_same_event_once(monkeypatch):
+    class RetrySink(Sink):
+        async def admit_event(self, **event):
+            self.attempts.append(event)
+            if len(self.attempts) == 1:
+                return SimpleNamespace(refusal=SimpleNamespace(code="intake_unreachable"))
+            return await super().admit_event(**event)
+
+    sink = RetrySink()
+    sink.attempts = []
+    agg = aggregator(sink)
+    agg.observe(payload())
+    await asyncio.gather(*agg._tasks.values())
+    assert len(sink.attempts) == 2 and len(sink.events) == 1
+    assert sink.attempts[0]["event_id"] == sink.attempts[1]["event_id"]
+    assert await pending.pending() == []
+
+
+@pytest.mark.asyncio
+async def test_transient_suite_read_retries_and_emits(monkeypatch):
+    calls = []
+
+    async def read(*_args):
+        calls.append(True)
+        if len(calls) == 1:
+            raise OSError("temporary failure")
+        return GhResponse(200, {}, {"check_suites": [SUITE]}), None
+
+    monkeypatch.setattr(poller, "gated_read", read)
+    sink = Sink()
+    agg = aggregator(sink)
+    agg.observe(payload())
+    await asyncio.gather(*agg._tasks.values())
+    assert len(calls) == 2 and len(sink.events) == 1
+    assert await pending.pending() == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["read", "intake"])
+async def test_exhausted_transient_failure_keeps_pending_head(monkeypatch, failure):
+    attempts = []
+
+    async def fail_read(*_args):
+        attempts.append(True)
+        raise OSError("temporary failure")
+
+    class RefusingSink(Sink):
+        async def admit_event(self, **event):
+            attempts.append(event["event_id"])
+            return SimpleNamespace(refusal=SimpleNamespace(code="intake_unreachable"))
+
+    if failure == "read":
+        monkeypatch.setattr(poller, "gated_read", fail_read)
+    agg = aggregator(RefusingSink())
+    agg.observe(payload())
+    await asyncio.gather(*agg._tasks.values())
+    assert len(attempts) == checks.MAX_ATTEMPTS
+    if failure == "intake":
+        assert len(set(attempts)) == 1
+    assert [e["head_sha"] for e in await pending.pending()] == ["abc"]
+    await pending.forget("o/r", "abc")
+
+
+@pytest.mark.asyncio
 async def test_stale_keys_are_never_rearmed_and_are_pruned():
     await pending.remember("o/r", "old", None, None)
     await pending.remember("o/r", "new", None, None)
