@@ -27,7 +27,7 @@ from tools.launch_agent_plists import corsia_plist_deny_rule, is_corsia_plist
 from tools.project_fence import Fence, fence_for_thread
 from tools.protected_path_rules import ancestor_pins
 from tools.sandbox_git import sandbox_literal
-from tools.workspace_git_paths import is_workspace_git_control, workspace_git_paths, workspace_git_rules
+from tools.workspace_git_paths import is_workspace_git_control, workspace_git_history_rules
 
 
 _CONTROL_FILES = (
@@ -126,7 +126,7 @@ class ProtectedHostPathPolicy:
         )
 
     def hard_floor_denial(self, path: Path, *, for_write: bool = False) -> str | None:
-        """Return the non-leaseable denial for a credential root or a workspace Git write.
+        """Return the non-leaseable denial for credentials or workspace Git metadata.
 
         Symlinks and ``..`` are traced component-wise, so a route into a
         credential root is refused as well as the canonical path.
@@ -142,8 +142,8 @@ class ProtectedHostPathPolicy:
                 return _CREDENTIAL_DENIAL
             if resolution_touches(root, path, loop_touches=False):
                 return _CREDENTIAL_DENIAL
-        if for_write and candidate is not None and is_workspace_git_control(self.workspace, candidate):
-            return "Workspace Git settings and hooks are blocked in protected mode." + _NO_LEASE
+        if candidate is not None and is_workspace_git_control(self.workspace, candidate):
+            return "Workspace Git history is blocked; use workspace_history or workspace_commit." + _NO_LEASE
         return None
 
     def denial(self, path: Path, *, for_write: bool) -> str | None:
@@ -266,7 +266,7 @@ class ProtectedHostPathPolicy:
     def hard_floor_sandbox_rules(self) -> str:
         """Render what holds under a lease: credentials, browser, the caller's Local only fence, workspace Git."""
         floor = hard_floor_rules(self.credential_roots, self.home, sandbox_literal)
-        return "\n".join([floor, *self.fence.local_only_rules(sandbox_literal), *workspace_git_rules(workspace_git_paths(self.workspace))])
+        return "\n".join([floor, *self.fence.local_only_rules(sandbox_literal), *workspace_git_history_rules(self.workspace)])
 
     def sandbox_rules(self) -> str:
         """Render protected Seatbelt rules from the protected path inventory."""

@@ -1,12 +1,15 @@
-"""Workspace Git files an agent shell must never change.
+"""Workspace Git metadata paths and sandbox rules.
 
-The backend runs Git in the workspace outside the sandbox, so these paths stay
-read-only to agent shells.
+The backend runs workspace Git outside the sandbox. Agent shells and file tools
+must not read or write that metadata.
 """
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+
+from tools.sandbox_git import sandbox_literal
 
 
 def _git_pointer(path: Path, base: Path, prefix: str = "") -> Path:
@@ -36,11 +39,36 @@ def workspace_git_paths(workspace: Path | None) -> tuple[Path, ...]:
             git_dir / "commondir", common / "hooks")
 
 
+def _pointer_forms(path: Path, base: Path, prefix: str = "", *, fallback: Path) -> tuple[Path, Path]:
+    """Return a pointer's lexical and resolved target, or the fallback when invalid."""
+    try:
+        text = path.read_text().strip()
+    except (OSError, UnicodeDecodeError):
+        text = ""
+    value = text.removeprefix(prefix).strip() if text.startswith(prefix) else ""
+    target = base / value if value else fallback
+    lexical = Path(os.path.abspath(target))
+    return lexical, lexical.resolve(strict=False)
+
+
+def workspace_git_history_paths(workspace: Path | None) -> tuple[Path, ...]:
+    """Return the marker, git directory and common directory, without invoking Git."""
+    if workspace is None:
+        return ()
+    marker = Path(os.path.abspath(workspace)) / ".git"
+    git_forms = (
+        _pointer_forms(marker, marker.parent, "gitdir:", fallback=marker)
+        if marker.is_file() else (marker, marker.resolve(strict=False))
+    )
+    common_forms = _pointer_forms(git_forms[-1] / "commondir", git_forms[-1], fallback=git_forms[-1])
+    return tuple(dict.fromkeys((marker, marker.resolve(strict=False), *git_forms, *common_forms)))
+
+
 def is_workspace_git_control(workspace: Path | None, path: Path) -> bool:
-    """Return whether ``path`` is a control path, ignoring case as a default macOS volume does."""
-    paths = [str(item).casefold() for item in workspace_git_paths(workspace)]
+    """Return whether a path is in workspace Git metadata, ignoring case."""
+    paths = [str(item).casefold() for item in workspace_git_history_paths(workspace)]
     name = str(path).casefold()
-    return name in paths or (bool(paths) and name.startswith(f"{paths[-1]}/"))
+    return any(name == root or name.startswith(f"{root}/") for root in paths)
 
 
 def _any_case(path: Path) -> str:
@@ -57,6 +85,18 @@ def _any_case(path: Path) -> str:
             return f"[{char.upper()}{char.lower()}]"
         return char if not char.isascii() or char.isdigit() or char in "/-_ " else "."
     return "".join(spell(char) for char in str(path))
+
+
+def workspace_git_history_rules(workspace: Path | None) -> list[str]:
+    """Deny reads and writes throughout the workspace's Git metadata."""
+    return [
+        rule
+        for path in workspace_git_history_paths(workspace)
+        for rule in (
+            f'(deny file-read* file-write* (subpath "{sandbox_literal(path)}"))',
+            f'(deny file-read* file-write* (regex #"^{_any_case(path)}(/|$)"))',
+        )
+    ]
 
 
 def workspace_git_rules(paths: tuple[Path, ...]) -> list[str]:
