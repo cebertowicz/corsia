@@ -16,9 +16,12 @@ export async function setEvidenceViewport(page: Page, testInfo: TestInfo) {
 
 /**
  * Seeds `text` as a workspace document owned by a new thread, leaves `suggestions` on it from a second thread
- * (the way an agent leaves them), and opens the owner's canvas on it. `ids` follows `suggestions`.
+ * (the way an agent leaves them), and opens the owner's canvas on it. `ids` follows `suggestions`. `beforeOpen`
+ * runs after seeding and before the canvas first opens.
  */
-export async function openSuggestionDocument(page: Page, request: APIRequestContext, text: string, suggestions: SeededReviewItem[], { splitWidth = 540 }: { splitWidth?: number } = {}) {
+export async function openSuggestionDocument(page: Page, request: APIRequestContext, text: string, suggestions: SeededReviewItem[], { splitWidth = 540, beforeOpen }: {
+	splitWidth?: number; beforeOpen?: (seeded: { artifactId: string; docPath: string; ids: string[]; ownerId: string }) => Promise<void>;
+} = {}) {
 	const stamp = Date.now();
 	const ownerTitle = `suggestions-owner-${stamp}`;
 	const reviewerTitle = `Suggestion Reviewer ${stamp}`;
@@ -49,6 +52,7 @@ export async function openSuggestionDocument(page: Page, request: APIRequestCont
 		const result = await created.json();
 		ids.push((result.comment ?? result).id as string);
 	}
+	await beforeOpen?.({ artifactId, docPath, ids, ownerId });
 
 	await page.addInitScript(({ ownerId, docPath, name, artifactId, splitWidth }) => {
 		// The theme follows the emulated colour scheme, so the evidence below can show both.

@@ -448,6 +448,39 @@ def test_connected_app_keeps_the_transport_failure_class(runtime, monkeypatch):
     assert [state["state"] for state in published] == ["connecting", "failed"]
 
 
+def test_connected_app_with_a_refused_key_says_so(runtime, monkeypatch):
+    from tools.mcp import MCPConnectionFailure
+
+    mcp_runtime, _tools, _gate = runtime
+    published = []
+
+    async def load(fn, *args):
+        if fn.__name__ == "load_runtime_app_config":
+            return "GitHub", {"connected_app_id": args[0]}
+        if fn.__name__ == "load_missing_app_key_refs":
+            return []
+        if fn.__name__ == "register_stored":
+            return 0
+        if fn.__name__ == "record_runtime_app_state":
+            published.append(args[1])
+            return None
+        raise AssertionError(fn.__name__)
+
+    async def failed_connect(config, _registry, _stack):
+        return {next(iter(config)): MCPConnectionFailure("HTTP 401", "token_rejected")}
+
+    monkeypatch.setattr(mcp_runtime, "run_in_db", load)
+    monkeypatch.setattr(mcp_runtime, "connect_mcp_servers", failed_connect)
+
+    result = asyncio.run(mcp_runtime.apply_connected_app_runtime("connect", "app-1"))
+
+    assert result == {
+        "state": "token_rejected", "state_since": result["state_since"], "tool_count": 0,
+        "failure_class": None,
+    }
+    assert [state["state"] for state in published] == ["connecting", "token_rejected"]
+
+
 def test_connect_runs_the_real_key_lookup_for_a_local_and_a_keyed_app(runtime, isolated_db):
     """Only the transport is faked; every DB job, the missing-key lookup included, really runs."""
     from connections.app_lifecycle import create_app

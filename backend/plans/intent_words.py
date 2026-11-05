@@ -166,7 +166,7 @@ def _quoted(connection: sqlite3.Connection, quote: str, recipient: str) -> tuple
     Candidates are chosen by their words alone; ``person_input.load`` is the one
     reader of the person's words and ``source_reaches_thread`` the one scope rule.
     """
-    from memory.node_start_recall import source_reaches_thread
+    from memory.source_scope import source_reaches_thread
     from plans import person_input
 
     wanted = _normal(quote)
