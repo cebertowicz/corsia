@@ -85,6 +85,21 @@ test('@flow:document-comments tagging an agent in a reply delivers only to parti
 			'print(json.dumps([row[0] for row in rows]))',
 		], rootId, `%Tag recipient ${stamp}%`, tagged, other))).toEqual([tagged]);
 		await captureFrames(page, delivered, 'delivered');
+
+		// A cut and paste moves plain text, not the selected agent identity.
+		await reply.fill('@Tag recipient');
+		await page.getByRole('option', { name: new RegExp(`Tag recipient ${stamp}`) }).click();
+		await reply.press('ControlOrMeta+A');
+		await reply.press('ControlOrMeta+X');
+		await reply.press('ControlOrMeta+V');
+		await expect(reply).toHaveValue(`@Tag recipient ${stamp} `);
+		const posted = page.waitForRequest((req) => req.method() === 'POST' && req.url().includes(`/api/artifacts/${doc.artifactId}/comments`));
+		await card.getByRole('button', { name: 'Send reply', exact: true }).click();
+		const payload = (await posted).postDataJSON();
+		expect(payload.tagged_agent_ids).toEqual([]);
+		expect(payload.tagged_agent_mentions).toEqual([]);
+		await expect(card.getByText(`@Tag recipient ${stamp}`, { exact: true })).toBeVisible();
+		await expect(card.locator('.comment-mention').filter({ hasText: `@Tag recipient ${stamp}` })).toHaveCount(1);
 	} finally {
 		await demoteAgent(request, tagged);
 		await demoteAgent(request, other);
