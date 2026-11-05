@@ -17,28 +17,8 @@ ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "docs/reference/cli.md"
 SHELL = ROOT / "scripts/corsia"
 APP_SHELL = ROOT / "desktop/scripts/corsia"
-# Parser roots defined but dispatched by neither wrapper. Fail when this goes stale.
-UNROUTED = set()
 INTERNAL = {"ensure-current-release", "prepare-redeploy", "restart-prepared", "discard-prepared", "redeploy"}
-# These dispatch arms do not have an entry in the shell help.
-EXTRA = {
-    "doc": "Comment on and review documents",
-    "local": "Set up a local model",
-    "agent": "Prepare the CORSIA agent's first reply",
-    "ensure-current-release": "Ensure the frontend release is current",
-    "prepare-redeploy": "Prepare a redeploy",
-    "restart-prepared": "Restart a prepared release",
-    "discard-prepared": "Discard a prepared release",
-}
 SCRIPTS = {"delegate": "delegate_cli", "doc": "doc_cli", "context": "context_cli", "providers": "providers_cli"}
-# Shared descriptions where source and desktop help differ.
-SHARED_DESCRIPTIONS = {
-    "start": "Start CORSIA; --open also checks model sources and opens the browser",
-    "open": "Open CORSIA in the browser",
-    "stop": "Stop CORSIA; attempts to finish active work first unless --force is set",
-    "service": "Manage CORSIA's service; source installs use the service for their checkout",
-    "setup": "Choose local or server exposure",
-}
 
 
 def shell_commands(text):
@@ -64,17 +44,15 @@ def app_commands(text):
     return {word for arm in arms for word in arm.split("|")}
 
 
-def shell_help(text):
+def shell_help(text, usage):
     # Read literal help only: running the shell sources checkout configuration.
-    start = text.index('            echo "Usage: corsia <command>"')
-    lines = re.findall(r'^\s*echo "  ([a-z][^"$]*)"', text[start:], re.M)
-    descriptions = {}
-    for line in lines:
+    block = text.split(f'echo "{usage}"', 1)[1].split(';;', 1)[0].split('exit "$help_status"', 1)[0]
+    entries = {}
+    for line in re.findall(r'^\s*echo "  ([a-z][^"]*)"', block, re.M):
         parts = re.split(r"\s{2,}", line.strip(), maxsplit=1)
         if len(parts) == 2:
-            name = parts[0].split()[0]
-            descriptions.setdefault(name, parts[1])
-    return descriptions
+            entries.setdefault(parts[0].split()[0], []).append(tuple(parts))
+    return entries
 
 
 def subparsers(parser):
@@ -101,23 +79,9 @@ def module_guard():
 
 
 def capture_parser(module):
-    if hasattr(module, "build_parser"):
-        return module.build_parser()
-    # Some script CLIs construct their parser in main. Interrupt parsing before
-    # it can return arguments or execute a handler.
-    class Captured(Exception):
-        pass
-    original = argparse.ArgumentParser.parse_args
-    def capture(self, *args, **kwargs):
-        raise Captured(self)
-    argparse.ArgumentParser.parse_args = capture
-    try:
-        module.main([])
-        raise ValueError(f"Parser not captured: {module.__name__}")
-    except Captured as captured:
-        return captured.args[0]
-    finally:
-        argparse.ArgumentParser.parse_args = original
+    if not hasattr(module, "build_parser"):
+        raise ValueError(f"Missing build_parser: {module.__name__}")
+    return module.build_parser()
 
 
 def parsers():
@@ -128,6 +92,9 @@ def parsers():
     cli._add_bootstrap_commands(sub)
     cli._add_runtime_commands(sub)
     result = dict(sub.choices)
+    for action in sub._choices_actions:
+        if action.help and not result[action.dest].description:
+            result[action.dest].description = action.help
     for name, module in SCRIPTS.items():
         result[name] = capture_parser(importlib.import_module(module))
     return result
@@ -183,45 +150,42 @@ def render():
     source_commands = shell_commands(text)
     app_direct = app_commands(APP_SHELL.read_text())
     commands = source_commands | app_direct
-    help_text = shell_help(text)
+    source_usage = "Usage: corsia <command> [--force]"
+    source_help = shell_help(text, source_usage)
+    app_help = shell_help(text, "Usage: corsia <command>")
     module_guard()
     available = parsers()
     backend_roots = set(available) - set(SCRIPTS)
-    if UNROUTED & commands:
-        raise ValueError(f"Unrouted exemption is now dispatched: {sorted(UNROUTED & commands)}")
-    if backend_roots - commands != UNROUTED:
-        raise ValueError(f"Unclassified parser commands: {sorted(backend_roots - commands - UNROUTED)}; stale exemptions: {sorted(UNROUTED - backend_roots)}")
+    if backend_roots - commands:
+        raise ValueError(f"Unclassified parser commands: {sorted(backend_roots - commands)}")
     if app_direct - backend_roots:
         raise ValueError(f"Desktop commands lack parsers: {sorted(app_direct - backend_roots)}")
-    unknown = commands - set(help_text) - set(EXTRA) - backend_roots
+    unknown = {name for name in commands - INTERNAL
+               if name not in source_help and name not in app_help
+               and (name not in available or not available[name].description)}
     if unknown:
         raise ValueError(f"Shell commands lack descriptions: {', '.join(sorted(unknown))}")
     lines = ["# CLI reference", "", "Generated reference for `corsia` commands.", "",
              f"Generate with `{regenerate_command('generate_cli')}`; add `--check` to compare the generated page. The backend's locked dependencies are required.", ""]
+    lines.extend([f"Source-install help: `{source_usage}`.", ""])
     for name in sorted(commands - INTERNAL):
-        description = SHARED_DESCRIPTIONS.get(name, help_text.get(name, EXTRA.get(name, "")))
-        lines.extend([f"## `{name}`", "", cell(description), ""])
+        lines.extend([f"## `{name}`", ""])
+        entries = source_help.get(name, [])
         if name not in source_commands:
             lines.extend(["Desktop app only.", ""])
+            entries = app_help.get(name, [])
+        for usage, description in entries:
+            lines.extend([f"`corsia {usage}` — {cell(description)}", ""])
+        if name in source_commands and name in app_help:
+            descriptions = {description for _, description in entries}
+            for _, description in app_help[name]:
+                if description not in descriptions:
+                    lines.extend([f"In the desktop app: {cell(description)}", ""])
         if name in available:
             describe_parser(lines, available[name], f"corsia {name}")
-        elif name == "service":
-            lines.extend(["`corsia service [install|uninstall|start|stop|restart|status]`", "",
-                          "`install` and `uninstall` are available in source installs; the desktop app refuses them.", ""])
-        elif name == "logs":
-            lines.extend(["`corsia logs [backend]`", ""])
-        elif name == "start":
-            lines.extend(["`corsia start [--open] [--force]`", ""])
-        elif name == "stop":
-            lines.extend(["`corsia stop [--stop-local-model] [--force]`", ""])
-        elif name in {"open", "restart"}:
-            lines.extend([f"`corsia {name} [--force]`", ""])
-        if name == "setup":
-            lines.extend(["In source installs, `corsia setup local|server` updates the choice and restarts the service. "
-                          "In the desktop app, it updates the choice without restarting.", ""])
     lines.extend(["## Internal commands", "", "These commands are for internal operation.", ""])
     for name in sorted(INTERNAL & commands):
-        lines.append(f"- `{name}`: {cell(help_text.get(name, EXTRA.get(name, '')))}")
+        lines.append(f"- `{name}`")
     lines.append("")
     return "\n".join(lines)
 

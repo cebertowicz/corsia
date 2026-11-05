@@ -16,6 +16,20 @@ def test_cli_reference_is_current():
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_source_help_change_makes_reference_stale(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "scripts/docs"))
+    import generate_cli
+
+    shell = tmp_path / "corsia"
+    text = (ROOT / "scripts/corsia").read_text()
+    shell.write_text(text)
+    monkeypatch.setattr(generate_cli, "SHELL", shell)
+    monkeypatch.setattr(sys, "argv", ["generate_cli.py", "--check"])
+    assert generate_cli.main() == 0
+    shell.write_text(text.replace("Open the local CORSIA app", "Open the local application"))
+    assert generate_cli.main() == 1
+
+
 def test_parser_defaults_are_readable(monkeypatch):
     monkeypatch.syspath_prepend(str(ROOT / "scripts/docs"))
     from generate_cli import describe_parser

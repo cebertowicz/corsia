@@ -2,13 +2,15 @@
 
 Generated reference for `corsia` commands.
 
-Generate with `python scripts/docs/generate_cli.py`; add `--check` to compare the generated page. The backend's locked dependencies are required.
+Generate with `.venv/bin/python scripts/docs/generate_cli.py`; add `--check` to compare the generated page. The backend's locked dependencies are required.
+
+Source-install help: `Usage: corsia <command> [--force]`.
 
 ## `agent`
 
-Prepare the CORSIA agent's first reply
-
 ### `corsia agent`
+
+CORSIA agent helpers
 
 ### `corsia agent warm`
 
@@ -16,11 +18,13 @@ Pre-warm the CORSIA agent's first reply on the local starter model
 
 ## `artifact`
 
-Artifact registry lifecycle (resolve/register/update/reconcile/relocate/rehome/release).
-
 Desktop app only.
 
+`corsia artifact` — Artifact registry lifecycle (resolve/register/update/reconcile/relocate/rehome/release).
+
 ### `corsia artifact`
+
+Artifact registry lifecycle (resolve/register/update/reconcile/relocate/rehome/release).
 
 ### `corsia artifact reconcile`
 
@@ -117,11 +121,13 @@ Update an artifact description or pane visibility.
 
 ## `bind-host`
 
-Print the interface CORSIA listeners bind
-
 Desktop app only.
 
+`corsia bind-host` — Print the interface CORSIA listeners bind
+
 ### `corsia bind-host`
+
+Print the interface CORSIA listeners bind
 
 | Argument | Description |
 |---|---|
@@ -129,7 +135,7 @@ Desktop app only.
 
 ## `context`
 
-CTX bootloader: attach\|create
+`corsia context <sub>` — CTX bootloader: attach\|create
 
 ### `corsia context`
 
@@ -163,7 +169,7 @@ Create and attach a bootloader file
 
 ## `delegate`
 
-Delegation: create-thread\|task\|send\|set-model\|status
+`corsia delegate <sub>` — Delegation: create-thread\|task\|send\|set-model\|status
 
 ### `corsia delegate`
 
@@ -232,8 +238,6 @@ Create a hidden child thread and send its first task turn
 | `--from-thread-id` | Parent/sender thread id (default: $CORSIA_THREAD_ID when present) |
 
 ## `doc`
-
-Comment on and review documents
 
 ### `corsia doc`
 
@@ -387,11 +391,13 @@ Suggest an anchored replacement
 
 ## `event`
 
-Emit a declared event from a local program.
-
 Desktop app only.
 
+`corsia event` — Emit a declared event from a local program.
+
 ### `corsia event`
+
+Emit a declared event from a local program.
 
 ### `corsia event emit`
 
@@ -406,11 +412,13 @@ Emit one declared event through the live intake.
 
 ## `init`
 
-First-run setup — configure workspace path
-
 Desktop app only.
 
+`corsia init` — First-run setup — configure workspace path
+
 ### `corsia init`
+
+First-run setup — configure workspace path
 
 | Argument | Description |
 |---|---|
@@ -421,9 +429,9 @@ Desktop app only.
 
 ## `local`
 
-Set up a local model
-
 ### `corsia local`
+
+Set up a local model
 
 ### `corsia local setup`
 
@@ -438,17 +446,17 @@ Install oMLX and the local model its recommender picks for this Mac
 
 ## `logs`
 
-Tail the backend log
-
-`corsia logs [backend]`
+`corsia logs` — Tail the backend log
 
 ## `mcp`
 
-Configure external MCP tools
-
 Desktop app only.
 
+`corsia mcp` — Configure external MCP tools
+
 ### `corsia mcp`
+
+Configure external MCP tools
 
 ### `corsia mcp add`
 
@@ -516,15 +524,17 @@ Remove a connected MCP server
 
 ## `open`
 
-Open CORSIA in the browser
+`corsia open` — Open the local CORSIA app
 
-`corsia open [--force]`
+In the desktop app: Open CORSIA
 
 ## `perf`
 
-Historical latency reports: routes\|tools
+`corsia perf <sub>` — Historical latency reports: routes\|tools
 
 ### `corsia perf`
+
+Historical aggregate performance reports
 
 ### `corsia perf routes`
 
@@ -545,7 +555,7 @@ Historical aggregate tool and LLM latency
 
 ## `providers`
 
-Providers and models: list\|models\|add\|edit\|remove\|test\|window\|...
+`corsia providers <sub>` — Providers and models: list\|models\|add\|edit\|remove\|test\|window\|...
 
 ### `corsia providers`
 
@@ -660,11 +670,13 @@ set a model's context window
 
 ## `remote-address`
 
-Print the saved outside address while devices can connect
-
 Desktop app only.
 
+`corsia remote-address` — Print the saved outside address while devices can connect
+
 ### `corsia remote-address`
+
+Print the saved outside address while devices can connect
 
 | Argument | Description |
 |---|---|
@@ -673,35 +685,43 @@ Desktop app only.
 
 ## `restart`
 
-Restart CORSIA
-
-`corsia restart [--force]`
+`corsia restart` — Restart CORSIA
 
 ## `service`
 
-Manage CORSIA's service; source installs use the service for their checkout
+`corsia service install` — Render + install $(service_label) for this checkout
 
-`corsia service [install|uninstall|start|stop|restart|status]`
+`corsia service start|stop` — Use or preserve the installed service definition
 
-`install` and `uninstall` are available in source installs; the desktop app refuses them.
+`corsia service restart` — Refresh the definition, then bounce the service
+
+`corsia service status` — Show plist, loaded process, and health
+
+`corsia service uninstall` — Boot out + remove the plist
+
+In the desktop app: Manage the app service
 
 ## `setup`
 
-Choose local or server exposure
+`corsia setup local|server` — This computer only, or reachable from other devices
+
+In the desktop app: Choose local or server exposure
 
 ### `corsia setup`
+
+Choose local or server exposure
 
 | Argument | Description |
 |---|---|
 | `setup` | Choices: local, server; Required |
 
-In source installs, `corsia setup local|server` updates the choice and restarts the service. In the desktop app, it updates the choice without restarting.
-
 ## `sources`
 
-Which model sources are ready, one fix each
+`corsia sources [recheck]` — Which model sources are ready, one fix each
 
 ### `corsia sources`
+
+Show which model sources are ready
 
 | Argument | Description |
 |---|---|
@@ -710,25 +730,27 @@ Which model sources are ready, one fix each
 
 ## `start`
 
-Start CORSIA; --open also checks model sources and opens the browser
+`corsia start [--open]` — Start CORSIA (--open: model sources, then the browser)
 
-`corsia start [--open] [--force]`
+In the desktop app: Start CORSIA
 
 ## `status`
 
-Show CORSIA status
+`corsia status` — Show CORSIA status
 
 ## `stop`
 
-Stop CORSIA; attempts to finish active work first unless --force is set
+`corsia stop` — Stop CORSIA (drains first unless --force)
 
-`corsia stop [--stop-local-model] [--force]`
+In the desktop app: Stop CORSIA
 
 ## `token`
 
-API tokens: create\|list\|revoke\|service
+`corsia token <sub>` — API tokens: create\|list\|revoke\|service
 
 ### `corsia token`
+
+Manage API tokens
 
 ### `corsia token create`
 
@@ -763,9 +785,11 @@ Mint the lifecycle shell's 1-hour service token
 
 ## `user`
 
-Accounts: add\|passwd\|list
+`corsia user <sub>` — Accounts: add\|passwd\|list
 
 ### `corsia user`
+
+Manage accounts on this install
 
 ### `corsia user add`
 
@@ -793,8 +817,8 @@ Change a password
 
 These commands are for internal operation.
 
-- `discard-prepared`: Discard a prepared release
-- `ensure-current-release`: Ensure the frontend release is current
-- `prepare-redeploy`: Prepare a redeploy
-- `redeploy`: Pull --ff-only + build + bounce THIS instance's serving checkout
-- `restart-prepared`: Restart a prepared release
+- `discard-prepared`
+- `ensure-current-release`
+- `prepare-redeploy`
+- `redeploy`
+- `restart-prepared`
