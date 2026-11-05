@@ -2,7 +2,7 @@
 
 How people and programs sign in to CORSIA, how agents act, and what a project or an account does and doesn't separate.
 
-**In short:** CORSIA is built for one person per install. Sign-in protects the server from other devices and other people on the network. It doesn't separate agents from each other, projects from each other, or accounts on the same install from each other.
+**In short:** CORSIA is built for one person per install. Sign-in protects the server from other devices and other people on the network. It doesn't separate agents from each other or accounts on the same install from each other. On macOS, projects are separated only for agents' shells.
 
 ## Signing in
 
@@ -38,7 +38,7 @@ What an agent can reach through tools:
 
 | | Reach |
 |---|---|
-| Files | The whole workspace and registered repositories ([Agent sandbox](agent-sandbox.md)) |
+| Files | File tools: the whole workspace and registered repositories. Shell on macOS: the same, minus the projects it is fenced from ([Agent sandbox](agent-sandbox.md#projects)) |
 | Other conversations | Any conversation's messages by its id, in any project, except an [isolated worker's](untrusted-content.md#isolated-workers) (`backend/tools/query_projects.py`) |
 | Connected apps | Those whose reach includes its project ([Connected apps](connected-apps.md)) |
 | Host access | Only through a reviewed lease ([Host access](host-access.md)) |
@@ -46,7 +46,9 @@ What an agent can reach through tools:
 
 ## What a project does and doesn't separate
 
-A **project** decides what an agent is given by default: its project's context and instructions, which connected apps it can use, and whether Local only applies. It does **not** stop an agent from reading or changing another project's files, or reading another project's conversations.
+A **project** decides what an agent is given by default: its project's context and instructions, which connected apps it can use, and whether Local only applies.
+
+On macOS it also fences the shells of other projects' agents out of its folder and repositories; the CORSIA agent's shell is fenced only from Local only projects, which stay closed even under a lease ([Agent sandbox](agent-sandbox.md#projects)). It does **not** stop an agent's file tools from reading or changing another project's files, or its conversation tools from reading another project's conversations. Linux has no fence.
 
 To keep two bodies of work apart, give each its own workspace and CORSIA install, ideally under separate macOS users.
 

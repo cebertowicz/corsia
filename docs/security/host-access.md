@@ -61,10 +61,13 @@ What follows from that:
 
 The **hard floor** applies under every lease (Operating system for the shell, CORSIA code for file tools):
 
-- CORSIA's key store and the agents' saved browser profile
+- CORSIA's key store, the agents' saved browser profile and the folder holding the `corsia` command's API token
 - The Safehouse binary and the generated sandbox profile, so a leased command can't rewrite its own confinement
+- On macOS, Local only projects the agent isn't in ([Agent sandbox](agent-sandbox.md#projects)). An ordinary project the agent is fenced from **can** be opened by a lease
 
-CORSIA's state folder (database and logs) is outside the default sandbox but **can** be opened by a lease.
+CORSIA's state folder (database, logs, and the Claude Code and Codex sign-ins CORSIA keeps there) is outside the default sandbox but **can** be opened by a lease.
+
+If you gave CORSIA Full Disk Access (Messages needs it), leased commands also inherit it, and can read files macOS otherwise protects, such as Mail, Messages and Photos.
 
 The floor binds the leased command and what it starts, nothing else. A leased command can write almost anywhere your user can, including shell startup files, startup items and CORSIA's own code. Whatever it leaves there runs later outside the sandbox, where the floor doesn't apply and stored keys are readable. The floor itself is Operating system; stopping that indirect route is Model judgment. The reviewers are told to block changes to the code and settings that govern a lease, and no instruction names startup files or startup items. Under Auto-approve, no person sees the request.
 

@@ -10,9 +10,9 @@ Where CORSIA's code and its dependencies come from, what is pinned or signed, ho
 |---|---|---|
 | Python packages | Exact versions in `backend/requirements.lock`; **no hashes**, so a replaced file on the package index wouldn't be caught. One package, `litellm`, comes from a fixed Git commit | `backend/requirements.lock` |
 | Web app packages | `frontend/package-lock.json`, with integrity hashes. CI uses `npm ci`; the updater uses `npm install --no-save`, which follows the lock file but, unlike `npm ci`, doesn't refuse when it and `package.json` disagree | `scripts/corsia.d/runtime.sh` |
-| Desktop app build | `npm ci` | `desktop/scripts/build-macos-bundle.sh` |
-| Agents' browser | `agent-browser@0.31` from npm, installed globally by the installer | `scripts/install.sh` |
-| Sandbox (macOS) | Agent Safehouse from Homebrew; CORSIA refuses to run shells with a version older than 0.11.1 | `scripts/install.sh`, `backend/tools/shell_guard.py` |
+| Desktop app build | `npm ci`. The app's own copies of Python 3.11.17, oMLX, Git 2.53.0 (built from kernel.org's source), agent-browser 0.31.2 and Agent Safehouse 0.11.1 are downloaded at build time and each checked against a fixed SHA-256 | `desktop/scripts/build-macos-bundle.sh` |
+| Agents' browser (source install) | `agent-browser@0.31` from npm, installed globally by the installer. CORSIA runs it only if it is the 0.31.2 release whose digests it pins | `scripts/install.sh`, `backend/host_access/browser_executables.py` |
+| Sandbox (macOS, source install) | Agent Safehouse from Homebrew; CORSIA refuses to run shells with a version older than 0.11.1 | `scripts/install.sh`, `backend/tools/shell_guard.py` |
 | Linux runtimes | Downloaded by CORSIA (at install time) and checked against fixed checksums | `backend/tools/managed_runtime.py` |
 | Google Workspace CLI | `gws` 0.22.5 from the maker's GitHub release, checked against a fixed SHA-256: bundled in the Mac app at build time, installed by `scripts/install.sh` on a Mac source checkout and on Linux, never downloaded when the tool runs | `backend/tools/gws_release.py` (version and Mac digest, shared with the bundle script), `backend/tools/managed_runtime.py` |
 | Homebrew (macOS, if missing) | Homebrew's own installer from its `HEAD` | `scripts/install.sh` |
@@ -25,7 +25,7 @@ No automated dependency-update service (Dependabot or Renovate) is configured.
 
 - The release workflow (`.github/workflows/release-macos.yml`) builds an **unsigned** app. Signing and notarization happen in a separate script run by hand (`desktop/scripts/sign-macos-bundle.sh`).
 - Nothing in the repository records whether a published download (such as the GitHub pre-release named `dev-channel`) was signed and notarized before upload. Check a download yourself before trusting it (below), or build from source.
-- Release tags `v0.1.0` to `v0.3.0` are annotated tags with no signature (`git verify-tag` answers "no signature found"). The `v0.4.1-dev.*` tags are lightweight: they name a commit and carry no signature of their own. Commits merged through GitHub's website carry GitHub's own signature; other commits aren't signed (checked for this page).
+- Release tags `v0.1.0` to `v0.4.2` are annotated tags with no signature (`git verify-tag` answers "no signature found"). The `v0.4.1-dev.*` tags are lightweight: they name a commit and carry no signature of their own. Commits merged through GitHub's website carry GitHub's own signature; other commits aren't signed (checked for this page).
 
 ## Updates
 
@@ -83,7 +83,7 @@ grep -c "hash=sha256" backend/requirements.lock
 In your CORSIA checkout (`~/.corsia` for an install from source):
 
 ```bash
-git verify-tag v0.3.0
+git verify-tag v0.4.2
 ```
 
 `error: no signature found` means the tag carries no signature of any kind (checked for this page). For a tag that `git cat-file -t` reports as `commit` rather than `tag`, there is no tag object to sign; this command then checks nothing.

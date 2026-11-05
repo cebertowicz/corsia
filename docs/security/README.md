@@ -1,6 +1,6 @@
 # Security model
 
-CORSIA runs agents on your own computer, as your own user account, with real tools: a shell, file tools, the web, your email and the apps you connect. This section says what those agents can reach, what stops them, how strong each stop is, and where it doesn't hold. These pages were last checked against the code at commit `43a8c7780`, and that check did not cover every claim; "at this commit" on these pages means that commit. On each pull request, CI checks only that the files and links a page cites still exist, not that what the page says is still true, so a later change can leave a page out of date. The pages name the source files so you can check.
+CORSIA runs agents on your own computer, as your own user account, with real tools: a shell, file tools, the web, your email and the apps you connect. This section says what those agents can reach, what stops them, how strong each stop is, and where it doesn't hold. These pages were last checked against the code at commit `7a8c55d84`: every change since the previous check at `43a8c7780` was reviewed and the claims it touched were rechecked, but not every other claim was re-verified. "At this commit" on these pages means `7a8c55d84`. On each pull request, CI checks only that the files and links a page cites still exist, not that what the page says is still true, so a later change can leave a page out of date. The pages name the source files so you can check.
 
 **Who this is for:** someone deciding whether to let agents work on their machine. If you only read one page, read this one and [Known limits](limits.md).
 
@@ -10,22 +10,26 @@ CORSIA runs agents on your own computer, as your own user account, with real too
 flowchart LR
     subgraph You[Your user account]
         subgraph WS[Workspace folder]
-            P1[Project A]
-            P2[Project B]
+            P1[The agent's<br/>own project]
+            P2[Other projects]
+            P3[Local only<br/>projects]
         end
         H[Rest of your<br/>home folder]
         F[Hard floor: CORSIA keys,<br/>agents' browser profile,<br/>sandbox itself]
     end
-    A[Agent shell and<br/>file tools] -->|read and write| WS
+    A[Agent shell and<br/>file tools] -->|read and write| P1
+    A -->|file tools; shell<br/>only with a lease| P2
+    A -->|file tools;<br/>shell never| P3
     A -->|reviewed<br/>lease only| H
     A -.->|never| F
     A -->|not limited| N[Internet and<br/>local network]
     S[CORSIA server] --> M[Model providers<br/>you connect]
-    S --> C[Email, calendar,<br/>tool servers you connect]
+    S --> C[Email, calendar, Messages,<br/>tool servers you connect]
 ```
 
 - **Workspace:** the folder CORSIA works in (by default `~/corsia`). It holds every project, shared files, context and each conversation's working files.
-- **Project:** a folder inside the workspace. Projects organize work and settings; they are **not** a security boundary. An agent in one project can read and change every other project in the same workspace.
+- **Project:** a folder inside the workspace. Projects organize work and settings, and on macOS they are a **partial** boundary: an agent's shell can't read or write another project's folder or its repositories, but its file tools and conversation tools still can, and so can a shell reading the workspace's Git history. See [Agent sandbox](agent-sandbox.md#projects).
+- **Local only:** a setting that keeps a chat or project on local models. A whole project with it on is also closed to every other agent's shell, even under a lease. See [Data and privacy](data-and-privacy.md#local-only).
 - **Thread:** one conversation with one agent. Each thread has its own working folder inside the workspace.
 - **Lease:** a short, reviewed grant that lets one agent run commands outside the workspace. See [Host access](host-access.md).
 - **Hard floor:** paths no leased command can read or write. It stops direct access only; see [What no lease opens](host-access.md#what-no-lease-opens) for the indirect route.
@@ -47,7 +51,9 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 
 | Action | Default | Strength |
 |---|---|---|
-| Read and write anything in the workspace, every project included | Allowed | — |
+| Read and write its own project, the workspace's shared files and its own working folder | Allowed | — |
+| Read or write another project's folder or registered repositories from the shell | Refused on macOS; a lease opens it unless that project is Local only. Allowed on Linux | Operating system |
+| Read or write another project's files with file tools (`read_file`, `write_file` and the rest), or read its conversations | Allowed | — |
 | Read the rest of your home folder (Documents, Desktop, Downloads, Pictures, shell history, Mail, browser data, `~/.ssh` keys, Keychains, cloud credential folders) | Refused | Operating system |
 | Read some tool settings in your home folder: `~/.gitconfig`, most of `~/.config` (your GitHub CLI login in `~/.config/gh` included; if an agents' GitHub account is set up, that account's token instead), `~/.cache`, `~/.npm`, `~/.cargo`; and system files such as `/etc` | Allowed | — |
 | Write outside the workspace and registered repositories | Refused, except temporary folders (`/tmp`, the system temp folder that holds per-conversation package caches), `~/.ssh/known_hosts`, and some developer-tool caches Agent Safehouse allows (such as `~/.npm`, `~/.cargo`, `~/.rustup`) | Operating system |
@@ -56,7 +62,7 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 | Make any outbound network request | Allowed, not limited | — |
 | Read a provider API key CORSIA stores | Refused; values are not in the shell's environment | Operating system and CORSIA code |
 | See a credential that sits in a workspace file | Masked in most cases; see [Secrets](secrets.md) for what masking misses | CORSIA code |
-| Send an email or calendar invite | Only an unchanged open draft, and only after you write in the conversation after its last change; it doesn't check what your reply said | CORSIA code |
+| Send an email, calendar invite or text message | Only an unchanged open draft, and only after you write in the conversation after its last change; it doesn't check what your reply said | CORSIA code |
 | Anything outside the workspace that the rows above refuse | Only through a lease | CORSIA code to require it; Model judgment to review it |
 | Approve its own lease | No; you approve, or the reviewer model does when Auto-approve is on ([Host access](host-access.md)) | CORSIA code; Model judgment under Auto-approve |
 
@@ -65,10 +71,10 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 The full list, with what to do about each, is in [Known limits](limits.md).
 
 1. **Agents run as you.** The sandbox narrows what a command can touch; it is not a container or a separate user. A sandbox flaw exposes what your user can reach.
-2. **The workspace is the boundary, not the project.** Keep work that must stay apart in separate workspaces, each with its own CORSIA install and state.
+2. **Projects are only partly separated.** On macOS an agent's shell is fenced out of other projects, but its file tools and conversation tools are not, and nothing is fenced on Linux. Keep work that must stay apart in separate workspaces, each with its own CORSIA install and state.
 3. **Outbound network access is not limited.** An agent that reads something it shouldn't can send it anywhere.
 4. **Reviewers are not a defense against a tricked agent.** The models that review lease requests and leased commands assume the agent is yours and working on your task. They are instructed to block a short list: secret exposure, changes to access controls, needless destruction, and commands plainly outside the approved purpose. A model can miss those. They will usually allow a plausible request to read your ordinary personal files.
-5. **Prompt injection is not solved.** Email is screened by a local model and labelled; web pages, attachments and tool results are not screened. Labelled content still reaches the agent.
+5. **Prompt injection is not solved.** Email is screened by a local model and labelled; web pages, attachments, text messages and tool results are not screened. Labelled content still reaches the agent.
 6. **Stored keys are not encrypted.** They sit in a file only your user can read, and no agent command can open it directly, even under a lease. Anything running as your user outside the sandbox can read them, and that includes something a leased command left behind to run later.
 7. **No outside security audit.** Nobody outside the project has tested these controls.
 
@@ -83,7 +89,7 @@ The full list, with what to do about each, is in [Known limits](limits.md).
 | [Data and privacy](data-and-privacy.md) | What leaves your machine, to whom and when; Local only; telemetry; data at rest; removal |
 | [Network](network.md) | What listens, on which address; phones and other devices; outbound access |
 | [Untrusted content](untrusted-content.md) | Prompt injection: email screening, isolated workers, what isn't screened |
-| [Connected apps](connected-apps.md) | Tool servers, Google and Microsoft sign-in, sending email, the agents' browser |
+| [Connected apps](connected-apps.md) | Tool servers, Google and Microsoft sign-in, Google Docs and Drive, Messages, GitHub, sending, the agents' browser |
 | [Accounts and access](accounts-and-access.md) | Sign-in, sessions, tokens, what scope does and doesn't guarantee |
 | [Supply chain](supply-chain.md) | Dependency pinning, signing, updates, the skill library |
 | [Audit](audit.md) | What's recorded, where, for how long, how to read it |

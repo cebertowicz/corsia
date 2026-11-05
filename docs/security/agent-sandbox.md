@@ -2,7 +2,7 @@
 
 How CORSIA confines an agent's shell commands and file tools, on macOS and Linux, without a lease. Leases are on [Host access](host-access.md).
 
-**In short:** agents run as your user. File tools reach only the workspace and registered repositories. Shell commands run inside an OS sandbox that lets them read and write the workspace, read a few tool-settings folders, and reach the network freely. The workspace, not the project, is the boundary.
+**In short:** agents run as your user. File tools reach only the workspace and registered repositories. Shell commands run inside an OS sandbox that lets them read and write the workspace apart from other projects, read a few tool-settings folders, and reach the network freely. On macOS the shell is fenced out of other projects; file tools are not, so the workspace is still the boundary that holds for every tool.
 
 ## Layers
 
@@ -10,13 +10,14 @@ How CORSIA confines an agent's shell commands and file tools, on macOS and Linux
 |---|---|---|---|
 | File-tool gate | `read_file`, `write_file`, `edit_file`, `grep`, `glob`, `list_dir` | CORSIA code | `backend/tools/filesystem_gate.py`, `backend/tools/sandbox_config.py` |
 | Shell sandbox | Every `bash` command and everything it starts | Operating system | `backend/tools/shell_guard.py`, `backend/tools/shell_sandbox.py` |
+| Project fence (macOS) | Other projects' folders and registered repositories, in the shell, leased shells, other AI agent command-line tools started under a lease, and local tool servers | Operating system | `backend/tools/project_fence.py`, `backend/tools/host_path_policy.py` |
 | Command refusals | A list of commands refused before they run | CORSIA code | `backend/tools/shell_guard.py` (`check_command_safety`) |
 
 The file tools run inside the CORSIA server, so the OS sandbox doesn't apply to them; their own path check does. The shell runs in a separate sandboxed process.
 
 ## What's allowed
 
-**Read and write:** the whole workspace (every project, shared files, every thread's working folder) and every registered repository. A registered repository whose base checkout is protected keeps that main checkout read-only, with its verified worktrees under `.worktrees/` read and write; an unprotected repository is read and write throughout.
+**Read and write:** the workspace (shared files, the agent's own project and working folder) and every registered repository, apart from what the [project fence](#projects) closes to the shell. A registered repository whose base checkout is protected keeps that main checkout read-only, with its verified worktrees under `.worktrees/` read and write; an unprotected repository is read and write throughout.
 
 **Writable outside the workspace, from the shell (macOS):** temporary folders (`/tmp` and the system temp folder, which holds each conversation's package caches), `~/.ssh/known_hosts`, and some developer-tool caches that Agent Safehouse allows, such as `~/.npm`, `~/.cargo` and `~/.rustup`. On Linux, each thread gets its own `/tmp` (below).
 
@@ -24,16 +25,40 @@ The file tools run inside the CORSIA server, so the OS sandbox doesn't apply to 
 
 **Network:** any outbound connection, to the internet or your local network. Not limited. See [Network](network.md).
 
-**SSH:** the shell gets your SSH agent socket (`SSH_AUTH_SOCK`), so keys loaded in your SSH agent can be used to `ssh` or `git push`. The private key files stay unreadable. `~/.ssh/config`, `known_hosts` and `allowed_signers` are readable.
+**SSH:** the shell gets your SSH agent socket (`SSH_AUTH_SOCK`), so keys loaded in your SSH agent can be used to `ssh` or `git push`. The private key files stay unreadable. `~/.ssh/config`, `known_hosts` and `allowed_signers` are readable. Once an agents' GitHub account exists, a `git push` to GitHub goes over HTTPS as that account, including one your Git settings rewrite to SSH, and a GitHub push still arriving over SSH is refused; a command that sets its own SSH command can still push with your key (`backend/connections/github_agent.py`).
 
-The project is not a boundary. `backend/tools/filesystem_gate.py` states it in code: project scope is not a confidentiality boundary. An agent working on project A can read and change project B. If two bodies of work must stay apart, give each its own workspace and CORSIA install.
+## Projects
+
+On macOS the shell sandbox fences each agent out of projects that aren't its own (`backend/tools/project_fence.py`). The fence is worked out again on every command, so a change to a project's Local only setting or an agent's project applies to its next command.
+
+| Agent | Its shell can't read or write |
+|---|---|
+| An agent in a project | Every other project's folder, the repositories and worktrees registered to those projects, and the working folders of agents outside any project |
+| An agent outside any project | Every project's folder and registered repositories |
+| The CORSIA agent | Only Local only projects |
+| A local tool server | Only Local only projects; it serves no single agent |
+
+- A repository registered to two projects stays open to agents of both, unless one of them is Local only and the agent reaches it only through the other.
+- A lease opens an ordinary fenced project to that agent's leased commands. A Local only project stays closed under every lease.
+- If CORSIA can't read a project's or repository's record, it fences more, not less.
+- An agent can't register a repository that sits inside a project it is fenced from.
+
+**What the fence doesn't cover:**
+
+- **File tools.** `read_file`, `write_file`, `edit_file`, `grep`, `glob` and `list_dir` still reach every project in the workspace, Local only ones included.
+- **Conversations.** An agent can read another project's conversations by id ([Accounts and access](accounts-and-access.md#how-agents-act)).
+- **The workspace's Git history.** A shell running `git` at the workspace root can read the committed versions of other projects' files.
+- **Linux.** The Linux sandbox has no project fence at this commit.
+
+If two bodies of work must stay apart, give each its own workspace and CORSIA install.
 
 ## What's refused
 
 | Refused | Strength |
 |---|---|
 | The rest of your home folder: Documents, Desktop, Downloads, Pictures, Music, Movies, shell history and startup files, `~/Library` data (Mail, Messages, cookies, browser data, Keychains), `~/.ssh` private keys, `~/.aws`, `~/.docker`, `~/.kube`, `~/.gnupg`, `~/.netrc`, other AI tools' folders | Operating system |
-| CORSIA's state folder (database, logs, keys, the agents' browser profile) and its checkout's private files | Operating system |
+| CORSIA's state folder (database, logs, keys, the agents' browser profile, Claude Code and Codex sign-ins) and its checkout's private files | Operating system |
+| Other projects' folders and registered repositories, as listed under [Projects](#projects) (macOS) | Operating system |
 | Writes outside the workspace and registered repositories, including your home folder and `/`, apart from the exceptions under [What's allowed](#whats-allowed) | Operating system |
 | CORSIA's startup items (`LaunchAgents`), its restart control files, the generated `.corsia/context` and `.corsia/skills` folders | Operating system |
 | Writes to the workspace's Git settings, hooks and pointer files (`.git/config`, `.git/config.worktree`, `.git/commondir`, `.git/hooks`) and its `.git` marker, because the server runs Git there outside the sandbox. Agents can't run `git init` at the workspace root. On Linux, the first agent command in a workspace with no `.git` makes one so the rule covers it, and a symlinked `.git` stops agent commands until it's replaced with a directory or a `gitdir:` file | Operating system for the shell, CORSIA code for file tools |
@@ -81,4 +106,4 @@ curl -sI https://example.com | head -1   # HTTP/2 200: outbound is open
 ls ~/.config                 # readable: shows your tool settings folders
 ```
 
-To see that projects are not separated, ask an agent in one project to list another project's folder in the same workspace.
+To see how far the project fence goes, ask an agent in one project to run `ls` on another project's folder in its shell (`Operation not permitted` on macOS), then to list the same folder with its `list_dir` file tool (it lists). Both were run for this page.

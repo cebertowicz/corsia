@@ -10,6 +10,7 @@ What CORSIA listens on, who can reach it, how phones and other devices connect, 
 | Local model server (oMLX), when CORSIA manages one | Follows the CORSIA server's choice | Its own port | Requests need oMLX's own key | `backend/llm/providers/omlx_supervisor_config.py` |
 | Devices listener, off unless you turn it on | All interfaces | 47901, or the next free one up to 47910 | Signed-in person sessions only, from private network addresses unless you configure an outside address | `backend/infra/devices_listener.py` |
 | Tool-server sign-in callback | `127.0.0.1` | Chosen at sign-in | The sign-in flow that opened it | `backend/tools/mcp_oauth_listener.py` |
+| Measurement intake (OpenTelemetry logs over HTTP) | `127.0.0.1` | 47921, or the next free one up to 47930; `CORSIA_OTLP_PORT` sets one port | Programs on this machine that send a measure key for one agent; anything else is refused before the body is read | `backend/infra/otlp_listener.py`, `backend/infra/otlp_receiver.py` |
 
 **Local or server.** `corsia setup local` binds to `127.0.0.1`, so only programs on the same machine can connect. `corsia setup server` binds to all interfaces, so any device that can reach the machine can reach the sign-in page. The installer chooses local. The desktop app always binds to `127.0.0.1`.
 
