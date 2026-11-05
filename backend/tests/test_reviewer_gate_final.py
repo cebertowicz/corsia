@@ -602,6 +602,7 @@ class TestMergeableGate:
             "number": 42,
             "mergeable": True,
             "draft": True,
+            "state": "open",
             "base": {"ref": "dev", "sha": "base123def", "repo": {"full_name": "owner/repo"}},
             "head": {"sha": "abc123def", "repo": {"full_name": "owner/repo"}},
             "labels": [{"name": "ready"}],
@@ -625,6 +626,7 @@ class TestMergeableGate:
             "labels": [{"name": "ready"}],
             "title": "Contain reviewer scope",
             "body": "## Scope\nOnly review the changed release slice.",
+            "state": "open",
         }
         mock_gh.assert_called_once_with(["api", "repos/owner/repo/pulls/42"])
 

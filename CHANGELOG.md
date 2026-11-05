@@ -10,6 +10,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 
 - A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
 - A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
+- A pull request review that a restart cut off now picks up again when CORSIA starts, instead of waiting for the next push (thanks @mikemikimike).
 - A reply to an email you sent someone now goes to the people on its To line, leaving out your own address and with no notes about your own mail; anyone who was on Cc isn't added.
 - After this update, every chat that runs on your existing Claude Code or Codex account waits until you sign that account in again in CORSIA, automations and reviewers included; if many agents share that account, they all wait until then. Each Claude Code and Codex account now has its own CORSIA sign-in, so signing in or out of `claude` or `codex` in a terminal no longer changes the account CORSIA uses.
 - Agents can now read email attachments in Gmail and in mail accounts connected with a password: an agent reading an email sees its attachments and can save them into its workspace. Agents can now read PDFs, those attachments and any PDF in your workspace: the text page by page, a form's filled-in values, and a page as a picture when its text isn't enough.
