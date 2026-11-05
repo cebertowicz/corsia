@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 from history.projection import in_read_snapshot
-from infra.focus_rows import NEVER_DRAWN_FILTER
+from infra.focus_rows import NEVER_DRAWN_FILTER, RESULT_NOTICE_SQL
 from infra.turn_errors import apply_error_next_steps
 from infra.queries import get_thread_for_user
 from core.message_display import llm_to_display
@@ -106,11 +106,13 @@ def _project_delivery_intents(
             metadata["delivery_intent"] = "queue_after_turn"
 
 
+# A provider `result` row is a usage child, except a failed Turn's notice, which
+# is the only row that Turn left to read and so must survive a reload.
 _DISPLAY_ANCHOR_FILTER = (
     "AND role != 'tool' "
     "AND (role != 'system' OR "
     "COALESCE(CASE WHEN json_valid(metadata) "
-    "THEN json_extract(metadata, '$.type') ELSE '' END, '') != 'result') "
+    f"THEN json_extract(metadata, '$.type') ELSE '' END, '') != 'result' OR {RESULT_NOTICE_SQL}) "
 )
 
 

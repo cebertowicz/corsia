@@ -58,6 +58,15 @@ def frame(ctx: CCEventContext, ev: dict, payload: dict) -> dict:
     return {**payload, **event_identity(ctx, ev).frame_fields()}
 
 
+def release_owned_turn(live: _Live, identity: TurnIdentity) -> None:
+    """Release one completed CC generation before its successor is driven."""
+    if live.corsia_turn != identity:
+        return
+    live.turn_active = False
+    live.interrupt_requested = False
+    live.apply_now_interrupt_turn = None
+
+
 async def commit_cc_terminal(
     turn_id: str,
     outcome: str,

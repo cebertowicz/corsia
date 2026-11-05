@@ -214,6 +214,48 @@ def _open_step(db, node_id: str):
     return node, creation_payload(db, node_id)
 
 
+def reader_titles(db, node_ids) -> dict[str, str]:
+    """Each node's title as the person reads it outside its plan tree.
+
+    A workflow step keeps its workflow's stage title (Problem brief, Direction
+    agreed), which names no subject once it leaves the tree, so it reads as
+    ``<run> — <step>``. The run is the outermost workflow phase above the
+    step ``build_run`` made: a revision or follow-up moved out from under a
+    settled run is first traced back through ``follow_up_of`` to that step, and
+    a nested run's steps name the outer run. Not ``commitment_id``, which is
+    where cost is attributed: it is the top-level ancestor, or the parent
+    plan's task for a worker's run. Every other node reads as its own title;
+    an unknown id is absent.
+    """
+    ids = list(dict.fromkeys(str(node_id) for node_id in node_ids))
+    if not ids:
+        return {}
+    marks = ",".join("?" * len(ids))
+    rows = db.execute(
+        f"""WITH RECURSIVE origin(id, at) AS (
+                 SELECT id, id FROM plan_nodes WHERE id IN ({marks}) AND workflow_step IS NOT NULL
+                 UNION ALL SELECT origin.id, n.follow_up_of FROM origin
+                  JOIN plan_nodes n ON n.id = origin.at WHERE n.follow_up_of IS NOT NULL),
+             above(id, at) AS (
+                 SELECT origin.id, n.parent_id FROM origin
+                  JOIN plan_nodes n ON n.id = origin.at AND n.follow_up_of IS NULL
+                 UNION ALL SELECT above.id, n.parent_id FROM above
+                  JOIN plan_nodes n ON n.id = above.at
+                 WHERE NOT (n.kind = 'phase' AND n.workflow_ref IS NOT NULL AND n.workflow_step IS NULL)),
+             runs(id, title) AS (
+                 SELECT above.id, r.title FROM above JOIN plan_nodes r ON r.id = above.at
+                 WHERE r.kind = 'phase' AND r.workflow_ref IS NOT NULL AND r.workflow_step IS NULL)
+            SELECT n.id, n.title, runs.title AS run_title
+              FROM plan_nodes n LEFT JOIN runs ON runs.id = n.id
+             WHERE n.id IN ({marks})""",
+        [*ids, *ids],
+    ).fetchall()
+    return {
+        str(row["id"]): f"{row['run_title']} — {row['title']}" if row["run_title"] else row["title"]
+        for row in rows
+    }
+
+
 def creation_payload(db, node_id: str) -> dict[str, Any]:
     """A node's creation-event payload, where a workflow step's flags are recorded."""
     row = db.execute(
