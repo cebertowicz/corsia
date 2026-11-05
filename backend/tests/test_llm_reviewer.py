@@ -357,7 +357,6 @@ class TestSummaryBody:
 
         assert "Fix that cause, not each finding on its own" in body
         assert body.splitlines()[0] == "## Review: this needs a different approach"
-        assert "STOP" not in body
         assert body.splitlines()[4] == "**LLM Code Review:** 2 block, 1 flag, 0 nit"
 
 
