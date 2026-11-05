@@ -10,7 +10,7 @@ How CORSIA confines an agent's shell commands and file tools, on macOS and Linux
 |---|---|---|---|
 | File-tool gate | `read_file`, `write_file`, `edit_file`, `grep`, `glob`, `list_dir` | CORSIA code | `backend/tools/filesystem_gate.py`, `backend/tools/sandbox_config.py` |
 | Shell sandbox | Every `bash` command and everything it starts | Operating system | `backend/tools/shell_guard.py`, `backend/tools/shell_sandbox.py` |
-| Project fence | Other projects' folders and registered repositories, in the shell, other AI agent command-line tools started under a lease, and local tool servers; for a leased shell command, Local only projects only. On Linux, the shell only | Operating system | `backend/tools/project_fence.py`, `backend/tools/host_path_policy.py`, `backend/tools/linux_shell.py` |
+| Project fence | Other projects' folders and registered repositories, in the shell, other AI agent command-line tools started under a lease, and local tool servers; for a leased shell command, only projects set to Local models only. On Linux, the shell only | Operating system | `backend/tools/project_fence.py`, `backend/tools/host_path_policy.py`, `backend/tools/linux_shell.py` |
 | Command refusals | A list of commands refused before they run | CORSIA code | `backend/tools/shell_guard.py` (`check_command_safety`) |
 
 The file tools run inside the CORSIA server, so the OS sandbox doesn't apply to them; their own path check does. The shell runs in a separate sandboxed process.
@@ -29,23 +29,23 @@ The file tools run inside the CORSIA server, so the OS sandbox doesn't apply to 
 
 ## Projects
 
-On macOS and Linux the shell sandbox fences each agent out of projects that aren't its own (`backend/tools/project_fence.py`). On Linux, a project folder or repository that doesn't exist yet isn't fenced until it exists ([Linux](#linux)). The fence is worked out again on every command, so a change to a project's Local only setting or an agent's project applies to its next command.
+On macOS and Linux the shell sandbox fences each agent out of projects that aren't its own (`backend/tools/project_fence.py`). On Linux, a project folder or repository that doesn't exist yet isn't fenced until it exists ([Linux](#linux)). The fence is worked out again on every command, so a change to a project's Local models only setting or an agent's project applies to its next command.
 
 | Agent | Its shell can't read or write |
 |---|---|
 | An agent in a project | Every other project's folder, the repositories and worktrees registered to those projects, and the working folders of agents outside any project |
 | An agent outside any project | Every project's folder and registered repositories |
-| The CORSIA agent | Only Local only projects, and nothing while its own chat is Local only |
-| A local tool server | Only Local only projects; it serves no single agent |
+| The CORSIA agent | Only projects set to Local models only, and nothing while its own chat is Local only |
+| A local tool server | Only projects set to Local models only; it serves no single agent |
 
-- A repository registered to two projects stays open to agents of both, unless one of them is Local only and the agent reaches it only through the other.
-- A lease opens an ordinary fenced project to that agent's leased shell commands. Another AI agent's command-line tool started under a lease stays fenced from every project but its own. A Local only project stays closed under every lease.
+- A repository registered to two projects stays open to agents of both, unless one of them is set to Local models only and the agent reaches it only through the other.
+- A lease opens an ordinary fenced project to that agent's leased shell commands. Another AI agent's command-line tool started under a lease stays fenced from every project but its own. A project set to Local models only stays closed under every lease.
 - If CORSIA can't read a project's or repository's record, it fences more, not less.
 - An agent can't register a repository that sits inside a project it is fenced from.
 
 **What the fence doesn't cover:**
 
-- **File tools.** `read_file`, `write_file`, `edit_file`, `grep`, `glob` and `list_dir` still reach every project in the workspace, Local only ones included.
+- **File tools.** `read_file`, `write_file`, `edit_file`, `grep`, `glob` and `list_dir` still reach every project in the workspace, including ones set to Local models only.
 - **Conversations.** An agent can read another project's conversations by id ([Accounts and access](accounts-and-access.md#how-agents-act)).
 - **The workspace's Git history.** A shell running `git` at the workspace root can read the committed versions of other projects' files.
 - **Linux.** The Linux sandbox has no project fence at this commit.

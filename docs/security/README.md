@@ -12,7 +12,7 @@ flowchart LR
         subgraph WS[Workspace folder]
             P1[The agent's<br/>own project]
             P2[Other projects]
-            P3[Local only<br/>projects]
+            P3[Local models only<br/>projects]
         end
         H[Rest of your<br/>home folder]
         F[Hard floor: CORSIA keys,<br/>agents' browser profile,<br/>sandbox itself]
@@ -27,11 +27,11 @@ flowchart LR
     S --> C[Email, calendar, Messages,<br/>tool servers you connect]
 ```
 
-The arrows show an agent in a project. The CORSIA agent's shell also reaches ordinary projects without a lease; it is fenced from Local only projects only while its own chat isn't Local only ([Agent sandbox](agent-sandbox.md#projects)).
+The arrows show an agent in a project. The CORSIA agent's shell also reaches ordinary projects without a lease; it is fenced only from projects set to Local models only, and only while its own chat isn't Local only ([Agent sandbox](agent-sandbox.md#projects)).
 
 - **Workspace:** the folder CORSIA works in (by default `~/corsia`). It holds every project, shared files, context and each conversation's working files.
 - **Project:** a folder inside the workspace. Projects organize work and settings, and they are a **partial** boundary: an agent's shell can't read or write another project's folder or its repositories, but its file tools and conversation tools still can, and so can a shell reading the workspace's Git history. See [Agent sandbox](agent-sandbox.md#projects).
-- **Local only:** a setting that keeps a chat or project on local models. A whole project with it on is also closed to other agents' shells, even under a lease; the one exception is a CORSIA agent whose own chat is Local only. See [Data and privacy](data-and-privacy.md#local-only).
+- **Local only** and **Local models only:** the chat setting and the project setting that keep a chat or a whole project on local models. A project set to Local models only is also closed to other agents' shells, even under a lease; the one exception is a CORSIA agent whose own chat is Local only. See [Data and privacy](data-and-privacy.md#local-only).
 - **Thread:** one conversation with one agent. Each thread has its own working folder inside the workspace.
 - **Lease:** a short, reviewed grant that lets one agent run commands outside the workspace. See [Host access](host-access.md).
 - **Hard floor:** paths no leased command can read or write. It stops direct access only; see [What no lease opens](host-access.md#what-no-lease-opens) for the indirect route.
@@ -54,7 +54,7 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 | Action | Default | Strength |
 |---|---|---|
 | Read and write its own project, the workspace's shared files and its own working folder | Allowed | — |
-| Read or write another project's folder or registered repositories from the shell | Refused for an agent in a project; on macOS a lease opens it to leased shell commands unless that project is Local only. The CORSIA agent is refused only Local only projects | Operating system |
+| Read or write another project's folder or registered repositories from the shell | Refused for an agent in a project; on macOS a lease opens it to leased shell commands unless that project is set to Local models only. The CORSIA agent is refused only projects set to Local models only | Operating system |
 | Read or write another project's files with file tools (`read_file`, `write_file` and the rest), or read its conversations | Allowed | — |
 | Read the rest of your home folder (Documents, Desktop, Downloads, Pictures, shell history, Mail, browser data, `~/.ssh` keys, Keychains, cloud credential folders) | Refused | Operating system |
 | Read some tool settings in your home folder: `~/.gitconfig`, most of `~/.config` (your GitHub CLI login in `~/.config/gh` included; if an agents' GitHub account is set up, that account's token instead), `~/.cache`, `~/.npm`, `~/.cargo`; and system files such as `/etc` | Allowed | — |
@@ -73,7 +73,7 @@ This is the default on macOS: no lease, no settings changed. Linux differences a
 The full list, with what to do about each, is in [Known limits](limits.md).
 
 1. **Agents run as you.** The sandbox narrows what a command can touch; it is not a container or a separate user. A sandbox flaw exposes what your user can reach.
-2. **Projects are only partly separated.** A project agent's shell is fenced out of other projects, and the CORSIA agent's only out of Local only ones, but file tools and conversation tools are not fenced. Keep work that must stay apart in separate workspaces, each with its own CORSIA install and state.
+2. **Projects are only partly separated.** A project agent's shell is fenced out of other projects, and the CORSIA agent's only out of ones set to Local models only, but file tools and conversation tools are not fenced. Keep work that must stay apart in separate workspaces, each with its own CORSIA install and state.
 3. **Outbound network access is not limited.** An agent that reads something it shouldn't can send it anywhere.
 4. **Reviewers are not a defense against a tricked agent.** The models that review lease requests and leased commands assume the agent is yours and working on your task. They are instructed to block a short list: secret exposure, changes to access controls, needless destruction, and commands plainly outside the approved purpose. A model can miss those. They will usually allow a plausible request to read your ordinary personal files.
 5. **Prompt injection is not solved.** Email is screened by a local model and labelled; web pages, attachments, text messages and tool results are not screened. Labelled content still reaches the agent.
