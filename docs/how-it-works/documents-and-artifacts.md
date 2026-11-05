@@ -91,7 +91,7 @@ flowchart LR
     B --> T[task in owner's plan]
 ```
 
-- **Batching.** Comments join one open batch per author, document, recipient and lane. A lane is how soon a batch closes: immediate, or held until the person sends it or has been idle for 120 seconds. A person's image comments are always held. An agent's batch closes after 120 seconds without a new comment, when its turn ends, or when it calls `doc_feedback_send`.
+- **Batching.** Comments join one open batch per author, document, recipient and lane. A lane is how soon a batch closes: immediate, which closes after a 5-second pause (30 seconds after an edit), or held, which closes when the person sends it or after 120 seconds without a new comment. A person's image comments are always held. An agent's batch closes after 120 seconds without a new comment, when its turn ends, or when it calls `doc_feedback_send`.
 - **Recipients.** A comment goes to the document's owner. A reply also goes to the author of its thread's first comment, unless that is the replier. When the recipient is the person, the batch is shown in the app and creates no task.
 - **Delivery.** When a batch closes, it becomes a task in the recipient's plan, linked to the document, and the recipient gets a queued note that does not interrupt its turn. For comments, the task's acceptance is that every item is acknowledged, resolved or replied to. A person's comments set the task's intent and are framed as the person's intent; another agent's comments are framed as evidence to check.
 - **Joining.** A reply in a comment thread that already has an open task can join that task instead of creating another. A finished task, or one that is waiting, does not take it.
