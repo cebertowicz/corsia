@@ -12,6 +12,7 @@ These pages were last checked against the code at commit `43a8c7780`, except a p
 | [Scopes](scopes.md) | How a workspace is divided into projects, and what each level owns |
 | [Agents and threads](agents-and-threads.md) | What an agent is, how threads relate, and how work is delegated |
 | [Turns and delivery](turns-and-delivery.md) | How a message becomes a turn, and how it survives a restart |
+| [Events and automations](events-and-automations.md) | How events reach owners and agents schedule work |
 | [Plans](plans.md) | How commitments, waits and decisions are recorded |
 | [Context and memory](context-and-memory.md) | What an agent is told, in what order, and what survives a checkpoint |
 | [Models and harnesses](models-and-harnesses.md) | How a model is chosen and run, and what a switch preserves |
