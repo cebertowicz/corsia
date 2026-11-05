@@ -42,6 +42,7 @@
 				src={image.src}
 				alt={image.alt}
 				artifactId={comments.artifactId}
+				{target}
 				projectId={comments.projectId}
 				readOnly={comments.readOnly}
 				docName={target.name}
@@ -53,7 +54,7 @@
 				onLoaded={() => loaded = true}
 				inDocument={{
 					occurrence: { from: image.from, to: image.to },
-					post: (region, text) => comments.post(image.from, image.to, region, text),
+					post: (region, text, taggedAgentIds) => comments.post(image.from, image.to, region, text, taggedAgentIds),
 					failure: comments.failure,
 				}}
 				focus={image.focus ?? null}

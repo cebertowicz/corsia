@@ -1,13 +1,14 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import CommentThread, { type CommentThreadData } from './CommentThread.svelte';
+	import { createMentionSelection } from './mentionSelection';
 	import { groupRows } from '$lib/docImageComments';
 	import { plainQuote } from '$lib/plainQuote';
 	import { leaveRow } from '$lib/actions/leaveRow';
 	type Comment = CommentThreadData & { review?: boolean };
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
-	let { comments, docPath = null, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, cellLabel, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, replyDrafts = $bindable({}), replySelections = $bindable({}), leavingIds = new Set<string>(), keptIds = new Set<string>(), reduced = false }: {
+	let { comments, docPath = null, documentOrder = false, focusedId = null, hoveredId = null, onHover, scrollOnFocus = true, onFocus, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor, groupOf, groupHead, cellLabel, decisionErrors = {}, readOnly = false, reopenReachesOwner = false, focusReply = false, showReply = false, keepReplyVisible = false, replyDrafts = $bindable({}), replySelections = $bindable({}), replyTags = new Map(), leavingIds = new Set<string>(), keptIds = new Set<string>(), reduced = false }: {
 		comments: Comment[];
 		docPath?: string | null;
 		documentOrder?: boolean;
@@ -18,7 +19,7 @@
 		/** Off where the caller scrolls the list to the focused card itself. */
 		scrollOnFocus?: boolean;
 		onFocus?: (id: string) => void;
-		onReply?: (id: string, text: string) => Promise<void>;
+		onReply?: (id: string, text: string, taggedAgentIds: string[]) => Promise<void>;
 		onResolve?: (id: string, resolved: boolean) => void;
 		onAgree?: (id: string, agreed: boolean) => void;
 		onDecision?: (id: string, decision: 'accept' | 'reject') => Promise<void>;
@@ -44,6 +45,7 @@
 		replyDrafts?: Record<string, string>;
 		/** Reply caret/ranges, by comment id, preserved with drafts when a drawer remounts. */
 		replySelections?: Record<string, [number, number]>;
+		replyTags?: Map<string, ReturnType<typeof createMentionSelection>>;
 		/** Threads easing out of the list before the caller removes them (a resolved card whose reply was sent or cleared). */
 		leavingIds?: ReadonlySet<string>;
 		/** Threads resolved by someone else while a reply to them was being typed; each shows as its full card. */
@@ -51,6 +53,11 @@
 		/** Reduced motion: a leaving row fades and nothing slides. */
 		reduced?: boolean;
 	} = $props();
+	function tagsFor(id: string) {
+		let tags = replyTags.get(id);
+		if (!tags) { tags = createMentionSelection(); replyTags.set(id, tags); }
+		return tags;
+	}
 	function rememberSelection(id: string, selection: [number, number] | null) {
 		if (selection) replySelections[id] = selection; else delete replySelections[id];
 	}
@@ -104,13 +111,13 @@
 						</button>
 					{/if}
 				{/snippet}
-				<CommentThread kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} {header} focused={focusedId === comment.id} linked={region && hoveredId === comment.id} selectable={region} leaving={leavingIds.has(comment.id)} {scrollOnFocus} onFocus={region || !unplaced(comment) ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} keepReplyVisible={keepReplyVisible && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} drawerCard hideOrphan={documentOrder} />
+				<CommentThread selectedTags={tagsFor(comment.id)} kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} {header} focused={focusedId === comment.id} linked={region && hoveredId === comment.id} selectable={region} leaving={leavingIds.has(comment.id)} {scrollOnFocus} onFocus={region || !unplaced(comment) ? () => onFocus?.(comment.id) : undefined} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} keepReplyVisible={keepReplyVisible && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} drawerCard hideOrphan={documentOrder} />
 			</div>
 			{/each}
 		{/each}
 	{:else}
-	{#each current as comment, index (comment.id)}{#if sectionOf(comment) !== (current[index - 1] && sectionOf(current[index - 1]))}<h3>{sectionOf(comment)}</h3>{/if}<CommentThread kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} drawerCard hideOrphan={documentOrder} />{/each}
-	{#if resolved.length}<details><summary>Resolved · {resolved.length}</summary>{#each resolved as comment (comment.id)}<CommentThread kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} drawerCard hideOrphan={documentOrder} />{/each}</details>{/if}
+	{#each current as comment, index (comment.id)}{#if sectionOf(comment) !== (current[index - 1] && sectionOf(current[index - 1]))}<h3>{sectionOf(comment)}</h3>{/if}<CommentThread selectedTags={tagsFor(comment.id)} kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} drawerCard hideOrphan={documentOrder} />{/each}
+	{#if resolved.length}<details><summary>Resolved · {resolved.length}</summary>{#each resolved as comment (comment.id)}<CommentThread selectedTags={tagsFor(comment.id)} kept={keptIds.has(comment.id)} bind:replyText={() => replyDrafts[comment.id] ?? "", (text) => replyDrafts[comment.id] = text} replySelection={replySelections[comment.id] ?? null} onReplySelection={(selection) => rememberSelection(comment.id, selection)} {comment} focused={focusedId === comment.id} onFocus={() => onFocus?.(comment.id)} focusReply={focusReply && focusedId === comment.id} showReply={showReply && focusedId === comment.id} {onReply} {onViewed} {onResolve} {onAgree} {onDecision} decisionError={decisionErrors[comment.id]} tagColor={tagColor?.(comment) ?? null} {onMovePin} {readOnly} {reopenReachesOwner} drawerCard hideOrphan={documentOrder} />{/each}</details>{/if}
 	{/if}
 </div>
 

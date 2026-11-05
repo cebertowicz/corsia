@@ -114,8 +114,8 @@ export async function selectLine(page: Page, quote: string): Promise<void> {
 export async function beginComment(page: Page, quote: string, body?: string): Promise<void> {
 	await selectLine(page, quote);
 	await page.locator('.sel-comment').click();
-	await expect(page.getByPlaceholder('Comment…')).toBeVisible();
-	if (body !== undefined) await page.getByPlaceholder('Comment…').fill(body);
+	await expect(page.getByPlaceholder('Comment, or @ to tag an agent')).toBeVisible();
+	if (body !== undefined) await page.getByPlaceholder('Comment, or @ to tag an agent').fill(body);
 }
 export function submitButton(page: Page): Locator { return page.locator('.composer').getByRole('button', { name: 'Comment', exact: true }); }
 export async function insertPrefix(page: Page, prefix: string): Promise<void> {
@@ -189,7 +189,7 @@ export async function outsideClose(page: Page): Promise<void> {
 		expect(point, 'No inert point outside the popover and editor to click').not.toBeNull();
 		await page.mouse.click(point!.x, point!.y);
 	}
-	await expect(page.getByPlaceholder('Comment…')).toHaveCount(0);
+	await expect(page.getByPlaceholder('Comment, or @ to tag an agent')).toHaveCount(0);
 }
 
 export async function expectToastLayout(page: Page, toast: Locator): Promise<void> {

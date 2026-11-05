@@ -1,3 +1,32 @@
+/** Content a panel is told eases its own height, with the height it had at the panel's last look (null before the first one). */
+type Carried = { holds: number; height: number | null };
+type Panel = { held: Map<HTMLElement, Carried>; watch: (content: HTMLElement, on: boolean) => void };
+const carrying = new WeakMap<HTMLElement, Panel>();
+
+/**
+ * Content that eases its own height tells the panel around it, because a frame that drops as the ease ends can run it to
+ * its end between two looks: the panel then sees a snap it never saw easing, and replays it. The hold lasts until the
+ * frame after the one that laid out the end height, however late that frame lands. The hold stops the replay of the
+ * content's own change only: the panel measures that content too, so a resize the content did not make, landing during the
+ * hold, still eases.
+ */
+export function carryPanelHeight(content: HTMLElement, settled: Promise<unknown>) {
+	for (let panel = content.parentElement; panel; panel = panel.parentElement) {
+		const owner = carrying.get(panel);
+		if (!owner) continue;
+		const entry = owner.held.get(content) ?? { holds: 0, height: null };
+		entry.holds++;
+		owner.held.set(content, entry);
+		owner.watch(content, true);
+		const release = () => {
+			entry.holds = Math.max(0, entry.holds - 1);
+			if (entry.holds === 0 && owner.held.get(content) === entry) { owner.held.delete(content); owner.watch(content, false); }
+		};
+		void settled.catch(() => {}).then(() => requestAnimationFrame(() => requestAnimationFrame(release)));
+		return;
+	}
+}
+
 /**
  * Eases a bottom-anchored panel from its old height to its new one when its content changes the height
  * (a filter that leaves fewer rows, a footer appearing), instead of snapping in a single frame.
@@ -10,6 +39,8 @@
 export function settleHeight(node: HTMLElement, options: { enabled: boolean; reduced?: boolean }) {
 	let enabled = options.enabled;
 	let reduced = options.reduced ?? false;
+	const held = new Map<HTMLElement, Carried>();
+	carrying.set(node, { held, watch: (content, on) => (on ? observer?.observe(content) : observer?.unobserve(content)) });
 	let last = node.getBoundingClientRect().height;
 	let animation: Animation | null = null;
 	let destroyed = false;
@@ -19,8 +50,22 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 		return style.boxSizing === 'border-box' ? 0 : (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
 	};
 	/** Content that animates its own height already carries the panel with it, frame by frame. */
-	const contentEases = () => typeof node.getAnimations === 'function' && node.getAnimations({ subtree: true }).some((item) =>
-		item !== animation && item.playState === 'running' && (item.effect as KeyframeEffect | null)?.getKeyframes?.().some((frame) => 'height' in frame));
+	const contentEases = () => (typeof node.getAnimations === 'function' && node.getAnimations({ subtree: true }).some((item) =>
+		item !== animation && item.playState === 'running' && (item.effect as KeyframeEffect | null)?.getKeyframes?.().some((frame) => 'height' in frame)));
+	/**
+	 * What of the panel's `change` the held content did not make: the content's height is read at each look, so the part of
+	 * the change it made itself drops out. Nothing is known about a content until its first look, so that look is all its own.
+	 */
+	const unexplained = (change: number) => {
+		let own = 0, known = held.size > 0;
+		for (const [content, entry] of held) {
+			const height = content.getBoundingClientRect().height;
+			if (entry.height === null) known = false;
+			else own += height - entry.height;
+			entry.height = height;
+		}
+		return known ? change - own : 0;
+	};
 	const fadeIn = () => {
 		const style = getComputedStyle(node);
 		const duration = Number.parseFloat(style.getPropertyValue('--dur-tight')) || 120;
@@ -32,20 +77,26 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 		// The panel's own animation changes its size; observe it again once that animation settles.
 		observer?.unobserve(node);
 		const inset = border();
-		animation = node.animate(
+		// `fill: both` holds the end height from the frame the ease ends until `done` has handled the finish, which can
+		// land a frame or two later: without it those frames show the content's own height, a snap that is then eased back.
+		const current = node.animate(
 			[{ height: `${from - inset}px` }, { height: `${to - inset}px` }],
-			{ duration: 200, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'backwards' },
+			{ duration: 200, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'both' },
 		);
+		animation = current;
 		const done = () => {
 			animation = null;
+			// Released and read in one task, so no frame shows the height the content alone gives.
+			current.cancel();
 			// Content may have changed again while this ran; ease on from where it stopped.
 			const now = node.getBoundingClientRect().height;
 			last = now;
 			if (enabled && Math.abs(now - to) > 1) run(to, now);
 			else if (!destroyed) observer?.observe(node);
 		};
-		animation.addEventListener('finish', done, { once: true });
-		animation.addEventListener('cancel', () => {
+		current.addEventListener('finish', done, { once: true });
+		current.addEventListener('cancel', () => {
+			if (animation !== current) return;
 			animation = null;
 			last = node.getBoundingClientRect().height;
 			if (!destroyed) observer?.observe(node);
@@ -53,13 +104,15 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 	};
 	const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
 		const now = node.getBoundingClientRect().height;
+		const rest = unexplained(now - last);
 		if (animation || detentMoves > 0) return;
 		const from = last;
 		last = now;
 		if (!enabled || typeof node.animate !== 'function' || Math.abs(now - from) <= 1) return;
-		if (contentEases()) return;
+		// Under a hold only what the held content did not make eases, from where that part began.
+		if (held.size > 0 ? Math.abs(rest) <= 1 : contentEases()) return;
 		if (reduced) fadeIn();
-		else run(from, now);
+		else run(held.size > 0 ? now - rest : from, now);
 	});
 	const moveStart = (event: TransitionEvent) => { if (event.target === node && event.propertyName === 'max-height') detentMoves++; };
 	const moveEnd = (event: TransitionEvent) => {
@@ -76,6 +129,7 @@ export function settleHeight(node: HTMLElement, options: { enabled: boolean; red
 		destroy() {
 			destroyed = true;
 			observer?.disconnect();
+			carrying.delete(node);
 			animation?.cancel();
 			node.removeEventListener('transitionrun', moveStart);
 			node.removeEventListener('transitionend', moveEnd);

@@ -67,7 +67,7 @@ for (const width of [393, 1440]) {
 			await overlay(page).locator('[data-image-comment]').click();
 			const imageBox = (await imageSurface(page).boundingBox())!;
 			await drag(page, { x: imageBox.x + imageBox.width * 0.1, y: imageBox.y + imageBox.height * 0.7 }, { x: imageBox.x + imageBox.width * 0.3, y: imageBox.y + imageBox.height * 0.9 });
-			const imageDraft = page.getByPlaceholder('Comment…');
+			const imageDraft = page.getByPlaceholder('Comment, or @ to tag an agent');
 			await imageDraft.fill('The image draft must survive.');
 			await expect(overlay(page).locator('[data-doc-reply-chip]')).toHaveCount(0);
 			await expect(imageDraft).toHaveValue('The image draft must survive.');

@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { loadMentionRoster } from './comments/mentionRoster.svelte';
+	import { createMentionSelection } from './comments/mentionSelection';
 	import { keptThreads } from '$lib/docKeptThreads.svelte';
 	import { get } from 'svelte/store';
 	import { Button, IconButton } from './ui';
@@ -46,8 +48,8 @@
 		onClose: () => void;
 		restoreFocus: () => void;
 		onFocus: (id: string, placement?: 'top') => void;
-		onSubmit: (text: string) => Promise<void>;
-		onReply: (id: string, text: string) => Promise<void>;
+		onSubmit: (text: string, taggedAgentIds: string[]) => Promise<void>;
+		onReply: (id: string, text: string, taggedAgentIds: string[]) => Promise<void>;
 		onResolve: (id: string, resolved: boolean) => void;
 		onAgree: (id: string, agreed: boolean) => void;
 		onViewed?: (id: string, replyId: string) => Promise<void>;
@@ -77,6 +79,7 @@
 		/** Asks the editor to keep the draft's text clear of the sheet, now and whenever the sheet moves. */
 		onRevealDraft?: (opening: boolean) => void;
 	} = $props();
+	loadMentionRoster(() => ({ artifactId, threadId: target?.threadId ?? null }));
 	const asDoc = (comment: unknown) => comment as DocComment;
 	const cellLabel = createCellLabels(() => widgetLabel);
 	const listDrawerShown = presence((shown) => onDrawerShown?.(shown));
@@ -101,6 +104,9 @@
 	// Image viewers already decide whether their canvas is a sheet; document canvases use the 900 px rule.
 	const sheetDrawer = $derived(narrow || (!image && canvasWidth < 900));
 	let detent = $state<'full' | 'half'>('full');
+	const draftTags = createMentionSelection();
+	const replyTags = new Map<string, ReturnType<typeof createMentionSelection>>();
+	$effect(() => { if (!draft) draftTags.clear(); });
 	let replyDrafts = $state<Record<string, string>>({});
 	let replySelections = $state<Record<string, [number, number]>>({});
 	// A thread someone else resolves while a reply to it is being typed stays in the Open list, as a resolved card, until that reply is sent or cleared.
@@ -316,7 +322,7 @@
 	{#if images && src}<ImageRegionThumb {src} alt={imageAlt(group[0])} caption comments={group} colorOf={images.colorOf} onOpen={onItsImage(group[0]) ? () => images?.onOpen(group[0]) : undefined} />{/if}
 {/snippet}
 {#snippet content()}
-	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={sheet.cancelDraft} />
+	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer selectedTags={draftTags} quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={sheet.cancelDraft} />
 	{:else}
 		{#if !readOnly && sheet.state?.kind !== 'thread'}
 			<div class="suggestion-status">
@@ -327,7 +333,7 @@
 			</div>
 			{#if outcome.acceptAllError}<div class="suggestion-error" role="alert">{outcome.acceptAllError}</div>{/if}
 		{/if}
-		<CommentList docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={displayed} {cellLabel} documentOrder={sheet.state?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+		<CommentList {replyTags} docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={displayed} {cellLabel} documentOrder={sheet.state?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
 {#snippet listBody()}

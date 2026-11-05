@@ -10,6 +10,11 @@ import { shouldReloadPresenceEdit } from '$lib/docPresence';
 import { withDraftArtifactId, existingDraft } from '$lib/stores/docSaveQueue';
 import { toasts } from '$lib/stores/toast';
 
+function commentFailure(error: unknown): string {
+	if (error instanceof Error && error.message.includes('A valid viewing thread_id is required to tag agents')) return 'A valid viewing thread is required to tag agents. Your draft is kept.';
+	return "Couldn't post the comment — try again";
+}
+
 // The viewer retains retry state; the composer needs the rejection to keep its draft.
 export async function submitDocumentComment<T>(action: () => Promise<T>, onFailure?: (toastId: string) => void, failureMessage?: (error: unknown) => string): Promise<T> {
 	try {
@@ -17,7 +22,7 @@ export async function submitDocumentComment<T>(action: () => Promise<T>, onFailu
 	} catch (error) {
 		if (error instanceof DOMException && error.name === 'AbortError') throw error;
 		console.error('comment failed', error);
-		const toastId = toasts.show(failureMessage?.(error) ?? "Couldn't post the comment — try again", 'error');
+		const toastId = toasts.show(failureMessage?.(error) ?? commentFailure(error), 'error');
 		onFailure?.(toastId);
 		throw error;
 	}
@@ -115,12 +120,12 @@ export function reloadDocumentFeedback(
 }
 
 /** Reply, resolve and agree on the open document's threads; a reply also tells the feedback status a comment arrived. */
-export function createThreadActions(artifactId: () => string | null, commentCreated: () => void) {
+export function createThreadActions(artifactId: () => string | null, commentCreated: () => void, threadId: () => string | null = () => null) {
 	return {
-		async reply(id: string, text: string) {
+		async reply(id: string, text: string, taggedAgentIds: string[] = []) {
 			const artifact = artifactId();
 			if (!artifact) return;
-			await addReply(artifact, id, text, 'you');
+			await submitDocumentComment(() => addReply(artifact, id, text, 'you', taggedAgentIds, threadId()));
 			commentCreated();
 		},
 		resolve(id: string, resolved: boolean) { const artifact = artifactId(); if (artifact) resolveComment(artifact, id, resolved); },

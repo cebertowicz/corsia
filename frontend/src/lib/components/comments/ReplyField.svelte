@@ -2,18 +2,24 @@
 	import { keepInView } from '$lib/actions/keepInView';
 	import { autosize } from '$lib/actions/autosize';
 	import Field from '$lib/components/ui/Field.svelte';
+	import MentionPicker from './MentionPicker.svelte';
+	import { createMentionSelection } from './mentionSelection';
 
 	/** The reply field of a comment thread: a textarea that grows with its text, and a send button once it holds some. */
-	let { value = $bindable(''), selection = null, keepVisible = false, onSend, onSelection }: {
+	let { value = $bindable(''), selection = null, keepVisible = false, onSend, onSelection, selectedTags = createMentionSelection() }: {
 		value?: string;
 		selection?: [number, number] | null;
 		keepVisible?: boolean;
+		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onSend: () => void;
 		onSelection?: (selection: [number, number] | null) => void;
 	} = $props();
 
 	const inputId = $props.id();
 	let input = $state<HTMLTextAreaElement>();
+	let picker = $state<MentionPicker>();
+	export function taggedAgentIds() { return picker?.taggedAgentIds(value) ?? []; }
+	export function clearTags() { selectedTags.clear(); }
 	let appliedSelection: string | null = null;
 	export function focus(options?: FocusOptions) { input?.focus(options); }
 
@@ -47,6 +53,7 @@
 </script>
 
 <div class="ct-compose open">
+	<MentionPicker bind:this={picker} {input} {selectedTags} />
 	<Field variant="nested" hideLabel label="Reply" labelFor={inputId}>
 		<textarea id={inputId} class="ct-input" rows="1" placeholder="Reply…" bind:this={input} use:keepInView={keepVisible} bind:value use:autosize={value} oninput={saveSelection} onselect={saveSelection} onkeyup={saveSelection} onpointerup={saveSelection} onkeydown={onKey} onclick={(event) => { event.stopPropagation(); saveSelection(); }}></textarea>
 		{#if value.trim()}

@@ -36,9 +36,9 @@ for (const [width, height, project] of layouts) for (const theme of ['light', 'd
 			await expect.poll(() => serverText(request, document), { timeout: 20_000 }).toBe(prefix + document.body);
 			// The selection was captured before the remote change and before opening the composer.
 			await reader.locator('.sel-comment').click();
-			await reader.getByPlaceholder('Comment…').fill(body);
+			await reader.getByPlaceholder('Comment, or @ to tag an agent').fill(body);
 			await submitButton(reader).click();
-			await expect(reader.getByPlaceholder('Comment…')).toHaveCount(0);
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveCount(0);
 			expect(creates).toHaveLength(1);
 			const payload = creates[0], file = await serverText(request, document);
 			expect(payload).toMatchObject({ body, anchor_text: quote, from_off: file.indexOf(quote), to_off: file.indexOf(quote) + quote.length });
@@ -92,7 +92,7 @@ for (const [width, height, project] of layouts) for (const theme of ['light', 'd
 			await expect(reader.locator('.cm-content')).toContainText(quote);
 			await expect.poll(() => serverText(request, document), { timeout: 20_000 }).toBe(document.body);
 			await expect(submitButton(reader)).toBeDisabled();
-			await expect(reader.getByPlaceholder('Comment…')).toHaveValue(body);
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveValue(body);
 			const explanation = await submitButton(reader).getAttribute('aria-describedby');
 			expect(explanation).toBeTruthy();
 			await expect(reader.locator(`[id="${explanation}"]`)).toHaveText('The text you selected changed or was removed. Select the text again; your draft will carry over.');
@@ -101,10 +101,10 @@ for (const [width, height, project] of layouts) for (const theme of ['light', 'd
 			await reader.screenshot({ path: testInfo.outputPath(`equal-identity-refusal-${width}-${theme}.png`), animations: 'disabled' });
 			await outsideClose(reader);
 			await beginComment(reader, quote);
-			await expect(reader.getByPlaceholder('Comment…')).toHaveValue(body);
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveValue(body);
 			await expect(submitButton(reader)).toBeEnabled();
 			await submitButton(reader).click();
-			await expect(reader.getByPlaceholder('Comment…')).toHaveCount(0);
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveCount(0);
 			expect(creates).toHaveLength(1);
 			expectCorrelation(wire, creates[0], document.artifactId);
 			await expectOneComment(request, document, [reader, writer], quote, body, document.body.indexOf(quote), creates[0].client_id);
@@ -128,7 +128,7 @@ for (const [width, height, project] of layouts) for (const theme of ['light', 'd
 			await submitButton(reader).click();
 			await hold.arrived;
 			await expect(reader.locator('.composer').getByRole('button', { name: 'Posting…', exact: true })).toBeDisabled();
-			await expect(reader.getByPlaceholder('Comment…')).toHaveValue(body);
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveValue(body);
 			expect(await storedComments(request, document)).toEqual([]);
 			// The capture has already reserved its range on the server; a remote edit lands before the POST does.
 			const prefix = `intervening edit ${stamp}\n`;
@@ -138,7 +138,7 @@ for (const [width, height, project] of layouts) for (const theme of ['light', 'd
 			const created = reader.waitForResponse(response => new URL(response.url()).pathname === `/api/artifacts/${document.artifactId}/comments` && response.request().method() === 'POST');
 			hold.release();
 			expect((await created).status(), 'the server consumes the reservation instead of refusing the older state').toBe(200);
-			await expect(reader.getByPlaceholder('Comment…')).toHaveCount(0);
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveCount(0);
 			await expect(reader.getByRole('status').filter({ hasText: refusalText })).toHaveCount(0);
 			expect(creates).toHaveLength(1);
 			const payload = creates[0], file = await serverText(request, document), original = document.body.indexOf(quote);
@@ -169,7 +169,7 @@ for (const [width, height, project] of layouts) for (const theme of ['light', 'd
 			await beginComment(reader, quote, body);
 			await submitButton(reader).click();
 			await hold.arrived;
-			await expect(reader.getByPlaceholder('Comment…')).toHaveValue(body);
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveValue(body);
 			// Three characters into the selected line is inside the reserved range, not at either edge.
 			await selectLine(writer, quote);
 			await writer.keyboard.press('Home');
@@ -181,7 +181,7 @@ for (const [width, height, project] of layouts) for (const theme of ['light', 'd
 			const posted = reader.waitForResponse(response => new URL(response.url()).pathname === `/api/artifacts/${document.artifactId}/comments` && response.request().method() === 'POST');
 			hold.release();
 			expect((await posted).status(), 'the reserved range anchors on the text now in it').toBe(200);
-			await expect(reader.getByPlaceholder('Comment…')).toHaveCount(0);
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveCount(0);
 			await expect(reader.getByRole('status').filter({ hasText: refusalText })).toHaveCount(0);
 			const file = await serverText(request, document), from = file.indexOf(edited);
 			await expect.poll(() => storedComments(request, document)).toEqual([
@@ -212,15 +212,15 @@ for (const [width, height, project] of layouts) for (const theme of ['light', 'd
 			await outsideClose(reader);
 			wire.release();
 			await beginComment(reader, quote);
-			await expect(reader.getByPlaceholder('Comment…')).toHaveValue(body);
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveValue(body);
 			await expect(submitButton(reader)).toBeEnabled();
 			expect(creates).toEqual([]);
 			await reader.locator('.composer').getByRole('button', { name: 'Cancel', exact: true }).click();
 			// On a narrow canvas the cancelled composer remains visible for its drawer outro.
-			await expect(reader.getByPlaceholder('Comment…')).toHaveCount(0);
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveCount(0);
 			await beginComment(reader, quote);
-			await expect(reader.getByPlaceholder('Comment…')).toHaveValue('');
-			await reader.getByPlaceholder('Comment…').fill(body);
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveValue('');
+			await reader.getByPlaceholder('Comment, or @ to tag an agent').fill(body);
 			wire.arm();
 			await submitButton(reader).click();
 			await expect.poll(() => wire.held(), { timeout: 20_000 }).not.toBeNull();
@@ -231,15 +231,15 @@ for (const [width, height, project] of layouts) for (const theme of ['light', 'd
 			wire.release();
 			await expect(reader.locator('.cm-content')).toContainText(other.body.trim());
 			await beginComment(reader, otherQuote);
-			await expect(reader.getByPlaceholder('Comment…')).toHaveValue('');
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveValue('');
 			await reader.locator('.composer').getByRole('button', { name: 'Cancel', exact: true }).click();
 			await switchDocument(reader, document);
 			await beginComment(reader, quote);
-			await expect(reader.getByPlaceholder('Comment…')).toHaveValue('');
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveValue('');
 			const freshBody = `Fresh after leaving ${stamp}`;
-			await reader.getByPlaceholder('Comment…').fill(freshBody);
+			await reader.getByPlaceholder('Comment, or @ to tag an agent').fill(freshBody);
 			await submitButton(reader).click();
-			await expect(reader.getByPlaceholder('Comment…')).toHaveCount(0);
+			await expect(reader.getByPlaceholder('Comment, or @ to tag an agent')).toHaveCount(0);
 			expect(creates).toHaveLength(1); expect(otherCreates).toEqual([]);
 			expectCorrelation(wire, creates[0], document.artifactId);
 			await expectOneComment(request, document, [reader], quote, freshBody, 0, creates[0].client_id);

@@ -3,8 +3,12 @@
 	import { autosize } from '$lib/actions/autosize';
 	import Field from '$lib/components/ui/Field.svelte';
 	import CommentQuote from './CommentQuote.svelte';
+	import MentionPicker from './MentionPicker.svelte';
+	import { createMentionSelection } from './mentionSelection';
+	let input = $state<HTMLTextAreaElement>();
+	let picker = $state<MentionPicker>();
 
-	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment…', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', onBody, onSubmit, onCancel }: {
+	let { quote, label = '', body = '', fieldLabel = 'Comment', placeholder = 'Comment, or @ to tag an agent', disabledReason = '', submitLabel = 'Comment', submittingLabel = 'Posting…', onBody, onSubmit, onCancel, mentions = true, selectedTags = createMentionSelection() }: {
 		quote: string;
 		/** What the comment is on when it is not text, such as a box on an image; shown in place of the quote. */
 		label?: string;
@@ -14,8 +18,10 @@
 		disabledReason?: string;
 		submitLabel?: string;
 		submittingLabel?: string;
+		mentions?: boolean;
+		selectedTags?: ReturnType<typeof createMentionSelection>;
 		onBody?: (text: string) => void;
-		onSubmit: (text: string) => Promise<void>;
+		onSubmit: (text: string, taggedAgentIds: string[]) => Promise<void>;
 		onCancel: () => void;
 	} = $props();
 	let text = $state(untrack(() => body));
@@ -29,23 +35,26 @@
 		const value = text.trim();
 		if (!value || posting || disabledReason) return;
 		posting = true;
-		try { await onSubmit(value); text = ''; }
+		try { await onSubmit(value, picker?.taggedAgentIds(text) ?? []); selectedTags.clear(); text = ''; }
 		catch { /* onSubmit reports its own failure; keep the draft for a retry. */ }
 		finally { posting = false; }
 	}
 	function onKey(event: KeyboardEvent) {
 		if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') void submit();
-		if (event.key === 'Escape') onCancel();
+		if (event.key === 'Escape') { selectedTags.clear(); onCancel(); }
 	}
 </script>
 
 <div class="composer">
 	<CommentQuote {quote} {label} />
-	<Field variant="nested" hideLabel label={fieldLabel} labelFor={`${explanationId}-body`}>
-		<textarea id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
-	</Field>
+	<div>
+		{#if mentions}<MentionPicker bind:this={picker} {input} {selectedTags} />{/if}
+		<Field variant="nested" hideLabel label={fieldLabel} labelFor={`${explanationId}-body`}>
+			<textarea bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
+		</Field>
+	</div>
 	<div class="actions">
-		<button class="cancel" onclick={onCancel}>Cancel</button>
+		<button class="cancel" onclick={() => { selectedTags.clear(); onCancel(); }}>Cancel</button>
 		<button class="submit" disabled={!text.trim() || posting || !!disabledReason} aria-describedby={disabledReason ? explanationId : undefined} onclick={() => void submit()}>{posting ? submittingLabel : submitLabel}</button>
 	</div>
 	{#if disabledReason}<p id={explanationId} class="selection-reason">{disabledReason}</p>{/if}

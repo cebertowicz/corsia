@@ -171,8 +171,8 @@
 		onStart: commentUI.openDraft, onClose: commentUI.close,
 		awaitsMark: (id) => awaitsFirstMark(listedComments.find((item) => item.id === id), highlights.some((range) => range.id === id)),
 	});
-	async function submitComment(text: string) {
-		const id = await draftController.submit(text);
+	async function submitComment(text: string, taggedAgentIds: string[]) {
+		const id = await draftController.submit(text, taggedAgentIds, target?.threadId ?? null);
 		if (!id) return;
 		scroll.toComment(id, true, 'comment-save');
 		focusedDocComment.set(id);
@@ -181,7 +181,7 @@
 		feedbackStatus?.commentCreated();
 		commentRetryToast.dismissAfterSuccess();
 	}
-	const threadActions = createThreadActions(() => loadedArtifactId, () => feedbackStatus?.commentCreated());
+	const threadActions = createThreadActions(() => loadedArtifactId, () => feedbackStatus?.commentCreated(), () => target?.threadId ?? null);
 
 	// Keyed off the load-relevant fields only (not object identity) so an
 	// unrelated re-render that recreates the `target` prop object (e.g. a

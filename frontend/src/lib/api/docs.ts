@@ -158,7 +158,7 @@ export async function fetchComments(artifactId: string): Promise<CommentList> {
 
 export async function postComment(
 	artifactId: string,
-	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion; delivery_policy?: 'immediate' | 'document-held' }
+	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion; delivery_policy?: 'immediate' | 'document-held'; tagged_agent_ids?: string[]; thread_id?: string | null }
 ): Promise<ServerComment> {
 	const data = await ok(await fetchWithTimeout(
 		`/api/artifacts/${artifactId}/comments?token=${tok()}`,

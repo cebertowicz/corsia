@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { fade, slide } from 'svelte/transition';
+	import { tick } from 'svelte';
+	import { get } from 'svelte/store';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
+	import { captureLayout, mentionHost, playLayoutCrossfade, type MentionPlayback } from '$lib/actions/layoutCrossfade';
 	import type { Snippet } from 'svelte';
 	import './comment-link.css';
 	import { clipFade } from '$lib/actions/clipFade';
@@ -13,6 +17,7 @@
 		/** The authoring agent's thread, whose presence colour its avatar shares with its caret and marks. */
 		authorThreadId?: string | null;
 		text: string;
+		taggedAgents?: { id: string; name: string }[];
 		at: string;
 		createdAt?: string;
 		resolved: boolean;
@@ -38,12 +43,13 @@
 	import CommentMeta from './CommentMeta.svelte';
 	import CommentPlacementLine from './CommentPlacementLine.svelte';
 	import ReplyField from './ReplyField.svelte';
+	import { createMentionSelection } from './mentionSelection';
 	import ResolvedWhileReplying from './ResolvedWhileReplying.svelte';
 	import CommentMarkdownBody from './CommentMarkdownBody.svelte';
 	import CommentReplyList, { type CommentReplyData } from './CommentReplyList.svelte';
 	import { createReplyVisibility } from './replyVisibility';
 
-	let { comment, header, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
+	let { comment, header, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
 		comment: CommentThreadData;
 		header?: Snippet;
 		/** Keep resolved threads in the drawer's card presentation. */
@@ -71,7 +77,7 @@
 		scrollOnFocus?: boolean;
 		onFocus?: () => void;
 		readOnly?: boolean;
-		onReply?: (commentId: string, text: string) => Promise<void>;
+		onReply?: (commentId: string, text: string, taggedAgentIds: string[]) => Promise<void>;
 		onResolve?: (commentId: string, resolved: boolean) => void;
 		onAgree?: (commentId: string, agreed: boolean) => void;
 		/** Settles when the decision does and never rejects: a refusal comes back as `decisionError`. */
@@ -88,6 +94,7 @@
 		/** Resolved by someone else while this person was replying (docKeptThreads): shown as the full card, not the resolved row. */
 		kept?: boolean;
 		/** The reply being typed. The caller may own it, so it outlives a card that moves groups. */
+		selectedTags?: ReturnType<typeof createMentionSelection>;
 		replyText?: string;
 		/** The reply caret/range, preserved with caller-owned draft text when a drawer remounts. */
 		replySelection?: [number, number] | null;
@@ -106,6 +113,32 @@
 	let decisionBusy = $state<'accept' | 'reject' | null>(null);
 	let resolvedOpen = $state(false);
 	let el = $state<HTMLElement>();
+	let previousAck: boolean | undefined;
+	let agreePlayback: MentionPlayback | undefined;
+	let agreeGeneration = 0;
+	$effect.pre(() => {
+		const acked = !!comment.acked;
+		const previous = previousAck; previousAck = acked;
+		if (previous === undefined || previous === acked || !el || !get(prefersReducedMotion)) return;
+		const host = mentionHost(el);
+		let capture = agreePlayback?.handoff();
+		if (!capture) {
+			const seen = agreePlayback?.supersede();
+			capture = captureLayout(host);
+			if (capture && seen?.midFade) Object.assign(capture, { from: seen.from, liveFrom: seen.liveFrom });
+		}
+		agreePlayback = undefined;
+		if (!capture) return;
+		const generation = ++agreeGeneration;
+		void tick().then(() => {
+			if (generation !== agreeGeneration || !host?.isConnected) { capture.overlay.remove(); return; }
+			agreePlayback = playLayoutCrossfade(capture, host);
+		});
+	});
+	$effect(() => () => { agreeGeneration++; agreePlayback?.cancel(); });
+	function agreeTransition(node: HTMLElement) {
+		return get(prefersReducedMotion) ? { duration: 0 } : clipFade(node);
+	}
 	let replyField = $state<ReplyField>();
 	let newestReply = $state<HTMLElement>();
 	// Bumped to observe rendered replies again with fresh geometry.
@@ -203,8 +236,10 @@
 		if (readOnly || !t || replyPosting) return;
 		replyPosting = true;
 		try {
-			await onReply?.(comment.id, t);
-			replyText = ''; onReplySelection?.(null);
+			await onReply?.(comment.id, t, replyField?.taggedAgentIds() ?? []);
+			replyField?.clearTags(); replyText = ''; onReplySelection?.(null);
+		} catch {
+			// The caller reports the refusal; keep the reply for retry.
 		} finally {
 			replyPosting = false;
 		}
@@ -243,7 +278,7 @@
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
-				{#if comment.text}<CommentMarkdownBody text={comment.text} />{/if}
+				{#if comment.text}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} />{/if}
 				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 			</div>
 		{/if}
@@ -254,9 +289,9 @@
 		{@render resolvedHead('check', `Resolved · ${comment.replies.length + 1} message${comment.replies.length ? 's' : ''}`)}
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
-				<CommentMarkdownBody text={comment.text} />
+				<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} />
 				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
-				{#if !readOnly}<ReplyField bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />{/if}
+				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
 					{#if reopenReachesOwner}<span class="ct-res-hint">Re-open asks the agent to revisit.</span>{/if}
@@ -290,7 +325,7 @@
 		{#if isSuggestion}
 			{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
 			{#if comment.orphaned}<div class="ct-orphan">The text this suggestion replaces has changed.</div>{/if}
-			{#if comment.text}<CommentMarkdownBody text={comment.text} />{/if}
+			{#if comment.text}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} />{/if}
 			{#if !readOnly}
 				<div class="ct-suggestion-actions">
 					<button class="ct-suggestion-accept" aria-busy={decisionBusy === 'accept'} disabled={decisionBusy !== null || comment.orphaned} title={comment.orphaned ? 'The text this suggestion replaces has changed.' : undefined} onclick={(e) => { e.stopPropagation(); decide('accept'); }}>{decisionBusy === 'accept' ? 'Accepting…' : 'Accept'}</button>
@@ -304,7 +339,7 @@
 			{#if comment.regionStale}
 				<div class="ct-orphan" data-region-stale>Image changed since this comment{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
 			{/if}
-			<CommentMarkdownBody text={comment.text} />
+			<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} />
 		{/if}
 
 		{#if comment.replies.length && !leaving}
@@ -312,10 +347,10 @@
 		{/if}
 
 		{#if !isSuggestion && comment.acked && !comment.resolved}
-			<div class="ct-agreed"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed</div>
+			<div class="ct-agreed" transition:agreeTransition><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed</div>
 		{/if}
 		{#if !readOnly}
-			<ReplyField bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />
+			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />
 		{/if}
 	</div>
 {/if}

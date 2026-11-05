@@ -821,7 +821,7 @@ for (const theme of ['light', 'dark'] as const) {
 				const line = page.locator('.cm-line').filter({ hasText: 'This workstream covers the first-run screens' }).first();
 				await line.dblclick({ position: { x: 20, y: 8 } });
 				await page.locator('.sel-comment').click();
-				await page.getByPlaceholder('Comment…').fill('Please confirm the handover.');
+				await page.getByPlaceholder('Comment, or @ to tag an agent').fill('Please confirm the handover.');
 				await expect(page.locator('[data-adaptive-drawer].drawer-backdrop')).toBeVisible();
 				await expect(chipBox(page)).toHaveCount(0);
 
@@ -832,7 +832,7 @@ for (const theme of ['light', 'dark'] as const) {
 				const line = page.locator('.cm-line').filter({ hasText: 'This workstream covers the first-run screens' }).first();
 				await line.dblclick({ position: { x: 20, y: 8 } });
 				await page.locator('.sel-comment').click();
-				const draft = page.getByPlaceholder('Comment…');
+				const draft = page.getByPlaceholder('Comment, or @ to tag an agent');
 				await draft.fill('Please confirm the handover.');
 				await chipButton(page).click();
 				const savedDraft = await page.evaluate(async () => {

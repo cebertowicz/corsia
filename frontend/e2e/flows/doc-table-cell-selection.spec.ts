@@ -99,7 +99,7 @@ test.describe('@flow:doc-table-cell-selection @surface:documents', () => {
 		await saveEvidenceScreenshot(page, testInfo, 'cell-selection-held');
 
 		await page.locator('.sel-comment').click();
-		await page.getByPlaceholder('Comment…').fill('Anchored in a cell.');
+		await page.getByPlaceholder('Comment, or @ to tag an agent').fill('Anchored in a cell.');
 		await page.getByRole('button', { name: 'Comment', exact: true }).last().click();
 		await expect(page.getByText('Anchored in a cell.')).toBeVisible();
 		await expect(page.locator('.cm-md-table td', { hasText: 'wrapping note' }).locator('.cm-comment-anchor').first()).toBeVisible();

@@ -53,7 +53,7 @@ for (const [width, height, project] of layouts) {
 			await writer.keyboard.press('Home');
 			await writer.keyboard.press('Shift+End');
 			await writer.locator('.sel-comment').click();
-			await writer.getByPlaceholder('Comment…').fill(`Late ${stamp}`);
+			await writer.getByPlaceholder('Comment, or @ to tag an agent').fill(`Late ${stamp}`);
 			await writer.getByRole('button', { name: 'Comment', exact: true }).last().click();
 			await expect(editor).toContainText(remote);
 			await expect(reader.getByRole('button', { name: /^1 open thread\b/ })).toBeVisible();

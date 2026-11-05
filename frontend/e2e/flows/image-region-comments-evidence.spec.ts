@@ -325,7 +325,7 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 		await expect(line).toBeVisible();
 		await line.dblclick({ position: { x: 40, y: 8 } });
 		await page.locator('.sel-comment').click();
-		await expect(sheet(page).locator('textarea[placeholder="Comment…"]')).toBeVisible();
+		await expect(sheet(page).locator('textarea[placeholder="Comment, or @ to tag an agent"]')).toBeVisible();
 		await still(page, testInfo, '393-09-text-comment-composer-sheet-light');
 	});
 });

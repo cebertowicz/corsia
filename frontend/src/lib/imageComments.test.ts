@@ -44,11 +44,30 @@ describe('image comments', () => {
 		comments.setDraftBody('Too dark');
 		expect(comments.hasDraftText).toBe(true);
 		await comments.submit('Too dark');
-		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark');
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark', [], null);
 		expect(onCreated).toHaveBeenCalledOnce();
 		expect(comments.ui.state).toEqual({ kind: 'thread', id: 'new' });
 		expect(comments.selectedId).toBe('new');
 		expect(comments.draft).toBeNull();
+	});
+
+	it('passes selected tags and viewing thread for an image comment', async () => {
+		mocks.addRegionComment.mockResolvedValueOnce('new');
+		const comments = createImageComments({ artifactId: () => 'image', threadId: () => 'viewer', readOnly: () => false, restoreFocus: vi.fn() });
+		await comments.draw(BOX, rect);
+		await comments.submit('@Agent', ['agent']);
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, '@Agent', ['agent'], 'viewer');
+	});
+
+	it('keeps a tagged draft and explains a missing viewing thread', async () => {
+		mocks.addRegionComment.mockRejectedValueOnce(new Error('400 {"detail":"A valid viewing thread_id is required to tag agents"}'));
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const { comments } = controller();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('@Agent');
+		await expect(comments.submit('@Agent', ['agent'])).rejects.toThrow();
+		expect(mocks.show).toHaveBeenCalledWith('A valid viewing thread is required to tag agents. Your draft is kept.', 'error');
+		expect(comments.draft?.body).toBe('@Agent');
 	});
 
 	it('keeps the composer and says why when posting fails', async () => {

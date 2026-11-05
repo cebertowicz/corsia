@@ -4,6 +4,8 @@
 	import { Button } from '$lib/components/ui';
 	import { agentColor } from '$lib/docPresence';
 	import type { DocumentReviewState } from '$lib/docReviewState.svelte';
+	import AgentOptions from './AgentOptions.svelte';
+	import { agentOptionIndex } from './agentOptionKeys';
 	let { model, id, onSent }: { model: DocumentReviewState; id: string; onSent: () => void } = $props();
 	let search = $state('');
 	let active = $state(0);
@@ -32,10 +34,7 @@
 		if (event.key === 'Enter') { if (activeReviewer) { event.preventDefault(); add(activeReviewer); } return; }
 		event.preventDefault();
 		if (!matches.length) return;
-		if (event.key === 'Home') active = 0;
-		else if (event.key === 'End') active = matches.length - 1;
-		else if (event.key === 'ArrowDown') active = (active + 1) % matches.length;
-		else active = active <= 0 ? matches.length - 1 : active - 1;
+		active = agentOptionIndex(event.key, active, matches.length) ?? active;
 	}
 	// A press on Send, the drawer's Close, or another nearby control blurs the field first. Keep the list
 	// until the gesture finishes, so resizing the bottom-anchored drawer cannot move that control under the pointer.
@@ -58,26 +57,13 @@
 				<button type="button" class="chip-remove" aria-label={`Remove ${reviewer.name}`} onclick={() => remove(reviewer.id)}><svg aria-hidden="true" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4 4 12" /></svg></button></span>
 		{/each}
 		<input bind:this={searchInput} id={`${id}-search`} data-review-autofocus role="combobox" aria-autocomplete="list" aria-expanded={open}
-			aria-controls={`${id}-options`} aria-activedescendant={activeReviewer ? `${id}-option-${activeReviewer.id}` : undefined}
+			aria-controls={`${id}-options`} aria-activedescendant={activeReviewer ? `${id}-options-option-${activeReviewer.id}` : undefined}
 			placeholder={model.selected.length ? '' : 'Find an agent'} value={search} autocomplete="off"
 			oninput={(event) => { search = event.currentTarget.value; active = 0; }} onkeydown={keys}
 			onfocus={() => focused = true} onblur={blurred} />
 	</div>
 	{#if open}
-		<!-- tabindex -1: a scrolling list is a Tab stop in Chromium, and it unmounts when the field loses focus, dropping focus to the page. -->
-		<div id={`${id}-options`} role="listbox" tabindex="-1" aria-label="Agents that can review" class="options">
-			{#each matches as reviewer, index (reviewer.id)}
-				<!-- svelte-ignore a11y_click_events_have_key_events (The combobox input owns the keyboard path.) -->
-				<div id={`${id}-option-${reviewer.id}`} role="option" tabindex="-1" aria-selected={false} class="option" class:active={index === Math.min(active, matches.length - 1)}
-					onmousedown={(event) => event.preventDefault()} onclick={() => add(reviewer)}>
-					<Avatar name={reviewer.name} color={agentColor(reviewer.id)} hidden size="md" />
-					<span class="option-text">
-						<span class="option-name">{reviewer.name}</span>
-						{#if reviewer.responsibility}<span class="option-detail" title={reviewer.responsibility}>{reviewer.responsibility}</span>{/if}
-					</span>
-				</div>
-			{/each}
-		</div>
+		<AgentOptions id={`${id}-options`} label="Agents that can review" {matches} active={Math.min(active, matches.length - 1)} choose={add} />
 	{:else}
 		<div id={`${id}-options`} role="listbox" aria-label="Agents that can review" hidden></div>
 	{/if}
@@ -121,12 +107,6 @@
 	.chip-remove:hover { background: var(--bg-hover); color: var(--text-primary); }
 	.chip-remove svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; }
 	.chip-remove:focus-visible { outline: 2px solid var(--accent); }
-	.options { max-height: 176px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); }
-	.option { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 4px 8px; cursor: pointer; }
-	.option.active, .option:hover { background: var(--bg-hover); }
-	.option-text { display: flex; flex-direction: column; min-width: 0; }
-	.option-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-	.option-detail { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: var(--text-footnote); }
 	textarea { width: 100%; box-sizing: border-box; resize: none; padding: 6px 8px; font: inherit; color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 	textarea:focus-visible { outline: 0; border-color: var(--accent); }
 	.hint { margin: 0; color: var(--text-secondary); font-size: var(--text-footnote); overflow-wrap: anywhere; }
@@ -143,6 +123,5 @@
 	@media (max-width: 768px) {
 		.chip-field { min-height: 44px; }
 		.chip-remove { width: 28px; height: 28px; }
-		.option { min-height: 44px; }
 	}
 </style>

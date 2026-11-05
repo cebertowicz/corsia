@@ -47,7 +47,7 @@ function refusalMessage(wire: string): string {
 	return reason ? `Couldn't post the comment: ${reason}. Your draft is kept.` : "Couldn't post the comment. Your draft is kept.";
 }
 
-async function postLiveComment(draft: CommentDraft, text: string, context: Context, current: () => boolean): Promise<string> {
+async function postLiveComment(draft: CommentDraft, text: string, context: Context, current: () => boolean, taggedAgentIds: string[], threadId: string | null): Promise<string> {
 	const selection = draft.selection!;
 	cancelCommentCapture(draft.scope);
 	const controller = new AbortController(), sequence = (draft.sequence ?? 0) + 1;
@@ -57,7 +57,7 @@ async function postLiveComment(draft: CommentDraft, text: string, context: Conte
 		const captured = await captureComment(selection, sequence, controller.signal);
 		try {
 			if (!current() || controller.signal.aborted || context.session() !== session) throw aborted();
-			return await addComment(session.artifactId, captured.from, captured.to, captured.quote, text, 'you', true, captured.clientId);
+			return await addComment(session.artifactId, captured.from, captured.to, captured.quote, text, 'you', true, captured.clientId, taggedAgentIds, threadId);
 		} catch (error) {
 			session.releaseReservation(captured.clientId);
 			throw error;
@@ -129,16 +129,16 @@ export function createViewerCommentDraft(context: Context) {
 		pending = null; selected = undefined;
 		context.onStart(value.anchor ?? new DOMRect(value.left, value.top, 0, 0));
 	}
-	async function submit(text: string): Promise<string | null> {
+	async function submit(text: string, taggedAgentIds: string[] = [], threadId: string | null = null): Promise<string | null> {
 		const draft = context.draft();
 		if (!draft || draft.scope !== context.scope()) return null;
 		const current = () => context.draft()?.identity === draft.identity && context.scope() === draft.scope && context.isOpen();
 		const id = await submitDocumentComment(async () => {
-			if (draft.selection) return postLiveComment(draft, text, context, current);
+			if (draft.selection) return postLiveComment(draft, text, context, current, taggedAgentIds, threadId);
 			const artifactId = await context.ensureArtifactId();
 			if (!current()) throw aborted();
 			if (!artifactId) throw new Error('Document artifact is unavailable.');
-			return addComment(artifactId, draft.from, draft.to, draft.text, text);
+			return addComment(artifactId, draft.from, draft.to, draft.text, text, 'you', false, undefined, taggedAgentIds, threadId);
 		}, context.onFailure, draft.selection ? liveFailureMessage : undefined);
 		// A widget comment's mark is painted by the widget after placement, so only it holds the pending mark that long.
 		if (current() && draft.selection && draft.holdUntilDrawn) posted = { id, selection: draft.selection };
