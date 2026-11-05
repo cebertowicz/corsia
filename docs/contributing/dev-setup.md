@@ -43,6 +43,8 @@ cd backend
 ../.venv/bin/python -m uvicorn main:app --host 127.0.0.1 --port 43871
 ```
 
+Before it serves, the backend builds the frontend if the checkout has no current build, so the first start prints build output and takes longer. Wait for `Application startup complete`.
+
 `BACKEND_PORT` must match `--port`. The backend uses it to address itself, so agent tool calls and sign-in callbacks reach this backend and not the default port, 1956, where your everyday CORSIA may be running.
 
 Leave the backend running. In another terminal, from the checkout's `frontend` directory, start the frontend and point its proxy at that backend:
