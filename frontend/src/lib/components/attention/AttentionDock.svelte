@@ -47,6 +47,8 @@
 		visibleQueue,
 	} from '$lib/stores/attentionDock.svelte';
 	import { answerNotice, answers } from '$lib/stores/attentionAnswerState';
+	import { decideHeld } from '$lib/stores/attentionHeld.svelte';
+	import type { HeldVerb } from '$lib/api/heldReplies';
 	import type { AttentionDestination, AttentionQueueItem, DecisionDetail, ExternalReviewDetail, HeldReplyDetail } from '$lib/api/attentionQueue';
 
 	let {
@@ -94,9 +96,14 @@
 	let closingHeld = $state<{ item: AttentionQueueItem; position: number; count: number } | null>(null);
 	const drawerItem = $derived($goneReply?.item ?? closingHeld?.item ?? current);
 
-	function beginHeldClose() {
-		if (current) closingHeld = { item: current, position, count: dockQueue.count };
-		void close(true);
+	/** The drawer leaves at once; focus waits for the outcome, as a failed or gone reply reopens on its own heading. */
+	function decideFromDrawer(held: HeldReplyDetail, verb: HeldVerb) {
+		const from = document.activeElement;
+		void decideHeld(held, verb, () => { if (current) closingHeld = { item: current, position, count: dockQueue.count }; goneReply.set(null); collapse(); })
+			.then(() => {
+				const now = document.activeElement; // left wherever the person put it mid-flight
+				if (!showChip && !$goneReply && (!now || now === document.body || now === from)) void close(true);
+			});
 	}
 
 	/** Focus returns to the exact control that opened the chip. */
@@ -222,7 +229,6 @@
 		};
 	});
 
-
 </script>
 
 {#if recording}
@@ -307,7 +313,7 @@
 			     "Decision · chat · project" eyebrow and the decision title. -->
 
 			{#if drawerItem.renderer === 'held-reply'}
-				<HeldReplyBody held={drawerItem.detail as HeldReplyDetail} writesDisabled={effectiveWritesDisabled} goneLine={$goneReply?.line} onSkip={canSkip && !$goneReply ? skip : undefined} onDecision={beginHeldClose} />
+				<HeldReplyBody held={drawerItem.detail as HeldReplyDetail} writesDisabled={effectiveWritesDisabled} goneLine={$goneReply?.line} onSkip={canSkip && !$goneReply ? skip : undefined} onDecide={(verb) => decideFromDrawer(drawerItem.detail as HeldReplyDetail, verb)} />
 			{:else}
 				<DecisionChip decision={drawerItem.detail as DecisionDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} {heldQueued} />
 			{/if}

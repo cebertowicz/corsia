@@ -4,20 +4,20 @@
 	 *
 	 * The text is shown exactly as it would be sent (line breaks kept, never editable): approving
 	 * covers these bytes and no others. There is no option list, no recommendation and no free-text
-	 * choice. Approve once and Decline hand off to `attentionHeld`, so the dock advances at once and
-	 * a failed write returns the reply here with its reason.
+	 * choice. Approve once and Decline go to the dock, which hands off to `attentionHeld`, so the dock
+	 * advances at once and a failed write returns the reply here with its reason.
 	 */
 	import Button from '$lib/components/ui/Button.svelte';
 	import ErrorReference from '$lib/components/ui/ErrorReference.svelte';
 	import type { HeldReplyDetail } from '$lib/api/attentionQueue';
+	import type { HeldVerb } from '$lib/api/heldReplies';
 	import { answers } from '$lib/stores/attentionAnswerState';
-	import { decideHeld } from '$lib/stores/attentionHeld.svelte';
 
 	let {
 		held,
 		writesDisabled = false,
 		onSkip,
-		onDecision,
+		onDecide,
 		goneLine,
 	}: {
 		held: HeldReplyDetail;
@@ -25,7 +25,7 @@
 		writesDisabled?: boolean;
 		/** Present only when another item waits: move on, keeping this one open. */
 		onSkip?: () => void;
-		onDecision?: () => void;
+		onDecide: (verb: HeldVerb) => void;
 		goneLine?: string;
 	} = $props();
 
@@ -88,8 +88,8 @@
 			{#if onSkip}
 				<span class="skip"><Button variant="secondary" size="sm" ariaLabel="Skip to next item" onclick={onSkip}>Skip</Button></span>
 			{/if}
-			<Button variant="secondary" size="sm" disabled={locked} onclick={() => void decideHeld(held, 'decline', onDecision)}>Decline</Button>
-			<Button variant="primary" size="sm" disabled={locked} onclick={() => void decideHeld(held, 'approve', onDecision)}>Approve once</Button>
+			<Button variant="secondary" size="sm" disabled={locked} onclick={() => onDecide('decline')}>Decline</Button>
+			<Button variant="primary" size="sm" disabled={locked} onclick={() => onDecide('approve')}>Approve once</Button>
 		</div>
 	</div>
 	{/if}

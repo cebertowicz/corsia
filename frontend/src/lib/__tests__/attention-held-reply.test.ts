@@ -169,28 +169,96 @@ describe("held reply in the dock", () => {
     expect(host.querySelector(".drawer-motion")).toBeNull();
   });
 
-  it.each(["Approve once", "Decline"])("returns focus to the dock after %s", async (action) => {
-    body = queueBody(heldReplyItem(), 2, [heldReplyItem(), decisionItem()]);
-    decide = () => new Promise(() => {});
-    await openDock();
-    button(action)!.focus();
-    button(action)!.click();
-    await settle();
-    expect(document.activeElement).toBe(host.querySelector(".dock-bar"));
-  });
-
-  it.each(["Approve once", "Decline"])("returns focus to the composer after the last held reply: %s", async (action) => {
+  function addComposer(): HTMLElement {
     const composer = document.createElement("div");
     composer.setAttribute("role", "textbox");
     composer.setAttribute("aria-label", "Message CORSIA");
     composer.tabIndex = 0;
     host.append(composer);
-    decide = () => new Promise(() => {});
+    return composer;
+  }
+
+  /** The decision request waits until the test settles it, so focus can be read mid-flight. */
+  function heldDecision(): (outcome: { status: number; payload?: unknown }) => void {
+    let release: (outcome: { status: number; payload?: unknown }) => void = () => {};
+    const pending = new Promise<{ status: number; payload?: unknown }>((resolve) => { release = resolve; });
+    decide = () => pending;
+    return release;
+  }
+
+  it.each(["Approve once", "Decline"])("returns focus to the dock once %s is recorded", async (action) => {
+    body = queueBody(heldReplyItem(), 2, [heldReplyItem(), decisionItem()]);
+    const release = heldDecision();
     await openDock();
     button(action)!.focus();
     button(action)!.click();
     await settle();
+    expect(document.activeElement).not.toBe(host.querySelector(".dock-bar"));
+    body = queueBody(decisionItem(), 1);
+    release({ status: 200, payload: { ok: true, state: action === "Decline" ? "declined" : "sent" } });
+    await settle();
+    expect(document.activeElement).toBe(host.querySelector(".dock-bar"));
+  });
+
+  it.each(["Approve once", "Decline"])("returns focus to the composer after the last held reply: %s", async (action) => {
+    const composer = addComposer();
+    const release = heldDecision();
+    await openDock();
+    button(action)!.focus();
+    button(action)!.click();
+    await settle();
+    expect(document.activeElement).not.toBe(composer);
+    body = queueBody(null, 0);
+    release({ status: 200, payload: { ok: true, state: action === "Decline" ? "declined" : "sent" } });
+    await settle();
     expect(document.activeElement).toBe(composer);
+  });
+
+  it("keeps focus off the composer when a failed send reopens the reply, and lands on its error", async () => {
+    const composer = addComposer();
+    const line = "Couldn’t send the reply to the Researcher agent because of an unexpected error. Approve once to try again.";
+    const release = heldDecision();
+    await openDock();
+    button("Approve once")!.focus();
+    button("Approve once")!.click();
+    await settle();
+    expect(document.activeElement).not.toBe(composer);
+    release({ status: 502, payload: { detail: line } });
+    await settle();
+    expect(host.querySelector(".problem")?.textContent).toBe(line);
+    expect(document.activeElement).toBe(host.querySelector("h3[data-drawer-autofocus]"));
+  });
+
+  it("keeps focus off the composer when the recipient is gone, and lands on that line", async () => {
+    const composer = addComposer();
+    const line = "Couldn’t send the reply because the Researcher agent no longer exists.";
+    const release = heldDecision();
+    await openDock();
+    button("Approve once")!.focus();
+    button("Approve once")!.click();
+    await settle();
+    expect(document.activeElement).not.toBe(composer);
+    body = queueBody(null, 0);
+    release({ status: 200, payload: { ok: true, state: "not_sent", reason: "recipient_gone", line } });
+    await settle();
+    expect(document.activeElement).toBe(host.querySelector("h3.problem"));
+  });
+
+  it("leaves focus where the person put it while the decision was in flight", async () => {
+    const composer = addComposer();
+    const elsewhere = document.createElement("button");
+    host.append(elsewhere);
+    const release = heldDecision();
+    await openDock();
+    button("Approve once")!.focus();
+    button("Approve once")!.click();
+    await settle();
+    elsewhere.focus();
+    body = queueBody(null, 0);
+    release({ status: 200, payload: { ok: true, state: "sent" } });
+    await settle();
+    expect(document.activeElement).toBe(elsewhere);
+    expect(document.activeElement).not.toBe(composer);
   });
 
 
