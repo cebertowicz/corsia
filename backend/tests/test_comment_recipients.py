@@ -181,7 +181,8 @@ def test_leave_suppresses_reply_already_waiting_in_batch(isolated_db):
     with write_transaction(db, scope="test_leave_pending") as connection:
         comment_recipients.leave(connection, root, "agent")
     assert feedback_batches.close_batch(db, batch, "send")[1] == ()
-    assert db.execute("SELECT delivery_outcome FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == "empty"
+    assert tuple(db.execute("SELECT delivery_outcome,item_count FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()) == ("empty", 0)
+    assert not db.execute("SELECT 1 FROM doc_feedback_batch_items WHERE batch_id=?", (batch,)).fetchone()
     db.close()
 
 
@@ -249,6 +250,70 @@ def test_failed_node_delivery_rolls_back_rejoin_and_notification(isolated_db, mo
     state = db.execute("SELECT left_thread,notifications FROM doc_comment_recipient_state WHERE root_id=? AND agent_id=?", (root["id"], "agent")).fetchone()
     assert tuple(state) == (1, 0)
     assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == "open"
+    db.close()
+
+
+def test_local_only_reply_to_other_agent_author_is_held(isolated_db):
+    db = get_db()
+    for name in ("owner", "cloud", "local"):
+        seed_thread(db, name, model=None)
+    db.execute("UPDATE threads SET local_only=1 WHERE id='local'")
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_kind="user", author_id=None)
+    add_comment(db, aid, author_id="cloud", parent_id=root["id"])
+    with write_transaction(db, scope="local_reply") as connection:
+        reply, created = comments.create_with_status(
+            aid, body="Reply", author="Local", author_kind="agent",
+            author_thread_id="local", parent_id=root["id"], db=connection,
+        )
+        result = feedback_batches.record_comment(connection, reply, created=created)
+    assert any("cloud" in refusal for refusal in result.get("tag_refusals", []))
+    assert not db.execute(
+        "SELECT 1 FROM doc_feedback_batch_items i JOIN doc_feedback_batches b ON b.id=i.batch_id "
+        "WHERE i.comment_id=? AND b.recipient_id='cloud'", (reply["id"],),
+    ).fetchone()
+    assert db.execute(
+        "SELECT 1 FROM doc_feedback_batch_items i JOIN doc_feedback_batches b ON b.id=i.batch_id "
+        "WHERE i.comment_id=? AND b.recipient_id='owner'", (reply["id"],),
+    ).fetchone()
+    db.close()
+
+
+def test_local_only_reply_keeps_owner_and_root_author_exempt(isolated_db):
+    db = get_db()
+    for name in ("owner", "root-author", "local"):
+        seed_thread(db, name, model=None)
+    db.execute("UPDATE threads SET local_only=1 WHERE id='local'")
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_id="root-author")
+    reply, result = add_comment(db, aid, author_id="local", parent_id=root["id"])
+    assert "tag_refusals" not in result
+    for batch in result["batch_ids"]:
+        feedback_batches.close_batch(db, batch, "send")
+    rows = db.execute(
+        "SELECT recipient_id,state FROM doc_feedback_batches WHERE id IN "
+        "(SELECT batch_id FROM doc_feedback_batch_items WHERE comment_id=?)", (reply["id"],),
+    ).fetchall()
+    assert {tuple(row) for row in rows} == {("owner", "delivered"), ("root-author", "delivered")}
+    db.close()
+
+
+def test_pending_reply_to_other_agent_rechecks_locality(isolated_db):
+    db = get_db()
+    for name in ("owner", "cloud", "local"):
+        seed_thread(db, name, model=None)
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_kind="user", author_id=None)
+    add_comment(db, aid, author_id="cloud", parent_id=root["id"])
+    reply, result = add_comment(db, aid, author_id="local", parent_id=root["id"])
+    batch = next(batch_id for batch_id in result["batch_ids"] if db.execute(
+        "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,),
+    ).fetchone()[0] == "cloud")
+    db.execute("UPDATE threads SET local_only=1 WHERE id='local'")
+    db.commit()
+    feedback_batches.close_batch(db, batch, "send")
+    state = db.execute("SELECT state,undelivered_reason FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()
+    assert state[0] == "undelivered" and reply["id"] in state[1]
     db.close()
 
 
@@ -394,10 +459,14 @@ def test_tag_locality_does_not_emit_held_event(isolated_db, monkeypatch):
     db = get_db()
     seed_thread(db, "writer", model=None)
     seed_thread(db, "recipient", model=None)
+    seed_thread(db, "owner", model=None)
+    aid = seed_document(db, "owner")
+    comment, _ = add_comment(db, aid, author_id="writer")
     db.execute("UPDATE threads SET local_only=1 WHERE id='writer'")
     events = []
     monkeypatch.setattr(local_only, "_emit", lambda *args: events.append(args))
-    assert comment_recipients.tag_locality_refusal(db, "writer", "recipient")
+    refusal, exempt = comment_recipients.locality_disposition(db, comment, "recipient", "writer", aid)
+    assert refusal and not exempt
     assert events == []
     assert local_only.send_needs_hold({"id": "writer", "local_only": 1}, {"id": "recipient", "model": None}, db=db)
     assert events[0][0] == "local_only.send_held"

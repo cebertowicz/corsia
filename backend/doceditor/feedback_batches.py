@@ -80,16 +80,16 @@ def record_comment(
     recipients = feedback_comments.recipients(db, comment)
     refused = set()
     if comment["author_kind"] == "agent":
-        for recipient in sorted(set(recipients) & set(comment.get("tagged_agent_ids") or ())):
-            refusal = comment_recipients.tag_locality_refusal(db, str(comment["author_thread_id"]), recipient)
-            if refusal:
-                ordinary = feedback_comments.recipients(db, {**comment, "tagged_agent_ids": []})
-                if recipient not in ordinary:
-                    refused.add(recipient)
-                    from registry.models import get_artifact
-                    artifact = get_artifact(comment["artifact_id"], db=db)
-                    document = (artifact.get("path") or artifact.get("title") or comment["artifact_id"]) if artifact else comment["artifact_id"]
-                    tag_refusals.append(f"{document}, comment {comment['id']}: {refusal}")
+        for recipient in recipients:
+            refusal, legacy_exempt = comment_recipients.locality_disposition(
+                db, comment, recipient, str(comment["author_thread_id"]), str(comment["artifact_id"]),
+            )
+            if refusal and not legacy_exempt:
+                refused.add(recipient)
+                from registry.models import get_artifact
+                artifact = get_artifact(comment["artifact_id"], db=db)
+                document = (artifact.get("path") or artifact.get("title") or comment["artifact_id"]) if artifact else comment["artifact_id"]
+                tag_refusals.append(f"{document}, comment {comment['id']}: {refusal}")
     if created:
         feedback_comments.emit_comment_created(db, comment)
         feedback_comments.make_user_document_durable(db, comment)

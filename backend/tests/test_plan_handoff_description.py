@@ -54,8 +54,8 @@ KEY = "selected_description"
 #: Serialized-byte ceiling of one carried description, as the tool emits it.
 BRIEF_CAP = 16384
 CRITERIA = (
-    "Every item is acknowledged, resolved, or replied to, and every change made for one is also made "
-    "wherever this document says the same thing in other words."
+    "Every item is considered and acted on where needed, and every change made for one is also made "
+    "wherever this document says the same thing in other words. Do not reply if no reply is needed."
 )
 SMALL = "Comment c-1\nQuote: quoted source\nFeedback: Please check this point."
 #: Over the ceiling on its own, so the cut is the description's, not the block's.
