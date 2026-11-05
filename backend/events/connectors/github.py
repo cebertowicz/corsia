@@ -1,9 +1,6 @@
-"""GitHub connector manifest (declared data).
+"""GitHub manifest and source-owned fact extraction.
 
-Reuses the single GitHub artifact-id format source — ``events.identity`` —
-so there is no parallel derivation of a PR's identity (replace-don't-preserve):
-the legacy router and the new envelope path resolve a PR to the *same*
-``repo#N`` external id.
+The router and envelope share ``events.identity`` for each ``repo#N`` artifact id.
 """
 
 from __future__ import annotations
@@ -32,7 +29,8 @@ from events.connectors.github_label_events import IDENTITY, change_event
 from events.connectors.github_ownership import declaration_facts
 from events.connectors.github_pr_facts import HEAD_FACTS, PAYLOAD_FACTS, READ_FACTS, pull_facts
 from events.connectors.github_observe_rules import GITHUB_OBSERVE_RULES
-from events.connectors.github_content_facts import REPLY_FILTERABLE, REPLY_TYPES, content_facts, content_kind, reply_envelope_facts, repository_name
+from events.connectors.github_content_facts import content_facts, content_kind, repository_name
+from events.connectors.github_reply_facts import REPLY_FILTERABLE, REPLY_TYPES, reply_facts
 from events.connectors.github_receiver import GITHUB_RECEIVER
 from events.connectors.github_screen.workflow import triage_capture, triage_validate, triage_version, triage_workflow
 from events.identity_formula import MalformedEventError, RelationshipDecl
@@ -151,18 +149,20 @@ def _extract_facts(raw: dict[str, Any], resolved: Mapping[str, Any] | None = Non
     facts: dict[str, Any] = {"repo": repository_name(raw)}
     pr = raw.get("pull_request") or {}
     content = content_facts(raw) if any(raw.get(k) for k in ("pull_request", "issue", "comment", "review")) else {}
-    if pr:
-        user = _json_object(pr, "user")
+    is_reply = content_kind(raw) in REPLY_TYPES
+    if pr and not is_reply:
         facts.update({
             "pr_number": pr.get("number"), "action": raw.get("action"),
             "merged": pr.get("merged"),
             "branch": (pr.get("base") or {}).get("ref"),
-            "sha": (pr.get("head") or {}).get("sha"), "author": user.get("login"), **pull_facts(pr),
+            "sha": (pr.get("head") or {}).get("sha"), **pull_facts(pr),
         })
     kind = "pull_request" if pr else "issues" if raw.get("issue") else None
     change = change_event(kind, raw) if kind else None
     facts.update(change.facts if change else {})
-    reply_envelope_facts(raw, facts, content, PAYLOAD_FACTS)
+    facts.update(content)
+    if is_reply:
+        facts.update(reply_facts(raw))
     if (pr and not raw.get("comment") and not raw.get("review")
             and content.get("author_origin") == "inside" and pr.get("title") is not None):
         facts["title"] = pr["title"]

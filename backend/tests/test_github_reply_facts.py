@@ -7,7 +7,8 @@ import pytest
 from events.connectors import github_pr_facts as pr_facts
 from events.connectors import github_repo_activity as poller
 from events.connectors.github import MANIFEST
-from events.connectors.github_content_facts import REPLY_FILTERABLE, REPLY_TYPES
+from events.connectors.github_reply_facts import REPLY_FILTERABLE, REPLY_TYPES
+from events.identity_formula import MalformedEventError
 from events.connectors.github_notifications_feed import GhResponse
 from events.envelope import normalize
 from events.markers import REVIEW_SUMMARY_MARKER
@@ -44,16 +45,35 @@ def test_reply_facts_and_no_body(kind):
         assert (facts["path"], facts["commit_id"], facts["in_reply_to_id"]) == ("a.py", "c1", 5)
     if kind == "review":
         assert facts["state"] == "changes_requested"
-    assert ("base_sha" in facts) == (kind == "review")
+    assert not {"base_sha", "draft", "labels"} & facts.keys()
 
 
-@pytest.mark.parametrize("kind", ["line", "review"])
+@pytest.mark.parametrize("kind", ["issue", "line", "review"])
 def test_reply_with_no_user_names_no_author(kind):
     raw = payload(kind)
     raw["review" if kind == "review" else "comment"]["user"] = None
     facts = normalize("github", raw, "review.submitted" if kind == "review" else "pr_comment.created").facts
     assert "author" not in facts and facts["author_origin"] == "outside"
     assert facts["pr_author_login"] == "pr-author"
+
+
+@pytest.mark.parametrize("kind", ["line", "review"])
+def test_edited_reply_with_null_user_never_inherits_pr_author(kind):
+    raw = payload(kind)
+    raw["review" if kind == "review" else "comment"]["user"] = None
+    raw["action"] = "edited"
+    raw["review" if kind == "review" else "comment"]["updated_at"] = "2026-11-04T18:00:00Z"
+    facts = normalize("github", raw, "review.edited" if kind == "review" else "pr_comment.edited").facts
+    assert "author" not in facts and facts["author_origin"] == "outside"
+
+
+@pytest.mark.parametrize("field,value", [("id", True), ("path", 3), ("user", {"login": 3}),
+                                        ("body", []), ("in_reply_to_id", "5"), ("state", False)])
+def test_malformed_reply_is_refused_on_event_path(field, value):
+    raw = payload("line")
+    raw["comment"][field] = value
+    with pytest.raises(MalformedEventError):
+        normalize("github", raw, "pr_comment.created")
 
 
 @pytest.mark.parametrize("body,expected", [("review: release ABCDEF1\nmore", "abcdef1"), ("x\nreview: release abcdef1", None), ("review: release abcdef", None), ("review: release abcdef1 extra", None)])
@@ -87,7 +107,7 @@ async def test_read_uses_live_head_and_one_source_for_each_type(monkeypatch, kin
     got = (await pr_facts.enriched(envelope(kind), object())).facts
     assert got["current_head"] == "live" and got["check_state"] == "green"
     assert any("/commits/live/" in path for path in paths)
-    assert got["base_sha"] == ("payload-base" if kind == "review" else "read-base")
+    assert (got["base_sha"], got["draft"], got["labels"]) == ("read-base", True, ["read"])
     assert got["pr_author_login"] == "pr-author"
 
 

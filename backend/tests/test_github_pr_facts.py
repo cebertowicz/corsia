@@ -272,8 +272,8 @@ async def test_a_head_checks_event_keeps_its_settled_head_when_the_pull_request_
     got = await facts.head_facts(None, "o/r", 7, settled)
     assert got["head_sha"] == "X" and got["current_head"] == "Y"
     assert got["check_state"] == "failing"  # about X: state_of its conclusion
-    # The read refreshes only draft, mergeable and labels; the base stays the payload's.
-    assert got["mergeable"] == "MERGEABLE" and got["labels"] == ["a", "b"] and "base_sha" not in got
+    # A settled head reads missing PR facts, including its current base.
+    assert got["mergeable"] == "MERGEABLE" and got["labels"] == ["a", "b"] and got["base_sha"] == "b1"
     # The head's checks were read by the aggregator, so only the PR is read here.
     assert reader.paths == ["repos/o/r/pulls/7"]
 
@@ -364,6 +364,7 @@ AUTHOR = {"field": "author_origin", "op": "eq", "value": "outside"}
     ([REPO, {"field": "mergeable", "op": "eq", "value": "MERGEABLE"}], 1, "pr.synchronize", True),
     ([REPO, AUTHOR], 1, "head.checks_completed", True),  # supplied only by the read there
     ([REPO, {"field": "draft", "op": "eq", "value": False}], 1, "head.checks_completed", True),
+    ([REPO, {"field": "base_sha", "op": "present"}], 1, "head.checks_completed", True),
     ([REPO, {"field": "draft", "op": "eq", "value": False}], 1, "pr.synchronize", False),
     ([REPO, CHECK], 0, "pr.synchronize", False),  # disabled
     ([REPO, CHECK], 1, "pr.opened", False),  # another type's rule
@@ -378,7 +379,7 @@ def test_a_rule_naming_a_fact_the_read_supplies_is_what_asks_for_the_read(isolat
     ("pr_comment.created", "author", False),
     ("pr_comment.created", "draft", True),
     ("pr_comment.created", "check_state", True),
-    ("review.submitted", "draft", False),
+    ("review.submitted", "draft", True),
     ("review.submitted", "check_state", True),
 ])
 def test_reply_rule_gate(isolated_db, event, field, expected):
@@ -393,7 +394,7 @@ def test_a_type_with_no_rule_asks_for_no_read(isolated_db):
 def test_the_read_facts_per_type_are_what_the_read_supplies_there():
     assert facts.read_facts("pr.opened") == facts.READ_FACTS
     assert set(facts.read_facts("head.checks_completed")) == {
-        "current_head", "check_state", "draft", "mergeable", "labels", "author_origin"}
+        "current_head", "check_state", "base_sha", "draft", "mergeable", "labels", "author_origin"}
     assert facts.read_facts("pr.merged") == facts.read_facts("pr.closed") == ()
 
 

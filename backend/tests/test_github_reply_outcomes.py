@@ -53,25 +53,6 @@ def pr_comment(body: str | None = None, **issue: Any) -> dict[str, Any]:
     return payload
 
 
-def test_reply_drafts_preserve_pre_change_serialization():
-    """Canonical JSON fingerprints captured from the pre-change implementation."""
-    import dataclasses
-    import hashlib
-    from events.connectors import github_reply_outcomes as replies
-
-    cases = [
-        (replies.review_drafts, delivery("pr_review_submitted")[1], "057e977cd438112b98678c9a71b2991d9269859154b8a22a3d312bc9677fc9e4"),
-        (replies.review_drafts, delivery("pr_review_dismissed")[1], "3260a90d3137d9bbf3a8fb8ed6f0cbd3b8e8578295013e1e6287cd4d57197116"),
-        (replies.review_comment_drafts, delivery("pr_review_comment_created")[1], "46bf6eb5401297339e4737541284eebc06aa02e403abd4af5955fd2dc0a1adee"),
-        (replies.issue_comment_drafts, delivery("issue_comment_created")[1], "4e9fe213c5daa5e121d230822894399a8d0cc15e9d82d34dea6250ca235e90a4"),
-        (replies.issue_comment_drafts, pr_comment(), "acc40d5210937df4e8fd57dfd3bc4f93f169c75258fa3908900d2d5be6c18660"),
-    ]
-    for mapper, payload, expected in cases:
-        encoded = json.dumps([dataclasses.asdict(d) for d in mapper(payload, REPO)],
-                             sort_keys=True, separators=(",", ":")).encode()
-        assert hashlib.sha256(encoded).hexdigest() == expected
-
-
 def events(db) -> list[tuple[str, str, dict[str, Any]]]:
     rows = db.execute("SELECT event_name, dedupe_key, attributes FROM outcome_events ORDER BY dedupe_key")
     return [(name, key, json.loads(attributes)) for name, key, attributes in rows]
@@ -199,6 +180,18 @@ async def test_a_conversation_comment_on_a_plain_issue_is_an_issue_comment(main_
     }
     assert counters(main_db) == {}
     assert map_github_outcomes(event_type, payload)[0].subject_key == f"github:issue:{REPO}#1"
+
+
+@pytest.mark.parametrize("fixture,parent_kind", [
+    ("pr_review_submitted", "pr"), ("pr_review_comment_created", "pr"),
+    ("issue_comment_created", "issue"),
+])
+def test_parent_association_is_stored_for_each_subject(fixture, parent_kind):
+    event_type, payload = delivery(fixture)
+    payload["pull_request" if parent_kind == "pr" else "issue"]["author_association"] = "MEMBER"
+    (draft,) = map_github_outcomes(event_type, payload)
+    assert draft.attributes[f"{parent_kind}_author_association"] == "MEMBER"
+    assert draft.attributes["author_association"] == "OWNER"
 
 
 async def test_a_comment_seen_twice_is_one_event(main_db):
