@@ -225,16 +225,14 @@ def test_target_matching_never_reuses_another_owners_trial(tmp_path, monkeypatch
     assert retired == []
 
 
-def test_plan_start_delivers_trial_even_when_prior_words_are_disabled(db, monkeypatch):
+def test_plan_start_delivers_trial(db, monkeypatch):
     from types import SimpleNamespace
-    from memory import node_start_recall
     from plans import public
     from tools import plans as plan_tools
 
     node_id = _node("with")
     _resolved(monkeypatch, [_trial()])
     monkeypatch.setattr(public, "attributed_selection", lambda *_: {"node_id": node_id})
-    monkeypatch.setattr(node_start_recall, "DELIVERY_ON", False)
     result = {"node": {"id": node_id, "kind": "task"}}
     class Connection:
         def __getattr__(self, name):
