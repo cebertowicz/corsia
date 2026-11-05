@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import CommentThread, { type CommentThreadData } from './CommentThread.svelte';
+import CommentThread from './CommentThread.svelte';
+import type { CommentThreadData } from './CommentThreadData';
 import CommentComposer from './CommentComposer.svelte';
 import { agentColor } from '$lib/docPresence';
 

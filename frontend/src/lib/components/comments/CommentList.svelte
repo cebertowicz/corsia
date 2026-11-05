@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import CommentThread, { type CommentThreadData } from './CommentThread.svelte';
+	import CommentThread from './CommentThread.svelte';
+	import type { CommentThreadData } from './CommentThreadData';
 	import { createMentionSelection, type MentionOccurrence } from './mentionSelection';
 	import { groupRows } from '$lib/docImageComments';
 	import { plainQuote } from '$lib/plainQuote';
