@@ -68,9 +68,9 @@ def open_user_step(
         ]
         intent_node_id = None
         if len(selected) == 1:
-            from plans import intent_words
+            from plans import intent_creation
 
-            intent_node_id = str(intent_words.canonical(connection, selected[0])["id"])
+            intent_node_id = str(intent_creation.canonical(connection, selected[0])["id"])
         node = service.add_node(
             plan.id, kind="task", title=title, acceptance_criteria=title,
             description=description, assignee="user", actor_id=None,

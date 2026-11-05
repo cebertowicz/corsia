@@ -137,24 +137,20 @@ from plans.status_context import render as render_status
 # The status a plan write left owed: drained before a digest (infra/passive_changes)
 # and swept at startup (app_lifecycle).
 from plans.status_drain import drain_for_digest as drain_status_for_digest, sweep as sweep_owed_status
-# The person's new words, matched against running tasks off-path (jobs/corrections_recording).
-from plans.person_input import arrived as person_words_arrived
-from plans.intent_words import message_words as person_message_words
 # The node holding a task's intent, itself unless inherited.
-from plans.intent_words import canonical as canonical_intent_node
+from plans.intent_creation import canonical as canonical_intent_node
 
 
 def intent_of(node_id: str, *, db) -> dict:
     """Read a node's canonical intent for an authorized Agent Substrate fork."""
-    from plans import intent_words, service
+    from plans import intent_creation, service
 
     with service._connection(db) as connection:
-        source = intent_words.canonical(connection, node_id)
+        source = intent_creation.canonical(connection, node_id)
         return {
             "node_id": source["id"], "title": source["title"],
             "requirements_revision": source["requirements_revision"],
             "intent": source["intent"], "acceptance_criteria": source["acceptance_criteria"],
-            "intent_words": intent_words.newest(connection, source["id"]),
         }
 
 
