@@ -3,7 +3,7 @@
 	import { Button } from '$lib/components/ui';
 	import { agentColor } from '$lib/docPresence';
 	import type { TaggableAgent } from '$lib/api/docReviews';
-	let { id, label, matches, active, choose, status = 'ready', retry }: { id: string; label: string; matches: T[]; active: number; choose: (reviewer: T) => void; status?: 'loading' | 'error' | 'empty' | 'ready'; retry?: () => Promise<void> } = $props();
+	let { id, label, matches, active, choose, status = 'ready', retry }: { id: string; label: string; matches: T[]; active: number; choose: (reviewer: T) => void; status?: 'loading' | 'error' | 'empty' | 'no_thread' | 'ready'; retry?: () => Promise<void> } = $props();
 </script>
 <div {id} role="listbox" tabindex="-1" aria-label={label} class="options">
 	{#each matches as reviewer, index (reviewer.id)}
@@ -15,6 +15,7 @@
 	{/each}
 	{#if status === 'loading'}<p class="empty" role="status">Loading agents…</p>
 	{:else if status === 'error'}<p class="empty" role="status">Couldn’t load agents. <Button size="sm" variant="ghost" onclick={retry}>Retry</Button></p>
+	{:else if status === 'no_thread'}<p class="empty" role="status">Open this document from a chat to tag agents.</p>
 	{:else if status === 'empty'}<p class="empty" role="status">No agents in this project to tag.</p>
 	{:else if !matches.length}<p class="empty" role="status">No matching agents.</p>{/if}
 </div>

@@ -7,7 +7,9 @@ export function loadMentionRoster(target: () => { artifactId: string | null; thr
 	// The picker reads the tag roster's own failure, never the reviewer list's.
 	provideMentionRoster({
 		get taggableAgents() { return model.taggableAgents; }, get loadState() { return model.loadState; },
-		get rosterError() { return model.tagRosterError; }, load: () => model.load(),
+		get rosterError() { return model.tagRosterError; },
+		// Tags need the chat the document was opened from; the server refuses a tag without one.
+		get noViewingThread() { return !target().threadId; }, load: () => model.load(),
 	});
 	$effect(() => {
 		const { artifactId, threadId } = target();

@@ -18,8 +18,8 @@
 	let query = $state<string | null>(null), start = 0, active = $state(0);
 	let lastQuery = '';
 	let chosen: { start: number; text: string } | null = null;
-	const matches = $derived(roster.loadState !== 'ready' || roster.rosterError ? [] : roster.taggableAgents.filter((agent) => agent.name.toLowerCase().includes((query ?? lastQuery).toLowerCase())));
-	const status = $derived(roster.loadState === 'loading' ? 'loading' : roster.loadState === 'error' || roster.rosterError ? 'error' : !roster.taggableAgents.length ? 'empty' : 'ready');
+	const matches = $derived(roster.noViewingThread || roster.loadState !== 'ready' || roster.rosterError ? [] : roster.taggableAgents.filter((agent) => agent.name.toLowerCase().includes((query ?? lastQuery).toLowerCase())));
+	const status = $derived(roster.noViewingThread ? 'no_thread' : roster.loadState === 'loading' ? 'loading' : roster.loadState === 'error' || roster.rosterError ? 'error' : !roster.taggableAgents.length ? 'empty' : 'ready');
 	// What the picker shows: a change to it crossfades the panel around it under reduced motion.
 	const shownKey = $derived(query === null ? 'closed' : `${status}:${matches.map((agent) => `${agent.id}:${agent.name}:${agent.responsibility}`).join('|')}`);
 	const transition = useLayoutCrossfade(() => input, () => shownKey);

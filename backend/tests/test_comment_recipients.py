@@ -641,6 +641,30 @@ def test_tagged_reply_context_is_bounded_and_not_an_item(isolated_db):
     db.close()
 
 
+def test_thread_context_withholds_local_only_authors_from_a_cloud_recipient(isolated_db):
+    db = get_db()
+    for name in ("owner", "local", "cloud", "recipient"):
+        seed_thread(db, name, model=None)
+    db.execute("UPDATE threads SET local_only=1 WHERE id='local'")
+    aid = seed_document(db, "owner")
+    root, _ = add_comment(db, aid, author_kind="user", author_id=None)
+    private, _ = add_comment(db, aid, author_id="local", parent_id=root["id"])
+    shared, _ = add_comment(db, aid, author_id="cloud", parent_id=root["id"])
+    db.execute("UPDATE doc_comments SET author='Local', body='Private text' WHERE id=?", (private["id"],))
+    db.execute("UPDATE doc_comments SET author='Cloud', body='Shared text' WHERE id=?", (shared["id"],))
+    db.commit()
+    reply, _ = add_comment(db, aid, author_kind="user", author_id=None, parent_id=root["id"])
+    comment_recipients.save_tags(db, reply, ["recipient"])
+    item = {**reply, "kind": "comment"}
+    comment_recipients.prepare_notification(db, [item], "recipient")
+    assert "Private text" not in item["thread_context"]
+    assert "- Local: (not shown: this agent is Local only)" in item["thread_context"]
+    assert "- Cloud: Shared text" in item["thread_context"]
+    db.execute("UPDATE threads SET local_only=0 WHERE id='local'")
+    assert "- Local: Private text" in comment_recipients.thread_context(db, reply, "recipient")
+    db.close()
+
+
 def test_thread_context_keeps_newest_whole_comments_and_counts_omissions(isolated_db):
     db = get_db()
     for name in ("owner", "first", "second"):
@@ -652,7 +676,7 @@ def test_thread_context_keeps_newest_whole_comments_and_counts_omissions(isolate
     reply, _ = add_comment(db, aid, author_id="second", parent_id=root["id"])
     db.execute("UPDATE doc_comments SET body=? WHERE id=?", ("old " * 500, older["id"]))
     db.execute("UPDATE doc_comments SET body='Newest full comment',author='Newest' WHERE id=?", (newer["id"],))
-    context = comment_recipients.thread_context(db, reply)
+    context = comment_recipients.thread_context(db, reply, "owner")
     assert '2 earlier comments not shown; read them all with doc_comments_list' in context
     assert '- Newest: Newest full comment' in context
     assert 'old old' not in context

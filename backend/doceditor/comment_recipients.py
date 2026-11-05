@@ -201,16 +201,36 @@ def filter_left_replies(db, items: list[dict], agent_id: str, *, person_owner: b
     return [item for item in items if keep(item)]
 
 
-def thread_context(db, item: dict) -> str:
-    """Render earlier comments as bounded context for a tagged reply."""
+def _withheld_authors(db, rows, recipient_id: str) -> set[str]:
+    """Agent authors whose own comment to this recipient would be refused under Local only."""
+    from infra.local_only import send_needs_hold
+
+    authors = {str(row["author_thread_id"]) for row in rows
+               if row["author_kind"] == "agent" and row["author_thread_id"]}
+    if not authors:
+        return set()
+    recipient = db.execute("SELECT id,model,pending_model,title FROM threads WHERE id=?", (recipient_id,)).fetchone()
+    withheld = set()
+    for author in authors:
+        sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id=?", (author,)).fetchone()
+        # Fail closed as locality_disposition does: an unreadable sender or recipient is withheld.
+        if sender is None or recipient is None or send_needs_hold(
+                dict(sender), dict(recipient), db=db, emit_hold_event=False):
+            withheld.add(author)
+    return withheld
+
+
+def thread_context(db, item: dict, recipient_id: str) -> str:
+    """Render earlier comments as bounded context for a tagged reply, never a Local only agent's text."""
     from plans.public import WORDS_MAX_BYTES
     from prompts.plan_tools import bounded_text
 
     root = root_id(item)
     rows = db.execute(
-        """SELECT id,author,body,anchor_text,created_at FROM doc_comments
+        """SELECT id,author,author_kind,author_thread_id,body,anchor_text,created_at FROM doc_comments
            WHERE id=? OR parent_id=? ORDER BY created_at,id""", (root, root),
     ).fetchall()
+    withheld = _withheld_authors(db, rows, recipient_id)
     root_row = next((row for row in rows if row["id"] == root), None)
     header = ["Thread so far (context, not new feedback):"]
     if root_row and root_row["anchor_text"]:
@@ -219,7 +239,8 @@ def thread_context(db, item: dict) -> str:
     for row in rows:
         if row["id"] == item["id"]:
             break
-        prior.append(f'- {row["author"]}: {row["body"]}')
+        hidden = row["author_kind"] == "agent" and str(row["author_thread_id"]) in withheld
+        prior.append(f'- {row["author"]}: ' + ("(not shown: this agent is Local only)" if hidden else row["body"]))
     measure = lambda value: len(value.encode("utf-8"))
     def marker(count: int) -> str:
         return f'… {count} earlier comments not shown; read them all with doc_comments_list(comment_id="{root}")'
@@ -257,7 +278,7 @@ def prepare_notification(db, items: list[dict], agent_id: str) -> None:
         if tagged:
             reinstate(db, item, agent_id)
             if item.get("parent_id") and root not in context_roots:
-                item["thread_context"] = thread_context(db, item)
+                item["thread_context"] = thread_context(db, item, agent_id)
                 context_roots.add(root)
         if root in roots:
             continue

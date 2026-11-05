@@ -32,8 +32,9 @@ describe('comment mentions', () => {
   { state:'error' as const, agents, copy:"Couldn’t load agents." },
   { state:'ready' as const, agents:[], copy:'No agents in this project to tag.' },
   { state:'ready' as const, agents, rosterError:true, copy:"Couldn’t load agents." },
- ])('shows the correct roster state: $copy', ({state, agents, rosterError, copy}) => {
-  host=document.createElement('div'); document.body.append(host); component=mount(MentionPickerHarness,{target:host,props:{agents,status:state,rosterError}}); flushSync();
+  { state:'ready' as const, agents:[], noViewingThread:true, copy:'Open this document from a chat to tag agents.' },
+ ])('shows the correct roster state: $copy', ({state, agents, rosterError, noViewingThread, copy}) => {
+  host=document.createElement('div'); document.body.append(host); component=mount(MentionPickerHarness,{target:host,props:{agents,status:state,rosterError,noViewingThread}}); flushSync();
   const field=host.querySelector('textarea')!; field.value='@'; field.setSelectionRange(1,1); field.dispatchEvent(new Event('input',{bubbles:true})); flushSync();
   expect(host.querySelector('[role=listbox]')?.textContent).toContain(copy); expect(host.textContent).not.toContain('No matching agents.');
   expect(field.hasAttribute('aria-activedescendant')).toBe(false);
