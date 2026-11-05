@@ -243,7 +243,8 @@ _NO_LOGIN: dict[Cause, str] = {
 }
 _NOT_READY = "the agents' GitHub account isn't ready"
 _UNAPPROVED = ("scripts get no GitHub login: this script isn't approved to use the agents' GitHub account; "
-               "schedule it with authenticated=true so the person can approve it")
+               "only if it failed on a GitHub call that needs that account, schedule it with "
+               "authenticated=true so the person can approve it")
 
 
 def github_lock_reason(view: AgentAccountView, *, approved: bool = True) -> str | None:

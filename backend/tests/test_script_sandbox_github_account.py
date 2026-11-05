@@ -156,7 +156,8 @@ def test_unapproved_run_hides_even_a_verified_account(run):
     assert not any(name in env for name in _TOKENS)
     assert seen["result"].github_locked == (
         "scripts get no GitHub login: this script isn't approved to use the agents' GitHub account; "
-        "schedule it with authenticated=true so the person can approve it")
+        "only if it failed on a GitHub call that needs that account, schedule it with "
+        "authenticated=true so the person can approve it")
 
 
 def test_authenticated_run_keeps_ready_account_locked(run):
