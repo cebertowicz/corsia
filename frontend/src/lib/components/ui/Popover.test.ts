@@ -93,6 +93,28 @@ describe('Popover', () => {
 			HTMLElement.prototype.getBoundingClientRect = original;
 		}
 	});
+	describe('pointer placement', () => {
+		const original = HTMLElement.prototype.getBoundingClientRect;
+		afterEach(() => { HTMLElement.prototype.getBoundingClientRect = original; });
+		const cardAt = async (line: DOMRect) => {
+			HTMLElement.prototype.getBoundingClientRect = function () { return this.classList.contains('popover') ? new DOMRect(0, 0, 300, 120) : original.call(this); };
+			host = document.createElement('div'); document.body.appendChild(host);
+			component = mount(Popover, { target: host, props: { anchor: line, open: true, onClose: vi.fn(), placement: 'pointer', children: (() => {}) as any } });
+			flushSync();
+			const surface = document.body.querySelector<HTMLElement>('.popover')!;
+			return surface;
+		};
+		it('opens just under the clicked line and to the right of the pointer, wherever the line is', async () => {
+			// The clicked line sits at the top of the screen: the card follows it up there instead of going to the bottom.
+			const surface = await cardAt(new DOMRect(200, 100, 0, 20));
+			await vi.waitFor(() => expect([surface.style.left, surface.style.top]).toEqual(['212px', '124px']));
+		});
+		it('flips to the left of the pointer at the right edge and above the line at the bottom', async () => {
+			const x = window.innerWidth - 40, y = window.innerHeight - 40;
+			const surface = await cardAt(new DOMRect(x, y, 0, 20));
+			await vi.waitFor(() => expect([surface.style.left, surface.style.top]).toEqual([`${x - 12 - 300}px`, `${y - 4 - 120}px`]));
+		});
+	});
 	it('closes on an outside pointerdown', () => {
 		const { onClose } = render();
 		document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));

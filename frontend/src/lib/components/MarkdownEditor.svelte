@@ -192,14 +192,14 @@
 	/** A click on a mark drawn inside a table or diagram: one comment opens as a click on its text does, several as their margin marker does. */
 	function focusWidgetComments(ids: string[], opener: HTMLElement) {
 		const open = ids.length > 1 ? curHighlights.find((h) => h.id === ids[0])?.onMarkerFocus : undefined;
-		if (open) open(ids, opener); else onAnchorFocus?.(ids[0], liveAnchor(ids[0]));
+		if (open) open(ids, opener); else onAnchorFocus?.(ids[0], liveAnchor(ids[0]), opener.dataset.suggestionId !== undefined || undefined);
 	}
 
 	function handleSelection(v: EditorView) {
 		const r = v.state.selection.main;
 		if (r.empty) {
 			onSelect?.(null);
-			const hit = curHighlights.find((h) => r.from >= h.from && r.from <= h.to);
+			const hit = curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to);
 			// Where cards open as the phone sheet, a caret in a suggestion is editing: only a press on its insert (suggestionMarks) opens the card.
 			if (hit && !(hit.suggestion && commentsAsSheet) && v.coordsAtPos(r.from)) {
 				if (hit.suggestion) onAnchorFocus?.(hit.id, liveAnchor(hit.id), true);
@@ -342,7 +342,7 @@
 				return id ? liveAnchor(id)() : null;
 			})),
 		}));
-		const sig = ranges.map((r) => `${r.from}:${r.to}:${r.id}:${r.focused ? 1 : 0}:${r.replyWaiting ? 1 : 0}:${JSON.stringify(r.suggestion ?? null)}`).join('|');
+		const sig = ranges.map((r) => `${r.from}:${r.to}:${r.id}:${r.focused ? 1 : 0}:${r.replyWaiting ? 1 : 0}:${r.point ? 1 : 0}:${r.lost ? 1 : 0}:${JSON.stringify(r.suggestion ?? null)}`).join('|');
 		if (sig === lastPainted) return;
 		lastPainted = sig;
 		curHighlights = ranges;

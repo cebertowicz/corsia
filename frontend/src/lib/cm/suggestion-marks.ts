@@ -128,6 +128,8 @@ const theme = EditorView.baseTheme({
 		wordBreak: 'normal',
 		overflowWrap: 'anywhere',
 	},
+	// In a table cell `anywhere` also shrinks the column's minimum width, so words break mid-word; `break-word` does not.
+	'td .cm-suggestion-insert, th .cm-suggestion-insert': { overflowWrap: 'break-word' },
 	'.cm-suggestion-insert::after': { content: 'attr(data-insert)' },
 	// Presentation only: never part of the document or a copy.
 	'.cm-suggestion-insert-after': { marginLeft: '0.25em' },

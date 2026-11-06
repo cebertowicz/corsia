@@ -113,6 +113,8 @@ def _record_decision_row(
     connection, comment_id: str, *, decision: str, decided_by: str,
     decided_by_thread_id: str | None, decision_event_id: str, decided_at: str, bulk: bool = False,
 ) -> dict[str, Any]:
+    # A suggestion that already has replies stays open after it is decided, so the discussion can go on.
+    replied = connection.execute("SELECT 1 FROM doc_comments WHERE parent_id=? LIMIT 1", (comment_id,)).fetchone() is not None
     row = store.update(comment_id, {
         "decision": DECISIONS[decision],
         "decided_by": decided_by,
@@ -120,7 +122,7 @@ def _record_decision_row(
         "decided_at": decided_at,
         "decision_event_id": decision_event_id,
         "decided_in_bulk": bulk,
-        "resolved": True,
+        "resolved": not replied,
         "acked": True,
     }, db=connection)
     if row is None:

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState, StateField, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
-import { commentMarks, setCommentRanges, type CommentRange } from './comment-marks';
+import { commentMarks, commentRanges, setCommentRanges, type CommentRange } from './comment-marks';
 import { commentRail } from './comment-rail';
 import { railWidth } from './comment-clusters';
 
@@ -98,6 +98,29 @@ describe('comment rail', () => {
 		expect(buttons(view)[0]).toBe(count);
 		expect(count.querySelector('.cm-comment-dot')).toBeNull();
 		expect(count.textContent).toBe('2');
+	});
+
+	it('draws a marker dashed only when every comment in it has lost its text, with no highlight on the text', async () => {
+		const view = mount('alpha\nbeta');
+		const open = vi.fn();
+		await show(view, [{ from: 6, to: 6, id: 'gone', point: true, lost: true, onMarkerFocus: open }]);
+		expect(buttons(view)).toHaveLength(1);
+		expect(buttons(view)[0].dataset.lost).toBe('true');
+		expect(view.dom.querySelector('.cm-comment-anchor')).toBeNull();
+		await show(view, [{ from: 6, to: 6, id: 'gone', point: true, lost: true, onMarkerFocus: open }, { from: 6, to: 10, id: 'live', onMarkerFocus: open }]);
+		expect(buttons(view)[0].dataset.lost).toBeUndefined();
+		expect(view.dom.querySelectorAll('.cm-comment-anchor')).toHaveLength(1);
+		await show(view, [{ from: 6, to: 10, id: 'live', onMarkerFocus: open }]);
+		expect(buttons(view)[0].dataset.lost).toBeUndefined();
+	});
+
+	it('moves a point marker with the text around it and keeps it when that text is deleted', async () => {
+		const view = mount('alpha\nbeta\ngamma');
+		await show(view, [{ from: 6, to: 6, id: 'gone', point: true, lost: true }]);
+		view.dispatch({ changes: { from: 0, to: 0, insert: 'start ' } });
+		expect(view.state.field(commentRanges)).toMatchObject([{ id: 'gone', from: 12, to: 12 }]);
+		view.dispatch({ changes: { from: 6, to: 17 } });
+		expect(view.state.field(commentRanges)).toMatchObject([{ id: 'gone', from: 6, to: 6 }]);
 	});
 
 	it('keeps the same button, and its focus, when a regroup still holds the focused thread', async () => {

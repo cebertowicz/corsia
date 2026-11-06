@@ -72,9 +72,11 @@
 		const card = event.currentTarget as HTMLElement;
 		if (!(event.relatedTarget instanceof Node) || !card.contains(event.relatedTarget)) onHover?.(null);
 	}
-	const shownQuote = (comment: Comment) => comment.orphaned || comment.review ? null : cellLabel?.(comment) ?? null;
+	/** Its text could not be found. An accepted suggestion that stays open has no quote left by design, so it is not this. */
+	const lostText = (comment: Comment) => !!comment.orphaned && !(comment.replacement != null && comment.decision);
+	const shownQuote = (comment: Comment) => lostText(comment) || comment.review ? null : cellLabel?.(comment) ?? null;
 	// Cards keep the caller's order and one each block: a thread whose section changes only changes its heading, because moving its card would take the person out of the reply box.
-	const sectionOf = (comment: Comment) => comment.resolved ? 'Resolved' : comment.review ? 'Review comments' : comment.orphaned ? 'Text changed' : 'Open comments';
+	const sectionOf = (comment: Comment) => comment.resolved ? 'Resolved' : comment.review ? 'Review comments' : lostText(comment) ? 'Text changed' : 'Open comments';
 	const current = $derived(comments.filter((comment) => !comment.resolved || keptIds.has(comment.id)));
 	const resolved = $derived(comments.filter((comment) => comment.resolved && !keptIds.has(comment.id)));
 </script>
@@ -99,8 +101,8 @@
 			>
 				{#snippet header()}
 					{#if !region}
-						<button type="button" class="comment-jump" data-comment-jump disabled={unplaced(comment)} aria-describedby={unplaced(comment) ? `comment-placement-${comment.id}` : undefined} onclick={(event) => { event.stopPropagation(); onFocus?.(comment.id); }} aria-label={comment.orphaned || comment.review ? 'Show comment: text unavailable' : comment.anchor ? `Go to text: ${shownQuote(comment) ?? plainQuote(comment.anchor)}` : 'Go to text'}>
-							{#if comment.review || comment.orphaned}{comment.review ? 'Review comment' : 'Text changed'}{comment.anchor ? `: “${plainQuote(comment.anchor)}”` : ''}{:else}{shownQuote(comment) ?? (comment.anchor ? `“${plainQuote(comment.anchor)}”` : 'Go to text')}{/if}
+						<button type="button" class="comment-jump" data-comment-jump disabled={unplaced(comment)} aria-describedby={unplaced(comment) ? `comment-placement-${comment.id}` : undefined} onclick={(event) => { event.stopPropagation(); onFocus?.(comment.id); }} aria-label={lostText(comment) || comment.review ? 'Show comment: text unavailable' : comment.anchor ? `Go to text: ${shownQuote(comment) ?? plainQuote(comment.anchor)}` : 'Go to text'}>
+							{#if comment.review || lostText(comment)}{comment.review ? 'Review comment' : 'Text changed'}{comment.anchor ? `: “${plainQuote(comment.anchor)}”` : ''}{:else}{shownQuote(comment) ?? (comment.anchor ? `“${plainQuote(comment.anchor)}”` : 'Go to text')}{/if}
 						</button>
 					{/if}
 				{/snippet}

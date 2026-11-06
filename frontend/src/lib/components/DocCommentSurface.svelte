@@ -20,6 +20,8 @@
 	import { trackOverlaySheet } from '$lib/cm/visible-region';
 	import { createCellLabels, type WidgetLabelReader } from '$lib/docCommentLabels';
 	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
+	import { isPointerAnchor } from '$lib/docViewerClickPoint';
+	import { imageDrawerMotion } from '$lib/docCommentDrawerMotion';
 	import { imageAlt, imageGroupKey, type ImageCommentSurface, type DocImageComments } from '$lib/docImageComments';
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -184,19 +186,16 @@
 		if (!shown || !id) return;
 		void tick().then(() => scrollListToCard(drawer, id, opening));
 	});
-	/**
-	 * An image's drawer slides with the grid track its viewer animates, so it stays mounted while the track closes; with
-	 * reduced motion it crossfades instead. A document's side drawer (a canvas wide enough for a column) appears and leaves
-	 * at once; its sheet form uses AdaptiveDrawer's open/onClosed lifecycle.
-	 */
-	function drawerMotion(_node: Element, { leaving }: { leaving: boolean }) {
-		if (!isImage) return { duration: 0 };
-		const token = (name: string) => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name)) || 0;
-		const pace = leaving ? 0.7 : 1;
-		if (get(prefersReducedMotion)) return { duration: token('--dur-tight') * pace, css: (t: number) => `opacity: ${t}` };
-		return { duration: leaving ? token('--dur-drawer') * pace : 0 };
-	}
+	const drawerMotion = (_node: Element, { leaving }: { leaving: boolean }) => imageDrawerMotion(isImage, leaving);
 	function closeDrawer() { onClose(); restoreFocus(); }
+	// Resolving a decided suggestion's card ends its conversation: its text has no marker left to return to, so the card closes with it.
+	function resolveThread(id: string, resolved: boolean) {
+		onResolve(id, resolved);
+		if (resolved && surfaceState?.kind === 'thread' && surfaceState.id === id && comments.find((item) => item.id === id)?.decision) {
+			onClose();
+			if (!narrow) restoreFocus();
+		}
+	}
 	function finishSheetClose() {
 		sheet.finishClose();
 		if (!sheet.open) void tick().then(() => restoreFocus());
@@ -219,7 +218,7 @@
 		else onFocus(id);
 	}
 	const authorsWithOpenSuggestions = $derived.by(() => Object.entries(
-		comments.filter((comment) => !comment.resolved && !comment.orphaned && comment.replacement !== null && comment.replacement !== undefined)
+		comments.filter((comment) => !comment.resolved && !comment.decision && !comment.orphaned && comment.replacement !== null && comment.replacement !== undefined)
 			.reduce<Record<string, DocComment[]>>((groups, comment) => ({ ...groups, [comment.author]: [...(groups[comment.author] ?? []), comment] }), {})
 	).filter(([, suggestions]) => suggestions.length >= 2));
 	// Whose accept-all is running. It disables every accept-all on purpose, across documents: one request at a time.
@@ -322,7 +321,7 @@
 			</div>
 			{#if outcome.acceptAllError}<div class="suggestion-error" role="alert">{outcome.acceptAllError}</div>{/if}
 		{/if}
-		<CommentList docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={displayed} {cellLabel} documentOrder={sheet.state?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+		<CommentList docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={displayed} {cellLabel} documentOrder={sheet.state?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} onResolve={resolveThread} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
 {#snippet rowHost(above = true)}<div class="rb-sheet-host" class:above hidden={typing}>{#if reviewVisible && reviewBar}{@render reviewBar(true)}{/if}</div>{/snippet}
@@ -352,7 +351,7 @@
 	{:else if surfaceState?.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
 	{:else if narrow && sheet.state}<AdaptiveDrawer bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose} above={rowHost}>{@render content()}</AdaptiveDrawer>
-	{:else if surfaceState}<Popover anchor={cardAnchor} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} sideKey={surfaceState.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
+	{:else if surfaceState}<Popover anchor={cardAnchor} placement={isPointerAnchor(anchor) ? 'pointer' : 'right'} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} sideKey={surfaceState.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
 {/if}
 
 <style>

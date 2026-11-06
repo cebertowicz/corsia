@@ -39,6 +39,9 @@ export function canvasFocusedCommentScrollTarget(current: CanvasScrollTarget | n
 const openSuggestion = (comment: DocComment) =>
 	comment.replacement != null && !comment.decision && !comment.resolved && !comment.review && !comment.orphaned;
 
+/** A suggestion that was accepted or rejected but stays an open conversation: it has replies, and nobody has resolved it. */
+export const decidedOpen = (comment: DocComment) => comment.replacement != null && !!comment.decision && !comment.resolved && !comment.review;
+
 /** The agent's presence colour: the thread that wrote the suggestion, the same source as its caret. */
 const suggestionColor = (comment: DocComment) => agentColor(comment.authorThreadId || comment.author);
 
@@ -49,8 +52,17 @@ const suggestionColor = (comment: DocComment) => agentColor(comment.authorThread
  */
 export function canvasCommentHighlights(comments: DocComment[], text: string, focusedId: string | null, onMarkerFocus: CommentRange['onMarkerFocus'], accepting: string | null = null): CommentRange[] {
 	let inlineEnd = -1;
-	return comments.filter((comment) => (!comment.resolved || comment.id === focusedId) && !(comment.replacement != null && comment.decision)).flatMap((comment) => {
+	return comments.filter((comment) => (!comment.resolved || comment.id === focusedId) && !(comment.replacement != null && comment.decision && comment.resolved)).flatMap((comment): CommentRange[] => {
 		const anchorRange = canvasCommentRange(comment, text);
+		// With no passage to mark, a comment keeps a margin marker at the line its text last was: one whose original text is gone (dashed), a decided
+		// suggestion that is still open (its quote was replaced), and the suggestion whose Accept is in flight while its replacement stands in the quote's place.
+		if (!anchorRange && !comment.resolved && !comment.review && comment.regionNumber == null && comment.from != null) {
+			const lost = !!comment.detached && !decidedOpen(comment);
+			if (lost || decidedOpen(comment) || (comment.id === accepting && !comment.orphaned)) {
+				const at = Math.min(Math.max(comment.from, 0), text.length);
+				return [{ from: at, to: at, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasUnread(comment), onMarkerFocus, point: true, lost }];
+			}
+		}
 		if (!anchorRange) return [];
 		const range = comment.insertAfter && openSuggestion(comment) ? { from: anchorRange.to, to: anchorRange.to } : anchorRange;
 		let suggestion: InlineSuggestion | undefined;
@@ -71,13 +83,24 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
  * remains in the text.
  */
 export function commentSurfaceStatus(comments: DocComment[]) {
+	// An accepted suggestion that is still open has no quote left by design: its text is not text that could not be placed.
+	const lost = (comment: DocComment) => comment.orphaned && !comment.resolved && !decidedOpen(comment);
 	return {
 		commentCount: comments.filter((comment) => !comment.resolved || hasUnread(comment)).length,
-		orphanedCount: comments.filter((comment) => comment.orphaned && !comment.resolved).length,
-		replaceableCount: comments.filter((comment) => comment.orphaned && !comment.resolved && !comment.detached).length,
+		orphanedCount: comments.filter(lost).length,
+		replaceableCount: comments.filter((comment) => lost(comment) && !comment.detached).length,
 		placementReloading: comments.some((comment) => comment.placementReloading),
 		placementReloadError: comments.some((comment) => comment.placementReloadError),
 	};
+}
+
+/**
+ * A live-tracked comment keeps its two ends where the text moves them: an edit inside its range keeps the thread on the words now inside
+ * (the server does the same, so a reload agrees), and text typed just outside is not part of it. A suggestion is left out: its quote is
+ * the text it replaces, so rewriting it would change what it proposes.
+ */
+function followsText(comment: DocComment, text: string): comment is DocComment & { from: number; to: number } {
+	return !!comment.drawn && !comment.review && comment.replacement == null && comment.from != null && comment.to != null && comment.to > comment.from && comment.to <= text.length;
 }
 
 /**
@@ -89,12 +112,17 @@ export function commentSurfaceStatus(comments: DocComment[]) {
  * A live row not yet placed (4.2) is never orphaned; it sorts by the server's offset.
  * Orphaned cards sort after located ones. Comments on one image read in their tags' number order (FR13.6).
  */
-export function commentsInDocumentOrder(comments: DocComment[], text: string, refused: Record<string, string> = {}): DocComment[] {
+export function commentsInDocumentOrder(comments: DocComment[], text: string, refused: Record<string, string> = {}, accepting: string | null = null): DocComment[] {
 	const at = (comment: DocComment) => (unplaced(comment) ? comment.from : canvasCommentRange(comment, text)?.from) ?? Infinity;
 	const sameImage = (a: DocComment, b: DocComment) => (a.regionNumber != null && b.regionNumber != null && a.imageSrc === b.imageSrc ? a.regionNumber - b.regionNumber : 0);
-	return comments.map((comment) => {
-		const orphaned = !comment.review && !unplaced(comment) && (comment.id in refused || rangeFor(comment, text) === null);
-		const detached = orphaned && (!comment.anchor || !text.includes(comment.anchor));
+	// Accept puts the replacement where the quote was before its decision lands, so the quote's absence is not an outside edit.
+	const replaced = (comment: DocComment) => comment.id === accepting && comment.replacement != null && comment.from != null && text.slice(comment.from, comment.from + comment.replacement.length) === comment.replacement;
+	return comments.map((listed) => {
+		const comment = followsText(listed, text) ? { ...listed, anchor: text.slice(listed.from, listed.to) } : listed;
+		const orphaned = !comment.review && !unplaced(comment) && (comment.id in refused || (rangeFor(comment, text) === null && !replaced(comment)));
+		// The original text is gone: the range collapsed (everything in it was deleted), or the quote is nowhere in the document.
+		const collapsed = !!comment.drawn && comment.from != null && comment.from === comment.to && !(comment.replacement != null && comment.decision);
+		const detached = orphaned && (collapsed || !comment.anchor || !text.includes(comment.anchor));
 		return { ...comment, orphaned, detached };
 	}).sort((a, b) => at(a) - at(b) || sameImage(a, b) || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id));
 }

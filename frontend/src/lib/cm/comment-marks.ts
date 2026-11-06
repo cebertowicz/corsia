@@ -25,6 +25,10 @@ export interface CommentRange {
 	replyWaiting?: boolean;
 	onMarkerFocus?: (ids: string[], opener: HTMLElement, anchor?: () => DOMRect | null) => void;
 	suggestion?: InlineSuggestion;
+	/** A point, not a passage: drawn as a margin marker only, with no highlight (text deleted, or a decided suggestion whose quote was replaced). */
+	point?: boolean;
+	/** The comment's original text is gone from the document: its margin marker is drawn dashed. */
+	lost?: boolean;
 }
 
 export const setCommentRanges = StateEffect.define<CommentRange[]>();
@@ -33,7 +37,7 @@ const anchor = Decoration.mark({ class: 'cm-comment-anchor' });
 const anchorFocused = Decoration.mark({ class: 'cm-comment-anchor cm-comment-focused' });
 
 // A suggestion with an empty quote is a pure insertion: its range is a point.
-const located = (range: CommentRange) => range.from < range.to || (range.suggestion !== undefined && range.from === range.to);
+const located = (range: CommentRange) => range.from < range.to || (range.suggestion !== undefined && range.from === range.to) || (!!range.point && range.from === range.to);
 const holdsQuote = (range: CommentRange, text: { sliceString(from: number, to: number): string }) =>
 	!range.suggestion || text.sliceString(range.from, range.to) === range.suggestion.quote;
 
@@ -50,7 +54,7 @@ export const commentRanges = StateField.define<CommentRange[]>({
 		}
 		if (!tr.docChanged) return ranges;
 		return ranges
-			.map((range) => ({ ...range, from: tr.changes.mapPos(range.from, 1), to: tr.changes.mapPos(range.to, -1) }))
+			.map((range) => range.point ? { ...range, from: tr.changes.mapPos(range.from, -1), to: tr.changes.mapPos(range.from, -1) } : { ...range, from: tr.changes.mapPos(range.from, 1), to: tr.changes.mapPos(range.to, -1) })
 			.filter((range) => located(range) && holdsQuote(range, tr.newDoc));
 	}
 });
@@ -59,7 +63,7 @@ export const commentRanges = StateField.define<CommentRange[]>({
 export const commentMarks = [
 	commentRanges,
 	EditorView.decorations.compute([commentRanges], (state): DecorationSet =>
-		Decoration.set(state.field(commentRanges).filter((range) => !range.suggestion)
+		Decoration.set(state.field(commentRanges).filter((range) => !range.suggestion && !range.point)
 			.map((range) => (range.focused ? anchorFocused : anchor).range(range.from, range.to)), true)),
 ];
 

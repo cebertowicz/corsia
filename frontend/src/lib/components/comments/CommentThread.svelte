@@ -18,6 +18,8 @@
 		createdAt?: string;
 		resolved: boolean;
 		orphaned?: boolean;
+		/** The original text is gone from the document: the card says so, and keeps the old text in quotes. */
+		detached?: boolean;
 		acked?: boolean;
 		replacement?: string | null;
 		insertAfter?: boolean;
@@ -38,6 +40,9 @@
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { agentColor } from '$lib/docPresence';
 	import CommentMeta from './CommentMeta.svelte';
+	import CommentSuggestionActions from './CommentSuggestionActions.svelte';
+	import CommentQuote from './CommentQuote.svelte';
+	import { plainQuote } from '$lib/plainQuote';
 	import NewMarker from './NewMarker.svelte';
 	import CommentPlacementLine from './CommentPlacementLine.svelte';
 	import ReplyField from './ReplyField.svelte';
@@ -107,9 +112,10 @@
 	const avatarColor = $derived(author.kind === 'agent' && comment.authorThreadId ? agentColor(comment.authorThreadId) : author.color);
 
 	const isSuggestion = $derived(comment.replacement !== undefined && comment.replacement !== null);
+	/** Accepted or rejected, but still a conversation: it has replies and nobody resolved it. The card shows the conversation, not the edit. */
+	const decidedOpen = $derived(isSuggestion && !!comment.decision && !comment.resolved);
 	const suggestionDiff = $derived(isSuggestion ? lineDiff(comment.insertAfter ? '' : comment.anchor, comment.replacement!) : null);
 	let replyPosting = $state(false);
-	let decisionBusy = $state<'accept' | 'reject' | null>(null);
 	let resolvedOpen = $state(untrack(() => !viewEachUnread && (!!comment.newComment || !!comment.newReplyIds?.length)));
 	$effect(() => { if (!viewEachUnread && (comment.newComment || comment.newReplyIds?.length)) resolvedOpen = true; });
 	let el = $state<HTMLElement>();
@@ -220,16 +226,6 @@
 		if ((event.target as Element).closest('a') || !window.getSelection()?.isCollapsed) return;
 		onFocus?.();
 	}
-	async function decide(decision: 'accept' | 'reject') {
-		if (readOnly || decisionBusy || (decision === 'accept' && comment.orphaned)) return;
-		openThread();
-		decisionBusy = decision;
-		try {
-			await onDecision?.(comment.id, decision);
-		} finally {
-			decisionBusy = null;
-		}
-	}
 </script>
 
 <svelte:window onvisibilitychange={onVisibilityChange} />
@@ -244,7 +240,7 @@
 	</button>
 {/snippet}
 
-{#if isSuggestion && comment.decision}
+{#if isSuggestion && comment.decision && !decidedOpen}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 	<div class="ct resolved" class:drawerCard class:focused bind:this={el} role="region" aria-label="{comment.decision} suggestion by {author.name}" onclick={openThread} onfocusin={openFromFocus}>
 		{@render header?.()}
@@ -276,7 +272,7 @@
 	</div>
 {:else}
 	<!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-	<div class="ct" class:flat class:focused class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned} bind:this={el} role="region" aria-label="Comment by {author.name}" onclick={(event) => { openThread(); if (onFocus) pressCard(event); }} onfocusin={openFromFocus}>
+	<div class="ct" class:flat class:focused class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned && !decidedOpen} bind:this={el} role="region" aria-label={decidedOpen ? `Suggestion ${comment.decision}` : `Comment by ${author.name}`} onclick={(event) => { openThread(); if (onFocus) pressCard(event); }} onfocusin={openFromFocus}>
 		{@render header?.()}
 		<div class="ct-head">
 			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
@@ -291,6 +287,8 @@
 				<button class="ct-act ack" transition:clipFade={{ axis: 'x' }} class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); openThread(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree" title="Agree">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><path d="M7 11l4-7a2 2 0 0 1 3 2l-1 5h5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 16.8 21H7" /></svg>
 				</button>
+			{/if}
+			{#if (!isSuggestion && !comment.resolved) || decidedOpen}
 				<button class="ct-act resolve" transition:clipFade={{ axis: 'x' }} disabled={readOnly} onclick={(e) => { e.stopPropagation(); openThread(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
 				</button>
@@ -298,20 +296,17 @@
 		</div>
 		<CommentPlacementLine {comment} />
 
-		{#if isSuggestion}
+		{#if decidedOpen}
+			<div class="ct-decided"><svg class="ct-{comment.decision === 'accepted' ? 'check' : 'cross'}" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={comment.decision === 'accepted' ? 'M20 6L9 17l-5-5' : 'M18 6L6 18M6 6l12 12'} /></svg>Suggestion {comment.decision}</div>
+			{#if comment.text}<CommentMarkdownBody text={comment.text} />{/if}
+		{:else if isSuggestion}
 			{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
 			{#if comment.orphaned}<div class="ct-orphan">The text this suggestion replaces has changed.</div>{/if}
 			{#if comment.text}<CommentMarkdownBody text={comment.text} />{/if}
-			{#if !readOnly}
-				<div class="ct-suggestion-actions">
-					<button class="ct-suggestion-accept" aria-busy={decisionBusy === 'accept'} disabled={decisionBusy !== null || comment.orphaned} title={comment.orphaned ? 'The text this suggestion replaces has changed.' : undefined} onclick={(e) => { e.stopPropagation(); decide('accept'); }}>{decisionBusy === 'accept' ? 'Accepting…' : 'Accept'}</button>
-					<button class="ct-link" aria-busy={decisionBusy === 'reject'} disabled={decisionBusy !== null} onclick={(e) => { e.stopPropagation(); decide('reject'); }}>{decisionBusy === 'reject' ? 'Rejecting…' : 'Reject'}</button>
-				</div>
-			{/if}
-			{#if decisionError}<div class="ct-decision-error" role="alert">{decisionError}</div>{/if}
+			<CommentSuggestionActions orphaned={!!comment.orphaned} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />
 		{:else}
 			{#if comment.resolved}<div transition:clipFade><ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} /></div>{/if}
-			{#if comment.orphaned && !hideOrphan}<div class="ct-orphan">The text this comment was on has changed</div>{/if}
+			{#if comment.orphaned && !hideOrphan}{#if comment.detached && comment.anchor}<CommentQuote quote={plainQuote(comment.anchor)} />{/if}<div class="ct-orphan" data-detached={comment.detached || undefined}>{comment.detached ? 'Original text deleted' : 'The text this comment was on has changed'}</div>{/if}
 			{#if comment.regionStale}
 				<div class="ct-orphan" data-region-stale>Image changed since this comment{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
 			{/if}
@@ -361,6 +356,7 @@
 	.ct-act.resolve:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 	.ct-orphan { font-size: var(--text-caption); color: var(--amber); }
+	.ct-decided { display: flex; align-items: center; gap: 6px; font-size: var(--text-footnote); color: var(--text-secondary); text-transform: none; }
 	/* An image comment's number, in its tag's colour and shape. */
 	.ct-num {
 		box-sizing: border-box; flex-shrink: 0; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--radius-2xs);
@@ -371,13 +367,14 @@
 	button.ct-num:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	/* A 44 px target around the 18 px number on touch. */
 	@media (pointer: coarse) { button.ct-num::before { content: ''; position: absolute; inset: -13px; } }
-	.ct-suggestion-actions { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
-	.ct-suggestion-accept { font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-on-fill); background: var(--accent-fill); border: none; border-radius: var(--radius-xs); padding: 5px 10px; cursor: pointer; }
-	.ct-suggestion-accept:disabled, .ct-link:disabled { opacity: 0.55; cursor: not-allowed; }
-	.ct-suggestion-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
-	.ct-suggestion-accept:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); opacity: 1; }
-	.ct-link:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }
-	.ct-decision-error { font-size: var(--text-caption); color: var(--red-text); }
+	.ct-link:disabled { opacity: 0.55; cursor: not-allowed; }
+	:global(.ct-suggestion-actions) { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+	:global(.ct-suggestion-accept) { font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-on-fill); background: var(--accent-fill); border: none; border-radius: var(--radius-xs); padding: 5px 10px; cursor: pointer; }
+	:global(.ct-suggestion-accept:disabled) { opacity: 0.55; cursor: not-allowed; }
+	:global(.ct-suggestion-actions button:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
+	:global(.ct-suggestion-accept:disabled[aria-busy="true"]) { color: var(--text-primary); background: var(--accent-wash); opacity: 1; }
+	:global(.ct-link:disabled[aria-busy="true"]) { color: var(--text-primary); background: var(--accent-wash); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }
+	:global(.ct-decision-error) { font-size: var(--text-caption); color: var(--red-text); }
 
 	.ct-agreed { display: flex; align-items: center; gap: 5px; font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--green); margin-top: 2px; }
 

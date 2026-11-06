@@ -196,6 +196,13 @@ def create_with_status(
         r = dict(row)
         _check_existing_identity(r, artifact_id, author, cid)
         created = inserted.rowcount == 1
+        if created and parent_id:
+            # A decided suggestion stays open while it has replies: the first reply to one that closed with its decision reopens it.
+            connection.execute(
+                """UPDATE doc_comments SET resolved=0 WHERE id=? AND decision IS NOT NULL AND resolved=1
+                   AND (SELECT COUNT(*) FROM doc_comments WHERE parent_id=?)=1""",
+                (r["parent_id"], r["parent_id"]),
+            )
         if created:
             # Only a new top-level agent comment or suggestion names itself; replies and user comments do not.
             named = author_kind == "agent" and author_thread_id and not parent_id
@@ -261,7 +268,7 @@ def set_stranded_notice(comment_id: str, at: str | None, *, db=None) -> None:
 
 
 def update_positions(artifact_id: str, updates: list[dict], *, db=None) -> int:
-    """Batch-persist remapped anchor offsets and optionally refreshed context."""
+    """Batch-persist remapped anchor offsets and optionally refreshed context and quote."""
     now = _now()
     with write_transaction(db, scope="update_doc_comment_positions") as connection:
         n = 0
@@ -271,6 +278,9 @@ def update_positions(artifact_id: str, updates: list[dict], *, db=None) -> int:
             if "anchor_prefix" in u:
                 sets.extend(["anchor_prefix=?", "anchor_suffix=?"])
                 params.extend([u["anchor_prefix"], u["anchor_suffix"]])
+            if "anchor_text" in u:
+                sets.append("anchor_text=?")
+                params.append(u["anchor_text"])
             sets.append("updated_at=?")
             params.extend([now, u.get("id"), artifact_id])
             cur = connection.execute(

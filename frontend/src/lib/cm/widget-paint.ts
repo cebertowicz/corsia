@@ -1,9 +1,12 @@
 import { cellElement } from './widget-blocks';
 import { clean, intersectsCell, occurrences, tableCells } from './widget-cells';
+import { colourStyle } from './suggestion-marks';
 
-export interface Mark { from: number; to: number; id: string; kind: 'placed' | 'focused' | 'pending' }
+/** An open suggestion drawn inside a table cell: the quote struck through, the insert after it, as in body text. */
+export interface CellSuggestion { insert: string; color: string; busy?: boolean }
+export interface Mark { from: number; to: number; id: string; kind: 'placed' | 'focused' | 'pending'; suggestion?: CellSuggestion }
 
-const CLASSES = ['cm-comment-anchor', 'cm-comment-focused', 'cm-comment-pending', 'cm-comment-block', 'cm-comment-block-focused', 'cm-comment-block-pending'];
+const CLASSES = ['cm-suggestion-del', 'cm-suggestion-focus', 'cm-comment-anchor', 'cm-comment-focused', 'cm-comment-pending', 'cm-comment-block', 'cm-comment-block-focused', 'cm-comment-block-pending'];
 
 const PAINTED = [...CLASSES.map((name) => `.${name}`), '[data-comment-ids]'].join(',');
 
@@ -24,6 +27,7 @@ export function commentIdsAt(widget: HTMLElement, target: Element): string[] {
 }
 
 export function unpaint(el: HTMLElement) {
+	for (const insert of el.querySelectorAll<HTMLElement>('span.cm-suggestion-insert')) insert.remove();
 	for (const wrap of el.querySelectorAll<HTMLElement>('span.cm-comment-wrap')) wrap.replaceWith(...wrap.childNodes);
 	for (const marked of [el, ...el.querySelectorAll<HTMLElement>(PAINTED)]) {
 		marked.classList.remove(...CLASSES);
@@ -80,6 +84,7 @@ export function wrapRange(range: Range, mark: Mark, interactivePending = false) 
 	const nodes: Text[] = [];
 	for (let node = walker.nextNode(); node; node = walker.nextNode()) if (range.intersectsNode(node)) nodes.push(node as Text);
 	if (range.commonAncestorContainer.nodeType === Node.TEXT_NODE) nodes.push(range.commonAncestorContainer as Text);
+	const wraps: HTMLElement[] = [];
 	for (const text of new Set(nodes)) {
 		const part = document.createRange();
 		part.selectNodeContents(text);
@@ -87,13 +92,30 @@ export function wrapRange(range: Range, mark: Mark, interactivePending = false) 
 		if (text === range.endContainer) part.setEnd(text, range.endOffset);
 		if (part.collapsed) continue;
 		const wrap = document.createElement('span');
-		wrap.className = ['cm-comment-wrap', ...markClasses(mark.kind)].join(' ');
+		wrap.className = ['cm-comment-wrap', ...(mark.suggestion ? ['cm-suggestion-del', ...(mark.kind === 'focused' ? ['cm-suggestion-focus'] : [])] : markClasses(mark.kind))].join(' ');
+		if (mark.suggestion) { wrap.setAttribute('style', colourStyle(mark.suggestion.color)); wrap.dataset.suggestionId = mark.id; }
 		addCommentId(wrap, mark);
 		if (interactivePending && mark.kind === 'pending') wrap.dataset.commentIds = mark.id;
 		wrap.dataset.commentAria = 'true';
 		wrap.setAttribute('aria-label', `Commented text: ${clean(part.toString())}`);
 		part.surroundContents(wrap);
+		wraps.push(wrap);
 	}
+	const last = wraps[wraps.length - 1];
+	if (mark.suggestion && last) last.after(suggestionInsert(mark, mark.suggestion));
+}
+
+/** The inserted text of a suggestion in a cell: drawn by CSS from an attribute, so it is neither selectable nor part of the cell's text. */
+function suggestionInsert(mark: Mark, suggestion: CellSuggestion): HTMLElement {
+	const insert = document.createElement('span');
+	insert.className = ['cm-suggestion-insert', 'cm-suggestion-insert-after', ...(mark.kind === 'focused' ? ['cm-suggestion-focus'] : [])].join(' ');
+	insert.setAttribute('style', colourStyle(suggestion.color));
+	insert.dataset.suggestionId = mark.id;
+	insert.dataset.insert = suggestion.insert;
+	insert.contentEditable = 'false';
+	insert.setAttribute('aria-hidden', 'true');
+	addCommentId(insert, mark);
+	return insert;
 }
 
 export function paintTable(el: HTMLElement, base: number, src: string, marks: Mark[]) {
@@ -109,7 +131,7 @@ export function paintTable(el: HTMLElement, base: number, src: string, marks: Ma
 		for (const span of hit) {
 			const cell = cellElement(el, span);
 			if (!cell) continue;
-			const inside = hit.length === 1 && (from > span.from || to < span.to);
+			const inside = hit.length === 1 && (from > span.from || to < span.to || !!mark.suggestion);
 			const text = src.slice(span.from, span.to), part = src.slice(Math.max(from, span.from), Math.min(to, span.to));
 			const rendered = cell.textContent ?? '';
 			const inSource = occurrences(text, part);

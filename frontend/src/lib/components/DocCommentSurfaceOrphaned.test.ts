@@ -229,6 +229,8 @@ describe('what the user sees for each way a suggestion card is attached or orpha
 	const ATTACHED = { section: 'Open comments', accept: true, highlighted: true, jump: { from: 4, to: 9 }, order: ['comment-1', 'located'] };
 	const SHIFTED = { ...ATTACHED, jump: { from: 8, to: 13 } };
 	const ORPHANED = { section: 'Text changed', accept: false, highlighted: false, jump: null, order: ['located', 'comment-1'] };
+	// The quote is nowhere in the document: the card keeps a margin marker at the line it was on, a point rather than a passage, so there is still nothing to jump to.
+	const LOST = { ...ORPHANED, highlighted: true };
 	// A comment further down whose text never changes, to sort against.
 	const located = serverRow(false, { id: 'located', anchor_text: 'fox', from_off: 16, to_off: 19, replacement: null });
 	async function load(orphaned: boolean) {
@@ -258,11 +260,11 @@ describe('what the user sees for each way a suggestion card is attached or orpha
 	it.each([
 		{ row: 'attached', server: false, drive: () => {}, sees: ATTACHED, alert: null },
 		{ row: 'server-orphaned, quote still on screen', server: true, drive: () => {}, sees: ATTACHED, alert: null },
-		{ row: 'screen-orphaned, server placed it', server: false, drive: breakQuote, sees: ORPHANED, alert: null },
-		{ row: 'orphaned by both', server: false, drive: async () => { breakQuote(); await load(true); }, sees: ORPHANED, alert: null },
+		{ row: 'screen-orphaned, server placed it', server: false, drive: breakQuote, sees: LOST, alert: null },
+		{ row: 'orphaned by both', server: false, drive: async () => { breakQuote(); await load(true); }, sees: LOST, alert: null },
 		{ row: 'server-orphaned, then an edit before the quote', server: true, drive: editBefore, sees: SHIFTED, alert: null },
 		{ row: 'server-orphaned, then an edit after the quote', server: true, drive: editAfter, sees: ATTACHED, alert: null },
-		{ row: 'server-orphaned, then an edit that breaks the quote', server: true, drive: breakQuote, sees: ORPHANED, alert: null },
+		{ row: 'server-orphaned, then an edit that breaks the quote', server: true, drive: breakQuote, sees: LOST, alert: null },
 		{ row: 'server-orphaned, then the quote broken and restored exactly', server: true, drive: breakAndRestore, sees: ATTACHED, alert: null },
 		{ row: 'server-orphaned, then a programmatic sync', server: true, drive: programmaticSync, sees: ATTACHED, alert: null },
 		{ row: 'unsaved typing, then a load that reports it orphaned', server: false, drive: async () => { editAfter(); await load(true); }, sees: ATTACHED, alert: null },
@@ -272,7 +274,7 @@ describe('what the user sees for each way a suggestion card is attached or orpha
 		{ row: 'refused accept, then a load that fails', server: false, drive: refusedThen(() => anotherLoad('fails')), sees: ORPHANED, alert: STALE },
 		{ row: 'refused accept, then an edit before the quote', server: false, drive: refusedThen(editBefore), sees: ORPHANED, alert: STALE },
 		{ row: 'refused accept, then an edit after the quote', server: false, drive: refusedThen(editAfter), sees: ORPHANED, alert: STALE },
-		{ row: 'refused accept, then an edit that breaks the quote', server: false, drive: refusedThen(breakQuote), sees: ORPHANED, alert: STALE },
+		{ row: 'refused accept, then an edit that breaks the quote', server: false, drive: refusedThen(breakQuote), sees: LOST, alert: STALE },
 		{ row: 'refused accept, then the quote broken and restored exactly', server: false, drive: refusedThen(breakAndRestore), sees: ORPHANED, alert: STALE },
 		{ row: 'refused accept, then typing and a save', server: false, drive: refusedThen(typeAndSave), sees: ORPHANED, alert: STALE },
 		{ row: 'refused accept, then a failed reject (its error shows over the refusal)', server: false, drive: refusedThen(failedReject), sees: ORPHANED, alert: 'Network down' },

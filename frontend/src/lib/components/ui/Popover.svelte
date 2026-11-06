@@ -15,7 +15,7 @@
 		onClose: () => void;
 		onClosed?: () => void;
 		restoreFocus?: () => void;
-		placement?: 'right' | 'bottom' | 'bottom-end';
+		placement?: 'right' | 'bottom' | 'bottom-end' | 'pointer';
 		/** Make the content a column bounded by the popover, so one child can shrink and scroll while the rest stay in view. */
 		fill?: boolean;
 		/** A CSS width for a card that should span the column of text it covers, instead of the default card width. */
@@ -89,6 +89,15 @@
 			'avoid-below': [under, (avoided?.bottom ?? rect.bottom) + gap],
 			'avoid-above': [under, (avoided?.top ?? rect.top) - height - gap],
 		};
+		if (placement === 'pointer') {
+			// Opened by a click: `rect` is the clicked line's box at the pointer's x. The card's top sits `--space-1` under that box (the line's own half-leading, so no glyph of the next line peeks out) and to the pointer's right; near the right edge it flips left, near the bottom it flips above the line.
+			const reach = 12, drop = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--space-1')) || 4;
+			const beside = rect.right + reach + width <= area.right - gap ? rect.right + reach : rect.left - reach - width;
+			const down = rect.bottom + drop + height <= area.bottom - gap ? rect.bottom + drop : rect.top - drop - height;
+			style = `left: ${Math.max(area.left + gap, Math.min(beside, area.right - width - gap))}px; top: ${Math.max(area.top + gap, Math.min(down, area.bottom - height - gap))}px; max-width: ${width}px;`;
+			if (onPlace) void tick().then(() => requestAnimationFrame(() => { if (surface) onPlace(surface); }));
+			return;
+		}
 		const overflowsBelow = rect.bottom + gap + height > area.bottom - gap;
 		const fitsAbove = rect.top - gap - height >= area.top + gap;
 		let side: Side = 'below';

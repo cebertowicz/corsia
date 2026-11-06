@@ -7,7 +7,7 @@ import sqlite3
 
 from doceditor import comments as store
 from doceditor.doc_text import read_doc_text
-from doceditor.quote_anchor import anchor_context, reanchor
+from doceditor.quote_anchor import _cp_at_u16, anchor_context, reanchor
 
 log = logging.getLogger(__name__)
 
@@ -23,11 +23,23 @@ def _anchored_quote(comment: dict) -> str:
     return comment["anchor_text"]
 
 
+def _text_in_range(text: str, from16: int, to16: int) -> str:
+    """The text between two UTF-16 offsets, or "" for a collapsed or invalid range."""
+    start, end = _cp_at_u16(text, from16), _cp_at_u16(text, to16)
+    return text[start:end] if start is not None and end is not None and end > start else ""
+
+
 def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict]:
     """Resolve one text snapshot; callers choose when its offsets are persisted.
 
     A decided suggestion is never orphaned: its decision closed it, so losing
     its place keeps the offsets it has.
+
+    A comment whose live range still holds text keeps its place when the text
+    inside the range changes: the anchor is the range's two ends, and the text
+    between them becomes its new quote. Only a collapsed range, with all of its
+    text gone, orphans. A suggestion's quote is the text it replaces, so a
+    suggestion keeps the quote rule.
     """
     updates: list[dict] = []
     for comment in threads:
@@ -36,6 +48,9 @@ def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict
         quote = _anchored_quote(comment)
         undecided = not comment.get("decision")
         resolved = (ranges or {}).get(comment["id"])
+        tracked = resolved is not None
+        if tracked and undecided and not comment.get("replacement"):
+            quote = _text_in_range(text, *resolved) or quote
         if resolved is None:
             resolved = reanchor(
                 text, quote, from16=comment["from_off"], to16=comment["to_off"],
@@ -56,11 +71,17 @@ def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict
         prefix, suffix = context
         prior = (comment.get("from_off"), comment.get("to_off"),
                  comment.get("anchor_prefix"), comment.get("anchor_suffix"))
+        requoted = undecided and quote != comment["anchor_text"]
         comment.update(from_off=from_off, to_off=to_off, anchor_prefix=prefix,
                        anchor_suffix=suffix, orphaned=False)
-        if prior != (from_off, to_off, prefix, suffix):
-            updates.append({"id": comment["id"], "from_off": from_off, "to_off": to_off,
-                            "anchor_prefix": prefix, "anchor_suffix": suffix})
+        if requoted:
+            comment["anchor_text"] = quote
+        if prior != (from_off, to_off, prefix, suffix) or requoted:
+            update = {"id": comment["id"], "from_off": from_off, "to_off": to_off,
+                      "anchor_prefix": prefix, "anchor_suffix": suffix}
+            if requoted:
+                update["anchor_text"] = quote
+            updates.append(update)
     return updates
 
 

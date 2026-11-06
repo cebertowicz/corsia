@@ -61,7 +61,8 @@ describe('orphaned is the text on screen, plus a refused accept', () => {
 		const row = rows.find((item) => item.id === 'card')!;
 		expect(row.orphaned).toBe(orphaned);
 		// The card, the mark, the jump and the order agree: an orphaned card has no place in the text.
-		expect(canvasCommentHighlights([row], text, null, undefined)).toHaveLength(orphaned ? 0 : 1);
+		// Except that a comment whose text is gone from the document keeps a marker at the line it was on.
+		expect(canvasCommentHighlights([row], text, null, undefined)).toHaveLength(orphaned && !row.detached ? 0 : 1);
 		expect(canvasCommentRange(row, text)).toEqual(orphaned ? null : { from: 5, to: 10 });
 		expect(rows.map((item) => item.id)).toEqual(orphaned ? ['located', 'card'] : ['card', 'located']);
 	});
@@ -148,18 +149,21 @@ describe('inline suggestions in the highlight ranges', () => {
 		expect(highlights([suggestion('s1', 8, quote, { replacement: '' })])[0].suggestion).toMatchObject({ insert: '' });
 	});
 
+	it('draws nothing for a resolved suggestion', () => {
+		expect(highlights([suggestion('s1', 8, quote, { resolved: true })])).toEqual([]);
+	});
+
 	it.each([
 		['accepted', { decision: 'accepted' as const }],
 		['rejected', { decision: 'rejected' as const }],
-		['resolved', { resolved: true }],
-	])('draws nothing for a %s suggestion', (_name, overrides) => {
-		expect(highlights([suggestion('s1', 8, quote, overrides)])).toEqual([]);
+	])('draws a %s suggestion that is still open as a plain comment mark, with no inline suggestion', (_name, overrides) => {
+		expect(highlights([suggestion('s1', 8, quote, overrides)])).toMatchObject([{ id: 's1', from: 8, to: 8 + quote.length, suggestion: undefined }]);
 	});
 
-	it('draws nothing for a suggestion whose quote no longer matches the text on screen', () => {
+	it('marks a suggestion whose quote no longer matches the text on screen at the line it was on, not as a passage', () => {
 		const rows = commentsInDocumentOrder([suggestion('s1', 8, quote)], 'Before. The team changed its mind. After.');
 		expect(rows[0].orphaned).toBe(true);
-		expect(canvasCommentHighlights(rows, 'Before. The team changed its mind. After.', null, undefined)).toEqual([]);
+		expect(canvasCommentHighlights(rows, 'Before. The team changed its mind. After.', null, undefined)).toMatchObject([{ id: 's1', from: 8, to: 8, point: true, lost: true }]);
 	});
 });
 
@@ -197,5 +201,71 @@ describe('awaitsFirstMark', () => {
 		expect(awaitsFirstMark(comment('a', 0, 'x', { placement: 'not_placed' }), false)).toBe(false);
 		expect(awaitsFirstMark(comment('a', 0, 'x', { orphaned: true }), false)).toBe(false);
 		expect(awaitsFirstMark(undefined, false)).toBe(false);
+	});
+});
+
+describe('a comment whose text was deleted keeps a marker at the nearest line', () => {
+	const text = 'Lunch is at noon.\nTrain leaves at nine.';
+	const gone = (overrides: Partial<DocComment> = {}) => comment('gone', 18, 'two extra liters', { to: 18, drawn: true, placement: 'placed', ...overrides });
+
+	it('reads as detached when the text is nowhere in the document', () => {
+		const [row] = commentsInDocumentOrder([comment('gone', 18, 'two extra liters')], text);
+		expect(row).toMatchObject({ orphaned: true, detached: true });
+	});
+
+	it('reads as detached when everything inside its range was deleted', () => {
+		const [row] = commentsInDocumentOrder([gone({ anchor: 'Train' })], text);
+		expect(row).toMatchObject({ orphaned: true, detached: true });
+	});
+
+	it('draws a point marker flagged lost at the position the text was, with its reply-waiting dot', () => {
+		const replies = [{ id: 'r', author: 'Reviewer', text: 'Why?', at: 'now' }];
+		const rows = commentsInDocumentOrder([gone({ replies, newReplyIds: ['r'] })], text);
+		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 'gone', from: 18, to: 18, point: true, lost: true, replyWaiting: true }]);
+	});
+
+	it('draws no marker for a resolved comment, a review comment or one with no known position', () => {
+		const rows = commentsInDocumentOrder([gone({ resolved: true }), gone({ id: 'r', review: true }), gone({ id: 'n', from: undefined, to: undefined })], text);
+		expect(canvasCommentHighlights(rows, text, null, undefined)).toEqual([]);
+	});
+
+	it('clamps the marker to the end of a document that got shorter', () => {
+		const rows = commentsInDocumentOrder([gone({ from: 500, to: 500 })], text);
+		expect(canvasCommentHighlights(rows, text, null, undefined)[0]).toMatchObject({ from: text.length, to: text.length, point: true });
+	});
+
+	it('follows an edit inside its range to the words now inside it', () => {
+		const edited = 'Lunch is at noon.\nTrain leaves at ten.';
+		const [row] = commentsInDocumentOrder([comment('live', 18, 'Train leaves at nine.', { drawn: true, placement: 'placed', to: 18 + 'Train leaves at ten.'.length })], edited);
+		expect(row).toMatchObject({ anchor: 'Train leaves at ten.', orphaned: false });
+	});
+});
+
+describe('a decided suggestion that has replies stays an open conversation', () => {
+	const after = 'Lunch is at noon. Train leaves at ten.';
+	const accepted = (overrides: Partial<DocComment> = {}): DocComment =>
+		comment('s1', 34, 'nine', { replacement: 'ten', decision: 'accepted', author: 'Reviewer', replies: [{ id: 'r', author: 'Reviewer', text: 'Thanks', at: 'now' }] as DocComment['replies'], ...overrides });
+
+	it('draws a margin marker at the accepted text rather than nothing', () => {
+		const rows = commentsInDocumentOrder([accepted()], after);
+		expect(canvasCommentHighlights(rows, after, null, undefined)).toMatchObject([{ id: 's1', from: 34, to: 34, point: true, lost: false }]);
+	});
+
+	it('draws nothing once it is resolved', () => {
+		const rows = commentsInDocumentOrder([accepted({ resolved: true })], after);
+		expect(canvasCommentHighlights(rows, after, null, undefined)).toEqual([]);
+	});
+
+	it('is not counted as text that could not be placed', () => {
+		const rows = commentsInDocumentOrder([accepted()], after);
+		expect(commentSurfaceStatus(rows)).toMatchObject({ orphanedCount: 0, replaceableCount: 0, commentCount: 1 });
+	});
+
+	it('does not read as orphaned while its own Accept is in flight and the replacement already stands where the quote was', () => {
+		const open = accepted({ decision: undefined, replies: [] });
+		const [row] = commentsInDocumentOrder([open], after, {}, 's1');
+		expect(row.orphaned).toBe(false);
+		const [other] = commentsInDocumentOrder([open], after);
+		expect(other.orphaned).toBe(true);
 	});
 });

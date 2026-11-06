@@ -109,6 +109,10 @@ export const docTheme = EditorView.theme({
 		color: 'var(--amber-text)', fontFamily: 'inherit', pointerEvents: 'auto', cursor: 'pointer'
 	},
 	'.cm-comment-marker svg': { borderRadius: 'var(--radius-xs)', transition: 'background-color 0.12s' },
+	// A comment whose original text is gone keeps its marker, dashed and in the muted text colour so it reads as not attached to text.
+	'.cm-comment-marker[data-lost="true"]': { color: 'var(--text-secondary)' },
+	'.cm-comment-marker[data-lost="true"] svg path': { strokeDasharray: '3 2.6' },
+	'.cm-comment-marker[data-lost="true"] .cm-comment-count': { borderStyle: 'dashed' },
 	'.cm-comment-count': {
 		boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', overflow: 'hidden',
 		border: '1.5px solid currentColor', borderRadius: 'var(--radius-xs)', fontSize: '11px', fontWeight: 'var(--fw-semibold)', lineHeight: '1', fontVariantNumeric: 'tabular-nums',
