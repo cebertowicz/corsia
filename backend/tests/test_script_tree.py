@@ -59,23 +59,15 @@ def test_tree_hash_is_canonical():
 
 
 @pytest.mark.asyncio
-async def test_review_shows_the_folder_and_records_its_hash(monkeypatch, tmp_path):
-    entry = tmp_path / "run.py"
+async def test_review_shows_the_folder_and_records_its_hash(walled):
+    ws, review, reviewer = walled
+    entry = ws / "tools" / "run.py"
+    entry.parent.mkdir()
     entry.write_text("import helper\n")
-    (tmp_path / "helper.py").write_text("X = 1\n")
-    (tmp_path / "native.so").write_bytes(b"\xff\xfe\0")
-    sha = hashlib.sha256(entry.read_bytes()).hexdigest()
-    monkeypatch.setattr(script_access, "pin_script", lambda *args, **kwargs: (entry, sha))
-    monkeypatch.setattr(script_access, "get_host_access_auto_approve", lambda: True)
-    monkeypatch.setattr(script_access.reviewer_target, "resolve_reviewer_target",
-                        AsyncMock(return_value=SimpleNamespace(harness="native")))
-    identity = ReviewerIdentity("test", "native", "test", "test", "test")
-    reviewer = AsyncMock(return_value=ScriptApplicationReview(identity, "allow", "ok"))
-    monkeypatch.setattr(script_access, "review_application", reviewer)
+    (entry.parent / "helper.py").write_text("X = 1\n")
+    (entry.parent / "native.so").write_bytes(b"\xff\xfe\0")
 
-    _, _, record = await script_access.review_script(
-        "owner", {"script_path": str(entry), "purpose": "work", "user_request": "please"},
-    )
+    _, _, record = await review(entry)
 
     application = reviewer.await_args.args[1]
     assert application["script"] == "import helper\n"
@@ -107,3 +99,51 @@ def test_authenticated_python_never_loads_bytecode_from_the_folder(tmp_path):
 
     assert run() == b"pyc\n"  # the hole: an unconfined run loads the planted bytecode
     assert run(pycache_dir=tmp_path.parent / f"{tmp_path.name}-pycache") == b"src\n"
+
+
+@pytest.fixture
+def walled(tmp_path, monkeypatch):
+    """A workspace with a project the requester is walled from, and a reviewer that never answers."""
+    from tools import sandbox_config
+    from tools.project_fence import Fence, FencedRoot
+
+    ws = tmp_path / "workspace"
+    private = ws / "projects" / "Private"
+    private.mkdir(parents=True)
+    (private / "secret.txt").write_text("walled\n")
+    monkeypatch.setattr(script_access, "fence_for_thread", lambda _thread_id: Fence((FencedRoot(private),)))
+    monkeypatch.setattr(sandbox_config, "WORKSPACE", ws)
+    monkeypatch.setattr("infra.config.WORKSPACE", ws)
+    monkeypatch.setattr(script_access, "WORKSPACE", ws)
+    monkeypatch.setattr(sandbox_config, "_STATIC_ALLOWED_RW", [ws])
+    monkeypatch.setattr(sandbox_config, "_STATIC_ALLOWED_RO", [])
+    monkeypatch.setattr(sandbox_config, "_list_authoritative_repo_policies", lambda: [])
+    monkeypatch.setattr(script_access, "get_host_access_auto_approve", lambda: True)
+    monkeypatch.setattr(script_access.reviewer_target, "resolve_reviewer_target",
+                        AsyncMock(return_value=SimpleNamespace(harness="native")))
+    identity = ReviewerIdentity("test", "native", "test", "test", "test")
+    reviewer = AsyncMock(return_value=ScriptApplicationReview(identity, "allow", "ok"))
+    monkeypatch.setattr(script_access, "review_application", reviewer)
+
+    async def review(entry):
+        entry.parent.mkdir(parents=True, exist_ok=True)
+        if not entry.exists():
+            entry.write_text("pass\n")
+        sha = hashlib.sha256(entry.read_bytes()).hexdigest()
+        monkeypatch.setattr(script_access, "pin_script", lambda *args, **kwargs: (entry, sha))
+        return await script_access.review_script(
+            "requester", {"script_path": str(entry), "purpose": "work", "user_request": "please"})
+
+    return ws, review, reviewer
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("where", ["holds_a_walled_project", "in_a_walled_project", "workspace_git"])
+async def test_review_reads_nothing_the_requester_cannot_read(walled, where):
+    ws, review, reviewer = walled
+    entry = {"holds_a_walled_project": ws / "projects" / "x.py",
+             "in_a_walled_project": ws / "projects" / "Private" / "run.py",
+             "workspace_git": ws / ".git" / "logs" / "HEAD"}[where]
+    with pytest.raises(ValueError):
+        await review(entry)
+    reviewer.assert_not_awaited()

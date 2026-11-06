@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 from automation.script_schedules import MAX_SCRIPT_BYTES
@@ -18,15 +19,17 @@ _TOO_LARGE = ("the script's folder holds more than 1 MB; put the script and only
               "loads in a folder of its own")
 
 
-def read_tree(entry: Path) -> dict[str, bytes]:
+def read_tree(entry: Path, denied: Callable[[Path], str | None] | None = None) -> dict[str, bytes]:
     """Every file under ``entry``'s folder by relative path, with the bytes a run would load.
 
     A link is refused: a run would load what it points at, which may lie outside what
-    the run, or the agent asking for review, can read.
+    the run, or the agent asking for review, can read. ``denied`` is the requester's
+    read check; the folder and everything in it pass it before anything is read.
     """
     folder = entry.parent
     files: dict[str, bytes] = {}
     total = 0
+    _check(folder, denied)
     for root, dirs, names in os.walk(folder, followlinks=False):
         base = Path(root)
         dirs[:] = sorted(name for name in dirs if name != "__pycache__")
@@ -34,6 +37,7 @@ def read_tree(entry: Path) -> dict[str, bytes]:
             if (base / name).is_symlink():
                 raise ValueError(f"{_relative(base / name, folder)} in the script's folder is a link; "
                                  "copy what the script loads into its own folder instead")
+            _check(base / name, denied)
         for name in sorted(names):
             path = base / name
             if not path.is_file():
@@ -51,6 +55,11 @@ def tree_sha256(files: dict[str, bytes]) -> str:
     return hashlib.sha256(json.dumps(
         hashes, sort_keys=True, ensure_ascii=False, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
+
+
+def _check(path: Path, denied: Callable[[Path], str | None] | None) -> None:
+    if denied is not None and (denial := denied(path)):
+        raise ValueError(denial)
 
 
 def _relative(path: Path, folder: Path) -> str:

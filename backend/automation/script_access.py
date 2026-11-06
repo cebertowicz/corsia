@@ -17,6 +17,8 @@ from host_access.supervisor import _reviewer_binary
 from infra.config import WORKSPACE
 from infra.db_async import run_in_db, run_off_db
 from infra.settings import get_host_access_auto_approve
+from tools.filesystem_gate import resolve_path
+from tools.project_fence import fence_for_thread
 
 
 async def review_script(thread_id: str, params: dict[str, Any]) -> tuple[Path, str, dict[str, Any]]:
@@ -30,7 +32,8 @@ async def review_script(thread_id: str, params: dict[str, Any]) -> tuple[Path, s
     if not params.get("script_path"):
         raise ValueError("script_path is required for a script schedule")
     path, sha = await run_off_db(pin_script, str(params["script_path"]), workspace=WORKSPACE)
-    tree = await run_off_db(read_tree, path)
+    fence = await run_off_db(fence_for_thread, thread_id)
+    tree = await run_off_db(read_tree, path, lambda candidate: _read_denial(candidate, thread_id, fence))
     raw = tree.pop(path.name, b"")
     if hashlib.sha256(raw).hexdigest() != sha:
         raise ValueError("script changed while preparing review; request it again")
@@ -58,6 +61,15 @@ async def review_script(thread_id: str, params: dict[str, Any]) -> tuple[Path, s
               "user_request": user_request, "trigger": trigger, "application_hash": application_hash,
               "tree_sha256": tree_hash, "review": asdict(review)}
     return path, sha, record
+
+
+def _read_denial(path: Path, thread_id: str, fence: Any) -> str | None:
+    """Why the requester's own read_file would refuse ``path``, if it would; the review reads with backend rights."""
+    try:
+        resolve_path(str(path), WORKSPACE, thread_id=thread_id, fence=fence)
+    except (PermissionError, FileNotFoundError) as exc:
+        return str(exc) or f"{path} can't be read by this agent"
+    return None
 
 
 def _reviewed_file(name: str, data: bytes) -> dict[str, Any]:
