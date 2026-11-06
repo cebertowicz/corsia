@@ -245,8 +245,8 @@ def _storage_at(local: datetime) -> str:
 
 
 def _local_at(hour: int, minute: int = 0, *, day: int = 2) -> datetime:
-    local_tz = datetime.now().astimezone().tzinfo
-    return datetime(2026, 9, day, hour, minute, tzinfo=local_tz)
+    # Resolve the local zone's offset for this date, not today's (DST differs).
+    return datetime(2026, 9, day, hour, minute).astimezone()
 
 
 def test_clock_visibility_is_sparse_and_uses_the_existing_passive_message():
