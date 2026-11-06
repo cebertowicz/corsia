@@ -58,9 +58,12 @@ function hrefUnder(view: EditorView, target: EventTarget | null): string | null 
 	return followable(href) ? href : null;
 }
 
-/** `file.md:12` or `file.md:12:3`, a place in a file as agents cite it, is that file: it opens, the place is not kept. */
+/**
+ * `file.md:12` or `file.md:12:3`, a place in a file as agents cite it, is that file: it opens, the place is not kept.
+ * The colon may still be encoded (`%3A`), so a raw href and a decoded path give the same file.
+ */
 export function withoutLineSuffix(path: string): string {
-	return path.replace(/^(.+\.[A-Za-z0-9]{1,8}):\d+(?::\d+)?$/, '$1');
+	return path.replace(/^(.+\.[A-Za-z0-9]{1,8})(?::|%3A)\d+(?:(?::|%3A)\d+)?$/i, '$1');
 }
 
 /**
