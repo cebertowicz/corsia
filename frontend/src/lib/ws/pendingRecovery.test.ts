@@ -31,6 +31,21 @@ function historyResponse(rows: unknown[], hasMore = false, oldestId: string | nu
 
 const emptyHistory = async () => historyResponse([]);
 
+/** A history read a test settles by hand, so a send can land while it is open. */
+function deferredHistory() {
+	let settle: (page: Response) => void = () => {};
+	let refuse: (error: Error) => void = () => {};
+	const page = new Promise<Response>((resolve, reject) => {
+		settle = resolve;
+		refuse = reject;
+	});
+	return {
+		fetchPage: (((() => page) as unknown) as typeof fetch),
+		settle,
+		refuse,
+	};
+}
+
 beforeEach(() => {
 	mockSocket();
 	subagentMeta.set(new Map());
@@ -91,6 +106,9 @@ describe('resending an input the server never received', () => {
 		expect(fetchPage).toHaveBeenCalledOnce();
 		expect(frames).toHaveLength(1);
 		expect(getTurnState(THREAD).pendingInputIds).toEqual([]);
+		// Settling the row settled its frame too: recovery does not keep a copy
+		// of an input the server has.
+		expect(_unconfirmedFrameIdsForTests()).toEqual([]);
 	});
 
 	it.each([
@@ -140,13 +158,89 @@ describe('resending an input the server never received', () => {
 	});
 
 	it('resends nothing it holds no frame for', async () => {
-		// A page reload keeps the pending row and loses its frame with the socket.
+		// A pending input this client holds no frame for: the read proves it is
+		// absent, and there is nothing here to put back on the socket.
 		requestInput(THREAD, 'reloaded-input');
 
 		await recoverPendingInputs(emptyHistory);
 
 		expect(frames).toHaveLength(0);
 		expect(getTurnState(THREAD).pendingInputIds).toEqual(['reloaded-input']);
+	});
+
+	it('sends a message typed during the read only after the lost input it must follow', async () => {
+		// The first input went on the socket that died, so its frame is the one
+		// recovery owes the server, and it was asked for before anything this
+		// socket's person sends.
+		const lostId = sendMessage(THREAD, 'lost with the old socket')!;
+		const lostFrame = frames[0];
+		mockSocket();
+		const paging = deferredHistory();
+
+		const recovering = recoverPendingInputs(paging.fetchPage);
+		const laterId = sendMessage(THREAD, 'typed while the read is open')!;
+		// Held back: the row is queued and its frame is kept, and the new socket
+		// carries nothing while the read that decides the order is still open.
+		expect(frames).toHaveLength(0);
+
+		paging.settle(historyResponse([]));
+		await recovering;
+
+		expect(frames).toHaveLength(2);
+		expect(frames[0]).toBe(lostFrame);
+		expect(frames.map(frame => JSON.parse(frame).input_id)).toEqual([lostId, laterId]);
+		expect(JSON.parse(frames[1])).toMatchObject({ content: 'typed while the read is open' });
+	});
+
+	it('still sends a held message when the read fails, and resends nothing unproved', async () => {
+		const lostId = sendMessage(THREAD, 'lost with the old socket')!;
+		const lostFrame = frames[0];
+		mockSocket();
+		const paging = deferredHistory();
+
+		const recovering = recoverPendingInputs(paging.fetchPage);
+		const laterId = sendMessage(THREAD, 'typed while the read is open')!;
+		expect(frames).toHaveLength(0);
+
+		paging.refuse(new TypeError('offline'));
+		await recovering;
+
+		// The lost frame's absence was never proved, so it stays off the wire. The
+		// held frame never went on it at all, and leaving it there would hang the
+		// person's own message on a read that already failed.
+		expect(frames).toHaveLength(1);
+		expect(frames).not.toContain(lostFrame);
+		expect(JSON.parse(frames[0]).input_id).toBe(laterId);
+		expect(getTurnState(THREAD).pendingInputIds).toEqual([lostId, laterId]);
+	});
+
+	it('sends nothing on a socket a newer one replaced, and the new recovery sends in order', async () => {
+		const lostId = sendMessage(THREAD, 'lost with the old socket')!;
+		const lostFrame = frames[0];
+		mockSocket();
+		let owns = true;
+		const paging = deferredHistory();
+
+		const recovering = recoverPendingInputs(paging.fetchPage, () => owns);
+		const laterId = sendMessage(THREAD, 'typed while the read is open')!;
+		expect(frames).toHaveLength(0);
+
+		// Ownership ends mid-read, and the read then answers anyway: a retired
+		// socket gets nothing sent on it, and both frames stay pending with it.
+		owns = false;
+		mockSocket();
+		paging.settle(historyResponse([]));
+		await recovering;
+
+		expect(frames).toHaveLength(0);
+
+		// The new socket's own recovery proves both absent and puts them on in the
+		// order they were asked for.
+		await recoverPendingInputs(emptyHistory);
+
+		expect(frames).toHaveLength(2);
+		expect(frames[0]).toBe(lostFrame);
+		expect(frames.map(frame => JSON.parse(frame).input_id)).toEqual([lostId, laterId]);
 	});
 });
 
@@ -161,9 +255,34 @@ describe('the frame an input was sent with', () => {
 			message_id: 'row-1', created_at: STORED_AT, turn_id: 'turn-1', turn_order: 1,
 		}, () => {});
 
-		// The store is bounded by the inputs still pending, checked as each new
-		// send records its own frame.
+		// The store is bounded by the inputs still pending: turn state's own
+		// membership settles it, and this send only adds its own frame.
 		const next = sendMessage(THREAD, 'next')!;
 		expect(_unconfirmedFrameIdsForTests()).toEqual([waiting, next]);
+	});
+
+	it('is forgotten once the server accepts or rejects the input, with no further send', () => {
+		const accepted = sendMessage(THREAD, 'accepted')!;
+		const rejected = sendMessage(THREAD, 'rejected')!;
+		const waiting = sendMessage(THREAD, 'still waiting')!;
+		const sentFrames = [...frames];
+		expect(_unconfirmedFrameIdsForTests()).toEqual([accepted, rejected, waiting]);
+
+		handleMessage({
+			type: 'input_accepted', thread_id: THREAD, input_id: accepted,
+			message_id: 'row-1', created_at: STORED_AT, turn_id: 'turn-1', turn_order: 1,
+		}, () => {});
+		expect(_unconfirmedFrameIdsForTests()).toEqual([rejected, waiting]);
+
+		handleMessage({
+			type: 'error', thread_id: THREAD, input_id: rejected,
+			message: 'Message was not delivered',
+		}, () => {});
+
+		// Turn state is the one owner of membership: settling an input drops its
+		// frame where it stands, with no next send to trigger a prune and nothing
+		// extra put on the socket.
+		expect(_unconfirmedFrameIdsForTests()).toEqual([waiting]);
+		expect(frames).toEqual(sentFrames);
 	});
 });

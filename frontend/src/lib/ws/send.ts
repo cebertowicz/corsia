@@ -9,9 +9,10 @@ import { subagentMeta } from '../stores/subagents';
 import { viewingDocumentForThread } from '../stores/documentViewport';
 import {
 	acknowledgedTurnId,
+	getTurnState,
 	hasActiveTurn as reducerHasActiveTurn,
-	pendingInputThreads,
 	requestInput,
+	turnStates,
 } from './turnState';
 import { beginPendingSnapshot } from './streamState';
 import { takeReplyContext, type ReplyComment } from '../stores/replyContextCapture';
@@ -81,41 +82,84 @@ export function resubscribeWatchedThreads(): void {
 }
 
 /**
- * The exact frame each pending input put on the socket, keyed by input id.
+ * The exact frame each pending input put on the socket, keyed by input id, and
+ * whether that frame ever reached one.
  *
  * `ws.send` is fire-and-forget and can be swallowed whole: a half-dead socket
  * accepts the frame, the person sees their message, and the server never hears
- * of it. Recovery on the next socket can only re-ask for an input it can find
- * in the server's history, so the only copy of a lost frame is the one this
- * client still holds. It is kept only while its input is still pending, so it
- * can never grow past the inputs actually waiting.
+ * of it, so the only copy of a lost frame is the one this client still holds.
+ * Turn state owns membership: the subscription below drops a frame as soon as
+ * its input stops being pending, so nothing outlives the send it waits on.
  */
-const unconfirmedFrames = new Map<string, { threadId: string; frame: string }>();
+const unconfirmedFrames = new Map<string, { threadId: string; frame: string; onWire: boolean }>();
 
-function rememberFrame(threadId: string, inputId: string, frame: string): void {
-	const pendingByThread = new Map<string, Set<string>>(pendingInputThreads().map(entry =>
-		[entry.threadId, new Set<string>(entry.inputIds)]
-	));
-	for (const [pendingId, stored] of unconfirmedFrames) {
-		if (!pendingByThread.get(stored.threadId)?.has(pendingId)) {
-			unconfirmedFrames.delete(pendingId);
+turnStates.subscribe(states => {
+	for (const [inputId, stored] of unconfirmedFrames) {
+		if (!states.get(stored.threadId)?.pendingInputIds.includes(inputId)) {
+			unconfirmedFrames.delete(inputId);
 		}
 	}
-	unconfirmedFrames.set(inputId, { threadId, frame });
+});
+
+/**
+ * A running recovery's hold on one thread's sends, valued by the run that set
+ * it. Recovery reads the server's history before it resends what the server
+ * never got, and that read takes time: a message sent meanwhile on the new
+ * socket would be admitted at once and could land ahead of the input the
+ * person sent first. While a run holds a thread, `sendMessage` still queues
+ * the input and keeps its frame, and puts nothing on the socket; the run's
+ * release then sends every owed frame in the order the inputs were requested.
+ * The run is the hold's identity, so a late run cannot release what a newer
+ * one set.
+ */
+const threadSendHolds = new Map<string, object>();
+
+/** Hold one thread's sends for the duration of one recovery run. */
+export function holdThreadSends(generation: object, threadId: string): void {
+	threadSendHolds.set(threadId, generation);
 }
 
 /**
- * Put a pending input's original frame back on the current socket.
- *
- * Byte-for-byte, so the server's duplicate check sees the payload it saw the
- * first time and the input lands once. False means this client holds no frame
- * to resend — after a page reload, for example, it is gone.
+ * Stop holding a thread and put every frame it still owes the server on the
+ * current socket, in the order its inputs were requested, byte for byte: a
+ * frame proven absent from the server's history, or one this client never put
+ * on the wire. A frame already on the wire whose absence was not proven is
+ * left alone — only a read to the end of the history can say it was lost.
+ * `isCurrent` is the recovery's ownership check: a retired socket gets
+ * nothing, and the owed frames stay pending until the next socket's recovery
+ * proves them absent.
  */
-export function resendUnconfirmedInput(inputId: string): boolean {
-	const stored = unconfirmedFrames.get(inputId);
-	if (!stored || !ws || ws.readyState !== WebSocket.OPEN) return false;
-	ws.send(stored.frame);
-	return true;
+export function releaseThreadSends(
+	generation: object,
+	threadId: string,
+	provenAbsent: ReadonlySet<string>,
+	isCurrent: () => boolean,
+): void {
+	if (threadSendHolds.get(threadId) !== generation) return;
+	threadSendHolds.delete(threadId);
+	const socket = ws;
+	if (!isCurrent() || !socket || socket.readyState !== WebSocket.OPEN) return;
+	for (const inputId of getTurnState(threadId).pendingInputIds) {
+		const stored = unconfirmedFrames.get(inputId);
+		if (!stored || (!provenAbsent.has(inputId) && stored.onWire)) continue;
+		socket.send(stored.frame);
+		stored.onWire = true;
+	}
+}
+
+/** Hand a send's frame to the socket, or hold it while a recovery owns this thread's order. */
+function putFrameOnSocket(
+	socket: WebSocket,
+	threadId: string,
+	inputId: string,
+	frame: string,
+): void {
+	if (threadSendHolds.has(threadId)) {
+		unconfirmedFrames.set(inputId, { threadId, frame, onWire: false });
+		return;
+	}
+	socket.send(frame);
+	unconfirmedFrames.set(inputId, { threadId, frame, onWire: true });
 }
 
 /** Which inputs this client still holds a frame for. Test-only visibility. */
@@ -162,8 +206,8 @@ export function sendMessage(
 		messages.update(m => [...m, msg]);
 	}
 	// One queue. A message sent while a checkpoint holds the thread is an
-	// ordinary queued row that the transcript renders like any other, so there
-	// is nothing to track in a side store and nothing to reconcile later.
+	// ordinary queued row that the transcript renders like any other; the frame
+	// it went out with is kept beside the pending row for as long as it waits.
 	requestInput(threadId, inputId);
 
 	if (get(subagentMeta).has(threadId)) {
@@ -174,8 +218,7 @@ export function sendMessage(
 			...(attachments && attachments.length > 0 ? { attachments } : {}),
 			...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
 		});
-		ws.send(frame);
-		rememberFrame(threadId, inputId, frame);
+		putFrameOnSocket(ws, threadId, inputId, frame);
 		return inputId;
 	}
 
@@ -211,8 +254,7 @@ export function sendMessage(
 		...(attachments && attachments.length > 0 ? { attachments } : {}),
 		...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
 	});
-	ws.send(frame);
-	rememberFrame(threadId, inputId, frame);
+	putFrameOnSocket(ws, threadId, inputId, frame);
 	return inputId;
 }
 
