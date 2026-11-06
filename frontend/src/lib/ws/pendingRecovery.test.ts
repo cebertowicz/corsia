@@ -5,9 +5,11 @@ import { subagentMeta } from '../stores/subagents';
 import { activeThreadId, messages } from '../stores/threads';
 import { handleMessage } from './handlers';
 import { recoverPendingInputs } from './pendingRecovery';
-import { _unconfirmedFrameIdsForTests, sendMessage } from './send';
+import { _forgetUnconfirmedFramesForTests, _unconfirmedFrameIdsForTests, sendMessage } from './send';
 import { setWs } from './state';
-import { _resetTurnStateForTests, getTurnState, requestInput } from './turnState';
+import {
+	_resetTurnStateForTests, getTurnState, requestInput, resetTurnState, restoreTurnState,
+} from './turnState';
 
 const THREAD = 'main-1';
 const STORED_AT = '2026-11-05T18:00:00Z';
@@ -52,6 +54,7 @@ beforeEach(() => {
 	activeThreadId.set(THREAD);
 	messages.set([]);
 	_resetTurnStateForTests();
+	_forgetUnconfirmedFramesForTests();
 	token.set('test-token');
 });
 
@@ -359,5 +362,19 @@ describe('the frame an input was sent with', () => {
 		// extra put on the socket.
 		expect(_unconfirmedFrameIdsForTests()).toEqual([waiting]);
 		expect(frames).toEqual(sentFrames);
+	});
+
+	it('is kept through a failed delete, so recovery can still resend it', async () => {
+		const inputId = sendMessage(THREAD, 'sent before the delete')!;
+		const frame = frames[0];
+
+		// A delete resets the thread, then puts its turn state back when the delete fails.
+		const prior = getTurnState(THREAD);
+		resetTurnState(THREAD);
+		restoreTurnState(THREAD, prior);
+		await recoverPendingInputs(emptyHistory);
+
+		expect(frames).toEqual([frame, frame]);
+		expect(getTurnState(THREAD).pendingInputIds).toEqual([inputId]);
 	});
 });
