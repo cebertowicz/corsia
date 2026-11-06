@@ -102,10 +102,9 @@ def _title(db, thread_id: str | None) -> str:
     return str(row["title"]) if row is not None and row["title"] else "another agent"
 
 
-def _turn_is_mine(line, root_id: str, thread_id: str) -> bool:
-    """No person is on the thread, no other agent is mid-write, and this agent is first in line or none wait."""
-    return (writer_turns.person_holding(root_id) is None and writer_turns.agent_writing(root_id) in (None, thread_id)
-            and (not line or line[0]["agent_thread_id"] == thread_id))
+def _claim_turn(line, root_id: str, thread_id: str) -> bool:
+    """Take the turn when this agent is first in line or none wait, and no person or other agent holds it."""
+    return (not line or line[0]["agent_thread_id"] == thread_id) and writer_turns.agent_claim(root_id, thread_id)
 
 
 def admit(db, *, root_id: str, artifact_id: str, thread_id: str, user_id: str, op: dict[str, Any]) -> Admitted | Queued:
@@ -115,8 +114,7 @@ def admit(db, *, root_id: str, artifact_id: str, thread_id: str, user_id: str, o
     ordinary call then replaces its saved text, since it is that agent's rewrite.
     """
     line = active(db, root_id)
-    if _turn_is_mine(line, root_id, thread_id):
-        writer_turns.agent_enter(root_id, thread_id)
+    if _claim_turn(line, root_id, thread_id):
         return Admitted(root_id)
     mine = next((row for row in line if row["agent_thread_id"] == thread_id), None)
     if mine is None:
@@ -141,8 +139,7 @@ def admit_as_is(db, *, root_id: str, thread_id: str) -> Admitted | Queued | None
     mine = saved_entry(db, root_id, thread_id)
     if mine is None:
         return None
-    if _turn_is_mine(active(db, root_id), root_id, thread_id):
-        writer_turns.agent_enter(root_id, thread_id)
+    if _claim_turn(active(db, root_id), root_id, thread_id):
         settle(db, mine, "posted_as_is")
         return Admitted(root_id, tuple(json.loads(mine["ops"])))
     db.execute("UPDATE doc_comment_writer_line SET state='waiting' WHERE id=?", (mine["id"],))
@@ -261,7 +258,8 @@ def serve_waiting(db) -> list[str]:
     """The continuation sweep's pass: serve every line with a write waiting, so none waits on a lost serve."""
     drives: list[str] = []
     for row in db.execute("SELECT DISTINCT root_id FROM doc_comment_writer_line WHERE state='waiting'").fetchall():
-        drives.extend(serve(db, str(row["root_id"])))
+        root_id = str(row["root_id"])
+        drives.extend(_contained(db, root_id, lambda: serve(db, root_id)))
     return drives
 
 
@@ -269,7 +267,8 @@ def settle_turn_end(db, thread_id: str, turn_id: str | None) -> list[str]:
     """Drop this agent's woken rows whose wake ended unanswered, stopped or never written included; serve each next.
 
     A wake still queued is yet to be read unless the thread can no longer take it, and one inside
-    another live turn may still be answered there.
+    another live turn may still be answered there. Each row's step is contained, so a failure here
+    never rolls back the turn's own terminal settlement; that row is re-woken by restart recovery.
     """
     drives: list[str] = []
     rows = db.execute(
@@ -281,16 +280,30 @@ def settle_turn_end(db, thread_id: str, turn_id: str | None) -> list[str]:
         (thread_id,),
     ).fetchall()
     for row in rows:
-        if row["delivery_state"] == "queued":
-            if reason := _unable(db, row):
-                _drop(db, row, reason)
-                drives.extend(serve(db, str(row["root_id"])))
-            continue
-        if row["active_turn_id"] != turn_id and row["turn_status"] in ("running", "waiting_retry"):
-            continue
-        _drop(db, row, "your turn ended without posting it as is or rewriting it")
-        drives.extend(serve(db, str(row["root_id"])))
+        drives.extend(_contained(db, str(row["root_id"]), lambda row=row: _settle_ended(db, row, turn_id)))
     return drives
+
+
+def _settle_ended(db, row, turn_id: str | None) -> list[str]:
+    if row["delivery_state"] == "queued":
+        if reason := _unable(db, row):
+            _drop(db, row, reason)
+            return serve(db, str(row["root_id"]))
+        return []
+    if row["active_turn_id"] != turn_id and row["turn_status"] in ("running", "waiting_retry"):
+        return []
+    _drop(db, row, "your turn ended without posting it as is or rewriting it")
+    return serve(db, str(row["root_id"]))
+
+
+def _contained(db, root_id: str, step) -> list[str]:
+    """Run one line's step in its own savepoint: a failure is logged and undone, never raised into the caller's work."""
+    try:
+        with write_transaction(db, scope="writer_line_step"):
+            return step()
+    except Exception:
+        logger.exception("comment writer line on {} failed; left as it was", root_id)
+        return []
 
 
 def recover(db) -> list[str]:

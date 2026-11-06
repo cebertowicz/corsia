@@ -19,6 +19,7 @@ async def test_script_review_decides_registration(monkeypatch, tmp_path, auto, v
     script.write_text("print('ok')\n")
     sha = hashlib.sha256(script.read_bytes()).hexdigest()
     monkeypatch.setattr(script_access, "pin_script", lambda *args, **kwargs: (script, sha))
+    monkeypatch.setattr(script_access, "_read_denial", lambda *_args: None)  # the gate: test_script_tree.py
     monkeypatch.setattr(script_access, "get_host_access_auto_approve", lambda: auto)
     monkeypatch.setattr(script_access.reviewer_target, "resolve_reviewer_target", AsyncMock(return_value=SimpleNamespace(harness="native")))
     identity = ReviewerIdentity("test", "native", "test", "test", "test")

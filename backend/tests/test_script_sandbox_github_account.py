@@ -80,6 +80,7 @@ def run(monkeypatch, tmp_path):
         return str(tmp_path), None
 
     async def prepare(command, cwd_, envelope):
+        seen["command"] = command
         profile = tmp_path / "p.sb"
         if envelope.profile_required:  # Linux runs with no profile, as ``_write_envelope`` does
             seen["profile"] = envelope.build_profile(command, cwd_, profile, **envelope.profile_options)
@@ -168,6 +169,11 @@ def test_authenticated_run_keeps_ready_account_locked(run):
     assert str(seen["agent_home"]) not in _read_only(seen["argv"])
     assert _deny(seen["agent_home"]) in seen["profile"]
     assert not any(name in seen["env"] for name in _TOKENS)
+
+
+def test_only_an_authenticated_run_keeps_python_bytecode_in_its_private_folder(run, tmp_path):
+    assert f"export PYTHONPYCACHEPREFIX={tmp_path / 'pycache'};" in run("ready", authenticated=True)["command"]
+    assert "PYTHONPYCACHEPREFIX" not in run("ready")["command"]
 
 
 def test_a_run_with_no_cached_answer_waits_for_the_verification(run):

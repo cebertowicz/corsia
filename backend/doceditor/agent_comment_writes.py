@@ -302,7 +302,7 @@ async def post_as_is(comment_id: str, *, thread_id: str, user_id: str) -> dict[s
     """Post this agent's saved writes on the thread, in the order it saved them, exactly once.
 
     The saved row is read and settled in the admitting transaction, so a second call finds nothing.
-    A write that fails is reported with its saved text, so nothing is lost.
+    A write that fails, for any reason, is reported with its saved text and the rest are still tried.
     """
     target = await run_in_db(_target, comment_id, user_id)
     if target is None:
@@ -321,6 +321,9 @@ async def post_as_is(comment_id: str, *, thread_id: str, user_id: str) -> dict[s
                 posted.append(await _replay(op, thread_id, user_id))
             except (CommentActionError, DocumentSaveError) as exc:
                 failed.append({"write": writer_line.describe(op), "error": exc.message})
+            except Exception:
+                logger.exception("saved write on {} by {} failed to post as is", root_id, thread_id)
+                failed.append({"write": writer_line.describe(op), "error": "It couldn't be posted."})
     finally:
         await _finish_and_drive(root_id, thread_id)
     result: dict[str, Any] = {"posted": posted}
