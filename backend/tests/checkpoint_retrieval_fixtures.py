@@ -7,7 +7,9 @@ state install leaves them.
 
 Two owners exist from the start. Retrieval is a cross-thread read surface, so
 "whose generation is this" is part of the contract under test, not a variation
-a later test bolts on.
+a later test bolts on. The project columns and the three tables the project fence
+resolves a caller from are here too, because every retrieval read now asks that
+question before it ranks anything.
 """
 
 from __future__ import annotations
@@ -37,7 +39,20 @@ def fresh_db():
     db.row_factory = sqlite3.Row
     db.execute(
         "CREATE TABLE threads (id TEXT PRIMARY KEY, user_id TEXT, title TEXT,"
-        " history_epoch INTEGER NOT NULL DEFAULT 0, confinement TEXT)"
+        " history_epoch INTEGER NOT NULL DEFAULT 0, confinement TEXT,"
+        " project_id TEXT, local_only INTEGER NOT NULL DEFAULT 0,"
+        " local_only_cut_seq INTEGER, agent_enabled INTEGER DEFAULT 0)"
+    )
+    # The project fence resolves a caller on these three, so retrieval can answer
+    # "whose project is this caller outside of" the way the production read does.
+    db.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT)")
+    db.execute(
+        "CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT, path TEXT,"
+        " conductor_thread_id TEXT)"
+    )
+    db.execute(
+        "CREATE TABLE project_inference_policies (project_id TEXT PRIMARY KEY,"
+        " cloud_models_off INTEGER NOT NULL DEFAULT 0)"
     )
     db.executescript(CHECKPOINT_SCHEMA_SQL)
     db.executescript(CONTINUITY_SCHEMA_SQL)

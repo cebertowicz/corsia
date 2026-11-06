@@ -206,12 +206,12 @@ def test_message_search_returns_thread_identity_and_title(with_fts):
     _create_threads(db)
     db.execute(
         "CREATE TABLE messages (id TEXT, thread_id TEXT, role TEXT, content TEXT, "
-        "metadata TEXT, created_at TEXT, delivery_state TEXT)"
+        "metadata TEXT, created_at TEXT, delivery_state TEXT, seq INTEGER)"
     )
     db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('thread-1','u','Planning','t','t')")
     db.execute(
         "INSERT INTO messages VALUES "
-        "('message-1', 'thread-1', 'user', 'alpha', NULL, '2026-09-06T04:00:00Z', 'delivered')"
+        "('message-1', 'thread-1', 'user', 'alpha', NULL, '2026-09-06T04:00:00Z', 'delivered', 1)"
     )
     if with_fts:
         db.execute("CREATE VIRTUAL TABLE messages_fts USING fts5(content)")
@@ -233,7 +233,7 @@ def test_message_search_filters_and_labels_durable_sender_class(with_fts):
     _create_threads(db)
     db.execute(
         "CREATE TABLE messages (id TEXT, thread_id TEXT, role TEXT, content TEXT, "
-        "metadata TEXT, created_at TEXT, delivery_state TEXT)"
+        "metadata TEXT, created_at TEXT, delivery_state TEXT, seq INTEGER)"
     )
     db.execute("INSERT INTO threads (id,user_id,title,created_at,updated_at) VALUES ('thread-1','u','Planning','t','t')")
     messages = [
@@ -262,7 +262,7 @@ def test_message_search_filters_and_labels_durable_sender_class(with_fts):
         ("digest", "system", {"type": "context_event", "event_disposition": "passive"}),
     ]
     db.executemany(
-        "INSERT INTO messages VALUES (?, 'thread-1', ?, 'alpha', ?, '2026-09-06T04:00:00Z', 'delivered')",
+        "INSERT INTO messages VALUES (?, 'thread-1', ?, 'alpha', ?, '2026-09-06T04:00:00Z', 'delivered', 1)",
         [(message_id, role, json.dumps(metadata)) for message_id, role, metadata in messages],
     )
     if with_fts:
