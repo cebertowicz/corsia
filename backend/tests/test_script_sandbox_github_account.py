@@ -184,7 +184,7 @@ def test_only_an_authenticated_run_is_kept_off_python_bytecode_in_its_folder(run
 def test_the_bytecode_deny_matches_the_folder_literally():
     assert _folder_bytecode_deny(Path("/w/a.b (c)+[d]")) == (
         '(deny file-read* file-write* (regex #"^/w/a\\.b \\(c\\)\\+\\[d\\]/(.*/)?__pycache__(/.*)?$"))\n')
-    with pytest.raises(ScriptSandboxError):
+    with pytest.raises(ScriptSandboxError, match="Rename the folder without it, then run the script again"):
         _folder_bytecode_deny(Path('/w/a"b'))
 
 

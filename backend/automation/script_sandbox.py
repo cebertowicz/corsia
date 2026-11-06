@@ -285,7 +285,10 @@ def _folder_bytecode_deny(folder: Path) -> str:
     """
     path = str(folder.resolve())
     if '"' in path:
-        raise ScriptSandboxError("the script's folder path contains a double quote")
+        raise ScriptSandboxError(
+            "the script's folder path contains a double quote, which the sandbox cannot "
+            "express. Rename the folder without it, then run the script again"
+        )
     escaped = re.sub(r"([.^$*+?()\[\]{}|\\])", r"\\\1", path)
     return f'(deny file-read* file-write* (regex #"^{escaped}/(.*/)?__pycache__(/.*)?$"))\n'
 
