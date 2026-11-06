@@ -23,12 +23,13 @@ from cc_runtime_fixtures import (  # noqa: F401
     fake_claude,
     feed_with_persisted_input,
 )
+from claude_controls import confined_claude_controls
 from subagents.cc_invocation import (
     ClaudeInvocation,
     build_claude_cmd,
     claude_invocation_from_metadata,
     claude_invocation_metadata,
-    claude_untrusted_profile_args,
+    confined_claude_tool_names,
 )
 from subagents.managed_launch import claude_project_discovery_args
 
@@ -49,10 +50,33 @@ def reviewed_dir():
     shutil.rmtree(path, ignore_errors=True)
 
 
+@pytest.fixture(autouse=True)
+async def _retire_late_wakes():
+    """Retire a CC handle that a child's reply wakes after the test body ends.
+
+    The parent's own launch lands a moment after the last ``retire``, so without
+    this wait it would be left for the next test's loop to terminate.
+    """
+    yield
+    import asyncio
+
+    import subagents.cc_runtime as rt
+    from subagents.cc_runtime_state import _LIVE
+
+    for _ in range(40):
+        ids = _LIVE.ids()
+        if not ids:
+            await asyncio.sleep(0.05)
+            if not _LIVE.ids():
+                return
+            continue
+        for thread_id in ids:
+            await rt.retire(thread_id)
+
+
 @pytest.fixture
 def launches(monkeypatch):
-    """Record each real CC launch's command, cwd and env; forbid the tool bridge."""
-    from subagents import harness_tool_bridge
+    """Record each real CC launch's command, cwd, env and tool bridge."""
     from subagents.cc_stream import CCStreamSession
 
     seen: list[dict] = []
@@ -65,11 +89,7 @@ def launches(monkeypatch):
         })
         await original(session)
 
-    def no_bridge(*_args, **_kwargs):
-        raise AssertionError("a confined launch configured the CORSIA tool bridge")
-
     monkeypatch.setattr(CCStreamSession, "start", start)
-    monkeypatch.setattr(harness_tool_bridge, "configure_cc_tool_bridge", no_bridge)
     return seen
 
 
@@ -84,15 +104,17 @@ def _stored_invocation(db, thread_id: str) -> dict:
     return json.loads(row["metadata"])["claude_invocation"]
 
 
-def _assert_confined(launch: dict, reviewed: str, child_id: str) -> None:
+def _assert_confined(launch: dict, child_id: str) -> None:
     cmd = launch["cmd"]
-    profile = claude_untrusted_profile_args()
+    profile = confined_claude_controls()
     start = cmd.index(profile[0])
     assert cmd[start:start + len(profile)] == profile
-    assert cmd[cmd.index("--add-dir") + 1] == reviewed
-    assert "--mcp-config" not in cmd and "bypassPermissions" not in cmd
+    assert cmd[cmd.index("--tools") + 1] == ",".join(confined_claude_tool_names())
+    assert "--add-dir" not in cmd and "bypassPermissions" not in cmd
     assert cmd.count("--permission-mode") == 1
-    assert launch["mcp_config"] is None
+    # Its reads are the bridge's, so the paths never reach the command line.
+    assert cmd[cmd.index("--mcp-config") + 1] == launch["mcp_config"]
+    assert launch["mcp_config"] and Path(launch["mcp_config"]).is_file()
     assert launch["cwd"].endswith(f"{child_id}/confined")
     assert Path(launch["cwd"]).is_dir() and not any(Path(launch["cwd"]).iterdir())
     assert "GH_TOKEN" not in launch["env"]
@@ -121,7 +143,7 @@ async def test_review_spawn_and_cold_start_stay_confined(
     )
     assert await _wait(lambda: rt.is_live(child_id))
     assert len(launches) == 1
-    _assert_confined(launches[0], reviewed_dir, child_id)
+    _assert_confined(launches[0], child_id)
     stored = _stored_invocation(child_db, child_id)
     assert stored["confinement"] == "untrusted" and stored["add_dirs"] == [reviewed_dir]
     # On its row too, so a switch to another harness can't launch it unconfined.
@@ -138,7 +160,7 @@ async def test_review_spawn_and_cold_start_stay_confined(
     )
     assert did is not None and rt.is_live(child_id)
     assert len(launches) == 2
-    _assert_confined(launches[1], reviewed_dir, child_id)
+    _assert_confined(launches[1], child_id)
     assert launches[1]["cwd"] == launches[0]["cwd"]
     assert _stored_invocation(child_db, child_id)["confinement"] == "untrusted"
     await rt.retire(child_id)
@@ -188,15 +210,16 @@ def test_stored_record_without_confinement_reads_unconfined():
 
 
 @pytest.mark.asyncio
-async def test_review_launches_read_confinement_once_and_install_no_tools(
+async def test_review_launches_read_confinement_once_and_advertise_only_the_reads(
     child_db, fake_claude, launches, reviewed_dir, monkeypatch, tmp_path,
 ):
     """A cold start and a provider resume read confinement once each, before the
-    destination is prepared, and build, install and budget no CORSIA tools."""
+    destination is prepared, and build, install and budget only the confined reads."""
     import connections.models as cm
     import infra.thread_confinement as thread_confinement
     import subagents.cc_runtime as rt
-    from subagents import cc_destination, harness_tool_bridge
+    from subagents import cc_destination
+    from tools.confined_reads import UNTRUSTED_READ_TOOLS
 
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / ".claude"))
     monkeypatch.setattr(
@@ -217,11 +240,6 @@ async def test_review_launches_read_confinement_once_and_install_no_tools(
     monkeypatch.setattr(cc_destination, "_fit_sections",
                         lambda **kwargs: fits.append(fit(**kwargs)) or fits[-1])
 
-    def no_tools(*_args, **_kwargs):
-        raise AssertionError("a review launch built the CORSIA tool registry")
-
-    monkeypatch.setattr(harness_tool_bridge, "build_tool_registry", no_tools)
-
     # Provider resume with no live handle.
     live, in_root = cc_destination._LIVE, cc_destination._require_session_in_root
     monkeypatch.setattr(cc_destination, "_LIVE", {})
@@ -231,7 +249,10 @@ async def test_review_launches_read_confinement_once_and_install_no_tools(
         selection=None, provider_resume=True,
     )
     assert reads == [child_id] and resumed.confinement.mode == "untrusted"
-    assert resumed.tool_registry is None and resumed.tool_definitions == ()
+    assert {d["function"]["name"] for d in resumed.tool_definitions} == set(UNTRUSTED_READ_TOOLS)
+    assert resumed.tool_registry is not None
+    # A provider resume keeps the surface Claude Code already holds, so it
+    # budgets no tool tokens, confined or not.
     assert resumed.fit_section_tokens["tools"] == 0 and fits[-1][0]["tools"] == 0
     monkeypatch.setattr(cc_destination, "_LIVE", live)
     monkeypatch.setattr(cc_destination, "_require_session_in_root", in_root)
@@ -245,8 +266,10 @@ async def test_review_launches_read_confinement_once_and_install_no_tools(
     )
     assert did is not None and rt.is_live(child_id)
     assert reads.count(child_id) == 1  # the parent's own launches read their own
-    assert fits[-1][0]["tools"] == 0
-    assert rt._LIVE.get(child_id).tool_definitions == ()
+    assert fits[-1][0]["tools"] > 0
+    assert {d["function"]["name"] for d in rt._LIVE.get(child_id).tool_definitions} == set(
+        UNTRUSTED_READ_TOOLS
+    )
     await rt.retire(child_id)
 
 
@@ -388,10 +411,10 @@ def test_invocation_rejects_inconsistent_confinement():
         ClaudeInvocation(binary="c", permission_mode="dontAsk", confinement="untrusted")
     with pytest.raises(ValueError):
         ClaudeInvocation(binary="c", permission_mode="p", add_dirs=("/w",))
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="needs the CORSIA tool bridge"):
         ClaudeInvocation(
             binary="c", permission_mode="dontAsk", confinement="untrusted",
-            add_dirs=("/w",), mcp_config="cfg.json",
+            add_dirs=("/w",),
         )
     with pytest.raises(ValueError):
         ClaudeInvocation(binary="c", permission_mode="p", confinement="write")

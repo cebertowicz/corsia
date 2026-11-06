@@ -10,6 +10,7 @@ from cc_runtime_fixtures import _seed_parent, child_db  # noqa: F401
 from subagents.cc_invocation import UNCONFINED, ClaudeInvocation, build_claude_cmd, permission_mode_for
 
 _REVIEW = dict(binary="claude", permission_mode=permission_mode_for("untrusted"),
+               mcp_config="/bridge.json",
                confinement="untrusted", add_dirs=("/src",), working_dir="/child/confined")
 _PLAIN = dict(binary="claude", permission_mode="bypassPermissions")
 

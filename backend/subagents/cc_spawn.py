@@ -96,8 +96,7 @@ async def _start_process(prepared: PreparedCCSpawn) -> None:
     _validate_working_dir(prepared.working_dir, request.project_id)
     from subagents.harness_tool_bridge import configure_cc_tool_bridge
 
-    confined = request.confinement != CONFINEMENT_NONE
-    mcp_config = None if confined else configure_cc_tool_bridge(
+    mcp_config = configure_cc_tool_bridge(
         live,
         thread_id=prepared.child_id,
         working_dir=prepared.working_dir,

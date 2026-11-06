@@ -11,11 +11,7 @@ from core.installed_context import persist_installed_delivery
 from llm.resolution import ExecutionTarget
 from subagents.cc_accept import _source_artifact
 from subagents.cc_context_reconstruction import build_cc_context_reconstruction
-from subagents.cc_invocation import (
-    CONFINEMENT_NONE,
-    ClaudeInvocation,
-    permission_mode_for,
-)
+from subagents.cc_invocation import CONFINEMENT_NONE
 from subagents.cc_runtime_helpers import (
     _build_seed,
     _check_live_cap,
@@ -191,30 +187,11 @@ async def _build_live(
         context_snapshot_id=reconstruction.snapshot_id,
         context_snapshot=reconstruction.snapshot.to_dict(),
         source_artifacts=artifacts,
-        tool_definitions=(
-            () if tool_registry is None else dynamic_tool_definitions(tool_registry)
+        tool_definitions=dynamic_tool_definitions(
+            tool_registry, request.confinement != CONFINEMENT_NONE,
         ),
     )
     return live, resolved_dir
-
-
-def _confined_record(
-    request: CCSpawnRequest, child_id: str, working_dir: str | None, cc_alias: str,
-) -> ClaudeInvocation | None:
-    """Store an untrusted child's confinement before anything can launch it.
-
-    Without this, a child whose first launch never ran would cold-start
-    later from a record with no confinement, so with every tool.
-    """
-    if request.confinement == CONFINEMENT_NONE:
-        return None
-    return ClaudeInvocation(
-        binary=request.binary,
-        permission_mode=permission_mode_for(request.confinement),
-        session_id=child_id, working_dir=working_dir, model=cc_alias,
-        effort=request.effort, confinement=request.confinement,
-        add_dirs=request.add_dirs,
-    )
 
 
 async def prepare_spawn(request: CCSpawnRequest, db) -> PreparedCCSpawn:
@@ -236,8 +213,8 @@ async def prepare_spawn(request: CCSpawnRequest, db) -> PreparedCCSpawn:
     name = request.title or request.task[:60]
     from subagents.harness_tool_bridge import build_tool_registry
 
-    # An untrusted child has no tool bridge, so no CORSIA tools, as on every later launch.
-    tool_registry = None if request.confinement != CONFINEMENT_NONE else build_tool_registry(working_dir)
+    # Every launch gets the bridge for its own working dir, confined or not.
+    tool_registry = build_tool_registry(working_dir)
     user_id = _parent_user_id(request.parent_thread_id, db)
     epoch = await run_in_db(
         _register_lineage,
@@ -246,7 +223,6 @@ async def prepare_spawn(request: CCSpawnRequest, db) -> PreparedCCSpawn:
     _previous_id, session_row = await run_in_db(
         persist_cc_session,
         child_id, child_id, title=name, cwd=working_dir,
-        invocation=_confined_record(request, child_id, working_dir, cc_alias),
     )
     notify_cc_session(child_id, child_id, session_row)
     live, resolved_dir = await _build_live(

@@ -12,26 +12,23 @@ from subagents.managed_launch import claude_project_discovery_args
 
 #: A launch with every CORSIA tool, as every managed child had before confinement.
 CONFINEMENT_NONE = "none"
-#: A launch that may only Read, Grep and Glob its working directory and add-dirs.
+#: A launch whose only tools are CORSIA's confined read tools, checked per call.
 CONFINEMENT_UNTRUSTED = "untrusted"
 CONFINEMENTS = (CONFINEMENT_NONE, CONFINEMENT_UNTRUSTED)
 _CONFINEMENT_FIELDS = ("confinement", "add_dirs")
-#: The only tools an untrusted launch has: Claude Code's own, run inside the provider.
-UNTRUSTED_NATIVE_TOOLS = ("Read", "Grep", "Glob")
 
 
-def claude_untrusted_profile_args() -> list[str]:
-    """Return the fixed Claude Code tool profile for a confined untrusted child.
+def confined_claude_tool_names() -> list[str]:
+    """The bridged tool names a confined launch is offered: CORSIA's confined reads.
 
-    The caller supplies the reviewed paths with ``--add-dir``. Keeping this
-    profile separate from normal managed-session construction prevents an untrusted
-    child from inheriting CORSIA MCP access, local settings, or any tool other
-    than Read, Grep, and Glob.
+    The names come from the shared boundary (``tools.confined_reads``), so the
+    surface Claude Code is offered and the surface the boundary serves on every
+    call can never drift apart.
     """
-    return [
-        *confined_claude_controls(),
-        "--tools", ",".join(UNTRUSTED_NATIVE_TOOLS),
-    ]
+    from tools.catalog import MCP_CORSIA_PREFIX
+    from tools.confined_reads import UNTRUSTED_READ_TOOLS
+
+    return [f"{MCP_CORSIA_PREFIX}{name}" for name in sorted(UNTRUSTED_READ_TOOLS)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,8 +49,8 @@ class ClaudeInvocation:
 
     def __post_init__(self) -> None:
         _require_confinement(self.confinement, self.add_dirs)
-        if self.confinement == CONFINEMENT_UNTRUSTED and self.mcp_config:
-            raise ValueError("a confined Claude Code launch has no CORSIA tool bridge")
+        if self.confinement == CONFINEMENT_UNTRUSTED and not self.mcp_config:
+            raise ValueError("a confined Claude Code launch needs the CORSIA tool bridge")
 
 
 def _require_confinement(confinement: object, add_dirs: object) -> None:
@@ -169,11 +166,13 @@ def claude_transcript_prefix_proof(
 
 
 def _untrusted_args(invocation: ClaudeInvocation) -> list[str]:
-    """Read-only tools over the add-dirs; the profile sets the permission mode."""
-    args = [*claude_untrusted_profile_args(), "--disable-slash-commands"]
-    for path in invocation.add_dirs:
-        args += ["--add-dir", path]
-    return args
+    """Only CORSIA's confined read tools, over the bridge; the profile sets the mode."""
+    return [
+        *confined_claude_controls(),
+        "--tools", ",".join(confined_claude_tool_names()),
+        "--disable-slash-commands",
+        "--mcp-config", invocation.mcp_config,
+    ]
 
 
 def _managed_args(invocation: ClaudeInvocation) -> list[str]:

@@ -1,7 +1,8 @@
 """Where a confined Claude Code child runs and what it may read.
 
-A ``untrusted`` child reads only its own empty working directory and the
-add-dirs its parent could already read, and holds no credential. The
+A ``untrusted`` child runs in its own empty working directory and reads only
+the add-dirs its parent could already read, through CORSIA's confined read
+tools; the tool boundary checks every call. It holds no credential. The
 confinement is stored on the thread row. A cold launch reads that row;
 a live process retains the confinement it was launched with.
 """
@@ -106,11 +107,11 @@ def launch_confinement(thread_id: str, live, db) -> LaunchConfinement:
 def launch_tools(working_dir: str | None, confined: bool) -> tuple[object, tuple]:
     """The CORSIA tool registry and definitions a launch installs and budgets.
 
-    An untrusted child has no tool bridge, so it gets neither, however it launches.
+    A confined launch builds the same registry as any other and is advertised
+    only its confined read tools; the boundary still refuses every other call
+    and every path outside its read roots when the call arrives.
     """
-    if confined:
-        return None, ()
     from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
 
     registry = build_tool_registry(working_dir)
-    return registry, dynamic_tool_definitions(registry)
+    return registry, dynamic_tool_definitions(registry, confined)
