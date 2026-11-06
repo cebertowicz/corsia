@@ -49,7 +49,7 @@ class CommentInput:
     delivery_policy: str = feedback_batch_core.IMMEDIATE
     tagged_agent_ids: list[str] = field(default_factory=list)
     tagged_agent_mentions: list[dict] = field(default_factory=list)
-    # An agent's ask for the person on this comment; only the agent tool path sets it.
+    # An agent's ask for the person on this comment, who is the account in user_id; only agent paths set it.
     tag_person: bool = False
     viewing_thread_id: str | None = None
 
@@ -156,7 +156,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 author_thread_id=request.author_thread_id, parent_id=request.parent_id,
                 anchor_text=quote, from_off=start, to_off=end, anchor_prefix=prefix, anchor_suffix=suffix,
                 review=request.review, replacement=request.replacement, insert_after=request.insert_after,
-                tags_person=request.tag_person, client_id=identifier,
+                tagged_user_id=request.user_id if request.tag_person else None, client_id=identifier,
                 region=request.region, image_rev=image_rev, image_src=image_src, announce=request.author_kind != "user", db=connection,
             )
             if created:

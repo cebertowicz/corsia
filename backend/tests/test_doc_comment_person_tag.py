@@ -4,14 +4,14 @@ import json
 
 import pytest
 
-from auth_fixtures import OWNER_TOKEN, OWNER_USER
+from auth_fixtures import OTHER_TOKEN, OWNER_TOKEN, OWNER_USER
 from delegation_docs_fixtures import _OWNER, _mk_thread, _post, _registrable_roots, doc
 
 pytestmark = pytest.mark.integration
 
 
-def _listed(integration_client, artifact_id: str) -> dict[str, dict]:
-    listed = integration_client.get(f"/api/artifacts/{artifact_id}/comments", params={"token": OWNER_TOKEN})
+def _listed(integration_client, artifact_id: str, token: str = OWNER_TOKEN) -> dict[str, dict]:
+    listed = integration_client.get(f"/api/artifacts/{artifact_id}/comments", params={"token": token})
     assert listed.status_code == 200, listed.text
     return {thread["id"]: thread for thread in listed.json()["comments"]}
 
@@ -37,12 +37,12 @@ def _tag_rows(comment_id: str) -> list:
         db.close()
 
 
-def _person_mark(comment_id: str) -> int:
+def _person_mark(comment_id: str) -> str | None:
     from infra.database import get_db
 
     db = get_db()
     try:
-        return db.execute("SELECT tags_person FROM doc_comments WHERE id=?", (comment_id,)).fetchone()[0]
+        return db.execute("SELECT tagged_user_id FROM doc_comments WHERE id=?", (comment_id,)).fetchone()[0]
     finally:
         db.close()
 
@@ -65,7 +65,7 @@ async def test_an_agent_tags_the_person_on_a_new_comment_and_a_reply(integration
     assert root["tagged_person"] == OWNER_USER and reply["tagged_person"] == OWNER_USER
     assert root["tagged_agents"] == [] and reply["tagged_agents"] == []
     assert root["tagged_agent_ids"] == [] and reply["tagged_agent_ids"] == []
-    assert _person_mark(root["id"]) == 1 and _person_mark(reply["id"]) == 1
+    assert _person_mark(root["id"]) == OWNER_USER and _person_mark(reply["id"]) == OWNER_USER
     # The tag table stays agents only.
     assert _tag_rows(root["id"]) == [] and _tag_rows(reply["id"]) == []
     # The listing carries the same field, which is what the comment surface renders.
@@ -128,7 +128,7 @@ async def test_an_untagged_agent_comment_still_needs_nobody(integration_client, 
     assert threads[root["id"]]["new_reply_ids"] == []
     assert reply["tagged_agents"] == []
     assert reply["tagged_person"] is None
-    assert _person_mark(reply["id"]) == 0
+    assert _person_mark(reply["id"]) is None
 
 
 @pytest.mark.asyncio
@@ -250,8 +250,8 @@ async def test_an_agent_tag_and_a_person_tag_on_one_comment_stay_separate_fields
 
 
 @pytest.mark.asyncio
-async def test_a_workspace_document_names_the_first_account_on_the_tag(integration_client, doc, _registrable_roots):
-    """A `ui`-owned document has no owning thread, but the tag still names the person on the chip."""
+async def test_a_tag_on_a_shared_document_needs_only_the_account_it_names(integration_client, doc, _registrable_roots):
+    """Every account can read a `ui`-owned document; the tag names, and needs, the agent's own account only."""
     from infra.database import get_db
     from tools.documents import DocCommentCreateTool
 
@@ -273,6 +273,9 @@ async def test_a_workspace_document_names_the_first_account_on_the_tag(integrati
     thread = _listed(integration_client, root["artifact_id"])[root["id"]]
     assert thread["tagged_person"] == OWNER_USER
     assert thread["new_comment"] is True
+    other = _listed(integration_client, root["artifact_id"], OTHER_TOKEN)[root["id"]]
+    assert other["tagged_person"] == OWNER_USER
+    assert other["new_comment"] is False
 
 
 def test_the_corsia_doc_route_tags_the_person_too(integration_client, doc):
@@ -283,5 +286,5 @@ def test_the_corsia_doc_route_tags_the_person_too(integration_client, doc):
     comment = created.json()["comment"]
 
     assert comment["tagged_person"] == OWNER_USER
-    assert _person_mark(comment["id"]) == 1
+    assert _person_mark(comment["id"]) == OWNER_USER
     assert _tag_rows(comment["id"]) == []

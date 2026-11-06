@@ -179,15 +179,16 @@ def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
 
 
 def _person_tagged(alias: str) -> str:
-    """SQL predicate for a comment whose author tagged the person; alias is an internal SQL identifier."""
-    return f"{alias}.tags_person=1"
+    """SQL predicate for a comment that tags the viewing account; binds one user_id parameter."""
+    return f"{alias}.tagged_user_id=?"
 
 
 def _eligible_top_level(alias: str) -> str:
-    """SQL predicate for an eligible unread top-level comment; alias is an internal SQL identifier.
+    """SQL predicate for an eligible unread top-level comment; binds one user_id parameter.
 
-    A tag of the person makes the comment eligible on its own: the noise rules that keep an agent's
-    suggestions and review notes out of the unread set decide what needs the person *without* an ask.
+    A tag of the viewing account makes the comment eligible on its own: the noise rules that keep an
+    agent's suggestions and review notes out of the unread set decide what needs the person *without*
+    an ask. Alias is an internal SQL identifier.
     """
     return f"""{alias}.parent_id IS NULL AND {alias}.author_kind='agent'
                AND ({_person_tagged(alias)}
@@ -212,7 +213,8 @@ def unread_comment_rows(user_id: str, artifact_id: str | None, *, include_author
     """The one definition of unread rows for replies and eligible top-level comments.
 
     Both use the same per-thread watermark, ordered by creation time and id. A tag of the
-    person makes either kind eligible even where the ordinary rules would not.
+    viewing account makes either kind eligible even where the ordinary rules would not; a tag of
+    another account does not.
     """
     # A document read binds both sides to its artifact so idx_doc_comments_artifact bounds the scan to that document.
     scoped = artifact_id is not None
@@ -239,7 +241,8 @@ def unread_comment_rows(user_id: str, artifact_id: str | None, *, include_author
                      AND item.id>thread_view.seen_reply_id
                  )
              )"""
-    return sql, ((artifact_id, user_id, artifact_id, artifact_id) if scoped else (user_id,))
+    # Text order: touched, thread_view, the scope, then the two person-tag tests.
+    return sql, ((artifact_id, user_id, artifact_id, artifact_id, user_id, user_id) if scoped else (user_id, user_id, user_id))
 
 
 def _unread_items(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
@@ -286,7 +289,7 @@ def mark_thread_viewed(
     item = db.execute(
         f"""SELECT item.id,item.created_at FROM doc_comments item
            WHERE item.id=? AND (item.parent_id=? OR (item.id=? AND {_eligible_top_level('item')}))""",
-        (seen_item_id, root_id, root_id),
+        (seen_item_id, root_id, root_id, user_id),
     ).fetchone()
     if item is None:
         raise ValueError("reply_not_found")

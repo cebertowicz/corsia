@@ -294,6 +294,19 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.diff')?.classList.contains('words')).toBe(true);
 	});
 
+	it('shows the person tag on a suggestion with no text, open, decided and resolved', () => {
+		const chip = () => host.querySelector('[data-person-tag]')?.textContent;
+		render(thread({ anchor: 'old text', replacement: 'new text', text: '', taggedPerson: 'steve' }));
+		expect(chip()).toBe('@steve');
+		unmount(component!); host.remove();
+		render(thread({ anchor: 'old text', replacement: 'new text', text: '', taggedPerson: 'steve', decision: 'accepted' }));
+		expect(chip()).toBe('@steve');
+		unmount(component!); host.remove();
+		render(thread({ anchor: 'old text', replacement: 'new text', text: '', taggedPerson: 'steve', decision: 'rejected', resolved: true }));
+		button('.ct-res-head').click(); flushSync();
+		expect(chip()).toBe('@steve');
+	});
+
 	it('gives an agent the avatar colour of its presence caret, and any other author the participant colour', () => {
 		render(thread({ author: 'Reviewer', authorKind: 'agent', authorThreadId: 'thread-1' }));
 		expect(host.querySelector<HTMLElement>('.avatar')!.style.background).toBe(hexToRgb(agentColor('thread-1')));

@@ -7,10 +7,8 @@ import sqlite3
 from core.agent_roster_queries import agent_rows
 from doceditor import writer_line
 from doceditor.comment_action_errors import CommentActionError
-from infra.accounts import get_user, list_users
-from infra.auth import is_owner_sentinel
+from infra.accounts import get_user
 from infra.queries import get_thread_for_user
-from registry.models import get_artifact
 
 
 LEGACY_RECIPIENTS_SKIP_LOCALITY = True
@@ -130,27 +128,18 @@ def save_tags(db, comment: dict, agent_ids: list[str]) -> None:
         )
 
 
-def _person_display_name(db, rows: list[dict]) -> str | None:
-    """Who a tag of the person names: the account that owns the document being commented on.
+def _person_names(db, rows: list[dict]) -> dict[str, str]:
+    """Display names of the accounts these rows tag, one key lookup per distinct account.
 
-    Read once per call, never per row, and only when a row carries the mark: three key lookups.
-    A workspace or project document (an owner sentinel) has no owning account, so it names the
-    first account, as the conductor backfill does for an ownerless member. Their display name is
-    the one their own comments carry as ``author``; no name is returned for an account that is gone.
+    The name is the one that account's own comments carry as ``author``; an account that is
+    gone has none, so its tag shows no chip.
     """
-    tagged = next((row for row in rows if row.get("tags_person")), None)
-    if tagged is None:
-        return None
-    # Every caller passes one artifact's rows, so one name covers the listing.
-    artifact = get_artifact(str(tagged["artifact_id"]), db=db)
-    if artifact is None:
-        return None
-    owner = artifact.get("parent_thread_id")
-    if is_owner_sentinel(owner):
-        first = next(iter(list_users(db=db)), None)
-        return (get_user(str(first["id"]), db=db) or {}).get("name") if first else None
-    account = db.execute("SELECT user_id FROM threads WHERE id=?", (str(owner),)).fetchone()
-    return (get_user(str(account["user_id"]), db=db) or {}).get("name") if account else None
+    names = {}
+    for user_id in {str(row["tagged_user_id"]) for row in rows if row.get("tagged_user_id")}:
+        name = (get_user(user_id, db=db) or {}).get("name")
+        if name:
+            names[user_id] = name
+    return names
 
 
 def tags_for_comments(db, rows: list[dict]) -> None:
@@ -158,7 +147,7 @@ def tags_for_comments(db, rows: list[dict]) -> None:
 
     ``tagged_agents`` and ``tagged_person`` are what a reader sees; ``tagged_agent_ids`` names who
     a comment is delivered to, which is never the person (their tag is the comment's own
-    ``tags_person`` mark, not a row of this table).
+    ``tagged_user_id``, not a row of this table).
     """
     if not rows:
         return
@@ -168,11 +157,10 @@ def tags_for_comments(db, rows: list[dict]) -> None:
         row["tagged_agents"] = []
         row["tagged_agent_mentions"] = []
         row["tagged_person"] = None
-    person_name = _person_display_name(db, rows)
-    if person_name:
-        for row in rows:
-            if row.get("tags_person"):
-                row["tagged_person"] = person_name
+    names = _person_names(db, rows)
+    for row in rows:
+        if row.get("tagged_user_id"):
+            row["tagged_person"] = names.get(str(row["tagged_user_id"]))
     marks = ",".join("?" for _ in by_id)
     for tag in db.execute(f"SELECT comment_id,agent_id,agent_name FROM doc_comment_tags WHERE comment_id IN ({marks}) ORDER BY agent_id", tuple(by_id)):
         row = by_id[tag["comment_id"]]

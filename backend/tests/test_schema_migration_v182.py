@@ -2,7 +2,7 @@
 
 import sqlite3
 
-from infra.migration_181_to_182_comment_tags_person import migrate_181_to_182
+from infra.migration_181_to_182_comment_tagged_user import migrate_181_to_182
 
 
 def test_existing_comments_gain_an_unset_person_mark_and_keep_their_text():
@@ -11,7 +11,7 @@ def test_existing_comments_gain_an_unset_person_mark_and_keep_their_text():
     db.execute("INSERT INTO doc_comments VALUES ('comment', 'kept')")
     migrate_181_to_182(db)
     migrate_181_to_182(db)
-    assert db.execute("SELECT body,tags_person FROM doc_comments").fetchone() == ("kept", 0)
+    assert db.execute("SELECT body,tagged_user_id FROM doc_comments").fetchone() == ("kept", None)
     db.close()
 
 

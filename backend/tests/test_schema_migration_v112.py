@@ -12,7 +12,7 @@ from infra.migration_133_to_134_doc_stranded_suggestions import migrate_133_to_1
 from infra.migration_134_to_135_doc_decision_bulk import migrate_134_to_135
 from infra.migration_149_to_150_doc_insert_after import migrate_149_to_150
 from infra.migration_179_to_180_comment_replies_index import migrate_179_to_180
-from infra.migration_181_to_182_comment_tags_person import migrate_181_to_182
+from infra.migration_181_to_182_comment_tagged_user import migrate_181_to_182
 from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
 
 _V111_DOC_COMMENTS = """

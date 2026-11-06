@@ -811,7 +811,7 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         from infra.migration_180_to_181_comment_writer_line import migrate_180_to_181
         migrate_180_to_181(db)
         # 181 -> 182 only adds the comment's person-tag mark.
-        from infra.migration_181_to_182_comment_tags_person import migrate_181_to_182
+        from infra.migration_181_to_182_comment_tagged_user import migrate_181_to_182
         migrate_181_to_182(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:

@@ -61,9 +61,9 @@ DOC_COMMENTS_SCHEMA_SQL = """
         insert_after INTEGER NOT NULL DEFAULT 0,
         -- 1 while the suggestion's decision is what resolved it; any other change to `resolved` clears it.
         closed_by_decision INTEGER NOT NULL DEFAULT 0,
-        -- 1 when the comment's author asked the person here (doceditor.comment_create_db); an agent's
-        -- tag of the person, never an agent tag, which stays a doc_comment_tags row.
-        tags_person INTEGER NOT NULL DEFAULT 0
+        -- The account an agent's tag of the person names: the account that agent works for
+        -- (doceditor.comment_create_db). Never an agent tag, which stays a doc_comment_tags row.
+        tagged_user_id TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_doc_comments_artifact
         ON doc_comments(artifact_id, created_at);
