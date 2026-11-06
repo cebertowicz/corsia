@@ -30,6 +30,24 @@ async def test_fork_listing_uses_frozen_model_and_fails_closed(review_env, monke
 
 
 @pytest.mark.asyncio
+async def test_cloud_fork_withholds_local_reply_to_cloud_root(review_env, monkeypatch):
+    from infra import local_only
+
+    db, aid = review_env
+    request(db, aid)
+    db.execute("UPDATE threads SET local_only=1 WHERE id='second'")
+    db.commit()
+    root, _ = add_comment(db, aid, author_id='owner')
+    reply, _ = add_comment(db, aid, author_id='second', parent_id=root['id'])
+    monkeypatch.setattr(local_only, '_is_cloud', lambda *_args, **_kw: True)
+    result = await DocCommentsListTool().execute(
+        artifact_id=aid, _thread_id='reviewer', _review_reader_model='cloud/model',
+    )
+    assert root['id'] in result
+    assert reply['id'] not in result
+
+
+@pytest.mark.asyncio
 async def test_cloud_fork_keeps_public_replies_to_withheld_root(review_env, monkeypatch):
     from infra import local_only
 

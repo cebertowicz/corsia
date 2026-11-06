@@ -83,8 +83,7 @@ class ToolRegistry:
 
     async def execute(
         self, name: str, params: dict[str, Any], *, review_request_id: str | None = None,
-        review_reader_model: str | None = None,
-    ) -> str:
+        review_reader_model: str | None = None) -> str:
         """Execute a tool with optional backend-owned review scope."""
         try:
             result = sanitize_result(await self._execute_unredacted(
