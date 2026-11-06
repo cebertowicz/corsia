@@ -46,8 +46,12 @@ it('ignores a scroll that left its anchor in place, and answers one that moved i
    expect(surface().getAttribute('aria-hidden')).toBeNull();
    expect(document.activeElement).toBe(field());
   }
-  // The person's own scroll moves the text: the card follows it out, focused or not.
+  // A scroll the document caused, with no wheel or touch behind it, leaves the card they are typing in where it is.
   fixture.setRect(new DOMRect(400, 3000, 50, 20)); window.dispatchEvent(new Event('scroll')); flushSync();
+  expect(surface().getAttribute('aria-hidden')).toBeNull();
+  expect(document.activeElement).toBe(field());
+  // The person's own scroll moves the text: the card follows it out, focused or not.
+  fixture.setRect(new DOMRect(400, 3500, 50, 20)); window.dispatchEvent(new Event('wheel')); window.dispatchEvent(new Event('scroll')); flushSync();
   expect(surface().getAttribute('aria-hidden')).toBe('true');
   fixture.setRect(new DOMRect(400, 400, 50, 20)); window.dispatchEvent(new Event('scroll')); flushSync();
   expect(surface().getAttribute('aria-hidden')).toBeNull();
