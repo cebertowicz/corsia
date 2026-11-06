@@ -236,6 +236,26 @@ describe('delegated rendered-markdown listener', () => {
 		await vi.waitFor(() => expect(d.openArtifact).toHaveBeenCalledOnce());
 	});
 
+	it.each(['/workspace/shared/linked.md:143', 'shared/linked.md:143'])('opens the document a chat link cites at a line (%s)', async (href) => {
+		const d = deps();
+		host = document.createElement('section');
+		document.body.appendChild(host);
+		component = mount(AssistantMessage, {
+			target: host,
+			props: {
+				msg: { id: 'message-1', content: `[Readout](${href})`, created_at: '2026-09-28T00:00:00Z' },
+				expandedTools: new Set<string>(), expandedReasoning: new Set<string>(),
+				onToggleToolBlock: () => {}, onToggleReasoning: () => {},
+			},
+		});
+		flushSync();
+		cleanup = installLinkTargetResolver(document, () => d);
+		host.querySelector<HTMLAnchorElement>('a')!.click();
+		await vi.waitFor(() => expect(d.openArtifact).toHaveBeenCalledOnce());
+		expect(d.fetchRevision).toHaveBeenCalledWith('/workspace/shared/linked.md', 'project-1');
+		expect(d.showError).not.toHaveBeenCalled();
+	});
+
 	it('routes an artifact document table link through the same root listener', async () => {
 		const d = deps();
 		const anchor = installSurface('| Doc |\n| --- |\n| [Open](/workspace/shared/linked.md) |', 'artifact-document', d);

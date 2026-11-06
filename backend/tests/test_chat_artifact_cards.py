@@ -577,6 +577,13 @@ def test_only_links_and_bare_paths_outside_code_are_candidates():
     assert targets(text) == ["shared/plan.md", "/workspace/notes/a.md"]
 
 
+def test_a_link_cited_at_a_line_is_a_candidate_for_its_file():
+    text = "See [the readout](BRIEFING.md:143), [the plan](/workspace/plan.md:12:3) and [mail](mailto:a@b.c)."
+
+    assert targets(text) == ["BRIEFING.md:143", "/workspace/plan.md:12:3"]
+    assert workspace_path("BRIEFING.md:143", ["/workspace"]) == "/workspace/BRIEFING.md"
+
+
 def test_a_message_gets_cards_for_accessible_named_files_without_registering(db, ws):
     kept = _registered(db, ws, "plan.md")
     (ws / "unregistered.md").write_text("x")

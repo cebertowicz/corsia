@@ -7,7 +7,7 @@ import { openSubagentRequest } from '$lib/stores/subagents';
 import { activeThreadId } from '$lib/stores/threads';
 import { emitProductEvent } from '$lib/product_events';
 import { toasts } from '$lib/stores/toast';
-import { documentLinkTarget } from '$lib/cm/markdown-link';
+import { documentLinkTarget, withoutLineSuffix } from '$lib/cm/markdown-link';
 import { uiScope } from '$lib/stores/uiScope';
 import { SETTINGS_SECTIONS, requestSettingsSection, type SettingsSection } from '$lib/stores/settingsNavigation';
 
@@ -29,7 +29,7 @@ function targetPath(href: string): string | null {
 	const withoutQuery = href.split(/[?#]/, 1)[0];
 	if (!withoutQuery) return null;
 	try {
-		return decodeURIComponent(withoutQuery);
+		return withoutLineSuffix(decodeURIComponent(withoutQuery));
 	} catch {
 		return null;
 	}
@@ -102,7 +102,8 @@ function threadLink(href: string, origin: string): string | null {
 }
 
 function hasScheme(href: string): boolean {
-	return /^[a-z][a-z\d+.-]*:/i.test(href);
+	const path = href.split(/[?#]/, 1)[0];
+	return /^[a-z][a-z\d+.-]*:/i.test(href) && withoutLineSuffix(path) === path;
 }
 
 /** Opens an external link in the correct host without changing web navigation. */

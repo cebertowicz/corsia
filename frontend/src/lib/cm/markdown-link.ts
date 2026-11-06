@@ -58,13 +58,18 @@ function hrefUnder(view: EditorView, target: EventTarget | null): string | null 
 	return followable(href) ? href : null;
 }
 
+/** `file.md:12` or `file.md:12:3`, a place in a file as agents cite it, is that file: it opens, the place is not kept. */
+export function withoutLineSuffix(path: string): string {
+	return path.replace(/^(.+\.[A-Za-z0-9]{1,8}):\d+(?::\d+)?$/, '$1');
+}
+
 /**
  * A relative target resolves from the document's folder, which is how an agent writes links between documents.
  * Anything else (a web or other scheme target, an absolute path, `/thread/...`, `/settings/...`) goes as written.
  */
 export function documentLinkTarget(docPath: string | null, href: string): string {
 	if (href.startsWith('/') || href.startsWith('#')) return href;
-	const resolved = resolveImagePath(docPath, href.split(/[?#]/, 1)[0]);
+	const resolved = resolveImagePath(docPath, withoutLineSuffix(href.split(/[?#]/, 1)[0]));
 	return resolved ? resolved.split('/').map(encodeURIComponent).join('/') : href;
 }
 
