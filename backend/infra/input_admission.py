@@ -15,7 +15,7 @@ from infra.document_viewing import PreparedViewingDocument
 from infra.reply_context import require_every_comment, validate_reply_context
 from infra.thread_inputs import thread_admission_state
 from infra.time import utc_now_iso
-from infra.vendor_login import LOGIN_KEY, public_metadata
+from infra.vendor_login import LOGIN_KEY
 
 DELIVERY_INTENTS = frozenset({"apply_now", "queue_after_turn"})
 
@@ -202,14 +202,19 @@ def _accepted_duplicate(
     if existing is None:
         return None
     stored_metadata = json.loads(existing["metadata"] or "{}")
-    if isinstance(stored_metadata, dict):
-        stored_metadata = public_metadata(stored_metadata)
     stored_options = json.loads(existing["delivery_options"] or "{}")
+    # Delivery adds its own keys to a stored row (a login stamp, an installed
+    # context snapshot, a paused-plan time) after admission, so the sent payload
+    # is the same input when every key it carries still holds its stored value.
     same = (
         str(existing["thread_id"]) == thread_id
         and str(existing["role"]) == role
         and str(existing["content"]) == content
-        and stored_metadata == (metadata or {})
+        and isinstance(stored_metadata, dict)
+        and all(
+            key in stored_metadata and stored_metadata[key] == value
+            for key, value in (metadata or {}).items()
+        )
         and stored_options == (delivery_options or {})
         and str(existing["delivery_intent"]) == intent
     )

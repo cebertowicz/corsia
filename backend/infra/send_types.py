@@ -53,6 +53,8 @@ class InboxQueuedInput:
     duplicate: bool = False
     held: HeldAdmission | None = None
     admission_hold: str | None = None
+    # A duplicate reports its stored row's state, which delivery may have moved on.
+    delivery_state: str = "queued"
 
     @property
     def held_line(self) -> str | None:

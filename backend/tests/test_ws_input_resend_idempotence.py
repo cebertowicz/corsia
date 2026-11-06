@@ -1,9 +1,10 @@
 """A resent WebSocket input frame is admitted once, on both input paths.
 
-Turn & Delivery puts a chat frame back on a new socket when recovery cannot find
-the input in the server's history. That is safe only because the same frame sent
-twice is one input: these tests drive both WebSocket entry points with the frame
-the client actually sends and pin what the second admission does.
+After a reconnect the client puts every input it holds no receipt for back on
+the new socket, byte for byte. That is safe only because the same frame sent
+twice is one input, even after delivery has written to the stored row: these
+tests drive both WebSocket entry points with the frame the client actually
+sends and pin what the second admission does.
 """
 from __future__ import annotations
 
@@ -188,6 +189,65 @@ async def test_the_same_input_with_other_content_is_refused(
     await _send_frame(service, path, row, f"{CONTENT} reworded")
 
     assert receipts and receipts[0]["input_id"] == INPUT_ID
+    assert _user_inputs(row["id"]) == 1
+    assert any(
+        "input identity already has a different payload" in payload.get("message", "")
+        for payload in errors
+    ), errors
+
+
+def _write_stored_row(message_id: str, sql_set: str, *params) -> None:
+    from infra.database import get_db
+
+    db = get_db()
+    db.execute(f"UPDATE messages SET {sql_set} WHERE id=?", (*params, message_id))
+    db.commit()
+    db.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["message", "subagent_feed"])
+async def test_a_resend_after_delivery_wrote_to_the_row_is_still_one_input(
+    isolated_db, monkeypatch, path
+):
+    """Keys delivery adds after admission never make a resend a new payload.
+
+    Its receipt reports where delivery has the stored row, not a fresh queue.
+    """
+    from core.installed_context import INSTALLED_SOURCES
+
+    service, receipts, errors = _stub_delivery(monkeypatch)
+    row = _thread_row(f"{path}-delivered-thread")
+    if path == "subagent_feed":
+        _as_subagent(monkeypatch, row)
+
+    await _send_frame(service, path, row, CONTENT)
+    _write_stored_row(
+        INPUT_ID,
+        "metadata=json_set(json_set(COALESCE(metadata,'{}'),'$." + INSTALLED_SOURCES
+        + "',json('[]')),'$.plan_paused_since','t1'),delivery_state='delivered'",
+    )
+    await _send_frame(service, path, row, CONTENT)
+
+    assert not errors, errors
+    assert _user_inputs(row["id"]) == 1
+    assert len(receipts) == 2, receipts
+    assert receipts[1]["duplicate"] is True
+    assert receipts[1]["delivery_state"] == "delivered"
+
+
+@pytest.mark.asyncio
+async def test_a_resend_whose_sent_key_changed_value_is_refused(isolated_db, monkeypatch):
+    """Only keys the resend does not carry are ignored; a carried key must match."""
+    service, receipts, errors = _stub_delivery(monkeypatch)
+    row = _thread_row("changed-key-thread")
+
+    await _send_frame(service, "message", row, CONTENT)
+    _write_stored_row(
+        INPUT_ID, "metadata=json_set(metadata,'$.reply_via_post_update',json('false'))",
+    )
+    await _send_frame(service, "message", row, CONTENT)
+
     assert _user_inputs(row["id"]) == 1
     assert any(
         "input identity already has a different payload" in payload.get("message", "")

@@ -17,7 +17,6 @@ import {
 	getTurnState,
 } from '../ws/turnState';
 import { token } from '../stores/auth';
-import { recoverPendingInputs } from '../ws/pendingRecovery';
 import { isAwaitingDelivery, isImminentDelivery } from '../messageDelivery';
 
 const _SUBAGENT_REF: SubagentRef = {
@@ -365,43 +364,6 @@ describe('authoritative input correlation and stop', () => {
 		expect(get(subagentMeta).get('child-1')?.status).toBe('idle');
 	});
 
-	it('recovers a lost acknowledgement from existing paged message history', async () => {
-		mockWs();
-		const inputId = sendMessage('main-1', 'durable')!;
-		let fetchedUrl: RequestInfo | URL | undefined;
-		const fetchPage = vi.fn(async (input: RequestInfo | URL) => {
-			fetchedUrl = input;
-			return new Response(JSON.stringify({
-				messages: [{
-					id: 'canonical-1',
-					role: 'user',
-					content: 'durable',
-					created_at: '2026-07-14T13:00:00Z',
-					metadata: { input_id: inputId },
-				}],
-				has_more: false,
-				oldest_id: 'canonical-1',
-			}), { status: 200 });
-		});
-
-		await recoverPendingInputs(fetchPage as typeof fetch);
-
-		expect(fetchPage).toHaveBeenCalledOnce();
-		expect(String(fetchedUrl)).toContain('/api/threads/main-1/messages?');
-		expect(getTurnState('main-1')).toEqual({
-			turnId: null, turnOrder: null, phase: 'idle', pendingInputIds: [],
-			visibleRootThreadId: null, startedAt: null,
-		});
-		expect(get(messages)[0]).toMatchObject({
-			id: 'canonical-1', created_at: '2026-07-14T13:00:00Z', _optimistic: false,
-		});
-	});
-
-	it('does not query history when no thread retains pending input', async () => {
-		const fetchPage = vi.fn();
-		await recoverPendingInputs(fetchPage as typeof fetch);
-		expect(fetchPage).not.toHaveBeenCalled();
-	});
 });
 
 describe('durable checkpoint admission', () => {

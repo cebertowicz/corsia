@@ -136,7 +136,7 @@ def _accepted_input_payload(
             "message_id": receipt.message_id,
             "queue_order": receipt.input_order,
             "created_at": receipt.created_at,
-            "delivery_state": "queued",
+            "delivery_state": result.delivery_state,
             "delivery_error": None,
             "delivery_revision": receipt.delivery_revision,
             "duplicate": result.duplicate,

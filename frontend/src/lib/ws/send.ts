@@ -10,8 +10,8 @@ import { viewingDocumentForThread } from '../stores/documentViewport';
 import {
 	acknowledgedTurnId,
 	hasActiveTurn as reducerHasActiveTurn,
-	pendingInputThreads,
 	requestInput,
+	turnStates,
 } from './turnState';
 import { beginPendingSnapshot } from './streamState';
 import { takeReplyContext, type ReplyComment } from '../stores/replyContextCapture';
@@ -85,37 +85,32 @@ export function resubscribeWatchedThreads(): void {
  *
  * `ws.send` is fire-and-forget and can be swallowed whole: a half-dead socket
  * accepts the frame, the person sees their message, and the server never hears
- * of it. Recovery on the next socket can only re-ask for an input it can find
- * in the server's history, so the only copy of a lost frame is the one this
- * client still holds. It is kept only while its input is still pending, so it
- * can never grow past the inputs actually waiting.
+ * of it, so the only copy of a lost frame is the one this client still holds.
+ * Turn state owns membership: the subscription below drops a frame as soon as
+ * its input stops being pending, a deleted thread's included, so the store can
+ * never grow past the inputs actually waiting.
  */
 const unconfirmedFrames = new Map<string, { threadId: string; frame: string }>();
 
-function rememberFrame(threadId: string, inputId: string, frame: string): void {
-	const pendingByThread = new Map<string, Set<string>>(pendingInputThreads().map(entry =>
-		[entry.threadId, new Set<string>(entry.inputIds)]
-	));
-	for (const [pendingId, stored] of unconfirmedFrames) {
-		if (!pendingByThread.get(stored.threadId)?.has(pendingId)) {
-			unconfirmedFrames.delete(pendingId);
-		}
+turnStates.subscribe(states => {
+	for (const [inputId, stored] of unconfirmedFrames) {
+		const state = states.get(stored.threadId);
+		if (!state?.pendingInputIds.includes(inputId)) unconfirmedFrames.delete(inputId);
 	}
-	unconfirmedFrames.set(inputId, { threadId, frame });
-}
+});
 
 /**
- * Put a pending input's original frame back on the current socket.
+ * Put every frame still waiting for a receipt on a new socket, in the order the
+ * person sent them, before anything else can be sent on it.
  *
- * Byte-for-byte, so the server's duplicate check sees the payload it saw the
- * first time and the input lands once. False means this client holds no frame
- * to resend — after a page reload, for example, it is gone.
+ * Each goes out byte for byte as first sent. The server admits one it never
+ * got, and answers one it already stores as a duplicate with that row's
+ * delivery state. It admits a socket's messages one at a time in the order
+ * they arrive, so a lost message is admitted before any message sent after
+ * the reconnect.
  */
-export function resendUnconfirmedInput(inputId: string): boolean {
-	const stored = unconfirmedFrames.get(inputId);
-	if (!stored || !ws || ws.readyState !== WebSocket.OPEN) return false;
-	ws.send(stored.frame);
-	return true;
+export function resendUnconfirmedFrames(socket: WebSocket): void {
+	for (const { frame } of unconfirmedFrames.values()) socket.send(frame);
 }
 
 /** Which inputs this client still holds a frame for. Test-only visibility. */
@@ -162,8 +157,8 @@ export function sendMessage(
 		messages.update(m => [...m, msg]);
 	}
 	// One queue. A message sent while a checkpoint holds the thread is an
-	// ordinary queued row that the transcript renders like any other, so there
-	// is nothing to track in a side store and nothing to reconcile later.
+	// ordinary queued row that the transcript renders like any other; the frame
+	// it went out with is kept beside the pending row for as long as it waits.
 	requestInput(threadId, inputId);
 
 	if (get(subagentMeta).has(threadId)) {
@@ -175,7 +170,7 @@ export function sendMessage(
 			...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
 		});
 		ws.send(frame);
-		rememberFrame(threadId, inputId, frame);
+		unconfirmedFrames.set(inputId, { threadId, frame });
 		return inputId;
 	}
 
@@ -212,7 +207,7 @@ export function sendMessage(
 		...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
 	});
 	ws.send(frame);
-	rememberFrame(threadId, inputId, frame);
+	unconfirmedFrames.set(inputId, { threadId, frame });
 	return inputId;
 }
 

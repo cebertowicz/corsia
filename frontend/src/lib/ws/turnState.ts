@@ -179,17 +179,6 @@ export function isCurrentTurn(
 	return state.turnId === identity.turnId && state.turnOrder === identity.turnOrder;
 }
 
-export function pendingInputThreads(): Array<{
-	threadId: string;
-	inputIds: readonly string[];
-}> {
-	return [...get(mutableTurnStates)].flatMap(([threadId, state]) =>
-		state.pendingInputIds.length > 0
-			? [{ threadId, inputIds: state.pendingInputIds }]
-			: []
-	);
-}
-
 export function _resetTurnStateForTests(): void {
 	mutableTurnStates.set(new Map());
 }

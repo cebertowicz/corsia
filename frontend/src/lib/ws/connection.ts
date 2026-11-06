@@ -3,6 +3,7 @@ import { token, user } from '../stores/auth';
 import { connectionState, connectionError } from '../stores/connection';
 import { ws, setWs } from './state';
 import { handleMessage } from './handlers';
+import { resendUnconfirmedFrames } from './send';
 import './documentOpen';
 import './browserOpen';
 
@@ -86,6 +87,8 @@ function openOwner(session: string) {
 	socket.onopen = () => {
 		if (!owns()) return;
 		socket.send(JSON.stringify({ type: 'auth', token: session }));
+		// Ahead of any message sent on this socket, so a lost one keeps its place.
+		resendUnconfirmedFrames(socket);
 	};
 
 	socket.onmessage = (event) => {

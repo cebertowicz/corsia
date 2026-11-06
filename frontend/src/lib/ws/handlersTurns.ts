@@ -178,32 +178,6 @@ export function handleInputRejected(data: any): boolean {
 	return transition.inputResolved;
 }
 
-export function handleRecoveredInput(
-	threadId: string,
-	inputId: string,
-	message: any,
-): void {
-	const transition = recoverInput(threadId, inputId);
-	if (!transition.inputResolved) return;
-	if (typeof message?.id === 'string' && typeof message?.created_at === 'string') {
-		const deliveryState = readMessageDeliveryState(message.delivery_state);
-		reconcileOptimisticRow(
-			threadId, inputId, message.id, message.created_at,
-			deliveryState !== null
-				? {
-					delivery_state: deliveryState,
-					delivery_error: typeof message.delivery_error === 'string'
-						? message.delivery_error
-						: null,
-					...(typeof message.delivery_revision === 'number'
-						? { delivery_revision: message.delivery_revision }
-						: {}),
-				}
-				: { delivery_state: 'delivered', delivery_error: null },
-		);
-	}
-}
-
 /**
  * Settle a thread the server has told us holds no live turn.
  *

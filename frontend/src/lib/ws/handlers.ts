@@ -11,6 +11,7 @@ import { emit } from './events';
 import { registerSubagent, setSubagentStatus, setSubagentInit } from '../stores/subagents';
 import { handleAuthOk, handleSystemDraining, handleWsError } from './handlersConnection';
 import { compareMessageOrder } from '../messageHistory';
+import { readMessageDeliveryState } from '../messageDelivery';
 import { startTypewriter } from './typewriter';
 import { consumeFirstRunOpening } from './firstRunOpeningReveal';
 import {
@@ -73,7 +74,8 @@ function reconcileQueuedInputReceipt(data: any): void {
 			id: messageId,
 			created_at: queuedAt ?? correlated.created_at,
 			_optimistic: false,
-			delivery_state: 'queued',
+			// A resent input the server already stored reports where delivery has it.
+			delivery_state: readMessageDeliveryState(data?.delivery_state) ?? 'queued',
 			delivery_error: null,
 			...(revision !== undefined ? { delivery_revision: revision } : {}),
 		};
