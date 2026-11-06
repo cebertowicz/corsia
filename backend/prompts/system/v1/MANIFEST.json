@@ -39,11 +39,11 @@
       "sha256": "825bcd4b6af726571e08e91d129f5c4ff204808e27002da1e81981c3e45cafca"
     },
     {
-      "bytes": 622,
+      "bytes": 581,
       "kind": "context",
       "path": "context/roles/corsia_agent/00-operating-model.md",
       "role": "corsia_agent",
-      "sha256": "1053295df821c619f4a6423c77f1d803a3cc314ea36c5c90340a61aa4bb78f9c"
+      "sha256": "637d3510e8e7413df982fa49ddf995bb78e77762a2e260ab643c3965dfab01f3"
     },
     {
       "bytes": 729,
@@ -142,10 +142,10 @@
       "sha256": "2e094613d974f45221c8d61b538b7c54ed7486e73a96d6c8465b21ea35ef4214"
     },
     {
-      "bytes": 18740,
+      "bytes": 19255,
       "kind": "skill",
       "path": "skills/attention-watch/SKILL.md",
-      "sha256": "d33af852f69473e7f2e885a7bbc1c05ed8b506ed65a7d3ab000081f1022e2f86"
+      "sha256": "d642778c402120d0f0a8b9c1861b4b4588dad93c65fd33a7d487ad8ccee5d3ac"
     },
     {
       "bytes": 3700,
@@ -154,10 +154,10 @@
       "sha256": "075871dd2dc7e7c61eac2138a80ca63be257e396f95adcdcfe757a01cf4bc682"
     },
     {
-      "bytes": 9106,
+      "bytes": 9105,
       "kind": "skill",
       "path": "skills/conductor-bootstrap/SKILL.md",
-      "sha256": "5bd2d7a201d94010d198f1626189b48164f2f5efa80acfdaa4f1ad7d110d3100"
+      "sha256": "21db0bad1d49364aebca1cae521a77953615f06ae40fc7aba84105ab0d23fd4d"
     },
     {
       "bytes": 6186,
@@ -400,10 +400,10 @@
       "sha256": "f2c3ccf9a25e4dba95ae7938361346e51b07f3e6283c0cd2904f70c5666c6061"
     },
     {
-      "bytes": 10651,
+      "bytes": 11071,
       "kind": "skill",
       "path": "skills/time-to-agent/SKILL.md",
-      "sha256": "b5225bc152ffc68f41b13c41f7790acd429872aa8363e08d130a40a258d90971"
+      "sha256": "e4d87199e693df821fe3e68e08b4fea751f2bd6ee4a29a2103f2a61358806937"
     },
     {
       "bytes": 4996,
