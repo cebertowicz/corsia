@@ -41,7 +41,8 @@ async def test_fork_and_reviewer_share_read_fence(review_env, world, monkeypatch
     for tool in (ReadFileTool(workspace=ws), ListDirTool(workspace=ws),
                  GlobTool(workspace=ws), GrepTool(workspace=ws)):
         registry.register(tool)
-    provider = SimpleNamespace(fork_id=row["fork_id"], thread_id="reviewer", working_dir=str(ws))
+    provider = SimpleNamespace(fork_id=row["fork_id"], thread_id="reviewer", working_dir=str(ws),
+                               target=SimpleNamespace(catalog_id='cloud/model'))
 
     def args(directory, filename):
         if name == "read_file":
@@ -74,4 +75,4 @@ async def test_fork_and_reviewer_share_read_fence(review_env, world, monkeypatch
     forged = SimpleNamespace(fork_id="wrong", thread_id="reviewer", working_dir=str(ws))
     refused = await execute_fork_tool(ARTIFACT_REVIEW_KIND, forged, registry, asyncio.Event(),
                                       name, args(own, "allowed.txt"))
-    assert refused == ARTIFACT_REVIEW_KIND.tool_refusal
+    assert refused == 'This review request is no longer active. ' + ARTIFACT_REVIEW_KIND.tool_refusal

@@ -148,7 +148,7 @@ async def test_out_of_scope_arguments_return_kind_refusal_before_dispatch(review
         SimpleNamespace(fork_id=row["fork_id"], thread_id="reviewer", working_dir="/workspace"),
         SimpleNamespace(execute=execute), asyncio.Event(), name, arguments,
     )
-    assert result == ARTIFACT_REVIEW_KIND.tool_refusal
+    assert result == 'Review fork may only use its requested document. ' + ARTIFACT_REVIEW_KIND.tool_refusal
     assert calls == []
 
 
@@ -167,7 +167,7 @@ async def test_valid_document_path_cannot_hide_an_unrelated_artifact(review_env)
         SimpleNamespace(execute=execute), asyncio.Event(), "doc_comment_create",
         {"doc_path": path, "artifact_id": "unrelated", "body": "Out of scope"},
     )
-    assert result == ARTIFACT_REVIEW_KIND.tool_refusal
+    assert result == 'Review fork may only use its requested document. ' + ARTIFACT_REVIEW_KIND.tool_refusal
 
 
 @pytest.mark.asyncio
@@ -185,7 +185,7 @@ async def test_codex_bridge_returns_scope_refusal_without_a_foreground_turn(revi
         registry, thread_id="reviewer", fork_id=row["fork_id"], fork_policy=policy,
         name="doc_feedback_send", arguments={"artifact_id": "unrelated"}, harness="codex",
     )
-    assert result == ARTIFACT_REVIEW_KIND.tool_refusal
+    assert result == 'Review fork may only use its requested document. ' + ARTIFACT_REVIEW_KIND.tool_refusal
     assert stored(db, row["id"])["state"] == "forked"
     assert db.execute("SELECT COUNT(*) FROM active_turns WHERE thread_id='reviewer'").fetchone()[0] == 0
 
@@ -234,6 +234,31 @@ async def test_registry_strips_forged_review_scope_and_injects_only_trusted_scop
 
 
 @pytest.mark.asyncio
+async def test_registry_uses_only_trusted_review_reader_model(review_env):
+    from infra import state
+    from test_tool_registry_identity import _CaptureTool
+    from tools.registry import ToolRegistry
+
+    class Listing(_CaptureTool):
+        @property
+        def name(self):
+            return 'doc_comments_list'
+
+    registry, tool = ToolRegistry(), Listing()
+    registry.register(tool)
+    token = state._current_thread_id.set('reviewer')
+    try:
+        forged = {'value': 'safe', '_review_reader_model': 'local/model'}
+        assert await registry.execute('doc_comments_list', forged, review_request_id='trusted',
+                                      review_reader_model='cloud/model') == 'ok'
+        assert await registry.execute('doc_comments_list', forged) == 'ok'
+    finally:
+        state._current_thread_id.reset(token)
+    assert tool.calls[0]['_review_reader_model'] == 'cloud/model'
+    assert '_review_reader_model' not in tool.calls[1]
+
+
+@pytest.mark.asyncio
 async def test_executor_passes_request_scope_explicitly(review_env):
     from doceditor.comment_create_db import CommentInput
 
@@ -247,9 +272,10 @@ async def test_executor_passes_request_scope_explicitly(review_env):
 
     result = await execute_fork_tool(
         ARTIFACT_REVIEW_KIND,
-        SimpleNamespace(fork_id=row["fork_id"], thread_id="reviewer", working_dir="/workspace"),
+        SimpleNamespace(fork_id=row["fork_id"], thread_id="reviewer", working_dir="/workspace",
+                        target=SimpleNamespace(catalog_id='cloud/model')),
         SimpleNamespace(execute=execute), asyncio.Event(), "doc_comments_list", {"artifact_id": aid},
     )
     assert result == "ok"
-    assert calls == [{"review_request_id": row["id"]}]
+    assert calls == [{"review_request_id": row["id"], 'review_reader_model': 'cloud/model'}]
     assert CommentInput.__dataclass_fields__["review_request_id"].default is None

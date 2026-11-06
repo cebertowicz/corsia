@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.fork_runtime import ForkKind, native_iteration_limit
+from core.fork_runtime import ForkKind
+from core.checkpoint_fork_kind import REVIEW_FORK_STEP_LIMITS
 from core.artifact_review_capture import (
     preserve_on_shutdown, provider_failure, review_end_handler, review_limit_or_failure_handler,
 )
@@ -28,25 +29,23 @@ async def execute_review_tool(
 
     try:
         request_id = await run_in_db(authorize_tool, request, name, arguments)
-    except PermissionError:
-        return ARTIFACT_REVIEW_KIND.tool_refusal
+    except PermissionError as error:
+        return f"{str(error).capitalize()}. {ARTIFACT_REVIEW_KIND.tool_refusal}"
     with tool_invocation_context(None), without_host_lease():
-        return await await_or_cancel(
-            agent.tools.execute(name, arguments, review_request_id=request_id), cancel_event,
-        )
+        return await await_or_cancel(agent.tools.execute(
+            name, arguments, review_request_id=request_id, review_reader_model=request.target.catalog_id), cancel_event)
 
 
 ARTIFACT_REVIEW_KIND = ForkKind(
     name="artifact_review",
     tool_allowlist=REVIEW_TOOL_ALLOWLIST,
-    tool_refusal="Artifact reviews may only write comments and feedback on the requested document.",
+    tool_refusal="Reviews can read files, but can write comments and feedback only on their requested document.",
     over_room_text=(
         "{excess} tokens over the remaining review room and was not sent; "
         "leave your comments and call doc_feedback_send now."
     ),
     tool_executor=execute_review_tool,
-    # Use the same harness limits as other disposable forks.
-    step_limits={"native": native_iteration_limit, "claude-code": None, "codex": None},
+    step_limits=REVIEW_FORK_STEP_LIMITS,
     end_handler=review_end_handler,
     limit_or_failure_handler=review_limit_or_failure_handler,
     usage_binder=bind_usage,

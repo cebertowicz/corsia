@@ -70,8 +70,7 @@ def prepare_positions(artifact_id: str, text: str, db: sqlite3.Connection, *, ra
 
 
 def anchored_threads(artifact_id: str, path: str | None, db: sqlite3.Connection,
-                     *, text: str | None = None, persist: bool = True,
-                     reader_id: str | None = None, reader_model: str | None = None) -> tuple[list[dict], bool]:
+                     *, text: str | None = None, persist: bool = True) -> tuple[list[dict], bool]:
     """Return threads anchored to current text, without making a read fragile.
 
     A failed text read leaves persisted offsets alone and reports that anchoring
@@ -79,23 +78,6 @@ def anchored_threads(artifact_id: str, path: str | None, db: sqlite3.Connection,
     valid; the next read retries persistence.
     """
     threads = store.list_for_artifact(artifact_id, db=db)
-    if reader_id is not None:
-        from doceditor.comment_recipients import _withheld_authors
-
-        rows = [item for root in threads for item in [root, *root.get("replies", [])]]
-        withheld = _withheld_authors(db, rows, reader_id, reader_model=reader_model)
-        visible = []
-        for root in threads:
-            replies = [reply for reply in root.get("replies", []) if reply.get("author_thread_id") not in withheld]
-            if root.get("author_thread_id") in withheld:
-                if replies:
-                    visible.append({"id": root["id"], "parent_id": None, "review": True, "anchor_text": None,
-                                    "resolved": root.get("resolved"), "decision": root.get("decision"),
-                                    "body": "(not shown: this agent is Local only)", "replies": replies})
-            else:
-                root["replies"] = replies
-                visible.append(root)
-        threads = visible
     ranges = None
     if text is None and path:
         from pathlib import Path

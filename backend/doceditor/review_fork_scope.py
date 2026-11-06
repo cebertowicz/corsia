@@ -46,7 +46,7 @@ def authorize_tool(request, name: str, arguments: dict) -> str:
         ).fetchone()
         if (row is None or row["reviewer_thread_id"] != request.thread_id
                 or row["state"] != "forked"):
-            raise PermissionError("review fork no longer owns this request")
+            raise PermissionError("This review request is no longer active")
         if not name.startswith("doc_"):
             return str(row["id"])
         if arguments.get("artifact_id") and arguments["artifact_id"] != row["artifact_id"]:

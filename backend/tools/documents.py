@@ -8,7 +8,7 @@ from typing import Any
 
 from doceditor import comments as store, doc_images, image_regions
 from doceditor.comment_anchoring import anchored_threads
-from doceditor.comment_recipients import comment_reader_model
+from doceditor.comment_recipients import visible_comment_threads
 from doceditor.comment_creation import create_validated_comment
 from doceditor.comment_create_db import CommentInput
 from doceditor.document_save import DocumentSaveError, agent_document_writer
@@ -160,10 +160,10 @@ class DocCommentsListTool(Tool):
                 )
                 if aid is None:
                     return {"found": False, "comments": [], "closed_count": 0}
-                reader_model = comment_reader_model(db, actor_thread_id, kwargs.get("_review_request_id"))
-                comments, anchors_checked = anchored_threads(
-                    aid, path, db, reader_id=actor_thread_id, reader_model=reader_model,
-                )
+                comments, anchors_checked = anchored_threads(aid, path, db)
+                reader = ({'model': kwargs['_review_reader_model'], 'pending_model': None}
+                          if '_review_reader_model' in kwargs else None)
+                comments = visible_comment_threads(db, comments, actor_thread_id, reader=reader)
                 return {"found": True, "artifact_id": aid, "anchors_checked": anchors_checked,
                         **select_comment_threads(comments, status, comment_id)}
             finally:

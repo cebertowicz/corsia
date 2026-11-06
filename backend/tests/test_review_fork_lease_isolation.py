@@ -35,7 +35,8 @@ async def test_review_read_does_not_use_reviewers_live_lease(review_env, world, 
     monkeypatch.setattr(host_access_gate, '_review_action', review)
     registry = ToolRegistry()
     registry.register(ReadFileTool(workspace=ws))
-    provider = SimpleNamespace(fork_id=row['fork_id'], thread_id='reviewer', working_dir=str(ws))
+    provider = SimpleNamespace(fork_id=row['fork_id'], thread_id='reviewer', working_dir=str(ws),
+                               target=SimpleNamespace(catalog_id='cloud/model'))
 
     result = await execute_fork_tool(ARTIFACT_REVIEW_KIND, provider, registry, asyncio.Event(),
                                      'read_file', {'path': str(outside)})

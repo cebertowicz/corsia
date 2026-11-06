@@ -214,9 +214,6 @@ async def _review(request_id: str, request: Any, cancel_event: asyncio.Event) ->
             building = True
             _row, request = await asyncio.to_thread(_cold_request, request_id)
             building = False
-            handle = handles.get(request.fork_id)
-            if handle is not None:
-                handle.request = request
         request = await ARTIFACT_REVIEW_KIND.usage_binder(await _source(request))
         from core.fork_runtime import invoke_fork
 

@@ -46,9 +46,15 @@ async def test_rebuilt_fork_uses_rebuilt_model_for_listing(review_env, monkeypat
     invoked = []
 
     async def invoke(actual, *_args, **_kwargs):
-        assert actual is rebuilt and handle.request is rebuilt
-        result = await DocCommentsListTool().execute(
-            artifact_id=aid, _thread_id="reviewer", _review_request_id=row["id"],
+        assert actual is rebuilt and handle.request is old
+        async def execute(name, arguments, *, review_request_id, review_reader_model):
+            assert name == 'doc_comments_list' and review_request_id == row['id']
+            return await DocCommentsListTool().execute(**arguments, _thread_id='reviewer',
+                                                       _review_reader_model=review_reader_model)
+        actual.working_dir = '/workspace'
+        result = await ARTIFACT_REVIEW_KIND.tool_executor(
+            SimpleNamespace(tools=SimpleNamespace(execute=execute)), 'doc_comments_list',
+            {'artifact_id': aid}, asyncio.Event(), actual,
         )
         assert comment["id"] not in result
         invoked.append(True)
