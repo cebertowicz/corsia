@@ -1,4 +1,4 @@
-"""The Messages app waits for the person: the agent's connect adds it off, and only the person's Sign in turns it on."""
+"""The Messages app waits for the person: the agent's connect adds it off, and only the person's Enable turns it on."""
 
 from __future__ import annotations
 
@@ -114,9 +114,10 @@ async def test_the_connect_tool_tells_the_agent_the_person_turns_it_on(isolated_
     try:
         thread = make_session(db, prefix="corsia")
         result = await MessagesConnectTool().execute(_thread_id=thread)
-        assert result == texts.WAITING and "Full Disk Access" in result and "Sign in" in result
+        assert result == texts.WAITING and "Full Disk Access" in result and "press Enable" in result
+        assert all("press Enable" in instruction for instruction in (texts.CONNECT, texts.NOT_CONNECTED, texts.WAITING))
         # The person hears what Full Disk Access opens before granting it, on both paths.
-        assert texts.FDA_OPENS in result and "protected files" in messages_route.NO_FDA
+        assert texts.FDA_OPENS in result and "protected file" in messages_route.NO_FDA
         assert await account.usable_for_thread(thread) is None
         assert await MessagesConnectTool().execute(_thread_id=thread) == texts.WAITING
     finally:

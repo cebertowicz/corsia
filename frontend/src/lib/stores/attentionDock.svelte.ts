@@ -37,6 +37,7 @@ export interface DockDraft {
 export const EMPTY: AttentionQueue = { current: null, count: 0, items: [] };
 
 export const queue = writable<AttentionQueue>(EMPTY);
+export const goneReply = writable<{ item: AttentionQueueItem; line: string } | null>(null);
 
 /**
  * The queue the user works: an answer that is being recorded has already left
@@ -156,6 +157,7 @@ export function clearDraft(decisionId: string): void {
 /** Test seam: reset every module-scoped fact between cases. */
 export function __reset(): void {
   queue.set(EMPTY);
+  goneReply.set(null);
   answers.set({});
   showNotice(null);
   expandedId.set(null);
@@ -190,6 +192,7 @@ function clearForIdentityChange(): void {
   identityGeneration += 1;
   inFlight = null;
   queue.set(EMPTY);
+  goneReply.set(null);
   answers.set({});
   showNotice(null);
   expandedId.set(null);

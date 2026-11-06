@@ -173,7 +173,7 @@ async def test_shutdown_drains_exact_comment_before_document_and_storage_close(o
         assert await asyncio.to_thread(entered.wait, 5)
         app_loop.clear()
         events.append('clear')
-        shutdown = asyncio.create_task(app_lifecycle._shutdown_runtime_services([None] * 5))
+        shutdown = asyncio.create_task(app_lifecycle._shutdown_runtime_services([None] * 6))
         await drain_started.wait()
         shutdown.cancel()
         await asyncio.sleep(0)
@@ -259,5 +259,5 @@ async def test_remaining_handoff_count_prevents_storage_teardown(monkeypatch):
     monkeypatch.setattr(app_shutdown_storage, 'close_documents', close_documents)
     monkeypatch.setattr(app_lifecycle, 'shutdown_pool', lambda: storage.append('pool'))
     with pytest.raises(RuntimeError, match="'awaited_handoffs': 1"):
-        await app_lifecycle._shutdown_runtime_services([None] * 5)
+        await app_lifecycle._shutdown_runtime_services([None] * 6)
     assert storage == []

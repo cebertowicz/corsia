@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import CommentThread, { type CommentThreadData } from './CommentThread.svelte';
+import CommentThread from './CommentThread.svelte';
+import type { CommentThreadData } from './CommentThreadData';
 
 type Reply = NonNullable<CommentThreadData['replies']>[number];
 const reply = (id: string, createdAt = '2026-10-16T18:00:00Z'): Reply => ({ id, author: 'agent-1', authorKind: 'agent', text: `reply ${id}`, at: 'later', createdAt });
@@ -38,7 +39,7 @@ const surface = $state({ active: true });
 function setVisibility(value: 'visible' | 'hidden') {
 	Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value });
 }
-function render(onViewed: (id: string, replyId: string) => Promise<void>, viewEachUnread = false) {
+function render(onViewed: (id: string, replyId: string) => Promise<void>, viewEachUnread = true) {
 	vi.stubGlobal('IntersectionObserver', FakeObserver);
 	host = document.createElement('div'); document.body.appendChild(host);
 	component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, get onViewed() { return surface.active ? onViewed : undefined; }, viewEachUnread } });
@@ -127,24 +128,25 @@ describe('CommentThread stamping', () => {
 		expect(FakeObserver.live().map((observer) => (observer.target as HTMLElement).dataset.replyId)).toEqual(['r1', 'r2']);
 	});
 
-	it('does not stamp when only the newest unread reply is visible', async () => {
+	it('stamps only the visible chat reply when an earlier reply is unseen', async () => {
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
 		render(onViewed);
 		FakeObserver.live()[1].report(true);
 		await dwell();
-		expect(onViewed).not.toHaveBeenCalled();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r2']]);
 	});
 
-	it('advances through a later reply already seen once the earlier reply dwells', async () => {
+	it('stamps chat replies independently when the later one is seen first', async () => {
 		const onViewed = vi.fn().mockResolvedValue(undefined);
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
 		render(onViewed);
 		FakeObserver.live()[1].report(true);
 		await dwell();
+		expect(onViewed.mock.calls).toEqual([['c1', 'r2']]);
 		FakeObserver.live()[1].report(false);
 		FakeObserver.live()[0].report(true);
-		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2']]), { timeout: 3000 });
+		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2'], ['c1', 'r1']]), { timeout: 3000 });
 	});
 
 	it('stamps only the earliest unread reply when it alone is visible', async () => {
@@ -275,7 +277,7 @@ describe('CommentThread stamping', () => {
 		}
 	});
 
-	it('stamps both visible unread replies together and keeps the collapse point stable', async () => {
+	it('stamps both visible chat replies and keeps the collapse point stable', async () => {
 		// Fake timers make both dwells finish at the same instant. With real timers a slow run can start the
 		// second dwell a millisecond later, so the first reply's stamp legitimately goes out on its own.
 		vi.useFakeTimers();
@@ -291,7 +293,7 @@ describe('CommentThread stamping', () => {
 		expect(onViewed).not.toHaveBeenCalled();
 		// The dwells end at 1500 ms and their shared stamp timer runs on the next tick.
 		await vi.advanceTimersByTimeAsync(2);
-		expect(onViewed.mock.calls).toEqual([['c1', 'r5']]);
+		expect(onViewed.mock.calls).toEqual([['c1', 'r4'], ['c1', 'r5']]);
 		arrive({ newReplyIds: [] });
 		expect(newMarks()).toBe(0);
 		expect(host.textContent).toContain('Show 4 earlier replies');

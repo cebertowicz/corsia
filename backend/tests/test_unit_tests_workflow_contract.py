@@ -46,8 +46,16 @@ RELEVANCE_PATTERN_CASES = {
         "must_skip": ("frontend/app.ts",),
     },
     "unit-tests.yml": {
-        "must_run": ("backend/module.py", "frontend/app.ts", "requirements-test.txt", "frontend/package-lock.json"),
-        "must_skip": ("README.md",),
+        # unit tests read or import these paths, so a change to only them must run them
+        "must_run": ("backend/module.py", "frontend/app.ts", "requirements-test.txt", "frontend/package-lock.json",
+                     ".github/workflows/integration.yml", ".github/workflows/e2e.yml",
+                     "scripts/corsia", "scripts/corsia.d/service.sh", "desktop/scripts/corsia",
+                     "qa/select-tests.mjs", "testdata/link-target-vectors.json", "bulletins/index.json",
+                     "evals/scenarios/canonical/case.yaml", "benchmarks/harbor/proxy.py",
+                     "tools/antipatterns/engine.py", "docs/coordination-models/corsia-default/context/guide.tmpl",
+                     "README.md", "docs/observability.md", "skills/demo/SKILL.md", "skills/demo/corsia.yaml"),
+        "must_skip": ("quality/file-size-limits.json", "docs/activity.png", "infra/github/labels.json",
+                      "pyproject.toml"),
     },
 }
 HISTORICAL_SCENARIO_TESTS = (
@@ -212,7 +220,7 @@ def test_live_reviewer_proof_is_a_separate_static_workflow_dispatch_job() -> Non
     live_reviewer = _workflow_job(workflow, "live-reviewer")
 
     assert "name: Integration tests (L3)" in integration
-    assert "timeout-minutes: 25" in integration
+    assert "timeout-minutes: 35" in integration
     assert "Run integration tests" in integration
     assert "Run bounded live Haiku reviewer proof" not in integration
     assert "!(github.event_name == 'workflow_dispatch' && inputs.live_reviewer)" in integration

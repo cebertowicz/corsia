@@ -78,6 +78,26 @@ rl.on("line", line => { const request = JSON.parse(line);
 });
 '''
 
+_UVX_BUILD_BACKEND = r'''
+import pathlib, zipfile
+
+_INFO = "mcp_floor_uvx-1.dist-info"
+_META = {
+    f"{_INFO}/METADATA": "Metadata-Version: 2.1\nName: mcp-floor-uvx\nVersion: 1\n",
+    f"{_INFO}/WHEEL": "Wheel-Version: 1.0\nGenerator: floor_backend\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
+    f"{_INFO}/entry_points.txt": "[console_scripts]\nmcp-floor-uvx = mcp_floor_uvx:main\n",
+}
+
+def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
+    name = "mcp_floor_uvx-1-py3-none-any.whl"
+    files = {"mcp_floor_uvx.py": pathlib.Path(__file__).with_name("mcp_floor_uvx.py").read_text(encoding="utf-8"), **_META}
+    with zipfile.ZipFile(pathlib.Path(wheel_directory) / name, "w") as wheel:
+        for path, body in files.items():
+            wheel.writestr(path, body)
+        wheel.writestr(f"{_INFO}/RECORD", "".join(f"{path},,\n" for path in [*files, f"{_INFO}/RECORD"]))
+    return name
+'''
+
 
 def _require_safehouse() -> None:
     from tools.shell_guard import safehouse_version_error
@@ -562,16 +582,22 @@ async def test_local_mcp_safehouse_uvx_launch(monkeypatch, tmp_path):
     monkeypatch.setattr(safehouse_launch, "direct_safehouse_argv", capture_launch)
     package = tmp_path / "uvx-package"
     package.mkdir()
+    # A stdlib-only in-tree build backend, so the build needs no package index: a
+    # setuptools fetch from PyPI made this launch fail whenever the index was slow.
     (package / "pyproject.toml").write_text(
-        "[build-system]\nrequires=['setuptools']\nbuild-backend='setuptools.build_meta'\n"
-        "[project]\nname='mcp-floor-uvx'\nversion='1'\n[project.scripts]\nmcp-floor-uvx='mcp_floor_uvx:main'\n",
+        "[build-system]\nrequires=[]\nbuild-backend='floor_backend'\nbackend-path=['.']\n"
+        "[project]\nname='mcp-floor-uvx'\nversion='1'\n",
         encoding="utf-8",
     )
+    (package / "floor_backend.py").write_text(_UVX_BUILD_BACKEND, encoding="utf-8")
     (package / "mcp_floor_uvx.py").write_text(_PYTHON_SERVER + "\ndef main():\n    pass\n", encoding="utf-8")
     registry = await _connect("uvx", {
         "command": "uvx",
-        "args": ["--from", str(package), "mcp-floor-uvx"],
+        # --offline turns any remaining network need into a visible failure, not a slow one.
+        "args": ["--offline", "--from", str(package), "mcp-floor-uvx"],
         "env": {"PATH": str(tmp_path / "no-host-uvx")},
+        # Generous for a busy CI runner. This test proves the launch, not its speed.
+        "connect_timeout": 120,
     })
     assert await registry.get("mcp_uvx_manage_child").execute()
     assert len(launched) == 1

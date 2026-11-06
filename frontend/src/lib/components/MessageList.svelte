@@ -172,7 +172,7 @@
 	$effect(() => {
 		const id = renderedThreadId;
 		const cards = id ? $threadUpdateCards[id]?.cards : undefined;
-		if (!renderedCards.changed(id, cards) || !cards?.length || !userIsNearBottom
+		if (!renderedCards.arrived(id, cards, transcriptCheckpoint) || !userIsNearBottom
 			|| $openAtDivider === id || (focusMode && landedVisit !== id && hasLandingTarget) || initialLanding.blocksLiveEdge(id)) return;
 		scrollToBottom();
 	});

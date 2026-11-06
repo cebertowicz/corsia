@@ -34,10 +34,10 @@ def untrusted_working_dir(thread_id: str, project_id: str | None, db) -> str:
     return str(path)
 
 
-def require_readable_dirs(paths: list[str], workspace: str | None) -> tuple[str, ...]:
-    """Resolve each path under the parent's own read checks, or refuse one by name.
+def require_readable_dirs(paths: list[str], workspace: str | None, thread_id: str | None = None) -> tuple[str, ...]:
+    """Resolve each path under the launched session's read checks, or refuse one by name.
 
-    These are the checks every filesystem tool applies to the parent: the
+    These are the checks every filesystem tool applies to the session: the
     protected host-path denial, then the workspace and repository scope.
     """
     from tools.filesystem_gate import resolve_path
@@ -48,7 +48,7 @@ def require_readable_dirs(paths: list[str], workspace: str | None) -> tuple[str,
         if not isinstance(raw, str) or not raw.strip():
             raise ConfinementRefused("read_paths entries must be non-empty paths")
         try:
-            path = resolve_path(raw, base, for_write=False)
+            path = resolve_path(raw, base, for_write=False, thread_id=thread_id)
         except PermissionError as error:
             raise ConfinementRefused(f"read path {raw} refused: {error}") from error
         if not path.is_dir():

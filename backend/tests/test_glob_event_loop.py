@@ -21,7 +21,7 @@ async def test_glob_traversal_does_not_block_the_event_loop(
     entered = threading.Event()
 
     async def authorize(**_kwargs):
-        return SimpleNamespace(resolved=tmp_path, reviewed=reviewed)
+        return SimpleNamespace(resolved=tmp_path, reviewed=reviewed, fence=None)
 
     def slow_result(*_args, **_kwargs):
         entered.set()

@@ -88,7 +88,7 @@ def read_input_broadcast_row(
             if not isinstance(metadata, dict):
                 metadata = {}
         apply_error_next_steps(
-            connection, str(row["thread_id"]), [{"id": str(row["id"]), "metadata": metadata}],
+            connection, str(row["thread_id"]), [{"id": str(row["id"]), "created_at": row["created_at"], "metadata": metadata}],
         )
         return InputBroadcastRow(
             str(row["id"]),
@@ -171,6 +171,16 @@ def broadcast_input_row(
     )
 
 
+def input_rows_payload(thread_id: str, rows: tuple[InputBroadcastRow, ...]) -> dict:
+    """The one frame shape for saved rows: a singleton or one ordered multi-row event."""
+    messages = [project_input_message(row) for row in rows]
+    return {
+        "type": "message_added" if len(messages) == 1 else "messages_added",
+        "thread_id": thread_id,
+        **({"message": messages[0]} if len(messages) == 1 else {"messages": messages}),
+    }
+
+
 def broadcast_input_rows(
     thread_id: str,
     rows: tuple[InputBroadcastRow, ...],
@@ -181,12 +191,7 @@ def broadcast_input_rows(
     """Publish one singleton or one atomically ordered multi-row event."""
     if not rows:
         return
-    messages = [project_input_message(row) for row in rows]
-    payload = {
-        "type": "message_added" if len(messages) == 1 else "messages_added",
-        "thread_id": thread_id,
-        **({"message": messages[0]} if len(messages) == 1 else {"messages": messages}),
-    }
+    payload = input_rows_payload(thread_id, rows)
     if broadcast is not None:
         if exclude_ws is not None:
             raise ValueError("custom input broadcast cannot exclude one socket")
@@ -266,10 +271,25 @@ async def broadcast_newest_error(thread_id: str) -> None:
 async def broadcast_claimed_batch(batch) -> None:
     """Publish every row in one claimed FIFO batch through the canonical shape.
 
-    Recovered rows were stamped before this batch's inputs, so they go first
-    to keep the published rows in seq order.
+    Error rows this claim moved past were written before this batch's inputs,
+    so they go first to keep the published rows in seq order.
     """
     await broadcast_message_rows(
         batch.thread_id,
-        (*batch.recovered_message_ids, *(item.message_id for item in batch.items)),
+        (*batch.error_message_ids, *(item.message_id for item in batch.items)),
     )
+
+
+async def announce_successor_turn(batch) -> None:
+    """Announce a successor Turn at its claim, not only once its harness accepts it.
+
+    A Turn claimed with no sender showing it as working (a predecessor's
+    terminal, a restart drain, a lifted hold, a spawn) would read as idle while
+    its harness starts. Sent once, at the
+    claim: the batch's later re-publishes (after a Stop or an error) must never
+    announce a Turn that has already ended.
+    """
+    from core.turn_activity import turn_activity_frame
+    import infra.state as state
+
+    state.broadcast_to_thread(batch.thread_id, await turn_activity_frame(batch.thread_id, batch.identity))

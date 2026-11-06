@@ -22,6 +22,7 @@ import infra.startup_progress as startup_progress
 from infra import state
 from infra.db_async import run_in_db
 from infra.database import shutdown_pool
+from llm.providers.omlx_startup import adopt_and_upgrade
 from llm.providers.omlx_supervisor import stop_watching as stop_watching_omlx
 
 
@@ -44,40 +45,12 @@ async def _discover_network_servers(logger) -> int:
     return len(online)
 
 
-def _reconcile_omlx_servers(servers: list[dict], logger) -> dict[str, int]:
-    """Adopt or clear each oMLX pid record; return the adopted server ids with their pids."""
-    from llm.providers.omlx_supervisor import reconcile
-
-    adopted: dict[str, int] = {}
-    for server in servers:
-        if server.get("provider") != "omlx":
-            continue
-        result = reconcile({"server_id": server["id"]})
-        if result.get("adopted"):
-            adopted[server["id"]] = result["pid"]
-            logger.info(
-                f"oMLX supervisor: adopted pid {result['pid']} for {server['id']}"
-            )
-        elif result.get("cleared"):
-            logger.info(
-                f"oMLX supervisor: cleared stale pid {result['pid']} for {server['id']}"
-            )
-    return adopted
-
 async def _startup_network_discovery() -> None:
     from llm.network_discovery import _sweep_all_servers, get_servers
     from loguru import logger
 
     try:
         servers = await run_in_db(get_servers)
-        try:
-            from llm.providers.omlx_supervisor import watch
-
-            adopted = await run_in_db(_reconcile_omlx_servers, servers or [], logger)
-            for server_id, pid in adopted.items():
-                watch(server_id, pid)
-        except Exception as exc:
-            logger.warning(f"oMLX pid reconciliation failed: {exc}")
         if not servers:
             return
         await _sweep_all_servers()
@@ -103,7 +76,7 @@ async def lifespan(app: FastAPI):
 
     if not getattr(app.state, "litellm_cost_map_offline", False):
         start_refresh()
-    startup_tasks: list[asyncio.Task | None] = [None, None, None, None, None]
+    startup_tasks: list[asyncio.Task | None] = [None, None, None, None, None, None]
     body_cancel: asyncio.CancelledError | None = None
     try:
         from api.usage_rollup import schedule_refresh as schedule_usage_rollup_refresh
@@ -116,6 +89,10 @@ async def lifespan(app: FastAPI):
         from host_access.browser_orphan import close_dead_sessions
         from host_access.processes import PROCESS_OWNER
 
+        try:
+            startup_tasks[5] = await adopt_and_upgrade(logger)
+        except Exception as exc:
+            logger.warning(f"oMLX startup reconciliation failed: {exc}")
         try:
             await asyncio.to_thread(close_dead_sessions, PROCESS_OWNER.browser_sessions().socket_dir)
         except Exception:
@@ -137,6 +114,9 @@ async def lifespan(app: FastAPI):
         await _start_otlp_listener()
         await start_documents()
         await resume_local_setup()
+        from events.connectors.github_reviewer_gate_recovery import recover_pending_reviews
+
+        await recover_pending_reviews(asyncio.get_running_loop())
         schedule_usage_rollup_refresh()
         from infra.usage_summary import record_current_install_week
 

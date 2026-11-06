@@ -8,6 +8,7 @@ from typing import Any
 
 from doceditor import comments as store, doc_images, image_regions
 from doceditor.comment_anchoring import anchored_threads
+from doceditor.comment_recipients import visible_comment_threads
 from doceditor.comment_creation import create_validated_comment
 from doceditor.comment_create_db import CommentInput
 from doceditor.document_save import DocumentSaveError, agent_document_writer
@@ -32,6 +33,7 @@ from tools.artifact_tool_helpers import default_workspace, tool_path
 from tools.base import Tool
 from tools.delegation import _require_context, _tool_schema
 from tools.document_comment_listing import select_comment_threads
+from tools.document_comment_leave import leave_comment_thread
 from tools.document_regions import REGION_SCHEMA, region_result
 
 
@@ -159,6 +161,9 @@ class DocCommentsListTool(Tool):
                 if aid is None:
                     return {"found": False, "comments": [], "closed_count": 0}
                 comments, anchors_checked = anchored_threads(aid, path, db)
+                reader = ({'model': kwargs['_review_reader_model'], 'pending_model': None}
+                          if '_review_reader_model' in kwargs else None)
+                comments = visible_comment_threads(db, comments, actor_thread_id, reader=reader)
                 return {"found": True, "artifact_id": aid, "anchors_checked": anchors_checked,
                         **select_comment_threads(comments, status, comment_id)}
             finally:
@@ -187,6 +192,7 @@ class DocCommentCreateTool(Tool):
         return ("Create a document comment as the current agent thread. To suggest an edit, "
                 "pass quote (the exact current text) and replacement (the new text); body is "
                 "an optional note. To add text without replacing it, quote the preceding text and set insert_after. "
+                "To tag agents, pass their thread IDs from agent_roster in tagged_agent_ids. "
                 "To retry undelivered feedback, use doc_feedback_send.")
 
     @property
@@ -197,7 +203,8 @@ class DocCommentCreateTool(Tool):
             "artifact_id": {"type": ["string", "null"]},
             "quote": {"type": ["string", "null"]},
             "near": {"type": ["string", "null"]},
-            "parent_id": {"type": ["string", "null"]},
+            "parent_id": {"type": ["string", "null"], "description": "Comment ID to reply to; the reply needs body text."},
+            "tagged_agent_ids": {"type": "array", "items": {"type": "string"}, "description": "Agent thread IDs from agent_roster to tag in this comment."},
             "review": {"type": "boolean"},
             "client_id": {"type": ["string", "null"]},
             "replacement": {"type": ["string", "null"]},
@@ -256,6 +263,7 @@ class DocCommentCreateTool(Tool):
                 quote=kwargs.get("quote"), near=kwargs.get("near"),
                 registration=target[2], submit=bool(kwargs.get("submit")), region=region,
                 review_request_id=kwargs.get("_review_request_id"),
+                tagged_agent_ids=kwargs.get("tagged_agent_ids") or [],
             )
             row, registered, feedback, _created = await create_validated_comment(request, client_id)
         except QuoteResolveError as exc:
@@ -286,7 +294,7 @@ class DocCommentUpdateTool(Tool):
 
     @property
     def description(self) -> str:
-        return ("Resolve, acknowledge, edit, or accept/reject a document suggestion as the current agent thread. "
+        return ("Resolve, acknowledge, edit, leave a comment thread, or accept/reject a document suggestion as the current agent thread. "
                 "You may edit only comments you wrote, and resolve or acknowledge only on a document you own or a "
                 "comment you wrote; otherwise reply with doc_comment_create. " + PERSON_COMMENT_RESOLVE_RULE)
 
@@ -294,6 +302,7 @@ class DocCommentUpdateTool(Tool):
     def parameters(self) -> dict[str, Any]:
         return _tool_schema({
             "comment_id": {"type": "string"},
+            "leave": {"type": "boolean", "description": "Leave this comment thread and stop its reply notifications; a tag can bring you back."},
             "resolved": {"type": ["boolean", "null"]},
             "acked": {"type": ["boolean", "null"]},
             "body": {"type": ["string", "null"]},
@@ -316,6 +325,14 @@ class DocCommentUpdateTool(Tool):
         if isinstance(context, str):
             return context
         actor_thread_id, actor = context
+        if kwargs.get("leave"):
+            others = [name for name in ("resolved", "acked", "body", "from_off", "to_off", "anchor_text", "region",
+                                        "decision", "reason") if kwargs.get(name) is not None]
+            if kwargs.get("all_from_author"):
+                others.append("all_from_author")
+            if others:
+                return f"Error: leave can't be combined with {', '.join(others)}. Leave in its own call."
+            return await leave_comment_thread(comment_id, actor_thread_id, actor["user_id"])
         if refusal := decision_only_error(
                 decision=kwargs.get("decision"), all_from_author=bool(kwargs.get("all_from_author")),
                 reason=kwargs.get("reason")):

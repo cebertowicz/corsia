@@ -76,9 +76,7 @@ class Failed:
 
 @dataclass(frozen=True)
 class AgentAccountView:
-    """One read of the agents' account; ``absent`` is the only state that leaves shells alone.
-
-    A rule-started script is locked even then (``script_env``)."""
+    """One read of the agents' account; ``absent`` leaves ordinary shells alone."""
 
     state: str  # not_installed | needs_auth | unverified | wrong_account | ready
     cause: Cause | None = None
@@ -308,13 +306,15 @@ def shell_env(account: AgentAccountView) -> dict[str, str]:
     return {} if account.absent else _identity_env(account)
 
 
-def script_env(account: AgentAccountView) -> dict[str, str]:
-    """A rule-started script's GitHub identity: a shell's, but locked with no account too.
 
-    No person is at the keyboard to own a fallback to their own login, so an absent
-    account gets the locked state rather than the person's setup.
-    """
-    return _identity_env(account)
+def script_view() -> AgentAccountView:
+    """Scripts have a locked identity and no account-home grant; GitHub uses the forwarder."""
+    return AgentAccountView("needs_auth")
+
+
+def locked_env() -> dict[str, str]:
+    """Git and gh settings for a script without direct account access."""
+    return _identity_env(script_view())
 
 
 def _identity_env(account: AgentAccountView) -> dict[str, str]:
@@ -328,6 +328,25 @@ def _identity_env(account: AgentAccountView) -> dict[str, str]:
     return env
 
 
+def script_forwarder_credential(account: AgentAccountView) -> str:
+    """Read the agents' credential for the script forwarder only; never return it to a script."""
+    import yaml
+
+    if not account.ready or not account.home:
+        raise ValueError("agents' GitHub account is not ready")
+    try:
+        document = yaml.safe_load((Path(account.home) / "hosts.yml").read_text())
+        host = document["github.com"]
+        value = host.get("oauth_token")
+        if value is None and account.login:
+            value = host.get("users", {}).get(account.login, {}).get("oauth_token")
+        if not isinstance(value, str) or not value:
+            raise ValueError("agents' GitHub credential is unavailable")
+        return value
+    except (OSError, KeyError, TypeError, yaml.YAMLError) as exc:
+        raise ValueError("agents' GitHub credential is unavailable") from exc
+
+
 def backend_gh(account: AgentAccountView) -> tuple[str, dict[str, str] | None]:
     """How the backend runs ``gh`` for CORSIA's own GitHub writes: executable and environment.
 
@@ -339,6 +358,17 @@ def backend_gh(account: AgentAccountView) -> tuple[str, dict[str, str] | None]:
         return "gh", None
     home = account.home if account.ready and account.home else LOCKED_HOME
     return account.binary or "gh", clean_env() | {"GH_CONFIG_DIR": home, "GH_PROMPT_DISABLED": "1"}
+
+
+def backend_gh_now() -> tuple[str, dict[str, str] | None, AgentAccountView]:
+    """``backend_gh`` for the account as it is now, with that account: every backend read and write runs ``gh`` this way.
+
+    The first call after a restart finds the account still verifying and waits once for the answer.
+    """
+    account = view()
+    if account.cause == "verifying":
+        account = verify_now()
+    return (*backend_gh(account), account)
 
 
 def sandbox_ro_dirs(account: AgentAccountView) -> list[Path]:

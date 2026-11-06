@@ -8,16 +8,16 @@
 ## Overview
 
 Product events are user-action-scoped emits written to DuckDB at
-`~/.corsia/analytics.duckdb` (Sprint 5 Slice 0; backend wrapper).
+`analytics.duckdb` in the state root (Sprint 5 Slice 0; backend wrapper); see
+[Architecture](how-it-works/architecture.md) for where the state root is.
 Frontend can emit to a separately configured PostHog endpoint. This
 repository does not provide a local PostHog stack. Any relay replacement
 requires a current plan/PRD; the archived subsystem spec does not authorize
 future work. The schema is portable —
 the same taxonomy works against DuckDB, ClickHouse, BigQuery, or
-PostHog Cloud via `INSERT INTO target SELECT * FROM source`. They power:
-
-- Evals tab live cards (Slice 8)
-- Ad-hoc analytics via `tools/qh-query` CLI (DuckDB SQL helpers)
+PostHog Cloud via `INSERT INTO target SELECT * FROM source`. No app screen
+reads them; they are read ad hoc with the `tools/qh-query` CLI (DuckDB SQL
+helpers).
 
 Emits are **not** the same as OTel spans. In-process evaluation tracing captures
 traces and latency (Slice 2 / Slice 6). Product events capture user
@@ -28,7 +28,7 @@ event) because the two surfaces answer different questions.
 ## Wrappers (the only public surface)
 
 - **Backend:** `backend/infra/product_events.py` →
-  `emit_product_event(category, action, *, session_id, user_id, properties)`
+  `emit_product_event(category, action, *, thread_id, user_id, properties)`
 - **Frontend:** `frontend/src/lib/product_events.ts` →
   `emitProductEvent(category, action, properties)`
 - **Dev tooling (CLI):** `tools/antipatterns/` uses a small
@@ -168,6 +168,20 @@ All six onboarding events are backend-only lifecycle observations. They contain 
 |---|---|---|
 | `dev_tool.antipatterns_invoked` | `tools/antipatterns/` CLI exits | CLI (pre-commit / CI / manual) |
 
+### Outside-tool intake
+
+| Event | When it fires | Surface |
+|---|---|---|
+| `measure_key.minted` | An agent minted a key an outside tool sends its measures with; no properties beyond the defaults | backend |
+| `otlp_intake.request_accepted` | An outside tool's OTLP/HTTP logs request was accepted; `records` is how many records it held, `rejected` how many were refused | backend |
+
+### Project fence
+
+| Event | When it fires | Surface |
+|---|---|---|
+| `project_fence.refused` | CORSIA named a refusal for a path in a project the agent is fenced from (a shell denial it could attribute, a file-tool or other path argument, repository registration, or workspace history); a sandbox denial whose path isn't in the command's output isn't counted. `local_only` says whether that project is Local only | backend |
+| `project_fence.failed_closed` | A project, repository or caller row couldn't be read. `reason` is `local_only_folder_unresolved` or `caller_unknown`, which fence the agent from more, or `repo_path_unreadable`, which means a registered repository's path couldn't be fenced | backend |
+
 ### UI
 
 | Event | When it fires | Surface |
@@ -280,7 +294,7 @@ when the frontend relay lands.
 All events carry these defaults (attached by the wrappers, never by callers):
 
 - `project` — logical project name (`corsia`); lets multi-project PostHog instances filter
-- `session_id` — CORSIA session id when known
+- `thread_id` — (backend only) the CORSIA thread id when known, also stored in its own column
 - (frontend only) distinct_id is the PostHog user id, persisted in localStorage
 
 Caller-supplied properties merge with defaults. Caller properties win on key collision.
@@ -328,7 +342,7 @@ Both wrappers read environment variables; nothing is hard-coded.
 | `CORSIA_ANALYTICS_DISABLE` | `0` | Set to `1` to force-disable (tests, opt-out, CI smoke runs). Read per-call so `monkeypatch.setenv` takes effect without a singleton reset. |
 | `CORSIA_ANALYTICS_PROJECT` | `corsia` | Logical project tag (also stored in the dedicated `project_id` column for index lookup). |
 
-The DuckDB file lives at `~/.corsia/analytics.duckdb`. Schema +
+The DuckDB file is `analytics.duckdb` in the state root (`backend/infra/platform_paths.py`). Schema +
 indexes are bootstrapped lazily by `analytics_db.get_db()` on first
 emit. No daemon, no Colima, no API key — the wrapper writes to a local
 file synchronously; the `qh-query` CLI reads the same file.
@@ -400,7 +414,7 @@ a future automated monitor requires a current KPI contract.
    Backend:
    ```python
    from infra.product_events import emit_product_event
-   emit_product_event("turn", "completed", session_id=sid,
+   emit_product_event("turn", "completed", thread_id=thread_id,
                       properties={"model": model_id, "token_count": n})
    ```
 
@@ -416,22 +430,22 @@ a future automated monitor requires a current KPI contract.
 
 ## Local debugging
 
-Backend (DuckDB-backed):
+Backend (DuckDB-backed). Run from the root of a source checkout with its
+`.venv` (see the README's source install). Point `CORSIA_STATE_DIR` at a
+scratch folder so the test event stays out of your real analytics file:
 
 ```bash
-~/.corsia/.venv/bin/python -c "
-from infra.product_events import emit_product_event, flush
+export CORSIA_STATE_DIR="$(mktemp -d)"
+PYTHONPATH=backend .venv/bin/python -c "
+from infra.product_events import emit_product_event
 emit_product_event('smoke', 'test', properties={'src': 'manual'})
-flush()  # no-op under DuckDB but safe to call
 "
 ```
 
-Then read with `qh-query` or DuckDB SQL:
+Then read it with `qh-query`:
 
 ```bash
-~/.corsia/.venv/bin/python -m qh_query 'SELECT * FROM product_events WHERE category=$1 ORDER BY ts DESC LIMIT 5' --param smoke
-# or against the file directly:
-duckdb ~/.corsia/analytics.duckdb "SELECT * FROM product_events WHERE category='smoke' ORDER BY ts DESC LIMIT 5;"
+.venv/bin/python tools/qh-query/cli.py --sql "SELECT category, action, properties FROM product_events WHERE category='smoke' ORDER BY ts DESC LIMIT 5"
 ```
 
 For the frontend, set both `PUBLIC_POSTHOG_API_KEY` and
@@ -449,11 +463,15 @@ count / runtime attrs — useful for verifying that a
 new emit point is wired correctly before relying on it for KPI
 queries:
 
+Run it from the repository root, in a new shell with its own disposable
+state root:
+
 ```bash
+export CORSIA_WORKSPACE=$(mktemp -d) CORSIA_STATE_DIR=$(mktemp -d)
 CORSIA_ANALYTICS_PROJECT=corsia PYTHONPATH=tools \
-  ~/.corsia/.venv/bin/python -m antipatterns --paths backend/main.py
-duckdb ~/.corsia/analytics.duckdb \
-  "SELECT category, action, properties FROM product_events WHERE category='dev_tool' ORDER BY ts DESC LIMIT 1;"
+  .venv/bin/python -m antipatterns --paths backend/main.py
+.venv/bin/python tools/qh-query/cli.py \
+  --sql "SELECT category, action, properties FROM product_events WHERE category='dev_tool' ORDER BY ts DESC LIMIT 1"
 ```
 
 ## Structured plans (PLANS-AC41)
@@ -461,8 +479,9 @@ duckdb ~/.corsia/analytics.duckdb \
 ### What is state and what is evidence
 
 Plan **state** lives in `plans`, `plan_nodes`, `plan_node_dependencies`,
-`plan_node_events`, `plan_node_artifact_links` and `plan_mutation_receipts`.
-It is transactional and audited, and it is the only
+`plan_node_events`, `plan_node_artifact_links`, `plan_mutation_receipts`,
+`plan_markdown_imports`, `plan_node_attempts`, `plan_tool_dispatches` and
+`plan_node_holds`. It is transactional and audited, and it is the only
 thing any decision or authorization reads.
 
 Product events are **operational evidence**: fail-silent, post-state, and
@@ -485,7 +504,7 @@ transactional, exact, and survives an analytics store that was never enabled.
 | stalled duration | `plan_liveness_wakes.fired_at` |
 | wake admission (attempts) | `continuation_triggers.attempt` |
 | delivery outcome | `continuation_triggers.state` / `.reason` |
-| wake deferral and stall | `continuation_triggers.state` / `.deferrals` / `.reason` |
+| wake deferral and failure | `continuation_triggers.state` / `.deferrals` / `.reason` |
 | wake cost | `llm_usage.cost_usd`, joined through `sessions` |
 | dedupe | **not observable** — see below |
 | rollup freshness | `plans.revision`, `plan_nodes.updated_at` |
@@ -555,7 +574,8 @@ SELECT kind,
 incremented `attempt`, and a wake that was admitted and then failed to land was
 still admitted. Read delivery success as
 `delivered / (delivered + failed WHERE reason='delivery_failed')`.
-Only a failed delivery stalls a trigger now, and nothing defers one; rows
+A failed delivery marks its trigger `failed` with reason `delivery_failed` and
+stalls the wake in `plan_liveness_wakes`; nothing defers a trigger. Rows
 written before 2026-10-22 may still carry `deferred`, `deferrals`, or the
 reasons `cycle_cap_reached`, `wake_budget_exhausted` and `deferral_exhausted`.
 
@@ -610,11 +630,14 @@ Decision age uses the same `plan_node_events` series, from `decision_raised` to
 
 ### `plans.close_next`
 
-A closing mutation (request_review, fail, accept, accept_with_follow_up,
-archive_node) returns a bounded `next` block: the task now holding its
+A closing or parking mutation (request_review, mark_done, fail, accept,
+accept_with_follow_up, close_node, archive_node, pause_node, block_node,
+arm_watch; the set is `backend/plans/boundary_fields.py` `NEXT_OPERATIONS`) returns
+a bounded `next` block: the task now holding its
 executor's slot, a few of that executor's other open tasks, and the outcome of
 an optional named next task. The plans domain's one emit point, in
-`backend/plans/boundary.py`, measures whether that block replaces a whole-plan
+`backend/plans/close_next_event.py` (called from `backend/plans/boundary.py`),
+measures whether that block replaces a whole-plan
 reread: follow-through, the refusal mix, and how often an already-active task
 fills the slot. It fires once per fresh closing mutation, after its write has
 committed; a replayed mutation emits nothing.
@@ -622,6 +645,7 @@ committed; a replayed mutation emits nothing.
 | Property | Meaning |
 |---|---|
 | `operation` | the closing or parking operation |
+| `idle` | `pick_up` when the block carries an idle pick-up line, `imminent` when only its listing is in the idle order, else `none` |
 | `named` | `absent` (no task named), `started`, or the refusal code: `unknown`, `not_open`, `lane_owned`, `user_assigned`, `other_executor`, `not_ready`, `slot_held` |
 | `selected_how` | `started`, `auto_selected`, `running`, or `none` (slot empty) |
 | `open_total` | the executor's other open tasks in the plan |
@@ -660,10 +684,11 @@ settlement driver hands the count to that worker after the terminal write
 commits. Plans' own tools record no row and emit nothing. Tool names, reasons,
 outcomes and counts only; never tool arguments or results.
 
+Checked against the code at `7a8c55d84`.
+
 ## Cross-references
 
-- `sprints/2026-05-13-quality-foundation-sprint-04/PLAN.md` — Sprint 4 deliverables (this slice is #3)
-- `sprints/2026-05-13-quality-foundation-sprint-05/PLAN.md` — Slice 0 PostHog → DuckDB reversal (DECISIONS-LOG #26)
 - `backend/eval/otel.py` — OTel emit surface (distinct from product events)
 - `backend/infra/analytics_db.py` — DuckDB substrate (schema + connection singleton)
-- `.env.example` — required env vars template
+
+Product-event sections checked against the code at `7a8c55d84`.

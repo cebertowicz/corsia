@@ -5,8 +5,8 @@ import { captureComment, selectComment } from './commentSelection';
 import type { LiveDocumentSession } from './liveDocumentSession';
 
 /** Comment on part of an image artifact: a box, or a point when its width and height are 0. */
-export async function addRegionComment(artifactId: string, region: ImageRegion, text: string): Promise<string> {
-	const row = await postReconciled(artifactId, newClientId(), { body: text, region, author: 'you', author_kind: 'user' });
+export async function addRegionComment(artifactId: string, region: ImageRegion, text: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []): Promise<string> {
+	const row = await postReconciled(artifactId, newClientId(), { body: text, region, author: 'you', author_kind: 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId });
 	upsertTop(artifactId, row);
 	return row.id;
 }
@@ -18,6 +18,7 @@ export interface DocImageAnchor {
 	to: number;
 	/** The document's text on screen; its markdown at `from`..`to` is the quote. */
 	text: string;
+	diagramSource?: string;
 	/** A live document tracks the range itself, as it does for a selected quote. */
 	session?: LiveDocumentSession;
 }
@@ -28,12 +29,12 @@ let captures = 0;
  * Comment on part of an image inside a document (DCOL-FR13.3): a text comment anchored on the image's markdown,
  * captured like a selection so it follows the image through edits, plus the region. The server finds the file.
  */
-export async function addDocImageComment(image: DocImageAnchor, region: ImageRegion, body: string): Promise<string> {
+export async function addDocImageComment(image: DocImageAnchor, region: ImageRegion, body: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []): Promise<string> {
 	const { session } = image;
 	if (!session) {
 		const row = await postReconciled(image.artifactId, newClientId(), {
-			body, region, anchor_text: image.text.slice(image.from, image.to), from_off: image.from, to_off: image.to,
-			author: 'you', author_kind: 'user',
+			body, region, diagram_source: image.diagramSource, anchor_text: image.text.slice(image.from, image.to), from_off: image.from, to_off: image.to,
+			author: 'you', author_kind: 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId,
 		});
 		upsertTop(image.artifactId, row);
 		return row.id;
@@ -41,8 +42,8 @@ export async function addDocImageComment(image: DocImageAnchor, region: ImageReg
 	const captured = await captureComment(selectComment(session, image.from, image.to), ++captures, new AbortController().signal);
 	try {
 		const row = await postReconciled(session.artifactId, captured.clientId, {
-			body, region, anchor_text: captured.quote, from_off: captured.from, to_off: captured.to, live_capture: true,
-			author: 'you', author_kind: 'user',
+			body, region, diagram_source: image.diagramSource, anchor_text: captured.quote, from_off: captured.from, to_off: captured.to, live_capture: true,
+			author: 'you', author_kind: 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId,
 		});
 		upsertTop(session.artifactId, row);
 		return row.id;
@@ -53,8 +54,8 @@ export async function addDocImageComment(image: DocImageAnchor, region: ImageReg
 }
 
 /** Move a pin. The server places it on the image as it is now, so it is no longer stale. */
-export async function moveRegion(artifactId: string, commentId: string, region: ImageRegion): Promise<void> {
-	const row = await patchComment(commentId, { region });
+export async function moveRegion(artifactId: string, commentId: string, region: ImageRegion, diagramSource?: string): Promise<void> {
+	const row = await patchComment(commentId, { region, diagram_source: diagramSource });
 	docComments.update((all) => ({
 		...all,
 		[artifactId]: (all[artifactId] ?? []).map((c) => (c.id === commentId ? { ...c, ...regionFromServer(row) } : c))

@@ -3,6 +3,7 @@ import { syntaxTree } from '@codemirror/language';
 import { Facet, Prec, RangeSet, StateEffect, StateField, type EditorState, type Range, type Text } from '@codemirror/state';
 import type { SyntaxNode } from '@lezer/common';
 import { imageContentUrl } from '$lib/artifactImage';
+import { placeTop } from '$lib/documentReadingPlace';
 import { FAILED_IMAGE, imageFailureReason, MISSING_IMAGE, NOT_AN_IMAGE, UNAVAILABLE_IMAGE } from '$lib/imageFailure';
 
 export { FAILED_IMAGE, MISSING_IMAGE, NOT_AN_IMAGE, UNAVAILABLE_IMAGE };
@@ -184,8 +185,14 @@ export interface OpenImageRequest {
 	from: number;
 	to: number;
 	scrollTop: number;
-	/** How far below the top of the scrolled text the image sits; it is held there when the document is put back. */
+	/** How far below the document pane's top edge the image's line starts; it is held there when the document is put back. */
 	top: number;
+	/** A diagram's snapshot is drawn larger than the diagram; the scale at which its labels are body size. Opens there, not at Fit. */
+	readableScale?: number;
+	/** Diagram element bounds in image fractions, for framing a selected subject. */
+	diagramElements?: import('$lib/imageRegions').ImageRegion[];
+	/** Source rendered into this snapshot, used to reject pins on a changed diagram. */
+	diagramSource?: string;
 }
 
 /** Supplied by the editor's host; with none, an image is only selected and never opens. */
@@ -203,8 +210,7 @@ function loadedImageWidget(target: EventTarget | null): HTMLElement | null {
 function requestFromWidget(view: EditorView, wrap: HTMLElement): OpenImageRequest | null {
 	const [from, to] = [Number(wrap.dataset.from), Number(wrap.dataset.to)];
 	if (!(to > from) || to > view.state.doc.length) return null;
-	const top = wrap.getBoundingClientRect().top - view.scrollDOM.getBoundingClientRect().top;
-	return { src: wrap.dataset.src ?? '', alt: wrap.dataset.alt ?? '', from, to, scrollTop: view.scrollDOM.scrollTop, top };
+	return { src: wrap.dataset.src ?? '', alt: wrap.dataset.alt ?? '', from, to, scrollTop: view.scrollDOM.scrollTop, top: placeTop(view, from) };
 }
 
 function openFromWidget(view: EditorView, wrap: HTMLElement): boolean {

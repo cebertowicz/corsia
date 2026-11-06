@@ -18,6 +18,8 @@ from infra.continuation_schema import CONTINUATION_SCHEMA_SQL
 from infra.continuity_schema import CONTINUITY_SCHEMA_SQL
 from infra.continuity_staging import STAGING_SCHEMA_SQL
 from infra.delivery_foundation_schema import DELIVERY_FOUNDATION_SCHEMA_SQL
+from infra.artifact_relocation_schema import ARTIFACT_RELOCATION_SCHEMA_SQL
+from infra.held_replies_schema import HELD_REPLIES_SCHEMA_SQL
 from infra.host_access_schema import HOST_ACCESS_LEASE_SCHEMA_SQL
 from infra.key_store_schema import KEY_STORE_SCHEMA_SQL
 from infra.learning_schema import LEARNING_INDEX_SQL
@@ -37,7 +39,7 @@ from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 172
+SCHEMA_VERSION = 179
 SCHEMA_SQL = f"""
     {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
@@ -467,26 +469,8 @@ SCHEMA_SQL = f"""
     CREATE INDEX IF NOT EXISTS idx_artifact_reconcile_receipts_session
         ON artifact_reconcile_receipts(thread_id, created_at DESC);
 
-    -- Durable recovery journal for artifact_relocate: filesystem rename and registry
-    -- identity update are not one transaction, so an interrupted relocation is
-    -- deterministically completed or cleaned up on discovery. target_type/target_title
-    -- carry the FULL target identity so recovery reaches the same end state as the
-    -- uninterrupted path; they are nullable only so a pre-existing in-flight intent can
-    -- still be recovered (the writer always populates them).
-    CREATE TABLE IF NOT EXISTS artifact_relocation_intents (
-        id TEXT PRIMARY KEY,
-        artifact_id TEXT NOT NULL REFERENCES artifact_identities(id),
-        actor_thread_id TEXT NOT NULL,
-        source_path TEXT NOT NULL,
-        target_path TEXT NOT NULL,
-        source_external_id TEXT NOT NULL,
-        target_external_id TEXT NOT NULL,
-        target_type TEXT,
-        target_title TEXT,
-        phase TEXT NOT NULL CHECK (phase IN ('recorded', 'file_moved', 'identity_updated')),
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-    );
+    {ARTIFACT_RELOCATION_SCHEMA_SQL}
+    {HELD_REPLIES_SCHEMA_SQL}
     {REVIEWER_GATE_SCHEMA_SQL}
     {DOCUMENT_SCHEMA_SQL}
     {MEASUREMENT_BREAKS_SCHEMA_SQL}{MEASUREMENT_INDEX_SQL}

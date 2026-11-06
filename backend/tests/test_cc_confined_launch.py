@@ -300,6 +300,30 @@ async def test_delegate_task_refuses_a_read_path_outside_the_parents_scope(
 
 
 @pytest.mark.asyncio
+async def test_delegate_task_refuses_another_project_before_creating_cc_child(
+    child_db, monkeypatch, reviewed_dir,
+):
+    import connections.models as cm
+    from subagents import cc_runtime
+    from tools import delegate_task, project_fence
+
+    _seed_parent(child_db)
+    fence = project_fence.Fence((project_fence.FencedRoot(Path(reviewed_dir), "other"),), "parent")
+    monkeypatch.setattr(project_fence, "fence_for_thread", lambda thread: fence if thread == "parent" else project_fence.Fence((), thread))
+    monkeypatch.setattr(cm, "get_connection", lambda provider, db=None: {"config": {}})
+    monkeypatch.setattr(delegate_task.delegation, "_resolve_cc_target", lambda _m: cc_target("sonnet"))
+    spawn = AsyncMock(side_effect=AssertionError("no child may start"))
+    monkeypatch.setattr(cc_runtime, "spawn", spawn)
+    refused = await delegate_task._spawn_claude_code_child(
+        parent_thread_id="parent", task="review", title=None,
+        model_id="claude-code/sonnet", confinement="untrusted", read_paths=[reviewed_dir],
+    )
+    assert refused.startswith(f"Error: read path {reviewed_dir} refused: ")
+    spawn.assert_not_awaited()
+    assert child_db.execute("SELECT COUNT(*) FROM threads").fetchone()[0] == 1
+
+
+@pytest.mark.asyncio
 async def test_delegate_task_review_needs_paths_on_every_model(child_db, monkeypatch):
     from tools import delegate_task
 

@@ -122,7 +122,7 @@ class _StubCli:
 
 def _account(tmp_path):
     """A probe runs inside an account's home: there is no ambient one."""
-    return SimpleNamespace(source_home=str(tmp_path / "account-home"))
+    return SimpleNamespace(account_id="acct-1", source_home=str(tmp_path / "account-home"))
 
 
 def _install(monkeypatch, cli: _StubCli) -> None:

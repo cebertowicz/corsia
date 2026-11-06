@@ -11,10 +11,8 @@ from __future__ import annotations
 import asyncio
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
-from dataclasses import dataclass, field
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import stat
@@ -47,6 +45,9 @@ from host_access.supervisor import (
 )
 from infra.db_async import run_in_db
 from tools.host_access_errors import HostAccessBlocked, HostAccessGateError, HostAccessRequired
+from tools.host_action_admission import no_lease_authorization, host_lease_disabled
+from tools.host_action_types import ActionPermit as _ActionPermit, PreparedAction as _PreparedAction, HostActionAuthorization, ConsumedHostAction
+from tools.host_action_values import boolean as _boolean, integer as _integer, number as _number, text as _text, search_payload
 from tools.host_access_external import (
     ExternalLaunchMismatch,
     classify_external_launch,
@@ -76,70 +77,6 @@ _HOST_ADAPTERS = _PATH_TOOLS | {
 }
 
 
-@dataclass(frozen=True, slots=True)
-class _PreparedAction:
-    tool_name: str
-    descriptor_json: str = field(repr=False)
-    action_hash: str
-    requires_elevation: bool
-    lexical_path: Path | None = None
-    resolved_path: Path | None = None
-    host_scope: bool = False
-    working_directory: Path | None = None
-    working_directory_device: int | None = field(default=None, repr=False)
-    working_directory_inode: int | None = field(default=None, repr=False)
-    effective_timeout: int | None = None
-    parameter_overrides: tuple[tuple[str, Any], ...] = ()
-    literal_command: str | None = field(default=None, repr=False)
-    literal_credentials: int = field(default=0, repr=False)
-
-    def review_descriptor(self) -> dict[str, Any]:
-        value = json.loads(self.descriptor_json)
-        if not isinstance(value, dict):  # pragma: no cover - construction invariant
-            raise HostAccessBlocked("Host action descriptor is invalid.")
-        return value
-
-
-@dataclass(frozen=True, slots=True)
-class _ActionPermit:
-    permit_id: str = field(repr=False)
-    lease_id: str = field(repr=False)
-    thread_id: str
-    lease_revision: int
-    application_hash: str = field(repr=False)
-    action: _PreparedAction
-    external_agent: bool = field(default=False, repr=False)
-
-
-@dataclass(frozen=True, slots=True)
-class HostActionAuthorization:
-    """Opaque registry result; only safe parameter overrides are public."""
-
-    _permit: _ActionPermit | None = field(default=None, repr=False)
-    _parameter_overrides: tuple[tuple[str, Any], ...] = field(
-        default=(),
-        repr=False,
-    )
-
-    @property
-    def parameter_overrides(self) -> dict[str, Any]:
-        return dict(self._parameter_overrides)
-
-
-@dataclass(frozen=True, slots=True)
-class ConsumedHostAction:
-    """Permit-free exact values the lower layer may now use for its effect."""
-
-    tool_name: str
-    resolved_path: Path | None = None
-    working_directory: Path | None = None
-    effective_timeout: int | None = None
-    _working_directory_fd: int | None = field(default=None, repr=False)
-    lease_id: str | None = field(default=None, repr=False)
-    lease_revision: int | None = field(default=None, repr=False)
-    permit_id: str | None = field(default=None, repr=False)
-    external_agent: bool = field(default=False, repr=False)
-
 
 _current_action_permit: ContextVar[_ActionPermit | None] = ContextVar(
     "host_access_action_permit",
@@ -154,45 +91,16 @@ def _canonical_tool_name(name: str | None) -> str:
     return normalize_tool_name(name)
 
 
+def is_path_tool(name: str | None) -> bool:
+    return _canonical_tool_name(name) in _PATH_TOOLS
+
+
 def _safe_params(params: Mapping[str, Any]) -> dict[str, Any]:
     return {
         str(key): value
         for key, value in dict(params).items()
         if not str(key).startswith(_RESERVED_PREFIXES)
     }
-
-
-def _text(value: Any, field_name: str) -> str:
-    if not isinstance(value, str) or not value:
-        raise HostAccessBlocked(f"Host action {field_name} is invalid.")
-    return value
-
-
-def _boolean(value: Any, default: bool = False) -> bool:
-    if value is None:
-        return default
-    if not isinstance(value, bool):
-        raise HostAccessBlocked("Host action parameters are invalid.")
-    return value
-
-
-def _integer(value: Any, default: int, *, minimum: int, maximum: int) -> int:
-    if value is None:
-        value = default
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise HostAccessBlocked("Host action parameters are invalid.")
-    if value < minimum:
-        raise HostAccessBlocked("Host action parameters are invalid.")
-    return min(value, maximum)
-
-
-def _number(value: Any, field_name: str, *, minimum: float = 0.0) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise HostAccessBlocked(f"Host action {field_name} is invalid.")
-    normalized = float(value)
-    if not math.isfinite(normalized) or normalized < minimum:
-        raise HostAccessBlocked(f"Host action {field_name} is invalid.")
-    return normalized
 
 
 def _tool_workspace(tool: Any) -> Path:
@@ -307,14 +215,16 @@ def _path_requires_elevation(
     lexical: Path,
     resolved: Path,
     for_write: bool,
+    thread_id: str | None = None,
+    fence: Any = None,
 ) -> bool:
-    from tools.host_path_policy import path_review_classification
+    from tools.host_path_classification import path_review_classification
 
     # Every path-bearing host action is prepared here, when a permit is
     # requested and again before it is consumed: a hard-floor path is refused
     # before any review happens or any permit is honoured.
     ordinary_denied, hard_floor = path_review_classification(
-        lexical, resolved, for_write=for_write
+        lexical, resolved, for_write=for_write, thread_id=thread_id, fence=fence
     )
     if hard_floor:
         raise HostAccessBlocked(hard_floor)
@@ -338,6 +248,8 @@ def _path_action(
     params: Mapping[str, Any],
     *,
     tool: Any,
+    thread_id: str | None = None,
+    fence: Any = None,
 ) -> _PreparedAction:
     base = _tool_workspace(tool)
     raw_path = params.get("path")
@@ -354,6 +266,8 @@ def _path_action(
         lexical=lexical,
         resolved=resolved,
         for_write=for_write,
+        thread_id=thread_id,
+        fence=fence,
     )
     payload: dict[str, Any] = {"path": _path_payload(lexical, resolved)}
 
@@ -385,35 +299,8 @@ def _path_action(
         ]
         if len(payload["edits"]) != len(edits):
             raise HostAccessBlocked("Host action edits are invalid.")
-    elif canonical == "glob":
-        payload.update(
-            {
-                "pattern": _text(params.get("pattern"), "pattern"),
-                "all_threads": _boolean(params.get("all_threads")),
-            }
-        )
-    elif canonical == "grep":
-        payload.update(
-            {
-                "pattern": _text(params.get("pattern"), "pattern"),
-                "glob": params.get("glob"),
-                "output_mode": params.get("output_mode") or "files",
-                "case_insensitive": _boolean(params.get("case_insensitive")),
-                "context": _integer(
-                    params.get("context"),
-                    0,
-                    minimum=0,
-                    maximum=10,
-                ),
-                "max_results": _integer(
-                    params.get("max_results"),
-                    50,
-                    minimum=1,
-                    maximum=200,
-                ),
-                "all_threads": _boolean(params.get("all_threads")),
-            }
-        )
+    elif canonical in {"glob", "grep"}:
+        payload.update(search_payload(canonical, params))
     elif canonical == "browser_screenshot":
         payload["full_page"] = _boolean(params.get("full_page"))
 
@@ -579,6 +466,8 @@ def _prepare_action(
     params: Mapping[str, Any],
     *,
     tool: Any,
+    thread_id: str | None = None,
+    fence: Any = None,
 ) -> _PreparedAction | None:
     canonical = _canonical_tool_name(tool_name)
     if canonical not in _HOST_ADAPTERS:
@@ -590,7 +479,7 @@ def _prepare_action(
         return None
     if canonical in {"process_discover", "process_signal"}:
         return _process_action(canonical, safe)
-    return _path_action(canonical, safe, tool=tool)
+    return _path_action(canonical, safe, tool=tool, thread_id=thread_id, fence=fence)
 
 
 async def _resolve_active_lease(thread_id: str) -> dict[str, Any] | None:
@@ -809,6 +698,7 @@ async def authorize_host_action(
     tool: Any,
     tool_name: str,
     params: Mapping[str, Any],
+    fence: Any = None,
 ) -> HostActionAuthorization:
     """Classify one call and obtain a fresh private permit when required."""
     if not isinstance(thread_id, str) or not thread_id.strip():
@@ -820,7 +710,7 @@ async def authorize_host_action(
         params=params,
         tool=tool,
     )
-    action = await asyncio.to_thread(_prepare_action, tool_name, materialized, tool=tool)
+    action = await asyncio.to_thread(_prepare_action, tool_name, materialized, tool=tool, thread_id=thread_id, fence=fence)
     if action is None:
         return HostActionAuthorization(_parameter_overrides=tuple(overrides.items()))
     if action.parameter_overrides:
@@ -852,29 +742,9 @@ async def authorize_host_action(
         return HostActionAuthorization(
             _parameter_overrides=tuple(overrides.items())
         )
-    lease = await _resolve_active_lease(thread_id)
+    lease = None if host_lease_disabled() else await _resolve_active_lease(thread_id)
     if lease is None:
-        if ordinary_action:
-            return HostActionAuthorization(
-                _parameter_overrides=tuple(overrides.items())
-            )
-        if action.tool_name == "bash":
-            # host:true with no active lease is a fast structured denial, never
-            # a wall — host scope is only reviewable under an already-active
-            # lease, so the guidance sends the agent to request one first.
-            raise HostAccessRequired(
-                protected_scope_denial(
-                    "host scope was requested but no host-access lease is "
-                    "active",
-                    lease_active=False,
-                )
-            )
-        raise HostAccessRequired(
-            protected_scope_denial(
-                "this action is outside protected scope",
-                lease_active=False,
-            )
-        )
+        return await no_lease_authorization(action, ordinary_action, overrides, thread_id, fence=fence)
     try:
         external_agent = classify_external_launch(
             lease,
@@ -914,6 +784,44 @@ def host_action_permit_scope(
         _current_action_permit.reset(token)
 
 
+def _open_reviewed_working_directory(action: _PreparedAction, permit: _ActionPermit) -> int | None:
+    if action.tool_name != "bash":
+        return None
+    expected_device = permit.action.working_directory_device
+    expected_inode = permit.action.working_directory_inode
+    if (
+        action.working_directory is None
+        or expected_device is None
+        or expected_inode is None
+    ):
+        raise HostAccessBlocked(
+            "Host action working directory binding is unavailable."
+        )
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    working_directory_fd: int | None = None
+    try:
+        working_directory_fd = os.open(action.working_directory, flags)
+        opened = os.fstat(working_directory_fd)
+    except OSError as exc:
+        if working_directory_fd is not None:
+            os.close(working_directory_fd)
+        raise HostAccessBlocked(
+            "Host action working directory changed after safety review."
+        ) from exc
+    if (
+        not stat.S_ISDIR(opened.st_mode)
+        or int(opened.st_dev) != expected_device
+        or int(opened.st_ino) != expected_inode
+    ):
+        os.close(working_directory_fd)
+        raise HostAccessBlocked(
+            "Host action working directory changed after safety review."
+        )
+    return working_directory_fd
+
+
 async def consume_current_action_permit(
     *,
     thread_id: str | None,
@@ -921,6 +829,7 @@ async def consume_current_action_permit(
     tool: Any,
     tool_name: str,
     params: Mapping[str, Any],
+    fence: Any = None,
 ) -> ConsumedHostAction | None:
     """Recompute and atomically consume the current permit before an effect."""
     permit = _current_action_permit.get()
@@ -934,46 +843,14 @@ async def consume_current_action_permit(
         tool_name=tool_name,
         params=params, tool=tool,
     )
-    action = await asyncio.to_thread(_prepare_action, tool_name, materialized, tool=tool)
+    action = await asyncio.to_thread(_prepare_action, tool_name, materialized, tool=tool, thread_id=thread_id, fence=fence)
     if (
         action is None
         or action.tool_name != permit.action.tool_name
         or action.action_hash != permit.action.action_hash
     ):
         raise HostAccessBlocked("Host action changed after safety review.")
-    working_directory_fd: int | None = None
-    if action.tool_name == "bash":
-        expected_device = permit.action.working_directory_device
-        expected_inode = permit.action.working_directory_inode
-        if (
-            action.working_directory is None
-            or expected_device is None
-            or expected_inode is None
-        ):
-            raise HostAccessBlocked(
-                "Host action working directory binding is unavailable."
-            )
-        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-        if hasattr(os, "O_CLOEXEC"):
-            flags |= os.O_CLOEXEC
-        try:
-            working_directory_fd = os.open(action.working_directory, flags)
-            opened = os.fstat(working_directory_fd)
-        except OSError as exc:
-            if working_directory_fd is not None:
-                os.close(working_directory_fd)
-            raise HostAccessBlocked(
-                "Host action working directory changed after safety review."
-            ) from exc
-        if (
-            not stat.S_ISDIR(opened.st_mode)
-            or int(opened.st_dev) != expected_device
-            or int(opened.st_ino) != expected_inode
-        ):
-            os.close(working_directory_fd)
-            raise HostAccessBlocked(
-                "Host action working directory changed after safety review."
-            )
+    working_directory_fd = _open_reviewed_working_directory(action, permit)
     try:
         await _consume_host_action_permit(
             permit.permit_id,

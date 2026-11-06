@@ -99,9 +99,9 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
     writer), so its instruction and check reach the agent the step is handed to.
     A step naming a workflow becomes a child phase built the same way.
     """
-    from plans import dependencies, intent_words, node_creation
+    from plans import closure, dependencies, gate_handoff, intent_creation, node_creation
 
-    intent_node_id = intent_words.canonical(db, phase.id)["id"]
+    intent_node_id = intent_creation.canonical(db, phase.id)["id"]
     built: dict[str, Any] = {}
     listed = []
     for step in steps:
@@ -111,6 +111,10 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
             raise service.PlanInputError(f"step {step['id']}: {difficulty_rubric()}")
         nested = step.get("workflow")
         by = step.get("by", "agent")
+        gate = step.get("gate") if nested is None else None
+        gate_mode, gate_state = gate_handoff.mode_for(db, phase, step["id"]) if gate == "acceptance" else (None, None)
+        if gate_mode == "agent":
+            by = "reviewer"
         check = step.get("check") or f"Done: {title}"
         description = step.get("instruction")
         if by == "person":
@@ -135,11 +139,19 @@ def build_run(db, phase, steps, *, causing_executor: str | None) -> list[dict[st
             provenance="plans.workflow_run", node_id=service._id(),
             intent_node_id=intent_node_id, required_step=step.get("required") is True, workflow_by=by,
             person_step=not (by == "person" and step.get("after")),
+            workflow_gate=gate, workflow_gate_mode=gate_mode,
         )
+        if gate_mode == "dropped" and gate_state is not None:
+            closure.close_node(
+                node.id, reason=gate_handoff.drop_reason(gate_state), actor_id=None,
+                provenance=gate_handoff.PROVENANCE, db=db,
+            )
         built[step["id"]] = node
         entry = {"id": node.id, "title": title, "required": step.get("required") is True}
         if by != "agent":
             entry["by"] = by
+        if gate_mode in gate_handoff.GATE_HOW:
+            entry["gate_mode"] = gate_mode
         if step.get("hard_if"):
             entry["hard_if"] = step["hard_if"]
         if nested:
@@ -158,6 +170,18 @@ def _has_hard_if(listed) -> bool:
     return any("hard_if" in entry or _has_hard_if(entry.get("steps", ())) for entry in listed)
 
 
+def _gate_notices(listed) -> list[str]:
+    """One line for each step of the run whose acceptance gate the person handed off."""
+    from plans.gate_handoff import GATE_HOW, GATE_NOTICE
+
+    lines = []
+    for entry in listed:
+        if "gate_mode" in entry:
+            lines.append(GATE_NOTICE.format(step=entry["title"], how=GATE_HOW[entry["gate_mode"]]))
+        lines.extend(_gate_notices(entry.get("steps", ())))
+    return lines
+
+
 def added(db, node, line, steps, *, causing_executor: str | None):
     """The add reply: the node, its rank line, and the run built under a workflow phase."""
     from plans.boundary import node_projection
@@ -170,7 +194,9 @@ def added(db, node, line, steps, *, causing_executor: str | None):
         result["rank"] = line
     if listed:
         result["steps"] = listed
-        result["notice"] = STEPS_CREATED + (" " + HARD_IF_NOTICE if _has_hard_if(listed) else "")
+        result["notice"] = " ".join(
+            [STEPS_CREATED, *([HARD_IF_NOTICE] if _has_hard_if(listed) else []), *_gate_notices(listed)],
+        )
     return result
 
 
@@ -186,6 +212,48 @@ def _open_step(db, node_id: str):
     if node["workflow_step"] is None or node["state"] in service._TERMINAL_STATES:
         return None, {}
     return node, creation_payload(db, node_id)
+
+
+def reader_titles(db, node_ids) -> dict[str, str]:
+    """Each node's title as the person reads it outside its plan tree.
+
+    A workflow step keeps its workflow's stage title (Problem brief, Direction
+    agreed), which names no subject once it leaves the tree, so it reads as
+    ``<run> — <step>``. The run is the outermost workflow phase above the
+    step ``build_run`` made: a revision or follow-up moved out from under a
+    settled run is first traced back through ``follow_up_of`` to that step, and
+    a nested run's steps name the outer run. Not ``commitment_id``, which is
+    where cost is attributed: it is the top-level ancestor, or the parent
+    plan's task for a worker's run. Every other node reads as its own title;
+    an unknown id is absent.
+    """
+    ids = list(dict.fromkeys(str(node_id) for node_id in node_ids))
+    if not ids:
+        return {}
+    marks = ",".join("?" * len(ids))
+    rows = db.execute(
+        f"""WITH RECURSIVE origin(id, at) AS (
+                 SELECT id, id FROM plan_nodes WHERE id IN ({marks}) AND workflow_step IS NOT NULL
+                 UNION ALL SELECT origin.id, n.follow_up_of FROM origin
+                  JOIN plan_nodes n ON n.id = origin.at WHERE n.follow_up_of IS NOT NULL),
+             above(id, at) AS (
+                 SELECT origin.id, n.parent_id FROM origin
+                  JOIN plan_nodes n ON n.id = origin.at AND n.follow_up_of IS NULL
+                 UNION ALL SELECT above.id, n.parent_id FROM above
+                  JOIN plan_nodes n ON n.id = above.at
+                 WHERE NOT (n.kind = 'phase' AND n.workflow_ref IS NOT NULL AND n.workflow_step IS NULL)),
+             runs(id, title) AS (
+                 SELECT above.id, r.title FROM above JOIN plan_nodes r ON r.id = above.at
+                 WHERE r.kind = 'phase' AND r.workflow_ref IS NOT NULL AND r.workflow_step IS NULL)
+            SELECT n.id, n.title, runs.title AS run_title
+              FROM plan_nodes n LEFT JOIN runs ON runs.id = n.id
+             WHERE n.id IN ({marks})""",
+        [*ids, *ids],
+    ).fetchall()
+    return {
+        str(row["id"]): f"{row['run_title']} — {row['title']}" if row["run_title"] else row["title"]
+        for row in rows
+    }
 
 
 def creation_payload(db, node_id: str) -> dict[str, Any]:
@@ -209,6 +277,8 @@ def same_step_fields(db, source) -> dict[str, Any]:
         **{field: source[field] for field in NOT_A_STEP},
         "required_step": created.get("workflow_required") is True,
         "workflow_by": created.get("workflow_by", "agent"),
+        "workflow_gate": created.get("workflow_gate"),
+        "workflow_gate_mode": created.get("workflow_gate_mode"),
     }
 
 
@@ -237,6 +307,14 @@ def refuse_reviewer_self_close(db, node_id: str, operation: str) -> None:
     if operation != "mark_done" and delegation_harvest.harvest_review(db, node) is not None:
         return
     raise service.PlanError(REVIEWER_ROUTE)
+
+
+def refuse_unready_close(db, node_id: str, operation: str) -> None:
+    """Refuse a close the step isn't ready for: a reviewer step without a return, or a rejected gate."""
+    from plans import gate_handoff
+
+    refuse_reviewer_self_close(db, node_id, operation)
+    gate_handoff.refuse_rejected(db, node_id, operation)
 
 
 def refuse_required_skip(db, node_id: str) -> None:

@@ -89,6 +89,8 @@ export const docTheme = EditorView.theme({
 	'.cm-md-image img': { display: 'block', maxWidth: '100%', height: 'auto' },
 	'.cm-md-image-selected img, .cm-md-image-selected .cm-md-image-note': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
 	'.cm-md-image-note': { color: 'var(--text-tertiary)' },
+	// A cell image or diagram is a tab stop that Enter or Space opens (`widget-open.ts`), ringed as the selected image is.
+	'.cm-md-cell-image:focus-visible, .cm-md-mermaid:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '2px' },
 
 	// Text anchor rules live in commentAnchors.css for documents and chat.
 	// A whole table or diagram: the same amber as an outline on the block, since a block has no text to underline.
@@ -115,7 +117,7 @@ export const docTheme = EditorView.theme({
 		transition: 'background-color 0.12s'
 	},
 	// The count box is 18px, centred, at the button's top: centre the 6px dot on its top-right corner.
-	'.cm-comment-dot': { position: 'absolute', top: '-3px', left: 'calc(50% + 6px)', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'currentColor' },
+	'.cm-comment-dot': { position: 'absolute', top: '-3px', left: 'calc(50% + 6px)', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--accent)' },
 	'.cm-comment-marker:hover svg, .cm-comment-marker:hover .cm-comment-count': { backgroundColor: 'color-mix(in srgb, var(--amber) 16%, transparent)' },
 	'.cm-comment-marker:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
 	// The app's reduced-motion reset gives every element a 0.01ms transition on

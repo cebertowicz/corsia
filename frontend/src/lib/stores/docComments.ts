@@ -7,7 +7,7 @@ import { fromServer, type CommentAuthor, type DocComment } from './docCommentPro
 import { heldIds, withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
 
-export { fromServer, hasNewReplies, regionFromServer } from './docCommentProjection';
+export { fromServer, hasUnread, regionFromServer } from './docCommentProjection';
 export type { CommentAuthor, CommentReply, DocComment } from './docCommentProjection';
 
 function findById(rows: ServerComment[], id: string): ServerComment | null {
@@ -36,6 +36,8 @@ export async function postReconciled(
 
 
 export const docComments = writable<Record<string, DocComment[]>>({});
+/** Threads brought into view by an explicit unread navigation. */
+export const arrivedDocComments = writable<Set<string>>(new Set());
 /** `owner` is the document owner's name from the last load; null when it has no owner thread, so a re-open reaches nobody. */
 export type CommentLoad = { state: 'loading' | 'ready' | 'error'; error?: string; owner?: string | null };
 export const commentLoads = writable<Record<string, CommentLoad>>({});
@@ -132,27 +134,27 @@ export function upsertTop(artifactId: string, row: ServerComment) {
 	});
 }
 
-export async function addComment(artifactId: string, from: number, to: number, anchor: string, text: string, author: CommentAuthor = 'you', liveCapture = false, clientId?: string): Promise<string> {
+export async function addComment(artifactId: string, from: number, to: number, anchor: string, text: string, author: CommentAuthor = 'you', liveCapture = false, clientId?: string, taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []): Promise<string> {
 	const cid = clientId ?? newClientId();
 	const row = await postReconciled(artifactId, cid, {
 		body: text, anchor_text: anchor, from_off: from, to_off: to, ...(liveCapture ? { live_capture: true } : {}),
-		author, author_kind: isAgent(author) ? 'agent' : 'user'
+		author, author_kind: isAgent(author) ? 'agent' : 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId
 	});
 	upsertTop(artifactId, row);
 	return row.id;
 }
 
 
-export async function addReply(artifactId: string, commentId: string, text: string, author: CommentAuthor = 'you') {
+export async function addReply(artifactId: string, commentId: string, text: string, author: CommentAuthor = 'you', taggedAgentIds: string[] = [], threadId: string | null = null, mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []) {
 	const cid = newClientId();
 	const row = await postReconciled(artifactId, cid, {
-		body: text, parent_id: commentId, author, author_kind: isAgent(author) ? 'agent' : 'user'
+		body: text, parent_id: commentId, author, author_kind: isAgent(author) ? 'agent' : 'user', tagged_agent_ids: taggedAgentIds, tagged_agent_mentions: mentions, thread_id: threadId
 	});
 	docComments.update((all) => {
 		const list = (all[artifactId] ?? []).map((c) => {
 			if (c.id !== commentId) return c;
 			if (c.replies.some((r) => r.id === row.id)) return c;
-			return { ...c, replies: [...c.replies, { id: row.id, author, text, at: 'just now' }] };
+			return { ...c, replies: [...c.replies, { id: row.id, author, text, taggedAgents: row.tagged_agents ?? [], mentions: row.tagged_agent_mentions ?? [], at: 'just now' }] };
 		});
 		return { ...all, [artifactId]: list };
 	});
@@ -182,7 +184,7 @@ export async function markThreadViewed(artifactId: string, rootId: string, seenR
 	docComments.update((all) => ({
 		...all,
 		[artifactId]: (all[artifactId] ?? []).map((comment) => (
-			comment.id === result.root_id ? { ...comment, newReplyIds: result.new_reply_ids } : comment
+			comment.id === result.root_id ? { ...comment, newComment: false, newReplyIds: result.new_reply_ids } : comment
 		)),
 	}));
 }

@@ -251,12 +251,48 @@ def test_a_claim_after_an_error_publishes_the_stamped_error_row(isolated_db, mon
             boot_epoch="test-boot", admitted_at="t1", db=db,
         )
     batch = admitted.batch
-    assert batch is not None and batch.recovered_message_ids == ("err-1",)
+    assert batch is not None and batch.error_message_ids == ("err-1",)
 
     asyncio.run(broadcast_claimed_batch(batch))
 
-    order = [m["id"] for p in published for m in (p.get("messages") or [p["message"]])]
+    rows = [p for p in published if p["type"] in ("message_added", "messages_added")]
+    order = [m["id"] for p in rows for m in (p.get("messages") or [p["message"]])]
     assert order.index("err-1") < order.index("wake-1")
-    sent = {m["id"]: m for p in published for m in (p.get("messages") or [p["message"]])}
+    sent = {m["id"]: m for p in rows for m in (p.get("messages") or [p["message"]])}
     assert {"wake-1", "err-1"} <= set(sent)
     assert sent["err-1"]["metadata"]["recovered"] is True
+
+
+def test_a_successor_is_announced_once_and_a_republish_never_announces(isolated_db, monkeypatch):
+    """A successor reads as working at its claim; the batch's re-publish after a Stop never re-announces an ended Turn."""
+    import asyncio
+
+    import infra.state as state
+    from infra.database import get_db
+    from infra.send_broadcast import announce_successor_turn, broadcast_claimed_batch
+    from infra.thread_driver import admit_input
+
+    published: list[dict] = []
+    monkeypatch.setattr(state, "broadcast_to_thread", lambda _thread, payload, **_kw: published.append(payload))
+    with get_db() as db:
+        db.execute(
+            "INSERT INTO threads (id,user_id,model,created_at,updated_at) "
+            "VALUES ('thread-run','user-1','claude-code/sonnet','t0','t0')"
+        )
+        db.commit()
+        admitted = admit_input(
+            "thread-run", role="system", content="continue", intent="apply_now",
+            message_id="continue-1", metadata={"type": "context_event"}, turn_id="turn-run",
+            boot_epoch="test-boot", admitted_at="t1", db=db,
+        )
+    batch = admitted.batch
+    assert batch is not None
+
+    asyncio.run(broadcast_claimed_batch(batch))
+    assert published and {p["type"] for p in published} <= {"message_added", "messages_added"}
+
+    published.clear()
+    asyncio.run(announce_successor_turn(batch))
+    assert [p["type"] for p in published] == ["turn_activity"]
+    assert published[0]["turn_id"] == "turn-run"
+    assert published[0]["turn_order"] == batch.turn_order

@@ -3,7 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
-import { loginByUrl } from '../support/corsia';
+import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { raiseAsk } from '../support/reviewAsk';
 import { expectSenders, headerSend, leaveUnsent } from '../support/heldComments';
 import { journey, type Case, seed, type Doc, seedImage, comment, type Mode, WIDTH, open, selectThread, shot, hitAtCentre, settled } from '../support/reviewFixtures';
 
@@ -35,34 +36,10 @@ function addPersonStep(threadId: string, artifactId: string): void {
 		'accept_thread_input(thread, role="user", content=intent, intent="apply_now", message_id=message_id, db=db)',
 		'db.execute("UPDATE messages SET active_turn_id=? WHERE id=?", (turn_id, message_id))',
 		'plan = service.ensure_plan("thread", thread, db=db)',
-		'params = {"kind": "task", "title": "Set up the workspace", "acceptance_criteria": "It is ready.", "size": "unknown", "assignee": "user", "description": "Follow the document. Already tried: I opened the instructions.", "instructions_artifact_id": artifact, "intent": intent, "intent_words": [{"quote": intent, "role": "authority"}]}',
+		'params = {"kind": "task", "title": "Set up the workspace", "acceptance_criteria": "It is ready.", "size": "unknown", "assignee": "user", "description": "Follow the document. Already tried: I opened the instructions.", "instructions_artifact_id": artifact, "intent": intent}',
 		'mutate(plan.id, "add", params, actor=PlanActor(thread, user, None, turn_id=turn_id), provenance="e2e.person_step", mutation_id=uuid.uuid4().hex, db=db)',
 		'db.commit()',
 	].join('\n'), threadId, artifactId], {
-		cwd: backendDir, encoding: 'utf8',
-		env: { ...process.env, CORSIA_TEST_MODE: '1', CORSIA_STATE_DIR: state, CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE ?? '' },
-	});
-}
-
-function raiseAsk(threadId: string, artifactId: string, reason: string): void {
-	const state = process.env.CORSIA_E2E_STATE_DIR;
-	if (process.env.CORSIA_E2E_MOCK !== '1' || !state) throw new Error('The ask fixture requires isolated E2E mock state');
-	execFileSync(python(), ['-c', [
-		'import sys, uuid',
-		'from infra.database import get_db',
-		'from plans import service',
-		'from plans.boundary import PlanActor, mutate',
-		'thread, artifact, reason = sys.argv[1:]',
-		'db = get_db()',
-		'user = db.execute("SELECT user_id FROM threads WHERE id=?", (thread,)).fetchone()["user_id"]',
-		'plan = service.ensure_plan("thread", thread, db=db)',
-		'node = service.add_node(plan.id, kind="task", title="Review the proposal", acceptance_criteria="Reviewed", db=db)',
-		'db.commit()',
-		'mutate(plan.id, "block_node", {"node_id": node.id, "reason_key": "review", "reason": reason, "owner_kind": "user", "owner_id": None,',
-		'  "ask_artifact_id": artifact, "expected_revision": service._node_row(db, node.id)["revision"]},',
-		'  actor=PlanActor(thread, user, None), provenance="e2e.review_bar", mutation_id=uuid.uuid4().hex, db=db)',
-		'db.commit()',
-	].join('\n'), threadId, artifactId, reason], {
 		cwd: backendDir, encoding: 'utf8',
 		env: { ...process.env, CORSIA_TEST_MODE: '1', CORSIA_STATE_DIR: state, CORSIA_WORKSPACE: process.env.CORSIA_E2E_WORKSPACE ?? '' },
 	});
@@ -282,7 +259,7 @@ journey('approve a plain ask from the reading', ALL, async ({ page, request, inf
 	await shot(page, 'ask', info);
 	await bar(page).getByRole('button', { name: 'Approve', exact: true }).click();
 	const receipt = bar(page).locator('.rb-receipt');
-	await expect(receipt).toContainText('You approved this');
+	await expect(receipt).toContainText('Approved');
 	await expect(receipt).toBeFocused();
 	await shot(page, 'receipt', info);
 	await page.reload();
@@ -305,29 +282,29 @@ journey('approve with changes after two comments', ALL, async ({ page, request, 
 	await expect(headerSend(page)).not.toHaveClass(/primary/);
 	await expectSenders(page, ['header: Send 2 comments']);
 	await expect(page.locator('.comment-status')).toHaveAttribute('aria-label', /, 2 messages not sent yet$/);
-	await expect(approve).toHaveClass(/primary/);
+	await expect(approve).not.toHaveClass(/primary/);
 	await shot(page, 'ask-with-changes', info);
 	await approve.click();
-	await expect(bar(page).locator('.rb-receipt')).toContainText('You approved this with changes');
-	await expect(bar(page).locator('.rb-receipt')).toContainText('sent 2 comments');
+	await expect(bar(page).locator('.rb-receipt')).toContainText('Approved with changes');
+	await expect(bar(page).locator('.rb-receipt')).not.toContainText('comments');
 	await expect(page.locator('.comment-status')).not.toHaveAttribute('aria-label', /not sent yet/);
 	await expect(page.getByText('Place again')).toHaveCount(0);
 	await shot(page, 'receipt-with-changes', info);
 });
 
-journey('a receipt names mixed feedback kinds', [
+journey('an approval receipt counts comments only', [
 	['393 light', 'phone', 'light'], ['393 dark', 'phone', 'dark'],
 ], async ({ page, request, info, mode, theme }) => {
 	const doc = await seed(request, `Review mixed receipt ${mode} ${theme}`);
 	raiseAsk(doc.threadId, doc.artifactId, 'Check the handoff.');
 	await open(page, doc, mode, theme);
 	await page.route('**/api/attention/*/clear', async (route) => {
-		await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ review: { verdict: 'approved_with_changes', note: null, feedback_counts: { comments: 2, suggestions: 1, edits: 0 } } }) });
+		await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ review: { verdict: 'approved', note: null, feedback_counts: { comments: 2, suggestions: 1, edits: 0 } } }) });
 	});
 	await bar(page).getByRole('button', { name: 'Approve', exact: true }).click();
 	const receipt = bar(page).locator('.rb-receipt');
-	await expect(receipt).toContainText('sent 2 comments, 1 suggestion');
-	expect(await receipt.evaluate((el) => el.textContent?.includes('sent 2 comments, 1 suggestion'))).toBe(true);
+	await expect(receipt).toContainText('2 comments sent');
+	await expect(receipt).not.toContainText('suggestion');
 	await shot(page, 'receipt-mixed-counts', info);
 });
 
@@ -338,16 +315,16 @@ journey('request changes with only a note', [
 	const doc = await seed(request, `Review note ${mode} ${theme}`);
 	raiseAsk(doc.threadId, doc.artifactId, 'Is this ready to ship?');
 	await open(page, doc, mode, theme);
-	await bar(page).getByRole('button', { name: 'Request changes', exact: true }).click();
+	await bar(page).getByRole('button', { name: 'Reject', exact: true }).click();
 	const note = bar(page).getByRole('textbox');
 	await expect(note).toBeFocused();
-	const send = bar(page).getByRole('button', { name: 'Request changes', exact: true });
+	const send = bar(page).getByRole('button', { name: 'Reject', exact: true });
 	await expect(send).toBeDisabled();
 	await note.fill('Not yet: the rollback is missing.');
 	await expectLayout(page, mode);
 	await shot(page, 'noting', info);
 	await send.click();
-	await expect(bar(page).locator('.rb-receipt')).toContainText('You requested changes');
+	await expect(bar(page).locator('.rb-receipt')).toContainText('Rejected');
 	await shot(page, 'receipt-requested', info);
 	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 	expect(overflow).toBeLessThanOrEqual(0);
@@ -360,16 +337,16 @@ journey('answer a plain ask on an image', [['1440 light', 'default', 'light'], [
 	await expect(bar(page)).toContainText('Is this the right diagram?');
 	// An image takes no comments, so Approve is always plain and Request changes always needs a note.
 	await expect(bar(page).getByRole('button', { name: 'Approve', exact: true })).toBeVisible();
-	await expect(bar(page).getByRole('button', { name: 'Approve with changes' })).toHaveCount(0);
+	await expect(bar(page).getByRole('button', { name: 'Approve with changes' })).toBeVisible();
 	await expectLayout(page, mode);
 	await shot(page, 'image-ask', info);
-	await bar(page).getByRole('button', { name: 'Request changes', exact: true }).click();
-	const send = bar(page).getByRole('button', { name: 'Request changes', exact: true });
+	await bar(page).getByRole('button', { name: 'Reject', exact: true }).click();
+	const send = bar(page).getByRole('button', { name: 'Reject', exact: true });
 	await expect(send).toBeDisabled();
 	await bar(page).getByRole('textbox').fill('Use the new palette.');
 	await shot(page, 'image-noting', info);
 	await send.click();
-	await expect(bar(page).locator('.rb-receipt')).toContainText('You requested changes');
+	await expect(bar(page).locator('.rb-receipt')).toContainText('Rejected');
 	await expect(page.getByRole('img', { name: doc.name })).toBeVisible();
 	await shot(page, 'image-receipt', info);
 	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
@@ -383,10 +360,10 @@ journey('a note in flight keeps its layout', [['1440 light', 'default', 'light']
 	const held = new Promise<void>((resolve) => { release = resolve; });
 	await page.route('**/api/attention/*/clear', async (route) => { await held; await route.continue(); });
 	await open(page, doc, mode, theme);
-	await bar(page).getByRole('button', { name: 'Request changes', exact: true }).click();
+	await bar(page).getByRole('button', { name: 'Reject', exact: true }).click();
 	const note = bar(page).getByRole('textbox');
 	await note.fill('Not yet: the rollback is missing.');
-	await bar(page).getByRole('button', { name: 'Request changes', exact: true }).click();
+	await bar(page).getByRole('button', { name: 'Reject', exact: true }).click();
 
 	// Mid-send the bar is still the note layout: the same input, only the sender busy, nothing else pressable.
 	await expect(bar(page).locator('.spinner')).toHaveCount(1);
@@ -401,7 +378,7 @@ journey('a note in flight keeps its layout', [['1440 light', 'default', 'light']
 	await expectLayout(page, mode);
 	await shot(page, 'note-sending', info);
 	release();
-	await expect(bar(page).locator('.rb-receipt')).toContainText('You requested changes');
+	await expect(bar(page).locator('.rb-receipt')).toContainText('Rejected');
 });
 
 journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
@@ -409,8 +386,8 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await comment(request, doc, 'Ring two should wait.', 2);
 	await comment(request, doc, 'Add a rollback line.', 5);
 	await open(page, doc, mode, theme);
-	// The pill names its threads, then any unsent messages: "2 open threads, 2 messages not sent yet".
-	await page.getByRole('button', { name: /^2 open threads\b/ }).click();
+	// The pill names its threads, then any unsent messages: "2 threads, 2 messages not sent yet".
+	await page.getByRole('button', { name: /^2 threads\b/ }).click();
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer).toBeVisible();
 	const close = drawer.getByRole('button', { name: 'Close comments', exact: true });
@@ -449,6 +426,88 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	await shot(page, 'drawer-touch', info);
 	await close.click();
 	await expect(drawer).toBeHidden();
+});
+
+journey('the review controls remain usable in the phone comments sheet', [['393 light', 'phone', 'light']], async ({ page, request, mode, theme }) => {
+	const doc = await seed(request, 'Review controls in comments');
+	raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
+	await comment(request, doc, 'Check the first step.', 1);
+	await open(page, doc, mode, theme);
+	await page.getByRole('button', { name: /^1 thread\b/ }).click();
+	const drawer = page.locator('[data-doc-comments-drawer]');
+	const approve = drawer.getByRole('button', { name: 'Approve', exact: true });
+	await expect(approve).toBeVisible();
+	const reply = drawer.getByPlaceholder('Reply…').first();
+	await reply.focus();
+	await expect(approve).toBeHidden();
+	await reply.blur();
+	await expect(approve).toBeVisible();
+	await approve.click();
+	await expect(drawer.locator('.rb-receipt')).toContainText('Approved');
+	await drawer.getByRole('button', { name: 'Close comments', exact: true }).click();
+	await expect(page.locator('.review-bar .rb-receipt')).toBeVisible();
+});
+
+test.describe('375px review sheet', () => {
+	test.use({ hasTouch: true, isMobile: true });
+	test('@surface:review-bar suggestion actions stay on one row in the sheet', async ({ page, request }) => {
+		const doc = await seed(request, 'Review sheet suggestion actions');
+		raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
+		const reviewer = await createSession(request, 'Sheet suggester');
+		for (const step of [1, 2]) {
+			const result = await request.post('/api/delegation/docs/comments', { params: { token: TEST_TOKEN }, data: { artifact_id: doc.artifactId, quote: `Step ${step}: the rollout`, replacement: `Phase ${step}: the rollout`, body: 'Use phase.', as_session_id: reviewer } });
+			expect(result.ok()).toBeTruthy();
+		}
+		await open(page, doc, 'phone', 'light');
+		await page.setViewportSize({ width: 375, height: 852 });
+		await page.getByRole('button', { name: /^\d+ threads?\b/ }).click();
+		const buttons = page.locator('[data-doc-comments-drawer] .review-bar .rb-actions .btn');
+		await expect(buttons).toHaveCount(3);
+		await expect(page.locator('[data-doc-comments-drawer]').getByRole('button', { name: 'Approve all', exact: true })).toBeVisible();
+		const boxes = await buttons.evaluateAll((items) => items.map((item) => item.getBoundingClientRect().top));
+		expect(new Set(boxes.map(Math.round)).size).toBe(1);
+	});
+});
+
+journey('a review note survives moving into and out of the phone comments sheet', [['393 light', 'phone', 'light']], async ({ page, request, mode, theme }) => {
+	const doc = await seed(request, 'Review note across comments');
+	raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
+	await comment(request, doc, 'Check the first step.', 1);
+	await open(page, doc, mode, theme);
+	await page.getByRole('button', { name: 'Reject', exact: true }).click();
+	await page.getByRole('textbox', { name: /^Note for / }).fill('Keep this note');
+	await page.getByRole('button', { name: /^1 thread\b/ }).click();
+	const drawer = page.locator('[data-doc-comments-drawer]');
+	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Keep this note');
+	await expect(page.getByRole('textbox', { name: /^Note for / })).toHaveCount(1);
+	await drawer.getByRole('button', { name: 'Close comments', exact: true }).click();
+	await expect(page.getByRole('textbox', { name: /^Note for / })).toHaveValue('Keep this note');
+	await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+	await expect(page.getByRole('button', { name: 'Reject', exact: true })).toBeFocused();
+});
+
+journey('a pending review send survives moving through the phone comments sheet', [['393 light', 'phone', 'light']], async ({ page, request, mode, theme }) => {
+	const doc = await seed(request, 'Review send across comments');
+	raiseAsk(doc.threadId, doc.artifactId, 'Check the rollout.');
+	await comment(request, doc, 'Check the first step.', 1);
+	await open(page, doc, mode, theme);
+	let release!: () => void;
+	let started!: () => void;
+	const blocked = new Promise<void>((resolve) => { release = resolve; });
+	const sent = new Promise<void>((resolve) => { started = resolve; });
+	await page.route(`**/api/attention/${doc.artifactId}/clear`, async (route) => { started(); await blocked; await route.continue(); });
+	await page.getByRole('button', { name: 'Reject', exact: true }).click();
+	await page.getByRole('textbox', { name: /^Note for / }).fill('Please revise');
+	await page.getByRole('button', { name: 'Reject', exact: true }).click();
+	await sent;
+	await page.getByRole('button', { name: /^1 thread\b/ }).click();
+	const drawer = page.locator('[data-doc-comments-drawer]');
+	await expect(drawer.getByText('Sending your review…')).toBeVisible();
+	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Please revise');
+	await drawer.getByRole('button', { name: 'Close comments', exact: true }).click();
+	await expect(page.getByText('Sending your review…')).toBeVisible();
+	release();
+	await expect(page.locator('.rb-receipt')).toContainText('Rejected');
 });
 
 journey('held comments have the header Send, whole at every size, and the drawer has no footer', [
@@ -500,7 +559,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	if (output && mode === 'phone') await page.screenshot({ path: path.join(output, `reviewbar-held-send-393-${theme}.png`), scale: 'css' });
 
 	// The drawer lists the threads and ends with the last card: no footer, no second Send.
-	await page.getByRole('button', { name: /^6 open threads, 6 messages not sent yet$/ }).click();
+	await page.getByRole('button', { name: /^6 threads, 6 messages not sent yet$/ }).click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	await expect(drawer).toBeVisible();
 	await expect(drawer.locator('[data-drawer-unsent]')).toHaveCount(0);
@@ -679,10 +738,10 @@ for (const theme of ['light', 'dark'] as const) {
 		await expect.poll(() => header.evaluate((el) => getComputedStyle(el).paddingInlineEnd), 'overlay inset').not.toBe('0px');
 
 		const tools = page.locator('.document-tools');
-		const pill = tools.getByRole('button', { name: /^0 open threads\b/ });
+		const pill = tools.getByRole('button', { name: /^0 threads\b/ });
 		const requestReview = tools.getByRole('button', { name: 'Request review', exact: true });
 		const approve = bar(page).getByRole('button', { name: 'Approve', exact: true });
-		const requestChanges = bar(page).getByRole('button', { name: 'Request changes', exact: true });
+		const requestChanges = bar(page).getByRole('button', { name: 'Reject', exact: true });
 		for (const control of [pill, requestReview, approve, requestChanges]) {
 			await expect(control).toBeVisible();
 			const box = (await control.boundingBox())!;
@@ -748,7 +807,7 @@ for (const theme of ['light', 'dark'] as const) {
 		await settled(page);
 
 		await approve.click();
-		await expect(bar(page).locator('.rb-receipt')).toContainText('You approved this');
+		await expect(bar(page).locator('.rb-receipt')).toContainText('Approved');
 
 		// At 1440 and above this seeded desktop canvas can host the minimum split, so the pane docks beside it and the header has no inset.
 		for (const width of [1440, 1920]) {

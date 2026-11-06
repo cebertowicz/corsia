@@ -39,6 +39,8 @@ def canonical_calls(calls: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
 
 def _subset(expected: object, actual: object) -> bool:
     if isinstance(expected, dict):
+        if set(expected) == {"$contains"} and isinstance(expected["$contains"], str):
+            return isinstance(actual, str) and expected["$contains"] in actual
         return isinstance(actual, dict) and all(
             key in actual and _subset(value, actual[key]) for key, value in expected.items()
         )

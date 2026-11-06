@@ -15,7 +15,6 @@ from llm.locality import locality_refusal
 from prompts.cloud_off import thread_local_only_text
 
 LOCAL_ONLY_REFUSAL_CODE = "local_only_requires_local_model"
-LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE = "local_only_send_needs_confirm"
 _ANCESTOR_DEPTH = 64
 
 #: The thread and every thread under it through the family links.
@@ -168,61 +167,33 @@ def write_family_local_only(thread_id: str, local_only: bool, now: str, *, db: s
 
 
 
-def send_confirmation_refusal(
-    sender: dict,
-    recipient: dict,
-    *,
-    no_sensitive_content: object,
-    db: sqlite3.Connection,
-) -> str | None:
-    """Require a local-only sender to confirm a cloud-bound recipient is safe."""
+def send_needs_hold(sender: dict, recipient: dict, *, db: sqlite3.Connection | None = None,
+                    emit_hold_event: bool = True) -> bool:
+    """Whether a message from this sender to this recipient waits for the person to approve it.
+
+    True for a Local only sender (its own switch or its project's) and a recipient bound to a cloud
+    model, or to none yet. Every recipient thread is read by its own bound model, so only its
+    locality decides; a person's chat on a cloud model is still cloud-bound. A pending switch
+    decides over the current model, because queued inputs run on it.
+    """
+    from infra.database import get_db
     from llm.locality import project_cloud_models_off
 
-    if not sender.get("local_only") and not project_cloud_models_off(sender.get("project_id"), db=db):
-        return None
-    # Every recipient thread is read by its own bound model, so only its
-    # locality decides; a person's chat on a cloud model is still cloud-bound.
-    # A pending switch decides over the current model: queued inputs run on it.
-    recipient_model = recipient.get("pending_model") or recipient.get("model")
-    recipient_name = str(recipient.get("title") or recipient.get("id") or "This recipient")
-    if not isinstance(recipient_model, str) or not recipient_model.strip():
-        reason = "has no selected model and may adopt a cloud model"
-    elif _is_cloud(recipient_model.strip(), db=db):
-        reason = f"runs on a cloud model ({recipient_model})"
-    else:
-        return None
-    confirmed = no_sensitive_content is True
-    _emit(
-        "local_only.send_confirmed" if confirmed else "local_only.send_needs_confirm",
-        sender.get("id"), {"recipient_thread_id": recipient.get("id")},
-    )
-    if confirmed:
-        return None
-    return (
-        f"{LOCAL_ONLY_SEND_NEEDS_CONFIRM_CODE}: {recipient_name} {reason}. Remove anything "
-        "sensitive from the message (keys, secrets, personal data, private file contents), "
-        "then call again with no_sensitive_content: true (on `corsia delegate send`, "
-        "add --no-sensitive-content)."
-    )
-
-
-def send_confirmation_error(
-    sender: dict,
-    recipient: dict,
-    no_sensitive_content: object,
-) -> str | None:
-    """Read model locality and return the send confirmation refusal, if any."""
     if not sender.get("local_only") and not sender.get("project_id"):
-        return None
-    from infra.database import get_db
-
-    db = get_db()
+        return False
+    conn: sqlite3.Connection = get_db() if db is None else db
     try:
-        return send_confirmation_refusal(
-            sender, recipient, no_sensitive_content=no_sensitive_content, db=db,
-        )
+        if not sender.get("local_only") and not project_cloud_models_off(sender.get("project_id"), db=conn):
+            return False
+        recipient_model = recipient.get("pending_model") or recipient.get("model")
+        if isinstance(recipient_model, str) and recipient_model.strip() and not _is_cloud(recipient_model.strip(), db=conn):
+            return False
     finally:
-        db.close()
+        if db is None:
+            conn.close()
+    if emit_hold_event:
+        _emit("local_only.send_held", sender.get("id"), {"recipient_thread_id": recipient.get("id")})
+    return True
 
 
 def _emit(action: str, thread_id: str | None, properties: dict) -> None:

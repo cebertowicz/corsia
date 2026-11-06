@@ -783,6 +783,27 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         from infra.migration_171_to_172_message_drafts import migrate_171_to_172
         migrate_170_to_171(db)
         migrate_171_to_172(db)
+        # 172 -> 173 adds a partial index on plan_nodes.workflow_ref.
+        from infra.migration_172_to_173_workflow_ref_index import migrate_172_to_173
+        migrate_172_to_173(db)
+        # 173 -> 174 only adds the held-reply table.
+        from infra.migration_173_to_174_held_replies import migrate_173_to_174
+        migrate_173_to_174(db)
+        # 174 -> 175 only adds the reviewer gate's pending-run table.
+        from infra.migration_174_to_175_reviewer_gate_pending import migrate_174_to_175
+        migrate_174_to_175(db)
+        # 175 -> 176 removes the retired plan quote table.
+        from infra.migration_175_to_176_drop_plan_quotes import migrate_175_to_176
+        migrate_175_to_176(db)
+        # 176 -> 177 carries unread state into the expanded projection.
+        from infra.migration_176_to_177_unread_comments import migrate_176_to_177
+        migrate_176_to_177(db)
+        # 177 -> 178 only moves offset clock schedules to UTC.
+        from infra.migration_177_to_178_clock_utc import migrate_177_to_178
+        migrate_177_to_178(db)
+        # 178 -> 179 adds comment recipient state, tags, and mention ranges.
+        from infra.migration_178_to_179_comment_recipients import migrate_178_to_179
+        migrate_178_to_179(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
@@ -916,7 +937,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 172
+    assert SCHEMA_VERSION == 179
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83

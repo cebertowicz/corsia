@@ -107,9 +107,6 @@ def test_node_link_provenance_framing_counts_and_idempotency(isolated_db):
         assert "Comment " in node.description and "Suggested replacement: replacement text" in node.description
         assert "workspace" not in node.description.lower()
         assert node.intent is None
-        assert db.execute(
-            "SELECT COUNT(*) FROM plan_node_intent_words WHERE node_id=?", (node.id,)
-        ).fetchone()[0] == 0
         link = db.execute(
             "SELECT * FROM plan_node_artifact_links WHERE node_id=?",
             (node.id,),
@@ -128,7 +125,7 @@ def test_user_batch_uses_fixed_user_framing_and_ui_recipient_creates_no_node(iso
     db = get_db()
     try:
         seed_thread(db, "owner", title="Owner")
-        artifact_id = seed_document(db, "owner")
+        artifact_id = seed_document(db, "owner", name="notes.md")
         first, _ = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
         second, _ = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Steve")
         user_batch = batches(db, state="open")[0]
@@ -136,26 +133,20 @@ def test_user_batch_uses_fixed_user_framing_and_ui_recipient_creates_no_node(iso
         user_node = service.get_node(batches(db)[0]["delivered_node_id"], db=db)
         assert user_node.description.startswith(USER_FRAMING)
         assert "Your replies reach the user through the chat's reply chip, so don't also send a post_update about a reply." in user_node.description
-        assert user_node.intent == "User document feedback: Please check this point.\nPlease check this point."
-        words = db.execute(
-            """SELECT author,role,source_kind,source_id,quote,requirements_revision
-               FROM plan_node_intent_words WHERE node_id=? ORDER BY source_id""",
-            (user_node.id,),
-        ).fetchall()
-        assert [dict(word) for word in words] == [
-            {"author": "person", "role": "origin", "source_kind": "doc_comment",
-             "source_id": comment_id, "quote": "Please check this point.", "requirements_revision": 1}
-            for comment_id in sorted((first["id"], second["id"]))
-        ]
+        assert user_node.intent == "Answer the person's 2 comments on notes"
         detail = current.read_current_status(
             actor=PlanActor("owner", "owner-token", None), node_id=user_node.id, db=db,
         )
-        assert [word["quote"] for word in detail["intent_words"]] == ["Please check this point."] * 2
+        assert detail["intent"] == user_node.intent
+        comment_ids = db.execute(
+            """SELECT i.comment_id FROM doc_feedback_batch_items i
+               JOIN doc_feedback_batches b ON b.id=i.batch_id
+               WHERE b.delivered_node_id=? ORDER BY i.comment_id""", (user_node.id,),
+        ).fetchall()
+        assert [row["comment_id"] for row in comment_ids] == sorted((first["id"], second["id"]))
         again = create_feedback_node(db, "owner", batches(db)[0])
         assert (again.node_id, again.created) == (user_node.id, False)
-        assert db.execute(
-            "SELECT COUNT(*) FROM plan_node_intent_words WHERE node_id=?", (user_node.id,)
-        ).fetchone()[0] == 2
+
         # A reply under a comment the agent then resolves is hidden from the user.
         assert "Leave the user's comment open for them to resolve" in user_node.description
 

@@ -94,6 +94,7 @@ from plans.activity_projection import (
     read_project as read_activity_project,
     read_workspace as read_activity_workspace,
 )
+from plans.held_attention import queue_rows as held_reply_queue_rows
 from plans.user_ask import (
     ASKABLE_TYPES,
     ASK_ENDINGS,
@@ -126,6 +127,8 @@ from plans.operator_projection import (
 from plans.pane_views import delete_thread as delete_pane_view
 from plans.review_evidence import latest as latest_review_evidence
 
+# The ``selected.how`` values meaning a plan operation started the task (core/lesson_delivery).
+from plans.close_next import _CRITERIA_HOWS as TASK_STARTED_HOWS
 # The thin status a checkpoint freezes (infra/checkpoint_snapshots).
 from plans.close_next_bounds import bounded as bounded_label
 from plans.close_next_bounds import REVISION_BRIEF_MAX_BYTES
@@ -134,24 +137,22 @@ from plans.status_context import render as render_status
 # The status a plan write left owed: drained before a digest (infra/passive_changes)
 # and swept at startup (app_lifecycle).
 from plans.status_drain import drain_for_digest as drain_status_for_digest, sweep as sweep_owed_status
-# The person's new words, matched against running tasks off-path (jobs/corrections_recording).
-from plans.person_input import arrived as person_words_arrived
-from plans.intent_words import message_words as person_message_words
-# The node holding a task's intent, itself unless inherited (memory/node_text).
-from plans.intent_words import canonical as canonical_intent_node
+# The byte limit used for delivered document reply context.
+from plans.person_input import WORDS_MAX_BYTES
+# The node holding a task's intent, itself unless inherited.
+from plans.intent_creation import canonical as canonical_intent_node
 
 
 def intent_of(node_id: str, *, db) -> dict:
     """Read a node's canonical intent for an authorized Agent Substrate fork."""
-    from plans import intent_words, service
+    from plans import intent_creation, service
 
     with service._connection(db) as connection:
-        source = intent_words.canonical(connection, node_id)
+        source = intent_creation.canonical(connection, node_id)
         return {
             "node_id": source["id"], "title": source["title"],
             "requirements_revision": source["requirements_revision"],
             "intent": source["intent"], "acceptance_criteria": source["acceptance_criteria"],
-            "intent_words": intent_words.newest(connection, source["id"]),
         }
 
 
@@ -298,3 +299,5 @@ from plans.node_states import is_container_sql as container_sql
 from plans.writer_context import sanctioned_write as sanctioned_plan_write
 # What one or more nodes, commitments or plans cost in dollars, priced from their usage rows.
 from plans.usage_cost import usage_dollars
+# The title a person reads for a node: a workflow step names its run.
+from plans.workflow_fields import reader_titles

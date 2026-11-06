@@ -25,7 +25,7 @@ flowchart TB
 | Step | What happens | Strength | Source |
 |---|---|---|---|
 | Apply | The agent states a purpose (up to 2,000 characters), the exact resources, a plan of up to 20 steps, the effects, and a duration of at most 30 minutes | CORSIA code checks the shape and limits | `backend/infra/host_access_leases.py`, `backend/tools/host_access.py` |
-| Application review | A model reviews the application in a fresh call that sees only the application, not the agent's conversation; a malformed verdict is retried once | Model judgment | `backend/host_access/reviewer.py`, `backend/host_access/review_policy.py` |
+| Application review | A model reviews the application in a fresh call that sees only the application, not the agent's chat; a malformed verdict is retried once | Model judgment | `backend/host_access/reviewer.py`, `backend/host_access/review_policy.py` |
 | Approval | You approve or reject it in the app; or, if Auto-approve is on, the reviewer's allow is the approval | CORSIA code requires a signed-in person session; Your setting | `backend/infra/auth.py` (`require_human_user`) |
 | Each command | Every shell call the agent marks `host`, every file-tool call on a path outside the sandbox, and every process control call is reviewed before it runs. A shell call not marked `host` stays in the sandbox and isn't reviewed | Model judgment | `backend/host_access/reviewer.py`, `backend/tools/shell.py` |
 | Run | The command runs with only the hard floor and the sandbox's self-protection in place | Operating system for the floor | `backend/tools/shell_guard.py` |
@@ -61,10 +61,14 @@ What follows from that:
 
 The **hard floor** applies under every lease (Operating system for the shell, CORSIA code for file tools):
 
-- CORSIA's key store and the agents' saved browser profile
+- CORSIA's key store, the agents' saved browser profile and the folder holding the `corsia` command's API token
 - The Safehouse binary and the generated sandbox profile, so a leased command can't rewrite its own confinement
+- The workspace's own Git history; agents use the workspace history and commit tools instead ([Agent sandbox](agent-sandbox.md#whats-refused))
+- Projects set to Local models only that the agent isn't in, for its shell and its file tools, except for the CORSIA agent while its own chat is Local only ([Agent sandbox](agent-sandbox.md#projects)). An ordinary project the agent is fenced from **can** be opened to its leased shell commands and file-tool calls, though not to another AI agent's command-line tool started under the lease
 
-CORSIA's state folder (database and logs) is outside the default sandbox but **can** be opened by a lease.
+CORSIA's state folder (database, logs, and the Claude Code and Codex sign-ins CORSIA keeps there) is outside the default sandbox but **can** be opened by a lease.
+
+If you gave CORSIA Full Disk Access (Messages needs it), leased commands also inherit it, and can read files macOS otherwise protects, such as Mail, Messages and Photos.
 
 The floor binds the leased command and what it starts, nothing else. A leased command can write almost anywhere your user can, including shell startup files, startup items and CORSIA's own code. Whatever it leaves there runs later outside the sandbox, where the floor doesn't apply and stored keys are readable. The floor itself is Operating system; stopping that indirect route is Model judgment. The reviewers are told to block changes to the code and settings that govern a lease, and no instruction names startup files or startup items. Under Auto-approve, no person sees the request.
 

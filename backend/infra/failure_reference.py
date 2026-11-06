@@ -4,6 +4,16 @@ import re
 import secrets
 from typing import Literal, get_args
 
+from fastapi import HTTPException
+
+
+class ReferencedHTTPException(HTTPException):
+    """An HTTP failure whose already-minted reference must reach the API handler."""
+
+    def __init__(self, status_code: int, detail: str, reference: str) -> None:
+        super().__init__(status_code, detail)
+        self.reference = reference
+
 Prefix = Literal["cli", "local", "signin"]
 # Crockford base32: no I, L, O or U, so a reference survives being read aloud.
 _SPOKEN_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"

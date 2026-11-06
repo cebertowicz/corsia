@@ -75,6 +75,17 @@ def _threads(client, artifact_id: str) -> dict[str, dict]:
     return {c["id"]: c for c in r.json()["comments"]}
 
 
+def test_image_pin_survives_unreadable_document_context(integration_client, doc, monkeypatch):
+    from doceditor import comment_create_db
+    artifact = _register(integration_client, doc)
+    def unreadable(_path):
+        raise OSError('document unavailable')
+    monkeypatch.setattr(comment_create_db, 'read_doc_text', unreadable)
+    response = _post(integration_client, artifact, doc, LOGIN, {'x': .1, 'y': .2})
+    assert response.status_code == 200, response.text
+    assert response.json()['comment']['image_src'] == str(doc.parent / 'img' / 'login.png')
+
+
 def test_a_region_on_a_doc_image_anchors_on_its_markdown_and_numbers_per_image(integration_client, doc):
     artifact_id = _register(integration_client, doc)
     login = doc.parent / "img" / "login.png"
@@ -268,7 +279,7 @@ def test_a_doc_pin_does_not_move_onto_an_image_now_outside_the_scope(integration
 def test_listing_comments_never_reads_an_image_now_outside_the_scope(integration_client, doc, tmp_path_factory,
                                                                       monkeypatch):
     """Judging a pin stale reads its image, so the list passes the same scope check as every other read."""
-    from doceditor import image_regions
+    from doceditor import image_revision
 
     artifact_id = _register(integration_client, doc)
     comment = _region_comment(integration_client, artifact_id, doc, CART, {"x": 0.2, "y": 0.2})
@@ -277,8 +288,8 @@ def test_listing_comments_never_reads_an_image_now_outside_the_scope(integration
     cart.unlink()
     cart.symlink_to(outside)
     read = []
-    real = image_regions.sha256_file
-    monkeypatch.setattr(image_regions, "sha256_file", lambda path: read.append(Path(path).resolve()) or real(path))
+    real = image_revision.sha256_file
+    monkeypatch.setattr(image_revision, "sha256_file", lambda path: read.append(Path(path).resolve()) or real(path))
 
     listed = _threads(integration_client, artifact_id)[comment["id"]]
 

@@ -179,7 +179,7 @@ for (const [label, width, theme] of SURFACES) {
 			await expect(row).toHaveAttribute('data-card-state', 'approved');
 			await screenshot(page, `chat-card-answer-flip-${width}-${theme}`);
 			release();
-			await expect(reviewBar.locator('.rb-receipt')).toContainText('You approved this');
+			await expect(reviewBar.locator('.rb-receipt')).toContainText('Approved');
 		});
 
 		test(`@surface:chat-cards an image ask has a thumbnail and an unavailable artifact is not tappable (${label})`, async ({ page, request }, info) => {

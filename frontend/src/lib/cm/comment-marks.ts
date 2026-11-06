@@ -2,6 +2,7 @@ import { StateField, StateEffect } from '@codemirror/state';
 import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
 import { visibleRegion, type Box } from './visible-region';
 import { widgetTarget } from './widget-scroll';
+import { releasePlace } from '$lib/documentReadingPlace';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
 export interface InlineSuggestion {
@@ -24,6 +25,8 @@ export interface CommentRange {
 	replyWaiting?: boolean;
 	onMarkerFocus?: (ids: string[], opener: HTMLElement, anchor?: () => DOMRect | null) => void;
 	suggestion?: InlineSuggestion;
+	/** A pin on an image or diagram region: drawn by its pin, never as a highlight on the whole block. */
+	region?: boolean;
 }
 
 export const setCommentRanges = StateEffect.define<CommentRange[]>();
@@ -108,6 +111,8 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 					if (box) scroller.scrollTop += box.top - (quote ? band.top + QUOTE_MARGIN : (band.top + band.bottom - (box.bottom - box.top)) / 2);
 				},
 			});
+			// The reader's place is taken again from where this lands.
+			releasePlace(view);
 			return;
 		}
 		view.dispatch({ effects: EditorView.scrollIntoView(widget?.start ?? target, quote || widget ? { y: 'start', yMargin: QUOTE_MARGIN } : { y: 'center' }) });
@@ -126,6 +131,8 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 			},
 			write(onScreen) {
 				if (onScreen) {
+					// A table drawn after the initial jump still needs its target cell revealed sideways.
+					if (steady === 0) widget?.reveal(view);
 					steady += 1;
 					if (steady < STEADY_CHECKS) check(pass);
 					return;

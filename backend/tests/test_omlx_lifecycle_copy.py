@@ -14,7 +14,7 @@ def test_spawn_failure_is_logged_and_has_plain_message(tmp_path, monkeypatch, ca
     def fail(*args, **kwargs):
         raise failure("raw spawn problem")
 
-    monkeypatch.setattr(sup.subprocess, "Popen", fail)
+    monkeypatch.setattr(sup.process.subprocess, "Popen", fail)
     result = sup._spawn_process(["omlx"], tmp_path / "omlx.log")
     assert result["message"] == "Couldn’t start the model server. Try again."
     assert result["ok"] is False and "raw spawn problem" in result["error"]

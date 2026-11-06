@@ -153,6 +153,7 @@ def create_script(
     now: str,
     db,
     workflow: str | None = None,
+    authentication: dict[str, Any] | None = None,
 ) -> Schedule:
     """Register one script schedule, due at once, under the per-agent and instance caps.
 
@@ -169,9 +170,11 @@ def create_script(
         )
     if isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise ValueError(f"timeout_seconds must be between 1 and {MAX_TIMEOUT_SECONDS}")
-    payload = json.dumps(
-        {"series": [vars(s) for s in series], "workflow": workflow}, sort_keys=True,
-    )
+    payload_data: dict[str, Any] = {"series": [vars(s) for s in series], "workflow": workflow}
+    if authentication is not None:
+        payload_data["authentication"] = authentication
+    payload = json.dumps(payload_data, sort_keys=True)
+    state = "paused" if authentication and authentication["state"] == "pending" else "active"
     schedule_id = uuid.uuid4().hex
     with write_transaction(db, scope="automation_script_create") as connection:
         _require_capacity(connection, thread_id)
@@ -180,12 +183,12 @@ def create_script(
                (id,thread_id,scope_id,kind,spec,next_run_at,max_runs,state,
                 payload_json,created_by_actor,created_at,updated_at,
                 script_path,script_sha256,timeout_seconds)
-               VALUES (?,?,?,'script',?,?,?,'active',?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,'script',?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 schedule_id, thread_id, scope_id,
                 # No cadence: no next run, which alone says only run_script rules start it.
                 "" if cadence_seconds is None else str(cadence_seconds),
-                None if cadence_seconds is None else now, UNBOUNDED_RUNS, payload, thread_id, now, now,
+                None if cadence_seconds is None else now, UNBOUNDED_RUNS, state, payload, thread_id, now, now,
                 str(script_path), script_sha256, timeout_seconds,
             ),
         )

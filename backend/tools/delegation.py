@@ -14,7 +14,7 @@ from infra.send_types import InboxQueuedInput
 from infra.thread_input_types import held_admission_line
 from llm.delegation_model import dispatch_scope, eligible_delegation_model
 from tools.base import Tool
-from tools.delegation_completion import resolve_child_turn_for_parent
+from tools.delegation_completion import completion_refusal as _completion_refusal, resolve_child_turn_for_parent
 
 
 def _clean(value: Any) -> str | None:
@@ -137,25 +137,21 @@ def _tool_schema(properties: dict[str, Any], required: list[str] | None = None) 
 _resolve_child_turn_for_parent = resolve_child_turn_for_parent
 
 
+
 async def _send_explicit_completion(
-    child_thread_id: str,
-    parent_thread_id: str,
-    child_turn_id: str | None,
-    content: str,
+    child_thread_id: str, parent_thread_id: str, child_turn_id: str | None, content: str,
+) -> str:
+    """Check and admit an explicit completion."""
+    refusal = await _completion_refusal(child_thread_id, child_turn_id)
+    if refusal:
+        return refusal
+    return await _admit_completion(child_thread_id, parent_thread_id, child_turn_id, content)
+
+
+async def _admit_completion(
+    child_thread_id: str, parent_thread_id: str, child_turn_id: str | None, content: str,
 ) -> str:
     """Admit one completion message; that message is the idempotency record."""
-    if not child_turn_id:
-        return (
-            "Error: completion intent is valid only from a delegated child to "
-            "its registered parent during an active turn"
-        )
-    from plans.public import has_open_structured_attachment, plan_is_empty
-    from tools.completion_refusals import PLANLESS, STEPS
-
-    if await run_in_db(has_open_structured_attachment, child_thread_id):
-        if await run_in_db(plan_is_empty, child_thread_id):
-            return PLANLESS
-        return STEPS
     from infra.database import get_db
 
     def _parent() -> dict | None:

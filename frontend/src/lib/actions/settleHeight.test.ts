@@ -5,17 +5,26 @@ let height = 300;
 let notify: () => void = () => {};
 const animate = vi.fn();
 let finish: () => void = () => {};
+let cancel: () => void = () => {};
+const observe = vi.fn();
+const unobserve = vi.fn();
 
 beforeEach(() => {
 	height = 300;
+	observe.mockReset();
+	unobserve.mockReset();
 	animate.mockReset();
 	animate.mockImplementation(() => ({
-		addEventListener: (type: string, listener: () => void) => { if (type === 'finish') finish = listener; },
-		cancel: vi.fn(),
+		addEventListener: (type: string, listener: () => void) => {
+			if (type === 'finish') finish = listener;
+			if (type === 'cancel') cancel = listener;
+		},
+		cancel: () => cancel(),
 	}));
 	vi.stubGlobal('ResizeObserver', class {
 		constructor(callback: () => void) { notify = callback; }
-		observe() {}
+		observe = observe;
+		unobserve = unobserve;
 		disconnect() {}
 	});
 });
@@ -29,6 +38,38 @@ function panel() {
 }
 
 describe('settleHeight', () => {
+	it('pauses observation during the panel animation and resumes after it finishes', () => {
+		const node = panel();
+		settleHeight(node, { enabled: true });
+		height = 200;
+		notify();
+		expect(unobserve).toHaveBeenCalledWith(node);
+		expect(unobserve.mock.invocationCallOrder[0]).toBeLessThan(animate.mock.invocationCallOrder[0]);
+		expect(observe).toHaveBeenCalledTimes(1);
+		finish();
+		expect(observe).toHaveBeenCalledTimes(2);
+		expect(observe).toHaveBeenLastCalledWith(node);
+	});
+
+	it('resumes observation when an animation is cancelled', () => {
+		const node = panel();
+		settleHeight(node, { enabled: true });
+		height = 200;
+		notify();
+		cancel();
+		expect(observe).toHaveBeenCalledTimes(2);
+		expect(observe).toHaveBeenLastCalledWith(node);
+	});
+
+	it('does not resume observation when a running animation is destroyed', () => {
+		const node = panel();
+		const action = settleHeight(node, { enabled: true });
+		height = 200;
+		notify();
+		action.destroy();
+		expect(observe).toHaveBeenCalledTimes(1);
+	});
+
 	it('eases a content-driven height change from the old height to the new one', () => {
 		const node = panel();
 		settleHeight(node, { enabled: true });
@@ -80,7 +121,10 @@ describe('settleHeight', () => {
 		expect(animate).toHaveBeenCalledTimes(1);
 		finish();
 		expect(animate).toHaveBeenCalledTimes(2);
+		expect(observe).toHaveBeenCalledTimes(1);
 		expect((animate.mock.calls[1][0] as Array<{ height: string }>).map((frame) => frame.height)).toEqual(['200px', '120px']);
+		finish();
+		expect(observe).toHaveBeenCalledTimes(2);
 	});
 
 	it('leaves content that eases its own height to carry the panel, frame by frame', () => {

@@ -348,7 +348,8 @@ def test_a_codex_childs_turn_end_drives_the_parent_it_woke(
         codex_thread_id="codex-thread", session=None,
         parent_thread_id="parent", name="codex",
     )
-    _bind_active_turn(live, "worker")
+    # A delegated worker's input is its parent's brief, never a person's message.
+    _bind_active_turn(live, "worker", metadata={"sender_kind": "agent", "from_thread": "parent"})
 
     _run(_deliver_codex_terminal(
         codex_runtime._make_on_event(live, "worker", MagicMock()), event, live,

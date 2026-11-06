@@ -4,16 +4,17 @@
 	import DocReplyChip from './DocReplyChip.svelte';
 	import DeliveryConfirmation from './attention/DeliveryConfirmation.svelte';
 
-	let { artifactId, threads, ready, covered, sheetModalOpen, onStep }: {
+	let { artifactId, threads, ready, covered, sheetModalOpen, onStep, ignoreConfirmationId = null }: {
 		artifactId: string | null;
 		threads: DocComment[];
 		ready: boolean;
 		covered: boolean;
 		sheetModalOpen: boolean;
 		onStep: () => void;
+		ignoreConfirmationId?: string | null;
 	} = $props();
 	const hasChip = $derived(ready && !covered && !sheetModalOpen && !!artifactId && threads.length > 0);
-	const hasToast = $derived(!!artifactId && $deliveryConfirmation?.artifactId === artifactId);
+	const hasToast = $derived(!!artifactId && $deliveryConfirmation?.artifactId === artifactId && $deliveryConfirmation.id !== ignoreConfirmationId);
 </script>
 
 {#if hasChip || hasToast}

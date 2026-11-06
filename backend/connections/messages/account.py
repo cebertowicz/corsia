@@ -92,5 +92,5 @@ async def connect(thread_id: str) -> tuple[dict | None, bool]:
 
 
 async def turn_on(account_id: str, actor: tuple[str, str]) -> bool:
-    """Settings › Connected apps: Sign in on a signed-out Messages row."""
+    """Settings › Connected apps: Enable on an off Messages row."""
     return await run_in_db(_own_db, lambda _id, db: _turn_on(_id, actor, db), account_id)

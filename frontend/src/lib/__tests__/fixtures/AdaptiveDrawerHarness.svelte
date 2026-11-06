@@ -1,7 +1,7 @@
 <script lang="ts">
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 
-	let { onClose, tall = false, fill = false, followKeyboard = false, modal = true, detent = 'full', callerControlled = false, covered = false, contextLabel = null }: { onClose: () => void; tall?: boolean; fill?: boolean; followKeyboard?: boolean; modal?: boolean; detent?: 'full' | 'half'; callerControlled?: boolean; covered?: boolean; contextLabel?: string | null } = $props();
+	let { onClose, tall = false, fill = false, followKeyboard = false, modal = true, detent = 'full', callerControlled = false, keepMounted = false, covered = false, contextLabel = null }: { onClose: () => void; tall?: boolean; fill?: boolean; followKeyboard?: boolean; modal?: boolean; detent?: 'full' | 'half'; callerControlled?: boolean; keepMounted?: boolean; covered?: boolean; contextLabel?: string | null } = $props();
 	let surfaceOpen = $state(false);
 	let drawerOpen = $state(false);
 
@@ -13,7 +13,7 @@
 		drawerOpen = false;
 	}
 	function finishClose(): void {
-		surfaceOpen = false;
+		if (!keepMounted) surfaceOpen = false;
 		onClose();
 	}
 </script>

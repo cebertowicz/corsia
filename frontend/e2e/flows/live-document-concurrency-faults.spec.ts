@@ -45,7 +45,7 @@ for (const [width, height, project] of layouts) {
 				// Select the line's first word, as a reader commenting on it would (document-comment-scroll.spec.ts).
 				await target.dblclick({ position: { x: 12, y: 8 } });
 				await reader.locator('.sel-comment').click();
-				const composer = reader.getByPlaceholder('Comment…');
+				const composer = reader.getByPlaceholder('Comment, or @ to tag an agent');
 				const draft = `Draft ${stamp}`;
 				await composer.fill(draft);
 				await reader.getByRole('button', { name: 'Comment', exact: true }).last().click();
@@ -123,7 +123,7 @@ for (const [width, height, project] of layouts) {
 			const reports = watchPlacementReports(reader);
 			const foreignSeen = await countReceived(reader, '"store_id":"foreign-');
 			await expect.poll(() => markTexts(reader)).toEqual([placed]);
-			await reader.getByRole('button', { name: /^1 open thread\b/ }).click();
+			await reader.getByRole('button', { name: /^1 thread\b/ }).click();
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
 			fault.arm();
 			await agentComment(request, document, agent.id, fresh, `Fresh ${stamp}`);
@@ -164,7 +164,7 @@ for (const [width, height, project] of layouts) {
 			const typed = `typed ${stamp}`;
 			await typeAtDocumentEnd(page, typed);
 			await expect.poll(() => serverText(request, document), { timeout: 20_000 }).toContain(typed);
-			await page.getByRole('button', { name: /^1 open thread\b/ }).click();
+			await page.getByRole('button', { name: /^1 thread\b/ }).click();
 			const row = page.getByRole('region', { name: 'Document comments', exact: true }).locator(`[data-comment-id="${loose}"]`);
 			let decisions = 0;
 			page.on('request', outgoing => { if (outgoing.url().includes(`/api/comments/${loose}/decision`)) decisions += 1; });

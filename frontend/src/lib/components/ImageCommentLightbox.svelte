@@ -10,12 +10,13 @@
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocFeedbackControls from './DocFeedbackControls.svelte';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
+	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace } from '$lib/artifactTabs';
 	import { createImageComments } from '$lib/imageComments.svelte';
 	import { commentsAtImage, type ImageOccurrence } from '$lib/docImageComments';
 	import type { ImageRegion } from '$lib/imageRegions';
 	import { regionColor, revealCentre } from '$lib/imageRegions';
-	import { FIT_MARGIN } from '$lib/imageZoom';
+	import { subjectForRegion } from '$lib/diagramSubject';
 	import { subscribeToDocumentCommentChanges } from '$lib/docViewerOperations';
 	import { commentLoads, docComments, loadComments, markThreadViewed, type DocComment } from '$lib/stores/docComments';
 	import { isPaneDrawer } from '$lib/stores/paneOpen';
@@ -23,11 +24,19 @@
 	import { projects } from '$lib/stores/projects';
 	import { projectAccent } from '$lib/utils/projectColors';
 
-	let { src, alt, artifactId, projectId = null, readOnly = false, docName = '', docPath = null, onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, onPlace, onLoaded, onFailed, onRetry }: {
+	const COMMENT_IMAGE_MARGIN = 40;
+
+	let { src, alt, readableScale, diagramElements, diagramSource, refreshDiagram, artifactId, target = null, projectId = null, readOnly = false, docName = '', docPath = null, onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, visibleBottom = null, onPlace, onLoaded, onFailed, onRetry }: {
 		src: string;
 		alt: string;
+		/** A diagram's labels are body size at this scale; it opens there rather than at Fit. */
+		readableScale?: number;
+		diagramElements?: ImageRegion[];
+		diagramSource?: string;
+		refreshDiagram?: () => Promise<boolean>;
 		/** Comments need the image's artifact (a document's, for an image in it); until it is known the viewer shows the image alone. */
 		artifactId: string | null;
+		target?: DocViewerTarget | null;
 		projectId?: string | null;
 		readOnly?: boolean;
 		/** The document the image is in, and the way back to it. */
@@ -37,7 +46,7 @@
 		/** An image inside a document: where its markdown is, and how a comment anchors on it. */
 		inDocument?: {
 			occurrence: ImageOccurrence;
-			post: (region: ImageRegion, text: string) => Promise<string>;
+			post: (region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[]) => Promise<string>;
 			failure?: (error: unknown) => string;
 		} | null;
 		/** Opened on this comment: its card shows at its tag, or with `move` its pin is placed again. */
@@ -53,6 +62,7 @@
 		sheetUp?: boolean;
 		selectedThread?: string | null;
 		place?: ImageViewportPlace | null;
+		visibleBottom?: (() => number | null) | null;
 		onPlace?: (place: ImageViewportPlace) => void;
 		onLoaded?: () => void;
 		onFailed?: () => void;
@@ -62,10 +72,11 @@
 	let root = $state<HTMLElement>();
 	let lightbox = $state<ReturnType<typeof ImageLightbox>>();
 	let layer = $state<ReturnType<typeof ImageRegionLayer>>();
+	let surface = $state<ReturnType<typeof DocCommentSurface>>();
 	const all = $derived(artifactId ? $docComments[artifactId] ?? [] : []);
 	const comments = $derived(inDocument ? commentsAtImage(all, inDocument.occurrence) : all);
-	// The pill counts open threads, as the document's does: resolved ones are in the drawer's other filters.
-	const openThreads = $derived(comments.filter((comment) => !comment.resolved).length);
+	// The image list opens on All, so its pill counts every thread.
+	const threadCount = $derived(comments.length);
 	const accent = $derived($projects.find((project) => project.id === projectId)?.accent_color ?? null);
 	const colorOf = (comment: DocComment) => regionColor(comment, projectId, accent);
 	const canComment = $derived(!readOnly && !!artifactId);
@@ -78,14 +89,22 @@
 	}
 	const image = createImageComments({
 		artifactId: () => artifactId,
+		threadId: () => target?.threadId ?? null,
 		readOnly: () => !canComment,
+		diagramSource: () => diagramSource,
+		refreshDiagram: () => refreshDiagram?.() ?? Promise.resolve(false),
 		restoreFocus: () => root?.querySelector<HTMLElement>('.viewport')?.focus({ preventScroll: true }),
-		reveal: (id, region) => {
+		reveal: (id, region, fromList) => {
 			const frame = root?.querySelector('[data-image-regions]')?.getBoundingClientRect();
 			if (!frame?.width || !frame.height) return;
-			const tag = root?.querySelector(`[data-region-tag][data-comment-id="${id}"]:not([inert])`)?.getBoundingClientRect() ?? null;
-			const centre = revealCentre(region, tag, frame);
-			lightbox?.revealFraction(centre.x, centre.y);
+			if (fromList) {
+				const tag = root?.querySelector(`[data-region-tag][data-comment-id="${id}"]:not([inert])`)?.getBoundingClientRect() ?? null;
+				const centre = revealCentre(region, tag, frame);
+				lightbox?.revealFraction(centre.x, centre.y);
+			} else {
+				lightbox?.revealRegion(region.x, region.y, region.w, region.h, subjectForRegion(region, diagramElements ?? []));
+			}
+			revealed = true;
 		},
 		post: () => (inDocument ? { create: inDocument.post, failure: inDocument.failure } : null),
 		onCreated: () => {
@@ -96,24 +115,44 @@
 
 	// Opened from a comment in the document: once the image has drawn, its card shows at its tag, once.
 	let focused = false;
+	let focusing = false;
+	let initialLoadDone = $state(false);
+	let revealed = $state(false);
 	async function showFocus() {
 		const wanted = focus;
-		if (focused || !wanted) return;
-		await tick();
+		if (focused || focusing || !wanted) return;
 		const comment = comments.find((item) => item.id === wanted.id);
 		if (!comment) return;
-		if (wanted.move) { focused = true; image.movePin(wanted.id); return; }
+		focusing = true;
+		await tick();
+		// The pane beside the canvas may be closing; settle against its final width before painting the subject.
+		const shell = root?.closest('.app-content');
+		if (shell) {
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+			const transitions = shell.getAnimations({ subtree: true }).filter((animation) =>
+				animation instanceof CSSTransition && animation.transitionProperty === 'width');
+			await Promise.allSettled(transitions.map((animation) => animation.finished));
+			// A finished transition's final layout is applied on the next frame.
+			await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+		}
 		const tag = root?.querySelector<HTMLElement>(`[data-region-tag][data-comment-id="${wanted.id}"]`);
-		if (!tag) return;
+		if (!tag) { focusing = false; revealed = true; return; }
 		focused = true;
-		image.select(wanted.id, tag, comment.region);
+		if (wanted.move) { image.movePin(wanted.id); revealed = true; return; }
+		image.select(wanted.id, tag, comment.region, comment.region ? layer?.anchorFor(comment.region) : undefined);
+		if (!comment.region) revealed = true;
 	}
 	let loaded = $state(false);
 	function imageLoaded() {
 		loaded = true;
 		onLoaded?.();
 	}
-	$effect(() => { if (loaded && comments.length) void showFocus(); });
+	export function refreshCoveredArea() { lightbox?.refreshCoveredArea(); }
+	$effect(() => {
+		if (!loaded || !focus) return;
+		if (comments.some((item) => item.id === focus.id)) void showFocus();
+		else if (initialLoadDone) revealed = true;
+	});
 
 	$effect(() => { draftOpen = image.hasDraftText; hasDraft = !!image.draftRegion; });
 	$effect(() => { selectedThread = image.ui.state?.kind === 'thread' ? image.ui.state.id : null; });
@@ -133,7 +172,9 @@
 	// A new revision of the image comes with a new `src`: read the comments again, so pins placed on the old one show as stale.
 	$effect(() => {
 		void src;
-		if (artifactId) reload(artifactId);
+		initialLoadDone = false;
+		if (artifactId) void reload(artifactId).finally(() => { initialLoadDone = true; });
+		else initialLoadDone = true;
 	});
 	// An agent's comment arrives while the image is open: its pin appears, sweeping in.
 	$effect(() => subscribeToDocumentCommentChanges(() => artifactId, reload));
@@ -168,8 +209,8 @@
 		const usual = Math.min(box.height * 0.36, 260);
 		const natural = lightbox?.naturalSize();
 		if (!natural || !(natural.width > 0)) { drawerSize = Math.round(usual); return; }
-		const fitted = natural.height * Math.min(1, Math.max(0, box.width - 2 * FIT_MARGIN) / natural.width);
-		drawerSize = Math.round(Math.max(usual, box.height - DRAWER_GAP - (bar + fitted + 2 * FIT_MARGIN)));
+		const fitted = natural.height * Math.min(1, Math.max(0, box.width - 2 * COMMENT_IMAGE_MARGIN) / natural.width);
+		drawerSize = Math.round(Math.max(usual, box.height - DRAWER_GAP - (bar + fitted + 2 * COMMENT_IMAGE_MARGIN)));
 	}
 	$effect(() => { if (drawerOpen) measureDrawer(); });
 	onMount(() => {
@@ -184,7 +225,11 @@
 <div class="image-comments">
 <div class="layout" class:drawer-open={trackOpen} style:--drawer-size="{drawerSize}px" bind:this={root}>
 	<div class="viewer-cell">
-		<ImageLightbox bind:this={lightbox} {src} {alt} {docName} {onBack} {place} {onPlace} onLoaded={imageLoaded} {onFailed} {onRetry}>
+		<ImageLightbox bind:this={lightbox} {src} {alt} preserveSameSource={diagramSource !== undefined} imageMargin={COMMENT_IMAGE_MARGIN} pendingReveal={!!focus && !revealed} visibleBottom={() => {
+			const sheet = surface?.sheetTop() ?? null;
+			const band = visibleBottom?.() ?? null;
+			return sheet === null ? band : band === null ? sheet : Math.min(sheet, band);
+		}} {readableScale} {docName} {onBack} {place} {onPlace} onLoaded={imageLoaded} {onFailed} {onRetry}>
 			{#snippet barActions({ loaded })}
 				{#if artifactId}
 					<ImageCommentBar
@@ -192,13 +237,13 @@
 						ready={loaded}
 						moving={!!image.moving}
 						savingMove={image.moveSaving}
-						count={openThreads}
+						count={threadCount}
 						unsent={feedback?.pendingCount ?? 0}
 						loading={$commentLoads[artifactId]?.state === 'loading'}
 						listOpen={image.ui.state?.kind === 'list'}
 						readOnly={!canComment}
 						onToggle={toggleBoxMode}
-						onOpenList={image.ui.openList}
+						onOpenList={image.openList}
 					/>
 					<!-- The bar is narrow at any window size (a canvas panel beside the chat): the image lane's Send is the one control here, so leaving the image and pressing it send the same comments. -->
 					{#if feedback}
@@ -211,6 +256,7 @@
 					<ImageRegionLayer
 						bind:this={layer}
 						{scale}
+						diagram={diagramSource !== undefined}
 						{comments}
 						{colorOf}
 						draftColor={projectAccent(projectId, accent)}
@@ -222,6 +268,7 @@
 						cardOpen={image.cardOpen}
 						readOnly={!canComment}
 						onPick={image.pick}
+						onAmbiguous={image.pickCandidates}
 						onHover={image.ui.hover}
 						onDraw={image.draw}
 						onDismiss={image.close}
@@ -233,12 +280,14 @@
 	{#if artifactId}
 		<!-- The drawer lists this one image's comments while the image itself is on screen above or beside it, so it has no thumbnail group header repeating the image. -->
 		<DocCommentSurface
+			bind:this={surface}
 			state={image.ui.state}
 			anchor={image.ui.anchor}
 			bounds={root}
 			narrow={isPaneDrawer()}
 			{comments}
 			focusedId={image.selectedId}
+			focusedIds={image.listCandidates}
 			draft={image.draft}
 			onDraftBody={image.setDraftBody}
 			onCancelDraft={image.close}
@@ -252,13 +301,13 @@
 			onViewed={(id, replyId) => markThreadViewed(artifactId, id, replyId)}
 			onResolve={image.threads.resolve}
 			onAgree={image.threads.agree}
-			target={null}
+			{target}
 			{docPath}
 			{artifactId}
 			readOnly={!canComment}
 			onDrawerShown={(shown) => drawerShown = shown}
-			onSheetModalChange={(up) => sheetUp = up}
-			image={{ src, alt, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks }}
+			onSheetModalChange={(up) => { sheetUp = up; if (!up) lightbox?.clearSheet(); }}
+			image={{ src, alt, diagram: diagramSource !== undefined, colorOf, onMovePin: image.movePin, onOpen: image.close, showThumbnail: false, imageBounds: () => lightbox?.imageBounds() ?? null, hoveredId: image.ui.hovered, onHover: image.ui.hover, picks: image.listPicks, candidateOrder: image.listCandidateOrder }}
 		/>
 	{/if}
 </div>

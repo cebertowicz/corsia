@@ -278,6 +278,30 @@ describe("AdaptiveDrawer", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("reopens at rest after a drag dismissal when the caller keeps it mounted", async () => {
+    component = mount(AdaptiveDrawerHarness, {
+      target: host,
+      props: { callerControlled: true, keepMounted: true, onClose: vi.fn(), tall: true },
+    });
+    await settle();
+    const trigger = host.querySelector("[data-drawer-trigger]") as HTMLButtonElement;
+    trigger.click();
+    await settle();
+
+    const handle = host.querySelector(".drawer-drag-region") as HTMLElement;
+    handle.dispatchEvent(pointer("pointerdown", 100));
+    handle.dispatchEvent(pointer("pointermove", 280));
+    handle.dispatchEvent(pointer("pointerup", 280));
+    await settle();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+
+    trigger.click();
+    await settle();
+    expect(
+      (host.querySelector(".drawer-panel") as HTMLElement).style.getPropertyValue("--drawer-drag-y"),
+    ).toBe("0px");
+  });
+
   it("keeps a dedicated independently scrollable body for long content", async () => {
     component = mount(AdaptiveDrawerHarness, {
       target: host,

@@ -62,7 +62,7 @@ def note_stranded_suggestions(db, artifact, *, actor_thread_id: str | None) -> N
     ]
     editor = None if actor_thread_id in (None, UI_THREAD) else actor_thread_id
     for row in pending:
-        stranded = bool(row.get("orphaned")) and not _applied(row, text)
+        stranded = bool(row.get("orphaned") or row.get("text_changed")) and not _applied(row, text)
         if stranded == bool(row["stranded_notified_at"]):
             continue
         # The mark and its note commit together, whoever owns the connection: a save with no

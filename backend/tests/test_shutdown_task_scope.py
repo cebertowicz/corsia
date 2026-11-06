@@ -55,10 +55,19 @@ async def test_scoped_shutdown_joins_own_task_then_restores_session_lifecycle(
     await entered.wait()
     monkeypatch.setattr(state, '_github_ownership_login_task', task)
     assert task.get_loop() is asyncio.get_running_loop()
-    assert await shutdown_owned_tasks([None] * 5, Mock()) is None
+    assert await shutdown_owned_tasks([None] * 6, Mock()) is None
     assert task.cancelled() and closed == ['joined']
     assert all(not original.cancelling() for original in originals.values()
                if original is not None)
+
+
+@pytest.mark.parametrize("count", [5, 7])
+async def test_shutdown_rejects_incorrect_startup_task_shape(count, monkeypatch):
+    from app_shutdown_owned_tasks import shutdown_owned_tasks
+
+    isolated_shutdown_tasks.__wrapped__(monkeypatch)
+    with pytest.raises(ValueError):
+        await shutdown_owned_tasks([None] * count, Mock())
 
 
 @pytest.mark.asyncio
@@ -83,7 +92,7 @@ async def test_foreign_task_still_refuses_join_and_is_cleaned_on_its_owner_loop(
     monkeypatch.setattr(state, '_idle_recovery_task', task)
     try:
         with pytest.raises(RuntimeError, match='attached to a different loop'):
-            await shutdown_owned_tasks([None] * 5, Mock())
+            await shutdown_owned_tasks([None] * 6, Mock())
         assert task.cancelling() == 1
     finally:
         async def drain_owner():

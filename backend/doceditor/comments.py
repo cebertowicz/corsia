@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from doceditor import comment_notifications, feedback_reopens, feedback_settlement, live_events
+from doceditor import comment_notifications, comment_recipients, feedback_reopens, feedback_settlement, feedback_state, live_events
 from infra.database import get_db, write_transaction
 
 _CLIENT_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
@@ -66,7 +66,11 @@ def get_comment(comment_id: str, *, db=None) -> dict | None:
         row = _db.execute(
             "SELECT * FROM doc_comments WHERE id=?", (comment_id,)
         ).fetchone()
-        return dict(row) if row else None
+        if row is None:
+            return None
+        comment = dict(row)
+        comment_recipients.tags_for_comments(_db, [comment])
+        return comment
     finally:
         if not db:
             _db.close()
@@ -95,6 +99,7 @@ def list_for_artifact(artifact_id: str, *, db=None) -> list[dict]:
                 (artifact_id,),
             ).fetchall()
         ]
+        comment_recipients.tags_for_comments(_db, rows)
         return _rows_to_threads(rows)
     finally:
         if not db:
@@ -203,7 +208,9 @@ def create_with_status(
                 comment_notifications.announce_after_commit(
                     connection, artifact_id, comment_id=cid if named else None,
                     author_thread_id=author_thread_id if named else None,
-                    reply_attention_changed=bool(author_kind == 'agent' and parent_id))
+                    # unread_attention_changed includes eligible new top-level comments.
+                    unread_attention_changed=feedback_state.may_change_unread_attention(
+                        author_kind, parent_id, replacement, review))
             if region is not None:
                 live_events.region_after_commit(connection, "placed", artifact_id, w, h, author_kind=author_kind)
         return r, created
@@ -240,11 +247,12 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
             feedback_reopens.discard_open_item(connection, comment_id, now)
             feedback_settlement.settle_batches_of(connection, comment_id)
         row = dict(connection.execute("SELECT * FROM doc_comments WHERE id=?", (comment_id,)).fetchone())
+        comment_recipients.tags_for_comments(connection, [row])
         if "region_x" in fields:
             live_events.region_after_commit(connection, "moved", row["artifact_id"], row["region_w"], row["region_h"])
         comment_notifications.announce_after_commit(
             connection, row["artifact_id"],
-            reply_attention_changed="resolved" in fields and row["parent_id"] is None,
+            unread_attention_changed="resolved" in fields and row["parent_id"] is None,
         )
         return row
 
@@ -259,7 +267,7 @@ def set_stranded_notice(comment_id: str, at: str | None, *, db=None) -> None:
 
 
 def update_positions(artifact_id: str, updates: list[dict], *, db=None) -> int:
-    """Batch-persist remapped anchor offsets and optionally refreshed context."""
+    """Batch-persist remapped anchor offsets and optionally refreshed context and quote."""
     now = _now()
     with write_transaction(db, scope="update_doc_comment_positions") as connection:
         n = 0
@@ -269,6 +277,9 @@ def update_positions(artifact_id: str, updates: list[dict], *, db=None) -> int:
             if "anchor_prefix" in u:
                 sets.extend(["anchor_prefix=?", "anchor_suffix=?"])
                 params.extend([u["anchor_prefix"], u["anchor_suffix"]])
+            if "anchor_text" in u:
+                sets.append("anchor_text=?")
+                params.append(u["anchor_text"])
             sets.append("updated_at=?")
             params.extend([now, u.get("id"), artifact_id])
             cur = connection.execute(

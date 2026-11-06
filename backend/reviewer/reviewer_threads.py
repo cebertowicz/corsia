@@ -56,10 +56,9 @@ def format_threaded_comment_body(finding: dict[str, Any]) -> str:
     lines: list[str] = []
     if category == APPROACH_CHURN_CATEGORY:
         lines.extend([
-            ":no_entry_sign: **STOP — APPROACH RESET REQUIRED**",
+            "**This needs a different approach**",
             "",
-            "**Do not patch the evidence below one-by-one. Regroup around the "
-            "shared cause before revising.**",
+            "Fix the cause described below, not each finding on its own.",
             "",
         ])
     lines.extend([

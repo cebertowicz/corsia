@@ -58,6 +58,8 @@ def test_person_reply_joins_the_open_task_of_its_thread(isolated_db):
         assert "1 comment on" in first["title"]
         assert joined.title == first["title"].replace("1 comment on", "2 comments on")
         assert joined.requirements_revision == first["requirements_revision"] + 1
+        assert first["intent"].startswith("Answer the person's 1 comment on ")
+        assert joined.intent == first["intent"].replace("1 comment on", "2 comments on")
         assert db.execute(
             "SELECT 1 FROM plan_node_events WHERE node_id=? AND event='node_restated'", (first["id"],),
         ).fetchone() is not None
@@ -70,11 +72,12 @@ def test_person_reply_joins_the_open_task_of_its_thread(isolated_db):
             (reply["id"],),
         ).fetchone()
         assert batch["delivered_node_id"] == first["id"]
-        words = db.execute(
-            "SELECT source_id FROM plan_node_intent_words WHERE node_id=? ORDER BY added_at,rowid",
-            (first["id"],),
+        comments = db.execute(
+            """SELECT i.comment_id FROM doc_feedback_batch_items i
+               JOIN doc_feedback_batches b ON b.id=i.batch_id
+               WHERE b.delivered_node_id=? ORDER BY i.comment_id""", (first["id"],),
         ).fetchall()
-        assert [row["source_id"] for row in words] == [root["id"], reply["id"]]
+        assert [row["comment_id"] for row in comments] == sorted([root["id"], reply["id"]])
 
         # Delivering the same batch again adds nothing.
         again = create_feedback_node(db, "owner", db.execute(
@@ -98,14 +101,14 @@ def test_person_reply_joins_the_task_its_owner_is_working_and_wakes_the_owner(is
         (first,) = _feedback_nodes(db, "owner")
         attempts = db.execute("SELECT id FROM plan_node_attempts WHERE node_id=?", (first["id"],)).fetchall()
 
-        reply = _person_reply(db, artifact_id, root["id"])
+        reply = _person_reply(db, artifact_id, root["id"], "Also the second point. " + "detail " * 300)
 
         assert [node["id"] for node in _feedback_nodes(db, "owner")] == [first["id"]]
         joined = service.get_node(first["id"], db=db)
         assert joined.description.startswith(first["description"])
         assert f"Comment {reply['id']}" in joined.description
         assert joined.title == first["title"].replace("1 comment on", "2 comments on")
-        # No intent words, so the owner keeps the task it is working.
+        # A reply to a task already in progress keeps the owner's selection.
         assert joined.requirements_revision == first["requirements_revision"]
         assert db.execute(
             "SELECT id FROM plan_node_attempts WHERE node_id=? AND released_at IS NULL", (first["id"],),
@@ -120,10 +123,71 @@ def test_person_reply_joins_the_task_its_owner_is_working_and_wakes_the_owner(is
         facts = json.loads(payload)["intent_input"]
         assert facts["node_id"] == first["id"] and facts["source_kind"] == "doc_comment"
         assert facts["words"].startswith(f"Comment {reply['id']}") and "Also the second point." in facts["words"]
+        from plans.person_input import WORDS_MAX_BYTES
+        assert len(facts["words"].encode()) <= WORDS_MAX_BYTES
         # The reply is not queued, so no note says it is.
         assert db.execute(
             "SELECT COUNT(*) FROM context_change_journal WHERE object_id='owner' AND summary LIKE '%is queued%'",
         ).fetchone()[0] == 1
+    finally:
+        db.close()
+
+
+def test_tagged_reply_wake_keeps_action_after_bounded_context(isolated_db):
+    from doceditor import comment_recipients
+
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner")
+        root, _ = add_person_comment(db, artifact_id)
+        db.execute("UPDATE doc_comments SET body=?, anchor_text='The quote', author='Earlier author' WHERE id=?",
+                   ("prior " * 500, root["id"]))
+        db.commit()
+        reply, feedback = add_comment(db, artifact_id, author_kind="user", author_id=None,
+                                      author="Person", parent_id=root["id"])
+        with write_transaction(db, scope="tagged_wake") as connection:
+            connection.execute("UPDATE doc_comments SET body='Actionable reply' WHERE id=?", (reply["id"],))
+            comment_recipients.save_tags(connection, reply, ["owner"])
+        feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
+        wake = db.execute("SELECT content FROM messages WHERE thread_id='owner' AND id LIKE 'plan-wake:intent_input:%'").fetchone()
+        payload = json.loads(wake[0].split("\n", 1)[1])
+        words = payload["intent_input"]["words"]
+        context = payload["thread_context"]
+        assert 'Highlighted: "The quote"' in context
+        assert '- Earlier author:' not in context
+        assert '1 earlier comments not shown; read them all with doc_comments_list' in context
+        assert 'Earlier author' not in words and 'prior prior' not in words
+        assert 'Feedback: Actionable reply' in words
+    finally:
+        db.close()
+
+
+def test_multiple_tagged_reply_contexts_name_each_root_when_cut(isolated_db):
+    from doceditor import comment_recipients
+    from plans.person_input import WORDS_MAX_BYTES
+
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner")
+        roots = []
+        for _ in range(2):
+            root, feedback = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Person")
+            db.execute("UPDATE doc_comments SET body=? WHERE id=?", ("prior " * 140, root["id"]))
+            roots.append(root)
+        db.commit()
+        feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
+        for root in roots:
+            reply, feedback = add_comment(db, artifact_id, author_kind="user", author_id=None,
+                                          author="Person", parent_id=root["id"])
+            comment_recipients.save_tags(db, reply, ["owner"])
+        db.commit()
+        feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
+        wake = db.execute("SELECT content FROM messages WHERE thread_id='owner' AND id LIKE 'plan-wake:intent_input:%'").fetchone()
+        context = json.loads(wake[0].split("\n", 1)[1])["thread_context"]
+        assert len(context.encode("utf-8")) <= WORDS_MAX_BYTES
+        assert all(f'doc_comments_list(comment_id="{root["id"]}")' in context for root in roots)
     finally:
         db.close()
 

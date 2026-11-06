@@ -14,6 +14,7 @@ from plans import (
     activity_facts,
     activity_reducer,
     activity_subagents,
+    held_attention,
     hierarchy,
     node_states,
     not_moving,
@@ -337,7 +338,12 @@ def _scope(kind: str, owner_id: str, label: str, actor: PlanActor, *, db) -> dic
     rows, eligible_ids, decision_facts = _project_rows(plan_rows, owners, db=db)
     plan_index = {str(plan["id"]): dict(plan) for plan in plan_rows}
     eligible_tree = _reachable_plan_ids(plan_index, eligible_ids)
-    awaiting = len({
+    # Held replies are the user's too, and the dock's queue lists them from the same reader. A
+    # project counts those shown in it; the workspace, whose tree holds every project, counts all.
+    held = held_attention.count(
+        db, actor.user_id, project_id=owner_id if kind == "project_scope" else None,
+    )
+    awaiting = held + len({
         str(item["artifact_id"])
         for item in decision_facts
         if item["answerable"] and str(item["plan_id"]) in eligible_tree

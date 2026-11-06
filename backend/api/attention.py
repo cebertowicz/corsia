@@ -169,7 +169,7 @@ def _queue_for(user_id: str, *, db=None) -> list[dict]:
         annotated = public.annotate_attention(
             _authorized_raised(None, user_id, db=_db), db=_db,
         )
-        ordered = public.attention_queue(annotated)
+        ordered = public.attention_queue([*annotated, *public.held_reply_queue_rows(_db, user_id)])
         counted = public.activity_counted_plan_ids(
             {row["detail"]["plan_id"] for row in ordered if row["renderer"] == "decision"},
             actor=public.PlanActor(None, user_id, None, kind="user"), db=_db,
@@ -185,10 +185,10 @@ def _queue_for(user_id: str, *, db=None) -> list[dict]:
             _db.close()
 
 
-def _reply_items_for(user_id: str) -> list[dict]:
+def _unread_items_for(user_id: str) -> list[dict]:
     db = get_db()
     try:
-        return reply_attention.unread_reply_items(db, user_id)
+        return reply_attention.unread_items(db, user_id)
     finally:
         db.close()
 
@@ -216,12 +216,12 @@ async def get_queue(user: dict = Depends(require_user)):
     always `items[0]`.
     """
     rows = await run_in_db(lambda: _queue_for(user["id"]))
-    replies = await run_in_db(lambda: _reply_items_for(user["id"]))
+    unread_items = await run_in_db(lambda: _unread_items_for(user["id"]))
     return {
         "current": rows[0] if rows else None,
         "count": len(rows),
         "items": rows[:QUEUE_ITEMS_CAP],
-        **({"reply_items": replies} if replies else {}),
+        **({"reply_items": unread_items} if unread_items else {}),
     }
 
 

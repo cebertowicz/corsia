@@ -15,7 +15,7 @@
 	type Receipt = { icon: 'check' | 'changes' | 'dash'; label: string; segments: string[] };
 	let {
 		view, who, plus = 0, ask = '', lineLabel = '', full = '', others = [], askLabel, noting = false, busy = false,
-		status = '', suppressed = false, capsuleClearance = $bindable(0), receipt, stale, actions,
+		status = '', suppressed = false, inSheet = false, capsuleClearance = $bindable(0), receipt, stale, actions,
 	}: {
 		view: 'ask' | 'receipt' | 'stale';
 		who?: { name: string; id: string };
@@ -31,6 +31,7 @@
 		busy?: boolean;
 		status?: string;
 		suppressed?: boolean;
+		inSheet?: boolean;
 		/** Out: px the bar's container leaves at its bottom so the floating capsule never covers it; 0 while it does not float. */
 		capsuleClearance?: number;
 		receipt?: Receipt | null;
@@ -71,7 +72,7 @@
 	 */
 	function measureClearance(): number {
 		const capsule = capsuleEl;
-		if (!capsule || suppressed) return 0;
+		if (!capsule || suppressed || inSheet) return 0;
 		const style = getComputedStyle(capsule);
 		if (style.position !== 'fixed') return 0;
 		// From its layout box, not its rect: the capsule slides in by a transform, which would move the measured top.
@@ -100,15 +101,15 @@
 <!-- The slot outlives the phase: it grows once when the first ask arrives, and an answer or a replaced notice swaps inside it at the same height. -->
 <div class="rb-slot" bind:this={slotEl}>
 {#if view === 'receipt' && receipt}
-	<section class="review-bar receipt" class:changes={receipt.icon === 'changes'} aria-label={receipt.label} in:swap={{ leaving: false }} out:swap={{ leaving: true }}>
+	<section class="review-bar receipt" class:changes={receipt.icon === 'changes'} class:insheet={inSheet} aria-label={receipt.label} in:swap={{ leaving: false }} out:swap={{ leaving: true }}>
 		<svg class="rb-icon" aria-hidden="true" viewBox="0 0 16 16">
-			{#if receipt.icon === 'changes'}<path d="M3 13l.6-2.8 6.9-6.9a1.4 1.4 0 012 2l-6.9 6.9L3 13z" />
+			{#if receipt.icon === 'changes'}<g transform="scale(0.666667)"><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></g>
 			{:else if receipt.icon === 'dash'}<circle cx="8" cy="8" r="6" /><path d="M5 8h6" />
 			{:else}<circle cx="8" cy="8" r="6" /><path d="M5.3 8.2l1.9 1.9 3.5-3.9" />{/if}
 		</svg>
 		<span class="rb-receipt" role="status" tabindex="-1" bind:this={receiptEl}>
 			{#each receipt.segments as segment, index (segment)}
-				<span class="rb-seg" class:rb-text={index === 0}>{segment}{index < receipt.segments.length - 1 ? ' ·' : ''}</span>{' '}
+				<span class="rb-seg" class:rb-text={index === 0}>{index > 0 ? '· ' : ''}{segment}</span>{' '}
 			{/each}
 		</span>
 	</section>
@@ -118,7 +119,7 @@
 		<span class="rb-text">{stale.text}</span><span class="rb-sub">{stale.sub}</span>
 	</section>
 {:else if view === 'ask' && who}
-	<section class="review-bar ask" class:noting class:expanded class:static={!expandable} aria-label={askLabel} aria-busy={busy} in:swap={{ leaving: false, content: true }} out:swap={{ leaving: true, content: true }}>
+	<section class="review-bar ask" class:insheet={inSheet} class:noting class:expanded class:static={!expandable} aria-label={askLabel} aria-busy={busy} in:swap={{ leaving: false, content: true }} out:swap={{ leaving: true, content: true }}>
 		<span class="rb-head">
 			{#snippet lead()}
 				<span class="rb-lead">
@@ -143,7 +144,7 @@
 			{/if}
 		</span>
 		<span class="rb-row2">
-			<div class="rb-capsule" class:suppressed bind:this={capsuleEl} out:capsuleOut|global>
+			<div class="rb-capsule" class:suppressed class:insheet={inSheet} class:noting bind:this={capsuleEl} out:capsuleOut|global>
 				<!-- At a fine pointer the status keeps its height when empty, so the buttons never move when a status appears. On a phone it shows above the buttons inside the floating capsule, which grows upward. -->
 				<span class="rb-status" class:busy role="status">{status}</span>
 				{@render actions()}
@@ -177,6 +178,7 @@
 		background: transparent; box-shadow: none;
 	}
 	.rb-head { display: flex; flex-direction: column; min-width: 0; }
+	.review-bar.ask.insheet .rb-head { display: none; }
 	.rb-line { display: flex; align-items: center; gap: var(--space-2); min-height: var(--space-7); min-width: 0; padding: 0; border: 0; background: none; color: var(--text-primary); font: inherit; text-align: left; cursor: pointer; border-radius: var(--radius-sm); }
 	.review-bar.static .rb-line { cursor: default; }
 	.rb-line:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -203,12 +205,13 @@
 	.review-bar.noting .rb-row2 { flex-wrap: wrap; }
 	.review-bar.noting .rb-status { order: 3; flex-basis: 100%; min-height: 0; }
 	.rb-capsule { display: contents; }
-	.rb-capsule :global(.rb-actions) { display: inline-flex; align-items: center; gap: var(--space-1); flex: none; margin-left: auto; }
+	.rb-capsule :global(.rb-actions) { display: inline-flex; align-items: center; gap: var(--space-1); flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; min-width: 0; margin-left: auto; }
 	/* The note is one line on a wide canvas; the script sizes it to its text and the CSS caps it (four lines in the phone capsule). */
 	.rb-capsule :global(.rb-note) { flex: 1 1 10rem; min-width: 0; box-sizing: border-box; height: var(--space-6); min-height: var(--space-6); max-height: var(--space-6); padding: 0 var(--space-2); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--text-primary) 5%, transparent); color: var(--text-primary); font-family: var(--font-sans); font-size: var(--text-footnote); line-height: var(--space-6); resize: none; overflow-y: auto; }
 	.rb-capsule :global(.rb-note::placeholder) { color: var(--text-tertiary); }
 	.rb-capsule :global(.rb-note:focus) { outline: 2px solid var(--accent); outline-offset: -2px; border-color: transparent; }
 	.rb-icon { width: var(--text-subhead); height: var(--text-subhead); flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; stroke-linecap: round; }
+	.review-bar.receipt.insheet { min-height: var(--rb-hit); padding: 0 var(--space-2); }
 	.review-bar.receipt .rb-icon { color: var(--green-text); }
 	.review-bar.receipt.changes .rb-icon { color: var(--amber-text); }
 	.review-bar.receipt .rb-text { color: var(--text-primary); font-weight: var(--fw-medium); }
@@ -252,7 +255,7 @@
 	}
 
 	/* Expanded, the ask text (`.rb-ask-full`) is its own grid item spanning every column under line 1, so it has the header's full width, not what the pill and Request review leave it. */
-	/* A narrow column, at any pointer, gives the note its own full-width row (up to four lines) above Cancel and Request changes, as the phone capsule does. */
+	/* A narrow column, at any pointer, gives the note its own full-width row (up to four lines) above Cancel and the note's send button, as the phone capsule does. */
 	/* There, a status takes its own row above the buttons too, rather than wrapping a word per line beside them. */
 	/* 37.5rem is the document canvas's 600px narrow breakpoint at the default root size. */
 	@container doc-canvas (max-width: 37.5rem) {
@@ -292,9 +295,14 @@
 			.rb-capsule.suppressed { transform: translateY(calc(100% + var(--space-3) + var(--safe-bottom))); pointer-events: none; visibility: hidden; transition-duration: calc(var(--dur-standard) * 0.7), 0s; transition-delay: 0s, calc(var(--dur-standard) * 0.7); }
 			.review-bar.ask .rb-capsule .rb-status { order: -1; flex: 1 0 100%; padding: 0 var(--space-2); }
 			.review-bar.ask .rb-capsule .rb-status:empty { display: none; }
-			.rb-capsule :global(.rb-actions) { flex: 1 1 auto; margin-left: 0; }
-			.rb-capsule :global(.btn) { flex: 1 1 0; min-width: 0; min-height: var(--rb-hit); }
-			/* Request changes: the capsule grows upward into two rows, the field across the full width (up to four lines), then Cancel and Request changes right-aligned (PE B3). */
+			.rb-capsule.insheet { position: static; z-index: auto; animation: none; box-shadow: none; padding-inline: 0; --rb-hit: calc(var(--space-8) - var(--space-1)); font-size: var(--text-footnote); color: var(--text-secondary); }
+			.rb-capsule.insheet .rb-status { order: -1; flex: 1 0 100%; padding: 0 var(--space-2); }
+			.rb-capsule.insheet .rb-status:empty { display: none; }
+			.rb-capsule.insheet.noting :global(.rb-actions) { flex: 1 0 100%; justify-content: flex-end; }
+			.rb-capsule.insheet.noting :global(.rb-actions .btn) { flex: 0 0 auto; min-width: max-content; }
+			.rb-capsule :global(.rb-actions) { flex: 1 1 auto; flex-wrap: wrap; margin-left: 0; }
+			.rb-capsule :global(.btn) { flex: 1 1 auto; min-width: 0; min-height: var(--rb-hit); }
+			/* Writing a note: the capsule grows upward into two rows, the field across the full width (up to four lines), then Cancel and the send button right-aligned (PE B3). */
 			.rb-capsule :global(.rb-note) { flex: 1 0 100%; min-height: var(--rb-hit); max-height: calc(4lh + 2 * var(--space-2)); padding: var(--space-2); font-size: var(--text-input); line-height: var(--lh-normal); }
 			.review-bar.noting .rb-capsule :global(.rb-actions) { flex: 1 0 100%; justify-content: flex-end; }
 			.review-bar.noting .rb-capsule :global(.rb-actions .btn) { flex: 0 0 auto; min-width: max-content; }

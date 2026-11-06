@@ -1,7 +1,9 @@
 import { get } from 'svelte/store';
+import { releaseDiagramSnapshot } from '$lib/diagramSnapshot';
 import { imageRequestAt, type OpenImageRequest } from '$lib/cm/markdown-image';
+import { widgetImageRequestAt } from '$lib/cm/widget-open';
 import { imageContentUrl } from '$lib/artifactImage';
-import { sharedImage, type ImageOccurrence } from '$lib/docImageComments';
+import { diagramAtAnchor, isDiagramPin, sharedImage, type ImageOccurrence } from '$lib/docImageComments';
 import type { DocFeedback } from '$lib/docFeedback.svelte';
 import { liveFailureMessage } from '$lib/docViewerCommentDraft.svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
@@ -24,9 +26,11 @@ export interface DocumentImageComments {
 	projectId: string | null;
 	readOnly: boolean;
 	/** Post a region comment anchored on the image's markdown, where it is now. */
-	post: (from: number, to: number, region: ImageRegion, text: string) => Promise<string>;
+	post: (from: number, to: number, region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[], diagramSource?: string) => Promise<string>;
 	/** What a failed post says. */
 	failure?: (error: unknown) => string;
+	/** Snapshot the current diagram using the editor's existing render. */
+	refreshDiagram: (from: number, to: number) => Promise<OpenImageRequest | null>;
 	/** The document's feedback batch: the viewer shows its pending-send status and Send (DCOL-FR13.12). */
 	feedback?: DocFeedback;
 }
@@ -56,15 +60,28 @@ interface DocViewerImagesOptions {
 export function createDocViewerImages(options: DocViewerImagesOptions) {
 	const projectId = () => options.target()?.projectId ?? null;
 	function open(request: OpenImageRequest, focus?: Focus) {
-		options.onOpenImage()?.({ ...request, focus });
+		const onOpenImage = options.onOpenImage();
+		if (onOpenImage) onOpenImage({ ...request, focus });
+		else releaseDiagramSnapshot(request.src);
 	}
 	/** The comments of an image shown now, bound to this document as it is; none when it has no artifact to hold them. */
 	function comments(): DocumentImageComments | undefined {
 		const artifactId = options.artifactId();
 		return artifactId ? {
 			artifactId, projectId: projectId(), readOnly: options.readOnly(),
-			post: (from, to, region, body) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session() }, region, body),
+			post: (from, to, region, body, taggedAgentIds, mentions, diagramSource) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session(), diagramSource }, region, body, taggedAgentIds, options.target()?.threadId ?? null, mentions),
 			failure: options.session() ? liveFailureMessage : undefined, feedback: options.feedback(),
+			refreshDiagram: async (from, to) => {
+				const root = options.root();
+				if (!root) return null;
+				const snapshot = await widgetImageRequestAt(root, { from, to });
+				const current = diagramAtAnchor(options.text(), from);
+				if (snapshot && (!current || snapshot.diagramSource !== current.source)) {
+					releaseDiagramSnapshot(snapshot.src);
+					return null;
+				}
+				return snapshot;
+			},
 		} : undefined;
 	}
 	/** The one image all of `ids` are region comments on, when the viewer can open images. */
@@ -75,7 +92,7 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 	async function openAt(image: ImageOccurrence, focus?: Focus): Promise<boolean> {
 		const root = options.root();
 		if (!options.onOpenImage() || !root) return false;
-		const request = await imageRequestAt(root, image);
+		const request = await imageRequestAt(root, image) ?? await widgetImageRequestAt(root, image);
 		if (!request) return false;
 		open(request, focus);
 		return true;
@@ -93,6 +110,9 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 	}
 	const groups = {
 		srcOf: (comment: DocComment) => (comment.imageSrc ? imageContentUrl({ path: comment.imageSrc, projectId: projectId(), token: get(token) ?? '', imageCacheKey: options.imageCacheKey() }) : null),
+		/** The diagram a pin is on, as the document has it now: its source to draw, and its drawer caption. */
+		isDiagram: isDiagramPin,
+		diagramOf: (comment: DocComment) => (isDiagramPin(comment) && !comment.orphaned && comment.from != null ? diagramAtAnchor(options.text(), comment.from) : null),
 		colorOf: (comment: DocComment) => regionColor(comment, projectId(), options.accent()),
 		onOpen: (comment: DocComment, focus?: Focus) => openOr([comment.id], focus, () => options.showInText(comment.id)),
 	};

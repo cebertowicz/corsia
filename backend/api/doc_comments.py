@@ -25,8 +25,10 @@ from api.doc_comment_models import CommentCreate
 
 from doceditor import comments as store, doc_images, feedback_batches, feedback_state, image_regions
 from doceditor.comment_anchoring import anchored_threads
-from doceditor.comment_creation import CommentSelectionChanged, create_validated_comment
+from doceditor.comment_action_errors import CommentSelectionChanged
+from doceditor.comment_creation import create_validated_comment
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
+from doceditor.comment_recipients import TagValidationError, trim_mentions
 from doceditor.feedback_batch_core import PersonDocumentLane
 from infra.app_loop import AppLoopUnavailable
 from doceditor.comment_feedback_transitions import apply_user_transition
@@ -41,7 +43,7 @@ from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context
 from infra.auth import authenticate, may_access_artifact, require_user_header_only
 from infra.database import get_db, write_transaction
-from api.doc_comment_decisions import comment_action_status, decision_refusal
+from api.doc_comment_decisions import comment_action_status, decision_refusal, selection_refusal
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
 from infra.db_async import run_in_db
@@ -129,20 +131,30 @@ async def create_comment(
 
     if body.anchor_text and not body.parent_id and not body.review and (body.from_off is None or body.to_off is None):
         raise HTTPException(400, "Anchored comments require selection offsets")
+    try:
+        mentions = trim_mentions(body.body, body.tagged_agent_ids, [mention.model_dump() for mention in body.tagged_agent_mentions])
+    except TagValidationError as exc:
+        return decision_refusal(exc)
     request = CommentInput(
         artifact_id=artifact_id, path=path, body=text, author=user["name"], author_kind="user", user_id=user["id"],
         parent_id=body.parent_id, review=body.review, replacement=body.replacement,
         quote=body.anchor_text, start=body.from_off, end=body.to_off, browser=True, live_capture=body.live_capture,
-        region=region,
-        delivery_policy=body.delivery_policy,
+        region=region, diagram_source=body.diagram_source,
+        delivery_policy=body.delivery_policy, tagged_agent_ids=body.tagged_agent_ids, viewing_thread_id=body.thread_id,
+        tagged_agent_mentions=mentions,
     )
     try:
         row, _registered, feedback, created = await create_validated_comment(request, body.client_id)
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
+    except TagValidationError as exc:
+        # Its kind tells the browser which of the known causes to name.
+        return decision_refusal(exc)
     except CommentActionError as exc:
         raise HTTPException(400, exc.message) from exc
-    except (CommentSelectionChanged, AppLoopUnavailable) as exc:
+    except CommentSelectionChanged as exc:
+        return selection_refusal(exc)
+    except AppLoopUnavailable as exc:
         raise HTTPException(409, str(exc)) from exc
     except CrossArtifactIdError as exc:
         raise HTTPException(
@@ -293,6 +305,7 @@ class CommentPatch(BaseModel):
     delivery_policy: PersonDocumentLane | None = None
     # Moves an image comment's pin; the pin then counts as placed on the current image.
     region: dict | None = None
+    diagram_source: str | None = None
 
     @model_validator(mode="after")
     def _reopen_names_its_lane(self) -> "CommentPatch":
@@ -323,7 +336,8 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
                 check_user_text_edit(comment, fields)
                 artifact = registry_models.get_artifact(artifact_id, db=db) or {}
                 moved = doc_images.region_patch(
-                    db, comment, fields, doc_path=artifact.get("path"), owner_thread_id=artifact.get("parent_thread_id"))
+                    db, comment, fields, doc_path=artifact.get("path"), owner_thread_id=artifact.get("parent_thread_id"),
+                    require_diagram_source=True)
                 patch = reopen_fields(comment, moved)
             except CommentActionError as exc:
                 raise HTTPException(comment_action_status(exc), exc.message) from exc
@@ -334,7 +348,10 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
         finally:
             db.close()
 
-    row = await run_in_db(_patch)
+    try:
+        row = await run_in_db(_patch)
+    except CommentSelectionChanged as exc:
+        return selection_refusal(exc)
     if row is None:
         raise HTTPException(404, "Comment not found")
     return {"comment": row}

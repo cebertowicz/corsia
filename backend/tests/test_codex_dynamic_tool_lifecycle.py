@@ -1173,12 +1173,21 @@ async def test_natural_terminal_settles_missing_tool_result_before_removing_live
     monkeypatch.setattr(
         plan_liveness_terminal, "on_thread_turn_complete", lambda *_a, **_kw: None,
     )
+    # A failed Turn that took in the person's input queues one wake; capture its
+    # drive here instead of letting it start a real Codex Turn on this thread.
+    driven: list[str] = []
+
+    async def capture_drive(threads):
+        driven.extend(threads)
+
+    monkeypatch.setattr("plans.notifications.drive_threads", capture_drive)
 
     on_event = codex_runtime._make_on_event(
         live, thread_id,
         lambda _sid, payload: broadcasts.append(payload),
     )
     await _deliver_terminal(on_event, live, dict(terminal_event))
+    assert driven == ([thread_id] if expected_status == "error" else [])
 
     db = get_db()
     try:

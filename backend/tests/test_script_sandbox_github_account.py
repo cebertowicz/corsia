@@ -98,7 +98,7 @@ def run(monkeypatch, tmp_path):
     monkeypatch.setattr(script_sandbox.PROCESS_OWNER, "spawn", spawn)
     views = _views(agent_home)
 
-    def go(state: str, verified: str | None = None):
+    def go(state: str, verified: str | None = None, *, authenticated: bool = False):
         reads: list[bool] = []
         waits: list[bool] = []
         view = views[state]
@@ -114,8 +114,16 @@ def run(monkeypatch, tmp_path):
 
         monkeypatch.setattr(github_agent, "view", read)
         monkeypatch.setattr(github_agent, "verify_now", verify)
+        if authenticated:
+            from contextlib import asynccontextmanager
+
+            @asynccontextmanager
+            async def client(*_args):
+                yield tmp_path, tmp_path / "socket", tmp_path / "placeholder", tmp_path
+
+            monkeypatch.setattr(script_sandbox, "_authenticated_client", client)
         result = asyncio.run(script_sandbox.run_script(
-            THREAD, None, tmp_path / "s.sh", run_id="r", timeout_seconds=5))
+            THREAD, None, tmp_path / "s.sh", run_id="r", timeout_seconds=5, authenticated=authenticated))
         return {**seen, "reads": len(reads), "waits": len(waits), "result": result, "view": answer,
                 "person_gh": person_gh.resolve(), "agent_home": agent_home.resolve(),
                 "home_gh": (home / ".config" / "gh").resolve()}
@@ -136,29 +144,37 @@ def _read_only(argv: list[str]) -> list[str]:
     return [path for path in granted.removeprefix("--add-dirs-ro=").split(":") if path]
 
 
-def test_a_verified_account_gives_the_script_exactly_the_shells_github(run):
+def test_unapproved_run_hides_even_a_verified_account(run):
     seen = run("ready")
     env = seen["env"]
-    assert seen["reads"] == 1
-    assert {name: env[name] for name in BOT_ENV_NAMES} == github_agent.script_env(seen["view"])
-    assert github_agent.script_env(seen["view"]) == github_agent.shell_env(seen["view"])
-    assert env["GH_CONFIG_DIR"] == seen["view"].home
-    assert dict(_git(env))["credential.https://github.com.helper"] == "!'/opt/agent/gh' auth git-credential"
-    assert dict(_git(env))["user.name"] == "agents-bot"
-    assert str(seen["agent_home"]) in _read_only(seen["argv"])
-    assert _deny(seen["agent_home"]) not in seen["profile"]
-    for person in (seen["person_gh"], seen["home_gh"]):
-        assert _deny(person) in seen["profile"]
+    assert seen["reads"] == 1 and seen["waits"] == 0
+    assert env["GH_CONFIG_DIR"] == LOCKED_HOME
+    assert _git(env) == _LOCKED_GIT
+    assert str(seen["agent_home"]) not in _read_only(seen["argv"])
+    for home in (seen["person_gh"], seen["home_gh"], seen["agent_home"]):
+        assert _deny(home) in seen["profile"]
     assert not any(name in env for name in _TOKENS)
+    assert seen["result"].github_locked == (
+        "scripts get no GitHub login: this script isn't approved to use the agents' GitHub account; "
+        "only if it failed on a GitHub call that needs that account, schedule it with "
+        "authenticated=true so the person can approve it")
+
+
+def test_authenticated_run_keeps_ready_account_locked(run):
+    seen = run("ready", authenticated=True)
     assert seen["result"].github_locked is None
-    assert seen["waits"] == 0  # a cached answer costs no GitHub round trip
+    assert seen["env"]["GH_CONFIG_DIR"] != str(seen["agent_home"])
+    assert _git(seen["env"]) == _LOCKED_GIT
+    assert str(seen["agent_home"]) not in _read_only(seen["argv"])
+    assert _deny(seen["agent_home"]) in seen["profile"]
+    assert not any(name in seen["env"] for name in _TOKENS)
 
 
 def test_a_run_with_no_cached_answer_waits_for_the_verification(run):
     seen = run("verifying", verified="ready")  # nothing cached yet; the verification says ready
     assert seen["reads"] == 1 and seen["waits"] == 1
-    assert seen["env"]["GH_CONFIG_DIR"] == seen["view"].home
-    assert seen["result"].github_locked is None
+    assert seen["env"]["GH_CONFIG_DIR"] == LOCKED_HOME
+    assert seen["result"].github_locked.endswith("so the person can approve it")
 
 
 @pytest.mark.parametrize("state, reason", [
@@ -204,11 +220,11 @@ def test_linux_scripts_hide_the_same_homes_from_the_same_view(run, monkeypatch, 
     monkeypatch.setattr(shell_envelope, "sys", SimpleNamespace(platform="linux"))
     monkeypatch.setattr(linux_shell, "shell_argv", shell_argv)
     seen = run(state)
-    assert captured["agent_account"] is seen["view"]
+    assert not captured["agent_account"].ready
     hidden = set(captured["extra_hidden_roots"])
     assert {seen["person_gh"], seen["home_gh"]} <= hidden
-    # An absent account has no home to hide; an unverified one's stays hidden.
-    assert (seen["agent_home"] in hidden) is (state == "unverified")
+    # An absent account has no home to hide; any recorded home stays hidden.
+    assert (seen["agent_home"] in hidden) is (state != "absent")
 
 
 def test_git_askpass_is_a_credential_name():

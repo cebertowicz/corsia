@@ -70,7 +70,6 @@ def add(
     provenance: str,
     db,
     intent: str | None = None,
-    intent_words: list[dict[str, str]] | None = None,
 ) -> dict:
     """Create required rework while preserving the terminal source as history."""
 
@@ -84,7 +83,6 @@ def add(
         title=title,
         acceptance_criteria=acceptance_criteria,
         intent=intent,
-        intent_words=intent_words,
         actor_id=actor_id,
         provenance=provenance,
         expected_revision=expected_revision,
@@ -106,6 +104,9 @@ def add(
     from core.self_caught_corrections import record_self_caught_correction
 
     record_self_caught_correction(db, event_id)
+    from plans import gate_handoff
+
+    gate_handoff.after_correction(db, node_id)
     for row in affected:
         dependencies.add_dependency(
             row["id"],

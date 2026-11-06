@@ -47,7 +47,8 @@ class _Thread:
             "CREATE INDEX idx_messages_active_turn ON messages(active_turn_id, input_order)"
         )
         self.conn.execute(
-            "CREATE TABLE active_turns (id TEXT, thread_id TEXT, turn_order INTEGER, status TEXT)"
+            "CREATE TABLE active_turns (id TEXT, thread_id TEXT, turn_order INTEGER, status TEXT, "
+            "started_at TEXT)"
         )
         self._next = 0
 
@@ -124,6 +125,22 @@ def test_sequenced_walk_orders_by_seq_and_counts_only_anchors():
         (["u1"], False, "u1"),
     ]
     assert _results(_flatten(pages)["s1"]) == ["one", "two"]
+
+
+def test_a_failed_turns_result_notice_survives_reload():
+    # A Claude Code Turn that fails before replying leaves only its `result` row to read.
+    thread = _Thread()
+    thread.add("u1", "user", "hello")
+    thread.add("failed", "system", "API Error: 500", metadata={"type": "result", "is_error": True})
+    thread.add("empty", "system", "", metadata={"type": "result", "is_error": True})
+    thread.add("ok", "system", "done", metadata={"type": "result", "is_error": False})
+    thread.add("a1", "assistant", "Answer to hello")
+
+    (ids, more, _, _), = thread.walk(10)
+
+    assert (ids, more) == (["u1", "failed", "a1"], False)
+    unpaged, _, _ = page_messages(thread.conn, _SID, None, None)
+    assert [row["id"] for row in unpaged] == ["u1", "failed", "a1"]
 
 
 def test_page_does_not_carry_the_deleted_reply_window_mark():

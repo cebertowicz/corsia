@@ -25,6 +25,8 @@ _BARE_PATH = re.compile(r"(?<![\w/.:~%-])((?:/|(?:\.{1,2}/))?(?:[\w@%+=,.~-]+/)*
 _URL = re.compile(r"[a-z][a-z\d+.-]*://[^\s<>()]+", re.IGNORECASE)
 _BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
 _SCHEME = re.compile(r"^[a-z][a-z\d+.-]*:", re.IGNORECASE)
+# ``file.md:12`` or ``file.md:12:3``, a place in a file as agents cite it, names that file.
+_LINE_SUFFIX = re.compile(r"^(.+\.[A-Za-z0-9]{1,8}):\d+(?::\d+)?$")
 
 
 def link_target_path(href: str) -> str | None:
@@ -33,7 +35,7 @@ def link_target_path(href: str) -> str | None:
     if not without_query or _BAD_ESCAPE.search(without_query):
         return None
     try:
-        return unquote(without_query, errors="strict")
+        return _LINE_SUFFIX.sub(r"\1", unquote(without_query, errors="strict"))
     except UnicodeDecodeError:
         return None
 
@@ -66,6 +68,15 @@ def workspace_path(href: str, roots: Sequence[str], origin: str | None = None) -
     return normalize_path(origin or roots[0], target)
 
 
+def _names_file(target: str) -> bool:
+    """No scheme, or a dotted one that is really a file cited at a line (``a.md:12``)."""
+    scheme = _SCHEME.match(target)
+    if not scheme:
+        return True
+    path = re.split(r"[?#]", target, maxsplit=1)[0]
+    return "." in scheme.group() and bool(_LINE_SUFFIX.match(path))
+
+
 def targets(text: str) -> list[str]:
     """Link targets and bare paths outside fenced code, in the order text names them."""
     body = _FENCE.sub("", text or "")
@@ -76,7 +87,7 @@ def targets(text: str) -> list[str]:
     ordered: list[str] = []
     seen: set[str] = set()
     for _pos, target in sorted(found):
-        if not _SCHEME.match(target) and target not in seen:
+        if _names_file(target) and target not in seen:
             seen.add(target)
             ordered.append(target)
     return ordered

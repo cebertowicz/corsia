@@ -61,6 +61,7 @@ def _check_suite_payload(
 
 _DEFAULT_PR_INFO = {
     "number": 42,
+    "state": "open",
     "mergeable": "MERGEABLE",
     "isDraft": False,
     "baseRefName": "dev",

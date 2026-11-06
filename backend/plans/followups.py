@@ -8,7 +8,7 @@ from plans import workflow_fields
 
 
 def _canonical_intent(connection, node_id: str) -> str:
-    from plans.intent_words import canonical
+    from plans.intent_creation import canonical
 
     return canonical(connection, node_id)["id"]
 
@@ -40,7 +40,6 @@ def add_follow_up(
     description: str | None = None,
     spawn_kind: str | None = None,
     intent: str | None = None,
-    intent_words: list[dict[str, str]] | None = None,
     step: workflow_fields.FollowUpStep = "none",
     db=None,
 ):
@@ -79,9 +78,6 @@ def add_follow_up(
             ),
             actor_id=actor_id, provenance=provenance, node_id=follow_up_id,
         )
-        if intent_words:
-            from plans import intent_words as words
-            words.append(connection, follow_up.id, intent_words, revision=follow_up.requirements_revision)
         return follow_up
 
 
@@ -92,7 +88,6 @@ def accept_with_follow_up(
     acceptance_criteria: str,
     size: str | None = None,
     intent: str | None = None,
-    intent_words: list[dict[str, str]] | None = None,
     actor_id: str | None = None,
     provenance: str = "plan_service",
     verification_result: str | None = None,
@@ -116,7 +111,7 @@ def accept_with_follow_up(
         )
         follow_up = add_follow_up(
             node_id, title=title, acceptance_criteria=acceptance_criteria, size=size,
-            intent=intent, intent_words=intent_words, actor_id=actor_id, provenance=provenance,
+            intent=intent, actor_id=actor_id, provenance=provenance,
             inherit_commitment=True, step="identity", db=connection,
         )
         return service._node_from_row(

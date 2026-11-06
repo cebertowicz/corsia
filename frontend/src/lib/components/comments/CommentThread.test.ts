@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import CommentThread, { type CommentThreadData } from './CommentThread.svelte';
+import CommentThread from './CommentThread.svelte';
+import type { CommentThreadData } from './CommentThreadData';
 import CommentComposer from './CommentComposer.svelte';
 import { agentColor } from '$lib/docPresence';
 
@@ -30,7 +31,7 @@ describe('CommentThread', () => {
 		type(input, '  looks right  ');
 		button('.ct-send').click();
 		await vi.waitFor(() => expect(input.value).toBe(''));
-		expect(onReply).toHaveBeenCalledWith('c1', 'looks right');
+		expect(onReply).toHaveBeenCalledWith('c1', 'looks right', [], []);
 	});
 
 	it('restores a reply selection across remounts and saves a click-placed caret', async () => {
@@ -57,7 +58,7 @@ describe('CommentThread', () => {
 		input.setSelectionRange(1, 4);
 		input.dispatchEvent(new Event('select', { bubbles: true }));
 		button('.ct-send').click();
-		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'ship it'));
+		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'ship it', [], []));
 		await vi.waitFor(() => expect(onReplySelection).toHaveBeenLastCalledWith(null));
 	});
 
@@ -115,7 +116,7 @@ describe('CommentThread', () => {
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 		type(input, 'ship it');
 		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
-		expect(onReply).toHaveBeenCalledWith('c1', 'ship it');
+		expect(onReply).toHaveBeenCalledWith('c1', 'ship it', [], []);
 	});
 
 	function visibleObserver() {
@@ -132,7 +133,7 @@ describe('CommentThread', () => {
 	it('stamps an unread reply only after it is observed in the viewport', async () => {
 		visibleObserver();
 		const onViewed = vi.fn().mockResolvedValue(undefined);
-		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed });
+		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed, viewEachUnread: true });
 		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
 		vi.unstubAllGlobals();
 	});
@@ -141,7 +142,7 @@ describe('CommentThread', () => {
 		visibleObserver();
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const onViewed = vi.fn().mockRejectedValue(new Error('offline'));
-		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed });
+		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed, viewEachUnread: true });
 		await vi.waitFor(() => expect(warn).toHaveBeenCalled(), { timeout: 3000 });
 		flushSync(); await Promise.resolve(); flushSync();
 		expect(onViewed).toHaveBeenCalledTimes(1);
@@ -309,6 +310,15 @@ describe('CommentThread', () => {
 		expect(host.textContent).toContain('The text this suggestion replaces has changed.');
 	});
 
+	it('disables accepting a suggestion edited inside, with the reason, while Reject and Reply stay', () => {
+		render(thread({ replacement: 'new text', textChanged: true }));
+		const accept = button('.ct-suggestion-accept');
+		expect(accept.disabled).toBe(true);
+		expect(accept.title).toBe('The text changed after this suggestion');
+		expect(host.querySelector('.ct-orphan')?.textContent).toBe('The text changed after this suggestion');
+		expect(host.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.disabled).toBe(false);
+	});
+
 	it('collapses a decided suggestion with attribution', () => {
 		render(thread({ replacement: 'new text', decision: 'accepted', decidedBy: 'Ada', resolved: true }));
 		expect(host.textContent).toContain('Suggested by You · Accepted by Ada');
@@ -328,7 +338,7 @@ describe('CommentThread', () => {
 		type(input, ' fine by me ');
 		button('.ct-send').click();
 		await vi.waitFor(() => expect(input.value).toBe(''));
-		expect(onReply).toHaveBeenCalledWith('c1', 'fine by me');
+		expect(onReply).toHaveBeenCalledWith('c1', 'fine by me', [], []);
 		expect(host.querySelector('.ct-act.ack')).toBeNull();
 		expect(host.querySelector('.ct-act.resolve')).toBeNull();
 		expect(host.querySelector('.ct-suggestion-actions')).not.toBeNull();
@@ -396,6 +406,24 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct-res-head .ct-num')?.textContent).toBe('3');
 	});
 
+	it("fills the drawer's number chip with the viewer disc's stepped colour so the digit reads on it", () => {
+		render(thread({ anchor: '', regionNumber: 3 }), false, { tagColor: '#8b5cf6' });
+		expect(host.querySelector<HTMLElement>('.ct-head .ct-num')!.style.getPropertyValue('--disc-color')).toBe('#aa87f8');
+		unmount(component!); host.remove();
+		render(thread({ anchor: '', regionNumber: 3 }));
+		expect(host.querySelector<HTMLElement>('.ct-head .ct-num')!.style.getPropertyValue('--disc-color')).toBe('');
+	});
+
+	it('says when the diagram changed under a pin, with the same Move pin', () => {
+		const onMovePin = vi.fn();
+		render(thread({ anchor: '```mermaid', regionNumber: 1, regionStale: true }), false, { onMovePin, diagram: true });
+		const note = host.querySelector('[data-region-stale]')?.textContent ?? '';
+		expect(note).toContain('Diagram changed since this comment');
+		expect(note).not.toContain('Image');
+		button('[data-move-pin]').click();
+		expect(onMovePin).toHaveBeenCalledWith('c1');
+	});
+
 	it('says when the image changed under a pin and offers Move pin', () => {
 		const onMovePin = vi.fn();
 		render(thread({ anchor: '', regionNumber: 1, regionStale: true }), false, { onMovePin });
@@ -424,7 +452,7 @@ describe('CommentComposer', () => {
 		const textarea = host.querySelector<HTMLTextAreaElement>('textarea')!;
 		type(textarea, ' first point ');
 		button('.submit').click();
-		await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledWith('first point'));
+		await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledWith('first point', [], []));
 		textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 		expect(onCancel).toHaveBeenCalledOnce();
 	});

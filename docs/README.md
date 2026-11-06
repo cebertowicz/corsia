@@ -1,16 +1,26 @@
 # Documentation
 
-The main pages under `docs/`, by topic. Start with the repository [README](../README.md) for what CORSIA is and how to install it.
+Every section of the docs, in reading order; each section's first page lists the rest. Start with the repository [README](../README.md) for what CORSIA is, then [Get started](#get-started) to install it.
+
+## Get started
+
+How to install CORSIA, create a first project and get a first agent doing work. Start with [Getting started](getting-started/README.md), which lists every page in order.
+
+## Contribute
+
+How to go from a fresh clone to a merged change. Start with [Contributing to CORSIA](contributing/README.md), which lists every contributor page.
+
+The rules for issues, the Contributor License Agreement and pull requests are in [`CONTRIBUTING.md`](../CONTRIBUTING.md).
+
+## How CORSIA works
+
+How CORSIA is built and why, for engineers deciding whether to adopt it or contribute. Start with the [overview](how-it-works/README.md), which lists every page, then [Architecture](how-it-works/architecture.md).
 
 ## Security
 
 What agents can reach, what stops them, how strong each control is, and where it doesn't hold. Start with the [security model](security/README.md), which lists every security page, then [Known limits](security/limits.md).
 
 Before reporting a vulnerability, read [`SECURITY.md`](../SECURITY.md).
-
-## How CORSIA works
-
-How CORSIA is built and why, for engineers deciding whether to adopt it or contribute. Start with the [overview](how-it-works/README.md), which lists every page and defines the terms, then [Architecture](how-it-works/architecture.md).
 
 ## Features and internals
 
@@ -25,6 +35,19 @@ How CORSIA is built and why, for engineers deciding whether to adopt it or contr
 | [Observability: product events](observability.md) | The product events CORSIA records locally |
 | [Importing size ratings](size-rating-import.md) | Importing task size ratings |
 | [Client metadata](client-metadata/README.md) | The public file a sign-in provider reads when you connect a hosted tool server |
+
+## Reference
+
+| Page | What it covers |
+|---|---|
+| [`ARCHITECTURE.md`](../ARCHITECTURE.md) | Code map: where each part lives |
+| [`BACKEND.md`](../BACKEND.md) · [`FRONTEND.md`](../FRONTEND.md) | Module maps and rules for each side of the code |
+| [Data model](reference/data-model/README.md) | Tables and relationships in CORSIA's data stores, generated from the schema code |
+| [CLI](reference/cli.md) | Commands and arguments, generated from the CLI code |
+| [Configuration](reference/configuration.md) | Environment variables CORSIA reads, generated from the code |
+| [Agent tools](reference/agent-tools.md) | Reachable agent tools and how to load them |
+| [Glossary](reference/glossary.md) | Terms used throughout the documentation |
+| [`CHANGELOG.md`](../CHANGELOG.md) | What has shipped |
 
 ## About this project
 

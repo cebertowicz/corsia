@@ -15,7 +15,7 @@
 	 */
 	import { onMount } from 'svelte';
 	import CommentReplyChipRow from './CommentReplyChipRow.svelte';
-	import { replyItemsForThread, subscribeReplyAttention } from './replyItems';
+	import { unreadItemsForThread, subscribeUnreadAttention } from './replyItems';
 	import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { get } from 'svelte/store';
 	import { on } from '$lib/ws';
@@ -25,9 +25,11 @@
 	import { forgetAutoOpen, holdsDraft, judgeAutoOpen, noteLoad } from '$lib/stores/attentionAutoOpen';
 	import { activeThreadId, messages } from '$lib/stores/threads';
 	import DecisionChip from './DecisionChip.svelte';
+	import HeldReplyBody from './HeldReplyBody.svelte';
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import ExternalReviewRow from './ExternalReviewRow.svelte';
-	import { label, decisionMeta, regionLabel as getRegionLabel } from './dockPresentation';
+	import { actionWord, decisionMeta, heldMeta, label, recordingLine, regionLabel as getRegionLabel } from './dockPresentation';
+	import { watchDockActivity } from './dockActivity';
 	import {
 		collapse,
 		EMPTY,
@@ -36,6 +38,7 @@
 		activeId,
 		focusRequest,
 		focusTarget,
+		goneReply,
 		queue,
 		reload,
 		shownItem,
@@ -44,7 +47,9 @@
 		visibleQueue,
 	} from '$lib/stores/attentionDock.svelte';
 	import { answerNotice, answers } from '$lib/stores/attentionAnswerState';
-	import type { AttentionDestination, DecisionDetail, ExternalReviewDetail } from '$lib/api/attentionQueue';
+	import { decideHeld } from '$lib/stores/attentionHeld.svelte';
+	import type { HeldVerb } from '$lib/api/heldReplies';
+	import type { AttentionDestination, AttentionQueueItem, DecisionDetail, ExternalReviewDetail, HeldReplyDetail } from '$lib/api/attentionQueue';
 
 	let {
 		writesDisabled = false,
@@ -69,7 +74,7 @@
 
 	const dockQueue = $derived($visibleQueue);
 	const current = $derived(shownItem(dockQueue, $activeId));
-	const hasReplies = $derived(replyItemsForThread($visibleQueue, $activeThreadId).length > 0 ||
+	const hasUnreadItems = $derived(unreadItemsForThread($visibleQueue, $activeThreadId).length > 0 ||
 		($chatReplyAttention?.threadId === $activeThreadId && $chatReplyAttention.items.length > 0));
 	const position = $derived(
 		current ? dockQueue.items.findIndex((i) => i.external_id === current.external_id) + 1 : 0,
@@ -78,22 +83,36 @@
 	const effectiveWritesDisabled = $derived(
 		writesDisabled || $stale || $connectionState !== 'connected',
 	);
-	/** Answers shown as recorded whose write is still in flight. */
-	const recording = $derived(
-		Object.values($answers).some((answer) => answer.state === 'sending'),
-	);
+	/** The receipt line for an answer shown as recorded whose write is still in flight. */
+	const recording = $derived(recordingLine($answers));
+	const heldQueued = $derived(dockQueue.items.some((item) => item.renderer === 'held-reply'));
 	const failed = $derived(
 		current ? ($answers[current.external_id]?.state === 'failed') : false,
 	);
 	const showChip = $derived(
 		!!current && !suppressed && $expandedId === current.external_id,
 	);
+	// Retain only the visual being dismissed; queue and receipt state continue immediately.
+	let closingHeld = $state<{ item: AttentionQueueItem; position: number; count: number } | null>(null);
+	const drawerItem = $derived($goneReply?.item ?? closingHeld?.item ?? current);
+
+	/** The drawer leaves at once; focus waits for the outcome, as a failed or gone reply reopens on its own heading. */
+	function decideFromDrawer(held: HeldReplyDetail, verb: HeldVerb) {
+		const from = document.activeElement;
+		void decideHeld(held, verb, () => { if (current) closingHeld = { item: current, position, count: dockQueue.count }; goneReply.set(null); collapse(); })
+			.then(() => {
+				const now = document.activeElement; // left wherever the person put it mid-flight
+				if (!showChip && !$goneReply && (!now || now === document.body || now === from)) void close(true);
+			});
+	}
 
 	/** Focus returns to the exact control that opened the chip. */
-	async function close() {
+	async function close(heldDecision = false) {
+		goneReply.set(null);
 		collapse();
 		await Promise.resolve();
-		const back = priorFocus?.isConnected ? priorFocus : openTrigger;
+		const back = priorFocus?.isConnected ? priorFocus : openTrigger?.isConnected ? openTrigger
+			: heldDecision ? document.querySelector<HTMLElement>('[role="textbox"][aria-label="Message CORSIA"]') : null;
 		priorFocus = null;
 		back?.focus();
 	}
@@ -179,20 +198,11 @@
 		// Reuses the existing invalidation signal rather than inventing one; a
 		// missed nudge is recovered on reconnect.
 		const offNudge = on('plans_changed', () => { void reload(); });
-		const offReplies = subscribeReplyAttention(() => { void reload(); });
+		const offHeld = on('held_reply_changed', () => { void reload(); });
+		const offUnread = subscribeUnreadAttention(() => { void reload(); });
 		// Typing, pasting or sending ends in a re-judge once the window has passed,
 		// so a hold on a draft is released when the draft is sent or cleared.
-		let idleTimer: ReturnType<typeof setTimeout> | undefined;
-		const noteActivity = () => {
-			lastKeydown = Date.now();
-			clearTimeout(idleTimer);
-			idleTimer = setTimeout(() => { busyTick += 1; }, TYPING_IDLE_MS);
-		};
-		const rejudge = () => { setTimeout(() => { busyTick += 1; }, 0); };
-		document.addEventListener('keydown', noteActivity, true);
-		document.addEventListener('input', noteActivity, true);
-		document.addEventListener('focusin', rejudge);
-		document.addEventListener('focusout', rejudge);
+		const offActivity = watchDockActivity(TYPING_IDLE_MS, () => { lastKeydown = Date.now(); }, () => { busyTick += 1; });
 		let wasConnected = false;
 		const offConnection = connectionState.subscribe((state) => {
 			const connected = state === 'connected';
@@ -209,31 +219,27 @@
 			if (value) void reload();
 		});
 		return () => {
-			clearTimeout(idleTimer);
-			document.removeEventListener('keydown', noteActivity, true);
-			document.removeEventListener('input', noteActivity, true);
-			document.removeEventListener('focusin', rejudge);
-			document.removeEventListener('focusout', rejudge);
+			offActivity();
 			forgetAutoOpen();
 			offNudge?.();
-			offReplies();
+			offHeld?.();
+			offUnread();
 			offConnection();
 			offToken();
 		};
 	});
-
 
 </script>
 
 {#if recording}
 	<!-- The answer is already out of the queue; this is its receipt until the
 	     write confirms, and a failed write returns the decision with its reason. -->
-	<p class="dock-receipt" role="status">Answer recorded</p>
+	<p class="dock-receipt" role="status">{recording}</p>
 {:else if $answerNotice}
 	<!-- The question left the queue before this answer reached it. -->
 	<p class="dock-receipt" role="status">{$answerNotice}</p>
 {/if}
-{#if current || hasReplies}
+{#if current || hasUnreadItems}
 	<div
 		class="attention-dock"
 		class:expanded={showChip}
@@ -261,37 +267,17 @@
 					<span class="dock-count">{position} of {dockQueue.count}</span>
 				{/if}
 				<span class="dock-action">
-					{failed ? 'Not saved — Retry' : current.renderer === 'decision' ? 'Answer' : 'Review'}
+					{actionWord(current, failed)}
 				</span>
 				<svg class="dock-chevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
 			</button>
 			</div>
 		{/if}
-		{#if current.renderer === 'decision'}
-			{#key current.external_id}
-				<AdaptiveDrawer
-					ariaLabel={`Decision — ${label(current)}`}
-					contextLabel={decisionMeta(current.detail as DecisionDetail)}
-					opaque
-					flushBottom
-					open={showChip}
-					onClose={close}
-				>
-					<!-- No chrome heading: the decision's own header already carries a
-					     "Decision · chat · project" eyebrow and the decision title. -->
-
-					<DecisionChip
-						decision={current.detail as DecisionDetail}
-						writesDisabled={effectiveWritesDisabled}
-						onSkip={canSkip ? skip : undefined}
-					/>
-				</AdaptiveDrawer>
-			{/key}
-		{:else if showChip}
+		{#if current.renderer === 'external-review' && showChip}
 			{#key current.external_id}
 				<ExternalReviewRow
 					review={current.detail as ExternalReviewDetail}
-					onClose={close}
+					onClose={() => void close()}
 					onSkip={canSkip ? skip : undefined}
 					{onOpenDestination}
 				/>
@@ -301,7 +287,7 @@
 			<!-- Deferred, not hidden: say why, and keep the control focusable so a
 			     keyboard or screen-reader user is not silently skipped past it. -->
 			<p class="dock-deferred" id={deferredId}>
-				Answer this after the host-access request above.
+				{current.renderer === 'held-reply' ? 'Review' : 'Answer'} this after the host-access request above.
 			</p>
 		{/if}
 		{#if $stale}
@@ -310,6 +296,29 @@
 		</section>
 		{/if}
 	</div>
+{/if}
+
+{#if drawerItem && (drawerItem.renderer === 'decision' || drawerItem.renderer === 'held-reply')}
+	{#key drawerItem.external_id}
+		<AdaptiveDrawer
+			ariaLabel={`${drawerItem.renderer === 'held-reply' ? 'Held reply' : 'Decision'} — ${label(drawerItem)}`}
+			contextLabel={drawerItem.renderer === 'held-reply' ? heldMeta(drawerItem.detail as HeldReplyDetail, closingHeld?.position ?? position, closingHeld?.count ?? dockQueue.count) : decisionMeta(drawerItem.detail as DecisionDetail)}
+			opaque
+			flushBottom
+			open={!!$goneReply || (!closingHeld && showChip)}
+			onClose={() => void close()}
+			onClosed={() => { closingHeld = null; }}
+		>
+			<!-- No chrome heading: the decision's own header already carries a
+			     "Decision · chat · project" eyebrow and the decision title. -->
+
+			{#if drawerItem.renderer === 'held-reply'}
+				<HeldReplyBody held={drawerItem.detail as HeldReplyDetail} writesDisabled={effectiveWritesDisabled} goneLine={$goneReply?.line} onSkip={canSkip && !$goneReply ? skip : undefined} onDecide={(verb) => decideFromDrawer(drawerItem.detail as HeldReplyDetail, verb)} />
+			{:else}
+				<DecisionChip decision={drawerItem.detail as DecisionDetail} writesDisabled={effectiveWritesDisabled} onSkip={canSkip ? skip : undefined} {heldQueued} />
+			{/if}
+		</AdaptiveDrawer>
+	{/key}
 {/if}
 
 <style>

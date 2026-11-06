@@ -12,6 +12,7 @@ from automation.turn_end_effects import (
     record_external_turn_end,
 )
 from core.reasoning_provenance import merge_reasoning_provenance_evidence
+from core.stop_causes import ContextOverflowEnd
 from infra.delivery_states import PROVIDER_MISSING_RESULT_REASON
 from core.turn_core import (
     TurnIdentity,
@@ -19,6 +20,7 @@ from core.turn_core import (
     commit_turn_terminal,
 )
 from infra.db_async import run_in_db
+from infra.plan_limit_continue import rerun_queued
 from infra.queries import insert_message
 from infra.send_broadcast import broadcast_message_rows, broadcast_stored_message
 from llm.error_cause import codex_failure_meta
@@ -534,7 +536,7 @@ async def _on_result(ctx, ev: dict) -> None:
             metadata=meta_r,
             bcast=ctx.bcast,
             label="result",
-            announce=ctx.live.last_assistant_message_id is None,
+            announce=is_error or ctx.live.last_assistant_message_id is None,
             created_at=datetime.now(timezone.utc).isoformat(),
             best_effort_announcement=True,
         )
@@ -561,7 +563,8 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
     cause = ev.get("cause", "process_exited")
     reset_at = ev.get("reset_at")
     msg = ev.get("message") or f"Codex turn failed: {cause}"
-    settlement = await commit_turn_terminal(identity.turn_id, "error", msg)
+    overflow = cause == "context_window_exceeded"
+    settlement = await commit_turn_terminal(identity.turn_id, "error", ContextOverflowEnd(msg) if overflow else msg)
     if settlement.result is not TurnTerminalResult.APPLIED:
         return
     ev["_corsia_terminal_committed"] = True
@@ -570,7 +573,7 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
         unrecorded = await _settle_failed_turn_usage(ctx.thread_id, ctx.live, ev.get("token_volume"))
         if cause in ("quota_exhausted", "auth_failed"):
             ctx.dead_set.add(ctx.thread_id)
-        if cause == "context_window_exceeded":
+        if overflow:
             from subagents.codex_runtime_state import mark_provider_context_untrusted
 
             mark_provider_context_untrusted(ctx.thread_id)
@@ -579,14 +582,11 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
             **codex_failure_meta(cause, msg, reset_at, ctx.live.model, unrecorded),
             "turn_id": identity.turn_id,
         }
-        marker_id = await record_terminal_marker(
-            ctx.thread_id,
-            content=f"⚠️ {msg}",
-            metadata=meta_f,
-            bcast=ctx.bcast,
-            label="failure",
-            best_effort_announcement=True,
-        )
+        # A size refusal with its re-run queued writes no notice; the re-run answers instead.
+        queued = overflow and await run_in_db(rerun_queued, identity.turn_id)
+        marker_id = None if queued else await record_terminal_marker(
+            ctx.thread_id, content=f"⚠️ {msg}", metadata=meta_f, bcast=ctx.bcast,
+            label="failure", best_effort_announcement=True)
         await _publish_claimed_terminal(
             thread_id=ctx.thread_id,
             live=ctx.live,

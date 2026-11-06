@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from doceditor import diagram_pins
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
 from core.corrections_recording import SOURCE_KIND_DOC_COMMENT
-from plans import admission, artifact_links, feedback_join, intent_words, person_input, review_requests, service
+from plans import admission, artifact_links, feedback_join, intent_creation, person_input, review_requests, service
 from plans.feedback_items import (
     artifact_name, artifact_row, batch_value, feedback_display, feedback_item_counts, feedback_kind_counts,
     load_feedback_items,
@@ -16,8 +17,8 @@ from plans.plan_write import transaction
 
 PROVENANCE = "document.feedback_batch"
 COMMENT_ACCEPTANCE = (
-    "Every item is acknowledged, resolved, or replied to, and every change made for one is also made "
-    "wherever this document says the same thing in other words."
+    "Every item is considered and acted on where needed, and every change made for one is also made "
+    "wherever this document says the same thing in other words. Do not reply if no reply is needed."
 )
 EDIT_ACCEPTANCE = (
     "The edit is checked against current intent and kept, adjusted, or reverted "
@@ -140,12 +141,15 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
 def item_blocks(batch: Any, items: list[dict[str, Any]]) -> str:
     """Render a batch's items as its task description lists them, without the framing."""
     blocks: list[str] = []
-    # One marked-up copy per image, set by delivery on the batch's region comments.
-    # It leads, so a handoff cap that cuts the tail never drops it.
-    marked = (str(item["marked_image_line"]) for item in items if item.get("marked_image_line"))
-    blocks.extend(dict.fromkeys(marked))
+    # One line per image or diagram the comments are about, set by delivery on the batch's region comments.
+    # A line naming a marked-up image is short and leads. A diagram's carries its source, so it goes after
+    # the comments: a handoff cap cuts the tail, and the person's words must never be what it cuts.
+    subjects = list(dict.fromkeys(str(item["subject_line"]) for item in items if item.get("subject_line")))
+    blocks.extend(line for line in subjects if not line.startswith(diagram_pins.LINE_PREFIX))
     for item in items:
         if item["kind"] == "comment":
+            if item.get("thread_context"):
+                blocks.append(str(item["thread_context"]))
             lines = [
                 (
                     f"Comment {item['id']} (re-opened by {item['event_by']} after it was resolved)"
@@ -158,6 +162,8 @@ def item_blocks(batch: Any, items: list[dict[str, Any]]) -> str:
             if item.get("region_line"):
                 lines.append(str(item["region_line"]))
             lines.append(f"Feedback: {item['body']}")
+            if item.get("leave_hint"):
+                lines.append(str(item["leave_hint"]))
             if item.get("replacement") is not None:
                 label = "Suggested insertion after the quote" if item.get("insert_after") else "Suggested replacement"
                 lines.append(f"{label}: {item['replacement']}")
@@ -181,6 +187,7 @@ def item_blocks(batch: Any, items: list[dict[str, Any]]) -> str:
                     f"{item['actor_display']}'s change. Read the current file before acting."
                 )
         blocks.append("\n".join(lines))
+    blocks.extend(line for line in subjects if line.startswith(diagram_pins.LINE_PREFIX))
     return "\n\n".join(blocks)
 
 
@@ -223,9 +230,9 @@ def create_feedback_node(
     """Create one queued recipient-plan task, idempotently keyed by batch id.
 
     A batch of replies whose comment thread already has an open task joins that
-    task instead (``plans.feedback_join``). Joining a task its owner is working
-    adds no intent words, so the owner keeps its selection, and wakes the owner
-    with the reply instead.
+    task instead (``plans.feedback_join``). When its owner is working on that
+    task, the owner keeps its selection and receives a wake with the reply;
+    otherwise the person's new comments restate the task's intent.
     """
     batch_id = str(batch_value(batch, "id"))
     artifact_id = str(batch_value(batch, "artifact_id"))
@@ -236,44 +243,68 @@ def create_feedback_node(
     if not loaded:
         raise EmptyFeedbackBatchError(f"feedback batch {batch_id} has no renderable items")
     author, document = feedback_display(db, batch, loaded)
-    words = (
-        intent_words.document_comment_words(loaded)
-        if batch_value(batch, "author_kind") == "user"
-        else ()
-    )
     joined = feedback_join.open_thread_task(db, recipient_thread_id, batch, loaded)
     if joined is not None:
         held = feedback_join.earlier_items(db, joined.node_id, batch) + loaded
         blocks = item_blocks(batch, loaded)
+        restate = not joined.working and _person_comments(batch, loaded)
         feedback_join.join(
-            db, joined.node_id, title=_title(author, document, held),
-            blocks=blocks, words=() if joined.working else words, provenance=PROVENANCE,
+            db, joined.node_id, title=_title(author, document, held), blocks=blocks,
+            intent=_document_comment_intent(_person_comments(batch, held), document) if restate else None,
+            provenance=PROVENANCE,
         )
+        contexts = [str(item["thread_context"]) for item in loaded if item.get("thread_context")]
+        wake_blocks = item_blocks(batch, [{key: value for key, value in item.items() if key != "thread_context"}
+                                          for item in loaded])
+        if len(contexts) > 1:
+            from prompts.plan_tools import bounded_text
+            roots = dict.fromkeys(str(item["parent_id"]) for item in loaded if item.get("thread_context"))
+            marker = '… threads cut; read each with ' + ', '.join(
+                f'doc_comments_list(comment_id="{root}")' for root in roots
+            )
+            if len(marker.encode("utf-8")) > person_input.WORDS_MAX_BYTES:
+                marker = '… threads cut; read them with doc_comments_list per thread'
+            contexts = [bounded_text("\n\n".join(contexts), person_input.WORDS_MAX_BYTES,
+                                     measure=lambda value: len(value.encode("utf-8")), marker=marker)]
         woke = joined.working and person_input.joined_reply(
             db, joined.node_id,
-            person_input.Source(SOURCE_KIND_DOC_COMMENT, str(loaded[0]["id"]), (blocks,),
+            person_input.Source(SOURCE_KIND_DOC_COMMENT, str(loaded[0]["id"]), (wake_blocks,),
                                 str(loaded[0]["sort_at"]), recipient_thread_id, None),
-            [str(item["id"]) for item in loaded],
+            [str(item["id"]) for item in loaded], context=contexts[0] if contexts else "",
         ) is not None
         return FeedbackNodeResult(joined.node_id, (), False, woke)
+    count = _person_comments(batch, loaded)
     return _create_linked_node(
         db, recipient_thread_id, artifact_id, batch_id, PROVENANCE,
         title=_title(author, document, loaded), acceptance=_acceptance(loaded),
         description=_description(batch, loaded),
-        intent=intent_words.document_comment_intent(loaded) if words else None, words=words,
+        intent=_document_comment_intent(count, document) if count else None,
     )
 
 
+def _person_comments(batch, items) -> int:
+    """How many non-blank comments the person wrote among ``items``; none in an agent's batch."""
+    if batch_value(batch, "author_kind") != "user":
+        return 0
+    return sum(
+        1 for item in items
+        if item["kind"] == "comment" and item.get("author_kind", "user") == "user" and str(item["body"]).strip()
+    )
+
+
+def _document_comment_intent(count: int, document: str) -> str:
+    text = f"Answer the person's {count} comment{'s' if count != 1 else ''} on {document}"
+    return intent_creation.validate_intent(text.encode()[:intent_creation.MAX_INTENT_BYTES].decode(errors="ignore"))
+
+
 def _create_linked_node(db, recipient_thread_id, artifact_id, source_id, provenance,
-                        *, title, acceptance, description, intent=None, intent_node_id=None,
-                        words=()) -> FeedbackNodeResult:
+                        *, title, acceptance, description, intent=None, intent_node_id=None) -> FeedbackNodeResult:
     plan = service.ensure_plan("thread", recipient_thread_id, db=db)
     node = service.add_node(
         plan.id, kind="task", title=title, acceptance_criteria=acceptance,
         description=description, intent=intent, intent_node_id=intent_node_id,
         actor_id=None, provenance=provenance, db=db,
     )
-    intent_words.append(db, node.id, words, revision=node.requirements_revision)
     service.transition_node(
         node.id, "active", actor_id=None, provenance=provenance, db=db,
     )
@@ -314,4 +345,4 @@ def _requesting_intent(db, request) -> str | None:
     requesting_node_id = request["requesting_node_id"]
     if not requesting_node_id:
         return None
-    return str(intent_words.canonical(db, str(requesting_node_id))["id"])
+    return str(intent_creation.canonical(db, str(requesting_node_id))["id"])

@@ -20,7 +20,6 @@ async def test_real_admission_queues_committed_comment_identity(isolated_db, mon
     async def deliver(*args, **kwargs):
         return None
     monkeypatch.setattr(send_service, '_deliver_admission', deliver)
-    monkeypatch.setattr('jobs.corrections_recording._plans_hear', lambda *args: None)
     seen = []
     monkeypatch.setattr('jobs.corrections_realtime.notify', lambda *args: seen.append(args))
     await send_service.send_thread_input('thread', row, 'plain', input_id='plain', native_mode='ws', ws=object())

@@ -139,7 +139,7 @@ def test_no_findings_posts_nothing():
 
 
 def test_approach_reset_groups_evidence_into_one_pull_comment():
-    """A pulls/comments-only reader must see STOP, never a local patch queue."""
+    """A pulls/comments-only reader sees one different-approach finding."""
     from reviewer import review_publication
 
     approach = _finding(
@@ -169,9 +169,10 @@ def test_approach_reset_groups_evidence_into_one_pull_comment():
     assert "A provider session is mislabeled as a thread." in (
         grouped[0]["description"]
     )
+    assert "Findings that share this cause:" in grouped[0]["description"]
     assert poster.paths() == ["repos/owner/repo/pulls/42/comments"]
     assert poster.calls[0][1]["body"].startswith(
-        ":no_entry_sign: **STOP — APPROACH RESET REQUIRED**"
+        "**This needs a different approach**"
     )
     assert publication.deliveries[0].channel == CHANNEL_LINE
 

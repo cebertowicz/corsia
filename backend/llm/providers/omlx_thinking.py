@@ -46,10 +46,9 @@ def wire_reasoning_effort(
 ) -> str | None:
     """Return the effort to put on the wire, or None to omit the field.
 
-    ``auto`` and ``none`` both omit it: ``auto`` defers to the server's own
-    setting, and ``none`` is expressed by ``enable_thinking=False`` instead.
-    An unset level sends the shape's ``send_when_unset``, which only CORSIA's
-    own oMLX carries; anywhere else it is omitted and the server's default runs.
+    Unset, ``auto`` and ``none`` all omit it: unset and ``auto`` defer to the
+    server's setting or the model's template default, and ``none`` is
+    expressed by ``enable_thinking=False`` instead.
 
     ``reasoning_config`` is the shape the server reported for this model:
 
@@ -62,7 +61,7 @@ def wire_reasoning_effort(
       template), so the value passes through and the server validates it.
     """
     if not reasoning_effort:
-        return (reasoning_config or {}).get("send_when_unset")
+        return None
     effort = reasoning_effort.strip().lower()
     if effort in ("auto", "none", ""):
         return None

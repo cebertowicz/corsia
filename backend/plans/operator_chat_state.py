@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from core.thread_identity import root_visible_thread_ids
 import infra.thread_updates as thread_updates
+import plans.held_attention as held_attention
 import plans.node_states as node_states
 import plans.not_moving as not_moving
 import plans.operator_node_state as operator_node_state
@@ -12,6 +13,7 @@ import plans.open_tree as open_tree
 import plans.operator_owners as operator_owners
 import plans.operator_projection as operator_projection
 import plans.service as service
+import plans.workflow_fields as workflow_fields
 from plans.boundary import PlanActor
 
 THREAD_STATE_LIMIT = 200
@@ -144,6 +146,22 @@ def _plan_attention_items(presented: dict) -> list[dict]:
     return items
 
 
+def _name_runs(states: dict[str, dict], *, db) -> None:
+    """Give every plan item, failed ones included, its reader title in one read.
+
+    Read outside the plan tree, a workflow step names its run. A decision's
+    review node already carries the decision's own question as its title.
+    Access requests and held replies are not plan nodes and carry no node id.
+    """
+    items = [
+        item for row in states.values() for item in row["attention_items"]
+        if item["node_id"] is not None
+    ]
+    readers = workflow_fields.reader_titles(db, [item["node_id"] for item in items])
+    for item in items:
+        item["title"] = readers.get(item["node_id"], item["title"])
+
+
 def _live_visible_thread_ids(ids: list[str], *, actor: PlanActor, db) -> list[str]:
     """Return requested threads which are live and visible to the operator."""
     rows = db.execute(
@@ -229,6 +247,10 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
     plan_ids = list(plans_by_id)
     failed_by_plan = _failed_nodes(plan_ids, actor=actor, db=db)
     access_by_thread = _access_requests(visible_thread_ids, actor=actor, db=db)
+    # A held reply is the person's to decide, on the same footing as an access request.
+    for thread_id, items in held_attention.items_by_thread(db, actor.user_id).items():
+        if thread_id in visible_thread_ids:
+            access_by_thread.setdefault(thread_id, []).extend(items)
     latest_updates, attention_updates = thread_updates.latest_by_thread_with_attention(
         db, visible_thread_ids,
     )
@@ -260,6 +282,7 @@ def read_thread_states(thread_ids: list[str], *, actor: PlanActor, db) -> dict:
                 and plan_row["has_finished"]
             ),
         }
+    _name_runs(states, db=db)
     _add_planless_rows(states, access_by_thread, seen)
     for thread_id, row in states.items():
         row["latest_update"] = latest_updates.get(thread_id)

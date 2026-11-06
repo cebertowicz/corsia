@@ -69,6 +69,7 @@ DOC_FEEDBACK_SCHEMA_SQL = """
         user_id TEXT NOT NULL,
         root_id TEXT NOT NULL REFERENCES doc_comments(id),
         seen_at TEXT NOT NULL,
+        -- Newest seen item: a reply or the root comment.
         seen_reply_id TEXT NOT NULL,
         PRIMARY KEY (user_id, root_id)
     );

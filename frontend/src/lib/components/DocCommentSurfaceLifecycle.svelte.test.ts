@@ -2,11 +2,27 @@ import { flushSync, mount, tick, unmount } from 'svelte';
 import { describe, expect, it, vi } from 'vitest';
 import DocCommentSurface from './DocCommentSurface.svelte';
 import type { CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
+import { createMentionSelection } from './comments/mentionSelection';
 
 vi.mock('$lib/stores/docSaveQueue', () => ({ flushDraft: vi.fn(), seedDraft: vi.fn() }));
 vi.mock('$lib/stores/docComments', () => ({ loadComments: vi.fn() }));
 
 describe('comment sheet visibility', () => {
+	it('submits the selected identity after the comment surface is recreated', async () => {
+		const host = document.body.appendChild(document.createElement('div'));
+		const mentionSelection = createMentionSelection('😀 @Agent');
+		mentionSelection.select('agent-id', 3, '@Agent');
+		const onSubmit = vi.fn(async () => {});
+		const props = { state: { kind: 'draft' } as CommentSurfaceState, anchor: () => new DOMRect(), narrow: false,
+			comments: [], focusedId: null, draft: { text: 'quoted', body: '😀 @Agent', mentionSelection },
+			onClose: vi.fn(), restoreFocus: vi.fn(), onFocus: vi.fn(), onSubmit,
+			onReply: vi.fn(), onResolve: vi.fn(), onAgree: vi.fn(), target: null, artifactId: 'doc' };
+		let surface = mount(DocCommentSurface, { target: host, props }); flushSync();
+		await unmount(surface); surface = mount(DocCommentSurface, { target: host, props }); flushSync();
+		document.body.querySelector<HTMLButtonElement>('button.submit')!.click(); await tick();
+		expect(onSubmit).toHaveBeenCalledWith('😀 @Agent', ['agent-id'], [{ agent_id: 'agent-id', start: 3, end: 9 }]);
+		await unmount(surface); host.remove();
+	});
 	it.each([false, true])('stays up through close and goes down on %s', async (unmountDuringOutro) => {
 		const host = document.body.appendChild(document.createElement('div'));
 		let state = $state<CommentSurfaceState>(null);

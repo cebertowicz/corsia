@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createReviewBarState } from './reviewBarState.svelte';
 import { answerSubmitted, submittedAnswers } from './stores/cardAnswers';
-import type { ReviewBarRead } from './api/reviewBar';
+import { ReviewRefusal, type ReviewBarRead } from './api/reviewBar';
 
 const api = vi.hoisted(() => ({ fetchReviewBar: vi.fn(), answerReview: vi.fn() }));
 vi.mock('./api/reviewBar', async (importOriginal) => ({ ...(await importOriginal<object>()), ...api }));
@@ -32,7 +32,7 @@ describe('review-bar submission outcomes', () => {
 	it('reconciles the original hold with the server verdict when an artifact switch happens before a successful send resolves', async () => {
 		api.fetchReviewBar.mockResolvedValue(read);
 		const feedback_counts = { comments: 1, suggestions: 2, edits: 3 };
-		let succeed!: (value: { verdict: 'approved_with_changes'; note: null; feedback_counts: typeof feedback_counts }) => void;
+		let succeed!: (value: { verdict: 'approved'; note: null; feedback_counts: typeof feedback_counts }) => void;
 		api.answerReview.mockReturnValue(new Promise((resolve) => { succeed = resolve; }));
 		const state = createReviewBarState();
 		state.setTarget('doc-1');
@@ -41,9 +41,50 @@ describe('review-bar submission outcomes', () => {
 		const outcome = startAnswer(state);
 		expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved', feedback: read.round_feedback_counts } });
 		state.setTarget('doc-2');
-		succeed({ verdict: 'approved_with_changes', note: null, feedback_counts });
+		succeed({ verdict: 'approved', note: null, feedback_counts });
 
 		expect(await outcome).toBe('sent');
-		expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved_with_changes', feedback: feedback_counts } });
+		expect(get(submittedAnswers)).toEqual({ h1: { state: 'approved', feedback: feedback_counts } });
+	});
+
+	it('opens the note for the verdict the server refused, not one left from earlier', async () => {
+		api.fetchReviewBar.mockResolvedValue({ ...read, round_feedback_count: 1, round_feedback_counts: { comments: 1, suggestions: 0, edits: 0 } });
+		api.answerReview.mockRejectedValue(new ReviewRefusal('note_required', 'Add a note'));
+		const state = createReviewBarState();
+		state.setTarget('doc-1');
+		await state.load();
+		state.noteFor = 'changes_requested';
+
+		expect(await state.answer('approved_with_changes')).toBe('failed');
+		expect(state.phase).toBe('noting');
+		expect(state.noteFor).toBe('approved_with_changes');
+	});
+
+	it('keeps the note required after the server refuses one, until the document changes', async () => {
+		api.fetchReviewBar.mockResolvedValue({ ...read, round_feedback_count: 1, round_feedback_counts: { comments: 1, suggestions: 0, edits: 0 } });
+		api.answerReview.mockRejectedValue(new ReviewRefusal('note_required', 'Add a note'));
+		const state = createReviewBarState();
+		state.setTarget('doc-1');
+		await state.load();
+		expect(state.noteRequired).toBe(false);
+
+		await state.answer('changes_requested');
+		expect(state.noteRequired).toBe(true);
+		expect(await state.answer('changes_requested')).toBe('ignored');
+		expect(api.answerReview).toHaveBeenCalledTimes(1);
+
+		state.setTarget('doc-2');
+		expect(state.noteRequired).toBe(true);
+		api.fetchReviewBar.mockResolvedValue({ ...read, round_feedback_count: 1 });
+		await state.load();
+		expect(state.noteRequired).toBe(false);
+	});
+
+	it('starts each document with the default note verdict', () => {
+		const state = createReviewBarState();
+		state.setTarget('doc-1');
+		state.noteFor = 'approved_with_changes';
+		state.setTarget('doc-2');
+		expect(state.noteFor).toBe('changes_requested');
 	});
 });

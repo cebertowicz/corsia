@@ -47,9 +47,13 @@ def _budget_env(isolated_db, monkeypatch):
 class Runner:
     """A ``gh`` runner that answers every read with one status and headers."""
 
-    def __init__(self, status: int = 200, body: dict | None = None, **headers: str) -> None:
+    def __init__(self, status: int = 200, body: dict | None = None, *, as_person: bool = False,
+                 **headers: str) -> None:
+        from events.connectors.github_read_budget import person_budget
+
         self.status, self.headers, self.body = status, headers, body or {}
         self.paths: list[str] = []
+        self.read_budget = person_budget if as_person else None
 
     def __call__(self, args, **_kwargs):
         self.paths.append(args[-1])
@@ -78,7 +82,7 @@ def _rate_limited(call):
     assert caught.value.error_class == "rate_limited"
 
 
-def test_two_pollers_and_two_repos_share_one_budget():
+def test_readers_of_one_account_and_two_repos_share_its_budget():
     first = Runner(403, retry_after="120")
     _rate_limited(lambda: _notifications_read(first))
     sweep = Runner()
@@ -239,13 +243,37 @@ def test_status_shows_the_budget(_budget_env):
     from events.connectors.github_pr_quiet_watch import quiet_watch_status
 
     assert poller_status()["read_budget"] == {}
-    _notifications_read(Runner(200, x_ratelimit_remaining="12", x_ratelimit_reset=str(int(RESET))))
+    _notifications_read(Runner(200, as_person=True, x_ratelimit_remaining="12", x_ratelimit_reset=str(int(RESET))))
     core = poller_status()["read_budget"]
     assert core == {
         "remaining": 12, "limit": 5000, "reset_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(RESET)),
         "backing_off": False, "backoff_until": None, "sweep_paused": True,
     }
-    _notifications_read(Runner(200, x_ratelimit_remaining="0", x_ratelimit_reset=str(int(RESET))))
+    _notifications_read(Runner(200, as_person=True, x_ratelimit_remaining="0", x_ratelimit_reset=str(int(RESET))))
     core = poller_status()["read_budget"]
     assert core["backing_off"] is True and core["backoff_until"] == core["reset_at"]
     assert {"state", "last_run", "fired_count"} <= set(quiet_watch_status())
+
+
+def test_a_limit_on_one_account_never_stops_the_other_accounts_reads(_budget_env, monkeypatch):
+    from connections import github_agent
+    from events.connectors.github_notifications import poller_status
+    from events.connectors.github_pr_quiet_watch import quiet_watch_status
+    from events.connectors.github_read_budget import person_budget
+
+    monkeypatch.setattr(person_budget, "_clock", lambda: _budget_env["now"])
+    monkeypatch.setattr(github_agent, "view", lambda: pytest.fail("a status read looked up the account"))
+    _sweep_read(Runner(200, x_ratelimit_limit="60", x_ratelimit_remaining="0",
+                       x_ratelimit_reset=str(int(RESET))), "o/r")  # the agents' account is spent
+    person = Runner(as_person=True, x_ratelimit_remaining="4999", x_ratelimit_reset=str(int(RESET)))
+    assert _notifications_read(person).status == 200
+    _rate_limited(lambda: _notifications_read(Runner(429, as_person=True)))
+    agents = Runner()
+    _rate_limited(lambda: _sweep_read(agents, "o/r"))  # the agents' own exhaustion
+    _budget_env["now"] += 61
+    assert _notifications_read(person).status == 200  # the person's minute is over
+    _rate_limited(lambda: _sweep_read(agents, "o/r"))  # the agents' account still waits for its reset
+    _budget_env["now"] = RESET + 1
+    assert _sweep_read(agents, "o/r") == {}
+    assert poller_status()["read_budget"]["remaining"] == 4999
+    assert quiet_watch_status()["read_budget"]["limit"] == 60

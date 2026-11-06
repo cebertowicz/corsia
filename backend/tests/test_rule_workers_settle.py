@@ -92,9 +92,10 @@ async def test_a_worker_cut_short_before_its_first_turn_returns_no_result_once(w
 
 
 # 3 (restart) -- a start cut short, made or not, removes its inputs and reports what its row
-# kept: the rule in the event's trace (so loop detection sees it) and the workflow.
+# kept (the workflow). Its event starts a fresh rule chain even when an older row kept a
+# trace, so a rule that retries the review is never skipped as a loop.
 @pytest.mark.asyncio
-async def test_an_orphaned_start_removes_its_inputs_and_carries_its_trace(world, monkeypatch):
+async def test_an_orphaned_start_removes_its_inputs_and_starts_a_fresh_chain(world, monkeypatch):
     from automation.worker_inputs import start_dir
     from events import intake, worker_starts
     from infra.database import write_transaction
@@ -122,9 +123,9 @@ async def test_an_orphaned_start_removes_its_inputs_and_carries_its_trace(world,
     await settle_all()
     assert [row[:2] for row in starts(rule)] == [("no_result", "a restart cut the start short")] * 2
     assert not any(path.exists() for path in dirs)
-    assert {(item["trace"], item["facts"]["workflow"]) for item in admitted
+    assert {(item.get("trace", ()), item["facts"]["workflow"]) for item in admitted
             if item["event_type"] == "worker.no_result"} == {
-        ((rule,), "worker-flow"), (("rule_up", rule), "worker-flow@3")}
+        ((), "worker-flow"), ((), "worker-flow@3")}
 
 
 # The owner reads a classified reason; the exception's own text stays in the log.

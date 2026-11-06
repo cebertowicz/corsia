@@ -240,11 +240,10 @@ async function backToDocument(page: Page): Promise<void> {
 const chipButton = (page: Page) => page.locator('[data-doc-reply-chip]').getByRole('button');
 const chipBox = (page: Page) => page.locator('[data-doc-reply-chip]');
 
-/** Stay on the thread the chip opened until its dwell has read it: its New replies show, then clear. */
+/** Arriving on a thread opens it, so its New replies clear once its card is shown. */
 async function awaitFocusedRead(page: Page): Promise<void> {
-	const fresh = page.locator('[data-comment-id].focused .ct-reply.new');
-	await expect(fresh.first()).toBeVisible();
-	await expect(fresh).toHaveCount(0);
+	await expect(page.locator('[data-comment-id].focused')).toBeVisible();
+	await expect(page.locator('[data-comment-id].focused .ct-reply.new')).toHaveCount(0);
 }
 
 /** The button's extended hit area is a pseudo-element, not the visible face's bounding box. */
@@ -370,7 +369,8 @@ for (const width of [1440, 393]) {
 
 		await page.getByRole('button', { name: 'Close comments' }).click();
 		const statement = "INSERT INTO doc_comments (id, artifact_id, parent_id, author, author_kind, author_thread_id, body, created_at, updated_at) VALUES (lower(hex(randomblob(16))), ?, ?, ?, 'agent', ?, ?, ?, ?)";
-		sqlite(Array.from({ length: 119 }, (_, index) => [statement, [doc.artifactId, doc.roots[10], REPLIER, threadId, `Update ${index + 1}.`, null, null]]));
+		// The chip's own arrival read the long reply; 120 more on another thread make the large count.
+		sqlite(Array.from({ length: 120 }, (_, index) => [statement, [doc.artifactId, doc.roots[10], REPLIER, threadId, `Update ${index + 1}.`, null, null]]));
 		await reloadComments(page, doc.artifactId);
 		await expectChip(page, '120 new replies');
 
@@ -604,7 +604,8 @@ for (const width of [1440, 393]) {
 		await expect(chipBox(page)).toHaveCount(0);
 		expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-doc-reply-chip]'), { x, y }), 'the chip cannot be hit while the sheet is up').toBe(false);
 		await expect(sheet).toHaveCount(0);
-		await expectChip(page, '2 new replies');
+		// Arriving from the chip opened the first thread, so only the other one is still new.
+		await expectChip(page, '1 new reply');
 		await holdDwell(page, false);
 	});
 }
@@ -780,7 +781,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await expectChip(page, '12 new replies');
 
 			// Beside the comments pill: both stay whole and clear of each other.
-			const pill = page.getByRole('button', { name: /open threads?/ });
+			const pill = page.getByRole('button', { name: /^\d+ threads?\b/ });
 			await expect(pill).toBeVisible();
 			const [chip, pillBox] = await Promise.all([chipBox(page).boundingBox(), pill.boundingBox()]);
 			const overlaps = chip!.x < pillBox!.x + pillBox!.width && pillBox!.x < chip!.x + chip!.width && chip!.y < pillBox!.y + pillBox!.height && pillBox!.y < chip!.y + chip!.height;
@@ -789,7 +790,7 @@ for (const theme of ['light', 'dark'] as const) {
 			for (let step = 0; step < 12; step += 1) {
 				if (!(await chipBox(page).count())) break;
 				await chipButton(page).click();
-				// The comments list opens over the document and covers the chip; stay until the dwell reads it, then put it away to tap again.
+				// The comments list opens over the document and covers the chip; stay until the arrival reads it, then put it away to tap again.
 				await awaitFocusedRead(page);
 				await page.getByRole('button', { name: 'Close comments' }).click();
 				await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
@@ -821,7 +822,7 @@ for (const theme of ['light', 'dark'] as const) {
 				const line = page.locator('.cm-line').filter({ hasText: 'This workstream covers the first-run screens' }).first();
 				await line.dblclick({ position: { x: 20, y: 8 } });
 				await page.locator('.sel-comment').click();
-				await page.getByPlaceholder('Comment…').fill('Please confirm the handover.');
+				await page.getByPlaceholder('Comment, or @ to tag an agent').fill('Please confirm the handover.');
 				await expect(page.locator('[data-adaptive-drawer].drawer-backdrop')).toBeVisible();
 				await expect(chipBox(page)).toHaveCount(0);
 
@@ -832,7 +833,7 @@ for (const theme of ['light', 'dark'] as const) {
 				const line = page.locator('.cm-line').filter({ hasText: 'This workstream covers the first-run screens' }).first();
 				await line.dblclick({ position: { x: 20, y: 8 } });
 				await page.locator('.sel-comment').click();
-				const draft = page.getByPlaceholder('Comment…');
+				const draft = page.getByPlaceholder('Comment, or @ to tag an agent');
 				await draft.fill('Please confirm the handover.');
 				await chipButton(page).click();
 				const savedDraft = await page.evaluate(async () => {

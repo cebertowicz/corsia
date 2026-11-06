@@ -1,0 +1,44 @@
+[
+  {
+    "name": "close marks at the top of a wide image",
+    "width": 1000,
+    "height": 500,
+    "radius": 11,
+    "gap": 3,
+    "regions": [
+      {"x": 0.5, "y": 0.1, "w": 0.1, "h": 0.1},
+      {"x": 0.505, "y": 0.1, "w": 0.1, "h": 0.1}
+    ],
+    "expected": [
+      {"x": 500, "y": -16, "side": "above", "anchor": {"x": 500, "y": 50}},
+      {"x": 529, "y": -16, "side": "above", "anchor": {"x": 505, "y": 50}}
+    ]
+  },
+  {
+    "name": "right edge",
+    "width": 1000,
+    "height": 500,
+    "radius": 11,
+    "gap": 3,
+    "regions": [{"x": 0.9, "y": 0.4, "w": 0.08, "h": 0.2}],
+    "expected": [{"x": 1016, "y": 200, "side": "right", "anchor": {"x": 980, "y": 200}}]
+  },
+  {
+    "name": "left edge",
+    "width": 1000,
+    "height": 500,
+    "radius": 11,
+    "gap": 3,
+    "regions": [{"x": 0.02, "y": 0.4, "w": 0.08, "h": 0.2}],
+    "expected": [{"x": -16, "y": 200, "side": "left", "anchor": {"x": 20, "y": 200}}]
+  },
+  {
+    "name": "bottom edge",
+    "width": 1000,
+    "height": 500,
+    "radius": 11,
+    "gap": 3,
+    "regions": [{"x": 0.5, "y": 0.85, "w": 0.1, "h": 0.1}],
+    "expected": [{"x": 500, "y": 516, "side": "below", "anchor": {"x": 500, "y": 475}}]
+  }
+]

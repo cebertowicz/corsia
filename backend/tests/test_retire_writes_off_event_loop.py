@@ -146,6 +146,14 @@ async def test_cc_shutdown_marker_writes_off_the_event_loop(
     from core.turn_core import TurnIdentity
     from subagents import cc_shutdown
     from subagents.cc_runtime_state import _Live
+    from infra import send_broadcast
+
+    published = []
+
+    async def _broadcast(thread_id, ids):
+        published.append((thread_id, ids))
+
+    monkeypatch.setattr(send_broadcast, "broadcast_message_rows", _broadcast)
 
     async def _prepared(*_a, **_k):
         return (1.0, [])
@@ -176,6 +184,8 @@ async def test_cc_shutdown_marker_writes_off_the_event_loop(
     await cc_shutdown.shutdown_one_live("child-1", live)
 
     assert _message_count("child-1") == 1
+    assert len(published) == 1 and published[0][0] == "child-1"
+    assert len(published[0][1]) == 1
 
 
 @pytest.mark.asyncio
@@ -188,6 +198,14 @@ async def test_codex_shutdown_marker_writes_off_the_event_loop(
     from core.turn_core import TurnIdentity, TurnTerminalResult
     from subagents import codex_runtime
     from subagents.codex_runtime_state import _LiveCodex
+    from infra import send_broadcast
+
+    published = []
+
+    async def _broadcast(thread_id, ids):
+        published.append((thread_id, ids))
+
+    monkeypatch.setattr(send_broadcast, "broadcast_message_rows", _broadcast)
 
     async def _quiesced(*_a, **_k):
         return True
@@ -219,3 +237,5 @@ async def test_codex_shutdown_marker_writes_off_the_event_loop(
         codex_runtime._LIVE.pop("thread-1", None)
 
     assert _message_count("thread-1") == 1
+    assert len(published) == 1 and published[0][0] == "thread-1"
+    assert len(published[0][1]) == 1

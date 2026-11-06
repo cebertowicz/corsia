@@ -5,13 +5,13 @@ from __future__ import annotations
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
-from doceditor import image_regions
+from doceditor import image_regions, image_revision
 
 
 def test_an_unchanged_image_is_hashed_once_and_a_changed_one_again(tmp_path, monkeypatch):
     hashed = []
-    real = image_regions.sha256_file
-    monkeypatch.setattr(image_regions, "sha256_file", lambda path: hashed.append(path) or real(path))
+    real = image_revision.sha256_file
+    monkeypatch.setattr(image_revision, "sha256_file", lambda path: hashed.append(path) or real(path))
     login, cart = tmp_path / "login.png", tmp_path / "cart.png"
     login.write_bytes(b"login v1")
     cart.write_bytes(b"cart v1")

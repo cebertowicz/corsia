@@ -105,7 +105,7 @@ def test_identity_view_once_per_delivery(monkeypatch, login, expected_calls):
     view = Mock(return_value=SimpleNamespace(ready=False))
     monkeypatch.setattr(github_agent, "view", view)
     monkeypatch.setattr(github_agent, "agent_login", lambda account: None)
-    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (True, True))
+    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (True, True, False))
     monkeypatch.setattr(github_rules.rule_reads, "unrouted_projects", lambda *args, **kwargs: frozenset({"p"}))
     monkeypatch.setattr(github_rules, "apply_webhook_rules_sync", lambda *args, **kwargs: None)
     raw = payload("pr", "opened", login)
@@ -121,7 +121,7 @@ def test_no_rule_reads_no_identity(monkeypatch):
     monkeypatch.setattr(github_content_facts, "is_own", github_ownership.is_own)
     view = Mock(return_value=SimpleNamespace(ready=False))
     monkeypatch.setattr(github_agent, "view", view)
-    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (False, False))
+    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (False, False, False))
     scope = github_rules.rule_scope("webhook.github.pr_opened", payload("pr", "opened"), None)
     assert not scope.any_rule and scope.envelope is None
     assert view.call_count == 0
@@ -173,7 +173,7 @@ async def test_delivery_identity_reads_by_author_and_declaration(main_db, monkey
     view = Mock(return_value=SimpleNamespace(ready=False))
     monkeypatch.setattr(github_agent, "view", view)
     monkeypatch.setattr(github_agent, "agent_login", lambda account: None)
-    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (True, True))
+    monkeypatch.setattr(github_rules.rule_reads, "type_rules", lambda *args: (True, True, False))
     monkeypatch.setattr(github_rules.rule_reads, "unrouted_projects", lambda *args, **kwargs: frozenset({"p"}))
     monkeypatch.setattr(github_rules, "apply_webhook_rules_sync", lambda *args, **kwargs: None)
     deliver = AsyncMock(return_value=True)

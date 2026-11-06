@@ -16,8 +16,8 @@ flowchart TB
     P --> A1[Agent]
     C --> A1
     C --> A2[Agent]
-    A1 -->|delegate_task| W1[Temporary<br/>worker]
-    A1 -->|delegate_task| W2[Temporary<br/>worker]
+    A1 -->|delegate_task| W1[Worker]
+    A1 -->|delegate_task| W2[Worker]
     W1 -->|return| A1
 ```
 
@@ -33,16 +33,16 @@ An agent is a thread with the roster fields set. Two paths change the roster: th
 
 ### Addressing another thread
 
-`delegate_send` sends a message into another thread. Same-scope sends are the default; cross-scope sends are limited as described in [Scopes](scopes.md). A send is admitted through the same path as a person's message; see [Turns and delivery](turns-and-delivery.md).
+`delegate_send` sends a message into another thread. Same-scope sends are the default; cross-scope sends are limited as described in [Scopes](scopes.md). When the local-only policy requires a hold, the message is held for the person instead of being delivered immediately; an approved held reply uses the same delivery path (`backend/tools/delegate_send.py`). See [Turns and delivery](turns-and-delivery.md).
 
 ### Delegating a task
 
 `delegate_task` creates a hidden child thread and sends its first message. By default it also attempts to hand the child the parent's current plan task; the caller can name another task or request a chat return instead. The child may already be running if the handover fails, so the result reports that failure (`backend/tools/delegate_task.py`).
 
 - **A model is required.** The caller names the model; there is no default. See [Models and harnesses](models-and-harnesses.md).
-- **Confinement is `none` or `untrusted`.** `untrusted` limits the worker to file reads in directories the caller lists and its own confined working directory. It is for content neither the caller nor the person controls, such as outside contributors' code or mail from an unknown sender. The sandbox model is described in the security section: [Security](../security/README.md).
+- **Confinement is `none` or `untrusted`.** `untrusted` limits the worker's model-accessible tools to file reads; the caller lists the directories it may read. It is for content neither the caller nor the person controls, such as outside contributors' code or mail from an unknown sender. The sandbox model is described in the security section: [Security](../security/README.md).
 - **Completion returns to the parent.** For an unstructured child with a final reply, the reply can be admitted to the parent in the transaction that settles the completed turn. Structured delegation uses the plan's harvest path instead. A fenced parent, a rule-started worker, or a turn without a final reply also does not produce that completion message; an error does not send one this way (`backend/infra/thread_driver.py`, `backend/plans/delegation.py`).
-- **Skills inherit down the ancestry.** A child sees its ancestors' thread-level skills; a skill in the child overrides the parent's of the same name (`backend/core/skill_resolution.py`).
+- **Skills inherit down the ancestry.** A child sees its ancestors' thread-level skills; a skill in the child overrides the parent's of the same name, unless a System skill has that name (`backend/core/skill_resolution.py`).
 
 ### Limits on live processes
 
@@ -65,3 +65,5 @@ Claude Code runs as a separate process per thread. The backend caps how many are
 | Process caps | `backend/infra/subagent_caps.py`, `backend/infra/subagent_caps.json` |
 | Claude Code process management | `backend/subagents/` |
 | Skill ancestry | `backend/core/skill_resolution.py` |
+
+Checked against the code at `7a8c55d84`.

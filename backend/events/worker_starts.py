@@ -77,7 +77,6 @@ def queue(
                 "event": labelled_event({"type": f"{event.connector}.{event.event_type}", "id": event.event_id,
                           "rule_id": rule.id, "facts": dict(event.facts), "origin": event.origin,
                           "artifact": dict(event.artifact_ref) if event.artifact_ref else None}),
-                "trace": [*event.trace, rule.id],
             }, ensure_ascii=False, default=str)))
     return outcomes
 

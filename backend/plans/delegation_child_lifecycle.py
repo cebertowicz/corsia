@@ -30,6 +30,7 @@ def notify_turn_error(
     """
     from datetime import datetime, timezone
 
+    from infra.plan_limit_continue import rerun_queued
     from infra.thread_confinement import ChildOutput
     from plans import delegation_turn_end, wait_causes
     from plans.delegation_child_rollover import has_rollover_successor
@@ -62,6 +63,8 @@ def notify_turn_error(
                        subject_id=error_episode(connection, parent_plan_id, worker, f'locality\n{refused_on}'))
         return
     if held_kind != 'account' and not held and not provider_limit:
+        if turn_id is not None and rerun_queued(turn_id, db=connection):
+            return  # its one re-run is queued: the re-run answers
         _wake_parent(
             connection, parent_plan_id, worker, kind="child_turn_errored",
             subject_id=error_episode(connection, parent_plan_id, worker, error), child_plan_id=str(plan["id"]),

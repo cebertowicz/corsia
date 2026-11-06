@@ -21,7 +21,7 @@ def shape_messages(
     metadata = json.loads(row.get("metadata_json") or "{}")
     if metadata.get("config_model_type") not in ("gemma4", "gemma4_unified"):
         return messages
-    # oMLX 0.7.1rc1 merges tool responses into the preceding assistant message;
+    # oMLX 0.7.1rc1 through 0.7.3 merges tool responses into the preceding assistant message;
     # the Gemma 4 template closes the turn when that message has content.
     # Providers & Inference: recheck on each oMLX bump; remove once oMLX keeps
     # tool responses separate from the preceding assistant message.

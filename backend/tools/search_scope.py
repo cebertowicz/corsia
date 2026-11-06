@@ -22,6 +22,7 @@ from pathlib import Path
 from core.workspace_layout import THREADS_DIR, thread_tray_owners
 from eval.tool_allowlist import carry_in_hides
 from tools.filesystem_effects import expanded_globs, match_relative_glob
+from tools.search_fence import SearchFence
 
 SKIPPED_NAMES = frozenset({"node_modules", "__pycache__", "venv"})
 # A reviewed host grep searches the hidden folders its reviewed path holds, as it
@@ -72,6 +73,7 @@ class SearchScope:
     all_threads: bool
     root_name: str = ""
     lists_env: bool = False
+    fence: SearchFence | None = None
 
     def other_thread(self, parent: str, name: str) -> bool:
         """Whether ``name`` is another thread's folder inside a ``.threads`` folder."""
@@ -104,6 +106,8 @@ class SearchScope:
     def prunes_reviewed_directory(self, relative: Path, components: frozenset[str]) -> bool:
         """Whether a reviewed host grep skips a directory: another thread's, or an
         unnamed cache, environment or worktree folder."""
+        if self.fence and self.fence.excludes(self.fence.root / relative):
+            return True
         parent = relative.parent.name if len(relative.parts) > 1 else self.root_name
         name = relative.name
         if self.other_thread(parent, name):
@@ -116,6 +120,8 @@ class SearchScope:
         ``components`` are the pattern's parts; the exact positional check is
         ``scoped_match``, applied to every file the walk yields.
         """
+        if self.fence and self.fence.excludes(self.fence.root / relative):
+            return True
         parent = relative.parent.name if len(relative.parts) > 1 else self.root_name
         name = relative.name
         return not self.descends(parent, name) and not self._named(parent, name, components)

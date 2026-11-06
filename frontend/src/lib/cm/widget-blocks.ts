@@ -24,6 +24,16 @@ export function isMermaidFence(node: SyntaxNodeRef, doc: Text): boolean {
 	return !!info && doc.sliceString(info.from, info.to).trim().toLowerCase() === 'mermaid';
 }
 
+/** The body the renderer and diagram comments use, without container prefixes or fence indentation. */
+export function mermaidSource(node: SyntaxNodeRef, doc: Text): string {
+	const prefix = doc.sliceString(doc.lineAt(node.from).from, node.from);
+	const afterQuotes = prefix.replace(/^(?: {0,3}> ?)+/, '');
+	const indent = /^ *$/.test(afterQuotes) ? afterQuotes.length : 0;
+	let content = node.node.getChildren('CodeText').map((part) => doc.sliceString(part.from, part.to)).join('');
+	if (node.node.getChildren('CodeMark').length === 1 && content.endsWith('\n')) content = content.slice(0, -1);
+	return content.split('\n').map((line) => line.replace(new RegExp(`^ {0,${indent}}`), '')).join('\n');
+}
+
 /**
  * The editor's syntax tree parsed at least to `pos`. These lookups must be right, so they finish the parse rather than stop at a time
  * budget: a partly parsed tree would silently answer "no block here" on a slower machine. Callers include comment-card labels, which

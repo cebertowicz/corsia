@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 
 const mocks = vi.hoisted(() => ({ fetchComments: vi.fn() }));
 vi.mock('$lib/ws', () => ({ on: vi.fn(() => () => {}) }));
-vi.mock('$lib/api/docs', () => ({
+vi.mock('$lib/api/docs', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api/docs')>()),
 	fetchComments: mocks.fetchComments,
 	postComment: vi.fn(),
 	patchComment: vi.fn(),
@@ -22,7 +23,11 @@ vi.mock('$lib/stores/viewport', async () => {
 
 import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
+import SnapshotOverlayHost from './SnapshotOverlayHost.test.svelte';
+import { RequestRefused } from '$lib/api/docs';
+import { clearTabViewState, openTabDocumentImage, tabDocumentImage } from '$lib/stores/tabViewState';
 import { docComments } from '$lib/stores/docComments';
+import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 import { prefersReducedMotion } from '$lib/stores/viewport';
 
 const SRC = '/api/files/content?path=%2Fws%2Fshot.png&raw=true';
@@ -79,16 +84,52 @@ afterEach(() => {
 	delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
 	delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientHeight;
 	Object.defineProperty(window, 'innerWidth', { configurable: true, value: realWidth });
+	deliveryConfirmation.dismiss();
 	vi.restoreAllMocks();
 });
 
 describe('ImageCommentLightbox', () => {
+	it('keeps a refused draft while replacing the tab snapshot and posts against the refreshed source', async () => {
+		vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const snapshot = { src: 'blob:new', alt: 'Diagram', from: 0, to: 10, scrollTop: 0, top: 0, diagramSource: 'new' };
+		const post = vi.fn().mockRejectedValueOnce(new RequestRefused('409', 'diagram_changed')).mockResolvedValue('new-comment');
+		openTabDocumentImage('thread', 'tab', { ...snapshot, src: 'blob:old', diagramSource: 'old' });
+		component = mount(SnapshotOverlayHost, { target: host, props: { comments: {
+			artifactId: 'art-img', projectId: null, readOnly: false, post, refreshDiagram: vi.fn(async () => snapshot),
+		} } });
+		await settle();
+		const img = host.querySelector<HTMLImageElement>('.pad img')!;
+		Object.defineProperties(img, { naturalWidth: { value: 1000 }, naturalHeight: { value: 500 } });
+		img.dispatchEvent(new Event('load'));
+		await settle();
+		commentButton()!.click();
+		await settle();
+		host.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+		await settle();
+		const text = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
+		text.value = 'Keep this'; text.dispatchEvent(new Event('input', { bubbles: true }));
+		await settle();
+		document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
+		await settle();
+		expect(tabDocumentImage('thread', 'tab')?.diagramSource).toBe('new');
+		expect(host.querySelector('.pad img')).toBe(img);
+		img.dispatchEvent(new Event('load'));
+		await settle();
+		host.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+		await settle();
+		expect(document.body.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Keep this');
+		document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
+		await settle();
+		expect(post.mock.calls.map((args) => args[6])).toEqual(['old', 'new']);
+		clearTabViewState('thread', 'tab');
+	});
 	it('shows the document reply chip for replies arriving while its image is open', async () => {
 		const step = vi.fn();
 		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
-			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0 },
+			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0, viewId: {} },
 			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
-			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn() },
+			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), refreshDiagram: vi.fn(async () => null) },
 			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: step,
 		} });
 		await settle();
@@ -104,23 +145,38 @@ describe('ImageCommentLightbox', () => {
 		expect(step).toHaveBeenCalledOnce();
 	});
 
+	it('keeps an earlier document confirmation out of the viewer but shows a new viewer confirmation', async () => {
+		deliveryConfirmation.show('art-img', 1);
+		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
+			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0, viewId: {} },
+			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
+			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), refreshDiagram: vi.fn(async () => null) },
+			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: vi.fn(),
+		} });
+		await settle();
+		expect(host.querySelector('[data-doc-bottom-band]')).toBeNull();
+		deliveryConfirmation.show('art-img', 2);
+		await settle();
+		expect(host.querySelector('.viewer-band [data-doc-bottom-band]')?.textContent).toContain('2 comments sent');
+	});
+
 	it('reads the image\'s comments, counts them on the pill and numbers their tags on the image', async () => {
 		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
 		expect(mocks.fetchComments).toHaveBeenCalledWith('art-img');
-		expect(pill()!.getAttribute('aria-label')).toBe('2 open threads');
+		expect(pill()!.getAttribute('aria-label')).toBe('2 threads');
 		// The tags sit inside the zoomed frame, so they pan and zoom with the image.
 		const tags = [...host.querySelectorAll<HTMLElement>('.frame [data-region-tag]')];
 		expect(tags.map((tag) => tag.dataset.regionTag)).toEqual(['1', '3']);
 	});
 
-	it('counts open threads on the pill, as the document\'s pill does: resolved ones are not counted', async () => {
+	it('counts all threads on the image pill, including resolved ones', async () => {
 		mocks.fetchComments.mockResolvedValue({
 			comments: [row('first', 1, 0.1), row('second', 3, 0.6), { ...row('done', 2, 0.4), resolved: true }],
 			feedback: { owner_label: null, undelivered_batches: [] },
 		});
 		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img' });
-		expect(pill()!.getAttribute('aria-label')).toBe('2 open threads');
-		expect(pill()!.querySelector('.count')!.textContent).toBe('2');
+		expect(pill()!.getAttribute('aria-label')).toBe('3 threads');
+		expect(pill()!.querySelector('.count')!.textContent).toBe('3');
 		expect(pill()!.querySelector('.count-unit')!.textContent).toBe('threads');
 		// Nothing waits to be sent, so no dot.
 		expect(pill()!.querySelector('.unsent-dot')).toBeNull();
@@ -145,6 +201,25 @@ describe('ImageCommentLightbox', () => {
 		img.dispatchEvent(new Event('load'));
 		await settle();
 		expect(commentButton()!.disabled).toBe(false);
+	});
+
+	it.each([['image', undefined], ['diagram', 'flowchart LR\n A-->B']])('keeps a %s draft open while using viewer zoom controls', async (_kind, diagramSource) => {
+		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img', diagramSource });
+		commentButton()!.click();
+		await settle();
+		host.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		await settle();
+		const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
+		textarea.value = 'Keep this draft';
+		textarea.dispatchEvent(new Event('input', { bubbles: true }));
+		await settle();
+		for (const name of ['Zoom in', 'Zoom out', 'Fit']) {
+			const button = [...host.querySelectorAll<HTMLButtonElement>('[data-image-zoom] button')].find((el) => (el.getAttribute('aria-label') ?? el.textContent?.trim()) === name)!;
+			button.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+			button.click();
+			await settle();
+			expect(document.body.querySelector('textarea')?.value, name).toBe('Keep this draft');
+		}
 	});
 
 	it('comments on the whole image from the keyboard, and holds the review bar while the comment has text', async () => {
@@ -399,7 +474,7 @@ describe('ImageCommentLightbox', () => {
 	it('keeps the count and the tags but offers no Comment button when read-only', async () => {
 		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img', readOnly: true });
 		expect(commentButton()).toBeNull();
-		expect(pill()!.getAttribute('aria-label')).toBe('2 open threads');
+		expect(pill()!.getAttribute('aria-label')).toBe('2 threads');
 		expect(host.querySelectorAll('[data-region-tag]')).toHaveLength(2);
 	});
 
@@ -434,7 +509,7 @@ describe('ImageCommentLightbox', () => {
 		it('shows only the comments on this image, with the way back to the document', async () => {
 			await render({ src: SRC, alt: 'Mock', artifactId: 'art-doc', docName: 'notes.md', onBack: vi.fn(), inDocument: inDocument() });
 			expect(mocks.fetchComments).toHaveBeenCalledWith('art-doc');
-			expect(pill()!.getAttribute('aria-label')).toBe('2 open threads');
+			expect(pill()!.getAttribute('aria-label')).toBe('2 threads');
 			expect(host.querySelectorAll('[data-region-tag]')).toHaveLength(2);
 			expect(host.querySelector('button[aria-label="Back to notes.md"]')).not.toBeNull();
 		});
@@ -452,7 +527,7 @@ describe('ImageCommentLightbox', () => {
 			await settle();
 			document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
 			await settle();
-			expect(post).toHaveBeenCalledWith({ x: 0, y: 0, w: 1, h: 1 }, 'Too dark');
+			expect(post).toHaveBeenCalledWith({ x: 0, y: 0, w: 1, h: 1 }, 'Too dark', [], []);
 		});
 
 		it('opens at the comment it was opened on, its card at its tag', async () => {

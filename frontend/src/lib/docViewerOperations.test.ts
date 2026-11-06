@@ -4,7 +4,8 @@ const { markArtifactVerified } = vi.hoisted(() => ({
 	markArtifactVerified: vi.fn().mockResolvedValue({}),
 }));
 
-vi.mock('$lib/api/docs', () => ({
+vi.mock('$lib/api/docs', async (importOriginal) => ({
+	RequestRefused: (await importOriginal<typeof import('$lib/api/docs')>()).RequestRefused,
 	markArtifactVerified,
 	fetchContent: vi.fn(),
 }));
@@ -13,6 +14,7 @@ import { shouldOfferVerification, type DocumentFreshness } from '$lib/docFreshne
 import { emit } from '$lib/ws/events';
 import { createCommentRetryToast, markFreshnessVerified, postDocumentComment, subscribeToDocumentCommentChanges, submitDocumentComment } from './docViewerOperations';
 import { toasts } from '$lib/stores/toast';
+import { RequestRefused } from '$lib/api/docs';
 
 function freshness(overrides: Partial<DocumentFreshness> = {}): DocumentFreshness {
 	return {
@@ -49,6 +51,22 @@ describe('comment submission failure delivery', () => {
 		try {
 			await expect(submitDocumentComment(async () => { throw error; })).rejects.toBe(error);
 			expect(report).toHaveBeenCalledWith("Couldn't post the comment — try again", 'error');
+		} finally {
+			report.mockRestore();
+			log.mockRestore();
+		}
+	});
+
+	it.each([
+		['no_viewing_thread', 'Open this document from a chat to tag agents. Your comment is still here.'],
+		['tag_unavailable', 'An agent you tagged can’t be tagged from this chat. Remove its tag and post again. Your comment is still here.'],
+	])('names a %s tag refusal by its kind, ahead of the surface message', async (kind, copy) => {
+		const error = new RequestRefused('400 {}', kind);
+		const report = vi.spyOn(toasts, 'show').mockImplementation(() => 'toast');
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+		try {
+			await expect(submitDocumentComment(async () => { throw error; }, undefined, () => 'surface')).rejects.toBe(error);
+			expect(report).toHaveBeenCalledWith(copy, 'error');
 		} finally {
 			report.mockRestore();
 			log.mockRestore();

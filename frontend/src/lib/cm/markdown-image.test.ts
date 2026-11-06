@@ -9,6 +9,7 @@ import { commentMarks, setCommentRanges } from './comment-marks';
 import { commentRail } from './comment-rail';
 import { markdownLivePreview } from './markdown-live';
 import { installLinkTargetResolver } from '$lib/linkTargetResolver';
+import { placeTop } from '$lib/documentReadingPlace';
 import {
 	FAILED_IMAGE, imageContext, imageOpener, imageRequestAt, MISSING_IMAGE, NOT_AN_IMAGE, refreshMarkdownImages, resolveImagePath, UNAVAILABLE_IMAGE,
 	type ImageContext, type OpenImageRequest,
@@ -203,7 +204,8 @@ describe('markdown images in the live preview', () => {
 			expect(down.defaultPrevented).toBe(true);
 			expect(open).toHaveBeenCalledTimes(1);
 			const request: OpenImageRequest = open.mock.calls[0][0];
-			expect(request).toMatchObject({ alt: 'Mock screen', from: at, to: at + IMAGE.length, scrollTop: 0, top: 0 });
+			// Its place is its line's, read the way the document's place is read, so Back holds that line.
+			expect(request).toMatchObject({ alt: 'Mock screen', from: at, to: at + IMAGE.length, scrollTop: 0, top: placeTop(view, at) });
 			expect(imagePath(Object.assign(new Image(), { src: request.src }))).toBe('/ws/notes/shots/a.png');
 			expect(view.state.selection.main.empty).toBe(true);
 			expect(view.dom.querySelector('.cm-md-image-selected')).toBeNull();

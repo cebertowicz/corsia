@@ -39,7 +39,7 @@ TERMINAL_EVENTS = (RESULT, RETIRED, COVERAGE)
 RETIRE_REASONS = (
     "lesson_unreadable", "lesson_retired", "version_changed", "case_changed",
     "target_moved", "owner_missing", "delivery_mismatch", "not_mechanically_executable",
-    "target_unavailable", "same_input", OMIT_MISSING_SECTION,
+    "target_unavailable", "same_input", "decisive_unparameterized", OMIT_MISSING_SECTION,
 )
 #: Why a claimed case ended without enough completed samples: the eval route's own
 #: failure kinds (``eval.endpoint.EVAL_FAILURES``), a restart, lost capacity, or

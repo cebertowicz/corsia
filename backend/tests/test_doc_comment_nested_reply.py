@@ -59,7 +59,7 @@ def test_migration_reroots_legacy_chains_and_leaves_roots_and_missing_parents_un
         "unrelated-root": None,
         "missing-parent": "absent",
     }
-    assert SCHEMA_VERSION == 172
+    assert SCHEMA_VERSION == 179
     assert MIGRATIONS[141] is migrate_141_to_142
 
 
@@ -76,7 +76,7 @@ def test_reply_to_a_reply_notifies_the_root_comment_author(isolated_db):
         db.close()
 
     assert nested["parent_id"] == root["id"]
-    assert recipients == ("owner", "root-author")
+    assert recipients == ("middle-author", "owner", "root-author")
 
 
 def test_migrated_legacy_reply_is_reported_as_new_on_its_root_thread(isolated_db):

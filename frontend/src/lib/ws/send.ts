@@ -10,6 +10,7 @@ import { viewingDocumentForThread } from '../stores/documentViewport';
 import {
 	acknowledgedTurnId,
 	hasActiveTurn as reducerHasActiveTurn,
+	pendingInputThreads,
 	requestInput,
 } from './turnState';
 import { beginPendingSnapshot } from './streamState';
@@ -79,6 +80,49 @@ export function resubscribeWatchedThreads(): void {
 	}
 }
 
+/**
+ * The exact frame each pending input put on the socket, keyed by input id.
+ *
+ * `ws.send` is fire-and-forget and can be swallowed whole: a half-dead socket
+ * accepts the frame, the person sees their message, and the server never hears
+ * of it. Recovery on the next socket can only re-ask for an input it can find
+ * in the server's history, so the only copy of a lost frame is the one this
+ * client still holds. It is kept only while its input is still pending, so it
+ * can never grow past the inputs actually waiting.
+ */
+const unconfirmedFrames = new Map<string, { threadId: string; frame: string }>();
+
+function rememberFrame(threadId: string, inputId: string, frame: string): void {
+	const pendingByThread = new Map<string, Set<string>>(pendingInputThreads().map(entry =>
+		[entry.threadId, new Set<string>(entry.inputIds)]
+	));
+	for (const [pendingId, stored] of unconfirmedFrames) {
+		if (!pendingByThread.get(stored.threadId)?.has(pendingId)) {
+			unconfirmedFrames.delete(pendingId);
+		}
+	}
+	unconfirmedFrames.set(inputId, { threadId, frame });
+}
+
+/**
+ * Put a pending input's original frame back on the current socket.
+ *
+ * Byte-for-byte, so the server's duplicate check sees the payload it saw the
+ * first time and the input lands once. False means this client holds no frame
+ * to resend — after a page reload, for example, it is gone.
+ */
+export function resendUnconfirmedInput(inputId: string): boolean {
+	const stored = unconfirmedFrames.get(inputId);
+	if (!stored || !ws || ws.readyState !== WebSocket.OPEN) return false;
+	ws.send(stored.frame);
+	return true;
+}
+
+/** Which inputs this client still holds a frame for. Test-only visibility. */
+export function _unconfirmedFrameIdsForTests(): string[] {
+	return [...unconfirmedFrames.keys()];
+}
+
 export function sendMessage(
 	threadId: string,
 	content: string,
@@ -123,13 +167,15 @@ export function sendMessage(
 	requestInput(threadId, inputId);
 
 	if (get(subagentMeta).has(threadId)) {
-		ws.send(JSON.stringify({
+		const frame = JSON.stringify({
 			type: 'subagent_feed', thread_id: threadId, content, input_id: inputId,
 			...viewingPayload,
 			...(comments.length ? { reply_context: { comments } } : {}),
 			...(attachments && attachments.length > 0 ? { attachments } : {}),
 			...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
-		}));
+		});
+		ws.send(frame);
+		rememberFrame(threadId, inputId, frame);
 		return inputId;
 	}
 
@@ -153,7 +199,7 @@ export function sendMessage(
 	const replyContext = takeReplyContext(threadId) ?? {};
 	if (comments.length) replyContext.comments = comments;
 	const hasReplyContext = Object.keys(replyContext).length > 0;
-	ws.send(JSON.stringify({
+	const frame = JSON.stringify({
 		type: 'message',
 		...viewingPayload,
 		...(hasReplyContext ? { reply_context: replyContext } : {}),
@@ -164,7 +210,9 @@ export function sendMessage(
 		...(effort ? { reasoning_effort: effort } : {}),
 		...(attachments && attachments.length > 0 ? { attachments } : {}),
 		...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
-	}));
+	});
+	ws.send(frame);
+	rememberFrame(threadId, inputId, frame);
 	return inputId;
 }
 

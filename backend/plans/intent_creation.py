@@ -1,38 +1,61 @@
-"""The intent gate and provenance writes for task creation."""
+"""Validation and inheritance of the agreed intent for plan nodes."""
 from __future__ import annotations
 
-from plans import intent_words, service
+from plans import service
+
+MAX_INTENT_BYTES = 600
+
+
+def validate_intent(value: object) -> str:
+    if not isinstance(value, str) or not (text := value.strip()):
+        raise service.PlanInputError("intent is required")
+    if len(text.encode()) > MAX_INTENT_BYTES:
+        raise service.PlanInputError(f"intent exceeds the {MAX_INTENT_BYTES}-byte limit")
+    return text
+
+
+def canonical(connection, node_id: str):
+    row = service._node_row(connection, node_id)
+    seen: set[str] = set()
+    while row["intent_node_id"] is not None:
+        if row["id"] in seen:
+            raise service.PlanError("intent node reference cycle")
+        seen.add(row["id"])
+        row = service._node_row(connection, row["intent_node_id"])
+    return row
+
+
+def inherited_node_id(connection, plan_id: str) -> str | None:
+    """Return the attached parent task's canonical intent for a worker plan."""
+    owner = connection.execute("SELECT owner_kind,owner_id FROM plans WHERE id=?", (plan_id,)).fetchone()
+    if owner is None or owner["owner_kind"] != "thread":
+        return None
+    parent = connection.execute(
+        """SELECT id FROM plan_nodes WHERE spawned_thread_id=? AND archived_at IS NULL
+           ORDER BY updated_at DESC LIMIT 1""", (owner["owner_id"],)
+    ).fetchone()
+    return None if parent is None else canonical(connection, parent["id"])["id"]
+
+
+def detail(connection, node) -> dict:
+    result = {"intent": node["intent"], "requirements_revision": node["requirements_revision"]}
+    if node["intent_node_id"] is not None:
+        source = canonical(connection, node["id"])
+        result["canonical_intent"] = {
+            "node_id": source["id"], "title": source["title"], "intent": source["intent"],
+        }
+    return result
 
 
 def prepare(db, plan_id: str, params: dict, *, workflow_version: str | None, operation: str, actor, run: bool = False):
-    """Validate one add/insert request before it can create a node; ``run`` marks a workflow run's phase."""
+    """Validate one add/insert request before it can create a node."""
     from plans import boundary_fields as fields
 
-    inherited = intent_words.inherited_node_id(db, plan_id)
+    inherited = inherited_node_id(db, plan_id)
     created = fields.node_fields(
         params, workflow_version=workflow_version, include_before=operation == "insert",
         intent_required=inherited is None, run=run,
     )
-    requested_words = created.pop("intent_words", None)
-    acting = actor.thread_id if actor.kind == "thread" else None
-    resolved_words = intent_words.resolve_words(db, requested_words, actor_id=acting)
-    # Caller person words replace the turn's input (see capture), so one of them must carry the authority.
-    caller_person = any(word["author"] == "person" for word in resolved_words)
-    if (
-        actor.kind == "thread" and created["kind"] == "task" and inherited is None
-        and (caller_person or not intent_words.has_person_origin(db, actor.turn_id))
-        and not any(word["author"] == "person" and word["role"] == "authority" for word in resolved_words)
-    ):
-        raise service.PlanInputError(
-            "task creation needs intent_words with an exact person quote and role: authority"
-        )
     if inherited is not None and created["intent"] is None:
         created["intent_node_id"] = inherited
-    return created, resolved_words
-
-
-def capture(db, node, words: list[dict[str, str]], *, actor) -> None:
-    """Record the turn's origin and resolved caller words at node revision one."""
-    if not any(word["author"] == "person" for word in words):
-        intent_words.capture_origin(db, node.id, turn_id=actor.turn_id, revision=node.requirements_revision)
-    intent_words.append(db, node.id, words, revision=node.requirements_revision)
+    return created

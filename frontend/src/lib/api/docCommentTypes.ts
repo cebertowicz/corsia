@@ -8,6 +8,9 @@ export interface ServerComment {
 	author_kind: 'user' | 'agent';
 	author_thread_id?: string | null;
 	body: string;
+	tagged_agent_ids?: string[];
+	tagged_agents?: { id: string; name: string }[];
+	tagged_agent_mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[];
 	anchor_text: string | null;
 	from_off: number | null;
 	to_off: number | null;
@@ -19,9 +22,12 @@ export interface ServerComment {
 	decision?: 'accepted' | 'rejected' | null;
 	decided_by?: string | null;
 	orphaned?: boolean;
+	/** An open suggestion edited inside: it keeps its place and quote, and cannot be accepted. */
+	text_changed?: boolean;
 	created_at: string;
 	updated_at: string;
 	new_reply_ids?: string[];
+	new_comment?: boolean;
 	replies?: ServerComment[];
 	/** A region comment on an image (DCOL-FR13.3): fractions of the image; w = h = 0 is a point. */
 	region_x?: number | null;

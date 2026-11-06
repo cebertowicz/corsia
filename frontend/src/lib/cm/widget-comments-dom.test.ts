@@ -7,6 +7,8 @@ import { GFM } from '@lezer/markdown';
 import { commentRanges, setCommentRanges, type CommentRange } from './comment-marks';
 import { markdownLivePreview } from './markdown-live';
 import { pendingCommentMark } from './pending-comment-mark';
+import { imageOpener } from './markdown-image';
+import { markOpenable } from './widget-open';
 import { selectionIn, widgetComments, type WidgetSelection } from './widget-comments';
 
 const TABLE = '| Item | Note |\n|---|---|\n| Alpha | ab ab |\n| Bravo | Eli |\n| Charlie ||';
@@ -157,9 +159,9 @@ describe('comments drawn on a diagram', () => {
 	const range = (id: string): CommentRange => ({ id, from: FENCE_FROM, to: FENCE_TO });
 
 	/** A mermaid widget in the editor's content, painted for the given comments and draft. */
-	function paintedDiagram(ids: string[], draft: boolean) {
+	function paintedDiagram(ids: string[], draft: boolean, opener?: () => void, pins: string[] = []) {
 		vi.useFakeTimers({ toFake: ['requestAnimationFrame'] });
-		const handlers = hooks(), view = open(widgetComments(handlers));
+		const handlers = hooks(), view = open([widgetComments(handlers), ...(opener ? [imageOpener.of(opener)] : [])]);
 		const el = document.createElement('div');
 		el.className = 'cm-md-mermaid';
 		// Drawn outside CodeMirror's own content, which would drop a node it did not draw.
@@ -168,10 +170,32 @@ describe('comments drawn on a diagram', () => {
 		Object.defineProperty(view, 'contentDOM', { value: drawn });
 		view.posAtDOM = () => FENCE_FROM;
 		if (draft) view.plugin(pendingCommentMark)!.range = { from: FENCE_FROM, to: FENCE_TO };
-		view.dispatch({ effects: setCommentRanges.of(ids.map(range)) });
+		view.dispatch({ effects: setCommentRanges.of([...ids.map(range), ...pins.map((id) => ({ ...range(id), region: true }))]) });
 		vi.advanceTimersByTime(100);
-		return { el, handlers };
+		return { el, handlers, view };
 	}
+
+	it('opens the viewer, not the pin, on a click on a diagram with only a pin', () => {
+		const opener = vi.fn(), { el, handlers } = paintedDiagram([], false, opener, ['pin']);
+		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		Object.defineProperty(svg, 'viewBox', { value: { baseVal: { width: 100, height: 100 } } });
+		Object.defineProperty(svg, 'getScreenCTM', { value: () => null });
+		el.append(svg);
+		vi.stubGlobal('URL', class extends URL { static createObjectURL() { return 'blob:diagram'; } });
+		expect(el.dataset.commentIds).toBeUndefined();
+		expect(el.classList.contains('cm-comment-block')).toBe(false);
+		el.click();
+		expect(handlers.onFocus).not.toHaveBeenCalled();
+		expect(opener).toHaveBeenCalledTimes(1);
+		vi.unstubAllGlobals();
+	});
+
+	it('opens only the whole-diagram comment when the diagram also has a pin', () => {
+		const { el, handlers } = paintedDiagram(['a'], false, undefined, ['pin']);
+		expect(el.dataset.commentIds).toBe('a');
+		el.click();
+		expect(handlers.onFocus).toHaveBeenCalledWith(['a'], el);
+	});
 
 	it('carries every comment on the element and opens them all on a click', () => {
 		const { el, handlers } = paintedDiagram(['a', 'b'], false);
@@ -179,6 +203,22 @@ describe('comments drawn on a diagram', () => {
 		el.click();
 		expect(handlers.onFocus).toHaveBeenCalledTimes(1);
 		expect(handlers.onFocus).toHaveBeenCalledWith(['a', 'b'], el);
+	});
+
+	it('opens the whole-diagram comment on a drawn diagram even when the viewer is available', () => {
+		const opener = vi.fn(), { el, handlers, view } = paintedDiagram(['a'], false, opener);
+		const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+		Object.defineProperty(svg, 'viewBox', { value: { baseVal: { width: 100, height: 100 } } });
+		Object.defineProperty(svg, 'getScreenCTM', { value: () => null });
+		el.append(svg);
+		vi.stubGlobal('URL', class extends URL { static createObjectURL() { return 'blob:diagram'; } });
+		el.click();
+		expect(handlers.onFocus).toHaveBeenCalledWith(['a'], el);
+		expect(opener).not.toHaveBeenCalled();
+		markOpenable(el, view);
+		el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		expect(opener).toHaveBeenCalledTimes(1);
+		vi.unstubAllGlobals();
 	});
 
 	it('never routes a click to a pending draft over the same diagram', () => {

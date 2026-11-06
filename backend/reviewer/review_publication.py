@@ -51,11 +51,12 @@ _PUBLICATION_ANCHOR = "_publication_anchor"
 def prepare_findings_for_publication(
     findings: list[dict[str, Any]], *, fallback_file: str = "",
 ) -> list[dict[str, Any]]:
-    """Collapse reset-mode output into one grouped, stop-first finding.
+    """Collapse reset-mode output into one grouped, approach-first finding.
     The approach finding already owns the shared defect and consequence. The
     other findings are evidence for that diagnosis, not an author patch queue,
     so keep their content in the grouped finding and use the first real anchor
-    only to make the STOP visible to ``pulls/{pr}/comments`` readers.
+    only to make the different-approach finding visible to
+    ``pulls/{pr}/comments`` readers.
     """
     approach = next((
         finding for finding in findings
@@ -79,7 +80,7 @@ def prepare_findings_for_publication(
             )
         grouped["description"] = (
             f"{grouped.get('description') or '(no description)'}\n\n"
-            "Correlated evidence — do not patch individually:\n"
+            "Findings that share this cause:\n"
             + "\n".join(evidence)
         )
 

@@ -107,7 +107,7 @@ def test_add_creates_its_dependency_in_the_same_mutation(db):
     db.execute("UPDATE messages SET active_turn_id='dependency-turn' WHERE id='dependency-authority'")
     created = mutate(plan.id, "add", {
         "title": "Dependent", "acceptance_criteria": "Dependent DOD", "size": "unknown",
-        "intent": intent, "intent_words": [{"quote": intent, "role": "authority"}],
+        "intent": intent,
         "depends_on_node_id": prerequisite.id,
     }, actor=replace(OWNER, turn_id="dependency-turn"), provenance="test", mutation_id=_mid(), db=db).result["node"]
 

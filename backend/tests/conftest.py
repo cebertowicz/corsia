@@ -274,6 +274,22 @@ def signed_in_defaults(request, isolated_db):
         db.close()
 
 
+@pytest.fixture
+def held_wake_drives(monkeypatch):
+    """Collect the threads a terminal's wake would drive instead of starting their Turns.
+
+    A Turn that errors after taking in a person's message queues a wake for that thread; a test
+    whose subject is the terminal itself uses this so the wake's own Turn does not start.
+    """
+    driven: list[str] = []
+
+    async def hold(threads):
+        driven.extend(threads)
+
+    monkeypatch.setattr("plans.notifications.drive_threads", hold)
+    return driven
+
+
 class _NoClose:
 
     def __init__(self, c):
@@ -640,8 +656,9 @@ def _system_projection_readable(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _github_read_budget_starts_empty():
-    """The GitHub read budget is process-wide; each test starts with none learned."""
+    """The GitHub read budgets are process-wide; each test starts with none learned."""
     budget = sys.modules.get("events.connectors.github_read_budget")
     if budget is not None:
         budget.budget.clear()
+        budget.person_budget.clear()
     yield

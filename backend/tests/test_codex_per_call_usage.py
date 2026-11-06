@@ -380,16 +380,18 @@ async def test_the_failed_terminal_settles_usage_before_its_marker(monkeypatch) 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("is_error", "last_assistant_message_id", "expected_quiet"),
-    [(True, None, True), (True, "assistant-output", False), (False, None, False)],
+    ("is_error", "last_assistant_message_id", "expected_quiet", "expected_announce"),
+    [(True, None, True, True), (True, "assistant-output", False, True),
+     (False, None, False, True), (False, "assistant-output", False, False)],
 )
 async def test_result_passes_quiet_usage_only_for_an_error_without_output(
-    monkeypatch, is_error, last_assistant_message_id, expected_quiet,
+    monkeypatch, is_error, last_assistant_message_id, expected_quiet, expected_announce,
 ) -> None:
     from core.turn_core import TurnTerminalResult
     from infra.thread_inputs import TurnIdentity
 
     captured: list[bool] = []
+    announcements: list[bool] = []
 
     async def claim(*_args, **_kwargs):
         return SimpleNamespace(result=TurnTerminalResult.APPLIED)
@@ -398,7 +400,8 @@ async def test_result_passes_quiet_usage_only_for_an_error_without_output(
         captured.append(kwargs["quiet_if_unmeasured"])
         return {}
 
-    async def marker(*_args, **_kwargs):
+    async def marker(*_args, **kwargs):
+        announcements.append(kwargs["announce"])
         return "marker"
 
     async def publish(**_kwargs):
@@ -425,3 +428,4 @@ async def test_result_passes_quiet_usage_only_for_an_error_without_output(
     })
 
     assert captured == [expected_quiet]
+    assert announcements == [expected_announce]

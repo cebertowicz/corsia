@@ -6,16 +6,13 @@ from pathlib import Path
 from uuid import uuid4
 
 from doceditor import comments
-from doceditor.doc_images import check_image_quote, widen_to_image
+from doceditor.comment_action_errors import CommentSelectionChanged
+from doceditor.doc_images import widen_to_image
 from doceditor.image_regions import check_region_target
 from doceditor.live_document import IdentityInUse
 from doceditor.quote_anchor import anchor_context, resolve_quote
 from infra import app_loop, write_effects
 from infra.db_async import run_in_db
-
-
-class CommentSelectionChanged(ValueError):
-    """The selection a browser captured can no longer be anchored; its draft is kept and it selects again."""
 
 
 @dataclass(frozen=True)
@@ -154,8 +151,6 @@ async def create_validated_comment(request, client_id):
 
     if request.region is not None:
         check_region_target(request.path, request.quote)
-        if request.browser and request.quote:
-            check_image_quote(request.quote)
     prepare = None
     if request.quote and not request.parent_id and not request.review:
         if request.browser:

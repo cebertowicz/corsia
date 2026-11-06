@@ -158,6 +158,22 @@ describe('EventChip', () => {
 		expect(chip.querySelector('.ev-summary')?.textContent).toBe('Context saved');
 	});
 
+	it('shows an unpaired retry without a label', () => {
+		const summary = 'The agent tried once more.';
+		const chip = renderChip({
+			...RESTART_WAKE_MSG,
+			id: 'unanswered-wake-1',
+			content: '[EVENT: system.turn.unanswered_input]',
+			metadata: {
+				...RESTART_WAKE_MSG.metadata,
+				event_type: 'system.turn.unanswered_input',
+				summary,
+			},
+		});
+		expect(chip.querySelector('.ev-label')).toBeNull();
+		expect(chip.querySelector('.ev-summary')?.textContent).toBe(summary);
+	});
+
 	it('renders no link when url is null', () => {
 		const chip = renderChip(CHECK_CHIP_MSG);
 		expect(chip.tagName).toBe('DIV');

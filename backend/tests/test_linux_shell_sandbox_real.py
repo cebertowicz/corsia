@@ -44,7 +44,7 @@ def linux_box(linux_sandbox_root, monkeypatch, isolated_db):
     policy = ProtectedHostPathPolicy(home, state)
     overlays = [repo / '.git/HEAD', repo / '.git/logs/HEAD',
                 workspace / '.corsia/context', workspace / '.corsia/skills']
-    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda: policy)
+    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda **_: policy)
     monkeypatch.setattr(sandbox_config, '_STATIC_ALLOWED_RW', [workspace])
     monkeypatch.setattr(config, 'WORKSPACE', workspace)
     monkeypatch.setenv('HOME', str(home))
@@ -71,13 +71,14 @@ def linux_box(linux_sandbox_root, monkeypatch, isolated_db):
                            policy=policy, run=run, argv_for=argv_for, env=env)
 
 
-def shell_workspace_git_runner(box, monkeypatch):
+def shell_workspace_git_runner(box, monkeypatch, fence=None):
     """Run commands through the real Linux shell path, so the backend prepares the workspace Git paths."""
     from connections import github_agent
     from tools import linux_shell
+    from tools.project_fence import Fence
 
-    policy = replace(box.policy, workspace=box.workspace)
-    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda: policy)
+    policy = replace(box.policy, workspace=box.workspace, fence=fence or Fence())
+    monkeypatch.setattr(linux_shell, 'current_protected_host_path_policy', lambda **_: policy)
     monkeypatch.setattr(github_agent, 'default_home', lambda: box.home / '.config/gh')
     monkeypatch.setattr(linux_shell, 'get_sandbox_add_dirs_rw', lambda *a, **k: [box.workspace])
     monkeypatch.setattr(linux_shell, 'get_allowed_dirs_ro', lambda **k: [])
@@ -91,54 +92,70 @@ def shell_workspace_git_runner(box, monkeypatch):
     return run
 
 
-def test_agent_cannot_create_workspace_git_controls_in_a_real_shell(linux_box, monkeypatch):
+def host_git(workspace, *args):
+    return subprocess.run(['git', '-C', str(workspace), '-c', 'user.name=T', '-c', 'user.email=t@example.invalid',
+                           *args], capture_output=True, text=True, timeout=20)
+
+
+def test_the_workspace_git_history_is_hidden_from_a_real_shell(linux_box, monkeypatch):
     box = linux_box
     run = shell_workspace_git_runner(box, monkeypatch)
     assert not (box.workspace / '.git').exists()
-    result = run('git status --porcelain')
-    print(f'first launch: exit={result.returncode} stderr={result.stderr.strip()}')
+    result = run('true')
     assert result.returncode == 0, result.stderr
     git_dir = box.workspace / '.git'
     assert git_dir.is_dir() and (git_dir / 'HEAD').is_file()
-    assert (git_dir / 'commondir').read_text() == '.\n'
-    assert (git_dir / 'config.worktree').read_bytes() == b''
-    for command in ('ln -snfT /tmp .git', 'touch .git/commondir', 'touch .git/config.worktree',
-                    'printf x > .git/config', 'printf x > .git/hooks/pre-commit', 'mv .git moved',
-                    'rm -f .git/commondir', 'rm -f .git/config.worktree',
-                    'cp .git/config .git/config.lock && mv .git/config.lock .git/config',
-                    'cp .git/commondir .git/commondir.new && mv .git/commondir.new .git/commondir'):
+    # Content that now lives only in history, as another project's deleted file would.
+    (box.workspace / 'gone.md').write_text('history-marker\n')
+    assert host_git(box.workspace, 'add', 'gone.md').returncode == 0
+    assert host_git(box.workspace, 'commit', '-qm', 'x').returncode == 0
+    (box.workspace / 'gone.md').unlink()
+    for command in ('git log -p', 'git --git-dir=.git log -p', 'git cat-file -p HEAD', 'cat .git/HEAD',
+                    'ls .git', 'find .git -type f', 'grep -r history-marker .git',
+                    'ln -snfT /tmp .git', 'touch .git/commondir', 'printf x > .git/config',
+                    'printf x > .git/hooks/pre-commit', 'rm .git/HEAD', 'mv .git moved', 'rm -rf .git',
+                    'git -c user.name=T -c user.email=t@example.invalid commit --allow-empty -m y'):
         result = run(command)
         print(f'{command}: exit={result.returncode} stderr={result.stderr.strip()}')
         assert result.returncode != 0, command
-    assert (git_dir / 'commondir').read_text() == '.\n'
-    assert (git_dir / 'config.worktree').read_bytes() == b''
-    assert 'x' not in (git_dir / 'config').read_text()
-    assert not (git_dir / 'hooks' / 'pre-commit').exists()
-    result = run('git -c user.name=T -c user.email=t@example.invalid commit --allow-empty -m x')
-    print(f'agent commit: exit={result.returncode} stderr={result.stderr.strip()}')
-    assert result.returncode == 0, result.stderr
-    assert subprocess.run(['git', '-C', str(box.workspace), 'rev-list', '--count', 'HEAD'],
-                         capture_output=True, text=True, timeout=20).stdout.strip() == '1'
+        assert 'history-marker' not in result.stdout, command
+    assert (git_dir / 'HEAD').is_file() and 'x' not in (git_dir / 'config').read_text()
+    assert not (git_dir / 'hooks' / 'pre-commit').exists() and not (git_dir / 'commondir').exists()
+    assert host_git(box.workspace, 'rev-list', '--count', 'HEAD').stdout.strip() == '1'
+    # Control: the rest of the workspace stays readable and writable.
+    result = run('echo kept > sibling && cat sibling')
+    assert result.returncode == 0 and result.stdout == 'kept\n', result.stderr
 
 
-def test_a_bare_repository_planted_by_a_real_shell_is_not_adopted(linux_box, monkeypatch):
+def test_a_bare_layout_planted_by_a_real_shell_is_not_adopted(linux_box, monkeypatch):
     from infra.guidance_git import workspace_repository
 
     box = linux_box
     run = shell_workspace_git_runner(box, monkeypatch)
     assert run('true').returncode == 0
-    result = run("rm .git/HEAD && mkdir objects refs && echo 'ref: refs/heads/main' > HEAD "
+    result = run("mkdir objects refs && echo 'ref: refs/heads/main' > HEAD "
                  "&& printf '[core]\\n\\trepositoryformatversion = 0\\n\\tworktree = .\\n' > config")
     print(f'plant: exit={result.returncode} stderr={result.stderr.strip()}')
     assert result.returncode == 0, result.stderr
-    assert subprocess.run(['git', 'rev-parse', '--show-toplevel'], cwd=str(box.workspace),
-                          capture_output=True, timeout=20).returncode == 0
-    repo, reason = workspace_repository(box.workspace)
-    assert repo is None and 'bare repository' in reason
+    assert workspace_repository(box.workspace) == (box.workspace.resolve(), None)
+
+
+def test_a_marker_that_points_nowhere_hides_only_itself_in_a_real_shell(linux_box, monkeypatch):
+    box = linux_box
+    (box.workspace / '.git').write_text('not a gitdir pointer\n')
+    run = shell_workspace_git_runner(box, monkeypatch)
+    for command in ('cat .git', 'printf "gitdir: /tmp" > .git', 'mv .git moved', 'rm -f .git'):
+        result = run(command)
+        print(f'{command}: exit={result.returncode} stderr={result.stderr.strip()}')
+        assert result.returncode != 0, command
+    assert (box.workspace / '.git').read_text() == 'not a gitdir pointer\n'
+    # The workspace root is not frozen: new entries, control-file names included, can still be made.
+    result = run('touch new-entry && mkdir hooks && touch config')
+    assert result.returncode == 0, result.stderr
 
 
 def test_an_enclosing_repository_leaves_an_unplanted_marker_in_a_real_shell(linux_box, monkeypatch):
-    """With no repository of its own the workspace gets an empty marker no shell can fill in."""
+    """With no repository of its own the workspace gets an empty marker no shell can open or fill in."""
     box = linux_box
     subprocess.run(['git', 'init', '--quiet'], cwd=str(box.home), check=True, timeout=30)
     run = shell_workspace_git_runner(box, monkeypatch)
@@ -155,6 +172,41 @@ def test_an_enclosing_repository_leaves_an_unplanted_marker_in_a_real_shell(linu
     result = run('touch new-entry')
     assert result.returncode == 0, result.stderr
     assert (box.workspace / 'new-entry').exists()
+
+
+def test_another_project_is_hidden_from_a_real_shell(linux_box, monkeypatch):
+    from tools import project_fence
+    from tools.host_path_resolution import linux_denied_paths_in
+    from tools.project_fence import Fence, FencedRoot
+    monkeypatch.setattr(project_fence, '_event', lambda *_a, **_k: None)
+    box = linux_box
+    projects = box.workspace / 'projects'
+    for name in ('own', 'other'):
+        (projects / name).mkdir(parents=True)
+        (projects / name / 'notes.md').write_text(f'{name}-marker\n')
+    (box.workspace / 'own-link').symlink_to(projects / 'other')
+    fence = Fence((FencedRoot(projects / 'other', 'other'), FencedRoot(projects / 'later', 'later')), 'one')
+    run = shell_workspace_git_runner(box, monkeypatch, fence)
+    for command in ('ls projects/other/notes.md', 'cat projects/other/notes.md', 'cat own-link/notes.md',
+                    'touch projects/other/new', 'mv projects/other projects/moved',
+                    'mv projects projects-moved', 'rm -rf projects/other'):
+        result = run(command)
+        print(f'{command}: exit={result.returncode} stdout={result.stdout.strip()} stderr={result.stderr.strip()}')
+        assert result.returncode != 0, command
+        assert 'other-marker' not in result.stdout
+        if not command.startswith(('mv', 'rm')):  # a mount point refuses those as busy, not denied
+            named = [fence.refusal(path) for path in linux_denied_paths_in(result.stderr, box.workspace)]
+            assert any(message and 'in project `other`' in message for message in named), result.stderr
+    assert (projects / 'other/notes.md').read_text() == 'other-marker\n'
+    assert not (projects / 'other/new').exists()
+    # Control: the caller's own project stays readable and writable.
+    result = run('cat projects/own/notes.md && touch projects/own/new')
+    assert result.returncode == 0 and result.stdout == 'own-marker\n', result.stderr
+    # An absent fenced root is skipped rather than freezing projects/; the next command masks it.
+    result = run('mkdir projects/later && echo later-marker > projects/later/notes.md && touch projects/fresh')
+    assert result.returncode == 0, result.stderr
+    result = run('cat projects/later/notes.md')
+    assert result.returncode != 0 and 'later-marker' not in result.stdout
 
 
 def test_personal_gh_home_hidden_with_agent_account(linux_box, monkeypatch):

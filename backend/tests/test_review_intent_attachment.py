@@ -58,11 +58,10 @@ def test_ok_attaches_the_intent_in_its_shape(db):
     intent, record = review_intent.attach(ROW, OPTED_IN, db=db)
 
     assert set(intent) == {"node_id", "linked_node", "title", "requirements_revision", "intent",
-                           "acceptance_criteria", "intent_words"}
+                           "acceptance_criteria"}
     assert (intent["intent"], intent["acceptance_criteria"], intent["title"]) == ("Ship the thing", "Done", "Open the PR")
     assert record == {"node_id": task.id, "linked_node": task.id, "requirements_revision": intent["requirements_revision"],
-                      "intent": "Ship the thing", "acceptance_criteria": "Done",
-                      "quotes": [word["quote"] for word in intent["intent_words"]]}
+                      "intent": "Ship the thing", "acceptance_criteria": "Done"}
     assert "Ship the thing" in worker_inputs.brief("w@1", "body", {}, [], {}, intent)
     assert "Ship the thing" not in worker_inputs.brief("w@1", "body", {}, [], {})
 
@@ -148,7 +147,7 @@ def test_the_intent_and_criteria_are_bounded(db, monkeypatch):
 
 
 RECORD = {"node_id": "n1", "linked_node": "n0", "requirements_revision": 3, "intent": "Goal",
-          "acceptance_criteria": "AC", "quotes": ["Quote one"]}
+          "acceptance_criteria": "AC"}
 
 
 def _settled_facts(db, record, said=None):
@@ -179,7 +178,7 @@ def test_the_stamp_comes_from_the_record_and_wins_over_the_workers_answer(db):
     task = _task(db, plan.id, "Open the PR", intent="First goal")
     _registered_from(db, thread_id, plan.id, task.id)
     _, record = review_intent.attach(ROW, OPTED_IN, db=db)
-    forged = {"intent_text": {"intent": "fake", "acceptance_criteria": "fake", "quotes": []},
+    forged = {"intent_text": {"intent": "fake", "acceptance_criteria": "fake"},
               "intent_node": "fake", "intent_current_revision": 99, "intent_revision": 99,
               "intent_linked_node": "fake"}
 
@@ -187,8 +186,7 @@ def test_the_stamp_comes_from_the_record_and_wins_over_the_workers_answer(db):
         facts = _settled_facts(db, record, said)
         assert facts["intent_node"] == facts["intent_linked_node"] == task.id
         assert facts["intent_revision"] == facts["intent_current_revision"] == record["requirements_revision"]
-        assert facts["intent_text"] == {"intent": "First goal", "acceptance_criteria": "Done",
-                                        "quotes": record["quotes"]}
+        assert facts["intent_text"] == {"intent": "First goal", "acceptance_criteria": "Done"}
 
 
 def test_a_worst_case_intent_with_a_typical_result_fits_intakes_fact_limit(db, monkeypatch):
@@ -197,11 +195,9 @@ def test_a_worst_case_intent_with_a_typical_result_fits_intakes_fact_limit(db, m
     from events.intake import _MAX_FACT_BYTES
 
     big = "x" * (REVISION_BRIEF_MAX_BYTES * 2)
-    quote = "q" * 240
     record = {"node_id": "n1", "linked_node": "n0", "requirements_revision": 3,
               "intent": review_intent.bounded_label(big, REVISION_BRIEF_MAX_BYTES),
-              "acceptance_criteria": review_intent.bounded_label(big, REVISION_BRIEF_MAX_BYTES),
-              "quotes": [quote] * 3}
+              "acceptance_criteria": review_intent.bounded_label(big, REVISION_BRIEF_MAX_BYTES)}
     monkeypatch.setattr(review_intent, "intent_of", lambda *a, **k: {"requirements_revision": 3})
     typical = json.dumps({"findings": [{"title": "t" * 200, "body": "b" * 600}] * 20})
     facts = _settled_facts(db, record, {"result": typical})
@@ -224,7 +220,7 @@ def test_a_failed_fresh_read_says_so_and_never_copies_the_old_revision(db, monke
     facts = _settled_facts(db, RECORD)
     assert (facts["intent_node"], facts["intent_reason"]) == ("n1", "lookup_failed")
     assert (facts["intent_revision"], facts["intent_linked_node"], facts["intent_text"]) == (
-        3, "n0", {"intent": "Goal", "acceptance_criteria": "AC", "quotes": ["Quote one"]})
+        3, "n0", {"intent": "Goal", "acceptance_criteria": "AC"})
     assert "intent_current_revision" not in facts
 
 
@@ -277,8 +273,7 @@ async def test_a_big_result_with_a_maximal_intent_is_admitted_through_the_real_s
     big = "x" * (REVISION_BRIEF_MAX_BYTES * 2)
     record = {"node_id": "n1", "linked_node": "n0", "requirements_revision": 3,
               "intent": review_intent.bounded_label(big, REVISION_BRIEF_MAX_BYTES),
-              "acceptance_criteria": review_intent.bounded_label(big, REVISION_BRIEF_MAX_BYTES),
-              "quotes": ["q" * 8192] * 4}  # 32 KB of quotes, as in Quality Gate pack test
+              "acceptance_criteria": review_intent.bounded_label(big, REVISION_BRIEF_MAX_BYTES)}
     monkeypatch.setattr(review_intent, "attach", lambda row, skill, *, db: (None, record))
     monkeypatch.setattr(review_intent, "intent_of", lambda *a, **k: {"requirements_revision": 3})
     seen = []

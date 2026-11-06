@@ -19,9 +19,9 @@ People have different subscriptions, hardware and tolerance for sending data off
 
 ### The catalog
 
-The catalog is built from discovery of cloud providers, servers on the local network, a locally managed oMLX server, and the Claude Code and Codex harnesses (`backend/llm/catalog.py`, `backend/llm/catalog_cloud.py`, `backend/llm/catalog_network_models.py`, `backend/llm/harness_catalog.py`). It is served at `/api/models`. Each row says whether the model is available now.
+The catalog is built from discovery of cloud providers, servers on the local network, a locally managed oMLX server, and the Claude Code and Codex harnesses (`backend/llm/catalog.py`, `backend/llm/catalog_cloud.py`, `backend/llm/catalog_network_models.py`, `backend/llm/harness_catalog.py`). It is served at `/api/models`. For harness models, the row's model status and the selected account's status are distinct: `runs_on` shows the decision for each permitted account. Discovery, project policy and usage evidence all affect that decision. The selected account's discovery supplies its identity and context window when available; other capabilities may be retained for display when that account does not offer the model (`backend/llm/account_catalog.py`).
 
-**Context window.** The window used for checkpointing is resolved afresh. When known, it is the provider's window capped by 262,144 tokens unless the model id names a larger one (such as an explicit `[1m]` suffix) or an operator has saved an override (`backend/llm/context_window.py`).
+**Context window.** The window used for checkpointing is resolved afresh. By default, a known provider window is capped at 262,144 tokens, unless the model id names a larger one (such as an explicit `[1m]` suffix). A saved native model window replaces the discovered value; a saved Claude Code or Codex window caps it (`backend/llm/context_window.py`).
 
 ### No silent fallback
 
@@ -31,7 +31,7 @@ If the model a thread selected cannot run, the turn ends with a named reason. A 
 
 | Harness | How a turn runs |
 |---|---|
-| `native` | CORSIA's own loop, calling models through LiteLLM (`backend/llm/router.py`). Up to 200 tool iterations per turn by default (`backend/core/agent.py`, `backend/core/turn_iteration.py`). |
+| `native` | CORSIA's own loop, routing inference through provider clients or LiteLLM (`backend/llm/router.py`). Up to 200 tool iterations per turn by default (`backend/core/agent.py`, `backend/core/turn_iteration.py`). |
 | `claude-code` | The `claude` program in print mode with streaming JSON in and out. An ordinary managed launch uses CORSIA's tool bridge when configured and switches off Claude Code's auto memory, project instruction file, hooks and bundled skills; a confined launch instead uses its read-only native tools (`backend/subagents/cc_invocation.py`, `backend/subagents/managed_launch.py`). |
 | `codex` | `codex app-server` over standard I/O, with provider-native actions, skills, search and project docs disabled. It starts with `--strict-config`, so a Codex release that removes or renames a governed control makes startup fail visibly instead of silently restoring a native tool. A turn starts with `turn/start`, and later input joins the running turn with `turn/steer` (`backend/subagents/codex_launch_policy.py`, `backend/subagents/managed_launch.py`, `backend/subagents/codex_runtime_support.py`). |
 
@@ -41,7 +41,11 @@ A worker created with `untrusted` confinement is limited to file reads; see [Sec
 
 ### Local models
 
-CORSIA can start and supervise its own oMLX server for local inference, probe it, and resume a pending setup or download at startup (`backend/llm/providers/omlx_supervisor.py`, `backend/llm/local_setup.py`). Local steps that fail at startup are logged and do not stop the app. A network server is also supported (`backend/llm/network_endpoints.py`).
+CORSIA can start and supervise its own oMLX server for local inference, probe it, and resume a pending setup or download at startup (`backend/llm/providers/omlx_supervisor.py`, `backend/llm/local_setup.py`). A managed server upgrade starts during CORSIA startup and holds local requests until it has restored the models that were loaded before replacement; a failed upgrade returns an error to held requests (`backend/llm/providers/omlx_upgrade.py`). If managed oMLX refuses a prefill for memory and the refusal can be parsed, CORSIA can temporarily reduce the runtime window for all turns using that model on that server. A later refusal replaces the observation; it is removed when the turn that recorded it ends. The configured catalog window is unchanged (`backend/llm/memory_fit.py`).
+
+External servers are managed by their operator. CORSIA discovers their models but does not load or unload them. An External catalog selector qualifies a served model id with its server; the served id is used for the request, and any alias resolution on the server is outside CORSIA (`backend/llm/external_provider.py`).
+
+For native requests, CORSIA does not send sampling settings. A caller can supply an output budget; otherwise the generic and OpenAI transports leave it unset. The Anthropic Messages API requires a limit, so its adapter supplies one from the catalog or a fallback (`backend/llm/router.py`, `backend/llm/providers/anthropic.py`).
 
 ### Switching models
 
@@ -57,7 +61,7 @@ When the destination needs a new checkpoint, the pending switch can start one be
 
 ### Account rollover
 
-When an account reaches a usage limit, or a project's policy no longer permits it, a thread can move to another account if rollover is enabled. The destination must run the same model, be ready, and report usage as allowed; unknown usage is not enough (`backend/connections/account_rollover.py`). A move happens before the next queued input is claimed.
+When an account reaches a usage limit, or a project's policy no longer permits it, a thread can move to another account if rollover is enabled. CORSIA checks the project's permitted account order; the destination must run the same model, be ready, and report usage as allowed. Unknown usage is not enough. An account explicitly named by a caller is not moved by project rollover. A move happens before the next queued input is claimed (`backend/connections/account_rollover.py`).
 
 ## What can go wrong
 
@@ -80,4 +84,7 @@ When an account reaches a usage limit, or a project's policy no longer permits i
 | Dispatch table | `backend/infra/send_dispatch.py` |
 | oMLX supervision | `backend/llm/providers/omlx_supervisor.py` |
 | Model switching | `backend/thread/model_row.py`, `backend/thread/model_state.py` |
-| Account rollover | `backend/connections/account_rollover.py` |
+| Account status and rollover | `backend/llm/account_catalog.py`, `backend/connections/account_rollover.py` |
+| External servers and local memory fit | `backend/llm/external_provider.py`, `backend/llm/memory_fit.py` |
+
+Checked against the code at `7a8c55d84c75cbee7b8f26c8839f188fa466b559`.

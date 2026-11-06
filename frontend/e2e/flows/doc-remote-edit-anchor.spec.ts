@@ -5,6 +5,7 @@ import { createSession, loginByUrl, sendChatMessage } from '../support/corsia';
 import { test } from '../support/test';
 import { openLiveDocument, seedLiveDocument, type LiveDocument } from '../support/liveDocument';
 import { readMockCallCount, seedMockResponses } from '../support/mock';
+import { raiseAsk } from '../support/reviewAsk';
 import { agentCreatesSharedDocument, demoteAgent } from '../support/sharedLiveDocument';
 import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedFrames';
 import { syntheticPng } from '../support/syntheticImages';
@@ -48,18 +49,29 @@ async function readAt(page: Page, heading: string, margin = 40): Promise<void> {
 	await page.waitForTimeout(600);
 }
 
-/** The first line whose top is inside the pane: its text and its distance below the pane's top. */
+/**
+ * The first line whose top is inside the pane: its text and where it is on screen. It is read against the viewport,
+ * as the reader sees it, never against the pane: a notice or the review bar growing above the pane moves the pane too.
+ * It is read in a painted frame, like every sample after it. A read from a task can land between a notice coming or
+ * going in the header and the frame that holds the text against it, and take a place no frame ever painted.
+ */
 async function anchorLine(page: Page): Promise<{ text: string; top: number }> {
-	return page.evaluate(() => {
-		const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-		const box = scroller.getBoundingClientRect();
-		const line = [...scroller.querySelectorAll<HTMLElement>('.cm-line')].find((el) => el.getBoundingClientRect().top >= box.top && (el.textContent ?? '').trim().length > 12);
-		if (!line) throw new Error('no line in view');
-		return { text: (line.textContent ?? '').trim(), top: line.getBoundingClientRect().top - box.top };
-	});
+	const found = await page.evaluate(() => new Promise<{ text: string; top: number } | null>((resolve) => {
+		(window as Win).__eachPaintedFrame!(() => {
+			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+			const box = scroller.getBoundingClientRect();
+			const line = [...scroller.querySelectorAll<HTMLElement>('.cm-line')].find((el) => el.getBoundingClientRect().top >= box.top && (el.textContent ?? '').trim().length > 12);
+			return line ? { text: (line.textContent ?? '').trim(), top: line.getBoundingClientRect().top } : null;
+		}, (line) => {
+			resolve(line);
+			return false;
+		});
+	}));
+	if (!found) throw new Error('no line in view');
+	return found;
 }
 
-/** Samples the anchor line's distance on every painted frame for `ms`. */
+/** Samples the anchor line's place on screen on every painted frame for `ms`. */
 async function startSampling(page: Page, text: string, ms: number): Promise<void> {
 	await page.evaluate(({ text, ms }) => {
 		const win = window as Win;
@@ -68,9 +80,8 @@ async function startSampling(page: Page, text: string, ms: number): Promise<void
 		const start = performance.now();
 		win.__eachPaintedFrame!(() => {
 			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
-			const box = scroller.getBoundingClientRect();
 			const line = [...scroller.querySelectorAll<HTMLElement>('.cm-line')].find((el) => (el.textContent ?? '').trim() === text);
-			return { t: performance.now() - start, top: line ? line.getBoundingClientRect().top - box.top : null, scrollTop: scroller.scrollTop };
+			return { t: performance.now() - start, top: line ? line.getBoundingClientRect().top : null, scrollTop: scroller.scrollTop };
 		}, (sample) => {
 			win.__anchorSamples!.push(sample);
 			if (sample.t < ms) return true;
@@ -96,7 +107,7 @@ async function drift(page: Page, name: string, anchor: { top: number }): Promise
 }
 
 /** Applies `edit(doc)` in the writer's editor as one or more transactions; the reader receives each as a remote update. */
-async function writerEdits(writer: Page, edit: { find: string; offset?: number; remove?: number; insert?: string; typed?: boolean }): Promise<void> {
+async function writerEdits(writer: Page, edit: { find: string; offset?: number; remove?: number; insert?: string; typed?: boolean; streamed?: number }): Promise<void> {
 	await writer.evaluate(async ({ editorView, edit }) => {
 		const view = eval(editorView);
 		const at = view.state.doc.toString().indexOf(edit.find);
@@ -109,6 +120,12 @@ async function writerEdits(writer: Page, edit: { find: string; offset?: number; 
 			}
 			return;
 		}
+		// A streaming write: the same words arrive again and again at one place, each piece its own update.
+		for (let i = 0; i < (edit.streamed ?? 0); i++) {
+			view.dispatch({ changes: { from, insert: edit.insert ?? '' } });
+			await new Promise((resolve) => setTimeout(resolve, 40));
+		}
+		if (edit.streamed) return;
 		view.dispatch({ changes: { from, to: from + (edit.remove ?? 0), insert: edit.insert ?? '' } });
 	}, { editorView, edit });
 }
@@ -120,6 +137,8 @@ const cases: Array<{ name: string; edit: Parameters<typeof writerEdits>[1] }> = 
 	{ name: 'delete above', edit: { find: '## Section 6\n', remove: `## Section 6\n\n${paragraph(6)}\n\n`.length } },
 	{ name: 'replace above', edit: { find: paragraph(8), remove: paragraph(8).length, insert: 'A much shorter paragraph eight.' } },
 	{ name: 'large block above', edit: { find: '## Section 3\n', insert: BLOCK(40) } },
+	// Each piece wraps the paragraph above onto more lines; the browser's whole-pixel scroll must not add up over the run.
+	{ name: 'streamed write above', edit: { find: '## Section 12\n', insert: 'streamed words arriving one piece at a time ', streamed: 30 } },
 	{ name: 'typing in view', edit: { find: '## Section 31\n', offset: '## Section 31\n\n'.length, insert: 'Typed words arriving inside the section in view, one at a time. ', typed: true } },
 	{ name: 'insert in view', edit: { find: '## Section 31\n', offset: '## Section 31\n\n'.length, insert: BLOCK(3) } },
 	{ name: 'insert below', edit: { find: '## Section 50\n', insert: BLOCK(5) } },
@@ -138,12 +157,13 @@ async function pair(browser: Browser, document: LiveDocument, width: number, hei
 /** Leaves the reader a measured distance from the live edge after CodeMirror has settled its scroll height. */
 async function readNearEnd(page: Page, remaining: number): Promise<void> {
 	const scroller = page.locator('.cm-scroller');
-	await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight; });
-	await expect.poll(() => scroller.evaluate((element) =>
-		Math.round(element.scrollHeight - element.scrollTop - element.clientHeight),
-	)).toBeLessThanOrEqual(2);
+	// Measuring the lines that scroll into view can grow the scroll height after the jump, so scroll to the end again until it stays there.
+	await expect.poll(() => scroller.evaluate((element) => {
+		element.scrollTop = element.scrollHeight;
+		return Math.round(element.scrollHeight - element.scrollTop - element.clientHeight);
+	})).toBe(0);
 	await page.waitForTimeout(500);
-	await scroller.evaluate((element, distance) => { element.scrollTop -= distance; }, remaining);
+	await scroller.evaluate((element, distance) => { element.scrollTop = element.scrollHeight - element.clientHeight - distance; }, remaining);
 	await expect.poll(() => scroller.evaluate((element) =>
 		Math.round(element.scrollHeight - element.scrollTop - element.clientHeight),
 	)).toBe(remaining);
@@ -202,7 +222,7 @@ const agentCases: Array<{ name: string; marker: string; text: string }> = [
 
 for (const [width, height] of LAYOUTS) {
 	test(`@surface:live-document an agent's live writes leave the reader's place at ${width}`, async ({ browser, request }, testInfo) => {
-		test.skip((width <= 768) !== (testInfo.project.name === 'chromium-mobile'), 'One layout per project.');
+		test.skip((width <= 768) !== testInfo.project.name.endsWith('-mobile'), 'One layout per project.');
 		test.setTimeout(240_000);
 		const context = await browser.newContext({ viewport: { width, height } });
 		const results: Drift[] = [];
@@ -238,14 +258,14 @@ for (const [width, height] of LAYOUTS) {
 			await context.close();
 		}
 		for (const result of results) {
-			expect.soft(result.maxDrift, `${result.name}: the text in view never moves`).toBeLessThanOrEqual(3);
+			expect.soft(result.maxDrift, `${result.name}: the text in view never moves`).toBeLessThanOrEqual(2);
 		}
 	});
 }
 
 for (const [width, height] of LAYOUTS) {
 	test(`@surface:live-document another writer's edits leave the reader's place at ${width}`, async ({ browser, request }, testInfo) => {
-		test.skip((width <= 768) !== (testInfo.project.name === 'chromium-mobile'), 'One layout per project.');
+		test.skip((width <= 768) !== testInfo.project.name.endsWith('-mobile'), 'One layout per project.');
 		test.setTimeout(180_000);
 		const text = body();
 		const document = await seedLiveDocument(request, `anchor-${width}`, text);
@@ -266,24 +286,37 @@ for (const [width, height] of LAYOUTS) {
 				await live.reader.screenshot({ path: testInfo.outputPath(`anchor-${width}-${name.replace(/ /g, '-')}-after.png`) });
 				results.push(result);
 			}
+			// The document's agent asks for a review while the person reads: the review bar eases open in the header above
+			// the text. The bar reads the ask on the document's next change.
+			await readAt(live.reader, '## Section 30');
+			const anchor = await anchorLine(live.reader);
+			await startSampling(live.reader, anchor.text, 5_000);
+			await live.reader.screenshot({ path: testInfo.outputPath(`anchor-${width}-review-ask-before.png`) });
+			raiseAsk(document.threadId, document.artifactId, 'Is this right?');
+			await writerEdits(live.writer, { find: '## Section 55\n', insert: 'A late line far below.\n\n' });
+			await expect(live.reader.locator('.review-bar')).toBeVisible({ timeout: 4_000 });
+			const result = await drift(live.reader, 'review ask raised', anchor);
+			await live.reader.screenshot({ path: testInfo.outputPath(`anchor-${width}-review-ask-after.png`) });
+			results.push(result);
 		} finally {
 			fs.writeFileSync(testInfo.outputPath(`anchor-drift-${testInfo.project.name}-${width}.json`), JSON.stringify(results, null, 2));
 			testInfo.annotations.push({ type: 'drift', description: JSON.stringify(results) });
 			await live.close();
 		}
 		for (const result of results) {
-			expect.soft(result.maxDrift, `${result.name}: the text in view never moves`).toBeLessThanOrEqual(3);
+			expect.soft(result.maxDrift, `${result.name}: the text in view never moves`).toBeLessThanOrEqual(2);
 		}
 	});
 }
 
 for (const [width, height] of LAYOUTS) {
 	test(`@surface:live-document remote appends follow only a reader near the end at ${width}`, async ({ browser, request }, testInfo) => {
-		test.skip((width <= 768) !== (testInfo.project.name === 'chromium-mobile'), 'One layout per project.');
+		test.skip((width <= 768) !== testInfo.project.name.endsWith('-mobile'), 'One layout per project.');
 		test.setTimeout(180_000);
 		const document = await seedLiveDocument(request, `append-${width}`, body());
 		const live = await pair(browser, document, width, height);
 		try {
+			await installPaintedFrames(live.reader);
 			await readNearEnd(live.reader, 40);
 			await append(live.writer, `\n\n${BLOCK(3)}`);
 			await expect(live.reader.locator('.cm-content')).toContainText('Inserted paragraph 2');
@@ -300,6 +333,107 @@ for (const [width, height] of LAYOUTS) {
 			expect(Math.abs(after.top - before.top), 'the held top line stays in place').toBeLessThanOrEqual(3);
 		} finally {
 			await live.close();
+		}
+	});
+}
+
+/** Where the line reading `text` is on screen in the next painted frame. */
+async function paintedLineTop(page: Page, text: string): Promise<number | null> {
+	return page.evaluate((text) => new Promise<number | null>((resolve) => {
+		(window as Win).__eachPaintedFrame!(() => {
+			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+			const line = [...scroller.querySelectorAll<HTMLElement>('.cm-line')].find((el) => (el.textContent ?? '').trim() === text);
+			return line ? line.getBoundingClientRect().top : null;
+		}, (top) => {
+			resolve(top);
+			return false;
+		});
+	}), text);
+}
+
+for (const [width, height] of LAYOUTS) {
+	// A notice comes and goes above a reader at or near the end: when the editor grows back past the text below the view,
+	// the browser already pulls the offset back by part of the move, and the hold makes only the rest of it.
+	test(`@surface:live-document a header change leaves a reader at the end in place at ${width}`, async ({ browser, request }, testInfo) => {
+		test.skip((width <= 768) !== testInfo.project.name.endsWith('-mobile'), 'One layout per project.');
+		test.setTimeout(120_000);
+		const document = await seedLiveDocument(request, `edge-${width}`, body());
+		const context = await browser.newContext({ viewport: { width, height } });
+		try {
+			const reader = await context.newPage();
+			await openLiveDocument(reader, document, '# Anchor document');
+			await installPaintedFrames(reader);
+			for (const remaining of [0, 40, 200]) {
+				await readNearEnd(reader, remaining);
+				const anchor = await anchorLine(reader);
+				for (const shown of [true, false]) {
+					await reader.evaluate((shown) => {
+						if (!shown) return document.getElementById('anchor-notice')?.remove();
+						const notice = document.createElement('div');
+						notice.id = 'anchor-notice';
+						notice.style.height = '108px';
+						document.querySelector('.document-header')!.append(notice);
+					}, shown);
+					await reader.waitForTimeout(300);
+					const top = await paintedLineTop(reader, anchor.text);
+					expect(Math.abs((top ?? Infinity) - anchor.top), `${remaining}px from the end, notice ${shown ? 'shown' : 'gone'}: the text in view never moves`).toBeLessThanOrEqual(2);
+				}
+			}
+		} finally {
+			await context.close();
+		}
+	});
+}
+
+/** The document's first line and how far below the scroller's top edge it is, in the next painted frame. */
+async function firstLine(page: Page): Promise<{ text: string; offset: number; scrollTop: number; height: number }> {
+	return page.evaluate(() => new Promise((resolve) => {
+		(window as Win).__eachPaintedFrame!(() => {
+			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
+			const line = scroller.querySelector<HTMLElement>('.cm-line')!;
+			return { text: (line.textContent ?? '').trim(), offset: line.getBoundingClientRect().top - scroller.getBoundingClientRect().top, scrollTop: scroller.scrollTop, height: scroller.clientHeight };
+		}, (first) => {
+			resolve(first);
+			return false;
+		});
+	}));
+}
+
+for (const [width, height] of LAYOUTS) {
+	// The review bar reads its ask after the editor opens. A reader still at the start keeps the title in view as the bar
+	// arrives; the text moves down with the header instead of being scrolled up under it.
+	test(`@surface:live-document a review ask that arrives after the editor opens leaves the start of the document in view at ${width}`, async ({ browser, request }, testInfo) => {
+		test.skip((width <= 768) !== testInfo.project.name.endsWith('-mobile'), 'One layout per project.');
+		test.setTimeout(120_000);
+		const document = await seedLiveDocument(request, `top-${width}`, body());
+		raiseAsk(document.threadId, document.artifactId, 'Is this right?');
+		const context = await browser.newContext({ viewport: { width, height } });
+		try {
+			const reader = await context.newPage();
+			let answer = () => {};
+			const answered = new Promise<void>((resolve) => { answer = resolve; });
+			await reader.route('**/api/attention/*/review', async (route) => {
+				await answered;
+				await route.fallback();
+			});
+			await openLiveDocument(reader, document, '# Anchor document');
+			await installPaintedFrames(reader);
+			await expect(reader.locator('.review-bar')).toHaveCount(0);
+			const opened = await firstLine(reader);
+			expect(opened.text).toBe('Anchor document');
+			expect(opened.scrollTop).toBe(0);
+			await reader.screenshot({ path: testInfo.outputPath(`top-${width}-before-ask.png`) });
+			answer();
+			await expect(reader.locator('.review-bar')).toBeVisible({ timeout: 10_000 });
+			await reader.waitForTimeout(800);
+			const shown = await firstLine(reader);
+			await reader.screenshot({ path: testInfo.outputPath(`top-${width}-ask-shown.png`) });
+			expect(shown.scrollTop, 'the reader is still at the start').toBe(0);
+			expect(shown.text).toBe('Anchor document');
+			expect(Math.abs(shown.offset - opened.offset), 'the first line is still at the top of the scroller').toBeLessThanOrEqual(2);
+			expect(shown.offset + 20, 'the first line is in view').toBeLessThanOrEqual(shown.height);
+		} finally {
+			await context.close();
 		}
 	});
 }

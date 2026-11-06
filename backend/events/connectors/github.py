@@ -1,9 +1,6 @@
-"""GitHub connector manifest (declared data).
+"""GitHub manifest and source-owned fact extraction.
 
-Reuses the single GitHub artifact-id format source — ``events.identity`` —
-so there is no parallel derivation of a PR's identity (replace-don't-preserve):
-the legacy router and the new envelope path resolve a PR to the *same*
-``repo#N`` external id.
+The router and envelope share ``events.identity`` for each ``repo#N`` artifact id.
 """
 
 from __future__ import annotations
@@ -30,8 +27,10 @@ from events.identity import (
 from events.connectors.github_artifacts import pr_artifact_in_result
 from events.connectors.github_label_events import IDENTITY, change_event
 from events.connectors.github_ownership import declaration_facts
+from events.connectors.github_pr_facts import HEAD_FACTS, PAYLOAD_FACTS, READ_FACTS, pull_facts
 from events.connectors.github_observe_rules import GITHUB_OBSERVE_RULES
 from events.connectors.github_content_facts import content_facts, content_kind, repository_name
+from events.connectors.github_reply_facts import REPLY_FILTERABLE, REPLY_TYPES, reply_facts
 from events.connectors.github_receiver import GITHUB_RECEIVER
 from events.connectors.github_screen.workflow import triage_capture, triage_validate, triage_version, triage_workflow
 from events.identity_formula import MalformedEventError, RelationshipDecl
@@ -150,18 +149,20 @@ def _extract_facts(raw: dict[str, Any], resolved: Mapping[str, Any] | None = Non
     facts: dict[str, Any] = {"repo": repository_name(raw)}
     pr = raw.get("pull_request") or {}
     content = content_facts(raw) if any(raw.get(k) for k in ("pull_request", "issue", "comment", "review")) else {}
-    if pr:
-        user = _json_object(pr, "user")
+    is_reply = content_kind(raw) in REPLY_TYPES
+    if pr and not is_reply:
         facts.update({
             "pr_number": pr.get("number"), "action": raw.get("action"),
             "merged": pr.get("merged"),
             "branch": (pr.get("base") or {}).get("ref"),
-            "sha": (pr.get("head") or {}).get("sha"), "author": user.get("login"),
+            "sha": (pr.get("head") or {}).get("sha"), **pull_facts(pr),
         })
     kind = "pull_request" if pr else "issues" if raw.get("issue") else None
     change = change_event(kind, raw) if kind else None
     facts.update(change.facts if change else {})
     facts.update(content)
+    if is_reply:
+        facts.update(reply_facts(raw))
     if (pr and not raw.get("comment") and not raw.get("review")
             and content.get("author_origin") == "inside" and pr.get("title") is not None):
         facts["title"] = pr["title"]
@@ -258,13 +259,13 @@ def _repository_projects(repository: str) -> frozenset[str] | None:
         return None
 
 
-_PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author", "author_origin", "item_version")
-# A label change adds the one name changed, the item's names after it, who did it and when.
-_PR_LABEL_FILTERABLE = (*_PR_FILTERABLE, "label", "labels", "actor", "at")
+_PR_FILTERABLE = ("repo", "branch", "sha", "pr_number", "author", "author_origin", "item_version", *PAYLOAD_FACTS)
+# READ_FACTS are read only when a rule tests one. A label change adds the name changed, who did it and when.
+_PR_LABEL_FILTERABLE = (*_PR_FILTERABLE, *READ_FACTS, "label", "actor", "at")
 _ISSUE_FILTERABLE = ("repo", "issue_number", "label", "labels", "actor", "at",
                      "minutes_since_opened", "state_reason", "author", "author_origin", "item_version")
 _CONTENT_FILTERABLE = ("repo", "author", "author_origin", "item_version")
-_HEAD_CHECKS_FILTERABLE = ("repo", "head_sha", "head_branch", "pr_number", "conclusion")
+_HEAD_CHECKS_FILTERABLE = ("repo", "head_sha", "head_branch", "pr_number", "conclusion", *HEAD_FACTS)
 _CHECK_FILTERABLE = ("repo", "branch", "head_sha", "check_suite_id", "conclusion")
 
 MANIFEST = register(ConnectorManifest(
@@ -273,16 +274,16 @@ MANIFEST = register(ConnectorManifest(
     version="1",
     event_types={
         "pr.opened": EventTypeDecl(
-            "pr.opened", ("repo", "pr_number", "action"), _PR_FILTERABLE,
+            "pr.opened", ("repo", "pr_number", "action"), (*_PR_FILTERABLE, *READ_FACTS),
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
             event_class="actionable", routed_event=GITHUB_ROUTED_EVENTS["pr.opened"]),
         "pr.synchronize": EventTypeDecl(
-            "pr.synchronize", ("repo", "pr_number", "action", "sha"), _PR_FILTERABLE,
+            "pr.synchronize", ("repo", "pr_number", "action", "sha"), (*_PR_FILTERABLE, *READ_FACTS),
             artifact_type=PR_TYPE, artifact_integration=GITHUB_INTEGRATION,
             event_class="actionable", routed_event=GITHUB_ROUTED_EVENTS["pr.synchronize"]),
         "pr.ready_for_review": EventTypeDecl(
             "pr.ready_for_review", ("repo", "pr_number", "action", "sha"),
-            _PR_FILTERABLE, artifact_type=PR_TYPE,
+            (*_PR_FILTERABLE, *READ_FACTS), artifact_type=PR_TYPE,
             artifact_integration=GITHUB_INTEGRATION, event_class="informational",
             routed_event=GITHUB_ROUTED_EVENTS["pr.ready_for_review"]),
         "pr.labeled": EventTypeDecl(
@@ -297,7 +298,7 @@ MANIFEST = register(ConnectorManifest(
         **{suffix: EventTypeDecl(suffix, facts, _ISSUE_FILTERABLE,
                                  routed_event=GITHUB_ROUTED_EVENTS.get(suffix))
            for suffix, facts in IDENTITY.items() if suffix.startswith("issue.")},
-        **{name: EventTypeDecl(name, ("repo", "item_version"), _CONTENT_FILTERABLE,
+        **{name: EventTypeDecl(name, ("repo", "item_version"), (*REPLY_FILTERABLE, *PAYLOAD_FACTS, *READ_FACTS) if name in REPLY_TYPES else _CONTENT_FILTERABLE,
                                 routed_event=GITHUB_ROUTED_EVENTS.get(name))
            for name in ("issue.edited", "issue_comment.created", "issue_comment.edited",
                         "pr_comment.created", "pr_comment.edited", "review.submitted", "review.edited")},

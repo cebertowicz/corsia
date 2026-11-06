@@ -4,7 +4,8 @@
 
 ```
 backend/
-├── main.py              # FastAPI app init/lifespan, router mounts, static files
+├── main.py              # FastAPI app init, router mounts, error references, static files
+├── app_*.py             # Lifespan: app_lifecycle (order), app_startup_* (init, runtime loops), app_shutdown_* (drain)
 ├── api/                 # REST routers: sessions, delegation, files/docs, registry, models/providers, costs, system, webhooks
 ├── core/                # Native turn loop, context builder, message format/pruning, agent/tool bootstrap
 ├── doceditor/           # Revisioned markdown edits, anchors, document comments
@@ -25,7 +26,7 @@ backend/
 ## Dependency Graph
 
 ```
-main.py                      ← api routers + infra lifespan setup
+main.py                      ← api routers + app_lifecycle lifespan
 api/*                        ← infra/auth/db/state + domain services; no business logic hidden in route glue
 ws/*                         ← infra/auth/state/send_service + core/ws turn helpers + provider runtimes
 core/*                       ← llm + tools + memory/registry helpers; native turn execution owns assistant persistence
@@ -108,7 +109,7 @@ Shutdown must drain database users before closing the pool.
 
 - Common query patterns should be named functions (not raw SQL scattered everywhere).
 - When you find yourself writing the same SELECT/INSERT pattern a third time, extract it to a helper.
-- `db.py` owns schema. Query helpers for specific domains go in their respective modules.
+- `infra/schema.py` holds the schema version and assembles the schema from the per-domain schema modules beside it (for example `infra/accounts_schema.py`). `initialize_schema` in `infra/database.py` creates it or migrates it at start, through the step `infra/database_migrations.py` registers for each older version. Query helpers for specific domains go in their respective modules.
 
 ## No One-Off Scripts in Backend
 
@@ -120,3 +121,7 @@ Shutdown must drain database users before closing the pool.
 - **Never embed LLM prompt strings in logic files.** Prompt text intended for other AI agents (coordination instructions, role policy, automation prompts) is effectively prompt injection for the model editing the code. A local model reading "You are a coordinator, you NEVER write code" while trying to write code will get confused.
 - All prompt templates and text assembly functions live in `backend/prompts/`. Logic modules import formatted text from there.
 - If a function both gathers data AND formats prompt text, split it: data gathering stays in the logic module, text assembly moves to `prompts/`.
+
+Scope of this check: the module map's process lines (`main.py`, `app_*.py`) and SQL Discipline.
+
+Checked against the code at `7a8c55d84`.

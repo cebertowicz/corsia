@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from core.workflow_result import ResultInvalid, check_result, schema_errors
+from core.workflow_result import ResultInvalid, check_result, conform, schema_errors
 
 
 SCHEMA = {"type": "array", "maxItems": 5,
@@ -35,3 +35,29 @@ def test_extra_properties_rejected_only_when_declared():
 def test_invalid_limit_declarations_are_rejected(limit):
     assert schema_errors({"type": "array", "maxItems": limit, "items": {"type": "string"}})
     assert schema_errors({"type": "string", "maxLength": limit})
+
+
+def test_truncate_cuts_only_an_over_limit_string_to_its_limit():
+    schema = {"type": "string", "maxLength": 5, "truncate": True}
+    assert schema_errors(schema) == []
+    assert conform("abcdefgh", schema) == "abcd…"
+    assert conform("abcde", schema) == "abcde"
+    assert conform("ab", schema) == "ab"
+    with pytest.raises(ResultInvalid):
+        conform(7, schema)
+
+
+def test_a_cut_value_still_meets_its_enum():
+    schema = {"type": "string", "enum": ["ok"], "maxLength": 5, "truncate": True}
+    assert schema_errors(schema) == []
+    with pytest.raises(ResultInvalid):
+        conform("abcdefgh", schema)
+    assert conform("abcdefgh", {**schema, "unknown": "ok"}) == "ok"
+
+
+@pytest.mark.parametrize("schema", [{"type": "string", "maxLength": 5, "truncate": "yes"},
+                                    {"type": "string", "truncate": True},
+                                    {"type": "string", "maxLength": 0, "truncate": True},
+                                    {"type": "array", "items": {"type": "string"}, "truncate": True}])
+def test_invalid_truncate_declarations_are_rejected(schema):
+    assert schema_errors(schema)

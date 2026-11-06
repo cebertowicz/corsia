@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { flushSync, mount, unmount, type ComponentProps } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Writable } from 'svelte/store';
@@ -209,6 +210,27 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(footerIn(shown.target)).toBeNull();
 	});
 
+	it('keeps the comments pill beside a held Send, which takes its short wording in the bar on a phone', async () => {
+		const doc = documentStatus();
+		doc.component.sync('art-doc', pending(3, { doc: 1, image: 2 }));
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(3, { doc: 1, image: 2 }) });
+		flushSync();
+		const shown = await viewer({
+			src: SRC, alt: 'Mock', artifactId: 'art-doc', docName: 'notes.md', onBack: vi.fn(),
+			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
+		});
+		const bar = shown.target.querySelector('.bar')!;
+		// Both stand in the bar together: the count is never swapped out for the Send.
+		expect(bar.querySelector('[data-image-comments-pill]')).not.toBeNull();
+		const send = sendIn(bar)!;
+		expect(send.getAttribute('data-short')).toBe('Send 2');
+		// The short wording is the narrow bar's own rule (a phone width), not the document header's container; the count and Send are no longer one or the other.
+		const controls = readFileSync('src/lib/components/DocFeedbackControls.svelte', 'utf8');
+		expect(controls).toContain('.sending-now.compact > :global(.btn)::before { content: attr(data-short);');
+		expect(readFileSync('src/lib/components/ImageLightboxResponsive.css', 'utf8')).not.toContain('data-image-comments-pill');
+		expect(readFileSync('src/lib/components/ImageLightboxResponsive.css', 'utf8')).toContain('min-width: var(--touch-target)');
+	});
+
 	it('sends nothing when only the lightbox goes: leaving the image is the overlay\'s exit, not the viewer\'s unmount', async () => {
 		const doc = documentStatus();
 		doc.component.sync('art-doc', pending(2, { image: 2 }));
@@ -228,7 +250,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 			const component = mount(ArtifactDocumentImageOverlay, {
 				target,
 				props: {
-					image: { src: SRC, alt: 'Mock', from: 10, to: 24 },
+					image: { src: SRC, alt: 'Mock', from: 10, to: 24, viewId: {} },
 					comments: { artifactId: 'art-doc', projectId: null, readOnly: false, post: vi.fn(async () => 'new'), feedback },
 					target: { instanceId: 'tab-1', name: 'notes.md', path: '/ws/notes.md', projectId: null, threadId: null, artifactId: 'art-doc' },
 					onBack: vi.fn(), onPlace: vi.fn(),
@@ -316,12 +338,13 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		const shown = await imageTab();
 		const pill = shown.target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!;
 		expect(pill.getAttribute('aria-expanded')).toBe('false');
-		expect(pill.getAttribute('aria-label')).toBe('1 open thread, 3 messages not sent yet');
-		expect(pill.querySelector('.count-unit')!.textContent).toBe('thread');
+		// The image viewer's list opens on All, so its pill counts the resolved thread too.
+		expect(pill.getAttribute('aria-label')).toBe('2 threads, 3 messages not sent yet');
+		expect(pill.querySelector('.count-unit')!.textContent).toBe('threads');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
 	});
 
-	it('marks the in-document lightbox\'s pill from the document\'s batch, counting this image\'s open threads', async () => {
+	it('marks the in-document lightbox\'s pill from the document\'s batch, counting this image\'s threads', async () => {
 		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1), onImage('there', 2), { ...onImage('done', 3), resolved: true }], feedback: pending(2) });
 		const doc = documentStatus();
 		doc.component.sync('art-doc', pending(2));
@@ -330,11 +353,11 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
 		});
 		const pill = shown.target.querySelector<HTMLButtonElement>('[data-image-comments-pill]')!;
-		expect(pill.getAttribute('aria-label')).toBe('2 open threads, 2 messages not sent yet');
+		expect(pill.getAttribute('aria-label')).toBe('3 threads, 2 messages not sent yet');
 		expect(pill.querySelector('.unsent-dot')).not.toBeNull();
 		doc.component.sync('art-doc', pending(0));
 		flushSync();
-		expect(pill.getAttribute('aria-label')).toBe('2 open threads');
+		expect(pill.getAttribute('aria-label')).toBe('3 threads');
 		expect(pill.querySelector('.unsent-dot')).toBeNull();
 	});
 

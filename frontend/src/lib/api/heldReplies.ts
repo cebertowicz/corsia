@@ -1,0 +1,34 @@
+/** The person's decision on a held reply: send its stored text once, or send nothing. */
+
+export type HeldVerb = 'approve' | 'decline';
+
+export type HeldOutcome =
+	| { status: 'sent' | 'declined' }
+	/** Approved, but delivery was impossible; the reason identifies the recovery. */
+	| { status: 'not_sent'; line: string; reason: 'recipient_gone' | 'scope' | undefined }
+	/** Another page decided it first, or it is gone: nothing was sent by this call. */
+	| { status: 'settled' }
+	| { status: 'unauthorized' }
+	/** Delivery failed; the server keeps the reply held and names the failure when it can. */
+	| { status: 'error'; line: string | null; reference?: string };
+
+export async function decideHeldReply(bearer: string, id: string, verb: HeldVerb): Promise<HeldOutcome> {
+	let res: Response;
+	try {
+		res = await fetch(`/api/held-replies/${encodeURIComponent(id)}/${verb}`, {
+			method: 'POST',
+			headers: { Authorization: `Bearer ${bearer}` },
+		});
+	} catch {
+		return { status: 'error', line: null };
+	}
+	if (res.status === 401) return { status: 'unauthorized' };
+	if (res.status === 404 || res.status === 409) return { status: 'settled' };
+	if (!res.ok) {
+		const body = (await res.json().catch(() => ({}))) as { detail?: unknown; reference?: unknown };
+		return { status: 'error', line: typeof body.detail === 'string' ? body.detail : null, reference: typeof body.reference === 'string' ? body.reference : undefined };
+	}
+	const body = (await res.json()) as { state?: string; line?: string; reason?: 'recipient_gone' | 'scope' };
+	if (body.state === 'not_sent') return { status: 'not_sent', line: body.line ?? '', reason: body.reason };
+	return { status: verb === 'approve' ? 'sent' : 'declined' };
+}

@@ -18,7 +18,7 @@ function comment(region: ImageRegion, id = 'a', regionNumber = 1): DocComment {
 function render(comments = [comment(OLD)]) {
 	const props = $state({
 		comments, moving: null as { id: string; region: ImageRegion | null } | null, selectedId: 'a' as string | null, scale: 1,
-		colorOf: () => '#e5484d', draftColor: '#3e63dd', onPick: vi.fn(), onHover: vi.fn(), onDraw: vi.fn(), onDismiss: vi.fn(),
+		colorOf: () => '#e5484d', draftColor: '#3e63dd', onPick: vi.fn(), onAmbiguous: vi.fn(), onHover: vi.fn(), onDraw: vi.fn(), onDismiss: vi.fn(),
 	});
 	host = document.createElement('div'); document.body.appendChild(host);
 	component = mount(ImageRegionLayer, { target: host, props });
@@ -115,6 +115,29 @@ describe('ImageRegionLayer moving a pin', () => {
 	// Two boxes 16 px apart: the second's tag steps above the first's until the first moves away.
 	const NEAR = [comment({ x: 0.4, y: 0.4, w: 0.1, h: 0.1 }), comment({ x: 0.42, y: 0.4, w: 0.1, h: 0.1 }, 'b', 2)];
 	const glideOf = (element: Element) => animate.mock.calls.find(([frames], index) => animate.mock.contexts[index] === element && Array.isArray(frames) && 'translate' in (frames[0] ?? {}));
+
+	it('opens the list for overlapping touch and pen targets, while mouse and keyboard pick one', () => {
+		const props = render([comment({ x: 0.4, y: 0.4, w: 0, h: 0 }), comment({ x: 0.45, y: 0.4, w: 0, h: 0 }, 'b', 2)]);
+		const a = live('[data-region-tag="1"]')!, b = live('[data-region-tag="2"]')!;
+		const centre = (tag: HTMLElement) => ({ x: frame.left + parseFloat(tag.style.left), y: frame.top + parseFloat(tag.style.top) });
+		const pa = centre(a), pb = centre(b);
+		const mid = { x: (pa.x + pb.x) / 2, y: (pa.y + pb.y) / 2 };
+		expect(Math.abs(pa.x - pb.x)).toBeLessThan(44);
+		expect(Math.abs(pa.y - pb.y)).toBeLessThan(44);
+		const press = (kind: string, at: { x: number; y: number }, detail = 1) => {
+			const down = new Event('pointerdown', { bubbles: true });
+			Object.defineProperty(down, 'pointerType', { value: kind });
+			a.dispatchEvent(down);
+			a.dispatchEvent(new MouseEvent('click', { bubbles: true, detail, clientX: at.x, clientY: at.y }));
+		};
+		press('touch', mid); expect(props.onAmbiguous).toHaveBeenLastCalledWith(['a', 'b'], a);
+		press('pen', mid); expect(props.onAmbiguous).toHaveBeenCalledTimes(2);
+		press('touch', { x: pa.x - Math.sign(pb.x - pa.x || 1) * 21, y: pa.y - Math.sign(pb.y - pa.y || 1) * 21 });
+		expect(props.onPick).toHaveBeenLastCalledWith('a', expect.any(Function), a);
+		press('mouse', pb); expect(props.onPick).toHaveBeenLastCalledWith('b', expect.any(Function), a);
+		press('touch', mid, 0); expect(props.onPick).toHaveBeenLastCalledWith('a', expect.any(Function), a);
+		expect(props.onAmbiguous).toHaveBeenCalledTimes(2);
+	});
 
 	it('glides a neighbour’s tag to the place a moved pin leaves free, rather than jumping', async () => {
 		const props = render(NEAR);

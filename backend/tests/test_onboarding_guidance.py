@@ -616,7 +616,7 @@ def test_the_user_profile_fact_is_described_as_read_from_the_workspace_profile()
 def test_the_about_you_doc_opens_after_the_chat_answers_and_is_filled_by_suggestions_only():
     doc = (FIRST_RUN_APP.parent / "about-you-doc.md").read_text(encoding="utf-8")
 
-    assert "`shared/about-you.md`, outside `.threads/`" in doc and "`document_open`" in doc
+    assert "`shared/about/about-you.md`, outside `.threads/`" in doc and "`document_open`" in doc
     assert re.findall(r"^## (.+)$", doc.split("```", 2)[1], flags=re.MULTILINE) == [
         "Who you are", "What you're working toward", "How you like to work"]
     assert "no text under a heading" in doc

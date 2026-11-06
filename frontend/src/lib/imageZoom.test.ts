@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
 	clampScale, distance, fitScale, fractionOnImage, isActualSize, MAX_SCALE, midpoint, percentLabel,
-	scrollToHold, stepScale, wheelFactor,
+	readableOpen, scrollToHold, stepScale, wheelFactor,
 } from './imageZoom';
 
 describe('fitScale', () => {
@@ -89,5 +89,19 @@ describe('labels', () => {
 		expect(isActualSize(1.25)).toBe(false);
 		expect(percentLabel(0.524)).toBe('52%');
 		expect(percentLabel(1)).toBe('100%');
+	});
+});
+
+describe('readableOpen', () => {
+	it('opens at the readable scale when the image does not fit there, and never above its own size', () => {
+		expect(readableOpen(0.33, 0.1)).toBeCloseTo(0.33);
+		expect(readableOpen(2, 0.1)).toBe(1);
+	});
+
+	it('is Fit (null) when the image already fits at the readable scale, or has none', () => {
+		expect(readableOpen(0.33, 0.33)).toBeNull();
+		expect(readableOpen(0.5208, 0.52)).toBeNull();
+		expect(readableOpen(0.33, 1)).toBeNull();
+		expect(readableOpen(undefined, 0.1)).toBeNull();
 	});
 });

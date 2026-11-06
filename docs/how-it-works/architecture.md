@@ -12,18 +12,13 @@ CORSIA has a backend process that manages application state, a browser UI it ser
 ```mermaid
 flowchart TB
     UI[Browser or<br/>desktop shell] -->|REST, /ws| BE[Backend<br/>FastAPI]
-    BE -->|native loop| LLM[Model providers]
-    BE -->|spawns| CC[Claude Code]
-    BE -->|spawns| CX[Codex]
-    BE --> DB[(SQLite<br/>corsia.db)]
-    BE --> AN[(DuckDB<br/>analytics)]
+    BE -->|runs| AG[Agent loops:<br/>native, Claude Code,<br/>Codex]
+    AG -->|tools| BE
+    AG --> LLM[Model<br/>providers]
+    BE --> DB[(State root:<br/>corsia.db,<br/>analytics.duckdb)]
     BE --> WS[Workspace<br/>files]
-    CC -->|MCP bridge<br/>when configured| BE
-    CX -->|tools| BE
-    %% invisible links only stack the stores under the agent row, to keep the diagram narrow
-    LLM ~~~ DB
-    CC ~~~ AN
-    CX ~~~ WS
+    %% the invisible link puts the stores a row below the agents, so no row is wider than two boxes
+    AG ~~~ DB
 ```
 
 ## Why it is shaped this way
@@ -53,14 +48,18 @@ The schema version is stored in the database (`PRAGMA user_version`) and compare
 
 Startup runs in two stages, in the application's lifespan hook (`backend/app_lifecycle.py`).
 
-1. **Synchronous init** (`backend/app_startup_init.py`): create runtime folders, initialize or migrate the database, repair moved paths, sweep leftover private launch files and key-store values, then recover interrupted durable writes and file relocations and initialize the workspace folders.
-2. **Runtime start** (`backend/app_lifecycle.py`, `backend/app_startup_runtime.py`): reconcile in-flight turns from the previous run (see [Turns and delivery](turns-and-delivery.md)) before starting the runtime services, which include the background loops: plan liveness, presence sweep, GitHub notification polling, mail polling, skill-library refresh, owned-PR quiet watch, and nightly jobs.
+1. **Synchronous init** (`backend/app_startup_init.py`): create runtime folders, initialize or migrate the database, repair moved paths, sweep leftover private launch files and key-store values, then recover interrupted durable writes, file relocations and held replies, and initialize the workspace folders.
+2. **Runtime start** (`backend/app_lifecycle.py`, `backend/app_startup_runtime.py`): reconcile in-flight turns from the previous run (see [Turns and delivery](turns-and-delivery.md)) before starting the runtime services, which include the background loops: plan liveness, presence sweep, GitHub notification polling (for the person's account and the agents' account), mail polling, skill-library refresh, owned-PR quiet watch, and nightly jobs. One-time tasks run alongside them, such as re-arming the PR head checks that were waiting when the last process stopped. `RUNTIME_LOOP_TASKS` in `backend/app_startup_runtime.py` is the full list; shutdown cancels exactly those.
 
-Startup steps for local models are independent: each failure is logged with a reference and does not stop the app.
+Before startup work runs, CORSIA adopts its running managed oMLX server and starts any needed upgrade. Local requests wait for the bundled build and previously loaded models; cloud work can continue independently. A failed upgrade releases waiting local requests with an error (`backend/llm/providers/omlx_upgrade.py`).
+
+Model prices come from LiteLLM's bundled map. Once the app is up, the backend fetches LiteLLM's current map once in the background (5 s limit) and keeps the bundled one if that fails. Setting `LITELLM_LOCAL_MODEL_COST_MAP=true` skips the fetch (`backend/main.py`, `backend/llm/live_cost_map.py`).
 
 ### Network exposure
 
 The main server binds to one interface chosen at setup: `127.0.0.1` for "this computer only" or `0.0.0.0` for "reachable from other devices". The Devices listener is separate: it is off unless you turn it on, and then it binds all interfaces whichever you chose ([Network](../security/network.md)). A setting that can't be used fails closed with the command that fixes it. A missing bootstrap uses the legacy all-interface bind, and an older bootstrap without either setting is updated to retain that bind (`backend/infra/bind_host.py`). The default port is 1956 (`backend/infra/default_port.py`).
+
+A third listener receives measures from outside tools over OTLP/HTTP. It is always loopback-only (`127.0.0.1`), on port 47921, or the first free port from 47922 to 47930; `CORSIA_OTLP_PORT` sets one port instead. It skips a port another collector already holds. If no port is free it logs a warning and the rest of the app runs normally (`backend/infra/otlp_listener.py`).
 
 ## What can go wrong
 
@@ -89,3 +88,5 @@ The schema version and the migration entry point:
 grep -n "SCHEMA_VERSION" backend/infra/schema.py
 grep -n "def initialize_schema" backend/infra/database.py
 ```
+
+Checked against the code at `7a8c55d84`.

@@ -4,14 +4,16 @@
  * A region is a box or a point in fractions of the image, origin top-left, so it
  * holds at any zoom. Tags follow the same rule as the marked-up copy an agent
  * gets back (`backend/doceditor/image_markup.py` `place_tag`): a tag never covers
- * what its box points at. A box's tag tries left of its top-left corner, above
- * it, then right of the box, and only when the image edge clips all three sits
- * inside the box's corner. A point's tag tries up-right, then the other diagonals.
+ * what its box points at. A box's tag sits outside its top-left corner, then tries
+ * left of the corner, above it, then right of the box, and only when the image edge
+ * clips all four sits inside the box's corner. A point's tag sits up-left of the
+ * point, then tries the other diagonals.
  * A spot over another comment's dot or box, or over a tag placed before it, is
  * passed over while a clear one fits.
  */
 import type { ImageRegion } from '$lib/api/docs';
 import { agentColor } from '$lib/docPresence';
+import { contrastRatio, over, parseColor, stepUntil, toHex, type Rgb } from '$lib/utils/contrast';
 import { projectAccent } from '$lib/utils/projectColors';
 
 export type { ImageRegion };
@@ -49,10 +51,10 @@ export function placeTag(region: ImageRegion, size: Size, radius = TAG_RADIUS, g
 	let spots: [number, number, TagSide][];
 	if (isPoint(region)) {
 		const reach = radius * 1.4;
-		spots = [[x0 + reach, y0 - reach, 'up-right'], [x0 - reach, y0 - reach, 'up-left'], [x0 + reach, y0 + reach, 'down-right'], [x0 - reach, y0 + reach, 'down-left']];
+		spots = [[x0 - reach, y0 - reach, 'up-left'], [x0 + reach, y0 - reach, 'up-right'], [x0 + reach, y0 + reach, 'down-right'], [x0 - reach, y0 + reach, 'down-left']];
 	} else {
 		const x1 = x0 + region.w * width;
-		spots = [[x0 - gap - r, y0 + r, 'left'], [x0 + r, y0 - gap - r, 'above'], [x1 + gap + r, y0 + r, 'right']];
+		spots = [[x0 - gap - r, y0 - gap - r, 'up-left'], [x0 - gap - r, y0 + r, 'left'], [x0 + r, y0 - gap - r, 'above'], [x1 + gap + r, y0 + r, 'right']];
 	}
 	const clear = (cx: number, cy: number) => avoid.every((other) => Math.hypot(cx - other.x, cy - other.y) >= 2 * r);
 	const open = (cx: number, cy: number) => marks.every((mark) => 'r' in mark
@@ -73,7 +75,7 @@ export function placeTag(region: ImageRegion, size: Size, radius = TAG_RADIUS, g
 /**
  * Every tag on one image, placed in `regions`' order, each keeping clear of the
  * tags before it and of every other comment's mark; `dot` is a point's dot
- * radius with its ring.
+ * radius with its ring. Centres come back in pixels of the image.
  */
 export function placeTags(regions: ImageRegion[], size: Size, radius = TAG_RADIUS, gap = TAG_GAP, dot = POINT_RADIUS + 2): (Point & { side: TagSide })[] {
 	const { width, height } = size;
@@ -153,6 +155,23 @@ export function nearestTarget<T extends Point & { id: string }>(targets: T[], at
 export function regionColor(comment: { authorKind?: 'user' | 'agent'; authorThreadId?: string | null }, projectId: string | null, accent?: string | null): string {
 	if (comment.authorKind === 'agent' && comment.authorThreadId) return agentColor(comment.authorThreadId);
 	return projectAccent(projectId, accent);
+}
+
+/** The digit's ink (`--image-region-ink`), the disc's fill opacity and the two backdrops it is read over. Keep equal to `INK`, `ALPHA` and `BACKDROPS` in `backend/doceditor/badge_tone.py`. */
+const BADGE_INK: Rgb = [17, 17, 17];
+const BADGE_ALPHA = 0.8;
+const BADGE_BACKDROPS: Rgb[] = [[0, 0, 0], [255, 255, 255]];
+
+/**
+ * The disc's fill: the author's colour, stepped lighter only as far as the digit needs to meet 4.5:1
+ * against the fill at 80% over black and over white. A colour that already does is returned as it came,
+ * and so is anything that is not a colour.
+ */
+export function badgeFill(colour: string): string {
+	const own = parseColor(colour);
+	if (!own) return colour;
+	const tone = stepUntil(own, 'dark', (fill) => BADGE_BACKDROPS.every((backdrop) => contrastRatio(BADGE_INK, over(fill, backdrop, BADGE_ALPHA)) >= 4.5));
+	return tone === own ? colour : toHex(tone);
 }
 
 const pct = (value: number) => `${Math.round(value * 100)}%`;

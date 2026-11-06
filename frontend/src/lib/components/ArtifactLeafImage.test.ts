@@ -35,7 +35,8 @@ let component: Record<string, unknown> | null = null;
 let realRO: typeof ResizeObserver;
 
 async function settle() {
-	for (let i = 0; i < 5; i++) {
+	// The viewer awaits one more tick before it reports loaded (focus lands in it only once drawn).
+	for (let i = 0; i < 8; i++) {
 		await Promise.resolve();
 		flushSync();
 	}

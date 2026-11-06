@@ -83,7 +83,8 @@ export async function open(page: Page, doc: Doc, mode: Mode, theme: 'light' | 'd
 	// The plan pane opens beside the document by default; the one-row layout needs the canvas's full width.
 	if (mode === 'closed' && !(await page.locator('.pane').evaluate((pane) => pane.classList.contains('collapsed')))) {
 		await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
-		await expect(page.locator('.pane.collapsed')).toBeVisible();
+		// A collapsed pane is zero wide, so it reads hidden once any width transition ends (at once under reduced motion).
+		await expect(page.locator('.pane')).toHaveClass(/\bcollapsed\b/);
 	}
 }
 export async function selectThread(page: Page, doc: Doc, mode: Mode) {

@@ -26,7 +26,7 @@ const DOC = [
 
 type Opened = { title: string; artifactId: string; ids: { table: string; prose: string } };
 
-async function openDocument(page: Page, size: { width: number; height: number }): Promise<Opened> {
+async function openDocument(page: Page, size: { width: number; height: number }, doc = DOC): Promise<Opened> {
 	await page.setViewportSize(size);
 	await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 	const request = page.request, params = { token: TEST_TOKEN };
@@ -36,11 +36,11 @@ async function openDocument(page: Page, size: { width: number; height: number })
 	const workspace = roots.find((root) => root.kind === 'workspace')?.path;
 	expect(workspace).toEqual(expect.any(String));
 	const fileName = `${title}.md`, docPath = path.join(workspace!, fileName);
-	const seeded = await request.put('/api/files/content', { params, data: { path: docPath, text: DOC, thread_id: threadId, create: true } });
+	const seeded = await request.put('/api/files/content', { params, data: { path: docPath, text: doc, thread_id: threadId, create: true } });
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId: string = (await seeded.json()).artifact.id;
 	const add = async (quoted: string, body: string) => {
-		const from = DOC.indexOf(quoted);
+		const from = doc.indexOf(quoted);
 		expect(from, `setup: ${quoted} is in the document`).toBeGreaterThanOrEqual(0);
 		const created = await request.post(`/api/artifacts/${artifactId}/comments`, { params, data: { body, anchor_text: quoted, from_off: from, to_off: from + quoted.length, delivery_policy: 'immediate' } });
 		expect(created.ok(), await created.text()).toBeTruthy();
@@ -56,7 +56,7 @@ async function openDocument(page: Page, size: { width: number; height: number })
 	if (size.width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	await expect(page.locator('.cm-content')).toBeVisible();
-	await expect(page.getByRole('button', { name: /^2 open threads\b/ })).toBeEnabled();
+	await expect(page.getByRole('button', { name: /^2 threads\b/ })).toBeEnabled();
 	await settle(page);
 	return { title, artifactId, ids };
 }
@@ -113,7 +113,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 	test('an empty table cell can start and keep a comment after reload', async ({ page }, testInfo) => {
 		test.setTimeout(90_000);
 		const { title, ids } = await openDocument(page, { width: 1440, height: 900 });
-		await page.getByRole('button', { name: /^2 open threads\b/ }).click();
+		await page.getByRole('button', { name: /^2 threads\b/ }).click();
 		const comments = page.locator('[data-doc-comments-drawer]');
 		await comments.locator(`[data-comment-id="${ids.table}"]`).locator('[data-comment-jump]').click();
 		await comments.getByRole('button', { name: 'Close comments' }).click();
@@ -122,22 +122,42 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		await cell.scrollIntoViewIfNeeded();
 		await cell.click();
 		await page.locator('.sel-comment').click();
-		await page.getByPlaceholder('Comment…').fill('Empty-cell comment.');
+		await page.getByPlaceholder('Comment, or @ to tag an agent').fill('Empty-cell comment.');
 		await page.getByRole('button', { name: 'Comment', exact: true }).last().click();
 		await expect(cell).toHaveClass(/cm-comment-anchor/);
 		await loginByUrl(page, { waitForComposer: false });
 		await page.getByText(title, { exact: true }).first().click();
 		await expect(page.locator('.cm-content')).toBeVisible();
-		await page.getByRole('button', { name: /^3 open threads\b/ }).click();
+		await page.getByRole('button', { name: /^3 threads\b/ }).click();
 		await expect(page.getByText('Empty-cell comment.', { exact: true })).toBeVisible();
 		await expect(page.getByText('Couldn’t find its place', { exact: true })).toHaveCount(0);
 		await evidence(page, testInfo, 'empty-cell-after-reload');
 	});
 
+	test('jumping to a comment reveals its far cell in a wide table', async ({ page }) => {
+		test.setTimeout(90_000);
+		const wideTable = [
+			`| ${Array.from({ length: 12 }, (_, i) => `Column ${i}`).join(' | ')} |`,
+			`| ${Array.from({ length: 12 }, () => '---').join(' | ')} |`,
+			`| ${Array.from({ length: 12 }, (_, i) => i === 11 ? 'owner-07' : `Wide content ${i}`).join(' | ')} |`,
+		].join('\n');
+		const doc = DOC.replace(['| Item | Owner |', '| --- | --- |', ...TABLE_ROWS].join('\n'), wideTable);
+		const { ids } = await openDocument(page, { width: 1440, height: 900 }, doc);
+		await page.getByRole('button', { name: /^2 threads\b/ }).click();
+		const side = page.locator('[data-doc-comments-drawer]');
+		await side.locator(`[data-comment-id="${ids.table}"]`).locator('[data-comment-jump]').click();
+		const cell = page.locator('.cm-md-table td', { hasText: 'owner-07' });
+		await expect.poll(() => cell.evaluate((el) => {
+			const cellBox = el.getBoundingClientRect(), wrap = el.closest('.table-wrap')!.getBoundingClientRect();
+			const scroller = el.closest<HTMLElement>('.table-wrap')!;
+			return scroller.scrollWidth > scroller.clientWidth && scroller.scrollLeft > 0 && cellBox.left >= wrap.left && cellBox.right <= wrap.right;
+		})).toBe(true);
+	});
+
 	test('navigating to a table row and a prose comment lands inside the editor, and saving on visible text does not scroll', async ({ page }, testInfo) => {
 		test.setTimeout(90_000);
 		const { ids } = await openDocument(page, { width: 2400, height: 900 });
-		await page.getByRole('button', { name: /^2 open threads\b/ }).click();
+		await page.getByRole('button', { name: /^2 threads\b/ }).click();
 		const side = page.locator('[data-doc-comments-drawer]');
 		await expect(side).toBeVisible();
 		await expect(page.locator('[data-adaptive-drawer]'), 'the list is the side-by-side drawer, not a sheet').toHaveCount(0);
@@ -166,7 +186,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		const before = { scrollTop: await scrollTop(), y: (await boxOf(target))!.y };
 		await target.dblclick({ position: { x: 12, y: 8 } });
 		await page.locator('.sel-comment').click();
-		await page.getByPlaceholder('Comment…').fill('Saved on visible text.');
+		await page.getByPlaceholder('Comment, or @ to tag an agent').fill('Saved on visible text.');
 		await page.getByRole('button', { name: 'Comment', exact: true }).last().click();
 		await expect(page.getByText('Saved on visible text.')).toBeVisible();
 		await expect(target.locator('.cm-comment-anchor')).toHaveCount(1);

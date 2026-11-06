@@ -1,0 +1,18 @@
+[
+  {"name":"plain", "markdown":"```mermaid\ngraph TD\nA-->B\n```", "anchor":0, "block":{"first":1,"last":4,"source":"graph TD\nA-->B"}},
+  {"name":"one space", "markdown":" ```mermaid\n graph TD\n ```", "anchor":0, "block":{"first":1,"last":3,"source":"graph TD"}},
+  {"name":"two spaces", "markdown":"  ```mermaid\n  graph TD\n  ```", "anchor":0, "block":{"first":1,"last":3,"source":"graph TD"}},
+  {"name":"three spaces", "markdown":"   ```mermaid\n   graph TD\n   ```", "anchor":0, "block":{"first":1,"last":3,"source":"graph TD"}},
+  {"name":"four spaces", "markdown":"    ```mermaid\n    graph TD\n    ```", "anchor":0, "block":null},
+  {"name":"tildes", "markdown":"~~~mermaid\ngraph TD\n~~~", "anchor":0, "block":{"first":1,"last":3,"source":"graph TD"}},
+  {"name":"longer closing fence", "markdown":"```mermaid\ngraph TD\n`````", "anchor":0, "block":{"first":1,"last":3,"source":"graph TD"}},
+  {"name":"unclosed", "markdown":"```mermaid\ngraph TD", "anchor":0, "block":{"first":1,"last":2,"source":"graph TD"}},
+  {"name":"unclosed trailing newline", "markdown":"```mermaid\ngraph TD\n", "anchor":0, "block":{"first":1,"last":2,"source":"graph TD"}},
+  {"name":"blockquote", "markdown":"> ```mermaid\n> graph TD\n> A-->B\n> ```", "anchor":0, "block":{"first":1,"last":4,"source":"graph TD\nA-->B"}},
+  {"name":"indented blockquote", "markdown":">   ```mermaid\n>   graph TD\n>    A-->B\n>   ```", "anchor":0, "block":{"first":1,"last":4,"source":"graph TD\n A-->B"}},
+  {"name":"bullet list", "markdown":"- ```mermaid\n  graph TD\n  A-->B\n  ```", "anchor":0, "block":{"first":1,"last":4,"source":"graph TD\nA-->B"}},
+  {"name":"ordered list", "markdown":"1. ```mermaid\n   graph TD\n   A-->B\n   ```", "anchor":0, "block":{"first":1,"last":4,"source":"graph TD\nA-->B"}},
+  {"name":"other language", "markdown":"```python\nprint(1)\n```", "anchor":0, "block":null},
+  {"name":"not first line", "markdown":"```mermaid\ngraph TD\n```", "anchor":11, "block":null},
+  {"name":"unicode preceding", "markdown":"😀\n\n```mermaid\ngraph TD\n```", "anchor":4, "block":{"first":3,"last":5,"source":"graph TD"}}
+]

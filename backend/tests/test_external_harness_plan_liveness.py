@@ -17,7 +17,7 @@ from plans import admission as plan_admission, service
 from tests.event_routing_helpers import mk_session
 
 
-def _bind_active_turn(live, thread_id: str, *, db=None) -> None:
+def _bind_active_turn(live, thread_id: str, *, db=None, metadata=None) -> None:
     from infra.input_writes import begin_batch_write, settle_batch_write
     from infra.thread_driver import admit_input
 
@@ -31,6 +31,7 @@ def _bind_active_turn(live, thread_id: str, *, db=None) -> None:
         turn_id=turn_id,
         boot_epoch=BOOT_EPOCH,
         admitted_at="t",
+        metadata=metadata,
         db=db,
     )
     assert admission.batch is not None
@@ -203,7 +204,7 @@ def test_codex_error_marker_is_recorded_before_plan_liveness(isolated_db, event,
     try:
         metadata = json.loads(db.execute(
             "SELECT metadata FROM messages WHERE thread_id=? AND role='system' "
-            "ORDER BY seq DESC LIMIT 1",
+            "AND json_extract(metadata,'$.type')='cc_error' ORDER BY seq DESC LIMIT 1",
             (thread_id,),
         ).fetchone()["metadata"])
     finally:
@@ -431,9 +432,15 @@ async def test_native_llm_error_frame_matches_history_projection(isolated_db, mo
     finally:
         db.close()
 
+    broadcast_row = next(call.args[0]["message"] for call in emit.await_args_list
+                         if call.args[0]["type"] == "message_added")
+    assert broadcast_row["id"] == history[0]["id"]
+    assert broadcast_row["seq"] is not None
+    assert broadcast_row["content"] == "provider failed"
+    assert broadcast_row["metadata"]["reference"] == frame["reference"]
     assert frame["turn_id"] == history[0]["metadata"]["turn_id"]
     assert frame["reference"] == history[0]["metadata"]["reference"]
-    assert frame["next_step"] == history[0]["metadata"]["next_step"]
+    assert "next_step" not in frame  # the Turn still runs; settlement re-publishes the real value
 
 
 @pytest.mark.asyncio

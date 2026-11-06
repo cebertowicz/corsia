@@ -32,7 +32,7 @@ from loguru import logger
 
 from core import carry_in_facts as facts
 from core.carry_in_facts import CarryInFact
-from infra import carry_in_capacity as capacity
+from infra import carry_in_action, carry_in_capacity as capacity
 from infra.carry_in_arm import (
     Arm as _Arm,
     arms as _arms,
@@ -333,6 +333,7 @@ async def wake(workspace: Path) -> bool:
     """
     from core.turn_core import BOOT_EPOCH
     from infra.guidance_git import GitFault
+    from core.agent import get_agent
     from llm.provider_overflow import GUARD_QUIET_TIMEOUT_SECONDS
 
     await run_in_db(partial(_write, _settle_interrupted, scope="carry_in_interrupted"))
@@ -349,6 +350,11 @@ async def wake(workspace: Path) -> bool:
         "owner_missing" if owner is None else
         "not_mechanically_executable" if case.actions is None else None
     )
+    if reason is None and not isinstance(case, str) and case.actions is not None:
+        if not case.actions["decisive_action"]["params"]:
+            registry = (await get_agent()).tools
+            if carry_in_action.unparameterized(case.actions, registry):
+                reason = carry_in_action.UNPARAMETERIZED
     try:
         blobs = None if reason is not None else await run_off_db(_blobs, workspace, fact, case.deliver)
     except GitFault as fault:  # the history, not the case, failed: it stays the oldest pending case

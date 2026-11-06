@@ -754,25 +754,6 @@ def test_an_outside_edit_on_an_unborn_repository_is_recorded_unrecorded_at_start
     assert _git(["show", "HEAD:context/demo.md"], cwd=workspace) == "saved\n"
 
 
-def test_a_guidance_save_works_with_the_control_placeholders(isolated_db, tmp_path):
-    """A save on the repository a Linux shell launch prepares records its bytes with the ``.`` commondir in place."""
-    from tools.linux_workspace_git import prepare_workspace_git
-
-    workspace = _unborn_workspace(tmp_path, "placeholder", "demo")
-    assert prepare_workspace_git(workspace)
-    git_dir = workspace / ".git"
-    assert (git_dir / "commondir").read_text() == ".\n"
-    assert (git_dir / "config.worktree").read_bytes() == b""
-    assert _git(["rev-parse", "--show-toplevel"], cwd=workspace).strip() == str(workspace.resolve())
-    assert _git(["rev-parse", "--git-common-dir"], cwd=workspace).strip() == str(git_dir)
-
-    result = _save(workspace, _history(workspace), "saved\n")
-
-    assert result.outcome == "written" and _count(workspace) == 1
-    assert _git(["show", "HEAD:context/demo.md"], cwd=workspace) == "saved\n"
-    assert _git(["status", "--porcelain"], cwd=workspace).strip() == ""
-
-
 def test_an_ignored_guidance_path_reports_history_off(history_scope):
     workspace, _ = history_scope
     (workspace / ".gitignore").write_text("context/private.md\n")

@@ -147,20 +147,23 @@ def reset_iso(detail: object, reset_at: object = None) -> str | None:
     return deadline.isoformat() if deadline else None
 
 
-def harness_cause_kind(harness: str, cause: str | None, detail: Any = None) -> str:
+def harness_cause_kind(
+    harness: str, cause: str | None, detail: Any = None, *, login_answered: bool = False,
+) -> str:
     """The kind of one harness failure row.
 
     ``cause`` is the row's own cause. A process exit is an expired login only
     when its stderr says so; where a cause does not name the failure (a result
     row, an unmapped Codex value) the error text decides the expired login and
-    the usage limit, through their existing classifiers.
+    the usage limit, through their existing classifiers. ``login_answered``
+    means a check of the Turn's login passed after that text, so it is not one.
     """
     if cause in _SELF_NAMING:
         return cause_kind(cause)
     from connections.auth_failure import auth_failure_kind
     from subagents.provider_usage_limits import is_provider_usage_or_quota_limit
 
-    if auth_failure_kind(harness, detail):
+    if not login_answered and auth_failure_kind(harness, detail):
         return "sign_in_expired"
     if cause == "process_exited":
         return "process_exited"
@@ -173,13 +176,13 @@ def harness_cause_kind(harness: str, cause: str | None, detail: Any = None) -> s
 
 def cause_fields(
     harness: str, cause: str | None, detail: Any = None, reset_at: object = None,
-    model: str | None = None,
+    model: str | None = None, *, login_answered: bool = False,
 ) -> dict[str, str]:
     """Row metadata for one harness failure: ``cause``, ``cause_kind``, and ``resets_at`` / ``model`` when known.
 
     ``cause`` is omitted when None so a row never gains a null cause.
     """
-    kind = harness_cause_kind(harness, cause, detail)
+    kind = harness_cause_kind(harness, cause, detail, login_answered=login_answered)
     fields = {"cause": cause} if cause is not None else {}
     fields["cause_kind"] = kind
     if kind == "usage_limit" and (resets := reset_iso(detail or "", reset_at)):

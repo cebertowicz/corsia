@@ -5,15 +5,15 @@ Short answers to the hard questions. Each links to the page with the detail and 
 ## Blast radius
 
 **1. If an agent goes wrong, what's the worst it can do to my machine?**
-Without a lease: read and change everything in the workspace, every project included; read a few tool-settings folders; use your loaded SSH keys and GitHub CLI login; and send anything it can read to any address on the internet or your local network. It can't read the rest of your home folder, or write outside the workspace apart from temporary folders, `~/.ssh/known_hosts` and some developer-tool caches. With a lease, a command can reach most of your home folder, checked only by a reviewer model. See [Agent sandbox](agent-sandbox.md) and [Host access](host-access.md).
+Without a lease: read and change its own project and the workspace's shared files (the CORSIA agent is fenced less ([Agent sandbox](agent-sandbox.md#projects))); read a few tool-settings folders; use your loaded SSH keys and GitHub CLI login; and send anything it can read to any address on the internet or your local network. It can't read the rest of your home folder, or write outside the workspace apart from temporary folders, `~/.ssh/known_hosts` and some developer-tool caches. With a lease, a command can reach most of your home folder, checked only by a reviewer model. See [Agent sandbox](agent-sandbox.md) and [Host access](host-access.md).
 
 **2. Can an agent delete my home folder? My git history? My other projects?**
 - Home folder: not without a lease. Writes to your home folder are refused by the OS, apart from `~/.ssh/known_hosts` and some developer-tool caches ([Agent sandbox](agent-sandbox.md#whats-allowed)), and `rm -rf ~` is refused by CORSIA code. Under a lease, the action reviewer, a model, is told to block needless destruction; nothing else stops it.
-- Other projects: yes. Every project in the workspace is writable.
-- Git history: local history of repositories in the workspace, yes, except the main checkout of a registered repository whose base is protected, which is read-only. Remote history: an agent using your SSH keys or GitHub login can force-push wherever you can, unless the remote protects the branch.
+- Other projects: a project agent can't, from its shell or with its file tools (the CORSIA agent is fenced less ([Agent sandbox](agent-sandbox.md#projects))); on macOS a lease opens an ordinary project to leased shell commands and file-tool calls, but not one set to Local models only, and not to another AI agent's command-line tool started under the lease.
+- Git history: local history of repositories in the workspace, yes, except the main checkout of a registered repository whose base is protected, which is read-only. The workspace's own history is closed to agents' shells and file tools; they reach it only through the workspace history and commit tools. Remote history: an agent using your SSH keys or GitHub login can force-push wherever you can, unless the remote protects the branch.
 
-**3. Can an agent in one project read another project? Why is that allowed?**
-Yes. Projects organize work, settings and what each agent is given; they aren't designed to keep agents apart, and the code says so (`backend/tools/filesystem_gate.py`: project scope is not a confidentiality boundary). The OS sandbox works at the workspace folder. Keep work that must stay apart in separate installs. See [Accounts and access](accounts-and-access.md#what-a-project-does-and-doesnt-separate).
+**3. Can an agent in one project read another project?**
+Not its files without a lease, but its chats, yes. Its shell is fenced out of other projects' folders and repositories by the OS sandbox and its file tools by CORSIA code, and neither can read the workspace's Git history; its chat tools are not fenced. On macOS a lease opens an ordinary project to leased commands and file-tool calls (question 2). The CORSIA agent is fenced only from projects set to Local models only, and from none while its own chat is Local only. Keep work that must stay apart in separate installs. See [Agent sandbox](agent-sandbox.md#projects).
 
 **4. Agents run as my user. Isn't that the same as no sandbox?**
 No. The OS sandbox refuses reads of most of your home folder and writes outside the workspace, apart from a few named exceptions such as temporary folders, whatever the command. But it isn't a separate user or a container: a flaw in the sandbox exposes what your user can reach, and anything agents can read they can send out. See [Agent sandbox](agent-sandbox.md).
@@ -33,10 +33,11 @@ On macOS: [Agent Safehouse](https://github.com/eugene1g/agent-safehouse), an ind
 ## Secrets
 
 **9. Can an agent read my API keys, SSH keys, cookies, Keychain, `.env` files?**
+- Your Claude Code and Codex sign-ins: not without a lease. CORSIA keeps them in its state folder, which a lease can open ([Secrets](secrets.md#where-keys-live)).
 - Keys in CORSIA's key store: not directly, even with a lease. A leased command can leave something behind that runs later outside the sandbox and can read them; only the reviewers stand in the way ([Host access](host-access.md#what-no-lease-opens)).
 - The agents' GitHub account token, if you set that account up: yes. It is outside the key store and agent shells can read it, so they can use `gh` and `git` as that account ([Secrets](secrets.md#where-keys-live)).
 - SSH private keys, Keychains, your browsers' cookies: not without a lease, and a lease reviewer is told to block reading keychain and auth files. It can **use** keys loaded in your SSH agent.
-- The agents' own browser cookies: same as CORSIA's key store.
+- The shared browser's cookies: same as CORSIA's key store.
 - `.env` files: yes, if they are in the workspace. Values the masker recognizes are hidden from the model, but commands can still use them.
 
 See [Secrets](secrets.md).
@@ -53,24 +54,24 @@ In one file in CORSIA's state folder, readable only by your user and closed to e
 ## Data
 
 **13. What leaves my machine, exactly? What goes to the model provider?**
-On a cloud model, each turn sends the instructions, the conversation and every tool result, including the contents of files and pages the agent read. Other traffic goes to services you connect, websites agents visit, and a few anonymous downloads from GitHub. See [Data and privacy](data-and-privacy.md#what-leaves-your-machine).
+On a cloud model, each turn sends the instructions, the chat and every tool result, including the contents of files and pages the agent read. Other traffic goes to services you connect, websites agents visit, and a few anonymous downloads from GitHub. See [Data and privacy](data-and-privacy.md#what-leaves-your-machine).
 
 **14. Does Local only mean nothing leaves?**
-No. Local only means a chat may run only on models served from this machine, or from a server you marked as a trusted device. Its agent can still use the web, email, tool servers, GitHub and the network. See [Data and privacy](data-and-privacy.md#local-only).
+No. Local only means a chat may run only on models served from this machine, or from a server you marked as a trusted device, and its messages to chats on cloud models wait for your approval. Its agent can still use the web, email, connected apps, GitHub and the network, and agents in other projects can still read the chats of a project set to Local models only. See [Data and privacy](data-and-privacy.md#local-only).
 
 **15. Do you collect telemetry? Can I turn it off? Does anything phone home?**
-No product analytics or crash reports are sent. CORSIA does make anonymous requests to GitHub for update checks, a model price list and the skill library index. See [Data and privacy](data-and-privacy.md#what-leaves-your-machine) for each and how to stop it.
+The builds this repository publishes send no product analytics, and no crash reports are collected. The web app can send analytics only if it is built with an analytics key and host, which none of this repository's build and release scripts set. The **Usage sharing** setting uploads nothing at this commit. CORSIA does make anonymous requests to GitHub for update checks, a model price list and the skill library index. See [Data and privacy](data-and-privacy.md#what-leaves-your-machine) for each and how to stop it.
 
 **16. Is my data encrypted at rest?**
 Not by CORSIA. Use FileVault or Linux disk encryption. See [Data and privacy](data-and-privacy.md#whats-stored-and-where).
 
 **17. How do I remove everything?**
-Stop CORSIA; delete the state folder, the workspace, the checkout or app, and the agents' GitHub account folder if you set that account up; then revoke CORSIA's access in your Google or Microsoft account and that account's GitHub CLI access in GitHub. See [Data and privacy](data-and-privacy.md#removing-everything).
+Stop CORSIA; delete the state folder, the workspace, the checkout or app, and the agents' GitHub account folder if you set that account up; then revoke CORSIA's access in your Google or Microsoft account and that account's GitHub CLI access in GitHub, and switch CORSIA off under Full Disk Access if you turned it on for Messages. See [Data and privacy](data-and-privacy.md#removing-everything).
 
 ## Prompt injection
 
 **18. A web page or email tells my agent to upload my files. What stops it?**
-Not much, if the files are in the workspace. Web pages aren't screened; email is screened and labelled, but the agent still sees the text. Outbound network access isn't limited, so an agent that follows the instruction can upload anything it can read. Files outside the workspace need a lease, but **the reviewers won't reliably stop this**: they default to allow, assume the applicant is your own agent on a task you gave it, and can't check that you gave it. They are instructed to block a short list: secret exposure, changes to access controls, needless destruction, and commands plainly outside the approved purpose. A tricked agent that asks to read your ordinary personal files with a plausible reason will usually be allowed. What remains is you reading each lease request. See [Untrusted content](untrusted-content.md) and [Host access](host-access.md).
+Not much, if the files are in the workspace. Web pages and text messages aren't screened; email is screened and labelled, but the agent still sees the text. Outbound network access isn't limited, so an agent that follows the instruction can upload anything it can read. Files outside the workspace need a lease, but **the reviewers won't reliably stop this**: they default to allow, assume the applicant is your own agent on a task you gave it, and can't check that you gave it. They are instructed to block a short list: secret exposure, changes to access controls, needless destruction, and commands plainly outside the approved purpose. A tricked agent that asks to read your ordinary personal files with a plausible reason will usually be allowed. What remains is you reading each lease request. See [Untrusted content](untrusted-content.md) and [Host access](host-access.md).
 
 **19. Can an agent send data to any website?**
 Yes. Outbound access is not limited. See [Network](network.md#outbound).
@@ -84,7 +85,7 @@ Every file is checked against the hash in the library's index, so you get what t
 ## The reviewer
 
 **22. Isn't a model reviewing a model circular?**
-Partly, yes. The reviewer is a separate call that sees only the request, not the conversation that may have misled the agent. That keeps the conversation out, but not injected text: an agent that was misled can repeat that text in its application or commands. The reviewer is told to treat their content as quoted data, not instructions. And it is a model, by default the agent's own, and it is told to let the work proceed; question 18 has what it assumes and blocks. It is **not** a defense against a tricked agent asking for your ordinary personal files. The hard floor and the sandbox are CORSIA code and the OS; the review is not. See [Host access](host-access.md#what-the-reviewers-are-told-to-block-and-what-they-arent).
+Partly, yes. The reviewer is a separate call that sees only the request, not the chat that may have misled the agent. That keeps the chat out, but not injected text: an agent that was misled can repeat that text in its application or commands. The reviewer is told to treat their content as quoted data, not instructions. And it is a model, by default the agent's own, and it is told to let the work proceed; question 18 has what it assumes and blocks. It is **not** a defense against a tricked agent asking for your ordinary personal files. The hard floor and the sandbox are CORSIA code and the OS; the review is not. See [Host access](host-access.md#what-the-reviewers-are-told-to-block-and-what-they-arent).
 
 **23. What happens when the reviewer is down or wrong? How often does it block good work or pass bad work?**
 Down: an application is blocked, and a command under an active lease is denied. Wrong: nothing catches it except you. No measurement of wrong approvals or wrong blocks is published; the README reports how often it said yes and no in one week. See [Host access](host-access.md#when-something-fails).
@@ -108,7 +109,7 @@ See [Network](network.md) and [Accounts and access](accounts-and-access.md).
 With the local setup, no: it listens only on this machine. A server setup, or an old install with no setup recorded, listens on every interface behind sign-in. Phones connect through a private tailnet, or through Devices pairing, which you turn on. See [Network](network.md).
 
 **28. Is this multi-user? Can two people share an install?**
-No. More than one account can exist, but their agents run as the same user in the same workspace and can read each other's files and conversations. One install per person. See [Accounts and access](accounts-and-access.md#more-than-one-account).
+No. More than one account can exist, but their agents run as the same user in the same workspace and can read each other's files and chats. One install per person. See [Accounts and access](accounts-and-access.md#more-than-one-account).
 
 **29. How do I report a vulnerability?**
 Privately, through GitHub's [private report form](https://github.com/cebertowicz/corsia/security/advisories/new), never in a public issue. [`SECURITY.md`](../../SECURITY.md) says what to include.
@@ -119,4 +120,4 @@ No. Nobody outside the project has audited or tested it.
 ## Compliance
 
 **31. Is it suitable for regulated data (HIPAA, SOC 2)?**
-CORSIA makes no compliance claim: no HIPAA, SOC 2 or other certification, attestation or agreement. It sends conversation content to the model providers you choose, stores data unencrypted, and keeps an audit trail that isn't tamper-evident. Whether you may put regulated data through it depends on your obligations and your providers' terms; it isn't designed for it.
+CORSIA makes no compliance claim: no HIPAA, SOC 2 or other certification, attestation or agreement. It sends chat content to the model providers you choose, stores data unencrypted, and keeps an audit trail that isn't tamper-evident. Whether you may put regulated data through it depends on your obligations and your providers' terms; it isn't designed for it.

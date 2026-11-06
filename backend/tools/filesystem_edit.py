@@ -189,6 +189,7 @@ class EditFileTool(Tool):
                 allowed_dir=self._allowed_dir,
                 thread_id=kwargs.get("_thread_id"),
                 project_id=kwargs.get("_thread_project_id"),
+                fence=kwargs.get("_host_access_fence"),
                 for_write=True,
             )
             file_path = authorized.resolved
@@ -292,6 +293,7 @@ class MultiEditTool(Tool):
                 allowed_dir=self._allowed_dir,
                 thread_id=kwargs.get("_thread_id"),
                 project_id=kwargs.get("_thread_project_id"),
+                fence=kwargs.get("_host_access_fence"),
                 for_write=True,
             )
             file_path = authorized.resolved
@@ -374,6 +376,7 @@ class ListDirTool(Tool):
                 allowed_dir=self._allowed_dir,
                 thread_id=kwargs.get("_thread_id"),
                 project_id=kwargs.get("_thread_project_id"),
+                fence=kwargs.get("_host_access_fence"),
             )
             entries = await asyncio.to_thread(list_bound_directory, authorized.resolved)
             items = []

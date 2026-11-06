@@ -31,6 +31,15 @@ PORT_OWNER_UNKNOWN = _PortOwnerUnknown()
 PortOwnerPid = int | None | _PortOwnerUnknown
 
 
+def process_exited(pid: int, alive: Callable[[int], bool]) -> bool:
+    """Reap an exited child, or check the identity of a process adopted from another parent."""
+    try:
+        waited_pid, _ = os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        return not alive(pid)
+    return waited_pid == pid or not alive(pid)
+
+
 def pid_path(runtime_dir: Path, server_id: str) -> Path:
     return runtime_dir / f"omlx-{server_id}.pid"
 
@@ -65,15 +74,34 @@ def read_pid(runtime_dir: Path, server_id: str, *, legacy_port_owner_pid: PortOw
     return None
 
 
-def write_pid(runtime_dir: Path, server_id: str, pid: int) -> None:
-    """Bind the supervisor's spawn record to this process's creation time."""
+def is_recorded_process(runtime_dir: Path, pid: int) -> bool:
+    """Match a process to a durable spawn record, preserving legacy records during identity reads."""
+    return any(read_pid(path.parent, path.stem.removeprefix("omlx-"), preserve_legacy=True) == pid
+               for path in runtime_dir.glob("omlx-*.pid"))
+
+
+def write_pid(runtime_dir: Path, server_id: str, pid: int, *, omlx_version: str | None = None) -> None:
+    """Bind the supervisor's spawn record to this process's creation time and, for a managed server, its build."""
     try:
         created = psutil.Process(pid).create_time()
     except psutil.Error:
         clear_pid(runtime_dir, server_id)
         return
     runtime_dir.mkdir(parents=True, exist_ok=True)
-    pid_path(runtime_dir, server_id).write_text(json.dumps({"pid": pid, "create_time": created}))
+    record: dict[str, int | float | str] = {"pid": pid, "create_time": created}
+    if omlx_version is not None:
+        record["omlx"] = omlx_version
+    pid_path(runtime_dir, server_id).write_text(json.dumps(record))
+
+
+def recorded_omlx_version(runtime_dir: Path, server_id: str) -> str | None:
+    """The build recorded when this server was spawned; None when the record is older than that field or gone."""
+    try:
+        record = json.loads(pid_path(runtime_dir, server_id).read_text())
+    except (OSError, ValueError):
+        return None
+    version = record.get("omlx") if isinstance(record, dict) else None
+    return version if isinstance(version, str) else None
 
 
 def clear_pid(runtime_dir: Path, server_id: str) -> None:
@@ -202,6 +230,42 @@ def port_is_free(port: int) -> bool:
         sock.close()
 
 
+def spawn_process(argv: list[str], log_path: Path) -> subprocess.Popen | dict[str, Any]:
+    """Spawn one supervised process, returning a logged failure if launch fails."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        log_fh = log_path.open("ab", buffering=0)
+        return subprocess.Popen(
+            argv, env={**os.environ, "OMLX_SUPERVISED": "corsia"},
+            stdout=log_fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+            start_new_session=True, close_fds=True,
+        )
+    except Exception as exc:
+        log.exception("Failed to spawn oMLX")
+        return {"ok": False, "message": "Couldn’t start the model server. Try again.", "error": str(exc)}
+
+
+def managed_omlx_argv(host: str, port: int, settings: dict, *, managed: bool) -> list[str] | dict[str, Any]:
+    """Resolve the executable and build arguments for an oMLX server."""
+    if managed:
+        install_error = managed_omlx_install_error()
+        if install_error:
+            return {"ok": False, "message": install_error}
+        executable = managed_omlx_executable()
+    else:
+        executable = None
+    executable = executable or shutil.which("omlx")
+    if not executable:
+        return {
+            "ok": False,
+            "message": (
+                "omlx binary not found on PATH. Install oMLX "
+                "(`brew install omlx` or pip install omlx) and retry."
+            ),
+        }
+    return build_argv(host, port, settings, executable=executable)
+
+
 def build_argv(
     host: str,
     port: int,
@@ -241,6 +305,28 @@ def build_argv(
         argv.append("--no-cache")
 
     return argv
+
+
+def log_size(runtime_dir: Path, server_id: str) -> int | None:
+    try:
+        return log_path(runtime_dir, server_id).stat().st_size
+    except FileNotFoundError:
+        return 0
+    except OSError:
+        return None
+
+
+def logged_since(runtime_dir: Path, server_id: str, offset: int | None, text: str) -> bool | None:
+    """Whether ``text`` was logged after ``offset``; None if the offset or log is unreadable."""
+    if offset is None:
+        return None
+    try:
+        with log_path(runtime_dir, server_id).open("rb") as file:
+            size = file.seek(0, os.SEEK_END)
+            file.seek(max(offset, size - 64 * 1024))
+            return text.encode() in file.read()
+    except OSError:
+        return None
 
 
 def tail_log(runtime_dir: Path, server_id: str, lines: int = 20) -> str:

@@ -1,6 +1,9 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { AGENT_COLORS } from '$lib/docPresence';
-import { crowdedNames, describeRegion, nearestTarget, placeTag, placeTags, POINT_RADIUS, regionColor, regionFromDrag, regionRect, revealCentre, TAG_RADIUS } from './imageRegions';
+import { contrastRatio, over, parseHex } from '$lib/utils/contrast';
+import { badgeFill, crowdedNames, describeRegion, nearestTarget, placeTag, placeTags, POINT_RADIUS, regionColor, regionFromDrag, regionRect, revealCentre, TAG_RADIUS } from './imageRegions';
 
 const FRAME = { width: 800, height: 500 };
 
@@ -8,17 +11,43 @@ describe('placeTag', () => {
 	// Expected values come from backend/doceditor/image_markup.py place_tag with radius 11 and gap 3,
 	// so the viewer and the marked-up copy an agent reads put every tag in the same place.
 	it.each([
-		[{ x: 0.4, y: 0.3, w: 0.2, h: 0.2 }, { x: 304, y: 163, side: 'left' }],
+		[{ x: 0.4, y: 0.3, w: 0.2, h: 0.2 }, { x: 304, y: 134, side: 'up-left' }],
 		[{ x: 0, y: 0.3, w: 0.2, h: 0.2 }, { x: 13, y: 134, side: 'above' }],
 		[{ x: 0, y: 0, w: 0.3, h: 0.2 }, { x: 256, y: 13, side: 'right' }],
 		[{ x: 0, y: 0, w: 1, h: 0.5 }, { x: 14, y: 14, side: 'inside' }],
-		[{ x: 0.5, y: 0.5, w: 0, h: 0 }, { x: 415.4, y: 234.6, side: 'up-right' }],
+		[{ x: 0.5, y: 0.5, w: 0, h: 0 }, { x: 384.6, y: 234.6, side: 'up-left' }],
 		[{ x: 0.99, y: 0.01, w: 0, h: 0 }, { x: 776.6, y: 20.4, side: 'down-left' }],
 	])('matches the server renderer for %o', (region, expected) => {
 		const tag = placeTag(region, FRAME);
 		expect(tag.side).toBe(expected.side);
 		expect(tag.x).toBeCloseTo(expected.x, 6);
 		expect(tag.y).toBeCloseTo(expected.y, 6);
+	});
+
+	it('puts a box tag outside its top-left corner and a point tag up-left of the point', () => {
+		const box = placeTag({ x: 0.4, y: 0.3, w: 0.2, h: 0.2 }, FRAME);
+		expect(box.x).toBeLessThan(0.4 * 800);
+		expect(box.y).toBeLessThan(0.3 * 500);
+		const point = placeTag({ x: 0.5, y: 0.5, w: 0, h: 0 }, FRAME);
+		expect(point.x).toBeLessThan(0.5 * 800);
+		expect(point.y).toBeLessThan(0.5 * 500);
+	});
+
+	it('keeps the badge on the image at its edges by taking the next spot', () => {
+		// Box on the top edge: no room above-left, so left of the corner, still clear of the box.
+		expect(placeTag({ x: 0.4, y: 0, w: 0.2, h: 0.2 }, FRAME)).toMatchObject({ side: 'left', x: 304, y: 13 });
+		// Box on the left edge: no room left, so above.
+		expect(placeTag({ x: 0, y: 0.3, w: 0.2, h: 0.2 }, FRAME)).toMatchObject({ side: 'above', x: 13, y: 134 });
+		// Point on the left edge: up-right; on the top edge: down-right.
+		expect(placeTag({ x: 0, y: 0.5, w: 0, h: 0 }, FRAME)).toMatchObject({ side: 'up-right' });
+		expect(placeTag({ x: 0.5, y: 0, w: 0, h: 0 }, FRAME)).toMatchObject({ side: 'down-right' });
+		for (const region of [{ x: 0.4, y: 0, w: 0.2, h: 0.2 }, { x: 0, y: 0.5, w: 0, h: 0 }, { x: 0.5, y: 0, w: 0, h: 0 }, { x: 1, y: 1, w: 0, h: 0 }]) {
+			const tag = placeTag(region, FRAME);
+			expect(tag.x - (TAG_RADIUS + 2)).toBeGreaterThanOrEqual(-1e-9);
+			expect(tag.y - (TAG_RADIUS + 2)).toBeGreaterThanOrEqual(-1e-9);
+			expect(tag.x + (TAG_RADIUS + 2)).toBeLessThanOrEqual(800 + 1e-9);
+			expect(tag.y + (TAG_RADIUS + 2)).toBeLessThanOrEqual(500 + 1e-9);
+		}
 	});
 
 	it('never covers the box it points at unless every outside spot is clipped', () => {
@@ -153,5 +182,38 @@ describe('crowdedNames', () => {
 			tagWithName('f', [600, 10, 40, 12]), element('<div data-region-dot="g"></div>', [610, 8, 14, 14]),
 		);
 		expect([...crowdedNames(layer)].sort()).toEqual(['a', 'f']);
+	});
+});
+
+describe('badgeFill', () => {
+	const INK = parseHex('#111111')!;
+	const digitOver = (fill: string, backdrop: number) => contrastRatio(INK, over(parseHex(fill)!, [backdrop, backdrop, backdrop], 0.8));
+
+	it('steps a colour whose digit fails on black lighter, until the digit reads on black and on white', () => {
+		expect(digitOver('#8b5cf6', 0)).toBeLessThan(4.5);
+		const fill = badgeFill('#8b5cf6');
+		expect(fill).not.toBe('#8b5cf6');
+		expect(digitOver(fill, 0)).toBeGreaterThanOrEqual(4.5);
+		expect(digitOver(fill, 255)).toBeGreaterThanOrEqual(4.5);
+	});
+
+	it('leaves a colour whose digit already reads as it came', () => {
+		expect(badgeFill('#22c55e')).toBe('#22c55e');
+		expect(badgeFill('#2DD4BF')).toBe('#2DD4BF');
+	});
+
+	it('reads the digit on every agent colour, over black and over white', () => {
+		for (const colour of AGENT_COLORS) {
+			for (const backdrop of [0, 255]) expect(digitOver(badgeFill(colour), backdrop)).toBeGreaterThanOrEqual(4.5);
+		}
+	});
+
+	it('reads the digit in the ink the token gives it', () => {
+		const tokens = readFileSync(resolve(__dirname, '../app-tokens.css'), 'utf8');
+		expect(/--image-region-ink:\s*#111;/.test(tokens)).toBe(true);
+	});
+
+	it('returns what is not a colour as it came', () => {
+		expect(badgeFill('var(--accent)')).toBe('var(--accent)');
 	});
 });

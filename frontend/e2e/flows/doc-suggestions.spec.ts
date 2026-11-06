@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { replyField, showAllThreads } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
-import { saveEvidenceScreenshot } from '../support/corsia';
+import { saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 import { expectContrast, GRAPHIC, TEXT } from '../support/contrast';
 import { openSuggestionDocument, setEvidenceViewport } from '../support/docSuggestions';
 
@@ -17,7 +17,7 @@ async function openSuggestionFlow(page: Page, request: APIRequestContext) {
 	const [loose, fine, stale] = seeded.ids;
 	await expect(seeded.editor).toContainText('The first line is loose.');
 	const openComments = async () => {
-		await page.getByRole('button', { name: /^3 open threads\b/ }).click();
+		await page.getByRole('button', { name: /^3 threads\b/ }).click();
 		await expect(seeded.drawer).toBeVisible();
 		await showAllThreads(seeded.drawer);
 	};
@@ -317,4 +317,39 @@ test('@flow:document-suggestions recovers from inline decision and accept-all fa
 	await expectContrast(page, testInfo, 'document-suggestions-accept-all-failure', { failure: { target: second.drawer.getByRole('alert'), min: TEXT } });
 	await acceptAll.click();
 	await expect(second.row(second.loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible();
+});
+
+test('@flow:document-suggestions a document opens after the text a decided suggestion was on is cut', async ({ page, request }, testInfo) => {
+	await setEvidenceViewport(page, testInfo);
+	const pageErrors: string[] = [];
+	page.on('pageerror', (error) => pageErrors.push(error.message));
+	const text = '# Decided\n\nThe first line stays.\n\nThe last line will go.\n';
+	const shorter = '# Decided\n\nThe first line stays.\n';
+	const params = { token: TEST_TOKEN };
+	// The suggestion on the last line is rejected, then the owner cuts that line, so the offsets its decision
+	// kept now reach past the end of the file. The open suggestion on the first line still has its place.
+	const { drawer, editor, ids: [open, decided], row } = await openSuggestionDocument(page, request, text, [
+		{ quote: 'stays', replacement: 'remains', body: 'Say remains.' },
+		{ quote: 'will go', replacement: 'goes', body: 'Shorter.' },
+	], {
+		beforeOpen: async ({ docPath, ids, ownerId }) => {
+			const rejected = await request.post(`/api/comments/${ids[1]}/decision`, { params, data: { decision: 'reject' } });
+			expect(rejected.ok(), await rejected.text()).toBeTruthy();
+			const cut = await request.put('/api/files/content', { params, data: { path: docPath, text: shorter, thread_id: ownerId } });
+			expect(cut.ok(), await cut.text()).toBeTruthy();
+		},
+	});
+	await expect(editor).toContainText('The first line stays.');
+	await expect(editor).not.toContainText('The last line');
+	await expect(page.getByText(/^Couldn't open /)).toHaveCount(0);
+	await expect(page.locator('.cm-suggestion-del').filter({ hasText: 'stays' })).toHaveCount(1);
+	// The decided suggestion is closed, so it is neither counted open nor reported as a comment without a place.
+	const pill = page.getByRole('button', { name: /^1 thread\b/ });
+	await expect(pill).not.toHaveAccessibleName(/couldn't be placed/);
+	await pill.click();
+	await expect(drawer).toBeVisible();
+	await showAllThreads(drawer);
+	await expect(row(open)).toBeVisible();
+	await expect(row(decided).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible();
+	expect(pageErrors).toEqual([]);
 });

@@ -101,7 +101,7 @@ def test_a_doc_batch_carries_one_marked_copy_per_image_and_judges_staleness_per_
 
 def test_a_doc_batch_draws_no_copy_of_an_image_now_outside_the_readers_scope(isolated_db, tmp_path_factory, monkeypatch):
     """A link retargeted after the comment was placed hands the reader nothing from outside its scope, nor reads it."""
-    from doceditor import image_regions
+    from doceditor import image_revision
     folder = _in_workspace()
     login = _png(folder / "a" / "shot.png", (800, 500))
     outside = _png(tmp_path_factory.mktemp("outside-scope") / "secret.png", (300, 200))
@@ -114,8 +114,8 @@ def test_a_doc_batch_draws_no_copy_of_an_image_now_outside_the_readers_scope(iso
         login.unlink()
         login.symlink_to(outside)
         read = []
-        real = image_regions.sha256_file
-        monkeypatch.setattr(image_regions, "sha256_file", lambda path: read.append(Path(path).resolve()) or real(path))
+        real = image_revision.sha256_file
+        monkeypatch.setattr(image_revision, "sha256_file", lambda path: read.append(Path(path).resolve()) or real(path))
 
         feedback_batches.close_batch(db, batches(db, state="open")[0]["id"], "quiet")
         description = _node_description(db)

@@ -1,4 +1,4 @@
-"""A review fork never runs on a document that shows images, or one it cannot read as text."""
+"""Review forks accept image documents but hand back unreadable text."""
 
 from __future__ import annotations
 
@@ -14,11 +14,6 @@ from plans import public
 from prompts.artifact_review import continuation
 from test_doc_review_requests import request, review_env, stored  # noqa: F401
 
-HAS_IMAGES = (
-    "Review update: A separate review could not start because the document has images. "
-    "Review the document here instead: open each image with read_file, then comment and call "
-    "doc_feedback_send. If an image cannot be opened, say which one in a comment."
-)
 UNREADABLE = (
     "Review update: A separate review could not start because the document could not be read as text. "
     "Review the document here instead, then call doc_feedback_send."
@@ -62,19 +57,20 @@ async def _handed_back(db, row, reason, copy):
 
 
 @pytest.mark.asyncio
-async def test_a_saved_document_with_an_image_hands_back_and_builds_no_fork(review_env, tmp_path, cold):
+async def test_a_saved_document_with_an_image_starts_a_fork(review_env, tmp_path, cold):
     db, aid = review_env
     _document(db, aid, tmp_path, "# Design\n\n![a](f.png)\n")
     row = request(db, aid)
 
     await runtime.start(row["id"])
 
-    await _handed_back(db, row, "document_has_images", HAS_IMAGES)
-    assert row["fork_id"] not in handles and f"fork-{row['id']}" not in handles
+    assert f"fork-{row['id']}" in handles
+    assert stored(db, row["id"])["state"] == "forked"
+    await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio
-async def test_an_image_only_in_the_live_snapshot_hands_back(review_env, tmp_path, cold, monkeypatch):
+async def test_an_image_only_in_the_live_snapshot_starts_a_fork(review_env, tmp_path, cold, monkeypatch):
     db, aid = review_env
     document = _document(db, aid, tmp_path, "# Design\n\nNo images saved.\n")
     live = SimpleNamespace(live=SimpleNamespace(snapshot=("# Design\n\n![new](new.png)\n", None)))
@@ -83,26 +79,29 @@ async def test_an_image_only_in_the_live_snapshot_hands_back(review_env, tmp_pat
 
     await runtime.start(row["id"])
 
-    await _handed_back(db, row, "document_has_images", HAS_IMAGES)
+    assert f"fork-{row['id']}" in handles
+    assert stored(db, row["id"])["state"] == "forked"
+    await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("text", [
     "| a | b |\n|---|---|\n| <IMG src=x> | y |\n",
-    # An accepted false positive: the editor draws no image inside a fenced block, but the check is a
-    # superset and would rather send the review back than miss one.
+    # An image marker inside a fenced block is text, not a reason to hand back.
     "```md\n![sample](f.png)\n```\n",
     "| a |\n|---|\n| <svg><image href=x.png/></svg> |\n",
     "| a |\n|---|\n| <div style=\"background:URL(x.png)\">z</div> |\n",
 ])
-async def test_other_image_forms_hand_back(review_env, tmp_path, cold, text):
+async def test_other_image_forms_start_a_fork(review_env, tmp_path, cold, text):
     db, aid = review_env
     _document(db, aid, tmp_path, text)
     row = request(db, aid)
 
     await runtime.start(row["id"])
 
-    await _handed_back(db, row, "document_has_images", HAS_IMAGES)
+    assert f"fork-{row['id']}" in handles
+    assert stored(db, row["id"])["state"] == "forked"
+    await asyncio.sleep(0)
 
 
 @pytest.mark.asyncio

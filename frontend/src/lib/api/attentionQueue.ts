@@ -9,7 +9,7 @@
  * the payload that draws it — never because its type asserted someone would.
  */
 
-export type AttentionRenderer = 'decision' | 'external-review';
+export type AttentionRenderer = 'decision' | 'external-review' | 'held-reply';
 
 export interface DecisionOption {
 	id: string;
@@ -51,6 +51,21 @@ export interface DecisionDetail {
 	source: AttentionSource;
 }
 
+/** A message held for the person's approval: the exact text, and who and what it would go to. */
+export interface HeldReplyDetail {
+	id: string;
+	thread_id: string;
+	title: string;
+	text: string;
+	recipient: string;
+	provider: string;
+	/** Why the last Approve once did not send, when it did not. */
+	error: string | null;
+	error_ref?: string | null;
+	raised_at: string | null;
+	source: AttentionSource;
+}
+
 export interface ExternalReviewDetail {
 	review_key: string;
 	title: string;
@@ -87,6 +102,7 @@ export interface AttentionDestination {
 export interface CommentReplyDetail {
 	title: string;
 	unread_count: number;
+	new_comment_count?: number;
 	newest_at: string;
 	destination: AttentionDestination;
 	source: { thread_id: string };
@@ -99,7 +115,7 @@ export interface CommentReplyItem {
 export interface AttentionQueueItem {
 	external_id: string;
 	renderer: AttentionRenderer;
-	detail: DecisionDetail | ExternalReviewDetail;
+	detail: DecisionDetail | ExternalReviewDetail | HeldReplyDetail;
 }
 
 export interface AttentionQueue {

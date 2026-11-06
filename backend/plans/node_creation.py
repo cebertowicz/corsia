@@ -238,12 +238,12 @@ def _creation_values(
     size = validate_size(size)
     if kind == "task" and size is None:
         size = UNKNOWN
-    from plans import intent_words
+    from plans import intent_creation
 
     if intent is not None:
-        intent = intent_words.validate_intent(intent)
+        intent = intent_creation.validate_intent(intent)
     elif intent_node_id is None:
-        intent_node_id = intent_words.inherited_node_id(connection, plan_id)
+        intent_node_id = intent_creation.inherited_node_id(connection, plan_id)
     order_key = _open_order_slot(connection, plan_id, parent_id, order_key)
     resolved_commitment = _commitment(connection, plan_id, node_id, parent_id, commitment_id)
     now = service._now()
@@ -287,6 +287,8 @@ def create_node(
     person_step: bool = True,
     required_step: bool = False,
     workflow_by: str = "agent",
+    workflow_gate: str | None = None,
+    workflow_gate_mode: str | None = None,
 ) -> PlanNode:
     """Validate and insert a node without opening another transaction.
 
@@ -317,6 +319,8 @@ def create_node(
             **({"person_step": False} if not person_step else {}),
             **({"workflow_required": True} if required_step else {}),
             **({"workflow_by": workflow_by} if workflow_by != "agent" else {}),
+            **({"workflow_gate": workflow_gate} if workflow_gate else {}),
+            **({"workflow_gate_mode": workflow_gate_mode} if workflow_gate_mode else {}),
         },
     )
     return service._node_from_row(connection, service._node_row(connection, node_id))
