@@ -92,8 +92,7 @@ async def write_live(path: Path, kwargs: dict, *, producer: str, content: str | 
         # A store found damaged refuses every write; saving one in a line would hide that refusal.
         return (await _submit(entry, path, kwargs, thread_id, producer, content, edits, description, edit_path))[0]
     text = entry.live.snapshot[0]
-    headings = (section_writes.write_sections(text, content) if content is not None
-                else section_writes.edit_sections(text, call["edits"]))
+    headings = section_writes.call_sections(text, call)
     kind = "write" if content is not None else "edit"
     outcome = await section_writes.through(
         entry.artifact_id, headings, thread_id, section_writes.saved_op(kind, call, text, headings),

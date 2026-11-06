@@ -165,12 +165,14 @@ async def _suggest(request: CommentInput, client_id: str | None):
     from doceditor.live_tools import find_live_artifact
 
     entry = find_live_artifact(request.artifact_id) if request.artifact_id and request.author_thread_id else None
+    call = {"tool": "doc_comment_create", "quote": request.quote, "near": request.near, "body": request.body,
+            "replacement": request.replacement, "insert_after": request.insert_after}
     if entry is None:
+        if request.artifact_id and request.author_thread_id:  # closed: a woken agent's suggestion answers its wake
+            await section_writes.settle_closed(None, request.author_thread_id, call, request.artifact_id)
         return await _create(request, client_id)
     text = entry.live.snapshot[0]
     headings = section_writes.quote_sections(text, request.quote, request.near)
-    call = {"tool": "doc_comment_create", "quote": request.quote, "near": request.near, "body": request.body,
-            "replacement": request.replacement, "insert_after": request.insert_after}
     op = section_writes.saved_op("suggest", call, text, headings)
     return await section_writes.through(request.artifact_id, headings, request.author_thread_id, op,
                                         lambda: _create(request, client_id))

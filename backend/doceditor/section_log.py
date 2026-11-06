@@ -1,10 +1,10 @@
 """What changed in each section of one open document, and when each agent last read it.
 
 A section writer turn's wake counts the changes in every other section since the woken agent last
-read the document (``section_wake``). A read is the agent's ``read_file`` of the document or its own
-landed write: the moments ``LiveDocument.read_bases`` records, stamped here with their time. One
-change is one agent write or one stretch of a person's editing in a section; comments and
-suggestions are counted from their rows.
+read the document (``section_wake``). A read is the agent's ``read_file`` of the document, or its
+own landed write when the write met no change of others the agent had not seen: the moments
+``LiveDocument.read_bases`` records, stamped here with their time. One change is one agent write or
+one stretch of a person's editing in a section; comments and suggestions are counted from their rows.
 
 Both live in memory with the live document, so an eviction or a restart forgets them and the wake
 says the counts are unknown. A change older than the oldest read still kept can never be counted
@@ -34,6 +34,15 @@ class SectionLog:
     def read(self, thread_id: str) -> None:
         self.read_at[thread_id] = now()
         self._keep(self.changes)
+
+    def wrote(self, thread_id: str, merged: bool) -> None:
+        """This agent's write landed: a read only if it merged with nothing the agent had not read.
+
+        ``merged`` is the write's receipt saying it merged with live edits. An agent with no read kept
+        has none to extend, and one with changes of others since its read has not seen them.
+        """
+        if not merged and self.since(thread_id) == {}:
+            self.read(thread_id)
 
     def changed(self, headings: list[str], thread_id: str | None = None) -> None:
         at = now()

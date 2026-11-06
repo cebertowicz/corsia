@@ -1,15 +1,17 @@
 """The sections of a Markdown document: each heading and the text under it, up to the next heading.
 
-A section is named by its heading line as written, marks included ("## Build order"), so two
-headings of one name at one level share a section. The text before the first heading is the
-document's start, named "". A ``#`` line inside fenced code is text. Setext (underlined) headings
-are not sections. Offsets are ``str`` indexes.
+A section is named by its heading line as written, marks included ("## Build order"), and, when
+other headings have the same line, by its occurrence among them: the first "### Notes" is named
+"### Notes", the second "### Notes\n2". The text before the first heading is the document's start,
+named "". A ``#`` line inside fenced code is text. Setext (underlined) headings are not sections.
+Offsets are ``str`` indexes.
 """
 
 from __future__ import annotations
 
+import bisect
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 
 # A line that may open a heading or a fence. Searched from its newline, which the regex engine
 # finds fast; the document's first line is checked on its own.
@@ -48,36 +50,61 @@ def _marks(text: str, end: int) -> Iterator[tuple[int, str]]:
             yield start, f"{heading.group(1)} {title}".rstrip()
 
 
+def _named(marks: Iterable[tuple[int, str]]) -> Iterator[tuple[int, str]]:
+    """Each heading line's start and its section name: a repeated heading carries its occurrence number."""
+    seen: dict[str, int] = {}
+    for start, heading in marks:
+        seen[heading] = seen.get(heading, 0) + 1
+        yield start, heading if seen[heading] == 1 else f"{heading}\n{seen[heading]}"
+
+
+class Sections:
+    """One document's sections, scanned once; each lookup is a bisect."""
+
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.marks = [(0, ""), *_named(_marks(text, len(text)))]
+        self.starts = [start for start, _ in self.marks]
+
+    def _index(self, offset: int) -> int:
+        return bisect.bisect_right(self.starts, offset) - 1
+
+    def between(self, start: int, end: int) -> list[str]:
+        """The name of every section ``[start, end]`` touches, in document order, each once."""
+        return [found for _, found in self.marks[self._index(start):self._index(end) + 1]]
+
+    def text_of(self, section: str) -> str | None:
+        """The section's text, its heading line included; None when there is none."""
+        for index, (start, found) in enumerate(self.marks):
+            if found == section:
+                end = self.marks[index + 1][0] if index + 1 < len(self.marks) else len(self.text)
+                return self.text[start:end]
+        return None
+
+
 def headings(text: str) -> list[tuple[int, str]]:
-    """Every section's start and heading, the document's start (0, "") first."""
-    return [(0, ""), *_marks(text, len(text))]
+    """Every section's start and name, the document's start (0, "") first."""
+    return Sections(text).marks
 
 
 def section_at(text: str, offset: int) -> str:
-    """The heading of the section ``offset`` falls in; a heading line belongs to its own section."""
+    """The name of the section ``offset`` falls in; a heading line belongs to its own section."""
     found = ""
-    for start, heading in _marks(text, offset):
+    for start, section in _named(_marks(text, offset)):
         if start > offset:
             break
-        found = heading
+        found = section
     return found
 
 
 def sections_in(text: str, start: int, end: int) -> list[str]:
-    """The headings of every section ``[start, end]`` touches, in document order, each once."""
-    touched = [section_at(text, start)]
-    touched += [heading for line, heading in _marks(text, end) if start < line <= end]
-    return list(dict.fromkeys(touched))
+    """The names of every section ``[start, end]`` touches, in document order, each once."""
+    return Sections(text).between(start, end)
 
 
-def section_text(text: str, heading: str) -> str | None:
-    """The first section named ``heading``, its heading line included; None when there is none."""
-    marks = headings(text)
-    for index, (start, found) in enumerate(marks):
-        if found == heading:
-            end = marks[index + 1][0] if index + 1 < len(marks) else len(text)
-            return text[start:end]
-    return None
+def section_text(text: str, section: str) -> str | None:
+    """The section named ``section``, its heading line included; None when there is none."""
+    return Sections(text).text_of(section)
 
 
 def changed_span(before: str, after: str) -> tuple[int, int, int]:
@@ -115,6 +142,12 @@ def _common(left: str, right: str) -> int:
     return low
 
 
-def name(heading: str) -> str:
+def label(section: str) -> str:
+    """A section's heading line, with its occurrence number when the heading repeats."""
+    heading, _, occurrence = section.partition("\n")
+    return f"{heading} (no. {occurrence} with this heading)" if occurrence else heading
+
+
+def name(section: str) -> str:
     """How a wake names a section."""
-    return f'the section "{heading}"' if heading else "the start of the document, before its first heading"
+    return f'the section "{label(section)}"' if section else "the start of the document, before its first heading"

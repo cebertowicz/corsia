@@ -5,7 +5,7 @@ import json
 import sqlite3
 
 from core.agent_roster_queries import agent_rows
-from doceditor import writer_line
+from doceditor import writer_line_count
 from doceditor.comment_action_errors import CommentActionError
 from infra.queries import get_thread_for_user
 
@@ -291,7 +291,7 @@ def prepare_notification(db, items: list[dict], agent_id: str) -> None:
     """Count one delivered batch per comment thread and attach any due hint."""
     roots = set()
     context_roots = set()
-    in_line = writer_line.counts(db, (root_id(item) for item in items if item.get("kind") == "comment"))
+    in_line = writer_line_count.counts(db, (root_id(item) for item in items if item.get("kind") == "comment"))
     for item in items:
         if item.get("kind") != "comment":
             continue

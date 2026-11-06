@@ -257,8 +257,9 @@ class DocumentLane:
         ranges = candidate_ranges(self.live, fork)
         await self.validate_actor(text, operation.actor)
         publication = await self.policy(operation, text) if self.policy else None
+        merged = operation.kind == "write" and text != operation.content
         if operation.kind == "edit" and operation.multi_edit and text == self.live.text:
-            self._advance_author(operation, author)
+            self._advance_author(operation, author, merged)
             return WriteResult(text, True, receipt=receipt)
         # Only for the typing reveal: looked up once the write is admitted, and
         # never able to fail it.
@@ -286,19 +287,18 @@ class DocumentLane:
         if server_saved:
             # The write has landed before memory publication yields. A queued
             # call by this author must capture the landed base, not the old read.
-            self._advance_author(operation, author)
+            self._advance_author(operation, author, merged)
             await self.live.apply_committed(record.candidate, record.mirror_state, record.result_hash, writer)
         else:
             self.live.apply_unsaved(record.candidate)
-            self._advance_author(operation, author)
+            self._advance_author(operation, author, merged)
         if server_saved and self.published:
             self.published()
         if server_saved and self.promoted:
             await self.promoted()
-        return WriteResult(text, server_saved, operation.kind == "write" and text != operation.content,
-                           accepted=accepted, skipped=skipped, receipt=receipt)
+        return WriteResult(text, server_saved, merged, accepted=accepted, skipped=skipped, receipt=receipt)
 
-    def _advance_author(self, operation: Operation, author: tuple[bytes, str]) -> None:
+    def _advance_author(self, operation: Operation, author: tuple[bytes, str], merged: bool) -> None:
         # Detached writes land through this same owner, before others' edits merge.
         if operation.actor is None:
             return
@@ -307,7 +307,7 @@ class DocumentLane:
         self.live.bases[own_hash] = state
         self.live.read_bases[operation.actor.thread_id] = own_hash
         if not operation.actor.direct_user:
-            self.live.sections.read(operation.actor.thread_id)
+            self.live.sections.wrote(operation.actor.thread_id, merged)
         while len(self.live.bases) > self.live.base_limit:
             self.live.bases.pop(next(iter(self.live.bases)))
 

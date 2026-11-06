@@ -35,7 +35,8 @@ async def test_stalled_eviction_does_not_hold_unrelated_open_or_legacy_save(owne
     reopen = asyncio.create_task(manager.open(entry.artifact_id, entry.live.path))
     other = asyncio.create_task(manager.open(other_id, other_path))
     try:
-        done, _ = await asyncio.wait({other}, timeout=.1)
+        # The stalled lane holds until ``release``, so a blocked open never finishes; the bound only ends a hang.
+        done, _ = await asyncio.wait({other}, timeout=10)
         assert other in done, "one path's lane must not block another path's open"
         assert not reopen.done()
         other_entry = other.result()

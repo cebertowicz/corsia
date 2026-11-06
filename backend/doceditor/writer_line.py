@@ -33,6 +33,7 @@ from loguru import logger
 
 from doceditor import comments as store, live_events, writer_turns
 from doceditor.note_names import document_name
+from doceditor.writer_line_count import publish_after_commit
 from doceditor.writer_line_text import describe, wake_text
 from infra.database import write_transaction
 from infra.failure_reference import new_error_reference
@@ -80,23 +81,6 @@ def active(db, root_id: str) -> list[sqlite3.Row]:
     return db.execute(
         "SELECT * FROM doc_comment_writer_line WHERE root_id=? ORDER BY saved_at,id", (root_id,),
     ).fetchall()
-
-
-def count(db, root_id: str) -> int:
-    return counts(db, [root_id]).get(root_id, 0)
-
-
-def counts(db, root_ids) -> dict[str, int]:
-    """How many writes wait on each of these threads, in one grouped read."""
-    roots = sorted(set(root_ids))
-    if not roots:
-        return {}
-    rows = db.execute(
-        f"""SELECT root_id, COUNT(*) AS waiting FROM doc_comment_writer_line
-            WHERE root_id IN ({",".join("?" * len(roots))}) GROUP BY root_id""",
-        roots,
-    ).fetchall()
-    return {str(row["root_id"]): int(row["waiting"]) for row in rows}
 
 
 def saved_entry(db, root_id: str, thread_id: str) -> sqlite3.Row | None:
@@ -164,7 +148,7 @@ def _queued(db, root_id: str, artifact_id: str, thread_id: str) -> Queued:
         holder = _title(db, agent)
     else:
         holder = _title(db, line[0]["agent_thread_id"])
-    _publish_after_commit(db, root_id, artifact_id)
+    publish_after_commit(db, root_id, artifact_id)
     return Queued(root_id, position, holder)
 
 
@@ -181,12 +165,22 @@ def landed(db, root_id: str, thread_id: str | None) -> None:
 
 
 def settle(db, row, outcome: str) -> None:
-    """The one end of a saved row: posted as is, rewritten, or dropped. The row is deleted."""
+    """The one end of a saved row: posted as is, rewritten, or dropped. The row is deleted.
+
+    A woken section row's end also clears its agent from the wake hint (``writer_turns``) once the
+    agent has no other woken section row.
+    """
     db.execute("DELETE FROM doc_comment_writer_line WHERE id=?", (row["id"],))
+    if row["state"] == "woken" and writer_turns.section_heading(str(row["root_id"])) is not None:
+        thread_id = str(row["agent_thread_id"])
+        if db.execute("""SELECT 1 FROM doc_comment_writer_line
+                         WHERE agent_thread_id=? AND state='woken' AND root_id LIKE 'section:%' LIMIT 1""",
+                      (thread_id,)).fetchone() is None:
+            after_commit(db, lambda: writer_turns.section_answered(thread_id))
     waited = (datetime.now(timezone.utc) - datetime.fromisoformat(str(row["saved_at"]))).total_seconds()
     _event(db, outcome, root_id=str(row["root_id"]), artifact_id=str(row["artifact_id"]), line_id=str(row["id"]),
            wakes=int(row["wakes"]), waited_seconds=round(waited, 3))
-    _publish_after_commit(db, str(row["root_id"]), str(row["artifact_id"]))
+    publish_after_commit(db, str(row["root_id"]), str(row["artifact_id"]))
 
 
 def _event(db, outcome: str, **properties) -> None:
@@ -266,7 +260,7 @@ def serve(db, root_id: str) -> list[str]:
         if heading is not None:
             writer_turns.section_woken(str(head["agent_thread_id"]))
         _event(db, "woken", root_id=root_id, artifact_id=str(head["artifact_id"]), line_id=str(head["id"]), wakes=wakes)
-        _publish_after_commit(db, root_id, head["artifact_id"])
+        publish_after_commit(db, root_id, head["artifact_id"])
         return [str(head["agent_thread_id"])]
 
 
@@ -397,30 +391,3 @@ def _drop(db, row, reason: str) -> None:
             details={**details, "artifact_id": row["artifact_id"]},
         )
     settle(db, row, "dropped")
-
-
-def _publish_after_commit(db, root_id: str, artifact_id: str | None) -> None:
-    """Tell the people on the thread how many agents wait, once this write commits."""
-    after_commit(db, lambda: publish(root_id, artifact_id))
-
-
-def publish(root_id: str, artifact_id: str | None, *, user_ids: set[str] | None = None) -> None:
-    from infra import state
-    from infra.database import get_db
-
-    users = user_ids if user_ids is not None else writer_turns.people_on(root_id)
-    if not users or writer_turns.section_heading(root_id) is not None:
-        # A section's line is not shown to people yet; only a comment thread's count is.
-        return
-    db = get_db()
-    try:
-        waiting = count(db, root_id)
-        if artifact_id is None:
-            row = db.execute("SELECT artifact_id FROM doc_comments WHERE id=?", (root_id,)).fetchone()
-            artifact_id = row["artifact_id"] if row else None
-    finally:
-        db.close()
-    for user_id in users:
-        state.broadcast_to_user(user_id, {
-            "type": "comment_line", "artifact_id": artifact_id, "comment_id": root_id, "waiting": waiting,
-        })

@@ -37,20 +37,21 @@ _people: dict[str, dict[object, PersonHold]] = {}
 _page_root: dict[object, str] = {}
 _agents: dict[str, str] = {}
 _lock = threading.Lock()
-#: Agents woken for a section turn since startup: a hint that their next write to a document no one
-#: has open may answer that wake (``section_writes.settle_closed``); the line rows decide.
+#: Agents with a woken section row: a hint that their next write may answer it, and that they have
+#: none to take a section turn past (``section_writes``); the line rows decide. Set when a row wakes,
+#: cleared by ``writer_line.settle``, the one end of a row.
 _section_wakes: set[str] = set()
 
 _SECTION = "section:"
 
 
 def section_key(artifact_id: str, heading: str) -> str:
-    """The turn of the section under ``heading`` in a document; it shares the comment line's keys."""
+    """The turn of a document's section, named as ``doc_sections`` names it; it shares the comment line's keys."""
     return f"{_SECTION}{artifact_id}:{heading}"
 
 
 def section_heading(key: str) -> str | None:
-    """The heading a section key names; None for a comment thread's root."""
+    """The section name a section key holds; None for a comment thread's root."""
     return key.split(":", 2)[2] if key.startswith(_SECTION) else None
 
 
@@ -134,6 +135,15 @@ def agent_claim(root_id: str, thread_id: str) -> bool:
         if _people.get(root_id) or _agents.get(root_id, thread_id) != thread_id:
             return False
         _agents[root_id] = thread_id
+        return True
+
+
+def agents_claim(root_ids: list[str], thread_id: str) -> bool:
+    """Give this agent every one of these turns, or none: False when a person or another agent holds any."""
+    with _lock:
+        if any(_people.get(root_id) or _agents.get(root_id, thread_id) != thread_id for root_id in root_ids):
+            return False
+        _agents.update(dict.fromkeys(root_ids, thread_id))
         return True
 
 
