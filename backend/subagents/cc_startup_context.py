@@ -37,7 +37,6 @@ class CCStartupContext:
     checkpoint_generation_id: str | None = None
     target_discovered_context_window: int | None = None
     confinement: str = CONFINEMENT_NONE
-    add_dirs: tuple[str, ...] = ()
 
 
 def _install_prepared_transcript(destination: Any) -> Any | None:
@@ -52,15 +51,16 @@ def _install_prepared_transcript(destination: Any) -> Any | None:
     return install_cc_prepared_transcript(destination.transcript)
 
 
-def _launch_confinement(confinement: LaunchConfinement, working_dir: str, thread_id: str) -> tuple[str, tuple[str, ...]]:
+def _launch_confinement(confinement: LaunchConfinement, working_dir: str, thread_id: str) -> str:
     """Carry the confinement the destination read into this launch, rechecking its reads."""
     if not confinement.confined:
-        return CONFINEMENT_NONE, ()
+        return CONFINEMENT_NONE
     if confinement.working_dir != working_dir:
         raise ConfinementRefused(
             "confined Claude Code child lost its own working directory"
         )
-    return confinement.mode, require_readable_dirs(list(confinement.add_dirs), None, thread_id)
+    require_readable_dirs(list(confinement.read_dirs), None, thread_id)
+    return confinement.mode
 
 
 def build_cc_startup_context(
@@ -98,7 +98,7 @@ def build_cc_startup_context(
         if authority.source == "provider_resume"
         else (destination.cc_session_id if transcript is not None else None)
     )
-    confinement, add_dirs = _launch_confinement(destination.confinement, destination.working_dir, session_id)
+    confinement = _launch_confinement(destination.confinement, destination.working_dir, session_id)
     reconstruction = destination.seed_reconstruction
     if reconstruction is None:
         raise CCPreparedDestinationStale(
@@ -129,7 +129,6 @@ def build_cc_startup_context(
         launch_identity=destination.launch_identity,
         checkpoint_generation_id=checkpoint_generation_id,
         confinement=confinement,
-        add_dirs=add_dirs,
     )
 
 

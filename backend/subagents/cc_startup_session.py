@@ -45,7 +45,6 @@ def build_starting_session(
         mcp_config=mcp_config,
         permission_mode=permission_mode_for(context.confinement),
         confinement=context.confinement,
-        add_dirs=context.add_dirs,
         working_dir=context.working_dir,
         claude_dir=live.claude_dir,
         model=context.model_alias,

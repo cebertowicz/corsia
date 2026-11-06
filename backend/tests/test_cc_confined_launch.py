@@ -129,19 +129,20 @@ async def test_review_spawn_and_cold_start_stay_confined(
     child_id = await rt.spawn(
         "parent", "review this", binary=fake_claude, target=cc_target("sonnet"),
         broadcast=lambda _sid, _message: None,
-        confinement="untrusted", add_dirs=(reviewed_dir,),
+        confinement="untrusted", read_dirs=(reviewed_dir,),
     )
     assert await _wait(lambda: rt.is_live(child_id))
     assert len(launches) == 1
     _assert_confined(launches[0], child_id)
     stored = _stored_invocation(child_db, child_id)
-    assert stored["confinement"] == "untrusted" and stored["add_dirs"] == [reviewed_dir]
-    # On its row too, so a switch to another harness can't launch it unconfined.
+    assert stored["confinement"] == "untrusted" and "add_dirs" not in stored
+    # The read dirs live only on its row, which every launch reads and the boundary
+    # enforces, so a switch to another harness can't launch it unconfined.
     from infra.thread_confinement import read_dirs
     assert read_dirs(child_id, child_db) == (reviewed_dir,)
 
     # Retirement drops every in-memory handle, as a restart does; the cold
-    # start can learn the confinement only from the stored launch record.
+    # start learns the confinement only from what was stored.
     await _retire(child_id)
     assert not rt.is_live(child_id)
     did = await feed_with_persisted_input(
@@ -173,7 +174,7 @@ async def test_cold_start_refuses_a_confined_child_whose_reads_left_scope(
     child_id = await rt.spawn(
         "parent", "review this", binary=fake_claude, target=cc_target("sonnet"),
         broadcast=lambda _sid, _message: None,
-        confinement="untrusted", add_dirs=(reviewed_dir,),
+        confinement="untrusted", read_dirs=(reviewed_dir,),
     )
     await _retire(child_id)
     shutil.rmtree(reviewed_dir)
@@ -195,8 +196,21 @@ def test_stored_record_without_confinement_reads_unconfined():
     }
     restored = claude_invocation_from_metadata(old)
     assert restored is not None
-    assert (restored.confinement, restored.add_dirs) == ("none", ())
+    assert restored.confinement == "none"
     assert claude_invocation_metadata(restored) == old
+
+
+def test_a_record_that_still_carries_read_dirs_restores_without_them():
+    """Records written before the thread row held the read dirs keep the old key; it is ignored."""
+    value = {
+        "binary": "claude", "permission_mode": "dontAsk",
+        "session_id": "s", "resume_session_id": None, "seed_file": "seed",
+        "mcp_config": "cfg.json", "working_dir": "/w", "model": "sonnet",
+        "effort": None, "confinement": "untrusted", "add_dirs": ["/src"],
+    }
+    restored = claude_invocation_from_metadata(value)
+    assert restored is not None and restored.confinement == "untrusted"
+    assert "add_dirs" not in claude_invocation_metadata(restored)
 
 
 @pytest.mark.asyncio
@@ -219,7 +233,7 @@ async def test_review_launches_read_confinement_once_and_advertise_only_the_read
     child_id = await rt.spawn(
         "parent", "review this", binary=fake_claude, target=cc_target("sonnet"),
         broadcast=lambda _sid, _message: None,
-        confinement="untrusted", add_dirs=(reviewed_dir,),
+        confinement="untrusted", read_dirs=(reviewed_dir,),
     )
     reads = []
     reader = thread_confinement.read_dirs
@@ -281,7 +295,7 @@ async def test_review_spawn_launches_nothing_without_its_record(
         await rt.spawn(
             "parent", "review this", binary=fake_claude, target=cc_target("sonnet"),
             broadcast=lambda _sid, _message: None,
-            confinement="untrusted", add_dirs=(reviewed_dir,),
+            confinement="untrusted", read_dirs=(reviewed_dir,),
         )
     assert launches == [] and rt._LIVE.count() == 0
 
@@ -397,14 +411,7 @@ def test_unconfined_launch_is_unchanged():
 
 
 def test_invocation_rejects_inconsistent_confinement():
-    with pytest.raises(ValueError):
-        ClaudeInvocation(binary="c", permission_mode="dontAsk", confinement="untrusted")
-    with pytest.raises(ValueError):
-        ClaudeInvocation(binary="c", permission_mode="p", add_dirs=("/w",))
     with pytest.raises(ValueError, match="needs the CORSIA tool bridge"):
-        ClaudeInvocation(
-            binary="c", permission_mode="dontAsk", confinement="untrusted",
-            add_dirs=("/w",),
-        )
+        ClaudeInvocation(binary="c", permission_mode="dontAsk", confinement="untrusted")
     with pytest.raises(ValueError):
         ClaudeInvocation(binary="c", permission_mode="p", confinement="write")

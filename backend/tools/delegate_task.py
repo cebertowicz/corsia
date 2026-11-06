@@ -367,10 +367,10 @@ async def _spawn_claude_code_child(
             f"{target.catalog_id} is unavailable ({target.availability_reason})"
         )
     working_dir, project_id = resolve_spawn_working_dir(parent_thread_id)
-    add_dirs: tuple[str, ...] = ()
+    read_dirs: tuple[str, ...] = ()
     if confinement != CONFINEMENT_NONE:
         try:
-            add_dirs = await asyncio.to_thread(
+            read_dirs = await asyncio.to_thread(
                 require_readable_dirs, read_paths or [], working_dir, thread_id=parent_thread_id,
             )
         except ConfinementRefused as e:
@@ -384,7 +384,7 @@ async def _spawn_claude_code_child(
             working_dir=working_dir,
             title=title,
             project_id=project_id, account_id=account_id,
-            confinement=confinement, add_dirs=add_dirs, rule_start=rule_start,
+            confinement=confinement, read_dirs=read_dirs, rule_start=rule_start,
             effort=effort, max_turns=max_turns,
         )
     except LiveSpawnCapExceeded as e:

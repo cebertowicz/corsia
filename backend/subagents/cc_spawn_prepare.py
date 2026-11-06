@@ -36,7 +36,7 @@ class CCSpawnRequest:
     broadcast: Broadcast | None
     account_id: str | None = None
     confinement: str = CONFINEMENT_NONE
-    add_dirs: tuple[str, ...] = ()
+    read_dirs: tuple[str, ...] = ()
     max_turns: int | None = None
 
 
@@ -107,7 +107,7 @@ def _register_lineage(
         )
         # On the row too, so no later model switch launches it unconfined.
         if request.confinement != CONFINEMENT_NONE:
-            thread_confinement.record(connection, child_id, request.confinement, request.add_dirs)
+            thread_confinement.record(connection, child_id, request.confinement, request.read_dirs)
     from host_access.supervisor import register_host_access_descendant
 
     register_host_access_descendant(

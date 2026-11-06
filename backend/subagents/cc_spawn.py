@@ -117,7 +117,6 @@ async def _start_process(prepared: PreparedCCSpawn) -> None:
         mcp_config=mcp_config,
         permission_mode=permission_mode_for(request.confinement),
         confinement=request.confinement,
-        add_dirs=request.add_dirs,
         working_dir=prepared.working_dir,
         claude_dir=prepared.resolved_claude_dir,
         model=prepared.cc_alias,
@@ -211,14 +210,14 @@ async def spawn(
     broadcast: Broadcast | None = None,
     account_id: str | None = None,
     confinement: str = CONFINEMENT_NONE,
-    add_dirs: tuple[str, ...] = (),
+    read_dirs: tuple[str, ...] = (),
     rule_start: RuleStart | None = None,
     max_turns: int | None = None,
     db=None,
 ) -> str:
     """Spawn one Claude Code subagent child thread.
 
-    An ``untrusted`` confinement runs it read-only over ``add_dirs`` from its own
+    An ``untrusted`` confinement runs it read-only over ``read_dirs`` from its own
     empty working directory; the caller has already checked those reads.
     ``rule_start(child_id)`` records a rule-started worker before its first turn can run.
     """
@@ -228,7 +227,7 @@ async def spawn(
     request = CCSpawnRequest(
         parent_thread_id, task, binary, target, working_dir, effort, title,
         project_id, claude_dir, broadcast, account_id,
-        confinement=confinement, add_dirs=add_dirs, max_turns=max_turns,
+        confinement=confinement, read_dirs=read_dirs, max_turns=max_turns,
     )
     prepared = await prepare_spawn(request, get_db())
     try:

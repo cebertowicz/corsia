@@ -68,7 +68,7 @@ def _launch(binary: str, cwd: Path, reviewed: Path, root: Path, arm: str, mcp_co
     session = CCStreamSession(
         binary=binary, session_id="00000000-0000-4000-8000-000000000001",
         model="claude-sonnet-4-6", working_dir=str(cwd), claude_dir=str(root),
-        confinement=CONFINEMENT_UNTRUSTED, add_dirs=(str(reviewed),),
+        confinement=CONFINEMENT_UNTRUSTED,
         mcp_config=str(mcp_config),
     )
     # The prompt goes over stdin: the variadic flags would take it.

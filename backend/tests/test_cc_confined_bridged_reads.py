@@ -86,7 +86,6 @@ def _confined_invocation(**overrides) -> ClaudeInvocation:
         "mcp_config": "bridge.json",
         "working_dir": "/confined-cwd",
         "confinement": "untrusted",
-        "add_dirs": ("/reviewed",),
     } | overrides
     return ClaudeInvocation(**fields)
 
@@ -147,7 +146,7 @@ async def test_confined_launch_is_never_forked_warm(monkeypatch, tmp_path):
     invocation = ClaudeInvocation(
         binary="claude", permission_mode="dontAsk", session_id="sid",
         mcp_config="bridge.json", working_dir=str(tmp_path),
-        confinement="untrusted", add_dirs=(str(tmp_path),),
+        confinement="untrusted",
     )
     live = SimpleNamespace(
         session=SimpleNamespace(invocation=lambda: invocation), claude_dir=str(tmp_path),
@@ -179,7 +178,7 @@ async def _run(child_db, standin, monkeypatch, tmp_path, *, tools, call, confine
         cm, "get_connection", lambda provider, db=None: {"config": {"binary": standin}},
     )
     _seed_parent(child_db)
-    confinement = {"confinement": "untrusted", "add_dirs": (confined,)} if confined else {}
+    confinement = {"confinement": "untrusted", "read_dirs": (confined,)} if confined else {}
     child_id = await rt.spawn(
         "parent", "review this", binary=standin, target=cc_target("sonnet"),
         broadcast=lambda _sid, _message: None, **confinement,

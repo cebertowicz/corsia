@@ -191,7 +191,7 @@ def test_confined_profile_admits_no_native_tool():
         ClaudeInvocation(
             binary="claude", permission_mode="dontAsk", session_id="sid",
             mcp_config="empty.json", model="claude-sonnet-4-6",
-            confinement="untrusted", add_dirs=("/reviewed",),
+            confinement="untrusted",
         ),
         stream_input=False,
     )
