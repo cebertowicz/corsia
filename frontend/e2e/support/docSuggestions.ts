@@ -19,8 +19,8 @@ export async function setEvidenceViewport(page: Page, testInfo: TestInfo) {
  * (the way an agent leaves them), and opens the owner's canvas on it. `ids` follows `suggestions`. `beforeOpen`
  * runs after seeding and before the canvas first opens.
  */
-export async function openSuggestionDocument(page: Page, request: APIRequestContext, text: string, suggestions: SeededReviewItem[], { splitWidth = 540, beforeOpen }: {
-	splitWidth?: number; beforeOpen?: (seeded: { artifactId: string; docPath: string; ids: string[]; ownerId: string }) => Promise<void>;
+export async function openSuggestionDocument(page: Page, request: APIRequestContext, text: string, suggestions: SeededReviewItem[], { splitWidth = 540, beforeOpen, placeAt }: {
+	splitWidth?: number; placeAt?: (ownerId: string, workspace: string) => string; beforeOpen?: (seeded: { artifactId: string; docPath: string; ids: string[]; ownerId: string }) => Promise<void>;
 } = {}) {
 	const stamp = Date.now();
 	const ownerTitle = `suggestions-owner-${stamp}`;
@@ -33,8 +33,10 @@ export async function openSuggestionDocument(page: Page, request: APIRequestCont
 	const roots: Array<{ kind: string; path: string }> = (await tree.json()).roots;
 	const workspace = roots.find((root) => root.kind === 'workspace')?.path;
 	expect(workspace).toEqual(expect.any(String));
-	const name = `suggestions-${stamp}.md`;
-	const docPath = path.join(workspace!, name);
+	// `placeAt` picks a path under the workspace (it creates any folder), for a document the app treats specially, such as a guidance file that keeps History.
+	const relative = placeAt ? placeAt(ownerId, workspace!) : `suggestions-${stamp}.md`;
+	const name = path.basename(relative);
+	const docPath = path.join(workspace!, relative);
 	const seeded = await request.put('/api/files/content', { params, data: { path: docPath, text, thread_id: ownerId, create: true } });
 	expect(seeded.ok(), await seeded.text()).toBeTruthy();
 	const artifactId = (await seeded.json()).artifact.id;
@@ -67,7 +69,7 @@ export async function openSuggestionDocument(page: Page, request: APIRequestCont
 	// On a phone the restored document covers the chat, so the composer's model chip can be hidden when checked.
 	await waitForModelListLoaded(page);
 	const editor = page.locator('.cm-content');
-	await expect(editor).toContainText(text.split('\n').find((line) => line.trim())!.replace(/^#+\s*/, ''));
+	await expect(editor).toContainText(text.split('\n').find((line) => line.trim() && line.trim() !== '---')!.replace(/^#+\s*/, ''));
 
 	const drawer = page.getByRole('region', { name: 'Document comments', exact: true });
 	const row = (id: string) => drawer.locator(`[data-comment-id="${id}"]`);

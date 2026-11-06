@@ -288,6 +288,24 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct.orphaned')).not.toBeNull();
 	});
 
+	it('keeps a margin card header on one row when it is focused, naming the author as it reads at rest', () => {
+		const name = 'Suggestion Reviewer 1793988264642';
+		const rows = (extra: Record<string, unknown>) => {
+			render(thread({ author: name, createdAt: new Date().toISOString(), replies: [{ ...reply, author: name }] }), false, extra);
+			const out = { stacked: host.querySelector('.ct-author.stacked') !== null, name: host.querySelector('.ct-author')!.textContent, replyName: host.querySelector('.ct-msg-author')!.textContent };
+			unmount(component!); component = null; host.remove();
+			return out;
+		};
+		const rest = rows({ inMargin: true, focused: false, scrollOnFocus: false });
+		const focusedInMargin = rows({ inMargin: true, focused: true, scrollOnFocus: false });
+		expect(rest.stacked).toBe(false);
+		expect(focusedInMargin).toEqual(rest);
+		// Elsewhere (the popover and the sheet) a focused card still gives the whole name its own row.
+		const focusedElsewhere = rows({ focused: true, scrollOnFocus: false });
+		expect(focusedElsewhere.stacked).toBe(true);
+		expect(focusedElsewhere.name).toBe(name);
+	});
+
 	it('lets the person read a long deleted text in full, and clamps it again, with the Show more control chat comments use', () => {
 		const long = 'The deleted paragraph. '.repeat(60);
 		render(thread({ orphaned: true, detached: true, anchor: long }));

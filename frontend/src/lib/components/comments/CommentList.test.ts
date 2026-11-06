@@ -145,3 +145,18 @@ it("goes to a text comment's text when its card is pressed, but not from a contr
 	expect(onFocus).not.toHaveBeenCalled();
 	selection.mockRestore();
 });
+
+it('shows a deleted-text card its quote once, in the card, with no quote line above it', () => {
+	host = document.createElement('div'); document.body.appendChild(host);
+	const gone = { id: 'a', anchor: 'The deleted words', orphaned: true, detached: true, author: 'you', text: 'Which words?', at: 'now', resolved: false, replies: [] };
+	const changed = { id: 'b', anchor: 'Changed words', orphaned: true, author: 'you', text: 'Still here?', at: 'now', resolved: false, replies: [] };
+	component = createClassComponent({ target: host, component: CommentList, props: { documentOrder: true, underTextChanged: true, comments: [gone, changed] } });
+	flushSync();
+	const card = (id: string) => host.querySelector<HTMLElement>(`[data-comment-id="${id}"]`)!;
+	expect(card('a').textContent!.split('The deleted words').length - 1).toBe(1);
+	expect(card('a').querySelector('[data-comment-jump]')).toBeNull();
+	expect(card('a').querySelector('.quote')?.textContent).toBe('“The deleted words”');
+	expect(card('a').querySelector('.ct-orphan')?.textContent).toBe('This text is no longer in the document');
+	// A card whose text only changed keeps the line that takes the reader to it.
+	expect(card('b').querySelector('[data-comment-jump]')?.textContent).toContain('Changed words');
+});

@@ -113,8 +113,9 @@ export type Run = (args: { page: Page; request: APIRequestContext; info: TestInf
 /** Deletes the threads seeded since the last call, for a spec that needs a clean database between its cases. */
 export async function deleteSeededThreads(request: APIRequestContext) {
 	for (const threadId of seededThreadIds.splice(0)) {
-		const deleted = await request.delete(`/api/threads/${threadId}?token=${TEST_TOKEN}`);
-		expect(deleted.ok(), `delete seeded thread ${threadId}`).toBeTruthy();
+		// The backend refuses a delete with 409 while a turn is still running on the thread (a comment sent for immediate delivery starts one); retry until that turn ends.
+		const deleteThread = () => request.delete(`/api/threads/${threadId}?token=${TEST_TOKEN}`);
+		await expect.poll(async () => (await deleteThread()).status(), { message: `delete seeded thread ${threadId}`, timeout: 20_000 }).toBeLessThan(300);
 	}
 }
 

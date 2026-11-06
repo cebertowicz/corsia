@@ -281,11 +281,21 @@ journey('a reply being typed survives someone else resolving the thread', [['144
 	const doc = await seed(request, `Drawer resolved while replying ${mode} ${theme}`);
 	const parent = await comment(request, doc, 'Ring two should wait.', 2);
 	await open(page, doc, mode, theme);
+	// Collapsing the plan pane widens the document over its width transition; the comments surface changes between the sheet and the margin column when it ends, so open it after.
+	await settled(page);
 	await pill(page).click();
 	const drawer = drawerOf(page);
 	await expect(drawer).toBeVisible();
-	const field = drawer.locator('.ct-input').first();
+	// A margin card shows its reply field only once picked, and whether the pill click or the column opening on load got there first varies, so pick the card by its header.
+	const card = drawer.getByRole('region', { name: /^Comment by / }).first();
+	await expect(card).toBeVisible();
+	const field = card.locator('.ct-input');
+	if (!(await field.count())) await card.locator('.ct-head').click({ position: { x: 14, y: 10 } });
+	await expect(field).toBeVisible();
+	// The picked card is still settling as it opens; type once it has, and see the text held before anyone resolves the thread.
+	await settled(page);
 	await field.fill('Half a reply that must not vanish.');
+	await expect(field).toHaveValue('Half a reply that must not vanish.');
 	await resolve(request, parent);
 	await expect(drawer.locator('[data-resolved-note]')).toBeVisible();
 	await expect(field).toHaveValue('Half a reply that must not vanish.');

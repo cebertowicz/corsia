@@ -1,6 +1,10 @@
 import { test } from '../support/test';
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { expect, type Page, type APIRequestContext } from '@playwright/test';
 import { openSuggestionDocument } from '../support/docSuggestions';
+import { TEST_TOKEN } from '../support/corsia';
 
 /**
  * Margin comments: open threads sit as cards beside their text, a cluster stacks, a picked card keeps its own line and pushes its
@@ -13,6 +17,8 @@ const para = (n: number) => `Paragraph ${n} of the plan says that agents hand wo
 const FIVE = 'Paragraph 5 notes alpha alphax and bravo bravox so that two notes sit on one line, then it carries on for a while so that the paragraph wraps onto a few lines of the page.';
 const TEXT = `# Handoff plan\n\n${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => (i === 5 ? FIVE : para(i))).join('\n\n')}\n`;
 // A comment, two comments on one line (the cluster), a suggestion, a suggestion, a comment, in document order.
+// A skill file must load as a skill, so the history document opens with its front matter.
+const SKILL_TEXT = `---\nname: demo\ndescription: A test skill.\n---\n\n${TEXT}`;
 const ITEMS = [
 	{ quote: 'Paragraph 1 of the plan', body: 'Which agents? Name them here.' },
 	{ quote: 'alpha alphax', body: 'Alpha needs a source.' },
@@ -103,12 +109,22 @@ test('@flow:doc-margin-cards a picked card keeps its own line, the cards around 
 	test.skip(info.project.name !== 'chromium-desktop', 'Desktop layout.');
 	test.setTimeout(120_000);
 	const doc = await open(page, request);
+	// Focusing a card adds its quote, replies and Reply field; the header (avatar, name, time) stays on its one row of the resting card.
+	const headRow = () => card(page, doc, BRAVO).locator('.ct-head').evaluate((head) => {
+		const top = (selector: string) => Math.round(head.querySelector(selector)!.getBoundingClientRect().top);
+		return { height: Math.round(head.getBoundingClientRect().height), author: top('.ct-author'), time: top('.ct-at.full') };
+	});
+	const resting = await headRow();
+	expect(Math.abs(resting.author - resting.time), 'name and time share a row at rest').toBeLessThanOrEqual(3);
 	await card(page, doc, BRAVO).locator('.ct-head').click({ position: { x: 14, y: 10 } });
 	await expect(card(page, doc, BRAVO).locator('.ct.focused')).toHaveCount(1);
 	await expect.poll(async () => {
 		const [, alpha, bravo] = await geometry(page, doc.ids);
 		return Math.abs(bravo.card!.top - bravo.line!) <= 12 && alpha.card!.bottom <= bravo.card!.top + 0.5;
 	}, { message: 'bravo level with its own line, alpha pushed above it' }).toBe(true);
+	await expect.poll(headRow, { message: 'the focused header keeps its one row' }).toMatchObject({ height: resting.height });
+	const focusedRow = await headRow();
+	expect(Math.abs(focusedRow.author - focusedRow.time)).toBeLessThanOrEqual(3);
 	// The highlight of the picked thread is deeper than the others.
 	await expect(page.locator('.cm-comment-focused').first()).toBeVisible();
 	// Picking highlighted text in the document picks its card, with no popover over the text.
@@ -214,4 +230,51 @@ test('@flow:doc-margin-cards below the margin width a thread opens as a popover 
 		await expect(popover).toContainText(ITEMS[FIRST].body);
 	}
 	expect(doc.ids.length).toBe(ITEMS.length);
+});
+
+test('@flow:doc-margin-cards the column comes back when version history closes, however it is closed', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'chromium-desktop', 'Desktop layout.');
+	test.setTimeout(150_000);
+	// Two saved versions give History something to list.
+	const doc = await openSuggestionDocument(page, request, SKILL_TEXT, ITEMS, {
+		splitWidth: 5000,
+		// History is offered for guidance files only (a skill's SKILL.md), recorded in the workspace's Git: put the document where a skill lives.
+		placeAt: (ownerId, workspace) => {
+			execFileSync('git', ['init', '-q', workspace]);
+			const folder = path.join(workspace, '.threads', ownerId, 'skills', 'demo');
+			fs.mkdirSync(folder, { recursive: true });
+			return path.join('.threads', ownerId, 'skills', 'demo', 'SKILL.md');
+		},
+		beforeOpen: async ({ docPath, ownerId }) => {
+			for (const text of [`${SKILL_TEXT}\nA closing line.\n`, `${SKILL_TEXT}\nA closing line, kept.\n`]) {
+				const saved = await request.put('/api/files/content', { params: { token: TEST_TOKEN }, data: { path: docPath, text, thread_id: ownerId } });
+				expect(saved.ok(), await saved.text()).toBe(true);
+			}
+			expect(fs.existsSync(docPath)).toBe(true);
+		},
+	});
+	await expect(page.locator('.cm-scroller')).toBeVisible();
+	await widen(page, doc);
+	await expect(card(page, doc, FIRST)).toBeVisible();
+	const history = page.getByRole('button', { name: 'History', exact: true });
+	for (const close of ['the History button', 'the history drawer Close button'] as const) {
+		await history.click();
+		await expect(page.locator('[data-doc-history-drawer]')).toBeVisible();
+		// While History is open the column is closed: that is unchanged.
+		await expect(page.locator('[data-margin-card]')).toHaveCount(0);
+		if (close === 'the History button') await history.click(); else await page.getByRole('button', { name: 'Close history', exact: true }).click();
+		await expect(page.locator('[data-doc-history-drawer]'), close).toHaveCount(0);
+		await expect(card(page, doc, FIRST), `cards are back after ${close}`).toBeVisible();
+		await expect(page.locator('.canvas-comment-drawer.margin')).toBeVisible();
+		expect(await page.locator('[data-margin-card]').count()).toBe(ITEMS.length);
+	}
+	// A reader who had the column closed before History opened does not get it opened after.
+	await pill(page).click();
+	await expect(page.locator('[data-margin-card]')).toHaveCount(0);
+	await history.click();
+	await expect(page.locator('[data-doc-history-drawer]')).toBeVisible();
+	await history.click();
+	await expect(page.locator('[data-doc-history-drawer]')).toHaveCount(0);
+	await page.waitForTimeout(600);
+	await expect(page.locator('[data-margin-card]')).toHaveCount(0);
 });
