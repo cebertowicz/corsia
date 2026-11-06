@@ -48,10 +48,12 @@ describe('the document image a tab shows', () => {
 		const comments = { artifactId: 'a1', projectId: null, readOnly: false, post: vi.fn() };
 		openTabDocumentImage(THREAD, tab, { ...IMAGE, focus: { id: 'pin' }, comments } as never);
 		recordTabDocumentImageCamera(THREAD, tab, { scrollLeft: 5, scrollTop: 6, scale: 2 });
-		expect(tabDocumentImage(THREAD, tab)).toEqual({ ...IMAGE, focus: { id: 'pin' }, camera: { scrollLeft: 5, scrollTop: 6, scale: 2 } });
+		const first = tabDocumentImage(THREAD, tab);
+		expect(first).toEqual({ ...IMAGE, focus: { id: 'pin' }, camera: { scrollLeft: 5, scrollTop: 6, scale: 2 }, viewId: expect.any(Object) });
 
 		openTabDocumentImage(THREAD, tab, IMAGE);
-		expect(tabDocumentImage(THREAD, tab)).toEqual({ ...IMAGE, focus: undefined });
+		expect(tabDocumentImage(THREAD, tab)).toEqual({ ...IMAGE, focus: undefined, viewId: expect.any(Object) });
+		expect(tabDocumentImage(THREAD, tab)!.viewId).not.toBe(first!.viewId);
 	});
 
 	it('follows its markdown through an edit of its own tab only, and changes nothing for an edit elsewhere', () => {
