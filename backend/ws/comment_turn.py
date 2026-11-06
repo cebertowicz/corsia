@@ -113,7 +113,4 @@ def disconnect(ws: WebSocket) -> None:
     _order.pop(ws, None)
     freed = writer_turns.release(ws)
     if freed:
-        try:
-            _spawn(_serve(freed))
-        except RuntimeError:
-            return
+        _spawn(_serve(freed))

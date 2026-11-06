@@ -211,3 +211,87 @@ async def test_each_line_step_records_one_product_event(
     assert steps == ["queued", "queued", "queued", "woken", "posted_as_is", "woken", "dropped", "woken", "rewritten"]
     for _action, _outcome, props in events:
         assert set(props) <= {"outcome", "root_id", "artifact_id", "line_id", "wakes", "waited_seconds"}
+
+
+@pytest.mark.asyncio
+async def test_post_as_is_returns_the_saved_text_of_any_failed_write_and_still_tries_the_rest(
+    integration_client, doc, _registrable_roots, driven, monkeypatch,
+):
+    """A write that fails for any reason, not only a comment error, comes back with its text."""
+    from doceditor import agent_comment_writes
+    from tools.documents import DocCommentUpdateTool
+
+    _a, root = _comment_by_thread_a(integration_client, doc)
+    b = _mk_thread(integration_client, _OWNER, title="Agent B")
+    page = object()
+    await _frame(page, root, True)
+    _post(integration_client, _OWNER, parent_id=root, body="B one", as_session_id=b)
+    _post(integration_client, _OWNER, parent_id=root, body="B two", as_session_id=b)
+    await _frame(page, root, False)
+    real, calls = agent_comment_writes._replay, []
+
+    async def first_fails(op, *args):
+        calls.append(op)
+        if len(calls) == 1:
+            raise RuntimeError("the document's app loop is gone")
+        return await real(op, *args)
+
+    monkeypatch.setattr(agent_comment_writes, "_replay", first_fails)
+    answer = json.loads(await DocCommentUpdateTool().execute(comment_id=root, post_as_is=True, _thread_id=b))
+
+    assert answer["failed"] == [{"write": 'Reply: "B one"', "error": "It couldn't be posted."}]
+    assert [item["comment"]["body"] for item in answer["posted"]] == ["B two"]
+    assert [reply["body"] for reply in _replies(root, b)] == ["B two"]
+
+
+@pytest.mark.asyncio
+async def test_a_line_that_fails_to_serve_neither_blocks_other_lines_nor_loses_the_sweeps_deliveries(
+    integration_client, doc, _registrable_roots, driven, monkeypatch,
+):
+    from doceditor import feedback_batches, writer_line, writer_turns
+
+    _a, first = _comment_by_thread_a(integration_client, doc)
+    _a2, second = _comment_by_thread_a(integration_client, doc)
+    b = _mk_thread(integration_client, _OWNER, title="Agent B")
+    c = _mk_thread(integration_client, _OWNER, title="Agent C")
+    pages = object(), object()
+    await _frame(pages[0], first, True)
+    _post(integration_client, _OWNER, parent_id=first, body="B saved", as_session_id=b)
+    await _frame(pages[1], second, True)
+    _post(integration_client, _OWNER, parent_id=second, body="C saved", as_session_id=c)
+    for page in pages:
+        writer_turns.release(page)  # both lines left waiting, as after a lost serve
+    real_text = writer_line.wake_text
+
+    def broken_for_first(db, row):
+        if row["root_id"] == first:
+            raise KeyError("input")
+        return real_text(db, row)
+
+    monkeypatch.setattr(writer_line, "wake_text", broken_for_first)
+    monkeypatch.setattr(feedback_batches, "close_due", lambda _now, db=None: ["delivered-thread"])
+
+    drives = _sweep()
+
+    assert "delivered-thread" in drives and c in drives and b not in drives
+    assert [r["state"] for r in _line(first)] == ["waiting"]
+    assert [r["state"] for r in _line(second)] == ["woken"]
+
+
+@pytest.mark.asyncio
+async def test_a_failing_line_step_at_turn_end_never_undoes_the_turns_own_settlement(
+    integration_client, doc, _registrable_roots, driven, monkeypatch,
+):
+    from doceditor import writer_line
+
+    root, b, _c = await _two_in_line(integration_client, doc)
+    turn_id = _wake_turn(b, _line(root)[0])
+
+    def broken(db, row, reason):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(writer_line, "_drop", broken)
+    _end(b, turn_id, "completed")
+
+    assert [r["status"] for r in _rows("SELECT status FROM active_turns WHERE id=?", turn_id)] == ["completed"]
+    assert [(r["agent_thread_id"], r["state"]) for r in _line(root)][0] == (b, "woken")

@@ -6,14 +6,16 @@ most once a minute). An agent holds it only inside one write call (``agent_comme
 Turns are kept in memory only, so a restart releases them all; the agent writes waiting for a turn
 are durable in ``writer_line``.
 
-Person holds change on the event loop and are read by the line on database workers. A read that
-races an arrival is the same as the arrival landing a moment later: an agent woken just before the
-person came back is put back in line by its own write, never let through. Agent holds are taken
-inside the line's admission write, which ``BEGIN IMMEDIATE`` serializes with every other line write.
+Person holds change on the event loop; agent holds change, and both are read, on database workers.
+One lock guards every read and change, so no reader sees a map mid-change. A person arriving while
+an agent's write is landing still takes their hold: the agent's write finishes, and the next agent
+write on the thread waits for the person. Agent holds are taken inside the line's admission write,
+which ``BEGIN IMMEDIATE`` serializes with every other line write.
 """
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 
 #: A page that stops renewing loses the turn after this long; it renews every 60 s while on a thread.
@@ -30,29 +32,34 @@ class PersonHold:
 _people: dict[str, dict[object, PersonHold]] = {}
 _page_root: dict[object, str] = {}
 _agents: dict[str, str] = {}
+_lock = threading.Lock()
 
 
 def person_holding(root_id: str) -> PersonHold | None:
     """The person whose page is on this thread, if any."""
-    pages = _people.get(root_id)
-    return next(iter(pages.values()), None) if pages else None
+    with _lock:
+        pages = _people.get(root_id)
+        return next(iter(pages.values()), None) if pages else None
 
 
 def agent_writing(root_id: str) -> str | None:
     """The agent whose write call is landing on this thread right now."""
-    return _agents.get(root_id)
+    with _lock:
+        return _agents.get(root_id)
 
 
 def is_free(root_id: str) -> bool:
-    return person_holding(root_id) is None and agent_writing(root_id) is None
+    with _lock:
+        return not _people.get(root_id) and root_id not in _agents
 
 
 def take(page: object, root_id: str, hold: PersonHold) -> list[str]:
     """``page`` is now on ``root_id``; returns the thread it left, if that freed it."""
-    freed = release(page) if _page_root.get(page) not in (None, root_id) else []
-    _people.setdefault(root_id, {})[page] = hold
-    _page_root[page] = root_id
-    return freed
+    with _lock:
+        freed = _release(page) if _page_root.get(page) not in (None, root_id) else []
+        _people.setdefault(root_id, {})[page] = hold
+        _page_root[page] = root_id
+        return freed
 
 
 def release(page: object) -> list[str]:
@@ -60,6 +67,11 @@ def release(page: object) -> list[str]:
 
     Returns the thread when no one holds it any more, so its line can be served.
     """
+    with _lock:
+        return _release(page)
+
+
+def _release(page: object) -> list[str]:
     root_id = _page_root.pop(page, None)
     if root_id is None:
         return []
@@ -72,25 +84,34 @@ def release(page: object) -> list[str]:
 
 
 def page_root(page: object) -> str | None:
-    return _page_root.get(page)
+    with _lock:
+        return _page_root.get(page)
 
 
 def people_on(root_id: str) -> set[str]:
     """The users with a page on this thread."""
-    return {hold.user_id for hold in _people.get(root_id, {}).values()}
+    with _lock:
+        return {hold.user_id for hold in _people.get(root_id, {}).values()}
 
 
-def agent_enter(root_id: str, thread_id: str) -> None:
-    _agents[root_id] = thread_id
+def agent_claim(root_id: str, thread_id: str) -> bool:
+    """Give this agent the turn unless a person or another agent holds it; check and claim are one step."""
+    with _lock:
+        if _people.get(root_id) or _agents.get(root_id, thread_id) != thread_id:
+            return False
+        _agents[root_id] = thread_id
+        return True
 
 
 def agent_exit(root_id: str, thread_id: str) -> None:
-    if _agents.get(root_id) == thread_id:
-        _agents.pop(root_id, None)
+    with _lock:
+        if _agents.get(root_id) == thread_id:
+            _agents.pop(root_id, None)
 
 
 def reset() -> None:
     """Forget every turn, as a restart does (tests)."""
-    _people.clear()
-    _page_root.clear()
-    _agents.clear()
+    with _lock:
+        _people.clear()
+        _page_root.clear()
+        _agents.clear()

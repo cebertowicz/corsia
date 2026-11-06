@@ -259,7 +259,8 @@ async def test_a_saved_write_survives_a_restart_and_is_woken_after_it(
     _wake_turn(b, woken_b, status="completed")  # the crash took B's turn with it; no turn end was recorded
     writer_turns.reset()  # a restart forgets every turn
 
-    assert await run_in_db(recover_line) == [b]
+    woken = await run_in_db(recover_line)  # serves every line in the shared DB, other tests' included
+    assert b in woken and c not in woken
 
     rows = _line(root)
     assert [(r["agent_thread_id"], r["state"]) for r in rows] == [(b, "woken"), (c, "waiting")]
