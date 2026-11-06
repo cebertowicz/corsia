@@ -23,6 +23,7 @@ READ_SNAPSHOTS = [
     ("infra/runtime_truth.py", "provider_boundary_snapshot"),
     ("infra/runtime_truth.py", "_has_registered_provider"),
     ("infra/send_replay_reads.py", "read_candidates"),
+    ("infra/held_usage_recheck.py", "_limited_receipt"),
     ("subagents/harness_checkpoint_context.py", "read_external_checkpoint_context"),
     ("thread/model_source.py", "_read_model_switch_start"),
     ("thread/model_source.py", "_read_model_switch_candidates"),

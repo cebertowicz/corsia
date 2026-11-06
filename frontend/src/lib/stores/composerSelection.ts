@@ -1,6 +1,6 @@
 import { derived, type Readable } from 'svelte/store';
 import { activeModelId, models, threadCatalogs, workspaceModels } from './modelsState';
-import { threadModelFor, threadModelVersion, type Model } from './models';
+import { threadModelFor, threadModelVersion, threadModelRequests, type Model } from './models';
 import { heldThreadSwitch } from './threadModelTruth';
 import { unknownStatus } from './modelsLoad';
 import { subagentMeta, subagentThreadRows } from './subagents';
@@ -34,14 +34,17 @@ export interface ComposerSelection {
  * An omitted id means the open thread.
  */
 export const composerSelectionFor: Readable<(threadId?: string | null) => ComposerSelection> = derived(
-	[activeThreadId, activeModelId, reasoningEffort, threads, subagentMeta, subagentThreadRows, threadModelVersion, models, threadCatalogs, workspaceModels],
-	([$activeThreadId, $activeModelId, $reasoningEffort, $threads, $subagentMeta, $workerRows, , $models, $catalogs, $workspaceModels]) =>
+	[activeThreadId, activeModelId, reasoningEffort, threads, subagentMeta, subagentThreadRows, threadModelVersion, models, threadCatalogs, workspaceModels, threadModelRequests],
+	([$activeThreadId, $activeModelId, $reasoningEffort, $threads, $subagentMeta, $workerRows, , $models, $catalogs, $workspaceModels, $requests]) =>
 		(threadId?: string | null): ComposerSelection => {
 			const id = threadId ?? $activeThreadId;
 			const worker = $subagentMeta.get(id ?? '');
 			const thread: ComposerThreadRow | undefined = $threads.find((row) => row.id === id)
 				?? (worker ? { ...$workerRows.get(worker.childThreadId), model: threadModelFor(worker.childThreadId) } : undefined);
-			const switching = thread ?? heldThreadSwitch(id ?? '');
+			const request = $requests.get(id ?? '');
+			const switching = request
+				? { pending_model: request.model, switch_status: 'preparing', switch_error: null }
+				: thread ?? heldThreadSwitch(id ?? '');
 			if (id === null || id === $activeThreadId) {
 				return { threadId: id, isOpen: true, thread, switching, modelId: $activeModelId, effort: $reasoningEffort, models: $models };
 			}

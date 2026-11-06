@@ -13,7 +13,7 @@ import {
 import {
 	_resetThreadModelTruthForTests,
 	activeModelId,
-	finishThreadModelSwitch,
+	_resetThreadModelRequestsForTests,
 	models,
 } from '$lib/stores/models';
 import { activeThreadId, reasoningEffort, threads } from '$lib/stores/threads';
@@ -114,7 +114,7 @@ beforeEach(() => {
 	host = document.createElement('div');
 	document.body.appendChild(host);
 	token.set('tok');
-	finishThreadModelSwitch('thread-1');
+	_resetThreadModelRequestsForTests();
 	_resetThreadModelTruthForTests();
 	_resetCheckpointsForTests();
 	activeThreadId.set('thread-1');

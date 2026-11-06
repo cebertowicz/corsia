@@ -30,6 +30,8 @@ _READ_SNAPSHOTS = {
     ("backend/infra/runtime_truth.py", "provider_boundary_snapshot"),
     ("backend/infra/runtime_truth.py", "_has_registered_provider"),
     ("backend/infra/send_replay_reads.py", "read_candidates"),
+    # Read-only chosen-account/usage/receipt snapshot; closes before control I/O.
+    ("backend/infra/held_usage_recheck.py", "_limited_receipt"),
     ("backend/api/checkpoints.py", "_manual_context"),
     ("backend/core/checkpoint_agent_admission.py", "read_checkpoint_preparation"),
     ("backend/core/turn_iteration_context.py", "_read_native_checkpoint_context"),
