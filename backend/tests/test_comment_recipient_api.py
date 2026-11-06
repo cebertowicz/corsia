@@ -65,7 +65,7 @@ def test_tag_create_list_and_idempotent_retry(integration_client, artifact_id, m
     assert again.status_code == 200
     # One event per new tagged comment, counting distinct agents; the idempotent retry adds none.
     assert [event for event in events if event[0] == "comment_tagged"] == [
-        ("comment_tagged", {"tag_count": 1, "reply": False, "author_kind": "user"})]
+        ("comment_tagged", {"tag_count": 1, "person_tagged": False, "reply": False, "author_kind": "user"})]
     assert again.json()["comment"]["tagged_agents"] == first.json()["comment"]["tagged_agents"]
     listed = integration_client.get(url).json()["comments"]
     assert listed[0]["tagged_agents"] == first.json()["comment"]["tagged_agents"]
@@ -90,7 +90,7 @@ def test_tag_create_list_and_idempotent_retry(integration_client, artifact_id, m
     reply = integration_client.post(url, json={**request, "parent_id": listed[0]["id"], "client_id": "tag-reply"})
     assert reply.status_code == 200
     assert reply.json()["comment"]["tagged_agent_mentions"] == mentions
-    assert events[-1] == ("comment_tagged", {"tag_count": 1, "reply": True, "author_kind": "user"})
+    assert events[-1] == ("comment_tagged", {"tag_count": 1, "person_tagged": False, "reply": True, "author_kind": "user"})
     for invalid in (
         {"agent_id": "other", "start": 3, "end": 9},
         {"agent_id": "agent", "start": 1, "end": 9},

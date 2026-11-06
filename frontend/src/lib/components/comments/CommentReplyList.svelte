@@ -10,6 +10,8 @@
 		authorThreadId?: string | null;
 		text: string;
 		taggedAgents?: { id: string; name: string }[];
+		/** An agent asked the person here; the value is the person's own account name. */
+		taggedPerson?: string | null;
 		mentions?: import('./mentionSelection').MentionOccurrence[];
 		at: string;
 		createdAt?: string;
@@ -66,7 +68,7 @@
 				<span class="ct-at">{reply.at}</span>
 				{#if isNew}<NewMarker />{/if}
 			</div>
-			<CommentMarkdownBody text={reply.text} taggedAgents={reply.taggedAgents} mentions={reply.mentions} />
+			<CommentMarkdownBody text={reply.text} taggedAgents={reply.taggedAgents} mentions={reply.mentions} taggedPerson={reply.taggedPerson} />
 		</div>
 	{/each}
 </div>

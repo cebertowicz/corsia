@@ -175,6 +175,7 @@ def create_with_status(
     review: bool = False,
     replacement: str | None = None,
     insert_after: bool = False,
+    tags_person: bool = False,
     client_id: str | None = None,
     region: tuple[float, float, float, float] | None = None,
     image_rev: str | None = None,
@@ -196,14 +197,14 @@ def create_with_status(
             """INSERT INTO doc_comments
                (id, artifact_id, parent_id, author, author_kind, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
-                review, resolved, acked, replacement, insert_after, created_at, updated_at,
+                review, resolved, acked, replacement, insert_after, tags_person, created_at, updated_at,
                 region_x, region_y, region_w, region_h, region_number, image_rev, image_src)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?,?)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO NOTHING""",
             (
                 cid, artifact_id, _thread_root_id(connection, parent_id), author, author_kind, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
-                1 if review else 0, replacement, int(insert_after), now, now,
+                1 if review else 0, replacement, int(insert_after), int(tags_person), now, now,
                 x, y, w, h, number, image_rev, image_src,
             ),
         )
@@ -225,7 +226,7 @@ def create_with_status(
                     author_thread_id=author_thread_id if named else None,
                     # unread_attention_changed includes eligible new top-level comments.
                     unread_attention_changed=feedback_state.may_change_unread_attention(
-                        author_kind, parent_id, replacement, review))
+                        author_kind, parent_id, replacement, review, tags_person=tags_person))
             if region is not None:
                 live_events.region_after_commit(connection, "placed", artifact_id, w, h, author_kind=author_kind)
         return r, created

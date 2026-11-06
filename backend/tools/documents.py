@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +13,11 @@ from doceditor.comment_create_db import CommentInput
 from doceditor.document_save import DocumentSaveError
 
 from doceditor.comment_actions import (
-    CommentActionError, SUGGESTION_REASON_MAX_CHARS, validate_create,
+    CommentActionError, SUGGESTION_REASON_MAX_CHARS,
 )
 from doceditor.comment_action_errors import decision_only_error
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
-from doceditor.comments import CrossArtifactIdError, validate_client_id
+from doceditor.comments import CrossArtifactIdError
 from doceditor.quote_anchor import QuoteResolveError
 from infra.auth import may_access_artifact
 from infra.database import get_db

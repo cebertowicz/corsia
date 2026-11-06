@@ -87,17 +87,39 @@ describe('CommentMarkdownBody', () => {
 		host.removeEventListener('click', card);
 	});
 
-	it('renders a tag of the person as a chip with their own name', () => {
+	it('renders a tag of the person as a chip with their own account name', () => {
 		vi.stubGlobal('ResizeObserver', ResizeObserverStub);
 		host = document.createElement('div');
 		document.body.appendChild(host);
 		component = mount(CommentMarkdownBody, {
 			target: host,
-			props: { text: 'Needs your call', taggedAgents: [{ id: 'ui', name: 'Sam' }] }
+			props: { text: 'Needs your call', taggedPerson: 'Sam' }
 		});
 		flushSync();
 
 		const chips = [...host.querySelectorAll<HTMLElement>('.comment-mention')];
 		expect(chips.map(chip => chip.textContent)).toEqual(['@Sam']);
+		expect(chips[0]!.dataset.personTag).toBe('1');
+		expect(chips[0]!.dataset.agentId).toBeUndefined();
+	});
+
+	it('marks a person tag beside agent tags, and shows no chip for a person who was not tagged', () => {
+		vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(CommentMarkdownBody, {
+			target: host,
+			props: { text: 'Needs your call', taggedAgents: [{ id: 'ag1', name: 'Quality Gate' }], taggedPerson: 'Sam' }
+		});
+		flushSync();
+		expect([...host.querySelectorAll<HTMLElement>('.comment-mention')].map(chip => chip.textContent)).toEqual(['@Quality Gate', '@Sam']);
+		unmount(component); component = null;
+
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(CommentMarkdownBody, { target: host, props: { text: 'Needs your call', taggedAgents: [{ id: 'ag1', name: 'Quality Gate' }] } });
+		flushSync();
+		expect([...host.querySelectorAll<HTMLElement>('.comment-mention')].map(chip => chip.textContent)).toEqual(['@Quality Gate']);
+		expect(host.textContent).not.toContain('@ui');
 	});
 });

@@ -10,6 +10,8 @@ export interface ServerComment {
 	body: string;
 	tagged_agent_ids?: string[];
 	tagged_agents?: { id: string; name: string }[];
+	/** An agent's ask for the person on this comment: their own account name, never an agent tag. */
+	tagged_person?: string | null;
 	tagged_agent_mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[];
 	anchor_text: string | null;
 	from_off: number | null;

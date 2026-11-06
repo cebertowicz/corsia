@@ -1,7 +1,8 @@
 """Document-target resolution and shared validation for the document comment tools.
 
-``tools.documents`` re-exports these under the private names they had there, since sibling
-tool modules and the live-preview comment path already reach them through that module.
+The document comment tools (``documents``, ``document_reviews``, ``document_feedback``,
+``document_open``) and the live-preview comment path each resolve a comment's document target and
+validate a creation the same way, so they import these from here rather than repeat the rules.
 """
 
 from __future__ import annotations

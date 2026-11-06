@@ -10,6 +10,8 @@ export type CommentThreadData = {
 	authorThreadId?: string | null;
 	text: string;
 	taggedAgents?: { id: string; name: string }[];
+	/** An agent asked the person here; the value is the person's own account name. */
+	taggedPerson?: string | null;
 	mentions?: MentionOccurrence[];
 	at: string;
 	createdAt?: string;

@@ -37,6 +37,16 @@ def _tag_rows(comment_id: str) -> list:
         db.close()
 
 
+def _person_mark(comment_id: str) -> int:
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return db.execute("SELECT tags_person FROM doc_comments WHERE id=?", (comment_id,)).fetchone()[0]
+    finally:
+        db.close()
+
+
 @pytest.mark.asyncio
 async def test_an_agent_tags_the_person_on_a_new_comment_and_a_reply(integration_client, doc, _registrable_roots):
     from tools.documents import DocCommentCreateTool
@@ -51,13 +61,16 @@ async def test_an_agent_tags_the_person_on_a_new_comment_and_a_reply(integration
         tag_person=True, _thread_id=writer,
     ))["comment"]
 
-    # The chip carries the person's own name, the same name their comments carry as author.
-    assert root["tagged_agents"] == [{"id": "ui", "name": OWNER_USER}]
-    assert reply["tagged_agents"] == [{"id": "ui", "name": OWNER_USER}]
-    # The person is never an agent tag id, which is the field that drives delivery.
+    # The tag is the comment's own mark, and the field that carries it names the person, not an agent.
+    assert root["tagged_person"] == OWNER_USER and reply["tagged_person"] == OWNER_USER
+    assert root["tagged_agents"] == [] and reply["tagged_agents"] == []
     assert root["tagged_agent_ids"] == [] and reply["tagged_agent_ids"] == []
-    assert [(row["agent_id"], row["agent_name"]) for row in _tag_rows(root["id"])] == [("ui", OWNER_USER)]
-    assert [(row["agent_id"], row["agent_name"]) for row in _tag_rows(reply["id"])] == [("ui", OWNER_USER)]
+    assert _person_mark(root["id"]) == 1 and _person_mark(reply["id"]) == 1
+    # The tag table stays agents only.
+    assert _tag_rows(root["id"]) == [] and _tag_rows(reply["id"]) == []
+    # The listing carries the same field, which is what the comment surface renders.
+    listed = _listed(integration_client, root["artifact_id"])
+    assert listed[root["id"]]["tagged_person"] == OWNER_USER
 
 
 @pytest.mark.asyncio
@@ -114,6 +127,8 @@ async def test_an_untagged_agent_comment_still_needs_nobody(integration_client, 
     assert threads[root["id"]]["new_comment"] is False
     assert threads[root["id"]]["new_reply_ids"] == []
     assert reply["tagged_agents"] == []
+    assert reply["tagged_person"] is None
+    assert _person_mark(reply["id"]) == 0
 
 
 @pytest.mark.asyncio
@@ -154,3 +169,81 @@ async def test_a_person_tag_never_becomes_an_agent_recipient(integration_client,
         ).fetchone()[0] == 1
     finally:
         db.close()
+
+
+@pytest.mark.asyncio
+async def test_a_person_tag_on_a_suggestion_or_a_review_note_needs_them_and_reloads_the_surface(
+    integration_client, doc, _registrable_roots, monkeypatch,
+):
+    """The tag beats the noise rules in both places that apply them, not just in the unread read.
+
+    ``unread_comment_rows`` makes a person-tagged suggestion or review note eligible, and
+    ``may_change_unread_attention`` has to say so too: the comment surface reloads on that hint
+    alone, so a tag that only reached the SQL would stay invisible until something else refreshed.
+    """
+    from doceditor import comment_notifications
+    from tools.documents import DocCommentCreateTool
+
+    hints: list[bool] = []
+    announce = comment_notifications.announce_after_commit
+
+    def record(connection, artifact_id, **kwargs):
+        hints.append(bool(kwargs.get("unread_attention_changed")))
+        return announce(connection, artifact_id, **kwargs)
+
+    monkeypatch.setattr(comment_notifications, "announce_after_commit", record)
+
+    writer = _mk_thread(integration_client, _OWNER, title="Writer")
+    suggestion = json.loads(await DocCommentCreateTool().execute(
+        doc_path=str(doc), quote="A unique tail sentence", body="Your call on this wording",
+        replacement="A unique tail sentence, rewritten.", tag_person=True, _thread_id=writer,
+    ))["comment"]
+    note = json.loads(await DocCommentCreateTool().execute(
+        doc_path=str(doc), review=True, body="This needs your sign-off",
+        tag_person=True, _thread_id=writer,
+    ))["comment"]
+
+    threads = _listed(integration_client, suggestion["artifact_id"])
+    assert threads[suggestion["id"]]["new_comment"] is True
+    assert threads[note["id"]]["new_comment"] is True
+    assert hints == [True, True]
+
+
+@pytest.mark.asyncio
+async def test_an_agent_tag_and_a_person_tag_on_one_comment_stay_separate_fields(
+    integration_client, doc, _registrable_roots, monkeypatch,
+):
+    """The event counts agents as it always did and reports the person's tag as its own fact."""
+    from doceditor import live_events
+    from tools.documents import DocCommentCreateTool
+
+    rostered = _mk_thread(integration_client, _OWNER, title="Rostered reviewer")
+    promoted = integration_client.patch(
+        f"/api/agents/{rostered}",
+        headers={"Authorization": f"Bearer {OWNER_TOKEN}"},
+        json={"active": True, "responsibility": "Reviews the document."},
+    )
+    assert promoted.status_code == 200, promoted.text
+
+    events: list[tuple] = []
+    emit = live_events.emit
+
+    def record(action, **properties):
+        events.append((action, properties))
+        return emit(action, **properties)
+
+    monkeypatch.setattr(live_events, "emit", record)
+    writer = _mk_thread(integration_client, _OWNER, title="Writer")
+    comment = json.loads(await DocCommentCreateTool().execute(
+        doc_path=str(doc), quote="A unique tail sentence", body="Both kinds of tag here",
+        tagged_agent_ids=[rostered], tag_person=True, _thread_id=writer,
+    ))["comment"]
+
+    assert comment["tagged_agent_ids"] == [rostered]
+    assert [agent["id"] for agent in comment["tagged_agents"]] == [rostered]
+    assert comment["tagged_person"] == OWNER_USER
+    # The tag table holds the agent row only; the person is the comment's own mark.
+    assert [row["agent_id"] for row in _tag_rows(comment["id"])] == [rostered]
+    assert ("comment_tagged", {
+        "tag_count": 1, "person_tagged": True, "reply": False, "author_kind": "agent",
+    }) in events

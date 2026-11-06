@@ -180,8 +180,7 @@ def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
 
 def _person_tagged(alias: str) -> str:
     """SQL predicate for a comment whose author tagged the person; alias is an internal SQL identifier."""
-    return (f"EXISTS (SELECT 1 FROM doc_comment_tags person_tag"
-            f" WHERE person_tag.comment_id={alias}.id AND person_tag.agent_id=?)")
+    return f"{alias}.tags_person=1"
 
 
 def _eligible_top_level(alias: str) -> str:
@@ -198,9 +197,15 @@ def _eligible_top_level(alias: str) -> str:
                                       AND person.created_at<{alias}.created_at)))"""
 
 
-def may_change_unread_attention(author_kind: str, parent_id: str | None, replacement: str | None, review: bool) -> bool:
-    """Coarse reload hint: deliberately omits the earlier person-comment condition."""
-    return author_kind == 'agent' and bool(parent_id or (replacement is None and not review))
+def may_change_unread_attention(
+    author_kind: str, parent_id: str | None, replacement: str | None, review: bool, *, tags_person: bool = False,
+) -> bool:
+    """Coarse reload hint: deliberately omits the earlier person-comment condition.
+
+    A tag of the person is the one exception to the noise rules it mirrors: it makes even a
+    suggestion or a review note need them, so the surface reloads for it (``_eligible_top_level``).
+    """
+    return author_kind == 'agent' and (tags_person or bool(parent_id or (replacement is None and not review)))
 
 
 def unread_comment_rows(user_id: str, artifact_id: str | None, *, include_author_thread: bool = False) -> tuple[str, tuple]:
@@ -234,9 +239,7 @@ def unread_comment_rows(user_id: str, artifact_id: str | None, *, include_author
                      AND item.id>thread_view.seen_reply_id
                  )
              )"""
-    tag_marks = (USER_AUTHOR_ID, USER_AUTHOR_ID)
-    return sql, ((artifact_id, user_id, artifact_id, artifact_id, *tag_marks) if scoped
-                 else (user_id, *tag_marks))
+    return sql, ((artifact_id, user_id, artifact_id, artifact_id) if scoped else (user_id,))
 
 
 def _unread_items(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
@@ -283,7 +286,7 @@ def mark_thread_viewed(
     item = db.execute(
         f"""SELECT item.id,item.created_at FROM doc_comments item
            WHERE item.id=? AND (item.parent_id=? OR (item.id=? AND {_eligible_top_level('item')}))""",
-        (seen_item_id, root_id, root_id, USER_AUTHOR_ID),
+        (seen_item_id, root_id, root_id),
     ).fetchone()
     if item is None:
         raise ValueError("reply_not_found")

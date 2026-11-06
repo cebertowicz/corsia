@@ -108,13 +108,12 @@ def _image(db, request: CommentInput, quote: str | None, start: int | None) -> t
 def _record_tags(connection, request: CommentInput, row: dict) -> None:
     """Store a new comment's tags and mentions, and count a tagged post once it commits."""
     comment_recipients.save_tags(connection, row, request.tagged_agent_ids)
-    if request.tag_person:
-        comment_recipients.save_person_tag(connection, row, request.user_id)
     comment_recipients.save_mentions(connection, row, request.tagged_agent_mentions)
-    tag_count = len(set(request.tagged_agent_ids)) + int(request.tag_person)
-    if tag_count:
-        tags = {"tag_count": tag_count, "reply": bool(request.parent_id),
-                "author_kind": request.author_kind}
+    agent_tags = len(set(request.tagged_agent_ids))
+    if agent_tags or request.tag_person:
+        # tag_count stays what it counted before: agents. A tag of the person is its own fact.
+        tags = {"tag_count": agent_tags, "person_tagged": bool(request.tag_person),
+                "reply": bool(request.parent_id), "author_kind": request.author_kind}
         after_commit(connection, lambda: live_events.emit("comment_tagged", **tags))
     if request.author_thread_id:
         comment_recipients.reset_action(connection, row, request.author_thread_id)
@@ -156,7 +155,8 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 artifact_id, body=request.body, author=request.author, author_kind=request.author_kind,
                 author_thread_id=request.author_thread_id, parent_id=request.parent_id,
                 anchor_text=quote, from_off=start, to_off=end, anchor_prefix=prefix, anchor_suffix=suffix,
-                review=request.review, replacement=request.replacement, insert_after=request.insert_after, client_id=identifier,
+                review=request.review, replacement=request.replacement, insert_after=request.insert_after,
+                tags_person=request.tag_person, client_id=identifier,
                 region=request.region, image_rev=image_rev, image_src=image_src, announce=request.author_kind != "user", db=connection,
             )
             if created:

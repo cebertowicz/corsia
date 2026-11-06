@@ -7,9 +7,9 @@ import sqlite3
 from core.agent_roster_queries import agent_rows
 from doceditor import writer_line
 from doceditor.comment_action_errors import CommentActionError
-from doceditor.feedback_state import USER_AUTHOR_ID
 from infra.accounts import get_user
 from infra.queries import get_thread_for_user
+from registry.models import get_artifact
 
 
 LEGACY_RECIPIENTS_SKIP_LOCALITY = True
@@ -129,24 +129,28 @@ def save_tags(db, comment: dict, agent_ids: list[str]) -> None:
         )
 
 
-def save_person_tag(db, comment: dict, user_id: str) -> None:
-    """Tag the person on one comment, keyed by the principal their feedback already uses.
+def _person_display_name(db, rows: list[dict]) -> str | None:
+    """Who a tag of the person names: the account that owns the document being commented on.
 
-    Their display name is the one their own comments carry as ``author``, so a tag of them
-    reads the same as anything they wrote.
+    Read once per listing, never per row. Their display name is the one their own comments carry
+    as ``author``; no name is returned for an account that is gone.
     """
-    name = (get_user(user_id, db=db) or {}).get("name") or user_id
-    db.execute(
-        "INSERT INTO doc_comment_tags(comment_id,agent_id,agent_name) VALUES (?,?,?)",
-        (comment["id"], USER_AUTHOR_ID, name),
-    )
+    tagged = next((row for row in rows if row.get("tags_person")), None)
+    if tagged is None:
+        return None
+    # Every caller passes one artifact's rows, so one name covers the listing.
+    artifact = get_artifact(str(tagged["artifact_id"]), db=db)
+    owner_thread = str(artifact["parent_thread_id"]) if artifact and artifact.get("parent_thread_id") else None
+    account = db.execute("SELECT user_id FROM threads WHERE id=?", (owner_thread,)).fetchone() if owner_thread else None
+    return (get_user(str(account["user_id"]), db=db) or {}).get("name") if account else None
 
 
 def tags_for_comments(db, rows: list[dict]) -> None:
-    """Attach tags to flat comment rows without per-row queries.
+    """Attach tag IDs to flat comment rows without per-row queries.
 
-    ``tagged_agents`` is what a reader sees, so it includes a tag of the person; the person is
-    never in ``tagged_agent_ids``, because that field names who a comment is delivered to.
+    ``tagged_agents`` and ``tagged_person`` are what a reader sees; ``tagged_agent_ids`` names who
+    a comment is delivered to, which is never the person (their tag is the comment's own
+    ``tags_person`` mark, not a row of this table).
     """
     if not rows:
         return
@@ -155,11 +159,16 @@ def tags_for_comments(db, rows: list[dict]) -> None:
         row["tagged_agent_ids"] = []
         row["tagged_agents"] = []
         row["tagged_agent_mentions"] = []
+        row["tagged_person"] = None
+    person_name = _person_display_name(db, rows)
+    if person_name:
+        for row in rows:
+            if row.get("tags_person"):
+                row["tagged_person"] = person_name
     marks = ",".join("?" for _ in by_id)
     for tag in db.execute(f"SELECT comment_id,agent_id,agent_name FROM doc_comment_tags WHERE comment_id IN ({marks}) ORDER BY agent_id", tuple(by_id)):
         row = by_id[tag["comment_id"]]
-        if tag["agent_id"] != USER_AUTHOR_ID:
-            row["tagged_agent_ids"].append(tag["agent_id"])
+        row["tagged_agent_ids"].append(tag["agent_id"])
         row["tagged_agents"].append({"id": tag["agent_id"], "name": tag["agent_name"]})
     for mention in db.execute(f"SELECT comment_id,agent_id,start_offset,end_offset FROM doc_comment_mentions WHERE comment_id IN ({marks}) ORDER BY start_offset,end_offset,agent_id", tuple(by_id)):
         by_id[mention["comment_id"]]["tagged_agent_mentions"].append({
