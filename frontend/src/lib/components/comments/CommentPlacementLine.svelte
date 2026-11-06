@@ -27,7 +27,7 @@
 	</p>
 {/if}
 {#if waiting > 0}
-	<p class="ct-placement" role="status" data-comment-waiting>{waiting === 1 ? '1 agent waiting its turn.' : `${waiting} agents waiting their turn.`}</p>
+	<p class="ct-placement" role="status" data-comment-waiting>{waiting === 1 ? '1 agent is waiting its turn.' : `${waiting} agents are waiting their turn.`}</p>
 {/if}
 
 <style>
