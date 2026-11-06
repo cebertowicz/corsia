@@ -10,7 +10,7 @@ it('saves an edited reply before its surface can unmount during the outro', asyn
 	const host = document.createElement('div'); document.body.appendChild(host);
 	const comment = { id: 'reply', messageId: 'message', seq: 1, from_off: 0, to_off: 4, quote: 'text', anchor_prefix: '', anchor_suffix: '', note: 'old', root_user_message_id: 'send', root_cid: 'c1.1' };
 	const onChange = vi.fn();
-	const component = mount(ChatCommentSelection, { target: host, props: { threadId: 'thread', comments: [comment], onChange } });
+	const component = mount(ChatCommentSelection, { target: host, props: { threadId: 'thread', comments: [comment], onChange, onSendReply: vi.fn() } });
 	flushSync();
 	await component.edit('reply');
 	flushSync();
@@ -33,7 +33,7 @@ async function openTyped(width: number) {
 	vi.stubGlobal('CSS', { escape: (value: string) => value });
 	vi.stubGlobal('innerWidth', width);
 	const host = document.createElement('div'); document.body.appendChild(host);
-	const component = mount(ChatCommentSelection, { target: host, props: { threadId: 'thread', comments: [reply('one', 'old'), reply('two', 'second')], onChange: vi.fn() } });
+	const component = mount(ChatCommentSelection, { target: host, props: { threadId: 'thread', comments: [reply('one', 'old'), reply('two', 'second')], onChange: vi.fn(), onSendReply: vi.fn() } });
 	flushSync();
 	await component.edit('one');
 	flushSync();

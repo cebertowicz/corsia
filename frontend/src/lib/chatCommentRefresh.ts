@@ -6,7 +6,7 @@ import type { CommentReplyItem } from '$lib/api/attentionQueue';
 import { on } from '$lib/ws';
 
 /** Refresh only loaded targets affected by newly committed comments or answers. */
-export function watchChatCommentThreads(pageSize: number): () => void {
+export function watchChatCommentThreads(pageSize: number, announce: (quote: string) => void = () => {}): () => void {
 	let generation = 0;
 	async function read(threadId: string, bearer: string, ids: string[]): Promise<{ rows: Message[]; replies: CommentReplyItem[] | null }> {
 		const result: Message[] = [];
@@ -46,6 +46,15 @@ export function watchChatCommentThreads(pageSize: number): () => void {
 			const refreshed = [...answers.rows, ...targetRows.rows];
 			if (current !== generation || get(activeThreadId) !== threadId) return;
 			const byId = new Map(refreshed.map(row => [row.id, row]));
+			if (!comments.length) {
+				const existing = new Set(rows.flatMap(row =>
+					(row.chat_comments ?? []).flatMap(comment => comment.answers.filter(answer => answer.author_kind === 'agent').map(answer => `${comment.id}:${answer.assistant_message_id}:${answer.cid}`))));
+				for (const row of targetRows.rows) for (const comment of row.chat_comments ?? []) for (const answer of comment.answers) {
+					if (answer.author_kind !== 'agent' || !answer.unread) continue;
+					const key = `${comment.id}:${answer.assistant_message_id}:${answer.cid}`;
+					if (!existing.has(key)) { existing.add(key); announce(comment.quote); }
+				}
+			}
 			messages.update(currentRows => currentRows.map(row => {
 				const fresh = row.thread_id === threadId ? byId.get(row.id) : undefined;
 				return fresh ? { ...row, chat_comments: fresh.chat_comments ?? [], chat_visible_content: fresh.chat_visible_content, chat_answer_cids: fresh.chat_answer_cids } : row;

@@ -26,6 +26,17 @@ it('shows a comment and its shared answer in the thread, and leaves an unanswere
 	expect(threads[1].textContent).not.toContain('New');
 });
 
+it('labels a detached chat comment on its card and keeps its unread reply', () => {
+	host = document.createElement('div'); document.body.appendChild(host);
+	component = mount(ChatCommentThreads, { target: host, props: {
+		messageId: 'target', threadId: 'thread', detached: true,
+		comments: [{ id: 'one', cid: 'c1.1', from_off: 0, to_off: 1, anchor_prefix: '', anchor_suffix: '', user_message_id: 'send', created_at: '2026-10-27T00:00:00Z', note: 'Why?', quote: 'gone', answers: [{ author_kind: 'agent', user_message_id: 'send', cid: 'c1.1', assistant_message_id: 'answer', text: 'Answer', created_at: '2026-10-27T00:01:00Z', unread: true }] }],
+	} });
+	flushSync();
+	expect(host.textContent).toContain('This text is no longer in the document');
+	expect(host.textContent).toContain('New');
+});
+
 it('stamps each visible unread answer, including a tall answer filling the viewport', async () => {
 	vi.useFakeTimers();
 	class Observer {

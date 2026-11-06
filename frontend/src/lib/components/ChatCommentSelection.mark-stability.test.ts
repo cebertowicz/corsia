@@ -1,0 +1,48 @@
+import { mount, unmount } from 'svelte';
+import { afterEach, expect, it, vi } from 'vitest';
+import { messages } from '$lib/stores/threads';
+import ChatCommentSelection from './ChatCommentSelection.svelte';
+
+afterEach(() => { messages.set([]); document.body.replaceChildren(); vi.unstubAllGlobals(); });
+
+it('keeps a mark when messages or another anchor change, while updating its own state', async () => {
+	vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+	vi.stubGlobal('CSS', { escape: (value: string) => value });
+	const host = document.createElement('div');
+	host.innerHTML = '<div class="messages"><div class="message assistant" data-message-id="m"><div class="long-message-body">text more</div></div></div><div id="mount"></div>';
+	document.body.append(host);
+	const first = { id: 'first', from_off: 0, to_off: 4, quote: 'text', answers: [], user_message_id: 'u', cid: 'c1' };
+	const row = { id: 'm', thread_id: 'thread', role: 'assistant', chat_comments: [first] };
+	messages.set([row as never]);
+	const component = mount(ChatCommentSelection, { target: host.querySelector('#mount')!, props: { threadId: 'thread', comments: [], onChange: vi.fn(), onSendReply: vi.fn() } });
+	const body = host.querySelector('.long-message-body')!;
+	await vi.waitFor(() => expect(body.querySelector('[data-comment-ids="first"]')).not.toBeNull());
+	const original = body.querySelector('[data-comment-ids="first"]');
+	const second = { id: 'second', from_off: 5, to_off: 9, quote: 'more', answers: [], user_message_id: 'u', cid: 'c2' };
+	messages.set([{ ...row, chat_comments: [first, second] } as never]);
+	await vi.waitFor(() => expect(body.querySelector('[data-comment-ids="second"]')).not.toBeNull());
+	expect(body.querySelector('[data-comment-ids="first"]')).toBe(original);
+	messages.set([{ ...row, chat_comments: [first] } as never]);
+	await vi.waitFor(() => expect(body.querySelector('[data-comment-ids="second"]')).toBeNull());
+	expect(body.querySelector('[data-comment-ids="first"]')).toBe(original);
+	const overlap = { ...second, from_off: 1, to_off: 6, quote: 'ext m' };
+	messages.set([{ ...row, chat_comments: [first, overlap] } as never]);
+	await vi.waitFor(() => expect(body.querySelector('[data-comment-ids="second"]')).not.toBeNull());
+	expect(body.querySelector('[data-comment-ids="first"]')).toBe(original);
+	messages.set([{ ...row, chat_comments: [first] } as never]);
+	await vi.waitFor(() => expect(body.querySelector('[data-comment-ids="second"]')).toBeNull());
+	expect(body.querySelector('[data-comment-ids="first"]')).toBe(original);
+	expect(body.textContent).toBe('text more');
+	await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+	const frames = vi.spyOn(window, 'requestAnimationFrame');
+	const step = document.createElement('div');
+	step.className = 'block-line'; step.dataset.messageId = 'step';
+	step.innerHTML = '<span class="long-message-body">Working</span>';
+	host.querySelector('.messages')!.append(step);
+	await new Promise(resolve => setTimeout(resolve, 60));
+	expect(frames).not.toHaveBeenCalled();
+	body.lastChild!.textContent = ' changed';
+	await vi.waitFor(() => expect(frames).toHaveBeenCalled());
+	frames.mockRestore();
+	await unmount(component);
+});

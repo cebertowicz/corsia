@@ -62,26 +62,20 @@ export function createChatReplyJumper(port: JumpPort) {
 		}
 		const element = port.element();
 		const row = element?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(target.messageId)}"]`);
-		const card = row?.querySelector<HTMLElement>(`[data-chat-comment="${CSS.escape(target.cid)}"]`);
+		const comment = get(messages).find(message => message.id === target.messageId && message.thread_id === threadId)
+			?.chat_comments?.find(comment => comment.cid === target.cid && (!destination.user_message_id || comment.user_message_id === destination.user_message_id));
+		const mark = [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids][role="button"]') ?? [])]
+			.find(item => item.dataset.commentIds?.split(',').includes(comment?.id ?? ''));
 		chatReplyJump.set(null);
-		if (!card) return false;
-		const mark = [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids]') ?? [])]
-			.find(item => item.dataset.commentIds?.split(',').includes(card.dataset.commentUuid ?? ''));
-		const focus = mark ?? card;
-		const priorTabIndex = focus.getAttribute('tabindex');
-		focus.tabIndex = -1;
-		focus.scrollIntoView({ block: 'center' });
-		focus.focus({ preventScroll: true });
-		card.classList.add('chat-reply-landed');
-		mark?.classList.add('chat-reply-mark-landed');
-		const clear = () => {
-			card.classList.remove('chat-reply-landed');
-			mark?.classList.remove('chat-reply-mark-landed');
-			if (priorTabIndex === null) focus.removeAttribute('tabindex'); else focus.setAttribute('tabindex', priorTabIndex);
-		};
+		if (!mark) return false;
+		mark.scrollIntoView({ block: 'center' });
+		mark.focus({ preventScroll: true });
+		mark.classList.add('chat-reply-mark-landed');
+		mark.click();
+		const clear = () => mark.classList.remove('chat-reply-mark-landed');
 		if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
 			element?.addEventListener('scroll', clear, { once: true });
-			card.addEventListener('pointerdown', clear, { once: true });
+			mark.addEventListener('pointerdown', clear, { once: true });
 		} else window.setTimeout(clear, 2000);
 		return false;
 	}

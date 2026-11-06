@@ -15,6 +15,7 @@
 	import { coreSettings } from '$lib/stores/settings';
 	import { chatReplyJump } from '$lib/stores/chatReplyJump';
 	import { activeToolsByThread, messages } from '$lib/stores/threads';
+	import { commentsAlreadyPlaced } from '$lib/chatCommentDelivery';
 	import { INITIAL_TURN_STATE, turnStates } from '$lib/ws/turnState';
 	import { threadLiveStep, UNKNOWN_STEP } from './plans/planLiveStep';
 	import { createLiveLine } from './plans/liveLine.svelte';
@@ -203,6 +204,8 @@
 {#snippet messageRow(entry: Extract<TranscriptEntry, { kind: 'message' }>)}
 	{@const msg = entry.message}
 	{@const isAgentInbound = msg.role === 'user' && msg.metadata?.sender_kind === 'agent'}
+	{@const original = $messages.find(row => row.id === msg.id && row.thread_id === boundThreadId)}
+	{#if !original || !commentsAlreadyPlaced(original, $messages, visibleSources)}
 	<div class="message {msg.role}" data-message-id={msg.id} data-message-seq={msg.seq} data-message-thread-id={boundThreadId} data-first-run-opening={msg.metadata?.first_run_opening === true ? '' : undefined} use:trackVisibleRow={{ seq: msg.seq, threadId: boundThreadId }} class:agent-inbound={isAgentInbound} class:human-user={msg.role === 'user' && !isAgentInbound}>
 		{#if msg.role === 'system'}
 			<SystemMessageRow {msg} />
@@ -223,6 +226,7 @@
 			/>
 		{/if}
 	</div>
+	{/if}
 	{#if heldNotice && heldInput?.id === msg.id}<div class="message system"><SystemMessageRow msg={heldNotice} /></div>{/if}
 {/snippet}
 

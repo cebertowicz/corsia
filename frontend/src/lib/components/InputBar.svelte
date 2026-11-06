@@ -214,6 +214,17 @@
 		return 'sent';
 	}
 
+	function sendReply(reply: ChatComment): void {
+		const target = boundThreadId;
+		if (!target || !canSendToModel) throw new Error('Cannot send reply');
+		const { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid } = reply;
+		const inputId = sendMessage(target, '', selection.modelId ?? undefined, [], undefined, 'apply_now', [{ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }]);
+		if (!inputId) {
+			toasts.show('Connection lost before CORSIA could accept this message.', 'error');
+			throw new Error('Cannot send reply');
+		}
+	}
+
 	const activeThread = $derived(selection.thread);
 	const hasReadySwitchDestination = $derived(readySwitchDestination(activeThread, selection.models));
 	// A thread outside the list (a worker, the Corsia agent) may have no model to gate on: the server holds or routes it.
@@ -332,7 +343,7 @@
 	}}
 >
 	<InputBarFileInputs bind:this={fileInputsRef} onFiles={handleFileSelect} />
-	<ChatCommentSelection bind:this={commentSelection} threadId={boundThreadId} {comments} surface={inputAreaEl} onChange={value => comments = value} />
+	<ChatCommentSelection bind:this={commentSelection} threadId={boundThreadId} {comments} surface={inputAreaEl} onChange={value => comments = value} onSendReply={sendReply} />
 
 	{#if uploadError}
 		<div class="upload-error">{uploadError} <button onclick={() => uploadError = ''}>✕</button></div>

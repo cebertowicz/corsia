@@ -30,9 +30,10 @@
 	import { arrivedDocComments } from '$lib/stores/docComments';
 	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
 
-	let { comment, header, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
+	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
 		comment: CommentThreadData;
 		header?: Snippet;
+		failure?: Snippet;
 		diagram?: boolean;
 		/** Keep resolved threads in the drawer's card presentation. */
 		drawerCard?: boolean;
@@ -203,13 +204,14 @@
 	const onVisibilityChange = observeArrivedThread(() => el, () => comment.id, () => !viewEachUnread && !!onViewed, () => $arrivedDocComments.has(comment.id), openThread, () => { observeTick++; }, () => replyVisibility.clear(), cancelDwell);
 
 	async function postReply() {
-		const t = replyText.trim();
+		const submittedText = replyText;
+		const t = submittedText.trim();
 		if (readOnly || !t || replyPosting) return;
 		replyPosting = true;
 		try {
 			const mentions = replyField?.mentions() ?? [];
 			await onReply?.(comment.id, t, [...new Set(mentions.map(item => item.agent_id))], mentions);
-			replyField?.clearTags(); replyText = ''; onReplySelection?.(null);
+			if (!viewEachUnread || replyText === submittedText) { replyField?.clearTags(); replyText = ''; onReplySelection?.(null); }
 		} catch {
 			// The caller reports the refusal; keep the reply for retry.
 		} finally {
@@ -253,6 +255,7 @@
 	<div class="ct resolved" class:drawerCard class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}" in:fade={{ duration: 150 }} onclick={openThread} onfocusin={openFromFocus}>
 		{@render header?.()}
 		{@render resolvedHead('check', `Resolved · ${comment.replies.length + 1} message${comment.replies.length ? 's' : ''}`)}
+		{@render failure?.()}
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} />
@@ -278,12 +281,12 @@
 			{#if comment.replies.length}
 				<span class="ct-reply-count">{comment.replies.length} {comment.replies.length === 1 ? 'reply' : 'replies'}</span>
 			{/if}
-			{#if !isSuggestion && !comment.resolved}
+			{#if !isSuggestion && !comment.resolved && (onAgree || !viewEachUnread)}
 				<button class="ct-act ack" transition:clipFade={{ axis: 'x' }} class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); openThread(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree" title="Agree">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><path d="M7 11l4-7a2 2 0 0 1 3 2l-1 5h5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 16.8 21H7" /></svg>
 				</button>
 			{/if}
-			{#if (!isSuggestion && !comment.resolved) || decidedOpen}
+			{#if ((!isSuggestion && !comment.resolved) || decidedOpen) && (onResolve || !viewEachUnread)}
 				<button class="ct-act resolve" transition:clipFade={{ axis: 'x' }} disabled={readOnly} onclick={(e) => { e.stopPropagation(); openThread(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
 				</button>
@@ -314,11 +317,12 @@
 			<CommentReplyList fullNames={focused && !inMargin} replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />
 		{/if}
 
+		{@render failure?.()}
 		{#if !isSuggestion && agreedBy && !comment.resolved}
 			<div class="ct-agreed" transition:agreeTransition><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed: {agreedBy}</div>
 		{/if}
 		{#if !readOnly && !(hideReply && !replyText.trim())}
-			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />
+			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} posting={viewEachUnread && replyPosting} onSend={postReply} />
 		{/if}
 	</div>
 {/if}

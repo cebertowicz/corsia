@@ -236,12 +236,13 @@
 	   attention dock are materially different heights, and the previous constant
 	   over-reserved the first and under-reserved the last. */
 	:global(.chat-content:has(.chat-attention-stack > *) .messages) {
-		padding-bottom: calc(
+		margin-bottom: calc(
 			var(--input-bar-height, 100px)
 			+ var(--kb-toolbar-inset, 0px)
 			+ var(--empty-parallax-offset, 0px)
 			+ var(--chat-attention-occupied-height, 56px)
 			+ var(--space-3)
 		);
+		padding-bottom: var(--space-3);
 	}
 </style>

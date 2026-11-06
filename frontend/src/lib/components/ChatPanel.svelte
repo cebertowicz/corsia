@@ -236,7 +236,10 @@
 	// A newer first-page read makes the older one stale: abort it, never download both.
 	const firstPageRead = supersedingRead();
 	onDestroy(firstPageRead.abort);
-	$effect(() => watchChatCommentThreads(MSG_PAGE_SIZE));
+	let replyAnnouncements = $state<string[]>([]);
+	$effect(() => watchChatCommentThreads(MSG_PAGE_SIZE, quote => {
+		replyAnnouncements.push(`New reply on "${quote}"`);
+	}));
 	/** Drop stale rows when the selected transcript's first page fails. */
 	function failFirstPage(threadId: string): void {
 		firstLoadFailed = true;
@@ -313,6 +316,7 @@
 	});
 </script>
 <div class="chat-shell">
+	<div class="reply-announcements" aria-live="polite" aria-relevant="additions">{#each replyAnnouncements as announcement}<div>{announcement}</div>{/each}</div>
 	<ChatThreadBindings />
 	<div class="chat-content" use:toastAnchorSurface>
 		<MessageList
@@ -361,7 +365,7 @@
 					if (destination.pane === 'documents') onOpenDocuments(destination.id);
 				}}
 			/>
-			<ChatScrollControl threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottomFromUser} />
+			<ChatScrollControl threadId={$activeThreadId} {userIsNearBottom} onScrollToBottom={scrollToBottomFromUser} onJumpToReply={jumpToChatReply} scroller={messagesEl} />
 			{#if $isMobile && $activeThreadId}
 				<PlanDrawerControl
 					threadId={$activeThreadId}
@@ -382,6 +386,7 @@
 	</div>
 </div>
 <style>
+	.reply-announcements { position: absolute; inline-size: 0; block-size: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 	.chat-shell {
 		flex: 1; display: flex; min-height: 0; overflow: hidden;
 	}

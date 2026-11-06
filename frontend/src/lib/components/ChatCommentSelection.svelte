@@ -1,14 +1,17 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { messages } from '$lib/stores/threads';
+	import { failedChatReplies, pendingChatReplies } from '$lib/chatCommentDelivery';
 	import { clipChatSelection, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
 	import Popover from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
+	import ChatCommentThreads from './ChatCommentThreads.svelte';
+	import { placeHighlightDot } from './comments/highlightDot';
 	import './commentAnchors.css';
 
-	let { threadId, comments, onChange, surface }: { threadId: string | null; comments: ChatComment[]; onChange: (comments: ChatComment[]) => void; surface?: HTMLElement } = $props();
+	let { threadId, comments, onChange, onSendReply, surface }: { threadId: string | null; comments: ChatComment[]; onChange: (comments: ChatComment[]) => void; onSendReply: (reply: ChatComment) => void; surface?: HTMLElement } = $props();
 	function messageRoot(): HTMLElement | null {
 		return surface?.closest('.subagent-conversation')?.querySelector<HTMLElement>('.messages') ?? document.querySelector<HTMLElement>('.messages');
 	}
@@ -16,6 +19,9 @@
 	let pick = $state<Pick | null>(null);
 	let draft = $state<Pick | null>(null);
 	let editingId = $state<string | null>(null);
+	let viewing = $state<{ messageId: string; commentId: string } | null>(null);
+	const viewedComment = $derived($messages.find(message => message.id === viewing?.messageId && message.thread_id === threadId)?.chat_comments?.find(comment => comment.id === viewing?.commentId));
+	const threadAnchor = () => viewing ? [...document.querySelectorAll<HTMLElement>('[data-comment-ids]')].find(el => el.dataset.commentIds?.split(',').includes(viewing!.commentId))?.getBoundingClientRect() ?? null : null;
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
 	let buttonWidth = $state(0);
@@ -47,7 +53,7 @@
 		return row?.querySelector<HTMLElement>('.long-message-body, .bubble-content') ?? null;
 	}
 	function close() {
-		pick = null; draft = null; editingId = null; typed = null;
+		pick = null; draft = null; editingId = null; viewing = null; typed = null;
 		window.getSelection()?.removeAllRanges();
 		const focus = returnFocus; returnFocus = null;
 		if (focus) void tick().then(() => focus.focus());
@@ -92,12 +98,21 @@
 		}
 		return last ? [last, last.length] : [body, 0];
 	}
+	type PaintedMark = { from: number; to: number; quote: string; wraps: HTMLElement[]; labels: string[] };
+	const painted = new WeakMap<HTMLElement, Map<string, PaintedMark>>();
 	let observer: MutationObserver | undefined;
+	let dotCleanups: (() => void)[] = [];
 	let painting = false;
 	function paint() {
 		const root = messageRoot();
 		if (!root) return;
+		const focusedMark = document.activeElement instanceof HTMLElement && root.contains(document.activeElement)
+			? document.activeElement.closest<HTMLElement>('[data-comment-ids][role="button"]') : null;
+		const focusedId = focusedMark?.dataset.commentIds?.split(',')[0];
+		const focusedMessageId = focusedMark?.closest<HTMLElement>('[data-message-id]')?.dataset.messageId;
 		painting = true;
+		for (const cleanup of dotCleanups) cleanup();
+		dotCleanups = [];
 		const byId = new Map<string, (typeof $messages)[number]>();
 		for (const message of $messages) {
 			if (message.thread_id !== threadId) continue;
@@ -106,18 +121,69 @@
 		for (const row of root.querySelectorAll<HTMLElement>('[data-message-id]')) {
 			const body = bodyOf(row);
 			if (!body) continue;
-			if (body.querySelector('.cm-comment-wrap')) keepingSelection(body, () => unpaint(body));
+			let previous = painted.get(body);
+			if (!previous) {
+				if (body.querySelector('.cm-comment-wrap')) keepingSelection(body, () => unpaint(body));
+				previous = new Map();
+				painted.set(body, previous);
+			}
 			const target = byId.get(row.dataset.messageId ?? '');
 			const sent = target?.chat_comments ?? [];
 			const pending = comments.filter(comment => comment.messageId === row.dataset.messageId);
-			const marks = [...sent.map(comment => ({ ...comment, kind: 'placed' as const })), ...pending.map(comment => ({ ...comment, kind: editingId === comment.id ? 'focused' as const : 'pending' as const }))];
+			const marks = [...sent.map(comment => ({ ...comment, kind: threadId && pendingChatReplies($messages, threadId, comment).length ? 'pending' as const : 'placed' as const })), ...pending.map(comment => ({ ...comment, kind: editingId === comment.id ? 'focused' as const : 'pending' as const }))];
 			if (draft && draft.messageId === row.dataset.messageId) marks.push({ ...draft.anchor, id: 'draft', kind: 'pending' } as typeof marks[number]);
-			for (const comment of marks) {
-				if ((body.textContent ?? '').slice(comment.from_off, comment.to_off) !== comment.quote) continue;
-				const range = document.createRange();
-				range.setStart(...point(body, comment.from_off)); range.setEnd(...point(body, comment.to_off));
-				keepingSelection(body, () => wrapRange(range, { from: comment.from_off, to: comment.to_off, id: comment.id, kind: comment.kind }, comment.id !== 'draft'));
+			const valid = marks.filter(comment => (body.textContent ?? '').slice(comment.from_off, comment.to_off) === comment.quote);
+			for (const [id, old] of previous) {
+				const next = valid.find(comment => comment.id === id);
+				const first = old.wraps[0];
+				const before = document.createRange();
+				if (first && body.contains(first)) { before.selectNodeContents(body); before.setEndBefore(first); }
+				const unchanged = next && old.from === next.from_off && old.to === next.to_off && old.quote === next.quote
+					&& old.wraps.length > 0 && old.wraps.every(wrap => body.contains(wrap))
+					&& before.toString().length === next.from_off && old.wraps.map(wrap => wrap.textContent ?? '').join('') === next.quote;
+				if (unchanged) continue;
+				keepingSelection(body, () => { for (const wrap of old.wraps) if (body.contains(wrap)) wrap.replaceWith(...wrap.childNodes); });
+				previous.delete(id);
 			}
+			for (const comment of valid) {
+				let current = previous.get(comment.id);
+				if (!current) {
+					const priorWraps = new Set(body.querySelectorAll<HTMLElement>('.cm-comment-wrap'));
+					const range = document.createRange();
+					range.setStart(...point(body, comment.from_off)); range.setEnd(...point(body, comment.to_off));
+					keepingSelection(body, () => wrapRange(range, { from: comment.from_off, to: comment.to_off, id: comment.id, kind: comment.kind }, comment.id !== 'draft'));
+					const wraps = [...body.querySelectorAll<HTMLElement>('.cm-comment-wrap')].filter(wrap => !priorWraps.has(wrap));
+					current = { from: comment.from_off, to: comment.to_off, quote: comment.quote, wraps, labels: wraps.map(wrap => wrap.getAttribute('aria-label') ?? '') };
+					previous.set(comment.id, current);
+				}
+				for (const [index, wrap] of current.wraps.entries()) {
+					wrap.classList.toggle('cm-comment-anchor', comment.kind !== 'pending');
+					wrap.classList.toggle('cm-comment-focused', comment.kind === 'focused');
+					wrap.classList.toggle('cm-comment-pending', comment.kind === 'pending');
+					wrap.setAttribute('aria-label', current.labels[index]);
+				}
+				if (comment.id !== 'draft' && current.wraps[0]) {
+					current.wraps[0].tabIndex = 0; current.wraps[0].setAttribute('role', 'button'); current.wraps[0].setAttribute('aria-haspopup', 'dialog');
+				}
+			}
+			for (const comment of sent) {
+				const failed = threadId !== null && failedChatReplies($messages, threadId, comment).length > 0;
+				const sending = threadId !== null && pendingChatReplies($messages, threadId, comment).length > 0;
+				const unread = comment.answers.some(answer => answer.author_kind === 'agent' && answer.unread);
+				if (!failed && !sending && !unread) continue;
+				const wraps = [...body.querySelectorAll<HTMLElement>('[data-comment-ids]')].filter(el => el.dataset.commentIds?.split(',').includes(comment.id));
+				const anchor = wraps.at(-1);
+				if (anchor) {
+					wraps[0].setAttribute('aria-label', failed ? `Reply not delivered on ${comment.quote}` : sending ? `Reply sending on ${comment.quote}` : `Commented text: ${comment.quote}. New`);
+					if (failed || !sending) dotCleanups.push(placeHighlightDot(body, anchor, failed ? comment.quote : null));
+				}
+			}
+		}
+		if (focusedId && focusedMessageId) {
+			const row = root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(focusedMessageId)}"]`);
+			const replacement = [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids][role="button"]') ?? [])]
+				.find(mark => mark.dataset.commentIds?.split(',').includes(focusedId));
+			replacement?.focus({ preventScroll: true });
 		}
 		observer?.takeRecords(); painting = false;
 	}
@@ -140,27 +206,55 @@
 			if (open || sourceThread !== threadId || !messageRoot()?.contains(target)) return;
 			if (message && comment) beginReply(message, comment, target);
 		};
-		const click = (event: MouseEvent) => {
-			const root = messageRoot();
-			const target = event.target as Element | null;
-			const hit = target?.closest<HTMLElement>('[data-comment-ids]');
-			if (open || !hit || !(document.getSelection()?.isCollapsed ?? true) || !root?.contains(hit)) return;
-			const source = hit;
-			const ids = hit.dataset.commentIds?.split(',') ?? [];
+		const openHighlight = (ids: string[], source: HTMLElement) => {
 			const pending = comments.find(comment => ids.includes(comment.id));
 			if (pending) { returnFocus = source; editingId = pending.id; return; }
 			for (const message of $messages) {
 				if (message.thread_id !== threadId) continue;
 				const comment = message.chat_comments?.find(item => ids.includes(item.id));
-				if (comment) { beginReply(message, comment, source); return; }
+				if (comment) { returnFocus = source; viewing = { messageId: message.id, commentId: comment.id }; return; }
+			}
+		};
+		const click = (event: MouseEvent) => {
+			const root = messageRoot();
+			const target = event.target as Element | null;
+			const hit = target?.closest<HTMLElement>('[data-comment-ids]');
+			if (!hit || !(document.getSelection()?.isCollapsed ?? true) || !root?.contains(hit)) return;
+			const ids = hit.dataset.commentIds?.split(',') ?? [];
+			if (closing) {
+				const finish = afterClose;
+				afterClose = () => { finish?.(); openHighlight(ids, hit); };
+				return;
+			}
+			if (!open) openHighlight(ids, hit);
+		};
+		const keydown = (event: KeyboardEvent) => {
+			if ((event.key === 'Enter' || event.key === ' ') && (event.target as HTMLElement | null)?.matches('[data-comment-ids][role="button"]')) {
+				event.preventDefault(); (event.target as HTMLElement).click();
 			}
 		};
 		document.addEventListener('click', click);
+		document.addEventListener('keydown', keydown);
 		document.addEventListener('chat-comment-reply', replyClick);
-		observer = new MutationObserver(() => { if (!painting) schedule(); });
+		observer = new MutationObserver(records => {
+			const changedContent = records.some(record => {
+				const target = record.target instanceof Element ? record.target : record.target.parentElement;
+				if (target?.closest('[data-highlight-dot]')) return false;
+				const nodes = [...record.addedNodes, ...record.removedNodes];
+				const row = target?.closest('.message[data-message-id]') ?? null;
+				if (target && bodyOf(row)?.contains(target)) {
+					return record.type === 'characterData' || nodes.some(node => !(node instanceof Element && node.matches('[data-highlight-dot]')));
+				}
+				return nodes.some(node => node instanceof Element && (
+					node.matches('.message[data-message-id]') || !!node.querySelector('.message[data-message-id]') ||
+					(!!row && (node.matches('.long-message-body, .bubble-content') || !!node.querySelector('.long-message-body, .bubble-content')))
+				));
+			});
+			if (!painting && changedContent) schedule();
+		});
 		const root = messageRoot();
 		if (root) observer.observe(root, { childList: true, subtree: true, characterData: true });
-		return () => { observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('chat-comment-reply', replyClick); };
+		return () => { for (const cleanup of dotCleanups) cleanup(); observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
 	});
 	export async function edit(id: string) {
 		const comment = comments.find(item => item.id === id);
@@ -170,13 +264,24 @@
 		await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 		document.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(comment.messageId)}"] .cm-comment-focused`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 	}
+	function replyInThread(note: string) {
+		const message = $messages.find(item => item.id === viewing?.messageId && item.thread_id === threadId);
+		const comment = viewedComment;
+		if (!message || typeof message.seq !== 'number' || !comment) throw new Error('Comment is unavailable');
+		onSendReply({ id: crypto.randomUUID(), messageId: message.id, seq: message.seq, from_off: comment.from_off, to_off: comment.to_off, quote: comment.quote, anchor_prefix: comment.anchor_prefix, anchor_suffix: comment.anchor_suffix, note, root_user_message_id: comment.user_message_id, root_cid: comment.cid });
+	}
 	async function submit(note: string) {
 		const currentDraft = draft; const currentEditing = editing;
 		if (currentDraft) onChange([...comments, { id: crypto.randomUUID(), messageId: currentDraft.messageId, seq: currentDraft.seq, ...currentDraft.anchor, note, root_user_message_id: currentDraft.root_user_message_id, root_cid: currentDraft.root_cid }]);
 		else if (currentEditing) onChange(comments.map(item => item.id === currentEditing.id ? { ...item, note } : item));
 		afterClose = () => {
 			returnFocus = null; close();
-			void tick().then(() => surface?.querySelector<HTMLElement>('[contenteditable="plaintext-only"]')?.focus());
+			void tick().then(() => {
+				const active = document.activeElement;
+				if (active === document.body || !active?.isConnected || active?.closest('[data-adaptive-drawer]')) {
+					surface?.querySelector<HTMLElement>('[contenteditable="plaintext-only"]')?.focus();
+				}
+			});
 		};
 		closing = true;
 	}
@@ -186,6 +291,17 @@
 	<button bind:offsetWidth={buttonWidth} class="sel-comment" class:above class:below={!above} style="top:{above ? pick.rect.top - 6 : pick.rect.bottom + 6}px; left:{left}px" onmousedown={event => event.preventDefault()} onclick={() => { draft = pick; }}>
 		<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>Comment
 	</button>
+{/if}
+{#if viewing && viewedComment && threadId && !open}
+	{#if narrow}
+		<AdaptiveDrawer ariaLabel="Comment thread" heading="Comments" doneLabel="Close" followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+			<ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} keepReplyVisible />
+		</AdaptiveDrawer>
+	{:else}
+		<Popover anchor={threadAnchor} bounds={messageRoot()} placement="bottom" open={!closing} surfaceRole={null} onClose={requestClose} onClosed={closed}>
+			<div role="dialog" aria-label="Comment thread"><ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} /></div>
+		</Popover>
+	{/if}
 {/if}
 {#if open}
 	{#key target}

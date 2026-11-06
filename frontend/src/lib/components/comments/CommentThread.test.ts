@@ -43,6 +43,20 @@ describe('CommentThread', () => {
 		expect(host.querySelector<HTMLTextAreaElement>('.ct-input')?.value).toBe('half a reply');
 	});
 
+	it('keeps a draft typed while the previous reply was still sending', async () => {
+		let finish!: () => void;
+		const onReply = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
+		render(thread(), false, { onReply, viewEachUnread: true });
+		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
+		type(input, 'first');
+		button('.ct-send').click();
+		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'first', [], []));
+		type(input, 'second thought');
+		finish();
+		await vi.waitFor(() => expect(button('.ct-send').getAttribute('aria-busy')).toBe('false'));
+		expect(input.value).toBe('second thought');
+	});
+
 	it('restores a reply selection across remounts and saves a click-placed caret', async () => {
 		const onReplySelection = vi.fn();
 		render(thread(), false, { showReply: true, replyText: 'draft text', replySelection: [2, 5], onReplySelection });
