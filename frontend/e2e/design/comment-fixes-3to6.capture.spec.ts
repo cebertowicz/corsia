@@ -388,7 +388,7 @@ cases('fix6', async ({ page, request, info, width, theme }) => {
 }, { chromiumAll: true });
 
 // ---- Recordings (Chromium, native-rate video; a corner marker brackets the action) ----
-const REC_DIR = path.join(OUT, 'recordings');
+const REC_DIR = path.join(OUT, TAG, 'recordings');
 const REC_MARK = `(on) => { document.getElementById('c36-rec')?.remove(); if (!on) return; const d = document.createElement('div'); d.id = 'c36-rec'; d.setAttribute('style', 'position:fixed;left:0;top:0;width:8px;height:8px;background:#ff00ff;z-index:2147483647;pointer-events:none;'); document.body.appendChild(d); }`;
 function recTake(id: string, width: 1440 | 393, body: (e: { page: Page; request: APIRequestContext; begin: () => Promise<void>; end: () => Promise<void> }) => Promise<void>) {
 	const phone = phoneOf(width), size = { width, height: phone ? 852 : 900 };
