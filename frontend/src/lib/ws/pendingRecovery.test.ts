@@ -4,11 +4,11 @@ import { token } from '../stores/auth';
 import { subagentMeta } from '../stores/subagents';
 import { activeThreadId, messages } from '../stores/threads';
 import { handleMessage } from './handlers';
-import { RECOVERY_HOLD_LIMIT_MS, recoverPendingInputs } from './pendingRecovery';
-import { _forgetUnconfirmedFramesForTests, _unconfirmedFrameIdsForTests, sendMessage } from './send';
+import { RECOVERY_PAGE_LIMIT_MS, recoverPendingInputs } from './pendingRecovery';
+import { _unconfirmedFrameIdsForTests, sendMessage } from './send';
 import { setWs } from './state';
 import {
-	_resetTurnStateForTests, getTurnState, requestInput, resetTurnState, restoreTurnState,
+	_resetTurnStateForTests, getTurnState, requestInput, resetTurnState,
 } from './turnState';
 
 const THREAD = 'main-1';
@@ -54,7 +54,6 @@ beforeEach(() => {
 	activeThreadId.set(THREAD);
 	messages.set([]);
 	_resetTurnStateForTests();
-	_forgetUnconfirmedFramesForTests();
 	token.set('test-token');
 });
 
@@ -146,7 +145,7 @@ describe('resending an input the server never received', () => {
 		sendMessage(THREAD, 'lost with the old socket');
 		// Ownership is held through every read and read-check, and lost at the
 		// last possible moment: the check taken immediately before resending.
-		let checksLeft = 7;
+		let checksLeft = 5;
 		const isCurrent = () => checksLeft-- > 0;
 		const fetchPage = vi.fn(async (url: RequestInfo | URL) => (
 			String(url).includes('before=')
@@ -240,29 +239,54 @@ describe('resending an input the server never received', () => {
 		expect(getTurnState(THREAD).pendingInputIds).toEqual([lostId, laterId]);
 	});
 
-	it('sends a held message at the hold limit while the read stays open, and still resends what it proves lost', async () => {
+	it('ends a page that never arrives at the page limit, as a failed read', async () => {
 		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 		try {
 			const lostId = sendMessage(THREAD, 'lost with the old socket')!;
 			const lostFrame = frames[0];
 			mockSocket();
-			const paging = deferredHistory();
+			const hung = ((_url: string, init?: RequestInit) => new Promise<Response>((_settle, refuse) => {
+				init?.signal?.addEventListener('abort', () => refuse(init.signal!.reason));
+			})) as unknown as typeof fetch;
 
-			const recovering = recoverPendingInputs(paging.fetchPage);
+			const recovering = recoverPendingInputs(hung);
 			const laterId = sendMessage(THREAD, 'typed while the read hangs')!;
-			vi.advanceTimersByTime(RECOVERY_HOLD_LIMIT_MS - 1);
+			await vi.advanceTimersByTimeAsync(RECOVERY_PAGE_LIMIT_MS - 1);
 			expect(frames).toHaveLength(0);
 
-			// A healthy socket never retires itself over a hung history read, so
-			// the limit alone lets the person's message out.
-			vi.advanceTimersByTime(1);
-			expect(frames.map(frame => JSON.parse(frame).input_id)).toEqual([laterId]);
-
-			paging.settle(historyResponse([]));
+			// A healthy socket never retires itself over a hung history read; the
+			// page limit ends the read, and a read that never ended proved nothing.
+			await vi.advanceTimersByTimeAsync(1);
 			await recovering;
-			expect(frames).toHaveLength(2);
-			expect(frames[1]).toBe(lostFrame);
-			expect(JSON.parse(frames[1]).input_id).toBe(lostId);
+			expect(frames.map(frame => JSON.parse(frame).input_id)).toEqual([laterId]);
+			expect(frames).not.toContain(lostFrame);
+			expect(getTurnState(THREAD).pendingInputIds).toEqual([lostId, laterId]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('keeps holding while a slow read still gets its pages, so the lost input goes out first', async () => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		try {
+			const lostId = sendMessage(THREAD, 'lost with the old socket')!;
+			const lostFrame = frames[0];
+			mockSocket();
+			const pages = [historyResponse([], true, 'older'), historyResponse([])];
+			const slow = (() => new Promise<Response>(settle => {
+				const page = pages.shift()!;
+				setTimeout(() => settle(page), RECOVERY_PAGE_LIMIT_MS - 1);
+			})) as unknown as typeof fetch;
+
+			const recovering = recoverPendingInputs(slow);
+			const laterId = sendMessage(THREAD, 'typed while the read is slow')!;
+			await vi.advanceTimersByTimeAsync(RECOVERY_PAGE_LIMIT_MS - 1);
+			expect(frames).toHaveLength(0);
+
+			await vi.advanceTimersByTimeAsync(RECOVERY_PAGE_LIMIT_MS - 1);
+			await recovering;
+			expect(frames.map(frame => JSON.parse(frame).input_id)).toEqual([lostId, laterId]);
+			expect(frames[0]).toBe(lostFrame);
 		} finally {
 			vi.useRealTimers();
 		}
@@ -392,17 +416,12 @@ describe('the frame an input was sent with', () => {
 		expect(frames).toEqual(sentFrames);
 	});
 
-	it('is kept through a failed delete, so recovery can still resend it', async () => {
-		const inputId = sendMessage(THREAD, 'sent before the delete')!;
-		const frame = frames[0];
+	it('is forgotten once its thread is deleted', () => {
+		sendMessage(THREAD, 'sent before the delete');
 
-		// A delete resets the thread, then puts its turn state back when the delete fails.
-		const prior = getTurnState(THREAD);
+		// A delete resets the thread's turn state, and nothing will ask for its frames again.
 		resetTurnState(THREAD);
-		restoreTurnState(THREAD, prior);
-		await recoverPendingInputs(emptyHistory);
 
-		expect(frames).toEqual([frame, frame]);
-		expect(getTurnState(THREAD).pendingInputIds).toEqual([inputId]);
+		expect(_unconfirmedFrameIdsForTests()).toEqual([]);
 	});
 });

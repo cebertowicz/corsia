@@ -89,15 +89,15 @@ export function resubscribeWatchedThreads(): void {
  * accepts the frame, the person sees their message, and the server never hears
  * of it, so the only copy of a lost frame is the one this client still holds.
  * Turn state owns membership: the subscription below drops a frame as soon as
- * its input stops being pending. A reset thread keeps its frames: a failed
- * delete restores its pending inputs, and only a pending input's frame is sent.
+ * its input stops being pending, a deleted thread's included, so the store can
+ * never grow past the inputs actually waiting.
  */
 const unconfirmedFrames = new Map<string, { threadId: string; frame: string; onWire: boolean }>();
 
 turnStates.subscribe(states => {
 	for (const [inputId, stored] of unconfirmedFrames) {
 		const state = states.get(stored.threadId);
-		if (state && !state.pendingInputIds.includes(inputId)) unconfirmedFrames.delete(inputId);
+		if (!state?.pendingInputIds.includes(inputId)) unconfirmedFrames.delete(inputId);
 	}
 });
 
@@ -126,9 +126,8 @@ export function holdThreadSends(generation: object, threadIds: readonly string[]
  * current socket, in the order its inputs were requested, byte for byte: a
  * frame proven absent from the server's history, or one this client never put
  * on the wire. A frame already on the wire whose absence was not proven is
- * left alone — only a read to the end of the history can say it was lost. A
- * run whose hold already ended at its limit still sends what its read proves
- * lost. `isCurrent` is the recovery's ownership check: a retired socket gets
+ * left alone — only a read to the end of the history can say it was lost.
+ * `isCurrent` is the recovery's ownership check: a retired socket gets
  * nothing, and the owed frames stay pending until the next socket's recovery proves them absent.
  */
 export function releaseThreadSends(
@@ -137,7 +136,7 @@ export function releaseThreadSends(
 	provenAbsent: ReadonlySet<string>,
 	isCurrent: () => boolean,
 ): void {
-	if ((threadSendHolds.get(threadId) ?? generation) !== generation) return;
+	if (threadSendHolds.get(threadId) !== generation) return;
 	threadSendHolds.delete(threadId);
 	const socket = ws;
 	if (!isCurrent() || !socket || socket.readyState !== WebSocket.OPEN) return;
@@ -168,9 +167,6 @@ function putFrameOnSocket(
 export function _unconfirmedFrameIdsForTests(): string[] {
 	return [...unconfirmedFrames.keys()];
 }
-
-/** Forget every held frame: a test's reset turn state keeps them, as a deleted thread's does. */
-export function _forgetUnconfirmedFramesForTests(): void { unconfirmedFrames.clear(); }
 
 export function sendMessage(
 	threadId: string,
