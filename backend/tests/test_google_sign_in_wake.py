@@ -454,7 +454,7 @@ async def test_backend_shutdown_stops_the_google_sign_ins(google, conductor, cli
         monkeypatch.setattr(state, name, None, raising=False)
     await _start(google, conductor, client_file)
 
-    await shutdown_owned_tasks([None] * 5, logging.getLogger("test"))
+    await shutdown_owned_tasks([None] * 6, logging.getLogger("test"))
 
     assert [wake["message"] for wake in wakes()] == [SHUT_DOWN_MESSAGE] and oauth._pending == {}
 

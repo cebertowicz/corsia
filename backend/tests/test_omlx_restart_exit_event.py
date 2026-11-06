@@ -33,7 +33,11 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "RUNTIME_DIR", tmp_path)
     monkeypatch.setattr(sup, "RUNTIME_DIR", tmp_path)
     monkeypatch.setattr(restart, "emit_product_event", lambda *_a, **_k: None)
+    async def read_loaded(_cfg):
+        return []
+
     monkeypatch.setattr(local_keep_loaded, "reload_after_restart", no_reload)
+    monkeypatch.setattr("llm.providers.omlx_lifecycle.read_loaded", read_loaded)
     yield
     sup.stop_watching()
     sup._life.clear()
@@ -50,7 +54,7 @@ def starts(monkeypatch):
         fired.set()
         return {"ok": True, "pid": 4242}
 
-    monkeypatch.setattr(sup, "start_server", fake_start)
+    monkeypatch.setattr(sup, "_start_recovery", fake_start)
     return calls, fired
 
 
@@ -97,8 +101,8 @@ async def test_an_adopted_server_that_exits_zero_is_not_restarted(starts, monkey
     observed = asyncio.Event()
     original = restart.on_exit
 
-    def record_exit(*args):
-        original(*args)
+    def record_exit(*args, **kwargs):
+        original(*args, **kwargs)
         observed.set()
 
     monkeypatch.setattr(restart, "on_exit", record_exit)
@@ -137,8 +141,8 @@ async def test_clean_exit_is_reaped_when_nonblocking_wait_would_be_too_early(sta
     original_waitpid = os.waitpid
     proc = sleeper("1")
 
-    def record_exit(*args):
-        original_exit(*args)
+    def record_exit(*args, **kwargs):
+        original_exit(*args, **kwargs)
         observed.set()
 
     def early_nonblocking_wait(pid, options):
@@ -206,7 +210,15 @@ async def test_backend_shutdown_never_restarts_a_server(starts):
 
 async def test_a_server_that_exits_while_a_restart_is_running_gets_a_new_restart(monkeypatch):
     calls: list[dict] = []
-    second = asyncio.Event()
+    second, exited = asyncio.Event(), asyncio.Event()
+    original_exit = restart.on_exit
+
+    def record_exit(*args, **kwargs):
+        original_exit(*args, **kwargs)
+        if len(calls) == 1:
+            exited.set()
+
+    monkeypatch.setattr(restart, "on_exit", record_exit)
 
     async def start_then_lose_the_server(cfg):
         calls.append(cfg)
@@ -214,12 +226,12 @@ async def test_a_server_that_exits_while_a_restart_is_running_gets_a_new_restart
             doomed = sleeper()
             sup.watch(SID, doomed.pid)
             doomed.kill()
-            await asyncio.sleep(5)
+            await asyncio.wait_for(exited.wait(), 2)
         else:
             second.set()
         return {"ok": True, "pid": 4242}
 
-    monkeypatch.setattr(sup, "start_server", start_then_lose_the_server)
+    monkeypatch.setattr(sup, "_start_recovery", start_then_lose_the_server)
     proc = sleeper()
     sup.watch(SID, proc.pid)
     proc.kill()

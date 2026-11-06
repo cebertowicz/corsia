@@ -317,7 +317,7 @@ async def test_shutdown_stops_a_pending_sign_in(env, isolated_shutdown_tasks):  
 
     link = (await env.start())["authorization_url"]
     pending = flow._flows[env.app_id]
-    await shutdown_owned_tasks([None] * 5, Mock())
+    await shutdown_owned_tasks([None] * 6, Mock())
     assert flow._flows == {} and pending.timer.done()
     with pytest.raises(Exception):
         await browse(env.fake.consent(link))

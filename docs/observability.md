@@ -179,7 +179,7 @@ All six onboarding events are backend-only lifecycle observations. They contain 
 
 | Event | When it fires | Surface |
 |---|---|---|
-| `project_fence.refused` | CORSIA named a refusal for a path in a project the agent is fenced from (a shell denial it could attribute, repository registration, or workspace history); a sandbox denial whose path isn't in the command's output isn't counted. `local_only` says whether that project is Local only | backend |
+| `project_fence.refused` | CORSIA named a refusal for a path in a project the agent is fenced from (a shell denial it could attribute, a file-tool or other path argument, repository registration, or workspace history); a sandbox denial whose path isn't in the command's output isn't counted. `local_only` says whether that project is Local only | backend |
 | `project_fence.failed_closed` | A project, repository or caller row couldn't be read. `reason` is `local_only_folder_unresolved` or `caller_unknown`, which fence the agent from more, or `repo_path_unreadable`, which means a registered repository's path couldn't be fenced | backend |
 
 ### UI
