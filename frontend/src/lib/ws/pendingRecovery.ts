@@ -27,9 +27,16 @@ export async function recoverPendingInputs(
 	// Set before the first await, so nothing can slip onto the socket between
 	// this run starting to read and the thread being held.
 	for (const { threadId } of threads) holdThreadSends(generation, threadId);
-	await Promise.allSettled(threads.map(({ threadId, inputIds }) => recoverThread(
+	const results = await Promise.allSettled(threads.map(({ threadId, inputIds }) => recoverThread(
 		threadId, inputIds, authToken, generation, fetchPage, isCurrent,
 	)));
+	// A thread whose recovery threw leaves its lost input pending and unproved;
+	// say why, since nothing else will.
+	results.forEach((result, index) => {
+		if (result.status === 'rejected') {
+			console.warn('[recovery] pending-input recovery failed', threads[index].threadId, result.reason);
+		}
+	});
 }
 
 async function recoverThread(

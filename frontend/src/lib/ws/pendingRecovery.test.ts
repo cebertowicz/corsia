@@ -237,6 +237,31 @@ describe('resending an input the server never received', () => {
 		expect(getTurnState(THREAD).pendingInputIds).toEqual([lostId, laterId]);
 	});
 
+	it('records why a thread\'s recovery threw, and still recovers the other thread', async () => {
+		const OTHER = 'main-2';
+		sendMessage(THREAD, 'lost here');
+		sendMessage(OTHER, 'lost there');
+		mockSocket();
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+		const fetchPage = (async (url: string) => (
+			url.includes(`/threads/${THREAD}/`)
+				? new Response('not json', { status: 200 })
+				: historyResponse([])
+		)) as unknown as typeof fetch;
+
+		try {
+			await recoverPendingInputs(fetchPage);
+
+			expect(warn).toHaveBeenCalledOnce();
+			expect(warn.mock.calls[0][1]).toBe(THREAD);
+			expect(warn.mock.calls[0][2]).toBeInstanceOf(SyntaxError);
+			// The other thread's read finished, so its lost frame went back on.
+			expect(frames.map(frame => JSON.parse(frame).thread_id)).toEqual([OTHER]);
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
 	it('sends nothing on a socket a newer one replaced, and the new recovery sends in order', async () => {
 		const lostId = sendMessage(THREAD, 'lost with the old socket')!;
 		const lostFrame = frames[0];
