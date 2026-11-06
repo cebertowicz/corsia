@@ -9,5 +9,5 @@
 	.ct-new-dot { width: var(--space-1); height: var(--space-1); border-radius: var(--radius-circle); flex-shrink: 0; align-self: center; background: var(--accent); }
 	.failed .ct-new-dot { background: var(--red); }
 	.dot-only { gap: 0; }
-	.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+	.visually-hidden { position: absolute; inline-size: 0; block-size: 0; margin: 0; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 </style>
