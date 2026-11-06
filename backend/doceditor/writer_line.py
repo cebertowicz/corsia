@@ -10,6 +10,10 @@ write that lands it (``landed``), so one never commits without the other. A woke
 ends without either drops out of line, is told, and the next row is woken; so does one whose thread
 can no longer take input. The continuation sweep serves any line left waiting (``serve_waiting``).
 
+A document section's line is the same line under the section's key (``writer_turns.section_key``):
+an agent's edit or suggestion saved while someone else changes that section (``section_writes``).
+Its wake is ``section_wake``'s, and its saved write is posted as is by making the same call again.
+
 Every function runs inside the caller's write transaction; ``BEGIN IMMEDIATE`` makes a line read
 and its write one step.
 """
@@ -36,6 +40,7 @@ from registry import models as registry_models
 __all__ = ["Admitted", "Queued", "describe", "wake_text"]
 
 EVENT = "doc_comment.writer_turn"
+SECTION_EVENT = "doc_section.writer_turn"
 #: Turn states still able to answer a wake.
 _LIVE = "('running','waiting_retry')"
 
@@ -183,6 +188,9 @@ def settle(db, row, outcome: str) -> None:
 
 def _event(db, outcome: str, **properties) -> None:
     """One product event per line step, once its write commits: identities and counts only."""
+    if writer_turns.section_heading(properties["root_id"]) is not None:
+        # A section's key holds its heading, which is document text.
+        properties = {**properties, "root_id": None, "line": "section"}
     after_commit(db, lambda: live_events.emit("comment_writer_line", outcome=outcome, **properties))
 
 
@@ -224,8 +232,9 @@ def serve(db, root_id: str) -> list[str]:
             return []
         woken = next((row for row in line if row["state"] == "woken"), None)
         head = woken or line[0]
-        if store.get_comment(root_id, db=db) is None:
-            _drop(db, head, "the thread was deleted")
+        heading = writer_turns.section_heading(root_id)
+        if gone := _gone(db, head, heading):
+            _drop(db, head, gone)
             continue
         if reason := _unable(db, head):
             _drop(db, head, reason)
@@ -234,6 +243,9 @@ def serve(db, root_id: str) -> list[str]:
             return []
         wakes = head["wakes"] + 1
         message_id = f"writer-line-{head['id']}-{wakes}"
+        metadata = ({"kind": "comment_writer_turn", "comment_id": root_id, "line_id": head["id"]} if heading is None
+                    else {"kind": "section_writer_turn", "artifact_id": head["artifact_id"], "section": heading,
+                          "line_id": head["id"]})
         try:
             with write_transaction(db, scope="writer_line_wake"):
                 db.execute(
@@ -241,17 +253,26 @@ def serve(db, root_id: str) -> list[str]:
                     (wakes, message_id, head["id"]),
                 )
                 enqueue_event_wake(
-                    head["agent_thread_id"], EVENT, wake_text(db, head),
-                    metadata={"kind": "comment_writer_turn", "comment_id": root_id, "line_id": head["id"]},
-                    message_id=message_id, db=db,
+                    head["agent_thread_id"], EVENT if heading is None else SECTION_EVENT, wake_text(db, head),
+                    metadata=metadata, message_id=message_id, db=db,
                 )
         except (ValueError, SendRejected) as error:
             logger.warning("writer line {} could not wake {}: {}", head["id"], head["agent_thread_id"], error)
             _drop(db, head, "your thread could not be woken")
             continue
+        if heading is not None:
+            writer_turns.section_woken(str(head["agent_thread_id"]))
         _event(db, "woken", root_id=root_id, artifact_id=str(head["artifact_id"]), line_id=str(head["id"]), wakes=wakes)
         _publish_after_commit(db, root_id, head["artifact_id"])
         return [str(head["agent_thread_id"])]
+
+
+def _gone(db, row, heading: str | None) -> str | None:
+    """Why a row's thread or document can no longer take its write; None while it can."""
+    if heading is None:
+        return None if store.get_comment(str(row["root_id"]), db=db) is not None else "the thread was deleted"
+    identity = db.execute("SELECT state FROM artifact_identities WHERE id=?", (row["artifact_id"],)).fetchone()
+    return None if identity is not None and identity["state"] != "tombstone" else "the document was deleted"
 
 
 def serve_waiting(db) -> list[str]:
@@ -321,6 +342,9 @@ def recover(db) -> list[str]:
                     OR (m.delivery_state='delivered' AND EXISTS (
                         SELECT 1 FROM active_turns t WHERE t.id=m.active_turn_id AND t.status IN {_LIVE}))))""",
     )
+    for row in db.execute(
+            "SELECT DISTINCT agent_thread_id FROM doc_comment_writer_line WHERE state='woken' AND root_id LIKE 'section:%'"):
+        writer_turns.section_woken(str(row["agent_thread_id"]))
     drives: list[str] = []
     for row in db.execute("SELECT DISTINCT root_id FROM doc_comment_writer_line").fetchall():
         drives.extend(serve(db, str(row["root_id"])))
@@ -330,13 +354,18 @@ def recover(db) -> list[str]:
 def _drop(db, row, reason: str) -> None:
     """Drop a row out of line and tell its agent what it had saved; a deleted agent has no one to tell."""
     if db.execute("SELECT 1 FROM threads WHERE id=?", (row["agent_thread_id"],)).fetchone() is not None:
+        from doceditor.doc_sections import name
+
         artifact = registry_models.get_artifact(str(row["artifact_id"]), db=db)
         drafts = "\n".join(describe(op) for op in json.loads(row["ops"]))
+        heading = writer_turns.section_heading(str(row["root_id"]))
+        where = "a comment thread" if heading is None else name(heading)
+        details = {"comment_id": row["root_id"]} if heading is None else {"section": heading}
         append_thread_context_note(
             db, thread_id=str(row["agent_thread_id"]),
-            summary=(f"Your saved write on a comment thread in {document_name(artifact)} dropped out of line and was "
+            summary=(f"Your saved write on {where} in {document_name(artifact)} dropped out of line and was "
                      f"not posted: {reason}. What you had saved:\n{drafts}"),
-            details={"comment_id": row["root_id"], "artifact_id": row["artifact_id"]},
+            details={**details, "artifact_id": row["artifact_id"]},
         )
     settle(db, row, "dropped")
 
@@ -351,7 +380,8 @@ def publish(root_id: str, artifact_id: str | None, *, user_ids: set[str] | None 
     from infra.database import get_db
 
     users = user_ids if user_ids is not None else writer_turns.people_on(root_id)
-    if not users:
+    if not users or writer_turns.section_heading(root_id) is not None:
+        # A section's line is not shown to people yet; only a comment thread's count is.
         return
     db = get_db()
     try:

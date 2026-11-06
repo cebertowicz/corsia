@@ -96,7 +96,9 @@ COMMENT_RECIPIENT_SCHEMA_SQL = """
 """
 # An agent's write saved while someone else holds the thread's writer turn (doceditor/writer_line.py).
 # A row lives only while it waits: it is deleted when it posts or drops out of line.
-# root_id has no foreign key: a deleted thread drops its line with the agent told, not silently.
+# root_id is a comment thread's root, or a document section's key ('section:<artifact>:<heading>',
+# doceditor/writer_turns.section_key). It has no foreign key: a deleted thread drops its line with the
+# agent told, not silently.
 WRITER_LINE_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS doc_comment_writer_line (
         id TEXT PRIMARY KEY,

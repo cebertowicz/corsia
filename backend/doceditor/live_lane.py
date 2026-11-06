@@ -306,6 +306,8 @@ class DocumentLane:
         self.live.bases.pop(own_hash, None)
         self.live.bases[own_hash] = state
         self.live.read_bases[operation.actor.thread_id] = own_hash
+        if not operation.actor.direct_user:
+            self.live.sections.read(operation.actor.thread_id)
         while len(self.live.bases) > self.live.base_limit:
             self.live.bases.pop(next(iter(self.live.bases)))
 

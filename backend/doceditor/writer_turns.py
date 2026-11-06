@@ -1,8 +1,12 @@
-"""Who holds a comment thread's writer turn right now.
+"""Who holds a comment thread's or a document section's writer turn right now.
 
 A thread (its root comment) has one writer turn. A person holds it while a page of theirs is on the
 thread: the card selected or its reply box in use (the browser's ``comment_turn`` frame, renewed at
 most once a minute). An agent holds it only inside one write call (``agent_comment_writes``).
+
+Each section of an open document (``doc_sections``) has one too, under its ``section_key``. A
+person holds it while their edits land in it (``ws/section_turn``; the page is the socket and the
+document), and an agent only inside one edit or suggestion call (``section_writes``).
 Turns are kept in memory only, so a restart releases them all; the agent writes waiting for a turn
 are durable in ``writer_line``.
 
@@ -33,6 +37,36 @@ _people: dict[str, dict[object, PersonHold]] = {}
 _page_root: dict[object, str] = {}
 _agents: dict[str, str] = {}
 _lock = threading.Lock()
+#: Agents woken for a section turn since startup: a hint that their next write to a document no one
+#: has open may answer that wake (``section_writes.settle_closed``); the line rows decide.
+_section_wakes: set[str] = set()
+
+_SECTION = "section:"
+
+
+def section_key(artifact_id: str, heading: str) -> str:
+    """The turn of the section under ``heading`` in a document; it shares the comment line's keys."""
+    return f"{_SECTION}{artifact_id}:{heading}"
+
+
+def section_heading(key: str) -> str | None:
+    """The heading a section key names; None for a comment thread's root."""
+    return key.split(":", 2)[2] if key.startswith(_SECTION) else None
+
+
+def section_woken(thread_id: str) -> None:
+    with _lock:
+        _section_wakes.add(thread_id)
+
+
+def may_answer_section(thread_id: str) -> bool:
+    with _lock:
+        return thread_id in _section_wakes
+
+
+def section_answered(thread_id: str) -> None:
+    with _lock:
+        _section_wakes.discard(thread_id)
 
 
 def person_holding(root_id: str) -> PersonHold | None:
@@ -115,3 +149,4 @@ def reset() -> None:
         _people.clear()
         _page_root.clear()
         _agents.clear()
+        _section_wakes.clear()

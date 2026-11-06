@@ -4,7 +4,8 @@ Both agent transports, the native tools (``tools/documents.py``) and the ``corsi
 (``api/delegation_docs.py``), call these instead of the shared writers. An agent's reply, accept,
 reject, resolve, re-open or edit on a thread someone else holds is saved in line (``writer_line``)
 and not run; the caller returns the line's answer. An Agree and a new top-level comment are not
-waits on a thread and run at once. ``post_as_is`` replays the saved writes holding the turn.
+waits on a thread and run at once; a new suggestion on an open document waits instead for the turns
+of the sections it spans (``section_writes``). ``post_as_is`` replays the saved writes holding the turn.
 Person writes never wait: a person sending or clearing a reply releases their own turn. A write made
 holding the turn settles its saved row inside the comment write's own transaction
 (``writer_line.landed``), so a posted write is never left in line.
@@ -157,9 +158,31 @@ async def _create(request: CommentInput, client_id: str | None):
     return row, registered, feedback, created
 
 
+async def _suggest(request: CommentInput, client_id: str | None):
+    """A new suggestion on an open document waits for the turns of the sections its quote spans."""
+    from doceditor import section_writes
+    from doceditor.live_tools import find_live_artifact
+
+    entry = find_live_artifact(request.artifact_id) if request.artifact_id and request.author_thread_id else None
+    if entry is None:
+        return await _create(request, client_id)
+    text = entry.live.snapshot[0]
+    headings = section_writes.quote_sections(text, request.quote, request.near)
+    call = {"tool": "doc_comment_create", "quote": request.quote, "near": request.near, "body": request.body,
+            "replacement": request.replacement, "insert_after": request.insert_after}
+    op = section_writes.saved_op("suggest", call, text, headings)
+    return await section_writes.through(request.artifact_id, headings, request.author_thread_id, op,
+                                        lambda: _create(request, client_id))
+
+
 async def reply(request: CommentInput, client_id: str | None):
-    """Create an agent comment; a reply waits for its thread's turn. Returns the creation result or ``Queued``."""
+    """Create an agent comment; a reply waits for its thread's turn, a suggestion for its sections'.
+
+    Returns the creation result or ``Queued``. A plain new comment never waits.
+    """
     if not request.parent_id:
+        if request.replacement is not None and not request.review:
+            return await _suggest(request, client_id)
         return await _create(request, client_id)
     target = await run_in_db(_target, request.parent_id, request.user_id)
     if target is None:
