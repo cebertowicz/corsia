@@ -32,13 +32,13 @@ describe('handleDocumentKey Escape', () => {
 	});
 
 	it('closes the document when no comments sheet is open', () => {
-		const { state, commentUI } = setup({ commentUI: { state: null, anchor: null, sheetUp: false, close: vi.fn(), restoreFocus: vi.fn() } as DocumentKeyState['commentUI'] });
+		const { state } = setup({ commentUI: { state: null, anchor: null, sheetUp: false, close: vi.fn(), restoreFocus: vi.fn() } as DocumentKeyState['commentUI'] });
 		const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
 		document.body.dispatchEvent(event);
 
 		handleDocumentKey(event, state);
 
-		expect(commentUI.close).not.toHaveBeenCalled();
+		expect(state.commentUI.close).not.toHaveBeenCalled();
 		expect(state.close).toHaveBeenCalledOnce();
 	});
 });
