@@ -52,6 +52,10 @@ SYNTHETIC_ROWS = {name: max(1, round(PRODUCTION_ROWS["doc_comments"] * SCALE)) f
     "doc_comment_tags", "doc_comment_mentions", "doc_comment_recipient_state",
 )}
 
+#: Schema 181 postdates the census too. Synthetic stress shape, built by the generic pass: one saved
+#: agent write per fixture comment; an assumption, not a production count.
+GENERIC_SYNTHETIC_ROWS = {"doc_comment_writer_line": max(1, round(PRODUCTION_ROWS["doc_comments"] * SCALE))}
+
 #: The one thread at the largest production parent, and its sibling relations.
 MAX_THREAD_MESSAGES = 100_639
 MAX_THREAD_USAGE = 36_834
@@ -67,7 +71,7 @@ def target_rows(table: str) -> int | None:
     """Rows this fixture builds for ``table``; None when the census has no figure."""
     if table in PRODUCTION_ROWS:
         return max(1, round(PRODUCTION_ROWS[table] * SCALE))
-    return SMALL_ROWS.get(table, SYNTHETIC_ROWS.get(table))
+    return SMALL_ROWS.get(table, SYNTHETIC_ROWS.get(table, GENERIC_SYNTHETIC_ROWS.get(table)))
 
 
 def quantile_rows(knots: tuple[tuple[float, int], ...], count: int) -> list[int]:

@@ -6,25 +6,22 @@ import json
 from pathlib import Path
 from typing import Any
 
-from doceditor import comments as store, doc_images, image_regions
+from doceditor import comments as store, image_regions
 from doceditor.comment_anchoring import anchored_threads
 from doceditor.comment_recipients import visible_comment_threads
-from doceditor.comment_creation import create_validated_comment
+from doceditor import agent_comment_writes
 from doceditor.comment_create_db import CommentInput
-from doceditor.document_save import DocumentSaveError, agent_document_writer
+from doceditor.document_save import DocumentSaveError
 
 from doceditor.comment_actions import (
-    CommentActionError, SUGGESTION_REASON_MAX_CHARS, check_agent_update,
-    decide_suggestion, reopen_fields, validate_create,
+    CommentActionError, SUGGESTION_REASON_MAX_CHARS, validate_create,
 )
-from doceditor.comment_batch_actions import decide_all_from_author
 from doceditor.comment_action_errors import decision_only_error
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
-from doceditor.comment_state_updates import update_comment
 from doceditor.comments import CrossArtifactIdError, validate_client_id
 from doceditor.quote_anchor import QuoteResolveError
 from infra.auth import may_access_artifact
-from infra.database import get_db, write_transaction
+from infra.database import get_db
 from infra.db_async import run_in_db
 from infra.queries import get_thread_for_user
 from registry import models as registry_models
@@ -265,7 +262,7 @@ class DocCommentCreateTool(Tool):
                 review_request_id=kwargs.get("_review_request_id"),
                 tagged_agent_ids=kwargs.get("tagged_agent_ids") or [],
             )
-            row, registered, feedback, _created = await create_validated_comment(request, client_id)
+            created = await agent_comment_writes.reply(request, client_id)
         except QuoteResolveError as exc:
             return f"Error creating document comment: {dict(error=exc.kind, message=exc.message, candidate_lines=exc.candidate_lines)}"
         except CrossArtifactIdError:
@@ -274,12 +271,9 @@ class DocCommentCreateTool(Tool):
             return f"Error: {e}"
         except Exception as e:
             return f"Error creating document comment: {e}"
-        if registered:
-            registry_service.notify_changed(row["artifact_id"])
-        if feedback["woken"]:
-            from plans import public
-
-            await public.drive_threads(feedback["woken"])
+        if isinstance(created, agent_comment_writes.Queued):
+            return created.text
+        row, _registered, feedback, _created = created
         if region is not None:
             return await region_result({"comment": row, **feedback}, row, target[1], actor_thread_id)
         return _json({"comment": row, **feedback})
@@ -314,6 +308,8 @@ class DocCommentUpdateTool(Tool):
                 "The result includes the image with the moved box drawn.")},
             "decision": {"type": ["string", "null"], "enum": ["accept", "reject"]},
             "all_from_author": {"type": "boolean"},
+            "post_as_is": {"type": "boolean", "description": (
+                "When woken with the writer turn, post the write you saved in line on this thread, unchanged.")},
             "reason": {
                 "type": ["string", "null"], "maxLength": SUGGESTION_REASON_MAX_CHARS,
                 "description": "Optional verbatim reason for rejecting a suggestion (maximum 2,000 characters).",
@@ -333,19 +329,28 @@ class DocCommentUpdateTool(Tool):
             if others:
                 return f"Error: leave can't be combined with {', '.join(others)}. Leave in its own call."
             return await leave_comment_thread(comment_id, actor_thread_id, actor["user_id"])
+        if kwargs.get("post_as_is"):
+            others = [name for name in ("resolved", "acked", "body", "from_off", "to_off", "anchor_text", "region",
+                                        "decision", "reason") if kwargs.get(name) is not None]
+            if others:
+                return (f"Error: post_as_is can't be combined with {', '.join(others)}. "
+                        "To change your saved write, make the call again without post_as_is.")
+            try:
+                posted = await agent_comment_writes.post_as_is(
+                    comment_id, thread_id=actor_thread_id, user_id=actor["user_id"])
+            except CommentActionError as exc:
+                return f"Error: {exc.message}"
+            return posted.text if isinstance(posted, agent_comment_writes.Queued) else _json(posted)
         if refusal := decision_only_error(
                 decision=kwargs.get("decision"), all_from_author=bool(kwargs.get("all_from_author")),
                 reason=kwargs.get("reason")):
             return f"Error: {refusal}"
         if kwargs.get("decision") is not None:
             try:
-                decide = decide_all_from_author if kwargs.get("all_from_author") else decide_suggestion
+                decide = agent_comment_writes.decide_all if kwargs.get("all_from_author") else agent_comment_writes.decide
                 row = await decide(
-                    comment_id, kwargs["decision"], user_id=actor["user_id"],
-                    decided_by=actor.get("title") or actor_thread_id,
-                    actor_thread_id=actor_thread_id,
-                    write=agent_document_writer(actor_thread_id, actor["user_id"]),
-                    reason=kwargs.get("reason"))
+                    comment_id, kwargs["decision"], thread_id=actor_thread_id, user_id=actor["user_id"],
+                    decided_by=actor.get("title") or actor_thread_id, reason=kwargs.get("reason"))
             except CommentActionError as exc:
                 return f"Error: {exc.message}"
             except DocumentSaveError as exc:
@@ -353,6 +358,8 @@ class DocCommentUpdateTool(Tool):
                     return f"Error: {exc.message}"
                 detail = exc.detail if exc.detail is not None else exc.message
                 return f"Error: the document could not be saved: {detail}"
+            if isinstance(row, agent_comment_writes.Queued):
+                return row.text
             return _json(row if kwargs.get("all_from_author") else {"comment": row})
         fields = {
             k: kwargs.get(k)
@@ -364,30 +371,13 @@ class DocCommentUpdateTool(Tool):
         if "body" in fields and not str(fields["body"]).strip():
             return "Error: Empty comment body"
 
-        def _update():
-            db = get_db()
-            try:
-                comment = store.get_comment(comment_id, db=db)
-                if comment is None:
-                    return None
-                art = registry_models.get_artifact(comment["artifact_id"], db=db)
-                if art is None or not may_access_artifact(art["parent_thread_id"], actor["user_id"], db=db):
-                    return None
-                check_agent_update(
-                    comment, fields, actor_thread_id=actor_thread_id,
-                    owner_thread_id=art["parent_thread_id"], db=db)
-                moved = doc_images.region_patch(
-                    db, comment, fields, doc_path=art["path"], owner_thread_id=art["parent_thread_id"])
-                patch = reopen_fields(comment, moved)
-                with write_transaction(db, scope="patch_agent_comment") as connection:
-                    return update_comment(connection, comment_id, patch, actor_thread_id=actor_thread_id), art["path"]
-            finally:
-                db.close()
-
         try:
-            updated = await run_in_db(_update)
+            updated = await agent_comment_writes.update(
+                comment_id, fields, thread_id=actor_thread_id, user_id=actor["user_id"])
         except CommentActionError as exc:
             return f"Error: {exc.message}"
+        if isinstance(updated, agent_comment_writes.Queued):
+            return updated.text
         row, path = updated or (None, None)
         if row is None:
             return "Error: Comment not found"

@@ -132,6 +132,7 @@ async def reconcile_startup_continuity(logger) -> tuple[object, tuple[str, ...],
     from infra.llm_usage import reconcile_pending_turn_usage
     from infra.thread_recovery import recover_threads
     from automation.restart_wakes import materialize_pending_registrations
+    from doceditor.agent_comment_writes import recover_line
 
     await run_in_db(close_out_prior_self_restart)
     projected_usage = await run_in_db(reconcile_pending_turn_usage)
@@ -149,9 +150,10 @@ async def reconcile_startup_continuity(logger) -> tuple[object, tuple[str, ...],
         successor_id=lambda _thread_id: str(uuid.uuid4()),
     )
     pending_switches = await run_in_db(_pending_switch_threads)
+    writer_line_threads = await run_in_db(recover_line)
     rolled_back_operation = await run_in_db(_complete_restart_operation)
     return recovered, tuple(
-        dict.fromkeys((*wake_threads, *process_threads, *pending_switches))
+        dict.fromkeys((*wake_threads, *process_threads, *pending_switches, *writer_line_threads))
     ), rolled_back_operation
 
 

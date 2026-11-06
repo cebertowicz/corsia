@@ -5,6 +5,7 @@ import json
 import sqlite3
 
 from core.agent_roster_queries import agent_rows
+from doceditor import writer_line
 from doceditor.comment_action_errors import CommentActionError
 from infra.queries import get_thread_for_user
 
@@ -300,6 +301,9 @@ def prepare_notification(db, items: list[dict], agent_id: str) -> None:
         ).fetchone()
         if tagged:
             reinstate(db, item, agent_id)
+            waiting = writer_line.count(db, root)
+            if waiting:
+                item["line_hint"] = f"{waiting} {'writer' if waiting == 1 else 'writers'} in line on this thread."
             if item.get("parent_id") and root not in context_roots:
                 item["thread_context"] = thread_context(db, item, agent_id)
                 context_roots.add(root)

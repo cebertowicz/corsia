@@ -31,7 +31,7 @@ def artifact_id(isolated_db):
         db.close()
 
 
-def test_user_comment_background_delivery_drives_only_after_the_saved_response(client, isolated_db, monkeypatch):
+def test_user_immediate_comment_waits_for_the_settle_then_is_delivered_once(client, isolated_db, monkeypatch):
     from doceditor import live_runtime
     from plans import public
 
@@ -61,12 +61,13 @@ def test_user_comment_background_delivery_drives_only_after_the_saved_response(c
     db = get_db()
     try:
         [batch] = batches(db)
-        assert (batch["state"], batch["closed_reason"], batch["item_count"], batch["attempts"]) == (
-            "delivered", "send", 1, 1,
-        )
+        assert (batch["state"], batch["item_count"]) == ("open", 1)
+        assert drives == []
+        assert feedback_batches.close_due(batch["closes_at"], db=db) == ["owner"]
+        [batch] = batches(db)
+        assert (batch["state"], batch["item_count"], batch["attempts"]) == ("delivered", 1, 1)
     finally:
         db.close()
-    assert drives == [["owner"]]
 
 
 @pytest.mark.asyncio
@@ -91,7 +92,7 @@ async def test_comment_handler_returns_before_a_blocked_background_delivery(isol
         started.set()
         await release.wait()
 
-    monkeypatch.setattr(doc_comments, "deliver_person_comment_after_response", blocked_delivery)
+    monkeypatch.setattr(doc_comments, "announce_person_comment_after_response", blocked_delivery)
     background = BackgroundTasks()
     result = await doc_comments.create_comment(
         created_artifact_id,
