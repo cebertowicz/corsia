@@ -115,7 +115,7 @@ def test_a_person_s_own_omlx_keeps_its_own_folders(isolated_db, tmp_path, monkey
         host="127.0.0.1", port=8000, status="offline", kind="network", source="discovered",
     )
     discovery.set_server_metadata(server_id, base_path="/Users/someone/.omlx", model_dir="/Volumes/models")
-    monkeypatch.setattr("llm.providers.omlx_supervisor.shutil.which", lambda _name: "/opt/homebrew/bin/omlx")
+    monkeypatch.setattr("llm.providers.omlx_process.shutil.which", lambda _name: "/opt/homebrew/bin/omlx")
 
     result, argv = _launch_argv(server_id, monkeypatch)
 

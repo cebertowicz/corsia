@@ -218,5 +218,5 @@ async def test_devices_shutdown_finishes_before_storage_pool(monkeypatch):
         events.append("devices_joined")
 
     monkeypatch.setattr(type(runtime), "disable", disable)
-    await app_lifecycle._shutdown_runtime_services([None] * 5)
+    await app_lifecycle._shutdown_runtime_services([None] * 6)
     assert events.index("devices_joined") < events.index("db_pool")

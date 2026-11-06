@@ -8,9 +8,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from llm import base
-from llm.providers import omlx_lifecycle, omlx_supervisor, omlx_upgrade
+from llm.providers import omlx_lifecycle, omlx_supervisor
 from llm.router import LLMResponse
-from test_omlx_upgrade import _seat
+from test_omlx_upgrade import _seat, _upgrade
 
 
 def _transport(monkeypatch):
@@ -57,7 +57,7 @@ async def test_request_during_model_snapshot_waits_through_restore(isolated_db, 
 
     monkeypatch.setattr(omlx_lifecycle, "read_loaded", loaded)
     monkeypatch.setattr("llm.local_keep_loaded.reload_after_restart", restore)
-    upgrade = asyncio.create_task(omlx_upgrade.upgrade_managed_omlx())
+    upgrade = asyncio.create_task(_upgrade())
     await asyncio.wait_for(snapshot.wait(), 2)
     request = asyncio.create_task(_call())
     try:
@@ -83,7 +83,7 @@ async def test_request_that_beat_restart_finishes_before_stop(isolated_db, monke
     entered, finish = _transport(monkeypatch)
     request = asyncio.create_task(_call())
     await asyncio.wait_for(entered.wait(), 2)
-    upgrade = asyncio.create_task(omlx_upgrade.upgrade_managed_omlx())
+    upgrade = asyncio.create_task(_upgrade())
     try:
         # Wait for the existing restart owner to claim replacement, without
         # assuming a particular number of DB-worker event-loop turns.
@@ -107,7 +107,7 @@ async def test_cancelling_an_active_request_releases_upgrade(isolated_db, monkey
     request.cancel()
     with pytest.raises(asyncio.CancelledError):
         await request
-    assert (await asyncio.wait_for(omlx_upgrade.upgrade_managed_omlx(), 2))["restarted"] is True
+    assert (await asyncio.wait_for(_upgrade(), 2))["restarted"] is True
     assert any(call[0] == "stop" for call in calls)
 
 
@@ -122,7 +122,7 @@ async def test_cancelling_a_waiter_does_not_cancel_restart(isolated_db, monkeypa
         return []
 
     monkeypatch.setattr(omlx_lifecycle, "read_loaded", loaded)
-    upgrade = asyncio.create_task(omlx_upgrade.upgrade_managed_omlx())
+    upgrade = asyncio.create_task(_upgrade())
     await asyncio.wait_for(snapshot.wait(), 2)
     request = asyncio.create_task(_call())
     try:
@@ -172,7 +172,7 @@ async def test_other_server_is_not_held_by_managed_restart(isolated_db, monkeypa
         return []
 
     monkeypatch.setattr(omlx_lifecycle, "read_loaded", loaded)
-    upgrade = asyncio.create_task(omlx_upgrade.upgrade_managed_omlx())
+    upgrade = asyncio.create_task(_upgrade())
     await asyncio.wait_for(snapshot.wait(), 2)
     request = asyncio.create_task(_call("other"))
     try:
