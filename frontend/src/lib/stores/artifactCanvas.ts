@@ -13,3 +13,10 @@ export const canvasCompact = writable(false);
 
 /** Whether the compact tab sheet is open. One sheet exists at a time. */
 export const artifactTabSheetOpen = writable(false);
+
+/**
+ * Whether the shell shows the Workspace panel over the canvas instead of taking layout beside it.
+ * `PaneShell` owns the decision (`shouldOverlayPane` is its rule); anything asking what the canvas would
+ * look like with the panel out of the way reads this instead of looking for the panel's class in the DOM.
+ */
+export const paneOverlay = writable(false);

@@ -27,6 +27,7 @@ from infra.guidance_messages import (
     REASON_PREFIX, SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_UNRECORDED, UNRECORDED_REASON,
     commit_message, is_person_author, recorded_reason,
 )
+from infra.guidance_states import HistoryOff, GitFault, NoRepository, _LockBusy
 from infra.guidance_save_types import SaveResult, _Commit
 from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
@@ -37,18 +38,6 @@ _GIT_CONFIG = (*GIT_CONFIG_ARGS, "-c", "commit.gpgsign=false", "-c", "safe.bareR
 _OUTSIDE = "Unknown editor <outside-edit@corsia.local>"
 MAX_GUIDANCE_BYTES = 1024 * 1024
 _SWEEP_LIMIT = 100
-
-
-class GitFault(RuntimeError):
-    """A Git or OS failure; callers surface it and never read it as clean."""
-
-
-class _LockBusy(GitFault):
-    pass
-
-
-class NoRepository(str):
-    """The reason :func:`workspace_repository` gives when the workspace has no repository of its own yet."""
 
 
 def _git_bytes(repo: Path, *args: str, env: dict[str, str] | None = None,
@@ -80,9 +69,9 @@ def workspace_repository(workspace: Path, *, create: bool = False) -> tuple[Path
     try:
         if (workspace / ".git").exists() and not (create and is_empty_git_dir(workspace / ".git")):
             top = Path(_git(workspace, "rev-parse", "--show-toplevel").strip()).resolve(strict=False)
-            return (workspace, None) if top == workspace else (None, "the workspace Git directory resolves elsewhere")
+            return (workspace, None) if top == workspace else (None, HistoryOff("the workspace Git directory resolves elsewhere"))
         if _git(workspace, "rev-parse", "--show-toplevel", ok=(0, 128)).strip():
-            return None, "the workspace is inside an enclosing repository"
+            return None, HistoryOff("the workspace is inside an enclosing repository")
         if not create:
             return None, NoRepository("the workspace has no repository yet")
         _git(workspace, "init", "--quiet")
@@ -317,7 +306,7 @@ def _save(
 ) -> SaveResult:
     def unrecorded(outcome: str, why: str, line: str | None) -> SaveResult:
         if not atomic:
-            if (stale := stale_result(expected, binary_safe_history=binary_safe_history, read_bytes=_read)) is not None:
+            if (stale := stale_result(expected, read_bytes=_read)) is not None:
                 return stale
             for path, data in writes.items():
                 if data is None:
@@ -351,7 +340,7 @@ def _save(
             lines = _sweep(repo, outside) if outside else []
         except Exception as exc:  # an unrecorded outside edit must never join the saver's commit
             return unrecorded("failed", str(exc), SAVE_FAILED.format(error=f"outside edits could not be recorded first ({exc})"))
-        if (stale := stale_result(expected, binary_safe_history=binary_safe_history, read_bytes=_read)) is not None:
+        if (stale := stale_result(expected, read_bytes=_read)) is not None:
             return stale
         prior = {path: _read(path) for path in writes} if atomic else {}
         for path, data in writes.items():

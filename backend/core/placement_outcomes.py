@@ -28,6 +28,7 @@ from core.placement_decide import (
 )
 from core import placement_room
 from core.placement_room import Operation, Room
+from infra.guidance_history_paths import expected_hash
 from infra.placement_marks import log_outcome
 
 
@@ -215,8 +216,6 @@ def commit_plan(
     so both see the same bytes. ``_ALREADY`` when the file already says the
     lesson; otherwise the ``unplaced`` reason.
     """
-    from infra.guidance_git import digest
-
     path = destination.path
     assert path is not None
     current = path.read_text() if path.exists() else None
@@ -224,7 +223,8 @@ def commit_plan(
         return _ALREADY
     over = _over_cap(destination.kind, current, decision)
     if over is None:
-        return {path: _new_text(destination.kind, current, decision)}, {path: digest(current)}, []
+        # The expectation is the file's own bytes: the read above rewrites line endings it does not keep.
+        return {path: _new_text(destination.kind, current, decision)}, {path: expected_hash(path)}, []
     if room is None:
         return over
     if current != room.base:
@@ -247,7 +247,6 @@ def _made_room(
     a fold replaced the appended lesson but the file does not say it.
     """
     from infra.config import WORKSPACE
-    from infra.guidance_git import digest
 
     path = destination.path
     if current is None or path is None:
@@ -267,10 +266,11 @@ def _made_room(
     text, overflow_text, operations = applied
     if any(op.op == "fold" for op in operations) and not says(text, decision.text):
         return "fold-lost-lesson"
-    writes, expected = {path: text}, {path: digest(current)}
+    # Each expectation is the file's own bytes; the text reads above rewrite line endings they keep no record of.
+    writes, expected = {path: text}, {path: expected_hash(path)}
     if overflow is not None and overflow_text is not None:
         writes[overflow] = overflow_text
-        expected[overflow] = digest(overflow_current)
+        expected[overflow] = expected_hash(overflow)
     return writes, expected, operations
 
 

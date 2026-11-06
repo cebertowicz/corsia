@@ -1,8 +1,10 @@
 import { get } from 'svelte/store';
 import { paneCollapsed, setPaneCollapsed, snapShell } from '$lib/stores/paneCollapsed';
 import { isPaneDrawer, paneOpen } from '$lib/stores/paneOpen';
+import { paneOverlay } from '$lib/stores/artifactCanvas';
+import { splitWidth } from '$lib/stores/artifactWorkspace';
 import { sidebarCollapsed } from '$lib/stores/ui';
-import { ARTIFACT_DEFAULT_FRACTION, ARTIFACT_MIN, CHAT_MIN, DIVIDER_WIDTH, clamp } from '$lib/artifactSplitLayout';
+import { computeSplitLayout } from '$lib/artifactSplitLayout';
 
 /** The leaf width the workspace pane's collapse gives (artifactSplitLayout's default cap); at or above it there is nothing to gain. */
 export const WIDE_ENOUGH_LEAF = 600;
@@ -42,23 +44,25 @@ export const HISTORY_BESIDE_CANVAS = Math.round(45 * 6.98) + 320 + 8 + 24;
  *
  * `canvasWidth` is the document canvas now, the `doc-canvas` container's content width, and `inset` what the leaf's body adds
  * around it (its horizontal padding). The width with both hidden is the split's own rule (`canvasWithPanesHidden`), which the
- * running app measured equal at every width from 1200 to 1920 px; a divider the user dragged is not predicted.
+ * running app measured equal at every width from 1200 to 1920 px, and it follows the divider where the person dragged it.
+ * Whether the panel is in the way at all is the shell's answer (`paneOverlay`, published by `PaneShell`).
  */
 export function widenForHistory(canvasWidth: number, inset: number, { instant = true } = {}): (release?: { instant?: boolean }) => void {
 	if (isPaneDrawer()) return () => {};
-	const overlaid = paneIsOverlay();
+	const overlaid = get(paneOverlay);
 	if (canvasWidth < HISTORY_BESIDE_CANVAS && canvasWithPanesHidden(window.innerWidth, inset) >= HISTORY_BESIDE_CANVAS) return hidePanes({ sidebar: true, instant });
 	return overlaid ? hidePanes({ sidebar: false, instant }) : () => {};
 }
 
-/** The Workspace panel is on screen as an overlay on the canvas (`aside.pane.overlay`, set by `PaneShell`). */
-function paneIsOverlay(): boolean {
-	return typeof document !== 'undefined' && document.querySelector('aside.pane.overlay') !== null;
-}
-
-/** The document canvas's content width at a viewport width with the sidebar and the Workspace panel both hidden. */
+/**
+ * The document canvas's content width at a split-canvas width with the sidebar and the Workspace panel both hidden.
+ *
+ * This is the split's own rule (`computeSplitLayout`) asked at that width, so it answers the same as the shell will:
+ * the width the person dragged the divider to where they dragged it, the default split where they did not.
+ */
 export function canvasWithPanesHidden(viewportWidth: number, inset: number): number {
-	return clamp(viewportWidth * ARTIFACT_DEFAULT_FRACTION, ARTIFACT_MIN, viewportWidth - CHAT_MIN - DIVIDER_WIDTH) - inset;
+	const layout = computeSplitLayout(viewportWidth, true, true, get(splitWidth));
+	return layout.mode === 'split' ? layout.artifactWidth - inset : 0;
 }
 
 /** An element's content-box width: what its `container-type: inline-size` queries (so the 666 px line) measure. */

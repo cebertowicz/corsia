@@ -24,6 +24,7 @@ from core import placement_outcomes as outcomes
 from core.lesson_admission import Admission, TrialRefused, admit
 from core.lesson_trials import capture_hash
 from core.placement_decide import Decision, Destination, ThreadPlace
+from infra.guidance_history_paths import expected_hash
 
 TRIAL_ACCEPTANCE = (
     "The trial lesson is retired, promoted or extended, with the evidence for that choice."
@@ -159,7 +160,7 @@ def _activate(
             and held.behavioral_sha256 == trial.behavioral_sha256 else None)
     draft = lesson_files.with_review_ref(base, kept) if kept else base
     if current != draft and not _save(
-        entry, place, decision, relative, {path: draft}, {path: digest(current)}, "trial written",
+        entry, place, decision, relative, {path: draft}, {path: expected_hash(path)}, "trial written",
     ):
         return
     is_watch = trial.lesson.state == "watch"
@@ -183,7 +184,7 @@ def _activate(
     captured = _read(capture)
     superseded = lesson_files.superseded_capture(captured, trial.lesson.id) if captured else None
     if superseded is not None and superseded != captured:
-        writes[capture], expected[capture] = superseded, digest(captured)
+        writes[capture], expected[capture] = superseded, expected_hash(capture)
     if writes and not _save(entry, place, decision, relative, writes, expected, "trial offered"):
         return
     outcomes.settle(
@@ -222,7 +223,7 @@ def _capture(
         case_metadata=admission.case_metadata,
     )
     if current != text and not _save(
-        entry, place, decision, relative, {path: text}, {path: digest(current)},
+        entry, place, decision, relative, {path: text}, {path: expected_hash(path)},
         "hypothesis captured",
     ):
         return

@@ -8,7 +8,7 @@ import pytest
 from api import files
 from doceditor.document_save import DocumentSave, save_document_text
 from infra.database import get_db
-from tests.test_guidance_history import history_scope as history_scope, SKILL_BODY, _git
+from tests.test_guidance_history import history_scope as history_scope, SKILL_BODY, _git, _save
 
 REASON = re.compile(r"Reason: Restored .+’s version of [A-Z][a-z]{2} \d{1,2}, \d{4} at \d{1,2}:\d{2} [AP]M \S+\.")
 
@@ -144,6 +144,93 @@ async def test_failures_leave_bytes_unchanged_and_never_say_saved(skill, monkeyp
     assert 'saved' not in json.loads(response.body)['detail'].lower()
     assert path.read_text() == current
     assert commits(workspace) == before
+
+
+@pytest.mark.asyncio
+async def test_restore_uses_the_bytes_on_disk_not_their_translated_text(skill):
+    """The document API revises a file by its bytes, so an instruction file saved with CRLF endings
+    restores the way an LF one does and its own line endings come back with it."""
+    workspace, thread_id, _skill_path, user_id = skill
+    guide = workspace / "notes" / "guide.md"
+    guide.parent.mkdir(parents=True)
+    db = get_db()
+    try:
+        db.execute("UPDATE threads SET bootloader_files=? WHERE id=?", ('["notes/guide.md"]', thread_id))
+        db.commit()
+    finally:
+        db.close()
+    crlf = "# Guide\r\n\r\nFirst text.\r\n"
+    await save_document_text(
+        DocumentSave(path=str(guide), text=crlf, thread_id=thread_id, create=True), user_id)
+    first = _git(["log", "-1", "--format=%H", "--", "notes/guide.md"], cwd=workspace).strip()
+    current = crlf + "Later text.\r\n"
+    await save_document_text(DocumentSave(path=str(guide), text=current, thread_id=thread_id), user_id)
+    assert guide.read_bytes() == current.encode()
+
+    result = await files.restore_version('test', files.RestoreBody(
+        path=str(guide), version=first, base_sha256=sha(current), thread_id=thread_id))
+
+    assert guide.read_bytes() == crlf.encode()
+    assert result == {
+        "version": _git(["rev-parse", "HEAD"], cwd=workspace).strip(),
+        "sha256": sha(crlf),
+    }
+
+
+@pytest.mark.parametrize("state", ["enclosing", "empty-marker"])
+@pytest.mark.asyncio
+async def test_a_workspace_with_no_repository_of_its_own_is_history_off(skill, state):
+    """Both permanent repository states read as history off, the way a guidance save records nothing for
+    them: no versions, no history offered on open, and a restore that says so instead of asking for a
+    retry that can only repeat itself."""
+    from api.files_load import read_document
+    from infra.document_history import list_versions
+
+    workspace, thread_id, path, user_id = skill
+    first = await recorded(skill, SKILL_BODY)
+    current = SKILL_BODY + "\nCurrent text.\n"
+    await recorded(skill, current)
+    enclosing = workspace.parent
+    _git(["init", "--quiet"], cwd=enclosing)
+    (workspace / ".git").rename(enclosing / "moved.git")
+    if state == "empty-marker":
+        (workspace / ".git").mkdir()  # an empty marker: Git answers with the enclosing repository
+
+    assert list_versions(workspace, path.relative_to(workspace).as_posix()) == ([], False)
+    assert read_document(str(path), user_id, None, thread_id)["history"] is False
+    assert refusal(await restore(skill, first, sha(current))) == (409, "history_off")
+    assert path.read_text() == current
+
+
+@pytest.mark.asyncio
+async def test_an_invalid_skill_version_refuses_with_its_own_kind(skill):
+    """Retrying cannot make an invalid SKILL.md valid, so the refusal carries its own kind."""
+    workspace, _thread, path, _user = skill
+    broken = "---\nname: demo-skill\n---\n\n# Demo skill\n"
+    path.write_text(broken)  # an outside edit; the sweep records it as a version of its own
+    current = await recorded(skill, SKILL_BODY)
+    broken_version = _git(
+        ["log", "--format=%H", "--", str(path.relative_to(workspace))], cwd=workspace
+    ).split()[-1]
+
+    assert refusal(await restore(skill, broken_version, sha(SKILL_BODY))) == (422, "invalid_skill")
+    assert path.read_text() == SKILL_BODY
+
+
+@pytest.mark.asyncio
+async def test_a_read_only_file_refuses_with_its_own_kind(skill):
+    """A file the document API never saves says that, instead of a failure line with a Retry."""
+    workspace, thread_id, _path, _user = skill
+    context = workspace / "context" / "demo.md"
+    assert _save(workspace, context, "First text.\n").outcome == "written"
+    assert _save(workspace, context, "Second text.\n").outcome == "written"
+    first = _git(["log", "--format=%H", "--", "context/demo.md"], cwd=workspace).split()[-1]
+
+    response = await files.restore_version('test', files.RestoreBody(
+        path=str(context), version=first, base_sha256=sha("Second text.\n"), thread_id=thread_id))
+
+    assert refusal(response) == (403, "context_read_only")
+    assert context.read_text() == "Second text.\n"
 
 
 def test_document_open_says_whether_history_exists(history_scope):

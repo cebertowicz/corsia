@@ -8,8 +8,22 @@ from pathlib import Path
 LOCAL_EDIT_MARK = "·dirty"
 
 
-def digest(text: str | None) -> str | None:
-    return None if text is None else hashlib.sha256(text.encode()).hexdigest()
+def digest(content: str | bytes | None) -> str | None:
+    """The one compare-and-swap hash: a file's content as the bytes it holds.
+
+    Text is its own bytes (``str.encode``), so a caller that read a file's bytes and one that holds
+    its text agree, while a read that turned CRLF into LF does not claim to be the file."""
+    if content is None:
+        return None
+    return hashlib.sha256(content if isinstance(content, bytes) else content.encode()).hexdigest()
+
+
+def expected_hash(path: Path) -> str | None:
+    """The compare-and-swap expectation for a file as it stands on disk: its bytes, or None when absent.
+
+    A caller that read the file as text still expects this hash: a text read turns CRLF and a lone CR
+    into LF, and that text is not what the destination holds."""
+    return digest(path.read_bytes()) if path.exists() else None
 
 
 def is_empty_git_dir(path: Path) -> bool:

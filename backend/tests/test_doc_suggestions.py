@@ -383,3 +383,38 @@ async def test_accepting_into_a_guidance_file_records_history(integration_client
         ["log", "-1", "--format=%ae%x00%B", "--", relative], cwd=integration_workspace).split("\x00", 1)
     assert author == f"{owner}@agents.corsia.local"
     assert f"Accepted suggestion {suggestion['id']} from {suggestion['author']}" in message
+
+
+@pytest.mark.asyncio
+async def test_accepting_into_a_guidance_file_with_crlf_endings_keeps_them(
+    integration_client, integration_workspace, _registrable_roots
+):
+    """The revision a person's accept writes against is the file's bytes, so a guidance file with CRLF
+    endings is not refused as changed and keeps the line endings it was saved with."""
+    from test_guidance_history import _git
+    from infra.database import get_db
+
+    _git(["init", "--quiet"], cwd=integration_workspace)
+    owner = _mk_thread(integration_client, _OWNER, title="Guide Owner")
+    guide = integration_workspace / "notes" / "guide.md"
+    db = get_db()
+    try:
+        db.execute("UPDATE threads SET bootloader_files=? WHERE id=?", ('["notes/guide.md"]', owner))
+        db.commit()
+    finally:
+        db.close()
+    crlf = "# Guide\r\n\r\nA unique tail sentence\r\n"
+    created = integration_client.put(f"/api/files/content?token={_OWNER}", json={
+        "path": str(guide), "text": crlf, "thread_id": owner, "create": True})
+    assert created.status_code == 200, created.text
+    suggestion = await _suggest(owner, guide, quote=QUOTE, replacement="A rewritten tail sentence")
+
+    relative = "notes/guide.md"
+    before = _git(["rev-list", "--count", "HEAD", "--", relative], cwd=integration_workspace).strip()
+    response = _user_decide(integration_client, suggestion["id"], "accept", token=_OWNER)
+    assert response.status_code == 200, response.text
+    assert response.json()["comment"]["decision"] == "accepted"
+
+    assert guide.read_bytes() == "# Guide\r\n\r\nA rewritten tail sentence\r\n".encode()
+    after = _git(["rev-list", "--count", "HEAD", "--", relative], cwd=integration_workspace).strip()
+    assert int(after) == int(before) + 1

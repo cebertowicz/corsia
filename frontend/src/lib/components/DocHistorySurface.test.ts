@@ -195,6 +195,18 @@ describe('document history', () => {
 		buttons('Retry')[0].click(); await flush();
 		expect(applyRestore).toHaveBeenCalledTimes(2);
 	});
+	it.each([
+		['invalid_skill', 'Couldn’t restore this version. Its text isn’t a valid skill, so nothing was restored.'],
+		['context_read_only', 'Couldn’t restore this version. This file is read-only, so nothing was restored.'],
+	])('names the cause of a %s refusal and offers no way to ask again', async (kind, line) => {
+		const applyRestore = vi.fn().mockRejectedValue(new RequestRefused('422 refused', kind));
+		render({ within: wide(), applyRestore }); await flush(); await open(2);
+		await press();
+		expect(host.textContent).toContain(line);
+		expect(buttons('Retry')).toHaveLength(0);
+		expect(buttons('Reload history')).toHaveLength(0);
+		expect(applyRestore).toHaveBeenCalledOnce();
+	});
 	it('lets the reloaded list decide a lost answer: a new row holding the restored text is the restore', async () => {
 		vi.mocked(fetchVersionText).mockImplementation(async (_target, id) => `Version ${id === 'new' ? 'v2' : id}\n`);
 		const applyRestore = vi.fn().mockRejectedValue(new TypeError('disconnected'));

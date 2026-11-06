@@ -10,15 +10,18 @@ from infra import config
 from infra.auth import owns_thread
 from infra.database import get_db
 from infra.db_async import run_off_db
-from infra.document_history import list_versions, restore_reason, version_bytes, version_text
+from infra.document_history import history_off, list_versions, repository, restore_reason, version_bytes, version_text
 from infra.guidance_git import GitFault
 
-# Each restore refusal's status and detail; the client words its line from ``kind``.
+# Each restore refusal's status and detail; the client words its line from ``kind``. Every refusal that
+# retrying cannot change carries its own kind, so the surface never offers a Retry that only repeats it.
 _REFUSED = {
     "stale": (409, "The document changed after this version was opened. Nothing was restored."),
     "history_off": (409, "This document has no recorded history. Nothing was restored."),
     "version_unavailable": (404, "This version is not in the document's history. Nothing was restored."),
     "failed": (503, "History could not be recorded. Nothing was restored."),
+    "invalid_skill": (422, "This version's text is not a valid skill. Nothing was restored."),
+    "context_read_only": (403, "This file is read-only. Nothing was restored."),
 }
 
 
@@ -54,6 +57,8 @@ def history(path: str, user_id: str, project_id: str | None, thread_id: str | No
         if commit is None:
             versions, truncated = list_versions(config.WORKSPACE, relative)
             return {"versions": versions, "truncated": truncated}
+        if repository(config.WORKSPACE) is None:
+            raise HTTPException(404, "Version not found")
         return {"text": version_text(config.WORKSPACE, relative, commit)}
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
@@ -71,6 +76,8 @@ def _restore_source(path: str, version: str, user_id: str, project_id: str | Non
         return "failed"
     workspace = Path(config.WORKSPACE)
     try:
+        if history_off(workspace):
+            return "history_off"
         # A commit's bytes never change, so reading before the save's lock is safe.
         return version_bytes(workspace, relative, version).decode(), restore_reason(workspace, version)
     except ValueError:
@@ -97,7 +104,7 @@ async def restore(path: str, version: str, base_sha256: str, user_id: str, proje
             reason=reason, expected_sha256=base_sha256, history_required=True,
         )
     except DocumentSaveError as exc:
-        if exc.kind in {"stale", "history_off"}:
+        if exc.kind in _REFUSED:
             return _refused(exc.kind)
         if exc.kind == "save_failed":
             return _refused("failed")

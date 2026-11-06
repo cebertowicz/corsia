@@ -4,6 +4,8 @@ import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { paneCollapsed, paneSnapping } from '$lib/stores/paneCollapsed';
 import { paneOpen } from '$lib/stores/paneOpen';
+import { paneOverlay } from '$lib/stores/artifactCanvas';
+import { splitWidth } from '$lib/stores/artifactWorkspace';
 import { sidebarCollapsed } from '$lib/stores/ui';
 import { HISTORY_BESIDE_CANVAS, WIDE_ENOUGH_LEAF, canvasWithPanesHidden, contentWidth, widenForHistory, widenForImageViewer } from './imageViewerPane';
 
@@ -15,6 +17,8 @@ beforeEach(() => {
 	paneCollapsed.set(false);
 	paneOpen.set(false);
 	sidebarCollapsed.set(false);
+	paneOverlay.set(false);
+	splitWidth.set(null);
 });
 afterEach(() => setWindowWidth(realWidth));
 
@@ -149,26 +153,41 @@ describe('widenForHistory (version history prototype)', () => {
 
 	it('at 1160, where the sheet stays, closes a Workspace panel the shell shows as an overlay (it would cover the rows) and hands it back; the sidebar stays', () => {
 		setWindowWidth(1160);
-		const overlay = document.createElement('aside');
-		overlay.className = 'pane overlay';
-		document.body.appendChild(overlay);
-		try {
-			const release = widenForHistory(700, 40);
-			expect([get(paneCollapsed), get(sidebarCollapsed)]).toEqual([true, false]);
-			release();
-			expect(get(paneCollapsed)).toBe(false);
-		} finally { overlay.remove(); }
+	paneOverlay.set(true);
+		const release = widenForHistory(700, 40);
+		expect([get(paneCollapsed), get(sidebarCollapsed)]).toEqual([true, false]);
+		release();
+		expect(get(paneCollapsed)).toBe(false);
 	});
 
 	it('closes an overlaid panel even where the canvas is already at the threshold', () => {
 		setWindowWidth(1300);
-		const overlay = document.createElement('aside');
-		overlay.className = 'pane overlay';
-		document.body.appendChild(overlay);
-		try {
-			widenForHistory(HISTORY_BESIDE_CANVAS + 10, 40);
-			expect([get(paneCollapsed), get(sidebarCollapsed)]).toEqual([true, false]);
-		} finally { overlay.remove(); }
+		paneOverlay.set(true);
+		widenForHistory(HISTORY_BESIDE_CANVAS + 10, 40);
+		expect([get(paneCollapsed), get(sidebarCollapsed)]).toEqual([true, false]);
+	});
+
+	it('leaves the panes alone where the shell says the panel takes layout instead of covering the canvas', () => {
+		setWindowWidth(1160);
+		const release = widenForHistory(700, 40);
+		expect([get(paneCollapsed), get(sidebarCollapsed)]).toEqual([false, false]);
+		release();
+	});
+
+	it('asks the split itself, so the width the person dragged the divider to is the width both hidden gives', () => {
+		setWindowWidth(1920);
+		splitWidth.set(500);
+		expect(canvasWithPanesHidden(1920, 40)).toBe(460);
+		const untouched = widenForHistory(380, 40);
+		expect([get(paneCollapsed), get(paneOpen), get(sidebarCollapsed)]).toEqual([false, false, false]);
+		untouched();
+		splitWidth.set(1000);
+		expect(canvasWithPanesHidden(1176, 40)).toBe(708); // the split's own chat minimum caps a wide drag at 748
+		const release = widenForHistory(380, 40);
+		expect([get(paneCollapsed), get(sidebarCollapsed)]).toEqual([true, true]);
+		release();
+		splitWidth.set(null);
+		expect(canvasWithPanesHidden(1920, 40)).toBe(1112);
 	});
 
 	it('touches nothing when the canvas is already at the threshold, or at drawer and phone widths', () => {
