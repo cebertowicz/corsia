@@ -132,8 +132,9 @@ def save_tags(db, comment: dict, agent_ids: list[str]) -> None:
 def _person_display_name(db, rows: list[dict]) -> str | None:
     """Who a tag of the person names: the account that owns the document being commented on.
 
-    Read once per listing, never per row. Their display name is the one their own comments carry
-    as ``author``; no name is returned for an account that is gone.
+    Read once per call, never per row, and only when a row carries the mark: three key lookups.
+    Their display name is the one their own comments carry as ``author``; no name is returned for
+    an account that is gone.
     """
     tagged = next((row for row in rows if row.get("tags_person")), None)
     if tagged is None:

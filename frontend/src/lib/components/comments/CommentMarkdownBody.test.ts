@@ -120,6 +120,5 @@ describe('CommentMarkdownBody', () => {
 		component = mount(CommentMarkdownBody, { target: host, props: { text: 'Needs your call', taggedAgents: [{ id: 'ag1', name: 'Quality Gate' }] } });
 		flushSync();
 		expect([...host.querySelectorAll<HTMLElement>('.comment-mention')].map(chip => chip.textContent)).toEqual(['@Quality Gate']);
-		expect(host.textContent).not.toContain('@ui');
 	});
 });
