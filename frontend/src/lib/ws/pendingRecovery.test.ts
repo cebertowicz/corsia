@@ -192,6 +192,29 @@ describe('resending an input the server never received', () => {
 		expect(JSON.parse(frames[1])).toMatchObject({ content: 'typed while the read is open' });
 	});
 
+	it('sends a held message once its own thread is read, without waiting on another thread', async () => {
+		const OTHER = 'main-2';
+		sendMessage(THREAD, 'lost here');
+		sendMessage(OTHER, 'lost there');
+		mockSocket();
+		const slow = deferredHistory();
+		const fetchPage = ((url: string) => (
+			url.includes(`/threads/${THREAD}/`) ? slow.fetchPage(url) : emptyHistory()
+		)) as unknown as typeof fetch;
+
+		const recovering = recoverPendingInputs(fetchPage);
+		const laterId = sendMessage(OTHER, 'typed while the other thread is read')!;
+		try {
+			await vi.waitFor(() => {
+				expect(frames.map(frame => JSON.parse(frame).input_id)).toContain(laterId);
+			});
+			expect(frames.every(frame => JSON.parse(frame).thread_id !== THREAD)).toBe(true);
+		} finally {
+			slow.settle(historyResponse([]));
+			await recovering;
+		}
+	});
+
 	it('still sends a held message when the read fails, and resends nothing unproved', async () => {
 		const lostId = sendMessage(THREAD, 'lost with the old socket')!;
 		const lostFrame = frames[0];
