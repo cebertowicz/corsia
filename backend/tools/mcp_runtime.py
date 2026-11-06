@@ -18,7 +18,6 @@ from contextlib import AsyncExitStack
 
 from loguru import logger
 
-from infra import state
 from infra.db_async import run_in_db
 from infra.time import utc_now_iso
 from tools.mcp import connect_mcp_servers
@@ -66,8 +65,6 @@ async def _remove_connected_app(app_id: str) -> None:
     names = _app_tools.pop(app_id, set())
     for name in names:
         _registry.unregister(name)
-        if state._agent is not None:
-            state._agent.tools.unregister(name)
     server = _app_servers.pop(app_id, None)
     if server is not None:
         getattr(_registry, "mcp_server_configs", {}).pop(server, None)
@@ -184,6 +181,7 @@ async def _connect_app(action: str, app_id: str) -> dict[str, object]:
             await _publish_app_state(app_id, result)
             return result
         _app_servers[app_id] = name
+        getattr(_registry, "mcp_server_states", {}).pop(name, None)  # only this attempt describes it
         stack = AsyncExitStack()
         errors = await connect_mcp_servers({name: config}, _registry, stack)
         if error := errors.get(name):
@@ -206,8 +204,6 @@ async def _connect_app(action: str, app_id: str) -> dict[str, object]:
             _app_configs[app_id] = (name, config)
             result = {"state": "working", "state_since": utc_now_iso(), "tool_count": len(names), "failure_class": None}
         await _publish_app_state(app_id, result)
-        if state._agent is not None:
-            register_mcp_tools(state._agent.tools)
         return result
     except asyncio.CancelledError:
         registered = _app_stacks.get(app_id) is stack
@@ -260,13 +256,13 @@ async def local_app_ids() -> list[str]:
 
 
 def register_mcp_tools(registry: ToolRegistry) -> None:
-    """Populate native and harness registries from the completed startup snapshot."""
-    registry.mcp_server_configs = getattr(_registry, "mcp_server_configs", {})
-    registry.mcp_server_states = getattr(_registry, "mcp_server_states", {})
-    for name in _registry.tool_names:
-        if registry.has(name) and registry.get(name) is not _registry.get(name):
-            raise RuntimeError("Configured MCP tool collides with an existing tool")
-        registry.register(_registry.get(name))
+    """Have a native or harness registry read the live tool set instead of holding a copy.
+
+    A thread keeps the registry it started with, so a copy goes stale when an app connects,
+    reconnects or is removed later (issue #2128). Reading ``_registry`` at each lookup also
+    follows ``_close`` replacing it.
+    """
+    registry.read_through(lambda: _registry)
 
 
 def tool_server_index() -> dict[str, str]:
@@ -283,10 +279,6 @@ async def _close() -> None:
     """Close every connected-app session and reset the registry under the lock."""
     global _registry
     app_stacks = tuple(_app_stacks.values())
-    if state._agent is not None:
-        for name in _registry.tool_names:
-            if state._agent.tools.get(name) is _registry.get(name):
-                state._agent.tools.unregister(name)
     _app_stacks.clear()
     _app_tools.clear()
     _app_servers.clear()
