@@ -3,8 +3,8 @@
 A thread (its root comment) has one writer turn. A person holds it while a page of theirs is on the
 thread: the card selected or its reply box in use (the browser's ``comment_turn`` frame, renewed at
 most once a minute). An agent holds it only inside one write call (``agent_comment_writes``).
-Turns are kept in memory only, so a restart releases them all (R5 of the hold-while-engaged design);
-the agent writes waiting for a turn are durable in ``writer_line``.
+Turns are kept in memory only, so a restart releases them all; the agent writes waiting for a turn
+are durable in ``writer_line``.
 
 Person holds change on the event loop and are read by the line on database workers. A read that
 races an arrival is the same as the arrival landing a moment later: an agent woken just before the

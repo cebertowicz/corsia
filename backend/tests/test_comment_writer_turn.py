@@ -21,6 +21,7 @@ def _fresh_turns():
     for handle in comment_turn._leases.values():
         handle.cancel()
     comment_turn._leases.clear()
+    comment_turn._order.clear()
     writer_turns.reset()
 
 
@@ -141,7 +142,7 @@ async def test_a_reply_waits_while_a_person_is_on_the_thread_and_posts_as_is_exa
     assert [item["comment"]["body"] for item in posted["posted"]] == ["B's reply"]
     assert again == "Error: You have nothing saved in line on this thread."
     assert [reply["body"] for reply in _replies(root, b)] == ["B's reply"]
-    assert [(r["state"], r["settled_reason"]) for r in _line(root)] == [("posted", "posted")]
+    assert _line(root) == []  # a posted row is deleted
 
 
 @pytest.mark.asyncio
@@ -169,8 +170,7 @@ async def test_two_agents_in_line_are_served_in_order_and_the_second_wakes_when_
 
     assert rewrite.status_code == 200, rewrite.text
     assert rewrite.json()["comment"]["body"] == "B, rewritten"
-    assert [(r["agent_thread_id"], r["state"], r["settled_reason"]) for r in _line(root)] == [
-        (b, "posted", "rewritten"), (c, "woken", None)]
+    assert [(r["agent_thread_id"], r["state"]) for r in _line(root)] == [(c, "woken")]
     assert driven == [b, c]
     assert [reply["body"] for reply in _replies(root, b)] == ["B, rewritten"]
     assert _replies(root, c) == []
@@ -195,7 +195,7 @@ async def test_an_agent_whose_turn_ends_without_answering_drops_out_is_told_and_
 
     settlement = _end(b, _wake_turn(b, woken_b, read=read), ending)
 
-    assert [(r["agent_thread_id"], r["state"]) for r in _line(root)] == [(b, "dropped"), (c, "woken")]
+    assert [(r["agent_thread_id"], r["state"]) for r in _line(root)] == [(c, "woken")]
     assert c in settlement.wake_thread_ids  # driven once the harness releases the turn
     notes = _rows(
         "SELECT summary FROM context_change_journal WHERE object_kind='thread_context' AND object_id=?", b)

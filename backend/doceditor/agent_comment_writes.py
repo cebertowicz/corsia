@@ -4,14 +4,15 @@ Both agent transports, the native tools (``tools/documents.py``) and the ``corsi
 (``api/delegation_docs.py``), call these instead of the shared writers. An agent's reply, accept,
 reject, resolve, re-open or edit on a thread someone else holds is saved in line (``writer_line``)
 and not run; the caller returns the line's answer. An Agree and a new top-level comment are not
-waits on a thread and run at once. ``post_as_is`` replays the saved writes through this same gate.
-Person writes never wait: a person sending or clearing a reply releases their own turn.
+waits on a thread and run at once. ``post_as_is`` replays the saved writes holding the turn.
+Person writes never wait: a person sending or clearing a reply releases their own turn. A write made
+holding the turn settles its saved row inside the comment write's own transaction
+(``writer_line.landed``), so a posted write is never left in line.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import json
 from typing import Any
 
 from loguru import logger
@@ -54,18 +55,12 @@ def _target(comment_id: str, user_id: str, check=None) -> tuple[str, str] | None
         db.close()
 
 
-def _admit(root_id: str, artifact_id: str, thread_id: str, user_id: str, op: dict | None, claim: bool = False):
+def _admit(root_id: str, artifact_id: str, thread_id: str, user_id: str, op: dict):
     db = get_db()
     try:
         with write_transaction(db, scope="writer_line_admit") as connection:
-            admission = writer_line.admit(
+            return writer_line.admit(
                 connection, root_id=root_id, artifact_id=artifact_id, thread_id=thread_id, user_id=user_id, op=op)
-            if claim and isinstance(admission, writer_line.Admitted) and admission.entry_id is not None:
-                # post_as_is takes its row in the same write, so a second call finds nothing left to post.
-                connection.execute(
-                    "UPDATE doc_comment_writer_line SET state='posted', settled_at=?, settled_reason='posted' WHERE id=?",
-                    (writer_line._now(), admission.entry_id))
-            return admission
     except BaseException:
         writer_turns.agent_exit(root_id, thread_id)
         raise
@@ -73,13 +68,38 @@ def _admit(root_id: str, artifact_id: str, thread_id: str, user_id: str, op: dic
         db.close()
 
 
-def _finish(root_id: str, thread_id: str, entry_id: str | None, posted: bool) -> list[str]:
+def _admit_as_is(root_id: str, thread_id: str):
+    db = get_db()
+    try:
+        with write_transaction(db, scope="writer_line_admit_as_is") as connection:
+            return writer_line.admit_as_is(connection, root_id=root_id, thread_id=thread_id)
+    except BaseException:
+        writer_turns.agent_exit(root_id, thread_id)
+        raise
+    finally:
+        db.close()
+
+
+def _finish(root_id: str, thread_id: str) -> list[str]:
     db = get_db()
     try:
         with write_transaction(db, scope="writer_line_finish") as connection:
-            return writer_line.finish(connection, root_id=root_id, thread_id=thread_id, entry_id=entry_id, posted=posted)
+            return writer_line.finish(connection, root_id=root_id, thread_id=thread_id)
     finally:
         db.close()
+
+
+async def _finish_and_drive(root_id: str, thread_id: str) -> None:
+    """Release the turn and wake the next agent; a write that landed is already settled.
+
+    A failure here strands no one: the turn is released in memory, and the continuation sweep
+    serves any line still waiting (``writer_line.serve_waiting``).
+    """
+    try:
+        await _drive(await run_in_db(_finish, root_id, thread_id))
+    except Exception:
+        writer_turns.agent_exit(root_id, thread_id)
+        logger.exception("writer turn on {} was not passed on after {}'s write", root_id, thread_id)
 
 
 def _serve_in_db(root_ids: list[str]) -> list[str]:
@@ -119,18 +139,11 @@ async def _through(root_id: str, artifact_id: str, thread_id: str, user_id: str,
     admission = await run_in_db(_admit, root_id, artifact_id, thread_id, user_id, op)
     if isinstance(admission, Queued):
         return admission
-    posted = False
     try:
-        result = await run()
-        posted = True
-        return result
+        return await run()
     finally:
         # The write is accepted here, before any typing animation, so the next agent is woken now.
-        try:
-            await _drive(await run_in_db(_finish, root_id, thread_id, admission.entry_id, posted))
-        except Exception:
-            writer_turns.agent_exit(root_id, thread_id)
-            logger.exception("writer turn on {} did not settle after {}'s write", root_id, thread_id)
+        await _finish_and_drive(root_id, thread_id)
 
 
 # -- replies -----------------------------------------------------------------------------------
@@ -192,7 +205,7 @@ async def decide_all(comment_id: str, decision: str, *, thread_id: str, user_id:
                      reason: str | None = None) -> dict[str, Any]:
     """Decide every open suggestion by an author; those on threads someone else holds are saved in line and listed."""
     queued: list[dict[str, Any]] = []
-    held: list[tuple[str, str | None]] = []
+    held: list[str] = []
 
     async def select(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         admitted = []
@@ -203,21 +216,17 @@ async def decide_all(comment_id: str, decision: str, *, thread_id: str, user_id:
             if isinstance(admission, Queued):
                 queued.append({"comment_id": row["id"], "message": admission.text})
             else:
-                held.append((row["id"], admission.entry_id))
+                held.append(row["id"])
                 admitted.append(row)
         return admitted
 
-    posted = False
     try:
         result = await decide_all_from_author(
             comment_id, decision, user_id=user_id, decided_by=decided_by, actor_thread_id=thread_id,
             write=agent_document_writer(thread_id, user_id), reason=reason, select=select)
-        posted = True
     finally:
-        drives: list[str] = []
-        for root_id, entry_id in held:
-            drives += await run_in_db(_finish, root_id, thread_id, entry_id, posted)
-        await _drive(drives)
+        for root_id in held:
+            await _finish_and_drive(root_id, thread_id)
     if queued:
         result["queued"] = queued
     return result
@@ -246,7 +255,10 @@ def _update_in_db(comment_id: str, fields: dict[str, Any], thread_id: str, user_
             db, comment, dict(fields), doc_path=art["path"], owner_thread_id=art["parent_thread_id"]) if regions else fields
         patch = reopen_fields(comment, moved)
         with write_transaction(db, scope="patch_agent_comment") as connection:
-            return update_comment(connection, comment_id, patch, actor_thread_id=thread_id), art["path"]
+            row = update_comment(connection, comment_id, patch, actor_thread_id=thread_id)
+            if row is not None:
+                writer_line.landed(connection, str(comment.get("parent_id") or comment["id"]), thread_id)
+            return row, art["path"]
     finally:
         db.close()
 
@@ -286,42 +298,31 @@ async def _replay(op: dict[str, Any], thread_id: str, user_id: str):
     return {"comment": updated[0]}
 
 
-def _saved(comment_id: str, thread_id: str, user_id: str):
-    target = _target(comment_id, user_id)
-    if target is None:
-        return None
-    db = get_db()
-    try:
-        row = writer_line.saved_entry(db, target[0], thread_id)
-        return (target, json.loads(row["ops"])) if row is not None else (target, None)
-    finally:
-        db.close()
-
-
 async def post_as_is(comment_id: str, *, thread_id: str, user_id: str) -> dict[str, Any] | Queued:
     """Post this agent's saved writes on the thread, in the order it saved them, exactly once.
 
+    The saved row is read and settled in the admitting transaction, so a second call finds nothing.
     A write that fails is reported with its saved text, so nothing is lost.
     """
-    saved = await run_in_db(_saved, comment_id, thread_id, user_id)
-    if saved is None:
+    target = await run_in_db(_target, comment_id, user_id)
+    if target is None:
         raise CommentActionError("not_found", "Comment not found")
-    (root_id, artifact_id), ops = saved
-    if ops is None:
+    root_id = target[0]
+    admission = await run_in_db(_admit_as_is, root_id, thread_id)
+    if admission is None:
         raise CommentActionError("nothing_saved", "You have nothing saved in line on this thread.")
-    admission = await run_in_db(_admit, root_id, artifact_id, thread_id, user_id, None, True)
     if isinstance(admission, Queued):
         return admission
     posted: list[dict[str, Any]] = []
     failed: list[dict[str, str]] = []
     try:
-        for op in ops:
+        for op in admission.ops:
             try:
                 posted.append(await _replay(op, thread_id, user_id))
             except (CommentActionError, DocumentSaveError) as exc:
                 failed.append({"write": writer_line.describe(op), "error": exc.message})
     finally:
-        await _drive(await run_in_db(_finish, root_id, thread_id, None, False))
+        await _finish_and_drive(root_id, thread_id)
     result: dict[str, Any] = {"posted": posted}
     if failed:
         result["failed"] = failed

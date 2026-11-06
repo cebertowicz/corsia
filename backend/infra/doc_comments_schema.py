@@ -95,6 +95,7 @@ COMMENT_RECIPIENT_SCHEMA_SQL = """
     );
 """
 # An agent's write saved while someone else holds the thread's writer turn (doceditor/writer_line.py).
+# A row lives only while it waits: it is deleted when it posts or drops out of line.
 # root_id has no foreign key: a deleted thread drops its line with the agent told, not silently.
 WRITER_LINE_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS doc_comment_writer_line (
@@ -104,15 +105,13 @@ WRITER_LINE_SCHEMA_SQL = """
         agent_thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
         user_id TEXT NOT NULL,
         ops TEXT NOT NULL,
-        state TEXT NOT NULL DEFAULT 'waiting' CHECK (state IN ('waiting','woken','posted','dropped')),
+        state TEXT NOT NULL DEFAULT 'waiting' CHECK (state IN ('waiting','woken')),
         saved_at TEXT NOT NULL,
         wake_message_id TEXT,
-        wakes INTEGER NOT NULL DEFAULT 0,
-        settled_at TEXT,
-        settled_reason TEXT
+        wakes INTEGER NOT NULL DEFAULT 0
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_comment_writer_line_active
-        ON doc_comment_writer_line(root_id, agent_thread_id) WHERE state IN ('waiting','woken');
+        ON doc_comment_writer_line(root_id, agent_thread_id);
     CREATE INDEX IF NOT EXISTS idx_doc_comment_writer_line_root
         ON doc_comment_writer_line(root_id, state, saved_at);
     CREATE INDEX IF NOT EXISTS idx_doc_comment_writer_line_agent

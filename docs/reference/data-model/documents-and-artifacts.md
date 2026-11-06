@@ -208,10 +208,8 @@ Source: `backend/infra/doc_comments_schema.py`.
 | `saved_at` | TEXT | No | Yes | — | — |
 | `wake_message_id` | TEXT | No | No | — | — |
 | `wakes` | INTEGER | No | Yes | 0 | — |
-| `settled_at` | TEXT | No | No | — | — |
-| `settled_reason` | TEXT | No | No | — | — |
 
-Indexes: `idx_doc_comment_writer_line_active` (root_id, agent_thread_id, partial unique), `idx_doc_comment_writer_line_agent` (agent_thread_id, state), `idx_doc_comment_writer_line_root` (root_id, state, saved_at), `sqlite_autoindex_doc_comment_writer_line_1` (id, unique).
+Indexes: `idx_doc_comment_writer_line_active` (root_id, agent_thread_id, unique), `idx_doc_comment_writer_line_agent` (agent_thread_id, state), `idx_doc_comment_writer_line_root` (root_id, state, saved_at), `sqlite_autoindex_doc_comment_writer_line_1` (id, unique).
 
 ### `doc_comments`
 

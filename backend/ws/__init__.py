@@ -65,7 +65,7 @@ async def _receive_frames(
                 schedule_frame(ws, user, data)
                 continue
             if msg_type == comment_turn.FRAME_TYPE:
-                await comment_turn.handle_frame(ws, user, data)
+                schedule_frame(ws, user, data, comment_turn.handle_frame)
                 continue
             if msg_type == "stop":
                 expected_turn_id = (
@@ -139,8 +139,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         processor_task.cancel()
         heartbeat_task.cancel()
         _cleanup_ws(user_id, ws)
-        comment_turn.disconnect(ws)
-        await disconnect_documents(ws)
+        try:
+            await disconnect_documents(ws)
+        finally:
+            # After the socket's scheduled frames are joined, so none takes a turn back.
+            comment_turn.disconnect(ws)
 
 
 async def _authenticate(ws: WebSocket) -> dict | None:

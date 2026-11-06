@@ -4,9 +4,11 @@ An agent write on a thread whose turn someone else holds is saved here with its 
 not run. One row per agent per thread while it waits; a second write by the same agent joins its row.
 When the turn frees, the oldest row is woken once with what was posted since it was saved, its saved
 text, and two answers: post it as is (``doc_comment_update(post_as_is=true)``), or rewrite it with an
-ordinary call. The row settles as posted when that agent's next write on the thread is accepted, and
-the next row is woken at once. A woken agent whose turn ends without either drops out of line, is
-told, and the next row is woken. Nothing here runs on a timer.
+ordinary call. A row lives only while it waits: ``settle`` deletes it when it posts or drops out of
+line, and the next row is woken at once. A rewrite settles in the same transaction as the comment
+write that lands it (``landed``), so one never commits without the other. A woken agent whose turn
+ends without either drops out of line, is told, and the next row is woken; so does one whose thread
+can no longer take input. The continuation sweep serves any line left waiting (``serve_waiting``).
 
 Every function runs inside the caller's write transaction; ``BEGIN IMMEDIATE`` makes a line read
 and its write one step.
@@ -23,17 +25,17 @@ from typing import Any
 
 from loguru import logger
 
-from doceditor import comments as store, writer_turns
+from doceditor import comments as store, live_events, writer_turns
 from doceditor.note_names import document_name
+from doceditor.writer_line_text import describe, wake_text
 from infra.database import write_transaction
 from infra.passive_changes import append_thread_context_note
 from infra.write_effects import after_commit
 from registry import models as registry_models
 
+__all__ = ["Admitted", "Queued", "describe", "wake_text"]
+
 EVENT = "doc_comment.writer_turn"
-#: Items posted since the save that a wake quotes; the rest are counted.
-SINCE_LIMIT = 20
-_ACTIVE = "state IN ('waiting','woken')"
 #: Turn states still able to answer a wake.
 _LIVE = "('running','waiting_retry')"
 
@@ -41,7 +43,7 @@ _LIVE = "('running','waiting_retry')"
 @dataclass(frozen=True)
 class Admitted:
     root_id: str
-    entry_id: str | None
+    ops: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -68,20 +70,30 @@ def _now() -> str:
 def active(db, root_id: str) -> list[sqlite3.Row]:
     """The thread's line, first in line first."""
     return db.execute(
-        f"SELECT * FROM doc_comment_writer_line WHERE root_id=? AND {_ACTIVE} ORDER BY saved_at,id", (root_id,),
+        "SELECT * FROM doc_comment_writer_line WHERE root_id=? ORDER BY saved_at,id", (root_id,),
     ).fetchall()
 
 
 def count(db, root_id: str) -> int:
-    return db.execute(
-        f"SELECT COUNT(*) FROM doc_comment_writer_line WHERE root_id=? AND {_ACTIVE}", (root_id,),
-    ).fetchone()[0]
+    return counts(db, [root_id]).get(root_id, 0)
+
+
+def counts(db, root_ids) -> dict[str, int]:
+    """How many writes wait on each of these threads, in one grouped read."""
+    roots = sorted(set(root_ids))
+    if not roots:
+        return {}
+    rows = db.execute(
+        f"""SELECT root_id, COUNT(*) AS waiting FROM doc_comment_writer_line
+            WHERE root_id IN ({",".join("?" * len(roots))}) GROUP BY root_id""",
+        roots,
+    ).fetchall()
+    return {str(row["root_id"]): int(row["waiting"]) for row in rows}
 
 
 def saved_entry(db, root_id: str, thread_id: str) -> sqlite3.Row | None:
     return db.execute(
-        f"SELECT * FROM doc_comment_writer_line WHERE root_id=? AND agent_thread_id=? AND {_ACTIVE}",
-        (root_id, thread_id),
+        "SELECT * FROM doc_comment_writer_line WHERE root_id=? AND agent_thread_id=?", (root_id, thread_id),
     ).fetchone()
 
 
@@ -90,35 +102,57 @@ def _title(db, thread_id: str | None) -> str:
     return str(row["title"]) if row is not None and row["title"] else "another agent"
 
 
-def admit(db, *, root_id: str, artifact_id: str, thread_id: str, user_id: str,
-          op: dict[str, Any] | None) -> Admitted | Queued:
+def _turn_is_mine(line, root_id: str, thread_id: str) -> bool:
+    """No person is on the thread, no other agent is mid-write, and this agent is first in line or none wait."""
+    return (writer_turns.person_holding(root_id) is None and writer_turns.agent_writing(root_id) in (None, thread_id)
+            and (not line or line[0]["agent_thread_id"] == thread_id))
+
+
+def admit(db, *, root_id: str, artifact_id: str, thread_id: str, user_id: str, op: dict[str, Any]) -> Admitted | Queued:
     """Let this agent's write take the turn, or save ``op`` in line.
 
-    The turn is free for an agent when no person is on the thread, no other agent is mid-write, and
-    the agent is first in line or the line is empty. A woken agent whose write finds the turn taken
-    again goes back to waiting in its place; an ordinary call then replaces its saved text, since it
-    is that agent's rewrite. ``op`` None is ``post_as_is``: nothing new to save.
+    A woken agent whose write finds the turn taken again goes back to waiting in its place; an
+    ordinary call then replaces its saved text, since it is that agent's rewrite.
     """
     line = active(db, root_id)
-    mine = next((row for row in line if row["agent_thread_id"] == thread_id), None)
-    person = writer_turns.person_holding(root_id)
-    agent = writer_turns.agent_writing(root_id)
-    if person is None and agent in (None, thread_id) and (not line or line[0]["agent_thread_id"] == thread_id):
+    if _turn_is_mine(line, root_id, thread_id):
         writer_turns.agent_enter(root_id, thread_id)
-        return Admitted(root_id, mine["id"] if mine else None)
+        return Admitted(root_id)
+    mine = next((row for row in line if row["agent_thread_id"] == thread_id), None)
     if mine is None:
+        line_id = uuid.uuid4().hex
         db.execute(
             """INSERT INTO doc_comment_writer_line(id,root_id,artifact_id,agent_thread_id,user_id,ops,saved_at)
                VALUES (?,?,?,?,?,?,?)""",
-            (uuid.uuid4().hex, root_id, artifact_id, thread_id, user_id, json.dumps([op]), _now()),
+            (line_id, root_id, artifact_id, thread_id, user_id, json.dumps([op]), _now()),
         )
+        _event(db, "queued", root_id=root_id, artifact_id=artifact_id, line_id=line_id)
     else:
-        ops = json.loads(mine["ops"])
-        if op is not None:
-            ops = [op] if mine["state"] == "woken" else [*ops, op]
+        ops = [op] if mine["state"] == "woken" else [*json.loads(mine["ops"]), op]
         db.execute("UPDATE doc_comment_writer_line SET ops=?, state='waiting' WHERE id=?", (json.dumps(ops), mine["id"]))
+    return _queued(db, root_id, artifact_id, thread_id)
+
+
+def admit_as_is(db, *, root_id: str, thread_id: str) -> Admitted | Queued | None:
+    """``post_as_is``: take the turn with this agent's saved writes, read in this transaction.
+
+    None when nothing is saved. Admitted settles the row here, so a second call finds nothing to post.
+    """
+    mine = saved_entry(db, root_id, thread_id)
+    if mine is None:
+        return None
+    if _turn_is_mine(active(db, root_id), root_id, thread_id):
+        writer_turns.agent_enter(root_id, thread_id)
+        settle(db, mine, "posted_as_is")
+        return Admitted(root_id, tuple(json.loads(mine["ops"])))
+    db.execute("UPDATE doc_comment_writer_line SET state='waiting' WHERE id=?", (mine["id"],))
+    return _queued(db, root_id, str(mine["artifact_id"]), thread_id)
+
+
+def _queued(db, root_id: str, artifact_id: str, thread_id: str) -> Queued:
     line = active(db, root_id)
     position = next(index for index, row in enumerate(line, 1) if row["agent_thread_id"] == thread_id)
+    person, agent = writer_turns.person_holding(root_id), writer_turns.agent_writing(root_id)
     if person is not None:
         holder = person.name
     elif agent is not None and agent != thread_id:
@@ -129,23 +163,59 @@ def admit(db, *, root_id: str, artifact_id: str, thread_id: str, user_id: str,
     return Queued(root_id, position, holder)
 
 
-def finish(db, *, root_id: str, thread_id: str, entry_id: str | None, posted: bool, as_is: bool = False) -> list[str]:
-    """The agent's write call ended: release its turn, settle its saved row, serve the next.
+def landed(db, root_id: str, thread_id: str | None) -> None:
+    """An agent's write on this thread commits in ``db``'s transaction: settle its saved row with it.
 
-    Returns the agent threads woken, to drive after commit.
+    Only a write made holding the turn settles a row; an Agree, which never waits, leaves it in line.
     """
+    if not thread_id or writer_turns.agent_writing(root_id) != thread_id:
+        return
+    mine = saved_entry(db, root_id, thread_id)
+    if mine is not None:
+        settle(db, mine, "rewritten")
+
+
+def settle(db, row, outcome: str) -> None:
+    """The one end of a saved row: posted as is, rewritten, or dropped. The row is deleted."""
+    db.execute("DELETE FROM doc_comment_writer_line WHERE id=?", (row["id"],))
+    waited = (datetime.now(timezone.utc) - datetime.fromisoformat(str(row["saved_at"]))).total_seconds()
+    _event(db, outcome, root_id=str(row["root_id"]), artifact_id=str(row["artifact_id"]), line_id=str(row["id"]),
+           wakes=int(row["wakes"]), waited_seconds=round(waited, 3))
+    _publish_after_commit(db, str(row["root_id"]), str(row["artifact_id"]))
+
+
+def _event(db, outcome: str, **properties) -> None:
+    """One product event per line step, once its write commits: identities and counts only."""
+    after_commit(db, lambda: live_events.emit("comment_writer_line", outcome=outcome, **properties))
+
+
+def finish(db, *, root_id: str, thread_id: str) -> list[str]:
+    """The agent's write call ended: release its turn and serve the next. Returns the agent threads woken."""
     writer_turns.agent_exit(root_id, thread_id)
-    if posted and entry_id is not None:
-        db.execute(
-            f"UPDATE doc_comment_writer_line SET state='posted', settled_at=?, settled_reason=? WHERE id=? AND {_ACTIVE}",
-            (_now(), "posted" if as_is else "rewritten", entry_id),
-        )
-        _publish_after_commit(db, root_id, None)
     return serve(db, root_id)
 
 
+def _unable(db, row) -> str | None:
+    """Why this row's agent can no longer take its wake, as a send to it would be refused; None when it can."""
+    from infra.send_target import model_admission
+
+    thread = db.execute("SELECT model FROM threads WHERE id=?", (row["agent_thread_id"],)).fetchone()
+    if thread is None:
+        return "your thread was deleted"
+    if row["state"] == "woken":
+        wake = db.execute("SELECT delivery_state FROM messages WHERE id=?", (row["wake_message_id"],)).fetchone()
+        if wake is not None and wake["delivery_state"] in ("failed", "cancelled"):
+            return "your thread could not take the wake"
+    if thread["model"] and model_admission(thread["model"], db=db, thread_id=str(row["agent_thread_id"])) == "fail":
+        return "your thread's model cannot take input"
+    return None
+
+
 def serve(db, root_id: str) -> list[str]:
-    """Wake the first agent in line once the turn is free and no one in line is already woken."""
+    """Wake the first agent in line once the turn is free and no one in line is already woken.
+
+    A woken or first row whose agent can no longer take input drops out of line first.
+    """
     from events.delivery import enqueue_event_wake
     from infra.send_types import SendRejected
 
@@ -153,12 +223,18 @@ def serve(db, root_id: str) -> list[str]:
         return []
     while True:
         line = active(db, root_id)
-        if not line or any(row["state"] == "woken" for row in line):
+        if not line:
             return []
-        head = line[0]
+        woken = next((row for row in line if row["state"] == "woken"), None)
+        head = woken or line[0]
         if store.get_comment(root_id, db=db) is None:
             _drop(db, head, "the thread was deleted")
             continue
+        if reason := _unable(db, head):
+            _drop(db, head, reason)
+            continue
+        if woken is not None:
+            return []
         wakes = head["wakes"] + 1
         message_id = f"writer-line-{head['id']}-{wakes}"
         try:
@@ -176,14 +252,24 @@ def serve(db, root_id: str) -> list[str]:
             logger.warning("writer line {} could not wake {}: {}", head["id"], head["agent_thread_id"], error)
             _drop(db, head, "your thread could not be woken")
             continue
+        _event(db, "woken", root_id=root_id, artifact_id=str(head["artifact_id"]), line_id=str(head["id"]), wakes=wakes)
         _publish_after_commit(db, root_id, head["artifact_id"])
         return [str(head["agent_thread_id"])]
+
+
+def serve_waiting(db) -> list[str]:
+    """The continuation sweep's pass: serve every line with a write waiting, so none waits on a lost serve."""
+    drives: list[str] = []
+    for row in db.execute("SELECT DISTINCT root_id FROM doc_comment_writer_line WHERE state='waiting'").fetchall():
+        drives.extend(serve(db, str(row["root_id"])))
+    return drives
 
 
 def settle_turn_end(db, thread_id: str, turn_id: str | None) -> list[str]:
     """Drop this agent's woken rows whose wake ended unanswered, stopped or never written included; serve each next.
 
-    A wake still queued is yet to be read, and one inside another live turn may still be answered there.
+    A wake still queued is yet to be read unless the thread can no longer take it, and one inside
+    another live turn may still be answered there.
     """
     drives: list[str] = []
     rows = db.execute(
@@ -196,6 +282,9 @@ def settle_turn_end(db, thread_id: str, turn_id: str | None) -> list[str]:
     ).fetchall()
     for row in rows:
         if row["delivery_state"] == "queued":
+            if reason := _unable(db, row):
+                _drop(db, row, reason)
+                drives.extend(serve(db, str(row["root_id"])))
             continue
         if row["active_turn_id"] != turn_id and row["turn_status"] in ("running", "waiting_retry"):
             continue
@@ -208,7 +297,8 @@ def recover(db) -> list[str]:
     """After a restart every turn is free: re-wake rows whose wake will not reach a live turn, serve every line.
 
     A wake still queued is delivered after the restart, and one inside a turn that is still live is
-    answered there; every other woken row goes back to waiting in its place and is woken again.
+    answered there; every other woken row goes back to waiting in its place and is woken again. A row
+    whose agent can no longer take input drops out of line when its line is served.
     """
     db.execute(
         f"""UPDATE doc_comment_writer_line SET state='waiting'
@@ -219,82 +309,23 @@ def recover(db) -> list[str]:
                         SELECT 1 FROM active_turns t WHERE t.id=m.active_turn_id AND t.status IN {_LIVE}))))""",
     )
     drives: list[str] = []
-    for row in db.execute(f"SELECT DISTINCT root_id FROM doc_comment_writer_line WHERE {_ACTIVE}").fetchall():
+    for row in db.execute("SELECT DISTINCT root_id FROM doc_comment_writer_line").fetchall():
         drives.extend(serve(db, str(row["root_id"])))
     return drives
 
 
 def _drop(db, row, reason: str) -> None:
-    db.execute(
-        "UPDATE doc_comment_writer_line SET state='dropped', settled_at=?, settled_reason=? WHERE id=?",
-        (_now(), reason, row["id"]),
-    )
-    artifact = registry_models.get_artifact(str(row["artifact_id"]), db=db)
-    drafts = "\n".join(describe(op) for op in json.loads(row["ops"]))
-    append_thread_context_note(
-        db, thread_id=str(row["agent_thread_id"]),
-        summary=(f"Your saved write on a comment thread in {document_name(artifact)} dropped out of line and was "
-                 f"not posted: {reason}. What you had saved:\n{drafts}"),
-        details={"comment_id": row["root_id"], "artifact_id": row["artifact_id"]},
-    )
-    _publish_after_commit(db, str(row["root_id"]), str(row["artifact_id"]))
-
-
-def describe(op: dict[str, Any]) -> str:
-    """One saved write in the words a wake shows it."""
-    kind = op.get("kind")
-    if kind == "reply":
-        return f'Reply: "{op["input"]["body"]}"'
-    if kind == "decide":
-        verb = "Accept" if op["decision"] == "accept" else "Reject"
-        reason = f' Reason: "{op["reason"]}"' if op.get("reason") else ""
-        return f"{verb} the suggestion.{reason}"
-    fields = op.get("fields", {})
-    parts = []
-    if fields.get("resolved") is True:
-        parts.append("Resolve the thread.")
-    if fields.get("resolved") is False:
-        parts.append("Re-open the thread.")
-    if fields.get("acked") is False:
-        parts.append("Take back your Agree.")
-    if "body" in fields:
-        parts.append(f'Edit your comment to: "{fields["body"]}"')
-    if any(key in fields for key in ("from_off", "to_off", "anchor_text", "region")):
-        parts.append("Move your comment.")
-    return " ".join(parts) or "Update the comment."
-
-
-def wake_text(db, row) -> str:
-    root_id = str(row["root_id"])
-    root = store.get_comment(root_id, db=db) or {}
-    artifact = registry_models.get_artifact(str(row["artifact_id"]), db=db)
-    where = f'the comment thread on "{root.get("anchor_text")}"' if root.get("anchor_text") else "a comment thread"
-    since = db.execute(
-        """SELECT author, body, created_at FROM doc_comments WHERE (id=? OR parent_id=?) AND created_at>?
-           ORDER BY created_at, id""",
-        (root_id, root_id, row["saved_at"]),
-    ).fetchall()
-    lines = [f"The writer turn is yours on {where} in {document_name(artifact)}."]
-    if since:
-        lines.append("Posted on the thread since you saved your write:")
-        lines += [f'- {item["author"]}: "{item["body"]}"' for item in since[:SINCE_LIMIT]]
-        if len(since) > SINCE_LIMIT:
-            lines.append(f'- and {len(since) - SINCE_LIMIT} more; read them with doc_comments_list(comment_id="{root_id}").')
-    else:
-        lines.append("Nothing was posted on the thread since you saved your write.")
-    if root.get("decision"):
-        lines.append(f"The suggestion is now {root['decision']} by {root.get('decided_by') or 'someone'}.")
-    elif root.get("resolved"):
-        lines.append("The thread is now resolved.")
-    lines.append("Your saved write:")
-    lines += [f"- {describe(op)}" for op in json.loads(row["ops"])]
-    lines += [
-        "Answer one way:",
-        f'- Post it as is: doc_comment_update(comment_id="{root_id}", post_as_is=true)',
-        "- Or rewrite it: make the call again with what you want to say now.",
-        "If this turn ends with neither, your write drops out of line and the next agent goes.",
-    ]
-    return "\n".join(lines)
+    """Drop a row out of line and tell its agent what it had saved; a deleted agent has no one to tell."""
+    if db.execute("SELECT 1 FROM threads WHERE id=?", (row["agent_thread_id"],)).fetchone() is not None:
+        artifact = registry_models.get_artifact(str(row["artifact_id"]), db=db)
+        drafts = "\n".join(describe(op) for op in json.loads(row["ops"]))
+        append_thread_context_note(
+            db, thread_id=str(row["agent_thread_id"]),
+            summary=(f"Your saved write on a comment thread in {document_name(artifact)} dropped out of line and was "
+                     f"not posted: {reason}. What you had saved:\n{drafts}"),
+            details={"comment_id": row["root_id"], "artifact_id": row["artifact_id"]},
+        )
+    settle(db, row, "dropped")
 
 
 def _publish_after_commit(db, root_id: str, artifact_id: str | None) -> None:

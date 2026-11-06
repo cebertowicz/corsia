@@ -1,7 +1,10 @@
 """WebSocket ``comment_turn`` frames: a person's page holding a comment thread's writer turn.
 
-A frame is state, not an input: it is handled inline by the frame reader and never reaches the
-Turn queue. Every failure is logged and dropped, because the turn must never break the socket.
+A frame is state, not an input: the frame reader schedules it off the reader
+(``document_control.schedule_frame``), so Stop and turn frames never wait behind it, and it never
+reaches the Turn queue. One socket's frames apply in the order sent. Every failure is logged and
+dropped, because the turn must never break the socket; a line a failed serve left waiting is served
+by the continuation sweep.
 
 Frames::
 
@@ -29,6 +32,8 @@ FRAME_TYPE = "comment_turn"
 
 _leases: dict[object, asyncio.TimerHandle] = {}
 _tasks: set[asyncio.Task] = set()
+# Frames from one socket run as separate tasks; this keeps them in the order the page sent them.
+_order: dict[object, asyncio.Lock] = {}
 
 
 def _root(comment_id: str, user_id: str) -> tuple[str, str] | None:
@@ -61,8 +66,8 @@ def _spawn(coro) -> None:
 async def _serve(freed: list[str]) -> None:
     try:
         await agent_comment_writes.serve_freed(freed)
-    except Exception as exc:
-        logger.warning(f"comment_turn: serving {freed} failed: {exc}")
+    except Exception:
+        logger.exception("comment_turn: serving {} failed; the continuation sweep serves it", freed)
 
 
 def _expire(page: object) -> None:
@@ -78,6 +83,11 @@ async def handle_frame(ws: WebSocket, user: dict, data: dict) -> None:
     if not isinstance(on, bool) or (on and not isinstance(comment_id, str)):
         logger.debug(f"comment_turn: ignored malformed frame {data!r}")
         return
+    async with _order.setdefault(ws, asyncio.Lock()):
+        await _apply(ws, user, comment_id, on)
+
+
+async def _apply(ws: WebSocket, user: dict, comment_id: str | None, on: bool) -> None:
     try:
         if not on:
             _forget_lease(ws)
@@ -100,6 +110,7 @@ async def handle_frame(ws: WebSocket, user: dict, data: dict) -> None:
 def disconnect(ws: WebSocket) -> None:
     """A closed socket's page leaves its thread at once."""
     _forget_lease(ws)
+    _order.pop(ws, None)
     freed = writer_turns.release(ws)
     if freed:
         try:

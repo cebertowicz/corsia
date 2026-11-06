@@ -58,7 +58,7 @@
 		/** Reduced motion: a leaving row fades and nothing slides. */
 		reduced?: boolean;
 	} = $props();
-	// The selected thread is the one the person is on: this page holds its writer turn (DRAFT-comment-lock).
+	// The selected thread is the one the person is on: this page holds its writer turn.
 	const turnOwner = {};
 	$effect(() => { commentTurn()?.show(turnOwner, readOnly ? null : focusedId); });
 	$effect(() => { const hasText = !!focusedId && !!replyDrafts[focusedId]?.trim(); commentTurn()?.draft(turnOwner, hasText); });

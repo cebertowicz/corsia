@@ -1,5 +1,5 @@
 /**
- * A comment thread's writer turn, held by the person while they are on it (DRAFT-comment-lock).
+ * A comment thread's writer turn, held by the person while they are on it.
  *
  * The comment list reports the thread whose card is selected (`show`) and whether its reply box
  * has text (`draft`). While the person is on that thread this page holds its turn: it sends

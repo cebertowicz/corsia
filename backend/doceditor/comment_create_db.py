@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from doceditor import comments, comment_recipients, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle
+from doceditor import comments, comment_recipients, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle, writer_line
 from doceditor.comment_action_errors import CommentSelectionChanged, diagram_changed
 from doceditor.comment_creation import Anchor, CreateReceipt
 from doceditor.doc_text import read_doc_text
@@ -156,6 +156,9 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
             )
             if created:
                 _record_tags(connection, request, row)
+            if row["parent_id"]:
+                # An agent reply made holding the thread's writer turn settles its saved row in this write.
+                writer_line.landed(connection, str(row["parent_id"]), request.author_thread_id)
             comment_recipients.tags_for_comments(connection, [row])
             if request.review_request_id is not None:
                 review_lifecycle.admit_feedback(

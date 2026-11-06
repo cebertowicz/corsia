@@ -331,8 +331,11 @@ async def handle_frame(socket, user: dict, data: dict) -> None:
                                     "message": "The document operation failed; keep your device copy and retry"})
 
 
-def schedule_frame(socket, user: dict, data: dict) -> None:
-    """Keep file/store waits off the receiver so turn and Stop frames still flow."""
+def schedule_frame(socket, user: dict, data: dict, handle=None) -> None:
+    """Keep file/store waits off the receiver so turn and Stop frames still flow.
+
+    ``handle`` runs another control frame (a comment turn) the same way; disconnect joins it too.
+    """
     owned = _tasks.setdefault(socket, set())
     # Updates following an open wait only for admission, never for a file flush.
     opening_tasks = _openings.setdefault(socket, set())
@@ -340,7 +343,7 @@ def schedule_frame(socket, user: dict, data: dict) -> None:
     async def dispatch():
         if openings:
             await asyncio.gather(*openings)
-        await handle_frame(socket, user, data)
+        await (handle or handle_frame)(socket, user, data)
     task = asyncio.create_task(dispatch())
     owned.add(task)
     if data["type"] == "doc_open":
