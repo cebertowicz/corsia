@@ -329,11 +329,12 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
     if approved:
         try:
             tree = await asyncio.to_thread(script_tree.read_tree, path)
-        except (OSError, ValueError):
-            return hash_mismatch_report(schedule, folder=True)
-        expected = script_tree.approved_tree_sha256(authentication, path, schedule.script_sha256)
-        if script_tree.tree_sha256(tree) != expected:
-            return hash_mismatch_report(schedule, folder=True)
+        except (OSError, ValueError) as exc:
+            return hash_mismatch_report(schedule, folder=str(exc))
+        if script_tree.tree_sha256(tree) != authentication.get("tree_sha256"):
+            return hash_mismatch_report(schedule, folder=(
+                "a file in it changed, appeared or went away; a script that writes into its own "
+                "folder does this too, so keep what it writes elsewhere"))
     project = None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id
     run_id = uuid.uuid4().hex
     try:

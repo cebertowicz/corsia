@@ -376,19 +376,36 @@ async def test_approved_script_stops_when_a_file_in_its_folder_changes(tmp_path,
     (tmp_path / "helper.py").write_text("VALUE = 2\n")
     report = await script_runner._execute(schedule)
     assert report.status == "hash_mismatch"
-    assert "folder" in (report.error or "")
+    assert "keep what it writes elsewhere" in (report.error or "")
     assert len(calls) == 1
 
 
 @pytest.mark.asyncio
-async def test_approval_without_a_folder_hash_runs_only_while_the_entry_is_alone(tmp_path, monkeypatch):
+async def test_approval_without_a_folder_hash_never_runs(tmp_path, monkeypatch):
     db = _db()
     schedule = _approved(db, tmp_path)
     calls = _use_authenticated_run(monkeypatch)
-    assert (await script_runner._execute(schedule)).status == "ok"
-    (tmp_path / "helper.py").write_text("VALUE = 1\n")
-    assert (await script_runner._execute(schedule)).status == "hash_mismatch"
-    assert len(calls) == 1
+    report = await script_runner._execute(schedule)
+    assert report.status == "hash_mismatch"
+    assert "schedule it again with authenticated=true" in (report.error or "")
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_folder_the_tree_refuses_names_its_own_fix(tmp_path, monkeypatch):
+    from automation import script_tree
+
+    db = _db()
+    entry = _script(tmp_path)
+    schedule = _approved(db, tmp_path, tree_sha256=script_tree.tree_sha256(script_tree.read_tree(entry)))
+    calls = _use_authenticated_run(monkeypatch)
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
+    outside.write_text("X = 1\n")
+    (tmp_path / "linked.py").symlink_to(outside)
+    report = await script_runner._execute(schedule)
+    assert report.status == "hash_mismatch"
+    assert "linked.py in the script's folder is a link" in (report.error or "")
+    assert calls == []
 
 
 @pytest.mark.asyncio

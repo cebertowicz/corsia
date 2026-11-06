@@ -24,19 +24,15 @@ def test_tree_holds_every_file_but_bytecode_caches(tmp_path):
     (tmp_path / "pkg" / "mod.py").write_text("Y = 2\n")
     (tmp_path / "__pycache__").mkdir()
     (tmp_path / "__pycache__" / "helper.cpython-313.pyc").write_bytes(b"\0cache")
-    outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
-    outside.write_text("Z = 3\n")
-    (tmp_path / "linked.py").symlink_to(outside)
 
     tree = script_tree.read_tree(entry)
 
-    assert tree == {"run.py": b"import helper\n", "helper.py": b"X = 1\n",
-                    "pkg/mod.py": b"Y = 2\n", "linked.py": b"Z = 3\n"}
-    outside.write_text("Z = 4\n")
+    assert tree == {"run.py": b"import helper\n", "helper.py": b"X = 1\n", "pkg/mod.py": b"Y = 2\n"}
+    (tmp_path / "pkg" / "mod.py").write_text("Y = 3\n")
     assert script_tree.tree_sha256(script_tree.read_tree(entry)) != script_tree.tree_sha256(tree)
 
 
-@pytest.mark.parametrize("make", ["folder_link", "broken_link", "too_large"])
+@pytest.mark.parametrize("make", ["folder_link", "file_link", "too_large"])
 def test_tree_refuses_what_it_cannot_cover_and_names_the_fix(tmp_path, make):
     entry = tmp_path / "run.py"
     entry.write_text("pass\n")
@@ -45,9 +41,11 @@ def test_tree_refuses_what_it_cannot_cover_and_names_the_fix(tmp_path, make):
         target.mkdir()
         (tmp_path / "pkg").symlink_to(target)
         expected = "copy what the script loads"
-    elif make == "broken_link":
-        (tmp_path / "gone.py").symlink_to(tmp_path / "missing.py")
-        expected = "broken link"
+    elif make == "file_link":  # what it points at may be outside what the run or the agent can read
+        outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
+        outside.write_text("Z = 3\n")
+        (tmp_path / "linked.py").symlink_to(outside)
+        expected = "linked.py in the script's folder is a link; copy what the script loads"
     else:
         (tmp_path / "data.bin").write_bytes(b"\0" * 1_000_001)
         expected = "folder of its own"

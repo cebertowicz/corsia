@@ -263,12 +263,15 @@ def _note_readings(
     return noted
 
 
-def hash_mismatch_report(schedule: Schedule, *, folder: bool = False) -> RunReport:
-    """The report for a script, or an approved script's folder, that is no longer the one registered."""
-    if folder:
+def hash_mismatch_report(schedule: Schedule, *, folder: str | None = None) -> RunReport:
+    """The report for a script, or an approved script's folder, that is no longer the one registered.
+
+    ``folder`` says what is wrong with the folder, with its own fix where it has one.
+    """
+    if folder is not None:
         return _failure(
             schedule, "hash_mismatch",
-            "has files in its folder that changed since it was approved, so its runs are stopped; "
+            f"its folder no longer matches its approval: {folder}. Its runs are stopped; "
             "schedule it again with authenticated=true to have the folder reviewed",
         )
     return _failure(
