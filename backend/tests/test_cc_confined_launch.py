@@ -200,17 +200,15 @@ def test_stored_record_without_confinement_reads_unconfined():
     assert claude_invocation_metadata(restored) == old
 
 
-def test_a_record_that_still_carries_read_dirs_restores_without_them():
-    """Records written before the thread row held the read dirs keep the old key; it is ignored."""
+def test_a_confined_record_from_before_the_bridge_does_not_restore():
+    """A confined launch used to run with no tool bridge; that record is not a launch now."""
     value = {
         "binary": "claude", "permission_mode": "dontAsk",
         "session_id": "s", "resume_session_id": None, "seed_file": "seed",
-        "mcp_config": "cfg.json", "working_dir": "/w", "model": "sonnet",
+        "mcp_config": None, "working_dir": "/w", "model": "sonnet",
         "effort": None, "confinement": "untrusted", "add_dirs": ["/src"],
     }
-    restored = claude_invocation_from_metadata(value)
-    assert restored is not None and restored.confinement == "untrusted"
-    assert "add_dirs" not in claude_invocation_metadata(restored)
+    assert claude_invocation_from_metadata(value) is None
 
 
 @pytest.mark.asyncio

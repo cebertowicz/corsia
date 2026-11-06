@@ -15,9 +15,6 @@ CONFINEMENT_NONE = "none"
 #: A launch whose only tools are CORSIA's confined read tools, checked per call.
 CONFINEMENT_UNTRUSTED = "untrusted"
 CONFINEMENTS = (CONFINEMENT_NONE, CONFINEMENT_UNTRUSTED)
-#: Launch records written before the thread row held a confined child's read dirs
-#: carry them here too; the row (``infra.thread_confinement``) is the only one read.
-_RETIRED_FIELDS = ("add_dirs",)
 
 
 def confined_claude_tool_names() -> list[str]:
@@ -107,7 +104,7 @@ def claude_invocation_from_metadata(value: object) -> ClaudeInvocation | None:
     """Restore one exact launch description only from a complete valid record."""
     if not isinstance(value, dict):
         return None
-    plain = {key: item for key, item in value.items() if key not in ("confinement", *_RETIRED_FIELDS)}
+    plain = {key: item for key, item in value.items() if key != "confinement"}
     fields = set(ClaudeInvocation.__dataclass_fields__) - {"confinement"}
     if set(plain) != fields or any(
         item is not None and not isinstance(item, str) for item in plain.values()

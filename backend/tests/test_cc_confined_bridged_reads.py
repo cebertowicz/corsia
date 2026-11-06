@@ -226,7 +226,7 @@ async def test_confined_launch_refuses_a_native_tool_it_declares(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("confined", [True, False], ids=["confined", "unconfined"])
-async def test_a_native_tool_call_is_never_run(
+async def test_a_native_tool_call_is_never_dispatched(
     child_db, standin, reviewed_dir, monkeypatch, tmp_path, confined,
 ):
     """(e) a native call is answered as a tool CORSIA does not serve, on any launch."""
