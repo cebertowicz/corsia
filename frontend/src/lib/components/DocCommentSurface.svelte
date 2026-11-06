@@ -219,7 +219,7 @@
 		else onFocus(id);
 	}
 	const authorsWithOpenSuggestions = $derived.by(() => Object.entries(
-		comments.filter((comment) => !comment.resolved && !comment.orphaned && comment.replacement !== null && comment.replacement !== undefined)
+		comments.filter((comment) => !comment.resolved && !comment.orphaned && !comment.textChanged && comment.replacement !== null && comment.replacement !== undefined)
 			.reduce<Record<string, DocComment[]>>((groups, comment) => ({ ...groups, [comment.author]: [...(groups[comment.author] ?? []), comment] }), {})
 	).filter(([, suggestions]) => suggestions.length >= 2));
 	// Whose accept-all is running. It disables every accept-all on purpose, across documents: one request at a time.

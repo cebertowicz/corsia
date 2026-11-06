@@ -46,7 +46,7 @@ def check_agent_suggestion_fits(
         return
     threads, _checked = anchored_threads(artifact_id, path, db, persist=False)
     for row in threads:
-        if not is_open_suggestion(row) or row.get("orphaned"):
+        if not is_open_suggestion(row) or row.get("orphaned") or row.get("text_changed"):
             continue
         if row["from_off"] is None or row["to_off"] is None:
             continue

@@ -7,7 +7,7 @@ import sqlite3
 
 from doceditor import comments as store
 from doceditor.doc_text import read_doc_text
-from doceditor.quote_anchor import anchor_context, reanchor
+from doceditor.quote_anchor import _cp_at_u16, anchor_context, reanchor
 
 log = logging.getLogger(__name__)
 
@@ -23,11 +23,50 @@ def _anchored_quote(comment: dict) -> str:
     return comment["anchor_text"]
 
 
+def _text_in_range(text: str, from16: int, to16: int) -> str:
+    """The text between two UTF-16 offsets, or "" for a collapsed or invalid range."""
+    start, end = _cp_at_u16(text, from16), _cp_at_u16(text, to16)
+    return text[start:end] if start is not None and end is not None and end > start else ""
+
+
+def _edited_place(comment: dict, text: str, tracked: tuple[int, int] | None) -> tuple[int, int] | None:
+    """Where an open suggestion's text was edited, if its two ends still hold.
+
+    Live, the range the document tracks; at rest, the stored offsets, which count
+    only while the stored text around them still surrounds them. The text between
+    must be non-empty: a suggestion whose text is all gone has no place left.
+    """
+    place: tuple[int, int]
+    if tracked is not None:
+        place = tracked
+    else:
+        from_off, to_off = comment.get("from_off"), comment.get("to_off")
+        prefix, suffix = comment.get("anchor_prefix") or "", comment.get("anchor_suffix") or ""
+        start, end = _cp_at_u16(text, from_off), _cp_at_u16(text, to_off)
+        if not (prefix or suffix) or start is None or end is None:
+            return None
+        if not isinstance(from_off, int) or not isinstance(to_off, int):
+            return None
+        if text[max(0, start - len(prefix)):start] != prefix or text[end:end + len(suffix)] != suffix:
+            return None
+        place = (from_off, to_off)
+    inside = _text_in_range(text, place[0], place[1])
+    return place if inside and inside != comment["anchor_text"] else None
+
+
 def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict]:
     """Resolve one text snapshot; callers choose when its offsets are persisted.
 
     A decided suggestion is never orphaned: its decision closed it, so losing
     its place keeps the offsets it has.
+
+    A comment whose live range still holds text keeps its place when the text
+    inside the range changes: the anchor is the range's two ends, and the text
+    between them becomes its new quote. Only a collapsed range, with all of its
+    text gone, orphans. A suggestion's quote is the text it replaces, so it is
+    never rewritten: an open suggestion edited inside keeps its place the same way,
+    flagged ``text_changed``, and its Accept is refused as stale (the quote no
+    longer matches).
     """
     updates: list[dict] = []
     for comment in threads:
@@ -36,11 +75,29 @@ def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict
         quote = _anchored_quote(comment)
         undecided = not comment.get("decision")
         resolved = (ranges or {}).get(comment["id"])
+        tracked = resolved is not None
+        suggestion = comment.get("replacement") is not None
+        if resolved is not None and undecided and not suggestion:
+            quote = _text_in_range(text, resolved[0], resolved[1]) or quote
         if resolved is None:
             resolved = reanchor(
                 text, quote, from16=comment["from_off"], to16=comment["to_off"],
                 prefix=comment.get("anchor_prefix"), suffix=comment.get("anchor_suffix"),
             )
+        edited = None
+        if undecided and suggestion and (tracked or resolved is None):
+            edited = _edited_place(comment, text, resolved if tracked else None)
+        if edited is not None:
+            inside = _text_in_range(text, edited[0], edited[1])
+            context = anchor_context(text, *edited, inside)
+            prior = (comment.get("from_off"), comment.get("to_off"),
+                     comment.get("anchor_prefix"), comment.get("anchor_suffix"))
+            comment.update(from_off=edited[0], to_off=edited[1], anchor_prefix=context[0],
+                           anchor_suffix=context[1], orphaned=False, text_changed=True)
+            if prior != (*edited, *context):
+                updates.append({"id": comment["id"], "from_off": edited[0], "to_off": edited[1],
+                                "anchor_prefix": context[0], "anchor_suffix": context[1]})
+            continue
         if resolved is None:
             comment["orphaned"] = undecided
             continue
@@ -48,19 +105,30 @@ def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict
         context = anchor_context(text, from_off, to_off, quote)
         if context is None:
             comment["orphaned"] = undecided
-            # Preserve mapped collapsed ranges in the live response. Reload can
-            # deliberately omit the range hint and resolve restored text anew.
-            if undecided and comment["id"] in (ranges or {}):
+            # A tracked range is where the thread is, whatever the text inside it now
+            # says: a deleted highlight's collapse point, or a decided suggestion's edited
+            # text. Report it and persist it, so a reload finds the same place instead of
+            # the stale offsets. Reload can deliberately omit the range hint and resolve
+            # restored text anew.
+            if comment["id"] in (ranges or {}):
+                if (comment.get("from_off"), comment.get("to_off")) != resolved:
+                    updates.append({"id": comment["id"], "from_off": from_off, "to_off": to_off})
                 comment["from_off"], comment["to_off"] = resolved
             continue
         prefix, suffix = context
         prior = (comment.get("from_off"), comment.get("to_off"),
                  comment.get("anchor_prefix"), comment.get("anchor_suffix"))
+        requoted = undecided and quote != comment["anchor_text"]
         comment.update(from_off=from_off, to_off=to_off, anchor_prefix=prefix,
                        anchor_suffix=suffix, orphaned=False)
-        if prior != (from_off, to_off, prefix, suffix):
-            updates.append({"id": comment["id"], "from_off": from_off, "to_off": to_off,
-                            "anchor_prefix": prefix, "anchor_suffix": suffix})
+        if requoted:
+            comment["anchor_text"] = quote
+        if prior != (from_off, to_off, prefix, suffix) or requoted:
+            update = {"id": comment["id"], "from_off": from_off, "to_off": to_off,
+                      "anchor_prefix": prefix, "anchor_suffix": suffix}
+            if requoted:
+                update["anchor_text"] = quote
+            updates.append(update)
     return updates
 
 

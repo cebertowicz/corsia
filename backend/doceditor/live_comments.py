@@ -41,6 +41,12 @@ async def positions(entry, artifact_id: str, *, reload: bool = False) -> dict:
     for row in placed:
         live.track_range(row["id"], row["from_off"], row["to_off"])
     # An orphaned row keeps its collapsed live range for a later resolution; naming it would report a place.
+    # A document opened afresh has no range for it, so its stored collapse point is tracked from here on, and
+    # edits above it move it. Only a collapsed point is a place: a wider stale span would attach it to other text.
+    for row in rows:
+        if (row.get("orphaned") and row["id"] not in live.ranges and row["from_off"] is not None
+                and row["from_off"] == row["to_off"] and live.fits(row["from_off"], row["to_off"])):
+            live.track_range(row["id"], row["from_off"], row["to_off"])
     return {"ranges": [{"id": row["id"], "from_off": live.ranges[row["id"]][0],
                         "to_off": live.ranges[row["id"]][1]} for row in placed],
             "digest": live.digest, "vector": live.doc.get_state()}

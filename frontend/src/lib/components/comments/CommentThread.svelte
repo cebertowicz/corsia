@@ -18,6 +18,8 @@
 		createdAt?: string;
 		resolved: boolean;
 		orphaned?: boolean;
+		/** An open suggestion edited inside: it keeps its place and cannot be accepted. */
+		textChanged?: boolean;
 		acked?: boolean;
 		replacement?: string | null;
 		insertAfter?: boolean;
@@ -221,7 +223,7 @@
 		onFocus?.();
 	}
 	async function decide(decision: 'accept' | 'reject') {
-		if (readOnly || decisionBusy || (decision === 'accept' && comment.orphaned)) return;
+		if (readOnly || decisionBusy || (decision === 'accept' && (comment.orphaned || comment.textChanged))) return;
 		openThread();
 		decisionBusy = decision;
 		try {
@@ -300,11 +302,11 @@
 
 		{#if isSuggestion}
 			{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
-			{#if comment.orphaned}<div class="ct-orphan">The text this suggestion replaces has changed.</div>{/if}
+			{#if comment.textChanged}<div class="ct-orphan">The text changed after this suggestion</div>{:else if comment.orphaned}<div class="ct-orphan">The text this suggestion replaces has changed.</div>{/if}
 			{#if comment.text}<CommentMarkdownBody text={comment.text} />{/if}
 			{#if !readOnly}
 				<div class="ct-suggestion-actions">
-					<button class="ct-suggestion-accept" aria-busy={decisionBusy === 'accept'} disabled={decisionBusy !== null || comment.orphaned} title={comment.orphaned ? 'The text this suggestion replaces has changed.' : undefined} onclick={(e) => { e.stopPropagation(); decide('accept'); }}>{decisionBusy === 'accept' ? 'Accepting…' : 'Accept'}</button>
+					<button class="ct-suggestion-accept" aria-busy={decisionBusy === 'accept'} disabled={decisionBusy !== null || comment.orphaned || comment.textChanged} title={comment.textChanged ? 'The text changed after this suggestion' : comment.orphaned ? 'The text this suggestion replaces has changed.' : undefined} onclick={(e) => { e.stopPropagation(); decide('accept'); }}>{decisionBusy === 'accept' ? 'Accepting…' : 'Accept'}</button>
 					<button class="ct-link" aria-busy={decisionBusy === 'reject'} disabled={decisionBusy !== null} onclick={(e) => { e.stopPropagation(); decide('reject'); }}>{decisionBusy === 'reject' ? 'Rejecting…' : 'Reject'}</button>
 				</div>
 			{/if}

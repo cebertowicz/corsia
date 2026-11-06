@@ -309,6 +309,15 @@ describe('CommentThread', () => {
 		expect(host.textContent).toContain('The text this suggestion replaces has changed.');
 	});
 
+	it('disables accepting a suggestion edited inside, with the reason, while Reject and Reply stay', () => {
+		render(thread({ replacement: 'new text', textChanged: true }));
+		const accept = button('.ct-suggestion-accept');
+		expect(accept.disabled).toBe(true);
+		expect(accept.title).toBe('The text changed after this suggestion');
+		expect(host.querySelector('.ct-orphan')?.textContent).toBe('The text changed after this suggestion');
+		expect(host.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.disabled).toBe(false);
+	});
+
 	it('collapses a decided suggestion with attribution', () => {
 		render(thread({ replacement: 'new text', decision: 'accepted', decidedBy: 'Ada', resolved: true }));
 		expect(host.textContent).toContain('Suggested by You · Accepted by Ada');

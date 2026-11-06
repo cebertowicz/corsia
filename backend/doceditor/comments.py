@@ -261,7 +261,7 @@ def set_stranded_notice(comment_id: str, at: str | None, *, db=None) -> None:
 
 
 def update_positions(artifact_id: str, updates: list[dict], *, db=None) -> int:
-    """Batch-persist remapped anchor offsets and optionally refreshed context."""
+    """Batch-persist remapped anchor offsets and optionally refreshed context and quote."""
     now = _now()
     with write_transaction(db, scope="update_doc_comment_positions") as connection:
         n = 0
@@ -271,6 +271,9 @@ def update_positions(artifact_id: str, updates: list[dict], *, db=None) -> int:
             if "anchor_prefix" in u:
                 sets.extend(["anchor_prefix=?", "anchor_suffix=?"])
                 params.extend([u["anchor_prefix"], u["anchor_suffix"]])
+            if "anchor_text" in u:
+                sets.append("anchor_text=?")
+                params.append(u["anchor_text"])
             sets.append("updated_at=?")
             params.extend([now, u.get("id"), artifact_id])
             cur = connection.execute(
