@@ -49,6 +49,26 @@ def test_the_decision_reply_read_uses_the_index() -> None:
         assert any(_INDEX in row[-1] for row in plan), plan
 
 
+def test_the_step_marks_each_decided_resolved_suggestion_as_closed_by_its_decision() -> None:
+    with closing(_fresh()) as db:
+        db.execute("DROP INDEX idx_doc_comments_parent")
+        db.execute("ALTER TABLE doc_comments DROP COLUMN closed_by_decision")
+        rows = [  # id, parent, decision, resolved
+            ("decided", None, "accepted", 1), ("discussed", None, "rejected", 1),
+            ("open", None, "rejected", 0), ("person", None, None, 1), ("reply", "discussed", None, 1),
+        ]
+        db.executemany(
+            "INSERT INTO doc_comments (id, artifact_id, parent_id, author, body, decision, resolved, created_at, updated_at)"
+            " VALUES (?, 'a', ?, 'Robin', 'b', ?, ?, 't', 't')", rows,
+        )
+
+        migrate_179_to_180(db)
+        migrate_179_to_180(db)
+
+        marked = dict(db.execute("SELECT id, closed_by_decision FROM doc_comments").fetchall())
+        assert marked == {"decided": 1, "discussed": 1, "open": 0, "person": 0, "reply": 0}
+
+
 def test_the_step_skips_a_database_without_comments() -> None:
     with closing(sqlite3.connect(":memory:")) as db:
         migrate_179_to_180(db)

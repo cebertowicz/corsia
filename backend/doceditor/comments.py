@@ -147,22 +147,16 @@ def _next_region_number(connection, cid: str, artifact_id: str, image_src: str |
     ).fetchone()[0]
 
 
-def closed_by_decision(connection, comment_id: str, *, reply_id: str) -> bool:
-    """Whether a resolved decided suggestion was closed by its decision, not by a person.
+def closed_by_decision(connection, comment_id: str) -> bool:
+    """Whether a suggestion is resolved because its decision resolved it, not a person.
 
-    A decision closes only a suggestion with no replies (``comment_actions._record_decision_row``); one with
-    replies stays open until someone resolves it, and Re-open never leaves a resolved decided
-    one. So a resolved decided suggestion with no reply other than ``reply_id`` is exactly
-    one its decision closed.
+    The decision sets ``closed_by_decision`` (``comment_actions._record_decision_row``); every other
+    change to ``resolved`` clears it (``update``).
     """
     root = connection.execute(
-        "SELECT decision, resolved FROM doc_comments WHERE id=?", (comment_id,)
+        "SELECT decision, resolved, closed_by_decision FROM doc_comments WHERE id=?", (comment_id,)
     ).fetchone()
-    if root is None or not root["decision"] or not root["resolved"]:
-        return False
-    return connection.execute(
-        "SELECT 1 FROM doc_comments WHERE parent_id=? AND id<>? LIMIT 1", (comment_id, reply_id)
-    ).fetchone() is None
+    return root is not None and bool(root["decision"] and root["resolved"] and root["closed_by_decision"])
 
 
 def create_with_status(
@@ -219,7 +213,7 @@ def create_with_status(
         r = dict(row)
         _check_existing_identity(r, artifact_id, author, cid)
         created = inserted.rowcount == 1
-        if created and parent_id and closed_by_decision(connection, r["parent_id"], reply_id=cid):
+        if created and parent_id and closed_by_decision(connection, r["parent_id"]):
             # The reply rule stated on comment_actions.reopen_fields.
             update(r["parent_id"], {"resolved": False}, db=connection)
         if created:
@@ -249,13 +243,15 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
     resolving or deciding settles the delivered feedback that holds it.
     """
     allowed = {"resolved", "acked", "body", "from_off", "to_off", "anchor_text", "decision", "decided_by", "decided_by_thread_id", "decided_at", "decision_event_id", "decided_in_bulk",
-               "region_x", "region_y", "region_w", "region_h", "image_rev"}
+               "closed_by_decision", "region_x", "region_y", "region_w", "region_h", "image_rev"}
+    if "resolved" in fields and "closed_by_decision" not in fields:
+        fields = {**fields, "closed_by_decision": False}  # only a decision closes a thread as decided
     sets, params = [], []
     for k, v in fields.items():
         if k not in allowed:
             continue
         sets.append(f"{k}=?")
-        params.append(int(v) if k in ("resolved", "acked", "decided_in_bulk") and isinstance(v, bool) else v)
+        params.append(int(v) if k in ("resolved", "acked", "decided_in_bulk", "closed_by_decision") and isinstance(v, bool) else v)
     if not sets:
         return None
     now = _now()

@@ -123,6 +123,7 @@ def _record_decision_row(
         "decision_event_id": decision_event_id,
         "decided_in_bulk": bulk,
         "resolved": not replied,
+        "closed_by_decision": not replied,
         "acked": True,
     }, db=connection)
     if row is None:

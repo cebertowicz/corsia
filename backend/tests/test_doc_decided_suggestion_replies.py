@@ -79,6 +79,20 @@ def test_a_decided_suggestion_a_person_resolved_stays_resolved_when_a_reply_arri
     assert _state(db, suggestion["id"]) == ("accepted", 1)
 
 
+def test_the_first_reply_reopens_a_thread_its_decision_closed_after_earlier_replies(scope):
+    # A suggestion decided before decisions kept discussed threads open: closed by its decision,
+    # with replies already under it (schema step 180 marks these rows).
+    db, artifact_id = scope
+    suggestion, _ = add_comment(db, artifact_id, replacement="better wording")
+    _decide(db, suggestion, "accept")
+    add_comment(db, artifact_id, parent_id=suggestion["id"], author_kind="user", author_id=None, author="Robin")
+    store.update(suggestion["id"], {"resolved": True, "closed_by_decision": True}, db=db)
+
+    add_comment(db, artifact_id, parent_id=suggestion["id"])
+
+    assert _state(db, suggestion["id"]) == ("accepted", 0)
+
+
 def test_a_reply_to_an_undecided_comment_changes_nothing_about_it(scope):
     db, artifact_id = scope
     suggestion, _ = add_comment(db, artifact_id, replacement="better wording")

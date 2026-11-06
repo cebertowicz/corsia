@@ -15,10 +15,17 @@ function clickedLine(target: Node, y: number): { top: number; bottom: number } |
 /**
  * The box a card opened by `click` sits against: the clicked line at the pointer's x. Null when no click opened it, for a
  * keyboard press on a button (a click with no pointer, `detail` 0), so the card opens beside the comment's text as before.
+ * The box keeps its offset from `live` (the comment's own box), so the card follows its text as it scrolls or moves and
+ * hides when `live` does.
  */
-export function clickAnchor(click: MouseEvent | undefined): (() => DOMRect) | null {
+export function clickAnchor(click: MouseEvent | undefined, live: () => DOMRect | null): (() => DOMRect | null) | null {
 	if (!click || click.detail === 0 || !(click.target instanceof Node)) return null;
 	const line = clickedLine(click.target, click.clientY);
 	const rect = new DOMRect(click.clientX, line?.top ?? click.clientY, 0, line ? line.bottom - line.top : 0);
-	return () => rect;
+	const from = live();
+	if (!from) return () => rect;
+	return () => {
+		const now = live();
+		return now && new DOMRect(rect.x + now.left - from.left, rect.y + now.top - from.top, 0, rect.height);
+	};
 }

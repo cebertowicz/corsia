@@ -58,7 +58,9 @@ DOC_COMMENTS_SCHEMA_SQL = """
         stranded_notified_at TEXT,
         -- 1 when the decision settled several suggestions at once, 0 for a single decision; NULL until decided.
         decided_in_bulk INTEGER,
-        insert_after INTEGER NOT NULL DEFAULT 0
+        insert_after INTEGER NOT NULL DEFAULT 0,
+        -- 1 while the suggestion's decision is what resolved it; any other change to `resolved` clears it.
+        closed_by_decision INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_doc_comments_artifact
         ON doc_comments(artifact_id, created_at);
