@@ -387,7 +387,43 @@ async def test_approval_without_a_folder_hash_never_runs(tmp_path, monkeypatch):
     calls = _use_authenticated_run(monkeypatch)
     report = await script_runner._execute(schedule)
     assert report.status == "hash_mismatch"
+    assert "approved before approval covered every file in its folder" in (report.error or "")
+    assert "changed, appeared or went away" not in (report.error or "")
     assert "schedule it again with authenticated=true" in (report.error or "")
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_approved_script_keeps_running_when_finder_adds_its_metadata(tmp_path, monkeypatch):
+    from automation import script_tree
+
+    db = _db()
+    entry = _script(tmp_path)
+    schedule = _approved(db, tmp_path, tree_sha256=script_tree.tree_sha256(script_tree.read_tree(entry)))
+    calls = _use_authenticated_run(monkeypatch)
+    (tmp_path / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1")
+    assert (await script_runner._execute(schedule)).status == "ok"
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_folder_names_the_file_and_its_fix(tmp_path, monkeypatch):
+    from automation import script_tree
+
+    db = _db()
+    entry = _script(tmp_path)
+    schedule = _approved(db, tmp_path, tree_sha256=script_tree.tree_sha256(script_tree.read_tree(entry)))
+    calls = _use_authenticated_run(monkeypatch)
+
+    def unreadable(_entry):
+        raise PermissionError(13, "Permission denied", str(tmp_path / "helper.py"))
+
+    monkeypatch.setattr(script_tree, "read_tree", unreadable)
+    report = await script_runner._execute(schedule)
+    assert report.status == "hash_mismatch"
+    assert f"{tmp_path / 'helper.py'} could not be read (Permission denied); make it readable" in (
+        report.error or "")
+    assert "[Errno" not in (report.error or "")
     assert calls == []
 
 

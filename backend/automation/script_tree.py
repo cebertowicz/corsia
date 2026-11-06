@@ -2,8 +2,10 @@
 
 ``python3 <entry>`` imports siblings from the entry's folder, and bash or node load
 them by relative path, so the approved bytes are the folder's, not only the entry's.
-Only directories named exactly ``__pycache__`` are left out; authenticated Python runs
-keep their bytecode elsewhere (``script_sandbox.script_command``), so none is read there.
+Only directories named exactly ``__pycache__`` and files named ``.DS_Store`` are left out.
+Authenticated Python runs keep their bytecode elsewhere (``script_sandbox.script_command``),
+so none is read there; Finder writes ``.DS_Store`` when the folder is merely opened, and
+no interpreter loads it.
 """
 from __future__ import annotations
 
@@ -39,11 +41,12 @@ def read_tree(entry: Path, denied: Callable[[Path], str | None] | None = None) -
         for root, dirs, names, dir_fd in os.fwalk(".", dir_fd=folder_fd, follow_symlinks=False):
             base = folder / root
             dirs[:] = sorted(name for name in dirs if name != "__pycache__")
-            for name in [*dirs, *sorted(names)]:
+            names = sorted(name for name in names if name != ".DS_Store")
+            for name in [*dirs, *names]:
                 if stat.S_ISLNK(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode):
                     raise ValueError(_link(base / name, folder))
                 _check(base / name, denied)
-            for name in sorted(names):
+            for name in names:
                 data = _read_file(name, dir_fd, base / name, folder, MAX_SCRIPT_BYTES - total)
                 if data is None:
                     continue  # a socket or pipe in the folder is not code a run can load

@@ -327,10 +327,17 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
     authentication = (schedule.payload or {}).get("authentication") or {}
     approved = authentication.get("state") == "approved"
     if approved:
+        if not authentication.get("tree_sha256"):
+            return hash_mismatch_report(schedule, folder=(
+                "it was approved before approval covered every file in its folder"))
         try:
             tree = await asyncio.to_thread(script_tree.read_tree, path)
-        except (OSError, ValueError) as exc:
+        except ValueError as exc:
             return hash_mismatch_report(schedule, folder=str(exc))
+        except OSError as exc:
+            return hash_mismatch_report(schedule, folder=(
+                f"{exc.filename or 'a file in it'} could not be read "
+                f"({exc.strerror or type(exc).__name__}); make it readable"))
         if script_tree.tree_sha256(tree) != authentication.get("tree_sha256"):
             return hash_mismatch_report(schedule, folder=(
                 "a file in it changed, appeared or went away; a script that writes into its own "
