@@ -387,7 +387,7 @@ async def test_approval_without_a_folder_hash_never_runs(tmp_path, monkeypatch):
     calls = _use_authenticated_run(monkeypatch)
     report = await script_runner._execute(schedule)
     assert report.status == "hash_mismatch"
-    assert "approved before approval covered every file in its folder" in (report.error or "")
+    assert "its approval covers only the script file, not the other files in its folder" in (report.error or "")
     assert "changed, appeared or went away" not in (report.error or "")
     assert "schedule it again with authenticated=true" in (report.error or "")
     assert calls == []
@@ -414,16 +414,13 @@ async def test_an_unreadable_folder_names_the_file_and_its_fix(tmp_path, monkeyp
     entry = _script(tmp_path)
     schedule = _approved(db, tmp_path, tree_sha256=script_tree.tree_sha256(script_tree.read_tree(entry)))
     calls = _use_authenticated_run(monkeypatch)
-
-    def unreadable(_entry):
-        raise PermissionError(13, "Permission denied", str(tmp_path / "helper.py"))
-
-    monkeypatch.setattr(script_tree, "read_tree", unreadable)
+    (tmp_path / "lib").mkdir()
+    (tmp_path / "lib" / "helper.py").write_text("X = 1\n")
+    (tmp_path / "lib" / "helper.py").chmod(0)
     report = await script_runner._execute(schedule)
     assert report.status == "hash_mismatch"
-    assert f"{tmp_path / 'helper.py'} could not be read (Permission denied); make it readable" in (
-        report.error or "")
-    assert "[Errno" not in (report.error or "")
+    assert "lib/helper.py in the script's folder can't be read; make it readable" in (report.error or "")
+    assert "Errno" not in (report.error or "")
     assert calls == []
 
 

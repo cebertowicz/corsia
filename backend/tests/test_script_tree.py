@@ -45,7 +45,7 @@ def test_tree_refuses_what_it_cannot_cover_and_names_the_fix(tmp_path, make):
         outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
         outside.write_text("Z = 3\n")
         (tmp_path / "linked.py").symlink_to(outside)
-        expected = "linked.py in the script's folder is a link; copy what the script loads"
+        expected = "linked.py in the script's folder is a link or another kind of special file"
     else:
         (tmp_path / "data.bin").write_bytes(b"\0" * 1_000_001)
         expected = "folder of its own"
@@ -180,12 +180,30 @@ def test_a_folder_reached_through_a_link_is_refused(tmp_path):
     real.mkdir()
     (real / "run.py").write_text("pass\n")
     (tmp_path / "alias").symlink_to(real, target_is_directory=True)
-    with pytest.raises(ValueError, match="goes through a link"):
+    with pytest.raises(ValueError, match="without going through a link"):
         script_tree.read_tree(tmp_path / "alias" / "run.py")
 
 
-def test_a_pipe_in_the_folder_is_skipped_without_blocking(tmp_path):
+@pytest.mark.parametrize("make", ["pipe", "unlistable_folder", "unreadable_file"])
+def test_what_the_walk_cannot_read_refuses_the_folder_by_its_path(tmp_path, make):
+    """A run could still load it by name, so leaving it out of the hash would let it change unreviewed."""
     entry = tmp_path / "run.py"
     entry.write_text("pass\n")
-    os.mkfifo(tmp_path / "pipe")
-    assert script_tree.read_tree(entry) == {"run.py": b"pass\n"}
+    (tmp_path / "lib").mkdir()
+    if make == "pipe":
+        os.mkfifo(tmp_path / "lib" / "x.sh")
+        expected = "lib/x.sh in the script's folder is a link or another kind of special file"
+    elif make == "unlistable_folder":
+        (tmp_path / "lib" / "x.sh").write_text("echo hi\n")
+        (tmp_path / "lib").chmod(0o300)
+        expected = "lib in the script's folder can't be read; make it readable"
+    else:
+        (tmp_path / "lib" / "x.sh").write_text("echo hi\n")
+        (tmp_path / "lib" / "x.sh").chmod(0)
+        expected = "lib/x.sh in the script's folder can't be read; make it readable"
+    try:
+        with pytest.raises(ValueError, match=expected) as refused:
+            script_tree.read_tree(entry)
+    finally:
+        (tmp_path / "lib").chmod(0o700)
+    assert "Errno" not in str(refused.value)

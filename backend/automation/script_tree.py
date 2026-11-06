@@ -5,7 +5,8 @@ them by relative path, so the approved bytes are the folder's, not only the entr
 Only directories named exactly ``__pycache__`` and files named ``.DS_Store`` are left out.
 Authenticated Python runs keep their bytecode elsewhere (``script_sandbox.script_command``),
 so none is read there; Finder writes ``.DS_Store`` when the folder is merely opened, and
-no interpreter loads it.
+no interpreter loads it. Anything else the walk can't read as a regular file refuses the
+folder, so the hash covers everything a run can load from it.
 """
 from __future__ import annotations
 
@@ -18,6 +19,9 @@ from collections.abc import Callable
 from pathlib import Path
 
 from automation.script_schedules import MAX_SCRIPT_BYTES
+from tools.filesystem_effects import FilesystemBindingError, open_bound_directory
+
+_NO_FOLLOW = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
 
 _TOO_LARGE = ("the script's folder holds more than 1 MB; put the script and only what it "
               "loads in a folder of its own")
@@ -26,76 +30,74 @@ _TOO_LARGE = ("the script's folder holds more than 1 MB; put the script and only
 def read_tree(entry: Path, denied: Callable[[Path], str | None] | None = None) -> dict[str, bytes]:
     """Every file under ``entry``'s folder by relative path, with the bytes a run would load.
 
-    A link is refused: a run would load what it points at, which may lie outside what
-    the run, or the agent asking for review, can read. ``denied`` is the requester's
-    read check; the folder and everything in it pass it before anything is read. Every
-    read goes through descriptors opened without following links, so a path swapped for
-    a link after its check fails to open instead of being read.
+    Every refusal is a ``ValueError`` naming the entry and its fix. A link is refused: a run
+    would load what it points at, which may lie outside what the run, or the agent asking
+    for review, can read. ``denied`` is the requester's read check; the folder and
+    everything in it pass it before anything is read. Every read goes through descriptors
+    opened without following links, so a path swapped for a link after its check fails to
+    open instead of being read.
     """
     folder = entry.parent
     files: dict[str, bytes] = {}
-    total = 0
     _check(folder, denied)
-    folder_fd = _open_folder(folder)
     try:
-        for root, dirs, names, dir_fd in os.fwalk(".", dir_fd=folder_fd, follow_symlinks=False):
-            base = folder / root
-            dirs[:] = sorted(name for name in dirs if name != "__pycache__")
-            names = sorted(name for name in names if name != ".DS_Store")
-            for name in [*dirs, *names]:
-                if stat.S_ISLNK(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode):
-                    raise ValueError(_link(base / name, folder))
-                _check(base / name, denied)
-            for name in names:
-                data = _read_file(name, dir_fd, base / name, folder, MAX_SCRIPT_BYTES - total)
-                if data is None:
-                    continue  # a socket or pipe in the folder is not code a run can load
-                total += len(data)
-                if total > MAX_SCRIPT_BYTES:
-                    raise ValueError(_TOO_LARGE)
-                files[_relative(base / name, folder)] = data
-    finally:
-        os.close(folder_fd)
+        with open_bound_directory(folder) as folder_fd:
+            _read_folder(folder_fd, folder, Path(), denied, files)
+    except FilesystemBindingError as exc:
+        raise ValueError(f"{folder} can't be opened without going through a link; schedule the "
+                         "script by its real path") from exc
     return files
 
 
-def _open_folder(folder: Path) -> int:
-    """``folder`` opened one component at a time from the root, none of them a link."""
-    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+def _read_folder(dir_fd: int, folder: Path, relative: Path, denied: Callable[[Path], str | None] | None,
+                 files: dict[str, bytes]) -> None:
     try:
-        for part in folder.parts[1:]:
-            try:
-                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-            except OSError as exc:
-                if exc.errno in (errno.ELOOP, errno.ENOTDIR):
-                    raise ValueError(f"{folder} goes through a link; schedule the script by its "
-                                     "real path") from exc
-                raise
-            os.close(fd)
-            fd = child
-    except BaseException:
-        os.close(fd)
-        raise
-    return fd
-
-
-def _read_file(name: str, dir_fd: int, path: Path, folder: Path, room: int) -> bytes | None:
-    """The regular file ``name`` under ``dir_fd``, never through a link; None when it isn't one."""
-    try:
-        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+        names = sorted(os.listdir(dir_fd))
     except OSError as exc:
-        if exc.errno == errno.ELOOP:
-            raise ValueError(_link(path, folder)) from exc
-        raise
-    with os.fdopen(fd, "rb") as stream:
-        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-            return None
-        return stream.read(max(room, 0) + 1)
+        raise ValueError(_unreadable(relative, exc)) from exc
+    for name in names:
+        path = relative / name
+        try:
+            mode = os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode
+        except OSError as exc:
+            raise ValueError(_unreadable(path, exc)) from exc
+        if (stat.S_ISDIR(mode) and name == "__pycache__") or (stat.S_ISREG(mode) and name == ".DS_Store"):
+            continue
+        if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
+            raise ValueError(_special(path))
+        _check(folder / path, denied)
+        try:
+            fd = os.open(name, _NO_FOLLOW | (os.O_DIRECTORY if stat.S_ISDIR(mode) else os.O_NONBLOCK),
+                         dir_fd=dir_fd)
+        except OSError as exc:
+            raise ValueError(_special(path) if exc.errno == errno.ELOOP else _unreadable(path, exc)) from exc
+        try:
+            if stat.S_ISDIR(mode):
+                _read_folder(fd, folder, path, denied, files)
+                continue
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise ValueError(_special(path))
+            room = MAX_SCRIPT_BYTES - sum(map(len, files.values()))
+            data = os.read(fd, room + 1)
+            if len(data) > room:
+                raise ValueError(_TOO_LARGE)
+            files[path.as_posix()] = data
+        except OSError as exc:
+            raise ValueError(_unreadable(path, exc)) from exc
+        finally:
+            os.close(fd)
 
 
-def _link(path: Path, folder: Path) -> str:
-    return (f"{_relative(path, folder)} in the script's folder is a link; "
+def _special(path: Path) -> str:
+    return (f"{path.as_posix()} in the script's folder is a link or another kind of special file; "
             "copy what the script loads into its own folder instead")
+
+
+def _unreadable(path: Path, exc: OSError) -> str:
+    where = f"{path.as_posix()} in the script's folder" if path.parts else "the script's folder"
+    if isinstance(exc, FileNotFoundError):
+        return f"{where} went away while the folder was being read"
+    return f"{where} can't be read; make it readable, or move it out if the script doesn't load it"
 
 
 def tree_sha256(files: dict[str, bytes]) -> str:
@@ -109,7 +111,3 @@ def tree_sha256(files: dict[str, bytes]) -> str:
 def _check(path: Path, denied: Callable[[Path], str | None] | None) -> None:
     if denied is not None and (denial := denied(path)):
         raise ValueError(denial)
-
-
-def _relative(path: Path, folder: Path) -> str:
-    return path.relative_to(folder).as_posix()
