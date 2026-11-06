@@ -10,6 +10,7 @@ from host_access.credential_sanitizer import sanitize_credential_text
 from tools.result_sanitizer import sanitize_result
 from infra.tool_result_errors import is_error_result
 from tools.base import Tool
+from tools.tool_store import ToolStore
 from tools.mcp_stamp import ConnectedAppResult, restamp, with_connected_app_stamp
 from tools.post_update_reminder import remind_current_turn
 from tools.recorded_call import CompletedToolFailure, execute_recorded_call
@@ -47,39 +48,8 @@ def _is_reserved_execution_param(key: object) -> bool:
     return isinstance(key, str) and key.startswith(_RESERVED_EXECUTION_PREFIXES)
 
 
-class ToolRegistry:
+class ToolRegistry(ToolStore):
     """Registry for agent tools."""
-
-    def __init__(self) -> None:
-        self._tools: dict[str, Tool] = {}
-
-    def register(self, tool: Tool) -> None:
-        """Register a tool."""
-        self._tools[tool.name] = tool
-
-    def unregister(self, name: str) -> None:
-        """Unregister a tool by name."""
-        self._tools.pop(name, None)
-
-    def get(self, name: str) -> Tool | None:
-        """Get a tool by name."""
-        return self._tools.get(name)
-
-    def has(self, name: str) -> bool:
-        """Check if a tool is registered."""
-        return name in self._tools
-
-    def get_definitions(self) -> list[dict[str, Any]]:
-        """Get all tool definitions in OpenAI format."""
-        return [tool.to_schema() for tool in self._tools.values()]
-
-    def retain_only(self, names: tuple[str, ...]) -> None:
-        """Keep only an exact validated tool set for one disposable evaluation."""
-        unknown = sorted(set(names) - set(self._tools))
-        if unknown:
-            raise ValueError("Unknown eval tool name(s): " + ", ".join(unknown))
-        allowed = set(names)
-        self._tools = {name: tool for name, tool in self._tools.items() if name in allowed}
 
     async def execute(
         self, name: str, params: dict[str, Any], *, review_request_id: str | None = None,
@@ -206,7 +176,7 @@ class ToolRegistry:
         A dispatch reaches only what ``tools_load`` lists; a direct call by
         exact name keeps the registry's execute-by-name behavior.
         """
-        tool = self._tools.get(name)
+        tool = self.get(name)
         if dispatcher is not None and name == TOOL_CALL and tool:
             return tool
         names = (
@@ -387,14 +357,3 @@ class ToolRegistry:
             context["_host_access_turn_identity"] = turn_identity
         return context, None
 
-
-    @property
-    def tool_names(self) -> list[str]:
-        """Get list of registered tool names."""
-        return list(self._tools.keys())
-
-    def __len__(self) -> int:
-        return len(self._tools)
-
-    def __contains__(self, name: str) -> bool:
-        return name in self._tools

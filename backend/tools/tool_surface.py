@@ -306,7 +306,7 @@ class ToolsLoadTool(Tool):
                 return connected_app_reach_refusal()
             tools = servers.get(server)
             if tools is None:
-                state = getattr(self._registry, "mcp_server_states", {}).get(server)
+                state = self._registry.mcp_server_state(server)
                 if state:
                     return f"Error: MCP server '{server}' is not connected: {state}."
                 known = ", ".join(servers) or "(none)"

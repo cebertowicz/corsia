@@ -283,6 +283,7 @@ def test_connected_app_reconnect_and_remove_own_only_their_app_runtime(runtime, 
 
     async def scenario():
         agent = type("Agent", (), {"tools": ToolRegistry()})()
+        mcp_runtime.register_mcp_tools(agent.tools)
         monkeypatch.setattr(state, "_agent", agent)
         first = await mcp_runtime.apply_connected_app_runtime("connect", "app-1")
         assert first["state"] == "working"
@@ -534,10 +535,9 @@ def test_no_new_app_starts_in_a_live_state(runtime, isolated_db, live_state):
 
 
 def test_runtime_error_after_connecting_publishes_failed_and_a_later_connect_retries(runtime, monkeypatch):
-    from infra import state
-
     mcp_runtime, tools, _gate = runtime
     published = []
+    calls = {"failed": False}
 
     async def load(fn, *args):
         if fn.__name__ == "load_runtime_app_config":
@@ -547,26 +547,14 @@ def test_runtime_error_after_connecting_publishes_failed_and_a_later_connect_ret
         if fn.__name__ == "register_stored":
             return 0
         if fn.__name__ == "record_runtime_app_state":
+            if args[1]["state"] == "working" and not calls["failed"]:
+                calls["failed"] = True
+                raise RuntimeError("fixture state write failed")
             published.append(args[1])
             return None
         raise AssertionError(fn.__name__)
 
-    class _Agent:
-        def __init__(self) -> None:
-            from tools.registry import ToolRegistry
-
-            self.tools = ToolRegistry()
-
-    calls = {"n": 0}
-
-    def flaky_register(_tools) -> None:
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise RuntimeError("fixture registration failed")
-
     monkeypatch.setattr(mcp_runtime, "run_in_db", load)
-    monkeypatch.setattr(mcp_runtime, "register_mcp_tools", flaky_register)
-    monkeypatch.setattr(state, "_agent", _Agent())
 
     first = asyncio.run(mcp_runtime.apply_connected_app_runtime("connect", "app-1"))
 
