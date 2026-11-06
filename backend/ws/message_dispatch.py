@@ -13,7 +13,6 @@ from ws.ingress import (
     reserve_admission_receipt as _send_admission_receipt,
     send_input_accepted as _send_input_accepted,
 )
-from ws.input_recovery import answer_recovered_input
 
 
 async def handle_message(
@@ -96,10 +95,6 @@ async def _handle_message(
     thread_row = await run_in_db_fn(_fetch_thread_row)
     if not thread_row:
         await _send_error(ws, thread_id, "Thread not found", input_id=input_id)
-        return
-    if data.get("recovery") is True and await answer_recovered_input(
-        ws, thread_id, input_id,
-    ):
         return
 
     await _send_native_input(

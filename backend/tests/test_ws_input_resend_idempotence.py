@@ -1,10 +1,10 @@
 """A resent WebSocket input frame is admitted once, on both input paths.
 
 After a reconnect the client puts every input it holds no receipt for back on
-the new socket, marked ``recovery``. These tests drive both WebSocket entry
-points with the frame the client actually sends and pin what each resend does:
-a stored input is answered with its row, an absent one is admitted, and an
-unmarked second copy goes through the duplicate check.
+the new socket, byte for byte. That is safe only because the same frame sent
+twice is one input, even after delivery has written to the stored row: these
+tests drive both WebSocket entry points with the frame the client actually
+sends and pin what the second admission does.
 """
 from __future__ import annotations
 
@@ -96,9 +96,7 @@ def _stub_delivery(monkeypatch):
     return service, receipts, errors
 
 
-async def _send_frame(
-    service, path: str, row: dict, content: str, *, recovery: bool = False,
-) -> None:
+async def _send_frame(service, path: str, row: dict, content: str) -> None:
     """Deliver one composer input, as its WebSocket frame, through its handler."""
     import ws as ws_module
     import ws.message_dispatch as dispatch
@@ -113,7 +111,6 @@ async def _send_frame(
                 "type": "message", "thread_id": row["id"], "content": content,
                 "input_id": INPUT_ID, "reasoning_effort": "high",
                 "reply_context": {"in_view": [[1, 3, 2]]},
-                **({"recovery": True} if recovery else {}),
             },
             get_db_fn=lambda: SimpleNamespace(close=lambda: None),
             run_in_db_fn=run,
@@ -127,7 +124,7 @@ async def _send_frame(
 
     await ws_module._handle_subagent_feed(
         SimpleNamespace(), {"id": "user-1"}, row["id"], content,
-        [], False, INPUT_ID, None, None, {"in_view": [[1, 3, 2]]}, recovery,
+        [], False, INPUT_ID, None, None, {"in_view": [[1, 3, 2]]},
     )
 
 
@@ -180,8 +177,8 @@ async def test_the_same_input_with_other_content_is_refused(
 ):
     """The duplicate check is a same-payload check, not an id-only one.
 
-    Delivery writes to a stored row, so a resent copy can stop matching it: the
-    reason a recovery resend is answered from the row instead (below).
+    This is exactly what a resend must never trip, and the reason the client
+    replays the stored frame byte for byte instead of rebuilding it.
     """
     service, receipts, errors = _stub_delivery(monkeypatch)
     row = _thread_row(f"{path}-refused-thread")
@@ -199,93 +196,60 @@ async def test_the_same_input_with_other_content_is_refused(
     ), errors
 
 
-def _rewrite_stored_metadata(message_id: str) -> None:
-    """Write to the stored row the way delivery does (an installed-context snapshot)."""
+def _write_stored_row(message_id: str, sql_set: str, *params) -> None:
     from infra.database import get_db
 
     db = get_db()
-    db.execute(
-        "UPDATE messages SET metadata=json_set(COALESCE(metadata,'{}'),"
-        "'$.installed_context','snapshot') WHERE id=?",
-        (message_id,),
-    )
+    db.execute(f"UPDATE messages SET {sql_set} WHERE id=?", (*params, message_id))
     db.commit()
     db.close()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["message", "subagent_feed"])
-async def test_a_recovery_resend_of_a_stored_input_is_answered_not_admitted(
+async def test_a_resend_after_delivery_wrote_to_the_row_is_still_one_input(
     isolated_db, monkeypatch, path
 ):
-    """The answer comes from the stored row, so a row delivery wrote to still settles."""
+    """Keys delivery adds after admission never make a resend a new payload.
+
+    Its receipt reports where delivery has the stored row, not a fresh queue.
+    """
+    from core.installed_context import INSTALLED_SOURCES
+
     service, receipts, errors = _stub_delivery(monkeypatch)
-    row = _thread_row(f"{path}-recovered-thread")
+    row = _thread_row(f"{path}-delivered-thread")
     if path == "subagent_feed":
         _as_subagent(monkeypatch, row)
 
     await _send_frame(service, path, row, CONTENT)
-    _rewrite_stored_metadata(INPUT_ID)
-    await _send_frame(service, path, row, CONTENT, recovery=True)
-
-    assert not errors, errors
-    assert _user_inputs(row["id"]) == 1
-    recovered = [r for r in receipts if r.get("type") == "input_recovered"]
-    assert len(recovered) == 1, receipts
-    stored = _stored(INPUT_ID)
-    assert stored is not None
-    assert recovered[0]["thread_id"] == row["id"]
-    assert recovered[0]["input_id"] == INPUT_ID
-    assert recovered[0]["message"]["id"] == INPUT_ID
-    assert recovered[0]["message"]["created_at"] == str(stored["created_at"])
-    assert "delivery_state" in recovered[0]["message"]
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("path", ["message", "subagent_feed"])
-async def test_a_recovery_resend_of_an_absent_input_is_admitted(
-    isolated_db, monkeypatch, path
-):
-    service, receipts, errors = _stub_delivery(monkeypatch)
-    row = _thread_row(f"{path}-lost-thread")
-    if path == "subagent_feed":
-        _as_subagent(monkeypatch, row)
-
-    await _send_frame(service, path, row, CONTENT, recovery=True)
-
-    assert not errors, errors
-    assert _user_inputs(row["id"]) == 1
-    assert not [r for r in receipts if r.get("type") == "input_recovered"]
-    assert receipts and receipts[0]["input_id"] == INPUT_ID
-    assert receipts[0].get("duplicate", False) is False
-
-
-@pytest.mark.asyncio
-async def test_a_recovery_resend_reads_only_an_owned_thread(isolated_db, monkeypatch):
-    service, receipts, errors = _stub_delivery(monkeypatch)
-    row = _thread_row("owned-thread")
-    await _send_frame(service, "message", row, CONTENT)
-    receipts.clear()
-
-    import ws.message_dispatch as dispatch
-
-    async def run(callback):
-        return callback()
-
-    await dispatch.handle_message(
-        SimpleNamespace(), {"id": "user-2"}, "user-2",
-        {
-            "type": "message", "thread_id": row["id"], "content": CONTENT,
-            "input_id": INPUT_ID, "recovery": True,
-        },
-        get_db_fn=lambda: SimpleNamespace(close=lambda: None),
-        run_in_db_fn=run,
-        get_thread_for_user_fn=lambda *_a, **_k: None,
-        touch_thread_fn=lambda *_a, **_k: None,
-        send_thread_input_fn=service.send_thread_input,
-        handle_cc_main_message_fn=AsyncMock(),
-        handle_codex_main_message_fn=AsyncMock(),
+    _write_stored_row(
+        INPUT_ID,
+        "metadata=json_set(json_set(COALESCE(metadata,'{}'),'$." + INSTALLED_SOURCES
+        + "',json('[]')),'$.plan_paused_since','t1'),delivery_state='delivered'",
     )
+    await _send_frame(service, path, row, CONTENT)
 
-    assert not [r for r in receipts if r.get("type") == "input_recovered"]
-    assert [e["message"] for e in errors] == ["Thread not found"]
+    assert not errors, errors
+    assert _user_inputs(row["id"]) == 1
+    assert len(receipts) == 2, receipts
+    assert receipts[1]["duplicate"] is True
+    assert receipts[1]["delivery_state"] == "delivered"
+
+
+@pytest.mark.asyncio
+async def test_a_resend_whose_sent_key_changed_value_is_refused(isolated_db, monkeypatch):
+    """Only keys the resend does not carry are ignored; a carried key must match."""
+    service, receipts, errors = _stub_delivery(monkeypatch)
+    row = _thread_row("changed-key-thread")
+
+    await _send_frame(service, "message", row, CONTENT)
+    _write_stored_row(
+        INPUT_ID, "metadata=json_set(metadata,'$.reply_via_post_update',json('false'))",
+    )
+    await _send_frame(service, "message", row, CONTENT)
+
+    assert _user_inputs(row["id"]) == 1
+    assert any(
+        "input identity already has a different payload" in payload.get("message", "")
+        for payload in errors
+    ), errors

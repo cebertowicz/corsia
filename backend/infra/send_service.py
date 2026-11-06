@@ -247,6 +247,7 @@ async def _deliver_admission(
         duplicate=admission.accepted.duplicate,
         held=limited,
         admission_hold=admission.accepted.delivery_error if held else None,
+        delivery_state=admission.accepted.delivery_state,
     )
     if on_admitted is not None:
         await publish_projection("on_admitted", admission, lambda: on_admitted(queued))

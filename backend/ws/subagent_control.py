@@ -9,7 +9,6 @@ from loguru import logger as default_logger
 from infra import state
 from infra.send_service import SendRejected
 from llm.resolution import ModelUnavailableError
-from ws.input_recovery import answer_recovered_input
 from ws.message_dispatch import _send_error, _send_input_accepted
 
 
@@ -68,7 +67,6 @@ async def handle_subagent_feed(
     delivery_intent: str = "apply_now",
     viewing_document: dict | None = None,
     reply_context: object = None,
-    recovery: bool = False,
     *,
     owned_thread_fn: OwnedThread,
     send_thread_input_fn: Callable,
@@ -95,8 +93,6 @@ async def handle_subagent_feed(
         await _send_error(
             ws, child_thread_id, "Thread not found", input_id=input_id,
         )
-        return
-    if recovery and await answer_recovered_input(ws, child_thread_id, input_id):
         return
 
     from infra.execution_class import execution_class, is_subagent
