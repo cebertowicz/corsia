@@ -268,8 +268,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 					});
 					const pending = view.plugin(pendingCommentMark)?.range ?? null;
 					// An open suggestion with a quote is drawn in its cell as it is in body text; a pure insertion has no quote to strike and a card-only one is not drawn.
-					const marks: Mark[] = view.state.field(commentRanges).filter((range) => !range.point && (!range.suggestion || (range.suggestion.inline && range.from < range.to)))
-						.map((range) => ({ from: range.from, to: range.to, id: range.id, kind: range.focused ? 'focused' : 'placed', suggestion: range.suggestion && { insert: range.suggestion.insert, color: range.suggestion.color, busy: range.suggestion.busy } }));
+					const marks: Mark[] = view.state.field(commentRanges).filter((range) => !range.point && (!range.suggestion || (range.suggestion.inline && range.from < range.to))).map((range) => ({ from: range.from, to: range.to, id: range.id, kind: range.focused ? 'focused' : 'placed', suggestion: range.suggestion && { insert: range.suggestion.insert, color: range.suggestion.color, busy: range.suggestion.busy } }));
 					if (pending) marks.push({ ...pending, id: 'pending', kind: 'pending' });
 					return { widgets, marks };
 				},

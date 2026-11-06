@@ -207,10 +207,7 @@
 	// Resolving a decided suggestion's card ends its conversation: its text has no marker left to return to, so the card closes with it.
 	function resolveThread(id: string, resolved: boolean) {
 		onResolve(id, resolved);
-		if (resolved && surfaceState?.kind === 'thread' && surfaceState.id === id && comments.find((item) => item.id === id)?.decision) {
-			onClose();
-			if (!narrow) restoreFocus();
-		}
+		if (resolved && surfaceState?.kind === 'thread' && surfaceState.id === id && comments.find((item) => item.id === id)?.decision) { onClose(); if (!narrow) restoreFocus(); }
 	}
 	function finishSheetClose() {
 		sheet.finishClose();
