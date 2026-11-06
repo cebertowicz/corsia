@@ -15,7 +15,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 
-from cc_user_context_fixtures import InferencePeer
+from cc_user_context_fixtures import InferencePeer, _completed_turn, _tool_use_turn
 from contract.matrix_environment import guarded_command
 from subagents.cc_invocation import CONFINEMENT_UNTRUSTED, build_claude_cmd
 from subagents.cc_stream import CCStreamSession
@@ -24,6 +24,22 @@ from tools.confined_reads import UNTRUSTED_READ_TOOLS
 _INSIDE = "inside-marker-bb921e"
 _OUTSIDE = "outside-marker-a1b7c4"
 _THREAD = "confined-cli-bridge"
+_TOOL_USE_ID = "toolu_peer_1"
+
+
+class AdversarialPeer(InferencePeer):
+    """Issue the scripted call even when the CLI did not offer that tool."""
+
+    def __init__(self, tool_use):
+        super().__init__(tool_use)
+        self._issued = False
+
+    def _answer(self, body):
+        model = body.get("model", "x")
+        if not self._issued and '"tool_result"' not in json.dumps(body.get("messages")):
+            self._issued = True
+            return _tool_use_turn(model, *self._tool_use)
+        return _completed_turn(model)
 
 
 def _seed(db, grant):
@@ -85,7 +101,7 @@ async def test_stock_cli_confined_bridge(case, isolated_db, monkeypatch):
         root.mkdir(parents=True)
         tmp = base / "tmp"
         tmp.mkdir()
-        peer = InferencePeer(_call(case, base, grant))
+        peer = AdversarialPeer(_call(case, base, grant))
         app = FastAPI()
         app.include_router(cc_attach.router)
         bridge_calls = []
@@ -167,14 +183,26 @@ async def test_stock_cli_confined_bridge(case, isolated_db, monkeypatch):
             assert set(init["tools"]) == expected
             for body in peer.bodies:
                 assert {tool["name"] for tool in json.loads(body).get("tools", [])} == expected
-            results = [body for body in peer.bodies if '"tool_result"' in body]
+            results = [
+                block
+                for body in peer.bodies
+                for message in json.loads(body).get("messages", [])
+                for block in (message.get("content") if isinstance(message.get("content"), list) else [])
+                if isinstance(block, dict) and block.get("type") == "tool_result"
+                and block.get("tool_use_id") == _TOOL_USE_ID
+            ]
+            assert results, f"no result for {_TOOL_USE_ID}"
             if case == "inside":
                 assert any(call["name"] == "read_file" and call["arguments"]["path"] == str(grant / "inside.txt")
                            for call in bridge_calls)
-                assert any(_INSIDE in body for body in results)
+                assert any(_INSIDE in json.dumps(result) for result in results)
             elif case == "outside":
-                assert results and any("outside this confined worker's read paths" in body for body in results)
+                assert any("outside this confined worker's read paths" in json.dumps(result)
+                           for result in results)
             else:
+                assert all(result.get("is_error") is True for result in results)
+                assert all(_INSIDE not in json.dumps(result) and _OUTSIDE not in json.dumps(result)
+                           for result in results)
                 assert not bridge_calls
                 assert not any(_INSIDE in body for body in peer.bodies)
             assert _OUTSIDE not in json.dumps(events)
