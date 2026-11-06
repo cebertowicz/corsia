@@ -39,6 +39,34 @@ async def test_fork_listing_uses_frozen_model_and_fails_closed(review_env, monke
 
 
 @pytest.mark.asyncio
+async def test_cloud_fork_keeps_public_replies_to_withheld_root(review_env, monkeypatch):
+    from infra import local_only
+
+    db, aid = review_env
+    row = request(db, aid)
+    db.execute("UPDATE threads SET local_only=1 WHERE id='second'")
+    db.commit()
+    root, _ = add_comment(db, aid, author_id="second")
+    reply, _ = add_comment(db, aid, author_id="owner", parent_id=root["id"])
+    db.execute("UPDATE doc_comments SET body='Local secret' WHERE id=?", (root["id"],))
+    db.execute("UPDATE doc_comments SET body='Public reply' WHERE id=?", (reply["id"],))
+    db.commit()
+    monkeypatch.setattr(local_only, "_is_cloud", lambda *_args, **_kw: True)
+    handles[row["fork_id"]] = ForkHandle(
+        asyncio.current_task(), asyncio.Event(), "reviewer", ARTIFACT_REVIEW_KIND,
+        request=SimpleNamespace(target=SimpleNamespace(catalog_id="cloud/model")),
+    )
+    try:
+        result = await DocCommentsListTool().execute(
+            artifact_id=aid, _thread_id="reviewer", _review_request_id=row["id"],
+        )
+    finally:
+        handles.pop(row["fork_id"], None)
+    assert "Local secret" not in result
+    assert "Public reply" in result
+
+
+@pytest.mark.asyncio
 async def test_fork_clears_parent_tool_invocation(review_env):
     from core.fork_tools import execute_fork_tool
     from infra.state.context import running_call_ids, tool_invocation_context

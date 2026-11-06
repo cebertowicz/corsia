@@ -84,10 +84,17 @@ def anchored_threads(artifact_id: str, path: str | None, db: sqlite3.Connection,
 
         rows = [item for root in threads for item in [root, *root.get("replies", [])]]
         withheld = _withheld_authors(db, rows, reader_id, reader_model=reader_model)
-        threads = [root for root in threads if root.get("author_thread_id") not in withheld]
+        visible = []
         for root in threads:
-            root["replies"] = [reply for reply in root.get("replies", [])
-                               if reply.get("author_thread_id") not in withheld]
+            replies = [reply for reply in root.get("replies", []) if reply.get("author_thread_id") not in withheld]
+            if root.get("author_thread_id") in withheld:
+                if replies:
+                    visible.append({"id": root["id"], "parent_id": None, "review": True, "anchor_text": None,
+                                    "body": "(not shown: this agent is Local only)", "replies": replies})
+            else:
+                root["replies"] = replies
+                visible.append(root)
+        threads = visible
     ranges = None
     if text is None and path:
         from pathlib import Path
