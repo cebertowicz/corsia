@@ -40,6 +40,25 @@ def _user_comment(client, artifact_id, **fields):
     )
 
 
+def _settle(artifact_id):
+    """Deliver the person's open comment batches at their deadline, as the continuation sweep does.
+
+    The sweep delivers every due batch in the shared database, so earlier tests' batches announce too:
+    assert on this document's frames only.
+    """
+    from doceditor import feedback_batches
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        [closes_at] = db.execute(
+            "SELECT MAX(closes_at) FROM doc_feedback_batches WHERE artifact_id=? AND state='open'", (artifact_id,),
+        ).fetchone()
+    finally:
+        db.close()
+    return feedback_batches.close_due(closes_at)
+
+
 @pytest.mark.asyncio
 async def test_user_create_patch_and_decision_each_send_one_frame(
     integration_client, doc, _registrable_roots, frames,
@@ -48,7 +67,9 @@ async def test_user_create_patch_and_decision_each_send_one_frame(
 
     created = _user_comment(integration_client, artifact_id)
     assert created.status_code == 200, created.text
-    assert frames == [artifact_id]
+    _settle(artifact_id)  # A person's comment settles for 5 s before delivery, and is announced then.
+    assert [frame for frame in frames if frame == artifact_id] == [artifact_id]
+    frames[:] = [artifact_id]
 
     comment_id = created.json()["comment"]["id"]
     patched = integration_client.patch(
@@ -81,6 +102,8 @@ async def test_a_person_comment_announces_once_after_post_response_delivery(
 
 
     def frame(frame_artifact_id, **_kwargs):
+        if frame_artifact_id != artifact_id:
+            return
         db = get_db()
         try:
             open_at_frame.append(
@@ -95,6 +118,7 @@ async def test_a_person_comment_announces_once_after_post_response_delivery(
     created = _user_comment(integration_client, artifact_id)
     assert created.status_code == 200, created.text
     assert created.json()["woken"] == []
+    _settle(artifact_id)  # A person's comment settles for 5 s before delivery, and is announced then.
     assert open_at_frame == [0]
 
 

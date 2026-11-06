@@ -46,6 +46,7 @@ from ws.subagent_control import (
 
 from ws.subagent_ingress import dispatch_subagent_feed as _handle_subagent_feed
 from ws.document_control import FRAME_TYPES, schedule_frame, disconnect as disconnect_documents
+from ws import comment_turn
 
 _MISSING_TURN_ID = object()
 
@@ -62,6 +63,9 @@ async def _receive_frames(
             msg_type = data.get("type")
             if msg_type in FRAME_TYPES:
                 schedule_frame(ws, user, data)
+                continue
+            if msg_type == comment_turn.FRAME_TYPE:
+                schedule_frame(ws, user, data, comment_turn.handle_frame)
                 continue
             if msg_type == "stop":
                 expected_turn_id = (
@@ -135,7 +139,11 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         processor_task.cancel()
         heartbeat_task.cancel()
         _cleanup_ws(user_id, ws)
-        await disconnect_documents(ws)
+        try:
+            await disconnect_documents(ws)
+        finally:
+            # After the socket's scheduled frames are joined, so none takes a turn back.
+            comment_turn.disconnect(ws)
 
 
 async def _authenticate(ws: WebSocket) -> dict | None:

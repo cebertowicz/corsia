@@ -1,6 +1,7 @@
 <script lang="ts">
 	import './comment-link.css';
 	import { retryPlacement } from '$lib/stores/docComments';
+	import { commentLines } from '$lib/ws/commentTurn';
 	import type { CommentThreadData } from './CommentThreadData';
 
 	let { comment }: { comment: CommentThreadData } = $props();
@@ -13,6 +14,8 @@
 		const timer = window.setTimeout(() => { showPlacement = true; }, 200);
 		return () => window.clearTimeout(timer);
 	});
+	// Agent writes waiting while the person holds this thread's writer turn; they post after the person sends or leaves.
+	const waiting = $derived($commentLines[comment.id] ?? 0);
 </script>
 
 {#if showPlacement}
@@ -22,6 +25,9 @@
 		Couldn’t find its place
 		<button class="ct-link" data-placement-retry onclick={(e) => { e.stopPropagation(); retryPlacement(comment.id); }}>Retry</button>
 	</p>
+{/if}
+{#if waiting > 0}
+	<p class="ct-placement" role="status" data-comment-waiting>{waiting === 1 ? '1 agent waiting its turn.' : `${waiting} agents waiting their turn.`}</p>
 {/if}
 
 <style>

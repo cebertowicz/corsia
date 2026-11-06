@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from doceditor import feedback_batches, feedback_state
+from doceditor import feedback_batches, feedback_state, writer_line
+from infra.database import write_transaction
 
 
 class FeedbackBatchSource:
@@ -13,8 +14,10 @@ class FeedbackBatchSource:
     kind = "document_feedback_batch"
 
     def prepare(self, now: str, *, db) -> list[str]:
-        """Deliver due rows and return newly selected recipient threads to drive."""
-        return feedback_batches.close_due(now, db=db)
+        """Deliver due rows, serve comment writer lines left waiting, and return the threads to drive."""
+        woken = feedback_batches.close_due(now, db=db)
+        with write_transaction(db, scope="writer_line_sweep") as connection:
+            return woken + writer_line.serve_waiting(connection)
 
     def seconds_until_next_deadline(self, now: datetime, *, db) -> float | None:
         """Seconds until the earliest open batch still ahead of its deadline, for the loop's sleep."""

@@ -162,6 +162,8 @@ def item_blocks(batch: Any, items: list[dict[str, Any]]) -> str:
             if item.get("region_line"):
                 lines.append(str(item["region_line"]))
             lines.append(f"Feedback: {item['body']}")
+            if item.get("line_hint"):
+                lines.append(str(item["line_hint"]))
             if item.get("leave_hint"):
                 lines.append(str(item["leave_hint"]))
             if item.get("replacement") is not None:

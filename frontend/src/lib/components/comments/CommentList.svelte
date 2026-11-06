@@ -6,6 +6,7 @@
 	import { groupRows } from '$lib/docImageComments';
 	import { plainQuote } from '$lib/plainQuote';
 	import { leaveRow } from '$lib/actions/leaveRow';
+	import { commentTurn } from '$lib/ws/commentTurn';
 	type Comment = CommentThreadData & { review?: boolean };
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
@@ -57,6 +58,11 @@
 		/** Reduced motion: a leaving row fades and nothing slides. */
 		reduced?: boolean;
 	} = $props();
+	// The selected thread is the one the person is on: this page holds its writer turn.
+	const turnOwner = {};
+	$effect(() => { commentTurn()?.show(turnOwner, readOnly ? null : focusedId); });
+	$effect(() => { const hasText = !!focusedId && !!replyDrafts[focusedId]?.trim(); commentTurn()?.draft(turnOwner, hasText); });
+	$effect(() => () => commentTurn()?.close(turnOwner));
 	function tagsFor(id: string) {
 		let tags = replyTags.get(id);
 		if (!tags) { tags = createMentionSelection(); replyTags.set(id, tags); }

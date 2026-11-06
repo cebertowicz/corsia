@@ -129,8 +129,11 @@ def _record_decision_row(
     if row is None:
         raise CommentActionError("not_found", "Comment not found")
     if decided_by_thread_id:
+        from doceditor import writer_line
         from doceditor.comment_recipients import reset_action
         reset_action(connection, row, decided_by_thread_id)
+        # A decision made holding the thread's writer turn settles the agent's saved row in this write.
+        writer_line.landed(connection, str(row.get("parent_id") or row["id"]), decided_by_thread_id)
     return row
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -231,12 +232,18 @@ async def _decide_batch(
 async def decide_all_from_author(
     comment_id: str, decision: str, *, user_id: str, decided_by: str,
     actor_thread_id: str | None, write: DocumentWriter, reason: str | None = None,
+    select: Callable[[list[dict[str, Any]]], Awaitable[list[dict[str, Any]]]] | None = None,
 ) -> dict[str, Any]:
-    """Accept or reject every open suggestion by the selected comment's author."""
+    """Accept or reject every open suggestion by the selected comment's author.
+
+    ``select`` narrows the loaded suggestions to those this caller may decide now (an agent's writer turn).
+    """
     if decision not in DECISIONS:
         raise CommentActionError("decision", "decision must be accept or reject")
     reason = validate_decision_reason(reason)
     artifact, project_id, rows = await run_in_db(_open_author_suggestions, comment_id, user_id, actor_thread_id, decision)
+    if select is not None:
+        rows = await select(rows)
     return await _decide_batch(
         artifact, project_id, rows, decision, user_id=user_id, decided_by=decided_by,
         actor_thread_id=actor_thread_id, write=write, reason=reason)

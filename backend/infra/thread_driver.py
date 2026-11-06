@@ -197,7 +197,7 @@ def finish_turn(
     lift_account = not (outcome == "error" and isinstance(error, AccountAdmissionError))
     with usage_settlement(db) as usage, write_transaction(db, scope="finish_turn") as connection:
         row = connection.execute(
-            "SELECT thread_id,status FROM active_turns WHERE id=?", (turn_id,),
+            "SELECT thread_id,status,boot_epoch FROM active_turns WHERE id=?", (turn_id,),
         ).fetchone()
         duplicate = _terminal_duplicate(row, outcome)
         if duplicate is not None:
@@ -226,6 +226,7 @@ def finish_turn(
         )
         parent = _parent_completion(connection, turn_id, thread_id) if outcome == "completed" else None
         _show_reply_on_nudge_stop(connection, thread_id, turn_id, outcome)
+        line_wakes = _pass_on_writer_turns(connection, row, turn_id, boot_epoch)
         queue_terminal_continue(
             connection, turn_id, thread_id, outcome=outcome, error=error,
             limit_recorded=isinstance(limits.limit, Recorded))
@@ -242,7 +243,7 @@ def finish_turn(
             fail_closed=limits.fail_closed, lift_account=lift_account,
         )
     _end_turn_process_state(turn_id, outcome)
-    wakes = () if parent is None else (parent,)
+    wakes = tuple(dict.fromkeys(((parent,) if parent is not None else ()) + line_wakes))
     return TerminalSettlement(
         TerminalResult.APPLIED,
         thread_id,
@@ -264,6 +265,15 @@ def _show_reply_on_nudge_stop(connection, thread_id: str, turn_id: str, outcome:
     from infra.reply_not_visible_wake import show_reply_on_nudge_stop
 
     show_reply_on_nudge_stop(connection, thread_id, turn_id)
+
+
+def _pass_on_writer_turns(connection, row, turn_id: str, boot_epoch: str) -> tuple[str, ...]:
+    """However a Turn ends, stopped included, a comment writer turn it was woken for passes on; after a restart, ``writer_line.recover`` re-wakes instead."""
+    if str(row["boot_epoch"]) != boot_epoch:
+        return ()
+    from doceditor import writer_line
+
+    return tuple(writer_line.settle_turn_end(connection, str(row["thread_id"]), turn_id))
 
 
 def _claim_after_terminal(

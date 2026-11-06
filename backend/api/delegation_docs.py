@@ -6,22 +6,16 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from doceditor import comments as store, feedback_batches
-from doceditor.comment_creation import create_validated_comment
+from doceditor import agent_comment_writes, comments as store, feedback_batches
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
 from doceditor.comment_recipients import TagValidationError, trim_mentions
 from infra.app_loop import AppLoopUnavailable
 from api.doc_comments import comment_action_status, decision_refusal
 from api.doc_comment_models import TaggedAgentMention
 from api.files import document_save_http_exception
-from doceditor.document_save import DocumentSaveError, agent_document_writer
-from doceditor.comment_actions import (
-    SUGGESTION_REASON_MAX_CHARS, CommentActionError, check_agent_update,
-    decide_suggestion, reopen_fields, validate_create,
-)
-from doceditor.comment_batch_actions import decide_all_from_author
+from doceditor.document_save import DocumentSaveError
+from doceditor.comment_actions import SUGGESTION_REASON_MAX_CHARS, CommentActionError, validate_create
 from doceditor.comment_action_errors import decision_only_error
-from doceditor.comment_state_updates import update_comment
 from doceditor.comments import CrossArtifactIdError, validate_client_id
 from doceditor.quote_anchor import QuoteResolveError
 from infra.auth import authenticate, may_access_artifact
@@ -166,7 +160,7 @@ async def create_agent_comment(token: str, body: AgentCommentCreate):
         tagged_agent_mentions=mentions,
     )
     try:
-        row, registered, feedback, _created = await create_validated_comment(request, body.client_id)
+        created = await agent_comment_writes.reply(request, body.client_id)
     except CommentAccessDenied as exc:
         raise HTTPException(404, str(exc)) from exc
     except AppLoopUnavailable as exc:
@@ -185,13 +179,14 @@ async def create_agent_comment(token: str, body: AgentCommentCreate):
         detail = str(exc)
         status = 413 if "too large" in detail else 415 if "binary" in detail else 422
         raise HTTPException(status, "binary file — cannot anchor a quote" if status == 415 else detail) from exc
-    if registered:
-        registry_service.notify_changed(row["artifact_id"])
-    if feedback["woken"]:
-        from plans import public
-
-        await public.drive_threads(feedback["woken"])
+    if isinstance(created, agent_comment_writes.Queued):
+        return _queued(created)
+    row, _registered, feedback, _created = created
     return {"comment": row, **feedback}
+
+
+def _queued(queued: agent_comment_writes.Queued) -> dict:
+    return {"queued": {"comment_id": queued.root_id, "position": queued.position, "message": queued.text}}
 
 
 class AgentFeedbackAction(BaseModel):
@@ -267,6 +262,7 @@ class AgentCommentPatch(BaseModel):
     anchor_text: str | None = None
     decision: str | None = None
     all_from_author: bool = False
+    post_as_is: bool = False
     reason: str | None = Field(
         default=None, max_length=SUGGESTION_REASON_MAX_CHARS,
         json_schema_extra={"maxLength": SUGGESTION_REASON_MAX_CHARS})
@@ -283,53 +279,34 @@ async def patch_agent_comment(comment_id: str, token: str, body: AgentCommentPat
     if not body.as_session_id:
         raise HTTPException(
             400, "as_session_id is required (the `corsia doc` CLI fills it automatically)")
+    if body.post_as_is:
+        return await _post_as_is(comment_id, body, user)
     if refusal := decision_only_error(
             decision=body.decision, all_from_author=body.all_from_author, reason=body.reason):
         raise HTTPException(400, refusal)
     if body.decision is not None:
         return await _decide_as_agent(comment_id, body, user)
-    fields = {k: v for k, v in body.model_dump(exclude={"as_session_id", "decision", "all_from_author", "reason"}).items()
-              if v is not None}
+    fields = {k: v for k, v in body.model_dump(
+        exclude={"as_session_id", "decision", "all_from_author", "post_as_is", "reason"}).items() if v is not None}
     if not fields:
         raise HTTPException(400, "No fields to update")
     if "body" in fields and not str(fields["body"]).strip():
         raise HTTPException(400, "Empty comment body")
 
-    def _patch():
-        db = get_db()
-        try:
-            if get_thread_for_user(body.as_session_id, user["id"], db=db) is None:
-                raise HTTPException(403, "as_session_id is not owned by the authenticated principal")
-            comment = store.get_comment(comment_id, db=db)
-            if comment is None:
-                return None
-            art = registry_models.get_artifact(comment["artifact_id"], db=db)
-            if art is None or not may_access_artifact(art["parent_thread_id"], user["id"], db=db):
-                return None
-            try:
-                check_agent_update(
-                    comment, fields, actor_thread_id=body.as_session_id,
-                    owner_thread_id=art["parent_thread_id"], db=db)
-                patch = reopen_fields(comment, fields)
-            except CommentActionError as exc:
-                raise HTTPException(comment_action_status(exc), exc.message) from exc
-            with write_transaction(db, scope="patch_agent_comment") as connection:
-                return update_comment(connection, comment_id, patch, actor_thread_id=body.as_session_id)
-        finally:
-            db.close()
-
-    row = await run_in_db(_patch)
-    if row is None:
+    await _require_session(body, user)
+    try:
+        updated = await agent_comment_writes.update(
+            comment_id, fields, thread_id=body.as_session_id, user_id=user["id"], regions=False)
+    except CommentActionError as exc:
+        raise HTTPException(comment_action_status(exc), exc.message) from exc
+    if isinstance(updated, agent_comment_writes.Queued):
+        return _queued(updated)
+    if updated is None:
         raise HTTPException(404, "Comment not found")
-    return {"comment": row}
+    return {"comment": updated[0]}
 
 
-async def _decide_as_agent(comment_id: str, body: AgentCommentPatch, user: dict) -> dict | JSONResponse:
-    """Accept or reject a suggestion as the ``as_session_id`` thread (``corsia doc accept|reject``)."""
-    allowed = {"decision", "all_from_author", "reason", "as_session_id"}
-    if any(key not in allowed for key in body.model_dump(exclude_none=True)):
-        raise HTTPException(400, "decision cannot be combined with other fields")
-
+async def _require_session(body: AgentCommentPatch, user: dict) -> dict:
     def _actor():
         db = get_db()
         try:
@@ -340,17 +317,39 @@ async def _decide_as_agent(comment_id: str, body: AgentCommentPatch, user: dict)
     actor = await run_in_db(_actor)
     if actor is None:
         raise HTTPException(403, "as_session_id is not owned by the authenticated principal")
+    return actor
+
+
+async def _post_as_is(comment_id: str, body: AgentCommentPatch, user: dict) -> dict:
+    """Post the write this agent saved in line on the thread, unchanged."""
+    if any(key not in {"post_as_is", "as_session_id"} for key in body.model_dump(exclude_none=True, exclude_defaults=True)):
+        raise HTTPException(400, "post_as_is cannot be combined with other fields")
+    await _require_session(body, user)
     try:
-        decide = decide_all_from_author if body.all_from_author else decide_suggestion
+        posted = await agent_comment_writes.post_as_is(comment_id, thread_id=body.as_session_id, user_id=user["id"])
+    except CommentActionError as exc:
+        raise HTTPException(comment_action_status(exc), exc.message) from exc
+    return _queued(posted) if isinstance(posted, agent_comment_writes.Queued) else posted
+
+
+async def _decide_as_agent(comment_id: str, body: AgentCommentPatch, user: dict) -> dict | JSONResponse:
+    """Accept or reject a suggestion as the ``as_session_id`` thread (``corsia doc accept|reject``)."""
+    allowed = {"decision", "all_from_author", "post_as_is", "reason", "as_session_id"}
+    if any(key not in allowed for key in body.model_dump(exclude_none=True)):
+        raise HTTPException(400, "decision cannot be combined with other fields")
+
+    actor = await _require_session(body, user)
+    try:
+        decide = agent_comment_writes.decide_all if body.all_from_author else agent_comment_writes.decide
         row = await decide(
-            comment_id, body.decision, user_id=user["id"],
-            decided_by=(actor["title"] or "").strip() or body.as_session_id,
-            actor_thread_id=body.as_session_id,
-            write=agent_document_writer(body.as_session_id, user["id"]), reason=body.reason)
+            comment_id, body.decision, thread_id=body.as_session_id, user_id=user["id"],
+            decided_by=(actor["title"] or "").strip() or body.as_session_id, reason=body.reason)
     except CommentActionError as exc:
         return decision_refusal(exc)
     except DocumentSaveError as exc:
         raise document_save_http_exception(exc) from exc
+    if isinstance(row, agent_comment_writes.Queued):
+        return _queued(row)
     if body.all_from_author:
         return row
     return {"comment": row}

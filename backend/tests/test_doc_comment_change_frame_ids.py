@@ -12,7 +12,7 @@ import json
 import pytest
 
 from delegation_docs_fixtures import _OWNER, _mk_thread, _registrable_roots, doc  # noqa: F401
-from test_doc_comment_change_frames import _user_comment
+from test_doc_comment_change_frames import _settle, _user_comment
 from test_doc_suggestions import _own, _suggest
 
 pytestmark = pytest.mark.integration
@@ -73,7 +73,8 @@ async def test_user_comments_replies_and_updates_name_nothing(
 
     user = _user_comment(integration_client, artifact_id)
     assert user.status_code == 200, user.text
-    assert sent == [plain]
+    _settle(artifact_id)  # A person's comment settles for 5 s before delivery, and is announced then.
+    assert [message for message in sent if message["artifact_id"] == artifact_id] == [plain]
 
     del sent[:]
     root = json.loads(await DocCommentCreateTool().execute(

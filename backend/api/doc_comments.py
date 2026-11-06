@@ -20,7 +20,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
-from api.doc_comment_delivery import deliver_person_comment_after_response
+from api.doc_comment_delivery import announce_person_comment_after_response
 from api.doc_comment_models import CommentCreate
 
 from doceditor import comments as store, doc_images, feedback_batches, feedback_state, image_regions
@@ -163,7 +163,7 @@ async def create_comment(
         ) from exc
     if created:
         background.add_task(
-            deliver_person_comment_after_response,
+            announce_person_comment_after_response,
             feedback["batch_ids"],
             artifact_id,
             feedback["delivery_policy"],

@@ -192,6 +192,25 @@ Source: `backend/infra/doc_feedback_schema.py`.
 
 Indexes: `sqlite_autoindex_doc_comment_thread_views_1` (user_id, root_id, unique).
 
+### `doc_comment_writer_line`
+
+Source: `backend/infra/doc_comments_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `id` | TEXT | Yes | No | — | — |
+| `root_id` | TEXT | No | Yes | — | — |
+| `artifact_id` | TEXT | No | Yes | — | — |
+| `agent_thread_id` | TEXT | No | Yes | — | threads.id |
+| `user_id` | TEXT | No | Yes | — | — |
+| `ops` | TEXT | No | Yes | — | — |
+| `state` | TEXT | No | Yes | 'waiting' | — |
+| `saved_at` | TEXT | No | Yes | — | — |
+| `wake_message_id` | TEXT | No | No | — | — |
+| `wakes` | INTEGER | No | Yes | 0 | — |
+
+Indexes: `idx_doc_comment_writer_line_active` (root_id, agent_thread_id, unique), `idx_doc_comment_writer_line_agent` (agent_thread_id, state), `idx_doc_comment_writer_line_root` (root_id, state, saved_at), `sqlite_autoindex_doc_comment_writer_line_1` (id, unique).
+
 ### `doc_comments`
 
 Source: `backend/infra/doc_comments_schema.py`.
