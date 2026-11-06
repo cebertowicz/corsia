@@ -38,12 +38,19 @@ export function canvasFocusedCommentScrollTarget(current: CanvasScrollTarget | n
 	return canvasCommentScrollTarget(comments, text, id, focus, 'navigation');
 }
 
-/** A suggestion is drawn inline only while it is open: a decided, resolved or stale one has no marks. */
-const openSuggestion = (comment: DocComment) =>
-	comment.replacement != null && !comment.decision && !comment.resolved && !comment.review && !comment.orphaned && !comment.textChanged;
+/** What a suggestion's state is read from, on a canvas comment or a card's thread data. */
+type SuggestionState = { replacement?: string | null; decision?: string | null; resolved?: boolean; review?: boolean };
+
+/** A suggestion still waiting to be accepted or rejected. A decided one can stay unresolved, so `!resolved` alone never means this. */
+export const pendingSuggestion = (comment: SuggestionState) =>
+	comment.replacement != null && !comment.decision && !comment.resolved && !comment.review;
 
 /** A suggestion that was accepted or rejected but stays an open conversation: it has replies, and nobody has resolved it. */
-export const decidedOpen = (comment: DocComment) => comment.replacement != null && !!comment.decision && !comment.resolved && !comment.review;
+export const decidedOpen = (comment: SuggestionState) =>
+	comment.replacement != null && !!comment.decision && !comment.resolved && !comment.review;
+
+/** A suggestion is drawn inline only while it is pending and its text still holds. */
+const openSuggestion = (comment: DocComment) => pendingSuggestion(comment) && !comment.orphaned && !comment.textChanged;
 
 /** The agent's presence colour: the thread that wrote the suggestion, the same source as its caret. */
 const suggestionColor = (comment: DocComment) => agentColor(comment.authorThreadId || comment.author);
@@ -55,7 +62,7 @@ const suggestionColor = (comment: DocComment) => agentColor(comment.authorThread
  */
 export function canvasCommentHighlights(comments: DocComment[], text: string, focusedId: string | null, onMarkerFocus: CommentRange['onMarkerFocus'], accepting: string | null = null): CommentRange[] {
 	let inlineEnd = -1;
-	return comments.filter((comment) => (!comment.resolved || comment.id === focusedId) && !(comment.replacement != null && comment.decision && comment.resolved)).flatMap((comment): CommentRange[] => {
+	return comments.filter((comment) => !comment.resolved || (comment.id === focusedId && !comment.decision)).flatMap((comment): CommentRange[] => {
 		const anchorRange = canvasCommentRange(comment, text);
 		// With no passage to mark, a comment keeps a margin marker at the line its text last was: one whose original text is gone (dashed), a decided
 		// suggestion that is still open (its quote was replaced), and the suggestion whose Accept is in flight while its replacement stands in the quote's place.
@@ -135,7 +142,7 @@ export function commentsInDocumentOrder(comments: DocComment[], text: string, re
 		const changed = textChangedAfter(comment, text);
 		const orphaned = !comment.review && !unplaced(comment) && !changed && (comment.id in refused || (rangeFor(comment, text) === null && !replaced(comment)));
 		// The original text is gone: the range collapsed (everything in it was deleted), or the quote is nowhere in the document.
-		const collapsed = !!comment.drawn && comment.from != null && comment.from === comment.to && !(comment.replacement != null && comment.decision);
+		const collapsed = !!comment.drawn && comment.from != null && comment.from === comment.to;
 		const detached = orphaned && (collapsed || !comment.anchor || !text.includes(comment.anchor));
 		return { ...comment, orphaned, detached, textChanged: changed };
 	}).sort((a, b) => at(a) - at(b) || sameImage(a, b) || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id));

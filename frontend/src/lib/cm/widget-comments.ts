@@ -87,7 +87,7 @@ export function selectionIn(view: EditorView, el: HTMLElement, range: Range): Wi
 export interface WidgetCommentHooks {
 	onSelect: (selection: WidgetSelection | null) => void;
 	/** Every comment drawn where the click landed, with the painted element it landed on; several open the list, as the margin marker does. */
-	onFocus: (ids: string[], opener: HTMLElement) => void;
+	onFocus: (ids: string[], opener: HTMLElement, click: MouseEvent) => void;
 }
 
 /**
@@ -118,10 +118,10 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			const selection = document.getSelection();
 			const ids = widget && origin ? commentIdsAt(widget, origin) : [];
 			// A whole-diagram text comment takes the click; the viewer remains reachable by keyboard and from its pins.
-			if (widget?.matches(DIAGRAM) && origin && ids.length > 0 && selection?.isCollapsed !== false) { hooks.onFocus(ids, origin.closest<HTMLElement>('[data-comment-ids]') ?? widget); return; }
+			if (widget?.matches(DIAGRAM) && origin && ids.length > 0 && selection?.isCollapsed !== false) { hooks.onFocus(ids, origin.closest<HTMLElement>('[data-comment-ids]') ?? widget, event); return; }
 			// A cell image or a diagram opens the viewer on a click, as an image in the text does; a drag across a diagram is a selection, not a click.
 			if (widget && origin && !origin.closest('a') && (drawnCellImage(origin) || selection?.isCollapsed !== false) && openWidgetImage(this.view, origin)) { event.preventDefault(); return; }
-			if (widget && origin && ids.length > 0 && selection?.isCollapsed !== false) { hooks.onFocus(ids, origin.closest<HTMLElement>('[data-comment-ids]') ?? widget); return; }
+			if (widget && origin && ids.length > 0 && selection?.isCollapsed !== false) { hooks.onFocus(ids, origin.closest<HTMLElement>('[data-comment-ids]') ?? widget, event); return; }
 			if ((this.pointer === 'touch' || this.recentTouch()) && (!origin || !widgetOf(this.view, origin))) { hooks.onSelect(null); return; }
 			this.tap(event);
 		};

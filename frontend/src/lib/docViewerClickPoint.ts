@@ -1,13 +1,3 @@
-/** How long after a press a card opening still counts as that click's. */
-const CLICK_WINDOW_MS = 800;
-
-const pointerAnchors = new WeakSet<object>();
-
-/** True for an anchor `point()` made, so a card knows it was opened by a click and sits at the pointer. */
-export function isPointerAnchor(anchor: unknown): boolean {
-	return typeof anchor === 'function' && pointerAnchors.has(anchor);
-}
-
 /** The line box under the click: the text rect at the click's height, widened by the line's half-leading. A margin marker's own box stands in for its line. */
 function clickedLine(target: Node, y: number): { top: number; bottom: number } | null {
 	const el = target instanceof Element ? target : target.parentElement;
@@ -23,27 +13,12 @@ function clickedLine(target: Node, y: number): { top: number; bottom: number } |
 }
 
 /**
- * Remembers the last press in a document so a card it opens can sit at the pointer. `listen` starts the tracking and returns its cleanup;
- * `point` is the box to place the card against, or null for a touch, a keyboard or list opening, a stale press, or the phone's sheet.
+ * The box a card opened by `click` sits against: the clicked line at the pointer's x. Null when no click opened it, for a
+ * keyboard press on a button (a click with no pointer, `detail` 0), so the card opens beside the comment's text as before.
  */
-export function createClickPoint(root: () => HTMLElement | null | undefined, sheet: () => boolean) {
-	let pointer: { x: number; y: number; at: number; type: string; target: EventTarget | null } | null = null;
-	return {
-		listen() {
-			const down = (event: PointerEvent) => { pointer = { x: event.clientX, y: event.clientY, at: Date.now(), type: event.pointerType, target: event.target }; };
-			const up = () => { if (pointer) pointer.at = Date.now(); };
-			window.addEventListener('pointerdown', down, true);
-			window.addEventListener('pointerup', up, true);
-			return () => { window.removeEventListener('pointerdown', down, true); window.removeEventListener('pointerup', up, true); };
-		},
-		point(): (() => DOMRect) | null {
-			const seen = pointer;
-			if (!seen || seen.type === 'touch' || sheet() || Date.now() - seen.at > CLICK_WINDOW_MS || !(seen.target instanceof Node) || !root()?.contains(seen.target)) return null;
-			const line = clickedLine(seen.target, seen.y);
-			const rect = new DOMRect(seen.x, line?.top ?? seen.y, 0, line ? line.bottom - line.top : 0);
-			const anchor = () => rect;
-			pointerAnchors.add(anchor);
-			return anchor;
-		},
-	};
+export function clickAnchor(click: MouseEvent | undefined): (() => DOMRect) | null {
+	if (!click || click.detail === 0 || !(click.target instanceof Node)) return null;
+	const line = clickedLine(click.target, click.clientY);
+	const rect = new DOMRect(click.clientX, line?.top ?? click.clientY, 0, line ? line.bottom - line.top : 0);
+	return () => rect;
 }

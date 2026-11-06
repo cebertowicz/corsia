@@ -63,6 +63,22 @@ describe('comment surface state', () => {
 		expect(surface.state).toBeNull();
 	});
 
+	it('opens a card at the click only when a click opened it', () => {
+		const surface = createCommentSurfaceState(() => {});
+		const opener = document.createElement('button');
+		surface.focusComment('c1', new DOMRect(), false, true);
+		expect(surface.atClick).toBe(true);
+		surface.focusComment('c2', new DOMRect());
+		expect(surface.atClick).toBe(false);
+		surface.focusMarker(['a'], opener, undefined, true);
+		expect(surface.atClick).toBe(true);
+		surface.openList(opener);
+		expect(surface.atClick).toBe(false);
+		surface.focusMarker(['a'], opener, undefined, true);
+		surface.openDraft(new DOMRect());
+		expect(surface.atClick).toBe(false);
+	});
+
 	it('tracks the hovered suggestion without moving focus', () => {
 		const surface = createCommentSurfaceState(() => {});
 		surface.hover('s1');

@@ -804,6 +804,9 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 178 -> 179 adds comment recipient state, tags, and mention ranges.
         from infra.migration_178_to_179_comment_recipients import migrate_178_to_179
         migrate_178_to_179(db)
+        # 179 -> 180 indexes comment replies by their thread.
+        from infra.migration_179_to_180_comment_replies_index import migrate_179_to_180
+        migrate_179_to_180(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
@@ -937,7 +940,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 179
+    assert SCHEMA_VERSION == 180
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83

@@ -181,8 +181,12 @@ def check_user_text_edit(comment: dict[str, Any], fields: dict[str, Any]) -> Non
 def reopen_fields(comment: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
     """Apply the re-open rule to a comment patch.
 
-    Re-opening a rejected suggestion clears its decision. An accepted one
-    cannot re-open, because its edit is already in the text.
+    The two ways a decided suggestion re-opens:
+
+    - Re-open (this patch): re-opening a rejected suggestion clears its decision. An
+      accepted one cannot re-open, because its edit is already in the text.
+    - Reply (``comments.create_with_status``): any reply to a resolved decided
+      suggestion re-opens it and keeps its decision, so the conversation goes on.
     """
     if fields.get("resolved") is True:
         if comment.get("replacement") is not None and not comment.get("decision"):

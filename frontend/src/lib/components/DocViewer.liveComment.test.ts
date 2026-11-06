@@ -434,3 +434,34 @@ it('returns focus to the editor without scrolling when the comment popover is di
 	expect(document.querySelector('[data-popover]')).toBeNull();
 	expect(viewFocus).toHaveBeenCalledOnce();
 });
+async function openWithComment() {
+	vi.stubGlobal('innerWidth', 1440);
+	vi.spyOn(EditorView.prototype, 'coordsAtPos').mockReturnValue({ left: 20, right: 30, top: 20, bottom: 30 });
+	await open();
+	docComments.set({ artifact: [{ id: 'c1', from: 6, to: 10, anchor: 'beta', author: 'you', text: 'note', at: '2026-10-07T00:00:00Z', resolved: false, replies: [] }] });
+	flushSync();
+	await vi.waitFor(() => expect(host.querySelector('.cm-comment-anchor')).not.toBeNull());
+	return EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+}
+const scrolledTo = (spy: { mock: { calls: unknown[][] } }, at: number) => spy.mock.calls.some(([pos]) => pos === at);
+it('scrolls to a comment the caret reaches by keyboard, even right after a press elsewhere in the text', async () => {
+	const view = await openWithComment();
+	const scroll = vi.spyOn(EditorView, 'scrollIntoView');
+	view.contentDOM.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 40, clientY: 400 }));
+	view.contentDOM.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 40, clientY: 400 }));
+	view.dispatch({ selection: { anchor: 7 } }); flushSync();
+	await vi.waitFor(() => expect(scrolledTo(scroll, 6)).toBe(true));
+});
+it('opens a comment where its text is clicked without scrolling to it', async () => {
+	const view = await openWithComment();
+	const scroll = vi.spyOn(EditorView, 'scrollIntoView');
+	// The press moves the caret into the comment's text, as the browser does under the pointer.
+	view.contentDOM.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 40, clientY: 25 }));
+	view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, detail: 1, clientX: 40, clientY: 25 }));
+	view.dispatch({ selection: { anchor: 7 }, userEvent: 'select.pointer' });
+	view.contentDOM.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: 40, clientY: 25 }));
+	window.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+	await vi.waitFor(() => expect(document.querySelector('[data-popover]')).not.toBeNull());
+	await new Promise((done) => requestAnimationFrame(() => done(null)));
+	expect(scrolledTo(scroll, 6)).toBe(false);
+});

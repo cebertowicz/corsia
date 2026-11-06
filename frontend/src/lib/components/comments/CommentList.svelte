@@ -4,6 +4,7 @@
 	import type { CommentThreadData } from './CommentThreadData';
 	import { createMentionSelection, type MentionOccurrence } from './mentionSelection';
 	import { groupRows } from '$lib/docImageComments';
+	import { decidedOpen } from '$lib/docCanvasComments';
 	import { plainQuote } from '$lib/plainQuote';
 	import { leaveRow } from '$lib/actions/leaveRow';
 	type Comment = CommentThreadData & { review?: boolean };
@@ -94,8 +95,8 @@
 		const card = event.currentTarget as HTMLElement;
 		if (!(event.relatedTarget instanceof Node) || !card.contains(event.relatedTarget)) onHover?.(null);
 	}
-	/** Its text could not be found. An accepted suggestion that stays open has no quote left by design, so it is not this. */
-	const lostText = (comment: Comment) => !!comment.orphaned && !(comment.replacement != null && comment.decision);
+	/** Its text could not be found. A decided suggestion that stays open (`decidedOpen`) may have no quote left by design, so it is not this. */
+	const lostText = (comment: Comment) => !!comment.orphaned && !decidedOpen(comment);
 	const shownQuote = (comment: Comment) => lostText(comment) || comment.review ? null : cellLabel?.(comment) ?? null;
 	// Cards keep the caller's order and one each block: a thread whose section changes only changes its heading, because moving its card would take the person out of the reply box.
 	const sectionOf = (comment: Comment) => comment.resolved ? 'Resolved' : comment.review ? 'Review comments' : lostText(comment) ? 'Text changed' : 'Open comments';

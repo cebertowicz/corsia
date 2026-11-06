@@ -19,6 +19,7 @@ from doceditor.document_scope import UI_THREAD
 from doceditor.feedback_suggestion_decisions import stranded_note
 from doceditor.note_names import actor_name
 from doceditor.quote_anchor import reanchor
+from doceditor.suggestion_overlap import is_pending_suggestion
 from infra.database import write_transaction
 
 log = logging.getLogger(__name__)
@@ -55,11 +56,7 @@ def note_stranded_suggestions(db, artifact, *, actor_thread_id: str | None) -> N
         log.info("stranded suggestion check skipped for %s: %s", artifact_id, exc)
         return
     threads, _ = anchored_threads(artifact_id, artifact["path"], db, text=text, persist=False)
-    pending = [
-        row for row in threads
-        if row.get("replacement") is not None and not row["resolved"]
-        and not row["review"] and row.get("author_thread_id")
-    ]
+    pending = [row for row in threads if is_pending_suggestion(row) and row.get("author_thread_id")]
     editor = None if actor_thread_id in (None, UI_THREAD) else actor_thread_id
     for row in pending:
         stranded = bool(row.get("orphaned") or row.get("text_changed")) and not _applied(row, text)

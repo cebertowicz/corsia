@@ -24,17 +24,18 @@
 	import { restingTop, trackOverlaySheet } from '$lib/cm/visible-region';
 	import { createCellLabels, type WidgetLabelReader } from '$lib/docCommentLabels';
 	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
-	import { isPointerAnchor } from '$lib/docViewerClickPoint';
 	import { imageAlt, imageGroupKey, onItsImage, type ImageCommentSurface, type DocImageComments } from '$lib/docImageComments';
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { CommentAnchor, CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, widgetLabel, focusedId, focusedIds = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, placementRecovery = { unplacedCount: 0, replaceableCount: 0 }, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onThreadMissing, reviewBar, reviewVisible = false }: {
+	let { state: surfaceState, anchor, anchorAtClick = false, bounds = null, narrow, comments, widgetLabel, focusedId, focusedIds = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, placementRecovery = { unplacedCount: 0, replaceableCount: 0 }, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onThreadMissing, reviewBar, reviewVisible = false }: {
 		state: CommentSurfaceState;
 		reviewBar?: Snippet<[boolean]>;
 		reviewVisible?: boolean;
 		onThreadMissing?: (remaining: string[]) => void;
 		anchor: CommentAnchor | null;
+		/** The anchor is where a click opened the card: the card opens just under it, not beside the text. */
+		anchorAtClick?: boolean;
 		/** The canvas the card stays inside. */
 		bounds?: HTMLElement | null;
 		narrow: boolean;
@@ -358,7 +359,7 @@
 	{:else if surfaceState?.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
 	{:else if narrow && sheet.state}<AdaptiveDrawer bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose} above={rowHost}>{@render content()}</AdaptiveDrawer>
-	{:else if surfaceState}<Popover anchor={cardAnchor} placement={isPointerAnchor(anchor) ? 'pointer' : 'right'} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} sideKey={surfaceState.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus} keepOpenOnPointer={(target) => !!image && surfaceState?.kind === 'draft' && target instanceof Element && !!bounds?.contains(target) && !!target.closest('[data-image-zoom]')}>{@render content()}</Popover>{/if}
+	{:else if surfaceState}<Popover anchor={cardAnchor} placement={anchorAtClick ? 'pointer' : 'right'} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} sideKey={surfaceState.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus} keepOpenOnPointer={(target) => !!image && surfaceState?.kind === 'draft' && target instanceof Element && !!bounds?.contains(target) && !!target.closest('[data-image-zoom]')}>{@render content()}</Popover>{/if}
 {/if}
 
 <style>

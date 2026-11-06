@@ -23,7 +23,7 @@ from doceditor.comment_actions import (
 from doceditor.comment_permissions import check_decider, owner_row
 from doceditor.doc_text import read_doc_text
 from doceditor.feedback_edit_discard import discard_new_edit_item
-from doceditor.suggestion_overlap import is_open_suggestion, suggestions_overlap
+from doceditor.suggestion_overlap import is_pending_suggestion, suggestions_overlap
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_off_db
 from registry import models as registry_models
@@ -40,7 +40,7 @@ def _open_author_suggestions(comment_id: str, user_id: str, actor_thread_id: str
         owner = owner_row(db, artifact["parent_thread_id"])
         check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
         rows = store.list_for_artifact(comment["artifact_id"], db=db)
-        open_rows = [row for row in rows if is_open_suggestion(row)
+        open_rows = [row for row in rows if is_pending_suggestion(row)
                      and row.get("author_thread_id") == comment.get("author_thread_id")]
         if decision == "accept":
             _attach_accepted_insertions(open_rows, rows)
@@ -63,7 +63,7 @@ def _open_suggestions(artifact_id: str, user_id: str, actor_thread_id: str | Non
         owner = owner_row(db, artifact["parent_thread_id"])
         check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
         all_rows = store.list_for_artifact(artifact_id, db=db)
-        rows = [row for row in all_rows if is_open_suggestion(row)]
+        rows = [row for row in all_rows if is_pending_suggestion(row)]
         _attach_accepted_insertions(rows, all_rows)
         return artifact, owner[1] if owner else None, rows
     finally:

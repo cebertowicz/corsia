@@ -102,8 +102,8 @@ function marks(state: EditorState): DecorationSet {
 }
 
 export interface SuggestionPointer {
-	/** The insert was pressed (or tapped): focus its card. */
-	focus: (id: string, anchor: DOMRect) => void;
+	/** The insert was pressed (or tapped): focus its card, opened at the press. */
+	focus: (id: string, click: MouseEvent) => void;
 	/** The pointer entered a suggestion's strike or insert, or left it (null). */
 	hover: (id: string | null) => void;
 }
@@ -157,7 +157,7 @@ export function suggestionMarks(pointer: () => SuggestionPointer): Extension[] {
 				if (!insert || !id) return false;
 				// The insert is not document text: pressing it never moves the caret or starts an edit.
 				event.preventDefault();
-				pointer().focus(id, insert.getBoundingClientRect());
+				pointer().focus(id, event);
 				return true;
 			},
 			mouseover(event) {

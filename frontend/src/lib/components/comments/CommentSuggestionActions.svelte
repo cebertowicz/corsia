@@ -29,3 +29,13 @@
 	</div>
 {/if}
 {#if decisionError}<div class="ct-decision-error" role="alert">{decisionError}</div>{/if}
+
+<style>
+	.ct-suggestion-actions { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+	.ct-suggestion-accept { font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-on-fill); background: var(--accent-fill); border: none; border-radius: var(--radius-xs); padding: 5px 10px; cursor: pointer; }
+	.ct-suggestion-accept:disabled, .ct-link:disabled { opacity: 0.55; cursor: not-allowed; }
+	.ct-suggestion-actions button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
+	.ct-suggestion-accept:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); opacity: 1; }
+	.ct-link:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }
+	.ct-decision-error { font-size: var(--text-caption); color: var(--red-text); }
+</style>

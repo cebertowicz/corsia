@@ -12,6 +12,13 @@ USER_COMMENTS_BY_TIME_INDEX_SQL = """
         ON doc_comments(created_at, id) WHERE author_kind='user';
 """
 
+#: Replies by their thread: deciding a suggestion and routing a reply read a thread's
+#: replies on the request path. Its own constant so step 180 creates it from this one definition.
+REPLIES_BY_PARENT_INDEX_SQL = """
+    CREATE INDEX IF NOT EXISTS idx_doc_comments_parent
+        ON doc_comments(parent_id) WHERE parent_id IS NOT NULL;
+"""
+
 DOC_COMMENTS_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS doc_comments (
         id TEXT PRIMARY KEY,
@@ -58,7 +65,7 @@ DOC_COMMENTS_SCHEMA_SQL = """
     CREATE INDEX IF NOT EXISTS idx_doc_comments_decision_event
         ON doc_comments(decision_event_id)
         WHERE decision_event_id IS NOT NULL;
-""" + f"    {REGION_NUMBER_INDEX_SQL};\n" + USER_COMMENTS_BY_TIME_INDEX_SQL
+""" + f"    {REGION_NUMBER_INDEX_SQL};\n" + USER_COMMENTS_BY_TIME_INDEX_SQL + REPLIES_BY_PARENT_INDEX_SQL
 
 # Feedback batches reference doc_comments, so they follow it.
 # Tag and recipient state also follow their referenced comments.

@@ -27,6 +27,7 @@
 	import { createThreadOpen } from './threadOpen';
 	import { observeArrivedThread } from './arrivedThread.svelte';
 	import { arrivedDocComments } from '$lib/stores/docComments';
+	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
 
 	let { comment, header, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
 		comment: CommentThreadData;
@@ -93,7 +94,7 @@
 
 	const isSuggestion = $derived(comment.replacement !== undefined && comment.replacement !== null);
 	/** Accepted or rejected, but still a conversation: it has replies and nobody resolved it. The card shows the conversation, not the edit. */
-	const decidedOpen = $derived(isSuggestion && !!comment.decision && !comment.resolved);
+	const decidedOpen = $derived(isDecidedOpen(comment));
 	const suggestionDiff = $derived(isSuggestion ? lineDiff(comment.insertAfter ? '' : comment.anchor, comment.replacement!) : null);
 	let replyPosting = $state(false);
 	let resolvedOpen = $state(untrack(() => !viewEachUnread && (!!comment.newComment || !!comment.newReplyIds?.length)));
@@ -290,7 +291,7 @@
 			<CommentSuggestionActions orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />
 		{:else}
 			{#if comment.resolved}<div transition:clipFade><ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} /></div>{/if}
-			{#if comment.orphaned && !hideOrphan}{#if comment.detached && comment.anchor}<CommentQuote quote={plainQuote(comment.anchor)} />{/if}<div class="ct-orphan" data-detached={comment.detached || undefined}>{comment.detached ? 'Original text deleted' : 'The text this comment was on has changed'}</div>{/if}
+			{#if comment.orphaned && !hideOrphan}{#if comment.detached && comment.anchor}<CommentQuote quote={plainQuote(comment.anchor)} />{/if}<div class="ct-orphan" data-detached={comment.detached || undefined}>{comment.detached ? 'The text this comment was on was deleted' : 'The text this comment was on has changed'}</div>{/if}
 			{#if comment.regionStale}
 				<div class="ct-orphan" data-region-stale>{changedLabel(diagram)}{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
 			{/if}
@@ -352,13 +353,6 @@
 	/* A 44 px target around the 18 px number on touch. */
 	@media (pointer: coarse) { button.ct-num::before { content: ''; position: absolute; inset: -13px; } }
 	.ct-link:disabled { opacity: 0.55; cursor: not-allowed; }
-	:global(.ct-suggestion-actions) { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
-	:global(.ct-suggestion-accept) { font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-on-fill); background: var(--accent-fill); border: none; border-radius: var(--radius-xs); padding: 5px 10px; cursor: pointer; }
-	:global(.ct-suggestion-accept:disabled) { opacity: 0.55; cursor: not-allowed; }
-	:global(.ct-suggestion-actions button:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-xs); }
-	:global(.ct-suggestion-accept:disabled[aria-busy="true"]) { color: var(--text-primary); background: var(--accent-wash); opacity: 1; }
-	:global(.ct-link:disabled[aria-busy="true"]) { color: var(--text-primary); background: var(--accent-wash); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }
-	:global(.ct-decision-error) { font-size: var(--text-caption); color: var(--red-text); }
 
 	.ct-agreed { display: flex; align-items: center; gap: 5px; font-size: var(--text-caption); font-weight: var(--fw-medium); color: var(--green); margin-top: 2px; }
 

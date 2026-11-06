@@ -23,7 +23,7 @@ export interface CommentRange {
 	id: string;
 	focused?: boolean;
 	replyWaiting?: boolean;
-	onMarkerFocus?: (ids: string[], opener: HTMLElement, anchor?: () => DOMRect | null) => void;
+	onMarkerFocus?: (ids: string[], opener: HTMLElement, anchor?: () => DOMRect | null, click?: MouseEvent) => void;
 	suggestion?: InlineSuggestion;
 	/** A point, not a passage: drawn as a margin marker only, with no highlight (text deleted, or a decided suggestion whose quote was replaced). */
 	point?: boolean;

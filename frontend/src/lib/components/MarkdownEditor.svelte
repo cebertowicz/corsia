@@ -66,7 +66,8 @@
 		onOpenLink?: (href: string) => void;
 		onSave?: () => void;
 		onSelect?: (sel: { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; label?: SelectionLabel; above?: boolean; inWidget?: boolean } | null) => void;
-		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) => void;
+		/** `click` is the press that opened it, when a pointer did; the card then opens at that point. */
+		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) => void;
 		/** Cards open as the phone sheet here, so a caret in a suggestion opens none and the editor keeps the focus to edit. */
 		commentsAsSheet?: boolean;
 		onSuggestionHover?: (id: string | null) => void;
@@ -190,20 +191,19 @@
 	export function widgetLabelStamp(): unknown { return view?.state.doc; }
 
 	/** A click on a mark drawn inside a table or diagram: one comment opens as a click on its text does, several as their margin marker does. */
-	function focusWidgetComments(ids: string[], opener: HTMLElement) {
+	function focusWidgetComments(ids: string[], opener: HTMLElement, click?: MouseEvent) {
 		const open = ids.length > 1 ? curHighlights.find((h) => h.id === ids[0])?.onMarkerFocus : undefined;
-		if (open) open(ids, opener); else onAnchorFocus?.(ids[0], liveAnchor(ids[0]), opener.dataset.suggestionId !== undefined || undefined);
+		if (open) open(ids, opener, undefined, click); else onAnchorFocus?.(ids[0], liveAnchor(ids[0]), opener.dataset.suggestionId !== undefined || undefined, click);
 	}
 
-	function handleSelection(v: EditorView) {
+	function handleSelection(v: EditorView, click?: MouseEvent) {
 		const r = v.state.selection.main;
 		if (r.empty) {
 			onSelect?.(null);
 			const hit = curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to);
 			// Where cards open as the phone sheet, a caret in a suggestion is editing: only a press on its insert (suggestionMarks) opens the card.
 			if (hit && !(hit.suggestion && commentsAsSheet) && v.coordsAtPos(r.from)) {
-				if (hit.suggestion) onAnchorFocus?.(hit.id, liveAnchor(hit.id), true);
-				else onAnchorFocus?.(hit.id, liveAnchor(hit.id));
+				onAnchorFocus?.(hit.id, liveAnchor(hit.id), hit.suggestion ? true : undefined, click);
 			}
 		} else {
 			emitSelection(v);
@@ -234,7 +234,7 @@
 				markdownTasks,
 				commentMarks,
 				pendingCommentMark,
-				suggestionMarks(() => ({ focus: (id) => onAnchorFocus?.(id, liveAnchor(id), true), hover: (id) => onSuggestionHover?.(id) })),
+				suggestionMarks(() => ({ focus: (id, click) => onAnchorFocus?.(id, liveAnchor(id), true, click), hover: (id) => onSuggestionHover?.(id) })),
 				commentRail,
 				widgetComments({ onSelect: (sel) => onSelect?.(sel), onFocus: focusWidgetComments }),
 				presenceMarks,
@@ -243,10 +243,10 @@
 				EditorView.contentAttributes.of({ spellcheck: 'true' }),
 				roComp.of(EditorState.readOnly.of(readOnly)),
 				EditorView.domEventHandlers({
-					mousedown(_e, v) {
+					mousedown(press, v) {
 						dragging = true;
 						onSelect?.(null);
-						const up = () => { dragging = false; requestAnimationFrame(() => handleSelection(v)); };
+						const up = () => { dragging = false; requestAnimationFrame(() => handleSelection(v, press)); };
 						window.addEventListener('mouseup', up, { once: true });
 						return false;
 					}
@@ -336,7 +336,7 @@
 		// A marker's card anchors to the rows of the comment's text, read again as the canvas scrolls.
 		const ranges = highlights.map((h) => ({
 			...h,
-			onMarkerFocus: h.onMarkerFocus && ((ids: string[], opener: HTMLElement) => h.onMarkerFocus!(ids, opener, () => {
+			onMarkerFocus: h.onMarkerFocus && ((ids: string[], opener: HTMLElement, _anchor?: () => DOMRect | null, click?: MouseEvent) => h.onMarkerFocus!(ids, opener, () => {
 				const focused = get(focusedDocComment);
 				const id = focused && ids.includes(focused) ? focused : ids.find((candidate) => curHighlights.some((highlight) => highlight.id === candidate));
 				return id ? liveAnchor(id)() : null;

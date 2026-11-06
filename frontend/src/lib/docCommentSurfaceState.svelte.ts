@@ -29,6 +29,8 @@ export function focusDocumentEditor(root: HTMLElement | undefined) {
 export function createCommentSurfaceState(restoreEditor: () => void, draftScope?: () => string) {
 	let state = $state<CommentSurfaceState>(null);
 	let anchor = $state<CommentAnchor | null>(null);
+	/** The anchor is the point a click opened the card at: the card sits there instead of beside the text. */
+	let atClick = $state(false);
 	let restoreFocus = $state<() => void>(restoreEditor);
 	// Derived solely from createCommentSheet's modal lifecycle; the viewer uses it to hide its sibling selection control.
 	let sheetUp = $state(false);
@@ -46,9 +48,10 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 	}
 	function openDraft(rect: CommentAnchor) {
 		anchor = rect;
+		atClick = false;
 		state = { kind: 'draft' };
 	}
-	function focusComment(id: string, rect: CommentAnchor, viaSuggestion = false) {
+	function focusComment(id: string, rect: CommentAnchor, viaSuggestion = false, clicked = false) {
 		// The drawer is nonmodal: a caret landing in commented text (a click, or
 		// Escape collapsing a selection) keeps it open rather than swapping it
 		// for that comment's popover. Pressing a suggestion in the editor still
@@ -60,13 +63,15 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		focusedDocComment.set(id);
 		state = { kind: 'thread', id };
 		anchor = rect;
+		atClick = clicked;
 		restoreFocus = restoreEditor;
 		return changed;
 	}
-	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) {
+	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, clicked = false) {
 		state = ids.length === 1 ? { kind: 'thread', id: ids[0] } : { kind: 'thread', id: ids[0], ids };
 		focusedDocComment.set(ids[0]);
 		anchor = reading ?? opener;
+		atClick = clicked;
 		restoreFocus = () => opener.focus();
 	}
 	function selectMarkerThread(id: string) {
@@ -84,11 +89,13 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		if (state?.kind === 'list') { close(); return; }
 		state = { kind: 'list' };
 		anchor = opener;
+		atClick = false;
 		restoreFocus = () => opener.focus();
 	}
 	return {
 		get state() { return state; }, set state(value: CommentSurfaceState) { state = value; },
 		get anchor() { return anchor; }, set anchor(value: CommentAnchor | null) { anchor = value; },
+		get atClick() { return atClick; },
 		get restoreFocus() { return restoreFocus; },
 		get sheetUp() { return sheetUp; }, set sheetUp(value: boolean) { sheetUp = value; },
 		get hovered() { return hovered; }, hover(id: string | null) { hovered = id; },

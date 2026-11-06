@@ -52,7 +52,7 @@ def test_a_decision_on_a_suggestion_with_no_replies_still_resolves_it(scope):
     assert _state(db, suggestion["id"]) == ("accepted", 1)
 
 
-def test_the_first_reply_to_a_decided_suggestion_reopens_it_and_a_second_changes_nothing(scope):
+def test_any_reply_to_a_resolved_decided_suggestion_reopens_it_and_keeps_its_decision(scope):
     db, artifact_id = scope
     suggestion, _ = add_comment(db, artifact_id, replacement="better wording")
     _decide(db, suggestion, "reject")
@@ -61,10 +61,14 @@ def test_the_first_reply_to_a_decided_suggestion_reopens_it_and_a_second_changes
     add_comment(db, artifact_id, parent_id=suggestion["id"], author_kind="user", author_id=None, author="Robin")
     assert _state(db, suggestion["id"]) == ("rejected", 0)
 
-    # Someone resolves the thread on purpose; a later reply is not the first, so it is not reopened by this rule.
+    # Resolved on purpose, it reopens again on the next reply, as a resolved comment does in Google Docs.
     store.update(suggestion["id"], {"resolved": True}, db=db)
+    db.execute("UPDATE doc_comments SET updated_at='2000-01-01T00:00:00+00:00' WHERE id=?", (suggestion["id"],))
+    db.commit()
     add_comment(db, artifact_id, parent_id=suggestion["id"], author_kind="user", author_id=None, author="Robin")
-    assert _state(db, suggestion["id"]) == ("rejected", 1)
+    assert _state(db, suggestion["id"]) == ("rejected", 0)
+    # The reopen is an ordinary update: it moves the thread's update time like every other change to `resolved`.
+    assert store.get_comment(suggestion["id"], db=db)["updated_at"] > "2000-01-01T00:00:00+00:00"
 
 
 def test_a_reply_to_an_undecided_comment_changes_nothing_about_it(scope):

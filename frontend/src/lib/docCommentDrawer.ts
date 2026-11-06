@@ -1,6 +1,7 @@
 import { get } from 'svelte/store';
 import { prefersReducedMotion } from '$lib/stores/viewport';
 import type { DocComment } from '$lib/stores/docCommentProjection';
+import { pendingSuggestion } from '$lib/docCanvasComments';
 
 /** Image comments follow their tag numbers. */
 export const byCommentNumber = (a: DocComment, b: DocComment) => (a.regionNumber ?? Infinity) - (b.regionNumber ?? Infinity);
@@ -16,7 +17,7 @@ export function imageDrawerMotion(_node: Element, { leaving }: { leaving: boolea
 
 /** Authors with at least two open, placed suggestions whose text is unchanged can accept them together. */
 export function authorsWithOpenSuggestions(comments: DocComment[]) {
-	return Object.entries(comments.filter((comment) => !comment.resolved && !comment.decision && !comment.orphaned && !comment.textChanged && comment.replacement !== null && comment.replacement !== undefined)
+	return Object.entries(comments.filter((comment) => pendingSuggestion(comment) && !comment.orphaned && !comment.textChanged)
 		.reduce<Record<string, DocComment[]>>((groups, comment) => ({ ...groups, [comment.author]: [...(groups[comment.author] ?? []), comment] }), {}))
 		.filter(([, suggestions]) => suggestions.length >= 2);
 }

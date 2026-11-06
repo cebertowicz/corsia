@@ -202,12 +202,12 @@ def create_with_status(
         _check_existing_identity(r, artifact_id, author, cid)
         created = inserted.rowcount == 1
         if created and parent_id:
-            # A decided suggestion stays open while it has replies: the first reply to one that closed with its decision reopens it.
-            connection.execute(
-                """UPDATE doc_comments SET resolved=0 WHERE id=? AND decision IS NOT NULL AND resolved=1
-                   AND (SELECT COUNT(*) FROM doc_comments WHERE parent_id=?)=1""",
-                (r["parent_id"], r["parent_id"]),
-            )
+            # The reply rule of comment_actions.reopen_fields: a reply reopens a resolved decided suggestion.
+            root = connection.execute(
+                "SELECT decision, resolved FROM doc_comments WHERE id=?", (r["parent_id"],)
+            ).fetchone()
+            if root is not None and root["decision"] and root["resolved"]:
+                update(r["parent_id"], {"resolved": False}, db=connection)
         if created:
             # Only a new top-level agent comment or suggestion names itself; replies and user comments do not.
             named = author_kind == "agent" and author_thread_id and not parent_id
@@ -231,7 +231,8 @@ def create(*args: Any, **kwargs: Any) -> dict[str, Any]:
 def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
     """Patch a comment (resolved / acked / body / offsets). Returns the row.
 
-    Resolving drops any unsent re-opened item for the comment, whichever route resolved it.
+    Resolving drops any unsent re-opened item for the comment, whichever route resolved it;
+    resolving or deciding settles the delivered feedback that holds it.
     """
     allowed = {"resolved", "acked", "body", "from_off", "to_off", "anchor_text", "decision", "decided_by", "decided_by_thread_id", "decided_at", "decision_event_id", "decided_in_bulk",
                "region_x", "region_y", "region_w", "region_h", "image_rev"}
@@ -252,6 +253,8 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
             return None
         if fields.get("resolved"):
             feedback_reopens.discard_open_item(connection, comment_id, now)
+        # A decision settles its feedback item even while the thread stays open for its replies.
+        if fields.get("resolved") or fields.get("decision"):
             feedback_settlement.settle_batches_of(connection, comment_id)
         row = dict(connection.execute("SELECT * FROM doc_comments WHERE id=?", (comment_id,)).fetchone())
         comment_recipients.tags_for_comments(connection, [row])

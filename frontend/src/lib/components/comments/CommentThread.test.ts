@@ -478,7 +478,7 @@ describe('CommentComposer', () => {
 describe('a comment whose text was deleted', () => {
 	it('says the original text was deleted and keeps the old text in quotes', () => {
 		render(thread({ anchor: 'two extra liters', orphaned: true, detached: true }));
-		expect(host.querySelector('.ct-orphan')?.textContent).toBe('Original text deleted');
+		expect(host.querySelector('.ct-orphan')?.textContent).toBe('The text this comment was on was deleted');
 		expect(host.textContent).toContain('two extra liters');
 	});
 

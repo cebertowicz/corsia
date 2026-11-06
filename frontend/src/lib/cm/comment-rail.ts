@@ -239,7 +239,7 @@ class CommentRail {
 		button.type = 'button';
 		button.className = 'cm-comment-marker press-tint';
 		const marker: Marker = { button, ids: [] };
-		button.addEventListener('click', () => marker.onFocus?.(marker.ids, button));
+		button.addEventListener('click', (click) => marker.onFocus?.(marker.ids, button, undefined, click));
 		return marker;
 	}
 }
