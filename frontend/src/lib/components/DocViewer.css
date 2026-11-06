@@ -1,15 +1,22 @@
 @import './commentAnchors.css';
 :root { --doc-visual-viewport-height: 100dvh; --doc-visual-viewport-offset: 0px; }
-.doc { --doc-canvas-top: 0px; --doc-drawer-footer-height: 0px; position: relative; box-sizing: border-box; width: 100%; height: 100%; max-height: calc(var(--doc-visual-viewport-height, 100dvh) + var(--doc-visual-viewport-offset, 0px) - var(--doc-canvas-top, 0px) - 8px); min-height: 0; display: grid; grid-template-areas: 'header' 'editor'; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: 8px; padding: 4px 0 8px; text-align: left; }
+.doc { --doc-canvas-top: 0px; --doc-drawer-footer-height: 0px; position: relative; box-sizing: border-box; width: 100%; height: 100%; max-height: calc(var(--doc-visual-viewport-height, 100dvh) + var(--doc-visual-viewport-offset, 0px) - var(--doc-canvas-top, 0px) - var(--space-2)); min-height: 0; display: grid; grid-template-areas: 'header' 'editor'; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); gap: var(--space-2); padding: var(--space-1) 0 var(--space-2); text-align: left; }
 /* A pending-feedback footer reports its own height. The list keeps its existing capped height; only the pinned footer is added below it. */
-.doc:has(.canvas-comment-drawer) { --doc-drawer-height: min(36%, 260px); grid-template-areas: 'header' 'editor' 'drawer'; grid-template-rows: auto minmax(0, 1fr) minmax(0, var(--doc-drawer-height)); }
+.doc:has(.canvas-comment-drawer), .doc:has(.canvas-history-drawer) { --doc-drawer-height: min(36%, 260px); grid-template-areas: 'header' 'editor' 'drawer'; grid-template-rows: auto minmax(0, 1fr) minmax(0, var(--doc-drawer-height)); }
 .doc:has(.canvas-comment-drawer .drawer-unsent) { --doc-drawer-height: calc(min(36%, 260px) + var(--doc-drawer-footer-height, 0px)); }
 /* The bottom band has its own track, so notices do not cover the editor, its activity control or a drawer. */
 .doc:has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom'; grid-template-rows: auto minmax(0, 1fr) auto; }
 .doc:has(.canvas-comment-drawer):has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom' 'drawer'; grid-template-rows: auto minmax(0, 1fr) auto minmax(0, var(--doc-drawer-height)); }
+.doc:has(.canvas-history-drawer):has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom' 'drawer'; grid-template-rows: auto minmax(0, 1fr) auto minmax(0, var(--doc-drawer-height)); }
 @container doc-canvas (min-width: 900px) {
   .doc:has(.canvas-comment-drawer) { grid-template-areas: 'header header' 'editor drawer'; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(0, 1fr); }
   .doc:has(.canvas-comment-drawer):has(.doc-bottom-band) { grid-template-areas: 'header header' 'editor drawer' 'bottom drawer'; grid-template-rows: auto minmax(0, 1fr) auto; }
+}
+/* Version history: History's side column starts where the text beside it keeps 45 characters a line (HISTORY_BESIDE_CANVAS in imageViewerPane.ts, 666), not at the comments drawer's 900. */
+@container doc-canvas (min-width: 666px) {
+  .doc:has(.canvas-history-drawer) .canvas-history-drawer { border-top: 0; border-left: 1px solid var(--border-subtle); padding-left: var(--space-3); }
+  .doc:has(.canvas-history-drawer) { grid-template-areas: 'header header' 'editor drawer'; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(0, 1fr); }
+  .doc:has(.canvas-history-drawer):has(.doc-bottom-band) { grid-template-areas: 'header header' 'editor drawer' 'bottom drawer'; grid-template-rows: auto minmax(0, 1fr) auto; }
 }
 /* CodeMirror owns scrolling; this grid cell clips without a second scroll container. */
 .doc-main { grid-area: editor; flex: 1; min-width: 0; min-height: 0; overflow: clip; overscroll-behavior: contain; }
@@ -36,3 +43,19 @@
 @keyframes load-slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
 .md-skel { display: flex; flex-direction: column; gap: 10px; }
 .ms-line { height: 13px; border-radius: var(--radius-2xs); background: var(--bg-hover); animation: pulse 1.4s ease-in-out infinite; }
+/* A write action's row: every control is its own 44 px target, so the hit box is the box (no overlapping extension). */
+@media (max-width: 768px), (any-pointer: coarse) {
+  .canvas-history-drawer[data-doc-history-drawer] .vrow { min-height: var(--touch-target); }
+  .canvas-history-drawer[data-doc-history-drawer] .vhead .btn, .canvas-history-drawer[data-doc-history-drawer] .vhead .ico-btn, .canvas-history-drawer[data-doc-history-drawer] .vhead .drill-back { min-height: var(--touch-target); min-width: var(--touch-target); box-sizing: border-box; }
+  .canvas-history-drawer[data-doc-history-drawer] .vhead .btn::after, .canvas-history-drawer[data-doc-history-drawer] .vhead .ico-btn::after { display: none; }
+  .history-version[data-doc-history-version] .vhead-wide .btn { min-height: var(--touch-target); }
+}
+/* Version history: below the side-column width, an open version replaces the text area; the list stays a strip. */
+@container doc-canvas (width < 666px) {
+  .doc:has(.canvas-history-drawer.full) { grid-template-areas: 'header' 'drawer'; grid-template-rows: auto minmax(0, 1fr); }
+  .doc:has(.canvas-history-drawer.full) > .doc-main { display: none; }
+}
+/* Version history: from the side-column width, the open version takes the text column and the list stays beside it. */
+@container doc-canvas (min-width: 666px) {
+  .doc:has(.history-version) > .doc-main { display: none; }
+}

@@ -55,6 +55,54 @@ describe('MarkdownEditor edits', () => {
 		expect(get(docComments).artifact[0]).toMatchObject({ from: 8, to: 13 });
 	});
 
+	it('keeps a comment mark on text a replaced value leaves alone', () => {
+		const text = writable('The quick brown fox. Then more.');
+		const live = fromStore(text);
+		const marks = writable([{ from: 4, to: 9, id: 'kept' }]);
+		const liveMarks = fromStore(marks);
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(MarkdownEditor, {
+			target: host,
+			props: Object.defineProperties({}, Object.getOwnPropertyDescriptors({
+				get value() { return live.current; },
+				set value(next: string) { text.set(next); },
+				get highlights() { return liveMarks.current; },
+			})),
+		});
+		flushSync();
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+		expect(view.state.field(commentRanges)).toHaveLength(1);
+
+		// A restore writes an older text: only the span that differs is replaced.
+		text.set('The quick brown fox. Else more.'); flushSync();
+		expect(view.state.doc.toString()).toBe('The quick brown fox. Else more.');
+		expect(view.state.field(commentRanges)).toMatchObject([{ id: 'kept', from: 4, to: 9 }]);
+	});
+
+	it('keeps a comment mark on its words when a reloaded file gains a line before it', () => {
+		const text = writable('The quick brown fox. Then more.');
+		const live = fromStore(text);
+		const marks = writable([{ from: 4, to: 9, id: 'kept' }]);
+		const liveMarks = fromStore(marks);
+		host = document.createElement('div'); document.body.appendChild(host);
+		component = mount(MarkdownEditor, {
+			target: host,
+			props: Object.defineProperties({}, Object.getOwnPropertyDescriptors({
+				get value() { return live.current; },
+				set value(next: string) { text.set(next); },
+				get highlights() { return liveMarks.current; },
+			})),
+		});
+		flushSync();
+		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
+
+		// The file changed on disk (the stale-file Reload path, not Restore): one new span before the mark.
+		text.set('Intro. The quick brown fox. Then more.'); flushSync();
+		expect(view.state.doc.toString()).toBe('Intro. The quick brown fox. Then more.');
+		expect(view.state.field(commentRanges)).toMatchObject([{ id: 'kept', from: 11, to: 16 }]);
+		expect(view.state.sliceDoc(11, 16)).toBe('quick');
+	});
+
 	it('repaints a reply marker when only replyWaiting changes', async () => {
 		replyHighlights.set([{ from: 0, to: 5, id: 'comment', replyWaiting: true }]);
 		host = document.createElement('div'); document.body.appendChild(host);

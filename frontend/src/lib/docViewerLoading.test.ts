@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { writable } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 import { DocOpenError } from '$lib/docOpenRefusal';
-import { clearDraft, seedDraft } from '$lib/stores/docSaveQueue';
+import { clearDraft, seedDraft, setDraftText } from '$lib/stores/docSaveQueue';
+import { commentDraft, commentDraftScope } from '$lib/stores/commentDraft';
 import { liveDocumentBindings, openLiveDocument } from '$lib/stores/liveDocuments';
-import { loadViewerContent, openFromDraft } from './docViewerLoading';
+import { leavePreviousTarget, loadViewerContent, openFromDraft, viewerContent } from './docViewerLoading';
 
 const api = vi.hoisted(() => ({ fetchContent: vi.fn(), fetchRevision: vi.fn(), writeContent: vi.fn() }));
 vi.mock('$lib/api/docs', () => api);
@@ -38,6 +39,14 @@ describe('a live open refused before the file snapshot arrives', () => {
 		const { error, onSnapshot } = await refusedBeforeAnySnapshot();
 		expect(onSnapshot).not.toHaveBeenCalled();
 		expect(error).toMatchObject({ code: 'setup_failed', message: "Live editing couldn't start for this document." });
+	});
+});
+
+describe('a document opened over HTTP', () => {
+	it('offers History only when the server says the file has recorded versions', () => {
+		const response = { text: 't', size: 1, mtime: 0, revision: 'r', writable: true, artifact: null, freshness: null };
+		expect(viewerContent({ ...response, history: true }, null).history).toBe(true);
+		expect(viewerContent(response, null).history).toBe(false);
 	});
 });
 
@@ -85,6 +94,31 @@ describe('a live reopen that replayed a device copy', () => {
 
 	it('writes nothing on a plain reopen with no local transactions to write', async () => {
 		expect(await openWith('# Doc\nfirst\nremote edit', false)).not.toHaveBeenCalled();
+	});
+});
+
+describe('switching the viewer to another tab', () => {
+	const next = { ...target, instanceId: 'next', path: '/documents/next.md' };
+	afterEach(() => { clearDraft(next); commentDraft.set(null); });
+
+	it('saves the previous tab’s typing and drops its comment draft, and returns the tab now shown', async () => {
+		api.writeContent.mockResolvedValue({ ok: true, sha256: 'saved', revision: 'saved' });
+		seedDraft(target, '# Saved', 'r1');
+		setDraftText(target, '# Typed');
+		commentDraft.set({ from: 0, to: 1, text: '#', top: 0, scope: commentDraftScope(target) });
+		expect(leavePreviousTarget(target, next)).toBe(next);
+		expect(get(commentDraft)).toBeNull();
+		await vi.waitFor(() => expect(api.writeContent).toHaveBeenCalledTimes(1));
+		expect(api.writeContent.mock.calls[0]).toContain('# Typed');
+	});
+
+	it('touches nothing when the same tab is shown again or none was shown', () => {
+		const draft = { from: 0, to: 1, text: '#', top: 0, scope: commentDraftScope(target) };
+		commentDraft.set(draft);
+		expect(leavePreviousTarget(target, target)).toBe(target);
+		expect(leavePreviousTarget(null, next)).toBe(next);
+		expect(get(commentDraft)).toBe(draft);
+		expect(api.writeContent).not.toHaveBeenCalled();
 	});
 });
 

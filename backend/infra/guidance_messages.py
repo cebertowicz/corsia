@@ -18,6 +18,15 @@ _SAFE_RE = re.compile(r"[^\w.-]")
 _AGENT_AUTHOR = re.compile(r"<([^<>@\s]+)@agents\.corsia\.local>\s*$")
 _EVIDENCE_RE = re.compile(r"https?://\S+|[A-Za-z0-9][\w.:/#+-]{0,119}")
 
+REASON_PREFIX = "Reason: "
+UNRECORDED_REASON = "unrecorded"
+
+
+def parse_recorded_reason(message: str) -> str | None:
+    reason = next((line[len(REASON_PREFIX):].strip() for line in message.splitlines() if line.startswith(REASON_PREFIX)), None)
+    return reason if reason and reason != UNRECORDED_REASON else None
+
+
 SAVE_COMMITTED = "Saved and committed {sha} ({scope}). Reason recorded."
 SAVE_UNRECORDED = "Saved and committed {sha} with Reason: unrecorded. Pass reason on your next guidance save so the history says why."
 SAVE_UNSYNCED = ("Partly saved: commit {sha} landed, but Git's index still holds the old {paths} ({error}). Run "
@@ -75,5 +84,5 @@ def commit_message(subject: str, scope: str, reason: str | None, evidence: str |
         and not contains_credential(token)
     ]
     notes += ["Evidence trimmed to identifiers and URLs."] if len(kept) < len(tokens) else []
-    trailers = [f"Reason: {recorded_reason(reason) or 'unrecorded'}", *([f"Evidence: {' '.join(kept)}"] if kept else []), f"Scope: {scope}"]
+    trailers = [f"{REASON_PREFIX}{recorded_reason(reason) or UNRECORDED_REASON}", *([f"Evidence: {' '.join(kept)}"] if kept else []), f"Scope: {scope}"]
     return "\n\n".join([subject, *([" ".join(notes)] if notes else []), "\n".join(trailers)])

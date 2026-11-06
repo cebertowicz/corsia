@@ -21,7 +21,7 @@ from doceditor.document_scope import UI_THREAD
 from infra import config
 from infra.auth import authenticate, owns_thread
 from infra.database import get_db
-from infra.db_async import run_in_db
+from infra.db_async import run_in_db, run_off_db
 from registry import service as registry_service
 from registry.path_access import path_allowed
 
@@ -92,6 +92,37 @@ async def content(token: str, path: str, project_id: str | None = None, thread_i
     return result
 
 
+@router.get("/history")
+async def document_history(token: str, path: str, project_id: str | None = None,
+                           thread_id: str | None = None, commit: str | None = None):
+    """Recorded versions or the text of one version, without changing the workspace."""
+    user = authenticate(token)
+    if not user:
+        raise HTTPException(401)
+    from api.files_history import history
+
+    return await run_off_db(history, path, user["id"], project_id, thread_id, commit)
+
+
+class RestoreBody(BaseModel):
+    path: str
+    version: str
+    base_sha256: str
+    project_id: str | None = None
+    thread_id: str | None = None
+
+
+@router.post("/history/restore")
+async def restore_version(token: str, body: RestoreBody):
+    """Record an earlier version as the newest one, if the document is still what the person saw."""
+    user = authenticate(token)
+    if not user:
+        raise HTTPException(401)
+    from api.files_history import restore
+
+    return await restore(body.path, body.version, body.base_sha256, user["id"], body.project_id, body.thread_id)
+
+
 class WriteBody(BaseModel):
     path: str
     text: str
@@ -112,6 +143,8 @@ DOCUMENT_SAVE_HTTP_STATUS = {
     "not_a_file": 400,
     "invalid_skill": 422,
     "stale": 409,
+    "history_off": 409,
+    "save_failed": 503,
     "document_live": 409,
     "store_damaged": 409,
     "store_unavailable": 409,

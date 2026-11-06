@@ -309,9 +309,16 @@
 	$effect(() => {
 		const next = value;
 		if (liveText) return;
-		if (view && next !== view.state.doc.toString()) {
+		const current = view?.state.doc.toString();
+		if (view && current !== undefined && next !== current) {
+			// Only the span that differs is replaced, so a comment mark on text this change leaves alone keeps its place (a whole-document
+			// replace maps every mark to the end of the document and its comment reads as 'Text changed').
+			let from = 0;
+			while (from < current.length && from < next.length && current[from] === next[from]) from += 1;
+			let tail = 0;
+			while (tail < current.length - from && tail < next.length - from && current[current.length - 1 - tail] === next[next.length - 1 - tail]) tail += 1;
 			syncing = true;
-			try { view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: next } }); }
+			try { view.dispatch({ changes: { from, to: current.length - tail, insert: next.slice(from, next.length - tail) } }); }
 			finally { syncing = false; }
 		}
 	});

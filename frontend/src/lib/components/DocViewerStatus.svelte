@@ -42,6 +42,9 @@
 		onRead,
 		imageOpen = false,
 		activityRoot = null,
+		historyAvailable = false,
+		historyOpen = false,
+		onOpenHistory,
 	}: {
 		title?: string;
 		presence?: import('svelte').Snippet;
@@ -74,6 +77,10 @@
 		/** An image of this document covers it; its viewer owns the image lane's Send until it is left. */
 		imageOpen?: boolean;
 		activityRoot?: HTMLElement | null;
+		/** The file has recorded versions (slice 1: instruction files). Without them there is no History, and no count. */
+		historyAvailable?: boolean;
+		historyOpen?: boolean;
+		onOpenHistory?: () => void;
 	} = $props();
 
 	let feedbackStatus = $state<DocFeedbackStatus>();
@@ -187,6 +194,10 @@
 				</span>
 				<DocReviewControls {artifactId} {viewingThreadId} targetKey={reviewTargetKey ?? targetInstanceId} />
 			{/if}
+			{#if historyAvailable && onOpenHistory}<button type="button" class="doc-tool history-tool" aria-label="History" title="History" aria-expanded={historyOpen} onclick={onOpenHistory}>
+				<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.35-5.65L4 8.5M4 4.5v4h4M12 7.5V12l3 2" /></svg>
+				<span class="label">History</span>
+			</button>{/if}
 		</span>
 		<!-- Document-held sender is mounted above, in the identity row. -->
 	</div>
@@ -245,9 +256,11 @@
 	/* After the base rules above: equal specificity, so the later rule wins at phone width. */
 	@container doc-canvas (max-width: 600px) {
 		.identity-details { min-height: 44px; justify-content: center; }
-		.identity-age { display: flex; width: 100%; gap: 6px; color: var(--text-secondary); font-size: var(--text-caption); }
+		.identity-age { display: flex; width: 100%; gap: 6px; color: var(--text-secondary); font-size: var(--text-caption); container: identity-age / inline-size; }
 		.identity-owner { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-		.identity-verified { flex: none; white-space: nowrap; }
+		/* The line gets what the tools leave it: the verified phrase truncates inside it, and the owner, which would show as a clipped fragment, steps aside first. */
+		.identity-verified { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		@container identity-age (width < 7.5rem) { .identity-owner { display: none; } }
 		.document-metadata:not(.expanded) { display: none; }
 		.document-status-row { flex-wrap: wrap; }
 		.document-status-row :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
@@ -308,6 +321,12 @@
 		/* The compact toolbar remains one row even when the review surface occupies the header. */
 		.document-header:has(:global(.rb-slot)) .document-tools { grid-column: 1 / -1; min-width: 0; justify-content: flex-end; }
 		.document-header:has(:global(.rb-slot)) > :global(.rb-slot) { grid-row: 2 / 3; }
+	}
+	/* History is a text button on a wide canvas and, like the Request review button beside it (DocReviewControls.svelte:97), an icon-only button once the canvas is phone-sized, so the row holds the same controls whatever the save state. */
+	.history-tool svg { display: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+	@container doc-canvas (max-width: 600px) {
+		.history-tool svg { display: block; }
+		.history-tool .label { display: none; }
 	}
 	@media (max-width: 768px) {
 		.delivery-toggle :global(.tg) { width: var(--touch-target); height: var(--touch-target); }

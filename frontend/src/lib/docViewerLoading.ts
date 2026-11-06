@@ -3,6 +3,7 @@ import type { DocumentFreshness } from '$lib/docFreshness';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { DocOpenError, docOpenRefusal, liveUnavailable, SNAPSHOT_REFUSAL_MESSAGE, type DocOpenRefusal, type LiveUnavailable } from '$lib/docOpenRefusal';
 import { withDraftArtifactId, enrichDraftTarget, existingDraft, flushDraft, type DocSaveDraft } from '$lib/stores/docSaveQueue';
+import { commentDraftScope, discardCommentDraft } from '$lib/stores/commentDraft';
 import { openLiveDocument } from '$lib/stores/liveDocuments';
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 import type { TabLoadSignal } from '$lib/artifactTabs';
@@ -16,11 +17,14 @@ export interface ViewerContent {
 	live: LiveDocumentSession | null;
 	/** Why a live open answered non-live, when the server said. */
 	liveUnavailable?: LiveUnavailable | null;
+	/** The file has recorded versions to show in History. */
+	history?: boolean;
 }
 /** The viewer's form of an HTTP content response, which never carries a live session. */
 export function viewerContent(response: DocContent, fallbackArtifactId: string | null): ViewerContent {
 	return { text: response.text, artifactId: response.artifact?.id ?? fallbackArtifactId, writable: response.writable !== false,
-		freshness: response.freshness, revision: response.revision ?? null, live: null, liveUnavailable: liveUnavailable(response) };
+		freshness: response.freshness, revision: response.revision ?? null, live: null, liveUnavailable: liveUnavailable(response),
+		history: response.history === true };
 }
 interface LoadOptions {
 	target: DocViewerTarget;
@@ -58,6 +62,17 @@ export interface DraftOpen {
 	/** Saved text, read-only while the loader confirms it against the live document. */
 	confirming: boolean;
 	signal: Omit<TabLoadSignal, 'instanceId'>;
+}
+
+/** Leaves the tab shown before `next`, returning `next` as the tab now shown. */
+export function leavePreviousTarget(previous: DocViewerTarget | null, next: DocViewerTarget): DocViewerTarget {
+	// Switching stays immediate: flush the previous target's draft in
+	// the background rather than awaiting it here.
+	if (previous && previous.instanceId !== next.instanceId) {
+		void flushDraft(previous);
+		discardCommentDraft(commentDraftScope(previous));
+	}
+	return next;
 }
 
 /** A tab whose draft holds its text shows that text at once; one without waits for the loader. */
