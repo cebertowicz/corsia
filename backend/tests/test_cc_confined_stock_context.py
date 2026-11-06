@@ -167,12 +167,21 @@ def _read_inside(_base: Path, reviewed: Path) -> tuple[str, dict]:
 async def test_review_launch_has_no_native_file_tool(tool_call):
     """A confined child's own Read/Grep never run, inside its roots or outside.
 
-    Reads go through CORSIA's confined read tools, so no planted file content --
-    inside the reviewed directory or outside every root -- may reach the model
-    from a native call.
+    Reads go through CORSIA's confined read tools, so the CLI offers the model
+    no tool of its own. The peer calls the scripted native tool only if it is
+    offered, so a regression that offers one also leaks its planted content.
+    A native call made anyway is answered as an error (test_review_child_profile).
     """
     peer, _hook_ran = await _run("review", tool_call)
 
-    assert _tool_results(peer), "the CLI never answered the scripted tool call"
+    assert peer.bodies, "the CLI never asked the model"
+    offered = {
+        tool.get("name")
+        for body in peer.bodies
+        for tool in json.loads(body).get("tools") or []
+        if isinstance(tool, dict)
+    }
+    assert not [name for name in offered if not str(name).startswith("mcp__corsia__")]
+    assert _tool_results(peer) == []
     assert not any(_OUTSIDE_SECRET in body for body in peer.bodies)
     assert not any(_INSIDE_TEXT in body for body in peer.bodies)
