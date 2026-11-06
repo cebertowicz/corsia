@@ -83,11 +83,11 @@ class ToolRegistry:
 
     async def execute(
         self, name: str, params: dict[str, Any], *, review_request_id: str | None = None,
-    ) -> str:
+        review_reader_model: str | None = None) -> str:
         """Execute a tool with optional backend-owned review scope."""
         try:
             result = sanitize_result(await self._execute_unredacted(
-                name, params, review_request_id=review_request_id,
+                name, params, review_request_id=review_request_id, review_reader_model=review_reader_model,
             ))
             if isinstance(result, ConnectedAppResult):
                 from registry.tool_result_observation import observe_in_db
@@ -218,15 +218,18 @@ class ToolRegistry:
         return tool
 
     @staticmethod
-    def _execution_params(model_params, thread_context, name, review_request_id):
+    def _execution_params(model_params, thread_context, name, review_request_id, review_reader_model):
         """Add trusted execution scope only after model arguments are validated."""
         execution_params = inject_context(model_params, thread_context, tool_name=name)
         if review_request_id is not None:
             execution_params["_review_request_id"] = review_request_id
+            if name == 'doc_comments_list':
+                execution_params['_review_reader_model'] = review_reader_model
         return execution_params
 
     async def _execute_unredacted(
         self, name: str, params: dict[str, Any], *, review_request_id: str | None = None,
+        review_reader_model: str | None = None,
     ) -> str:
         """Execute once, a ``tool_call`` as the tool it names; the boundary sanitizes."""
         name, params, dispatcher = resolve_dispatch(name, params)
@@ -248,10 +251,10 @@ class ToolRegistry:
                 return await tool.execute(name=TOOL_CALL)
 
             # Stamped from the tool this call ran: every string it returns carries it.
-            result = await self._run_tool(tool, name, params, dispatcher, review_request_id, _tool_span)
+            result = await self._run_tool(tool, name, params, dispatcher, review_request_id, review_reader_model, _tool_span)
             return with_connected_app_stamp(tool, result)
 
-    async def _run_tool(self, tool, name, params, dispatcher, review_request_id, _tool_span) -> str:
+    async def _run_tool(self, tool, name, params, dispatcher, review_request_id, review_reader_model, _tool_span) -> str:
         """Validate, authorize and run one resolved tool; errors it does not author keep the hint."""
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
         # A tool that states its own remedy gets no generic hint on the
@@ -284,7 +287,7 @@ class ToolRegistry:
             if reach_refusal is not None:
                 return reach_refusal
             execution_params = self._execution_params(
-                model_params, thread_context, name, review_request_id,
+                model_params, thread_context, name, review_request_id, review_reader_model,
             )
 
             drain_refusal = await self._restart_drain_refusal(

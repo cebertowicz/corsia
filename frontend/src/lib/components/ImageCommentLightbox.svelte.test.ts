@@ -127,7 +127,7 @@ describe('ImageCommentLightbox', () => {
 	it('shows the document reply chip for replies arriving while its image is open', async () => {
 		const step = vi.fn();
 		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
-			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0 },
+			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0, viewId: {} },
 			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
 			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), refreshDiagram: vi.fn(async () => null) },
 			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: step,
@@ -148,7 +148,7 @@ describe('ImageCommentLightbox', () => {
 	it('keeps an earlier document confirmation out of the viewer but shows a new viewer confirmation', async () => {
 		deliveryConfirmation.show('art-img', 1);
 		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
-			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0 },
+			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0, viewId: {} },
 			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
 			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), refreshDiagram: vi.fn(async () => null) },
 			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: vi.fn(),

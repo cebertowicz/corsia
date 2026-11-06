@@ -29,6 +29,8 @@ export interface CommentRange {
 	point?: boolean;
 	/** The comment's original text is gone from the document: its margin marker is drawn dashed. */
 	lost?: boolean;
+	/** A pin on an image or diagram region: drawn by its pin, never as a highlight on the whole block. */
+	region?: boolean;
 }
 
 export const setCommentRanges = StateEffect.define<CommentRange[]>();

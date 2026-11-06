@@ -4,7 +4,7 @@ import { colourStyle } from './suggestion-marks';
 
 /** An open suggestion drawn inside a table cell: the quote struck through, the insert after it, as in body text. */
 export interface CellSuggestion { insert: string; color: string; busy?: boolean }
-export interface Mark { from: number; to: number; id: string; kind: 'placed' | 'focused' | 'pending'; suggestion?: CellSuggestion }
+export interface Mark { from: number; to: number; id: string; kind: 'placed' | 'focused' | 'pending'; suggestion?: CellSuggestion; region?: boolean }
 
 const CLASSES = ['cm-suggestion-del', 'cm-suggestion-focus', 'cm-comment-anchor', 'cm-comment-focused', 'cm-comment-pending', 'cm-comment-block', 'cm-comment-block-focused', 'cm-comment-block-pending'];
 

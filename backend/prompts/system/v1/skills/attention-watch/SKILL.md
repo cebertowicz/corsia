@@ -55,7 +55,7 @@ Each watched agent has tasks in your plan titled `Watch <id8> <phase> <YYYY-MM-D
 
 ## Daily check
 
-Read the list. For each `worse` row whose `subject.kind` is `agent` and whose `subject.id` is not your own thread, look at that agent's tasks by title:
+Read the list. For each `worse` row whose `subject.kind` is `agent`, your own thread included, look at that agent's tasks by title:
 1. **One is open** (`confirm`, `final` or `told`): skip the row. If the row's `measure` is not the task's, record "<date>: also worse on <label>, <previous> → <latest>, <period>" once.
 2. **One holds the row:** `stop`, unless an `again` task is dated the same day or later; `told` within the last 28 days; `kept` within the last 90 days. Skip the row.
 3. **Otherwise:** open a task and park it until its due date. Send nothing yet.
@@ -75,8 +75,9 @@ Read the task, then the agent.
 - **Open question:** what would a top professional check about this agent that these figures don't?
 - **Not back:** in one edit, retitle `final <date 14 days from now>` and record "<date>: confirm check: not back, <figures and period>". Act below, record what you did, then park the task until that date.
 
-Act on a confirmed task by `agent.project.id`:
-- **Null (no project):** you own the fix. Read the agent's recent history (`get_thread_history`) and its guidance (`coordination_instruction_file_read`) and find the cause. If the fix is guarded (Approval guard), raise the decision and change nothing; otherwise change its guidance with `coordination_instruction_file_replace`. Record "changed its guidance on <date>: <what>", or "looked and found nothing to change". If a different model would fix it, raise the model decision (Decisions) yourself.
+Act on a confirmed task, by the first branch that applies:
+- **Your own thread:** the fix is handing work off. From your recent history, find the area of the person's work that drives the figure, and make a dedicated agent for it the next weekly review's one suggestion (this wake's, if it runs one) under skill `time-to-agent` (step 2's limits, then steps 3-5 on a yes). Record "suggested an agent for <area> on <date>", or why not.
+- **No project (`agent.project.id` null):** you own the fix. Read the agent's recent history (`get_thread_history`) and its guidance (`coordination_instruction_file_read`) and find the cause. If the fix is guarded (Approval guard), raise the decision and change nothing; otherwise change its guidance with `coordination_instruction_file_replace`. Record "changed its guidance on <date>: <what>", or "looked and found nothing to change". If a different model would fix it, raise the model decision (Decisions) yourself.
 - **Otherwise:** `corsia_api(method="GET", path="/api/conductor", query={"scope": "<agent.project.id>"})`. If it returns a `thread_id` other than the agent's own, send the finding to that conductor; otherwise send it to the agent. Record the send, or a refused send with its reason.
 
 The finding, in one `delegate_send` (to the agent itself, say "your" for "its"):
@@ -85,7 +86,7 @@ The finding, in one `delegate_send` (to the agent itself, say "your" for "its"):
 
 If the task recorded other agents on the same measure, add after the figures: "<names> moved on this measure the same week; a shared cause is likely."
 
-At this check, never send the finding to the person.
+At this check, never send the finding to the person; a suggestion for your own thread reaches them only as `time-to-agent`'s suggestion.
 
 ## Decisions
 
@@ -138,7 +139,7 @@ Read the task, then the agent.
 An open task titled `told`: do steps 3 and 4 with the line built from its records.
 
 The line: "<agent> has been worse on <label> since <the latest period's first day recorded when the task opened> (<baseline> → <latest>). <what was tried>. <ending>"
-- <what was tried>, from the task's records, the first that applies in this order: "I moved it to <model> on <date>"; "I asked to move it to <model> on <date>; the switch hasn't happened yet"; "I couldn't switch its model: <reason>"; "I changed its guidance on <date>"; "I asked you on <date> whether to <the change>" (a decision you raised); "Its project's conductor says it changed <what> on <date>"; "Its project's conductor raised a decision about it on <date>"; "Its project's conductor says <model> would fix it"; "Its project's conductor says it can't fix it"; "I asked its project's conductor on <date> and haven't heard back"; "I couldn't reach its project's conductor"; "I looked and found nothing to change". For a finding sent to the agent itself, say "it" for "its project's conductor".
+- <what was tried>, from the task's records, the first that applies in this order: "I moved it to <model> on <date>"; "I asked to move it to <model> on <date>; the switch hasn't happened yet"; "I couldn't switch its model: <reason>"; "I changed its guidance on <date>"; "I suggested an agent for <area> on <date>"; "I asked you on <date> whether to <the change>" (a decision you raised); "Its project's conductor says it changed <what> on <date>"; "Its project's conductor raised a decision about it on <date>"; "Its project's conductor says <model> would fix it"; "Its project's conductor says it can't fix it"; "I asked its project's conductor on <date> and haven't heard back"; "I couldn't reach its project's conductor"; "I looked and found nothing to change". For a finding sent to the agent itself, say "it" for "its project's conductor".
 - <ending>: if a decision you raised for it reads `review_requested` in this wake's `plan_read`, "A decision about it is waiting for you." If one reads `closed` and you did not record withdrawing it, "You dropped that question; nothing else is needed from you." Otherwise "Nothing is needed from you unless you want to change it; its task in my plan shows the detail."
 
 Several agents due the same day: one such line each, in the same message.
