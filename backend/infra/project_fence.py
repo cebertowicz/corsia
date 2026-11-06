@@ -116,24 +116,60 @@ def thread_refusal(subject: FencedSubject, thread_id: str, *, caller: str | None
     return refusal_copy(thread_id, subject.project, subject.local_only, subject.conductor, history=True)
 
 
-def inside_every_project(thread_id: str | None, *, db) -> bool:
-    """Whether this caller sits inside every project, so even a folder no project
-    claims is not walled from it.
+@dataclass(frozen=True, slots=True)
+class Caller:
+    """One caller's facts, read once.
 
-    One home with :func:`fenced_project_ids`, which fences no project from such a
-    caller for the same reason: the CORSIA agent holding its own Local only lock is
-    inside Local only by definition, so showing it a wall around Local only folders
-    would refuse it access to the work it is locked to do.
+    The file gate and the history readers both need these, and both derive every
+    decision from this one value: reading the caller's Local only lock twice lets a
+    lock change between the two reads split the decisions, which is the one thing the
+    file gate and a history read must never do.
     """
+
+    thread_id: str | None
+    designated_agent: str | None = None
+    known: bool = True
+    project_id: str | None = None
+    local_only: bool = False
+
+    @property
+    def is_corsia_agent(self) -> bool:
+        """Whether this caller is the install's designated CORSIA agent."""
+        return self.thread_id is not None and self.thread_id == self.designated_agent
+
+    @property
+    def inside_every_project(self) -> bool:
+        """Whether even a folder no project claims is not walled from this caller.
+
+        The one home of that rule. The CORSIA agent holding its own Local only lock is
+        inside Local only by definition, so a wall around Local only folders would
+        refuse it the work it is locked to do — which is also why
+        :func:`fenced_project_ids` fences no project from such a caller.
+        """
+        return self.is_corsia_agent and self.local_only
+
+
+def read_caller(thread_id: str | None, *, db) -> Caller:
+    """The caller's facts: its thread row and the agent designation, one read each."""
     from infra.corsia_agent import get_corsia_agent
 
-    if not thread_id or thread_id != get_corsia_agent(db=db):
-        return False
-    row = db.execute("SELECT local_only FROM threads WHERE id = ?", (thread_id,)).fetchone()
-    return bool(row and row["local_only"])
+    if not thread_id:
+        return Caller(thread_id=None)
+    designated = get_corsia_agent(db=db)
+    row = db.execute(
+        "SELECT project_id, local_only FROM threads WHERE id = ?", (thread_id,)
+    ).fetchone()
+    if row is None:
+        return Caller(thread_id=thread_id, designated_agent=designated, known=False)
+    return Caller(
+        thread_id=thread_id,
+        designated_agent=designated,
+        project_id=row["project_id"],
+        local_only=bool(row["local_only"]),
+    )
 
 
-def fenced_project_ids(thread_id: str | None, *, db) -> frozenset[str] | _All:
+def fenced_project_ids(caller: Caller, *, db) -> frozenset[str] | _All:
     """Every project ``thread_id`` is fenced from, or :data:`ALL` when it fails closed.
 
     - No thread is the person's own session: nothing is fenced from it.
@@ -147,22 +183,18 @@ def fenced_project_ids(thread_id: str | None, *, db) -> frozenset[str] | _All:
     project, because there is no project to be walled from; only :data:`ALL` hides
     such a thread, and it arises only from a caller that cannot be read.
     """
-    from infra.corsia_agent import get_corsia_agent
     from llm.locality import cloud_off_project_ids
 
-    if not thread_id:
+    if caller.thread_id is None:
         return frozenset()
-    caller = db.execute(
-        "SELECT project_id, local_only FROM threads WHERE id = ?", (thread_id,)
-    ).fetchone()
-    if caller is None:
+    if not caller.known:
         return ALL
-    if inside_every_project(thread_id, db=db):
+    if caller.inside_every_project:
         return frozenset()
-    if thread_id == get_corsia_agent(db=db):
+    if caller.is_corsia_agent:
         return frozenset(cloud_off_project_ids(db=db))
     every = frozenset(str(row["id"]) for row in db.execute("SELECT id FROM projects"))
-    own = caller["project_id"]
+    own = caller.project_id
     return every if own is None else every - {str(own)}
 
 
@@ -184,7 +216,7 @@ class HistoryFence:
         """The caller's fence. A person's session has none, by construction."""
         if reader.is_person:
             return cls(person=True)
-        fenced = fenced_project_ids(reader.thread_id, db=db)
+        fenced = fenced_project_ids(read_caller(reader.thread_id, db=db), db=db)
         if isinstance(fenced, _All):
             return cls(everything=True)
         return cls(project_ids=fenced)

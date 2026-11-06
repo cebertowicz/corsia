@@ -127,6 +127,52 @@ def test_local_one_corsia_agent_fences_nothing_even_when_a_local_only_folder_is_
     assert _paths(fence_for_thread(CORSIA_AGENT)) == {world.workspace / "projects" / "legacy"}
 
 
+def test_one_fence_comes_from_one_read_of_the_caller(world):
+    """Every decision in one fence derives from one read of the caller's facts.
+
+    The split this pins: reading the caller's Local only lock in two statements lets a
+    lock change between them, so the fenced project set could come from the locked
+    answer while the inside-every-project rule came from the unlocked one, leaving a
+    CORSIA agent that is on a cloud model with no Local only deny rules for that call.
+    One read makes the two answers the same value, so the count is asserted and the
+    cloud agent's Local only fence is asserted from the same call.
+    """
+    from tools.project_fence import fence_for_thread
+
+    counted: list[str] = []
+
+    class CountingDb:
+        """Delegates to the real connection, counting reads of the caller's own row."""
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __getattr__(self, name):
+            return getattr(world.db, name)
+
+        def execute(self, statement, params=()):
+            if "FROM threads WHERE id = ?" in statement:
+                self.calls += 1
+            return world.db.execute(statement, params)
+
+    projects = world.workspace / "projects"
+    threads = world.workspace / ".threads"
+    for caller, expected in (
+        # The cloud-model workspace agent: one read, and it still loses Local only.
+        (CORSIA_AGENT, {projects / "secret"}),
+        # A project agent: the same single read also replaces the separate lookup this
+        # function used to make for its own project.
+        (ALPHA_AGENT, {
+            projects / "beta", projects / "secret", projects / "legacy",
+            threads / WORKSPACE_AGENT, threads / CORSIA_AGENT,
+        }),
+    ):
+        db = CountingDb()
+        fence = fence_for_thread(caller, db=db)
+        assert db.calls == 1, f"{caller}: caller row read {db.calls} times"
+        assert _paths(fence) == expected
+
+
 def test_no_caller_is_unfenced_and_an_unknown_thread_is_fenced_from_every_project(world, monkeypatch):
     from tools import project_fence
 
