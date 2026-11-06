@@ -83,6 +83,7 @@ _current_action_permit: ContextVar[_ActionPermit | None] = ContextVar(
     default=None,
 )
 
+
 def _canonical_tool_name(name: str | None) -> str:
     # Import lazily: tools.catalog imports ToolRegistry for surface generation.
     from tools.catalog import normalize_tool_name

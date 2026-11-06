@@ -41,7 +41,7 @@
     "backend/subagents/codex_runtime_events.py": 657,
     "backend/tools/delegation.py": 449,
     "backend/tools/filesystem_effects.py": 658,
-    "backend/tools/host_access_gate.py": 891,
+    "backend/tools/host_access_gate.py": 892,
     "backend/tools/shell.py": 500,
     "backend/tools/shell_guard.py": 1174,
     "frontend/src/lib/components/DocumentsView.svelte": 522,
