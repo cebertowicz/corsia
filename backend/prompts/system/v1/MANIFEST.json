@@ -142,10 +142,10 @@
       "sha256": "2e094613d974f45221c8d61b538b7c54ed7486e73a96d6c8465b21ea35ef4214"
     },
     {
-      "bytes": 19255,
+      "bytes": 19289,
       "kind": "skill",
       "path": "skills/attention-watch/SKILL.md",
-      "sha256": "d642778c402120d0f0a8b9c1861b4b4588dad93c65fd33a7d487ad8ccee5d3ac"
+      "sha256": "e9fc822835e368071ac6c8627f7777c2a7e4d9bda0dab88752ebbfdd1a30563e"
     },
     {
       "bytes": 3700,

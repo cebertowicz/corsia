@@ -62,7 +62,7 @@ Read the list. For each `worse` row whose `subject.kind` is `agent`, your own th
 
 Then do every check that is due: each open task whose title is `confirm` or `final` with a due date of today or earlier, and each open task titled `told` (finish its ending).
 
-On a wake from a watch on one of these tasks, do only a `confirm` check that is due. A `final` check waits for the next daily health-check wake, because its line goes out in that wake's one `post_update`.
+On a wake from a watch on one of these tasks, do only a `confirm` check that is due for another agent. A `final` check, and a `confirm` check on your own thread, wait for the next daily health-check wake, because what they tell the person goes out in that wake's one `post_update`.
 
 If the one-agent read for a task fails on three different days, record it, retitle it `unread <date>` and close "could not read".
 
@@ -76,7 +76,7 @@ Read the task, then the agent.
 - **Not back:** in one edit, retitle `final <date 14 days from now>` and record "<date>: confirm check: not back, <figures and period>". Act below, record what you did, then park the task until that date.
 
 Act on a confirmed task, by the first branch that applies:
-- **Your own thread:** the fix is handing work off. From your recent history, find the area of the person's work that drives the figure, and make a dedicated agent for it the next weekly review's one suggestion (this wake's, if it runs one) under skill `time-to-agent` (step 2's limits, then steps 3-5 on a yes). Record "suggested an agent for <area> on <date>", or why not.
+- **Your own thread:** the fix is handing work off. From your recent history, find the area of the person's work that drives the figure, and make a dedicated agent for it this wake's one suggestion under skill `time-to-agent` (step 2's limits, then steps 3-5 on a yes). Record "suggested an agent for <area> on <date>", or why not.
 - **No project (`agent.project.id` null):** you own the fix. Read the agent's recent history (`get_thread_history`) and its guidance (`coordination_instruction_file_read`) and find the cause. If the fix is guarded (Approval guard), raise the decision and change nothing; otherwise change its guidance with `coordination_instruction_file_replace`. Record "changed its guidance on <date>: <what>", or "looked and found nothing to change". If a different model would fix it, raise the model decision (Decisions) yourself.
 - **Otherwise:** `corsia_api(method="GET", path="/api/conductor", query={"scope": "<agent.project.id>"})`. If it returns a `thread_id` other than the agent's own, send the finding to that conductor; otherwise send it to the agent. Record the send, or a refused send with its reason.
 
