@@ -141,7 +141,7 @@ async def request_slot(lives: dict[str, Life], server_id: str | None) -> AsyncIt
             if not result.get("restarted") or result.get("reason"):
                 if result.get("restarted") and result.get("reason") in _POST_START_FAILURES:
                     raise UpgradeAdmissionError(_POST_START_FAILURES[result["reason"]])
-                reason = _UPGRADE_FAILURES.get(result.get("reason"))
+                reason = _UPGRADE_FAILURES.get(str(result.get("reason")))
                 if reason:
                     raise UpgradeAdmissionError(f"Couldn’t upgrade the local model server because {reason}. Restart CORSIA to retry the upgrade.")
                 raise UpgradeAdmissionError(_UNKNOWN_FAILURE)
