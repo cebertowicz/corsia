@@ -2,7 +2,7 @@
 
 How to give a small piece of work to CORSIA inside your [first project](first-project.md), see where the result appears, and then make that chat a standing **agent**. A chat is one conversation. An **agent** is a chat with a responsibility that it keeps owning, so other chats and the conductor can address it; see [Agents and threads](../how-it-works/agents-and-threads.md).
 
-This page needs a working model from the setup screens, because every step here sends a message to one. The steps were walked in a browser on a test installation with a built-in test model that sends canned replies, so the content of a real model's reply, and the tools it would show as it works, were not walked. If a screen differs from what you read, the screen is right and the page needs a fix.
+This page needs a working model from the setup screens, because every step here sends a message to one. If a screen differs from what you read, the screen is right and the page needs a fix.
 
 Pick a small, harmless first task, something whose result you can check by reading it: a one-page summary of a topic, a checklist for something you do every month, or a first draft of a short document.
 

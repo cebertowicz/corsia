@@ -2,7 +2,7 @@
 
 What you see in the browser after [installing CORSIA](install.md): the setup screens, the first chat with the CORSIA agent, and creating a project. A **project** is one body of work with its own context, skills and files, kept in its own folder in your workspace; see [Scopes](../how-it-works/scopes.md). The **CORSIA agent** is the assistant you talk to outside any project. The [Glossary](../reference/glossary.md) defines project, conductor, plan, agent and other terms this page uses.
 
-Control names below are the labels the app shows. The setup screens, the project steps and the setup plan were walked in a browser. Lines marked **Not walked** describe steps that could not be run safely on a test installation, and the desktop-app and Linux details were not walked either; they come from the app's source code. If a screen differs from what you read, the screen is right and the page needs a fix.
+Control names below are the labels the app shows. If a screen differs from what you read, the screen is right and the page needs a fix.
 
 ## Setup screens
 
@@ -12,14 +12,14 @@ CORSIA opens at `http://localhost:1956` on a setup screen that shows four steps 
 
 1. **Welcome to CORSIA.** Press **Continue**. Two downloads start by themselves when this screen opens: the corrections classifier and, on a Mac that can run the local model, the local model. If the local model cannot be set up, for example because an installed oMLX is out of date, its row on the **Providers & models** step shows **Retry** and **Save a report**. In the desktop app only, **Connect to CORSIA on another computer** is offered here too, for when CORSIA already runs elsewhere and you only want to open it from this one.
 2. **Create your account.** Fill in **Full name**, **Username**, **Password** and **Confirm password**; **Email** is optional, and its hint says it is used only to sign you up for services you choose, such as web search. The page says your account and password stay on this computer. The **Share usage counts** switch is on to start with and is your choice. The work folder row shows where your workspace will live and has a **Change** button (the default is `~/corsia`; keep it out of Documents, Desktop, Downloads and iCloud Drive, as the [install page](install.md#know-before-you-start) explains). Press **Continue**.
-3. **Your subscriptions.** The question is **Which do you pay for?**, answered with **Claude**, **ChatGPT**, **Both** or **Neither**; the screen adds that Claude Code and Codex are the apps you sign in to next. There is no **Continue** button: picking an answer moves on. Picking Claude, ChatGPT or Both starts installing the matching tool right away (**Not walked**: that installs software on the computer). **Neither** is fine: it starts the local model's download if it isn't already running, or you add an API key on the next step.
+3. **Your subscriptions.** The question is **Which do you pay for?**, answered with **Claude**, **ChatGPT**, **Both** or **Neither**; the screen adds that Claude Code and Codex are the apps you sign in to next. There is no **Continue** button: picking an answer moves on. Picking Claude, ChatGPT or Both starts installing the matching tool right away. **Neither** is fine: it starts the local model's download if it isn't already running, or you add an API key on the next step.
 4. **Providers & models.** The page says CORSIA needs one working model to continue setup. Its rows are **Claude Code** and **Codex** (only for what you picked, or a tool already signed in inside CORSIA), **Local model** (with **Download**, **Check again** or **Retry**, depending on its state) and **API provider** (**Add provider**). A Claude Code or Codex row has its own **Sign in**, pressed once the tool is installed; it is needed even when you are already signed in to that tool in a terminal. A vendor password or sign-in code is typed only on the vendor's own page, never into a CORSIA chat. A line under the rows says to press **Retry**, set up a subscription or add an API provider to continue. Get one row to work; the other rows can wait. [Models and harnesses](../how-it-works/models-and-harnesses.md) explains what each source is.
 
-**Start using CORSIA** stays disabled until at least one model works (**Not walked** with a real model: no paid provider or local model was set up). A Mac with less than 32 GB of memory needs one of the cloud rows for agent work ([Know before you start](install.md#know-before-you-start)).
+**Start using CORSIA** stays disabled until at least one model works. A Mac with less than 32 GB of memory needs one of the cloud rows for agent work ([Know before you start](install.md#know-before-you-start)).
 
 ## The first chat and the setup plan
 
-Pressing **Start using CORSIA** opens a chat with the CORSIA agent (**Not walked**: the button needs a working model; the chat was opened another way, with a test model). The chat opens empty. Its first message is a fixed introduction, not a model reply, and it appears when a model is first chosen for that chat, from the model button in the message box. It says how help is organized:
+Pressing **Start using CORSIA** opens a chat with the CORSIA agent. The chat opens empty. Its first message is a fixed introduction, not a model reply, and it appears when a model is first chosen for that chat, from the model button in the message box. It says how help is organized:
 
 - a quick question is a new chat;
 - something that keeps coming back and taking your time is given to an agent, an AI that owns that job and answers for the result (the next page, [Your first agent](first-agent.md), does this);
@@ -28,7 +28,7 @@ Pressing **Start using CORSIA** opens a chat with the CORSIA agent (**Not walked
 
 The message also points to a **plan** for finishing setup, in the **Plan** section on the right. On a phone it is the button above the message box that shows how many tasks are left. A plan is a list of tasks, each with a stated end condition; see [Plans](../how-it-works/plans.md).
 
-The setup plan's tasks come in this order. A task that does not apply to you is skipped without a word. After answering **Neither**, the plan listed seven tasks, from **Bring over what your other tools know** to **Hand over to your agents**; the two subscription tasks were not in it, and neither was **Web search**, which is listed only until a web search works.
+The setup plan's tasks come in this order. A task that does not apply to you is left out of the plan without a word: a subscription task appears only for a subscription you said you pay for, and **Web search** only until a web search works.
 
 | Task | What it does |
 |---|---|
