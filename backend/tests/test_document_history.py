@@ -141,7 +141,7 @@ def test_git_fault_is_unavailable_not_unknown(repo, monkeypatch):
     def fault(*_args, **_kwargs):
         raise GitFault("fatal: unable to read tree")
 
-    monkeypatch.setattr(document_history, "_git", fault)
+    monkeypatch.setattr(document_history, "_git_bytes", fault)
     for commit_id in (None, "a" * 40):
         with pytest.raises(HTTPException) as failure:
             files_history.history(str(path), "person", None, None, commit_id)

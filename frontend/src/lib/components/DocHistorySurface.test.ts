@@ -125,11 +125,9 @@ describe('document history', () => {
 		let done!: () => void;
 		const applyRestore = vi.fn(() => new Promise<void>((resolve) => { done = resolve; }));
 		const onRestored = vi.fn(async () => {});
-		const onRestoring = vi.fn();
-		render({ within: wide(), applyRestore, onRestored, onRestoring }); await flush(); await open(2);
+		render({ within: wide(), applyRestore, onRestored }); await flush(); await open(2);
 		await press();
 		expect(buttons('Restoring…')[0].disabled).toBe(true);
-		expect(onRestoring).toHaveBeenLastCalledWith(true);
 		expect(rows()).toHaveLength(4);
 		versions = [restoredRow(), ...versions];
 		done(); await flush();
@@ -137,7 +135,7 @@ describe('document history', () => {
 		expect(onRestored).toHaveBeenCalledOnce();
 		expect(rows()).toHaveLength(5);
 		expect(rows()[0].textContent).toContain('Restored Author 2');
-		expect(onRestoring).toHaveBeenLastCalledWith(false);
+		expect(buttons('Restoring…')).toHaveLength(0);
 		expect(emitProductEvent).toHaveBeenCalledWith('document', 'version_restored');
 	});
 	it('offers one Retry after a failure and sends the same restore again', async () => {
@@ -162,18 +160,43 @@ describe('document history', () => {
 		expect(fetchHistory).toHaveBeenCalledOnce();
 		expect(host.textContent).not.toContain('Open History again');
 	});
+	it('says what to do when history is off, with no Retry', async () => {
+		const applyRestore = vi.fn().mockRejectedValue(new RequestRefused('409 refused', 'history_off'));
+		render({ within: wide(), applyRestore }); await flush(); await open(2);
+		await press();
+		expect(host.textContent).toContain('Couldn’t restore this version. This document’s history is off, so copy any text you need from the changes below.');
+		expect(buttons('Retry')).toHaveLength(0);
+		expect(buttons('Reload history')).toHaveLength(0);
+		expect(buttons('Restore')).toHaveLength(1);
+	});
+	it('offers Reload history when the version is not in the history, and reloads the list', async () => {
+		const applyRestore = vi.fn().mockRejectedValue(new RequestRefused('404 refused', 'version_unavailable'));
+		render({ within: wide(), applyRestore }); await flush(); await open(2);
+		await press();
+		expect(host.textContent).toContain('Couldn’t restore this version. This document’s history doesn’t include it. Reload history to see the versions it has.');
+		expect(buttons('Retry')).toHaveLength(0);
+		vi.mocked(fetchHistory).mockClear();
+		versions = versions.filter((row) => row.id !== 'v2');
+		buttons('Reload history')[0].click(); await flush();
+		expect(fetchHistory).toHaveBeenCalledOnce();
+		expect(rows()).toHaveLength(3);
+		expect(host.textContent).not.toContain('doesn’t include it');
+		expect(applyRestore).toHaveBeenCalledOnce();
+	});
 	it.each([
-		['history_off', 'Couldn’t restore this version. This document’s history is off.'],
-		['version_unavailable', 'Couldn’t restore this version. It is no longer in this document’s history.'],
-	])('says why a %s refusal cannot succeed, with no Retry', async (kind, line) => {
-		const applyRestore = vi.fn().mockRejectedValue(new RequestRefused('409 refused', kind));
+		['unsaved_typing', 'Couldn’t restore this version. Your latest typing isn’t saved yet, so nothing was restored.'],
+		['not_loaded', 'Couldn’t restore this version. The document is still loading.'],
+	])('names the known cause of a %s refusal and offers Retry', async (kind, line) => {
+		const applyRestore = vi.fn().mockRejectedValueOnce(new RequestRefused('refused before sending', kind)).mockResolvedValueOnce(undefined);
 		render({ within: wide(), applyRestore }); await flush(); await open(2);
 		await press();
 		expect(host.textContent).toContain(line);
-		expect(buttons('Retry')).toHaveLength(0);
-		expect(buttons('Restore')).toHaveLength(1);
+		expect(host.textContent).not.toContain('The document is unchanged.');
+		buttons('Retry')[0].click(); await flush();
+		expect(applyRestore).toHaveBeenCalledTimes(2);
 	});
-	it('lets the reloaded list decide a lost answer: a new row is the restore', async () => {
+	it('lets the reloaded list decide a lost answer: a new row holding the restored text is the restore', async () => {
+		vi.mocked(fetchVersionText).mockImplementation(async (_target, id) => `Version ${id === 'new' ? 'v2' : id}\n`);
 		const applyRestore = vi.fn().mockRejectedValue(new TypeError('disconnected'));
 		const onRestored = vi.fn(async () => {});
 		render({ within: wide(), applyRestore, onRestored }); await flush(); await open(2);
@@ -188,6 +211,19 @@ describe('document history', () => {
 		expect(onRestored).toHaveBeenCalledOnce();
 		expect(buttons('Restoring…')).toHaveLength(0);
 		expect(rows()[0].textContent).toContain('Restored Author 2');
+	});
+	it('lets the reloaded list decide a lost answer: a new row with other text is not the restore', async () => {
+		const applyRestore = vi.fn().mockRejectedValue(new TypeError('disconnected'));
+		const onRestored = vi.fn(async () => {});
+		render({ within: wide(), applyRestore, onRestored }); await flush(); await open(2);
+		await press();
+		versions = [{ ...versions[0], id: 'agent-edit', reason: 'An agent edit' }, ...versions];
+		buttons('Retry')[0].click(); await flush();
+		expect(applyRestore).toHaveBeenCalledTimes(1);
+		expect(onRestored).not.toHaveBeenCalled();
+		expect(emitProductEvent).not.toHaveBeenCalledWith('document', 'version_restored');
+		expect(host.textContent).toContain('Couldn’t confirm the restore. The newest version doesn’t hold this version’s text.');
+		expect(buttons('Restore')).toHaveLength(1);
 	});
 	it('lets the reloaded list decide a lost answer: no new row means unchanged', async () => {
 		const applyRestore = vi.fn().mockRejectedValueOnce(new TypeError('disconnected'));

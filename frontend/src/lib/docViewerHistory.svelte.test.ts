@@ -68,10 +68,21 @@ it('saves pending typing first and asks the server to restore against what was s
 	dispose();
 });
 
-it('sends nothing when pending typing could not be saved first', async () => {
-	vi.mocked(flushDraft).mockResolvedValue(false);
+it.each([
+	['refused', () => vi.mocked(flushDraft).mockResolvedValue(false)],
+	['offline', () => vi.mocked(flushDraft).mockRejectedValue(new TypeError('offline'))],
+])('sends nothing and names the cause when pending typing could not be saved first (%s)', async (_case, arrange) => {
+	arrange();
 	const { history, dispose } = create();
-	await expect(history.restore(version)).rejects.toThrow();
+	await expect(history.restore(version)).rejects.toMatchObject({ kind: 'unsaved_typing' });
+	expect(restoreVersion).not.toHaveBeenCalled();
+	dispose();
+});
+
+it('names a missing saved revision as a document still loading', async () => {
+	vi.mocked(existingDraft).mockReturnValue(undefined);
+	const { history, dispose } = create();
+	await expect(history.restore(version)).rejects.toMatchObject({ kind: 'not_loaded' });
 	expect(restoreVersion).not.toHaveBeenCalled();
 	dispose();
 });

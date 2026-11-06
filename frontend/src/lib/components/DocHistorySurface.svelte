@@ -13,7 +13,7 @@
 	import { RequestRefused } from '$lib/api/docs';
 	import { emitProductEvent } from '$lib/product_events';
 
-	let { target, narrow, within = null, covered = false, onClose, applyRestore, onRestored, onRestoring = () => {} }: {
+	let { target, narrow, within = null, covered = false, onClose, applyRestore, onRestored, restoring = $bindable(false) }: {
 		target: DocViewerTarget;
 		narrow: boolean;
 		within?: HTMLElement | null;
@@ -23,16 +23,19 @@
 		applyRestore: (version: DocVersion) => Promise<void>;
 		/** Shows the document's current text, as an agent's write to it would. */
 		onRestored: () => Promise<void>;
-		/** The restore is pending, so the document's save line reads "Saving…". */
-		onRestoring?: (busy: boolean) => void;
+		/** A restore is pending; the viewer binds it to its history controller, which owns it, so the save line reads "Saving…". */
+		restoring?: boolean;
 	} = $props();
 
-	// Each refusal kind's line; a Retry is offered only where sending the restore again can succeed.
-	const REFUSALS: Record<string, { line: string; retry: boolean }> = {
-		failed: { line: 'Couldn’t restore this version. The document is unchanged.', retry: true },
-		stale: { line: 'Couldn’t restore this version. The document changed since you opened it.', retry: true },
-		history_off: { line: 'Couldn’t restore this version. This document’s history is off.', retry: false },
-		version_unavailable: { line: 'Couldn’t restore this version. It is no longer in this document’s history.', retry: false },
+	// Each refusal kind's line and the one action that can help: sending the restore again, reloading the list, or none.
+	const REFUSALS: Record<string, { line: string; action: 'restore' | 'reload' | null }> = {
+		failed: { line: 'Couldn’t restore this version. The document is unchanged.', action: 'restore' },
+		stale: { line: 'Couldn’t restore this version. The document changed since you opened it.', action: 'restore' },
+		unsaved_typing: { line: 'Couldn’t restore this version. Your latest typing isn’t saved yet, so nothing was restored.', action: 'restore' },
+		not_loaded: { line: 'Couldn’t restore this version. The document is still loading.', action: 'restore' },
+		unconfirmed: { line: 'Couldn’t confirm the restore. The newest version doesn’t hold this version’s text.', action: 'restore' },
+		history_off: { line: 'Couldn’t restore this version. This document’s history is off, so copy any text you need from the changes below.', action: null },
+		version_unavailable: { line: 'Couldn’t restore this version. This document’s history doesn’t include it. Reload history to see the versions it has.', action: 'reload' },
 	};
 
 	let load = $state<'loading' | 'error' | 'ready'>('loading');
@@ -50,14 +53,13 @@
 	let diffScroll = $state<HTMLElement>();
 	let listEl = $state<HTMLElement>();
 	let backEl = $state<HTMLButtonElement>();
-	let restoring = $state(false);
 	let refusal = $state<string | null>(null);
-	// The answer to a restore never arrived; the newest row when it was pressed tells the reloaded list whether it landed.
+	// The answer to a restore never arrived; the reloaded list decides whether it landed (settleLost).
 	let lost = $state(false);
 	let pressHead: string | undefined;
+	let pressed: DocVersion | undefined;
 	let alive = true;
-	$effect(() => onRestoring(restoring));
-	onDestroy(() => { alive = false; if (restoring) onRestoring(false); });
+	onDestroy(() => { alive = false; if (restoring) restoring = false; });
 
 	$effect(() => {
 		if ($connectionState !== 'connected') { offline = true; return; }
@@ -143,14 +145,24 @@
 			versionRetry++;
 			if (lost) {
 				lost = false;
-				if (versions[0]?.id !== pressHead) await restored();
-				else { restoring = false; refusal = 'failed'; }
+				await settleLost();
 			}
 		} catch (error) {
 			if (!alive) return;
 			loadFailure = historyFailure(error);
 			if (versions.length && error instanceof TypeError) { offline = true; load = 'ready'; } else load = 'error';
 		}
+	}
+	// A lost restore landed only if a version newer than the one seen at press time holds the pressed version's text: any other write
+	// (an agent's edit, or the typing saved just before the restore) adds a row too.
+	async function settleLost(): Promise<void> {
+		const newest = versions[0];
+		if (!newest || !pressed || newest.id === pressHead) { restoring = false; refusal = 'failed'; return; }
+		let landed = false;
+		try { landed = (texts[newest.id] ?? await fetchVersionText(target, newest.id)) === texts[pressed.id]; } catch { landed = false; }
+		if (!alive) return;
+		if (landed) await restored();
+		else { restoring = false; refusal = 'unconfirmed'; }
 	}
 	async function restored(): Promise<void> {
 		emitProductEvent('document', 'version_restored');
@@ -161,12 +173,14 @@
 	async function restore(): Promise<void> {
 		if (!shown || restoreBlock || restoring || versionLoad !== 'ready') return;
 		pressHead = versions[0]?.id;
+		pressed = shown;
 		restoring = true;
 		refusal = null;
 		try {
 			await applyRestore(shown);
 		} catch (error) {
-			// No answer: whether it landed is unknown, so the restore is never sent again from here (design step 7).
+			// No answer: whether it landed is unknown, so the restore is never sent again from here (design step 7). Typing that
+			// couldn't be saved first is refused by the controller before anything is sent, so it never lands here.
 			if (error instanceof TypeError) { lost = true; offline = true; return; }
 			restoring = false;
 			refusal = error instanceof RequestRefused && error.kind && error.kind in REFUSALS ? error.kind : 'failed';
@@ -178,6 +192,10 @@
 		}
 		await retry();
 		await restored();
+	}
+	function reload(): void {
+		refusal = null;
+		void retry();
 	}
 	function openAt(index: number): void {
 		refusal = null;
@@ -243,7 +261,7 @@
 
 {#snippet versionDiff()}
 	{#if offline}<div class="status" role="status">Showing the last loaded history. Restore needs a connection to CORSIA.<Button size="sm" onclick={retry}>Retry</Button></div>
-	{:else if refusal}<div class="status" role="status">{REFUSALS[refusal].line}{#if REFUSALS[refusal].retry}<Button size="sm" onclick={restore}>Retry</Button>{/if}</div>{/if}
+	{:else if refusal}<div class="status" role="status">{REFUSALS[refusal].line}{#if REFUSALS[refusal].action === 'restore'}<Button size="sm" onclick={restore}>Retry</Button>{:else if REFUSALS[refusal].action === 'reload'}<Button size="sm" onclick={reload}>Reload history</Button>{/if}</div>{/if}
 	<div class="scroll" bind:this={diffScroll}>
 		{#if versionLoad === 'loading'}<p class="status">Loading history…</p>
 		{:else if versionLoad === 'error'}<div class="status" role="status">{versionFailure}<Button size="sm" onclick={retry}>Retry</Button></div>
