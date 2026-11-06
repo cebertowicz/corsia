@@ -200,6 +200,7 @@ def test_confined_profile_admits_no_native_tool():
         "--restricted", "--safe-mode", "--setting-sources", "",
         "--strict-mcp-config", "--permission-mode", "dontAsk",
         "--tools", ",".join(confined_claude_tool_names()),
+        "--allowedTools", *confined_claude_tool_names(),
         "--disable-slash-commands",
         "--mcp-config", "empty.json",
         "--model", "claude-sonnet-4-6",
@@ -298,6 +299,7 @@ async def test_confined_profile_leaves_stock_claude_no_native_tool():
             "--output-format", "stream-json", "--verbose", "--model", "claude-sonnet-4-6",
             *confined_claude_controls(),
             "--tools", ",".join(confined_claude_tool_names()),
+            "--allowedTools", *confined_claude_tool_names(),
             "--disable-slash-commands", "--mcp-config", str(empty_mcp),
         ]
         process = await asyncio.create_subprocess_exec(

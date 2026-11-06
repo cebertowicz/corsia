@@ -166,10 +166,16 @@ def claude_transcript_prefix_proof(
 
 
 def _untrusted_args(invocation: ClaudeInvocation) -> list[str]:
-    """Only CORSIA's confined read tools, over the bridge; the profile sets the mode."""
+    """Only CORSIA's confined read tools, over the bridge; the profile sets the mode.
+
+    ``dontAsk`` refuses any tool with no allow rule, and MCP tools are not exempt, so
+    the same names are allowed as offered.
+    """
+    tools = confined_claude_tool_names()
     return [
         *confined_claude_controls(),
-        "--tools", ",".join(confined_claude_tool_names()),
+        "--tools", ",".join(tools),
+        "--allowedTools", *tools,
         "--disable-slash-commands",
         "--mcp-config", invocation.mcp_config,
     ]

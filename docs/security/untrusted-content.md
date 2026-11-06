@@ -40,7 +40,7 @@ All of these reach the agent as ordinary tool output. The Messages tools' descri
 
 An agent that must read content from a source neither it nor you controls (an outside contributor's code, mail from an unknown sender) can hand the reading to an **untrusted** worker (`delegate_task` with confinement `untrusted`). That worker:
 
-- can only read and search files in the folders it was given, which must be folders its parent can already read. On every harness that means CORSIA's `read_file`, `grep`, `glob` and `list_dir`, with every path checked as given and as resolved (`backend/tools/confined_reads.py`). On Claude Code those four are its only tools: none of Claude Code's own, run from an empty working folder with no credential in its environment (`backend/subagents/cc_invocation.py`, `cc_confinement.py`)
+- can only read and search files in the folders it was given, which must be folders its parent can already read. With Claude Code or Codex alike, it reads through CORSIA's `read_file`, `grep`, `glob` and `list_dir`, with every path checked as given and as resolved (`backend/tools/confined_reads.py`). On Claude Code those four are its only tools; it gets none of Claude Code's own. The worker runs from an empty working folder with no credential in its environment (`backend/subagents/cc_invocation.py`, `cc_confinement.py`)
 - can't write, run commands, use the web, send anything, or use a lease
 - hands back only its final answer, labelled as an isolated result; its errors reach the parent only as fixed CORSIA text (`backend/infra/thread_confinement.py`)
 

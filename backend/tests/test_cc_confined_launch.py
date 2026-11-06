@@ -110,6 +110,9 @@ def _assert_confined(launch: dict, child_id: str) -> None:
     start = cmd.index(profile[0])
     assert cmd[start:start + len(profile)] == profile
     assert cmd[cmd.index("--tools") + 1] == ",".join(confined_claude_tool_names())
+    # dontAsk refuses an MCP tool with no allow rule, so each offered read is allowed.
+    allowed = cmd.index("--allowedTools") + 1
+    assert cmd[allowed:allowed + len(confined_claude_tool_names())] == confined_claude_tool_names()
     assert "--add-dir" not in cmd and "bypassPermissions" not in cmd
     assert cmd.count("--permission-mode") == 1
     # Its reads are the bridge's, so the paths never reach the command line.
