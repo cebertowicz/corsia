@@ -2,17 +2,17 @@
 
 How to give a small piece of work to CORSIA inside your [first project](first-project.md), see where the result appears, and then make that chat a standing **agent**. A chat is one conversation. An **agent** is a chat with a responsibility that it keeps owning, so other chats and the conductor can address it; see [Agents and threads](../how-it-works/agents-and-threads.md).
 
-This page needs a working model from the setup screens, because every step here sends a message to one. It was written from the app's source code and has not been walked through in a browser; if a screen differs from what you read, the screen is right and the page needs a fix.
+This page needs a working model from the setup screens, because every step here sends a message to one. The screens are described as the app shows them; what the model writes back, and the tools it shows as it works, depend on the model. If a screen differs from what you read, the screen is right and the page needs a fix.
 
 Pick a small, harmless first task, something whose result you can check by reading it: a one-page summary of a topic, a checklist for something you do every month, or a first draft of a short document.
 
 ## Start a chat in the project
 
-1. Open the project: press its name in the **Projects** section of the workspace **Activity** page.
-2. Press **New chat** in the sidebar. Inside a project it starts the chat in that project. To start one somewhere else, hold the button and choose from **New chat in…**.
+1. Open the project: press its name in the **Projects** section of the workspace **Activity** page. This opens the project's conductor chat, with **Back to workspace** at the top of the sidebar.
+2. Press the round **New chat** button at the bottom of the sidebar. Inside a project it starts the chat in that project: the header reads `<Name> · conductor` and the right pane lists **Roadmap** and **Documents** until you send the first message. To start a chat somewhere else, hold the button and choose from **New chat in…**.
 3. Type your task in the message box (**Message CORSIA**) and send it. The button on the message box shows the model the chat uses; press it to pick another. A chat on a cloud model sends what you write to that provider.
 
-The chat has its own history, model and files. Its context also includes the project's charter and skills, because the chat belongs to the project ([Scopes](../how-it-works/scopes.md)).
+The chat appears in the sidebar's chat list as **New Chat**. It has its own history, model and files. Its context also includes the project's charter and skills, because the chat belongs to the project ([Scopes](../how-it-works/scopes.md)).
 
 ## See what happened
 
@@ -31,12 +31,12 @@ If a plan task needs a decision from you, it appears on the **Activity** page un
 
 A chat that did something useful, and that you expect to need again, can become an agent:
 
-1. Open the chat's settings with the **Chat settings** button in the header.
+1. Open the chat's settings with the **Chat settings** button in the header. It opens a **Chat settings** page in place of the chat, with its context files and skills above the **Agent** section; the back arrow in the header returns to the chat.
 2. In the **Agent** section, which says to promote the chat when it has a clear responsibility, press **Make agent**.
-3. Write the **Responsibility**: the outcome this agent owns, in a sentence or two. **Paths** (folders or files) and **Topics** are optional and tell other agents what it covers.
-4. Press **Save**. **Edit** and **Remove** appear in the same place afterwards.
+3. Write the **Responsibility**: the outcome this agent owns, in a sentence or two. **Paths** (folders or files) and **Topics** are optional and tell other agents what it covers; type one and press **Add** to list it.
+4. Press **Save**, which stays disabled until there is a responsibility. **Edit** and **Remove** appear in the same place afterwards, next to the responsibility.
 
-The agent now appears in the sidebar's agent list for the project, under the conductor, with its responsibility as its tooltip. It keeps its history, plan and files, and the conductor can send it work. What it can reach is set by what [Security](../security/README.md) describes. Agents are instructed to ask you before they send or post as you, or spend money, unless you gave them standing permission; that is an instruction to the model, not a technical block.
+The agent now appears in the sidebar's agent list for the project, under the conductor, and leaves the chat list; its responsibility is its tooltip. It keeps its history, plan and files, and the conductor can send it work. What it can reach is set by what [Security](../security/README.md) describes. Agents are instructed to ask you before they send or post as you, or spend money, unless you gave them standing permission; that is an instruction to the model, not a technical block.
 
 ## Or ask the conductor
 
@@ -53,4 +53,4 @@ Start with one agent and watch its usage: teams use a lot of tokens ([Know befor
 - [How CORSIA works](../how-it-works/README.md) explains the parts you have used: plans, scopes, agents, and models.
 - [Security](../security/README.md) explains what agents can reach and when they ask first.
 
-Checked against the code at `b23cc5ab9`.
+Checked against the code at `0c56132e6`.
