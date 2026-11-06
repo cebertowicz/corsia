@@ -2,9 +2,9 @@
  * Geometry for comments on part of an image (DCOL-FR13.3, FR13.4).
  *
  * A region is a box or a point in fractions of the image, origin top-left, so it
- * holds at any zoom. The in-image placement below is also used by the marked-up
- * copy's gutter placement (`backend/doceditor/image_markup.py`): a box's tag
- * sits outside its top-left corner, then tries
+ * holds at any zoom. Tags follow the same rule as the marked-up copy an agent
+ * gets back (`backend/doceditor/image_markup.py` `place_tag`): a tag never covers
+ * what its box points at. A box's tag sits outside its top-left corner, then tries
  * left of the corner, above it, then right of the box, and only when the image edge
  * clips all four sits inside the box's corner. A point's tag sits up-left of the
  * point, then tries the other diagonals.
@@ -72,7 +72,11 @@ export function placeTag(region: ImageRegion, size: Size, radius = TAG_RADIUS, g
 	};
 }
 
-/** Places tags in region order, avoiding earlier tags and other marks when possible. */
+/**
+ * Every tag on one image, placed in `regions`' order, each keeping clear of the
+ * tags before it and of every other comment's mark; `dot` is a point's dot
+ * radius with its ring. Centres come back in pixels of the image.
+ */
 export function placeTags(regions: ImageRegion[], size: Size, radius = TAG_RADIUS, gap = TAG_GAP, dot = POINT_RADIUS + 2): (Point & { side: TagSide })[] {
 	const { width, height } = size;
 	const marks: Mark[] = regions.map((region) => isPoint(region)
