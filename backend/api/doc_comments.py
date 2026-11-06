@@ -25,7 +25,8 @@ from api.doc_comment_models import CommentCreate
 
 from doceditor import comments as store, doc_images, feedback_batches, feedback_state, image_regions
 from doceditor.comment_anchoring import anchored_threads
-from doceditor.comment_creation import CommentSelectionChanged, create_validated_comment
+from doceditor.comment_action_errors import CommentSelectionChanged
+from doceditor.comment_creation import create_validated_comment
 from doceditor.comment_create_db import CommentAccessDenied, CommentInput
 from doceditor.comment_recipients import TagValidationError, trim_mentions
 from doceditor.feedback_batch_core import PersonDocumentLane

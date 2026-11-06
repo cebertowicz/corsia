@@ -6,28 +6,13 @@ from pathlib import Path
 from uuid import uuid4
 
 from doceditor import comments
+from doceditor.comment_action_errors import CommentSelectionChanged
 from doceditor.doc_images import widen_to_image
 from doceditor.image_regions import check_region_target
 from doceditor.live_document import IdentityInUse
 from doceditor.quote_anchor import anchor_context, resolve_quote
 from infra import app_loop, write_effects
 from infra.db_async import run_in_db
-
-
-class CommentSelectionChanged(ValueError):
-    """The selection a browser captured can no longer be anchored; its draft is kept and it selects again.
-
-    ``kind`` is the machine-readable reason the browser acts on, as ``CommentActionError.kind`` is.
-    """
-
-    def __init__(self, message: str, kind: str = "selection_changed"):
-        super().__init__(message)
-        self.kind = kind
-
-
-def diagram_changed() -> CommentSelectionChanged:
-    """The diagram a pin was drawn on is not the one the document holds now."""
-    return CommentSelectionChanged("Place the pin on the current diagram; your draft is kept.", "diagram_changed")
 
 
 @dataclass(frozen=True)

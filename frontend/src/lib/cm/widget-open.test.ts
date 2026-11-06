@@ -87,6 +87,16 @@ describe('an image inside a table cell', () => {
 });
 
 describe('opening a delayed diagram from the keyboard', () => {
+	it('does not rewrite openability when another render leaves the diagram unchanged', async () => {
+		const view = mount(() => undefined, '# Plan\n\n```mermaid\ngraph TD; A-->B\n```\n', true);
+		const diagram = view.dom.querySelector<HTMLElement>('.cm-md-mermaid')!;
+		diagram.append(document.createElementNS('http://www.w3.org/2000/svg', 'svg'));
+		await vi.waitFor(() => expect(diagram.dataset.openable).toBe('true'));
+		const set = vi.spyOn(diagram, 'setAttribute');
+		view.dom.dispatchEvent(new Event('load'));
+		await new Promise<void>((resolve) => view.requestMeasure({ read: () => undefined, write: () => resolve() }));
+		expect(set).not.toHaveBeenCalled();
+	});
 	it('becomes a tab stop when its SVG is inserted after the initial paint', async () => {
 		const doc = '# Plan\n\n```mermaid\nflowchart LR\n A --> B\n```\n';
 		const view = mount(() => undefined, doc, true);

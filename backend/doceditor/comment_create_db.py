@@ -4,7 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from doceditor import comments, comment_recipients, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle
-from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt, diagram_changed
+from doceditor.comment_action_errors import CommentSelectionChanged, diagram_changed
+from doceditor.comment_creation import Anchor, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
 from doceditor.suggestion_overlap import check_agent_suggestion_fits

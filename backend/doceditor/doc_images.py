@@ -18,7 +18,7 @@ from typing import Any, Mapping
 from urllib.parse import unquote
 
 from doceditor import diagram_pins
-from doceditor.comment_action_errors import CommentActionError
+from doceditor.comment_action_errors import CommentActionError, diagram_changed
 from doceditor.doc_text import read_doc_text
 from doceditor.image_regions import (
     checked_image, comment_image, is_image_path, move_fields, move_fields_on, reader_bases, require_image,
@@ -153,6 +153,5 @@ def _diagram_patch(comment: Mapping[str, Any], fields: dict[str, Any], doc_path:
     if current is None:
         raise CommentActionError("region_target", "the diagram this pin is on is no longer in the document.")
     if require_source and (source is None or diagram_pins.source_revision(source) != current):
-        from doceditor.comment_creation import diagram_changed
         raise diagram_changed()
     return move_fields_on(comment, fields, current)

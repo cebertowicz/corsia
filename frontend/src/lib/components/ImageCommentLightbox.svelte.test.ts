@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 
 
 const mocks = vi.hoisted(() => ({ fetchComments: vi.fn() }));
 vi.mock('$lib/ws', () => ({ on: vi.fn(() => () => {}) }));
-vi.mock('$lib/api/docs', () => ({
+vi.mock('$lib/api/docs', async (importOriginal) => ({
+	...(await importOriginal<typeof import('$lib/api/docs')>()),
 	fetchComments: mocks.fetchComments,
 	postComment: vi.fn(),
 	patchComment: vi.fn(),
@@ -22,6 +23,9 @@ vi.mock('$lib/stores/viewport', async () => {
 
 import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
+import SnapshotOverlayHost from './SnapshotOverlayHost.test.svelte';
+import { RequestRefused } from '$lib/api/docs';
+import { clearTabViewState, openTabDocumentImage, tabDocumentImage } from '$lib/stores/tabViewState';
 import { docComments } from '$lib/stores/docComments';
 import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 import { prefersReducedMotion } from '$lib/stores/viewport';
@@ -85,6 +89,41 @@ afterEach(() => {
 });
 
 describe('ImageCommentLightbox', () => {
+	it('keeps a refused draft while replacing the tab snapshot and posts against the refreshed source', async () => {
+		vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const snapshot = { src: 'blob:new', alt: 'Diagram', from: 0, to: 10, scrollTop: 0, top: 0, diagramSource: 'new' };
+		const post = vi.fn().mockRejectedValueOnce(new RequestRefused('409', 'diagram_changed')).mockResolvedValue('new-comment');
+		openTabDocumentImage('thread', 'tab', { ...snapshot, src: 'blob:old', diagramSource: 'old' });
+		component = mount(SnapshotOverlayHost, { target: host, props: { comments: {
+			artifactId: 'art-img', projectId: null, readOnly: false, post, refreshDiagram: vi.fn(async () => snapshot),
+		} } });
+		await settle();
+		const img = host.querySelector<HTMLImageElement>('.pad img')!;
+		Object.defineProperties(img, { naturalWidth: { value: 1000 }, naturalHeight: { value: 500 } });
+		img.dispatchEvent(new Event('load'));
+		await settle();
+		commentButton()!.click();
+		await settle();
+		host.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+		await settle();
+		const text = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
+		text.value = 'Keep this'; text.dispatchEvent(new Event('input', { bubbles: true }));
+		await settle();
+		document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
+		await settle();
+		expect(tabDocumentImage('thread', 'tab')?.diagramSource).toBe('new');
+		expect(host.querySelector('.pad img')).toBe(img);
+		img.dispatchEvent(new Event('load'));
+		await settle();
+		host.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+		await settle();
+		expect(document.body.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Keep this');
+		document.body.querySelector<HTMLButtonElement>('button.submit')!.click();
+		await settle();
+		expect(post.mock.calls.map((args) => args[6])).toEqual(['old', 'new']);
+		clearTabViewState('thread', 'tab');
+	});
 	it('shows the document reply chip for replies arriving while its image is open', async () => {
 		const step = vi.fn();
 		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {

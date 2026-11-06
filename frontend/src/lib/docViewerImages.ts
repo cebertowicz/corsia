@@ -1,4 +1,5 @@
 import { get } from 'svelte/store';
+import { releaseDiagramSnapshot } from '$lib/diagramSnapshot';
 import { imageRequestAt, type OpenImageRequest } from '$lib/cm/markdown-image';
 import { widgetImageRequestAt } from '$lib/cm/widget-open';
 import { imageContentUrl } from '$lib/artifactImage';
@@ -61,7 +62,7 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 	function open(request: OpenImageRequest, focus?: Focus) {
 		const onOpenImage = options.onOpenImage();
 		if (onOpenImage) onOpenImage({ ...request, focus });
-		else if (request.src.startsWith('blob:')) URL.revokeObjectURL(request.src);
+		else releaseDiagramSnapshot(request.src);
 	}
 	/** The comments of an image shown now, bound to this document as it is; none when it has no artifact to hold them. */
 	function comments(): DocumentImageComments | undefined {
@@ -76,7 +77,7 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 				const snapshot = await widgetImageRequestAt(root, { from, to });
 				const current = diagramAtAnchor(options.text(), from);
 				if (snapshot && (!current || snapshot.diagramSource !== current.source)) {
-					if (snapshot.src.startsWith('blob:')) URL.revokeObjectURL(snapshot.src);
+					releaseDiagramSnapshot(snapshot.src);
 					return null;
 				}
 				return snapshot;
@@ -110,7 +111,8 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 	const groups = {
 		srcOf: (comment: DocComment) => (comment.imageSrc ? imageContentUrl({ path: comment.imageSrc, projectId: projectId(), token: get(token) ?? '', imageCacheKey: options.imageCacheKey() }) : null),
 		/** The diagram a pin is on, as the document has it now: its source to draw, and its drawer caption. */
-		diagramOf: (comment: DocComment) => (isDiagramPin(comment, options.text()) ? diagramAtAnchor(options.text(), comment.from!) : null),
+		isDiagram: isDiagramPin,
+		diagramOf: (comment: DocComment) => (isDiagramPin(comment) && !comment.orphaned && comment.from != null ? diagramAtAnchor(options.text(), comment.from) : null),
 		colorOf: (comment: DocComment) => regionColor(comment, projectId(), options.accent()),
 		onOpen: (comment: DocComment, focus?: Focus) => openOr([comment.id], focus, () => options.showInText(comment.id)),
 	};

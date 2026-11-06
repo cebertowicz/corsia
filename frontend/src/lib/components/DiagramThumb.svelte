@@ -5,6 +5,7 @@
 	import type { DocComment } from '$lib/stores/docComments';
 	import { diagramMarkupSnapshot } from '$lib/cm/widget-open';
 	import { renderMermaid } from '$lib/mermaid';
+	import { releaseDiagramSnapshot } from '$lib/diagramSnapshot';
 	import ImageRegionThumb from './ImageRegionThumb.svelte';
 
 	let { source, caption, comments, colorOf, onOpen }: {
@@ -23,12 +24,12 @@
 			url = diagramMarkupSnapshot(result.svg);
 			src = url;
 		});
-		return () => { current = false; src = null; if (url) URL.revokeObjectURL(url); };
+		return () => { current = false; src = null; releaseDiagramSnapshot(url); };
 	});
 </script>
 
 {#if src}
-	<ImageRegionThumb {src} alt={caption} caption {comments} {colorOf} {onOpen} />
+	<ImageRegionThumb {src} alt={caption} caption kind="diagram" {comments} {colorOf} {onOpen} />
 {:else}
 	<!-- Until it has drawn, or when it does not draw: the caption an image's thumbnail carries. -->
 	<button type="button" class="diagram-head" data-diagram-head disabled={!onOpen} onclick={() => onOpen?.()}>{caption}</button>

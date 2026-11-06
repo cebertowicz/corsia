@@ -3,6 +3,7 @@ import { imageContext, imageOpener, type OpenImageRequest } from './markdown-ima
 import { blockRange, DIAGRAM, TABLE } from './widget-blocks';
 import { tableCells } from './widget-cells';
 import { diagramElements } from '$lib/diagramSubject';
+import { createDiagramSnapshot } from '$lib/diagramSnapshot';
 import { cellImageSlots } from './widget-cell-images';
 
 /**
@@ -28,6 +29,16 @@ export function markOpenable(el: HTMLElement, view: EditorView) {
 	el.setAttribute('role', 'button');
 	el.setAttribute('aria-label', label);
 	el.dataset.openable = 'true';
+}
+
+/** Repaint openability only when comment paint or image readiness changes. */
+export function markChangedOpenable(el: HTMLElement, signature: string, view: EditorView, signatures: WeakMap<HTMLElement, string>) {
+	for (const opener of el.matches(DIAGRAM) ? [el] : el.querySelectorAll<HTMLElement>(CELL_IMAGE)) {
+		const state = JSON.stringify([signature, !!(opener === el ? drawnDiagram(opener) : drawnCellImage(opener))]);
+		if (signatures.get(opener) === state) continue;
+		signatures.set(opener, state);
+		markOpenable(opener, view);
+	}
 }
 
 /** Enter or Space on a focused cell image or diagram opens it; false for any other key or target. */
@@ -99,16 +110,7 @@ export function focusWidgetAt(root: HTMLElement, { from, to }: { from: number; t
 
 const SNAPSHOT_WIDTH = 1200;
 
-/**
- * The diagram as it is drawn now, as an image the viewer can show: its SVG at a size the viewer fits and zooms. It is a
- * snapshot, so it keeps the theme it was drawn in and does not follow the source after it is taken.
- */
-export function diagramSnapshot(el: HTMLElement): string | null {
-	const svg = el.querySelector('svg');
-	return svg ? snapshotOf(svg) : null;
-}
-
-/** The same snapshot from the SVG a diagram renders to, for a diagram not drawn in the document now (the drawer's thumbnail). */
+/** A snapshot from the SVG a diagram renders to, for a diagram not drawn in the document now (the drawer's thumbnail). */
 export function diagramMarkupSnapshot(markup: string): string | null {
 	const host = document.createElement('div');
 	host.innerHTML = markup;
@@ -132,7 +134,7 @@ function snapshotOf(svg: SVGSVGElement): string | null {
 	copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
 	copy.setAttribute('width', String(Math.round(size.width * size.scale)));
 	copy.setAttribute('height', String(Math.round(size.height * size.scale)));
-	return URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(copy)], { type: 'image/svg+xml' }));
+	return createDiagramSnapshot(new XMLSerializer().serializeToString(copy));
 }
 
 /** The viewer's scale at which a diagram's labels are the size they are drawn at in the document: its own size, never above it. */

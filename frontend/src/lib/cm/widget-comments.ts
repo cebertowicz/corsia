@@ -3,7 +3,7 @@ import { caretAt, touchMovedBeyond, type WidgetSelection } from './widget-select
 export { touchMovedBeyond, type WidgetSelection } from './widget-selection-types';
 import { commentRanges } from './comment-marks';
 import { pendingCommentMark } from './pending-comment-mark';
-import { CELL_IMAGE, drawnCellImage, markOpenable, openWidgetImage, openWidgetOnKey } from './widget-open';
+import { drawnCellImage, markChangedOpenable, openWidgetImage, openWidgetOnKey } from './widget-open';
 import { blockRange, cellElement, DIAGRAM, TABLE, widgetOf } from './widget-blocks';
 import { occurrences, snappedTableRows, tableCells, widgetCommentLabel, type CellSpan } from './widget-cells';
 import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
@@ -117,6 +117,8 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			const widget = origin && widgetOf(this.view, origin);
 			const selection = document.getSelection();
 			const ids = widget && origin ? commentIdsAt(widget, origin) : [];
+			// A whole-diagram text comment takes the click; the viewer remains reachable by keyboard and from its pins.
+			if (widget?.matches(DIAGRAM) && origin && ids.length > 0 && selection?.isCollapsed !== false) { hooks.onFocus(ids, origin.closest<HTMLElement>('[data-comment-ids]') ?? widget); return; }
 			// A cell image or a diagram opens the viewer on a click, as an image in the text does; a drag across a diagram is a selection, not a click.
 			if (widget && origin && !origin.closest('a') && (drawnCellImage(origin) || selection?.isCollapsed !== false) && openWidgetImage(this.view, origin)) { event.preventDefault(); return; }
 			if (widget && origin && ids.length > 0 && selection?.isCollapsed !== false) { hooks.onFocus(ids, origin.closest<HTMLElement>('[data-comment-ids]') ?? widget); return; }
@@ -199,6 +201,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 		private readonly key = (event: KeyboardEvent) => { if (openWidgetOnKey(this.view, event)) { event.preventDefault(); event.stopPropagation(); } };
 		private readonly rendered = () => this.paint();
 		private readonly observer = new MutationObserver(this.rendered);
+		private readonly openableSignatures = new WeakMap<HTMLElement, string>();
 
 		constructor(private readonly view: EditorView) {
 			view.dom.addEventListener('pointerdown', this.down, true);
@@ -273,22 +276,23 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 					for (const { el, block, src } of widgets) {
 						const mine = marks.filter((mark) => mark.from < block.to && mark.to > block.from);
 						const signature = JSON.stringify([block.from, src.length, mine]);
-						if (el.dataset.paintSignature === signature) continue;
-						el.dataset.paintSignature = signature;
-						keepingSelection(el, () => {
-							unpaint(el);
-							if (el.matches(DIAGRAM)) {
-								for (const mark of mine) {
-									el.classList.add(mark.kind === 'pending' ? 'cm-comment-block-pending' : 'cm-comment-block', ...(mark.kind === 'focused' ? ['cm-comment-block-focused'] : []));
-									addCommentId(el, mark);
-									el.dataset.commentAria = 'true';
-									el.setAttribute('role', 'img');
-									el.setAttribute('aria-label', 'Commented diagram');
-								}
-							} else paintTable(el, block.from, src, mine);
-						});
+						if (el.dataset.paintSignature !== signature) {
+							el.dataset.paintSignature = signature;
+							keepingSelection(el, () => {
+								unpaint(el);
+								if (el.matches(DIAGRAM)) {
+									for (const mark of mine) {
+										el.classList.add(mark.kind === 'pending' ? 'cm-comment-block-pending' : 'cm-comment-block', ...(mark.kind === 'focused' ? ['cm-comment-block-focused'] : []));
+										addCommentId(el, mark);
+										el.dataset.commentAria = 'true';
+										el.setAttribute('role', 'img');
+										el.setAttribute('aria-label', 'Commented diagram');
+									}
+								} else paintTable(el, block.from, src, mine);
+							});
+						}
+						markChangedOpenable(el, signature, this.view, this.openableSignatures);
 					}
-					for (const { el } of widgets) for (const opener of el.matches(DIAGRAM) ? [el] : el.querySelectorAll<HTMLElement>(CELL_IMAGE)) markOpenable(opener, this.view);
 				},
 			});
 		}

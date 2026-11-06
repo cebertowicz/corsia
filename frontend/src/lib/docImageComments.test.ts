@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DocComment } from '$lib/stores/docComments';
 import cases from '../../../backend/tests/fixtures/diagram-fences.json';
-import { changedLabel, commentsAtImage, diagramAtAnchor, groupRows, imageGroupKey, remapOccurrence, sharedImage } from './docImageComments';
+import { changedLabel, commentsAtImage, diagramAtAnchor, groupRows, imageGroupKey, isDiagramPin, remapOccurrence, sharedImage } from './docImageComments';
 
 const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
 function comment(id: string, extra: Partial<DocComment> = {}): DocComment {
@@ -71,6 +71,12 @@ describe('the drawer row of a diagram', () => {
 
 	it('is nothing when no diagram opens at that offset', () => {
 		expect(diagramAtAnchor(doc, 0)).toBeNull();
+	});
+
+	it('keeps the pin kind when the diagram fence is deleted', () => {
+		const pin = comment('pin', { region: BOX, from: 0, to: 10, orphaned: true });
+		expect(isDiagramPin(pin)).toBe(true);
+		expect(isDiagramPin(onImage('image', 1))).toBe(false);
 	});
 
 	it('words the changed state by kind: a diagram changed, or an image changed', () => {
