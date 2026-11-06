@@ -7,6 +7,8 @@
 	import { parseBrowserChip } from '$lib/browserChip';
 	import MessageArtifactCards from './MessageArtifactCards.svelte';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
+	import ChatCommentThreads from './ChatCommentThreads.svelte';
+	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
 
 	let {
 		msg,
@@ -33,6 +35,16 @@
 		/** Holds whose ask card is on screen elsewhere in the transcript. */
 		renderedAsks?: ReadonlySet<string>;
 	} = $props();
+
+	// The comments the highlight pass could not anchor on this message's rendered text. They have no mark to
+	// open, so they show as a detached thread under the message: that is their surface, and the surface an
+	// unread reply jumps to.
+	const detachedComments = $derived.by(() => {
+		if (!msg.id) return [];
+		const unplaced = chatCommentPlacement.unplacedIds(msg.id);
+		if (!unplaced.length) return [];
+		return (msg.chat_comments ?? []).filter((comment: { id: string }) => unplaced.includes(comment.id));
+	});
 
 	let openingAnnouncement = $state('');
 	$effect(() => {
@@ -170,6 +182,9 @@
 	</div>
 	{/if}
 
+	{#if showContent && msg.thread_id && detachedComments.length}
+		<ChatCommentThreads messageId={msg.id} threadId={msg.thread_id} comments={detachedComments} detached />
+	{/if}
 
 	{#if msg.cards?.length || browserChip}
 		<MessageArtifactCards cards={msg.cards ?? []} browser={browserChip} threadId={msg.thread_id} {hiddenHolds} {renderedAsks} />

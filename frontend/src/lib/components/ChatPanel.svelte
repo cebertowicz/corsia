@@ -237,9 +237,12 @@
 	const firstPageRead = supersedingRead();
 	onDestroy(firstPageRead.abort);
 	let replyAnnouncements = $state<string[]>([]);
-	$effect(() => watchChatCommentThreads(MSG_PAGE_SIZE, quote => {
-		replyAnnouncements.push(`New reply on "${quote}"`);
-	}));
+	// The live region announces what is added to it: keep the three newest, and clear them when the chat changes.
+	$effect(() => {
+		void $activeThreadId;
+		replyAnnouncements = [];
+		return watchChatCommentThreads(MSG_PAGE_SIZE, quote => { replyAnnouncements = [...replyAnnouncements.slice(-2), `New reply on "${quote}"`]; });
+	});
 	/** Drop stale rows when the selected transcript's first page fails. */
 	function failFirstPage(threadId: string): void {
 		firstLoadFailed = true;

@@ -66,16 +66,19 @@ export function createChatReplyJumper(port: JumpPort) {
 			?.chat_comments?.find(comment => comment.cid === target.cid && (!destination.user_message_id || comment.user_message_id === destination.user_message_id));
 		const mark = [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids][role="button"]') ?? [])]
 			.find(item => item.dataset.commentIds?.split(',').includes(comment?.id ?? ''));
+		// The highlight when the comment's text is still in the message; otherwise the detached thread rendered under it.
+		const landing = mark ?? (comment ? row?.querySelector<HTMLElement>(`[data-comment-uuid="${CSS.escape(comment.id)}"]`) ?? null : null);
 		chatReplyJump.set(null);
-		if (!mark) return false;
-		mark.scrollIntoView({ block: 'center' });
-		mark.focus({ preventScroll: true });
-		mark.classList.add('chat-reply-mark-landed');
-		mark.click();
-		const clear = () => mark.classList.remove('chat-reply-mark-landed');
+		if (!landing) return false;
+		landing.scrollIntoView({ block: 'center' });
+		landing.focus({ preventScroll: true });
+		const landedClass = mark ? 'chat-reply-mark-landed' : 'chat-reply-landed';
+		landing.classList.add(landedClass);
+		mark?.click();
+		const clear = () => landing.classList.remove(landedClass);
 		if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
 			element?.addEventListener('scroll', clear, { once: true });
-			mark.addEventListener('pointerdown', clear, { once: true });
+			landing.addEventListener('pointerdown', clear, { once: true });
 		} else window.setTimeout(clear, 2000);
 		return false;
 	}

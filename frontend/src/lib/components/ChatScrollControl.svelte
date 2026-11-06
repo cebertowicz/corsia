@@ -41,15 +41,18 @@
 	const unloaded = $derived(!target && !!attention && unreadCount > loadedCount
 		&& !$messages.some(message => message.thread_id === threadId && message.id === attention.detail.destination.id));
 	function jump() {
-		if (unloaded && attention) return onJumpToReply(attention.detail.destination);
-		if (!target) return onScrollToBottom();
-		const element = target.element;
-		element.scrollIntoView({ block: 'center', behavior: 'smooth' });
-		element.focus({ preventScroll: true });
-		element.click();
+		// One landing path for both cases: the reply jumper loads whatever pages the answer is still waiting in,
+		// scrolls, focuses and emphasises the comment, and opens it when the comment carries a highlight.
+		const destination = target?.destination ?? (unloaded ? attention?.detail.destination : undefined);
+		if (destination) return onJumpToReply(destination);
+		onScrollToBottom();
 	}
 	const visible = $derived(!!target || unloaded || (!userIsNearBottom && !!threadId));
-	const label = $derived(target ? `${unreadCount} new ${unreadCount === 1 ? 'reply' : 'replies'}, next ${direction}: '${target.quote}'` : unloaded ? 'New reply' : 'Scroll to bottom');
+	// The accessible name carries the same count the button shows, so the two can never disagree (COPY-STANDARD C5).
+	const countText = $derived(`${unreadCount} new ${unreadCount === 1 ? 'reply' : 'replies'}`);
+	const label = $derived(target ? `Go to the next new reply ${direction}: '${target.quote}'. ${countText}.`
+		: unloaded ? `Go to the next new reply in older messages. ${countText}.`
+			: 'Scroll to the bottom');
 </script>
 
 {#if visible}

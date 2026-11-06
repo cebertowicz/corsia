@@ -4,6 +4,8 @@
 	import { failedChatReplies, pendingChatReplies } from '$lib/chatCommentDelivery';
 	import { clipChatSelection, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
+	import { toasts } from '$lib/stores/toast';
+	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
 	import Popover from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
@@ -103,6 +105,14 @@
 	let observer: MutationObserver | undefined;
 	let dotCleanups: (() => void)[] = [];
 	let painting = false;
+	/** The messages this surface recorded unplaced comments for, so closing it can clear them again. */
+	let recorded: string[] = [];
+	function recordUnplaced(messageId: string | undefined, sent: { id: string }[], placed: { id: string }[]): void {
+		if (!messageId) return;
+		const placedIds = new Set(placed.map(comment => comment.id));
+		chatCommentPlacement.record(messageId, sent.filter(comment => !placedIds.has(comment.id)).map(comment => comment.id));
+		if (!recorded.includes(messageId)) recorded.push(messageId);
+	}
 	function paint() {
 		const root = messageRoot();
 		if (!root) return;
@@ -120,7 +130,8 @@
 		}
 		for (const row of root.querySelectorAll<HTMLElement>('[data-message-id]')) {
 			const body = bodyOf(row);
-			if (!body) continue;
+			// With no body to measure there is no surface for a thread under this message either: show nothing rather than what an earlier pass found.
+			if (!body) { recordUnplaced(row.dataset.messageId, [], []); continue; }
 			let previous = painted.get(body);
 			if (!previous) {
 				if (body.querySelector('.cm-comment-wrap')) keepingSelection(body, () => unpaint(body));
@@ -133,6 +144,7 @@
 			const marks = [...sent.map(comment => ({ ...comment, kind: threadId && pendingChatReplies($messages, threadId, comment).length ? 'pending' as const : 'placed' as const })), ...pending.map(comment => ({ ...comment, kind: editingId === comment.id ? 'focused' as const : 'pending' as const }))];
 			if (draft && draft.messageId === row.dataset.messageId) marks.push({ ...draft.anchor, id: 'draft', kind: 'pending' } as typeof marks[number]);
 			const valid = marks.filter(comment => (body.textContent ?? '').slice(comment.from_off, comment.to_off) === comment.quote);
+			recordUnplaced(row.dataset.messageId, sent, valid);
 			for (const [id, old] of previous) {
 				const next = valid.find(comment => comment.id === id);
 				const first = old.wraps[0];
@@ -194,7 +206,7 @@
 		void tick().then(() => requestAnimationFrame(() => { queued = false; paint(); }));
 	}
 	$effect(() => { void comments; void editingId; void draft; void $messages; schedule(); });
-	$effect(() => { void threadId; close(); });
+	$effect(() => { void threadId; close(); chatCommentPlacement.forget(recorded); recorded = []; });
 	onMount(() => {
 		const update = () => { narrow = window.innerWidth <= 768; };
 		update(); window.addEventListener('resize', update);
@@ -254,7 +266,7 @@
 		});
 		const root = messageRoot();
 		if (root) observer.observe(root, { childList: true, subtree: true, characterData: true });
-		return () => { for (const cleanup of dotCleanups) cleanup(); observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
+		return () => { for (const cleanup of dotCleanups) cleanup(); chatCommentPlacement.forget(recorded); recorded = []; observer?.disconnect(); window.removeEventListener('resize', update); document.removeEventListener('selectionchange', readSelection); document.removeEventListener('click', click); document.removeEventListener('keydown', keydown); document.removeEventListener('chat-comment-reply', replyClick); };
 	});
 	export async function edit(id: string) {
 		const comment = comments.find(item => item.id === id);
@@ -267,7 +279,11 @@
 	function replyInThread(note: string) {
 		const message = $messages.find(item => item.id === viewing?.messageId && item.thread_id === threadId);
 		const comment = viewedComment;
-		if (!message || typeof message.seq !== 'number' || !comment) throw new Error('Comment is unavailable');
+		if (!message || typeof message.seq !== 'number' || !comment) {
+			// The row this thread opened on was replaced or removed while the reply was being typed. Say so, then keep the rejection so the thread holds the draft.
+			toasts.show('CORSIA couldn’t send this reply because that comment is no longer in this chat. Comment on the text again.', 'error');
+			throw new Error('Comment is unavailable');
+		}
 		onSendReply({ id: crypto.randomUUID(), messageId: message.id, seq: message.seq, from_off: comment.from_off, to_off: comment.to_off, quote: comment.quote, anchor_prefix: comment.anchor_prefix, anchor_suffix: comment.anchor_suffix, note, root_user_message_id: comment.user_message_id, root_cid: comment.cid });
 	}
 	async function submit(note: string) {

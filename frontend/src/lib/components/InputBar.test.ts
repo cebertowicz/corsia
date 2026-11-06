@@ -1385,6 +1385,39 @@ describe('InputBar model readiness at the action seam', () => {
 	});
 });
 
+describe('a comment reply the composer cannot send', () => {
+	const reply = { id: 'reply', messageId: 'message-1', seq: 3, from_off: 0, to_off: 4, quote: 'text', anchor_prefix: '', anchor_suffix: '', note: 'draft reply', root_user_message_id: 'user-1', root_cid: 'c1' };
+	const sentence = 'CORSIA couldn’t send this reply because no model is ready to answer it. Your reply stays here; choose a model or wait for CORSIA to finish updating, then reply again.';
+
+	// The thread keeps the draft when the send is refused, so the person needs the cause on screen and not only in the console.
+	it('says no model can answer it when the chat is not bound', () => {
+		activeThreadId.set(null);
+		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
+		component = composer;
+		flushSync();
+		expect(() => composer.sendReply(reply)).toThrow('Cannot send reply');
+		expect(get(toasts).map(toast => toast.message)).toContain(sentence);
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+	});
+
+	it('says it again while the chosen model cannot answer', () => {
+		models.set([{ id: 'model-down', name: 'Down model', size: '', backend: 'local', speed: '', status: 'unavailable' }]);
+		activeModelId.set('model-down');
+		threads.set([{
+			id: 'thread-1', user_id: 'user-1', profile: 'default', title: 'Waiting thread', model: 'model-down',
+			created_at: '2026-07-21T08:00:00Z', updated_at: '2026-07-21T08:00:01Z',
+			pending_model: null, switch_status: null, switch_operation_id: null, switch_error: null,
+		}]);
+		activeThreadId.set('thread-1');
+		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
+		component = composer;
+		flushSync();
+		expect(() => composer.sendReply(reply)).toThrow('Cannot send reply');
+		expect(get(toasts).map(toast => toast.message)).toContain(sentence);
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+	});
+});
+
 // The chip stack above the composer renders the QUEUE and nothing else, read
 // straight off the message store — never a side store, which is what made a
 // failed snapshot decode erase the user's text from the screen entirely. A

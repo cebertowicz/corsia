@@ -1,0 +1,122 @@
+import { get } from 'svelte/store';
+import { flushSync, mount, tick, unmount } from 'svelte';
+import { afterEach, expect, it, vi } from 'vitest';
+import AssistantMessage from './AssistantMessage.svelte';
+import ChatCommentSelection from './ChatCommentSelection.svelte';
+import { messages } from '$lib/stores/threads';
+
+// A comment is anchored to the text it was made on. When that text leaves the message — an edited or
+// retried answer — no highlight can carry the comment, and the comment would have no surface at all.
+// The highlight pass records what it could not place, and the message row shows those comments beneath
+// itself. These run the two components together, because that is the only way to see the hand-off.
+
+const CONTENT = 'Kept text that the comment no longer matches';
+const AGENT_REPLY = { author_kind: 'agent', user_message_id: 'agent-message', cid: 'c1', assistant_message_id: 'same', text: 'The answer', created_at: '2026-11-05T00:01:00Z', unread: true };
+
+function comment(quote: string) {
+	return {
+		id: 'one', cid: 'c1', user_message_id: 'user-message', quote, note: 'Why?',
+		from_off: 0, to_off: quote.length, anchor_prefix: '', anchor_suffix: '',
+		created_at: '2026-11-05T00:00:00Z', answers: [{ ...AGENT_REPLY }],
+	};
+}
+
+let host: HTMLElement;
+let components: unknown[] = [];
+
+/** The transcript row and the highlight surface, mounted the way the chat mounts them. */
+function mountTranscript(quote: string) {
+	vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
+	vi.stubGlobal('CSS', { escape: (value: string) => value });
+	host = document.createElement('div');
+	host.innerHTML = '<div class="messages"><div class="message assistant" data-message-id="m1"><div id="message"></div></div></div><div id="mount"></div>';
+	document.body.append(host);
+	const row = { id: 'm1', thread_id: 'thread', role: 'assistant', content: CONTENT, chat_comments: [comment(quote)] };
+	messages.set([row as never]);
+	components = [
+		mount(AssistantMessage, {
+			target: host.querySelector('#message')!,
+			props: { msg: row, expandedTools: new Set<string>(), expandedReasoning: new Set<string>(), onToggleToolBlock: () => {}, onToggleReasoning: () => {} },
+		}),
+		mount(ChatCommentSelection, { target: host.querySelector('#mount')!, props: { threadId: 'thread', comments: [], onChange: vi.fn(), onSendReply: vi.fn() } }),
+	];
+	flushSync();
+	return {
+		row: () => host.querySelector<HTMLElement>('.message[data-message-id="m1"]')!,
+		body: () => host.querySelector<HTMLElement>('.message[data-message-id="m1"] .long-message-body')!,
+	};
+}
+
+afterEach(() => {
+	for (const component of components) unmount(component as never);
+	components = [];
+	messages.set([]);
+	host?.remove();
+	vi.unstubAllGlobals();
+	vi.useRealTimers();
+});
+
+it('shows a comment whose text left the message as a thread under the message, with its reply reachable', async () => {
+	const { row } = mountTranscript('Gone text');
+	await vi.waitFor(() => expect(row()?.querySelector('[data-comment-uuid="one"]')?.textContent).toContain('The answer'));
+	// One surface, not two: nothing is highlighted, and what is shown is the thread itself.
+	expect(row()!.querySelector('.long-message-body [data-comment-ids]')).toBeNull();
+	// Reachable means reachable: the reply control is on the thread, so the person can answer the comment.
+	expect(row()!.querySelector('[data-reply-comment="one"]')).not.toBeNull();
+	// The chat surface names its own state: the text is here, only the highlight was lost.
+	expect(row()!.querySelector('[data-comment-uuid="one"] [data-detached]')?.textContent)
+		.toBe('Couldn’t highlight this text in the message.');
+});
+
+it('leaves a comment whose text is still in the message on its highlight alone', async () => {
+	const { row, body } = mountTranscript('Gone text');
+	// Anchor the comment in the rendered text the way a selection does, then let the paint pass place it.
+	const text = body()!.textContent ?? '';
+	const from = text.indexOf('Kept text');
+	expect(from).toBeGreaterThanOrEqual(0);
+	messages.update(current => [{ ...current[0]!, chat_comments: [{ ...comment('Kept text'), from_off: from, to_off: from + 'Kept text'.length }] }] as never);
+	await vi.waitFor(() => expect(row()?.querySelector('.long-message-body [data-comment-ids="one"]')).not.toBeNull());
+	expect(row()!.querySelector('[data-comment-uuid="one"]')).toBeNull();
+});
+
+it('does not repaint the highlights when a detached thread appears under the message', async () => {
+	const { row } = mountTranscript('Gone text');
+	await vi.waitFor(() => expect(row()?.querySelector('[data-comment-uuid="one"]')?.textContent).toContain('The answer'));
+	// Adding the thread mutates the row, so this is where a paint pass would start one it cannot finish.
+	await new Promise<void>(resolve => setTimeout(resolve, 300));
+	const frames = vi.spyOn(window, 'requestAnimationFrame');
+	await new Promise<void>(resolve => setTimeout(resolve, 120));
+	expect(frames).not.toHaveBeenCalled();
+	expect(row()!.querySelectorAll('[data-comment-uuid="one"]')).toHaveLength(1);
+	frames.mockRestore();
+});
+
+it('clears the unread answer of a detached thread once the person has read it', async () => {
+	vi.useFakeTimers();
+	vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { callback(0); return 1; });
+	vi.stubGlobal('cancelAnimationFrame', () => {});
+	class Observer {
+		static all: Observer[] = [];
+		target?: Element;
+		constructor(private callback: IntersectionObserverCallback) { Observer.all.push(this); }
+		observe(target: Element) { this.target = target; }
+		disconnect() { this.target = undefined; }
+		report(visible: boolean) { if (this.target) this.callback([{ target: this.target, isIntersecting: visible, intersectionRatio: visible ? 1 : 0, rootBounds: new DOMRect(0, 0, 300, 400), boundingClientRect: new DOMRect(0, 0, 300, 400), intersectionRect: new DOMRect(0, 0, 300, visible ? 400 : 0) } as IntersectionObserverEntry], this as unknown as IntersectionObserver); }
+	}
+	vi.stubGlobal('IntersectionObserver', Observer);
+	const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ threads: [] }) });
+	vi.stubGlobal('fetch', fetcher);
+	Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+	const { row } = mountTranscript('Gone text');
+	await tick();
+	await vi.advanceTimersByTimeAsync(0);
+	flushSync();
+	const reply = row()!.querySelector<HTMLElement>('[data-comment-uuid="one"] .ct-reply');
+	expect(reply).not.toBeNull();
+	Observer.all.filter(observer => reply!.contains(observer.target ?? reply!) || observer.target === reply).forEach(observer => observer.report(true));
+	await vi.advanceTimersByTimeAsync(1500);
+	await vi.advanceTimersByTimeAsync(1);
+	expect(fetcher.mock.calls.some(call => String(call[0]).includes('/messages/agent-message/comments/c1/viewed'))).toBe(true);
+	expect(get(messages)[0]!.chat_comments?.[0]?.answers[0]?.unread).toBe(false);
+	delete (document as unknown as Record<string, unknown>).visibilityState;
+});

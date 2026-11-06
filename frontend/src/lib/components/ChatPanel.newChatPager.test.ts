@@ -132,9 +132,11 @@ describe('ChatPanel new chat', () => {
 		await (component as Record<string, any>).selectThread('thread-b');
 		flushSync();
 		expect(get(messages).map(row => row.id)).toContain('b1');
-		await vi.waitFor(() => expect(host.querySelector('button[aria-label="New reply"]')).not.toBeNull());
-		expect(host.querySelector('button[aria-label="New reply"]')?.textContent).toContain('1 new');
-		host.querySelector<HTMLButtonElement>('button[aria-label="New reply"]')!.click();
+		// The answer is in older history, so the control says where it is going and how many are waiting.
+		const olderLabel = 'Go to the next new reply in older messages. 1 new reply.';
+		await vi.waitFor(() => expect(host.querySelector(`button[aria-label="${olderLabel}"]`)).not.toBeNull());
+		expect(host.querySelector(`button[aria-label="${olderLabel}"]`)?.textContent).toContain('1 new');
+		host.querySelector<HTMLButtonElement>(`button[aria-label="${olderLabel}"]`)!.click();
 		await vi.waitFor(() => expect(get(messages).find(row => row.id === 'old')?.chat_comments?.length).toBe(1));
 		await vi.waitFor(() => expect(host.innerHTML).toContain('data-comment-ids'));
 		const mark = host.querySelector<HTMLElement>('[data-message-id="old"] [data-comment-ids]')!;
@@ -177,15 +179,17 @@ describe('ChatPanel new chat', () => {
 		component = mount(ChatPanel, { target: host, props: { onOpenLightbox: () => {} } });
 		flushSync();
 		await (component as Record<string, any>).selectThread('thread-b');
-		await vi.waitFor(() => expect(host.innerHTML).toContain(`2 new replies, next above: 'newer'`));
-		host.querySelector<HTMLButtonElement>(`button[aria-label="2 new replies, next above: 'newer'"]`)!.click();
+		const loadedLabel = `Go to the next new reply above: 'newer'. 2 new replies.`;
+		const olderLabel = 'Go to the next new reply in older messages. 1 new reply.';
+		await vi.waitFor(() => expect(host.innerHTML).toContain(loadedLabel));
+		host.querySelector<HTMLButtonElement>(`button[aria-label="${loadedLabel}"]`)!.click();
 		await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('answer newer'));
-		expect(host.querySelector('button[aria-label="New reply"]')).toBeNull();
+		expect(host.querySelector(`button[aria-label="${olderLabel}"]`)).toBeNull();
 		await vi.waitFor(() => expect(viewed).toBe(true), { timeout: 4000 });
 		await vi.waitFor(() => expect(get(chatReplyAttention)?.items[0]?.detail.destination.id).toBe('old'));
 		document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-		await vi.waitFor(() => expect(host.querySelector('button[aria-label="New reply"]')).not.toBeNull());
-		host.querySelector<HTMLButtonElement>('button[aria-label="New reply"]')!.click();
+		await vi.waitFor(() => expect(host.querySelector(`button[aria-label="${olderLabel}"]`)).not.toBeNull());
+		host.querySelector<HTMLButtonElement>(`button[aria-label="${olderLabel}"]`)!.click();
 		await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('answer older'));
 		Element.prototype.scrollIntoView = originalScroll;
 		vi.unstubAllGlobals();

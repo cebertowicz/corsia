@@ -1,7 +1,19 @@
-import type { Message } from '$lib/stores/threads';
+import type { ChatComment, Message } from '$lib/stores/threads';
+import type { AttentionDestination } from '$lib/api/attentionQueue';
 import { pendingChatReplies } from '$lib/chatCommentDelivery';
 
-export type UnreadTarget = { element: HTMLElement; quote: string; distance: number };
+export type UnreadTarget = { quote: string; distance: number; destination: AttentionDestination };
+
+/**
+ * Where an unread answer on this comment is on screen: its painted highlight, or — when the quote no
+ * longer matches the message and there is nothing to paint — the detached thread shown under the
+ * message. Both are focusable, and the reply jumper lands on whichever exists.
+ */
+function landingOf(row: HTMLElement, comment: ChatComment): HTMLElement | null {
+	return [...row.querySelectorAll<HTMLElement>('[data-comment-ids][role="button"]')]
+		.find(mark => mark.dataset.commentIds?.split(',').includes(comment.id))
+		?? row.querySelector<HTMLElement>(`[data-comment-uuid="${CSS.escape(comment.id)}"]`);
+}
 
 /** Find the nearest rendered unread highlight on each side of the transcript viewport. */
 export function unreadTargets(root: HTMLElement, messages: Message[], threadId: string | null) {
@@ -20,16 +32,17 @@ export function unreadTargets(root: HTMLElement, messages: Message[], threadId: 
 			const unreadCount = comment.answers.filter(answer => answer.author_kind === 'agent' && answer.unread).length;
 			if (!threadId || !unreadCount || pendingChatReplies(messages, threadId, comment).length) continue;
 			count += unreadCount;
-			if (!row) continue;
-			const element = [...row.querySelectorAll<HTMLElement>('[data-comment-ids][role="button"]')]
-				.find(mark => mark.dataset.commentIds?.split(',').includes(comment.id));
+			// A jump needs the message's place in history, so a row that cannot carry one is counted but not selected.
+			if (!row || !comment.cid || typeof message.seq !== 'number') continue;
+			const element = landingOf(row, comment);
 			if (!element) continue;
+			const destination: AttentionDestination = { pane: 'chat-replies', id: message.id, seq: message.seq, cid: comment.cid, user_message_id: comment.user_message_id };
 			const rect = element.getBoundingClientRect();
 			if (rect.bottom < visibleTop) {
-				const target = { element, quote: comment.quote, distance: visibleTop - rect.bottom };
+				const target = { quote: comment.quote, distance: visibleTop - rect.bottom, destination };
 				if (!above || target.distance < above.distance) above = target;
 			} else if (rect.top > visibleBottom) {
-				const target = { element, quote: comment.quote, distance: rect.top - visibleBottom };
+				const target = { quote: comment.quote, distance: rect.top - visibleBottom, destination };
 				if (!below || target.distance < below.distance) below = target;
 			}
 		}

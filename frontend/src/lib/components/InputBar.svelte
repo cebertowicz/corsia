@@ -214,8 +214,8 @@
 		return 'sent';
 	}
 
-	function sendReply(reply: ChatComment): void {
-		if (!boundThreadId || !canSendToModel) throw new Error('Cannot send reply');
+	export function sendReply(reply: ChatComment): void {
+		if (!boundThreadId || !canSendToModel) { toasts.show('CORSIA couldn’t send this reply because no model is ready to answer it. Your reply stays here; choose a model or wait for CORSIA to finish updating, then reply again.', 'error'); throw new Error('Cannot send reply'); }
 		const { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid } = reply;
 		const inputId = sendMessage(boundThreadId, '', selection.modelId ?? undefined, [], undefined, 'apply_now', [{ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }]);
 		if (!inputId) {
