@@ -102,8 +102,11 @@ function threadLink(href: string, origin: string): string | null {
 }
 
 function hasScheme(href: string): boolean {
+	const scheme = /^([a-z][a-z\d+.-]*):/i.exec(href)?.[1];
+	if (!scheme) return false;
+	// `linked.md:143` (a file cited at a line) reads as the scheme `linked.md`; web and editor schemes have no dot.
 	const path = href.split(/[?#]/, 1)[0];
-	return /^[a-z][a-z\d+.-]*:/i.test(href) && withoutLineSuffix(path) === path;
+	return !scheme.includes('.') || withoutLineSuffix(path) === path;
 }
 
 /** Opens an external link in the correct host without changing web navigation. */

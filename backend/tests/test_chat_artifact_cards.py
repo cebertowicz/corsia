@@ -578,7 +578,10 @@ def test_only_links_and_bare_paths_outside_code_are_candidates():
 
 
 def test_a_link_cited_at_a_line_is_a_candidate_for_its_file():
-    text = "See [the readout](BRIEFING.md:143), [the plan](/workspace/plan.md:12:3) and [mail](mailto:a@b.c)."
+    text = (
+        "See [the readout](BRIEFING.md:143), [the plan](/workspace/plan.md:12:3) and [mail](mailto:a@b.c),"
+        " not [code](vscode://file/a.ts:12) or [port](https://example.com:8080)."
+    )
 
     assert targets(text) == ["BRIEFING.md:143", "/workspace/plan.md:12:3"]
     assert workspace_path("BRIEFING.md:143", ["/workspace"]) == "/workspace/BRIEFING.md"

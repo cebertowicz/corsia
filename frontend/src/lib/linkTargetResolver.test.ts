@@ -125,9 +125,15 @@ describe('resolveLinkTarget', () => {
 		},
 	);
 
-	it('does not navigate unsafe schemes and shows a visible error', async () => {
+	it.each([
+		'javascript:alert(1)',
+		'vscode://file/Users/x/foo.ts:12',
+		'file:///workspace/shared/a.md:12',
+		'ftp://files.example.com:21',
+	])('does not navigate an unsupported scheme, even one ending like a line (%s), and shows a visible error', async (href) => {
 		const d = deps();
-		expect(await resolveLinkTarget('javascript:alert(1)', d)).toBe('error');
+		expect(await resolveLinkTarget(href, d)).toBe('error');
+		expect(d.fetchRevision).not.toHaveBeenCalled();
 		expect(d.showError).toHaveBeenCalledWith('This link uses an unsupported destination');
 		expect(d.openExternal).not.toHaveBeenCalled();
 	});

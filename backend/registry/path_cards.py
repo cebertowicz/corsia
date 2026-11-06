@@ -68,6 +68,15 @@ def workspace_path(href: str, roots: Sequence[str], origin: str | None = None) -
     return normalize_path(origin or roots[0], target)
 
 
+def _names_file(target: str) -> bool:
+    """No scheme, or a dotted one that is really a file cited at a line (``a.md:12``)."""
+    scheme = _SCHEME.match(target)
+    if not scheme:
+        return True
+    path = re.split(r"[?#]", target, maxsplit=1)[0]
+    return "." in scheme.group() and bool(_LINE_SUFFIX.match(path))
+
+
 def targets(text: str) -> list[str]:
     """Link targets and bare paths outside fenced code, in the order text names them."""
     body = _FENCE.sub("", text or "")
@@ -78,8 +87,7 @@ def targets(text: str) -> list[str]:
     ordered: list[str] = []
     seen: set[str] = set()
     for _pos, target in sorted(found):
-        path = re.split(r"[?#]", target, maxsplit=1)[0]
-        if (not _SCHEME.match(target) or _LINE_SUFFIX.match(path)) and target not in seen:
+        if _names_file(target) and target not in seen:
             seen.add(target)
             ordered.append(target)
     return ordered
