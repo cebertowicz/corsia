@@ -26,7 +26,7 @@ export async function recoverPendingInputs(
 	const threads = pendingInputThreads();
 	// Set before the first await, so nothing can slip onto the socket between
 	// this run starting to read and the thread being held.
-	for (const { threadId } of threads) holdThreadSends(generation, threadId);
+	holdThreadSends(generation, threads.map(({ threadId }) => threadId));
 	const results = await Promise.allSettled(threads.map(({ threadId, inputIds }) => recoverThread(
 		threadId, inputIds, authToken, generation, fetchPage, isCurrent,
 	)));

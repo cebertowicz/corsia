@@ -114,9 +114,11 @@ turnStates.subscribe(states => {
  */
 const threadSendHolds = new Map<string, object>();
 
-/** Hold one thread's sends for the duration of one recovery run. */
-export function holdThreadSends(generation: object, threadId: string): void {
-	threadSendHolds.set(threadId, generation);
+/** Start one recovery run's holds on the threads it reads. A run starts with each new socket, so every
+ * earlier run's hold ends here: that run can no longer send, and its hold would strand a later message. */
+export function holdThreadSends(generation: object, threadIds: readonly string[]): void {
+	threadSendHolds.clear();
+	for (const threadId of threadIds) threadSendHolds.set(threadId, generation);
 }
 
 /**

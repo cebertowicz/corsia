@@ -290,6 +290,33 @@ describe('resending an input the server never received', () => {
 		expect(frames[0]).toBe(lostFrame);
 		expect(frames.map(frame => JSON.parse(frame).input_id)).toEqual([lostId, laterId]);
 	});
+
+	it('sends at once on a thread the new recovery does not read, though a replaced run still reads it', async () => {
+		const settledId = sendMessage(THREAD, 'answered while the socket changed')!;
+		mockSocket();
+		let owns = true;
+		const paging = deferredHistory();
+		const replaced = recoverPendingInputs(paging.fetchPage, () => owns);
+
+		// The socket retires mid-read, and the thread's only pending input settles
+		// before the new socket's recovery looks, so that recovery holds nothing.
+		owns = false;
+		mockSocket();
+		handleMessage({
+			type: 'input_accepted', thread_id: THREAD, input_id: settledId,
+			message_id: 'row-1', created_at: STORED_AT, turn_id: 'turn-1', turn_order: 1,
+		}, () => {});
+		await recoverPendingInputs(emptyHistory);
+
+		try {
+			const laterId = sendMessage(THREAD, 'typed on the new socket')!;
+			expect(frames.map(frame => JSON.parse(frame).input_id)).toEqual([laterId]);
+		} finally {
+			paging.settle(historyResponse([]));
+			await replaced;
+		}
+		expect(frames).toHaveLength(1);
+	});
 });
 
 describe('the frame an input was sent with', () => {
