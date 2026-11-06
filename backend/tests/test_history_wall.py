@@ -419,7 +419,13 @@ async def test_unknown_caller_reads_no_checkpoint_by_search_list_or_id(world):
 
 
 async def test_fenced_rows_do_not_consume_the_page_limit(world):
-    """The wall runs in SQL, so a hidden message never takes one of the requested slots."""
+    """The wall runs in SQL, so a hidden row never takes one of the requested slots.
+
+    Two shapes, because a requested page size is exactly where a fence applied
+    after the query would hide in a passing test: a thread's own history, where
+    the cut hides the older rows, and an unscoped search, where the walled
+    project's rows are newer and would otherwise spend the whole page.
+    """
     _sql("UPDATE threads SET project_id = ? WHERE id = ?", (P_SECRET, T_BETA))
     for seq in (1, 2, 3):
         _message(T_BETA, seq, f"secret-era note {seq}")
@@ -427,11 +433,21 @@ async def test_fenced_rows_do_not_consume_the_page_limit(world):
     for seq in (4, 5):
         _message(T_BETA, seq, f"after the move {seq}")
 
-    out = await _history(T_BETA, caller=CALLER_BETA, limit=2)
+    history = await _history(T_BETA, caller=CALLER_BETA, limit=4)
 
-    assert "after the move 4" in out
-    assert "after the move 5" in out
-    assert "secret-era note" not in out
+    assert "after the move 4" in history
+    assert "after the move 5" in history
+    assert "secret-era note" not in history
+
+    for seq in (1, 2, 3, 4):
+        _message(T_ALPHA, seq, f"ledger note alpha {seq}")
+    for seq in (5, 6, 7, 8, 9):
+        _message(T_SECRET, seq, f"ledger note secret {seq}")
+
+    found = await _search("ledger", caller=CALLER_ALPHA, limit=4)
+
+    assert all(f"ledger note alpha {seq}" in found for seq in (1, 2, 3, 4))
+    assert "ledger note secret" not in found
 
 
 async def test_message_search_drops_messages_below_the_cut(world):
