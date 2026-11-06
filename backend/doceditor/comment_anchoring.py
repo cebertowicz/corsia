@@ -90,6 +90,7 @@ def anchored_threads(artifact_id: str, path: str | None, db: sqlite3.Connection,
             if root.get("author_thread_id") in withheld:
                 if replies:
                     visible.append({"id": root["id"], "parent_id": None, "review": True, "anchor_text": None,
+                                    "resolved": root.get("resolved"), "decision": root.get("decision"),
                                     "body": "(not shown: this agent is Local only)", "replies": replies})
             else:
                 root["replies"] = replies

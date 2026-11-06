@@ -67,6 +67,27 @@ async def test_cloud_fork_keeps_public_replies_to_withheld_root(review_env, monk
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(('resolved', 'decision'), [(1, None), (0, 'accepted')])
+async def test_withheld_root_preserves_closed_state(review_env, monkeypatch, resolved, decision):
+    from doceditor.comment_anchoring import anchored_threads
+    from doceditor.suggestion_overlap import is_open_thread
+    from tools.document_comment_listing import select_comment_threads
+    from infra import local_only
+
+    db, aid = review_env
+    db.execute("UPDATE threads SET local_only=1 WHERE id='second'")
+    db.commit()
+    root, _ = add_comment(db, aid, author_id='second')
+    add_comment(db, aid, author_id='owner', parent_id=root['id'])
+    db.execute('UPDATE doc_comments SET resolved=?, decision=? WHERE id=?', (resolved, decision, root['id']))
+    db.commit()
+    monkeypatch.setattr(local_only, '_is_cloud', lambda *_args, **_kw: True)
+    threads, _ = anchored_threads(aid, None, db, text='', reader_id='reviewer', reader_model='cloud/model')
+    assert len(threads) == 1 and not is_open_thread(threads[0])
+    assert select_comment_threads(threads, 'open', None)['closed_count'] == 1
+
+
+@pytest.mark.asyncio
 async def test_fork_clears_parent_tool_invocation(review_env):
     from core.fork_tools import execute_fork_tool
     from infra.state.context import running_call_ids, tool_invocation_context

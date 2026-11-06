@@ -45,7 +45,7 @@ from host_access.supervisor import (
 )
 from infra.db_async import run_in_db
 from tools.host_access_errors import HostAccessBlocked, HostAccessGateError, HostAccessRequired
-from tools.host_action_admission import no_lease_authorization
+from tools.host_action_admission import no_lease_authorization, host_lease_disabled
 from tools.host_action_types import ActionPermit as _ActionPermit, PreparedAction as _PreparedAction, HostActionAuthorization, ConsumedHostAction
 from tools.host_action_values import boolean as _boolean, integer as _integer, number as _number, text as _text, search_payload
 from tools.host_access_external import (
@@ -82,7 +82,6 @@ _current_action_permit: ContextVar[_ActionPermit | None] = ContextVar(
     "host_access_action_permit",
     default=None,
 )
-
 
 def _canonical_tool_name(name: str | None) -> str:
     # Import lazily: tools.catalog imports ToolRegistry for surface generation.
@@ -742,7 +741,7 @@ async def authorize_host_action(
         return HostActionAuthorization(
             _parameter_overrides=tuple(overrides.items())
         )
-    lease = await _resolve_active_lease(thread_id)
+    lease = None if host_lease_disabled() else await _resolve_active_lease(thread_id)
     if lease is None:
         return await no_lease_authorization(action, ordinary_action, overrides, thread_id, fence=fence)
     try:
