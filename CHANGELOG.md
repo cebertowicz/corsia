@@ -38,6 +38,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
 - Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.
 - The update screen's percentage now moves in step with the real time each stage takes, from waiting for agents through the restart, instead of sitting near 12% and then racing to 100%. Watched from a paired computer, it keeps counting through the restart and startup and no longer leaps when the main computer answers.
+- When an agent brings you something to judge, it now opens by restating the goal in its own words, with everything you need to decide at the top and the detail below for when you want it.
 - With an agents' GitHub account connected, comments on the agents' own pull requests now reach the owning chat without a repository webhook.
 - With "Roll over when an account hits its limit" on, a chat held on a limited account no longer asks you to move it: CORSIA checks your other accounts and moves the chat itself once one has room. Switch model is still there as a way out.
 - You can now open diagrams and images in table cells in the image viewer, zoom in, and comment on a specific part.
