@@ -370,7 +370,7 @@ def test_the_client_runs_gh_from_outside_the_local_bin_the_sandbox_refuses(tmp_p
     done = subprocess.run([sys.executable, str(CLI), "github", "pr", "list"], env=env,
                           capture_output=True, text=True, timeout=30)
     assert done.stdout == "tools pr list\n"
-    env["PATH"] = f"{local_bin}{os.pathsep}/usr/bin:/bin"
+    env["PATH"] = str(local_bin)  # a host gh in /usr/bin (CI runners have one) would be found
     missing = subprocess.run([sys.executable, str(CLI), "github", "pr", "list"], env=env,
                              capture_output=True, text=True, timeout=30)
     assert (missing.returncode, missing.stdout) == (127, "")
