@@ -478,7 +478,7 @@ describe('CommentComposer', () => {
 describe('a comment whose text was deleted', () => {
 	it('says the original text was deleted and keeps the old text in quotes', () => {
 		render(thread({ anchor: 'two extra liters', orphaned: true, detached: true }));
-		expect(host.querySelector('.ct-orphan')?.textContent).toBe('The text this comment was on was deleted');
+		expect(host.querySelector('.ct-orphan')?.textContent).toBe('This text is no longer in the document');
 		expect(host.textContent).toContain('two extra liters');
 	});
 
@@ -509,12 +509,6 @@ describe('a decided suggestion that has replies', () => {
 		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'Thanks', [], []));
 		button('.ct-act.resolve').click();
 		expect(onResolve).toHaveBeenCalledWith('c1', true);
-	});
-
-	it('does not read as orphaned although its quote was replaced', () => {
-		render(accepted({ orphaned: true, detached: true }));
-		expect(host.querySelector('.ct-orphan')).toBeNull();
-		expect(host.querySelector('.ct')?.classList.contains('orphaned')).toBe(false);
 	});
 
 	it('shows a rejected one the same way', () => {

@@ -185,8 +185,9 @@ def reopen_fields(comment: dict[str, Any], fields: dict[str, Any]) -> dict[str, 
 
     - Re-open (this patch): re-opening a rejected suggestion clears its decision. An
       accepted one cannot re-open, because its edit is already in the text.
-    - Reply (``comments.create_with_status``): any reply to a resolved decided
-      suggestion re-opens it and keeps its decision, so the conversation goes on.
+    - Reply (``comments.create_with_status``): the first reply to a suggestion its
+      decision closed re-opens it and keeps the decision (``comments.closed_by_decision``). A
+      thread a person resolved stays resolved whatever replies follow, as for any comment.
     """
     if fields.get("resolved") is True:
         if comment.get("replacement") is not None and not comment.get("decision"):

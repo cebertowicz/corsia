@@ -145,12 +145,3 @@ it("goes to a text comment's text when its card is pressed, but not from a contr
 	expect(onFocus).not.toHaveBeenCalled();
 	selection.mockRestore();
 });
-
-it('lists an accepted suggestion that is still open with the open comments, not under Text changed', () => {
-	host = document.createElement('div'); document.body.appendChild(host);
-	const accepted = { id: 's1', anchor: 'nine', replacement: 'ten', decision: 'accepted' as const, orphaned: true, detached: true, author: 'Reviewer', text: 'Nine was a typo', at: 'now', resolved: false, replies: [{ author: 'you', text: 'Thanks', at: 'now' }] };
-	component = createClassComponent({ target: host, component: CommentList, props: { comments: [accepted] } });
-	flushSync();
-	expect([...host.querySelectorAll('h3')].map((heading) => heading.textContent)).toEqual(['Open comments']);
-	expect(host.textContent).not.toContain('Text changed');
-});

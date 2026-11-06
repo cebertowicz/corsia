@@ -10,6 +10,7 @@ export type CanvasScrollTarget = { from: number; to: number; focus?: boolean; or
  */
 export function canvasCommentRange(comment: DocComment, text: string): { from: number; to: number } | null {
 	if (comment.orphaned || unplaced(comment)) return null;
+	if (acceptedDeletion(comment, text)) return { from: comment.from!, to: comment.from! };
 	// A suggestion edited inside keeps its place: its range, not its quote, says where it is.
 	if (comment.textChanged && comment.from != null && comment.to != null && comment.to > comment.from && comment.to <= text.length) return { from: comment.from, to: comment.to };
 	return rangeFor(comment, text);
@@ -64,14 +65,10 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 	let inlineEnd = -1;
 	return comments.filter((comment) => !comment.resolved || (comment.id === focusedId && !comment.decision)).flatMap((comment): CommentRange[] => {
 		const anchorRange = canvasCommentRange(comment, text);
-		// With no passage to mark, a comment keeps a margin marker at the line its text last was: one whose original text is gone (dashed), a decided
-		// suggestion that is still open (its quote was replaced), and the suggestion whose Accept is in flight while its replacement stands in the quote's place.
-		if (!anchorRange && !comment.resolved && !comment.review && comment.regionNumber == null && comment.from != null) {
-			const lost = !!comment.detached && !decidedOpen(comment);
-			if (lost || decidedOpen(comment) || (comment.id === accepting && !comment.orphaned)) {
-				const at = Math.min(Math.max(comment.from, 0), text.length);
-				return [{ from: at, to: at, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasUnread(comment), onMarkerFocus, point: true, lost }];
-			}
+		// A comment whose original text is gone keeps a dashed margin marker at the line its text last was.
+		if (!anchorRange && comment.detached && !comment.resolved && comment.regionNumber == null && comment.from != null) {
+			const at = Math.min(Math.max(comment.from, 0), text.length);
+			return [{ from: at, to: at, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasUnread(comment), onMarkerFocus, point: true, lost: true }];
 		}
 		if (!anchorRange) return [];
 		const range = comment.insertAfter && openSuggestion(comment) ? { from: anchorRange.to, to: anchorRange.to } : anchorRange;
@@ -81,20 +78,18 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 			if (inline) inlineEnd = range.to;
 			suggestion = { quote: comment.insertAfter ? '' : comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
 		}
-		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasUnread(comment), onMarkerFocus, suggestion, region: !!comment.region }];
+		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasUnread(comment), onMarkerFocus, suggestion, region: !!comment.region, ...(range.from === range.to && !suggestion ? { point: true } : {}) }];
 	});
 }
 
 /**
  * Shared comment state for the document surface: the header receives open-thread and orphaned counts; the drawer's
  * placement recovery also receives the live reload state. The orphaned count is the list's 'Text changed' group, so a
- * resolved thread is never in it: a decided suggestion is resolved, and Accept replaced its quote by design. The
- * recovery's count is the part of that group Place again can attempt: an orphaned unresolved comment whose quote
- * remains in the text.
+ * resolved thread is never in it. The recovery's count is the part of that group Place again can attempt: an orphaned
+ * unresolved comment whose quote remains in the text.
  */
 export function commentSurfaceStatus(comments: DocComment[]) {
-	// An accepted suggestion that is still open has no quote left by design: its text is not text that could not be placed.
-	const lost = (comment: DocComment) => comment.orphaned && !comment.resolved && !decidedOpen(comment);
+	const lost = (comment: DocComment) => comment.orphaned && !comment.resolved;
 	return {
 		commentCount: comments.filter((comment) => !comment.resolved || hasUnread(comment)).length,
 		orphanedCount: comments.filter(lost).length,
@@ -111,6 +106,24 @@ export function commentSurfaceStatus(comments: DocComment[]) {
  */
 function followsText(comment: DocComment, text: string): comment is DocComment & { from: number; to: number } {
 	return !!comment.drawn && !comment.review && comment.replacement == null && comment.from != null && comment.to != null && comment.to > comment.from && comment.to <= text.length;
+}
+
+/**
+ * An accepted suggestion sits on the text it put in the document, not on the quote it replaced, so it is placed,
+ * marked and jumped to like any comment. A suggestion whose Accept is in flight reads as accepted once the
+ * document holds its replacement, ahead of the server's answer.
+ */
+function onAppliedText(comment: DocComment, text: string, accepting: string | null): DocComment {
+	if (comment.replacement == null || comment.review || comment.from == null) return comment;
+	const anchor = comment.insertAfter ? comment.anchor + comment.replacement : comment.replacement;
+	const applied = { ...comment, anchor, to: comment.from + anchor.length };
+	if (comment.decision === 'accepted') return applied;
+	return comment.id === accepting && !comment.decision && text.startsWith(anchor, comment.from) ? { ...applied, decision: 'accepted' } : comment;
+}
+
+/** An accepted suggestion that deleted its text has none left by design: it sits at the point where the text was. */
+function acceptedDeletion(comment: DocComment, text: string): boolean {
+	return comment.decision === 'accepted' && comment.replacement != null && !comment.review && comment.anchor === '' && comment.from != null && comment.from <= text.length;
 }
 
 /**
@@ -135,12 +148,10 @@ function textChangedAfter(comment: DocComment, text: string): boolean {
 export function commentsInDocumentOrder(comments: DocComment[], text: string, refused: Record<string, string> = {}, accepting: string | null = null): DocComment[] {
 	const at = (comment: DocComment) => (unplaced(comment) ? comment.from : canvasCommentRange(comment, text)?.from) ?? Infinity;
 	const sameImage = (a: DocComment, b: DocComment) => (a.regionNumber != null && b.regionNumber != null && a.imageSrc === b.imageSrc ? a.regionNumber - b.regionNumber : 0);
-	// Accept puts the replacement where the quote was before its decision lands, so the quote's absence is not an outside edit.
-	const replaced = (comment: DocComment) => comment.id === accepting && comment.replacement != null && comment.from != null && text.slice(comment.from, comment.from + comment.replacement.length) === comment.replacement;
 	return comments.map((listed) => {
-		const comment = followsText(listed, text) ? { ...listed, anchor: text.slice(listed.from, listed.to) } : listed;
+		const comment = followsText(listed, text) ? { ...listed, anchor: text.slice(listed.from, listed.to) } : onAppliedText(listed, text, accepting);
 		const changed = textChangedAfter(comment, text);
-		const orphaned = !comment.review && !unplaced(comment) && !changed && (comment.id in refused || (rangeFor(comment, text) === null && !replaced(comment)));
+		const orphaned = !comment.review && !unplaced(comment) && !changed && (comment.id in refused || (rangeFor(comment, text) === null && !acceptedDeletion(comment, text)));
 		// The original text is gone: the range collapsed (everything in it was deleted), or the quote is nowhere in the document.
 		const collapsed = !!comment.drawn && comment.from != null && comment.from === comment.to;
 		const detached = orphaned && (collapsed || !comment.anchor || !text.includes(comment.anchor));

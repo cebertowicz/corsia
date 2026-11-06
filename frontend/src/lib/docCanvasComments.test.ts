@@ -153,11 +153,8 @@ describe('inline suggestions in the highlight ranges', () => {
 		expect(highlights([suggestion('s1', 8, quote, { resolved: true })])).toEqual([]);
 	});
 
-	it.each([
-		['accepted', { decision: 'accepted' as const }],
-		['rejected', { decision: 'rejected' as const }],
-	])('draws a %s suggestion that is still open as a plain comment mark, with no inline suggestion', (_name, overrides) => {
-		expect(highlights([suggestion('s1', 8, quote, overrides)])).toMatchObject([{ id: 's1', from: 8, to: 8 + quote.length, suggestion: undefined }]);
+	it('draws a rejected suggestion that is still open as a plain comment mark on its quote, with no inline suggestion', () => {
+		expect(highlights([suggestion('s1', 8, quote, { decision: 'rejected' })])).toMatchObject([{ id: 's1', from: 8, to: 8 + quote.length, suggestion: undefined }]);
 	});
 
 	it('marks a suggestion whose quote no longer matches the text on screen at the line it was on, not as a passage', () => {
@@ -298,9 +295,27 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 	const accepted = (overrides: Partial<DocComment> = {}): DocComment =>
 		comment('s1', 34, 'nine', { replacement: 'ten', decision: 'accepted', author: 'Reviewer', replies: [{ id: 'r', author: 'Reviewer', text: 'Thanks', at: 'now' }] as DocComment['replies'], ...overrides });
 
-	it('draws a margin marker at the accepted text rather than nothing', () => {
+	it('marks the text its Accept put in the document, like any comment', () => {
 		const rows = commentsInDocumentOrder([accepted()], after);
-		expect(canvasCommentHighlights(rows, after, null, undefined)).toMatchObject([{ id: 's1', from: 34, to: 34, point: true, lost: false }]);
+		expect(rows[0]).toMatchObject({ orphaned: false, detached: false, anchor: 'ten' });
+		const [range] = canvasCommentHighlights(rows, after, null, undefined);
+		expect(range).toMatchObject({ id: 's1', from: 34, to: 37, suggestion: undefined });
+		expect(range.point).toBeUndefined();
+		expect(canvasCommentScrollTarget(rows, after, 's1', false, 'navigation')).toMatchObject({ from: 34, to: 37 });
+	});
+
+	it('sits at a point when its Accept deleted the text', () => {
+		const text = 'Lunch is at noon. Train leaves at .';
+		const rows = commentsInDocumentOrder([accepted({ replacement: '' })], text);
+		expect(rows[0]).toMatchObject({ orphaned: false, detached: false });
+		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 's1', from: 34, to: 34, point: true }]);
+	});
+
+	it('reads as lost when the text its Accept put in is deleted later', () => {
+		const text = 'Lunch is at noon. Train leaves at .';
+		const rows = commentsInDocumentOrder([accepted()], text);
+		expect(rows[0]).toMatchObject({ orphaned: true, detached: true });
+		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 's1', point: true, lost: true }]);
 	});
 
 	it('draws nothing once it is resolved', () => {
@@ -313,10 +328,11 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 		expect(commentSurfaceStatus(rows)).toMatchObject({ orphanedCount: 0, replaceableCount: 0, commentCount: 1 });
 	});
 
-	it('does not read as orphaned while its own Accept is in flight and the replacement already stands where the quote was', () => {
+	it('reads as accepted on its new text while its own Accept is in flight and the replacement already stands where the quote was', () => {
 		const open = accepted({ decision: undefined, replies: [] });
 		const [row] = commentsInDocumentOrder([open], after, {}, 's1');
-		expect(row.orphaned).toBe(false);
+		expect(row).toMatchObject({ orphaned: false, decision: 'accepted', anchor: 'ten' });
+		expect(canvasCommentHighlights([row], after, null, undefined, 's1')).toMatchObject([{ from: 34, to: 37, suggestion: undefined }]);
 		const [other] = commentsInDocumentOrder([open], after);
 		expect(other.orphaned).toBe(true);
 	});

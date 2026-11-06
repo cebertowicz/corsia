@@ -25,7 +25,7 @@ export interface CommentRange {
 	replyWaiting?: boolean;
 	onMarkerFocus?: (ids: string[], opener: HTMLElement, anchor?: () => DOMRect | null, click?: MouseEvent) => void;
 	suggestion?: InlineSuggestion;
-	/** A point, not a passage: drawn as a margin marker only, with no highlight (text deleted, or a decided suggestion whose quote was replaced). */
+	/** A point, not a passage: drawn as a margin marker only, with no highlight (its text was deleted, or an accepted suggestion deleted it). */
 	point?: boolean;
 	/** The comment's original text is gone from the document: its margin marker is drawn dashed. */
 	lost?: boolean;
