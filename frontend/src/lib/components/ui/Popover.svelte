@@ -60,11 +60,12 @@
 		// A scroll inside the card or in another pane left the anchor where it was, so there is nothing to answer.
 		if (event?.type === 'scroll' && rect?.top === anchorSeen?.top && rect?.left === anchorSeen?.left) return;
 		anchorSeen = rect;
-		const typing = surface.contains(document.activeElement);
+		const active = document.activeElement;
+		const typing = !!active && surface.contains(active) && active.matches('textarea, input, [contenteditable]:not([contenteditable="false"])');
 		// While the person types in the card, a scroll counts as theirs only when a wheel or touch drove it; the document moving under them (an edit above, lines drawn) leaves the card in place.
 		const moved = event?.type === 'resize' || (event?.type === 'scroll' && (!typing || performance.now() - lastScrollInput < 500));
 		// Hiding a card makes it inert, which would throw the person out of the box they are typing in, so only their own scroll or resize hides it.
-		const engaged = !moved && typing;
+		const engaged = !moved && surface.contains(active);
 		if (!rect) { if (live && !engaged) hidden = true; return; }
 		const area = region();
 		if (!engaged && (rect.bottom < area.top || rect.top > area.bottom || rect.right < area.left || rect.left > area.right)) {
@@ -150,7 +151,7 @@
 		void sideKey;
 		if (open) void tick().then(() => position());
 	});
-	function onScrollInput() { lastScrollInput = performance.now(); }
+	function onScrollInput(event: Event) { if (!(event.target instanceof Node && surface?.contains(event.target))) lastScrollInput = performance.now(); }
 	function dismiss() { onClose(); if (restoreFocus) restoreFocus(); else opener?.focus(); }
 	function onPointer(event: PointerEvent) { if (open && surface && event.target instanceof Node && !surface.contains(event.target)) dismiss(); }
 	function onKey(event: KeyboardEvent) { if (open && event.key === 'Escape') { event.stopPropagation(); dismiss(); } }

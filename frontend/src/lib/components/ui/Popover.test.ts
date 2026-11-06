@@ -224,11 +224,30 @@ describe('Popover', () => {
 			await Promise.resolve();
 			expect(surface.inert).toBe(false);
 			expect(document.activeElement).toBe(box);
+			// A wheel over the card itself (a long comment) is not a scroll of the document.
+			box.dispatchEvent(new Event('wheel', { bubbles: true }));
+			reading = new DOMRect(520, 2500, 20, 20);
+			window.dispatchEvent(new Event('scroll'));
+			await Promise.resolve();
+			expect(surface.inert).toBe(false);
 			reading = new DOMRect(520, 2000, 20, 20);
 			window.dispatchEvent(new Event('wheel'));
 			window.dispatchEvent(new Event('scroll'));
 			await vi.waitFor(() => expect(surface.style.clipPath).toBe('inset(100%)'));
 			expect(surface.inert).toBe(true);
+		});
+		it('still follows a scroll the document caused when focus is on a button in the card, as a jump or step does', async () => {
+			let reading: DOMRect | null = new DOMRect(520, 100, 20, 20);
+			const surface = mountIn(new DOMRect(500, 0, 900, 700), () => reading);
+			await vi.waitFor(() => expect(surface.style.top).toBe('100px'));
+			const step = surface.appendChild(document.createElement('button'));
+			step.focus();
+			reading = new DOMRect(520, 300, 20, 20);
+			window.dispatchEvent(new Event('scroll'));
+			await vi.waitFor(() => expect(surface.style.top).toBe('300px'));
+			reading = new DOMRect(520, 2000, 20, 20);
+			window.dispatchEvent(new Event('scroll'));
+			await vi.waitFor(() => expect(surface.style.clipPath).toBe('inset(100%)'));
 		});
 	});
 
