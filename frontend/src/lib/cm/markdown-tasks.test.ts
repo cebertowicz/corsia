@@ -146,7 +146,7 @@ describe('markdown tasks', () => {
 		expect(markers).toHaveLength(1);
 		expect(markers[0].textContent).toBe('3');
 		markers[0].click();
-		expect(onMarkerFocus).toHaveBeenCalledWith(['one', 'two', 'three'], markers[0]);
+		expect(onMarkerFocus).toHaveBeenCalledWith(['one', 'two', 'three'], markers[0], undefined, expect.any(MouseEvent));
 	});
 
 	it('continues a task as an unchecked task through the existing markdown continuation', () => {

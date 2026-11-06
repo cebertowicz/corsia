@@ -42,7 +42,7 @@ describe('a click on comments drawn inside a table', () => {
 		const onMarkerFocus = vi.fn();
 		const onAnchorFocus = mountEditor([comment('a', onMarkerFocus)]);
 		(await painted()).click();
-		expect(onAnchorFocus).toHaveBeenCalledWith('a', expect.any(Function), undefined);
+		expect(onAnchorFocus).toHaveBeenCalledWith('a', expect.any(Function), undefined, expect.any(MouseEvent));
 		expect(onMarkerFocus).not.toHaveBeenCalled();
 	});
 
@@ -84,6 +84,6 @@ describe('a suggestion drawn inside a table cell', () => {
 	it('opens its card as a suggestion when the struck text is clicked', async () => {
 		const onAnchorFocus = mountEditor([suggestion()]);
 		(await struck()).click();
-		expect(onAnchorFocus).toHaveBeenCalledWith('s1', expect.any(Function), true);
+		expect(onAnchorFocus).toHaveBeenCalledWith('s1', expect.any(Function), true, expect.any(MouseEvent));
 	});
 });

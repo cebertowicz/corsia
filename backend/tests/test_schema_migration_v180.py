@@ -53,3 +53,10 @@ def test_the_step_skips_a_database_without_comments() -> None:
     with closing(sqlite3.connect(":memory:")) as db:
         migrate_179_to_180(db)
         assert _index_sql(db) is None
+
+
+def test_the_step_skips_a_comments_table_without_replies() -> None:
+    with closing(sqlite3.connect(":memory:")) as db:
+        db.execute("CREATE TABLE doc_comments (id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL)")
+        migrate_179_to_180(db)
+        assert _index_sql(db) is None

@@ -203,7 +203,7 @@ describe('suggestion pointer behavior', () => {
 		view.dispatch({ selection: { anchor: 3 } });
 		const press = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
 		inserts(view)[0].dispatchEvent(press);
-		expect(pointer.focus).toHaveBeenCalledWith('s1', expect.objectContaining({ left: 0, top: 0 }));
+		expect(pointer.focus).toHaveBeenCalledWith('s1', press);
 		expect(press.defaultPrevented).toBe(true);
 		expect(view.state.selection.main.head).toBe(3);
 		expect(view.state.doc.toString()).toBe(DOC);

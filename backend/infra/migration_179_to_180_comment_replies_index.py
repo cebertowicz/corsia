@@ -15,6 +15,6 @@ from infra.doc_comments_schema import REPLIES_BY_PARENT_INDEX_SQL
 
 
 def migrate_179_to_180(conn: sqlite3.Connection) -> None:
-    """Add the replies-by-parent index where the comments table exists."""
-    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='doc_comments'").fetchone() is not None:
+    """Add the replies-by-parent index where the comments table has replies (a ``parent_id`` column)."""
+    if any(column[1] == "parent_id" for column in conn.execute("PRAGMA table_info(doc_comments)")):
         conn.execute(REPLIES_BY_PARENT_INDEX_SQL)

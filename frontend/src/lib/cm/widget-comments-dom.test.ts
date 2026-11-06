@@ -194,7 +194,7 @@ describe('comments drawn on a diagram', () => {
 		const { el, handlers } = paintedDiagram(['a'], false, undefined, ['pin']);
 		expect(el.dataset.commentIds).toBe('a');
 		el.click();
-		expect(handlers.onFocus).toHaveBeenCalledWith(['a'], el);
+		expect(handlers.onFocus).toHaveBeenCalledWith(['a'], el, expect.any(MouseEvent));
 	});
 
 	it('carries every comment on the element and opens them all on a click', () => {
@@ -202,7 +202,7 @@ describe('comments drawn on a diagram', () => {
 		expect(el.dataset.commentIds).toBe('a,b');
 		el.click();
 		expect(handlers.onFocus).toHaveBeenCalledTimes(1);
-		expect(handlers.onFocus).toHaveBeenCalledWith(['a', 'b'], el);
+		expect(handlers.onFocus).toHaveBeenCalledWith(['a', 'b'], el, expect.any(MouseEvent));
 	});
 
 	it('opens the whole-diagram comment on a drawn diagram even when the viewer is available', () => {
@@ -213,7 +213,7 @@ describe('comments drawn on a diagram', () => {
 		el.append(svg);
 		vi.stubGlobal('URL', class extends URL { static createObjectURL() { return 'blob:diagram'; } });
 		el.click();
-		expect(handlers.onFocus).toHaveBeenCalledWith(['a'], el);
+		expect(handlers.onFocus).toHaveBeenCalledWith(['a'], el, expect.any(MouseEvent));
 		expect(opener).not.toHaveBeenCalled();
 		markOpenable(el, view);
 		el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -225,7 +225,7 @@ describe('comments drawn on a diagram', () => {
 		const { el, handlers } = paintedDiagram(['a', 'b'], true);
 		expect(el.classList.contains('cm-comment-block-pending')).toBe(true);
 		el.click();
-		expect(handlers.onFocus).toHaveBeenCalledWith(['a', 'b'], el);
+		expect(handlers.onFocus).toHaveBeenCalledWith(['a', 'b'], el, expect.any(MouseEvent));
 		expect(handlers.onFocus.mock.calls.flat(2)).not.toContain('pending');
 	});
 

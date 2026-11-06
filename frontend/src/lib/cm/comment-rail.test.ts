@@ -72,7 +72,7 @@ describe('comment rail', () => {
 		expect(single.querySelector('svg')).not.toBeNull();
 		expect(single.textContent).toBe('');
 		single.click();
-		expect(open).toHaveBeenCalledWith(['a'], single);
+		expect(open).toHaveBeenCalledWith(['a'], single, undefined, expect.any(MouseEvent));
 		await show(view, [{ from: 0, to: 2, id: 'a', onMarkerFocus: open }, { from: 2, to: 5, id: 'b', onMarkerFocus: open }]);
 		expect(buttons(view)).toHaveLength(1);
 		expect(buttons(view)[0].getAttribute('aria-label')).toBe('Open 2 comments');
