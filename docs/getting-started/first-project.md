@@ -2,7 +2,7 @@
 
 What you see in the browser after [installing CORSIA](install.md): the setup screens, the first chat with the CORSIA agent, and creating a project. A **project** is one body of work with its own context, skills and files, kept in its own folder in your workspace; see [Scopes](../how-it-works/scopes.md). The **CORSIA agent** is the assistant you talk to outside any project. The [Glossary](../reference/glossary.md) defines project, conductor, plan, agent and other terms this page uses.
 
-Control names below are the labels the app shows. This page was written from the app's source code and has not been walked through in a browser; if a screen differs from what you read, the screen is right and the page needs a fix.
+Control names below are the labels the app shows. The setup screens, the project steps and the setup plan were walked in a browser. Lines marked **Not walked** describe steps that could not be run safely on a test installation, and the desktop-app and Linux details were not walked either; they come from the app's source code. If a screen differs from what you read, the screen is right and the page needs a fix.
 
 ## Setup screens
 
@@ -10,16 +10,16 @@ These screens come with the desktop app and the Mac installer. On Linux, and aft
 
 CORSIA opens at `http://localhost:1956` on a setup screen that shows four steps in a side list: **Getting started**, **Account & workspace**, **Your subscriptions** and **Providers & models**. Jobs that run in the background, such as a model download, are listed under **In the background**.
 
-1. **Welcome to CORSIA.** Press **Continue**. On a Mac that can run the local model, its download starts by itself when this screen opens. In the desktop app only, **Connect to CORSIA on another computer** is offered here too, for when CORSIA already runs elsewhere and you only want to open it from this one.
-2. **Create your account.** Fill in **Full name**, **Username**, **Password** and **Confirm password**; **Email** is optional. The page says your account and password stay on this computer. The **Share usage counts** switch is your choice, and the work folder row shows where your workspace will live (the default is `~/corsia`; keep it out of Documents, Desktop, Downloads and iCloud Drive, as the [install page](install.md#know-before-you-start) explains). Press **Continue**.
-3. **Your subscriptions.** The question is **Which do you pay for?**, answered with **Claude**, **ChatGPT**, **Both** or **Neither**; the screen adds that Claude Code and Codex are the apps you sign in to next. Picking Claude, ChatGPT or Both starts installing the matching tool right away. **Neither** is fine: it starts the local model's download if it isn't already running, or you add an API key on the next step.
-4. **Providers & models.** The page says CORSIA needs one working model to continue setup. Its rows are **Claude Code** and **Codex** (only for what you picked, or a tool already signed in inside CORSIA), **Local model** (with **Download**, **Check again** or **Retry**, depending on its state) and **API provider** (**Add provider**). A Claude Code or Codex row has its own **Sign in**, pressed once the tool is installed; it is needed even when you are already signed in to that tool in a terminal. A vendor password or sign-in code is typed only on the vendor's own page, never into a CORSIA chat. Get one row to work; the other rows can wait. [Models and harnesses](../how-it-works/models-and-harnesses.md) explains what each source is.
+1. **Welcome to CORSIA.** Press **Continue**. Two downloads start by themselves when this screen opens: the corrections classifier and, on a Mac that can run the local model, the local model. If the local model cannot be set up, for example because an installed oMLX is out of date, its row on the **Providers & models** step shows **Retry** and **Save a report**. In the desktop app only, **Connect to CORSIA on another computer** is offered here too, for when CORSIA already runs elsewhere and you only want to open it from this one.
+2. **Create your account.** Fill in **Full name**, **Username**, **Password** and **Confirm password**; **Email** is optional, and its hint says it is used only to sign you up for services you choose, such as web search. The page says your account and password stay on this computer. The **Share usage counts** switch is on to start with and is your choice. The work folder row shows where your workspace will live and has a **Change** button (the default is `~/corsia`; keep it out of Documents, Desktop, Downloads and iCloud Drive, as the [install page](install.md#know-before-you-start) explains). Press **Continue**.
+3. **Your subscriptions.** The question is **Which do you pay for?**, answered with **Claude**, **ChatGPT**, **Both** or **Neither**; the screen adds that Claude Code and Codex are the apps you sign in to next. There is no **Continue** button: picking an answer moves on. Picking Claude, ChatGPT or Both starts installing the matching tool right away (**Not walked**: that installs software on the computer). **Neither** is fine: it starts the local model's download if it isn't already running, or you add an API key on the next step.
+4. **Providers & models.** The page says CORSIA needs one working model to continue setup. Its rows are **Claude Code** and **Codex** (only for what you picked, or a tool already signed in inside CORSIA), **Local model** (with **Download**, **Check again** or **Retry**, depending on its state) and **API provider** (**Add provider**). A Claude Code or Codex row has its own **Sign in**, pressed once the tool is installed; it is needed even when you are already signed in to that tool in a terminal. A vendor password or sign-in code is typed only on the vendor's own page, never into a CORSIA chat. A line under the rows says to press **Retry**, set up a subscription or add an API provider to continue. Get one row to work; the other rows can wait. [Models and harnesses](../how-it-works/models-and-harnesses.md) explains what each source is.
 
-**Start using CORSIA** stays disabled until at least one model works. A Mac with less than 32 GB of memory needs one of the cloud rows for agent work ([Know before you start](install.md#know-before-you-start)).
+**Start using CORSIA** stays disabled until at least one model works (**Not walked** with a real model: no paid provider or local model was set up). A Mac with less than 32 GB of memory needs one of the cloud rows for agent work ([Know before you start](install.md#know-before-you-start)).
 
 ## The first chat and the setup plan
 
-Pressing **Start using CORSIA** opens a chat with the CORSIA agent. Its first message is a fixed introduction, not a model reply. It says how help is organized:
+Pressing **Start using CORSIA** opens a chat with the CORSIA agent (**Not walked**: the button needs a working model; the chat was opened another way, with a test model). The chat opens empty. Its first message is a fixed introduction, not a model reply, and it appears when a model is first chosen for that chat, from the model button in the message box. It says how help is organized:
 
 - a quick question is a new chat;
 - something that keeps coming back and taking your time is given to an agent, an AI that owns that job and answers for the result (the next page, [Your first agent](first-agent.md), does this);
@@ -28,7 +28,7 @@ Pressing **Start using CORSIA** opens a chat with the CORSIA agent. Its first me
 
 The message also points to a **plan** for finishing setup, in the **Plan** section on the right. On a phone it is the button above the message box that shows how many tasks are left. A plan is a list of tasks, each with a stated end condition; see [Plans](../how-it-works/plans.md).
 
-The setup plan's tasks come in this order. A task that does not apply to you is skipped without a word.
+The setup plan's tasks come in this order. A task that does not apply to you is skipped without a word. After answering **Neither**, the plan listed seven tasks, from **Bring over what your other tools know** to **Hand over to your agents**; the two subscription tasks were not in it, and neither was **Web search**, which is listed only until a web search works.
 
 | Task | What it does |
 |---|---|
@@ -52,19 +52,19 @@ You can create a project at any time, and the setup plan does not need to be fin
 
 1. Open the workspace's **Activity** page (press **Workspace** in the sidebar if you are inside a project). The right pane has a **Projects** section listing your projects, or **No active projects**.
 2. Press **New project** at the end of that section. The command palette's **New project** does the same.
-3. In the **New project** window, type a **Name** (the placeholder is `e.g. Acme Redesign`) and, if you like, a **Description**, which is shown in the projects list, and an **Accent** colour. Names are unique: a second project with the same name is refused.
-4. Press **Create project**. It reads **Creating…** while it works; **Cancel** closes the window without creating anything.
+3. In the **New project** window, type a **Name** (the placeholder is `e.g. Acme Redesign`) and, if you like, a **Description**, which is shown in the projects list, and an **Accent** colour (**Auto** to start with, or a swatch or **Custom color…**). Names are unique: a second project with the same name is refused.
+4. Press **Create project**, which stays disabled until there is a name. It reads **Creating…** while it works; **Cancel** closes the window without creating anything.
 
 CORSIA then:
 
-- creates a folder for the project under `projects/` in your workspace, with `context/`, `skills/`, `shared/`, `.threads/` and `source/` inside it, plus a charter and a coordination-model file in `context/`;
+- creates a folder for the project under `projects/` in your workspace, with `context/`, `skills/`, `shared/`, `.threads/` and `source/` inside it, plus a charter (`PROJECT.md`) and a coordination-model file (`COORDINATION-MODEL.md`) in `context/`, and `AGENTS.md`, `CLAUDE.md` and `INDEX.md` at the top of the folder;
 - creates the project's **conductor**, a chat titled `<Name> Conductor` that coordinates the project's agents and keeps its charter. It starts empty; nothing is sent to it;
 - opens the project on its **Activity** page, which has nothing to list until work starts.
 
-The conductor is the first entry in the sidebar's agent list; its tooltip reads `<Name> Conductor — main chat for this project`. A repository you already work in is linked from **Project settings** (the header's **Project settings** button) with **Add repository**. The create window has no folder field.
+The conductor is the first entry in the sidebar's agent list; its tooltip reads `<Name> Conductor — main chat for this project`, and pressing the project's name in the **Projects** list opens that chat. A repository you already work in is linked from the project's **Project settings** button, which opens **Settings → Projects** for it; **Add repository** is in its **Repositories** section. The create window has no folder field.
 
 You can also ask the CORSIA agent to set a project up. It lists projects it finds when you allow it, creates the project and hands it to the new conductor, which asks how you work before it proposes anything. Nothing starts until you approve how the project should run.
 
 Next: [Your first agent](first-agent.md).
 
-Checked against the code at `b23cc5ab9`.
+Checked against the code at `0c56132e6`.
