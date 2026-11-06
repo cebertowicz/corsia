@@ -8,7 +8,9 @@ ordinary call. A row lives only while it waits: ``settle`` deletes it when it po
 line, and the next row is woken at once. A rewrite settles in the same transaction as the comment
 write that lands it (``landed``), so one never commits without the other. A woken agent whose turn
 ends without either drops out of line, is told, and the next row is woken; so does one whose thread
-can no longer take input. The continuation sweep serves any line left waiting (``serve_waiting``).
+can no longer take input. The continuation sweep serves any line left waiting and settles any woken
+row whose wake reached no live turn (``serve_waiting``). A line step that fails drops the row it was
+serving with its agent told and an error reference, so no row is left stuck or retried unseen.
 
 A document section's line is the same line under the section's key (``writer_turns.section_key``):
 an agent's edit or suggestion saved while someone else changes that section (``section_writes``).
@@ -33,6 +35,7 @@ from doceditor import comments as store, live_events, writer_turns
 from doceditor.note_names import document_name
 from doceditor.writer_line_text import describe, wake_text
 from infra.database import write_transaction
+from infra.failure_reference import new_error_reference
 from infra.passive_changes import append_thread_context_note
 from infra.write_effects import after_commit
 from registry import models as registry_models
@@ -275,9 +278,22 @@ def _gone(db, row, heading: str | None) -> str | None:
     return None if identity is not None and identity["state"] != "tombstone" else "the document was deleted"
 
 
+_WOKEN = """SELECT line.*, m.delivery_state, m.active_turn_id, t.status AS turn_status
+   FROM doc_comment_writer_line line
+   LEFT JOIN messages m ON m.id=line.wake_message_id
+   LEFT JOIN active_turns t ON t.id=m.active_turn_id
+   WHERE line.state='woken'"""
+
+
 def serve_waiting(db) -> list[str]:
-    """The continuation sweep's pass: serve every line with a write waiting, so none waits on a lost serve."""
+    """The continuation sweep's pass, so no line waits on a lost serve or a failed turn-end step.
+
+    A woken row whose wake reached no live turn is settled as its turn's end would have settled it;
+    then every line with a write waiting is served.
+    """
     drives: list[str] = []
+    for row in db.execute(_WOKEN).fetchall():
+        drives.extend(_contained(db, str(row["root_id"]), lambda row=row: _settle_ended(db, row, None)))
     for row in db.execute("SELECT DISTINCT root_id FROM doc_comment_writer_line WHERE state='waiting'").fetchall():
         root_id = str(row["root_id"])
         drives.extend(_contained(db, root_id, lambda: serve(db, root_id)))
@@ -289,17 +305,10 @@ def settle_turn_end(db, thread_id: str, turn_id: str | None) -> list[str]:
 
     A wake still queued is yet to be read unless the thread can no longer take it, and one inside
     another live turn may still be answered there. Each row's step is contained, so a failure here
-    never rolls back the turn's own terminal settlement; that row is re-woken by restart recovery.
+    never rolls back the turn's own terminal settlement; the row it failed on drops out of line.
     """
     drives: list[str] = []
-    rows = db.execute(
-        """SELECT line.*, m.delivery_state, m.active_turn_id, t.status AS turn_status
-           FROM doc_comment_writer_line line
-           LEFT JOIN messages m ON m.id=line.wake_message_id
-           LEFT JOIN active_turns t ON t.id=m.active_turn_id
-           WHERE line.agent_thread_id=? AND line.state='woken'""",
-        (thread_id,),
-    ).fetchall()
+    rows = db.execute(f"{_WOKEN} AND line.agent_thread_id=?", (thread_id,)).fetchall()
     for row in rows:
         drives.extend(_contained(db, str(row["root_id"]), lambda row=row: _settle_ended(db, row, turn_id)))
     return drives
@@ -313,18 +322,38 @@ def _settle_ended(db, row, turn_id: str | None) -> list[str]:
         return []
     if row["active_turn_id"] != turn_id and row["turn_status"] in ("running", "waiting_retry"):
         return []
-    _drop(db, row, "your turn ended without posting it as is or rewriting it")
+    _drop(db, row, _unable(db, row) or "your turn ended without posting it as is or rewriting it")
     return serve(db, str(row["root_id"]))
 
 
-def _contained(db, root_id: str, step) -> list[str]:
-    """Run one line's step in its own savepoint: a failure is logged and undone, never raised into the caller's work."""
+def _contained(db, root_id: str, step, *, give_up: bool = True) -> list[str]:
+    """Run one line's step in its own savepoint; a failure is undone and logged, never raised into the caller's work.
+
+    The row the step was serving then drops out of line with its agent told, so it is neither left
+    stuck nor tried again on every sweep. A failure that took the caller's own transaction with it
+    (SQLite rolls all of it back on some errors) is raised instead: going on would write outside it.
+    """
+    outer = db.in_transaction
     try:
         with write_transaction(db, scope="writer_line_step"):
             return step()
     except Exception:
-        logger.exception("comment writer line on {} failed; left as it was", root_id)
-        return []
+        if outer and not db.in_transaction:
+            raise
+        reference = new_error_reference()
+        logger.exception("comment writer line on {} failed (reference {})", root_id, reference)
+    if give_up:
+        _contained(db, root_id, lambda: _drop_head(db, root_id, reference), give_up=False)
+    return []
+
+
+def _drop_head(db, root_id: str, reference: str) -> list[str]:
+    """Drop the row a failed step was serving: the line's woken row, else its first. The sweep serves the next."""
+    line = active(db, root_id)
+    if line:
+        head = next((row for row in line if row["state"] == "woken"), line[0])
+        _drop(db, head, f"an error stopped it (reference {reference}); write it again if it still applies")
+    return []
 
 
 def recover(db) -> list[str]:

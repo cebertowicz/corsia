@@ -31,6 +31,7 @@ from doceditor.writer_line import Queued
 from infra.auth import may_access_artifact
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db
+from infra.failure_reference import new_error_reference
 from registry import models as registry_models
 from registry import service as registry_service
 
@@ -345,8 +346,11 @@ async def post_as_is(comment_id: str, *, thread_id: str, user_id: str) -> dict[s
             except (CommentActionError, DocumentSaveError) as exc:
                 failed.append({"write": writer_line.describe(op), "error": exc.message})
             except Exception:
-                logger.exception("saved write on {} by {} failed to post as is", root_id, thread_id)
-                failed.append({"write": writer_line.describe(op), "error": "It couldn't be posted."})
+                reference = new_error_reference()
+                logger.exception("saved write on {} by {} failed to post as is (reference {})",
+                                 root_id, thread_id, reference)
+                failed.append({"write": writer_line.describe(op), "error": (
+                    f"It couldn't be posted (reference {reference}). Write it again if it still applies.")})
     finally:
         await _finish_and_drive(root_id, thread_id)
     result: dict[str, Any] = {"posted": posted}
