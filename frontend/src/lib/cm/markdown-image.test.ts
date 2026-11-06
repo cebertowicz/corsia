@@ -119,6 +119,7 @@ describe('markdown images in the live preview', () => {
 		const view = mount(DOC, 0);
 		const at = DOC.indexOf(IMAGE);
 		view.dispatch({ changes: { from: at, insert: 'typed ' } });
+		if (!forceParsing(view, view.state.doc.length, 1_000)) throw new Error('markdown parser did not finish');
 		expect(view.contentDOM.textContent).not.toContain('![Mock screen]');
 		view.dispatch({ effects: setCommentRanges.of([{ from: at + 6, to: at + 6 + IMAGE.length, id: 'c1', focused: true }]), selection: { anchor: at + 6 } });
 		expect(view.contentDOM.textContent).not.toContain('![Mock screen]');
