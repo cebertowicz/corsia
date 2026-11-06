@@ -89,20 +89,15 @@ export function resubscribeWatchedThreads(): void {
  * accepts the frame, the person sees their message, and the server never hears
  * of it, so the only copy of a lost frame is the one this client still holds.
  * Turn state owns membership: the subscription below drops a frame as soon as
- * its input stops being pending, so nothing outlives the send it waits on. A
- * thread reset to no state at all keeps its frames: deleting a thread resets
- * it and puts its pending inputs back if the delete fails, and those inputs
- * still owe the server their frames. Nothing sends a frame whose input is not
- * pending, so a kept frame of a deleted thread is never put on a socket.
+ * its input stops being pending. A reset thread keeps its frames: a failed
+ * delete restores its pending inputs, and only a pending input's frame is sent.
  */
 const unconfirmedFrames = new Map<string, { threadId: string; frame: string; onWire: boolean }>();
 
 turnStates.subscribe(states => {
 	for (const [inputId, stored] of unconfirmedFrames) {
 		const state = states.get(stored.threadId);
-		if (state && !state.pendingInputIds.includes(inputId)) {
-			unconfirmedFrames.delete(inputId);
-		}
+		if (state && !state.pendingInputIds.includes(inputId)) unconfirmedFrames.delete(inputId);
 	}
 });
 
@@ -175,9 +170,7 @@ export function _unconfirmedFrameIdsForTests(): string[] {
 }
 
 /** Forget every held frame: a test's reset turn state keeps them, as a deleted thread's does. */
-export function _forgetUnconfirmedFramesForTests(): void {
-	unconfirmedFrames.clear();
-}
+export function _forgetUnconfirmedFramesForTests(): void { unconfirmedFrames.clear(); }
 
 export function sendMessage(
 	threadId: string,
