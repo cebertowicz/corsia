@@ -31,7 +31,7 @@
 	import { createCommentSurfaceState, focusDocumentEditor } from '$lib/docCommentSurfaceState.svelte';
 	import { railWidth } from '$lib/cm/comment-clusters';
 	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
-	import { loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
+	import { leavePreviousTarget, loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
 	import { connectionState } from '$lib/stores/connection';
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
@@ -41,7 +41,6 @@
 	import type { TabLoadSignal } from '$lib/artifactTabs';
 	import {
 		withDraftArtifactId, existingDraft,
-		flushDraft,
 	} from '$lib/stores/docSaveQueue';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
 	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
@@ -91,9 +90,6 @@
 
 	const save = createDocSaveState(() => target);
 	const history = createViewerHistory({ key: () => targetKey, target: () => target, closeComments: () => commentUI.close(), root: () => docRoot });
-	// The server says on open whether this file's versions are recorded; History is fetched only once opened.
-	let hasHistory = $state(false);
-	let historyRestoring = $state(false);
 	const liveSession = $derived(target ? $liveDocumentBindings[target.instanceId] : undefined);
 	let liveConnection = $state<LiveDocumentSession['connection'] | null>(null);
 	let liveGeneration = $state(0);
@@ -202,7 +198,7 @@
 	function applyViewerContent(d: DocViewerTarget, content: ViewerContent, seq: number): void {
 		applyDocumentContent(d, content, seq, { loadSeq: () => loadSeq, shown: () => docState === 'ready', signal: onSignal,
 			feedback: () => feedbackStatus, apply: (value, awaiting) => {
-				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; confirming = false; hasHistory = value.history === true;
+				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; confirming = false; history.setAvailable(value.history === true);
 				freshness = value.freshness; docState = 'ready'; legacyAwaitingSave = awaiting;
 			},
 		});
@@ -233,13 +229,7 @@
 			const signal = (s: Omit<TabLoadSignal, 'instanceId'>) =>
 				onSignal?.({ ...s, instanceId: d.instanceId });
 
-			// Switching stays immediate: flush the previous target's draft in
-			// the background rather than awaiting it here.
-			if (prevTarget && prevTarget.instanceId !== d.instanceId) {
-				void flushDraft(prevTarget);
-				discardCommentDraft(commentDraftScope(prevTarget));
-			}
-			prevTarget = d;
+			prevTarget = leavePreviousTarget(prevTarget, d);
 
 			draftController.select(null);
 			replyNavigation.reset();
@@ -294,7 +284,7 @@
 		title={target?.name ?? 'Document'}
 		commentsOpen={commentUI.state?.kind === 'list'}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
-		saveStatus={historyRestoring ? 'saving' : save.status}
+		saveStatus={history.restoring ? 'saving' : save.status}
 		bind:this={feedbackStatus}
 		ready={docState === 'ready'}
 		stale={stale && !liveSession}
@@ -309,7 +299,7 @@
 		imageOpen={covered} activityRoot={docRoot}
 		{onReload}
 		onOpenComments={(opener) => { history.close(); commentUI.openList(opener); }}
-		historyAvailable={hasHistory}
+		historyAvailable={history.available}
 		historyOpen={history.open}
 		onOpenHistory={history.toggle}
 		{freshness}
@@ -362,7 +352,7 @@
 		commentsAsSheet={isPaneDrawer()}
 		onStartComment={draftController.start}
 	/>
-	{#if history.open && hasHistory && target}<DocHistorySurface {target} applyRestore={history.restore} onRestored={async () => { (await onPrepareCleanReload())?.(); }} onRestoring={(busy) => { historyRestoring = busy; }} narrow={isPaneDrawer()} within={docRoot?.closest<HTMLElement>('.leaf-body') ?? docRoot} {covered} onClose={history.close} />{/if}
+	{#if history.open && history.available && target}<DocHistorySurface {target} applyRestore={history.restore} onRestored={async () => { (await onPrepareCleanReload())?.(); }} onRestoring={history.setRestoring} narrow={isPaneDrawer()} within={docRoot?.closest<HTMLElement>('.leaf-body') ?? docRoot} {covered} onClose={history.close} />{/if}
 	<DocCommentSurface
 		reviewBar={reviewControls}
 		reviewVisible={commentUI.sheetUp}

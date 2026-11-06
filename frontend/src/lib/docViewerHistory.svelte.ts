@@ -5,7 +5,7 @@ import { existingDraft, flushDraft } from '$lib/stores/docSaveQueue';
 import { contentWidth, widenForHistory } from '$lib/imageViewerPane';
 import { emitProductEvent } from '$lib/product_events';
 
-/** Whether History is open for the viewer's tab, and the one call that asks the server to restore a version. */
+/** Whether History is offered and open for the viewer's tab, and the one call that asks the server to restore a version. */
 export function createViewerHistory(source: {
 	key: () => string;
 	target: () => DocViewerTarget | null;
@@ -13,10 +13,14 @@ export function createViewerHistory(source: {
 	root: () => HTMLElement | undefined;
 }) {
 	let open = $state(false);
+	// The server says on open whether this file's versions are recorded; History is fetched only once opened.
+	let available = $state(false);
+	// A restore is pending, so the document's save line reads "Saving…".
+	let restoring = $state(false);
 
 	$effect(() => {
 		if (!source.key()) return;
-		return () => { open = false; };
+		return () => { open = false; available = false; restoring = false; };
 	});
 
 	$effect(() => {
@@ -46,6 +50,10 @@ export function createViewerHistory(source: {
 	}
 	return {
 		get open() { return open; },
+		get available() { return available; },
+		get restoring() { return restoring; },
+		setAvailable: (value: boolean) => { available = value; },
+		setRestoring: (busy: boolean) => { restoring = busy; },
 		close: () => { open = false; }, toggle, restore,
 	};
 }

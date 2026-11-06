@@ -37,6 +37,26 @@ it('reports History opened once per opening', () => {
 	dispose();
 });
 
+it('offers History only for the tab whose open said it has history, and mirrors a pending restore', () => {
+	let key = $state('tab');
+	let history!: ReturnType<typeof createViewerHistory>;
+	const dispose = $effect.root(() => {
+		history = createViewerHistory({ key: () => key, target: () => target, closeComments: vi.fn(), root: () => undefined });
+	});
+	flushSync();
+	expect(history.available).toBe(false);
+	history.setAvailable(true);
+	history.setRestoring(true);
+	expect(history.available).toBe(true);
+	expect(history.restoring).toBe(true);
+	history.setRestoring(false);
+	key = 'other-tab';
+	flushSync();
+	expect(history.available).toBe(false);
+	expect(history.restoring).toBe(false);
+	dispose();
+});
+
 it('saves pending typing first and asks the server to restore against what was saved', async () => {
 	const order: string[] = [];
 	vi.mocked(flushDraft).mockImplementation(async () => { order.push('flush'); return true; });
