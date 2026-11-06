@@ -29,6 +29,8 @@ def migrate_179_to_180(conn: sqlite3.Connection) -> None:
         return
     if "closed_by_decision" not in columns:
         conn.execute("ALTER TABLE doc_comments ADD COLUMN closed_by_decision INTEGER NOT NULL DEFAULT 0")
+        if "resolved" not in columns:
+            return
         conn.execute(
             "UPDATE doc_comments SET closed_by_decision=1 WHERE decision IS NOT NULL AND resolved=1"
             + (" AND parent_id IS NULL" if "parent_id" in columns else "")
