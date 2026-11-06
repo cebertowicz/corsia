@@ -12,7 +12,7 @@ Pick a small, harmless first task, something whose result you can check by readi
 2. Press the round **New chat** button at the bottom of the sidebar. Inside a project it starts the chat in that project: the header reads `<Name> · conductor` and the right pane lists **Roadmap** and **Documents** until you send the first message. To start a chat somewhere else, hold the button and choose from **New chat in…**.
 3. Type your task in the message box (**Message CORSIA**) and send it. The button on the message box shows the model the chat uses; press it to pick another. A chat on a cloud model sends what you write to that provider.
 
-The chat appears in the sidebar's chat list as **New Chat**. It has its own history, model and files. Its context also includes the project's charter and skills, because the chat belongs to the project ([Scopes](../how-it-works/scopes.md)).
+The chat appears in the sidebar's chat list as **New Chat**, and takes a title from your first message soon after you send it. It has its own history, model and files. Its context also includes the project's charter and skills, because the chat belongs to the project ([Scopes](../how-it-works/scopes.md)).
 
 ## See what happened
 
