@@ -92,7 +92,8 @@ STANDING_SCRIPT_REVIEW_SYSTEM_POLICY = (
     "with its text, or only its size when binary is true. Reject a binary file the run "
     "can load as code (a .pyc, .so, .dylib or .node file) since you cannot read it. "
     "Code the run loads from outside its folder is not shown to you, including a bash "
-    "source of a bare name (looked up on PATH and the working directory); judge it "
+    "source of a bare name (looked up on PATH and the working directory) or a bare node "
+    "package name (resolved from node_modules in this folder or any folder above it); judge it "
     "only from what the shown text says it loads. "
 )
 STANDING_SCRIPT_AUTO_APPROVE_ON = (
