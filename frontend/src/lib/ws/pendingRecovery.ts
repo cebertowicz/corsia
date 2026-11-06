@@ -5,17 +5,18 @@ import { handleRecoveredInput } from './handlersTurns';
 import { holdThreadSends, releaseThreadSends } from './send';
 
 const RECOVERY_PAGE_SIZE = 50;
-// The longest one history page may take. A page can fail to arrive while the
-// socket stays healthy, and nothing else would end that read or its hold; past
-// this the read ends the way a failed one does.
+// The longest one history page may hold the thread's new sends. A page can be
+// slow, or never arrive, while the socket stays healthy, and nothing else would
+// end the hold; past this the held messages go out and the read goes on, so an
+// input it still proves lost is resent, behind them, rather than stranded.
 export const RECOVERY_PAGE_LIMIT_MS = 5_000;
 
 // `isCurrent` reports whether the socket that started this recovery still owns
 // the connection. Once it does not, no further page is read and nothing read
 // under the retired session is written.
 //
-// A thread with pending inputs is held from this call until its own read ends,
-// so a message the person sends on this socket meanwhile cannot be admitted
+// A thread with pending inputs is held from this call until its own read ends
+// or one of its pages passes RECOVERY_PAGE_LIMIT_MS, so a message the person sends on this socket meanwhile cannot be admitted
 // ahead of the input they sent first. Threads are read side by side, so one
 // thread's slow read never holds another thread's sends. `generation` is this
 // run's identity in those holds: a run that ends after a newer socket took over
@@ -70,6 +71,7 @@ async function recoverThread(
 			if (before) query.set('before', before);
 			const page = await readPage(
 				fetchPage, `/api/threads/${threadId}/messages?${query.toString()}`,
+				() => releaseThreadSends(generation, threadId, new Set(), isCurrent),
 			);
 			if (!isCurrent()) return;
 			if (!page) break;
@@ -98,15 +100,15 @@ async function recoverThread(
 	}
 }
 
-// One history page, or null when the fetch threw, the server refused it, or it
-// did not arrive within RECOVERY_PAGE_LIMIT_MS. A body that is not JSON throws.
-async function readPage(fetchPage: typeof fetch, url: string) {
-	const pageLimit = new AbortController();
-	const timer = setTimeout(() => pageLimit.abort(), RECOVERY_PAGE_LIMIT_MS);
+// One history page, or null when the fetch threw or the server refused it. A
+// body that is not JSON throws. A page still open at RECOVERY_PAGE_LIMIT_MS
+// calls `liftHold` and is still read to the end.
+async function readPage(fetchPage: typeof fetch, url: string, liftHold: () => void) {
+	const timer = setTimeout(liftHold, RECOVERY_PAGE_LIMIT_MS);
 	try {
 		let response: Response;
 		try {
-			response = await fetchPage(url, { signal: pageLimit.signal });
+			response = await fetchPage(url);
 		} catch {
 			return null;
 		}

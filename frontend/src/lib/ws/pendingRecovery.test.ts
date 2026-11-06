@@ -239,28 +239,53 @@ describe('resending an input the server never received', () => {
 		expect(getTurnState(THREAD).pendingInputIds).toEqual([lostId, laterId]);
 	});
 
-	it('ends a page that never arrives at the page limit, as a failed read', async () => {
+	it('sends a held message once a page passes the page limit, and resends nothing it has not proved', async () => {
 		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 		try {
 			const lostId = sendMessage(THREAD, 'lost with the old socket')!;
 			const lostFrame = frames[0];
 			mockSocket();
-			const hung = ((_url: string, init?: RequestInit) => new Promise<Response>((_settle, refuse) => {
-				init?.signal?.addEventListener('abort', () => refuse(init.signal!.reason));
-			})) as unknown as typeof fetch;
+			const hung = (() => new Promise<Response>(() => {})) as unknown as typeof fetch;
 
-			const recovering = recoverPendingInputs(hung);
+			void recoverPendingInputs(hung);
 			const laterId = sendMessage(THREAD, 'typed while the read hangs')!;
 			await vi.advanceTimersByTimeAsync(RECOVERY_PAGE_LIMIT_MS - 1);
 			expect(frames).toHaveLength(0);
 
-			// A healthy socket never retires itself over a hung history read; the
-			// page limit ends the read, and a read that never ended proved nothing.
+			// A healthy socket never retires itself over a hung history read, so the
+			// page limit lets the person's message out; the read is still open and
+			// has proved nothing about the lost input.
 			await vi.advanceTimersByTimeAsync(1);
-			await recovering;
 			expect(frames.map(frame => JSON.parse(frame).input_id)).toEqual([laterId]);
 			expect(frames).not.toContain(lostFrame);
 			expect(getTurnState(THREAD).pendingInputIds).toEqual([lostId, laterId]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it('still resends what a page slower than the limit proves lost, behind the message the limit let out', async () => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		try {
+			const lostId = sendMessage(THREAD, 'lost with the old socket')!;
+			const lostFrame = frames[0];
+			mockSocket();
+			// Behaves as fetch does: an aborted request rejects, so a read that
+			// gave up on the slow page would show here as a lost input never resent.
+			const slow = ((_url: string, init?: RequestInit) => new Promise<Response>((settle, refuse) => {
+				init?.signal?.addEventListener('abort', () => refuse(init.signal!.reason));
+				setTimeout(() => settle(historyResponse([])), RECOVERY_PAGE_LIMIT_MS + 1);
+			})) as unknown as typeof fetch;
+
+			const recovering = recoverPendingInputs(slow);
+			const laterId = sendMessage(THREAD, 'typed while the read is slow')!;
+			await vi.advanceTimersByTimeAsync(RECOVERY_PAGE_LIMIT_MS + 1);
+			await recovering;
+
+			// Delivery outranks order past the limit: the lost input is not left
+			// pending on a healthy socket that no later recovery would revisit.
+			expect(frames.map(frame => JSON.parse(frame).input_id)).toEqual([laterId, lostId]);
+			expect(frames[1]).toBe(lostFrame);
 		} finally {
 			vi.useRealTimers();
 		}
