@@ -7,6 +7,7 @@
 	import { markThreadSeen } from '$lib/api/plans';
 	import { canMarkSeen } from './threadRowMark';
 	import { sidebarCollapsed } from '$lib/stores/ui';
+	import { paneSnapping } from '$lib/stores/paneCollapsed';
 	import { token } from '$lib/stores/auth';
 	import { threadSettingsOpen } from '$lib/stores/threadSettings';
 	import { toasts } from '$lib/stores/toast';
@@ -190,6 +191,7 @@
 	class="sidebar"
 	class:open
 	class:collapsed={$sidebarCollapsed}
+	class:snap={$paneSnapping}
 >
 	<div class="shell-top-pad" data-tauri-drag-region></div>
 
@@ -318,6 +320,7 @@
 		user-select: text;
 	}
 	.sidebar.collapsed { width: 0; border-right: none; }
+	.sidebar.snap { transition: none; }
 	.shell-top-pad {
 		flex-shrink: 0;
 		min-width: var(--sidebar-width);

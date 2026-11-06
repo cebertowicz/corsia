@@ -17,6 +17,8 @@
 	import { createDocViewerImages } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
 	import { paneOpen, isPaneDrawer } from '$lib/stores/paneOpen';
+	import DocHistorySurface from './DocHistorySurface.svelte';
+	import { createViewerHistory } from '$lib/docViewerHistory.svelte';
 	import type { DocOpenRefusal } from '$lib/docOpenRefusal';
 	import { handleViewerFailure } from '$lib/docViewerFailure';
 	import { applyDocumentContent } from '$lib/docViewerApplyContent';
@@ -88,6 +90,10 @@
 	let feedbackStatus = $state<DocViewerStatus>();
 
 	const save = createDocSaveState(() => target);
+	const history = createViewerHistory({ key: () => targetKey, target: () => target, closeComments: () => commentUI.close(), root: () => docRoot });
+	// The server says on open whether this file's versions are recorded; History is fetched only once opened.
+	let hasHistory = $state(false);
+	let historyRestoring = $state(false);
 	const liveSession = $derived(target ? $liveDocumentBindings[target.instanceId] : undefined);
 	let liveConnection = $state<LiveDocumentSession['connection'] | null>(null);
 	let liveGeneration = $state(0);
@@ -196,7 +202,7 @@
 	function applyViewerContent(d: DocViewerTarget, content: ViewerContent, seq: number): void {
 		applyDocumentContent(d, content, seq, { loadSeq: () => loadSeq, shown: () => docState === 'ready', signal: onSignal,
 			feedback: () => feedbackStatus, apply: (value, awaiting) => {
-				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; confirming = false;
+				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; confirming = false; hasHistory = value.history === true;
 				freshness = value.freshness; docState = 'ready'; legacyAwaitingSave = awaiting;
 			},
 		});
@@ -288,7 +294,7 @@
 		title={target?.name ?? 'Document'}
 		commentsOpen={commentUI.state?.kind === 'list'}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
-		saveStatus={save.status}
+		saveStatus={historyRestoring ? 'saving' : save.status}
 		bind:this={feedbackStatus}
 		ready={docState === 'ready'}
 		stale={stale && !liveSession}
@@ -302,7 +308,10 @@
 		targetInstanceId={target?.instanceId ?? null}
 		imageOpen={covered} activityRoot={docRoot}
 		{onReload}
-		onOpenComments={commentUI.openList}
+		onOpenComments={(opener) => { history.close(); commentUI.openList(opener); }}
+		historyAvailable={hasHistory}
+		historyOpen={history.open}
+		onOpenHistory={history.toggle}
 		{freshness}
 		onFeedbackChanged={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
 		onMarkVerified={() => verifyAndApplyDocumentFreshness(loadedArtifactId, freshness, (next) => freshness = next)}
@@ -353,6 +362,7 @@
 		commentsAsSheet={isPaneDrawer()}
 		onStartComment={draftController.start}
 	/>
+	{#if history.open && hasHistory && target}<DocHistorySurface {target} applyRestore={history.restore} onRestored={async () => { (await onPrepareCleanReload())?.(); }} onRestoring={(busy) => { historyRestoring = busy; }} narrow={isPaneDrawer()} within={docRoot?.closest<HTMLElement>('.leaf-body') ?? docRoot} {covered} onClose={history.close} />{/if}
 	<DocCommentSurface
 		reviewBar={reviewControls}
 		reviewVisible={commentUI.sheetUp}

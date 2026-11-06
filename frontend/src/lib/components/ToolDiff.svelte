@@ -3,13 +3,13 @@
 	import { diffStats } from '$lib/diff';
 
 	/** `words`: break between words, not anywhere in a line, for prose. */
-	let { file, lines, words = false }: { file: string; lines: DiffLine[]; words?: boolean } = $props();
+	let { file, lines, words = false, fill = false }: { file: string; lines: DiffLine[]; words?: boolean; fill?: boolean } = $props();
 
 	const stats = $derived(diffStats(lines));
 	const name = $derived(file ? (file.split('/').pop() || file) : '');
 </script>
 
-<div class="diff" class:words>
+<div class="diff" class:words class:fill>
 	<div class="diff-head">
 		{#if name}<span class="diff-file" title={file}>{name}</span>{/if}
 		<span class="diff-stat add">+{stats[0]}</span>
@@ -51,6 +51,8 @@
 		max-height: 240px; overflow-y: auto;
 		font-family: var(--font-mono); font-size: var(--text-footnote); line-height: 1.55;
 	}
+	/* A surface that owns its height lets the body use it. */
+	.fill .diff-body { max-height: none; overflow-y: visible; }
 	.diff-line { display: flex; }
 	.diff-line.add { background: color-mix(in srgb, var(--green) 10%, transparent); }
 	.diff-line.del { background: color-mix(in srgb, var(--red) 9%, transparent); }

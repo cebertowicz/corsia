@@ -21,10 +21,10 @@ from typing import Any, Callable, Iterator
 from loguru import logger
 
 from infra.backend_git import GIT_CONFIG_ARGS
-from infra.guidance_cas import stale_path
+from infra.guidance_cas import stale_result
 from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir
 from infra.guidance_messages import (
-    SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_STALE, SAVE_UNRECORDED,
+    REASON_PREFIX, SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_UNRECORDED, UNRECORDED_REASON,
     commit_message, is_person_author, recorded_reason,
 )
 from infra.guidance_save_types import SaveResult, _Commit
@@ -47,7 +47,9 @@ class _LockBusy(GitFault):
     pass
 
 
-# SaveResult stays importable from here for existing callers.
+class NoRepository(str):
+    """The reason :func:`workspace_repository` gives when the workspace has no repository of its own yet."""
+
 
 def _git_bytes(repo: Path, *args: str, env: dict[str, str] | None = None,
                data: bytes | None = None, ok: tuple[int, ...] = (0,)) -> bytes:
@@ -82,7 +84,7 @@ def workspace_repository(workspace: Path, *, create: bool = False) -> tuple[Path
         if _git(workspace, "rev-parse", "--show-toplevel", ok=(0, 128)).strip():
             return None, "the workspace is inside an enclosing repository"
         if not create:
-            return None, "the workspace has no repository yet"
+            return None, NoRepository("the workspace has no repository yet")
         _git(workspace, "init", "--quiet")
     except GitFault as exc:
         return None, str(exc)
@@ -205,7 +207,7 @@ def _sweep(repo: Path, rels: list[str]) -> list[str]:
     names = sorted(rels)
     shown = ", ".join(names[:12]) + (f" and {len(names) - 12} more" if len(names) > 12 else "")
     files = {rel: _read(repo / rel) for rel in names}
-    done = _commit(repo, files, f"guidance sweep: {shown}\n\nReason: unrecorded\nScope: sweep", _OUTSIDE)
+    done = _commit(repo, files, f"guidance sweep: {shown}\n\n{REASON_PREFIX}{UNRECORDED_REASON}\nScope: sweep", _OUTSIDE)
     if done is None:
         return []
     return [f"Swept and committed {shown} as {done.sha[:7]} with Reason: unrecorded.", *done.unsynced_line()]
@@ -308,14 +310,6 @@ def save_guidance(
     return result
 
 
-def _stale(
-    expected: dict[Path, str | None] | None, *, binary_safe_history: bool = False,
-) -> SaveResult | None:
-    """Return a stale result when the destination changed after the caller read it."""
-    path = stale_path(expected, binary_safe_history=binary_safe_history, read_bytes=_read)
-    return SaveResult("stale", "deferred-destination-changed", line=SAVE_STALE.format(path=path)) if path else None
-
-
 def _save(
     writes: dict[Path, bytes | None], workspace: Path, target: GuidanceTarget, author: str, message: str, done: str,
     expected: dict[Path, str | None] | None, atomic: bool, binary_safe_history: bool,
@@ -323,7 +317,7 @@ def _save(
 ) -> SaveResult:
     def unrecorded(outcome: str, why: str, line: str | None) -> SaveResult:
         if not atomic:
-            if (stale := _stale(expected, binary_safe_history=binary_safe_history)) is not None:
+            if (stale := stale_result(expected, binary_safe_history=binary_safe_history, read_bytes=_read)) is not None:
                 return stale
             for path, data in writes.items():
                 if data is None:
@@ -357,7 +351,7 @@ def _save(
             lines = _sweep(repo, outside) if outside else []
         except Exception as exc:  # an unrecorded outside edit must never join the saver's commit
             return unrecorded("failed", str(exc), SAVE_FAILED.format(error=f"outside edits could not be recorded first ({exc})"))
-        if (stale := _stale(expected, binary_safe_history=binary_safe_history)) is not None:
+        if (stale := stale_result(expected, binary_safe_history=binary_safe_history, read_bytes=_read)) is not None:
             return stale
         prior = {path: _read(path) for path in writes} if atomic else {}
         for path, data in writes.items():

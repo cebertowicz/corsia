@@ -18,6 +18,8 @@ export interface DocContent {
 	writable: boolean;
 	artifact: ArtifactRow | null;
 	freshness: DocumentFreshness | null;
+	/** The file's versions are recorded, so it has a History. */
+	history?: boolean;
 	/** On a live_open read: false with a reason when the document opens as a non-live file. */
 	live?: boolean;
 	live_unavailable?: string;

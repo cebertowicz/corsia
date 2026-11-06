@@ -9,14 +9,16 @@ let snaps = 0;
 
 /** Collapses or expands the pane; `instant` skips its width transition for this one change. */
 export function setPaneCollapsed(collapsed: boolean, instant = false): void {
-	const snap = ++snaps;
 	// An eased change right after a snap still eases.
-	paneSnapping.set(instant);
-	if (instant) {
-		// Lifted once a frame has been laid out at the new width, so the user's own toggles still ease.
-		if (typeof requestAnimationFrame === 'function') {
-			requestAnimationFrame(() => requestAnimationFrame(() => { if (snap === snaps) paneSnapping.set(false); }));
-		} else paneSnapping.set(false);
-	}
+	if (instant) snapShell(); else { snaps++; paneSnapping.set(false); }
 	paneCollapsed.set(collapsed);
+}
+
+/** The pane and the sidebar take their next width at once. Lifted once a frame has been laid out at it, so the user's own toggles still ease. */
+export function snapShell(): void {
+	const snap = ++snaps;
+	paneSnapping.set(true);
+	if (typeof requestAnimationFrame === 'function') {
+		requestAnimationFrame(() => requestAnimationFrame(() => { if (snap === snaps) paneSnapping.set(false); }));
+	} else paneSnapping.set(false);
 }

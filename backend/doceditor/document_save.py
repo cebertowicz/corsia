@@ -34,6 +34,7 @@ from registry.shared_document_events import report_plain_write
 from tools.file_write_completion import record_context_source_change
 
 _log = logging.getLogger(__name__)
+STALE_MESSAGE = "The document changed while these suggestions were being applied. Nothing was changed; try again."
 
 
 @dataclass(frozen=True)
@@ -107,35 +108,49 @@ def _saved_payload(resolved: Path, actor_thread_id: str, extra: dict) -> dict:
 
 
 async def _save_validated(
-    path: Path, text: str, author: Callable[[], str], reason: str | None, write,
+    path: Path, text: str, author: Callable[[], str], reason: str | None, write, *,
+    expected_sha256: str | None = None, history_required: bool = False,
 ) -> dict:
     """Write a validated editor save. Guidance goes through history off the DB executor, whose
     workers its lock wait and sweep would otherwise hold (issue #2272)."""
     target = await run_in_db(guidance_target, path, Path(config.WORKSPACE))
     if target is None:
+        if history_required:
+            raise DocumentSaveError("history_off", "This file has no recorded history")
         _refuse_invalid_skill(path, text)
-        return await run_in_db(write, path)
-    return await run_off_db(_guided_write, path, target, text, author, reason, write)
+        return await run_in_db(write, path, expected_sha256)
+    return await run_off_db(_guided_write, path, target, text, author, reason, write, expected_sha256, history_required)
 
 
 def _guided_write(
     path: Path, target: GuidanceTarget, text: str, author: Callable[[], str], reason: str | None, write,
+    expected_sha256: str | None = None, history_required: bool = False,
 ) -> dict:
-    """Blocking. Run a validated editor save of a guidance file through guidance history (issue #2272)."""
+    """Blocking. Run a validated editor save of a guidance file through guidance history (issue #2272).
+
+    ``expected_sha256`` is checked once, by the history lock's compare-and-swap; ``history_required``
+    writes nothing unless the version is recorded."""
     payloads: list[dict] = []
     saved = save_guidance(
         {path: text.encode()}, workspace=Path(config.WORKSPACE), target=target,
-        author=author(), reason=reason, write=lambda _path, _data: payloads.append(write(path)),
+        author=author(), reason=reason, expected=None if expected_sha256 is None else {path: expected_sha256},
+        atomic=history_required, write=lambda _path, _data: payloads.append(write(path, None)),
     )
     if saved.outcome == "refused":
         assert saved.line is not None
         if saved.reason == "lesson-outside-placement":
             raise DocumentSaveError("lesson-outside-placement", saved.line, {"errors": list(saved.errors), "line": saved.line})
         raise _invalid_skill_save_error(saved.errors, saved.line)
+    if saved.outcome == "stale":
+        raise DocumentSaveError("stale", STALE_MESSAGE)
+    if history_required and saved.outcome not in {"written", "unchanged"}:
+        kind = "history_off" if saved.outcome in {"history-off", "ordinary"} else "save_failed"
+        raise DocumentSaveError(kind, saved.line or "History could not be recorded")
     if not payloads:
         raise DocumentSaveError("save_failed", saved.line or "Document was not saved")
     if saved.line is not None:
         payloads[0]["guidance_history"] = saved.line
+    payloads[0]["version"] = saved.sha
     return payloads[0]
 
 
@@ -231,10 +246,7 @@ def _write_document(
     if expected_sha256 is not None:
         current_sha256 = hashlib.sha256(resolved.read_bytes()).hexdigest()
         if current_sha256 != expected_sha256:
-            raise DocumentSaveError(
-                "stale",
-                "The document changed while these suggestions were being applied. Nothing was changed; try again.",
-            )
+            raise DocumentSaveError("stale", STALE_MESSAGE)
     try:
         decision = write_text(
             resolved,
@@ -295,7 +307,7 @@ def _write_document(
 
 async def save_document_text(
     body: DocumentSave, user_id: str, *, by_agent: bool = False, reason: str | None = None,
-    expected_sha256: str | None = None, author: str | None = None,
+    expected_sha256: str | None = None, author: str | None = None, history_required: bool = False,
 ) -> dict:
     """Shared validated document writer for editor saves and accepted suggestions.
 
@@ -308,7 +320,7 @@ async def save_document_text(
     from doceditor.live_tools import find_live
     manager = get_documents()
     if manager is None or await run_off_db(guidance_target, resolved, config.WORKSPACE) is not None:
-        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author)
+        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author, history_required)
     async with manager.admission_lock(resolved):
         if (entry := find_live(resolved)) is not None:
             from doceditor import live_events
@@ -319,12 +331,13 @@ async def save_document_text(
         if refused is not None and not falls_back_to_plain(refused["code"]):
             # The file must not move away from acknowledged text the store still holds.
             raise DocumentSaveError(refused["code"], refused["message"], dict(refused))
-        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author)
+        return await _save_legacy_document(body, resolved, user_id, by_agent, reason, expected_sha256, author, history_required)
 
 
 async def _save_legacy_document(
     body: DocumentSave, resolved: Path, user_id: str, by_agent: bool,
     reason: str | None, expected_sha256: str | None, author: str | None = None,
+    history_required: bool = False,
 ) -> dict:
     """Keep the validated legacy writer intact under the admission boundary."""
     thread_id = body.thread_id if by_agent else None
@@ -333,9 +346,10 @@ async def _save_legacy_document(
         body.text,
         lambda: author or (saver_author(thread_id=thread_id) if thread_id else saver_author(user_id=user_id)),
         reason,
-        lambda path: _write_document(
-            body, path, direct_user=not by_agent, expected_sha256=expected_sha256,
+        lambda path, expected: _write_document(
+            body, path, direct_user=not by_agent, expected_sha256=expected,
         ),
+        expected_sha256=expected_sha256, history_required=history_required,
     )
     notification = result.pop("_notification")
     if notification is not None:

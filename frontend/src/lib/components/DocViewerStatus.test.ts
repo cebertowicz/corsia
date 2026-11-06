@@ -362,4 +362,19 @@ describe('DocViewerStatus held comments', () => {
 		await Promise.resolve();
 		expect(sends()).toHaveLength(0);
 	});
+
+	it('names the History button "History" whether its text or only its icon shows, and omits it without recorded history', () => {
+		const onOpenHistory = vi.fn();
+		render(value(), undefined, { historyAvailable: true, onOpenHistory });
+		const button = host.querySelector<HTMLButtonElement>('.history-tool')!;
+		expect(button.getAttribute('aria-label')).toBe('History');
+		expect(button.getAttribute('title')).toBe('History');
+		expect(button.querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+		expect(button.querySelector('.label')?.textContent).toBe('History');
+		button.click();
+		expect(onOpenHistory).toHaveBeenCalledTimes(1);
+		component!.$destroy(); host.remove();
+		render(value(), undefined, { historyAvailable: false, onOpenHistory });
+		expect(host.querySelector('.history-tool')).toBeNull();
+	});
 });

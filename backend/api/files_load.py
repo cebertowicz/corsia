@@ -98,9 +98,14 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     finally:
         db.close()
     notification = art or {"integration": "workspace", "type": artifact_type, "external_id": str(p)}
+    from infra.guidance_targets import guidance_target
+
+    # Only guidance files are recorded; this asks no Git, so opening stays as cheap as before.
+    target = guidance_target(p, config.WORKSPACE)
     return {"text": text, "size": st.st_size, "mtime": st.st_mtime,
             "revision": revision(raw), "writable": writable, "artifact": art,
-            "freshness": freshness, "_notification": notification}
+            "freshness": freshness, "history": target is not None and not target.fault,
+            "_notification": notification}
 
 
 def read_image_file(path: str, project_id: str | None) -> tuple[Path, str]:

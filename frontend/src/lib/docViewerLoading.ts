@@ -16,11 +16,14 @@ export interface ViewerContent {
 	live: LiveDocumentSession | null;
 	/** Why a live open answered non-live, when the server said. */
 	liveUnavailable?: LiveUnavailable | null;
+	/** The file has recorded versions to show in History. */
+	history?: boolean;
 }
 /** The viewer's form of an HTTP content response, which never carries a live session. */
 export function viewerContent(response: DocContent, fallbackArtifactId: string | null): ViewerContent {
 	return { text: response.text, artifactId: response.artifact?.id ?? fallbackArtifactId, writable: response.writable !== false,
-		freshness: response.freshness, revision: response.revision ?? null, live: null, liveUnavailable: liveUnavailable(response) };
+		freshness: response.freshness, revision: response.revision ?? null, live: null, liveUnavailable: liveUnavailable(response),
+		history: response.history === true };
 }
 interface LoadOptions {
 	target: DocViewerTarget;
