@@ -7,6 +7,14 @@ import { textDigest, type DocumentFrame } from './documentWire';
 
 const DOC = 'Hello world. The rest stays.';
 
+// The feed digests the editor's text with Web Crypto, which a busy machine can finish after any fixed
+// number of ticks; every digest is tracked so `settle` waits for the digests and the placements behind them.
+const digests = vi.hoisted(() => new Set<Promise<string>>());
+vi.mock('./documentWire', async (importOriginal) => {
+	const real = await importOriginal<typeof import('./documentWire')>();
+	return { ...real, textDigest: (text: string) => { const digest = real.textDigest(text); digests.add(digest); return digest; } };
+});
+
 // A live view keeps its typing driver ticking after the test, and a tick after the file's
 // environment is gone throws on the missing document; every view is destroyed after its test.
 const disposers = new Set<() => void>();
@@ -24,7 +32,14 @@ function harness(doc = DOC, holdsCall: (callId: string) => boolean = () => false
 }
 
 const previews = (view: EditorView) => view.state.field(typedReveals).flatMap((lane) => lane.previews.map((p) => ({ ...p, threadId: lane.threadId })));
-const settle = async () => { for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0)); };
+const settle = async (): Promise<void> => {
+	for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+	if (!digests.size) return;
+	const pending = [...digests];
+	digests.clear();
+	await Promise.all(pending);
+	return settle();
+};
 const preview = (digest: string, slots: unknown[], callId = 'call-1', kind?: string) =>
 	({ type: 'doc_preview', call_id: callId, thread_id: 'thread-a', name: 'Alpha', digest, slots, ...(kind ? { kind } : {}) });
 const end = (outcome: string) => ({ type: 'doc_preview_end', call_id: 'call-1', thread_id: 'thread-a', outcome });
