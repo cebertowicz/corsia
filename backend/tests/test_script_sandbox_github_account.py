@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from automation.script_sandbox import ScriptSandboxError, _folder_bytecode_deny
 from connections import github_agent
 from connections.github_agent import AgentAccountView
 from connections.github_agent_home import BOT_ENV_NAMES, LOCKED_HOME
@@ -171,9 +172,20 @@ def test_authenticated_run_keeps_ready_account_locked(run):
     assert not any(name in seen["env"] for name in _TOKENS)
 
 
-def test_only_an_authenticated_run_keeps_python_bytecode_in_its_private_folder(run, tmp_path):
-    assert f"export PYTHONPYCACHEPREFIX={tmp_path / 'pycache'};" in run("ready", authenticated=True)["command"]
-    assert "PYTHONPYCACHEPREFIX" not in run("ready")["command"]
+def test_only_an_authenticated_run_is_kept_off_python_bytecode_in_its_folder(run, tmp_path):
+    authenticated = run("ready", authenticated=True)
+    assert f"export PYTHONPYCACHEPREFIX={tmp_path / 'pycache'};" in authenticated["command"]
+    assert authenticated["profile"].endswith(_folder_bytecode_deny(tmp_path))
+    plain = run("ready")
+    assert "PYTHONPYCACHEPREFIX" not in plain["command"]
+    assert "__pycache__" not in plain["profile"]
+
+
+def test_the_bytecode_deny_matches_the_folder_literally():
+    assert _folder_bytecode_deny(Path("/w/a.b (c)+[d]")) == (
+        '(deny file-read* file-write* (regex #"^/w/a\\.b \\(c\\)\\+\\[d\\]/(.*/)?__pycache__(/.*)?$"))\n')
+    with pytest.raises(ScriptSandboxError):
+        _folder_bytecode_deny(Path('/w/a"b'))
 
 
 def test_a_run_with_no_cached_answer_waits_for_the_verification(run):

@@ -78,7 +78,7 @@ async def test_review_shows_the_folder_and_records_its_hash(walled):
     assert record["tree_sha256"] == script_tree.tree_sha256(script_tree.read_tree(entry))
 
 
-def test_authenticated_python_never_loads_bytecode_from_the_folder(tmp_path):
+def test_the_runs_bytecode_redirect_skips_a_cache_planted_in_the_folder(tmp_path):
     """A .pyc planted beside reviewed source, stamped to match it, still never runs."""
     helper = tmp_path / "helper.py"
     helper.write_text("print('pyc')\n")

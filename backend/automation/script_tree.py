@@ -3,8 +3,8 @@
 ``python3 <entry>`` imports siblings from the entry's folder, and bash or node load
 them by relative path, so the approved bytes are the folder's, not only the entry's.
 Only directories named exactly ``__pycache__`` and files named ``.DS_Store`` are left out.
-Authenticated Python runs keep their bytecode elsewhere (``script_sandbox.script_command``),
-so none is read there; Finder writes ``.DS_Store`` when the folder is merely opened, and
+An authenticated run's sandbox refuses every ``__pycache__`` in the folder
+(``script_sandbox._folder_bytecode_deny``; not yet on Linux), so none is read; Finder writes ``.DS_Store`` when the folder is merely opened, and
 no interpreter loads it. Anything else the walk can't read as a regular file refuses the
 folder, so the hash covers everything a run can load from it.
 """

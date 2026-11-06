@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import shlex
 import tempfile
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -90,8 +91,9 @@ def script_command(path: Path, stdin: Path | None = None, *, client_dir: Path | 
 
     ``head`` ends a runaway script with SIGPIPE instead of letting the process
     owner hold its whole output in memory, and ``pipefail`` keeps the script's
-    own exit code visible. ``pycache_dir`` keeps Python's bytecode out of the
-    script's folder, so an approved run never loads a ``__pycache__`` file there.
+    own exit code visible. ``pycache_dir`` keeps the run's own Python bytecode out
+    of the script's folder; on Linux, which has no ``_folder_bytecode_deny`` yet, it
+    is what keeps the main process off a cache planted there.
     """
     quoted = shlex.quote(str(path))
     interpreter = _INTERPRETERS.get(path.suffix)
@@ -273,7 +275,22 @@ def _script_gh_homes(view: AgentAccountView) -> set[Path]:
     return {path.resolve(strict=False) for path in paths}
 
 
-def _script_profile(view: AgentAccountView, socket_dir: Path | None = None):
+def _folder_bytecode_deny(folder: Path) -> str:
+    """Refuse every ``__pycache__`` under an authenticated script's folder.
+
+    The approval leaves bytecode caches out (``script_tree``), so a cache planted after
+    approval would run unreviewed as the agents' account. A refused read makes Python
+    compile the reviewed source instead, whatever flags or environment a process in the
+    run starts with.
+    """
+    path = str(folder.resolve())
+    if '"' in path:
+        raise ScriptSandboxError("the script's folder path contains a double quote")
+    escaped = re.sub(r"([.^$*+?()\[\]{}|\\])", r"\\\1", path)
+    return f'(deny file-read* file-write* (regex #"^{escaped}/(.*/)?__pycache__(/.*)?$"))\n'
+
+
+def _script_profile(view: AgentAccountView, socket_dir: Path | None = None, folder: Path | None = None):
     hidden = _script_gh_homes(view)
 
     def build(*args, **kwargs) -> str:
@@ -284,6 +301,8 @@ def _script_profile(view: AgentAccountView, socket_dir: Path | None = None):
             root = sandbox_literal(socket_dir.resolve())
             profile += f'(allow file-read* (subpath "{root}"))\n'
             profile += f'(allow network-outbound (remote unix-socket (subpath "{root}")))\n'
+            if folder is not None:
+                profile += _folder_bytecode_deny(folder)
         return profile
     return build
 
@@ -326,7 +345,7 @@ async def _run_with_channel(
     envelope = execution_envelope_for_consumed_action(
         None, leased=False, thread_id=thread_id, grant_policies=grant_policies,
         policies=policies, agent_account=github_agent.script_view(), env=env,
-        build_profile=_script_profile(view, socket_dir), build_argv=safehouse_argv,
+        build_profile=_script_profile(view, socket_dir, script.parent), build_argv=safehouse_argv,
     )
     if socket_dir is not None and envelope is None:
         raise ScriptSandboxError("authenticated script sandbox is unavailable")
