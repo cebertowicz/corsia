@@ -7,6 +7,8 @@ import sqlite3
 from core.agent_roster_queries import agent_rows
 from doceditor import writer_line
 from doceditor.comment_action_errors import CommentActionError
+from doceditor.feedback_state import USER_AUTHOR_ID
+from infra.accounts import get_user
 from infra.queries import get_thread_for_user
 
 
@@ -127,8 +129,25 @@ def save_tags(db, comment: dict, agent_ids: list[str]) -> None:
         )
 
 
+def save_person_tag(db, comment: dict, user_id: str) -> None:
+    """Tag the person on one comment, keyed by the principal their feedback already uses.
+
+    Their display name is the one their own comments carry as ``author``, so a tag of them
+    reads the same as anything they wrote.
+    """
+    name = (get_user(user_id, db=db) or {}).get("name") or user_id
+    db.execute(
+        "INSERT INTO doc_comment_tags(comment_id,agent_id,agent_name) VALUES (?,?,?)",
+        (comment["id"], USER_AUTHOR_ID, name),
+    )
+
+
 def tags_for_comments(db, rows: list[dict]) -> None:
-    """Attach tag IDs to flat comment rows without per-row queries."""
+    """Attach tags to flat comment rows without per-row queries.
+
+    ``tagged_agents`` is what a reader sees, so it includes a tag of the person; the person is
+    never in ``tagged_agent_ids``, because that field names who a comment is delivered to.
+    """
     if not rows:
         return
     by_id = {row["id"]: row for row in rows}
@@ -139,7 +158,8 @@ def tags_for_comments(db, rows: list[dict]) -> None:
     marks = ",".join("?" for _ in by_id)
     for tag in db.execute(f"SELECT comment_id,agent_id,agent_name FROM doc_comment_tags WHERE comment_id IN ({marks}) ORDER BY agent_id", tuple(by_id)):
         row = by_id[tag["comment_id"]]
-        row["tagged_agent_ids"].append(tag["agent_id"])
+        if tag["agent_id"] != USER_AUTHOR_ID:
+            row["tagged_agent_ids"].append(tag["agent_id"])
         row["tagged_agents"].append({"id": tag["agent_id"], "name": tag["agent_name"]})
     for mention in db.execute(f"SELECT comment_id,agent_id,start_offset,end_offset FROM doc_comment_mentions WHERE comment_id IN ({marks}) ORDER BY start_offset,end_offset,agent_id", tuple(by_id)):
         by_id[mention["comment_id"]]["tagged_agent_mentions"].append({

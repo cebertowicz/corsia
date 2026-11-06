@@ -49,6 +49,8 @@ class CommentInput:
     delivery_policy: str = feedback_batch_core.IMMEDIATE
     tagged_agent_ids: list[str] = field(default_factory=list)
     tagged_agent_mentions: list[dict] = field(default_factory=list)
+    # An agent's ask for the person on this comment; only the agent tool path sets it.
+    tag_person: bool = False
     viewing_thread_id: str | None = None
 
 
@@ -106,9 +108,12 @@ def _image(db, request: CommentInput, quote: str | None, start: int | None) -> t
 def _record_tags(connection, request: CommentInput, row: dict) -> None:
     """Store a new comment's tags and mentions, and count a tagged post once it commits."""
     comment_recipients.save_tags(connection, row, request.tagged_agent_ids)
+    if request.tag_person:
+        comment_recipients.save_person_tag(connection, row, request.user_id)
     comment_recipients.save_mentions(connection, row, request.tagged_agent_mentions)
-    if request.tagged_agent_ids:
-        tags = {"tag_count": len(set(request.tagged_agent_ids)), "reply": bool(request.parent_id),
+    tag_count = len(set(request.tagged_agent_ids)) + int(request.tag_person)
+    if tag_count:
+        tags = {"tag_count": tag_count, "reply": bool(request.parent_id),
                 "author_kind": request.author_kind}
         after_commit(connection, lambda: live_events.emit("comment_tagged", **tags))
     if request.author_thread_id:

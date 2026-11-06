@@ -64,7 +64,7 @@ def recipients(
                JOIN doc_feedback_batch_items i ON i.comment_id=c.id
                JOIN doc_feedback_batches b ON b.id=i.batch_id AND b.recipient_id=t.agent_id
                WHERE (c.id=? OR c.parent_id=?) AND b.state='delivered'
-                 AND b.delivery_outcome='node'""", (root_id, root_id),
+                 AND b.delivery_outcome='node' AND t.agent_id<>?""", (root_id, root_id, USER_AUTHOR_ID),
         ))
     left = {str(row["agent_id"]) for row in db.execute(
         "SELECT agent_id FROM doc_comment_recipient_state WHERE root_id=? AND left_thread=1", (root_id,),

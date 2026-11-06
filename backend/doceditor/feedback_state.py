@@ -178,13 +178,24 @@ def user_feedback_for_document(db, artifact_id: str) -> dict[str, Any]:
     }
 
 
+def _person_tagged(alias: str) -> str:
+    """SQL predicate for a comment whose author tagged the person; alias is an internal SQL identifier."""
+    return (f"EXISTS (SELECT 1 FROM doc_comment_tags person_tag"
+            f" WHERE person_tag.comment_id={alias}.id AND person_tag.agent_id=?)")
+
+
 def _eligible_top_level(alias: str) -> str:
-    """SQL predicate for an eligible unread top-level comment; alias is an internal SQL identifier."""
+    """SQL predicate for an eligible unread top-level comment; alias is an internal SQL identifier.
+
+    A tag of the person makes the comment eligible on its own: the noise rules that keep an agent's
+    suggestions and review notes out of the unread set decide what needs the person *without* an ask.
+    """
     return f"""{alias}.parent_id IS NULL AND {alias}.author_kind='agent'
-               AND {alias}.replacement IS NULL AND {alias}.review=0
-               AND EXISTS (SELECT 1 FROM doc_comments person
-                           WHERE person.artifact_id={alias}.artifact_id AND person.author_kind='user'
-                             AND person.created_at<{alias}.created_at)"""
+               AND ({_person_tagged(alias)}
+                    OR ({alias}.replacement IS NULL AND {alias}.review=0
+                        AND EXISTS (SELECT 1 FROM doc_comments person
+                                    WHERE person.artifact_id={alias}.artifact_id AND person.author_kind='user'
+                                      AND person.created_at<{alias}.created_at)))"""
 
 
 def may_change_unread_attention(author_kind: str, parent_id: str | None, replacement: str | None, review: bool) -> bool:
@@ -195,7 +206,8 @@ def may_change_unread_attention(author_kind: str, parent_id: str | None, replace
 def unread_comment_rows(user_id: str, artifact_id: str | None, *, include_author_thread: bool = False) -> tuple[str, tuple]:
     """The one definition of unread rows for replies and eligible top-level comments.
 
-    Both use the same per-thread watermark, ordered by creation time and id.
+    Both use the same per-thread watermark, ordered by creation time and id. A tag of the
+    person makes either kind eligible even where the ordinary rules would not.
     """
     # A document read binds both sides to its artifact so idx_doc_comments_artifact bounds the scan to that document.
     scoped = artifact_id is not None
@@ -211,7 +223,8 @@ def unread_comment_rows(user_id: str, artifact_id: str | None, *, include_author
              ON thread_view.user_id=? AND thread_view.root_id=root.id
            WHERE item.author_kind<>'user'
              {"AND item.artifact_id=? AND root.artifact_id=?" if scoped else ""}
-             AND ((item.parent_id IS NOT NULL AND (root.author_kind='user' OR touched.parent_id IS NOT NULL))
+             AND ((item.parent_id IS NOT NULL
+                   AND (root.author_kind='user' OR touched.parent_id IS NOT NULL OR {_person_tagged('item')}))
                   OR ({_eligible_top_level('item')}))
              AND (
                  item.created_at>COALESCE(thread_view.seen_at, '')
@@ -221,7 +234,9 @@ def unread_comment_rows(user_id: str, artifact_id: str | None, *, include_author
                      AND item.id>thread_view.seen_reply_id
                  )
              )"""
-    return sql, ((artifact_id, user_id, artifact_id, artifact_id) if scoped else (user_id,))
+    tag_marks = (USER_AUTHOR_ID, USER_AUTHOR_ID)
+    return sql, ((artifact_id, user_id, artifact_id, artifact_id, *tag_marks) if scoped
+                 else (user_id, *tag_marks))
 
 
 def _unread_items(db, user_id: str, artifact_id: str) -> list[tuple[str, str]]:
@@ -268,7 +283,7 @@ def mark_thread_viewed(
     item = db.execute(
         f"""SELECT item.id,item.created_at FROM doc_comments item
            WHERE item.id=? AND (item.parent_id=? OR (item.id=? AND {_eligible_top_level('item')}))""",
-        (seen_item_id, root_id, root_id),
+        (seen_item_id, root_id, root_id, USER_AUTHOR_ID),
     ).fetchone()
     if item is None:
         raise ValueError("reply_not_found")

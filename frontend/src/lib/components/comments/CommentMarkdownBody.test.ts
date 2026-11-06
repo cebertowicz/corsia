@@ -86,4 +86,18 @@ describe('CommentMarkdownBody', () => {
 		expect(card).not.toHaveBeenCalled();
 		host.removeEventListener('click', card);
 	});
+
+	it('renders a tag of the person as a chip with their own name', () => {
+		vi.stubGlobal('ResizeObserver', ResizeObserverStub);
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(CommentMarkdownBody, {
+			target: host,
+			props: { text: 'Needs your call', taggedAgents: [{ id: 'ui', name: 'Sam' }] }
+		});
+		flushSync();
+
+		const chips = [...host.querySelectorAll<HTMLElement>('.comment-mention')];
+		expect(chips.map(chip => chip.textContent)).toEqual(['@Sam']);
+	});
 });
