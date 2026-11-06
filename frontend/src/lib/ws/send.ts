@@ -126,10 +126,10 @@ export function holdThreadSends(generation: object, threadIds: readonly string[]
  * current socket, in the order its inputs were requested, byte for byte: a
  * frame proven absent from the server's history, or one this client never put
  * on the wire. A frame already on the wire whose absence was not proven is
- * left alone — only a read to the end of the history can say it was lost.
- * `isCurrent` is the recovery's ownership check: a retired socket gets
- * nothing, and the owed frames stay pending until the next socket's recovery
- * proves them absent.
+ * left alone — only a read to the end of the history can say it was lost. A
+ * run whose hold already ended at its limit still sends what its read proves
+ * lost. `isCurrent` is the recovery's ownership check: a retired socket gets
+ * nothing, and the owed frames stay pending until the next socket's recovery proves them absent.
  */
 export function releaseThreadSends(
 	generation: object,
@@ -137,7 +137,7 @@ export function releaseThreadSends(
 	provenAbsent: ReadonlySet<string>,
 	isCurrent: () => boolean,
 ): void {
-	if (threadSendHolds.get(threadId) !== generation) return;
+	if ((threadSendHolds.get(threadId) ?? generation) !== generation) return;
 	threadSendHolds.delete(threadId);
 	const socket = ws;
 	if (!isCurrent() || !socket || socket.readyState !== WebSocket.OPEN) return;

@@ -4,7 +4,7 @@ import { token } from '../stores/auth';
 import { subagentMeta } from '../stores/subagents';
 import { activeThreadId, messages } from '../stores/threads';
 import { handleMessage } from './handlers';
-import { recoverPendingInputs } from './pendingRecovery';
+import { RECOVERY_HOLD_LIMIT_MS, recoverPendingInputs } from './pendingRecovery';
 import { _forgetUnconfirmedFramesForTests, _unconfirmedFrameIdsForTests, sendMessage } from './send';
 import { setWs } from './state';
 import {
@@ -238,6 +238,34 @@ describe('resending an input the server never received', () => {
 		expect(frames).not.toContain(lostFrame);
 		expect(JSON.parse(frames[0]).input_id).toBe(laterId);
 		expect(getTurnState(THREAD).pendingInputIds).toEqual([lostId, laterId]);
+	});
+
+	it('sends a held message at the hold limit while the read stays open, and still resends what it proves lost', async () => {
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		try {
+			const lostId = sendMessage(THREAD, 'lost with the old socket')!;
+			const lostFrame = frames[0];
+			mockSocket();
+			const paging = deferredHistory();
+
+			const recovering = recoverPendingInputs(paging.fetchPage);
+			const laterId = sendMessage(THREAD, 'typed while the read hangs')!;
+			vi.advanceTimersByTime(RECOVERY_HOLD_LIMIT_MS - 1);
+			expect(frames).toHaveLength(0);
+
+			// A healthy socket never retires itself over a hung history read, so
+			// the limit alone lets the person's message out.
+			vi.advanceTimersByTime(1);
+			expect(frames.map(frame => JSON.parse(frame).input_id)).toEqual([laterId]);
+
+			paging.settle(historyResponse([]));
+			await recovering;
+			expect(frames).toHaveLength(2);
+			expect(frames[1]).toBe(lostFrame);
+			expect(JSON.parse(frames[1]).input_id).toBe(lostId);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it('records why a thread\'s recovery threw, and still recovers the other thread', async () => {
