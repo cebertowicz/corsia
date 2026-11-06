@@ -2,7 +2,7 @@
 
 What you see in the browser after [installing CORSIA](install.md): the setup screens, the first chat with the CORSIA agent, and creating a project. A **project** is one body of work with its own context, skills and files, kept in its own folder in your workspace; see [Scopes](../how-it-works/scopes.md). The **CORSIA agent** is the assistant you talk to outside any project. The [Glossary](../reference/glossary.md) defines project, conductor, plan, agent and other terms this page uses.
 
-Control names below are the labels the app shows. If a screen differs from what you read, the screen is right and the page needs a fix.
+Control names below are the labels the app shows. The desktop app, Linux, installing Claude Code or Codex, and pressing **Start using CORSIA** are described from the app's code, not from its screens. If a screen differs from what you read, the screen is right and the page needs a fix.
 
 ## Setup screens
 
