@@ -1,8 +1,10 @@
 <script lang="ts">
 	import './comment-link.css';
 
-	let { orphaned, readOnly, decisionError, onDecide }: {
+	let { orphaned, textChanged = false, readOnly, decisionError, onDecide }: {
 		orphaned: boolean;
+		/** An open suggestion edited inside: it keeps its place and cannot be accepted. */
+		textChanged?: boolean;
 		readOnly: boolean;
 		decisionError?: string;
 		/** Settles when the decision does and never rejects: a refusal comes back as `decisionError`. */
@@ -10,7 +12,7 @@
 	} = $props();
 	let decisionBusy = $state<'accept' | 'reject' | null>(null);
 	async function decide(decision: 'accept' | 'reject') {
-		if (readOnly || decisionBusy || (decision === 'accept' && orphaned)) return;
+		if (readOnly || decisionBusy || (decision === 'accept' && (orphaned || textChanged))) return;
 		decisionBusy = decision;
 		try {
 			await onDecide(decision);
@@ -22,7 +24,7 @@
 
 {#if !readOnly}
 	<div class="ct-suggestion-actions">
-		<button class="ct-suggestion-accept" aria-busy={decisionBusy === 'accept'} disabled={decisionBusy !== null || orphaned} title={orphaned ? 'The text this suggestion replaces has changed.' : undefined} onclick={(e) => { e.stopPropagation(); decide('accept'); }}>{decisionBusy === 'accept' ? 'Accepting…' : 'Accept'}</button>
+		<button class="ct-suggestion-accept" aria-busy={decisionBusy === 'accept'} disabled={decisionBusy !== null || orphaned || textChanged} title={textChanged ? 'The text changed after this suggestion' : orphaned ? 'The text this suggestion replaces has changed.' : undefined} onclick={(e) => { e.stopPropagation(); decide('accept'); }}>{decisionBusy === 'accept' ? 'Accepting…' : 'Accept'}</button>
 		<button class="ct-link" aria-busy={decisionBusy === 'reject'} disabled={decisionBusy !== null} onclick={(e) => { e.stopPropagation(); decide('reject'); }}>{decisionBusy === 'reject' ? 'Rejecting…' : 'Reject'}</button>
 	</div>
 {/if}

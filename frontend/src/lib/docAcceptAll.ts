@@ -5,7 +5,7 @@ import type { DocViewerTarget } from '$lib/docViewerTarget';
 
 /** Open suggestions the review bar's accept can apply: the ones the comments pane offers to accept, not orphaned ones. */
 export function openSuggestionCount(comments: DocComment[]): number {
-	return comments.filter((comment) => !comment.resolved && !comment.decision && !comment.orphaned && comment.replacement !== null && comment.replacement !== undefined).length;
+	return comments.filter((comment) => !comment.resolved && !comment.decision && !comment.orphaned && !comment.textChanged && comment.replacement !== null && comment.replacement !== undefined).length;
 }
 
 /**

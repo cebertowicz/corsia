@@ -194,6 +194,58 @@ describe('comment surface status', () => {
 	});
 });
 
+describe('a live-tracked comment keeps its two ends where the text moves them', () => {
+	// "The quick brown fox", after "red " was typed inside a comment on "quick brown": the tracked range grew to cover it, its stored quote did not.
+	const edited = 'The quick red brown fox';
+	const tracked = (overrides: Partial<DocComment> = {}) => comment('c', 4, 'quick brown', { drawn: true, placement: 'placed', to: 19, ...overrides });
+
+	it('keeps the thread on the words now inside after an edit inside its range', () => {
+		const [row] = commentsInDocumentOrder([tracked()], edited);
+		expect(row.orphaned).toBe(false);
+		expect(row.anchor).toBe('quick red brown');
+		expect(canvasCommentRange(row, edited)).toEqual({ from: 4, to: 19 });
+		expect(canvasCommentHighlights([row], edited, null, undefined).map((range) => [range.id, range.from, range.to])).toEqual([['c', 4, 19]]);
+	});
+
+	it('leaves a comment the document does not track as it was', () => {
+		const [row] = commentsInDocumentOrder([tracked({ drawn: false, placement: undefined })], edited);
+		expect(row.orphaned).toBe(true);
+	});
+
+	it('keeps an open suggestion at its line after an edit inside, with its quote unchanged and no inline edit', () => {
+		const [row] = commentsInDocumentOrder([tracked({ replacement: 'swift' })], edited);
+		expect(row.orphaned).toBe(false);
+		expect(row.textChanged).toBe(true);
+		expect(row.anchor).toBe('quick brown');
+		expect(canvasCommentRange(row, edited)).toEqual({ from: 4, to: 19 });
+		expect(canvasCommentHighlights([row], edited, null, undefined).map((range) => [range.id, range.from, range.to, range.suggestion])).toEqual([['c', 4, 19, undefined]]);
+	});
+
+	it('keeps it after a reload too, where the server says the stored place still holds (and not otherwise)', () => {
+		const [kept] = commentsInDocumentOrder([tracked({ replacement: 'swift', drawn: false, placement: undefined, textChanged: true })], edited);
+		expect(kept.textChanged).toBe(true);
+		expect(kept.orphaned).toBe(false);
+		const [lost] = commentsInDocumentOrder([tracked({ replacement: 'swift', drawn: false, placement: undefined })], edited);
+		expect(lost.textChanged).toBe(false);
+		expect(lost.orphaned).toBe(true);
+	});
+
+	it('orphans an open suggestion whose whole range was deleted', () => {
+		const [row] = commentsInDocumentOrder([tracked({ replacement: 'swift', to: 4 })], 'The  fox');
+		expect(row.orphaned).toBe(true);
+		expect(row.textChanged).toBe(false);
+	});
+
+	it('keeps a card for text deleted from the middle, and orphans one whose whole range was deleted', () => {
+		const [middle] = commentsInDocumentOrder([tracked({ to: 7 })], 'The qwn fox');
+		expect(middle.orphaned).toBe(false);
+		expect(middle.anchor).toBe('qwn');
+		const [row] = commentsInDocumentOrder([tracked({ to: 4 })], 'The  fox');
+		expect(row.orphaned).toBe(true);
+		expect(row.anchor).toBe('quick brown');
+	});
+});
+
 describe('awaitsFirstMark', () => {
 	it('holds a pending mark only for a comment that can still be drawn', () => {
 		expect(awaitsFirstMark(comment('a', 0, 'x', { placement: 'placing' }), false)).toBe(true);

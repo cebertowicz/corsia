@@ -22,6 +22,8 @@ export interface ServerComment {
 	decision?: 'accepted' | 'rejected' | null;
 	decided_by?: string | null;
 	orphaned?: boolean;
+	/** An open suggestion edited inside: it keeps its place and quote, and cannot be accepted. */
+	text_changed?: boolean;
 	created_at: string;
 	updated_at: string;
 	new_reply_ids?: string[];

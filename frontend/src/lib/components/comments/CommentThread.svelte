@@ -278,9 +278,9 @@
 			{#if comment.text}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} />{/if}
 		{:else if isSuggestion}
 			{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
-			{#if comment.orphaned}<div class="ct-orphan">The text this suggestion replaces has changed.</div>{/if}
+			{#if comment.textChanged}<div class="ct-orphan">The text changed after this suggestion</div>{:else if comment.orphaned}<div class="ct-orphan">The text this suggestion replaces has changed.</div>{/if}
 			{#if comment.text}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} />{/if}
-			<CommentSuggestionActions orphaned={!!comment.orphaned} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />
+			<CommentSuggestionActions orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />
 		{:else}
 			{#if comment.resolved}<div transition:clipFade><ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} /></div>{/if}
 			{#if comment.orphaned && !hideOrphan}{#if comment.detached && comment.anchor}<CommentQuote quote={plainQuote(comment.anchor)} />{/if}<div class="ct-orphan" data-detached={comment.detached || undefined}>{comment.detached ? 'Original text deleted' : 'The text this comment was on has changed'}</div>{/if}
