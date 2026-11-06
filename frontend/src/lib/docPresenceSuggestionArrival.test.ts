@@ -34,7 +34,7 @@ let cleanups: Array<() => void> = [];
 
 const serverSuggestion = (): ServerComment => ({
 	id: 's1', artifact_id: ART, parent_id: null, author: 'agent-a', author_kind: 'agent', author_thread_id: 'agent-a', body: 'Say it kindly.',
-	anchor_text: 'world', from_off: 6, to_off: 11, review: 0, resolved: 0, acked: 0, orphaned: false, replacement: INSERT,
+	anchor_text: 'world', from_off: 6, to_off: 11, review: 0, resolved: 0, orphaned: false, replacement: INSERT,
 	created_at: '2026-10-08T20:00:00Z', updated_at: '2026-10-08T20:00:00Z', replies: [],
 } as ServerComment);
 

@@ -16,7 +16,7 @@ from registry.retirement_predicate import RETIREMENT_NOT_EXEMPT_CLAUSE
 from tests.plan_review_helpers import submit_review_evidence
 
 
-def test_resolve_always_sets_acknowledged_in_the_shared_action_path(isolated_db):
+def test_resolve_records_no_acknowledgement_in_the_shared_action_path(isolated_db):
     db = get_db()
     try:
         seed_thread(db, "owner")
@@ -25,7 +25,7 @@ def test_resolve_always_sets_acknowledged_in_the_shared_action_path(isolated_db)
         comment, _ = add_comment(db, artifact_id)
         patch = reopen_fields(comment, {"resolved": True})
         updated = comments.update(comment["id"], patch, db=db)
-        assert (updated["resolved"], updated["acked"]) == (1, 1)
+        assert (updated["resolved"], updated["acknowledged_by"]) == (1, [])
     finally:
         db.close()
 

@@ -61,10 +61,8 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	await expect(comment).toContainText('Reply persisted.');
 	// The sent reply leaves the field empty and one line tall again, not held at the height of the text it held.
 	await expect.poll(async () => (await (await replyField(comment)).boundingBox())!.height).toBe(oneLine);
+	// The person is the only one in this thread, so their acknowledgement resolves it.
 	await comment.getByRole('button', { name: 'Agree', exact: true }).click();
-	await expect(comment).toContainText('Agreed');
-	await expect(await replyField(comment)).toBeVisible();
-	await comment.getByRole('button', { name: 'Resolve', exact: true }).click();
 	await openResolved(page.getByRole('region', { name: 'Document comments', exact: true }));
 	const resolved = page.getByRole('region', { name: /^Resolved comment by / });
 	await expect(resolved).toBeVisible();
@@ -87,13 +85,14 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 		const response = await request.get(commentUrl);
 		expect(response.ok()).toBeTruthy();
 		return (await response.json()).comments.find((row: { id: string }) => row.id === commentId);
-	}).toMatchObject({ resolved: 0, acked: 1, from_off: 14, to_off: 20,
+	}).toMatchObject({ resolved: 0, acknowledged_by: [], from_off: 14, to_off: 20,
 		replies: [expect.objectContaining({ body: reply })] });
 	await expectQuietSave(page);
 	await page.reload();
 	await page.getByText(title, { exact: true }).first().click();
 	await openComments();
-	await expect(comment).toContainText('Agreed');
+	// Re-opening took the acknowledgement back.
+	await expect(comment).not.toContainText('Agreed');
 	await expect(editor).toContainText('Prefix Before Anchor sentence.');
 	await saveEvidenceScreenshot(page, testInfo, 'document-comment-persisted', { fullPage: false });
 });

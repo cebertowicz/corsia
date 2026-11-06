@@ -132,12 +132,14 @@ def test_author_can_edit_own_comment_content(integration_client, doc):
     assert r.json()["comment"]["body"] == "A revises A"
 
 
-def test_other_thread_cannot_resolve_or_ack_another_threads_comment(integration_client, doc):
+def test_other_thread_cannot_resolve_another_threads_comment_but_may_acknowledge_it(integration_client, doc):
     # Thread A's comment registered the document, so A is both author and owner.
     _a, cid = _comment_by_thread_a(integration_client, doc)
     b = _mk_thread(integration_client, _OWNER, title="thread-B")
-    assert _patch(integration_client, _OWNER, cid, acked=True, as_session_id=b).status_code == 403
     assert _patch(integration_client, _OWNER, cid, resolved=True, as_session_id=b).status_code == 403
+    acked = _patch(integration_client, _OWNER, cid, acked=True, as_session_id=b)
+    assert acked.status_code == 200, acked.text
+    assert [ack["id"] for ack in acked.json()["comment"]["acknowledged_by"]] == [b]
 
 
 def test_create_broadcasts_doc_comment_changed(integration_client, doc, monkeypatch):

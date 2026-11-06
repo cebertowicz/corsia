@@ -18,7 +18,8 @@ export interface ServerComment {
 	to_off: number | null;
 	review: number;
 	resolved: number;
-	acked: number;
+	/** Who has acknowledged the thread, in order; on a top-level comment only. `kind` user is the person. */
+	acknowledged_by?: Acknowledger[];
 	replacement?: string | null;
 	insert_after?: boolean | number;
 	decision?: 'accepted' | 'rejected' | null;
@@ -44,6 +45,8 @@ export interface ServerComment {
 	/** For an image inside a document, the workspace file the image markdown shows; null on an image artifact. */
 	image_src?: string | null;
 }
+
+export type Acknowledger = { id: string; name: string; kind: 'user' | 'agent' };
 
 /** A box or point on an image, in fractions of its width and height; w = h = 0 is a point. */
 export type ImageRegion = { x: number; y: number; w: number; h: number };

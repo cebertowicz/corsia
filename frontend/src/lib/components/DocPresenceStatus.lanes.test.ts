@@ -27,7 +27,7 @@ let stop: (() => void) | undefined;
 function serverComment(id: string, textLength: number, from: number, to: number, author = 'agent'): ServerComment {
 	return {
 		id, artifact_id: ART, parent_id: null, author, author_kind: author === 'you' ? 'user' : 'agent', body: 'c'.repeat(textLength),
-		anchor_text: 'x', from_off: from, to_off: to, review: 0, resolved: 0, acked: 0, orphaned: false,
+		anchor_text: 'x', from_off: from, to_off: to, review: 0, resolved: 0, orphaned: false,
 		created_at: '2026-10-08T20:00:00Z', updated_at: '2026-10-08T20:00:00Z', replies: [],
 	};
 }

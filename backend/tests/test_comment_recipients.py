@@ -234,8 +234,8 @@ def test_mixed_held_replies_only_deliver_explicit_tag_to_left_agent(isolated_db)
     comment_recipients.save_tags(db, tagged, ["agent"])
     comment_recipients.leave(db, root, "agent")
     items = [{**untagged, "kind": "comment"}, {**tagged, "kind": "comment"}]
-    assert [item["id"] for item in comment_recipients.filter_left_replies(db, items, "agent", person_owner=False)] == [tagged["id"]]
-    assert len(comment_recipients.filter_left_replies(db, items, "agent", person_owner=True)) == 2
+    assert [item["id"] for item in comment_recipients.filter_stopped_replies(db, items, "agent", person_owner=False)] == [tagged["id"]]
+    assert len(comment_recipients.filter_stopped_replies(db, items, "agent", person_owner=True)) == 2
     db.close()
 
 

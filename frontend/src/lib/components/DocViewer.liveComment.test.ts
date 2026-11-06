@@ -39,7 +39,7 @@ beforeEach(() => {
 	api.fetchComments.mockResolvedValue({ comments: [], feedback: { open_count: 0, owner_label: null, undelivered_batches: [] } });
 	api.postComment.mockImplementation(async (_artifact, fields) => ({ id: fields.client_id, artifact_id: 'artifact',
 		body: fields.body, anchor_text: fields.anchor_text, from_off: fields.from_off, to_off: fields.to_off,
-		author: 'you', author_kind: 'user', created_at: '2026-10-07T00:00:00Z', parent_id: null, review: false, resolved: false, acked: false, replies: [] }));
+		author: 'you', author_kind: 'user', created_at: '2026-10-07T00:00:00Z', parent_id: null, review: false, resolved: false, replies: [] }));
 });
 afterEach(async () => {
 	vi.useRealTimers();
@@ -123,7 +123,7 @@ it.each([
 	const input = document.querySelector<HTMLTextAreaElement>('.composer textarea')!;
 	input.focus();
 	const row = { id: 'other', artifact_id: 'artifact', body: 'Earlier comment', anchor_text: 'alpha', from_off: 0, to_off: 5,
-		author: 'agent', author_kind: 'agent', created_at: '2026-10-07T00:00:00Z', parent_id: null, review: false, resolved: false, acked: false, replies: [], ...changes };
+		author: 'agent', author_kind: 'agent', created_at: '2026-10-07T00:00:00Z', parent_id: null, review: false, resolved: false, replies: [], ...changes };
 	api.fetchComments.mockResolvedValue({ comments: [row], feedback: { open_count: 1, owner_label: null, undelivered_batches: [] } });
 	const count = api.fetchComments.mock.calls.length;
 	emit('doc_comment_changed', { type: 'doc_comment_changed', artifact_id: 'artifact', comment_id: row.id });

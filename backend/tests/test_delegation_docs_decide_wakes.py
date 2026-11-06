@@ -180,7 +180,7 @@ async def test_agent_route_refuses_a_reason_without_a_decision(integration_clien
 
     assert response.status_code == 400, response.text
     assert "reason requires decision" in response.text
-    assert not _row(suggestion["id"])["acked"]
+    assert _row(suggestion["id"])["acknowledged_by"] == []
     assert driven == []
 
 
@@ -197,5 +197,5 @@ async def test_tool_refuses_a_reason_without_a_decision(integration_client, doc,
     )
 
     assert result == "Error: reason requires decision"
-    assert not _row(suggestion["id"])["acked"]
+    assert _row(suggestion["id"])["acknowledged_by"] == []
     assert driven == []

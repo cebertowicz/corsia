@@ -1,6 +1,6 @@
-"""Who may resolve or acknowledge a comment as an agent (DCOL-FR10.4): the
-document's owner or the comment's author, through the native tool and the
-agent route the ``corsia doc`` CLI calls. Anyone else replies."""
+"""Who may resolve a comment as an agent (DCOL-FR10.4): the document's owner or
+the comment's author, through the native tool and the agent route the
+``corsia doc`` CLI calls. Anyone else replies, or acknowledges it as their own."""
 
 from __future__ import annotations
 
@@ -43,30 +43,36 @@ def _row(comment_id):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("field", ["resolved", "acked"])
-async def test_bystander_tool_is_refused_with_reply_as_next_step(integration_client, doc, _registrable_roots, field):
+async def test_bystander_tool_is_refused_with_reply_as_next_step(integration_client, doc, _registrable_roots):
     _owner, _author, bystander, cid = await _setup(integration_client, doc)
-    result = await _tool_update(bystander, cid, **{field: True})
+    result = await _tool_update(bystander, cid, resolved=True)
     assert result.startswith("Error: Only the document's owner (Doc Owner) or the comment's author")
     assert "Reply to the comment instead" in result
-    assert _row(cid)[field] == 0
+    assert _row(cid)["resolved"] == 0
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("field", ["resolved", "acked"])
-async def test_bystander_route_is_refused(integration_client, doc, _registrable_roots, field):
+async def test_bystander_route_is_refused(integration_client, doc, _registrable_roots):
     _owner, _author, bystander, cid = await _setup(integration_client, doc)
-    r = _patch(integration_client, _OWNER, cid, as_session_id=bystander, **{field: True})
+    r = _patch(integration_client, _OWNER, cid, as_session_id=bystander, resolved=True)
     assert r.status_code == 403
     assert "Reply to the comment instead" in r.json()["detail"]
-    assert _row(cid)[field] == 0
+    assert _row(cid)["resolved"] == 0
+
+
+@pytest.mark.asyncio
+async def test_bystander_acknowledges_as_its_own(integration_client, doc, _registrable_roots):
+    _owner, _author, bystander, cid = await _setup(integration_client, doc)
+    acked = json.loads(await _tool_update(bystander, cid, acked=True))["comment"]
+    assert [ack["name"] for ack in acked["acknowledged_by"]] == ["Bystander"]
+    assert acked["resolved"] == 0
 
 
 @pytest.mark.asyncio
 async def test_owner_resolves_and_acks_another_agents_comment(integration_client, doc, _registrable_roots):
     owner, _author, _bystander, cid = await _setup(integration_client, doc)
     acked = json.loads(await _tool_update(owner, cid, acked=True))["comment"]
-    assert acked["acked"] == 1
+    assert [ack["id"] for ack in acked["acknowledged_by"]] == [owner]
     r = _patch(integration_client, _OWNER, cid, resolved=True, as_session_id=owner)
     assert r.status_code == 200, r.text
     assert r.json()["comment"]["resolved"] == 1

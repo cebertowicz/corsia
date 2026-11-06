@@ -34,7 +34,7 @@ let component: ReturnType<typeof mount> | undefined;
 function root(id: string, offsets: { from: number; to: number }, anchor: string, newReplies: string[], extra: Partial<ServerComment> = {}): ServerComment {
 	return {
 		id, artifact_id: 'artifact', parent_id: null, author: 'you', author_kind: 'user', body: `ask ${id}`, anchor_text: anchor,
-		from_off: offsets.from, to_off: offsets.to, created_at: '2026-10-27T10:00:00Z', review: false, resolved: false, acked: false,
+		from_off: offsets.from, to_off: offsets.to, created_at: '2026-10-27T10:00:00Z', review: false, resolved: false,
 		new_reply_ids: newReplies,
 		replies: newReplies.map((reply) => ({ id: reply, author: 'Maya Chen', author_kind: 'agent', body: `answer ${reply}`, created_at: '2026-10-27T11:00:00Z' })),
 		...extra,

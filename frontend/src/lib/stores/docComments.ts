@@ -162,19 +162,21 @@ export async function addReply(artifactId: string, commentId: string, text: stri
 
 /** Flips a flag at once and puts it back when the request fails. With `wait` the flag changes only once the request is answered: the caller shows the old state until then. Resolves true when the server took it. */
 function patchFlag(artifactId: string, commentId: string, field: 'resolved' | 'acked', value: boolean, wait = false): Promise<boolean> {
-	let prev: boolean | undefined;
-	const set = (next: boolean | undefined) => docComments.update((all) => {
+	// Re-opening a thread takes back every acknowledgement on the server, so the card drops them too, not on the next load.
+	const local: Partial<DocComment> = field === 'resolved' && !value ? { resolved: false, acked: false, acknowledgedBy: [] } : { [field]: value };
+	let prev: Partial<DocComment> | undefined;
+	const set = (next: Partial<DocComment>) => docComments.update((all) => {
 		const list = (all[artifactId] ?? []).map((c) => {
 			if (c.id !== commentId) return c;
-			prev ??= !!c[field];
-			return { ...c, [field]: next };
+			prev ??= Object.fromEntries(Object.keys(local).map((key) => [key, c[key as keyof DocComment]]));
+			return { ...c, ...next };
 		});
 		return { ...all, [artifactId]: list };
 	});
-	if (!wait) set(value);
-	return patchComment(commentId, { [field]: value }).then(() => { if (wait) set(value); return true; }, (e) => {
+	if (!wait) set(local);
+	return patchComment(commentId, { [field]: value }).then(() => { if (wait) set(local); return true; }, (e) => {
 		console.error(`comment ${field} failed`, e);
-		if (!wait) set(prev);
+		if (!wait && prev) set(prev);
 		return false;
 	});
 }

@@ -48,7 +48,8 @@ def check_decider(*, user_id: str, actor_thread_id: str | None, artifact: dict, 
 
 
 _CONTENT_FIELDS = frozenset({"body", "anchor_text", "from_off", "to_off", "region"})
-_STATE_FIELDS = frozenset({"resolved", "acked"})
+# An acknowledgement is the acting agent's own, so any agent that reaches the comment may give it.
+_STATE_FIELDS = frozenset({"resolved"})
 
 
 def check_agent_update(comment: dict[str, Any], fields: dict[str, Any], *, actor_thread_id: str, owner_thread_id: str | None, db) -> None:
@@ -58,4 +59,4 @@ def check_agent_update(comment: dict[str, Any], fields: dict[str, Any], *, actor
         raise CommentActionError("not_author", "an agent may only edit the content of comments it authored")
     if set(fields) & _STATE_FIELDS and actor_thread_id != owner_thread_id:
         owner = owner_row(db, owner_thread_id)
-        _require_owner(actor_thread_id, owner_thread_id, owner[0] if owner else None, also="the comment's author can resolve, re-open or acknowledge it", instead="Reply to the comment instead.")
+        _require_owner(actor_thread_id, owner_thread_id, owner[0] if owner else None, also="the comment's author can resolve or re-open it", instead="Reply to the comment instead.")

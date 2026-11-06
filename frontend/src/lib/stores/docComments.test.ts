@@ -159,13 +159,52 @@ describe('comment-thread view projection', () => {
 	it('carries the server-named new reply ids and reply timestamps for new-reply presentation', () => {
 		const comment = fromServer({
 			id: 'root', artifact_id: 'artifact', parent_id: null, author: 'Steve', author_kind: 'user', body: 'Root', anchor_text: 'quote', from_off: 0, to_off: 5,
-			review: 0, resolved: 0, acked: 0, created_at: '2026-10-16T17:00:00Z', updated_at: '2026-10-16T17:00:00Z',
+			review: 0, resolved: 0, created_at: '2026-10-16T17:00:00Z', updated_at: '2026-10-16T17:00:00Z',
 			new_reply_ids: ['new'], replies: [{
 				id: 'new', artifact_id: 'artifact', parent_id: 'root', author: 'Agent', author_kind: 'agent', body: 'Reply', anchor_text: null, from_off: null, to_off: null,
-				review: 0, resolved: 0, acked: 0, created_at: '2026-10-16T17:02:00Z', updated_at: '2026-10-16T17:02:00Z',
+				review: 0, resolved: 0, created_at: '2026-10-16T17:02:00Z', updated_at: '2026-10-16T17:02:00Z',
 			}],
 		});
 		expect(comment).toMatchObject({ newReplyIds: ['new'], replies: [{ id: 'new', createdAt: '2026-10-16T17:02:00Z' }] });
+	});
+
+	it("lights the person's own acknowledgement only, and carries everyone's in order", () => {
+		const row = {
+			id: 'root', artifact_id: 'artifact', parent_id: null, author: 'Steve', author_kind: 'user' as const, body: 'Root', anchor_text: 'quote',
+			from_off: 0, to_off: 5, review: 0, resolved: 0, created_at: '2026-10-16T17:00:00Z', updated_at: '2026-10-16T17:00:00Z',
+		};
+		const agent = { id: 'infra', name: 'Infrastructure', kind: 'agent' as const };
+		const person = { id: 'ui', name: 'Steve', kind: 'user' as const };
+		expect(fromServer({ ...row, acknowledged_by: [agent] })).toMatchObject({ acked: false, acknowledgedBy: [agent] });
+		expect(fromServer({ ...row, acknowledged_by: [agent, person] })).toMatchObject({ acked: true, acknowledgedBy: [agent, person] });
+		expect(fromServer(row)).toMatchObject({ acked: false, acknowledgedBy: [] });
+	});
+
+	it('drops every acknowledgement as soon as a thread is re-opened, and restores them if the re-open fails', async () => {
+		const acknowledgedBy = [{ id: 'ui', name: 'Steve', kind: 'user' as const }];
+		const thread = { id: 'root', anchor: 'quote', author: 'you', text: 'Root', at: 'now', resolved: true, acked: true, acknowledgedBy, replies: [] };
+		docComments.set({ artifact: [thread] });
+		mocks.patchComment.mockResolvedValueOnce({});
+		resolveComment('artifact', 'root', false);
+		expect(get(docComments).artifact[0]).toMatchObject({ resolved: false, acked: false, acknowledgedBy: [] });
+		expect(mocks.patchComment).toHaveBeenLastCalledWith('root', { resolved: false });
+
+		docComments.set({ artifact: [thread] });
+		let reject!: (error: Error) => void;
+		mocks.patchComment.mockReturnValueOnce(new Promise((_resolve, failure) => { reject = failure; }));
+		const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+		resolveComment('artifact', 'root', false);
+		reject(new Error('Offline'));
+		await vi.waitFor(() => expect(get(docComments).artifact[0]).toMatchObject({ resolved: true, acked: true, acknowledgedBy }));
+		quiet.mockRestore();
+	});
+
+	it('resolving keeps the acknowledgements a thread already has', () => {
+		const acknowledgedBy = [{ id: 'infra', name: 'Infrastructure', kind: 'agent' as const }];
+		docComments.set({ artifact: [{ id: 'root', anchor: 'quote', author: 'you', text: 'Root', at: 'now', resolved: false, acked: false, acknowledgedBy, replies: [] }] });
+		mocks.patchComment.mockResolvedValueOnce({});
+		resolveComment('artifact', 'root');
+		expect(get(docComments).artifact[0]).toMatchObject({ resolved: true, acknowledgedBy });
 	});
 });
 

@@ -279,7 +279,7 @@ async def test_an_agree_lands_at_once_while_a_person_holds_the_thread(
     agreed = _patch(integration_client, _OWNER, root, acked=True, as_session_id=a)
 
     assert agreed.status_code == 200, agreed.text
-    assert agreed.json()["comment"]["acked"] in (True, 1)
+    assert [ack["id"] for ack in agreed.json()["comment"]["acknowledged_by"]] == [a]
     assert _line(root) == []
 
 

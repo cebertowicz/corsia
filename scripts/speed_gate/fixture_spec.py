@@ -52,9 +52,11 @@ SYNTHETIC_ROWS = {name: max(1, round(PRODUCTION_ROWS["doc_comments"] * SCALE)) f
     "doc_comment_tags", "doc_comment_mentions", "doc_comment_recipient_state",
 )}
 
-#: Schema 181 postdates the census too. Synthetic stress shape, built by the generic pass: one saved
-#: agent write per fixture comment; an assumption, not a production count.
-GENERIC_SYNTHETIC_ROWS = {"doc_comment_writer_line": max(1, round(PRODUCTION_ROWS["doc_comments"] * SCALE))}
+#: Schemas 181 and 183 postdate the census too. Synthetic stress shape, built by the generic pass: one
+#: saved agent write and one acknowledgement per fixture comment; assumptions, not production counts.
+GENERIC_SYNTHETIC_ROWS = {name: max(1, round(PRODUCTION_ROWS["doc_comments"] * SCALE)) for name in (
+    "doc_comment_writer_line", "doc_comment_acks",
+)}
 
 #: The one thread at the largest production parent, and its sibling relations.
 MAX_THREAD_MESSAGES = 100_639

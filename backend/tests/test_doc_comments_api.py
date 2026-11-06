@@ -117,7 +117,7 @@ def test_comment_patch_resolve_ack_and_positions(integration_client, artifact_id
         f"/api/comments/{cid}?token={_TOKEN}", json={"resolved": True, "acked": True}
     )
     row = r.json()["comment"]
-    assert row["resolved"] == 1 and row["acked"] == 1
+    assert row["resolved"] == 1 and [ack["id"] for ack in row["acknowledged_by"]] == ["ui"]
 
     doc_file.write_text("Prefix. # Spec\n\nThe router decides where an inbound event goes.\n")
     r2 = integration_client.post(

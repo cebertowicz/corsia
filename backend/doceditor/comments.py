@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from doceditor import comment_notifications, comment_recipients, feedback_reopens, feedback_settlement, feedback_state, live_events
+from doceditor import comment_acks, comment_notifications, comment_recipients, feedback_reopens, feedback_settlement, feedback_state, live_events
 from infra.database import get_db, write_transaction
 
 _CLIENT_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
@@ -70,6 +70,7 @@ def get_comment(comment_id: str, *, db=None) -> dict | None:
             return None
         comment = dict(row)
         comment_recipients.tags_for_comments(_db, [comment])
+        comment_acks.attach(_db, [comment])
         return comment
     finally:
         if not db:
@@ -100,6 +101,7 @@ def list_for_artifact(artifact_id: str, *, db=None) -> list[dict]:
             ).fetchall()
         ]
         comment_recipients.tags_for_comments(_db, rows)
+        comment_acks.attach(_db, rows)
         return _rows_to_threads(rows)
     finally:
         if not db:
@@ -197,9 +199,9 @@ def create_with_status(
             """INSERT INTO doc_comments
                (id, artifact_id, parent_id, author, author_kind, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
-                review, resolved, acked, replacement, insert_after, tagged_user_id, created_at, updated_at,
+                review, resolved, replacement, insert_after, tagged_user_id, created_at, updated_at,
                 region_x, region_y, region_w, region_h, region_number, image_rev, image_src)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,0,?,?,?,?,?,?,?,?,?,?,?,?)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO NOTHING""",
             (
                 cid, artifact_id, _thread_root_id(connection, parent_id), author, author_kind, author_thread_id,
@@ -238,12 +240,13 @@ def create(*args: Any, **kwargs: Any) -> dict[str, Any]:
 
 
 def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
-    """Patch a comment (resolved / acked / body / offsets). Returns the row.
+    """Patch a comment (resolved / body / offsets). Returns the row.
 
     Resolving drops any unsent re-opened item for the comment, whichever route resolved it;
-    resolving or deciding settles the delivered feedback that holds it.
+    resolving or deciding settles the delivered feedback that holds it. Re-opening a resolved
+    thread takes back its acknowledgements: they were for the thread as it was settled.
     """
-    allowed = {"resolved", "acked", "body", "from_off", "to_off", "anchor_text", "decision", "decided_by", "decided_by_thread_id", "decided_at", "decision_event_id", "decided_in_bulk",
+    allowed = {"resolved", "body", "from_off", "to_off", "anchor_text", "decision", "decided_by", "decided_by_thread_id", "decided_at", "decision_event_id", "decided_in_bulk",
                "closed_by_decision", "region_x", "region_y", "region_w", "region_h", "image_rev"}
     if "resolved" in fields and "closed_by_decision" not in fields:
         fields = {**fields, "closed_by_decision": False}  # only a decision closes a thread as decided
@@ -252,13 +255,17 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
         if k not in allowed:
             continue
         sets.append(f"{k}=?")
-        params.append(int(v) if k in ("resolved", "acked", "decided_in_bulk", "closed_by_decision") and isinstance(v, bool) else v)
+        params.append(int(v) if k in ("resolved", "decided_in_bulk", "closed_by_decision") and isinstance(v, bool) else v)
     if not sets:
         return None
     now = _now()
     sets.append("updated_at=?")
     params.extend([now, comment_id])
     with write_transaction(db, scope="update_doc_comment") as connection:
+        if fields.get("resolved") is False:
+            was = connection.execute("SELECT parent_id,resolved FROM doc_comments WHERE id=?", (comment_id,)).fetchone()
+            if was is not None and was["resolved"] and not was["parent_id"]:
+                comment_acks.clear(connection, comment_id)
         cur = connection.execute(f"UPDATE doc_comments SET {', '.join(sets)} WHERE id=?", params)
         if cur.rowcount == 0:
             return None
@@ -269,6 +276,7 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
             feedback_settlement.settle_batches_of(connection, comment_id)
         row = dict(connection.execute("SELECT * FROM doc_comments WHERE id=?", (comment_id,)).fetchone())
         comment_recipients.tags_for_comments(connection, [row])
+        comment_acks.attach(connection, [row])
         if "region_x" in fields:
             live_events.region_after_commit(connection, "moved", row["artifact_id"], row["region_w"], row["region_h"])
         comment_notifications.announce_after_commit(

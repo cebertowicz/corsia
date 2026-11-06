@@ -18,6 +18,7 @@ erDiagram
 
 ```mermaid
 erDiagram
+    doc_comments ||--o{ doc_comment_acks : root_id
     doc_comment_tags ||--o{ doc_comment_mentions : comment_id
     doc_comment_tags ||--o{ doc_comment_mentions : agent_id
     doc_comments ||--o{ doc_comment_recipient_state : root_id
@@ -141,6 +142,19 @@ Source: `backend/infra/artifact_relocation_schema.py`.
 
 Indexes: `sqlite_autoindex_artifact_relocation_intents_1` (id, unique).
 
+### `doc_comment_acks`
+
+Source: `backend/infra/doc_comments_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `root_id` | TEXT | Yes | Yes | — | doc_comments.id |
+| `actor_id` | TEXT | Yes | Yes | — | — |
+| `actor_name` | TEXT | No | Yes | — | — |
+| `acked_at` | TEXT | No | Yes | — | — |
+
+Indexes: `sqlite_autoindex_doc_comment_acks_1` (root_id, actor_id, unique).
+
 ### `doc_comment_mentions`
 
 Source: `backend/infra/doc_comments_schema.py`.
@@ -231,7 +245,6 @@ Source: `backend/infra/doc_comments_schema.py`.
 | `anchor_suffix` | TEXT | No | No | — | — |
 | `review` | INTEGER | No | Yes | 0 | — |
 | `resolved` | INTEGER | No | Yes | 0 | — |
-| `acked` | INTEGER | No | Yes | 0 | — |
 | `replacement` | TEXT | No | No | — | — |
 | `decision` | TEXT | No | No | — | — |
 | `decided_by` | TEXT | No | No | — | — |

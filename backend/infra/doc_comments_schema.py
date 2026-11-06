@@ -35,7 +35,6 @@ DOC_COMMENTS_SCHEMA_SQL = """
         anchor_suffix TEXT,
         review INTEGER NOT NULL DEFAULT 0,
         resolved INTEGER NOT NULL DEFAULT 0,
-        acked INTEGER NOT NULL DEFAULT 0,
         replacement TEXT,
         decision TEXT,
         decided_by TEXT,
@@ -95,6 +94,14 @@ COMMENT_RECIPIENT_SCHEMA_SQL = """
         left_thread INTEGER NOT NULL DEFAULT 0,
         notifications INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (root_id, agent_id)
+    );
+    -- Who has acknowledged a thread: an agent's thread id, or 'ui' for the person (doceditor/comment_acks.py).
+    CREATE TABLE IF NOT EXISTS doc_comment_acks (
+        root_id TEXT NOT NULL REFERENCES doc_comments(id) ON DELETE CASCADE,
+        actor_id TEXT NOT NULL,
+        actor_name TEXT NOT NULL,
+        acked_at TEXT NOT NULL,
+        PRIMARY KEY (root_id, actor_id)
     );
 """
 # An agent's write saved while someone else holds the thread's writer turn (doceditor/writer_line.py).
