@@ -26,8 +26,8 @@ def build_starting_session(
     """Build the exact provider process frozen by destination preflight.
 
     A confined launch gets the same bridge as any other, advertised only its
-    confined read tools; its read dirs and working dir come from the launch
-    record, so they survive every cold start.
+    confined read tools; its read dirs and working dir come from
+    ``launch_confinement``, which a cold start answers from the thread row.
     """
     from subagents.harness_tool_bridge import configure_cc_tool_bridge
 

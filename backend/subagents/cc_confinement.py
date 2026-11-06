@@ -1,10 +1,10 @@
 """Where a confined Claude Code child runs and what it may read.
 
 A ``untrusted`` child runs in its own empty working directory and reads only
-the add-dirs its parent could already read, through CORSIA's confined read
-tools; the tool boundary checks every call. It holds no credential. The
-confinement is stored on the thread row. A cold launch reads that row;
-a live process retains the confinement it was launched with.
+read dirs its parent could already read, through CORSIA's confined read
+tools; the tool boundary checks every call against the thread row's read dirs.
+It holds no credential. A cold launch reads that row; a live process retains
+the confinement it was launched with, which spawn wrote from the same request.
 """
 
 from __future__ import annotations
