@@ -105,14 +105,14 @@ export async function commentOnRegion(page: Page, text: string, at = { x: 0.2, y
 	await expect(composer).toHaveCount(0);
 }
 
-/** On a phone the posted comment stays open in a sheet over the bar; Done puts it away, as before a user's next tap. */
+/** On a phone the posted comment stays open in a sheet over the bar; Close puts it away, as before a user's next tap. */
 export async function putSheetAway(page: Page) {
 	if ((page.viewportSize()?.width ?? 1440) > 768) return;
 	const backdrop = page.locator('[data-adaptive-drawer].drawer-backdrop');
 	await expect(backdrop).toBeVisible();
 	const layer = () => page.evaluate(() => (history.state as { backLayer?: number } | null)?.backLayer ?? null);
 	const open = await layer();
-	await page.getByRole('button', { name: 'Done', exact: true }).click();
+	await page.getByRole('button', { name: 'Close', exact: true }).click();
 	await expect(backdrop).toHaveCount(0);
 	// The sheet pops its history entry asynchronously; a tap before that pop would be undone by it.
 	if (open !== null) await expect.poll(layer, { message: 'the sheet\'s history entry is gone' }).not.toBe(open);

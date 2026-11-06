@@ -10,8 +10,10 @@ const TEXT = SECTIONS.map((name) => `## ${name} section\n\n${filler(name)}\n\nTh
 
 type Rect = { x: number; y: number; width: number; height: number };
 const strike = (page: Page, id: string) => page.locator(`.cm-content .cm-suggestion-del[data-suggestion-id="${id}"]`);
-const marker = (page: Page, id: string) => page.locator(`.cm-comment-marker[data-comment-ids*="${id}"]`);
+/** The highlighted words of a comment: pressing them opens its card (no margin icon stands beside the line). */
+const highlight = (page: Page, text: string) => page.locator('.cm-comment-anchor', { hasText: text }).first();
 const popover = (page: Page) => page.locator('[data-popover]');
+const marginCard = (page: Page, id: string) => page.locator(`[data-margin-card="${id}"]`);
 const lineOf = (page: Page, text: string) => page.locator('.cm-line', { hasText: text });
 const intersects = (a: Rect, b: Rect) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 
@@ -79,10 +81,10 @@ function textColumnRight(page: Page) {
  * never over the anchor's own line, so the reader can still see what the comment is about.
  * The canvas may still be scrolling the anchor into place when the card opens, so the card settles first.
  */
-async function expectBesideAnchor(page: Page, anchor: Locator, line: Locator, label: string, margin = false) {
+async function expectBesideAnchor(page: Page, anchor: Locator, line: Locator, label: string, margin = false, cardLocator: Locator = popover(page)) {
 	const gap = 48;
 	await expect.poll(async () => {
-		const card = await box(popover(page));
+		const card = await box(cardLocator);
 		const canvas = await box(page.locator('.doc'));
 		const at = await drawnBox(anchor);
 		const row = await drawnBox(line);
@@ -92,7 +94,8 @@ async function expectBesideAnchor(page: Page, anchor: Locator, line: Locator, la
 		if (card.y < canvas.y - slack) return `card (${card.y}) is above the canvas top (${canvas.y})`;
 		if (card.y + card.height > canvas.y + canvas.height + slack) return `card's bottom (${card.y + card.height}) is past the canvas bottom (${canvas.y + canvas.height})`;
 		if (intersects(card, at)) return `card ${JSON.stringify(card)} covers its anchor ${JSON.stringify(at)}`;
-		if (intersects(card, row)) return `card ${JSON.stringify(card)} covers the anchor's line ${JSON.stringify(row)}`;
+		// A card at the pointer opens below the line that was clicked, which can be a wrapped paragraph's first line: only the margin column keeps the whole paragraph clear.
+		if (margin && intersects(card, row)) return `card ${JSON.stringify(card)} covers the anchor's line ${JSON.stringify(row)}`;
 		if (margin) {
 			// The canvas has a free margin beside the text: the card belongs there, level with the anchor's row.
 			const textRight = await textColumnRight(page);
@@ -103,6 +106,46 @@ async function expectBesideAnchor(page: Page, anchor: Locator, line: Locator, la
 		const near = card.y <= row.y + row.height + gap && card.y + card.height >= row.y - gap;
 		return near ? 'beside its anchor' : `card ${JSON.stringify(card)} is away from its anchor's line ${JSON.stringify(row)}`;
 	}, { message: `${label}: the card opens beside its anchor inside the canvas`, timeout: 5_000 }).toBe('beside its anchor');
+}
+
+/**
+ * A margin card travels with its text in the column: level with the anchor's row, or, where cards cluster, stacked
+ * under the card above it (8 px gap), or held at the column's top under the header while its row is scrolled above it.
+ * A card near the bottom edge is not moved up to fit: it comes into view as the document scrolls.
+ */
+async function expectMarginCard(page: Page, anchor: Locator, line: Locator, label: string, cardLocator: Locator) {
+	await expect.poll(async () => {
+		const card = await box(cardLocator);
+		const canvas = await box(page.locator('.doc'));
+		const clip = await box(page.locator('.drawer-comments'));
+		const at = await drawnBox(anchor);
+		const row = await drawnBox(line);
+		const slack = 1;
+		if (card.x + card.width > canvas.x + canvas.width + slack) return `card's right edge (${card.x + card.width}) is past the canvas's right edge (${canvas.x + canvas.width})`;
+		const textRight = await textColumnRight(page);
+		if (card.x < textRight) return `card's left edge (${card.x}) is inside the text column, which ends at ${textRight}`;
+		if (intersects(card, at)) return `card ${JSON.stringify(card)} covers its anchor ${JSON.stringify(at)}`;
+		if (card.y < clip.y - slack || card.y > clip.y + clip.height) return `card ${JSON.stringify(card)} starts outside the column ${JSON.stringify(clip)}`;
+		const middle = row.y + row.height / 2;
+		if (card.y <= middle && card.y + card.height >= middle) return 'beside its anchor';
+		if (middle < clip.y && Math.abs(card.y - clip.y) <= 2) return 'beside its anchor';
+		const others = await page.locator('[data-margin-card]').evaluateAll((nodes) => nodes.map((node) => { const { y, height } = node.getBoundingClientRect(); return { y, bottom: y + height }; }));
+		if (others.some((other) => Math.abs(other.bottom + 8 - card.y) <= 2)) return 'beside its anchor';
+		return `card ${JSON.stringify(card)} is not level with the anchor's row ${JSON.stringify(row)}, held under the header, or stacked under another card`;
+	}, { message: `${label}: the card sits beside its anchor in the margin column`, timeout: 5_000 }).toBe('beside its anchor');
+}
+
+/** A wheel turn over the canvas: the reader's own scroll, which moves a card whose reply box holds focus (a script's scrollTop does not). */
+async function wheelCanvas(page: Page, deltaY: number) {
+	const area = await box(page.locator('.cm-scroller'));
+	await page.mouse.move(area.x + 24, area.y + 24); // the top-left corner of the text: a card at the pointer sits lower and further right
+	await page.mouse.wheel(0, deltaY);
+}
+
+/** The margin column, opened from the comments pill when the canvas was widened after the document loaded. */
+async function showMarginColumn(page: Page) {
+	if (!(await page.locator('[data-margin-card]').count())) await page.getByRole('button', { name: /^\d+ (open )?threads?/i }).first().click();
+	await expect(page.locator('.canvas-comment-drawer.margin')).toBeVisible();
 }
 
 /** The canvas at its widest: both side panels tucked away. */
@@ -125,6 +168,8 @@ for (const { name: layout, width, height, expanded } of layouts) {
 	const tag = layout.replace(' ', '-');
 	const options = { splitWidth: expanded ? 5000 : 540 };
 	test.describe(`comment card anchor at ${layout}`, () => {
+		// Where the canvas has room for the margin column the cards are in the column; in the split layouts (a 540 px canvas) a card opens as a popover at the click.
+		const inMargin = expanded;
 		test.beforeEach(async ({ page }, testInfo) => {
 			test.skip(testInfo.project.name !== 'chromium-desktop', 'Desktop split layout only.');
 			test.setTimeout(120_000);
@@ -141,11 +186,20 @@ for (const { name: layout, width, height, expanded } of layouts) {
 				if (expanded) await expandCanvas(page);
 				await placeTarget(page, fraction);
 				await expect(strike(page, suggested)).toBeVisible();
-				await expect(marker(page, plain)).toBeVisible();
+				const note = highlight(page, `The ${SECTION} note is`);
+				await expect(note).toBeVisible();
 
-				await marker(page, plain).click();
+				if (inMargin) {
+					await showMarginColumn(page);
+					await expectMarginCard(page, note, lineOf(page, `The ${SECTION} note is`), `${name} plain card`, marginCard(page, plain));
+					await saveEvidenceScreenshot(page, testInfo, `comment-card-plain-${name}-${tag}`, { fullPage: false });
+					await expectMarginCard(page, strike(page, suggested), lineOf(page, `${SECTION} target is`), `${name} suggestion card`, marginCard(page, suggested));
+					await saveEvidenceScreenshot(page, testInfo, `comment-card-suggestion-${name}-${tag}`, { fullPage: false });
+					return;
+				}
+				await note.click();
 				await expect(popover(page)).toBeVisible();
-				await expectBesideAnchor(page, marker(page, plain), lineOf(page, `The ${SECTION} note is`), `${name} plain marker`, expanded);
+				await expectBesideAnchor(page, note, lineOf(page, `The ${SECTION} note is`), `${name} plain highlight`, expanded);
 				await saveEvidenceScreenshot(page, testInfo, `comment-card-plain-${name}-${tag}`, { fullPage: false });
 				await page.keyboard.press('Escape');
 				await expect(popover(page)).toHaveCount(0);
@@ -157,26 +211,34 @@ for (const { name: layout, width, height, expanded } of layouts) {
 			});
 		}
 
-		test(`@flow:document-comments the card hides while its text is scrolled out of view and returns beside it at ${layout}`, async ({ page, request }) => {
+		test(`@flow:document-comments a card in the margin column stays with its text as the canvas scrolls; a card opened at the click holds its place at ${layout}`, async ({ page, request }) => {
 			const { ids: [plain] } = await openSuggestionDocument(page, request, TEXT, [{ quote: `The ${SECTION} note is`, body: `Plain note on the ${SECTION} note.` }], options);
 			await expect(page.locator('.cm-scroller')).toBeVisible();
 			if (expanded) await expandCanvas(page);
 			await placeTarget(page, 0.5);
-			await expect(marker(page, plain)).toBeVisible();
-			await marker(page, plain).click();
+			const note = highlight(page, `The ${SECTION} note is`);
+			await expect(note).toBeVisible();
+			if (inMargin) {
+				await showMarginColumn(page);
+				// The card travels with its text in the column: scrolling moves both, so they stay level.
+				await expectMarginCard(page, note, lineOf(page, `The ${SECTION} note is`), 'before scrolling', marginCard(page, plain));
+				const scrolling = await canvasScroller(page);
+				await scrolling.evaluate((element) => { element.scrollTop += 90; });
+				await expectMarginCard(page, note, lineOf(page, `The ${SECTION} note is`), 'after scrolling 90px', marginCard(page, plain));
+				return;
+			}
+			await note.click();
 			await expect(popover(page)).toBeVisible();
 			// Opening a comment keeps its text in view for a few frames while the canvas settles; scroll away after that.
 			await page.evaluate(() => new Promise<void>((done) => { let frames = 0; const step = () => (++frames >= 40 ? done() : requestAnimationFrame(step)); step(); }));
 			const scroller = await canvasScroller(page);
-			await scroller.evaluate((element) => { element.scrollTop = 0; });
-			// Hidden, not closed: the comment is still open, only its text is elsewhere.
-			await expect(popover(page)).toHaveCount(1);
-			await expect(popover(page)).toHaveAttribute('aria-hidden', 'true');
-			await expect(popover(page)).toHaveCSS('clip-path', 'inset(100%)');
-			await placeTarget(page, 0.5);
-			await expect(popover(page)).not.toHaveAttribute('aria-hidden', 'true');
+			const placed = await box(popover(page));
+			const before = await scroller.evaluate((element) => element.scrollTop);
+			await wheelCanvas(page, -2000);
+			await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeLessThan(before - 1500);
+			// A card opened at the click holds its place on screen (it is anchored to the pointer, not to the text) until the reader closes it.
 			await expect(popover(page)).toBeVisible();
-			await expectBesideAnchor(page, marker(page, plain), lineOf(page, `The ${SECTION} note is`), 'after scrolling back', expanded);
+			expect((await box(popover(page))).y).toBeCloseTo(placed.y, 0);
 		});
 
 		test(`@flow:document-comments the new-comment card stays with the selection when the canvas scrolls at ${layout}`, async ({ page, request }, testInfo) => {
@@ -190,8 +252,8 @@ for (const { name: layout, width, height, expanded } of layouts) {
 			await expect(page.getByPlaceholder('Comment, or @ to tag an agent')).toBeVisible();
 			await expectBesideAnchor(page, line, line, 'composer before scrolling', expanded);
 			await saveEvidenceScreenshot(page, testInfo, `comment-card-composer-${tag}`, { fullPage: false });
-			const scroller = await canvasScroller(page);
-			await scroller.evaluate((element) => { element.scrollTop -= 120; });
+			// The reader's wheel, not a script's scrollTop: the composer's box holds focus, and only the reader's own scroll moves it.
+			await wheelCanvas(page, -120);
 			await expectBesideAnchor(page, line, line, 'composer after scrolling the canvas', expanded);
 			await saveEvidenceScreenshot(page, testInfo, `comment-card-composer-scrolled-${tag}`, { fullPage: false });
 		});

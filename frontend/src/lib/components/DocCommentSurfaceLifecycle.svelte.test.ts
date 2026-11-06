@@ -5,7 +5,7 @@ import type { CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
 import { createMentionSelection } from './comments/mentionSelection';
 
 vi.mock('$lib/stores/docSaveQueue', () => ({ flushDraft: vi.fn(), seedDraft: vi.fn() }));
-vi.mock('$lib/stores/docComments', () => ({ loadComments: vi.fn() }));
+vi.mock('$lib/stores/docComments', () => ({ docComments: { subscribe: (run: (value: object) => void) => { run({}); return () => {}; } }, loadComments: vi.fn() }));
 
 describe('comment sheet visibility', () => {
 	it('submits the selected identity after the comment surface is recreated', async () => {

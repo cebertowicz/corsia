@@ -9,7 +9,7 @@ vi.mock('$lib/api/commentSuggestions', async (importOriginal) => ({
 	...await importOriginal<typeof import('$lib/api/commentSuggestions')>(), decideSuggestion: mocks.decideSuggestion,
 }));
 vi.mock('$lib/stores/docSaveQueue', () => ({ flushDraft: mocks.flushDraft, seedDraft: mocks.seedDraft }));
-vi.mock('$lib/stores/docComments', () => ({ loadComments: mocks.loadComments }));
+vi.mock('$lib/stores/docComments', () => ({ docComments: { subscribe: (run: (value: object) => void) => { run({}); return () => {}; } }, loadComments: mocks.loadComments }));
 
 import DocCommentSurface from './DocCommentSurface.svelte';
 import { SuggestionRefused } from '$lib/api/commentSuggestions';
@@ -61,17 +61,21 @@ async function settled() {
 	await new Promise((done) => setTimeout(done));
 	flushSync();
 }
-function reopen() {
+// The margin column's exit takes a frame, as in the viewer, where closing and opening are separate events: reopening in the same step would find the column still leaving.
+const nextFrame = () => new Promise((done) => setTimeout(done, 20));
+async function reopen() {
 	surface.set(null); flushSync();
+	await nextFrame(); flushSync();
 	surface.set({ kind: 'list' }); flushSync();
 }
 // What the viewer does on a tab switch: it closes the surface and shows the other document; the user opens its comments.
-function switchDocument() {
+async function switchDocument() {
 	surface.set(null); shown.set(second); flushSync();
+	await nextFrame(); flushSync();
 	surface.set({ kind: 'list' }); flushSync();
 }
 const meanwhile = [
-	{ what: 'nothing changed', act: () => {}, sameOpening: true, sameDocument: true },
+	{ what: 'nothing changed', act: async () => {}, sameOpening: true, sameDocument: true },
 	{ what: 'the surface closed and reopened', act: reopen, sameOpening: false, sameDocument: true },
 	{ what: 'the document changed', act: switchDocument, sameOpening: false, sameDocument: false },
 ];
@@ -90,7 +94,7 @@ describe('a decision that settles after the surface moved on', () => {
 		render();
 		host.querySelector<HTMLButtonElement>('.suggestion-status button')!.click();
 		await vi.waitFor(() => expect(mocks.decideSuggestion).toHaveBeenCalled());
-		act();
+		await act();
 		decision.fail(new Error('The document could not be saved'));
 		await settled();
 		expect(host.querySelector('.suggestion-error')?.textContent ?? null).toBe(sameOpening ? 'The document could not be saved' : null);
@@ -101,7 +105,7 @@ describe('a decision that settles after the surface moved on', () => {
 		render();
 		host.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] .ct-suggestion-actions .ct-link')!.click();
 		await vi.waitFor(() => expect(mocks.decideSuggestion).toHaveBeenCalled());
-		act();
+		await act();
 		decision.fail(new Error('Network down'));
 		await settled();
 		expect(host.querySelector('[role="alert"]')?.textContent ?? null).toBe(sameOpening ? 'Network down' : null);
@@ -112,7 +116,7 @@ describe('a decision that settles after the surface moved on', () => {
 		render();
 		host.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] .ct-suggestion-accept')!.click();
 		await vi.waitFor(() => expect(mocks.decideSuggestion).toHaveBeenCalled());
-		act();
+		await act();
 		decision.fail(new SuggestionRefused('The text changed on the server', 409, 'stale'));
 		await settled();
 		expect(get(suggestionRefusals)).toEqual(sameOpening ? { 'artifact-1': { 'comment-1': 'The text changed on the server' } } : {});
@@ -123,7 +127,7 @@ describe('a decision that settles after the surface moved on', () => {
 		render();
 		host.querySelector<HTMLButtonElement>('.suggestion-status button')!.click();
 		await vi.waitFor(() => expect(mocks.decideSuggestion).toHaveBeenCalled());
-		act();
+		await act();
 		decision.succeed({ accepted: ['comment-1'], skipped: [{ id: 'comment-2', reason: 'overlaps an earlier suggestion' }], text: 'accepted document', revision: 'r3' });
 		await settled();
 		// The draft and the comments that are refreshed are the first document's, whichever one is shown now.
@@ -144,7 +148,7 @@ describe('a decision that settles after the surface moved on', () => {
 		await settled();
 		expect(host.textContent?.includes('1 skipped')).toBe(true);
 		// Its reasons are about the first document's suggestions, so they do not stay on what replaced it.
-		act();
+		await act();
 		expect(host.textContent?.includes('1 skipped')).toBe(false);
 	});
 
@@ -156,7 +160,7 @@ describe('a decision that settles after the surface moved on', () => {
 		await vi.waitFor(() => expect(mocks.decideSuggestion).toHaveBeenCalled());
 		flushSync();
 		expect(acceptAll().textContent).toBe('Accepting…');
-		act();
+		await act();
 		// The request is the first document's; one at a time, so the button stays disabled wherever it is shown.
 		expect(acceptAll().textContent).toBe('Accept all from agent-1');
 		expect(acceptAll().disabled).toBe(true);

@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { replyField, showAllThreads } from '../support/commentDrawer';
+import { inResolved, replyField, showAllThreads } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
@@ -82,6 +82,9 @@ test('@flow:document-suggestions an agent\'s suggestions are refused when stale,
 	}).toEqual([expect.objectContaining({ body: 'Why tighter?' })]);
 
 	await accept(loose).click();
+	// A decided suggestion leaves the open cards for the Resolved list, which covers the margin while it is open.
+	const resolvedEntry = drawer.locator('[data-aside-kind="resolved"]');
+	await resolvedEntry.click();
 	const accepted = row(loose).getByRole('region', { name: /^accepted suggestion by / });
 	await expect(accepted).toBeVisible();
 	await expect(editor).toContainText('The first line is tight.');
@@ -90,7 +93,9 @@ test('@flow:document-suggestions an agent\'s suggestions are refused when stale,
 	await accepted.getByRole('button', { name: /Accepted by/ }).click();
 	await expect(accepted).toContainText('Why tighter?');
 
+	await resolvedEntry.click();
 	await reject(fine).click();
+	await resolvedEntry.click();
 	const rejected = row(fine).getByRole('region', { name: /^rejected suggestion by / });
 	await expect(rejected.getByRole('button', { name: /Rejected by/ })).toBeVisible();
 	await expect(rejected.locator('.ct-cross')).toHaveCount(1);
@@ -189,7 +194,7 @@ test('@flow:document-suggestions @surface:doc-line-start commented lines start w
 test('@flow:document-suggestions keyboard reaches Accept then Reject with a visible focus ring, and Enter decides', async ({ page, request }, testInfo) => {
 	test.setTimeout(90_000);
 	await setEvidenceViewport(page, testInfo);
-	const { accept, openComments, reject, row, loose } = await openSuggestionFlow(page, request);
+	const { accept, drawer, openComments, reject, row, loose } = await openSuggestionFlow(page, request);
 	await openComments();
 	// Tab in from whatever control precedes Accept, so focus arrives the way a keyboard user's does.
 	const tabIntoAccept = async () => {
@@ -227,7 +232,7 @@ test('@flow:document-suggestions keyboard reaches Accept then Reject with a visi
 	await page.keyboard.press('Shift+Tab');
 	await expect(accept(loose)).toBeFocused();
 	await page.keyboard.press('Enter');
-	await expect(row(loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible();
+	await inResolved(drawer, () => expect(row(loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 });
 
 test('@flow:document-suggestions accept-all stays singular while its real request is busy', async ({ page, request }, testInfo) => {
@@ -244,14 +249,14 @@ test('@flow:document-suggestions accept-all stays singular while its real reques
 	await expect(drawer.locator('.suggestion-status button')).toBeDisabled();
 	await expectContrast(page, testInfo, 'document-suggestions-accept-all-busy', { accepting: { target: acceptAll, min: TEXT } });
 	delayed.release();
-	await expect(row(loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible();
+	await inResolved(drawer, () => expect(row(loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 	await expect(accept(loose)).toHaveCount(0);
 });
 
 test('@flow:document-suggestions suppresses duplicate card decisions and scopes pending labels', async ({ page, request }, testInfo) => {
 	test.setTimeout(90_000);
 	await setEvidenceViewport(page, testInfo);
-	const { accept, fine, loose, openComments, reject, row } = await openSuggestionFlow(page, request);
+	const { accept, drawer, fine, loose, openComments, reject, row } = await openSuggestionFlow(page, request);
 	await openComments();
 	let looseDecisionRequests = 0;
 	let fineDecisionRequests = 0;
@@ -270,7 +275,7 @@ test('@flow:document-suggestions suppresses duplicate card decisions and scopes 
 	expect(looseDecisionRequests).toBe(1);
 	await expectContrast(page, testInfo, 'document-suggestions-accept-pending', { accepting: { target: accepting, min: TEXT } });
 	delayedAccept.release();
-	await expect(row(loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible();
+	await inResolved(drawer, () => expect(row(loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 	expect(looseDecisionRequests).toBe(1);
 	const delayedReject = await delayDecision(page, fine);
 	const rejecting = row(fine).getByRole('button', { name: /^(Reject|Rejecting…)$/ });
@@ -282,7 +287,7 @@ test('@flow:document-suggestions suppresses duplicate card decisions and scopes 
 	expect(fineDecisionRequests).toBe(1);
 	await expectContrast(page, testInfo, 'document-suggestions-reject-pending', { rejecting: { target: rejecting, min: TEXT } });
 	delayedReject.release();
-	await expect(row(fine).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible();
+	await inResolved(drawer, () => expect(row(fine).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
 	expect(fineDecisionRequests).toBe(1);
 });
 
@@ -298,14 +303,14 @@ test('@flow:document-suggestions recovers from inline decision and accept-all fa
 	await expect(first.row(first.loose).getByRole('region', { name: /^accepted suggestion by / })).toHaveCount(0);
 	await expectContrast(page, testInfo, 'document-suggestions-accept-failure', { failure: { target: first.row(first.loose).getByRole('alert'), min: TEXT } });
 	await first.accept(first.loose).click();
-	await expect(first.row(first.loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible();
+	await inResolved(first.drawer, () => expect(first.row(first.loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 	await expect(first.row(first.loose).getByRole('alert')).toHaveCount(0);
 	await failOneDecision(page, first.fine, 'reject');
 	await first.reject(first.fine).click();
 	await expect(first.row(first.fine).getByRole('alert')).toHaveText('Synthetic reject failure');
 	await expect(first.reject(first.fine)).toBeEnabled();
 	await first.reject(first.fine).click();
-	await expect(first.row(first.fine).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible();
+	await inResolved(first.drawer, () => expect(first.row(first.fine).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
 	const second = await openSuggestionFlow(page, request);
 	await second.openComments();
 	const acceptAll = second.drawer.getByRole('button', { name: `Accept all from ${second.reviewerTitle}`, exact: true });
@@ -316,7 +321,7 @@ test('@flow:document-suggestions recovers from inline decision and accept-all fa
 	await expect(second.drawer.getByText(/skipped$/)).toHaveCount(0);
 	await expectContrast(page, testInfo, 'document-suggestions-accept-all-failure', { failure: { target: second.drawer.getByRole('alert'), min: TEXT } });
 	await acceptAll.click();
-	await expect(second.row(second.loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible();
+	await inResolved(second.drawer, () => expect(second.row(second.loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 });
 
 test('@flow:document-suggestions a document opens after the text a decided suggestion was on is cut', async ({ page, request }, testInfo) => {
@@ -350,6 +355,6 @@ test('@flow:document-suggestions a document opens after the text a decided sugge
 	await expect(drawer).toBeVisible();
 	await showAllThreads(drawer);
 	await expect(row(open)).toBeVisible();
-	await expect(row(decided).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible();
+	await inResolved(drawer, () => expect(row(decided).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
 	expect(pageErrors).toEqual([]);
 });

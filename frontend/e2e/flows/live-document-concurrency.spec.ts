@@ -1,4 +1,4 @@
-import { replyField, showAllThreads } from '../support/commentDrawer';
+import { inResolved, replyField, showAllThreads } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { createComment, renderedCount, seedLiveDocument, serverText, typeAtDocumentEnd, type LiveDocument } from '../support/liveDocument';
@@ -145,12 +145,13 @@ for (const [width, height, project] of layouts) {
 			await reader.getByRole('button', { name: /^2 threads\b/ }).click();
 			await showAllThreads(reader.getByRole('region', { name: 'Document comments', exact: true }));
 			await drawerRow(reader, red).getByRole('button', { name: 'Accept', exact: true }).click();
-			await expect(drawerRow(reader, red).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible();
+			// A decided suggestion leaves the open cards for the Resolved list.
+			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(drawerRow(reader, red).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			// The accepted replacement removed the overlapping suggestion's quote, so it can no longer be accepted.
 			await expect(drawerRow(reader, dog)).toContainText('The text this suggestion replaces has changed.');
 			await expect(drawerRow(reader, dog).getByRole('button', { name: 'Accept', exact: true })).toBeDisabled();
 			await drawerRow(reader, dog).getByRole('button', { name: 'Reject', exact: true }).click();
-			await expect(drawerRow(reader, dog).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible();
+			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(drawerRow(reader, dog).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
 			await expectConverged([reader, writer], document, request, [`The quick red fox jumps ${stamp}.`, remote], ['brown', 'dog jumps']);
 			await reader.screenshot({ path: testInfo.outputPath(`live-overlap-decided-${width}.png`) });
 		} finally {
@@ -173,7 +174,7 @@ for (const [width, height, project] of layouts) {
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
 			await showAllThreads(drawer);
 			await drawer.getByRole('button', { name: `Accept all from ${reviewer.title}`, exact: true }).click();
-			await expect(drawerRow(reader, red).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible();
+			await inResolved(drawer, () => expect(drawerRow(reader, red).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			await expect(drawer.getByText('1 skipped', { exact: true })).toBeVisible();
 			await expect(drawerRow(reader, dog).getByRole('region', { name: /^accepted suggestion by / })).toHaveCount(0);
 			await expectConverged([reader, writer], document, request, [`The quick red fox jumps ${stamp}.`], ['brown', 'dog jumps']);
@@ -219,7 +220,9 @@ for (const [width, height, project] of layouts) {
 			expect(await replyState(), 'a remote edit never takes the reply draft or its focus').toEqual(draft);
 
 			held.release();
-			await expect(drawerRow(reader, loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible();
+			// The decided card moved to the Resolved list; read that from its entry, since opening the list would move focus off the draft.
+			await expect(drawer.locator('[data-aside-kind="resolved"]')).toContainText('Resolved · 1');
+			await expect(drawerRow(reader, loose)).toHaveCount(0);
 			await expect(reader.locator('.cm-content')).toContainText(`The tight line ${stamp}.`);
 			await expect.poll(replyState, { message: 'the settled Accept and its comments load leave the draft alone' }).toEqual(draft);
 			await expectConverged([reader, writer], document, request, [`The tight line ${stamp}.`, remote], ['loose line']);

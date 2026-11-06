@@ -14,7 +14,7 @@ function mount(doc: string, extra: Extension = []) {
 }
 
 const frame = () => new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-const buttons = (view: EditorView) => [...view.dom.querySelectorAll<HTMLButtonElement>('.cm-comment-marker')];
+const lines = (view: EditorView) => [...view.dom.querySelectorAll<HTMLElement>('.cm-comment-line')];
 
 async function show(view: EditorView, ranges: CommentRange[]) {
 	view.dispatch({ effects: setCommentRanges.of(ranges) });
@@ -63,58 +63,32 @@ const placeAt = (element: Element, top: number) => {
 };
 
 describe('comment rail', () => {
-	it('draws a glyph button for one thread and a count button for several', async () => {
+	it('draws nothing a person can press or focus: one empty hidden element per commented line', async () => {
 		const view = mount(`alpha${"\n".repeat(60)}beta`);
-		const open = vi.fn();
-		await show(view, [{ from: 0, to: 5, id: 'a', onMarkerFocus: open }]);
-		const [single] = buttons(view);
-		expect(single.getAttribute('aria-label')).toBe('Open comment');
-		expect(single.querySelector('svg')).not.toBeNull();
-		expect(single.textContent).toBe('');
-		single.click();
-		expect(open).toHaveBeenCalledWith(['a'], single, undefined, expect.any(MouseEvent));
-		await show(view, [{ from: 0, to: 2, id: 'a', onMarkerFocus: open }, { from: 2, to: 5, id: 'b', onMarkerFocus: open }]);
-		expect(buttons(view)).toHaveLength(1);
-		expect(buttons(view)[0].getAttribute('aria-label')).toBe('Open 2 comments');
-		expect(buttons(view)[0].textContent).toBe('2');
-		expect(buttons(view)[0].dataset.commentIds).toBe('a,b');
+		await show(view, [{ from: 0, to: 5, id: 'a', onMarkerFocus: vi.fn() }]);
+		expect(view.dom.querySelector('.cm-comment-rail')?.querySelector('button, svg, [tabindex]')).toBeNull();
+		expect(view.dom.querySelector('.cm-comment-rail')?.getAttribute('aria-hidden')).toBe('true');
+		const [only] = lines(view);
+		expect(only.dataset.commentIds).toBe('a');
+		expect(only.textContent).toBe('');
 	});
 
-	it('marks a waiting reply on a single glyph and on a cluster count, and clears it from both', async () => {
+	it('lists the threads of one line together and keeps each thread once', async () => {
 		const view = mount('alpha');
-		const open = vi.fn();
-		await show(view, [{ from: 0, to: 5, id: 'a', onMarkerFocus: open, replyWaiting: true }]);
-		expect(buttons(view)[0].querySelector('circle')?.getAttribute('fill')).toBe('var(--accent)');
-		expect(buttons(view)[0].querySelector('circle')?.getAttribute('stroke')).toBe('none');
-		const cluster = (waiting: boolean) => [
-			{ from: 0, to: 2, id: 'a', onMarkerFocus: open, replyWaiting: waiting },
-			{ from: 2, to: 5, id: 'b', onMarkerFocus: open },
-		];
-		await show(view, cluster(true));
-		const [count] = buttons(view);
-		expect(count.textContent).toBe('2');
-		expect(count.querySelector('.cm-comment-dot')).not.toBeNull();
-		await show(view, cluster(false));
-		expect(buttons(view)[0]).toBe(count);
-		expect(count.querySelector('.cm-comment-dot')).toBeNull();
-		expect(count.textContent).toBe('2');
+		await show(view, [{ from: 0, to: 2, id: 'a' }, { from: 2, to: 5, id: 'b' }, { from: 1, to: 4, id: 'a' }]);
+		expect(lines(view)).toHaveLength(1);
+		expect(lines(view)[0].dataset.commentIds).toBe('a,b');
 	});
 
-	it('draws a marker dashed only when every comment in it has lost its text, with no highlight on the text', async () => {
+	it('flags a line whose threads have all lost their text', async () => {
 		const view = mount('alpha\nbeta');
-		const open = vi.fn();
-		await show(view, [{ from: 6, to: 6, id: 'gone', point: true, lost: true, onMarkerFocus: open }]);
-		expect(buttons(view)).toHaveLength(1);
-		expect(buttons(view)[0].dataset.lost).toBe('true');
-		expect(view.dom.querySelector('.cm-comment-anchor')).toBeNull();
-		await show(view, [{ from: 6, to: 6, id: 'gone', point: true, lost: true, onMarkerFocus: open }, { from: 6, to: 10, id: 'live', onMarkerFocus: open }]);
-		expect(buttons(view)[0].dataset.lost).toBeUndefined();
-		expect(view.dom.querySelectorAll('.cm-comment-anchor')).toHaveLength(1);
-		await show(view, [{ from: 6, to: 10, id: 'live', onMarkerFocus: open }]);
-		expect(buttons(view)[0].dataset.lost).toBeUndefined();
+		await show(view, [{ from: 0, to: 5, id: 'a' }, { from: 6, to: 6, id: 'b', point: true, lost: true }]);
+		expect(lines(view).map((line) => [line.dataset.commentIds, line.dataset.orphan ?? null])).toEqual([['a', null], ['b', 'true']]);
+		await show(view, [{ from: 0, to: 5, id: 'a' }, { from: 1, to: 1, id: 'b', point: true, lost: true }]);
+		expect(lines(view).map((line) => [line.dataset.commentIds, line.dataset.orphan ?? null])).toEqual([['a,b', null]]);
 	});
 
-	it('moves a point marker with the text around it and keeps it when that text is deleted', async () => {
+	it('moves a point range with the text around it and keeps it when that text is deleted', async () => {
 		const view = mount('alpha\nbeta\ngamma');
 		await show(view, [{ from: 6, to: 6, id: 'gone', point: true, lost: true }]);
 		view.dispatch({ changes: { from: 0, to: 0, insert: 'start ' } });
@@ -123,35 +97,7 @@ describe('comment rail', () => {
 		expect(view.state.field(commentRanges)).toMatchObject([{ id: 'gone', from: 6, to: 6 }]);
 	});
 
-	it('keeps the same button, and its focus, when a regroup still holds the focused thread', async () => {
-		const view = mount('alpha');
-		const open = vi.fn();
-		await show(view, [{ from: 0, to: 2, id: 'a', onMarkerFocus: open }, { from: 2, to: 5, id: 'b', onMarkerFocus: open }]);
-		const [before] = buttons(view);
-		before.focus();
-		await show(view, [{ from: 0, to: 2, id: 'a', onMarkerFocus: open }]);
-		const [after] = buttons(view);
-		expect(after).toBe(before);
-		expect(document.activeElement).toBe(before);
-		expect(after.dataset.commentIds).toBe('a');
-	});
-
-	it('removes a marker whose threads are gone and returns focus to the editor', async () => {
-		vi.useFakeTimers({ toFake: ['setTimeout'] });
-		try {
-			const view = mount('alpha');
-			await show(view, [{ from: 0, to: 5, id: 'a' }]);
-			buttons(view)[0].focus();
-			await show(view, []);
-			expect(buttons(view)).toHaveLength(0);
-			vi.runAllTimers();
-			expect(document.activeElement).toBe(view.contentDOM);
-		} finally {
-			vi.useRealTimers();
-		}
-	});
-
-	it('reserves the pointer policy rail on the editor itself, so a mount outside the viewer agrees', () => {
+	it('reserves the pointer policy inset on the editor itself, so a mount outside the viewer agrees', () => {
 		const view = mount('alpha');
 		expect(view.dom.closest('.doc')).toBeNull();
 		expect(view.dom.style.getPropertyValue('--doc-rail')).toBe(`${railWidth()}px`);
@@ -159,48 +105,29 @@ describe('comment rail', () => {
 		expect(view.dom.style.getPropertyValue('--doc-rail')).toBe('');
 	});
 
-	it('keeps the whole hit box when the text inset is narrower, and centres the glyph in that inset', async () => {
-		const view = mount('alpha');
-		view.contentDOM.style.paddingLeft = '24px';
-		await show(view, [{ from: 0, to: 5, id: 'a' }]);
-		const [{ style }] = buttons(view);
-		expect(railWidth()).toBe(44);
-		expect([style.width, style.height]).toEqual(['44px', '44px']);
-		expect(style.paddingRight).toBe(`${44 - 24}px`);
-	});
-
-	it('leaves no spare padding when the inset is the whole rail', async () => {
-		const view = mount('alpha');
-		view.contentDOM.style.paddingLeft = '44px';
-		await show(view, [{ from: 0, to: 5, id: 'a' }]);
-		const [{ style }] = buttons(view);
-		expect([style.width, style.height, style.paddingRight]).toEqual(['44px', '44px', '0px']);
-	});
-
-	it('drops the marker together with the highlight when an edit collapses its anchor', async () => {
+	it('drops the line together with the highlight when an edit collapses its anchor', async () => {
 		const view = mount('alpha\nbeta');
 		await show(view, [{ from: 0, to: 5, id: 'a' }, { from: 6, to: 10, id: 'b' }]);
-		// jsdom lays out no lines, so both threads share one marker; the collapsed one must leave it.
-		expect(buttons(view).map((button) => button.dataset.commentIds)).toEqual(['a,b']);
+		expect(lines(view).map((line) => line.dataset.commentIds)).toEqual(['a', 'b']);
 		view.dispatch({ changes: { from: 0, to: 5 } });
 		await frame();
 		expect(view.dom.querySelectorAll('.cm-comment-anchor')).toHaveLength(1);
-		expect(buttons(view).map((button) => button.dataset.commentIds)).toEqual(['b']);
+		expect(lines(view).map((line) => line.dataset.commentIds)).toEqual(['b']);
 	});
 
-	it('puts the marker of a line drawn as a block widget at the widget, and moves it when the widget resizes', async () => {
+	it('puts a line drawn as a block widget at the widget, and moves it when the widget resizes', async () => {
 		const observer = stubResizeObserver();
 		const view = mount('alpha\nimage\ngamma', blockLine(6, 11));
 		const widget = view.contentDOM.querySelector('.block-widget')!;
 		placeAt(widget, 300);
 		await show(view, [{ from: 6, to: 11, id: 'a' }]);
-		expect(buttons(view)[0].style.top).toBe('300px');
+		expect(lines(view)[0].style.top).toBe('300px');
 		// An image above that loads, or a theme that changes the widget's size, moves it without any editor update.
 		expect(observer.watches(widget)).toBe(true);
 		placeAt(widget, 344);
 		observer.resize(widget);
 		await frame();
-		expect(buttons(view)[0].style.top).toBe('344px');
+		expect(lines(view)[0].style.top).toBe('344px');
 	});
 
 	it('regroups when an uncommented block widget above a commented line resizes', async () => {
@@ -210,19 +137,12 @@ describe('comment rail', () => {
 		const line = view.contentDOM.querySelector('.cm-line')!;
 		placeAt(line, 20);
 		await show(view, [{ from: 6, to: 11, id: 'a' }]);
-		expect(buttons(view)[0].style.top).toBe('20px');
+		expect(lines(view)[0].style.top).toBe('20px');
 		// The image above loads: the commented line moves down while the text's height may stay pinned at its minimum.
 		expect(observer.watches(widget)).toBe(true);
 		placeAt(line, 220);
 		observer.resize(widget);
 		await frame();
-		expect(buttons(view)[0].style.top).toBe('220px');
-	});
-
-	it('lists every thread once even when one range is repeated', async () => {
-		const view = mount('alpha');
-		await show(view, [{ from: 0, to: 3, id: 'a' }, { from: 1, to: 5, id: 'a' }]);
-		expect(buttons(view)).toHaveLength(1);
-		expect(buttons(view)[0].dataset.commentIds).toBe('a');
+		expect(lines(view)[0].style.top).toBe('220px');
 	});
 });

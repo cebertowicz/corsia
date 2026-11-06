@@ -2,6 +2,7 @@
 	import { resolveParticipant, userParticipant } from '$lib/stores/participants';
 	import CommentMarkdownBody from './CommentMarkdownBody.svelte';
 	import NewMarker from './NewMarker.svelte';
+	import MiddleName from '$lib/components/MiddleName.svelte';
 
 	export type CommentReplyData = {
 		id?: string;
@@ -15,8 +16,10 @@
 		createdAt?: string;
 	};
 
-	let { replies, newReplyIds = new Set<string>(), collapseReplyIds = newReplyIds, onNewestReplyRendered }: {
+	let { replies, newReplyIds = new Set<string>(), collapseReplyIds = newReplyIds, onNewestReplyRendered, fullNames = false }: {
 		replies: CommentReplyData[];
+		/** The thread is open: each author's whole name shows, wrapping. */
+		fullNames?: boolean;
 		newReplyIds?: ReadonlySet<string>;
 		collapseReplyIds?: ReadonlySet<string>;
 		onNewestReplyRendered?: (element: HTMLElement | undefined) => void;
@@ -28,9 +31,10 @@
 	let newest = $state<HTMLElement>();
 
 	const visibleFrom = $derived.by(() => {
-		if (expanded || replies.length <= 3) return 0;
+		// Up to 5 replies show whole; a longer thread shows everything from its earliest unread reply on, or its last 2 when none is unread.
+		if (expanded || replies.length <= 5) return 0;
 		const firstNew = replies.findIndex((reply) => !!reply.id && collapseReplyIds.has(reply.id));
-		return firstNew >= 0 ? firstNew : replies.length - 1;
+		return firstNew >= 0 ? Math.min(firstNew, replies.length - 2) : replies.length - 2;
 	});
 	const hiddenCount = $derived(visibleFrom);
 
@@ -62,7 +66,7 @@
 		<div class="ct-reply" class:new={isNew} data-reply-id={reply.id} use:newestElement={index === replies.length - 1}>
 			<div class="ct-msg-meta">
 				<!-- The reply rail supplies grouping; an author dot would repeat it. -->
-				<span class="ct-msg-author">{author.name}</span>
+				<span class="ct-msg-author" title={author.name}><MiddleName name={author.name} full={fullNames} /></span>
 				<span class="ct-at">{reply.at}</span>
 				{#if isNew}<NewMarker />{/if}
 			</div>
@@ -76,8 +80,10 @@
 	.ct-earlier { align-self: flex-start; min-height: var(--space-6); padding: 0; border: 0; background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-caption); font-weight: var(--fw-medium); cursor: pointer; }
 	.ct-earlier:hover { text-decoration: underline; }
 	.ct-reply { display: flex; flex-direction: column; gap: var(--space-1); }
-	.ct-msg-meta { display: flex; align-items: center; gap: var(--space-1); }
-	.ct-msg-author { font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--text-secondary); }
-	.ct-at { font-size: var(--text-caption); color: var(--text-tertiary); }
+	/* One line, as the thread's own row: the name truncates in the middle; the time and New keep their width. */
+	.ct-msg-meta { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
+	.ct-msg-author { display: flex; min-width: 0; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--text-secondary); white-space: nowrap; }
+	.ct-at { flex: none; font-size: var(--text-caption); color: var(--text-tertiary); white-space: nowrap; }
+	.ct-msg-meta > :global(.ct-new) { flex: none; white-space: nowrap; }
 
 </style>

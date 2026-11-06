@@ -87,7 +87,7 @@ for (const width of [393, 1440]) {
 				const chipHit = () => page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-doc-reply-chip]'), point);
 				expect(await chipHit()).toBe(false);
 				const layer = await page.evaluate(() => (history.state as { backLayer?: number } | null)?.backLayer ?? null);
-				await page.getByRole('button', { name: 'Done', exact: true }).click();
+				await page.getByRole('button', { name: 'Close', exact: true }).click();
 				await expect(backdrop.first()).toBeVisible();
 				await expect(overlay(page).locator('[data-doc-reply-chip]')).toHaveCount(0);
 				expect(await chipHit()).toBe(false);

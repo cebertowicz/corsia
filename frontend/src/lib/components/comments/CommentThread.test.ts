@@ -34,6 +34,15 @@ describe('CommentThread', () => {
 		expect(onReply).toHaveBeenCalledWith('c1', 'looks right', [], []);
 	});
 
+	it('draws no Reply field while hideReply is set, unless a reply is half typed', () => {
+		render(thread({ replies: [reply] }), false, { hideReply: true });
+		expect(host.querySelector('.ct-input')).toBeNull();
+		expect(host.textContent).toContain('1 reply');
+		unmount(component!); host.remove();
+		render(thread(), false, { hideReply: true, replyText: 'half a reply' });
+		expect(host.querySelector<HTMLTextAreaElement>('.ct-input')?.value).toBe('half a reply');
+	});
+
 	it('restores a reply selection across remounts and saves a click-placed caret', async () => {
 		const onReplySelection = vi.fn();
 		render(thread(), false, { showReply: true, replyText: 'draft text', replySelection: [2, 5], onReplySelection });
@@ -169,7 +178,8 @@ describe('CommentThread', () => {
 		const replies = Array.from({ length: 6 }, (_, index) => ({ ...reply, id: `r${index}`, text: `reply ${index}`, createdAt: `2026-10-16T18:0${index}:00Z` }));
 		render(thread({ replies, newReplyIds: [] }), false, { onViewed });
 		expect(host.querySelector('.ct-new')).toBeNull();
-		expect(host.textContent).toContain('Show 5 earlier replies');
+		// Up to 5 replies show whole; a longer thread with nothing unread shows its last 2.
+		expect(host.textContent).toContain('Show 4 earlier replies');
 		expect(host.textContent).toContain('reply 5');
 		await Promise.resolve(); flushSync();
 		expect(onViewed).not.toHaveBeenCalled();
@@ -272,6 +282,29 @@ describe('CommentThread', () => {
 		expect(host.querySelector('.ct-orphan')?.textContent).toContain('text this comment was on has changed');
 	});
 
+	it('labels a card whose original text is gone with the amber note and keeps its place', () => {
+		render(thread({ orphaned: true, detached: true }));
+		expect(host.querySelector('.ct-orphan')?.textContent).toBe('This text is no longer in the document');
+		expect(host.querySelector('.ct.orphaned')).not.toBeNull();
+	});
+
+	it('lets the person read a long deleted text in full, and clamps it again, with the Show more control chat comments use', () => {
+		const long = 'The deleted paragraph. '.repeat(60);
+		render(thread({ orphaned: true, detached: true, anchor: long }));
+		const more = () => host.querySelector<HTMLButtonElement>('[data-quote-more]')!;
+		expect([more().textContent, more().getAttribute('aria-expanded')]).toEqual(['Show more', 'false']);
+		expect(host.querySelector<HTMLElement>('.quote-line')!.style.getPropertyValue('--quote-lines')).toBe('1');
+		more().click(); flushSync();
+		expect([more().textContent, more().getAttribute('aria-expanded')]).toEqual(['Show less', 'true']);
+		expect(host.querySelector<HTMLElement>('.quote-line')!.style.getPropertyValue('--quote-lines')).toBe('unset');
+	});
+
+	it('shows a short deleted text whole with no control', () => {
+		render(thread({ orphaned: true, detached: true, anchor: 'A short deleted sentence.' }));
+		expect(host.querySelector('[data-quote-more]')).toBeNull();
+		expect(host.querySelector('.quote')?.textContent).toContain('A short deleted sentence.');
+	});
+
 	it('renders a suggestion diff inside the thread', () => {
 		render(thread({ anchor: 'old text', replacement: 'new text' }));
 		expect(host.querySelector('.diff')?.textContent).toContain('old text');
@@ -317,6 +350,7 @@ describe('CommentThread', () => {
 		expect(accept.title).toBe('The text changed after this suggestion');
 		expect(host.querySelector('.ct-orphan')?.textContent).toBe('The text changed after this suggestion');
 		expect(host.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.disabled).toBe(false);
+		expect(host.querySelector('.ct-input, .ct-compose')).not.toBeNull();
 	});
 
 	it('collapses a decided suggestion with attribution', () => {

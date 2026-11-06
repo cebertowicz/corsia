@@ -315,7 +315,7 @@ test.describe('@flow:image-region-comments @surface:documents image comment revi
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
 		const desktop = await openSuggestionDocument(page, request, text, [{ quote: 'text comment is beside', body: 'Text review note beside an image comment.' }]);
-		await page.locator(`.cm-comment-marker[data-comment-ids*="${desktop.ids[0]}"]`).click();
+		await page.locator('.cm-comment-anchor').first().click();
 		await expect(page.locator('[data-popover]')).toBeVisible();
 		await still(page, testInfo, '1440-36-text-comment-card-light');
 

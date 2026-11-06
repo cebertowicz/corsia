@@ -3,6 +3,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
+import { openResolved } from '../support/commentDrawer';
 import { isolatedDb } from '../support/imageRegionComments';
 import { comment, deleteSeededThreads, journey, open, seed, settled, shot, type Case, type Doc } from '../support/reviewFixtures';
 
@@ -51,13 +52,6 @@ async function seedReadOnly(request: APIRequestContext, baseTitle: string): Prom
 	expect(registered.ok(), await registered.text()).toBeTruthy();
 	return { ...doc, name, docPath, artifactId: (await registered.json()).artifact.id as string };
 }
-async function chooseFilter(page: Page, name: 'Open' | 'Resolved' | 'All') {
-	const filter = drawerOf(page).locator('[data-drawer-filter]');
-	await filter.click();
-	await drawerOf(page).getByRole('menu', { name: 'Filter comments', exact: true }).getByRole('menuitemradio', { name, exact: true }).click();
-	await expect(filter).toHaveAttribute('aria-label', `Filter comments: ${name}`);
-}
-
 journey('filters, replies and a jump near the end of the document', FINE_AND_PHONE, async ({ page, request, info, mode, theme }) => {
 	const doc = await seed(request, `Drawer states ${mode} ${theme}`);
 	const first = await comment(request, doc, 'Ring two should wait.', 2);
@@ -84,35 +78,34 @@ journey('filters, replies and a jump near the end of the document', FINE_AND_PHO
 	}
 	await shot(page, 'rs-13b-thread-replies-rendered', info);
 
-	// The All filter counts every thread, and its menu item carries a visible check, not colour alone.
-	await chooseFilter(page, 'All');
-	await expect(drawer.locator('.drawer-heading h2')).toContainText('3 threads');
-	await expect(drawer.locator('[data-comment-jump]')).toHaveCount(3);
-	await shot(page, 'rs-14-filter-all-with-count', info);
-	await drawer.locator('[data-drawer-filter]').click();
-	const menu = drawer.getByRole('menu', { name: 'Filter comments', exact: true });
-	await expect(menu.getByRole('menuitemradio', { checked: true })).toHaveCount(1);
-	await expect(menu.getByRole('menuitemradio', { name: 'All', exact: true }).locator('.filter-check svg')).toHaveCount(1);
-	await expect(menu.getByRole('menuitemradio', { name: 'Open', exact: true }).locator('.filter-check svg')).toHaveCount(0);
-	await shot(page, 'rs-15-filter-menu-check', info);
-	await menu.getByRole('menuitemradio', { name: 'Open', exact: true }).click();
-	await expect(drawer.locator('[data-drawer-filter]')).toHaveAttribute('aria-label', 'Filter comments: Open');
+	// The resolved thread sits under its own entry; opening it lists that thread and leaves the open list as it was.
+	const resolvedEntry = drawer.locator('[data-aside-kind="resolved"]');
+	await expect(resolvedEntry).toContainText('Resolved · 1');
+	await expect(drawer.locator('[data-drawer-filter]'), 'a text document has no filter').toHaveCount(0);
+	await openResolved(drawer);
+	await expect(drawer.getByRole('region', { name: /^Resolved comment by / })).toHaveCount(1);
+	await shot(page, 'rs-14-resolved-entry-open', info);
+	await resolvedEntry.click();
+	await expect(drawer.getByRole('region', { name: /^Resolved comment by / })).toHaveCount(0);
+	await expect(drawer.locator('[data-comment-jump]')).toHaveCount(2);
 
-	// Every writable open thread keeps its reply field visible in place.
+	// A writable open thread shows its reply field in place; a margin card beside the text shows it only once picked.
 	const firstCard = drawer.getByRole('region', { name: /^Comment by / }).first();
 	const field = firstCard.locator('.ct-input');
+	if (!(await field.count())) await firstCard.locator('.ct-head').click({ position: { x: 14, y: 10 } });
 	await expect(field).toBeVisible();
 	await expect(field).toBeInViewport();
 	await shot(page, mode === 'phone' ? 'rs-16-reply-open-touch' : 'rs-16-reply-open-fine-pointer', info);
 
 	// A quote near the end of the document scrolls the document under the drawer and keeps that thread's Reply in view.
-	const last = drawer.locator('[data-comment-jump]').last();
-	await last.click();
+	// A margin card is picked by its header (its jump button lies under it); a sheet row by its jump button.
+	const last = mode === 'phone' ? drawer.locator('[data-comment-jump]').last() : drawer.getByRole('region', { name: /^Comment by / }).last().locator('.ct-head');
+	await last.click(mode === 'phone' ? undefined : { position: { x: 14, y: 10 } });
 	await settled(page);
 	await expect(page.locator('.cm-content')).toContainText('Step 12:');
 	await expect(drawer).toBeVisible();
-	// Every writable open thread keeps its reply field available; the selected thread stays in view.
-	await expect.poll(() => drawer.locator('.ct-input').count()).toBe(2);
+	// The sheet keeps every writable open thread's reply field; the margin column only the picked card's. The picked thread stays in view.
+	await expect.poll(() => drawer.locator('.ct-input').count()).toBe(mode === 'phone' ? 2 : 1);
 	// The drawer owns scrolling, so the reply must be fully contained in its scrollport;
 	// browser-viewport containment is unrelated once the document has scrolled underneath it.
 	const replyField = drawer.locator('.ct-input').last();
@@ -158,22 +151,18 @@ journey('the empty and the resolved-empty drawer', FINE_AND_PHONE, async ({ page
 	await shot(page, 'rs-19-empty', info);
 });
 
-journey('Resolved with nothing resolved offers Show open', [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
+journey('with nothing resolved the drawer offers no Resolved entry and no filter', [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
 	const doc = await seed(request, `Drawer resolved empty ${mode} ${theme}`);
 	await comment(request, doc, 'Ring two should wait.', 2);
 	await comment(request, doc, 'Add a rollback line.', 5);
 	await open(page, doc, mode, theme);
 	await pill(page).click();
 	const drawer = drawerOf(page);
-	await chooseFilter(page, 'Resolved');
-	await expect(drawer.getByText('No resolved comments.')).toBeVisible();
-	const showOpen = drawer.getByRole('button', { name: 'Show open · 2' });
-	await expect(showOpen).toBeVisible();
-	await settled(page);
-	await shot(page, 'rs-20-resolved-empty-show-open', info);
-	await showOpen.click();
-	await expect(drawer.locator('[data-drawer-filter]')).toHaveAttribute('aria-label', 'Filter comments: Open');
 	await expect(drawer.locator('[data-comment-jump]')).toHaveCount(2);
+	await expect(drawer.locator('[data-aside-kind="resolved"]')).toHaveCount(0);
+	await expect(drawer.locator('[data-drawer-filter]')).toHaveCount(0);
+	await settled(page);
+	await shot(page, 'rs-20-nothing-resolved', info);
 });
 
 journey('a read-only document lists comments without writing controls', [['1440 light pane closed', 'closed', 'light'], ['393 light', 'phone', 'light']], async ({ page, request, info, mode, theme }) => {
@@ -241,9 +230,10 @@ journey('the server names the new replies, a long thread keeps only them and the
 		await reply(request, doc, parent, 'Thanks, that works for me.');
 	} else {
 		const earlier = [];
-		for (const text of ['First reply.', 'Second reply.', 'Third reply.']) earlier.push(await agentReply(request, doc, parent, text));
+		// Up to five replies show whole, so the collapse needs a longer thread.
+		for (const text of ['First reply.', 'Second reply.', 'Third reply.', 'Fourth reply.', 'Fifth reply.', 'Sixth reply.']) earlier.push(await agentReply(request, doc, parent, text));
 		await agentReply(request, doc, parent, 'Newest reply, not seen yet.');
-		await markViewed(request, doc, parent, earlier[2]);
+		await markViewed(request, doc, parent, earlier[5]);
 	}
 	await open(page, doc, mode, theme);
 	await pill(page).click();
@@ -255,9 +245,10 @@ journey('the server names the new replies, a long thread keeps only them and the
 		await expect(drawer.getByText('Thanks, that works for me.')).toBeVisible();
 		await shot(page, 'rs-23a-new-replies-marked', info);
 	} else {
-		await expect(drawer.getByRole('button', { name: 'Show 3 earlier replies' })).toBeVisible();
+		await expect(drawer.getByRole('button', { name: 'Show 5 earlier replies' })).toBeVisible();
 		await expect(drawer.locator('.ct-new')).toHaveCount(1);
 		await expect(drawer.getByText('Newest reply, not seen yet.')).toBeVisible();
+		await expect(drawer.getByText('Sixth reply.')).toBeVisible();
 		await expect(drawer.getByText('First reply.')).toBeHidden();
 		await shot(page, 'rs-23b-earlier-replies-collapsed', info);
 	}

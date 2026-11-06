@@ -49,12 +49,13 @@ async function serverAnswers(...rows: ReturnType<typeof serverRow>[]) {
 	await loadComments(ARTIFACT);
 	flushSync();
 }
-function openCard() {
+// `narrow` is the single-thread sheet; a wide canvas (`false`) is the margin column.
+function openCard(narrow = true) {
 	host = document.createElement('div'); document.body.appendChild(host);
 	component = mount(DocCommentSurface, {
 		target: host,
 		props: Object.defineProperties({
-			state: { kind: 'thread', id: 'comment-1' }, anchor: document.createElement('button'), narrow: false,
+			state: { kind: 'thread', id: 'comment-1' }, anchor: document.createElement('button'), narrow,
 			comments: [] as DocComment[], focusedId: null, draft: null, onClose: vi.fn(), restoreFocus: vi.fn(), onFocus: vi.fn(), onSubmit: vi.fn(),
 			onReply: vi.fn(), onResolve: vi.fn(), onAgree: vi.fn(), target, artifactId: ARTIFACT,
 		}, Object.getOwnPropertyDescriptors({
@@ -72,7 +73,8 @@ function edit(from: number, to: number, insert: string) {
 	screenText.set(before.slice(0, from) + insert + before.slice(to));
 	flushSync();
 }
-const group = () => document.body.querySelector('h3')?.textContent;
+// The single-thread sheet draws no section heading (the card says it itself), so the section is read off the card's own note.
+const group = () => document.body.querySelector('.ct-orphan') ? 'Text changed' : 'Open comments';
 const accept = () => document.body.querySelector<HTMLButtonElement>('.ct-suggestion-accept')!;
 const alert = () => document.body.querySelector('[role="alert"]')?.textContent ?? null;
 const expectAttached = () => {
@@ -109,6 +111,19 @@ afterEach(() => {
 });
 
 describe('a suggestion card and the text it replaces', () => {
+	it('on a wide canvas keeps the card in the margin column, with its note, when it loses its text, and has no list for it', async () => {
+		await serverAnswers(serverRow(false));
+		openCard(false);
+		expect(document.body.querySelector('[data-margin-card="comment-1"]')).not.toBeNull();
+		expect(document.body.querySelector('[data-margin-card="comment-1"] .ct-orphan')).toBeNull();
+		edit(6, 7, 'a');
+		expect(document.body.querySelector('[data-margin-card="comment-1"]')).not.toBeNull();
+		expect(document.body.querySelector('[data-margin-card="comment-1"] .ct-orphan')?.textContent).toBe('The text this suggestion replaces has changed.');
+		expect(document.body.querySelector('.aside-button, .margin-aside, .orphans-button')).toBeNull();
+		edit(6, 7, 'i');
+		expect(document.body.querySelector('[data-margin-card="comment-1"] .ct-orphan')).toBeNull();
+	});
+
 	it('keeps a comment on unsaved typing attached through a load that says the saved file lacks it', async () => {
 		// The user types a sentence and comments on it before the draft saves; the saved file has neither yet.
 		edit(START.length, START.length, ' Very new.');
@@ -290,8 +305,7 @@ describe('what the user sees for each way a suggestion card is attached or orpha
 		const card = listed().find((comment) => comment.id === 'comment-1')!;
 		expect(canvasCommentHighlights(listed(), get(screenText), null, undefined).some((mark) => mark.id === 'comment-1')).toBe(sees.highlighted);
 		expect(canvasCommentRange(card, get(screenText))).toEqual(sees.jump);
-		// The drawer lists every card in document order.
-		surface.set({ kind: 'list' }); flushSync();
-		expect([...host.querySelectorAll('[data-comment-id]')].map((item) => item.getAttribute('data-comment-id'))).toEqual(sees.order);
+		// The margin places its cards in this order.
+		expect(listed().map((item) => item.id)).toEqual(sees.order);
 	});
 });

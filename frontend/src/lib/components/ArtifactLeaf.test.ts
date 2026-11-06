@@ -93,6 +93,7 @@ import { setWs } from '$lib/ws/state';
 import { connectionState } from '$lib/stores/connection';
 import { LIVE_OPEN_WAIT_MS, startLiveDocuments } from '$lib/stores/liveDocuments';
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
+import { arrivedDocComments } from '$lib/stores/docComments';
 import { openTabDocumentImage, recordTabDocumentPlace, tabDocumentImage, tabViewState } from '$lib/stores/tabViewState';
 import { EditorView } from '@codemirror/view';
 
@@ -205,6 +206,18 @@ beforeEach(() => {
 	document.body.appendChild(host);
 });
 
+// jsdom ranges have no layout; the margin's anchor hold reads one, so give them an empty one (removed after each test).
+function giveRangesLayout() {
+	const layout = Range.prototype as Partial<Pick<Range, 'getClientRects' | 'getBoundingClientRect'>>;
+	layout.getClientRects = () => [] as unknown as DOMRectList;
+	layout.getBoundingClientRect = () => new DOMRect();
+}
+
+afterEach(() => {
+	const layout = Range.prototype as Partial<Pick<Range, 'getClientRects' | 'getBoundingClientRect'>>;
+	delete layout.getClientRects; delete layout.getBoundingClientRect;
+});
+
 afterEach(() => {
 	stopShowing?.(); stopShowing = null;
 	if (component) unmount(component);
@@ -304,6 +317,7 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			const rect = measure.call(this);
 			return this.classList.contains('doc') ? { ...rect, width: 1000, right: rect.left + 1000 } as DOMRect : rect;
 		});
+		giveRangesLayout();
 		try {
 			mocks.fetchContent.mockResolvedValue({ text: 'Changed document', revision: 'r-1', writable: true, artifact: { id: 'art-comments' } });
 			mocks.setComments({ 'art-comments': [{ id: 'orphan', from: 0, to: 5, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
@@ -492,6 +506,16 @@ describe('ArtifactLeaf in-canvas comments', () => {
 });
 
 describe('reply stamping through the document canvas', () => {
+	// jsdom lays nothing out: give the document column the width a wide canvas has, so the comments open as margin cards (a narrow canvas opens a resolved-only sheet), and a range its layout reads.
+	beforeEach(() => {
+		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
+		const measure = HTMLElement.prototype.getBoundingClientRect;
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+			const rect = measure.call(this);
+			return this.classList.contains('doc') ? { ...rect, width: 1000, right: rect.left + 1000 } as DOMRect : rect;
+		});
+		giveRangesLayout();
+	});
 	function setupObserver() {
 		const observers: Array<{ disconnected: boolean; target: Element | null }> = [];
 		vi.stubGlobal('IntersectionObserver', class {
@@ -963,59 +987,16 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		expect(view.state.selection.main).toMatchObject({ anchor: QUOTE.from + 2, head: QUOTE.from + 2 });
 	});
 
-	it('opens a single-comment marker without moving the caret or taking focus', async () => {
-		const view = await openCommented('art-marker');
-		const marker = await vi.waitFor(() => {
-			const found = host.querySelector<HTMLButtonElement>('.cm-comment-marker');
-			expect(found).not.toBeNull();
-			return found!;
-		});
-		const observe = vi.spyOn(MutationObserver.prototype, 'observe');
-		marker.focus();
-		marker.click();
+	it('marks a thread opened from its highlight as arrived, so showing its replies stamps them viewed', async () => {
+		arrivedDocComments.set(new Set());
+		const view = await openCommented('art-arrival');
+		view.dispatch({ selection: { anchor: QUOTE.from + 2 } });
 		flushSync();
-		await Promise.resolve();
-		// A read thread opens normally without starting the body-wide arrival observer.
-		expect(observe.mock.calls.some(([target]) => target === document.body)).toBe(false);
-		observe.mockRestore();
 		expect(get(focusedDocComment)).toBe('comment');
-		expect(document.body.querySelector('.popover')).not.toBeNull();
-		expect(view.state.selection.main).toMatchObject({ anchor: 0, head: 0 });
-		expect(view.contentDOM.contains(document.activeElement)).toBe(false);
+		expect(get(arrivedDocComments).has('comment')).toBe(true);
 	});
 
-	it('marks every unread card opened by a shared marker even when the first is read', async () => {
-		const observers: Array<{ callback: IntersectionObserverCallback; target: Element; observer: IntersectionObserver }> = [];
-		vi.stubGlobal('IntersectionObserver', class {
-			constructor(private callback: IntersectionObserverCallback) {}
-			observe(target: Element) { observers.push({ callback: this.callback, target, observer: this as unknown as IntersectionObserver }); }
-			unobserve() {} disconnect() {}
-		});
-		focusedDocComment.set(null);
-		mocks.rangeFor.mockReturnValue(QUOTE);
-		mocks.fetchContent.mockResolvedValue({ text: 'The quick brown fox.', revision: 'r-1', writable: true, artifact: { id: 'art-multiple' } });
-		mocks.setComments({ 'art-multiple': [
-			{ id: 'read', ...QUOTE, anchor: 'quick', author: 'you', text: 'read', at: '', resolved: false, replies: [] },
-			{ id: 'new1', ...QUOTE, anchor: 'quick', author: 'agent', text: 'new one', at: '', resolved: false, replies: [], newComment: true },
-			{ id: 'new2', ...QUOTE, anchor: 'quick', author: 'agent', text: 'new two', at: '', resolved: false, replies: [], newComment: true },
-		] });
-		openArtifactTab(THREAD, { path: '/art-multiple.md', title: 'art-multiple.md' });
-		render();
-		await vi.waitFor(() => expect(host.querySelector('.cm-editor')).not.toBeNull());
-		flushSync();
-		const marker = await vi.waitFor(() => { const found = host.querySelector<HTMLButtonElement>('.cm-comment-marker'); expect(found).not.toBeNull(); return found!; });
-		marker.click(); flushSync();
-		await vi.waitFor(() => expect(document.body.querySelectorAll('.ct').length).toBeGreaterThanOrEqual(3));
-		for (const { callback, target, observer } of observers) callback([{ target, isIntersecting: true } as IntersectionObserverEntry], observer);
-		flushSync();
-		await vi.waitFor(() => {
-			expect(mocks.markThreadViewed).toHaveBeenCalledWith('art-multiple', 'new1', 'new1');
-			expect(mocks.markThreadViewed).toHaveBeenCalledWith('art-multiple', 'new2', 'new2');
-		});
-		expect(mocks.markThreadViewed).toHaveBeenCalledTimes(2);
-	});
-
-	it('opens the image from a marker over a comment on part of it, at that comment, instead of its card', async () => {
+	it('opens the image from a click on it, with the region comment on it, where no marker stands any more', async () => {
 		focusedDocComment.set(null);
 		const IMG = { from: 7, to: 21 };
 		mocks.rangeFor.mockReturnValue(IMG);
@@ -1033,14 +1014,10 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		});
 		Object.defineProperty(img, 'complete', { value: true });
 		Object.defineProperty(img, 'naturalWidth', { value: 640 });
-		const marker = await vi.waitFor(() => {
-			const found = host.querySelector<HTMLButtonElement>('.cm-comment-marker');
-			expect(found).not.toBeNull();
-			return found!;
-		});
-		marker.click();
+		expect(host.querySelector('.cm-comment-marker')).toBeNull();
+		img.click();
 		const tab = get(threadWorkspaces)[THREAD].activeTabId!;
-		await vi.waitFor(() => expect(tabDocumentImage(THREAD, tab)).toMatchObject({ ...IMG, focus: { id: 'pin' } }));
+		await vi.waitFor(() => expect(tabDocumentImage(THREAD, tab)).toMatchObject(IMG));
 		await vi.waitFor(() => expect(host.querySelector('.image-overlay [data-image-comment]')).not.toBeNull());
 		expect(document.body.querySelector('.popover')).toBeNull();
 	});
