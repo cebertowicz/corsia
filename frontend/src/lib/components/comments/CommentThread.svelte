@@ -6,10 +6,12 @@
 	import { useLayoutCrossfade } from './layoutCrossfade.svelte';
 	import { lineDiff } from '$lib/diff';
 	import ToolDiff from '$lib/components/ToolDiff.svelte';
+	import { changedLabel } from '$lib/docImageComments';
 	import type { CommentThreadData } from './CommentThreadData';
 	import { userParticipant, resolveParticipant } from '$lib/stores/participants';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { agentColor } from '$lib/docPresence';
+	import { badgeFill } from '$lib/imageRegions';
 	import CommentMeta from './CommentMeta.svelte';
 	import CommentSuggestionActions from './CommentSuggestionActions.svelte';
 	import CommentQuote from './CommentQuote.svelte';
@@ -26,9 +28,10 @@
 	import { observeArrivedThread } from './arrivedThread.svelte';
 	import { arrivedDocComments } from '$lib/stores/docComments';
 
-	let { comment, header, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
+	let { comment, header, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
 		comment: CommentThreadData;
 		header?: Snippet;
+		diagram?: boolean;
 		/** Keep resolved threads in the drawer's card presentation. */
 		drawerCard?: boolean;
 		focused?: boolean;
@@ -52,6 +55,8 @@
 		leaving?: boolean;
 		/** Off where the caller scrolls its own list to the focused card. */
 		scrollOnFocus?: boolean;
+		/** A multi-selection may mark several cards without moving keyboard focus into each one. */
+		autoFocusSelection?: boolean;
 		onFocus?: () => void;
 		readOnly?: boolean;
 		onReply?: (commentId: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
@@ -78,6 +83,8 @@
 		onReplySelection?: (selection: [number, number] | null) => void;
 	} = $props();
 
+	/** The number chip's fill: the viewer disc's, so a pin's digit reads the same in the drawer. */
+	const chipFill = $derived(tagColor ? badgeFill(tagColor) : null);
 	const me = $derived($userParticipant);
 	const who = (id: string, kind?: 'user' | 'agent') => resolveParticipant(id, me, kind);
 	// Avatar owns the shared initials presentation.
@@ -121,7 +128,7 @@
 		if (!replyId && stampTimer !== null) { window.clearTimeout(stampTimer); stampTimer = null; }
 	}
 
-	$effect(() => { if ((focusReply || (focused && selectable)) && !readOnly) replyField?.focus({ preventScroll: true }); });
+	$effect(() => { if ((focusReply || (focused && selectable && autoFocusSelection)) && !readOnly) replyField?.focus({ preventScroll: true }); });
 	$effect(() => { if (focused && el && scrollOnFocus) el.scrollIntoView({ block: 'nearest' }); });
 	// One reply's own observer calls this with that reply's id, so nothing carries over from another element.
 	function stamp(replyId: string) {
@@ -210,7 +217,7 @@
 {#snippet resolvedHead(mark: 'check' | 'cross', label: string)}
 	<button class="ct-res-head press-tint" onclick={() => (resolvedOpen = !resolvedOpen)}>
 		<svg class="ct-{mark}" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d={mark === 'check' ? 'M20 6L9 17l-5-5' : 'M18 6L6 18M6 6l12 12'} /></svg>
-		{#if comment.regionNumber != null && !isSuggestion}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
+		{#if comment.regionNumber != null && !isSuggestion}<span class="ct-num" style:--region-color={tagColor} style:--disc-color={chipFill} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 		<span class="ct-res-text">{label}</span>
 		{#if comment.newComment}<NewMarker />{/if}
 		<svg class="ct-chev" class:open={resolvedOpen} width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6" /></svg>
@@ -252,8 +259,8 @@
 	<div class="ct" class:flat class:focused class:linked class:acked={comment.acked && !comment.resolved} class:read-only={readOnly} class:orphaned={comment.orphaned && !decidedOpen} bind:this={el} role="region" aria-label={decidedOpen ? `Suggestion ${comment.decision}` : `Comment by ${author.name}`} onclick={(event) => { openThread(); if (onFocus) pressCard(event); }} onfocusin={openFromFocus}>
 		{@render header?.()}
 		<div class="ct-head">
-			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
-			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
+			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} style:--disc-color={chipFill} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
+			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} style:--disc-color={chipFill} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 			<Avatar name={author.name} color={avatarColor} hidden />
 			<CommentMeta {author} at={comment.at} createdAt={comment.createdAt} />
 			{#if comment.newComment}<NewMarker />{/if}
@@ -285,7 +292,7 @@
 			{#if comment.resolved}<div transition:clipFade><ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} /></div>{/if}
 			{#if comment.orphaned && !hideOrphan}{#if comment.detached && comment.anchor}<CommentQuote quote={plainQuote(comment.anchor)} />{/if}<div class="ct-orphan" data-detached={comment.detached || undefined}>{comment.detached ? 'Original text deleted' : 'The text this comment was on has changed'}</div>{/if}
 			{#if comment.regionStale}
-				<div class="ct-orphan" data-region-stale>Image changed since this comment{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
+				<div class="ct-orphan" data-region-stale>{changedLabel(diagram)}{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
 			{/if}
 			<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} />
 		{/if}
@@ -337,7 +344,7 @@
 	/* An image comment's number, in its tag's colour and shape. */
 	.ct-num {
 		box-sizing: border-box; flex-shrink: 0; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--radius-2xs);
-		background: var(--region-color, var(--accent)); color: var(--image-region-ink); border: 1.5px solid color-mix(in srgb, var(--region-color, var(--accent)) 70%, var(--image-region-edge));
+		background: var(--disc-color, var(--region-color, var(--accent))); color: var(--image-region-ink); border: 1.5px solid color-mix(in srgb, var(--region-color, var(--accent)) 70%, var(--image-region-edge));
 		font-size: var(--text-caption); font-weight: var(--fw-bold); font-variant-numeric: tabular-nums; line-height: 1;
 	}
 	button.ct-num { position: relative; font-family: inherit; cursor: pointer; }

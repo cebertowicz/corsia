@@ -3,7 +3,7 @@
 	// same drawer. It counts the threads shown by that surface's default list, names the unit on a
 	// canvas wider than 600 px, carries a dot while messages wait to be sent, and an amber mark on its icon while
 	// comments could not be placed. The host gives it its own button look through `class`.
-	let { count, unread = 0, unsent = 0, unplaced = 0, loading = false, unknown = false, expanded = false, disabled = false, element = $bindable(), class: look = '', onOpen, ...data }: {
+	let { count, unread = 0, unsent = 0, unplaced = 0, loading = false, unknown = false, expanded = false, disabled = false, imageBadge = false, element = $bindable(), class: look = '', onOpen, ...data }: {
 		/** Threads in the default list. */
 		count: number;
 		/** Threads with unread comments or replies. */
@@ -17,6 +17,8 @@
 		unknown?: boolean;
 		expanded?: boolean;
 		disabled?: boolean;
+		/** The image viewer uses a compact count on phones. */
+		imageBadge?: boolean;
 		element?: HTMLButtonElement;
 		class?: string;
 		onOpen: (opener: HTMLElement) => void;
@@ -28,10 +30,10 @@
 	const label = $derived(unknown ? 'Comments unavailable until the document opens' : `${count} thread${count === 1 ? '' : 's'}${unread ? `, ${unreadPhrase}` : ''}${unplaced ? `, ${unplacedPhrase}` : ''}${unsent ? `, ${unsent} message${unsent === 1 ? '' : 's'} not sent yet` : ''}`);
 </script>
 
-<button type="button" class={look} {...data} bind:this={element} aria-expanded={expanded} {disabled}
+<button type="button" class={look} class:image-badge={imageBadge} {...data} bind:this={element} aria-expanded={expanded} {disabled}
 	aria-label={loading ? 'Loading comments' : label}
 	title={loading ? 'Comments are loading' : unknown ? 'Comments unavailable until the document opens' : unplaced ? unplacedPhrase : undefined} onclick={(event) => onOpen(event.currentTarget)}>
-	<span class="icon-anchor"><svg class="tool-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{#if unplaced}<span class="unplaced-dot" aria-hidden="true"></span>{/if}</span>
+	<span class="icon-anchor"><svg class="tool-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{#if unplaced}<span class="unplaced-dot" aria-hidden="true"></span>{/if}{#if imageBadge && !unknown}<span class="badge-count" aria-hidden="true">{loading ? '…' : count}</span>{/if}</span>
 	{#if !unknown}<span class="count">{loading ? '…' : count}</span>{#if !loading}{' '}<span class="count-unit" class:keep={unread > 0}>{count === 1 ? 'thread' : 'threads'}</span>{/if}{#if unread}{' '}<span class="unread">· {unreadPhrase}</span>{/if}{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}{/if}
 </button>
 
@@ -43,6 +45,14 @@
 	.count-unit { color: var(--text-tertiary); }
 	.unread { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
 	.unsent-dot { width: var(--space-2); height: var(--space-2); border-radius: var(--radius-circle); background: var(--accent); }
+	.badge-count { display: none; }
+	@media (max-width: 48rem) {
+		.image-badge { position: relative; width: var(--touch-target); min-width: var(--touch-target); padding: 0; }
+		.image-badge .tool-icon { width: calc(var(--touch-target) / 2); height: calc(var(--touch-target) / 2); }
+		.image-badge .badge-count { display: block; position: absolute; top: calc(var(--touch-target) / 2 - var(--space-1)); right: calc(1px - var(--space-2)); padding: 1px calc(var(--space-1) - 1px); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); font-size: var(--text-caption); line-height: 1; font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; }
+		.image-badge .count, .image-badge .count-unit, .image-badge .unread { display: none; }
+		.image-badge .unsent-dot { position: absolute; top: calc(var(--space-1) + 1px); right: var(--space-1); }
+	}
 	@container doc-canvas (max-width: 600px) {
 		/* An unread count needs its noun: "3 · 3 unread" does not say what is counted. */
 		.count-unit:not(.keep) { display: none; }

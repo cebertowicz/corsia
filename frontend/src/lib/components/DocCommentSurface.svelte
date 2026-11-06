@@ -15,21 +15,21 @@
 	import SuggestionStatus from './comments/SuggestionStatus.svelte';
 	import CommentPlacementRecovery, { type PlacementRecoveryProps } from './comments/CommentPlacementRecovery.svelte';
 	import ImageRegionThumb from './ImageRegionThumb.svelte';
+	import DiagramThumb from './DiagramThumb.svelte';
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
 	import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 	import { loadComments, type DocComment } from '$lib/stores/docComments';
 	import { retainUnreadList } from '$lib/docUnreadList.svelte';
-	import { COMMENT_FILTERS as FILTERS, byCommentNumber, clickedOpener, drawerFooterHeight, drawerKeys, observeCanvasWidth, observeSheetTyping, onSheetMoved, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
-	import { trackOverlaySheet } from '$lib/cm/visible-region';
+	import { COMMENT_FILTERS as FILTERS, authorsWithOpenSuggestions as groupOpenSuggestions, byCommentNumber, clickedOpener, drawerFooterHeight, drawerKeys, imageDrawerMotion, observeCanvasWidth, observeSheetTyping, onSheetMoved, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
+	import { restingTop, trackOverlaySheet } from '$lib/cm/visible-region';
 	import { createCellLabels, type WidgetLabelReader } from '$lib/docCommentLabels';
 	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
 	import { isPointerAnchor } from '$lib/docViewerClickPoint';
-	import { imageDrawerMotion } from '$lib/docCommentDrawerMotion';
-	import { imageAlt, imageGroupKey, type ImageCommentSurface, type DocImageComments } from '$lib/docImageComments';
+	import { imageAlt, imageGroupKey, onItsImage, type ImageCommentSurface, type DocImageComments } from '$lib/docImageComments';
 	import { suggestionRefusals, recordRefusal, clearRefusal, clearRefusals } from '$lib/stores/suggestionRefusals';
 	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { CommentAnchor, CommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
-	let { state: surfaceState, anchor, bounds = null, narrow, comments, widgetLabel, focusedId, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, placementRecovery = { unplacedCount: 0, replaceableCount: 0 }, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onThreadMissing, reviewBar, reviewVisible = false }: {
+	let { state: surfaceState, anchor, bounds = null, narrow, comments, widgetLabel, focusedId, focusedIds = null, draft, draftReason = '', onDraftBody, onCancelDraft, onClose, restoreFocus, onFocus, onSubmit, onReply, onResolve, onAgree, onViewed, target, docPath = null, artifactId, readOnly = false, onSuggestionBusy, onSuggestionAccepted, onDocumentChanged, load, onRetry, image = null, images = null, placementRecovery = { unplacedCount: 0, replaceableCount: 0 }, covered = false, readStampSuppressed = false, onDrawerShown, onSheetModalChange, onRevealDraft, onThreadMissing, reviewBar, reviewVisible = false }: {
 		state: CommentSurfaceState;
 		reviewBar?: Snippet<[boolean]>;
 		reviewVisible?: boolean;
@@ -42,6 +42,7 @@
 		/** Reads a table comment's label from the editor's own syntax tree. */
 		widgetLabel?: WidgetLabelReader;
 		focusedId: string | null;
+		focusedIds?: string[] | null;
 		/** `label` names what a non-text comment is on, in place of the quote. */
 		draft: { text: string; body?: string; label?: string; mentionSelection?: ReturnType<typeof createMentionSelection> } | null;
 		draftReason?: string;
@@ -85,8 +86,6 @@
 	const asDoc = (comment: unknown) => comment as DocComment;
 	const cellLabel = createCellLabels(() => widgetLabel);
 	const listDrawerShown = presence((shown) => onDrawerShown?.(shown));
-	/** A comment still on its image in the document; one whose image markdown is gone has nowhere to open. */
-	const onItsImage = (comment: DocComment) => !comment.orphaned && comment.from != null;
 	function movePinInDocument(id: string) {
 		const comment = comments.find((item) => item.id === id);
 		if (comment && onItsImage(comment)) images?.onOpen(comment, { id, move: true });
@@ -128,6 +127,11 @@
 	// The editor keeps its text above whichever of these sheets is up: it reads where it rests from `trackOverlaySheet`.
 	let listSheet = $state<HTMLElement | null>(null);
 	let draftSheet = $state<HTMLElement | null>(null);
+	/** The resting edge, even while the sheet is entering, for the image viewer's visible area. */
+	export function sheetTop(): number | null {
+		const panel = sheet.state?.kind === 'list' && sheetDrawer ? listSheet : draftSheet;
+		return sheet.open && panel ? restingTop(panel) : null;
+	}
 	let typing = $state(false);
 	$effect(() => observeSheetTyping(listSheet ?? draftSheet, (value) => typing = value));
 	$effect(() => trackOverlaySheet(bounds, () => covered || !sheet.open ? null : sheet.state?.kind === 'list' && sheetDrawer ? listSheet : draftSheet));
@@ -175,7 +179,7 @@
 			const list = drawer?.querySelector<HTMLElement>('.drawer-comments');
 			// An image's drawer opens at the selected comment instead (the effect below).
 			if (list && !(isImage && focusedId)) list.scrollTop = 0;
-			drawer?.querySelector<HTMLElement>('[data-drawer-filter]')?.focus();
+			drawer?.querySelector<HTMLElement>(focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-filter]')?.focus({ preventScroll: true });
 		});
 	});
 	// An image's selected comment, picked on the image or there when the drawer opens, is scrolled to and marked in it.
@@ -184,16 +188,21 @@
 	$effect(() => { if (load?.state === 'error') console.warn('Could not load comments', load.error); });
 	let listShown = false;
 	$effect(() => {
-		const id = focusedId;
+		const id = focusedIds ? displayed.find((comment) => focusedIds.includes(comment.id))?.id : focusedId;
 		// Picking the selected tag again scrolls back to its card.
 		void picks;
 		const shown = isImage && surfaceState?.kind === 'list';
 		const opening = shown && !listShown;
 		listShown = shown;
 		if (!shown || !id) return;
-		void tick().then(() => scrollListToCard(drawer, id, opening));
+		void tick().then(() => scrollListToCard(drawer, id, opening, !!image?.candidateOrder));
 	});
-	const drawerMotion = (_node: Element, { leaving }: { leaving: boolean }) => imageDrawerMotion(isImage, leaving);
+	/**
+	 * An image's drawer slides with the grid track its viewer animates, so it stays mounted while the track closes; with
+	 * reduced motion it crossfades instead. A document's side drawer (a canvas wide enough for a column) appears and leaves
+	 * at once; its sheet form uses AdaptiveDrawer's open/onClosed lifecycle.
+	 */
+	function drawerMotion(node: Element, options: { leaving: boolean }) { return imageDrawerMotion(node, options, isImage); }
 	function closeDrawer() { onClose(); restoreFocus(); }
 	// Resolving a decided suggestion's card ends its conversation: its text has no marker left to return to, so the card closes with it.
 	function resolveThread(id: string, resolved: boolean) {
@@ -224,10 +233,7 @@
 		if (useHalf) onFocus(id, 'top');
 		else onFocus(id);
 	}
-	const authorsWithOpenSuggestions = $derived.by(() => Object.entries(
-		comments.filter((comment) => !comment.resolved && !comment.decision && !comment.orphaned && !comment.textChanged && comment.replacement !== null && comment.replacement !== undefined)
-			.reduce<Record<string, DocComment[]>>((groups, comment) => ({ ...groups, [comment.author]: [...(groups[comment.author] ?? []), comment] }), {})
-	).filter(([, suggestions]) => suggestions.length >= 2));
+	const authorsWithOpenSuggestions = $derived(groupOpenSuggestions(comments));
 	// Whose accept-all is running. It disables every accept-all on purpose, across documents: one request at a time.
 	let acceptAllBusy = $state<string | null>(null);
 	const surfaceOpen = $derived(surfaceState !== null);
@@ -314,7 +320,10 @@
 {#snippet imageHead(row: unknown[])}
 	{@const group = row as DocComment[]}
 	{@const src = images?.srcOf(group[0])}
-	{#if images && src}<ImageRegionThumb {src} alt={imageAlt(group[0])} caption comments={group} colorOf={images.colorOf} onOpen={onItsImage(group[0]) ? () => images?.onOpen(group[0]) : undefined} />{/if}
+	{#if images && src}<ImageRegionThumb {src} alt={imageAlt(group[0])} caption comments={group} colorOf={images.colorOf} onOpen={onItsImage(group[0]) ? () => images?.onOpen(group[0]) : undefined} />
+	{:else if images && images.diagramOf?.(group[0])}
+		{@const diagram = images.diagramOf?.(group[0])}
+		<DiagramThumb source={diagram?.source ?? ''} caption={diagram?.caption ?? 'Diagram'} comments={group} colorOf={images.colorOf} onOpen={onItsImage(group[0]) ? () => images?.onOpen(group[0]) : undefined} />{/if}
 {/snippet}
 {#snippet content()}
 	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer selectedTags={sheet.draft?.mentionSelection ?? draftTags} quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={sheet.cancelDraft} />
@@ -322,7 +331,7 @@
 		{#if !readOnly && sheet.state?.kind !== 'thread'}
 			<SuggestionStatus authors={authorsWithOpenSuggestions} busy={acceptAllBusy} shownBusy={outcome.acceptAllShownBusy} skipped={outcome.skipped} error={outcome.acceptAllError} acceptAll={acceptAllFrom} />
 		{/if}
-		<CommentList {replyTags} docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={displayed} {cellLabel} documentOrder={sheet.state?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} onResolve={resolveThread} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+		<CommentList {replyTags} docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={displayed} {cellLabel} documentOrder={sheet.state?.kind === 'list'} {focusedId} {focusedIds} candidateOrder={image?.candidateOrder ?? null} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} onResolve={resolveThread} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment), !!images.diagramOf?.(asDoc(comment))) : undefined} diagramOf={(comment) => image?.diagram ?? images?.isDiagram?.(asDoc(comment)) ?? false} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
 {#snippet rowHost(above = true)}<div class="rb-sheet-host" class:above hidden={typing}>{#if reviewVisible && reviewBar}{@render reviewBar(true)}{/if}</div>{/snippet}
@@ -348,11 +357,11 @@
 
 {#if surfaceState || sheet.closing}
 	{#if sheet.state?.kind === 'list' && sheetDrawer}
-		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
+		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" initialFocusSelector={focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-autofocus]'} headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list'}
 		<section class="canvas-comment-drawer" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)} in:drawerMotion|global={{ leaving: false }} out:drawerMotion|global={{ leaving: true }}>{@render listBody()}</section>
 	{:else if narrow && sheet.state}<AdaptiveDrawer bind:panel={draftSheet} ariaLabel="Document comments" heading={sheet.state.kind === 'draft' ? 'New comment' : 'Comments'} followKeyboard {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose} above={rowHost}>{@render content()}</AdaptiveDrawer>
-	{:else if surfaceState}<Popover anchor={cardAnchor} placement={isPointerAnchor(anchor) ? 'pointer' : 'right'} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} sideKey={surfaceState.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus}>{@render content()}</Popover>{/if}
+	{:else if surfaceState}<Popover anchor={cardAnchor} placement={isPointerAnchor(anchor) ? 'pointer' : 'right'} {bounds} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} sideKey={surfaceState.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus} keepOpenOnPointer={(target) => !!image && surfaceState?.kind === 'draft' && target instanceof Element && !!bounds?.contains(target) && !!target.closest('[data-image-zoom]')}>{@render content()}</Popover>{/if}
 {/if}
 
 <style>

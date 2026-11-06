@@ -1,11 +1,12 @@
 import { createSubscriber } from 'svelte/reactivity';
+import { releaseDiagramSnapshot } from '$lib/diagramSnapshot';
 import type { ImageViewportPlace } from '$lib/artifactTabTypes';
 import { remapOccurrence } from '$lib/docImageComments';
 import type { DocumentImageRequest } from '$lib/docViewerImages';
 import type { TextDocumentPlace } from '$lib/documentImagePlace';
 
 /** An image of a document shown larger over its tab, and the camera the user left it at. */
-export type TabDocumentImage = DocumentImageRequest & { camera?: ImageViewportPlace };
+export type TabDocumentImage = DocumentImageRequest & { camera?: ImageViewportPlace; viewId?: object };
 
 export type TabViewState = {
 	documentPlace?: TextDocumentPlace;
@@ -38,7 +39,10 @@ export function tabViewState(threadId: string, instanceId: string): TabViewState
 
 function setTabViewState(threadId: string, instanceId: string, change: (current: TabViewState) => TabViewState): void {
 	const key = tabViewKey(threadId, instanceId);
-	const { documentImage, ...rest } = change(tabViewStates.get(key) ?? {});
+	const previous = tabViewStates.get(key);
+	const { documentImage, ...rest } = change(previous ?? {});
+	const oldSrc = previous?.documentImage?.src;
+	if (oldSrc !== documentImage?.src) releaseDiagramSnapshot(oldSrc);
 	const next: TabViewState = documentImage ? { ...rest, documentImage } : rest;
 	if (Object.keys(next).length) tabViewStates.set(key, next);
 	else tabViewStates.delete(key);
@@ -60,9 +64,18 @@ export function tabDocumentImage(threadId: string, instanceId: string): TabDocum
 
 /** Shows an image of the tab's document over it, at Fit: only where it is and what it opens on are kept, never the comments. */
 export function openTabDocumentImage(threadId: string, instanceId: string, request: DocumentImageRequest): void {
-	const { src, alt, from, to, scrollTop, top, focus } = request;
-	setTabViewState(threadId, instanceId, (current) => ({ ...current, documentImage: { src, alt, from, to, scrollTop, top, focus } }));
+	const { src, alt, from, to, scrollTop, top, focus, readableScale, diagramElements, diagramSource } = request;
+	setTabViewState(threadId, instanceId, (current) => ({ ...current, documentImage: { src, alt, from, to, scrollTop, top, focus, readableScale, diagramElements, diagramSource, viewId: {} } }));
 	announceDocumentImages();
+}
+
+/** Replace a snapshot only while the same image view is still open. */
+export function refreshTabDocumentImage(threadId: string, instanceId: string, opened: TabDocumentImage, snapshot: DocumentImageRequest): boolean {
+	const current = tabViewState(threadId, instanceId)?.documentImage;
+	if (!current || current.viewId !== opened.viewId) { releaseDiagramSnapshot(snapshot.src); return false; }
+	setTabViewState(threadId, instanceId, (state) => ({ ...state, documentImage: { ...current, ...snapshot, from: current.from, to: current.to } }));
+	announceDocumentImages();
+	return true;
 }
 
 export function recordTabDocumentImageCamera(threadId: string, instanceId: string, camera: ImageViewportPlace): void {
@@ -89,7 +102,9 @@ export function clearTabDocumentImage(threadId: string, instanceId: string): voi
 
 /** A closed tab takes its places and its open image with it. */
 export function clearTabViewState(threadId: string, instanceId: string): void {
-	const hadImage = !!tabViewState(threadId, instanceId)?.documentImage;
+	const image = tabViewState(threadId, instanceId)?.documentImage;
+	const hadImage = !!image;
+	releaseDiagramSnapshot(image?.src);
 	tabViewStates.delete(tabViewKey(threadId, instanceId));
 	if (hadImage) announceDocumentImages();
 }

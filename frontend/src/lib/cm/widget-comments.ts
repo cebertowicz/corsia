@@ -1,7 +1,9 @@
 import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
-import type { SelectionLabel } from '$lib/stores/commentDraft';
+import { caretAt, touchMovedBeyond, type WidgetSelection } from './widget-selection-types';
+export { touchMovedBeyond, type WidgetSelection } from './widget-selection-types';
 import { commentRanges } from './comment-marks';
 import { pendingCommentMark } from './pending-comment-mark';
+import { drawnCellImage, markChangedOpenable, openWidgetImage, openWidgetOnKey } from './widget-open';
 import { blockRange, cellElement, DIAGRAM, TABLE, widgetOf } from './widget-blocks';
 import { occurrences, snappedTableRows, tableCells, widgetCommentLabel, type CellSpan } from './widget-cells';
 import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
@@ -13,28 +15,6 @@ import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type
  * widget, because the widget replaces the range the mark decorations would sit on.
  */
 
-const TOUCH_SLOP = 6;
-
-/** A scroll or horizontal pan is not the tap fallback for a widget comment. */
-export const touchMovedBeyond = (start: { x: number; y: number }, current: { x: number; y: number }) => Math.hypot(current.x - start.x, current.y - start.y) > TOUCH_SLOP;
-
-export interface WidgetSelection {
-	from: number; to: number; text: string; top: number; left: number;
-	anchor: () => DOMRect | null;
-	/** Read when a draft is started, from the state the selection was made in: the parse it needs is paid once per comment, not per selection change. */
-	label?: SelectionLabel;
-	/** Marks a selection made inside a table or diagram widget. */
-	inWidget: true;
-	/** The Comment button sits on the selection's top edge instead of beside its end, so it never covers text in the selected row. */
-	above?: boolean;
-}
-
-function caretAt(x: number, y: number): { node: Node; offset: number } | null {
-	const position = document.caretPositionFromPoint?.(x, y);
-	if (position) return { node: position.offsetNode, offset: position.offset };
-	const range = document.caretRangeFromPoint?.(x, y);
-	return range ? { node: range.startContainer, offset: range.startOffset } : null;
-}
 
 /** Maps what the browser has selected inside a widget to source offsets, or null when there is nothing to comment on. */
 export function selectionIn(view: EditorView, el: HTMLElement, range: Range): WidgetSelection | null {
@@ -137,6 +117,10 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			const widget = origin && widgetOf(this.view, origin);
 			const selection = document.getSelection();
 			const ids = widget && origin ? commentIdsAt(widget, origin) : [];
+			// A whole-diagram text comment takes the click; the viewer remains reachable by keyboard and from its pins.
+			if (widget?.matches(DIAGRAM) && origin && ids.length > 0 && selection?.isCollapsed !== false) { hooks.onFocus(ids, origin.closest<HTMLElement>('[data-comment-ids]') ?? widget); return; }
+			// A cell image or a diagram opens the viewer on a click, as an image in the text does; a drag across a diagram is a selection, not a click.
+			if (widget && origin && !origin.closest('a') && (drawnCellImage(origin) || selection?.isCollapsed !== false) && openWidgetImage(this.view, origin)) { event.preventDefault(); return; }
 			if (widget && origin && ids.length > 0 && selection?.isCollapsed !== false) { hooks.onFocus(ids, origin.closest<HTMLElement>('[data-comment-ids]') ?? widget); return; }
 			if ((this.pointer === 'touch' || this.recentTouch()) && (!origin || !widgetOf(this.view, origin))) { hooks.onSelect(null); return; }
 			this.tap(event);
@@ -179,6 +163,8 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 				return;
 			}
 			const emptyCell = target.closest<HTMLTableCellElement>('td, th');
+			// An image's cell has no text but is not empty: a press on the image is the first half of a click that opens it.
+			if (drawnCellImage(target)) return;
 			// Chromium gives an empty cell a collapsed DOM range but does not announce it through selectionchange.
 			// This is the existing press path for table selection, so read the range synchronously here.
 			if (emptyCell && !emptyCell.textContent?.trim()) {
@@ -212,6 +198,11 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			window.addEventListener('mouseup', up);
 		};
 
+		private readonly key = (event: KeyboardEvent) => { if (openWidgetOnKey(this.view, event)) { event.preventDefault(); event.stopPropagation(); } };
+		private readonly rendered = () => this.paint();
+		private readonly observer = new MutationObserver(this.rendered);
+		private readonly openableSignatures = new WeakMap<HTMLElement, string>();
+
 		constructor(private readonly view: EditorView) {
 			view.dom.addEventListener('pointerdown', this.down, true);
 			view.dom.addEventListener('pointermove', this.move, true);
@@ -219,6 +210,10 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			document.addEventListener('selectionchange', this.listen);
 			view.dom.addEventListener('mouseup', this.listen);
 			view.dom.addEventListener('click', this.click);
+			view.dom.addEventListener('keydown', this.key, true);
+			view.dom.addEventListener('load', this.rendered, true);
+			view.dom.addEventListener('error', this.rendered, true);
+			this.observer.observe(view.contentDOM, { childList: true, subtree: true });
 			this.paint();
 		}
 
@@ -236,6 +231,10 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			this.view.dom.removeEventListener('pointermove', this.move, true);
 			this.view.dom.removeEventListener('mousedown', this.press, true);
 			this.view.dom.removeEventListener('click', this.click);
+			this.view.dom.removeEventListener('keydown', this.key, true);
+			this.view.dom.removeEventListener('load', this.rendered, true);
+			this.view.dom.removeEventListener('error', this.rendered, true);
+			this.observer.disconnect();
 		}
 
 		private dragging = false;
@@ -278,20 +277,22 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 					for (const { el, block, src } of widgets) {
 						const mine = marks.filter((mark) => mark.from < block.to && mark.to > block.from);
 						const signature = JSON.stringify([block.from, src.length, mine]);
-						if (el.dataset.paintSignature === signature) continue;
-						el.dataset.paintSignature = signature;
-						keepingSelection(el, () => {
-							unpaint(el);
-							if (el.matches(DIAGRAM)) {
-								for (const mark of mine) {
-									el.classList.add(mark.kind === 'pending' ? 'cm-comment-block-pending' : 'cm-comment-block', ...(mark.kind === 'focused' ? ['cm-comment-block-focused'] : []));
-									addCommentId(el, mark);
-									el.dataset.commentAria = 'true';
-									el.setAttribute('role', 'img');
-									el.setAttribute('aria-label', 'Commented diagram');
-								}
-							} else paintTable(el, block.from, src, mine);
-						});
+						if (el.dataset.paintSignature !== signature) {
+							el.dataset.paintSignature = signature;
+							keepingSelection(el, () => {
+								unpaint(el);
+								if (el.matches(DIAGRAM)) {
+									for (const mark of mine) {
+										el.classList.add(mark.kind === 'pending' ? 'cm-comment-block-pending' : 'cm-comment-block', ...(mark.kind === 'focused' ? ['cm-comment-block-focused'] : []));
+										addCommentId(el, mark);
+										el.dataset.commentAria = 'true';
+										el.setAttribute('role', 'img');
+										el.setAttribute('aria-label', 'Commented diagram');
+									}
+								} else paintTable(el, block.from, src, mine);
+							});
+						}
+						markChangedOpenable(el, signature, this.view, this.openableSignatures);
 					}
 				},
 			});

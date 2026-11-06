@@ -14,6 +14,22 @@ export interface RestoreDocumentPlaceOptions {
 	signal?: AbortSignal;
 }
 
+/** Cancel an older restore before starting a new one, and run its completion only if current. */
+export function documentRestorer(root: () => HTMLElement | undefined, restore = restoreDocumentPlace) {
+	let current: AbortController | null = null;
+	return {
+		abort() { current?.abort(); },
+		restore(place: OpenImageRequest | TextDocumentPlace, options: RestoreDocumentPlaceOptions = {}, then?: () => void) {
+			current?.abort();
+			const controller = new AbortController();
+			current = controller;
+			void restore(root(), place, { ...options, signal: controller.signal }).finally(() => {
+				if (current === controller) { current = null; then?.(); }
+			});
+		},
+	};
+}
+
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 
 /** Frames the pane width must hold before it counts as settled. */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolveImagePath } from '$lib/cm/markdown-image';
-import { agentColor } from '$lib/docPresence';
-import { placeTag, placeTags } from '$lib/imageRegions';
+import { AGENT_COLORS, agentColor } from '$lib/docPresence';
+import { badgeFill, placeTag, placeTags } from '$lib/imageRegions';
 import { projectColor } from '$lib/utils/projectColors';
 import contract from './fixtures/image-region-parity.contract.json';
 
@@ -15,6 +15,14 @@ describe('image region parity contract', () => {
 
 	it.each(contract.project_colors)('projectColor($project_id)', ({ project_id, color }) => {
 		expect(projectColor(project_id)).toBe(color);
+	});
+
+	it('holds a disc fill for every agent colour', () => {
+		expect(contract.badge_fills.map(({ color }) => color)).toEqual(AGENT_COLORS);
+	});
+
+	it.each(contract.badge_fills)('badgeFill($color)', ({ color, fill }) => {
+		expect(badgeFill(color)).toBe(fill);
 	});
 
 	it.each(contract.tag_placements)('placeTag: $case', ({ region, width, height, radius, gap, expected }) => {

@@ -89,6 +89,8 @@ export const docTheme = EditorView.theme({
 	'.cm-md-image img': { display: 'block', maxWidth: '100%', height: 'auto' },
 	'.cm-md-image-selected img, .cm-md-image-selected .cm-md-image-note': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
 	'.cm-md-image-note': { color: 'var(--text-tertiary)' },
+	// A cell image or diagram is a tab stop that Enter or Space opens (`widget-open.ts`), ringed as the selected image is.
+	'.cm-md-cell-image:focus-visible, .cm-md-mermaid:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '2px' },
 
 	// Text anchor rules live in commentAnchors.css for documents and chat.
 	// A whole table or diagram: the same amber as an outline on the block, since a block has no text to underline.
