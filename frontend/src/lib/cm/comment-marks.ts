@@ -25,6 +25,8 @@ export interface CommentRange {
 	replyWaiting?: boolean;
 	onMarkerFocus?: (ids: string[], opener: HTMLElement, anchor?: () => DOMRect | null) => void;
 	suggestion?: InlineSuggestion;
+	/** A pin on an image or diagram region: drawn by its pin, never as a highlight on the whole block. */
+	region?: boolean;
 }
 
 export const setCommentRanges = StateEffect.define<CommentRange[]>();

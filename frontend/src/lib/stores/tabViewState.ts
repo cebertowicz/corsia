@@ -6,7 +6,7 @@ import type { DocumentImageRequest } from '$lib/docViewerImages';
 import type { TextDocumentPlace } from '$lib/documentImagePlace';
 
 /** An image of a document shown larger over its tab, and the camera the user left it at. */
-export type TabDocumentImage = DocumentImageRequest & { camera?: ImageViewportPlace; viewId?: object };
+export type TabDocumentImage = DocumentImageRequest & { camera?: ImageViewportPlace; viewId: object };
 
 export type TabViewState = {
 	documentPlace?: TextDocumentPlace;

@@ -1,7 +1,7 @@
 import { cellElement } from './widget-blocks';
 import { clean, intersectsCell, occurrences, tableCells } from './widget-cells';
 
-export interface Mark { from: number; to: number; id: string; kind: 'placed' | 'focused' | 'pending' }
+export interface Mark { from: number; to: number; id: string; kind: 'placed' | 'focused' | 'pending'; region?: boolean }
 
 const CLASSES = ['cm-comment-anchor', 'cm-comment-focused', 'cm-comment-pending', 'cm-comment-block', 'cm-comment-block-focused', 'cm-comment-block-pending'];
 

@@ -63,9 +63,9 @@
 </script>
 
 <div class="image-overlay">
-	<!-- Keyed on the tab and the image, so opening another one starts its comments afresh, and another tab's (even
-	     of the same image) starts at that tab's own camera. -->
-	{#key image.viewId ?? `${target.instanceId}\u0000${image.src}\u0000${image.focus?.id ?? ''}`}
+	<!-- Keyed on this opening of the image, so opening another one, or the same one again, starts its comments afresh,
+	     and another tab's (even of the same image) starts at that tab's own camera. -->
+	{#key image.viewId}
 		{#if comments}
 			<ImageCommentLightbox
 				bind:this={viewer}

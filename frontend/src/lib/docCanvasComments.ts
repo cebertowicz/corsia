@@ -62,7 +62,7 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 			if (inline) inlineEnd = range.to;
 			suggestion = { quote: comment.insertAfter ? '' : comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
 		}
-		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasUnread(comment), onMarkerFocus, suggestion }];
+		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasUnread(comment), onMarkerFocus, suggestion, region: !!comment.region }];
 	});
 }
 

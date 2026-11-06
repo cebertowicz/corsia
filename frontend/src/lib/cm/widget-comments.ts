@@ -268,7 +268,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 					});
 					const pending = view.plugin(pendingCommentMark)?.range ?? null;
 					const marks: Mark[] = view.state.field(commentRanges).filter((range) => !range.suggestion)
-						.map((range) => ({ from: range.from, to: range.to, id: range.id, kind: range.focused ? 'focused' : 'placed' }));
+						.map((range) => ({ from: range.from, to: range.to, id: range.id, kind: range.focused ? 'focused' : 'placed', region: range.region }));
 					if (pending) marks.push({ ...pending, id: 'pending', kind: 'pending' });
 					return { widgets, marks };
 				},
@@ -281,7 +281,7 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 							keepingSelection(el, () => {
 								unpaint(el);
 								if (el.matches(DIAGRAM)) {
-									for (const mark of mine) {
+									for (const mark of mine.filter((item) => !item.region)) {
 										el.classList.add(mark.kind === 'pending' ? 'cm-comment-block-pending' : 'cm-comment-block', ...(mark.kind === 'focused' ? ['cm-comment-block-focused'] : []));
 										addCommentId(el, mark);
 										el.dataset.commentAria = 'true';
