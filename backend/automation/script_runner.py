@@ -25,7 +25,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from automation import script_rule_runs
+from automation import script_rule_runs, script_tree
 from automation import script_schedules as store
 from automation.schedules import Schedule, get
 from automation.script_readings import (
@@ -324,13 +324,25 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
         return hash_mismatch_report(schedule)
     if current != schedule.script_sha256:
         return hash_mismatch_report(schedule)
+    authentication = (schedule.payload or {}).get("authentication") or {}
+    approved = authentication.get("state") == "approved"
+    if approved:
+        if not authentication.get("tree_sha256"):
+            return hash_mismatch_report(schedule, folder=(
+                "its approval covers only the script file, not the other files in its folder"))
+        try:
+            tree = await asyncio.to_thread(script_tree.read_tree, path)
+        except ValueError as exc:
+            return hash_mismatch_report(schedule, folder=str(exc))
+        if script_tree.tree_sha256(tree) != authentication.get("tree_sha256"):
+            return hash_mismatch_report(schedule, folder=(
+                "a file in it changed, appeared or went away; a script that writes into its own "
+                "folder does this too, so keep what it writes elsewhere"))
     project = None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id
     run_id = uuid.uuid4().hex
     try:
         stdin, repository = (await run_off_db(script_rule_runs.execution_input, schedule, rule_run)
                              if rule_run else (None, None))
-        authentication = (schedule.payload or {}).get("authentication") or {}
-        approved = authentication.get("state") == "approved"
         run = await run_script(
             schedule.thread_id, project, path,
             run_id=run_id, timeout_seconds=int(schedule.timeout_seconds or 0),

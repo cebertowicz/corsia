@@ -1,7 +1,8 @@
 """User decisions on reviewed standing-script applications.
 
-This module owns standing-script approvals: a lasting grant for one file at one
-hash, kept on its schedule until the file changes or the schedule is cancelled.
+This module owns standing-script approvals: a lasting grant for one script's
+folder at one hash (``automation.script_tree``), kept on its schedule until a file
+in that folder changes or the schedule is cancelled.
 Host-access leases (``api.host_access``) are a different concept: a time-boxed
 grant of host resources, owned there. The two share only the person's approval
 surface, so a script application is served in the lease list as ``kind: 'script'``,
