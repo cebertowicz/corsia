@@ -7,10 +7,10 @@
       "sha256": "01f766a8d568c83815c1d577f03f99a490d73df3e37fb4df7ee95e819f5953f8"
     },
     {
-      "bytes": 7378,
+      "bytes": 7372,
       "kind": "context",
       "path": "context/10-HOW-TO-WORK.md",
-      "sha256": "ecda9c3656c9ac6d9bc0571ea8d36f5a186d3847a198e3c6cfd5915ac1ec8a7d"
+      "sha256": "52595419d59248dcd3eefc0e07a20f1d64c5886d94eae0d330426cd769b12fcc"
     },
     {
       "bytes": 830,
@@ -136,10 +136,10 @@
       "sha256": "8c76c3448e68bb117d2fd018df1a0b2da0371b6cf03287ac4a6ddf102370641c"
     },
     {
-      "bytes": 3251,
+      "bytes": 3294,
       "kind": "skill",
       "path": "skills/asking-the-person/SKILL.md",
-      "sha256": "8932d1298c385e563b165ac15bf4ed02eba32110616339422c4dfc5b5bc96921"
+      "sha256": "2e094613d974f45221c8d61b538b7c54ed7486e73a96d6c8465b21ea35ef4214"
     },
     {
       "bytes": 18740,
