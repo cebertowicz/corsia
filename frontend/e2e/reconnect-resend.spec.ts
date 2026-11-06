@@ -14,8 +14,8 @@ const REPLY = 'Shipping it now.';
  * A send whose frame the socket never carried is delivered after the reconnect.
  *
  * The person typed one message; the half-dead socket swallowed its frame and
- * then closed. The new socket carries the same frame again, marked recovery;
- * the server stores nothing under its id, so it admits it. Two things have to come true at once: the
+ * then closed. The new socket carries the same frame again; the server stores
+ * nothing under its id, so it admits it. Two things have to come true at once: the
  * message lands exactly once, and its row stops waiting for a send that already
  * happened.
  */

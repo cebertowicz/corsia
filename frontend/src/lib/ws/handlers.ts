@@ -11,11 +11,11 @@ import { emit } from './events';
 import { registerSubagent, setSubagentStatus, setSubagentInit } from '../stores/subagents';
 import { handleAuthOk, handleSystemDraining, handleWsError } from './handlersConnection';
 import { compareMessageOrder } from '../messageHistory';
+import { readMessageDeliveryState } from '../messageDelivery';
 import { startTypewriter } from './typewriter';
 import { consumeFirstRunOpening } from './firstRunOpeningReveal';
 import {
 	handleInputAccepted,
-	handleRecoveredInput,
 	handleContextUsageUpdated,
 	handleThreadSnapshot,
 	handleStepReasoning,
@@ -74,7 +74,8 @@ function reconcileQueuedInputReceipt(data: any): void {
 			id: messageId,
 			created_at: queuedAt ?? correlated.created_at,
 			_optimistic: false,
-			delivery_state: 'queued',
+			// A resent input the server already stored reports where delivery has it.
+			delivery_state: readMessageDeliveryState(data?.delivery_state) ?? 'queued',
 			delivery_error: null,
 			...(revision !== undefined ? { delivery_revision: revision } : {}),
 		};
@@ -159,13 +160,6 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 
 		case 'input_accepted':
 			handleInputAccepted(data);
-			break;
-
-		case 'input_recovered':
-			// A message resent after a reconnect that the server already had.
-			if (typeof data.thread_id === 'string' && typeof data.input_id === 'string') {
-				handleRecoveredInput(data.thread_id, data.input_id, data.message);
-			}
 			break;
 
 		case 'input_queued': {

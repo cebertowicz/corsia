@@ -103,15 +103,14 @@ turnStates.subscribe(states => {
  * Put every frame still waiting for a receipt on a new socket, in the order the
  * person sent them, before anything else can be sent on it.
  *
- * Each goes out marked `recovery`: the server answers one it already stores
- * with that stored row instead of admitting it again, and admits one it never
- * got. It admits a socket's messages one at a time in the order they arrive,
- * so a lost message is admitted before any message sent after the reconnect.
+ * Each goes out byte for byte as first sent. The server admits one it never
+ * got, and answers one it already stores as a duplicate with that row's
+ * delivery state. It admits a socket's messages one at a time in the order
+ * they arrive, so a lost message is admitted before any message sent after
+ * the reconnect.
  */
 export function resendUnconfirmedFrames(socket: WebSocket): void {
-	for (const { frame } of unconfirmedFrames.values()) {
-		socket.send(JSON.stringify({ ...JSON.parse(frame), recovery: true }));
-	}
+	for (const { frame } of unconfirmedFrames.values()) socket.send(frame);
 }
 
 /** Which inputs this client still holds a frame for. Test-only visibility. */

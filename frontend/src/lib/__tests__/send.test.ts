@@ -364,24 +364,6 @@ describe('authoritative input correlation and stop', () => {
 		expect(get(subagentMeta).get('child-1')?.status).toBe('idle');
 	});
 
-	it('recovers a lost acknowledgement from the server\'s answer to the resent frame', () => {
-		mockWs();
-		const inputId = sendMessage('main-1', 'durable')!;
-
-		handleMessage({
-			type: 'input_recovered', thread_id: 'main-1', input_id: inputId,
-			message: { id: 'canonical-1', created_at: '2026-07-14T13:00:00Z' },
-		}, () => {});
-
-		expect(getTurnState('main-1')).toEqual({
-			turnId: null, turnOrder: null, phase: 'idle', pendingInputIds: [],
-			visibleRootThreadId: null, startedAt: null,
-		});
-		expect(get(messages)[0]).toMatchObject({
-			id: 'canonical-1', created_at: '2026-07-14T13:00:00Z', _optimistic: false,
-		});
-	});
-
 });
 
 describe('durable checkpoint admission', () => {

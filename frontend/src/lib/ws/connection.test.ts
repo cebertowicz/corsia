@@ -360,7 +360,7 @@ describe('stale frames and recovery (Turn & Delivery controls)', () => {
 		expect(get(user)?.id).toBe('user-b');
 	});
 
-	it('TD-2: an input whose receipt A dropped goes back on B first, marked recovery, and B\'s answer settles it', () => {
+	it('TD-2: an input whose receipt A dropped goes back on B first, unchanged, and B\'s duplicate receipt settles it', () => {
 		const a = authenticated('session-a', 'user-a');
 		const inputId = sendMessage('main-1', 'hello')!;
 		const inputFrame = a.sent.find(frame => frame.input_id === inputId)!;
@@ -371,20 +371,19 @@ describe('stale frames and recovery (Turn & Delivery controls)', () => {
 		const b = sockets()[1];
 		b.open();
 		const later = sendMessage('main-1', 'sent after the reconnect')!;
-		expect(b.sent.map(frame => [frame.type, frame.input_id, frame.recovery])).toEqual([
-			['auth', undefined, undefined],
-			['message', inputId, true],
-			['message', later, undefined],
+		expect(b.sent.map(frame => [frame.type, frame.input_id])).toEqual([
+			['auth', undefined],
+			['message', inputId],
+			['message', later],
 		]);
-		expect(b.sent[1]).toEqual({ ...inputFrame, recovery: true });
+		expect(b.sent[1]).toEqual(inputFrame);
 
 		b.authOk('user-a');
 		b.receive({
-			type: 'input_recovered', thread_id: 'main-1', input_id: inputId,
-			message: {
-				id: inputId, created_at: '2026-10-03T15:00:00Z',
-				delivery_state: 'queued', delivery_error: null, delivery_revision: 1,
-			},
+			type: 'input_queued', queue_kind: 'messages', thread_id: 'main-1',
+			input_id: inputId, message_id: inputId, queue_order: 1,
+			created_at: '2026-10-03T15:00:00Z', delivery_state: 'queued',
+			delivery_error: null, delivery_revision: 1, duplicate: true,
 		});
 		expect(getTurnState('main-1').pendingInputIds).toEqual([later]);
 	});
@@ -442,7 +441,7 @@ describe('stale frames and recovery (Turn & Delivery controls)', () => {
 		expect(b.types().filter(type => type === 'subscribe_session')).toHaveLength(bSubscribes);
 	});
 
-	it('TD-6: a recovery answer on A writes nothing after B replaces it, and the input goes to B', async () => {
+	it('TD-6: a duplicate receipt on A writes nothing after B replaces it, and the input goes to B', async () => {
 		signIn('session-a');
 		const a = sockets()[0];
 		a.open();
@@ -455,8 +454,9 @@ describe('stale frames and recovery (Turn & Delivery controls)', () => {
 
 		signIn('session-b');
 		a.receive({
-			type: 'input_recovered', thread_id: 'main-1', input_id: inputId,
-			message: { id: inputId, created_at: '2026-10-03T15:00:00Z', delivery_state: 'queued' },
+			type: 'input_queued', queue_kind: 'messages', thread_id: 'main-1',
+			input_id: inputId, message_id: inputId, queue_order: 1,
+			created_at: '2026-10-03T15:00:00Z', delivery_state: 'queued', duplicate: true,
 		});
 		drain.resolve({ active: true, reason: 'restart', blockingTurns: [] });
 		await flush();
@@ -467,7 +467,7 @@ describe('stale frames and recovery (Turn & Delivery controls)', () => {
 		const b = sockets().at(-1)!;
 		b.open();
 		expect(b.sent.filter(frame => frame.input_id === inputId)).toEqual([
-			expect.objectContaining({ type: 'message', recovery: true }),
+			expect.objectContaining({ type: 'message', input_id: inputId }),
 		]);
 	});
 

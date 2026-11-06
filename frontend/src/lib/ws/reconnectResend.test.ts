@@ -37,7 +37,7 @@ beforeEach(() => {
 });
 
 describe('resending what a dropped socket never confirmed', () => {
-	it('puts every waiting frame on the new socket in send order, marked recovery and otherwise unchanged', () => {
+	it('puts every waiting frame on the new socket in send order, unchanged', () => {
 		const first = sendMessage(THREAD, 'first')!;
 		const other = sendMessage('main-2', 'another thread')!;
 		const second = sendMessage(THREAD, 'second')!;
@@ -47,7 +47,7 @@ describe('resending what a dropped socket never confirmed', () => {
 		resendUnconfirmedFrames(socket);
 
 		expect(sent.map(frame => frame.input_id)).toEqual([first, other, second]);
-		expect(sent).toEqual(original.map(frame => ({ ...frame, recovery: true })));
+		expect(sent).toEqual(original);
 	});
 
 	it('resends a subagent feed the same way', () => {
@@ -57,7 +57,7 @@ describe('resending what a dropped socket never confirmed', () => {
 		const { socket, sent } = newSocket();
 		resendUnconfirmedFrames(socket);
 
-		expect(sent).toEqual([{ ...JSON.parse(frames[0]), recovery: true }]);
+		expect(sent).toEqual([JSON.parse(frames[0])]);
 		expect(sent[0]).toMatchObject({ type: 'subagent_feed', input_id: inputId });
 	});
 
@@ -74,20 +74,19 @@ describe('resending what a dropped socket never confirmed', () => {
 		expect(sent).toEqual([]);
 	});
 
-	it('settles an input the server says it already stores, with the stored row', () => {
+	it('settles an input the server already stores from its duplicate receipt, in the stored state', () => {
 		const inputId = sendMessage(THREAD, 'durable')!;
 
 		handleMessage({
-			type: 'input_recovered', thread_id: THREAD, input_id: inputId,
-			message: {
-				id: inputId, created_at: STORED_AT,
-				delivery_state: 'queued', delivery_error: null, delivery_revision: 2,
-			},
+			type: 'input_queued', queue_kind: 'messages', thread_id: THREAD,
+			input_id: inputId, message_id: inputId, queue_order: 1, created_at: STORED_AT,
+			delivery_state: 'delivered', delivery_error: null, delivery_revision: 2,
+			duplicate: true,
 		}, () => {});
 
 		expect(getTurnState(THREAD).pendingInputIds).toEqual([]);
 		expect(get(messages)[0]).toMatchObject({
-			id: inputId, created_at: STORED_AT, _optimistic: false,
+			id: inputId, created_at: STORED_AT, _optimistic: false, delivery_state: 'delivered',
 		});
 		expect(_unconfirmedFrameIdsForTests()).toEqual([]);
 	});
