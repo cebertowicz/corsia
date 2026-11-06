@@ -16,11 +16,6 @@ _STOP_REASONS = {
 
 # Reasons a review was handed back before it started, with the continuation the reviewer reads.
 _START_REASONS = {
-    "document_has_images": (
-        "Review update: A separate review could not start because the document has images. "
-        "Review the document here instead: open each image with read_file, then comment and call "
-        "doc_feedback_send. If an image cannot be opened, say which one in a comment."
-    ),
     "document_unreadable": (
         "Review update: A separate review could not start because the document could not be read as text. "
         "Review the document here instead, then call doc_feedback_send."
@@ -53,7 +48,7 @@ def instruction(row, artifact, task_block: str | None = None) -> str:
     task = f"\n\n{task_block}" if task_block else ""
     return (
         f"Review the document {document!s}. Request: {row['note'] or DEFAULT_INTENT}{task}\n\n"
-        "Use only the document comment tools. Create review comments or suggestions as needed, "
+        "Read the document and relevant materials, including images. Create review comments or suggestions as needed, "
         "then call doc_feedback_send for this document. Do not send messages, spawn work, or write files."
     )
 

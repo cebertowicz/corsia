@@ -1,6 +1,7 @@
 """Comment-thread participants, tags and recipient notification state."""
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from core.agent_roster_queries import agent_rows
@@ -201,7 +202,7 @@ def filter_left_replies(db, items: list[dict], agent_id: str, *, person_owner: b
     return [item for item in items if keep(item)]
 
 
-def _withheld_authors(db, rows, recipient_id: str) -> set[str]:
+def _withheld_authors(db, rows, recipient_id: str, *, reader: dict | None = None) -> set[str]:
     """Agent authors whose own comment to this recipient would be refused under Local only."""
     from infra.local_only import send_needs_hold
 
@@ -209,15 +210,37 @@ def _withheld_authors(db, rows, recipient_id: str) -> set[str]:
                if row["author_kind"] == "agent" and row["author_thread_id"]}
     if not authors:
         return set()
-    recipient = db.execute("SELECT id,model,pending_model,title FROM threads WHERE id=?", (recipient_id,)).fetchone()
-    withheld = set()
-    for author in authors:
-        sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id=?", (author,)).fetchone()
-        # Fail closed as locality_disposition does: an unreadable sender or recipient is withheld.
-        if sender is None or recipient is None or send_needs_hold(
-                dict(sender), dict(recipient), db=db, emit_hold_event=False):
-            withheld.add(author)
+    rows = db.execute(
+        'SELECT a.value AS author,t.id,t.local_only,t.project_id,p.cloud_models_off FROM json_each(?) a '
+        'LEFT JOIN threads t ON t.id=a.value LEFT JOIN project_inference_policies p ON p.project_id=t.project_id',
+        (json.dumps(list(authors)),),
+    ).fetchall()
+    withheld = {row['author'] for row in rows if row['id'] is None}
+    candidates = [dict(row) for row in rows if row['id'] and (row['local_only'] or row['cloud_models_off'])]
+    if candidates:
+        recipient = db.execute('SELECT id,model,pending_model,title FROM threads WHERE id=?', (recipient_id,)).fetchone()
+        recipient = {**dict(recipient), **(reader or {})} if recipient else None
+        withheld.update(sender['id'] for sender in candidates if recipient is None
+                        or send_needs_hold(sender, recipient, db=db, emit_hold_event=False))
     return withheld
+
+
+def visible_comment_threads(db, threads: list[dict], recipient_id: str, *, reader: dict | None = None) -> list[dict]:
+    """Filter Local-only comments after anchoring, retaining the context of visible replies."""
+    rows = [item for root in threads for item in [root, *root.get('replies', [])]]
+    withheld = _withheld_authors(db, rows, recipient_id, reader=reader)
+    visible = []
+    for root in threads:
+        replies = [reply for reply in root.get('replies', []) if reply.get('author_thread_id') not in withheld]
+        if root.get('author_thread_id') in withheld:
+            if not replies:
+                continue
+            root = {**root, 'author': '(not shown: this agent is Local only)',
+                    'body': '(not shown: this agent is Local only)'}
+            if root.get('replacement') is not None:
+                root['replacement'] = '(not shown: this agent is Local only)'
+        visible.append({**root, 'replies': replies})
+    return visible
 
 
 def thread_context(db, item: dict, recipient_id: str) -> str:

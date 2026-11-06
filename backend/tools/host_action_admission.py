@@ -1,11 +1,30 @@
 """Refusals for host actions without an active lease."""
 
 import asyncio
-from typing import Any
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Any, Iterator
 
 from host_access.refusal_messages import protected_scope_denial
 from tools.host_access_errors import HostAccessRequired
 from tools.host_action_types import HostActionAuthorization
+
+
+_no_host_lease: ContextVar[bool] = ContextVar('no_host_lease', default=False)
+
+
+def host_lease_disabled() -> bool:
+    return _no_host_lease.get()
+
+
+@contextmanager
+def without_host_lease() -> Iterator[None]:
+    """Keep a disposable caller from using its owning thread's host lease."""
+    token = _no_host_lease.set(True)
+    try:
+        yield
+    finally:
+        _no_host_lease.reset(token)
 
 
 async def no_lease_authorization(action: Any, ordinary_action: bool, overrides: dict, thread_id: str, *, fence: Any = None) -> Any:

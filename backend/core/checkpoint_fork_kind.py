@@ -10,6 +10,8 @@ from core.fork_runtime import ForkKind, native_iteration_limit
 from core.fork_types import ProviderForkRejected
 
 CHECKPOINT_TOOL_NAME = "continuity_edit"
+FORK_STEP_LIMITS = {"native": native_iteration_limit, "claude-code": None, "codex": None}
+REVIEW_FORK_STEP_LIMITS = {**FORK_STEP_LIMITS, "claude-code": 12}
 
 
 async def execute_checkpoint_tool(agent: Any, name: str, arguments: dict[str, Any],
@@ -45,7 +47,7 @@ CHECKPOINT_KIND = ForkKind(
     tool_refusal="Native checkpoints may only use continuity_edit.",
     over_room_text="{excess} tokens over the remaining checkpoint room and was not sent; write the checkpoint now.",
     tool_executor=execute_checkpoint_tool,
-    step_limits={"native": native_iteration_limit, "claude-code": None, "codex": None},
+    step_limits=FORK_STEP_LIMITS,
     end_handler=capture_and_install,
     limit_or_failure_handler=terminal_failure,
     usage_binder=bind_usage,
