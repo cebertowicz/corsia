@@ -20,7 +20,7 @@ export function trackOverlaySheet(surface: Element | null, sheet: () => HTMLElem
 }
 
 /** Where the sheet rests: its backdrop's bottom less its own height, which neither the intro's slide nor a drag moves. */
-function restingTop(panel: HTMLElement): number | null {
+export function restingTop(panel: HTMLElement): number | null {
 	const backdrop = panel.closest<HTMLElement>('[data-adaptive-drawer]');
 	return panel.isConnected && backdrop ? backdrop.getBoundingClientRect().bottom - panel.offsetHeight : null;
 }

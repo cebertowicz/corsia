@@ -1,11 +1,41 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { flushSync } from 'svelte';
+import { flushSync, tick } from 'svelte';
 import { createClassComponent } from 'svelte/legacy';
 import CommentList from './CommentList.svelte';
 
 let host: HTMLElement;
 let component: ReturnType<typeof createClassComponent> | null = null;
 afterEach(() => { component?.$destroy(); component = null; host?.remove(); });
+it('keeps candidates together until the list is closed, then restores ordinary order', async () => {
+	host = document.createElement('div'); document.body.appendChild(host);
+	const comment = (id: string, regionNumber: number) => ({ id, regionNumber, anchor: id, author: 'you', text: id, at: 'now', resolved: false, replies: [] });
+	const comments = [comment('a', 10), comment('b', 30), comment('c', 35), comment('d', 40), comment('e', 50)];
+	const ids = () => [...host.querySelectorAll('[data-comment-id]')].map((card) => card.getAttribute('data-comment-id'));
+	component = createClassComponent({ target: host, component: CommentList, props: { comments, documentOrder: true, scrollOnFocus: false, focusedIds: ['b', 'd'], candidateOrder: ['b', 'd'] } });
+	flushSync(); await tick(); await tick();
+	expect(ids()).toEqual(['b', 'd', 'a', 'c', 'e']);
+	expect(document.activeElement?.getAttribute('aria-label')).toBe('Show comment 30 on the image');
+	component.$set({ focusedIds: null, focusedId: 'd' }); flushSync();
+	expect(ids()).toEqual(['b', 'd', 'a', 'c', 'e']);
+	component.$destroy(); component = null;
+	component = createClassComponent({ target: host, component: CommentList, props: { comments, documentOrder: true, focusedIds: null, candidateOrder: ['b', 'd'] } });
+	flushSync();
+	expect(ids()).toEqual(['b', 'd', 'a', 'c', 'e']);
+	component.$destroy(); component = null;
+	component = createClassComponent({ target: host, component: CommentList, props: { comments, documentOrder: true, focusedIds: null } });
+	flushSync();
+	expect(ids()).toEqual(['a', 'b', 'c', 'd', 'e']);
+});
+
+it('keeps group order and moves candidates first only within their group', () => {
+	host = document.createElement('div'); document.body.appendChild(host);
+	const comment = (id: string, regionNumber: number, group: string) => ({ id, regionNumber, group, anchor: id, author: 'you', text: id, at: 'now', resolved: false, replies: [] });
+	const comments = [comment('a', 10, 'one'), comment('b', 20, 'one'), comment('c', 10, 'two'), comment('d', 20, 'two'), comment('e', 30, 'two')];
+	component = createClassComponent({ target: host, component: CommentList, props: { comments, documentOrder: true, scrollOnFocus: false, groupOf: (item: { id: string }) => ['a', 'b'].includes(item.id) ? 'one' : 'two', focusedIds: ['d', 'e'], candidateOrder: ['d', 'e'] } });
+	flushSync();
+	expect([...host.querySelectorAll('[data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['a', 'b', 'd', 'e', 'c']);
+});
+
 it('holds document order through focus changes inside a card and updates after leaving it', () => {
 	host = document.createElement('div'); document.body.appendChild(host);
 	const comment = (id: string) => ({ id, anchor: id, author: 'you', text: id, at: 'now', resolved: false, replies: [] });

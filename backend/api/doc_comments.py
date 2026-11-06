@@ -42,7 +42,7 @@ from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context
 from infra.auth import authenticate, may_access_artifact, require_user_header_only
 from infra.database import get_db, write_transaction
-from api.doc_comment_decisions import comment_action_status, decision_refusal
+from api.doc_comment_decisions import comment_action_status, decision_refusal, selection_refusal
 from api.files import document_save_http_exception
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
 from infra.db_async import run_in_db
@@ -138,7 +138,7 @@ async def create_comment(
         artifact_id=artifact_id, path=path, body=text, author=user["name"], author_kind="user", user_id=user["id"],
         parent_id=body.parent_id, review=body.review, replacement=body.replacement,
         quote=body.anchor_text, start=body.from_off, end=body.to_off, browser=True, live_capture=body.live_capture,
-        region=region,
+        region=region, diagram_source=body.diagram_source,
         delivery_policy=body.delivery_policy, tagged_agent_ids=body.tagged_agent_ids, viewing_thread_id=body.thread_id,
         tagged_agent_mentions=mentions,
     )
@@ -151,7 +151,9 @@ async def create_comment(
         return decision_refusal(exc)
     except CommentActionError as exc:
         raise HTTPException(400, exc.message) from exc
-    except (CommentSelectionChanged, AppLoopUnavailable) as exc:
+    except CommentSelectionChanged as exc:
+        return selection_refusal(exc)
+    except AppLoopUnavailable as exc:
         raise HTTPException(409, str(exc)) from exc
     except CrossArtifactIdError as exc:
         raise HTTPException(
@@ -302,6 +304,7 @@ class CommentPatch(BaseModel):
     delivery_policy: PersonDocumentLane | None = None
     # Moves an image comment's pin; the pin then counts as placed on the current image.
     region: dict | None = None
+    diagram_source: str | None = None
 
     @model_validator(mode="after")
     def _reopen_names_its_lane(self) -> "CommentPatch":
@@ -332,7 +335,8 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
                 check_user_text_edit(comment, fields)
                 artifact = registry_models.get_artifact(artifact_id, db=db) or {}
                 moved = doc_images.region_patch(
-                    db, comment, fields, doc_path=artifact.get("path"), owner_thread_id=artifact.get("parent_thread_id"))
+                    db, comment, fields, doc_path=artifact.get("path"), owner_thread_id=artifact.get("parent_thread_id"),
+                    require_diagram_source=True)
                 patch = reopen_fields(comment, moved)
             except CommentActionError as exc:
                 raise HTTPException(comment_action_status(exc), exc.message) from exc
@@ -343,7 +347,10 @@ async def patch_comment(comment_id: str, token: str, body: CommentPatch):
         finally:
             db.close()
 
-    row = await run_in_db(_patch)
+    try:
+        row = await run_in_db(_patch)
+    except CommentSelectionChanged as exc:
+        return selection_refusal(exc)
     if row is None:
         raise HTTPException(404, "Comment not found")
     return {"comment": row}

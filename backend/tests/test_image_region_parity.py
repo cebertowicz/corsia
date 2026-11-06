@@ -2,7 +2,7 @@
 
 ``doceditor/image_regions.py`` and ``doceditor/image_markup.py`` port three viewer
 rules (``docPresence.ts`` ``agentColor``, ``projectColors.ts`` ``projectColor``,
-``imageRegions.ts`` ``placeTag`` and ``placeTags``) so the image an agent gets back looks like the
+``imageRegions.ts`` ``placeTag``, ``placeTags`` and ``badgeFill``, ported in ``badge_tone.py``) so the image an agent gets back looks like the
 one the reader sees, and ``doceditor/doc_images.py`` ports ``markdown-image.ts``
 ``resolveImagePath``, so a comment on an image in a document is keyed by the file
 the editor draws. This test and the frontend's
@@ -18,8 +18,9 @@ from pathlib import Path
 import pytest
 
 from doceditor.doc_images import resolve_image_path
-from doceditor.image_markup import Region, place_tag, place_tags
-from doceditor.image_regions import _project_color, agent_color
+from doceditor.badge_tone import badge_fill
+from doceditor.image_markup import Region, _rgb, gutter_tags, place_tag, place_tags
+from doceditor.image_regions import AGENT_COLORS, _project_color, agent_color
 
 FIXTURE = (
     Path(__file__).resolve().parents[2]
@@ -36,6 +37,15 @@ def test_agent_color_matches_viewer(case):
 @pytest.mark.parametrize("case", CONTRACT["project_colors"], ids=lambda c: str(c["project_id"]))
 def test_project_color_matches_viewer(case):
     assert _project_color(case["project_id"], None) == case["color"]
+
+
+def test_badge_fills_cover_every_agent_colour():
+    assert [case["color"] for case in CONTRACT["badge_fills"]] == list(AGENT_COLORS)
+
+
+@pytest.mark.parametrize("case", CONTRACT["badge_fills"], ids=lambda c: c["color"])
+def test_badge_fill_matches_viewer(case):
+    assert "#%02x%02x%02x" % badge_fill(_rgb(case["color"])) == case["fill"]
 
 
 @pytest.mark.parametrize("case", CONTRACT["tag_placements"], ids=lambda c: c["case"])
@@ -58,6 +68,18 @@ def test_tag_sets_match_viewer(case):
     assert [side for _, _, side in placed] == [e["side"] for e in case["expected"]]
     for (x, y, _), expected in zip(placed, case["expected"], strict=True):
         assert (x, y) == (pytest.approx(expected["x"], abs=1e-3), pytest.approx(expected["y"], abs=1e-3))
+
+
+GUTTER_CASES = json.loads((FIXTURE.parent / "image-gutter-parity.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("case", GUTTER_CASES, ids=lambda c: c["name"])
+def test_gutter_tags_match_viewer(case):
+    regions = [Region(r["x"], r["y"], r["w"], r["h"]) for r in case["regions"]]
+    tags = gutter_tags(regions, case["width"], case["height"], radius=case["radius"], gap=case["gap"])
+    for (x, y, side, ax, ay), expected in zip(tags, case["expected"], strict=True):
+        assert side == expected["side"]
+        assert (x, y, ax, ay) == pytest.approx((expected["x"], expected["y"], expected["anchor"]["x"], expected["anchor"]["y"]))
 
 
 @pytest.mark.parametrize("case", CONTRACT["image_paths"], ids=lambda c: c["case"])

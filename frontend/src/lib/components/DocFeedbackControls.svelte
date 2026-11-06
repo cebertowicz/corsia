@@ -85,6 +85,13 @@
 		.sending-now > :global(.btn.loading)::before { opacity: 0; }
 		.sending-now > :global(.btn.loading) > :global(.spinner) { position: absolute; inset: 0; margin: auto; }
 	}
+	/* The image viewer's bar is no `doc-header`: its narrow Send takes the same short wording on a phone, so the count and Send share one row. */
+	@media (max-width: 48rem) {
+		.sending-now.compact > :global(.btn) { font-size: 0; }
+		.sending-now.compact > :global(.btn)::before { content: attr(data-short); font-size: var(--text-footnote); }
+		.sending-now.compact > :global(.btn.loading)::before { opacity: 0; }
+		.sending-now.compact > :global(.btn.loading) > :global(.spinner) { position: absolute; inset: 0; margin: auto; }
+	}
 	.sent {
 		display: inline-flex;
 		align-items: center;

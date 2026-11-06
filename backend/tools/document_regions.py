@@ -19,7 +19,8 @@ REGION_SCHEMA = {
     "required": ["x", "y"],
     "description": ("A box {x, y, w, h} (or point {x, y}) in fractions 0..1 of an image, origin top-left: instead of "
                     "quote on an image artifact; with quote naming the image (its ![alt](path) or path; near picks "
-                    "among repeats) in a document. The result shows your box drawn, to move with doc_comment_update."),
+                    "among repeats) in a document. The result shows your box drawn, to move with doc_comment_update. "
+                    "For a diagram, quote its Mermaid source line without a region to create a text comment."),
 }
 
 

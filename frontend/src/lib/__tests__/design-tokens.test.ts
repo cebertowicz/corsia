@@ -42,6 +42,8 @@ const RUNTIME_PROVIDED = new Set([
 	'--doc-rail',
 	// One image comment's author colour: each tag, box, dot and card number sets `style:--region-color` from regionColor().
 	'--region-color',
+	// The numbered disc's fill: that colour stepped lighter until its digit reads, from badgeFill().
+	'--disc-color',
 	// ToastContainer's `style:--toast-top` (the toastTop store: the lowest edge of the header and status banners), and the
 	// column it centres on (`style:--toast-anchor-x` and `--toast-anchor-width`, from the toastAnchor store).
 	'--toast-top',

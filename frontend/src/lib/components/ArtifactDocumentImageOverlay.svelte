@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { leaveImageOnExit } from '$lib/docFeedbackLifecycle.svelte';
+	import { get } from 'svelte/store';
+	import { onDestroy } from 'svelte';
+	import type { OpenImageRequest } from '$lib/cm/markdown-image';
+	import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 	import ImageLightbox from './ImageLightbox.svelte';
 	import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 	import DocBottomBand from './DocBottomBand.svelte';
@@ -20,10 +24,36 @@
 		onReplyStep: (excludeId?: string) => void;
 	} = $props();
 
+	let refreshed = $state<OpenImageRequest | null>(null);
+	const currentImage = $derived(refreshed ? { ...image, ...refreshed, from: image.from, to: image.to } : image);
+	async function refreshDiagram(): Promise<boolean> {
+		if (!comments || image.diagramSource === undefined) return false;
+		const next = await comments.refreshDiagram(image.from, image.to);
+		if (!next) return false;
+		if (next.diagramSource === currentImage.diagramSource) {
+			if (next.src.startsWith('blob:')) URL.revokeObjectURL(next.src);
+			return false;
+		}
+		if (refreshed?.src.startsWith('blob:')) URL.revokeObjectURL(refreshed.src);
+		refreshed = next;
+		return true;
+	}
+	onDestroy(() => { if (refreshed?.src.startsWith('blob:')) URL.revokeObjectURL(refreshed.src); });
 	let hasDraft = $state(false);
 	let sheetUp = $state(false);
 	let selectedThread = $state<string | null>(null);
 	let loaded = $state(false);
+	let bottomBand = $state<HTMLDivElement>();
+	let viewer = $state<ReturnType<typeof ImageCommentLightbox>>();
+	// A document confirmation already showing belongs to the document underneath this viewer.
+	const priorConfirmation = get(deliveryConfirmation)?.id ?? null;
+	$effect(() => {
+		const band = bottomBand;
+		if (!band || typeof ResizeObserver === 'undefined') return;
+		const observer = new ResizeObserver(() => viewer?.refreshCoveredArea());
+		observer.observe(band);
+		return () => observer.disconnect();
+	});
 	const unread = $derived(comments?.artifactId
 		? ($docComments[comments.artifactId] ?? []).filter((comment) => hasUnread(comment) && comment.id !== selectedThread)
 		: []);
@@ -39,8 +69,13 @@
 	{#key `${target.instanceId}\u0000${image.src}\u0000${image.focus?.id ?? ''}`}
 		{#if comments}
 			<ImageCommentLightbox
-				src={image.src}
-				alt={image.alt}
+				bind:this={viewer}
+				src={currentImage.src}
+				alt={currentImage.alt}
+				readableScale={currentImage.readableScale}
+				diagramElements={currentImage.diagramElements}
+				diagramSource={currentImage.diagramSource}
+				{refreshDiagram}
 				artifactId={comments.artifactId}
 				{target}
 				projectId={comments.projectId}
@@ -54,23 +89,28 @@
 				onLoaded={() => loaded = true}
 				inDocument={{
 					occurrence: { from: image.from, to: image.to },
-					post: (region, text, taggedAgentIds, mentions) => comments.post(image.from, image.to, region, text, taggedAgentIds, mentions),
+					post: (region, text, taggedAgentIds, mentions) => comments.post(image.from, image.to, region, text, taggedAgentIds, mentions, currentImage.diagramSource),
 					failure: comments.failure,
 				}}
 				focus={image.focus ?? null}
 				feedback={comments.feedback ?? null}
+				visibleBottom={() => bottomBand?.querySelector('[data-doc-bottom-band]')?.getBoundingClientRect().top ?? null}
 				{place}
 				{onPlace}
 			/>
 		{:else}
-			<ImageLightbox src={image.src} alt={image.alt} docName={target.name} {onBack} {place} {onPlace} />
+			<ImageLightbox src={image.src} alt={image.alt} readableScale={image.readableScale} docName={target.name} {onBack} {place} {onPlace} />
 		{/if}
 	{/key}
 	{#if comments}
-		<DocBottomBand artifactId={comments.artifactId} threads={unread} ready={loaded} covered={hasDraft} sheetModalOpen={sheetUp} onStep={() => onReplyStep(selectedThread ?? undefined)} />
+		<div class="viewer-band" bind:this={bottomBand}>
+			<DocBottomBand artifactId={comments.artifactId} threads={unread} ready={loaded} covered={hasDraft} sheetModalOpen={sheetUp} ignoreConfirmationId={priorConfirmation} onStep={() => onReplyStep(selectedThread ?? undefined)} />
+		</div>
 	{/if}
 </div>
 
 <style>
-	.image-overlay { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; padding: 8px 12px 12px; box-sizing: border-box; background: var(--bg-primary); }
+	.image-overlay { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; padding: var(--space-2) var(--space-3) var(--space-3); box-sizing: border-box; background: var(--bg-primary); }
+	.viewer-band { position: absolute; bottom: var(--space-3); left: var(--space-3); right: var(--space-3); pointer-events: none; }
+	.viewer-band :global([data-doc-bottom-band]) { pointer-events: auto; }
 </style>

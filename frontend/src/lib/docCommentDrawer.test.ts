@@ -1,7 +1,27 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { clickedOpener, footerFocusHome, onSheetMoved, openerFocus, presence } from './docCommentDrawer';
+import { clickedOpener, footerFocusHome, onSheetMoved, openerFocus, presence, scrollListToCard } from './docCommentDrawer';
 
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
+
+it('keeps a visible candidate in place while still scrolling ordinary or offscreen cards', () => {
+	document.body.innerHTML = '<section><div class="drawer-comments"><div><div data-comment-id="a"></div></div></div></section>';
+	const drawer = document.querySelector<HTMLElement>('section')!;
+	const list = drawer.querySelector<HTMLElement>('.drawer-comments')!;
+	const card = drawer.querySelector<HTMLElement>('[data-comment-id]')!;
+	list.getBoundingClientRect = () => ({ top: 100, bottom: 500 } as DOMRect);
+	card.getBoundingClientRect = () => ({ top: 200, bottom: 300 } as DOMRect);
+	list.scrollTo = vi.fn();
+	scrollListToCard(drawer, 'a', false, true);
+	expect(list.scrollTo).not.toHaveBeenCalled();
+	scrollListToCard(drawer, 'a', true, true);
+	expect(list.scrollTo).toHaveBeenCalledTimes(1);
+	card.getBoundingClientRect = () => ({ top: 600, bottom: 700 } as DOMRect);
+	scrollListToCard(drawer, 'a', false, true);
+	expect(list.scrollTo).toHaveBeenCalledTimes(2);
+	card.getBoundingClientRect = () => ({ top: 200, bottom: 300 } as DOMRect);
+	scrollListToCard(drawer, 'a', false);
+	expect(list.scrollTo).toHaveBeenCalledTimes(3);
+});
 
 /** A drawer with a heading to rest on and a footer holding Send now. */
 function drawer() {

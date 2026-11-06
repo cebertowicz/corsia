@@ -9,7 +9,7 @@
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import { menuPop } from '$lib/popoverMotion';
-	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, surfaceRole = 'dialog', sideKey, children }: {
+	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, surfaceRole = 'dialog', sideKey, keepOpenOnPointer, children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
@@ -32,6 +32,8 @@
 		surfaceRole?: 'dialog' | null;
 		/** What the surface is about, when that outlives the `anchor` value. A surface keeps its side until it closes, a scroll or resize moves the anchor, or this changes. */
 		sideKey?: unknown;
+		/** A related control that can be used without dismissing this surface. */
+		keepOpenOnPointer?: (target: EventTarget | null) => boolean;
 		children: import('svelte').Snippet;
 	} = $props();
 	let surface = $state<HTMLElement>();
@@ -153,7 +155,7 @@
 	});
 	function onScrollInput(event: Event) { if (!(event.target instanceof Node && surface?.contains(event.target))) lastScrollInput = performance.now(); }
 	function dismiss() { onClose(); if (restoreFocus) restoreFocus(); else opener?.focus(); }
-	function onPointer(event: PointerEvent) { if (open && surface && event.target instanceof Node && !surface.contains(event.target)) dismiss(); }
+	function onPointer(event: PointerEvent) { if (open && surface && event.target instanceof Node && !surface.contains(event.target) && !keepOpenOnPointer?.(event.target)) dismiss(); }
 	function onKey(event: KeyboardEvent) { if (open && event.key === 'Escape') { event.stopPropagation(); dismiss(); } }
 </script>
 

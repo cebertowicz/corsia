@@ -38,7 +38,10 @@ export function tabViewState(threadId: string, instanceId: string): TabViewState
 
 function setTabViewState(threadId: string, instanceId: string, change: (current: TabViewState) => TabViewState): void {
 	const key = tabViewKey(threadId, instanceId);
-	const { documentImage, ...rest } = change(tabViewStates.get(key) ?? {});
+	const previous = tabViewStates.get(key);
+	const { documentImage, ...rest } = change(previous ?? {});
+	const oldSrc = previous?.documentImage?.src;
+	if (oldSrc?.startsWith('blob:') && oldSrc !== documentImage?.src) URL.revokeObjectURL(oldSrc);
 	const next: TabViewState = documentImage ? { ...rest, documentImage } : rest;
 	if (Object.keys(next).length) tabViewStates.set(key, next);
 	else tabViewStates.delete(key);
@@ -60,8 +63,8 @@ export function tabDocumentImage(threadId: string, instanceId: string): TabDocum
 
 /** Shows an image of the tab's document over it, at Fit: only where it is and what it opens on are kept, never the comments. */
 export function openTabDocumentImage(threadId: string, instanceId: string, request: DocumentImageRequest): void {
-	const { src, alt, from, to, scrollTop, top, focus } = request;
-	setTabViewState(threadId, instanceId, (current) => ({ ...current, documentImage: { src, alt, from, to, scrollTop, top, focus } }));
+	const { src, alt, from, to, scrollTop, top, focus, readableScale, diagramElements, diagramSource } = request;
+	setTabViewState(threadId, instanceId, (current) => ({ ...current, documentImage: { src, alt, from, to, scrollTop, top, focus, readableScale, diagramElements, diagramSource } }));
 	announceDocumentImages();
 }
 
@@ -89,7 +92,9 @@ export function clearTabDocumentImage(threadId: string, instanceId: string): voi
 
 /** A closed tab takes its places and its open image with it. */
 export function clearTabViewState(threadId: string, instanceId: string): void {
-	const hadImage = !!tabViewState(threadId, instanceId)?.documentImage;
+	const image = tabViewState(threadId, instanceId)?.documentImage;
+	const hadImage = !!image;
+	if (image?.src.startsWith('blob:')) URL.revokeObjectURL(image.src);
 	tabViewStates.delete(tabViewKey(threadId, instanceId));
 	if (hadImage) announceDocumentImages();
 }
