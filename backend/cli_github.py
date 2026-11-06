@@ -63,6 +63,22 @@ def legacy_github_read(args: list[str], path: str) -> int:
         return 1
 
 
+def _gh() -> str | None:
+    """The first ``gh`` on PATH that this run can open.
+
+    A run's sandbox may list a folder on PATH yet refuse to open what it holds (on macOS,
+    ~/.local/bin), so a ``gh`` there fails instead of running; the next one is tried.
+    """
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if directory and (found := shutil.which("gh", path=directory)):
+            try:
+                os.close(os.open(found, os.O_RDONLY))
+            except OSError:
+                continue
+            return found
+    return None
+
+
 def main(args: list[str]) -> int:
     legacy_socket = os.environ.get("CORSIA_SCRIPT_GITHUB_SOCKET")
     if args[:2] == ["github", "read"]:
@@ -78,7 +94,12 @@ def main(args: list[str]) -> int:
         gh_args = args[1:]
         if gh_args[:1] == ["read"]:
             gh_args = ["api", *gh_args[1:]]
-        os.execvp("gh", ["gh", *gh_args])
+        gh = _gh()
+        if gh is None:
+            print("No GitHub CLI (gh) on PATH that this script run can open; install gh in a "
+                  "system folder such as /usr/local/bin", file=sys.stderr)
+            return 127
+        os.execv(gh, [gh, *gh_args])
     for directory in os.environ.get("PATH", "").split(os.pathsep):
         command = shutil.which("corsia", path=directory)
         if command and os.path.realpath(command) != os.path.realpath(__file__):
