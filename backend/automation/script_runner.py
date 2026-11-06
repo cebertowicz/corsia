@@ -25,7 +25,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from automation import script_rule_runs
+from automation import script_rule_runs, script_tree
 from automation import script_schedules as store
 from automation.schedules import Schedule, get
 from automation.script_readings import (
@@ -324,13 +324,21 @@ async def _execute(schedule: Schedule, rule_run: script_rule_runs.RuleRun | None
         return hash_mismatch_report(schedule)
     if current != schedule.script_sha256:
         return hash_mismatch_report(schedule)
+    authentication = (schedule.payload or {}).get("authentication") or {}
+    approved = authentication.get("state") == "approved"
+    if approved:
+        try:
+            tree = await asyncio.to_thread(script_tree.read_tree, path)
+        except (OSError, ValueError):
+            return hash_mismatch_report(schedule, folder=True)
+        expected = script_tree.approved_tree_sha256(authentication, path, schedule.script_sha256)
+        if script_tree.tree_sha256(tree) != expected:
+            return hash_mismatch_report(schedule, folder=True)
     project = None if schedule.scope_id == WORKSPACE_SCOPE else schedule.scope_id
     run_id = uuid.uuid4().hex
     try:
         stdin, repository = (await run_off_db(script_rule_runs.execution_input, schedule, rule_run)
                              if rule_run else (None, None))
-        authentication = (schedule.payload or {}).get("authentication") or {}
-        approved = authentication.get("state") == "approved"
         run = await run_script(
             schedule.thread_id, project, path,
             run_id=run_id, timeout_seconds=int(schedule.timeout_seconds or 0),

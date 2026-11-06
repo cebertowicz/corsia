@@ -343,6 +343,54 @@ async def test_changed_approved_script_never_executes(tmp_path, monkeypatch):
     assert calls == []
 
 
+def _approved(db, tmp_path, *, tree_sha256: str | None = None):
+    from dataclasses import replace
+
+    auth = {"state": "approved", **({"tree_sha256": tree_sha256} if tree_sha256 else {})}
+    schedule = _register(db, tmp_path)
+    return replace(schedule, payload={**(schedule.payload or {}), "authentication": auth})
+
+
+def _use_authenticated_run(monkeypatch) -> list[Path]:
+    calls: list[Path] = []
+
+    async def fake(thread_id, project_id, path, *, run_id, timeout_seconds, authenticated=False):
+        assert authenticated
+        calls.append(path)
+        return _run('{"series":"cost","value":1}\n')
+
+    monkeypatch.setattr(script_runner, "run_script", fake)
+    return calls
+
+
+@pytest.mark.asyncio
+async def test_approved_script_stops_when_a_file_in_its_folder_changes(tmp_path, monkeypatch):
+    from automation import script_tree
+
+    (tmp_path / "helper.py").write_text("VALUE = 1\n")
+    db = _db()
+    entry = _script(tmp_path)
+    schedule = _approved(db, tmp_path, tree_sha256=script_tree.tree_sha256(script_tree.read_tree(entry)))
+    calls = _use_authenticated_run(monkeypatch)
+    assert (await script_runner._execute(schedule)).status == "ok"
+    (tmp_path / "helper.py").write_text("VALUE = 2\n")
+    report = await script_runner._execute(schedule)
+    assert report.status == "hash_mismatch"
+    assert "folder" in (report.error or "")
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_approval_without_a_folder_hash_runs_only_while_the_entry_is_alone(tmp_path, monkeypatch):
+    db = _db()
+    schedule = _approved(db, tmp_path)
+    calls = _use_authenticated_run(monkeypatch)
+    assert (await script_runner._execute(schedule)).status == "ok"
+    (tmp_path / "helper.py").write_text("VALUE = 1\n")
+    assert (await script_runner._execute(schedule)).status == "hash_mismatch"
+    assert len(calls) == 1
+
+
 @pytest.mark.asyncio
 async def test_restart_marks_in_flight_run_interrupted_without_replay(
     tmp_path, monkeypatch,

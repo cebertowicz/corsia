@@ -8,8 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from automation.script_schedules import pin_script
+from automation.script_tree import read_tree, tree_sha256
 from events.delivery import deliver_to_thread
 from host_access import reviewer_target
+from host_access.credential_sanitizer import sanitize_credential_text
 from host_access.reviewer import STANDING_SCRIPT_REVIEW, review_application
 from host_access.supervisor import _reviewer_binary
 from infra.config import WORKSPACE
@@ -28,13 +30,16 @@ async def review_script(thread_id: str, params: dict[str, Any]) -> tuple[Path, s
     if not params.get("script_path"):
         raise ValueError("script_path is required for a script schedule")
     path, sha = await run_off_db(pin_script, str(params["script_path"]), workspace=WORKSPACE)
-    raw = await run_off_db(path.read_bytes)
+    tree = await run_off_db(read_tree, path)
+    raw = tree.pop(path.name, b"")
     if hashlib.sha256(raw).hexdigest() != sha:
         raise ValueError("script changed while preparing review; request it again")
     text = raw.decode("utf-8", errors="backslashreplace")
     trigger = {"cadence_seconds": params.get("cadence_seconds")}
     application = {"purpose": purpose, "user_request": user_request, "trigger": trigger,
-                   "script": text, "script_path": str(path), "script_sha256": sha}
+                   "script": text, "script_path": str(path), "script_sha256": sha,
+                   "files": [_reviewed_file(name, data) for name, data in tree.items()]}
+    tree_hash = tree_sha256({**tree, path.name: raw})
     application_hash = hashlib.sha256(json.dumps(
         application, sort_keys=True, ensure_ascii=False, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
@@ -51,5 +56,14 @@ async def review_script(thread_id: str, params: dict[str, Any]) -> tuple[Path, s
     approved = review.verdict == "allow" and auto and await run_in_db(get_host_access_auto_approve)
     record = {"state": "approved" if approved else "pending", "purpose": purpose,
               "user_request": user_request, "trigger": trigger, "application_hash": application_hash,
-              "review": asdict(review)}
+              "tree_sha256": tree_hash, "review": asdict(review)}
     return path, sha, record
+
+
+def _reviewed_file(name: str, data: bytes) -> dict[str, Any]:
+    """A folder file as the reviewer reads it: its text, or only its size when it isn't text."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return {"path": name, "size": len(data), "binary": True}
+    return {"path": name, "text": sanitize_credential_text(text)}

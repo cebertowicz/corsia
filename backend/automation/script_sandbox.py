@@ -84,20 +84,23 @@ class ScriptRun:
         return len(self.stdout) > STDOUT_CAP_BYTES
 
 
-def script_command(path: Path, stdin: Path | None = None, *, client_dir: Path | None = None) -> str:
+def script_command(path: Path, stdin: Path | None = None, *, client_dir: Path | None = None,
+                   pycache_dir: Path | None = None) -> str:
     """The one bash command line for a script: ``stdin`` or none, capped stdout and stderr.
 
     ``head`` ends a runaway script with SIGPIPE instead of letting the process
     owner hold its whole output in memory, and ``pipefail`` keeps the script's
-    own exit code visible.
+    own exit code visible. ``pycache_dir`` keeps Python's bytecode out of the
+    script's folder, so an approved run never loads a ``__pycache__`` file there.
     """
     quoted = shlex.quote(str(path))
     interpreter = _INTERPRETERS.get(path.suffix)
     run = f"{interpreter} {quoted}" if interpreter else quoted
     source = shlex.quote(str(stdin)) if stdin is not None else "/dev/null"
     client_path = f'export PATH={shlex.quote(str(client_dir))}:"$PATH"; ' if client_dir else ""
+    pycache = f"export PYTHONPYCACHEPREFIX={shlex.quote(str(pycache_dir))}; " if pycache_dir else ""
     return (
-        f"{client_path}set -o pipefail; {run} <{source} "
+        f"{client_path}{pycache}set -o pipefail; {run} <{source} "
         f"2> >(head -c {STDERR_CAP_BYTES} >&2) | head -c {STDOUT_CAP_BYTES + 1}"
     )
 
@@ -332,7 +335,9 @@ async def _run_with_channel(
                                                   "extra_hidden_roots": _script_gh_homes(view),
                                                   "extra_socket_roots": [socket_dir] if socket_dir else []})
     profile_path, argv = await prepare_execution_envelope(
-        script_command(script, stdin, client_dir=client_dir), cwd, envelope,
+        script_command(script, stdin, client_dir=client_dir,
+                       pycache_dir=client_dir / "pycache" if socket_dir is not None and client_dir else None),
+        cwd, envelope,
     )
     try:
         owned = await PROCESS_OWNER.spawn(

@@ -82,12 +82,18 @@ APPLICATION_REVIEW_SYSTEM_POLICY = (
 STANDING_SCRIPT_REVIEW_SYSTEM_POLICY = (
     "You are CORSIA's application reviewer. The applicant is an agent working "
     "for the person who owns this machine. This application registers a standing "
-    "script that, once approved and until its file changes, can call any tool the "
-    "agent has and run gh as the agents' GitHub account. Default to allow. Reject an "
+    "script that, once approved and until any file in its folder changes, can call any "
+    "tool the agent has and run gh as the agents' GitHub account. Default to allow. Reject an "
     "unsafe request, including exposing credentials or destroying data that "
     "the stated purpose does not need. If it is safe but you are unsure the "
     "person wants it, choose ask_person. Judge the purpose, the person's "
-    "request, the trigger, and the script together. "
+    "request, the trigger, the script and the other files in its folder together. "
+    "files lists every other file in the script's folder, which a run can load: each "
+    "with its text, or only its size when binary is true. Reject a binary file the run "
+    "can load as code (a .pyc, .so, .dylib or .node file) since you cannot read it. "
+    "Code the run loads from outside its folder is not shown to you, including a bash "
+    "source of a bare name (looked up on PATH and the working directory); judge it "
+    "only from what the shown text says it loads. "
 )
 STANDING_SCRIPT_AUTO_APPROVE_ON = (
     " Auto approval is enabled: allow registers the script; ask_person sends it to the person."
