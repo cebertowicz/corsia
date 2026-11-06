@@ -125,9 +125,15 @@ describe('resolveLinkTarget', () => {
 		},
 	);
 
-	it('does not navigate unsafe schemes and shows a visible error', async () => {
+	it.each([
+		'javascript:alert(1)',
+		'vscode://file/Users/x/foo.ts:12',
+		'file:///workspace/shared/a.md:12',
+		'ftp://files.example.com:21',
+	])('does not navigate an unsupported scheme, even one ending like a line (%s), and shows a visible error', async (href) => {
 		const d = deps();
-		expect(await resolveLinkTarget('javascript:alert(1)', d)).toBe('error');
+		expect(await resolveLinkTarget(href, d)).toBe('error');
+		expect(d.fetchRevision).not.toHaveBeenCalled();
 		expect(d.showError).toHaveBeenCalledWith('This link uses an unsupported destination');
 		expect(d.openExternal).not.toHaveBeenCalled();
 	});
@@ -234,6 +240,26 @@ describe('delegated rendered-markdown listener', () => {
 		cleanup = installLinkTargetResolver(document, () => d);
 		host.querySelector<HTMLAnchorElement>('a')!.click();
 		await vi.waitFor(() => expect(d.openArtifact).toHaveBeenCalledOnce());
+	});
+
+	it.each(['/workspace/shared/linked.md:143', 'shared/linked.md:143'])('opens the document a chat link cites at a line (%s)', async (href) => {
+		const d = deps();
+		host = document.createElement('section');
+		document.body.appendChild(host);
+		component = mount(AssistantMessage, {
+			target: host,
+			props: {
+				msg: { id: 'message-1', content: `[Readout](${href})`, created_at: '2026-09-28T00:00:00Z' },
+				expandedTools: new Set<string>(), expandedReasoning: new Set<string>(),
+				onToggleToolBlock: () => {}, onToggleReasoning: () => {},
+			},
+		});
+		flushSync();
+		cleanup = installLinkTargetResolver(document, () => d);
+		host.querySelector<HTMLAnchorElement>('a')!.click();
+		await vi.waitFor(() => expect(d.openArtifact).toHaveBeenCalledOnce());
+		expect(d.fetchRevision).toHaveBeenCalledWith('/workspace/shared/linked.md', 'project-1');
+		expect(d.showError).not.toHaveBeenCalled();
 	});
 
 	it('routes an artifact document table link through the same root listener', async () => {

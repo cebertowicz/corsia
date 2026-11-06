@@ -282,6 +282,14 @@ describe('documentLinkTarget', () => {
 		expect(documentLinkTarget(DOC_PATH, 'my%20notes/a%25b.md')).toBe('/workspace/shared/documents/my%20notes/a%25b.md');
 	});
 
+	it('resolves a relative target cited at a line from the document folder, as that file', () => {
+		expect(documentLinkTarget(DOC_PATH, 'DECISIONS.md:143')).toBe('/workspace/shared/documents/DECISIONS.md');
+		expect(documentLinkTarget(DOC_PATH, '../y.md:12:3')).toBe('/workspace/shared/y.md');
+		// An encoded colon is the same citation, so it resolves from the document folder too, not the workspace root.
+		expect(documentLinkTarget(DOC_PATH, 'DECISIONS.md%3A143')).toBe('/workspace/shared/documents/DECISIONS.md');
+		expect(documentLinkTarget(DOC_PATH, '../y.md%3a12%3A3')).toBe('/workspace/shared/y.md');
+	});
+
 	it('passes absolute paths, anchors and other schemes on as written', () => {
 		for (const href of ['/workspace/a.md', '/thread/abc', '/settings/providers', '#top', 'https://example.com/a', 'mailto:a@b.c']) {
 			expect(documentLinkTarget(DOC_PATH, href)).toBe(href);
