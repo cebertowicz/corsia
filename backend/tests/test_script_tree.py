@@ -147,3 +147,45 @@ async def test_review_reads_nothing_the_requester_cannot_read(walled, where):
     with pytest.raises(ValueError):
         await review(entry)
     reviewer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_file_swapped_for_a_link_after_its_check_is_never_read(walled, monkeypatch):
+    ws, review, reviewer = walled
+    entry = ws / "tools" / "run.py"
+    entry.parent.mkdir()
+    entry.write_text("import helper\n")
+    helper = entry.parent / "helper.py"
+    helper.write_text("X = 1\n")
+    outside = ws.parent / "outside-secret.txt"
+    outside.write_text("outside-bytes\n")
+    checked = script_access._read_denial
+
+    def swap_after_check(path, *args):
+        denial = checked(path, *args)
+        if path == helper:
+            helper.unlink()
+            helper.symlink_to(outside)
+        return denial
+
+    monkeypatch.setattr(script_access, "_read_denial", swap_after_check)
+    with pytest.raises(ValueError, match="helper.py in the script's folder is a link") as refused:
+        await review(entry)
+    assert "outside-bytes" not in str(refused.value)
+    reviewer.assert_not_awaited()
+
+
+def test_a_folder_reached_through_a_link_is_refused(tmp_path):
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "run.py").write_text("pass\n")
+    (tmp_path / "alias").symlink_to(real, target_is_directory=True)
+    with pytest.raises(ValueError, match="goes through a link"):
+        script_tree.read_tree(tmp_path / "alias" / "run.py")
+
+
+def test_a_pipe_in_the_folder_is_skipped_without_blocking(tmp_path):
+    entry = tmp_path / "run.py"
+    entry.write_text("pass\n")
+    os.mkfifo(tmp_path / "pipe")
+    assert script_tree.read_tree(entry) == {"run.py": b"pass\n"}

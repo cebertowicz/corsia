@@ -7,9 +7,11 @@ keep their bytecode elsewhere (``script_sandbox.script_command``), so none is re
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
+import stat
 from collections.abc import Callable
 from pathlib import Path
 
@@ -24,29 +26,73 @@ def read_tree(entry: Path, denied: Callable[[Path], str | None] | None = None) -
 
     A link is refused: a run would load what it points at, which may lie outside what
     the run, or the agent asking for review, can read. ``denied`` is the requester's
-    read check; the folder and everything in it pass it before anything is read.
+    read check; the folder and everything in it pass it before anything is read. Every
+    read goes through descriptors opened without following links, so a path swapped for
+    a link after its check fails to open instead of being read.
     """
     folder = entry.parent
     files: dict[str, bytes] = {}
     total = 0
     _check(folder, denied)
-    for root, dirs, names in os.walk(folder, followlinks=False):
-        base = Path(root)
-        dirs[:] = sorted(name for name in dirs if name != "__pycache__")
-        for name in [*dirs, *sorted(names)]:
-            if (base / name).is_symlink():
-                raise ValueError(f"{_relative(base / name, folder)} in the script's folder is a link; "
-                                 "copy what the script loads into its own folder instead")
-            _check(base / name, denied)
-        for name in sorted(names):
-            path = base / name
-            if not path.is_file():
-                continue  # a socket or pipe in the folder is not code a run can load
-            total += path.stat().st_size
-            if total > MAX_SCRIPT_BYTES:
-                raise ValueError(_TOO_LARGE)
-            files[_relative(path, folder)] = path.read_bytes()
+    folder_fd = _open_folder(folder)
+    try:
+        for root, dirs, names, dir_fd in os.fwalk(".", dir_fd=folder_fd, follow_symlinks=False):
+            base = folder / root
+            dirs[:] = sorted(name for name in dirs if name != "__pycache__")
+            for name in [*dirs, *sorted(names)]:
+                if stat.S_ISLNK(os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode):
+                    raise ValueError(_link(base / name, folder))
+                _check(base / name, denied)
+            for name in sorted(names):
+                data = _read_file(name, dir_fd, base / name, folder, MAX_SCRIPT_BYTES - total)
+                if data is None:
+                    continue  # a socket or pipe in the folder is not code a run can load
+                total += len(data)
+                if total > MAX_SCRIPT_BYTES:
+                    raise ValueError(_TOO_LARGE)
+                files[_relative(base / name, folder)] = data
+    finally:
+        os.close(folder_fd)
     return files
+
+
+def _open_folder(folder: Path) -> int:
+    """``folder`` opened one component at a time from the root, none of them a link."""
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in folder.parts[1:]:
+            try:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                    raise ValueError(f"{folder} goes through a link; schedule the script by its "
+                                     "real path") from exc
+                raise
+            os.close(fd)
+            fd = child
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _read_file(name: str, dir_fd: int, path: Path, folder: Path, room: int) -> bytes | None:
+    """The regular file ``name`` under ``dir_fd``, never through a link; None when it isn't one."""
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise ValueError(_link(path, folder)) from exc
+        raise
+    with os.fdopen(fd, "rb") as stream:
+        if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+            return None
+        return stream.read(max(room, 0) + 1)
+
+
+def _link(path: Path, folder: Path) -> str:
+    return (f"{_relative(path, folder)} in the script's folder is a link; "
+            "copy what the script loads into its own folder instead")
 
 
 def tree_sha256(files: dict[str, bytes]) -> str:
