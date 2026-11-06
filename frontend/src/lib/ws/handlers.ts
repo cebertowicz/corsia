@@ -15,6 +15,7 @@ import { startTypewriter } from './typewriter';
 import { consumeFirstRunOpening } from './firstRunOpeningReveal';
 import {
 	handleInputAccepted,
+	handleRecoveredInput,
 	handleContextUsageUpdated,
 	handleThreadSnapshot,
 	handleStepReasoning,
@@ -158,6 +159,13 @@ export function handleMessage(data: any, resetHeartbeat: () => void, isCurrentOw
 
 		case 'input_accepted':
 			handleInputAccepted(data);
+			break;
+
+		case 'input_recovered':
+			// A message resent after a reconnect that the server already had.
+			if (typeof data.thread_id === 'string' && typeof data.input_id === 'string') {
+				handleRecoveredInput(data.thread_id, data.input_id, data.message);
+			}
 			break;
 
 		case 'input_queued': {

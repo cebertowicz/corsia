@@ -1,7 +1,7 @@
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const calls = vi.hoisted(() => ({ restore: 0, recover: 0 }));
+const calls = vi.hoisted(() => ({ restore: 0 }));
 vi.mock('./turnState', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('./turnState')>();
 	return {
@@ -9,16 +9,6 @@ vi.mock('./turnState', async (importOriginal) => {
 		restoreAuthTurns: (...args: Parameters<typeof actual.restoreAuthTurns>) => {
 			calls.restore += 1;
 			return actual.restoreAuthTurns(...args);
-		},
-	};
-});
-vi.mock('./pendingRecovery', async (importOriginal) => {
-	const actual = await importOriginal<typeof import('./pendingRecovery')>();
-	return {
-		...actual,
-		recoverPendingInputs: (...args: Parameters<typeof actual.recoverPendingInputs>) => {
-			calls.recover += 1;
-			return actual.recoverPendingInputs(...args);
 		},
 	};
 });
@@ -65,7 +55,6 @@ const sockets = () => FakeSocket.instances;
 const live = () => sockets().filter(socket => socket.readyState !== FakeSocket.CLOSED);
 let connected = 0;
 let stopListening: () => void;
-let historyPage: (threadId: string) => Promise<unknown>;
 let drainBody: () => Promise<unknown>;
 
 async function flush() {
@@ -95,7 +84,6 @@ function authenticated(session: string, userId: string, activeTurns: Frame[] = [
 beforeEach(() => {
 	vi.useFakeTimers();
 	vi.stubGlobal('WebSocket', FakeSocket);
-	historyPage = async () => ({ messages: [], has_more: false });
 	drainBody = async () => ({ active: false });
 	vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
 		const url = new URL(String(input), 'http://fixture.invalid');
@@ -104,11 +92,6 @@ beforeEach(() => {
 			return { ok: true, status: 200, json: async () => body };
 		}
 		if (url.pathname === '/api/auth/logout') return { ok: true, status: 200, json: async () => ({}) };
-		const history = url.pathname.match(/^\/api\/threads\/([^/]+)\/messages$/);
-		if (history) {
-			const body = await historyPage(history[1]);
-			return { ok: true, status: 200, json: async () => body };
-		}
 		return { ok: false, status: 404, json: async () => ({}) };
 	}));
 	// Start every case from a reset backoff with no owner.
@@ -119,7 +102,6 @@ beforeEach(() => {
 	user.set(null);
 	FakeSocket.instances = [];
 	calls.restore = 0;
-	calls.recover = 0;
 	connected = 0;
 	stopListening = on('connected', () => { connected += 1; });
 	_resetTurnStateForTests();
@@ -363,7 +345,7 @@ describe('stale frames and recovery (Turn & Delivery controls)', () => {
 		const a = sockets()[0];
 		const b = authenticated('session-b', 'user-b', [runningTurn]);
 		const before = {
-			restore: calls.restore, recover: calls.recover, connected,
+			restore: calls.restore, connected,
 			sent: b.sent.length, turn: getTurnState('main-1'),
 		};
 		expect(subscribedThreads.has('main-1')).toBe(true);
@@ -371,7 +353,6 @@ describe('stale frames and recovery (Turn & Delivery controls)', () => {
 		a.authOk('user-a', []);
 
 		expect(calls.restore).toBe(before.restore);
-		expect(calls.recover).toBe(before.recover);
 		expect(connected).toBe(before.connected);
 		expect(b.sent).toHaveLength(before.sent);
 		expect(getTurnState('main-1')).toEqual(before.turn);
@@ -379,7 +360,7 @@ describe('stale frames and recovery (Turn & Delivery controls)', () => {
 		expect(get(user)?.id).toBe('user-b');
 	});
 
-	it('TD-2: an input sent on A survives a dropped receipt and resolves from B without resend', async () => {
+	it('TD-2: an input whose receipt A dropped goes back on B first, marked recovery, and B\'s answer settles it', () => {
 		const a = authenticated('session-a', 'user-a');
 		const inputId = sendMessage('main-1', 'hello')!;
 		const inputFrame = a.sent.find(frame => frame.input_id === inputId)!;
@@ -387,21 +368,25 @@ describe('stale frames and recovery (Turn & Delivery controls)', () => {
 		a.receive({ type: 'input_accepted', thread_id: 'main-1', input_id: inputId });
 		expect(getTurnState('main-1').pendingInputIds).toEqual([inputId]);
 
-		historyPage = async () => ({
-			messages: [{
-				id: 'canonical-1', role: 'user', content: 'hello',
-				created_at: '2026-10-03T15:00:00Z', metadata: { input_id: inputId },
-			}],
-			has_more: false,
-		});
 		const b = sockets()[1];
 		b.open();
-		b.authOk('user-a');
-		await flush();
+		const later = sendMessage('main-1', 'sent after the reconnect')!;
+		expect(b.sent.map(frame => [frame.type, frame.input_id, frame.recovery])).toEqual([
+			['auth', undefined, undefined],
+			['message', inputId, true],
+			['message', later, undefined],
+		]);
+		expect(b.sent[1]).toEqual({ ...inputFrame, recovery: true });
 
-		expect(getTurnState('main-1').pendingInputIds).toEqual([]);
-		expect(b.types()).not.toContain(inputFrame.type);
-		expect(calls.recover).toBe(2);
+		b.authOk('user-a');
+		b.receive({
+			type: 'input_recovered', thread_id: 'main-1', input_id: inputId,
+			message: {
+				id: inputId, created_at: '2026-10-03T15:00:00Z',
+				delivery_state: 'queued', delivery_error: null, delivery_revision: 1,
+			},
+		});
+		expect(getTurnState('main-1').pendingInputIds).toEqual([later]);
 	});
 
 	it.each([
@@ -457,37 +442,33 @@ describe('stale frames and recovery (Turn & Delivery controls)', () => {
 		expect(b.types().filter(type => type === 'subscribe_session')).toHaveLength(bSubscribes);
 	});
 
-	it('TD-6: recovery started under A writes nothing and reads no further page after B replaces it', async () => {
+	it('TD-6: a recovery answer on A writes nothing after B replaces it, and the input goes to B', async () => {
 		signIn('session-a');
 		const a = sockets()[0];
 		a.open();
 		const inputId = sendMessage('main-1', 'hello')!;
-		const page = deferred<unknown>();
-		const historyCalls: string[] = [];
-		historyPage = (threadId) => { historyCalls.push(threadId); return page.promise; };
 		const drain = deferred<unknown>();
 		drainBody = () => drain.promise;
 		a.authOk('user-a');
 		await flush();
-		expect(historyCalls).toHaveLength(1);
 		const rowsBefore = get(messages);
 
 		signIn('session-b');
-		page.resolve({
-			messages: [{
-				id: 'canonical-a', role: 'user', content: 'hello',
-				created_at: '2026-10-03T15:00:00Z', metadata: { input_id: inputId },
-			}],
-			has_more: true,
-			oldest_id: 'canonical-a',
+		a.receive({
+			type: 'input_recovered', thread_id: 'main-1', input_id: inputId,
+			message: { id: inputId, created_at: '2026-10-03T15:00:00Z', delivery_state: 'queued' },
 		});
 		drain.resolve({ active: true, reason: 'restart', blockingTurns: [] });
 		await flush();
 
-		expect(historyCalls).toHaveLength(1);
 		expect(getTurnState('main-1').pendingInputIds).toEqual([inputId]);
 		expect(get(messages)).toEqual(rowsBefore);
 		expect(get(drainStatus)).toBeNull();
+		const b = sockets().at(-1)!;
+		b.open();
+		expect(b.sent.filter(frame => frame.input_id === inputId)).toEqual([
+			expect.objectContaining({ type: 'message', recovery: true }),
+		]);
 	});
 
 	it('TD-6: a drain read started under A is not applied after logout', async () => {
@@ -500,7 +481,7 @@ describe('stale frames and recovery (Turn & Delivery controls)', () => {
 		expect(get(drainStatus)).toBeNull();
 	});
 
-	it('TD-7: same-session reuse runs recovery and turn restore once per owner auth_ok', async () => {
+	it('TD-7: same-session reuse runs turn restore once per owner auth_ok', async () => {
 		signIn('session-a');
 		connect();
 		const a = sockets()[0];
@@ -509,7 +490,6 @@ describe('stale frames and recovery (Turn & Delivery controls)', () => {
 		a.authOk('user-a');
 		await flush();
 		expect(sockets()).toHaveLength(1);
-		expect(calls.recover).toBe(1);
 		expect(calls.restore).toBe(1);
 	});
 });

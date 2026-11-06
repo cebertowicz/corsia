@@ -25,7 +25,6 @@ import {
 	handleInputRejected,
 	handleTurnError,
 } from './handlersTurns';
-import { recoverPendingInputs } from './pendingRecovery';
 import { restoreAuthTurns, type TurnIdentity } from './turnState';
 
 // `isCurrentOwner` is the delivering socket's ownership check. The body below
@@ -90,7 +89,6 @@ export function handleAuthOk(
 			thread_ids: activeTurns.map((turn: { threadId: string }) => turn.threadId),
 		});
 	}
-	void recoverPendingInputs(fetch, isCurrentOwner);
 	emit('connected', data.user);
 }
 

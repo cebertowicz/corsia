@@ -83,7 +83,8 @@ async def _receive_frames(
                     ws, user, data.get("thread_id", ""), data.get("content", ""),
                     data.get("attachments") or [], data.get("edited", False),
                     data.get("input_id"), data.get("delivery_intent"),
-                    data.get("viewing_document"), data.get("reply_context")))
+                    data.get("viewing_document"), data.get("reply_context"),
+                    data.get("recovery") is True))
                 _background_tasks.add(task)
                 task.add_done_callback(_background_tasks.discard)
                 continue
