@@ -37,6 +37,9 @@ def update_comment(
     row = store.update(comment_id, patch, db=connection)
     if before is None or row is None:
         return row
+    if actor_thread_id and patch.get("resolved") is True and not before.get("resolved"):
+        from doceditor.comment_recipients import reset_action
+        reset_action(connection, before, actor_thread_id)
     author = before.get("author_thread_id")
     if before.get("author_kind") != "agent" or not author or author == actor_thread_id:
         return row

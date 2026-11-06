@@ -1,5 +1,6 @@
 import type {
 	HostAccessLease,
+	HostAccessItem,
 	HostAccessPolicyException,
 	HostAccessRepoPolicy,
 } from '$lib/api/hostAccess';
@@ -80,13 +81,12 @@ export function policyLabel(policy: HostAccessPolicyException['policy']): string
 		: 'Protected base checkout';
 }
 
-export function casReady(lease: HostAccessLease | null): boolean {
+export function casReady(lease: HostAccessItem | null): boolean {
 	return !!lease
 		&& text(lease.id)
 		&& text(lease.application_hash)
 		&& text(lease.decision_capability)
-		&& Number.isInteger(lease.revision)
-		&& lease.revision > 0;
+		&& (lease.kind === 'script' || (Number.isInteger(lease.revision) && lease.revision > 0));
 }
 
 /**
@@ -97,14 +97,19 @@ export function casReady(lease: HostAccessLease | null): boolean {
  * would silently no-op the click.
  */
 export function decisionBlocked(
-	lease: HostAccessLease | null,
+	lease: HostAccessItem | null,
 	stale: boolean,
 	blockingLeaseId: string | null,
 ): boolean {
 	return stale || blockingLeaseId !== null || !casReady(lease);
 }
 
-export function approvalReady(lease: HostAccessLease | null): boolean {
+export function approvalReady(lease: HostAccessItem | null): boolean {
+	if (lease?.kind === 'script') {
+		return lease.state === 'awaiting_user' && casReady(lease)
+			&& text(lease.script_name) && text(lease.purpose) && text(lease.user_request)
+			&& !!lease.trigger;
+	}
 	return !!lease
 		&& lease.state === 'awaiting_user'
 		&& casReady(lease)
@@ -131,10 +136,18 @@ export function approvalReady(lease: HostAccessLease | null): boolean {
 		&& nullableText(lease.terminal_reason);
 }
 
-export function owner(lease: HostAccessLease): string {
+export function owner(lease: HostAccessItem): string {
+	if (lease.kind === 'script') return lease.root_thread_id;
 	return text(lease.root_thread_title)
 		? lease.root_thread_title.trim()
 		: (text(lease.root_thread_id) ? lease.root_thread_id : 'Unknown chat');
+}
+
+/** The pending chip's and drawer's accessible name. */
+export function pendingLabel(request: HostAccessItem): string {
+	return request.kind === 'script'
+		? 'Review permission for this script to act as your agent and use the agents’ GitHub account'
+		: 'Review temporary host access';
 }
 
 export function duration(seconds: unknown): string {
@@ -144,6 +157,14 @@ export function duration(seconds: unknown): string {
 	if (seconds === 60) return '1 minute';
 	if ((seconds as number) % 60 === 0) return `${(seconds as number) / 60} minutes`;
 	return `${seconds} seconds`;
+}
+
+export function cadence(seconds: number | null): string {
+	if (seconds == null) return 'When a matching event arrives';
+	const [size, unit] = ([[86_400, 'day'], [3_600, 'hour'], [60, 'minute']] as const)
+		.find(([size]) => seconds % size === 0) ?? [1, 'second'];
+	const count = seconds / size;
+	return count === 1 ? `Every ${unit}` : `Every ${count} ${unit}s`;
 }
 
 export function remaining(lease: HostAccessLease, nowMs: number): string {

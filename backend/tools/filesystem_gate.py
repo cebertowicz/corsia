@@ -14,6 +14,7 @@ class AuthorizedPath:
 
     resolved: Path
     reviewed: bool
+    fence: Any = None
 
 
 def _join_relative_to_workspace(path: str, workspace: Path | None) -> Path:
@@ -63,19 +64,28 @@ def resolve_path(
     allowed_dir: Path | None = None,
     *,
     for_write: bool = False,
+    thread_id: str | None = None,
+    fence: Any = None,
 ) -> Path:
     """Resolve path against workspace (if relative) and enforce directory restriction.
 
     The configured workspace/registered-repository boundary applies independent
     of whether the optional Safehouse executable is installed. ``allowed_dir``
-    preserves the legacy denial detail, but does not override a registered-repo
-    grant or turn project scope into a confidentiality boundary.
+    preserves the legacy denial detail. When supplied, ``thread_id`` applies
+    the caller's project fence independently of registered-repo grants.
     """
     p = _join_relative_to_workspace(path, workspace)
     resolved = p.resolve(strict=False)
     import tools.confined_reads as confined_reads
     from tools.host_path_policy import ordinary_host_path_denial
 
+    if thread_id:
+        from tools.project_fence import fence_for_thread
+
+        if fence is None:
+            fence = fence_for_thread(thread_id)
+        if refusal := fence.refusal(p):
+            raise PermissionError(refusal)
     confined_reads.check(p, resolved, for_write=for_write)
     if not for_write and carry_in_hides(resolved, reading=True):
         raise FileNotFoundError(path)  # absent for this carry-in side
@@ -84,6 +94,7 @@ def resolve_path(
         if denial := ordinary_host_path_denial(
             candidate,
             for_write=for_write,
+            fence=fence,
         ):
             raise PermissionError(denial)
 
@@ -124,6 +135,7 @@ async def _resolve_path_for_action(
     thread_id: str | None,
     project_id: str | None,
     for_write: bool = False,
+    fence: Any = None,
 ) -> AuthorizedPath:
     """Consume one exact host permit, or apply the ordinary path boundary.
 
@@ -134,6 +146,14 @@ async def _resolve_path_for_action(
     """
     import tools.confined_reads as confined_reads
     from tools.host_access_gate import consume_current_action_permit
+    from tools.project_fence import fence_for_thread
+
+    if fence is None:
+        fence = await asyncio.to_thread(fence_for_thread, thread_id)
+    target = _join_relative_to_workspace(path, workspace)
+    root = fence.matching_root(target)
+    if root is not None and root.local_only:
+        raise PermissionError(fence.refusal(target))
 
     # A confined worker's reads never take a host permit: its read paths are all it has.
     consumed = None if confined_reads.confined() else await consume_current_action_permit(
@@ -142,6 +162,7 @@ async def _resolve_path_for_action(
         tool=tool,
         tool_name=tool_name,
         params=params,
+        fence=fence,
     )
     if consumed is None:
         # Repository policy behind the boundary reads SQLite and runs Git.
@@ -152,11 +173,14 @@ async def _resolve_path_for_action(
                 workspace,
                 allowed_dir,
                 for_write=for_write,
+                thread_id=thread_id,
+                fence=fence,
             ),
             reviewed=False,
+            fence=fence,
         )
 
     execution_path = consumed.resolved_path
     if execution_path is None:
         raise PermissionError("Host action path is unavailable.")
-    return AuthorizedPath(resolved=execution_path, reviewed=True)
+    return AuthorizedPath(resolved=execution_path, reviewed=True, fence=fence)

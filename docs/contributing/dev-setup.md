@@ -4,7 +4,7 @@ Choose where to work, run CORSIA with separate development data, and run targete
 
 ## Requirements
 
-See the [requirements table](../../README.md#getting-started). This setup uses Python 3.11 and Node.js with npm.
+See the [requirements table](../getting-started/install.md#manual-install-and-requirements). This setup uses Python 3.11 and Node.js with npm.
 
 ## Choose where to work
 

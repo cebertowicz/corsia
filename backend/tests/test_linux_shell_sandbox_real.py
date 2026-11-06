@@ -92,54 +92,70 @@ def shell_workspace_git_runner(box, monkeypatch, fence=None):
     return run
 
 
-def test_agent_cannot_create_workspace_git_controls_in_a_real_shell(linux_box, monkeypatch):
+def host_git(workspace, *args):
+    return subprocess.run(['git', '-C', str(workspace), '-c', 'user.name=T', '-c', 'user.email=t@example.invalid',
+                           *args], capture_output=True, text=True, timeout=20)
+
+
+def test_the_workspace_git_history_is_hidden_from_a_real_shell(linux_box, monkeypatch):
     box = linux_box
     run = shell_workspace_git_runner(box, monkeypatch)
     assert not (box.workspace / '.git').exists()
-    result = run('git status --porcelain')
-    print(f'first launch: exit={result.returncode} stderr={result.stderr.strip()}')
+    result = run('true')
     assert result.returncode == 0, result.stderr
     git_dir = box.workspace / '.git'
     assert git_dir.is_dir() and (git_dir / 'HEAD').is_file()
-    assert (git_dir / 'commondir').read_text() == '.\n'
-    assert (git_dir / 'config.worktree').read_bytes() == b''
-    for command in ('ln -snfT /tmp .git', 'touch .git/commondir', 'touch .git/config.worktree',
-                    'printf x > .git/config', 'printf x > .git/hooks/pre-commit', 'mv .git moved',
-                    'rm -f .git/commondir', 'rm -f .git/config.worktree',
-                    'cp .git/config .git/config.lock && mv .git/config.lock .git/config',
-                    'cp .git/commondir .git/commondir.new && mv .git/commondir.new .git/commondir'):
+    # Content that now lives only in history, as another project's deleted file would.
+    (box.workspace / 'gone.md').write_text('history-marker\n')
+    assert host_git(box.workspace, 'add', 'gone.md').returncode == 0
+    assert host_git(box.workspace, 'commit', '-qm', 'x').returncode == 0
+    (box.workspace / 'gone.md').unlink()
+    for command in ('git log -p', 'git --git-dir=.git log -p', 'git cat-file -p HEAD', 'cat .git/HEAD',
+                    'ls .git', 'find .git -type f', 'grep -r history-marker .git',
+                    'ln -snfT /tmp .git', 'touch .git/commondir', 'printf x > .git/config',
+                    'printf x > .git/hooks/pre-commit', 'rm .git/HEAD', 'mv .git moved', 'rm -rf .git',
+                    'git -c user.name=T -c user.email=t@example.invalid commit --allow-empty -m y'):
         result = run(command)
         print(f'{command}: exit={result.returncode} stderr={result.stderr.strip()}')
         assert result.returncode != 0, command
-    assert (git_dir / 'commondir').read_text() == '.\n'
-    assert (git_dir / 'config.worktree').read_bytes() == b''
-    assert 'x' not in (git_dir / 'config').read_text()
-    assert not (git_dir / 'hooks' / 'pre-commit').exists()
-    result = run('git -c user.name=T -c user.email=t@example.invalid commit --allow-empty -m x')
-    print(f'agent commit: exit={result.returncode} stderr={result.stderr.strip()}')
-    assert result.returncode == 0, result.stderr
-    assert subprocess.run(['git', '-C', str(box.workspace), 'rev-list', '--count', 'HEAD'],
-                         capture_output=True, text=True, timeout=20).stdout.strip() == '1'
+        assert 'history-marker' not in result.stdout, command
+    assert (git_dir / 'HEAD').is_file() and 'x' not in (git_dir / 'config').read_text()
+    assert not (git_dir / 'hooks' / 'pre-commit').exists() and not (git_dir / 'commondir').exists()
+    assert host_git(box.workspace, 'rev-list', '--count', 'HEAD').stdout.strip() == '1'
+    # Control: the rest of the workspace stays readable and writable.
+    result = run('echo kept > sibling && cat sibling')
+    assert result.returncode == 0 and result.stdout == 'kept\n', result.stderr
 
 
-def test_a_bare_repository_planted_by_a_real_shell_is_not_adopted(linux_box, monkeypatch):
+def test_a_bare_layout_planted_by_a_real_shell_is_not_adopted(linux_box, monkeypatch):
     from infra.guidance_git import workspace_repository
 
     box = linux_box
     run = shell_workspace_git_runner(box, monkeypatch)
     assert run('true').returncode == 0
-    result = run("rm .git/HEAD && mkdir objects refs && echo 'ref: refs/heads/main' > HEAD "
+    result = run("mkdir objects refs && echo 'ref: refs/heads/main' > HEAD "
                  "&& printf '[core]\\n\\trepositoryformatversion = 0\\n\\tworktree = .\\n' > config")
     print(f'plant: exit={result.returncode} stderr={result.stderr.strip()}')
     assert result.returncode == 0, result.stderr
-    assert subprocess.run(['git', 'rev-parse', '--show-toplevel'], cwd=str(box.workspace),
-                          capture_output=True, timeout=20).returncode == 0
-    repo, reason = workspace_repository(box.workspace)
-    assert repo is None and 'bare repository' in reason
+    assert workspace_repository(box.workspace) == (box.workspace.resolve(), None)
+
+
+def test_a_marker_that_points_nowhere_hides_only_itself_in_a_real_shell(linux_box, monkeypatch):
+    box = linux_box
+    (box.workspace / '.git').write_text('not a gitdir pointer\n')
+    run = shell_workspace_git_runner(box, monkeypatch)
+    for command in ('cat .git', 'printf "gitdir: /tmp" > .git', 'mv .git moved', 'rm -f .git'):
+        result = run(command)
+        print(f'{command}: exit={result.returncode} stderr={result.stderr.strip()}')
+        assert result.returncode != 0, command
+    assert (box.workspace / '.git').read_text() == 'not a gitdir pointer\n'
+    # The workspace root is not frozen: new entries, control-file names included, can still be made.
+    result = run('touch new-entry && mkdir hooks && touch config')
+    assert result.returncode == 0, result.stderr
 
 
 def test_an_enclosing_repository_leaves_an_unplanted_marker_in_a_real_shell(linux_box, monkeypatch):
-    """With no repository of its own the workspace gets an empty marker no shell can fill in."""
+    """With no repository of its own the workspace gets an empty marker no shell can open or fill in."""
     box = linux_box
     subprocess.run(['git', 'init', '--quiet'], cwd=str(box.home), check=True, timeout=30)
     run = shell_workspace_git_runner(box, monkeypatch)

@@ -77,6 +77,7 @@
 				diagramSource={currentImage.diagramSource}
 				{refreshDiagram}
 				artifactId={comments.artifactId}
+				{target}
 				projectId={comments.projectId}
 				readOnly={comments.readOnly}
 				docName={target.name}
@@ -88,7 +89,7 @@
 				onLoaded={() => loaded = true}
 				inDocument={{
 					occurrence: { from: image.from, to: image.to },
-					post: (region, text) => comments.post(image.from, image.to, region, text, currentImage.diagramSource),
+					post: (region, text, taggedAgentIds, mentions) => comments.post(image.from, image.to, region, text, taggedAgentIds, mentions, currentImage.diagramSource),
 					failure: comments.failure,
 				}}
 				focus={image.focus ?? null}

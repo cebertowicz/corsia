@@ -1,4 +1,5 @@
 import type { CommentReplyData } from './CommentReplyList.svelte';
+import type { MentionOccurrence } from './mentionSelection';
 
 export type CommentThreadData = {
 	id: string;
@@ -8,6 +9,8 @@ export type CommentThreadData = {
 	/** The authoring agent's thread, whose presence colour its avatar shares with its caret and marks. */
 	authorThreadId?: string | null;
 	text: string;
+	taggedAgents?: { id: string; name: string }[];
+	mentions?: MentionOccurrence[];
 	at: string;
 	createdAt?: string;
 	resolved: boolean;

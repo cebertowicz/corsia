@@ -4,7 +4,7 @@ The macOS desktop app wraps CORSIA's local backend in a Tauri application. This 
 
 ## Install and first run
 
-The desktop build produces a DMG containing CORSIA.app. The source install instead uses `scripts/install.sh`; see [Getting started](../../README.md#getting-started). The desktop app can also be built from a checkout as described there.
+The desktop build produces a DMG containing CORSIA.app. The source install instead uses `scripts/install.sh`; see [Install CORSIA](../getting-started/install.md#install). The desktop app can also be built from a checkout as described in [Desktop app from your checkout](../getting-started/install.md#desktop-app-from-your-checkout).
 
 When the app finds an earlier source install, **Take over** uses its existing account, workspace and data with the app. **Start fresh** sets the earlier install aside and starts first run again. Take over is one-way; opening a newer build over an installed one is untested. The source-install instructions describe the limitations and failure recovery.
 

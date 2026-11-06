@@ -10,7 +10,7 @@ import subprocess
 import pytest
 
 from tests.linux_sandbox_test_support import linux_sandbox_root
-from tools.workspace_git_paths import workspace_git_paths, workspace_git_rules
+from tools.workspace_git_paths import workspace_git_history_paths, workspace_git_history_rules, workspace_git_rules
 
 
 def git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -205,8 +205,9 @@ def test_workspace_git_rules_and_no_repository(tmp_path):
                        git_dir / 'commondir', git_dir / 'hooks', git_dir / 'hooks' / 'pre-commit'):
             for name in (str(target), str(target).upper()):
                 assert any(re.search(pattern, name) for pattern in patterns), name
-        for name in (git_dir / 'index', git_dir.parent / 'xgit', git_dir / 'hooks.old'):
-            assert not any(re.search(pattern, str(name)) for pattern in patterns), name
+        for name in (git_dir / 'index', git_dir / 'hooks.old'):
+            assert any(re.search(pattern, str(name)) for pattern in patterns), name
+        assert not any(re.search(pattern, str(git_dir.parent / 'xgit')) for pattern in patterns)
 
 
 def test_workspace_git_rules_keep_odd_paths_inside_the_profile():
@@ -217,20 +218,21 @@ def test_workspace_git_rules_keep_odd_paths_inside_the_profile():
 def test_file_tools_cannot_write_workspace_git_controls(tmp_path, monkeypatch):
     from tools import host_path_policy
     from tools.host_path_policy import ProtectedHostPathPolicy
+    from tools.host_path_classification import path_review_classification
 
     repo = tmp_path / 'workspace'
     init(repo)
     git = repo / '.git'
     policy = ProtectedHostPathPolicy(home=tmp_path / 'home', state_root=tmp_path / 'state', workspace=repo)
-    monkeypatch.setattr(host_path_policy, 'current_protected_host_path_policy', lambda: policy)
+    monkeypatch.setattr(host_path_policy, 'current_protected_host_path_policy', lambda **kwargs: policy)
     (repo / 'link').symlink_to(git / 'config')
     paths = (git / 'config', git / 'config.lock', git / 'commondir', git / 'hooks' / 'pre-commit', repo / 'link',
              repo / '.GIT' / 'CONFIG', repo / '.git' / 'Hooks' / 'pre-commit')
     for path in paths:
         assert 'No host-access lease' in policy.ordinary_denial(path, for_write=True)
-        assert 'No host-access lease' in host_path_policy.path_review_classification(path, for_write=True)[1]
-        assert policy.ordinary_denial(path, for_write=False) is None
-    assert policy.ordinary_denial(git / 'index', for_write=True) is None
+        assert 'No host-access lease' in path_review_classification(path, for_write=True)[1]
+        assert 'No host-access lease' in policy.ordinary_denial(path, for_write=False)
+    assert policy.ordinary_denial(git / 'index', for_write=True)
     assert policy.ordinary_denial(repo / 'notes.md', for_write=True) is None
 
 
@@ -249,8 +251,8 @@ def test_workspace_git_controls_in_all_macos_profiles(tmp_path, monkeypatch):
         host_access_external.external_agent_sandbox_rules(profile, []),
         safehouse_launch.mcp_private_state_profile(profile, tmp_path / 'safehouse', tmp_path / 'state', tmp_path / 'cache'),
     ]
-    rules = workspace_git_rules(workspace_git_paths(workspace))
-    assert len(rules) == 6
+    rules = workspace_git_history_rules(workspace)
+    assert rules
     for rendered in profiles:
         assert all(rule in rendered for rule in rules)
 
@@ -262,15 +264,15 @@ def test_broken_head_keeps_workspace_git_rules(tmp_path):
     init(repo)
     (repo / '.git' / 'HEAD').write_text('broken')
     rules = ProtectedHostPathPolicy(home=tmp_path / 'home', state_root=tmp_path / 'state', workspace=repo).hard_floor_sandbox_rules()
-    assert all(rule in rules for rule in workspace_git_rules(workspace_git_paths(repo)))
+    assert all(rule in rules for rule in workspace_git_history_rules(repo))
 
 
 def test_separate_git_dir_rules(tmp_path):
     repo = tmp_path / 'workspace'
     repo.mkdir()
     git(repo, 'init', '-q', '--separate-git-dir', str(repo / 'metadata'))
-    paths = workspace_git_paths(repo)
-    assert repo / '.git' in paths and repo / 'metadata' / 'config' in paths and repo / 'metadata' / 'commondir' in paths
+    paths = workspace_git_history_paths(repo)
+    assert repo / '.git' in paths and repo / 'metadata' in paths
 
 
 def linux_launch(tmp_path, monkeypatch, workspace):
@@ -296,15 +298,22 @@ def linux_launch(tmp_path, monkeypatch, workspace):
     return launch, captured
 
 
+def hidden_workspace_git(captured, workspace):
+    """The hidden roots the launch asked for, and every workspace Git path it still mounted otherwise."""
+    hidden = {path.resolve() for path in captured['hidden_roots']}
+    mounted = [path for path in [*captured['rw_roots'], *captured['readonly_overlays']]
+               if '.git' in path.parts or path.name in ('commondir', 'config.worktree')]
+    return hidden, mounted
+
+
 def test_linux_workspace_git_render(tmp_path, monkeypatch):
     workspace = tmp_path / 'workspace'
     init(workspace)
     launch, captured = linux_launch(tmp_path, monkeypatch, workspace)
     launch()
-    assert workspace / '.git' in captured['rw_roots']
-    assert workspace / '.git/config' in captured['readonly_overlays']
-    assert workspace / '.git/hooks' in captured['readonly_overlays']
-    assert workspace / '.git/config.lock' not in captured['readonly_overlays']
+    hidden, mounted = hidden_workspace_git(captured, workspace)
+    assert (workspace / '.git').resolve() in hidden
+    assert mounted == []
 
 
 def test_linux_launch_inits_an_absent_workspace_repository(tmp_path, monkeypatch):
@@ -314,10 +323,8 @@ def test_linux_launch_inits_an_absent_workspace_repository(tmp_path, monkeypatch
     launch()
     git_dir = workspace / '.git'
     assert git_dir.is_dir() and (git_dir / 'HEAD').is_file()
-    assert git_dir in captured['rw_roots']
-    for name in ('config', 'commondir', 'config.worktree', 'hooks'):
-        assert git_dir / name in captured['readonly_overlays'], name
-    assert git_dir / 'config.lock' not in captured['readonly_overlays']
+    assert git_dir.resolve() in {path.resolve() for path in captured['hidden_roots']}
+    assert not (git_dir / 'commondir').exists() and not (git_dir / 'config.worktree').exists()
     assert git(workspace, 'status', '--porcelain').stdout == ''
 
 
@@ -346,14 +353,13 @@ def test_linux_launch_leaves_an_empty_marker_when_init_is_blocked(tmp_path, monk
     marker = workspace / '.git'
     assert marker.is_dir() and not any(marker.iterdir())
     assert workspace_repository(workspace) == (None, 'the workspace Git directory resolves elsewhere')
-    controls = [path for path in workspace_git_paths(workspace)[1:] if path.suffix != '.lock']
-    assert all(path not in captured['rw_roots'] for path in controls)
-    grants = protected_mounts([workspace], [], controls)
-    assert grants[marker] is True and grants[workspace] is False
+    hidden, mounted = hidden_workspace_git(captured, workspace)
+    assert marker.resolve() in hidden and mounted == []
+    assert protected_mounts([workspace], [], sorted(hidden))[workspace] is False
 
 
-def test_the_empty_workspace_marker_is_bound_read_only_in_the_rendered_argv(linux_sandbox_root, monkeypatch):
-    """The real renderer must freeze just the empty marker, leaving the workspace writable."""
+def test_the_empty_workspace_marker_is_masked_in_the_rendered_argv(linux_sandbox_root, monkeypatch):
+    """The real renderer must hide just the empty marker, leaving the workspace writable."""
     from infra import config, project_repo_policy
     from tools import linux_shell
     from tools.host_path_policy import GENERATED_WORKSPACE_PROJECTIONS, ProtectedHostPathPolicy
@@ -383,7 +389,9 @@ def test_the_empty_workspace_marker_is_bound_read_only_in_the_rendered_argv(linu
         return [argv[index] for index in range(len(argv) - 2)
                 if argv[index] in ('--ro-bind', '--bind') and argv[index + 1] == path and argv[index + 2] == path]
 
-    assert bound(marker) == ['--ro-bind']
+    masked = [index for index in range(len(argv) - 3)
+              if argv[index:index + 4] == ['--perms', '0000', '--tmpfs', marker]]
+    assert masked and bound(marker) == []
     assert bound(str(workspace)) == ['--bind']
 
 
@@ -401,19 +409,7 @@ def test_an_empty_marker_is_inited_when_the_enclosing_repository_is_removed(tmp_
     assert (workspace / '.git' / 'HEAD').is_file()
 
 
-def test_absent_commondir_and_config_worktree_are_created_and_overlaid(tmp_path, monkeypatch):
-    workspace = tmp_path / 'workspace'
-    init(workspace)
-    launch, captured = linux_launch(tmp_path, monkeypatch, workspace)
-    launch()
-    git_dir = workspace / '.git'
-    assert (git_dir / 'commondir').read_text() == '.\n'
-    assert (git_dir / 'config.worktree').read_bytes() == b''
-    assert git_dir / 'commondir' in captured['readonly_overlays']
-    assert git_dir / 'config.worktree' in captured['readonly_overlays']
-
-
-def test_a_linked_worktree_keeps_its_commondir_and_gains_config_worktree(tmp_path, monkeypatch):
+def test_a_linked_worktree_workspace_hides_its_git_dir_and_common_dir(tmp_path, monkeypatch):
     workspace = tmp_path / 'workspace'
     init(workspace)
     linked = tmp_path / 'linked'
@@ -421,53 +417,10 @@ def test_a_linked_worktree_keeps_its_commondir_and_gains_config_worktree(tmp_pat
     git_dir = Path(git(linked, 'rev-parse', '--absolute-git-dir').stdout.strip())
     launch, captured = linux_launch(tmp_path, monkeypatch, linked)
     launch()
+    hidden, mounted = hidden_workspace_git(captured, linked)
+    assert {path.resolve() for path in (linked / '.git', git_dir, workspace / '.git')} <= hidden
+    assert mounted == []
     assert (git_dir / 'commondir').read_text() == '../..\n'
-    assert (git_dir / 'config.worktree').read_bytes() == b''
-    assert git_dir / 'commondir' in captured['readonly_overlays']
-    assert git_dir / 'config.worktree' in captured['readonly_overlays']
-
-
-def test_existing_git_control_files_are_never_overwritten(tmp_path, monkeypatch):
-    workspace = tmp_path / 'workspace'
-    init(workspace)
-    commondir = workspace / '.git' / 'commondir'
-    worktree_config = workspace / '.git' / 'config.worktree'
-    commondir.write_text('keep-me\n')
-    worktree_config.write_text('keep-too\n')
-    launch, captured = linux_launch(tmp_path, monkeypatch, workspace)
-    launch()
-    assert commondir.read_text() == 'keep-me\n' and worktree_config.read_text() == 'keep-too\n'
-    assert commondir in captured['readonly_overlays'] and worktree_config in captured['readonly_overlays']
-
-
-def test_a_failed_placeholder_write_refuses_the_launch(tmp_path, monkeypatch):
-    workspace = tmp_path / 'workspace'
-    init(workspace)
-    launch, captured = linux_launch(tmp_path, monkeypatch, workspace)
-    real_open = os.open
-
-    def blocked(path, flags, *args, **kwargs):
-        if str(path).endswith('commondir'):
-            raise OSError(30, 'Read-only file system')
-        return real_open(path, flags, *args, **kwargs)
-
-    monkeypatch.setattr(os, 'open', blocked)
-    with pytest.raises(RuntimeError, match='commondir') as refused:
-        launch()
-    assert 'free disk space' in str(refused.value) and 'Read-only file system' not in str(refused.value)
-    assert captured == {}
-
-
-def test_a_symlinked_placeholder_refuses_the_launch(tmp_path, monkeypatch):
-    workspace = tmp_path / 'workspace'
-    init(workspace)
-    (workspace / '.git' / 'commondir').symlink_to(tmp_path / 'planted-common')
-    launch, captured = linux_launch(tmp_path, monkeypatch, workspace)
-    with pytest.raises(RuntimeError, match='commondir') as refused:
-        launch()
-    assert captured == {}
-    assert (workspace / '.git' / 'commondir').is_symlink()
-    assert str(refused.value).startswith('Couldn’t protect the workspace Git path')
 
 
 @pytest.mark.parametrize('dangling', [False, True])
@@ -488,7 +441,7 @@ def test_a_symlinked_marker_refuses_the_launch_before_any_git(tmp_path, monkeypa
     assert str(refused.value).startswith('Couldn’t protect the workspace Git path')
 
 
-def test_a_marker_that_points_nowhere_writes_no_placeholders(tmp_path, monkeypatch):
+def test_a_marker_that_points_nowhere_hides_only_the_marker(tmp_path, monkeypatch):
     from tools.linux_sandbox import protected_mounts
 
     workspace = tmp_path / 'workspace'
@@ -496,10 +449,24 @@ def test_a_marker_that_points_nowhere_writes_no_placeholders(tmp_path, monkeypat
     (workspace / '.git').write_text('not a gitdir pointer\n')
     launch, captured = linux_launch(tmp_path, monkeypatch, workspace)
     launch()
+    hidden, mounted = hidden_workspace_git(captured, workspace)
+    assert {path for path in hidden if path.is_relative_to(workspace.resolve())} == {(workspace / '.git').resolve()}
+    assert mounted == []
     assert not (workspace / 'commondir').exists() and not (workspace / 'config.worktree').exists()
-    assert workspace / '.git' in captured['readonly_overlays']
-    controls = [path for path in workspace_git_paths(workspace)[1:] if path.suffix != '.lock']
-    assert protected_mounts([workspace], [], controls)[workspace] is True
+    assert protected_mounts([workspace], [], sorted(hidden))[workspace] is False
+
+
+def test_a_separate_git_dir_hides_the_marker_file_and_the_metadata_dir(tmp_path, monkeypatch):
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    metadata = tmp_path / 'metadata'
+    git(workspace, 'init', '-q', '--separate-git-dir', str(metadata))
+    launch, captured = linux_launch(tmp_path, monkeypatch, workspace)
+    launch()
+    hidden, mounted = hidden_workspace_git(captured, workspace)
+    assert {(workspace / '.git').resolve(), metadata.resolve()} <= hidden and mounted == []
+    assert not (metadata / 'commondir').exists()
+    assert git(workspace, 'status', '--porcelain').stdout == ''
 
 
 def plant_bare_layout(workspace, proof):
@@ -544,38 +511,6 @@ def test_a_save_makes_a_real_repository_beside_a_bare_layout(tmp_path):
     assert workspace_repository(workspace, create=True) == (workspace.resolve(), None)
     assert (workspace / '.git' / 'HEAD').is_file()
     assert workspace_repository(workspace) == (workspace.resolve(), None)
-
-
-def test_a_separate_git_dir_gets_the_placeholders_in_its_metadata_dir(tmp_path, monkeypatch):
-    workspace = tmp_path / 'workspace'
-    workspace.mkdir()
-    metadata = tmp_path / 'metadata'
-    git(workspace, 'init', '-q', '--separate-git-dir', str(metadata))
-    launch, _captured = linux_launch(tmp_path, monkeypatch, workspace)
-    launch()
-    assert (metadata / 'commondir').read_text() == '.\n'
-    assert (metadata / 'config.worktree').read_bytes() == b''
-    assert git(workspace, 'status', '--porcelain').stdout == ''
-
-
-def test_dot_commondir_keeps_the_repository_and_its_worktrees_working(tmp_path):
-    """The backend's ``.`` placeholder must not change how Git reads the workspace repository."""
-    from tools.linux_workspace_git import prepare_workspace_git
-
-    workspace = tmp_path / 'workspace'
-    init(workspace)
-    prepare_workspace_git(workspace)
-    assert (workspace / '.git' / 'commondir').read_text() == '.\n'
-    assert git(workspace, 'rev-parse', '--show-toplevel').stdout.strip() == str(workspace.resolve())
-    assert git(workspace, 'rev-parse', '--git-common-dir').stdout.strip() == str(workspace / '.git')
-    assert git(workspace, 'status', '--porcelain').stdout == ''
-    assert git(workspace, 'commit', '--allow-empty', '-qm', 'x').returncode == 0
-    linked = tmp_path / 'linked'
-    git(workspace, 'worktree', 'add', str(linked), '-b', 'linked')
-    listed = [line.split()[0] for line in git(workspace, 'worktree', 'list').stdout.splitlines()]
-    assert listed == [str(workspace.resolve()), str(linked.resolve())]
-    assert git(linked, 'rev-parse', '--git-common-dir').stdout.strip() == str(workspace / '.git')
-    assert git(workspace, 'worktree', 'remove', str(linked)).returncode == 0
 
 
 def safehouse_runner(workspace, tmp_path, monkeypatch):
@@ -627,6 +562,9 @@ def test_safehouse_workspace_git_controls(tmp_path, monkeypatch, separate):
         git(workspace, 'config', 'user.email', 'test@example.invalid')
     else:
         init(workspace)
+    (workspace / 'file').write_text('content')
+    git(workspace, 'add', 'file')
+    git(workspace, 'commit', '-qm', 'initial')
     run = safehouse_runner(workspace, tmp_path, monkeypatch)
     git_dir = 'metadata' if separate else '.git'
     for target in (f'{git_dir.upper()}/CONFIG', f'{git_dir}/COMMONDIR', f'{git_dir}/CONFIG.WORKTREE', f'{git_dir}/config', f'{git_dir}/config.lock', f'{git_dir}/config.worktree', f'{git_dir}/commondir', f'{git_dir}/hooks/test'):
@@ -639,6 +577,8 @@ def test_safehouse_workspace_git_controls(tmp_path, monkeypatch, separate):
     result = run('mv .git saved-git')
     assert result.returncode != 0
     assert (workspace / '.git').is_file() if separate else (workspace / '.git').is_dir()
-    result = run('printf content > file && git add file && git commit -qm test')
-    assert result.returncode == 0, result.stderr
-    assert git(workspace, 'status', '--porcelain').stdout == ('?? metadata/\n' if separate else '')
+    (workspace / 'file').write_text('content')
+    assert run('cat file').stdout == 'content'
+    assert run(f'cat {git_dir}/HEAD').returncode != 0
+    assert run('git log -1').returncode != 0
+    assert run('git add file').returncode != 0

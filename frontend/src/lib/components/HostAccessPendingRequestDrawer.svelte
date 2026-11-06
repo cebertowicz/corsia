@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { Button, StatePill } from '$lib/components/ui';
+	import HostAccessScriptRequestDrawer from './HostAccessScriptRequestDrawer.svelte';
 	import { text, duration, policyLabel, approvalReady, owner } from '$lib/hostAccess/leaseFormat';
-	import type { HostAccessLease } from '$lib/api/hostAccess';
-
+	import type { HostAccessItem } from '$lib/api/hostAccess';
 	let {
 		lease,
 		stale,
@@ -13,7 +13,7 @@
 		onReject,
 		onRetry,
 	}: {
-		lease: HostAccessLease;
+		lease: HostAccessItem;
 		stale: boolean;
 		/** Whether this lease's own decision is in flight, vs. another lease's. */
 		deciding: boolean;
@@ -26,7 +26,7 @@
 	} = $props();
 
 	const ready = $derived(approvalReady(lease));
-	const exceptions = $derived(Array.isArray(lease.requested_policy_exceptions)
+	const exceptions = $derived(lease.kind !== 'script' && Array.isArray(lease.requested_policy_exceptions)
 		? lease.requested_policy_exceptions : []);
 	const external = $derived(exceptions.some((exception) => exception?.policy === 'external_agent'));
 </script>
@@ -70,6 +70,9 @@
 	<p class="explainer">This agent is asking for temporary access to parts of this computer it can’t normally reach. It cannot use that access unless you approve, and you can revoke it at any time.</p>
 {/snippet}
 
+{#if lease.kind === 'script'}
+	<HostAccessScriptRequestDrawer request={lease} {stale} {deciding} {rejectDisabled} {approveDisabled} {onApprove} {onReject} {onRetry} />
+{:else}
 <div class="pending-drawer">
 	<header class="decision-head">
 		<div>
@@ -192,9 +195,12 @@
 		{/if}
 	</footer>
 </div>
+{/if}
 
 <style>
-	.pending-drawer {
+	/* The sheet both request kinds share (HostAccessScriptRequestDrawer renders inside it too),
+	   so it is global under .pending-drawer. */
+	:global(.pending-drawer) {
 		display: flex;
 		flex-direction: column;
 		min-height: 0;
@@ -205,7 +211,7 @@
 	   through .drawer-body's max-height-capped flex item does not reliably
 	   resolve (verified empirically), so sticky is the robust fix, not a
 	   nested `.decision-body { overflow-y: auto }` region. */
-	.decision-head {
+	:global(.pending-drawer .decision-head) {
 		position: sticky;
 		top: 0;
 		z-index: 2;
@@ -218,8 +224,8 @@
 		backdrop-filter: var(--glass-blur);
 		-webkit-backdrop-filter: var(--glass-blur);
 	}
-	.decision-head > div { min-width: 0; }
-	.decision-head h2 {
+	:global(.pending-drawer .decision-head > div) { min-width: 0; }
+	:global(.pending-drawer .decision-head h2) {
 		margin: 4px 0 0;
 		overflow: hidden;
 		color: var(--text-primary);
@@ -228,6 +234,37 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 	}
+	:global(.pending-drawer .decision-body) {
+		display: grid;
+		gap: 18px;
+		min-width: 0;
+	}
+	:global(.pending-drawer .decision-body section) { min-width: 0; }
+	:global(.pending-drawer .decision-body p) {
+		margin: 5px 0 0;
+		color: var(--text-secondary);
+		line-height: 1.5;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+	:global(.pending-drawer .purpose p) { color: var(--text-primary); font-size: var(--text-body); }
+	:global(.pending-drawer .decision-actions) {
+		position: sticky;
+		bottom: 0;
+		z-index: 2;
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		/* The sheet is flush-bottom, so the footer carries the bottom inset itself
+		   and sits on the scroller's edge instead of above a strip of padding the
+		   content scrolls through. */
+		padding: 14px 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
+		background: var(--glass-thick);
+		backdrop-filter: var(--glass-blur);
+		-webkit-backdrop-filter: var(--glass-blur);
+	}
+	:global(.pending-drawer .decision-spacer) { flex: 1; }
+
 	.eyebrow, .label {
 		color: var(--text-tertiary);
 		text-transform: uppercase;
@@ -235,21 +272,7 @@
 		font-size: var(--text-caption);
 		font-weight: 650;
 	}
-	.decision-body {
-		display: grid;
-		gap: 18px;
-		min-width: 0;
-	}
-	.decision-body section { min-width: 0; }
-	.decision-body p {
-		margin: 5px 0 0;
-		color: var(--text-secondary);
-		line-height: 1.5;
-		white-space: pre-wrap;
-		overflow-wrap: anywhere;
-	}
 	.decision-body .explainer { margin: 0; }
-	.purpose p { color: var(--text-primary); font-size: var(--text-body); }
 	ol {
 		margin: 7px 0 0;
 		padding-left: 22px;
@@ -337,35 +360,19 @@
 		font-size: var(--text-footnote);
 	}
 	.approval-blocked span { color: var(--text-secondary); }
-	.decision-actions {
-		position: sticky;
-		bottom: 0;
-		z-index: 2;
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		/* The sheet is flush-bottom, so the footer carries the bottom inset itself
-		   and sits on the scroller's edge instead of above a strip of padding the
-		   content scrolls through. */
-		padding: 14px 0 max(var(--space-4), env(safe-area-inset-bottom, 0px));
-		background: var(--glass-thick);
-		backdrop-filter: var(--glass-blur);
-		-webkit-backdrop-filter: var(--glass-blur);
-	}
-	.decision-spacer { flex: 1; }
 
 	@media (max-width: 720px) {
 		/* Keep the first requested exception above the sticky decision footer even
 		   when a non-Apple system font takes an extra line. The drawer remains the
 		   only scroll container; this only compacts existing sheet spacing. */
-		.decision-head { padding-bottom: var(--space-2); }
-		.decision-body { gap: var(--space-3); }
+		:global(.pending-drawer .decision-head) { padding-bottom: var(--space-2); }
+		:global(.pending-drawer .decision-body) { gap: var(--space-3); }
+		:global(.pending-drawer .decision-actions) { padding-top: var(--space-2); }
 		.policy-exceptions { padding: var(--space-2); }
 		.policy-exceptions .external-warning {
 			margin: var(--space-2) 0;
 			line-height: var(--lh-snug);
 		}
-		.decision-actions { padding-top: var(--space-2); }
 		.repo-policy-context li {
 			grid-template-columns: 1fr;
 			gap: 2px;

@@ -8,6 +8,7 @@ the earlier line instead of adding another.
 
 _Changes merged since the last release. Each PR that changes what you see or do adds a line here in its alphabetical place, not simply at the top or the end._
 
+- A comment box you are typing in no longer closes when the document changes under it, such as when an agent rewrites the file above your text; it closes only when you scroll it away yourself.
 - A connected app whose key is refused now says Key not accepted and offers Replace key, instead of Couldn't connect: unknown reason.
 - A decision card that opens on its own now waits until you've had time to read what came before it wherever you are; in most time zones it opened at once.
 - A pull request review that a restart cut off now picks up again when CORSIA starts, instead of waiting for the next push (thanks @mikemikimike).
@@ -25,7 +26,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - In the desktop app, Sign in and Open the page again on a connected app or account now open the sign-in page in your default browser; before, a connected app's page didn't open and you had to copy its link.
 - Jumping to a comment in a wide table now brings its cell into view sideways as well as its row.
 - Local models now follow each model's own defaults: a chat with no thinking level chosen runs at the model's default level (the picker reads Auto), and setup and model downloads no longer set a reply-length limit. Existing reply-length limits, including those earlier setup runs set, remain until changed in oMLX.
-- Local models now run on oMLX 0.7.3: several chats running at once on a local model use less memory and reply faster, and oMLX no longer gets stuck refusing every prompt for lack of memory after two prompts overlap. After an app update, CORSIA updates its running local model server once requests finish and reloads the same models; Settings shows “Restarting…” until they are loaded.
+- Local models now run on oMLX 0.7.3: several chats running at once on a local model use less memory and reply faster, and oMLX no longer gets stuck refusing every prompt for lack of memory after two prompts overlap. During a CORSIA restart or update, its local model server attempts to update before local chats resume and reloads the same models; Settings shows “Restarting…” while it does. If the update cannot finish, affected chats receive an error with the next steps.
 - Messages in Connected apps now says Enable and Turn off, and explains what Full Disk Access allows before you enable it.
 - First run's About you step now opens its document for you to review. Before, the document could not be created, so the step fell back to chat.
 - On a local model that runs short of memory partway through a reply, the context meter now measures the chat against what still fits in memory for the rest of that reply, the same limit CORSIA checks before each call, instead of showing it far emptier than it is.
@@ -39,6 +40,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - With an agents' GitHub account connected, comments on the agents' own pull requests now reach the owning chat without a repository webhook.
 - With "Roll over when an account hits its limit" on, a chat held on a limited account no longer asks you to move it: CORSIA checks your other accounts and moves the chat itself once one has room. Switch model is still there as a way out.
 - You can now open diagrams and images in table cells in the image viewer, zoom in, and comment on a specific part.
+- You can tag an agent in a document comment or reply. Agents hear about replies only on comment threads they wrote in or were tagged in, or on a document they own, and an agent can stop following a thread it no longer needs to.
 - Your About you doc now gets each fact as its own suggestion, so you can accept or reject them one at a time, and its headings are left alone.
 
 ## v0.4.2 — Google sign-in works again, a shorter first chat, and steadier local models

@@ -7,7 +7,7 @@ vi.mock('$lib/api/docs', async (importOriginal) => ({
 }));
 vi.mock('./commentSelection', () => ({ captureComment: mocks.captureComment, selectComment: mocks.selectComment }));
 
-import { DocRequestError } from '$lib/api/docs';
+import { RequestRefused } from '$lib/api/docs';
 import { docComments } from './docComments';
 import { addDocImageComment } from './imageRegionComments';
 import type { LiveDocumentSession } from './liveDocumentSession';
@@ -49,7 +49,7 @@ describe('a comment on part of an image inside a document', () => {
 		mocks.captureComment.mockRejectedValue(new Error('Lost'));
 		const diagram = addDocImageComment({ artifactId: 'doc', from: 0, to: 10, text: '```mermaid', session, diagramSource: 'graph TD' }, BOX, 'Pin');
 		await expect(diagram).rejects.toThrow('Lost');
-		await expect(diagram).rejects.not.toBeInstanceOf(DocRequestError);
+		await expect(diagram).rejects.not.toBeInstanceOf(RequestRefused);
 		expect(mocks.postComment).not.toHaveBeenCalled();
 	});
 

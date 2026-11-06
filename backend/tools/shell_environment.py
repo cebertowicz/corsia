@@ -32,7 +32,7 @@ _CREDENTIAL_NAMES = frozenset({"GIT_ASKPASS"})
 # TRACE_ENV is set only by the script runner for a run an event rule started.
 _SHELL_PASS_NAMES = ("CORSIA_THREAD_ID", "CORSIA_PROCESS_OWNER_MARKER", "CORSIA_TOOL_INVOCATION_ID",
                      "AGENT_BROWSER_ARGS", *agent_shell_tools.CACHE_ENV_NAMES, TRACE_ENV,
-                     "CORSIA_SCRIPT_GITHUB_SOCKET")
+                     "CORSIA_SCRIPT_GITHUB_SOCKET", "CORSIA_SCRIPT_TOOL_SOCKET", "GH_PROMPT_DISABLED")
 
 
 def is_credential_env_name(name: str) -> bool:
@@ -98,6 +98,7 @@ def safehouse_subprocess_env(
             and name not in {
                 "CORSIA_THREAD_ID", "CORSIA_PROCESS_OWNER_MARKER",
                 "CORSIA_TOOL_INVOCATION_ID", TRACE_ENV, "CORSIA_SCRIPT_GITHUB_SOCKET",
+                "CORSIA_SCRIPT_TOOL_SOCKET", "GH_PROMPT_DISABLED",
             }
         )
     }

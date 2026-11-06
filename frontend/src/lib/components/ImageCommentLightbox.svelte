@@ -10,6 +10,7 @@
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocFeedbackControls from './DocFeedbackControls.svelte';
 	import type { DocFeedback } from '$lib/docFeedback.svelte';
+	import type { DocViewerTarget } from '$lib/docViewerTarget';
 	import type { ImageViewportPlace } from '$lib/artifactTabs';
 	import { createImageComments } from '$lib/imageComments.svelte';
 	import { commentsAtImage, type ImageOccurrence } from '$lib/docImageComments';
@@ -25,7 +26,7 @@
 
 	const COMMENT_IMAGE_MARGIN = 40;
 
-	let { src, alt, readableScale, diagramElements, diagramSource, refreshDiagram, artifactId, projectId = null, readOnly = false, docName = '', docPath = null, onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, visibleBottom = null, onPlace, onLoaded, onFailed, onRetry }: {
+	let { src, alt, readableScale, diagramElements, diagramSource, refreshDiagram, artifactId, target = null, projectId = null, readOnly = false, docName = '', docPath = null, onBack, inDocument = null, focus = null, feedback = null, draftOpen = $bindable(false), hasDraft = $bindable(false), sheetUp = $bindable(false), selectedThread = $bindable<string | null>(null), place = null, visibleBottom = null, onPlace, onLoaded, onFailed, onRetry }: {
 		src: string;
 		alt: string;
 		/** A diagram's labels are body size at this scale; it opens there rather than at Fit. */
@@ -35,6 +36,7 @@
 		refreshDiagram?: () => Promise<boolean>;
 		/** Comments need the image's artifact (a document's, for an image in it); until it is known the viewer shows the image alone. */
 		artifactId: string | null;
+		target?: DocViewerTarget | null;
 		projectId?: string | null;
 		readOnly?: boolean;
 		/** The document the image is in, and the way back to it. */
@@ -44,7 +46,7 @@
 		/** An image inside a document: where its markdown is, and how a comment anchors on it. */
 		inDocument?: {
 			occurrence: ImageOccurrence;
-			post: (region: ImageRegion, text: string) => Promise<string>;
+			post: (region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[]) => Promise<string>;
 			failure?: (error: unknown) => string;
 		} | null;
 		/** Opened on this comment: its card shows at its tag, or with `move` its pin is placed again. */
@@ -87,6 +89,7 @@
 	}
 	const image = createImageComments({
 		artifactId: () => artifactId,
+		threadId: () => target?.threadId ?? null,
 		readOnly: () => !canComment,
 		diagramSource: () => diagramSource,
 		refreshDiagram: () => refreshDiagram?.() ?? Promise.resolve(false),
@@ -298,7 +301,7 @@
 			onViewed={(id, replyId) => markThreadViewed(artifactId, id, replyId)}
 			onResolve={image.threads.resolve}
 			onAgree={image.threads.agree}
-			target={null}
+			{target}
 			{docPath}
 			{artifactId}
 			readOnly={!canComment}

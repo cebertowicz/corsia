@@ -1,6 +1,10 @@
 # Documentation
 
-Every section of the docs, in reading order; each section's first page lists the rest. Start with the repository [README](../README.md) for what CORSIA is and how to install it.
+Every section of the docs, in reading order; each section's first page lists the rest. Start with the repository [README](../README.md) for what CORSIA is, then [Get started](#get-started) to install it.
+
+## Get started
+
+How to install CORSIA, create a first project and get a first agent doing work. Start with [Getting started](getting-started/README.md), which lists every page in order.
 
 ## Contribute
 

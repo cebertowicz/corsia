@@ -14,9 +14,9 @@ function tok(): string {
 	return encodeURIComponent(get(token) ?? '');
 }
 
-/** A failed request whose body names the server's reason in `kind`, as a refused suggestion decision does. */
-export class DocRequestError extends Error {
-	constructor(message: string, readonly status: number, readonly kind: string | null) {
+/** A refused request. Its message stays "<status> <body>"; `kind` is the server's stable reason when it names one. */
+export class RequestRefused extends Error {
+	constructor(message: string, readonly kind: string | null) {
 		super(message);
 	}
 }
@@ -24,15 +24,11 @@ export class DocRequestError extends Error {
 export async function ok(res: Response) {
 	if (!res.ok) {
 		const detail = await res.text().catch(() => '');
-		let parsed: unknown, kind: string | null = null;
-		try {
-			const body = JSON.parse(detail);
-			parsed = body?.detail;
-			if (typeof body?.kind === 'string') kind = body.kind;
-		} catch { /* Non-JSON failures keep the HTTP status below. */ }
+		let parsed: unknown, kind: unknown;
+		try { ({ detail: parsed, kind } = JSON.parse(detail) ?? {}); } catch { /* Non-JSON failures keep the HTTP status below. */ }
 		const refusal = docOpenFailure(parsed);
 		if (refusal) throw refusal;
-		throw new DocRequestError(`${res.status} ${detail.slice(0, 200)}`, res.status, kind);
+		throw new RequestRefused(`${res.status} ${detail.slice(0, 200)}`, typeof kind === 'string' ? kind : null);
 	}
 	return res.json();
 }
@@ -169,7 +165,7 @@ export async function fetchComments(artifactId: string): Promise<CommentList> {
 
 export async function postComment(
 	artifactId: string,
-	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion; diagram_source?: string; delivery_policy?: 'immediate' | 'document-held' }
+	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion; diagram_source?: string; delivery_policy?: 'immediate' | 'document-held'; tagged_agent_ids?: string[]; tagged_agent_mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[]; thread_id?: string | null }
 ): Promise<ServerComment> {
 	const data = await ok(await fetchWithTimeout(
 		`/api/artifacts/${artifactId}/comments?token=${tok()}`,

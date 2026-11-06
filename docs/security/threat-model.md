@@ -12,7 +12,7 @@ What CORSIA tries to protect, from whom, what it assumes, and what it does not t
 | Your accounts' outbound actions | Email you send, invites, posts made in your name |
 | Your machine's integrity | System files, startup items, disks |
 
-The workspace itself is **not** in this list as something agents are kept out of. Agents work there, and their file tools can read and change anything in it. Other projects are kept from an agent's shell, which narrows what a mistaken or tricked command reaches but doesn't separate projects. See [Agent sandbox](agent-sandbox.md#projects).
+The workspace itself is **not** in this list as something agents are kept out of. Agents work there. Other projects are kept from an agent's shell and file tools, which narrows what a mistaken or tricked agent reaches but doesn't separate projects: its chat tools still read other projects' chats. See [Agent sandbox](agent-sandbox.md#projects).
 
 ## Who we defend against
 
@@ -20,7 +20,7 @@ The workspace itself is **not** in this list as something agents are kept out of
 |---|---|---|
 | An agent that makes a mistake | Deletes the wrong folder, runs a destructive command | Sandbox write limits; command refusals; the reviewer on leased commands |
 | An agent that has been tricked by content it read | An email or web page tells it to upload your files | Sandbox read limits; email screening; isolated workers; masking. Partial: see [Untrusted content](untrusted-content.md) |
-| An agent reaching into another project | Its shell lists or copies another project's files | The project fence, the OS rule that keeps a project's agents' shells out of other projects. Partial: file tools and chat tools aren't fenced, and the CORSIA agent's shell is fenced less ([Agent sandbox](agent-sandbox.md#projects)) |
+| An agent reaching into another project | Its shell or file tools list or copy another project's files | The project fence, which keeps a project's agents' shells (OS rule) and file tools (CORSIA code) out of other projects. Partial: chat tools aren't fenced, and the CORSIA agent is fenced less ([Agent sandbox](agent-sandbox.md#projects)) |
 | An agent trying to widen its own access | Asks for a lease it doesn't need, edits the sandbox profile | Leases need approval; the hard floor; the reviewer is instructed to block access-control changes |
 | Someone else on your network | A device on the same Wi-Fi | Local-only listening by default; sign-in on every request except a few named routes; see [Network](network.md) |
 
@@ -40,7 +40,7 @@ These are not defended against. Each is stated so you can decide.
 - **Data sent out by an agent with network access.** Outbound traffic is not limited or inspected. If an agent can read something, it can send it somewhere.
 - **A determined prompt injection.** How much screening helps is not measured. Nothing guarantees an agent ignores instructions hidden in content.
 - **Physical access** to an unlocked machine.
-- **Full separation between projects.** The shell fence is the only project boundary; file tools, chat tools and the workspace's Git history still cross it. Use separate installs for that.
+- **Full separation between projects.** The project fence covers the shell and file tools; chat tools still cross it. Use separate installs for that.
 - **Separation between accounts on one install.** Use one install per person.
 - **Regulated data.** CORSIA makes no compliance claim (HIPAA, SOC 2 or other). See [FAQ](faq.md).
 

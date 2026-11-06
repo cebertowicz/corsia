@@ -122,7 +122,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		await cell.scrollIntoViewIfNeeded();
 		await cell.click();
 		await page.locator('.sel-comment').click();
-		await page.getByPlaceholder('Comment…').fill('Empty-cell comment.');
+		await page.getByPlaceholder('Comment, or @ to tag an agent').fill('Empty-cell comment.');
 		await page.getByRole('button', { name: 'Comment', exact: true }).last().click();
 		await expect(cell).toHaveClass(/cm-comment-anchor/);
 		await loginByUrl(page, { waitForComposer: false });
@@ -143,7 +143,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		].join('\n');
 		const doc = DOC.replace(['| Item | Owner |', '| --- | --- |', ...TABLE_ROWS].join('\n'), wideTable);
 		const { ids } = await openDocument(page, { width: 1440, height: 900 }, doc);
-		await page.getByRole('button', { name: /^2 open threads\b/ }).click();
+		await page.getByRole('button', { name: /^2 threads\b/ }).click();
 		const side = page.locator('[data-doc-comments-drawer]');
 		await side.locator(`[data-comment-id="${ids.table}"]`).locator('[data-comment-jump]').click();
 		const cell = page.locator('.cm-md-table td', { hasText: 'owner-07' });
@@ -186,7 +186,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		const before = { scrollTop: await scrollTop(), y: (await boxOf(target))!.y };
 		await target.dblclick({ position: { x: 12, y: 8 } });
 		await page.locator('.sel-comment').click();
-		await page.getByPlaceholder('Comment…').fill('Saved on visible text.');
+		await page.getByPlaceholder('Comment, or @ to tag an agent').fill('Saved on visible text.');
 		await page.getByRole('button', { name: 'Comment', exact: true }).last().click();
 		await expect(page.getByText('Saved on visible text.')).toBeVisible();
 		await expect(target.locator('.cm-comment-anchor')).toHaveCount(1);

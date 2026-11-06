@@ -25,7 +25,7 @@ export interface DocumentImageComments {
 	projectId: string | null;
 	readOnly: boolean;
 	/** Post a region comment anchored on the image's markdown, where it is now. */
-	post: (from: number, to: number, region: ImageRegion, text: string, diagramSource?: string) => Promise<string>;
+	post: (from: number, to: number, region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[], diagramSource?: string) => Promise<string>;
 	/** What a failed post says. */
 	failure?: (error: unknown) => string;
 	/** Snapshot the current diagram using the editor's existing render. */
@@ -68,7 +68,7 @@ export function createDocViewerImages(options: DocViewerImagesOptions) {
 		const artifactId = options.artifactId();
 		return artifactId ? {
 			artifactId, projectId: projectId(), readOnly: options.readOnly(),
-			post: (from, to, region, body, diagramSource) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session(), diagramSource }, region, body),
+			post: (from, to, region, body, taggedAgentIds, mentions, diagramSource) => addDocImageComment({ artifactId, from, to, text: options.text(), session: options.session(), diagramSource }, region, body, taggedAgentIds, options.target()?.threadId ?? null, mentions),
 			failure: options.session() ? liveFailureMessage : undefined, feedback: options.feedback(),
 			refreshDiagram: async (from, to) => {
 				const root = options.root();

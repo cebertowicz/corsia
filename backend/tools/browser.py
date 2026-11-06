@@ -170,6 +170,7 @@ class BrowserScreenshotTool(Tool):
             tool=self,
             tool_name=self.name,
             params={"path": path, "full_page": full_page},
+            fence=kwargs.get("_host_access_fence"),
         )
         if consumed is not None:
             if consumed.resolved_path is None:
@@ -180,6 +181,7 @@ class BrowserScreenshotTool(Tool):
             try:
                 save_path = await asyncio.to_thread(
                     resolve_path, path, self._workspace, for_write=True,
+                    thread_id=thread_id, fence=kwargs.get("_host_access_fence"),
                 )
             except PermissionError as exc:
                 return f"Error: {exc}"

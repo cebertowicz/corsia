@@ -56,7 +56,7 @@ Masking also has a side effect: an agent that reads a file and writes the whole 
 
 If a key sits in a file inside the workspace (a `.env`, a config file):
 
-1. Any agent's file tools can read the file. Agents in other projects can't reach it from their shell unless a lease opens that project to them. The CORSIA agent's shell can, unless the project is set to Local models only and the CORSIA agent's own chat isn't Local only.
+1. Agents in the project can read the file. Agents in other projects can't, from their shell or with their file tools, unless a lease opens that project to them. The CORSIA agent can, unless the project is set to Local models only and the CORSIA agent's own chat isn't Local only.
 2. What the model sees is masked when the masker recognizes the value (above), so the value usually doesn't reach the model provider.
 3. Commands the agent runs can still use the real value, and outbound network access is not limited.
 4. A whole-file rewrite by an agent can replace the value with `[REDACTED]`.

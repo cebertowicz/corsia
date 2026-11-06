@@ -158,6 +158,11 @@ class SourceLines:
         return result
 
 
+def with_notice(result: CredentialSafeText, line: str) -> CredentialSafeText:
+    """Append a sanitized notice to content already marked safe."""
+    return CredentialSafeText(f"{result}\n{sanitize_credential_text(line)}")
+
+
 def render(
     lines: list[GrepLine], safe: list[str | None], output_cap: int, header: str = "",
 ) -> CredentialSafeText:

@@ -27,7 +27,7 @@ Terms used in the CORSIA documentation. Where a linked page defines a term, the 
 - **State root:** the folder where CORSIA keeps its database and runtime files. See [Architecture](../how-it-works/architecture.md).
 - **Thread:** a conversation with its own history, model and skills, and optionally a plan. Every turn runs in a thread. See [Agents and threads](../how-it-works/agents-and-threads.md).
 - **Turn:** one execution of the thread's harness, from an admitted input until it finishes. See [Turns and delivery](../how-it-works/turns-and-delivery.md).
-- **Wait:** a task set aside until a time, an event, another task or a milestone. Each wait is recorded as a watch; see [Events and automations](../how-it-works/events-and-automations.md). See [Plans](../how-it-works/plans.md).
+- **Wait:** a task set aside until a time, an event, another task or a milestone. Each wait is recorded as a watch. See [Plans](../how-it-works/plans.md) and [Events and automations](../how-it-works/events-and-automations.md).
 - **Worker:** a thread created to do one bounded task for a parent thread. See [Agents and threads](../how-it-works/agents-and-threads.md).
 - **Workflow:** a skill whose CORSIA data file (`corsia.yaml`) declares a list of steps. See [Workflows](../how-it-works/workflows.md).
 - **Workspace:** everything shared across all of a person's work. See [Scopes](../how-it-works/scopes.md).

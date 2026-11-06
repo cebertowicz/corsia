@@ -1,6 +1,7 @@
 import { get, writable } from 'svelte/store';
 import type { CommentSelection } from './commentSelection';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
+import type { createMentionSelection } from '$lib/components/comments/mentionSelection';
 
 /** A name for what a comment is on, or a read of it that waits until a draft is started. */
 export type SelectionLabel = string | (() => string | undefined);
@@ -15,6 +16,7 @@ export interface CommentDraft {
 	/** The comment is on a table or diagram widget, which paints its mark only once the comment is placed: keep the pending mark until then. */
 	holdUntilDrawn?: boolean;
 	body?: string;
+	mentionSelection?: ReturnType<typeof createMentionSelection>;
 	scope?: string;
 	selection?: CommentSelection;
 	identity?: object;

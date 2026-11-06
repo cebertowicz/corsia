@@ -259,7 +259,7 @@ class TestLifecycle:
         task = asyncio.create_task(retirement.idle_retirement_loop())
         monkeypatch.setattr(state, "_cc_idle_retirement_task", task, raising=False)
         await asyncio.wait_for(ran.wait(), 5)
-        pending = await app_lifecycle._shutdown_owned_tasks([None] * 5, logger)
+        pending = await app_lifecycle._shutdown_owned_tasks([None] * 6, logger)
         assert pending is None and task.cancelled()
 
 

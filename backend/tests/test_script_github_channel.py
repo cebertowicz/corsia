@@ -244,7 +244,9 @@ async def test_run_stages_the_documented_command_and_removes_it(monkeypatch, tmp
     script.write_text('corsia github read "repos/o/r/pulls/7?page=2"\n')
     staged = []
 
-    async def execute(_thread, _project, script, _run, _timeout, stdin, _trace, socket_path, client_dir):
+    async def execute(_thread, _project, script, _run, _timeout, stdin, _trace,
+                      _socket_dir, _tool_socket, _config_dir, client_dir, _view, *, github_read_socket):
+        socket_path = github_read_socket
         staged.append(client_dir)
         process = await asyncio.create_subprocess_exec(
             "bash", "-c", script_sandbox.script_command(script, stdin, client_dir=client_dir),
@@ -268,7 +270,7 @@ async def test_run_stages_the_documented_command_and_removes_it(monkeypatch, tmp
         assert (process.returncode, stdout, stderr) == (0, b"event emit example", b"")
 
     monkeypatch.setattr(script_sandbox, "_run_with_channel", execute)
-    await script_sandbox._run(THREAD, None, script, "run", 10, None, (), None, "o/r")
+    await script_sandbox._run(THREAD, None, script, "run", 10, None, (), None, "o/r", False)
     assert not staged[0].exists()
 
 

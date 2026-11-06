@@ -6,7 +6,7 @@ vi.mock('$lib/stores/imageRegionComments', () => ({ addRegionComment: mocks.addR
 vi.mock('$lib/stores/toast', () => ({ toasts: { show: mocks.show, dismiss: mocks.dismiss } }));
 
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
-import { DocRequestError } from '$lib/api/docs';
+import { RequestRefused } from '$lib/api/docs';
 import { createImageComments, regionLabel } from './imageComments.svelte';
 
 const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
@@ -34,7 +34,7 @@ describe('image comments', () => {
 		await comments.draw(BOX, rect);
 		expect(comments.boxMode).toBe(false);
 		expect(comments.ui.state).toEqual({ kind: 'draft' });
-		expect(comments.draft).toEqual({ text: '', label: 'Box on the image', body: '' });
+		expect(comments.draft).toEqual(expect.objectContaining({ text: '', label: 'Box on the image', body: '' }));
 		expect(comments.cardOpen).toBe(true);
 	});
 
@@ -45,11 +45,42 @@ describe('image comments', () => {
 		comments.setDraftBody('Too dark');
 		expect(comments.hasDraftText).toBe(true);
 		await comments.submit('Too dark');
-		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark');
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark', [], null, []);
 		expect(onCreated).toHaveBeenCalledOnce();
 		expect(comments.ui.state).toEqual({ kind: 'thread', id: 'new' });
 		expect(comments.selectedId).toBe('new');
 		expect(comments.draft).toBeNull();
+	});
+
+	it('passes selected tags and viewing thread for an image comment', async () => {
+		mocks.addRegionComment.mockResolvedValueOnce('new');
+		const comments = createImageComments({ artifactId: () => 'image', threadId: () => 'viewer', readOnly: () => false, restoreFocus: vi.fn() });
+		await comments.draw(BOX, rect);
+		const mentions = [{ agent_id: 'agent', start: 0, end: 6 }];
+		await comments.submit('@Agent', ['agent'], mentions);
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, '@Agent', ['agent'], 'viewer', mentions);
+	});
+
+	it('keeps a tagged draft and explains a missing viewing thread', async () => {
+		mocks.addRegionComment.mockRejectedValueOnce(new RequestRefused('400 {"detail":"refused","kind":"no_viewing_thread"}', 'no_viewing_thread'));
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const { comments } = controller();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('@Agent');
+		await expect(comments.submit('@Agent', ['agent'])).rejects.toThrow();
+		expect(mocks.show).toHaveBeenCalledWith('Open this document from a chat to tag agents. Your comment is still here.', 'error');
+		expect(comments.draft?.body).toBe('@Agent');
+	});
+
+	it('names a tag that can no longer be used by the refusal kind, not by its English text', async () => {
+		mocks.addRegionComment.mockRejectedValueOnce(new RequestRefused('400 {"detail":"refused","kind":"tag_unavailable"}', 'tag_unavailable'));
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const { comments } = controller();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('@Agent');
+		await expect(comments.submit('@Agent', ['agent'])).rejects.toThrow();
+		expect(mocks.show).toHaveBeenCalledWith('An agent you tagged can’t be tagged from this chat. Remove its tag and post again. Your comment is still here.', 'error');
+		expect(comments.draft?.body).toBe('@Agent');
 	});
 
 	it('keeps the composer and says why when posting fails', async () => {
@@ -67,21 +98,24 @@ describe('image comments', () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
 		let source = 'old';
 		const post = vi.fn(async (_region, _text) => {
-			if (source === 'old') throw new DocRequestError('409 {"detail":"reworded","kind":"diagram_changed"}', 409, 'diagram_changed');
+			if (source === 'old') throw new RequestRefused('409 {"detail":"reworded","kind":"diagram_changed"}', 'diagram_changed');
 			return 'new';
 		});
 		const refreshDiagram = vi.fn(async () => { source = 'new'; return true; });
 		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
 			restoreFocus: () => {}, post: () => ({ create: post }), refreshDiagram });
 		await comments.draw(BOX, rect);
+		const clearTags = vi.spyOn(comments.draft!.mentionSelection, 'clear');
 		comments.setDraftBody('Keep this');
 		await expect(comments.submit('Keep this')).rejects.toThrow('409');
 		expect(refreshDiagram).toHaveBeenCalledOnce();
 		expect(comments.boxMode).toBe(true);
 		await comments.draw({ x: .6, y: .6, w: 0, h: 0 }, rect);
 		expect(comments.draft?.body).toBe('Keep this');
+		// The kept draft keeps its picked tags with its text.
+		expect(clearTags).not.toHaveBeenCalled();
 		await comments.submit('Keep this');
-		expect(post).toHaveBeenLastCalledWith({ x: .6, y: .6, w: 0, h: 0 }, 'Keep this');
+		expect(post).toHaveBeenLastCalledWith({ x: .6, y: .6, w: 0, h: 0 }, 'Keep this', [], []);
 		expect(comments.selectedId).toBe('new');
 	});
 
@@ -90,7 +124,7 @@ describe('image comments', () => {
 		['the live document words the failure itself', () => 'The document changed before your comment could be attached. Your draft is kept. Try again.'],
 	])('says to place the pin on the current diagram, with the draft kept, when %s', async (_flow, failure) => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
-		const post = vi.fn(async () => { throw new DocRequestError('409 {"kind":"diagram_changed"}', 409, 'diagram_changed'); });
+		const post = vi.fn(async () => { throw new RequestRefused('409 {"kind":"diagram_changed"}', 'diagram_changed'); });
 		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
 			restoreFocus: () => {}, post: () => ({ create: post, failure }), refreshDiagram: async () => true });
 		await comments.draw(BOX, rect);
@@ -103,7 +137,7 @@ describe('image comments', () => {
 
 	it('keeps the failure wording of any other refusal', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
-		const post = vi.fn(async () => { throw new DocRequestError('409 {"kind":"selection_changed"}', 409, 'selection_changed'); });
+		const post = vi.fn(async () => { throw new RequestRefused('409 {"kind":"selection_changed"}', 'selection_changed'); });
 		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
 			restoreFocus: () => {}, post: () => ({ create: post, failure: () => 'Live words' }), refreshDiagram: async () => true });
 		await comments.draw(BOX, rect);
@@ -113,7 +147,7 @@ describe('image comments', () => {
 
 	it('refreshes on the refusal kind, never on its wording', async () => {
 		vi.spyOn(console, 'error').mockImplementation(() => {});
-		const post = vi.fn(async () => { throw new DocRequestError('409 {"detail":"This diagram changed."}', 409, 'selection_changed'); });
+		const post = vi.fn(async () => { throw new RequestRefused('409 {"detail":"This diagram changed."}', 'selection_changed'); });
 		const refreshDiagram = vi.fn(async () => true);
 		const comments = createImageComments({ artifactId: () => 'doc', readOnly: () => false,
 			restoreFocus: () => {}, post: () => ({ create: post }), refreshDiagram });

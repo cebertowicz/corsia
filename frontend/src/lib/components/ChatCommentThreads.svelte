@@ -5,7 +5,7 @@
 	import { formatTime } from '$lib/time';
 	import CommentQuote from './comments/CommentQuote.svelte';
 	import CommentThread from './comments/CommentThread.svelte';
-	import type { CommentThreadData } from './comments/commentThreadData';
+	import type { CommentThreadData } from './comments/CommentThreadData';
 	import './comments/comment-link.css';
 
 	let { messageId, threadId, comments }: { messageId: string; threadId: string; comments: ChatComment[] } = $props();

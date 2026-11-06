@@ -1250,7 +1250,7 @@ async def test_shutdown_cancels_the_running_loop(gh, monkeypatch):
     monkeypatch.setattr(state, "_pr_quiet_watch_task", task, raising=False)
     await asyncio.wait_for(swept.wait(), 5)
 
-    await shutdown_owned_tasks([None] * 5, logging.getLogger("test"))
+    await shutdown_owned_tasks([None] * 6, logging.getLogger("test"))
 
     assert task.cancelled()
 

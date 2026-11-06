@@ -54,6 +54,7 @@ export type HostAccessPolicyException =
 
 export interface HostAccessLease {
 	id: string;
+	kind?: 'lease';
 	root_thread_id: string;
 	root_thread_title: string | null;
 	state: HostAccessLeaseState;
@@ -80,8 +81,28 @@ export interface HostAccessLease {
 	updated_at: string;
 }
 
+export interface HostAccessScript {
+	id: string;
+	kind: 'script';
+	state: 'awaiting_user';
+	thread_id: string;
+	root_thread_id: string;
+	application_hash: string;
+	script_name: string;
+	script_path: string;
+	trigger: { cadence_seconds: number | null };
+	purpose: string;
+	user_request: string;
+	reviewer_reason: string;
+	created_at: string;
+	updated_at: string;
+	decision_capability?: string;
+}
+
+export type HostAccessItem = HostAccessLease | HostAccessScript;
+
 export interface HostAccessLeaseList {
-	leases: HostAccessLease[];
+	leases: HostAccessItem[];
 }
 
 export type HostAccessLeaseDecision = 'approve' | 'reject' | 'revoke';
@@ -145,14 +166,11 @@ export async function fetchHostAccessLeases(
 
 export async function decideHostAccessLease(
 	token: string,
-	lease: Pick<
-		HostAccessLease,
-		'id' | 'revision' | 'application_hash' | 'decision_capability'
-	>,
+	lease: HostAccessItem,
 	decision: HostAccessLeaseDecision,
 ): Promise<HostAccessLease> {
 	const response = await fetch(
-		`/api/host-access/leases/${encodeURIComponent(lease.id)}/${decision}`,
+		`/api/host-access/leases/${lease.kind === 'script' ? 'scripts/' : ''}${encodeURIComponent(lease.id)}/${decision}`,
 		{
 			method: 'POST',
 			headers: {
@@ -160,7 +178,7 @@ export async function decideHostAccessLease(
 				'X-CORSIA-User-Decision': lease.decision_capability ?? '',
 			},
 			body: JSON.stringify({
-				revision: lease.revision,
+				...(lease.kind === 'script' ? {} : { revision: lease.revision }),
 				application_hash: lease.application_hash,
 			}),
 		},

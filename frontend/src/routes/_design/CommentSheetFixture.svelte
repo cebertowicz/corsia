@@ -2,7 +2,7 @@
 	import AdaptiveDrawer from '$lib/components/ui/AdaptiveDrawer.svelte';
 	import CommentComposer from '$lib/components/comments/CommentComposer.svelte';
 	import CommentThread from '$lib/components/comments/CommentThread.svelte';
-	import type { CommentThreadData } from '$lib/components/comments/commentThreadData';
+	import type { CommentThreadData } from '$lib/components/comments/CommentThreadData';
 
 	/**
 	 * The comment sheet as a client-only fixture: a new-comment composer (`kind=draft`) or one thread with its reply

@@ -230,6 +230,42 @@ def port_is_free(port: int) -> bool:
         sock.close()
 
 
+def spawn_process(argv: list[str], log_path: Path) -> subprocess.Popen | dict[str, Any]:
+    """Spawn one supervised process, returning a logged failure if launch fails."""
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        log_fh = log_path.open("ab", buffering=0)
+        return subprocess.Popen(
+            argv, env={**os.environ, "OMLX_SUPERVISED": "corsia"},
+            stdout=log_fh, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+            start_new_session=True, close_fds=True,
+        )
+    except Exception as exc:
+        log.exception("Failed to spawn oMLX")
+        return {"ok": False, "message": "Couldn’t start the model server. Try again.", "error": str(exc)}
+
+
+def managed_omlx_argv(host: str, port: int, settings: dict, *, managed: bool) -> list[str] | dict[str, Any]:
+    """Resolve the executable and build arguments for an oMLX server."""
+    if managed:
+        install_error = managed_omlx_install_error()
+        if install_error:
+            return {"ok": False, "message": install_error}
+        executable = managed_omlx_executable()
+    else:
+        executable = None
+    executable = executable or shutil.which("omlx")
+    if not executable:
+        return {
+            "ok": False,
+            "message": (
+                "omlx binary not found on PATH. Install oMLX "
+                "(`brew install omlx` or pip install omlx) and retry."
+            ),
+        }
+    return build_argv(host, port, settings, executable=executable)
+
+
 def build_argv(
     host: str,
     port: int,

@@ -1,6 +1,7 @@
 import { tick } from 'svelte';
 import { fromStore } from 'svelte/store';
-import { DocRequestError } from '$lib/api/docs';
+import { RequestRefused } from '$lib/api/docs';
+import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 import { createCommentSurfaceState, type CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 import { createCommentRetryToast, createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
 import { isPoint, type ImageRegion } from '$lib/imageRegions';
@@ -10,7 +11,7 @@ import { toasts } from '$lib/stores/toast';
 
 /** What a person is told when the diagram changed under their pin; the server's `diagram_changed` refusal carries the same words. */
 export const DIAGRAM_CHANGED_MESSAGE = 'Place the pin on the current diagram; your draft is kept.';
-const isDiagramChanged = (error: unknown) => error instanceof DocRequestError && error.kind === 'diagram_changed';
+const isDiagramChanged = (error: unknown) => error instanceof RequestRefused && error.kind === 'diagram_changed';
 
 const WHOLE = (region: ImageRegion) => region.x === 0 && region.y === 0 && region.w === 1 && region.h === 1;
 /** What the composer says a new comment is on, in place of a quote. */
@@ -25,6 +26,7 @@ export function regionLabel(region: ImageRegion): string {
  */
 export function createImageComments(context: {
 	artifactId: () => string | null;
+	threadId?: () => string | null;
 	readOnly: () => boolean;
 	diagramSource?: () => string | undefined;
 	/** Refresh the rendered diagram before asking for a replacement placement. */
@@ -39,17 +41,18 @@ export function createImageComments(context: {
 	 * Posts a new region comment; an image inside a document anchors it on the image's markdown. Without it the
 	 * comment goes on the image artifact. `failure` words what went wrong for the toast.
 	 */
-	post?: () => { create: (region: ImageRegion, text: string) => Promise<string>; failure?: (error: unknown) => string } | null;
+	post?: () => { create: (region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[]) => Promise<string>; failure?: (error: unknown) => string } | null;
 }) {
 	// Its own draft scope, so closing a card here never aborts a document's comment capture elsewhere.
 	const ui = createCommentSurfaceState(context.restoreFocus, () => `image-comments:${context.artifactId() ?? ''}`);
 	const focused = fromStore(focusedDocComment);
 	const retryToast = createCommentRetryToast(toasts);
-	const threads = createThreadActions(context.artifactId, () => context.onCreated?.());
+	const threads = createThreadActions(context.artifactId, () => context.onCreated?.(), () => context.threadId?.() ?? null);
 	let boxMode = $state(false);
 	let draftRegion = $state<ImageRegion | null>(null);
 	let draftBody = $state('');
 	let replacingDraft = $state(false);
+	const mentionSelection = createMentionSelection();
 	/** A stale pin is either awaiting a placement or visibly saving the newly drawn one. */
 	let moving = $state<{ id: string; region?: ImageRegion } | null>(null);
 	/** Counts tags picked with the drawer open, so picking the selected one again still brings its card back. */
@@ -69,6 +72,7 @@ export function createImageComments(context: {
 		draftRegion = null;
 		draftBody = '';
 		replacingDraft = false;
+		mentionSelection.clear();
 	}
 	/** The Comment button: box mode on, or off again without placing anything. */
 	function toggleBoxMode() {
@@ -101,11 +105,12 @@ export function createImageComments(context: {
 			return;
 		}
 		draftRegion = region;
-		if (!replacingDraft) draftBody = '';
+		// A draft kept after the diagram changed keeps its text and its tags.
+		if (!replacingDraft) { draftBody = ''; mentionSelection.clear(); }
 		replacingDraft = false;
 		ui.openDraft(anchor);
 	}
-	async function submit(text: string) {
+	async function submit(text: string, taggedAgentIds: string[] = [], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []) {
 		const artifact = context.artifactId(), region = draftRegion, anchor = ui.anchor;
 		if (!artifact || !region) return;
 		// The composer keeps the text when this rejects.
@@ -113,7 +118,7 @@ export function createImageComments(context: {
 		let id: string;
 		try {
 			id = await submitDocumentComment(
-				() => (post ? post.create(region, text) : addRegionComment(artifact, region, text)), retryToast.remember,
+				() => (post ? post.create(region, text, taggedAgentIds, mentions) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions)), retryToast.remember,
 				(error) => (isDiagramChanged(error) ? DIAGRAM_CHANGED_MESSAGE : post?.failure?.(error)),
 			);
 		} catch (error) {
@@ -129,6 +134,7 @@ export function createImageComments(context: {
 		retryToast.dismissAfterSuccess();
 		draftRegion = null;
 		draftBody = '';
+		mentionSelection.clear();
 		context.onCreated?.();
 		if (anchor) show(id, anchor);
 	}
@@ -214,7 +220,7 @@ export function createImageComments(context: {
 		get cardOpen() { return ui.state?.kind === 'thread' || ui.state?.kind === 'draft'; },
 		/** The composer has text, so the review bar must not answer over it. */
 		get hasDraftText() { return (!!draftRegion || replacingDraft) && draftBody.trim() !== ''; },
-		get draft() { return draftRegion ? { text: '', label: regionLabel(draftRegion), body: draftBody } : null; },
+		get draft() { return draftRegion ? { text: '', label: regionLabel(draftRegion), body: draftBody, mentionSelection } : null; },
 		setDraftBody(text: string) { draftBody = text; },
 		threads,
 		close, openList, toggleBoxMode, draw, submit, pick, pickCandidates, select, showFromList, movePin, onKeydownCapture,
