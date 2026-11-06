@@ -32,6 +32,8 @@ export interface DocComment {
 	orphaned?: boolean;
 	/** An orphaned comment whose quote no longer appears in the document text. */
 	detached?: boolean;
+	/** An open suggestion whose text was edited inside: it keeps its place and its quote, and cannot be accepted. */
+	textChanged?: boolean;
 	acked?: boolean;
 	review?: boolean;
 	replacement?: string | null;
@@ -80,6 +82,7 @@ export function fromServer(r: ServerComment): DocComment {
 		createdAt: r.created_at,
 		resolved: !!r.resolved,
 		orphaned: !!r.orphaned,
+		textChanged: !!r.text_changed,
 		acked: !!r.acked,
 		review: !!r.review,
 		replacement: r.replacement,

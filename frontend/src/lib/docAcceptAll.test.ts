@@ -26,6 +26,10 @@ describe('openSuggestionCount', () => {
 			comment({}), comment({ replacement: '' }), comment({ replacement: null }), comment({ resolved: true }), comment({ orphaned: true }),
 		])).toBe(2);
 	});
+
+	it('leaves out a suggestion edited inside, which the server refuses as stale', () => {
+		expect(openSuggestionCount([comment({}), comment({ textChanged: true })])).toBe(1);
+	});
 });
 
 describe('acceptAllOpen', () => {
