@@ -101,7 +101,6 @@ describe('placeTags', () => {
 	});
 });
 
-// Placement stays within the image; the viewer's gutter uses imageGutter.ts.
 describe('regionFromDrag', () => {
 	it('normalises a drag in any direction to a box in fractions', () => {
 		expect(regionFromDrag({ x: 400, y: 300 }, { x: 80, y: 100 }, FRAME)).toEqual({ x: 0.1, y: 0.2, w: 0.4, h: 0.4 });

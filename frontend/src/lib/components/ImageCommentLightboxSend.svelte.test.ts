@@ -250,7 +250,7 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 			const component = mount(ArtifactDocumentImageOverlay, {
 				target,
 				props: {
-					image: { src: SRC, alt: 'Mock', from: 10, to: 24 },
+					image: { src: SRC, alt: 'Mock', from: 10, to: 24, viewId: {} },
 					comments: { artifactId: 'art-doc', projectId: null, readOnly: false, post: vi.fn(async () => 'new'), feedback },
 					target: { instanceId: 'tab-1', name: 'notes.md', path: '/ws/notes.md', projectId: null, threadId: null, artifactId: 'art-doc' },
 					onBack: vi.fn(), onPlace: vi.fn(),
