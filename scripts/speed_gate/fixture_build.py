@@ -38,7 +38,8 @@ from . import fixture_spec as spec
 #: Tables built by hand; the generic pass skips them.
 HAND_BUILT = frozenset({"projects", "threads", "messages", "llm_usage", "plans", "plan_nodes",
                         "plan_node_attempts", "plan_node_events",
-                        "presence_visits", "thread_presence"})
+                        "presence_visits", "thread_presence", "doc_comment_tags",
+                        "doc_comment_mentions", "doc_comment_recipient_state"})
 #: Generic tables whose rows other generic tables reference, in dependency order.
 FIRST = ("artifact_identities", "active_turns", "checkpoints")
 
@@ -161,6 +162,26 @@ def _seed_default_accounts(db: sqlite3.Connection) -> None:
              f"/fixture/{provider}/default/source", f"/fixture/{provider}/default/runtime"))
 
 
+def _seed_comment_recipients(db: sqlite3.Connection, manifest: dict) -> None:
+    """Exercise recipient reads with linked synthetic comments, tags and mentions."""
+    comments = [row[0] for row in db.execute("SELECT id FROM doc_comments ORDER BY id")]
+    agents = [row[0] for row in db.execute("SELECT id FROM threads ORDER BY id")]
+    count = spec.SYNTHETIC_ROWS["doc_comment_tags"]
+    if len(comments) < count or not agents:
+        raise FixtureCoverageError("comment recipient seed requires fixture comments and threads")
+    for index, comment_id in enumerate(comments[:count]):
+        agent = agents[index % len(agents)]
+        db.execute("UPDATE doc_comments SET body='Review @Agent' WHERE id=?", (comment_id,))
+        db.execute("INSERT INTO doc_comment_tags(comment_id,agent_id,agent_name) VALUES (?,?,?)",
+                   (comment_id, agent, "Agent"))
+        db.execute("INSERT INTO doc_comment_mentions(comment_id,agent_id,start_offset,end_offset) VALUES (?,?,7,13)",
+                   (comment_id, agent))
+        db.execute("INSERT INTO doc_comment_recipient_state(root_id,agent_id,left_thread,notifications) VALUES (?,?,?,?)",
+                   (comment_id, agent, int(index % 5 == 0), index % 4))
+    for table in spec.SYNTHETIC_ROWS:
+        manifest["tables"][table] = {"target": count, "rows": count}
+
+
 def build_into(db: sqlite3.Connection) -> dict:
     """Fill an initialised database; returns the build manifest."""
     rng = random.Random(spec.SEED)
@@ -193,6 +214,7 @@ def build_into(db: sqlite3.Connection) -> dict:
     manifest["tables"]["thread_presence"] = {"target": spec.target_rows("thread_presence"),
                                              "rows": presence.seed_open_visits(db, rng)}
     _seed_generic(db, rng, pools, manifest)
+    _seed_comment_recipients(db, manifest)
     _account_for_empty_tables(manifest)
     _check_row_targets(db, manifest)
     db.commit()

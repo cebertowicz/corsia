@@ -404,7 +404,7 @@ describe('an image of a document opened in the canvas', () => {
 		await settle();
 		await commentOnWholeImage('Too dark');
 		expect(mocks.addDocImageComment).toHaveBeenCalledWith(
-			expect.objectContaining({ artifactId: 'art-doc', from: 12, to: 39 }), { x: 0, y: 0, w: 1, h: 1 }, 'Too dark',
+			expect.objectContaining({ artifactId: 'art-doc', from: 12, to: 39 }), { x: 0, y: 0, w: 1, h: 1 }, 'Too dark', [], THREAD, [],
 		);
 	});
 
@@ -426,7 +426,7 @@ describe('an image of a document opened in the canvas', () => {
 		expect(tabDocumentImage(THREAD, original)).toMatchObject({ from: 15, to: 42 });
 		await commentOnWholeImage('Moved');
 		expect(mocks.addDocImageComment).toHaveBeenCalledWith(
-			expect.objectContaining({ artifactId: 'art-doc', from: 15, to: 42 }), { x: 0, y: 0, w: 1, h: 1 }, 'Moved',
+			expect.objectContaining({ artifactId: 'art-doc', from: 15, to: 42 }), { x: 0, y: 0, w: 1, h: 1 }, 'Moved', [], THREAD, [],
 		);
 	});
 

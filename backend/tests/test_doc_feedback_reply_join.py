@@ -133,6 +133,65 @@ def test_person_reply_joins_the_task_its_owner_is_working_and_wakes_the_owner(is
         db.close()
 
 
+def test_tagged_reply_wake_keeps_action_after_bounded_context(isolated_db):
+    from doceditor import comment_recipients
+
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner")
+        root, _ = add_person_comment(db, artifact_id)
+        db.execute("UPDATE doc_comments SET body=?, anchor_text='The quote', author='Earlier author' WHERE id=?",
+                   ("prior " * 500, root["id"]))
+        db.commit()
+        reply, feedback = add_comment(db, artifact_id, author_kind="user", author_id=None,
+                                      author="Person", parent_id=root["id"])
+        with write_transaction(db, scope="tagged_wake") as connection:
+            connection.execute("UPDATE doc_comments SET body='Actionable reply' WHERE id=?", (reply["id"],))
+            comment_recipients.save_tags(connection, reply, ["owner"])
+        feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
+        wake = db.execute("SELECT content FROM messages WHERE thread_id='owner' AND id LIKE 'plan-wake:intent_input:%'").fetchone()
+        payload = json.loads(wake[0].split("\n", 1)[1])
+        words = payload["intent_input"]["words"]
+        context = payload["thread_context"]
+        assert 'Highlighted: "The quote"' in context
+        assert '- Earlier author:' not in context
+        assert '1 earlier comments not shown; read them all with doc_comments_list' in context
+        assert 'Earlier author' not in words and 'prior prior' not in words
+        assert 'Feedback: Actionable reply' in words
+    finally:
+        db.close()
+
+
+def test_multiple_tagged_reply_contexts_name_each_root_when_cut(isolated_db):
+    from doceditor import comment_recipients
+    from plans.person_input import WORDS_MAX_BYTES
+
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner")
+        roots = []
+        for _ in range(2):
+            root, feedback = add_comment(db, artifact_id, author_kind="user", author_id=None, author="Person")
+            db.execute("UPDATE doc_comments SET body=? WHERE id=?", ("prior " * 140, root["id"]))
+            roots.append(root)
+        db.commit()
+        feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
+        for root in roots:
+            reply, feedback = add_comment(db, artifact_id, author_kind="user", author_id=None,
+                                          author="Person", parent_id=root["id"])
+            comment_recipients.save_tags(db, reply, ["owner"])
+        db.commit()
+        feedback_batches.deliver_person_comment(db, feedback["batch_ids"], artifact_id)
+        wake = db.execute("SELECT content FROM messages WHERE thread_id='owner' AND id LIKE 'plan-wake:intent_input:%'").fetchone()
+        context = json.loads(wake[0].split("\n", 1)[1])["thread_context"]
+        assert len(context.encode("utf-8")) <= WORDS_MAX_BYTES
+        assert all(f'doc_comments_list(comment_id="{root["id"]}")' in context for root in roots)
+    finally:
+        db.close()
+
+
 def test_person_reply_to_a_task_handed_then_released_gets_its_own_task(isolated_db):
     """A task its owner picked up and put down is not being worked, so the reply is not folded into it."""
     from plans import admission

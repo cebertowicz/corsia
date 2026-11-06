@@ -109,7 +109,7 @@ export const tagNumbers = (page: Page) => page.locator('.image-viewer [data-regi
 export const commentButton = (page: Page) => viewer(page).locator('[data-image-comment]');
 export const pill = (page: Page) => viewer(page).locator('[data-image-comments-pill]');
 export const fitButton = (page: Page) => viewer(page).getByRole('button', { name: 'Fit', exact: true });
-export const composer = (page: Page) => page.locator('textarea[placeholder="Comment…"]');
+export const composer = (page: Page) => page.locator('textarea[placeholder="Comment, or @ to tag an agent"]');
 export const drawer = (page: Page) => page.locator('.canvas-comment-drawer');
 export const drawerList = (page: Page) => drawer(page).locator('.drawer-comments');
 export const sheet = (page: Page) => page.locator('.drawer-panel[role="dialog"]');

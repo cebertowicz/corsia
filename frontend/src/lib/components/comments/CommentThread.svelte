@@ -1,41 +1,12 @@
 <script lang="ts">
-	import { untrack } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import { fade, slide } from 'svelte/transition';
-	import type { Snippet } from 'svelte';
 	import './comment-link.css';
 	import { clipFade } from '$lib/actions/clipFade';
+	import { useLayoutCrossfade } from './layoutCrossfade.svelte';
 	import { lineDiff } from '$lib/diff';
 	import ToolDiff from '$lib/components/ToolDiff.svelte';
-	export type CommentThreadData = {
-		id: string;
-		anchor: string;
-		author: string;
-		authorKind?: 'user' | 'agent';
-		/** The authoring agent's thread, whose presence colour its avatar shares with its caret and marks. */
-		authorThreadId?: string | null;
-		text: string;
-		at: string;
-		createdAt?: string;
-		resolved: boolean;
-		orphaned?: boolean;
-		/** The original text is gone from the document: the card says so, and keeps the old text in quotes. */
-		detached?: boolean;
-		acked?: boolean;
-		replacement?: string | null;
-		insertAfter?: boolean;
-		decision?: 'accepted' | 'rejected' | null;
-		decidedBy?: string | null;
-		replies: CommentReplyData[];
-		/** Replies by others newer than this viewer's seen stamp: the server's answer, held once in the store. */
-		newReplyIds?: string[];
-		newComment?: boolean;
-		/** Live documents only (4.2): a row never `drawn` shows its placement on the card. */
-		placement?: 'placed' | 'placing' | 'not_placed';
-		drawn?: boolean;
-		/** On part of an image (DCOL-FR13.4): its number there, and whether the image changed after it was pinned (FR13.9). */
-		regionNumber?: number | null;
-		regionStale?: boolean;
-	};
+	import type { CommentThreadData } from './CommentThreadData';
 	import { userParticipant, resolveParticipant } from '$lib/stores/participants';
 	import Avatar from '$lib/components/ui/Avatar.svelte';
 	import { agentColor } from '$lib/docPresence';
@@ -46,15 +17,16 @@
 	import NewMarker from './NewMarker.svelte';
 	import CommentPlacementLine from './CommentPlacementLine.svelte';
 	import ReplyField from './ReplyField.svelte';
+	import { createMentionSelection, type MentionOccurrence } from './mentionSelection';
 	import ResolvedWhileReplying from './ResolvedWhileReplying.svelte';
 	import CommentMarkdownBody from './CommentMarkdownBody.svelte';
-	import CommentReplyList, { type CommentReplyData } from './CommentReplyList.svelte';
+	import CommentReplyList from './CommentReplyList.svelte';
 	import { createReplyVisibility } from './replyVisibility';
 	import { createThreadOpen } from './threadOpen';
 	import { observeArrivedThread } from './arrivedThread.svelte';
 	import { arrivedDocComments } from '$lib/stores/docComments';
 
-	let { comment, header, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection }: {
+	let { comment, header, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
 		comment: CommentThreadData;
 		header?: Snippet;
 		/** Keep resolved threads in the drawer's card presentation. */
@@ -82,7 +54,7 @@
 		scrollOnFocus?: boolean;
 		onFocus?: () => void;
 		readOnly?: boolean;
-		onReply?: (commentId: string, text: string) => Promise<void>;
+		onReply?: (commentId: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
 		onResolve?: (commentId: string, resolved: boolean) => void;
 		onAgree?: (commentId: string, agreed: boolean) => void;
 		/** Settles when the decision does and never rejects: a refusal comes back as `decisionError`. */
@@ -99,6 +71,7 @@
 		/** Resolved by someone else while this person was replying (docKeptThreads): shown as the full card, not the resolved row. */
 		kept?: boolean;
 		/** The reply being typed. The caller may own it, so it outlives a card that moves groups. */
+		selectedTags?: ReturnType<typeof createMentionSelection>;
 		replyText?: string;
 		/** The reply caret/range, preserved with caller-owned draft text when a drawer remounts. */
 		replySelection?: [number, number] | null;
@@ -119,6 +92,7 @@
 	let resolvedOpen = $state(untrack(() => !viewEachUnread && (!!comment.newComment || !!comment.newReplyIds?.length)));
 	$effect(() => { if (!viewEachUnread && (comment.newComment || comment.newReplyIds?.length)) resolvedOpen = true; });
 	let el = $state<HTMLElement>();
+	const agreeTransition = useLayoutCrossfade(() => el, () => !!comment.acked);
 	let replyField = $state<ReplyField>();
 	let newestReply = $state<HTMLElement>();
 	// Bumped to observe rendered replies again with fresh geometry.
@@ -215,8 +189,11 @@
 		if (readOnly || !t || replyPosting) return;
 		replyPosting = true;
 		try {
-			await onReply?.(comment.id, t);
-			replyText = ''; onReplySelection?.(null);
+			const mentions = replyField?.mentions() ?? [];
+			await onReply?.(comment.id, t, [...new Set(mentions.map(item => item.agent_id))], mentions);
+			replyField?.clearTags(); replyText = ''; onReplySelection?.(null);
+		} catch {
+			// The caller reports the refusal; keep the reply for retry.
 		} finally {
 			replyPosting = false;
 		}
@@ -248,7 +225,7 @@
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
-				{#if comment.text}<CommentMarkdownBody text={comment.text} />{/if}
+				{#if comment.text}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} />{/if}
 				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 			</div>
 		{/if}
@@ -260,9 +237,9 @@
 		{@render resolvedHead('check', `Resolved · ${comment.replies.length + 1} message${comment.replies.length ? 's' : ''}`)}
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
-				<CommentMarkdownBody text={comment.text} />
+				<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} />
 				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
-				{#if !readOnly}<ReplyField bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />{/if}
+				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
 					{#if reopenReachesOwner}<span class="ct-res-hint">Re-open asks the agent to revisit.</span>{/if}
@@ -298,11 +275,11 @@
 
 		{#if decidedOpen}
 			<div class="ct-decided"><svg class="ct-{comment.decision === 'accepted' ? 'check' : 'cross'}" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={comment.decision === 'accepted' ? 'M20 6L9 17l-5-5' : 'M18 6L6 18M6 6l12 12'} /></svg>Suggestion {comment.decision}</div>
-			{#if comment.text}<CommentMarkdownBody text={comment.text} />{/if}
+			{#if comment.text}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} />{/if}
 		{:else if isSuggestion}
 			{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
 			{#if comment.orphaned}<div class="ct-orphan">The text this suggestion replaces has changed.</div>{/if}
-			{#if comment.text}<CommentMarkdownBody text={comment.text} />{/if}
+			{#if comment.text}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} />{/if}
 			<CommentSuggestionActions orphaned={!!comment.orphaned} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />
 		{:else}
 			{#if comment.resolved}<div transition:clipFade><ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} /></div>{/if}
@@ -310,7 +287,7 @@
 			{#if comment.regionStale}
 				<div class="ct-orphan" data-region-stale>Image changed since this comment{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
 			{/if}
-			<CommentMarkdownBody text={comment.text} />
+			<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} />
 		{/if}
 
 		{#if comment.replies.length && !leaving}
@@ -318,10 +295,10 @@
 		{/if}
 
 		{#if !isSuggestion && comment.acked && !comment.resolved}
-			<div class="ct-agreed"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed</div>
+			<div class="ct-agreed" transition:agreeTransition><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed</div>
 		{/if}
 		{#if !readOnly}
-			<ReplyField bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />
+			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />
 		{/if}
 	</div>
 {/if}

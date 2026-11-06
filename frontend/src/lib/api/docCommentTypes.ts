@@ -8,6 +8,9 @@ export interface ServerComment {
 	author_kind: 'user' | 'agent';
 	author_thread_id?: string | null;
 	body: string;
+	tagged_agent_ids?: string[];
+	tagged_agents?: { id: string; name: string }[];
+	tagged_agent_mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[];
 	anchor_text: string | null;
 	from_off: number | null;
 	to_off: number | null;

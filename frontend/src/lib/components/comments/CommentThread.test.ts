@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import CommentThread, { type CommentThreadData } from './CommentThread.svelte';
+import CommentThread from './CommentThread.svelte';
+import type { CommentThreadData } from './CommentThreadData';
 import CommentComposer from './CommentComposer.svelte';
 import { agentColor } from '$lib/docPresence';
 
@@ -30,7 +31,7 @@ describe('CommentThread', () => {
 		type(input, '  looks right  ');
 		button('.ct-send').click();
 		await vi.waitFor(() => expect(input.value).toBe(''));
-		expect(onReply).toHaveBeenCalledWith('c1', 'looks right');
+		expect(onReply).toHaveBeenCalledWith('c1', 'looks right', [], []);
 	});
 
 	it('restores a reply selection across remounts and saves a click-placed caret', async () => {
@@ -57,7 +58,7 @@ describe('CommentThread', () => {
 		input.setSelectionRange(1, 4);
 		input.dispatchEvent(new Event('select', { bubbles: true }));
 		button('.ct-send').click();
-		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'ship it'));
+		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'ship it', [], []));
 		await vi.waitFor(() => expect(onReplySelection).toHaveBeenLastCalledWith(null));
 	});
 
@@ -115,7 +116,7 @@ describe('CommentThread', () => {
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 		type(input, 'ship it');
 		input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true }));
-		expect(onReply).toHaveBeenCalledWith('c1', 'ship it');
+		expect(onReply).toHaveBeenCalledWith('c1', 'ship it', [], []);
 	});
 
 	function visibleObserver() {
@@ -328,7 +329,7 @@ describe('CommentThread', () => {
 		type(input, ' fine by me ');
 		button('.ct-send').click();
 		await vi.waitFor(() => expect(input.value).toBe(''));
-		expect(onReply).toHaveBeenCalledWith('c1', 'fine by me');
+		expect(onReply).toHaveBeenCalledWith('c1', 'fine by me', [], []);
 		expect(host.querySelector('.ct-act.ack')).toBeNull();
 		expect(host.querySelector('.ct-act.resolve')).toBeNull();
 		expect(host.querySelector('.ct-suggestion-actions')).not.toBeNull();
@@ -424,7 +425,7 @@ describe('CommentComposer', () => {
 		const textarea = host.querySelector<HTMLTextAreaElement>('textarea')!;
 		type(textarea, ' first point ');
 		button('.submit').click();
-		await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledWith('first point'));
+		await vi.waitFor(() => expect(onSubmit).toHaveBeenCalledWith('first point', [], []));
 		textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 		expect(onCancel).toHaveBeenCalledOnce();
 	});
@@ -478,7 +479,7 @@ describe('a decided suggestion that has replies', () => {
 		await vi.waitFor(() => expect(host.querySelector('.ct-input')).not.toBeNull());
 		type(host.querySelector<HTMLInputElement>('.ct-input')!, 'Thanks');
 		button('.ct-send').click();
-		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'Thanks'));
+		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'Thanks', [], []));
 		button('.ct-act.resolve').click();
 		expect(onResolve).toHaveBeenCalledWith('c1', true);
 	});

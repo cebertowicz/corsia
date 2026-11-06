@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import CommentThread, { type CommentThreadData } from './CommentThread.svelte';
+import CommentThread from './CommentThread.svelte';
+import type { CommentThreadData } from './CommentThreadData';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -38,7 +39,7 @@ describe('CommentThread reply field', () => {
 		expect(document.activeElement).toBe(input);
 		expect(input.selectionStart).toBe(2);
 		press(input, {});
-		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'Hello'));
+		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'Hello', [], []));
 		expect(host.querySelector('.ct-res-head')).toBeTruthy();
 	});
 
@@ -61,7 +62,7 @@ describe('CommentThread reply field', () => {
 		expect(press(input, { shiftKey: true }).defaultPrevented).toBe(false);
 		expect(onReply).not.toHaveBeenCalled();
 		expect(press(input, {}).defaultPrevented).toBe(true);
-		expect(onReply).toHaveBeenCalledWith('c1', 'Looks right');
+		expect(onReply).toHaveBeenCalledWith('c1', 'Looks right', [], []);
 	});
 
 	it('on a touch screen Enter is a new line and Cmd+Enter sends', () => {
@@ -72,7 +73,7 @@ describe('CommentThread reply field', () => {
 		expect(press(input, {}).defaultPrevented).toBe(false);
 		expect(onReply).not.toHaveBeenCalled();
 		press(input, { metaKey: true });
-		expect(onReply).toHaveBeenCalledWith('c1', 'Looks right');
+		expect(onReply).toHaveBeenCalledWith('c1', 'Looks right', [], []);
 	});
 
 	it('shrinks back to one line once a multi-line reply is sent', async () => {

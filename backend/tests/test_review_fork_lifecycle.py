@@ -82,7 +82,11 @@ async def test_rebuild_after_checkpoint_failure_is_not_a_provider_failure(review
     (ProviderForkRejected("provider unavailable"), "failed", "provider_error:ProviderForkRejected"),
     (ForkCredentialsUnavailable("credentials are missing"), "failed", "missing_credentials"),
 ])
-async def test_partial_review_limit_and_failure_are_distinct_live_tasks(review_env, error, expected_state, reason):
+async def test_partial_review_limit_and_failure_are_distinct_live_tasks(review_env, monkeypatch, error, expected_state, reason):
+    async def skip_drive(_threads):
+        pass
+
+    monkeypatch.setattr(public, "drive_threads", skip_drive)
     db, aid = review_env
     row = request(db, aid)
     fork_comment(db, aid, row["id"])

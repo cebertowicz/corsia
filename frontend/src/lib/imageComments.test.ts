@@ -6,6 +6,7 @@ vi.mock('$lib/stores/imageRegionComments', () => ({ addRegionComment: mocks.addR
 vi.mock('$lib/stores/toast', () => ({ toasts: { show: mocks.show, dismiss: mocks.dismiss } }));
 
 import { focusedDocComment } from '$lib/stores/docCommentFocus';
+import { RequestRefused } from '$lib/api/docs';
 import { createImageComments, regionLabel } from './imageComments.svelte';
 
 const BOX = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
@@ -33,7 +34,7 @@ describe('image comments', () => {
 		await comments.draw(BOX, rect);
 		expect(comments.boxMode).toBe(false);
 		expect(comments.ui.state).toEqual({ kind: 'draft' });
-		expect(comments.draft).toEqual({ text: '', label: 'Box on the image', body: '' });
+		expect(comments.draft).toEqual(expect.objectContaining({ text: '', label: 'Box on the image', body: '' }));
 		expect(comments.cardOpen).toBe(true);
 	});
 
@@ -44,11 +45,42 @@ describe('image comments', () => {
 		comments.setDraftBody('Too dark');
 		expect(comments.hasDraftText).toBe(true);
 		await comments.submit('Too dark');
-		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark');
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, 'Too dark', [], null, []);
 		expect(onCreated).toHaveBeenCalledOnce();
 		expect(comments.ui.state).toEqual({ kind: 'thread', id: 'new' });
 		expect(comments.selectedId).toBe('new');
 		expect(comments.draft).toBeNull();
+	});
+
+	it('passes selected tags and viewing thread for an image comment', async () => {
+		mocks.addRegionComment.mockResolvedValueOnce('new');
+		const comments = createImageComments({ artifactId: () => 'image', threadId: () => 'viewer', readOnly: () => false, restoreFocus: vi.fn() });
+		await comments.draw(BOX, rect);
+		const mentions = [{ agent_id: 'agent', start: 0, end: 6 }];
+		await comments.submit('@Agent', ['agent'], mentions);
+		expect(mocks.addRegionComment).toHaveBeenCalledWith('image', BOX, '@Agent', ['agent'], 'viewer', mentions);
+	});
+
+	it('keeps a tagged draft and explains a missing viewing thread', async () => {
+		mocks.addRegionComment.mockRejectedValueOnce(new RequestRefused('400 {"detail":"refused","kind":"no_viewing_thread"}', 'no_viewing_thread'));
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const { comments } = controller();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('@Agent');
+		await expect(comments.submit('@Agent', ['agent'])).rejects.toThrow();
+		expect(mocks.show).toHaveBeenCalledWith('Open this document from a chat to tag agents. Your comment is still here.', 'error');
+		expect(comments.draft?.body).toBe('@Agent');
+	});
+
+	it('names a tag that can no longer be used by the refusal kind, not by its English text', async () => {
+		mocks.addRegionComment.mockRejectedValueOnce(new RequestRefused('400 {"detail":"refused","kind":"tag_unavailable"}', 'tag_unavailable'));
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		const { comments } = controller();
+		await comments.draw(BOX, rect);
+		comments.setDraftBody('@Agent');
+		await expect(comments.submit('@Agent', ['agent'])).rejects.toThrow();
+		expect(mocks.show).toHaveBeenCalledWith('An agent you tagged can’t be tagged from this chat. Remove its tag and post again. Your comment is still here.', 'error');
+		expect(comments.draft?.body).toBe('@Agent');
 	});
 
 	it('keeps the composer and says why when posting fails', async () => {

@@ -9,6 +9,8 @@ export interface CommentReply {
 	author: CommentAuthor;
 	authorKind?: 'user' | 'agent';
 	text: string;
+	taggedAgents?: { id: string; name: string }[];
+	mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[];
 	at: string;
 	createdAt?: string;
 }
@@ -22,6 +24,8 @@ export interface DocComment {
 	authorKind?: 'user' | 'agent';
 	authorThreadId?: string | null;
 	text: string;
+	taggedAgents?: { id: string; name: string }[];
+	mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[];
 	at: string;
 	createdAt?: string;
 	resolved: boolean;
@@ -70,6 +74,8 @@ export function fromServer(r: ServerComment): DocComment {
 		authorKind: r.author_kind,
 		authorThreadId: r.author_thread_id,
 		text: r.body,
+		taggedAgents: r.tagged_agents ?? [],
+		mentions: r.tagged_agent_mentions ?? [],
 		at: relLabel(r.created_at),
 		createdAt: r.created_at,
 		resolved: !!r.resolved,
@@ -82,7 +88,7 @@ export function fromServer(r: ServerComment): DocComment {
 		decidedBy: r.decided_by,
 		newReplyIds: r.new_reply_ids ?? [],
 		newComment: !!r.new_comment,
-		replies: (r.replies ?? []).map((x) => ({ id: x.id, author: x.author, authorKind: x.author_kind, text: x.body, at: relLabel(x.created_at), createdAt: x.created_at })),
+		replies: (r.replies ?? []).map((x) => ({ id: x.id, author: x.author, authorKind: x.author_kind, text: x.body, taggedAgents: x.tagged_agents ?? [], mentions: x.tagged_agent_mentions ?? [], at: relLabel(x.created_at), createdAt: x.created_at })),
 		...regionFromServer(r)
 	};
 }

@@ -142,7 +142,7 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 	await targetLine.dblclick({ position: { x: 12, y: 8 } });
 	const before = await readerPosition();
 	await page.locator('.sel-comment').click();
-	await page.getByPlaceholder('Comment…').fill('Preserve this viewport.');
+	await page.getByPlaceholder('Comment, or @ to tag an agent').fill('Preserve this viewport.');
 	const composerOpen = await readerPosition();
 	// The first attempt fails; the reader keeps their draft and place, then retries.
 	const commentsUrl = (url: URL) => /^\/api\/artifacts\/[^/]+\/comments$/.test(url.pathname);
@@ -154,7 +154,7 @@ test('@flow:document-comment-save preserves the visible editor viewport', async 
 	await page.unroute(commentsUrl);
 	const failed = await readerPosition();
 	expect(Math.abs(failed.line! - before.line!), `failed save moved the target line from y=${before.line} to y=${failed.line}`).toBeLessThanOrEqual(1);
-	await expect(page.getByPlaceholder('Comment…'), 'a failed save must keep the draft').toHaveValue('Preserve this viewport.');
+	await expect(page.getByPlaceholder('Comment, or @ to tag an agent'), 'a failed save must keep the draft').toHaveValue('Preserve this viewport.');
 	if ((page.viewportSize()?.width ?? 0) <= 768) {
 		const retry = page.getByRole('button', { name: 'Comment', exact: true }).last();
 		await expect(retry).toBeVisible();
