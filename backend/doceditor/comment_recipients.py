@@ -203,11 +203,11 @@ def filter_left_replies(db, items: list[dict], agent_id: str, *, person_owner: b
 
 
 def _withheld_authors(db, rows, recipient_id: str, *, reader: dict | None = None) -> set[str]:
-    """Agent authors whose comment to this recipient would be held under Local only."""
+    """Agent authors whose own comment to this recipient would be refused under Local only."""
     from infra.local_only import send_needs_hold
 
-    authors = {str(row['author_thread_id']) for row in rows
-               if row['author_kind'] == 'agent' and row['author_thread_id']}
+    authors = {str(row["author_thread_id"]) for row in rows
+               if row["author_kind"] == "agent" and row["author_thread_id"]}
     if not authors:
         return set()
     rows = db.execute(
