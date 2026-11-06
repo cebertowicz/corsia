@@ -105,6 +105,28 @@ def test_cloud_corsia_agent_is_fenced_from_local_only_projects_and_local_one_fro
     assert fence_for_thread(CORSIA_AGENT).roots == ()
 
 
+def test_local_one_corsia_agent_fences_nothing_even_when_a_local_only_folder_is_lost(world):
+    """The fail-closed folder rule must not fence a caller that is inside every project.
+
+    While a Local only project's folder does not resolve, every folder no project
+    claims is treated as that project, because any of them could be it. A cloud CORSIA
+    agent is fenced from those folders; the same agent on its own Local only lock is
+    inside every project, so it is fenced from none of them — the shape it had before
+    this rule was shared, which is what this pins.
+    """
+    from tools.project_fence import fence_for_thread
+
+    world.db.execute("UPDATE threads SET local_only = 1 WHERE id = ?", (CORSIA_AGENT,))
+    (world.workspace / "projects" / "secret").rmdir()
+
+    assert fence_for_thread(CORSIA_AGENT).roots == ()
+
+    # The lost folder does fence the same caller once it is back on a cloud model, so
+    # the assertion above is the caller's rule at work and not an empty workspace.
+    world.db.execute("UPDATE threads SET local_only = 0 WHERE id = ?", (CORSIA_AGENT,))
+    assert _paths(fence_for_thread(CORSIA_AGENT)) == {world.workspace / "projects" / "legacy"}
+
+
 def test_no_caller_is_unfenced_and_an_unknown_thread_is_fenced_from_every_project(world, monkeypatch):
     from tools import project_fence
 

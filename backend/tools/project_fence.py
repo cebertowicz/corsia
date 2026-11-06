@@ -225,17 +225,23 @@ def fence_for_thread(thread_id: str | None, *, db=None) -> Fence:
     from infra.config import WORKSPACE
     from infra.corsia_agent import get_corsia_agent
     from infra.database import get_db
-    from infra.project_fence import ALL, fenced_project_ids
+    from infra.project_fence import ALL, fenced_project_ids, inside_every_project
 
     db = db or get_db()
     workspace = Path(WORKSPACE)
     fenced = fenced_project_ids(thread_id, db=db)
     corsia_agent = get_corsia_agent(db=db)
+    inside_all = inside_every_project(thread_id, db=db)
 
     def fences(project_id: str | None, local_only: bool) -> bool:
         """Whether one project row, or a folder claiming none, is fenced from this caller."""
         if fenced is ALL:
             return True
+        if inside_all:
+            # Inside every project by rule — the CORSIA agent on its own Local only
+            # lock — so nothing is walled from it, not even a folder no project
+            # claims. Fencing those would refuse it the work it is locked to do.
+            return False
         if project_id is None:
             # A folder under ``projects/`` that claims no project row may still be a
             # project's folder, so every agent but one inside all of them fences it;
