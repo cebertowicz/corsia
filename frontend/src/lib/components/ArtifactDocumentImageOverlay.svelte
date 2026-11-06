@@ -2,7 +2,8 @@
 	import { leaveImageOnExit } from '$lib/docFeedbackLifecycle.svelte';
 	import { get } from 'svelte/store';
 	import { onDestroy } from 'svelte';
-	import type { OpenImageRequest } from '$lib/cm/markdown-image';
+	import { releaseDiagramSnapshot } from '$lib/diagramSnapshot';
+	import { refreshTabDocumentImage } from '$lib/stores/tabViewState';
 	import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 	import ImageLightbox from './ImageLightbox.svelte';
 	import ImageCommentLightbox from './ImageCommentLightbox.svelte';
@@ -24,21 +25,19 @@
 		onReplyStep: (excludeId?: string) => void;
 	} = $props();
 
-	let refreshed = $state<OpenImageRequest | null>(null);
-	const currentImage = $derived(refreshed ? { ...image, ...refreshed, from: image.from, to: image.to } : image);
+	let destroyed = false;
+	onDestroy(() => { destroyed = true; });
 	async function refreshDiagram(): Promise<boolean> {
-		if (!comments || image.diagramSource === undefined) return false;
-		const next = await comments.refreshDiagram(image.from, image.to);
+		if (!comments || image.diagramSource === undefined || !target.threadId) return false;
+		const opened = image;
+		const next = await comments.refreshDiagram(opened.from, opened.to);
 		if (!next) return false;
-		if (next.diagramSource === currentImage.diagramSource) {
-			if (next.src.startsWith('blob:')) URL.revokeObjectURL(next.src);
+		if (destroyed || next.diagramSource === opened.diagramSource) {
+			releaseDiagramSnapshot(next.src);
 			return false;
 		}
-		if (refreshed?.src.startsWith('blob:')) URL.revokeObjectURL(refreshed.src);
-		refreshed = next;
-		return true;
+		return refreshTabDocumentImage(target.threadId, target.instanceId, opened, next);
 	}
-	onDestroy(() => { if (refreshed?.src.startsWith('blob:')) URL.revokeObjectURL(refreshed.src); });
 	let hasDraft = $state(false);
 	let sheetUp = $state(false);
 	let selectedThread = $state<string | null>(null);
@@ -66,15 +65,15 @@
 <div class="image-overlay">
 	<!-- Keyed on the tab and the image, so opening another one starts its comments afresh, and another tab's (even
 	     of the same image) starts at that tab's own camera. -->
-	{#key `${target.instanceId}\u0000${image.src}\u0000${image.focus?.id ?? ''}`}
+	{#key image.viewId ?? `${target.instanceId}\u0000${image.src}\u0000${image.focus?.id ?? ''}`}
 		{#if comments}
 			<ImageCommentLightbox
 				bind:this={viewer}
-				src={currentImage.src}
-				alt={currentImage.alt}
-				readableScale={currentImage.readableScale}
-				diagramElements={currentImage.diagramElements}
-				diagramSource={currentImage.diagramSource}
+				src={image.src}
+				alt={image.alt}
+				readableScale={image.readableScale}
+				diagramElements={image.diagramElements}
+				diagramSource={image.diagramSource}
 				{refreshDiagram}
 				artifactId={comments.artifactId}
 				{target}
@@ -89,7 +88,7 @@
 				onLoaded={() => loaded = true}
 				inDocument={{
 					occurrence: { from: image.from, to: image.to },
-					post: (region, text, taggedAgentIds, mentions) => comments.post(image.from, image.to, region, text, taggedAgentIds, mentions, currentImage.diagramSource),
+					post: (region, text, taggedAgentIds, mentions) => comments.post(image.from, image.to, region, text, taggedAgentIds, mentions, image.diagramSource),
 					failure: comments.failure,
 				}}
 				focus={image.focus ?? null}

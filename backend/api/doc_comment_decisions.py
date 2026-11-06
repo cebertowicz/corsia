@@ -3,7 +3,7 @@
 from fastapi.responses import JSONResponse
 
 from doceditor.comment_actions import CommentActionError
-from doceditor.comment_creation import CommentSelectionChanged
+from doceditor.comment_action_errors import CommentSelectionChanged
 
 
 COMMENT_ACTION_HTTP_STATUS = {

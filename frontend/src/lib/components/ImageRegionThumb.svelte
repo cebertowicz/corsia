@@ -9,9 +9,10 @@
 
 	type Pinned = DocComment & { region: ImageRegion; regionNumber: number };
 	// The thumbnail uses the delivered image's placement rule at its natural size.
-	let { src, alt = '', caption = false, comments, colorOf, onOpen }: {
+	let { src, alt = '', caption = false, kind = 'image', comments, colorOf, onOpen }: {
 		src: string;
 		alt?: string;
+		kind?: 'image' | 'diagram';
 		/** Name the image beside it by its alt text, where the image itself is not in view. */
 		caption?: boolean;
 		comments: DocComment[];
@@ -44,7 +45,7 @@
 	const numbers = $derived(pinned.map((comment) => comment.regionNumber).join(', '));
 </script>
 
-<button type="button" class="thumb" data-region-thumb onclick={() => onOpen?.()} aria-label={`${alt ? `${alt}: ` : ''}image with comment${pinned.length === 1 ? '' : 's'} ${numbers}`} disabled={!onOpen}>
+<button type="button" class="thumb" data-region-thumb onclick={() => onOpen?.()} aria-label={`${alt ? `${alt}: ` : ''}${kind} with comment${pinned.length === 1 ? '' : 's'} ${numbers}`} disabled={!onOpen}>
 	<span class="frame" bind:this={frame}>
 		<img bind:this={image} {src} alt="" draggable="false" onload={measure} />
 		{#each pinned as comment (comment.id)}

@@ -2,9 +2,9 @@
  * Geometry for comments on part of an image (DCOL-FR13.3, FR13.4).
  *
  * A region is a box or a point in fractions of the image, origin top-left, so it
- * holds at any zoom. Tags follow the same rule as the marked-up copy an agent
- * gets back (`backend/doceditor/image_markup.py` `place_tag`): a tag never covers
- * what its box points at. A box's tag sits outside its top-left corner, then tries
+ * holds at any zoom. The in-image placement below is also used by the marked-up
+ * copy's gutter placement (`backend/doceditor/image_markup.py`): a box's tag
+ * sits outside its top-left corner, then tries
  * left of the corner, above it, then right of the box, and only when the image edge
  * clips all four sits inside the box's corner. A point's tag sits up-left of the
  * point, then tries the other diagonals.
@@ -72,30 +72,15 @@ export function placeTag(region: ImageRegion, size: Size, radius = TAG_RADIUS, g
 	};
 }
 
-/** Room outside an image where its tags may stand: the same on every side, or per side. */
-export type TagRoom = number | { top?: number; right?: number; bottom?: number; left?: number };
-
-/**
- * Every tag on one image, placed in `regions`' order, each keeping clear of the
- * tags before it and of every other comment's mark; `dot` is a point's dot
- * radius with its ring. A small image (a thumbnail) passes `room`, where its
- * tags may stand outside it, so a tag need not sit on the image. Centres come
- * back in pixels of the image itself, negative where a tag is outside its top
- * or left.
- */
-export function placeTags(regions: ImageRegion[], size: Size, radius = TAG_RADIUS, gap = TAG_GAP, dot = POINT_RADIUS + 2, room: TagRoom = 0): (Point & { side: TagSide })[] {
-	const { top = 0, right = 0, bottom = 0, left = 0 } = typeof room === 'number' ? { top: room, right: room, bottom: room, left: room } : room;
-	const frame = { width: size.width + left + right, height: size.height + top + bottom };
-	const inFrame = regions.map((region) => ({
-		x: (region.x * size.width + left) / frame.width, y: (region.y * size.height + top) / frame.height,
-		w: region.w * size.width / frame.width, h: region.h * size.height / frame.height,
-	}));
-	const marks: Mark[] = inFrame.map((region) => isPoint(region)
-		? { x: region.x * frame.width, y: region.y * frame.height, r: dot }
-		: { x0: region.x * frame.width, y0: region.y * frame.height, x1: (region.x + region.w) * frame.width, y1: (region.y + region.h) * frame.height });
+/** Places tags in region order, avoiding earlier tags and other marks when possible. */
+export function placeTags(regions: ImageRegion[], size: Size, radius = TAG_RADIUS, gap = TAG_GAP, dot = POINT_RADIUS + 2): (Point & { side: TagSide })[] {
+	const { width, height } = size;
+	const marks: Mark[] = regions.map((region) => isPoint(region)
+		? { x: region.x * width, y: region.y * height, r: dot }
+		: { x0: region.x * width, y0: region.y * height, x1: (region.x + region.w) * width, y1: (region.y + region.h) * height });
 	const placed: (Point & { side: TagSide })[] = [];
-	inFrame.forEach((region, index) => placed.push(placeTag(region, frame, radius, gap, placed, marks.filter((_, other) => other !== index))));
-	return placed.map((tag) => ({ ...tag, x: tag.x - left, y: tag.y - top }));
+	regions.forEach((region, index) => placed.push(placeTag(region, size, radius, gap, placed, marks.filter((_, other) => other !== index))));
+	return placed;
 }
 
 /** The region a drag from `a` to `b` (pixels in a `size` frame) draws; a short drag is a point at `a`. */

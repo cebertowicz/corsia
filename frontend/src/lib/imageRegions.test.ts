@@ -101,37 +101,7 @@ describe('placeTags', () => {
 	});
 });
 
-describe('placeTags with room outside the image', () => {
-	// A thumbnail is too small to hold a badge on the image: the badge stands up-left outside the box, the viewer's rule.
-	const THUMB = { width: 120, height: 75 };
-	it('puts a box tag up-left outside its corner, in pixels of the image', () => {
-		const [tag] = placeTags([{ x: 0.1, y: 0.1, w: 0.3, h: 0.3 }], THUMB, 7, 2, undefined, 20);
-		expect(tag.side).toBe('up-left');
-		expect(tag.x).toBeLessThan(0.1 * THUMB.width);
-		expect(tag.y).toBeLessThan(0.1 * THUMB.height);
-		expect(tag.x).toBeGreaterThan(-20);
-		expect(tag.y).toBeGreaterThan(-20);
-	});
-
-	it('does the same for a point, offset up-left off the point', () => {
-		const [tag] = placeTags([{ x: 0.5, y: 0.5, w: 0, h: 0 }], THUMB, 7, 2, undefined, 20);
-		expect(tag.side).toBe('up-left');
-		expect(tag.x).toBeLessThan(0.5 * THUMB.width);
-		expect(tag.y).toBeLessThan(0.5 * THUMB.height);
-	});
-
-	it('with room only above, a tag at the left edge stays on the image rather than leave it to the left', () => {
-		const [tag] = placeTags([{ x: 0, y: 0.1, w: 0.3, h: 0.5 }], THUMB, 7, 2, undefined, { top: 18 });
-		expect(tag.x).toBeGreaterThanOrEqual(0);
-		expect(tag.y).toBeGreaterThan(-18);
-	});
-
-	it('is the plain placement when there is no room to give', () => {
-		const regions = [{ x: 0.4, y: 0.3, w: 0.2, h: 0.2 }, { x: 0.5, y: 0.5, w: 0, h: 0 }];
-		expect(placeTags(regions, FRAME, 11, 3, undefined, 0)).toEqual(placeTags(regions, FRAME, 11, 3));
-	});
-});
-
+// Placement stays within the image; the viewer's gutter uses imageGutter.ts.
 describe('regionFromDrag', () => {
 	it('normalises a drag in any direction to a box in fractions', () => {
 		expect(regionFromDrag({ x: 400, y: 300 }, { x: 80, y: 100 }, FRAME)).toEqual({ x: 0.1, y: 0.2, w: 0.4, h: 0.4 });
