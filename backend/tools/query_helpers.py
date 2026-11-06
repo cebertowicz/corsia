@@ -6,6 +6,7 @@ from __future__ import annotations
 # definition lives with the index definitions in infra so that memory/ can
 # use it without importing back up into the tool layer.
 from infra.db_fts import fts5_escape
+from infra.project_fence import HistoryFence
 from infra.thread_confinement import Reader, hidden_clause
 
 __all__ = ["fts5_escape"]
@@ -55,13 +56,20 @@ def search_messages_fts(
     sender: str | None = None,
     limit: int = 20,
     reader: Reader = Reader.agent(),
+    fence: HistoryFence | None = None,
 ) -> list:
-    """Search delivered messages by text and durable sender class."""
+    """Search delivered messages by text and durable sender class.
+
+    A message of a thread whose current project the reader is fenced from, or at or
+    below that thread's cut, is dropped in SQL so it never counts toward ``limit``.
+    Pass the call's ``fence`` to read several sources under one computed fence.
+    """
     sender_expression = _sender_expression()
     fts_query = fts5_escape(query)
     visible, identity = hidden_clause(reader, "t")
-    filters = f" AND m.delivery_state = 'delivered' AND {visible}"
-    params: list = [fts_query, *identity]
+    open_to_caller, fence_params = (fence or HistoryFence.for_reader(reader, db=db)).visible_clause("t", "m.seq")
+    filters = f" AND m.delivery_state = 'delivered' AND {visible} AND {open_to_caller}"
+    params: list = [fts_query, *identity, *fence_params]
 
     if thread_id:
         filters += " AND m.thread_id = ?"
@@ -83,8 +91,8 @@ def search_messages_fts(
         )
         return db.execute(sql, params).fetchall()
     except Exception:
-        like_params: list = [f"%{query}%", *identity]
-        like_filters = f" AND m.delivery_state = 'delivered' AND {visible}"
+        like_params: list = [f"%{query}%", *identity, *fence_params]
+        like_filters = f" AND m.delivery_state = 'delivered' AND {visible} AND {open_to_caller}"
         if thread_id:
             like_filters += " AND m.thread_id = ?"
             like_params.append(thread_id)
@@ -111,6 +119,69 @@ def get_thread_message_count(db, thread_id: str) -> int:
         (thread_id,),
     ).fetchone()
     return row["cnt"] if row else 0
+
+
+def thread_history_rows(
+    db,
+    thread_id: str,
+    *,
+    reader: Reader,
+    role: str | None = None,
+    limit: int = 50,
+    oldest_first: bool = False,
+    from_seq: int | None = None,
+    to_seq: int | None = None,
+    tool_output: str = "preview",
+) -> tuple[dict | None, object]:
+    """One thread's readable message rows for this caller: ``(thread_row, rows)``.
+
+    The project wall is applied here, in SQL, so a fenced row is never fetched and
+    never counts toward ``limit``. The second half is the rows, or a
+    ``RestrictedRead`` for a confined thread, or the row R5 refusal text for a thread
+    wholly behind a wall the caller is outside: three answers, and the caller renders
+    whichever one arrived. A thread that left a Local only project serves only the
+    messages above its cut.
+    """
+    from infra.project_fence import thread_refusal
+    from infra.thread_confinement import transcript_restriction
+
+    thread_row = db.execute(
+        "SELECT id, title, confinement, local_only_cut_seq FROM threads WHERE id = ?",
+        (thread_id,),
+    ).fetchone()
+    if not thread_row:
+        return None, None
+    restriction = transcript_restriction(reader, thread_row)
+    if restriction is not None:
+        return thread_row, restriction
+    fence = HistoryFence.for_reader(reader, db=db)
+    subject = fence.wholly_fenced(db, thread_id)
+    if subject is not None:
+        return thread_row, thread_refusal(subject, thread_id, caller=reader.thread_id)
+    where = ["thread_id = ?", "delivery_state = 'delivered'", "seq IS NOT NULL"]
+    params: list[object] = [thread_id]
+    hidden = fence.hidden_below(thread_row["local_only_cut_seq"])
+    if hidden is not None:
+        where.append("seq > ?")
+        params.append(hidden)
+    if role:
+        where.append("role = ?")
+        params.append(role)
+    if from_seq is not None:
+        where.append("seq >= ?")
+        params.append(from_seq)
+    if to_seq is not None:
+        where.append("seq <= ?")
+        params.append(to_seq)
+    if tool_output == "omit":
+        where.append("role <> 'tool'")
+    order = "ASC" if oldest_first else "DESC"
+    rows = db.execute(
+        f"SELECT seq, role, content, metadata, created_at FROM messages "
+        f"WHERE {' AND '.join(where)} ORDER BY seq {order} LIMIT ?",
+        (*params, limit),
+    ).fetchall()
+    return thread_row, rows
 
 
 def format_history_results(

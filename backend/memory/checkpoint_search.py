@@ -11,6 +11,7 @@ import sqlite3
 from loguru import logger as log
 
 from infra.db_fts import fts5_escape
+from infra.project_fence import HistoryFence
 from infra.thread_confinement import Reader, hidden_clause
 from memory.checkpoint_entry_rows import entry_hits as _entry_hits
 from memory.checkpoint_entry_rows import entry_rows_matching
@@ -69,11 +70,13 @@ def _entry_rows(
     candidate_limit: int,
     per_thread: int,
     reader: Reader,
+    fence: HistoryFence | None = None,
 ) -> list[dict]:
     """Return bounded entry-FTS matches with lifecycle and checkpoint pointers."""
     return entry_rows_matching(
         db, fts5_escape(query, prefix=True), user_id, thread_id,
         candidate_limit, per_thread, reader,
+        fence=fence if fence is not None else HistoryFence.for_reader(reader, db=db),
     )
 
 
@@ -85,6 +88,7 @@ def _narrative_rows(
     candidate_limit: int,
     per_thread: int,
     reader: Reader,
+    fence: HistoryFence | None = None,
 ) -> list[dict]:
     """Return bounded narrative-only FTS matches without rebuilding entries."""
     params: list[object] = [f"raw_result : ({fts5_escape(query, prefix=True)})"]
@@ -93,7 +97,10 @@ def _narrative_rows(
         scope = "AND checkpoint.thread_id = ? "
         params.append(thread_id)
     visible, identity = hidden_clause(reader, "thread")
-    params.extend((user_id, *identity, max(1, per_thread) * 20, candidate_limit))
+    open_to_caller, fence_params = (
+        fence if fence is not None else HistoryFence.for_reader(reader, db=db)
+    ).visible_clause("thread")
+    params.extend((user_id, *identity, *fence_params, max(1, per_thread) * 20, candidate_limit))
     rows = db.execute(
         "WITH scored AS ("
         "  SELECT checkpoint.id, checkpoint.thread_id, checkpoint.through_seq, "
@@ -110,6 +117,7 @@ def _narrative_rows(
         f"    {scope}"
         "    AND checkpoint.status = 'installed' AND thread.user_id = ?"
         f"    AND {visible}"
+        f"    AND {open_to_caller}"
         "), ranked AS ("
         "  SELECT *, ROW_NUMBER() OVER (PARTITION BY thread_id "
         "      ORDER BY relevance ASC, generation_order DESC) AS thread_rank "
@@ -145,7 +153,10 @@ def search_checkpoints(
 ) -> list[dict]:
     """Search installed epochs in the caller's threads for concise history evidence.
 
-    Older epochs remain readable after a project move, but their hits are marked
+    Generations of a project the caller is walled from are left out, as are every
+    generation of a thread that has since left a Local only project: a checkpoint
+    carries earlier continuity entries forward, so its whole history moves with the
+    cut. Other older epochs remain readable after a project move, and are marked
     ``historical``. The current-plan authority remains the plan, not a result
     from this historical retrieval surface. Prefix recall lets ``poll`` find
     ``polling``. Infix matching (``poll`` finding ``extrapolling``) is a
@@ -168,14 +179,15 @@ def search_checkpoints(
         return []
     bounded = max(1, min(int(limit or 5), 20))
     keep = max(1, int(per_thread or 1))
+    fence = HistoryFence.for_reader(reader, db=db)
     candidate_limit = min(
         MAX_CANDIDATE_ENTRIES, max(50, bounded * keep * 20)
     )
     entry_hits = _entry_hits(
-        _entry_rows(db, query, user_id, thread_id, candidate_limit, keep, reader)
+        _entry_rows(db, query, user_id, thread_id, candidate_limit, keep, reader, fence)
     )
     narrative_hits = _narrative_hits(
-        _narrative_rows(db, query, user_id, thread_id, candidate_limit, keep, reader)
+        _narrative_rows(db, query, user_id, thread_id, candidate_limit, keep, reader, fence)
     )
     hits: list[dict] = []
     per_thread_count: dict[str, int] = {}
@@ -214,15 +226,16 @@ def recent_checkpoints(
     if user_id is None:
         return []
     visible, identity = hidden_clause(reader, "t")
+    open_to_caller, fence_params = HistoryFence.for_reader(reader, db=db).visible_clause("t")
     bounded = max(1, min(int(limit or 3), 10))
     rows = db.execute(
         "SELECT c.id, c.thread_id, c.through_seq, c.installed_at, c.captured_at, "
         "       c.raw_result, c.history_epoch, 0 AS historical FROM checkpoints c "
         "JOIN threads t ON t.id = c.thread_id "
         "WHERE c.thread_id = ? AND c.status = 'installed' "
-        f"  AND c.history_epoch = t.history_epoch AND t.user_id = ? AND {visible} "
+        f"  AND c.history_epoch = t.history_epoch AND t.user_id = ? AND {visible} AND {open_to_caller} "
         "ORDER BY c.generation_order DESC LIMIT ?",
-        (thread_id, user_id, *identity, bounded),
+        (thread_id, user_id, *identity, *fence_params, bounded),
     ).fetchall()
     return [generation_summary(dict(row)) for row in rows]
 
@@ -241,6 +254,7 @@ def get_checkpoint(
     read deliberately remains indistinguishable from a missing id.
     """
     user_id = caller_user_id(db, reader.thread_id)
+    open_to_caller, fence_params = HistoryFence.for_reader(reader, db=db).visible_clause("t")
     visible, identity = hidden_clause(reader, "t")
     row = None if user_id is None else db.execute(
         "SELECT c.id, c.thread_id, c.through_seq, c.installed_at, c.captured_at, "
@@ -248,8 +262,8 @@ def get_checkpoint(
         "       CASE WHEN c.history_epoch != t.history_epoch THEN 1 ELSE 0 END "
         "           AS historical FROM checkpoints c "
         "JOIN threads t ON t.id = c.thread_id "
-        f"WHERE c.id = ? AND c.status = 'installed' AND t.user_id = ? AND {visible}",
-        (checkpoint_id, user_id, *identity),
+        f"WHERE c.id = ? AND c.status = 'installed' AND t.user_id = ? AND {visible} AND {open_to_caller}",
+        (checkpoint_id, user_id, *identity, *fence_params),
     ).fetchone()
     if row is None:
         return {

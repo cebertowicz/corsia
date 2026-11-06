@@ -11,6 +11,7 @@ import sqlite3
 from loguru import logger as log
 
 from infra.checkpoint_entry_index import NO_REVISION
+from infra.project_fence import HistoryFence
 from infra.thread_confinement import Reader, hidden_clause
 from memory.checkpoint_search_entries import build_entry_hit, continuity_entries
 
@@ -32,12 +33,13 @@ def entry_rows_matching(
     candidate_limit: int,
     per_thread: int,
     reader: Reader = Reader.agent(),
+    fence: HistoryFence | None = None,
 ) -> list[dict]:
     """Return entry rows for an already-built FTS5 ``match`` expression."""
     return hydrate_entry_rows(
         db,
         entry_rank_rows_matching(
-            db, match, user_id, thread_id, candidate_limit, per_thread, reader
+            db, match, user_id, thread_id, candidate_limit, per_thread, reader, fence=fence
         ),
     )
 
@@ -50,17 +52,23 @@ def entry_rank_rows_matching(
     candidate_limit: int,
     per_thread: int,
     reader: Reader = Reader.agent(),
+    fence: HistoryFence | None = None,
 ) -> list[dict]:
     """Return the ranked, bounded entry rows with no checkpoint columns.
 
     Everything ranking needs lives on the lean index and continuity rows;
     :func:`hydrate_entry_rows` adds the checkpoint pointers and the large
-    frozen snapshots for the bounded result.
+    frozen snapshots for the bounded result. ``fence`` is the caller's project
+    fence, computed once by the search that owns this call; every entry of a
+    thread behind it, or of a thread that has a cut, is dropped before ranking.
     """
     params: list[object] = [match]
     scope = scope_clause(thread_id, params)
     visible, identity = hidden_clause(reader, "thread")
-    params.extend((user_id, *identity, max(1, per_thread) * 20, candidate_limit))
+    open_to_caller, fence_params = (
+        fence or HistoryFence.for_reader(reader, db=db)
+    ).visible_clause("thread")
+    params.extend((user_id, *identity, *fence_params, max(1, per_thread) * 20, candidate_limit))
     # Both window sorts carry only the narrow ranking keys of every match; the
     # wide columns (search_text, canonical body) are joined back for the bounded
     # winners. Carrying them through the sorts cost more than the FTS match.
@@ -75,7 +83,7 @@ def entry_rank_rows_matching(
         "  JOIN threads AS thread ON thread.id = entry.thread_id "
         "  WHERE checkpoint_entry_search_fts MATCH ? "
         f"    {scope}"
-        f"    AND thread.user_id = ? AND {visible}"
+        f"    AND thread.user_id = ? AND {visible} AND {open_to_caller}"
         "), revisions AS ("
         "  SELECT *, ROW_NUMBER() OVER ("
         "      PARTITION BY thread_id, history_epoch, entry_id "

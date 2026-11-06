@@ -348,6 +348,8 @@ class DelegateStatusTool(Tool):
         )
         if result is None:
             return f"Error: Thread not found: {thread_id}"
+        if isinstance(result, dict):
+            return result["restriction_reason"]
         thread_row, active, conductor_scopes, recent, checkpoint = result
         held = thread_row.pop("held_admission")
         model_switch = model_switch_status(thread_row)

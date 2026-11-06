@@ -341,6 +341,7 @@ Source: `backend/infra/schema.py`.
 | `parent_thread_id` | TEXT | No | No | — | threads.id |
 | `spawned_by` | TEXT | No | No | — | threads.id |
 | `local_only` | INTEGER | No | Yes | 0 | — |
+| `local_only_cut_seq` | INTEGER | No | No | — | — |
 | `confinement` | TEXT | No | No | — | — |
 | `confined_read_dirs` | TEXT | No | No | — | — |
 | `bootloader_files` | TEXT | No | No | — | — |
