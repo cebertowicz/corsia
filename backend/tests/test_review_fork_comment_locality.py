@@ -69,11 +69,10 @@ async def test_cloud_fork_keeps_public_replies_to_withheld_root(review_env, monk
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(('resolved', 'decision'), [(1, None), (0, 'accepted')])
+@pytest.mark.parametrize(('resolved', 'decision'), [(1, None), (1, 'accepted')])
 async def test_withheld_root_preserves_closed_state(review_env, monkeypatch, resolved, decision):
     from doceditor.comment_anchoring import anchored_threads
     from doceditor.comment_recipients import visible_comment_threads
-    from doceditor.suggestion_overlap import is_open_thread
     from tools.document_comment_listing import select_comment_threads
     from infra import local_only
 
@@ -87,7 +86,7 @@ async def test_withheld_root_preserves_closed_state(review_env, monkeypatch, res
     monkeypatch.setattr(local_only, '_is_cloud', lambda *_args, **_kw: True)
     threads, _ = anchored_threads(aid, None, db, text='')
     threads = visible_comment_threads(db, threads, 'reviewer', reader={'model': 'cloud/model', 'pending_model': None})
-    assert len(threads) == 1 and not is_open_thread(threads[0])
+    assert len(threads) == 1 and threads[0]['resolved'] and threads[0].get('decision') == decision
     assert select_comment_threads(threads, 'open', None)['closed_count'] == 1
 
 

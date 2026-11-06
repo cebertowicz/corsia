@@ -26,25 +26,29 @@ async def comment_threads(integration_client, doc, _registrable_roots):
     resolved_reply = store.create(aid, body="Resolved reply", parent_id=resolved["id"], announce=False)
     accepted = store.create(aid, body="Accepted", announce=False)
     rejected = store.create(aid, body="Rejected", announce=False)
+    talking = store.create(aid, body="Decided, still talking", announce=False)
+    talking_reply = store.create(aid, body="Why this wording?", parent_id=talking["id"], announce=False)
     store.update(resolved["id"], {"resolved": True})
-    store.update(accepted["id"], {"decision": "accepted"})
-    store.update(rejected["id"], {"decision": "rejected"})
-    return thread_id, aid, created, reply, orphan, resolved, resolved_reply, accepted, rejected
+    # As a decision leaves them: closed when nobody had replied, open when a conversation had started.
+    store.update(accepted["id"], {"decision": "accepted", "resolved": True, "closed_by_decision": True})
+    store.update(rejected["id"], {"decision": "rejected", "resolved": True, "closed_by_decision": True})
+    store.update(talking["id"], {"decision": "accepted"})
+    return thread_id, aid, created, reply, orphan, resolved, resolved_reply, accepted, rejected, talking, talking_reply
 
 
 @pytest.mark.asyncio
 async def test_default_open_threads_keep_replies_and_orphans(comment_threads):
     from tools.documents import DocCommentsListTool
 
-    sid, aid, opened, reply, orphan, *_ = comment_threads
+    sid, aid, opened, reply, orphan, _, _, _, _, talking, _ = comment_threads
     result = json.loads(await DocCommentsListTool().execute(artifact_id=aid, _thread_id=sid))
     assert result["found"] is True
     assert result["artifact_id"] == aid
     assert result["anchors_checked"] is True
     assert result["closed_count"] == 3
-    assert result["note"] == "3 resolved or decided comment threads not shown; pass status='all' to include them."
+    assert result["note"] == "3 resolved comment threads not shown; pass status='all' to include them."
     rows = {row["id"]: row for row in result["comments"]}
-    assert set(rows) == {opened["id"], orphan["id"]}
+    assert set(rows) == {opened["id"], orphan["id"], talking["id"]}
     assert [row["id"] for row in rows[opened["id"]]["replies"]] == [reply["id"]]
     assert rows[orphan["id"]]["orphaned"] is True
     all_rows = json.loads(await DocCommentsListTool().execute(
@@ -57,13 +61,25 @@ async def test_default_open_threads_keep_replies_and_orphans(comment_threads):
 async def test_all_includes_every_thread(comment_threads):
     from tools.documents import DocCommentsListTool
 
-    sid, aid, opened, _, orphan, resolved, _, accepted, rejected = comment_threads
+    sid, aid, opened, _, orphan, resolved, _, accepted, rejected, talking, _ = comment_threads
     result = json.loads(await DocCommentsListTool().execute(artifact_id=aid, status="all", _thread_id=sid))
     assert {row["id"] for row in result["comments"]} == {
-        opened["id"], orphan["id"], resolved["id"], accepted["id"], rejected["id"],
+        opened["id"], orphan["id"], resolved["id"], accepted["id"], rejected["id"], talking["id"],
     }
     assert result["closed_count"] == 0
     assert "note" not in result
+
+
+@pytest.mark.asyncio
+async def test_a_decided_suggestion_still_in_conversation_is_listed_as_open(comment_threads):
+    """The person sees it open with a reply box, so the agent answering them must see it too."""
+    from tools.documents import DocCommentsListTool
+
+    sid, aid, *_, talking, talking_reply = comment_threads
+    result = json.loads(await DocCommentsListTool().execute(artifact_id=aid, _thread_id=sid))
+    row = next(row for row in result["comments"] if row["id"] == talking["id"])
+    assert row["decision"] == "accepted"
+    assert [r["id"] for r in row["replies"]] == [talking_reply["id"]]
 
 
 @pytest.mark.asyncio
