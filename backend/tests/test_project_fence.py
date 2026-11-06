@@ -111,8 +111,8 @@ def test_local_one_corsia_agent_fences_nothing_even_when_a_local_only_folder_is_
     While a Local only project's folder does not resolve, every folder no project
     claims is treated as that project, because any of them could be it. A cloud CORSIA
     agent is fenced from those folders; the same agent on its own Local only lock is
-    inside every project, so it is fenced from none of them — the shape it had before
-    this rule was shared, which is what this pins.
+    inside every project, so it is fenced from none of them: the fail-closed guess
+    protects a project the caller is already inside.
     """
     from tools.project_fence import fence_for_thread
 
@@ -139,8 +139,6 @@ def test_one_fence_comes_from_one_read_of_the_caller(world):
     """
     from tools.project_fence import fence_for_thread
 
-    counted: list[str] = []
-
     class CountingDb:
         """Delegates to the real connection, counting reads of the caller's own row."""
 
@@ -160,8 +158,8 @@ def test_one_fence_comes_from_one_read_of_the_caller(world):
     for caller, expected in (
         # The cloud-model workspace agent: one read, and it still loses Local only.
         (CORSIA_AGENT, {projects / "secret"}),
-        # A project agent: the same single read also replaces the separate lookup this
-        # function used to make for its own project.
+        # A project agent: one read as well, and the fence still keeps every other
+        # project and the workspace agents' folders out.
         (ALPHA_AGENT, {
             projects / "beta", projects / "secret", projects / "legacy",
             threads / WORKSPACE_AGENT, threads / CORSIA_AGENT,

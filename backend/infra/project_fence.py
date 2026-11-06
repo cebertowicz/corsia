@@ -170,7 +170,7 @@ def read_caller(thread_id: str | None, *, db) -> Caller:
 
 
 def fenced_project_ids(caller: Caller, *, db) -> frozenset[str] | _All:
-    """Every project ``thread_id`` is fenced from, or :data:`ALL` when it fails closed.
+    """Every project this caller is fenced from, or :data:`ALL` when it fails closed.
 
     - No thread is the person's own session: nothing is fenced from it.
     - A caller thread with no readable row is fenced from everything.
