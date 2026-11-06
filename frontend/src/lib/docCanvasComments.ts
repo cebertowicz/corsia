@@ -1,4 +1,5 @@
 import { hasUnread, rangeFor, type DocComment } from '$lib/stores/docComments';
+import { anchoredQuote } from '$lib/stores/docCommentProjection';
 import type { CommentRange, InlineSuggestion, ScrollOrigin } from '$lib/cm/comment-marks';
 import { agentColor } from '$lib/docPresence';
 
@@ -110,20 +111,23 @@ function followsText(comment: DocComment, text: string): comment is DocComment &
 
 /**
  * An accepted suggestion sits on the text it put in the document, not on the quote it replaced, so it is placed,
- * marked and jumped to like any comment. A suggestion whose Accept is in flight reads as accepted once the
- * document holds its replacement, ahead of the server's answer.
+ * marked and jumped to like any comment. Its range is its replacement alone (`anchoredQuote`), where the server's
+ * offsets put it; for an insertion that is the inserted text, after the quote. `anchor` stays the quote, which the
+ * card's diff shows. A suggestion whose Accept is in flight reads as accepted once the document holds its
+ * replacement, ahead of the server's answer: its offsets are still the quote's, so an insertion's text starts where the quote ends.
  */
 function onAppliedText(comment: DocComment, text: string, accepting: string | null): DocComment {
 	if (comment.replacement == null || comment.review || comment.from == null) return comment;
-	const anchor = comment.insertAfter ? comment.anchor + comment.replacement : comment.replacement;
-	const applied = { ...comment, anchor, to: comment.from + anchor.length };
-	if (comment.decision === 'accepted') return applied;
-	return comment.id === accepting && !comment.decision && text.startsWith(anchor, comment.from) ? { ...applied, decision: 'accepted' } : comment;
+	const replacement = comment.replacement;
+	if (comment.decision === 'accepted') return { ...comment, to: comment.from + replacement.length };
+	const from = comment.insertAfter ? comment.from + comment.anchor.length : comment.from;
+	return comment.id === accepting && !comment.decision && text.startsWith(replacement, from)
+		? { ...comment, from, to: from + replacement.length, decision: 'accepted' } : comment;
 }
 
 /** An accepted suggestion that deleted its text has none left by design: it sits at the point where the text was. */
 function acceptedDeletion(comment: DocComment, text: string): boolean {
-	return comment.decision === 'accepted' && comment.replacement != null && !comment.review && comment.anchor === '' && comment.from != null && comment.from <= text.length;
+	return comment.decision === 'accepted' && comment.replacement === '' && !comment.review && comment.from != null && comment.from <= text.length;
 }
 
 /**
@@ -154,7 +158,8 @@ export function commentsInDocumentOrder(comments: DocComment[], text: string, re
 		const orphaned = !comment.review && !unplaced(comment) && !changed && (comment.id in refused || (rangeFor(comment, text) === null && !acceptedDeletion(comment, text)));
 		// The original text is gone: the range collapsed (everything in it was deleted), or the quote is nowhere in the document.
 		const collapsed = !!comment.drawn && comment.from != null && comment.from === comment.to;
-		const detached = orphaned && (collapsed || !comment.anchor || !text.includes(comment.anchor));
+		const quote = anchoredQuote(comment);
+		const detached = orphaned && (collapsed || !quote || !text.includes(quote));
 		return { ...comment, orphaned, detached, textChanged: changed };
 	}).sort((a, b) => at(a) - at(b) || sameImage(a, b) || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id));
 }

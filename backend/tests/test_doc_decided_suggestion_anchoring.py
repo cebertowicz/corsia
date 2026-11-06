@@ -78,6 +78,19 @@ def test_an_accepted_suggestion_whose_replacement_cannot_anchor_keeps_its_offset
     assert (row["from_off"], row["to_off"]) == (4, 17)
 
 
+def test_an_accepted_insertion_is_found_on_the_text_it_inserted(scope):
+    db, artifact_id = scope
+    suggestion = _suggest(db, artifact_id, replacement=" and more")
+    db.execute("UPDATE doc_comments SET insert_after=1 WHERE id=?", (suggestion["id"],))
+    db.commit()
+    _decide(db, suggestion, "accept")
+
+    row = _read(db, artifact_id, "The quoted source and more stays here.", suggestion["id"])
+
+    assert row["orphaned"] is False
+    assert (row["from_off"], row["to_off"]) == (17, 17 + len(" and more"))
+
+
 def test_an_accepted_deletion_reads_not_orphaned(scope):
     db, artifact_id = scope
     suggestion = _suggest(db, artifact_id, replacement="")

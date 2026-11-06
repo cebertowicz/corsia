@@ -297,7 +297,8 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 
 	it('marks the text its Accept put in the document, like any comment', () => {
 		const rows = commentsInDocumentOrder([accepted()], after);
-		expect(rows[0]).toMatchObject({ orphaned: false, detached: false, anchor: 'ten' });
+		// The quote stays the quote: the card's diff shows what the Accept changed.
+		expect(rows[0]).toMatchObject({ orphaned: false, detached: false, anchor: 'nine' });
 		const [range] = canvasCommentHighlights(rows, after, null, undefined);
 		expect(range).toMatchObject({ id: 's1', from: 34, to: 37, suggestion: undefined });
 		expect(range.point).toBeUndefined();
@@ -331,9 +332,26 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 	it('reads as accepted on its new text while its own Accept is in flight and the replacement already stands where the quote was', () => {
 		const open = accepted({ decision: undefined, replies: [] });
 		const [row] = commentsInDocumentOrder([open], after, {}, 's1');
-		expect(row).toMatchObject({ orphaned: false, decision: 'accepted', anchor: 'ten' });
+		expect(row).toMatchObject({ orphaned: false, decision: 'accepted', anchor: 'nine', from: 34, to: 37 });
 		expect(canvasCommentHighlights([row], after, null, undefined, 's1')).toMatchObject([{ from: 34, to: 37, suggestion: undefined }]);
 		const [other] = commentsInDocumentOrder([open], after);
 		expect(other.orphaned).toBe(true);
+	});
+
+	describe('an accepted insertion sits on the text it inserted', () => {
+		const inserted = 'Train leaves at ten sharp.';
+		const insertion = (from: number, overrides: Partial<DocComment> = {}): DocComment =>
+			accepted({ id: 's2', from, to: from + 3, anchor: 'ten', replacement: ' sharp', insertAfter: true, ...overrides });
+
+		it('where the server places it, after its quote', () => {
+			const [row] = commentsInDocumentOrder([insertion(19)], inserted);
+			expect(row).toMatchObject({ orphaned: false, detached: false, anchor: 'ten' });
+			expect(canvasCommentHighlights([row], inserted, null, undefined)).toMatchObject([{ id: 's2', from: 19, to: 25, suggestion: undefined }]);
+		});
+
+		it('while its own Accept is in flight, from the quote it follows', () => {
+			const [row] = commentsInDocumentOrder([insertion(16, { decision: undefined, replies: [] })], inserted, {}, 's2');
+			expect(row).toMatchObject({ orphaned: false, decision: 'accepted', from: 19, to: 25 });
+		});
 	});
 });

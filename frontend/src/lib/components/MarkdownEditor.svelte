@@ -340,7 +340,7 @@
 				const focused = get(focusedDocComment);
 				const id = focused && ids.includes(focused) ? focused : ids.find((candidate) => curHighlights.some((highlight) => highlight.id === candidate));
 				return id ? liveAnchor(id)() : null;
-			})),
+			}, click)),
 		}));
 		const sig = ranges.map((r) => `${r.from}:${r.to}:${r.id}:${r.focused ? 1 : 0}:${r.replyWaiting ? 1 : 0}:${r.point ? 1 : 0}:${r.lost ? 1 : 0}:${JSON.stringify(r.suggestion ?? null)}`).join('|');
 		if (sig === lastPainted) return;

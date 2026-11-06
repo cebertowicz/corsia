@@ -66,6 +66,14 @@ export function hasUnread(comment: Pick<DocComment, 'newReplyIds' | 'newComment'
 	return !!comment.newComment || (comment.newReplyIds?.length ?? 0) > 0;
 }
 
+/**
+ * The text a comment's place is found by, the server's rule (`comment_anchoring._anchored_quote`): an accepted
+ * suggestion's replacement, which is what the document now holds there; otherwise its quote.
+ */
+export function anchoredQuote(comment: Pick<DocComment, 'anchor' | 'decision' | 'replacement'>): string {
+	return comment.decision === 'accepted' && comment.replacement ? comment.replacement : comment.anchor;
+}
+
 export function fromServer(r: ServerComment): DocComment {
 	return {
 		id: r.id,
