@@ -63,6 +63,20 @@ def legacy_github_read(args: list[str], path: str) -> int:
         return 1
 
 
+def _gh() -> str | None:
+    """The first ``gh`` on PATH outside ~/.local/bin.
+
+    The run's sandbox refuses to open what that folder holds, so a ``gh`` linked there
+    fails instead of running; CORSIA never resolves a CLI from it (``cli_location``).
+    """
+    skipped = os.path.realpath(os.path.expanduser("~/.local/bin"))
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        if directory and os.path.realpath(directory) != skipped:
+            if found := shutil.which("gh", path=directory):
+                return found
+    return None
+
+
 def main(args: list[str]) -> int:
     legacy_socket = os.environ.get("CORSIA_SCRIPT_GITHUB_SOCKET")
     if args[:2] == ["github", "read"]:
@@ -78,7 +92,11 @@ def main(args: list[str]) -> int:
         gh_args = args[1:]
         if gh_args[:1] == ["read"]:
             gh_args = ["api", *gh_args[1:]]
-        os.execvp("gh", ["gh", *gh_args])
+        gh = _gh()
+        if gh is None:
+            print("GitHub CLI (gh) is not installed where a script run can reach it", file=sys.stderr)
+            return 127
+        os.execv(gh, [gh, *gh_args])
     for directory in os.environ.get("PATH", "").split(os.pathsep):
         command = shutil.which("corsia", path=directory)
         if command and os.path.realpath(command) != os.path.realpath(__file__):

@@ -353,3 +353,25 @@ def test_a_channel_that_cannot_open_says_why(spawned, monkeypatch):
                                               timeout_seconds=5, github_repo="o/r"))
     assert spawned["envs"] == []
 
+
+
+def test_the_client_runs_gh_from_outside_the_local_bin_the_sandbox_refuses(tmp_path):
+    """A gh in ~/.local/bin can't be opened inside a script run, so the client never picks it."""
+    home = tmp_path / "home"
+    local_bin = home / ".local" / "bin"
+    tool_bin = tmp_path / "tools"
+    for folder, says in ((local_bin, "local-bin"), (tool_bin, "tools")):
+        folder.mkdir(parents=True)
+        gh = folder / "gh"
+        gh.write_text(f"#!/bin/sh\necho {says} \"$@\"\n")
+        gh.chmod(0o755)
+    env = {**os.environ, "HOME": str(home), "PATH": f"{local_bin}{os.pathsep}{tool_bin}{os.pathsep}/usr/bin:/bin"}
+    env.pop("CORSIA_SCRIPT_GITHUB_SOCKET", None)
+    done = subprocess.run([sys.executable, str(CLI), "github", "pr", "list"], env=env,
+                          capture_output=True, text=True, timeout=30)
+    assert done.stdout == "tools pr list\n"
+    env["PATH"] = f"{local_bin}{os.pathsep}/usr/bin:/bin"
+    missing = subprocess.run([sys.executable, str(CLI), "github", "pr", "list"], env=env,
+                             capture_output=True, text=True, timeout=30)
+    assert (missing.returncode, missing.stdout) == (127, "")
+    assert "not installed where a script run can reach it" in missing.stderr
