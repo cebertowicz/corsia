@@ -147,6 +147,18 @@ def _next_region_number(connection, cid: str, artifact_id: str, image_src: str |
     ).fetchone()[0]
 
 
+def closed_by_decision(connection, comment_id: str) -> bool:
+    """Whether a suggestion is resolved because its decision resolved it, not a person.
+
+    The decision sets ``closed_by_decision`` (``comment_actions._record_decision_row``); every other
+    change to ``resolved`` clears it (``update``).
+    """
+    root = connection.execute(
+        "SELECT decision, resolved, closed_by_decision FROM doc_comments WHERE id=?", (comment_id,)
+    ).fetchone()
+    return root is not None and bool(root["decision"] and root["resolved"] and root["closed_by_decision"])
+
+
 def create_with_status(
     artifact_id: str,
     *,
@@ -201,6 +213,9 @@ def create_with_status(
         r = dict(row)
         _check_existing_identity(r, artifact_id, author, cid)
         created = inserted.rowcount == 1
+        if created and parent_id and closed_by_decision(connection, r["parent_id"]):
+            # The reply rule stated on comment_actions.reopen_fields.
+            update(r["parent_id"], {"resolved": False}, db=connection)
         if created:
             # Only a new top-level agent comment or suggestion names itself; replies and user comments do not.
             named = author_kind == "agent" and author_thread_id and not parent_id
@@ -224,16 +239,19 @@ def create(*args: Any, **kwargs: Any) -> dict[str, Any]:
 def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
     """Patch a comment (resolved / acked / body / offsets). Returns the row.
 
-    Resolving drops any unsent re-opened item for the comment, whichever route resolved it.
+    Resolving drops any unsent re-opened item for the comment, whichever route resolved it;
+    resolving or deciding settles the delivered feedback that holds it.
     """
     allowed = {"resolved", "acked", "body", "from_off", "to_off", "anchor_text", "decision", "decided_by", "decided_by_thread_id", "decided_at", "decision_event_id", "decided_in_bulk",
-               "region_x", "region_y", "region_w", "region_h", "image_rev"}
+               "closed_by_decision", "region_x", "region_y", "region_w", "region_h", "image_rev"}
+    if "resolved" in fields and "closed_by_decision" not in fields:
+        fields = {**fields, "closed_by_decision": False}  # only a decision closes a thread as decided
     sets, params = [], []
     for k, v in fields.items():
         if k not in allowed:
             continue
         sets.append(f"{k}=?")
-        params.append(int(v) if k in ("resolved", "acked", "decided_in_bulk") and isinstance(v, bool) else v)
+        params.append(int(v) if k in ("resolved", "acked", "decided_in_bulk", "closed_by_decision") and isinstance(v, bool) else v)
     if not sets:
         return None
     now = _now()
@@ -245,6 +263,8 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
             return None
         if fields.get("resolved"):
             feedback_reopens.discard_open_item(connection, comment_id, now)
+        # A decision settles its feedback item even while the thread stays open for its replies.
+        if fields.get("resolved") or fields.get("decision"):
             feedback_settlement.settle_batches_of(connection, comment_id)
         row = dict(connection.execute("SELECT * FROM doc_comments WHERE id=?", (comment_id,)).fetchone())
         comment_recipients.tags_for_comments(connection, [row])

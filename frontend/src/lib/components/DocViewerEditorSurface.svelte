@@ -56,7 +56,7 @@
 		scrollTo: { from: number; to: number; focus?: boolean; origin: ScrollOrigin } | null;
 		onSave: () => void;
 		onSelect: (selection: PendingSelection | null) => void;
-		onAnchorFocus: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) => void;
+		onAnchorFocus: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) => void;
 		onSuggestionHover?: (id: string | null) => void;
 		onEdit: (mapPos: (position: number) => number) => void;
 		onLayout: (mapPos?: (position: number) => number) => void;

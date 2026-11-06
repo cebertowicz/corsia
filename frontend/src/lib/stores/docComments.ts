@@ -3,7 +3,7 @@ import {
 	fetchComments, markCommentThreadViewed, postComment, patchComment, persistPositions, type ServerComment
 } from '$lib/api/docs';
 import { trackPlacements } from './docCommentPlacement';
-import { fromServer, type CommentAuthor, type DocComment } from './docCommentProjection';
+import { anchoredQuote, fromServer, type CommentAuthor, type DocComment } from './docCommentProjection';
 import { heldIds, withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
 
@@ -233,7 +233,7 @@ export async function flushPositions(artifactId: string, fullText?: string) {
 export function rangeFor(c: DocComment, fullText: string): { from: number; to: number } | null {
 	if (
 		c.from != null && c.to != null && c.to > c.from && c.to <= fullText.length
-		&& fullText.slice(c.from, c.to) === c.anchor
+		&& fullText.slice(c.from, c.to) === anchoredQuote(c)
 	) return { from: c.from, to: c.to };
 	return null;
 }

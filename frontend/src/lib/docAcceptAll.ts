@@ -2,10 +2,11 @@ import { acceptAllSuggestions, SuggestionRefused } from '$lib/api/commentSuggest
 import { flushDraft, seedDraft } from '$lib/stores/docSaveQueue';
 import { loadComments, type DocComment } from '$lib/stores/docComments';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
+import { pendingSuggestion } from '$lib/docCanvasComments';
 
 /** Open suggestions the review bar's accept can apply: the ones the comments pane offers to accept, not orphaned ones. */
 export function openSuggestionCount(comments: DocComment[]): number {
-	return comments.filter((comment) => !comment.resolved && !comment.orphaned && !comment.textChanged && comment.replacement !== null && comment.replacement !== undefined).length;
+	return comments.filter((comment) => pendingSuggestion(comment) && !comment.orphaned && !comment.textChanged).length;
 }
 
 /**

@@ -1,4 +1,4 @@
-"""Open suggestions, and the rule that an agent never suggests over one.
+"""Pending suggestions, and the rule that an agent never suggests over one.
 
 Two suggestions over the same text cannot both apply, and the person would have to
 resolve the conflict. The agent that arrives second is told so at creation; the person
@@ -19,10 +19,14 @@ def is_open_thread(row: dict[str, Any]) -> bool:
     return not row.get("decision") and not row.get("resolved")
 
 
-def is_open_suggestion(row: dict[str, Any]) -> bool:
-    """A top-level suggestion nobody has decided or resolved, whoever wrote it."""
+def is_pending_suggestion(row: dict[str, Any]) -> bool:
+    """A top-level suggestion nobody has decided or resolved, whoever wrote it.
+
+    The one test for "still waiting to be accepted or rejected". A decided suggestion
+    can stay unresolved while its conversation goes on, so ``not resolved`` alone never means pending.
+    """
     return (row.get("replacement") is not None and not row.get("parent_id")
-            and is_open_thread(row))
+            and not row.get("review") and is_open_thread(row))
 
 
 def suggestions_overlap(first: dict, first_span: tuple[int, int], second: dict, second_span: tuple[int, int]) -> bool:
@@ -46,7 +50,7 @@ def check_agent_suggestion_fits(
         return
     threads, _checked = anchored_threads(artifact_id, path, db, persist=False)
     for row in threads:
-        if not is_open_suggestion(row) or row.get("orphaned") or row.get("text_changed"):
+        if not is_pending_suggestion(row) or row.get("orphaned") or row.get("text_changed"):
             continue
         if row["from_off"] is None or row["to_off"] is None:
             continue

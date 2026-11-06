@@ -109,11 +109,11 @@ describe('MarkdownEditor edits', () => {
 			const onAnchorFocus = vi.fn();
 			const view = open({ highlights: [suggestion('red')], onAnchorFocus });
 			host.querySelector('.cm-suggestion-insert')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-			expect(onAnchorFocus).toHaveBeenLastCalledWith('sug', expect.anything(), true);
+			expect(onAnchorFocus).toHaveBeenLastCalledWith('sug', expect.anything(), true, expect.any(MouseEvent));
 			onAnchorFocus.mockClear();
 			view.dispatch({ selection: { anchor: 8 } }); flushSync();
 			expect(onAnchorFocus).toHaveBeenCalledOnce();
-			expect(onAnchorFocus).toHaveBeenCalledWith('sug', expect.anything(), true);
+			expect(onAnchorFocus).toHaveBeenCalledWith('sug', expect.anything(), true, undefined);
 			expect(view.state.doc.toString()).toBe('quick brown fox');
 		});
 
@@ -124,15 +124,15 @@ describe('MarkdownEditor edits', () => {
 			view.dispatch({ selection: { anchor: 9 } }); flushSync();
 			expect(onAnchorFocus).not.toHaveBeenCalled();
 			host.querySelector('.cm-suggestion-insert')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
-			expect(onAnchorFocus).toHaveBeenLastCalledWith('sug', expect.anything(), true);
+			expect(onAnchorFocus).toHaveBeenLastCalledWith('sug', expect.anything(), true, expect.any(MouseEvent));
 			expect(view.state.doc.toString()).toBe('quick brown fox');
 		});
 
-		it('reports a caret in a plain comment as before, with no third argument', () => {
+		it('reports a caret in a plain comment as before, with no suggestion flag and no click', () => {
 			const onAnchorFocus = vi.fn();
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus });
 			view.dispatch({ selection: { anchor: 8 } }); flushSync();
-			expect(onAnchorFocus).toHaveBeenCalledWith('plain', expect.anything());
+			expect(onAnchorFocus).toHaveBeenCalledWith('plain', expect.anything(), undefined, undefined);
 		});
 
 		it('reports the pointer on a suggestion to the viewer', () => {

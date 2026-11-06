@@ -11,6 +11,8 @@ type Opener = NonNullable<CommentRange['onMarkerFocus']>;
 interface Placed extends MarkerCluster {
 	onFocus?: Opener;
 	replyWaiting: boolean;
+	/** Every comment in this marker has lost its original text: the marker is drawn dashed. */
+	lost: boolean;
 	/** Height of one normal row, to seat the glyph on the first row. */
 	row: number;
 }
@@ -150,10 +152,11 @@ class CommentRail {
 		// A block widget that resizes (an image that loads) moves every line below it, commented or not.
 		for (const child of contentDOM.children) if (!child.classList.contains('cm-line')) drawnLines.add(child);
 		const lines = [...byLine.values()].sort((a, b) => a.at[0] - b.at[0] || a.at[1] - b.at[1]);
+		const lostIds = new Set(state.field(commentRanges).filter((range) => range.lost).map((range) => range.id));
 		const placed = clusterMarkerLines(lines, target).map((cluster): Placed => {
 			const first = lines.find((line) => line.ids.includes(cluster.ids[0]))!;
 			return {
-				...cluster, onFocus: first.onFocus, row: first.row,
+				...cluster, onFocus: first.onFocus, row: first.row, lost: cluster.ids.every((id) => lostIds.has(id)),
 				replyWaiting: cluster.ids.some((id) => lines.find((line) => line.ids.includes(id))?.replyWaiting),
 			};
 		});
@@ -196,6 +199,7 @@ class CommentRail {
 				fill(marker.button, cluster.ids, cluster.replyWaiting);
 			}
 			marker.button.dataset.replyWaiting = String(cluster.replyWaiting);
+			if (cluster.lost) marker.button.dataset.lost = 'true'; else delete marker.button.dataset.lost;
 			marker.ids = cluster.ids;
 			marker.onFocus = cluster.onFocus;
 			return { marker, cluster };
@@ -235,7 +239,7 @@ class CommentRail {
 		button.type = 'button';
 		button.className = 'cm-comment-marker press-tint';
 		const marker: Marker = { button, ids: [] };
-		button.addEventListener('click', () => marker.onFocus?.(marker.ids, button));
+		button.addEventListener('click', (click) => marker.onFocus?.(marker.ids, button, undefined, click));
 		return marker;
 	}
 }

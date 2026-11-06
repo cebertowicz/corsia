@@ -14,17 +14,22 @@ export function createCommentScrollTarget(source: {
 	listOpen: () => boolean;
 }) {
 	let target = $state<CanvasScrollTarget | null>(null);
+	// A comment opened where the pointer clicked it stays where it is: its focus builds no scroll target.
+	let stayOn: string | null = null;
 	$effect(() => {
 		const focused = source.focused();
-		if (!focused) { target = null; return; }
+		if (!focused) { target = null; stayOn = null; return; }
 		untrack(() => {
+			if (stayOn === focused) { target = null; return; }
 			target = canvasFocusedCommentScrollTarget(target, source.comments(), source.text(), focused, source.listOpen());
 		});
 	});
 	return {
 		get value() { return target; },
-		set value(next: CanvasScrollTarget | null) { target = next; },
+		set value(next: CanvasScrollTarget | null) { stayOn = null; target = next; },
+		/** Focus this comment without scrolling to it. */
+		stay(id: string) { stayOn = id; target = null; },
 		/** Scrolls to a comment's text as it is now placed; a comment with no text to jump to clears the target. */
-		toComment(id: string, focus: boolean, origin: ScrollOrigin) { target = canvasCommentScrollTarget(source.comments(), source.text(), id, focus, origin); },
+		toComment(id: string, focus: boolean, origin: ScrollOrigin) { stayOn = null; target = canvasCommentScrollTarget(source.comments(), source.text(), id, focus, origin); },
 	};
 }

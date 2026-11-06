@@ -113,6 +113,8 @@ def _record_decision_row(
     connection, comment_id: str, *, decision: str, decided_by: str,
     decided_by_thread_id: str | None, decision_event_id: str, decided_at: str, bulk: bool = False,
 ) -> dict[str, Any]:
+    # A suggestion that already has replies stays open after it is decided, so the discussion can go on.
+    replied = connection.execute("SELECT 1 FROM doc_comments WHERE parent_id=? LIMIT 1", (comment_id,)).fetchone() is not None
     row = store.update(comment_id, {
         "decision": DECISIONS[decision],
         "decided_by": decided_by,
@@ -120,7 +122,8 @@ def _record_decision_row(
         "decided_at": decided_at,
         "decision_event_id": decision_event_id,
         "decided_in_bulk": bulk,
-        "resolved": True,
+        "resolved": not replied,
+        "closed_by_decision": not replied,
         "acked": True,
     }, db=connection)
     if row is None:
@@ -179,8 +182,13 @@ def check_user_text_edit(comment: dict[str, Any], fields: dict[str, Any]) -> Non
 def reopen_fields(comment: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
     """Apply the re-open rule to a comment patch.
 
-    Re-opening a rejected suggestion clears its decision. An accepted one
-    cannot re-open, because its edit is already in the text.
+    The two ways a decided suggestion re-opens:
+
+    - Re-open (this patch): re-opening a rejected suggestion clears its decision. An
+      accepted one cannot re-open, because its edit is already in the text.
+    - Reply (``comments.create_with_status``): the first reply to a suggestion its
+      decision closed re-opens it and keeps the decision (``comments.closed_by_decision``). A
+      thread a person resolved stays resolved whatever replies follow, as for any comment.
     """
     if fields.get("resolved") is True:
         if comment.get("replacement") is not None and not comment.get("decision"):

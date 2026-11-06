@@ -51,6 +51,18 @@ describe('comment focus across the document and image viewer', () => {
 		} finally { test.stop(); }
 	});
 
+	it('focuses a comment opened at the pointer without scrolling to it, and navigates again for the next one', () => {
+		const test = setup();
+		try {
+			test.scroll.stay('text');
+			test.focus('text'); test.echo();
+			expect(test.scroll.value).toBeNull();
+			test.scroll.toComment('margin', false, 'navigation');
+			test.focus('margin');
+			expect(test.scroll.value).toMatchObject({ from: 6, to: 10, origin: 'navigation' });
+		} finally { test.stop(); }
+	});
+
 	it('still navigates text when focus arrives without an explicit target', () => {
 		const test = setup();
 		try {

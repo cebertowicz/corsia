@@ -781,4 +781,24 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		document.body.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] [data-resolved-note] .reopen')!.click();
 		expect(onResolve).toHaveBeenCalledWith('comment-1', false);
 	});
+	it('closes the card when a decided suggestion that kept its replies is resolved, and not for any other comment', () => {
+		const decided = { ...suggestion, decision: 'accepted' as const, replies: [{ id: 'r1', author: 'agent-1', text: 'Thanks', at: 'now' }] };
+		const onResolve = vi.fn(), onClose = vi.fn();
+		render({ comments: [decided], onResolve, onClose });
+		document.body.querySelector<HTMLButtonElement>('.ct-act.resolve')!.click();
+		expect(onResolve).toHaveBeenCalledWith('comment-1', true);
+		expect(onClose).toHaveBeenCalledOnce();
+		unmount(component!); component = null; host.remove();
+		const plain = { ...suggestion, replacement: undefined };
+		const onCloseAgain = vi.fn();
+		render({ comments: [plain], onResolve, onClose: onCloseAgain });
+		document.body.querySelector<HTMLButtonElement>('.ct-act.resolve')!.click();
+		expect(onCloseAgain).not.toHaveBeenCalled();
+	});
+
+	it('does not offer accept-all for suggestions that were already decided', () => {
+		const decided = (id: string) => ({ ...suggestion, id, decision: 'accepted' as const, replies: [{ id: 'r', author: 'you', text: 'Thanks', at: 'now' }] });
+		render({ state: { kind: 'list' }, comments: [decided('a'), decided('b')] });
+		expect(document.body.textContent).not.toMatch(/accept all/i);
+	});
 });

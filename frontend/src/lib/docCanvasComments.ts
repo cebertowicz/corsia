@@ -1,4 +1,5 @@
 import { hasUnread, rangeFor, type DocComment } from '$lib/stores/docComments';
+import { anchoredQuote } from '$lib/stores/docCommentProjection';
 import type { CommentRange, InlineSuggestion, ScrollOrigin } from '$lib/cm/comment-marks';
 import { agentColor } from '$lib/docPresence';
 
@@ -10,6 +11,7 @@ export type CanvasScrollTarget = { from: number; to: number; focus?: boolean; or
  */
 export function canvasCommentRange(comment: DocComment, text: string): { from: number; to: number } | null {
 	if (comment.orphaned || unplaced(comment)) return null;
+	if (acceptedDeletion(comment, text)) return { from: comment.from!, to: comment.from! };
 	// A suggestion edited inside keeps its place: its range, not its quote, says where it is.
 	if (comment.textChanged && comment.from != null && comment.to != null && comment.to > comment.from && comment.to <= text.length) return { from: comment.from, to: comment.to };
 	return rangeFor(comment, text);
@@ -38,9 +40,19 @@ export function canvasFocusedCommentScrollTarget(current: CanvasScrollTarget | n
 	return canvasCommentScrollTarget(comments, text, id, focus, 'navigation');
 }
 
-/** A suggestion is drawn inline only while it is open: a decided, resolved or stale one has no marks. */
-const openSuggestion = (comment: DocComment) =>
-	comment.replacement != null && !comment.decision && !comment.resolved && !comment.review && !comment.orphaned && !comment.textChanged;
+/** What a suggestion's state is read from, on a canvas comment or a card's thread data. */
+type SuggestionState = { replacement?: string | null; decision?: string | null; resolved?: boolean; review?: boolean };
+
+/** A suggestion still waiting to be accepted or rejected. A decided one can stay unresolved, so `!resolved` alone never means this. */
+export const pendingSuggestion = (comment: SuggestionState) =>
+	comment.replacement != null && !comment.decision && !comment.resolved && !comment.review;
+
+/** A suggestion that was accepted or rejected but stays an open conversation: it has replies, and nobody has resolved it. */
+export const decidedOpen = (comment: SuggestionState) =>
+	comment.replacement != null && !!comment.decision && !comment.resolved && !comment.review;
+
+/** A suggestion is drawn inline only while it is pending and its text still holds. */
+const openSuggestion = (comment: DocComment) => pendingSuggestion(comment) && !comment.orphaned && !comment.textChanged;
 
 /** The agent's presence colour: the thread that wrote the suggestion, the same source as its caret. */
 const suggestionColor = (comment: DocComment) => agentColor(comment.authorThreadId || comment.author);
@@ -52,8 +64,13 @@ const suggestionColor = (comment: DocComment) => agentColor(comment.authorThread
  */
 export function canvasCommentHighlights(comments: DocComment[], text: string, focusedId: string | null, onMarkerFocus: CommentRange['onMarkerFocus'], accepting: string | null = null): CommentRange[] {
 	let inlineEnd = -1;
-	return comments.filter((comment) => (!comment.resolved || comment.id === focusedId) && !(comment.replacement != null && comment.decision)).flatMap((comment) => {
+	return comments.filter((comment) => !comment.resolved || (comment.id === focusedId && !comment.decision)).flatMap((comment): CommentRange[] => {
 		const anchorRange = canvasCommentRange(comment, text);
+		// A comment whose original text is gone keeps a dashed margin marker at the line its text last was.
+		if (!anchorRange && comment.detached && !comment.resolved && comment.regionNumber == null && comment.from != null) {
+			const at = Math.min(Math.max(comment.from, 0), text.length);
+			return [{ from: at, to: at, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasUnread(comment), onMarkerFocus, point: true, lost: true }];
+		}
 		if (!anchorRange) return [];
 		const range = comment.insertAfter && openSuggestion(comment) ? { from: anchorRange.to, to: anchorRange.to } : anchorRange;
 		let suggestion: InlineSuggestion | undefined;
@@ -62,22 +79,22 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 			if (inline) inlineEnd = range.to;
 			suggestion = { quote: comment.insertAfter ? '' : comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
 		}
-		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasUnread(comment), onMarkerFocus, suggestion, region: !!comment.region }];
+		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasUnread(comment), onMarkerFocus, suggestion, region: !!comment.region, ...(range.from === range.to && !suggestion ? { point: true } : {}) }];
 	});
 }
 
 /**
  * Shared comment state for the document surface: the header receives open-thread and orphaned counts; the drawer's
  * placement recovery also receives the live reload state. The orphaned count is the list's 'Text changed' group, so a
- * resolved thread is never in it: a decided suggestion is resolved, and Accept replaced its quote by design. The
- * recovery's count is the part of that group Place again can attempt: an orphaned unresolved comment whose quote
- * remains in the text.
+ * resolved thread is never in it. The recovery's count is the part of that group Place again can attempt: an orphaned
+ * unresolved comment whose quote remains in the text.
  */
 export function commentSurfaceStatus(comments: DocComment[]) {
+	const lost = (comment: DocComment) => comment.orphaned && !comment.resolved;
 	return {
 		commentCount: comments.filter((comment) => !comment.resolved || hasUnread(comment)).length,
-		orphanedCount: comments.filter((comment) => comment.orphaned && !comment.resolved).length,
-		replaceableCount: comments.filter((comment) => comment.orphaned && !comment.resolved && !comment.detached).length,
+		orphanedCount: comments.filter(lost).length,
+		replaceableCount: comments.filter((comment) => lost(comment) && !comment.detached).length,
 		placementReloading: comments.some((comment) => comment.placementReloading),
 		placementReloadError: comments.some((comment) => comment.placementReloadError),
 	};
@@ -90,6 +107,27 @@ export function commentSurfaceStatus(comments: DocComment[]) {
  */
 function followsText(comment: DocComment, text: string): comment is DocComment & { from: number; to: number } {
 	return !!comment.drawn && !comment.review && comment.replacement == null && comment.from != null && comment.to != null && comment.to > comment.from && comment.to <= text.length;
+}
+
+/**
+ * An accepted suggestion sits on the text it put in the document, not on the quote it replaced, so it is placed,
+ * marked and jumped to like any comment. Its range is its replacement alone (`anchoredQuote`), where the server's
+ * offsets put it; for an insertion that is the inserted text, after the quote. `anchor` stays the quote, which the
+ * card's diff shows. A suggestion whose Accept is in flight reads as accepted once the document holds its
+ * replacement, ahead of the server's answer: its offsets are still the quote's, so an insertion's text starts where the quote ends.
+ */
+function onAppliedText(comment: DocComment, text: string, accepting: string | null): DocComment {
+	if (comment.replacement == null || comment.review || comment.from == null) return comment;
+	const replacement = comment.replacement;
+	if (comment.decision === 'accepted') return { ...comment, to: comment.from + replacement.length };
+	const from = comment.insertAfter ? comment.from + comment.anchor.length : comment.from;
+	return comment.id === accepting && !comment.decision && text.startsWith(replacement, from)
+		? { ...comment, from, to: from + replacement.length, decision: 'accepted' } : comment;
+}
+
+/** An accepted suggestion that deleted its text has none left by design: it sits at the point where the text was. */
+function acceptedDeletion(comment: DocComment, text: string): boolean {
+	return comment.decision === 'accepted' && comment.replacement === '' && !comment.review && comment.from != null && comment.from <= text.length;
 }
 
 /**
@@ -111,14 +149,17 @@ function textChangedAfter(comment: DocComment, text: string): boolean {
  * A live row not yet placed (4.2) is never orphaned; it sorts by the server's offset.
  * Orphaned cards sort after located ones. Comments on one image read in their tags' number order (FR13.6).
  */
-export function commentsInDocumentOrder(comments: DocComment[], text: string, refused: Record<string, string> = {}): DocComment[] {
+export function commentsInDocumentOrder(comments: DocComment[], text: string, refused: Record<string, string> = {}, accepting: string | null = null): DocComment[] {
 	const at = (comment: DocComment) => (unplaced(comment) ? comment.from : canvasCommentRange(comment, text)?.from) ?? Infinity;
 	const sameImage = (a: DocComment, b: DocComment) => (a.regionNumber != null && b.regionNumber != null && a.imageSrc === b.imageSrc ? a.regionNumber - b.regionNumber : 0);
 	return comments.map((listed) => {
-		const comment = followsText(listed, text) ? { ...listed, anchor: text.slice(listed.from, listed.to) } : listed;
+		const comment = followsText(listed, text) ? { ...listed, anchor: text.slice(listed.from, listed.to) } : onAppliedText(listed, text, accepting);
 		const changed = textChangedAfter(comment, text);
-		const orphaned = !comment.review && !unplaced(comment) && !changed && (comment.id in refused || rangeFor(comment, text) === null);
-		const detached = orphaned && (!comment.anchor || !text.includes(comment.anchor));
+		const orphaned = !comment.review && !unplaced(comment) && !changed && (comment.id in refused || (rangeFor(comment, text) === null && !acceptedDeletion(comment, text)));
+		// The original text is gone: the range collapsed (everything in it was deleted), or the quote is nowhere in the document.
+		const collapsed = !!comment.drawn && comment.from != null && comment.from === comment.to;
+		const quote = anchoredQuote(comment);
+		const detached = orphaned && (collapsed || !quote || !text.includes(quote));
 		return { ...comment, orphaned, detached, textChanged: changed };
 	}).sort((a, b) => at(a) - at(b) || sameImage(a, b) || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id));
 }

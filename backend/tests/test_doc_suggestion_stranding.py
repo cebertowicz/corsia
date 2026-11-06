@@ -121,6 +121,22 @@ def test_a_decided_suggestion_tells_no_one(doc):
     assert doc.notes() == []
 
 
+def test_a_decided_suggestion_left_open_by_its_replies_tells_no_one(doc):
+    pending = doc.suggest()
+    decided = doc.suggest(replacement="BEING")
+    store.create(doc.artifact_id, body="Why this word?", parent_id=decided["id"], announce=False, db=doc.db)
+    with write_transaction(doc.db, scope="test_stranding_decision") as connection:
+        comment_actions.record_decision(
+            decided["id"], decision="reject", decided_by="Robin", decided_by_thread_id=None, db=connection,
+        )
+    assert store.get_comment(decided["id"], db=doc.db)["resolved"] == 0
+
+    doc.save(CHANGED)
+
+    assert [note["details"]["comment_id"] for note in doc.notes()] == [pending["id"]]
+    assert store.get_comment(decided["id"], db=doc.db)["stranded_notified_at"] is None
+
+
 def test_a_resolved_suggestion_tells_no_one(doc):
     suggestion = doc.suggest()
     comments.update(suggestion["id"], {"resolved": True}, db=doc.db)

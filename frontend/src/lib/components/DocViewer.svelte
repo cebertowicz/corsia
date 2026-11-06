@@ -12,6 +12,7 @@
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
+	import { clickAnchor } from '$lib/docViewerClickPoint';
 	import { createReplyNavigation } from '$lib/docReplyLanding.svelte';
 	import { createDocViewerImages } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
@@ -107,7 +108,7 @@
 	// so a comment never remains highlighted after an in-editor edit changes it.
 	$effect(() => syncActiveDocumentEditor({ target, draft: save.draft, docState, artifactId: loadedArtifactId, text: editText, readonly: readonly || confirming }));
 
-	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined));
+	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined, suggestionBusyId));
 	const commentStatus = $derived(commentSurfaceStatus(listedComments));
 	const unreadThreads = $derived(listedComments.filter(hasUnread));
 	const scroll = createCommentScrollTarget({
@@ -122,13 +123,21 @@
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
 	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it.
 	const revealDraft = (opening: boolean) => { const { draft } = draftController; if (draft && (editorSurface?.draftCovered(draft.from, opening) ?? opening)) scroll.value = { from: draft.from, to: draft.to, origin: 'comment-save' }; };
-	function focusComment(id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean) {
-		if (!commentUI.focusComment(id, anchor, viaSuggestion)) return;
-		scroll.toComment(id, false, 'navigation');
+	// A click in the text or on a margin marker opens its card at the pointer, and scrolls nothing (desktop widths only; the phone keeps its sheet).
+	const clicked = (click: MouseEvent | undefined, live: () => DOMRect | null) => (isPaneDrawer() ? null : clickAnchor(click, live));
+	function focusComment(id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) {
+		const point = clicked(click, anchor);
+		if (!commentUI.focusComment(id, point ?? anchor, viaSuggestion, !!point)) return;
+		if (point) scroll.stay(id); else scroll.toComment(id, false, 'navigation');
 	}
-	function showMarkerCards(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { if (ids.length === 1) scroll.toComment(ids[0], false, 'navigation'); commentUI.focusMarker(ids, opener, reading); arrivedDocComments.set(new Set(ids)); }
+	function showMarkerCards(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent) {
+		const point = clicked(click, reading ?? (() => (opener.isConnected ? opener.getBoundingClientRect() : null)));
+		if (point) scroll.stay(ids[0]); else if (ids.length === 1) scroll.toComment(ids[0], false, 'navigation');
+		commentUI.focusMarker(ids, opener, point ?? reading, !!point);
+		arrivedDocComments.set(new Set(ids));
+	}
 	// A marker over comments on parts of one image opens the image, at the comment when it is the only one (DCOL-FR13.5).
-	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null) { arrivedDocComments.set(new Set(ids)); images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => showMarkerCards(ids, opener, reading)); }
+	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent) { arrivedDocComments.set(new Set(ids)); images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => showMarkerCards(ids, opener, reading, click)); }
 	function onDocEdit(mapPos: (p: number) => number) { if (loadedArtifactId) remapComments(loadedArtifactId, mapPos); images.remap(mapPos); }
 
 	const accent = $derived($projects.find((project) => project.id === target?.projectId)?.accent_color ?? null);
@@ -349,6 +358,7 @@
 		reviewVisible={commentUI.sheetUp}
 		state={commentUI.state}
 		anchor={commentUI.anchor}
+		anchorAtClick={commentUI.atClick}
 		bounds={docRoot}
 		narrow={isPaneDrawer()}
 		comments={listedComments}

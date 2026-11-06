@@ -474,3 +474,51 @@ describe('CommentComposer', () => {
 		expect(onSubmit).toHaveBeenCalledTimes(2);
 	});
 });
+
+describe('a comment whose text was deleted', () => {
+	it('says the original text was deleted and keeps the old text in quotes', () => {
+		render(thread({ anchor: 'two extra liters', orphaned: true, detached: true }));
+		expect(host.querySelector('.ct-orphan')?.textContent).toBe('This text is no longer in the document');
+		expect(host.textContent).toContain('two extra liters');
+	});
+
+	it('keeps the changed-text wording when the text is still in the document but no longer matches', () => {
+		render(thread({ orphaned: true, detached: false }));
+		expect(host.querySelector('.ct-orphan')?.textContent).toBe('The text this comment was on has changed');
+	});
+});
+
+describe('a decided suggestion that has replies', () => {
+	const accepted = (overrides: Partial<CommentThreadData> = {}) => thread({ replacement: 'ten', decision: 'accepted', author: 'Reviewer', text: 'Nine was a typo', replies: [reply], ...overrides });
+
+	it('reads as decided: one status line, the conversation, no diff and no Accept or Reject', () => {
+		render(accepted());
+		expect(host.querySelector('.ct-decided')?.textContent).toContain('Suggestion accepted');
+		expect(host.textContent).toContain('Nine was a typo');
+		expect(host.textContent).toContain(reply.text);
+		expect(host.querySelector('.ct-suggestion-accept')).toBeNull();
+		expect(host.querySelector('.ct-suggestion-actions')).toBeNull();
+		expect(host.textContent).not.toContain('Suggested edit');
+	});
+
+	it('has a reply box and a Resolve button that resolves the thread', async () => {
+		const { onResolve, onReply } = render(accepted(), false, { showReply: true });
+		await vi.waitFor(() => expect(host.querySelector('.ct-input')).not.toBeNull());
+		type(host.querySelector<HTMLInputElement>('.ct-input')!, 'Thanks');
+		button('.ct-send').click();
+		await vi.waitFor(() => expect(onReply).toHaveBeenCalledWith('c1', 'Thanks', [], []));
+		button('.ct-act.resolve').click();
+		expect(onResolve).toHaveBeenCalledWith('c1', true);
+	});
+
+	it('shows a rejected one the same way', () => {
+		render(accepted({ decision: 'rejected' }));
+		expect(host.querySelector('.ct-decided')?.textContent).toContain('Suggestion rejected');
+	});
+
+	it('is the collapsed decided row, with no reply box, once it is resolved', () => {
+		render(accepted({ resolved: true }));
+		expect(host.querySelector('.ct.resolved')).not.toBeNull();
+		expect(host.querySelector('.ct-decided')).toBeNull();
+	});
+});

@@ -15,6 +15,8 @@ export type CommentThreadData = {
 	createdAt?: string;
 	resolved: boolean;
 	orphaned?: boolean;
+	/** The original text is gone from the document: the card says so, and keeps the old text in quotes. */
+	detached?: boolean;
 	/** An open suggestion edited inside: it keeps its place and cannot be accepted. */
 	textChanged?: boolean;
 	acked?: boolean;

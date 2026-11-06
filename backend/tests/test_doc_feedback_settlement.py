@@ -64,6 +64,20 @@ def test_the_last_decided_suggestion_settles_the_task_with_each_outcome_as_evide
         db.close()
 
 
+def test_a_decision_settles_the_task_while_its_replies_keep_the_suggestion_open(isolated_db):
+    db = get_db()
+    try:
+        artifact_id, suggested, _, node_id, _ = _delivered(db, suggestions=1)
+        add_comment(db, artifact_id, parent_id=suggested[0]["id"], author_kind="user", author_id=None, author="Robin")
+
+        _decide(db, suggested[0], "accept")
+
+        assert comments.get_comment(suggested[0]["id"], db=db)["resolved"] == 0
+        assert _state(db, node_id) == "accepted"
+    finally:
+        db.close()
+
+
 def test_a_resolved_comment_counts_as_settled(isolated_db):
     db = get_db()
     try:

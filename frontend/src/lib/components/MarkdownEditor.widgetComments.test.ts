@@ -42,7 +42,7 @@ describe('a click on comments drawn inside a table', () => {
 		const onMarkerFocus = vi.fn();
 		const onAnchorFocus = mountEditor([comment('a', onMarkerFocus)]);
 		(await painted()).click();
-		expect(onAnchorFocus).toHaveBeenCalledWith('a', expect.any(Function));
+		expect(onAnchorFocus).toHaveBeenCalledWith('a', expect.any(Function), undefined, expect.any(MouseEvent));
 		expect(onMarkerFocus).not.toHaveBeenCalled();
 	});
 
@@ -50,7 +50,41 @@ describe('a click on comments drawn inside a table', () => {
 		const onMarkerFocus = vi.fn();
 		const onAnchorFocus = mountEditor([comment('a', onMarkerFocus), comment('b', onMarkerFocus)]);
 		(await painted()).click();
-		expect(onMarkerFocus).toHaveBeenCalledWith(['a', 'b'], expect.any(HTMLElement), expect.any(Function));
+		// The click goes on with them, so the cards open at it, as a click on one comment's text does.
+		expect(onMarkerFocus).toHaveBeenCalledWith(['a', 'b'], expect.any(HTMLElement), expect.any(Function), expect.any(MouseEvent));
 		expect(onAnchorFocus).not.toHaveBeenCalled();
+	});
+});
+
+describe('a suggestion drawn inside a table cell', () => {
+	const suggestion = (inline = true): CommentRange => ({
+		id: 's1', from: DANA, to: DANA + 4, suggestion: { quote: 'Dana', insert: 'Dan', color: 'oklch(0.6 0.15 250)', inline, busy: false },
+	});
+	const struck = () => vi.waitFor(() => {
+		const el = host.querySelector<HTMLElement>('.cm-md-table .cm-suggestion-del');
+		if (!el) throw new Error('not painted');
+		return el;
+	});
+
+	it('strikes the quote and shows the insert after it, as in body text', async () => {
+		mountEditor([suggestion()]);
+		const del = await struck();
+		expect(del.textContent).toBe('Dana');
+		const insert = host.querySelector<HTMLElement>('.cm-md-table .cm-suggestion-insert');
+		expect(insert?.dataset.insert).toBe('Dan');
+		expect(insert?.dataset.suggestionId).toBe('s1');
+		expect(insert?.getAttribute('aria-hidden')).toBe('true');
+	});
+
+	it('draws nothing for a suggestion that is card-only because an earlier one overlaps it', async () => {
+		mountEditor([suggestion(false)]);
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(host.querySelector('.cm-md-table .cm-suggestion-del')).toBeNull();
+	});
+
+	it('opens its card as a suggestion when the struck text is clicked', async () => {
+		const onAnchorFocus = mountEditor([suggestion()]);
+		(await struck()).click();
+		expect(onAnchorFocus).toHaveBeenCalledWith('s1', expect.any(Function), true, expect.any(MouseEvent));
 	});
 });
