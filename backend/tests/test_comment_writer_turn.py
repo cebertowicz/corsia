@@ -216,7 +216,7 @@ async def test_a_three_message_burst_from_the_person_reaches_the_agent_as_one_wa
     open_at_frame: list[int] = []
     monkeypatch.setattr(
         comment_notifications, "broadcast_doc_comment_changed",
-        lambda frame_artifact_id, **_kwargs: open_at_frame.append(len(_rows(
+        lambda frame_artifact_id, **_kwargs: frame_artifact_id == artifact_id and open_at_frame.append(len(_rows(
             "SELECT id FROM doc_feedback_batches WHERE artifact_id=? AND state='open'", frame_artifact_id))),
     )
     for body in ("First thought.", "Second thought.", "typo: thought"):
@@ -231,7 +231,9 @@ async def test_a_three_message_burst_from_the_person_reaches_the_agent_as_one_wa
 
     woken = feedback_batches.close_due(batch["closes_at"])
 
-    assert woken == [a]
+    # close_due closes every due batch in the shared database, including ones earlier tests left open,
+    # so the wake and frame checks count this thread and this document only.
+    assert woken.count(a) == 1
     [batch] = _rows("SELECT * FROM doc_feedback_batches WHERE recipient_id=? AND author_kind='user'", a)
     assert (batch["state"], batch["item_count"]) == ("delivered", 3)
     assert open_at_frame == [0]
