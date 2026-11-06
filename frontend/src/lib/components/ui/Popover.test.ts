@@ -207,6 +207,29 @@ describe('Popover', () => {
 			mountIn(new DOMRect(500, 0, 900, 700), new DOMRect(520, 2000, 20, 20), fixed);
 			await vi.waitFor(() => expect(fixed).toHaveBeenCalled());
 		});
+		it('leaves a card the person is typing in alone when the document scrolls under it, and still hides it for their own wheel scroll', async () => {
+			let reading: DOMRect | null = new DOMRect(520, 100, 20, 20);
+			const surface = mountIn(new DOMRect(500, 0, 900, 700), () => reading);
+			await vi.waitFor(() => expect(surface.style.top).toBe('100px'));
+			const box = surface.appendChild(document.createElement('textarea'));
+			box.focus();
+			reading = new DOMRect(520, 2000, 20, 20);
+			window.dispatchEvent(new Event('scroll'));
+			await Promise.resolve();
+			expect(surface.inert).toBe(false);
+			expect(surface.style.clipPath).toBe('');
+			expect(document.activeElement).toBe(box);
+			reading = null;
+			window.dispatchEvent(new Event('scroll'));
+			await Promise.resolve();
+			expect(surface.inert).toBe(false);
+			expect(document.activeElement).toBe(box);
+			reading = new DOMRect(520, 2000, 20, 20);
+			window.dispatchEvent(new Event('wheel'));
+			window.dispatchEvent(new Event('scroll'));
+			await vi.waitFor(() => expect(surface.style.clipPath).toBe('inset(100%)'));
+			expect(surface.inert).toBe(true);
+		});
 	});
 
 	it('places the surface at once when its anchor is replaced, without a scroll or an edit', async () => {
