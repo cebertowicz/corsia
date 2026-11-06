@@ -1929,9 +1929,16 @@
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
+    "frontend/src/lib/components/comments/CommentSuggestionActions.svelte": {
+      "raw_colors": 0,
+      "raw_px": 8,
+      "heavy_borders": 0,
+      "raw_shadows": 0,
+      "row_menu_buttons": 0
+    },
     "frontend/src/lib/components/comments/CommentThread.svelte": {
       "raw_colors": 0,
-      "raw_px": 27,
+      "raw_px": 19,
       "heavy_borders": 0,
       "raw_shadows": 1,
       "row_menu_buttons": 0
