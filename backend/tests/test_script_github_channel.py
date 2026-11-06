@@ -354,24 +354,37 @@ def test_a_channel_that_cannot_open_says_why(spawned, monkeypatch):
     assert spawned["envs"] == []
 
 
+def _fake_gh(folder, says):
+    folder.mkdir(parents=True)
+    gh = folder / "gh"
+    gh.write_text(f"#!/bin/sh\necho {says} \"$@\"\n")
+    gh.chmod(0o755)
+    return gh
 
-def test_the_client_runs_gh_from_outside_the_local_bin_the_sandbox_refuses(tmp_path):
-    """A gh in ~/.local/bin can't be opened inside a script run, so the client never picks it."""
-    home = tmp_path / "home"
-    local_bin = home / ".local" / "bin"
-    tool_bin = tmp_path / "tools"
-    for folder, says in ((local_bin, "local-bin"), (tool_bin, "tools")):
-        folder.mkdir(parents=True)
-        gh = folder / "gh"
-        gh.write_text(f"#!/bin/sh\necho {says} \"$@\"\n")
-        gh.chmod(0o755)
-    env = {**os.environ, "HOME": str(home), "PATH": f"{local_bin}{os.pathsep}{tool_bin}{os.pathsep}/usr/bin:/bin"}
+
+def _run_client(path, **env):
+    env = {**os.environ, "PATH": path, **env}
     env.pop("CORSIA_SCRIPT_GITHUB_SOCKET", None)
-    done = subprocess.run([sys.executable, str(CLI), "github", "pr", "list"], env=env,
+    return subprocess.run([sys.executable, str(CLI), "github", "pr", "list"], env=env,
                           capture_output=True, text=True, timeout=30)
+
+
+def test_the_client_runs_the_first_gh_it_can_open(tmp_path):
+    """A gh the run's sandbox won't open (macOS ~/.local/bin) is passed over for the next one."""
+    refused = tmp_path / "refused"
+    tool_bin = tmp_path / "tools"
+    _fake_gh(refused, "refused").chmod(0o111)  # executable by mode, but this process can't open it
+    _fake_gh(tool_bin, "tools")
+    done = _run_client(f"{refused}{os.pathsep}{tool_bin}{os.pathsep}/usr/bin:/bin")
     assert done.stdout == "tools pr list\n"
-    env["PATH"] = str(local_bin)  # a host gh in /usr/bin (CI runners have one) would be found
-    missing = subprocess.run([sys.executable, str(CLI), "github", "pr", "list"], env=env,
-                             capture_output=True, text=True, timeout=30)
+    missing = _run_client(str(refused))  # a host gh in /usr/bin (CI runners have one) would be found
     assert (missing.returncode, missing.stdout) == (127, "")
-    assert "not installed where a script run can reach it" in missing.stderr
+    assert "install gh in a system folder" in missing.stderr
+
+
+def test_a_gh_in_local_bin_that_opens_is_used(tmp_path):
+    """Where the sandbox lets a run read ~/.local/bin (Linux), a gh there still runs."""
+    local_bin = tmp_path / "home" / ".local" / "bin"
+    _fake_gh(local_bin, "local-bin")
+    done = _run_client(f"{local_bin}{os.pathsep}/usr/bin:/bin", HOME=str(tmp_path / "home"))
+    assert done.stdout == "local-bin pr list\n"
