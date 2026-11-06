@@ -50,28 +50,15 @@ def reviewed_dir():
     shutil.rmtree(path, ignore_errors=True)
 
 
-@pytest.fixture(autouse=True)
-async def _retire_late_wakes():
-    """Retire a CC handle that a child's reply wakes after the test body ends.
-
-    The parent's own launch lands a moment after the last ``retire``, so without
-    this wait it would be left for the next test's loop to terminate.
-    """
-    yield
-    import asyncio
-
+async def _retire(child_id: str) -> None:
+    """Retire the child and reap its turn-end driver, which would otherwise wake the
+    parent after the test ends; the parent's wake is not what these tests check."""
     import subagents.cc_runtime as rt
-    from subagents.cc_runtime_state import _LIVE
+    from tests.conftest import _join_terminal_driver
 
-    for _ in range(40):
-        ids = _LIVE.ids()
-        if not ids:
-            await asyncio.sleep(0.05)
-            if not _LIVE.ids():
-                return
-            continue
-        for thread_id in ids:
-            await rt.retire(thread_id)
+    live = rt._LIVE.get(child_id)
+    await rt.retire(child_id)
+    await _join_terminal_driver(live.session if live else None)
 
 
 @pytest.fixture
@@ -155,7 +142,7 @@ async def test_review_spawn_and_cold_start_stay_confined(
 
     # Retirement drops every in-memory handle, as a restart does; the cold
     # start can learn the confinement only from the stored launch record.
-    await rt.retire(child_id)
+    await _retire(child_id)
     assert not rt.is_live(child_id)
     did = await feed_with_persisted_input(
         child_id, "again", target=cc_target("sonnet"),
@@ -166,7 +153,7 @@ async def test_review_spawn_and_cold_start_stay_confined(
     _assert_confined(launches[1], child_id)
     assert launches[1]["cwd"] == launches[0]["cwd"]
     assert _stored_invocation(child_db, child_id)["confinement"] == "untrusted"
-    await rt.retire(child_id)
+    await _retire(child_id)
 
 
 @pytest.mark.asyncio
@@ -188,7 +175,7 @@ async def test_cold_start_refuses_a_confined_child_whose_reads_left_scope(
         broadcast=lambda _sid, _message: None,
         confinement="untrusted", add_dirs=(reviewed_dir,),
     )
-    await rt.retire(child_id)
+    await _retire(child_id)
     shutil.rmtree(reviewed_dir)
     with pytest.raises(ConfinementRefused, match="not a directory"):
         await feed_with_persisted_input(
@@ -261,7 +248,7 @@ async def test_review_launches_read_confinement_once_and_advertise_only_the_read
     monkeypatch.setattr(cc_destination, "_require_session_in_root", in_root)
 
     # Cold start after retirement.
-    await rt.retire(child_id)
+    await _retire(child_id)
     reads.clear()
     did = await feed_with_persisted_input(
         child_id, "again", target=cc_target("sonnet"),
@@ -273,7 +260,7 @@ async def test_review_launches_read_confinement_once_and_advertise_only_the_read
     assert {d["function"]["name"] for d in rt._LIVE.get(child_id).tool_definitions} == set(
         UNTRUSTED_READ_TOOLS
     )
-    await rt.retire(child_id)
+    await _retire(child_id)
 
 
 @pytest.mark.asyncio
