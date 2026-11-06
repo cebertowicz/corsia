@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { tick, type Snippet } from 'svelte';
+	import { loadMentionRoster } from './comments/mentionRoster.svelte';
+	import { createMentionSelection, type MentionOccurrence } from './comments/mentionSelection';
 	import { keptThreads } from '$lib/docKeptThreads.svelte';
 	import { get } from 'svelte/store';
 	import { Button, IconButton } from './ui';
@@ -10,6 +12,7 @@
 	import Popover from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
 	import CommentList from './comments/CommentList.svelte';
+	import SuggestionStatus from './comments/SuggestionStatus.svelte';
 	import CommentPlacementRecovery, { type PlacementRecoveryProps } from './comments/CommentPlacementRecovery.svelte';
 	import ImageRegionThumb from './ImageRegionThumb.svelte';
 	import { decideSuggestion, SuggestionRefused, type SuggestionDecision } from '$lib/api/commentSuggestions';
@@ -38,15 +41,15 @@
 		widgetLabel?: WidgetLabelReader;
 		focusedId: string | null;
 		/** `label` names what a non-text comment is on, in place of the quote. */
-		draft: { text: string; body?: string; label?: string } | null;
+		draft: { text: string; body?: string; label?: string; mentionSelection?: ReturnType<typeof createMentionSelection> } | null;
 		draftReason?: string;
 		onDraftBody?: (text: string) => void;
 		onCancelDraft?: () => void;
 		onClose: () => void;
 		restoreFocus: () => void;
 		onFocus: (id: string, placement?: 'top') => void;
-		onSubmit: (text: string) => Promise<void>;
-		onReply: (id: string, text: string) => Promise<void>;
+		onSubmit: (text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
+		onReply: (id: string, text: string, taggedAgentIds: string[], mentions: MentionOccurrence[]) => Promise<void>;
 		onResolve: (id: string, resolved: boolean) => void;
 		onAgree: (id: string, agreed: boolean) => void;
 		onViewed?: (id: string, replyId: string) => Promise<void>;
@@ -76,6 +79,7 @@
 		/** Asks the editor to keep the draft's text clear of the sheet, now and whenever the sheet moves. */
 		onRevealDraft?: (opening: boolean) => void;
 	} = $props();
+	loadMentionRoster(() => ({ artifactId, threadId: target?.threadId ?? null }));
 	const asDoc = (comment: unknown) => comment as DocComment;
 	const cellLabel = createCellLabels(() => widgetLabel);
 	const listDrawerShown = presence((shown) => onDrawerShown?.(shown));
@@ -94,6 +98,9 @@
 	// Image viewers already decide whether their canvas is a sheet; document canvases use the 900 px rule.
 	const sheetDrawer = $derived(narrow || (!image && canvasWidth < 900));
 	let detent = $state<'full' | 'half'>('full');
+	const draftTags = createMentionSelection();
+	const replyTags = new Map<string, ReturnType<typeof createMentionSelection>>();
+	$effect(() => { if (!draft) draftTags.clear(); });
 	let replyDrafts = $state<Record<string, string>>({});
 	let replySelections = $state<Record<string, [number, number]>>({});
 	// A thread someone else resolves while a reply to it is being typed stays in the Open list, as a resolved card, until that reply is sent or cleared.
@@ -311,18 +318,12 @@
 	{#if images && src}<ImageRegionThumb {src} alt={imageAlt(group[0])} caption comments={group} colorOf={images.colorOf} onOpen={onItsImage(group[0]) ? () => images?.onOpen(group[0]) : undefined} />{/if}
 {/snippet}
 {#snippet content()}
-	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={sheet.cancelDraft} />
+	{#if sheet.state?.kind === 'draft' && sheet.draft}<CommentComposer selectedTags={sheet.draft?.mentionSelection ?? draftTags} quote={sheet.draft.text} label={sheet.draft.label} body={sheet.draft.body ?? ''} disabledReason={draftReason} onBody={onDraftBody} onSubmit={onSubmit} onCancel={sheet.cancelDraft} />
 	{:else}
 		{#if !readOnly && sheet.state?.kind !== 'thread'}
-			<div class="suggestion-status">
-				{#each authorsWithOpenSuggestions as [author, suggestions] (author)}
-					<button type="button" aria-busy={outcome.acceptAllShownBusy === author} disabled={acceptAllBusy !== null} onclick={() => acceptAllFrom(author, suggestions[0].id)}>{outcome.acceptAllShownBusy === author ? 'Accepting…' : `Accept all from ${author}`}</button>
-				{/each}
-				{#if outcome.skipped.length}<details><summary>{outcome.skipped.length} skipped</summary>{#each outcome.skipped as item (item.id)}<p>{item.reason}</p>{/each}</details>{/if}
-			</div>
-			{#if outcome.acceptAllError}<div class="suggestion-error" role="alert">{outcome.acceptAllError}</div>{/if}
+			<SuggestionStatus authors={authorsWithOpenSuggestions} busy={acceptAllBusy} shownBusy={outcome.acceptAllShownBusy} skipped={outcome.skipped} error={outcome.acceptAllError} acceptAll={acceptAllFrom} />
 		{/if}
-		<CommentList docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={displayed} {cellLabel} documentOrder={sheet.state?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
+		<CommentList {replyTags} docPath={target?.path ?? docPath} bind:replyDrafts bind:replySelections leavingIds={held.leaving} keptIds={new Set(comments.filter(held.kept).map((comment) => comment.id))} reduced={$prefersReducedMotion} comments={displayed} {cellLabel} documentOrder={sheet.state?.kind === 'list'} {focusedId} hoveredId={image?.hoveredId ?? null} onHover={image?.onHover} scrollOnFocus={!isImage} focusReply={isImage && sheet.state?.kind === 'thread'} showReply={shouldShowReply} keepReplyVisible={sheetDrawer && sheet.state?.kind === 'list'} onViewed={covered || readStampSuppressed || !surfaceState ? undefined : onViewed} onFocus={sheet.state?.kind === 'list' ? navigate : onFocus} {onReply} {onResolve} {onAgree} onDecision={decideOne} decisionErrors={cardErrors} tagColor={image?.colorOf ?? (images ? (comment) => images.colorOf(asDoc(comment)) : undefined)} onMovePin={image?.onMovePin ?? (images ? movePinInDocument : undefined)} groupOf={images ? (comment) => imageGroupKey(asDoc(comment)) : undefined} groupHead={images ? imageHead : undefined} {readOnly} reopenReachesOwner={load?.state === 'ready' && load.owner != null} />
 	{/if}
 {/snippet}
 {#snippet rowHost(above = true)}<div class="rb-sheet-host" class:above hidden={typing}>{#if reviewVisible && reviewBar}{@render reviewBar(true)}{/if}</div>{/snippet}
@@ -389,12 +390,4 @@
 	/* The one measured wrapper owns the drawer's pinned-footer height, including either or both child footers. */
 	.drawer-footers { flex: none; }
 	.drawer-footers > :not(:last-child) { border-radius: 0; }
-	.suggestion-status { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-	.suggestion-status button { background: none; border: none; padding: 0; font: inherit; font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); cursor: pointer; }
-	.suggestion-status button:not(:disabled):hover { text-decoration: underline; }
-	.suggestion-status button:disabled { opacity: 0.55; cursor: not-allowed; }
-	.suggestion-status button:disabled[aria-busy="true"] { color: var(--text-primary); background: var(--accent-wash); border-radius: var(--radius-xs); padding: 2px 6px; margin: -2px -6px; opacity: 1; }
-	.suggestion-error { font-size: var(--text-caption); color: var(--red-text); }
-	.suggestion-status details { color: var(--text-tertiary); font-size: var(--text-footnote); }
-	.suggestion-status p { margin: 4px 0; }
 </style>

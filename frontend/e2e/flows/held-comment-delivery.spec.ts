@@ -120,7 +120,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 			await page.mouse.move(ends.end, ends.y, { steps: 12 });
 			await page.mouse.up();
 			await page.locator('.sel-comment').click();
-			await page.getByPlaceholder('Comment…').fill(body);
+			await page.getByPlaceholder('Comment, or @ to tag an agent').fill(body);
 			await page.getByRole('button', { name: 'Comment', exact: true }).last().click();
 			await expect(headerSend(page)).toHaveText('Send 1 comment');
 			await putSheetAway(page);

@@ -125,6 +125,9 @@ def _record_decision_row(
     }, db=connection)
     if row is None:
         raise CommentActionError("not_found", "Comment not found")
+    if decided_by_thread_id:
+        from doceditor.comment_recipients import reset_action
+        reset_action(connection, row, decided_by_thread_id)
     return row
 
 

@@ -12,7 +12,7 @@ vi.mock('$lib/api/docs', () => ({
 
 import { prepareCommentArrival, revealCommentArrival } from './docCommentArrivals';
 import {
-	docComments, commentLoads, fromServer, hasUnread, loadComments, flushPositions, markThreadViewed, remapComments,
+	docComments, commentLoads, fromServer, hasUnread, loadComments, flushPositions, markThreadViewed, remapComments, addComment, addReply,
 } from './docComments';
 import { canvasCommentHighlights } from '$lib/docCanvasComments';
 import { addRegionComment, moveRegion } from './imageRegionComments';
@@ -25,6 +25,18 @@ afterEach(() => {
 	mocks.postComment.mockReset();
 	mocks.patchComment.mockReset();
 	mocks.markCommentThreadViewed.mockReset();
+});
+
+describe('tagged comment requests', () => {
+	it('sends selected agent IDs and viewing thread for a comment and a reply', async () => {
+		const row = { id: 'c', author: 'you', author_kind: 'user', body: '@Agent', created_at: '2026-10-02T00:00:00Z', tagged_agents: [{ id: 'a', name: 'Agent' }] };
+		mocks.postComment.mockResolvedValue(row);
+		const mentions = [{ agent_id: 'a', start: 3, end: 9 }];
+		await addComment('artifact', 0, 1, 'x', '😀 @Agent', 'you', false, undefined, ['a'], 'viewer', mentions);
+		expect(mocks.postComment).toHaveBeenLastCalledWith('artifact', expect.objectContaining({ tagged_agent_ids: ['a'], tagged_agent_mentions: mentions, thread_id: 'viewer' }));
+		await addReply('artifact', 'c', '😀 @Agent', 'you', ['a'], 'viewer', mentions);
+		expect(mocks.postComment).toHaveBeenLastCalledWith('artifact', expect.objectContaining({ parent_id: 'c', tagged_agent_ids: ['a'], tagged_agent_mentions: mentions, thread_id: 'viewer' }));
+	});
 });
 
 describe('comment loading presentation', () => {

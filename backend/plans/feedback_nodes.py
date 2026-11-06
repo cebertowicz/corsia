@@ -16,8 +16,8 @@ from plans.plan_write import transaction
 
 PROVENANCE = "document.feedback_batch"
 COMMENT_ACCEPTANCE = (
-    "Every item is acknowledged, resolved, or replied to, and every change made for one is also made "
-    "wherever this document says the same thing in other words."
+    "Every item is considered and acted on where needed, and every change made for one is also made "
+    "wherever this document says the same thing in other words. Do not reply if no reply is needed."
 )
 EDIT_ACCEPTANCE = (
     "The edit is checked against current intent and kept, adjusted, or reverted "
@@ -146,6 +146,8 @@ def item_blocks(batch: Any, items: list[dict[str, Any]]) -> str:
     blocks.extend(dict.fromkeys(marked))
     for item in items:
         if item["kind"] == "comment":
+            if item.get("thread_context"):
+                blocks.append(str(item["thread_context"]))
             lines = [
                 (
                     f"Comment {item['id']} (re-opened by {item['event_by']} after it was resolved)"
@@ -158,6 +160,8 @@ def item_blocks(batch: Any, items: list[dict[str, Any]]) -> str:
             if item.get("region_line"):
                 lines.append(str(item["region_line"]))
             lines.append(f"Feedback: {item['body']}")
+            if item.get("leave_hint"):
+                lines.append(str(item["leave_hint"]))
             if item.get("replacement") is not None:
                 label = "Suggested insertion after the quote" if item.get("insert_after") else "Suggested replacement"
                 lines.append(f"{label}: {item['replacement']}")
@@ -246,11 +250,24 @@ def create_feedback_node(
             intent=_document_comment_intent(_person_comments(batch, held), document) if restate else None,
             provenance=PROVENANCE,
         )
+        contexts = [str(item["thread_context"]) for item in loaded if item.get("thread_context")]
+        wake_blocks = item_blocks(batch, [{key: value for key, value in item.items() if key != "thread_context"}
+                                          for item in loaded])
+        if len(contexts) > 1:
+            from prompts.plan_tools import bounded_text
+            roots = dict.fromkeys(str(item["parent_id"]) for item in loaded if item.get("thread_context"))
+            marker = '… threads cut; read each with ' + ', '.join(
+                f'doc_comments_list(comment_id="{root}")' for root in roots
+            )
+            if len(marker.encode("utf-8")) > person_input.WORDS_MAX_BYTES:
+                marker = '… threads cut; read them with doc_comments_list per thread'
+            contexts = [bounded_text("\n\n".join(contexts), person_input.WORDS_MAX_BYTES,
+                                     measure=lambda value: len(value.encode("utf-8")), marker=marker)]
         woke = joined.working and person_input.joined_reply(
             db, joined.node_id,
-            person_input.Source(SOURCE_KIND_DOC_COMMENT, str(loaded[0]["id"]), (blocks,),
+            person_input.Source(SOURCE_KIND_DOC_COMMENT, str(loaded[0]["id"]), (wake_blocks,),
                                 str(loaded[0]["sort_at"]), recipient_thread_id, None),
-            [str(item["id"]) for item in loaded],
+            [str(item["id"]) for item in loaded], context=contexts[0] if contexts else "",
         ) is not None
         return FeedbackNodeResult(joined.node_id, (), False, woke)
     count = _person_comments(batch, loaded)

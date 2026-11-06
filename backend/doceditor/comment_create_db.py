@@ -1,15 +1,16 @@
 """Canonical DB create/feedback transaction for validated comment adapters."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from doceditor import comments, doc_images, feedback_batch_core, feedback_batches, image_regions, review_feedback, review_lifecycle
+from doceditor import comments, comment_recipients, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle
 from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
 from doceditor.suggestion_overlap import check_agent_suggestion_fits
 from infra.auth import may_access_artifact
 from infra.database import get_db, write_transaction
+from infra.write_effects import after_commit
 from registry import models as registry_models, service as registry_service
 
 
@@ -43,6 +44,9 @@ class CommentInput:
     region: tuple[float, float, float, float] | None = None
     # An agent comment is always immediate (the batch layer enforces it); a person's caller names the lane.
     delivery_policy: str = feedback_batch_core.IMMEDIATE
+    tagged_agent_ids: list[str] = field(default_factory=list)
+    tagged_agent_mentions: list[dict] = field(default_factory=list)
+    viewing_thread_id: str | None = None
 
 
 def _anchor(request: CommentInput, anchor: Anchor | None, duplicate: dict | None) -> tuple:
@@ -86,6 +90,18 @@ def _image(db, request: CommentInput, quote: str | None) -> tuple[str | None, st
     return str(image), image_regions.image_revision(image)
 
 
+def _record_tags(connection, request: CommentInput, row: dict) -> None:
+    """Store a new comment's tags and mentions, and count a tagged post once it commits."""
+    comment_recipients.save_tags(connection, row, request.tagged_agent_ids)
+    comment_recipients.save_mentions(connection, row, request.tagged_agent_mentions)
+    if request.tagged_agent_ids:
+        tags = {"tag_count": len(set(request.tagged_agent_ids)), "reply": bool(request.parent_id),
+                "author_kind": request.author_kind}
+        after_commit(connection, lambda: live_events.emit("comment_tagged", **tags))
+    if request.author_thread_id:
+        comment_recipients.reset_action(connection, row, request.author_thread_id)
+
+
 def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, receipt: CreateReceipt):
     """The commit receipt belongs to the outer transaction that creates row and feedback."""
     db = get_db()
@@ -112,6 +128,12 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 artifact_id = registry_service.register_write_strict(
                     request.author_thread_id, request.registration["path"], db=connection,
                 )["id"]
+            comment_recipients.validate_tags(
+                connection, user_id=request.user_id,
+                thread_id=request.author_thread_id or request.viewing_thread_id,
+                agent_ids=request.tagged_agent_ids,
+            )
+            comment_recipients.validate_mentions(request.body, request.tagged_agent_ids, request.tagged_agent_mentions)
             row, created = comments.create_with_status(
                 artifact_id, body=request.body, author=request.author, author_kind=request.author_kind,
                 author_thread_id=request.author_thread_id, parent_id=request.parent_id,
@@ -119,6 +141,9 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
                 review=request.review, replacement=request.replacement, insert_after=request.insert_after, client_id=identifier,
                 region=request.region, image_rev=image_rev, image_src=image_src, announce=request.author_kind != "user", db=connection,
             )
+            if created:
+                _record_tags(connection, request, row)
+            comment_recipients.tags_for_comments(connection, [row])
             if request.review_request_id is not None:
                 review_lifecycle.admit_feedback(
                     connection, request.review_request_id, author_kind=request.author_kind,

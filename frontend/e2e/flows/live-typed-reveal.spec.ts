@@ -89,7 +89,7 @@ for (const [width, height, project] of layouts) {
 			const frames = await openLiveDocument(viewer, live);
 			const quote = `lead line ${stamp}`, body = `Unfinished ${stamp}`;
 			await beginComment(viewer, quote, body);
-			const input = viewer.getByPlaceholder('Comment…');
+			const input = viewer.getByPlaceholder('Comment, or @ to tag an agent');
 			await expect(input).toBeFocused();
 			const editorNode = await viewer.locator('.cm-content').elementHandle();
 			await seedMockResponses(request, [

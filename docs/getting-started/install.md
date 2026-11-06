@@ -86,13 +86,13 @@ For the source install, `corsia` means `~/.corsia/scripts/corsia`. The installer
 
 | Command | Does |
 |---|---|
-| `corsia start` / `stop` / `restart` / `status` / `logs` | Run and inspect the backend |
+| `corsia start` / `open` / `stop` / `restart` / `status` / `logs` | Run and inspect the backend; `open` opens CORSIA in your browser |
 | `corsia sources` / `sources recheck` | Show each model source with a fix for anything missing |
 | `corsia setup local` / `setup server` | Switch between this-computer-only and an always-on server |
-| `corsia service install` / `uninstall` | Run as a launchd service |
+| `corsia service install` / `uninstall` | Install or remove the always-on service: launchd on a Mac, a systemd user service on Linux |
 | `corsia user …` / `corsia token …` | Manage accounts and API tokens |
 | `corsia delegate …` / `doc …` / `context …` / `providers …` | Drive threads, documents, context files and model endpoints from the shell |
 
 A second checkout on the same machine needs its own `CORSIA_WORKSPACE`, `CORSIA_STATE_DIR` and `BACKEND_PORT`.
 
-Checked against the code at `b23cc5ab9`.
+Checked against the code at `0c56132e6`.

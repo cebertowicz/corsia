@@ -14,6 +14,9 @@ COMMENT_ACTION_HTTP_STATUS = {
     "region_shape": 400,
     "region_bounds": 400,
     "region_target": 400,
+    "no_viewing_thread": 400,
+    "tag_unavailable": 400,
+    "mention_position": 400,
 }
 
 

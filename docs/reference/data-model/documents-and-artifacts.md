@@ -18,6 +18,10 @@ erDiagram
 
 ```mermaid
 erDiagram
+    doc_comment_tags ||--o{ doc_comment_mentions : comment_id
+    doc_comment_tags ||--o{ doc_comment_mentions : agent_id
+    doc_comments ||--o{ doc_comment_recipient_state : root_id
+    doc_comments ||--o{ doc_comment_tags : comment_id
     doc_comments ||--o{ doc_comment_thread_views : root_id
     doc_comments o|--o{ doc_comments : parent_id
 ```
@@ -136,6 +140,44 @@ Source: `backend/infra/artifact_relocation_schema.py`.
 | `updated_at` | TEXT | No | Yes | — | — |
 
 Indexes: `sqlite_autoindex_artifact_relocation_intents_1` (id, unique).
+
+### `doc_comment_mentions`
+
+Source: `backend/infra/doc_comments_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `comment_id` | TEXT | No | Yes | — | doc_comment_tags.comment_id |
+| `agent_id` | TEXT | No | Yes | — | doc_comment_tags.agent_id |
+| `start_offset` | INTEGER | No | Yes | — | — |
+| `end_offset` | INTEGER | No | Yes | — | — |
+
+Indexes: `idx_doc_comment_mentions_comment` (comment_id, agent_id).
+
+### `doc_comment_recipient_state`
+
+Source: `backend/infra/doc_comments_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `root_id` | TEXT | Yes | Yes | — | doc_comments.id |
+| `agent_id` | TEXT | Yes | Yes | — | threads.id |
+| `left_thread` | INTEGER | No | Yes | 0 | — |
+| `notifications` | INTEGER | No | Yes | 0 | — |
+
+Indexes: `sqlite_autoindex_doc_comment_recipient_state_1` (root_id, agent_id, unique).
+
+### `doc_comment_tags`
+
+Source: `backend/infra/doc_comments_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `comment_id` | TEXT | Yes | Yes | — | doc_comments.id |
+| `agent_id` | TEXT | Yes | Yes | — | — |
+| `agent_name` | TEXT | No | Yes | — | — |
+
+Indexes: `sqlite_autoindex_doc_comment_tags_1` (comment_id, agent_id, unique).
 
 ### `doc_comment_thread_views`
 
