@@ -32,7 +32,7 @@ async function holdOneDocumentComment(page: Page) {
 	try {
 		await beginComment(page, 'Paragraph 2:', 'Reword this paragraph');
 		await submitButton(page).click();
-		await expect(page.getByPlaceholder('Comment…')).toHaveCount(0);
+		await expect(page.getByPlaceholder('Comment, or @ to tag an agent')).toHaveCount(0);
 		await putSheetAway(page);
 	} finally {
 		holdPersonBatches(false);
@@ -176,7 +176,7 @@ async function commentOnRegion(page: Page, text: string, at = { x: 0.2, y: 0.25 
 	const under = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.closest('.tag')?.getAttribute('aria-label') ?? null, from);
 	expect(under, `the drag for "${text}" starts on bare image`).toBeNull();
 	await drag(page, from, to);
-	const composer = page.locator('textarea[placeholder="Comment…"]');
+	const composer = page.locator('textarea[placeholder="Comment, or @ to tag an agent"]');
 	await expect(composer).toBeVisible();
 	await composer.fill(text);
 	await page.keyboard.press('ControlOrMeta+Enter');

@@ -45,7 +45,7 @@ for (const [width, height, project] of layouts) {
 				// Select the line's first word, as a reader commenting on it would (document-comment-scroll.spec.ts).
 				await target.dblclick({ position: { x: 12, y: 8 } });
 				await reader.locator('.sel-comment').click();
-				const composer = reader.getByPlaceholder('Comment…');
+				const composer = reader.getByPlaceholder('Comment, or @ to tag an agent');
 				const draft = `Draft ${stamp}`;
 				await composer.fill(draft);
 				await reader.getByRole('button', { name: 'Comment', exact: true }).last().click();

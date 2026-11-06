@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from doceditor import comment_notifications, feedback_comments
+from doceditor import comment_notifications, comment_recipients, feedback_comments
 from doceditor.feedback_batch_core import (
     AGENT_QUIET,
     DOCUMENT_HELD,
@@ -71,18 +71,35 @@ def record_comment(
     """Attach a newly inserted comment to recipient batches in the caller's write."""
     batch_ids: list[str] = []
     woken: list[str] = []
+    tag_refusals: list[str] = []
     notices = (
         take_unreported_undelivered(db, feedback_comments.author_id(comment), utc_now())
         if comment["author_kind"] == "agent"
         else []
     )
+    recipients = feedback_comments.recipients(db, comment)
+    refused = set()
+    if comment["author_kind"] == "agent":
+        from registry.models import get_artifact
+        artifact = get_artifact(comment["artifact_id"], db=db)
+        owner_id = artifact.get("parent_thread_id") if artifact else None
+        sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id=?",
+                            (comment["author_thread_id"],)).fetchone()
+        for recipient in recipients:
+            # A replayed client_id returns the same refusal but counts it only once.
+            refusal, legacy_exempt = comment_recipients.locality_disposition(
+                db, comment, recipient, sender, owner_id, emit=created,
+            )
+            if refusal and not legacy_exempt:
+                refused.add(recipient)
+                document = (artifact.get("path") or artifact.get("title") or comment["artifact_id"]) if artifact else comment["artifact_id"]
+                tag_refusals.append(f"{document}, comment {comment['id']}: {refusal}")
     if created:
-        feedback_comments.make_user_document_durable(db, comment)
         feedback_comments.emit_comment_created(db, comment)
-        batch_ids = [
-            _join_open_batch(db, comment, recipient, delivery_policy)
-            for recipient in feedback_comments.recipients(db, comment)
-        ]
+        feedback_comments.make_user_document_durable(db, comment)
+        for recipient in recipients:
+            if recipient not in refused:
+                batch_ids.append(_join_open_batch(db, comment, recipient, delivery_policy))
         if submit and comment["author_kind"] == "agent":
             woken = close_for_document(
                 db,
@@ -100,7 +117,10 @@ def record_comment(
         )
         known = {row["id"] for row in notices}
         notices.extend(row for row in current_failures if row["id"] not in known)
-    return {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken}
+    result = {"batch_ids": batch_ids, "undelivered_batches": notices, "woken": woken}
+    if tag_refusals:
+        result["tag_refusals"] = tag_refusals
+    return result
 
 
 def deliver_person_comment(db, batch_ids: list[str], artifact_id: str) -> list[str]:

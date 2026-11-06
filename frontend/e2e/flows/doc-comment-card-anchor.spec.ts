@@ -187,7 +187,7 @@ for (const { name: layout, width, height, expanded } of layouts) {
 			const line = lineOf(page, `The ${SECTION} target is right here`);
 			await line.dblclick({ position: { x: 12, y: 8 } });
 			await page.locator('.sel-comment').click();
-			await expect(page.getByPlaceholder('Comment…')).toBeVisible();
+			await expect(page.getByPlaceholder('Comment, or @ to tag an agent')).toBeVisible();
 			await expectBesideAnchor(page, line, line, 'composer before scrolling', expanded);
 			await saveEvidenceScreenshot(page, testInfo, `comment-card-composer-${tag}`, { fullPage: false });
 			const scroller = await canvasScroller(page);

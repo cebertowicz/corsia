@@ -61,6 +61,6 @@ for (const width of [1440, 393]) {
 		await expect(button).toBeVisible();
 		await button.click();
 		if (width === 393) await expect(page.getByRole('heading', { name: 'New comment', exact: true })).toBeVisible();
-		await expect(page.getByPlaceholder('Comment…')).toBeVisible();
+		await expect(page.getByPlaceholder('Comment, or @ to tag an agent')).toBeVisible();
 	});
 }

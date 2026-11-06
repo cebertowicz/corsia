@@ -235,6 +235,7 @@ from infra.migration_174_to_175_reviewer_gate_pending import migrate_174_to_175
 from infra.migration_175_to_176_drop_plan_quotes import migrate_175_to_176
 from infra.migration_176_to_177_unread_comments import migrate_176_to_177
 from infra.migration_177_to_178_clock_utc import migrate_177_to_178
+from infra.migration_178_to_179_comment_recipients import migrate_178_to_179
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -901,6 +902,7 @@ MIGRATIONS[174] = migrate_174_to_175
 MIGRATIONS[175] = migrate_175_to_176
 MIGRATIONS[176] = migrate_176_to_177
 MIGRATIONS[177] = migrate_177_to_178
+MIGRATIONS[178] = migrate_178_to_179
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

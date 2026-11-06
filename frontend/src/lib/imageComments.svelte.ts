@@ -1,4 +1,5 @@
 import { fromStore } from 'svelte/store';
+import { createMentionSelection } from '$lib/components/comments/mentionSelection';
 import { createCommentSurfaceState, type CommentAnchor } from '$lib/docCommentSurfaceState.svelte';
 import { createCommentRetryToast, createThreadActions, submitDocumentComment } from '$lib/docViewerOperations';
 import { isPoint, type ImageRegion } from '$lib/imageRegions';
@@ -19,6 +20,7 @@ export function regionLabel(region: ImageRegion): string {
  */
 export function createImageComments(context: {
 	artifactId: () => string | null;
+	threadId?: () => string | null;
 	readOnly: () => boolean;
 	/** Where focus goes when a card closes with nothing else to return to. */
 	restoreFocus: () => void;
@@ -30,16 +32,17 @@ export function createImageComments(context: {
 	 * Posts a new region comment; an image inside a document anchors it on the image's markdown. Without it the
 	 * comment goes on the image artifact. `failure` words what went wrong for the toast.
 	 */
-	post?: () => { create: (region: ImageRegion, text: string) => Promise<string>; failure?: (error: unknown) => string } | null;
+	post?: () => { create: (region: ImageRegion, text: string, taggedAgentIds: string[], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[]) => Promise<string>; failure?: (error: unknown) => string } | null;
 }) {
 	// Its own draft scope, so closing a card here never aborts a document's comment capture elsewhere.
 	const ui = createCommentSurfaceState(context.restoreFocus, () => `image-comments:${context.artifactId() ?? ''}`);
 	const focused = fromStore(focusedDocComment);
 	const retryToast = createCommentRetryToast(toasts);
-	const threads = createThreadActions(context.artifactId, () => context.onCreated?.());
+	const threads = createThreadActions(context.artifactId, () => context.onCreated?.(), () => context.threadId?.() ?? null);
 	let boxMode = $state(false);
 	let draftRegion = $state<ImageRegion | null>(null);
 	let draftBody = $state('');
+	const mentionSelection = createMentionSelection();
 	/** A stale pin is either awaiting a placement or visibly saving the newly drawn one. */
 	let moving = $state<{ id: string; region?: ImageRegion } | null>(null);
 	/** Counts tags picked with the drawer open, so picking the selected one again still brings its card back. */
@@ -54,6 +57,7 @@ export function createImageComments(context: {
 		ui.close();
 		draftRegion = null;
 		draftBody = '';
+		mentionSelection.clear();
 	}
 	/** The Comment button: box mode on, or off again without placing anything. */
 	function toggleBoxMode() {
@@ -81,19 +85,21 @@ export function createImageComments(context: {
 		}
 		draftRegion = region;
 		draftBody = '';
+		mentionSelection.clear();
 		ui.openDraft(anchor);
 	}
-	async function submit(text: string) {
+	async function submit(text: string, taggedAgentIds: string[] = [], mentions: import('$lib/components/comments/mentionSelection').MentionOccurrence[] = []) {
 		const artifact = context.artifactId(), region = draftRegion, anchor = ui.anchor;
 		if (!artifact || !region) return;
 		// The composer keeps the text when this rejects.
 		const post = context.post?.();
 		const id = await submitDocumentComment(
-			() => (post ? post.create(region, text) : addRegionComment(artifact, region, text)), retryToast.remember, post?.failure,
+			() => (post ? post.create(region, text, taggedAgentIds, mentions) : addRegionComment(artifact, region, text, taggedAgentIds, context.threadId?.() ?? null, mentions)), retryToast.remember, post?.failure,
 		);
 		retryToast.dismissAfterSuccess();
 		draftRegion = null;
 		draftBody = '';
+		mentionSelection.clear();
 		context.onCreated?.();
 		if (anchor) show(id, anchor);
 	}
@@ -159,7 +165,7 @@ export function createImageComments(context: {
 		get cardOpen() { return ui.state?.kind === 'thread' || ui.state?.kind === 'draft'; },
 		/** The composer has text, so the review bar must not answer over it. */
 		get hasDraftText() { return !!draftRegion && draftBody.trim() !== ''; },
-		get draft() { return draftRegion ? { text: '', label: regionLabel(draftRegion), body: draftBody } : null; },
+		get draft() { return draftRegion ? { text: '', label: regionLabel(draftRegion), body: draftBody, mentionSelection } : null; },
 		setDraftBody(text: string) { draftBody = text; },
 		threads,
 		close, toggleBoxMode, draw, submit, pick, select, showFromList, movePin, onKeydownCapture,
