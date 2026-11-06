@@ -11,7 +11,9 @@ from itertools import combinations
 import pytest
 from PIL import Image
 
-from doceditor.image_markup import MAX_RENDER_SIDE, Mark, Region, place_tag, place_tags, render_marked_image, tag_geometry
+from doceditor.badge_tone import badge_fill, contrast
+from doceditor.image_markup import MAX_RENDER_SIDE, TAG_GAP, TAG_RADIUS, Mark, Region, _rgb, gutter_tags, place_tag, place_tags, render_marked_image
+from doceditor.image_regions import AGENT_COLORS
 
 
 def _png(width: int, height: int, color=(240, 240, 240)) -> bytes:
@@ -24,12 +26,20 @@ def _inside(cx: float, cy: float, r: float, width: int, height: int) -> bool:
     return r <= cx <= width - r and r <= cy <= height - r
 
 
-def test_tag_sits_left_of_the_box_when_there_is_room():
+def test_tag_sits_outside_the_boxs_top_left_corner_when_there_is_room():
     cx, cy, side = place_tag(Region(0.5, 0.5, 0.2, 0.2), 1000, 1000, radius=10, gap=3)
 
-    assert side == "left"
+    assert side == "up-left"
     assert cx + 10 <= 500  # wholly left of the box's left edge
-    assert 500 <= cy <= 520  # level with the top of the box
+    assert cy + 10 <= 500  # and wholly above its top edge
+
+
+def test_tag_goes_left_of_the_corner_when_the_top_is_clipped():
+    cx, cy, side = place_tag(Region(0.5, 0.0, 0.2, 0.2), 1000, 1000, radius=10, gap=3)
+
+    assert side == "left"
+    assert cx + 10 <= 500
+    assert _inside(cx, cy, 10, 1000, 1000)
 
 
 def test_tag_goes_above_when_the_left_is_clipped():
@@ -58,12 +68,16 @@ def test_tag_moves_inside_the_corner_only_when_every_outside_spot_is_clipped():
     assert _inside(cx, cy, 10, 1000, 1000)
 
 
-def test_a_point_keeps_its_tag_up_and_right_unless_clipped():
+def test_a_point_keeps_its_tag_up_and_left_unless_clipped():
     _, _, side = place_tag(Region(0.5, 0.5), 1000, 1000, radius=10, gap=3)
-    assert side == "up-right"
+    assert side == "up-left"
 
-    cx, cy, side = place_tag(Region(0.999, 0.001), 1000, 1000, radius=10, gap=3)
-    assert side != "up-right"
+    cx, cy, side = place_tag(Region(0.001, 0.5), 1000, 1000, radius=10, gap=3)
+    assert side == "up-right"
+    assert _inside(cx, cy, 10, 1000, 1000)
+
+    cx, cy, side = place_tag(Region(0.5, 0.001), 1000, 1000, radius=10, gap=3)
+    assert side == "down-right"
     assert _inside(cx, cy, 10, 1000, 1000)
 
 
@@ -72,7 +86,7 @@ def test_tags_on_close_neighbours_do_not_overlap():
     regions = [Region(0.50, 0.50), Region(0.51, 0.50), Region(0.50, 0.51), Region(0.47, 0.49, 0.02, 0.02)]
     tags = place_tags(regions, 1000, 1000, radius=10, gap=3)
 
-    assert [side for _, _, side in tags][:2] == ["up-right", "down-right"]
+    assert [side for _, _, side in tags][:2] == ["up-left", "up-right"]
     for (ax, ay, _), (bx, by, _) in combinations(tags, 2):
         assert math.hypot(ax - bx, ay - by) >= 2 * (10 + 2)
 
@@ -113,14 +127,37 @@ def test_render_draws_the_tag_outside_the_box_and_leaves_the_corner_clear():
     png = render_marked_image(data, [Mark(1, Region(0.5, 0.5, 0.25, 0.25), "#ef4444")])
     img = Image.open(io.BytesIO(png)).convert("RGB")
 
+    radius, gap = TAG_RADIUS, TAG_GAP
     assert img.size == (800, 600)
-    radius, gap = tag_geometry(800, 600)
     cx, cy, side = place_tag(Region(0.5, 0.5, 0.25, 0.25), 800, 600, radius=radius, gap=gap)
-    assert side == "left"
-    # The tag's fill is the author's colour; the content just inside the box's corner is untouched.
+    assert side == "up-left"
+    # The translucent badge stays by the box, leaving its corner clear.
     r, g, b = img.getpixel((round(cx) - radius + 3, round(cy)))
-    assert r > 200 and g < 120 and b < 120
-    assert img.getpixel((400 + 12, 300 + 12)) == (240, 240, 240)
+    assert r > 200 and g < 160 and b < 160
+    assert img.getpixel((412, 312)) == (240, 240, 240)
+
+
+def test_badge_digit_reads_over_the_disc_on_black_and_white_for_every_agent_color():
+    ink = (17, 17, 17)
+    for color in AGENT_COLORS:
+        fill = badge_fill(_rgb(color))
+        for backdrop in (0, 255):
+            shown = [c * 0.8 + backdrop * 0.2 for c in fill]
+            assert contrast(ink, shown) >= 4.5, (color, fill, backdrop)
+
+
+def test_badge_fill_leaves_a_colour_that_already_reads_and_lightens_one_that_does_not():
+    assert badge_fill(_rgb("#22c55e")) == (34, 197, 94)
+    assert badge_fill(_rgb("#8b5cf6")) != (139, 92, 246)
+    assert badge_fill(_rgb("#8b5cf6"))[0] > 139
+
+
+def test_render_draws_the_disc_in_the_stepped_fill_so_its_digit_reads_on_black():
+    png = render_marked_image(_png(800, 600, (0, 0, 0)), [Mark(1, Region(0.5, 0.5, 0.25, 0.25), "#8b5cf6")])
+    img = Image.open(io.BytesIO(png)).convert("RGB")
+    cx, cy, _side = place_tag(Region(0.5, 0.5, 0.25, 0.25), 800, 600, radius=TAG_RADIUS, gap=TAG_GAP)
+    disc = img.getpixel((round(cx) - TAG_RADIUS + 3, round(cy)))
+    assert contrast((17, 17, 17), disc) >= 4.5
 
 
 def test_render_caps_the_longest_side():

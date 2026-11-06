@@ -165,7 +165,7 @@ export async function fetchComments(artifactId: string): Promise<CommentList> {
 
 export async function postComment(
 	artifactId: string,
-	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion; delivery_policy?: 'immediate' | 'document-held'; tagged_agent_ids?: string[]; tagged_agent_mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[]; thread_id?: string | null }
+	c: { body: string; parent_id?: string; anchor_text?: string; from_off?: number; to_off?: number; review?: boolean; author?: string; author_kind?: 'user' | 'agent'; client_id?: string; live_capture?: boolean; region?: ImageRegion; diagram_source?: string; delivery_policy?: 'immediate' | 'document-held'; tagged_agent_ids?: string[]; tagged_agent_mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[]; thread_id?: string | null }
 ): Promise<ServerComment> {
 	const data = await ok(await fetchWithTimeout(
 		`/api/artifacts/${artifactId}/comments?token=${tok()}`,
@@ -175,7 +175,7 @@ export async function postComment(
 	return data.comment;
 }
 
-export async function patchComment(commentId: string, fields: Partial<{ resolved: boolean; acked: boolean; body: string; from_off: number; to_off: number; anchor_text: string; region: ImageRegion }>): Promise<ServerComment> {
+export async function patchComment(commentId: string, fields: Partial<{ resolved: boolean; acked: boolean; body: string; from_off: number; to_off: number; anchor_text: string; region: ImageRegion; diagram_source: string }>): Promise<ServerComment> {
 	const data = await ok(await fetch(`/api/comments/${commentId}?token=${tok()}`, {
 		method: 'PATCH',
 		headers: { 'Content-Type': 'application/json' },

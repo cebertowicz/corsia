@@ -6,7 +6,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from doceditor import comments
-from doceditor.doc_images import check_image_quote, widen_to_image
+from doceditor.doc_images import widen_to_image
 from doceditor.image_regions import check_region_target
 from doceditor.live_document import IdentityInUse
 from doceditor.quote_anchor import anchor_context, resolve_quote
@@ -15,7 +15,19 @@ from infra.db_async import run_in_db
 
 
 class CommentSelectionChanged(ValueError):
-    """The selection a browser captured can no longer be anchored; its draft is kept and it selects again."""
+    """The selection a browser captured can no longer be anchored; its draft is kept and it selects again.
+
+    ``kind`` is the machine-readable reason the browser acts on, as ``CommentActionError.kind`` is.
+    """
+
+    def __init__(self, message: str, kind: str = "selection_changed"):
+        super().__init__(message)
+        self.kind = kind
+
+
+def diagram_changed() -> CommentSelectionChanged:
+    """The diagram a pin was drawn on is not the one the document holds now."""
+    return CommentSelectionChanged("Place the pin on the current diagram; your draft is kept.", "diagram_changed")
 
 
 @dataclass(frozen=True)
@@ -154,8 +166,6 @@ async def create_validated_comment(request, client_id):
 
     if request.region is not None:
         check_region_target(request.path, request.quote)
-        if request.browser and request.quote:
-            check_image_quote(request.quote)
     prepare = None
     if request.quote and not request.parent_id and not request.review:
         if request.browser:

@@ -23,6 +23,7 @@ vi.mock('$lib/stores/viewport', async () => {
 import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
 import { docComments } from '$lib/stores/docComments';
+import { deliveryConfirmation } from '$lib/stores/deliveryConfirmation';
 import { prefersReducedMotion } from '$lib/stores/viewport';
 
 const SRC = '/api/files/content?path=%2Fws%2Fshot.png&raw=true';
@@ -79,6 +80,7 @@ afterEach(() => {
 	delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientWidth;
 	delete (HTMLElement.prototype as unknown as Record<string, unknown>).clientHeight;
 	Object.defineProperty(window, 'innerWidth', { configurable: true, value: realWidth });
+	deliveryConfirmation.dismiss();
 	vi.restoreAllMocks();
 });
 
@@ -88,7 +90,7 @@ describe('ImageCommentLightbox', () => {
 		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
 			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0 },
 			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
-			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn() },
+			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), refreshDiagram: vi.fn(async () => null) },
 			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: step,
 		} });
 		await settle();
@@ -102,6 +104,21 @@ describe('ImageCommentLightbox', () => {
 		expect(chip?.textContent).toContain('1 new reply');
 		chip!.click();
 		expect(step).toHaveBeenCalledOnce();
+	});
+
+	it('keeps an earlier document confirmation out of the viewer but shows a new viewer confirmation', async () => {
+		deliveryConfirmation.show('art-img', 1);
+		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
+			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0 },
+			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
+			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), refreshDiagram: vi.fn(async () => null) },
+			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: vi.fn(),
+		} });
+		await settle();
+		expect(host.querySelector('[data-doc-bottom-band]')).toBeNull();
+		deliveryConfirmation.show('art-img', 2);
+		await settle();
+		expect(host.querySelector('.viewer-band [data-doc-bottom-band]')?.textContent).toContain('2 comments sent');
 	});
 
 	it('reads the image\'s comments, counts them on the pill and numbers their tags on the image', async () => {
@@ -145,6 +162,25 @@ describe('ImageCommentLightbox', () => {
 		img.dispatchEvent(new Event('load'));
 		await settle();
 		expect(commentButton()!.disabled).toBe(false);
+	});
+
+	it.each([['image', undefined], ['diagram', 'flowchart LR\n A-->B']])('keeps a %s draft open while using viewer zoom controls', async (_kind, diagramSource) => {
+		await render({ src: SRC, alt: 'Mock screen', artifactId: 'art-img', diagramSource });
+		commentButton()!.click();
+		await settle();
+		host.querySelector<HTMLElement>('[data-image-regions] .surface')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+		await settle();
+		const textarea = document.body.querySelector<HTMLTextAreaElement>('textarea')!;
+		textarea.value = 'Keep this draft';
+		textarea.dispatchEvent(new Event('input', { bubbles: true }));
+		await settle();
+		for (const name of ['Zoom in', 'Zoom out', 'Fit']) {
+			const button = [...host.querySelectorAll<HTMLButtonElement>('[data-image-zoom] button')].find((el) => (el.getAttribute('aria-label') ?? el.textContent?.trim()) === name)!;
+			button.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+			button.click();
+			await settle();
+			expect(document.body.querySelector('textarea')?.value, name).toBe('Keep this draft');
+		}
 	});
 
 	it('comments on the whole image from the keyboard, and holds the review bar while the comment has text', async () => {

@@ -26,6 +26,7 @@ class CommentCreate(BaseModel):
     live_capture: StrictBool = False
     # {x, y, w, h} in fractions of an image artifact; w = h = 0 (or omitted) is a point.
     region: dict | None = None
+    diagram_source: str | None = None
     # Required: the browser sends the person's stored lane with every comment; a missing one is a 422, never a silent lane.
     # Image-region comments always become image-held server-side; callers may only choose the document lane.
     delivery_policy: PersonDocumentLane

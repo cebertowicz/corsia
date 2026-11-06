@@ -21,7 +21,7 @@ function tagRefusal(error: unknown): string | undefined {
 }
 
 // The viewer retains retry state; the composer needs the rejection to keep its draft.
-export async function submitDocumentComment<T>(action: () => Promise<T>, onFailure?: (toastId: string) => void, failureMessage?: (error: unknown) => string): Promise<T> {
+export async function submitDocumentComment<T>(action: () => Promise<T>, onFailure?: (toastId: string) => void, failureMessage?: (error: unknown) => string | undefined): Promise<T> {
 	try {
 		return await action();
 	} catch (error) {
