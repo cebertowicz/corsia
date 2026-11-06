@@ -85,6 +85,7 @@ class AgentCommentCreate(BaseModel):
     client_id: str | None = None
     tagged_agent_ids: list[str] = Field(default_factory=list)
     tagged_agent_mentions: list[TaggedAgentMention] = Field(default_factory=list)
+    tag_person: bool = False
     submit: bool = False
 
     @field_validator("client_id")
@@ -157,7 +158,7 @@ async def create_agent_comment(token: str, body: AgentCommentCreate):
         author_thread_id=body.as_session_id, parent_id=body.parent_id, review=is_review,
         quote=body.quote, near=body.near, replacement=body.replacement, insert_after=body.insert_after,
         registration=register_spec, submit=body.submit, tagged_agent_ids=body.tagged_agent_ids,
-        tagged_agent_mentions=mentions,
+        tagged_agent_mentions=mentions, tag_person=body.tag_person,
     )
     try:
         created = await agent_comment_writes.reply(request, body.client_id)

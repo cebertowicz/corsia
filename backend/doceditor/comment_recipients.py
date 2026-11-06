@@ -7,7 +7,8 @@ import sqlite3
 from core.agent_roster_queries import agent_rows
 from doceditor import writer_line
 from doceditor.comment_action_errors import CommentActionError
-from infra.accounts import get_user
+from infra.accounts import get_user, list_users
+from infra.auth import is_owner_sentinel
 from infra.queries import get_thread_for_user
 from registry.models import get_artifact
 
@@ -133,16 +134,22 @@ def _person_display_name(db, rows: list[dict]) -> str | None:
     """Who a tag of the person names: the account that owns the document being commented on.
 
     Read once per call, never per row, and only when a row carries the mark: three key lookups.
-    Their display name is the one their own comments carry as ``author``; no name is returned for
-    an account that is gone.
+    A workspace or project document (an owner sentinel) has no owning account, so it names the
+    first account, as the conductor backfill does for an ownerless member. Their display name is
+    the one their own comments carry as ``author``; no name is returned for an account that is gone.
     """
     tagged = next((row for row in rows if row.get("tags_person")), None)
     if tagged is None:
         return None
     # Every caller passes one artifact's rows, so one name covers the listing.
     artifact = get_artifact(str(tagged["artifact_id"]), db=db)
-    owner_thread = str(artifact["parent_thread_id"]) if artifact and artifact.get("parent_thread_id") else None
-    account = db.execute("SELECT user_id FROM threads WHERE id=?", (owner_thread,)).fetchone() if owner_thread else None
+    if artifact is None:
+        return None
+    owner = artifact.get("parent_thread_id")
+    if is_owner_sentinel(owner):
+        first = next(iter(list_users(db=db)), None)
+        return (get_user(str(first["id"]), db=db) or {}).get("name") if first else None
+    account = db.execute("SELECT user_id FROM threads WHERE id=?", (str(owner),)).fetchone()
     return (get_user(str(account["user_id"]), db=db) or {}).get("name") if account else None
 
 

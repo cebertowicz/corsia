@@ -5,7 +5,7 @@ import json
 import pytest
 
 from auth_fixtures import OWNER_TOKEN, OWNER_USER
-from delegation_docs_fixtures import _OWNER, _mk_thread, _registrable_roots, doc
+from delegation_docs_fixtures import _OWNER, _mk_thread, _post, _registrable_roots, doc
 
 pytestmark = pytest.mark.integration
 
@@ -247,3 +247,41 @@ async def test_an_agent_tag_and_a_person_tag_on_one_comment_stay_separate_fields
     assert ("comment_tagged", {
         "tag_count": 1, "person_tagged": True, "reply": False, "author_kind": "agent",
     }) in events
+
+
+@pytest.mark.asyncio
+async def test_a_workspace_document_names_the_first_account_on_the_tag(integration_client, doc, _registrable_roots):
+    """A `ui`-owned document has no owning thread, but the tag still names the person on the chip."""
+    from infra.database import get_db
+    from tools.documents import DocCommentCreateTool
+
+    writer = _mk_thread(integration_client, _OWNER, title="Writer")
+    root = json.loads(await DocCommentCreateTool().execute(
+        doc_path=str(doc), quote="A unique tail sentence", body="Needs your call",
+        tag_person=True, _thread_id=writer,
+    ))["comment"]
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE artifact_registrations SET parent_thread_id='ui' WHERE artifact_id=? AND relationship_state LIKE 'owner-%'",
+            (root["artifact_id"],),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    thread = _listed(integration_client, root["artifact_id"])[root["id"]]
+    assert thread["tagged_person"] == OWNER_USER
+    assert thread["new_comment"] is True
+
+
+def test_the_corsia_doc_route_tags_the_person_too(integration_client, doc):
+    writer = _mk_thread(integration_client, _OWNER, title="Writer")
+    created = _post(integration_client, _OWNER, doc_path=str(doc), quote="A unique tail sentence",
+                    body="Needs your call", tag_person=True, as_session_id=writer)
+    assert created.status_code == 200, created.text
+    comment = created.json()["comment"]
+
+    assert comment["tagged_person"] == OWNER_USER
+    assert _person_mark(comment["id"]) == 1
+    assert _tag_rows(comment["id"]) == []
