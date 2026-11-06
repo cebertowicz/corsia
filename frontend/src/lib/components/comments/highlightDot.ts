@@ -1,7 +1,7 @@
 import { mount, unmount } from 'svelte';
 import NewMarker from './NewMarker.svelte';
 
-/** Prototype: keep the shared marker out of the text flow and only show it when the line gap has clearance. */
+/** Place the shared marker out of text flow, keeping it visible within the scroller. */
 export function placeHighlightDot(body: HTMLElement, anchor: HTMLElement, failedQuote: string | null = null, onVisibility?: (visible: boolean) => void): () => void {
 	const host = document.createElement('span');
 	const layer = body.parentElement?.classList.contains('comment-mark-layer') ? body.parentElement : null;
@@ -19,24 +19,13 @@ export function placeHighlightDot(body: HTMLElement, anchor: HTMLElement, failed
 		const last = rects.at(-1);
 		const size = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--space-1'));
 		if (!last || !Number.isFinite(size) || size <= 0) { setVisible(false); return; }
-		const x = last.right - size;
-		const y = last.top - size - 1;
 		const scroller = body.closest<HTMLElement>('.messages, .cm-scroller');
 		const clip = scroller?.getBoundingClientRect();
 		const headerBottom = document.querySelector('.shell-header')?.getBoundingClientRect().bottom ?? 0;
-		if (x < 0 || x + size > innerWidth || y < Math.max(0, headerBottom, clip?.top ?? 0) || y + size > Math.min(innerHeight, clip?.bottom ?? innerHeight)) { setVisible(false); return; }
-		// Reserve the whole band between this line and every earlier glyph, not a
-		// cutout over selected characters. A taller preceding run can only reduce it.
-		let bandTop = Math.max(0, headerBottom, clip?.top ?? 0);
-		const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
-		for (let text = walker.nextNode() as Text | null; text; text = walker.nextNode() as Text | null) {
-			for (let i = 0; i < text.length; i++) {
-				if (/\s/.test(text.data[i])) continue;
-				const range = document.createRange(); range.setStart(text, i); range.setEnd(text, i + 1);
-				for (const glyph of range.getClientRects()) if (glyph.top < last.top - 0.1) bandTop = Math.max(bandTop, glyph.bottom);
-			}
-		}
-		if (last.top - bandTop < size + 2) { setVisible(false); return; }
+		const top = Math.max(0, headerBottom, clip?.top ?? 0), bottom = Math.min(innerHeight, clip?.bottom ?? innerHeight);
+		if (last.right < 0 || last.left > innerWidth || last.bottom < top || last.top > bottom || bottom - top < size) { setVisible(false); return; }
+		const x = Math.max(0, Math.min(innerWidth - size, last.right - size));
+		const y = Math.max(top, Math.min(bottom - size, last.top - size - 1));
 		const layerRect = layer?.getBoundingClientRect();
 		host.style.left = `${x - (layerRect?.left ?? 0)}px`; host.style.top = `${y - (layerRect?.top ?? 0)}px`; setVisible(true);
 	}
