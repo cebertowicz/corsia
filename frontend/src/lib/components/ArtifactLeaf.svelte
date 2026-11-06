@@ -15,7 +15,8 @@
 	import { pushBackLayer } from '$lib/historyBackLayer';
 	import type { DocumentImageRequest } from '$lib/docViewerImages';
 	import { widenForImageViewer } from '$lib/imageViewerPane';
-	import { restoreDocumentPlace, type RestoreDocumentPlaceOptions, type TextDocumentPlace } from '$lib/documentImagePlace';
+	import { focusWidgetAt } from '$lib/cm/widget-open';
+	import { documentRestorer, type TextDocumentPlace } from '$lib/documentImagePlace';
 	import { uiScope } from '$lib/stores/uiScope';
 	import { docSaveDrafts } from '$lib/stores/docSaveQueue';
 	import { requestArtifactTabClose } from '$lib/artifactTabClose';
@@ -67,15 +68,7 @@
 	let leafBodyEl = $state<HTMLElement | undefined>(undefined);
 	/** The tab whose place is being put back; a document not on screen yet stays covered until it is in place. */
 	let restoringDocument = $state<{ instanceId: string; covered: boolean } | null>(null);
-	let documentRestore: AbortController | null = null;
-	function restoreDocument(place: Parameters<typeof restoreDocumentPlace>[1], options: RestoreDocumentPlaceOptions = {}) {
-		documentRestore?.abort();
-		const controller = new AbortController();
-		documentRestore = controller;
-		void restoreDocumentPlace(leafBodyEl, place, { ...options, signal: controller.signal }).finally(() => {
-			if (documentRestore === controller) documentRestore = null;
-		});
-	}
+	const documentRestore = documentRestorer(() => leafBodyEl);
 	// An image of the open document shown larger. Its tab's view state is the one record of it and its camera, so a
 	// tab switch keeps it with its tab. The document stays mounted beneath it, so closing it returns to the same live
 	// document; its comments are taken from that document each time it shows, never kept with the image.
@@ -96,17 +89,18 @@
 		easeCanvas = true;
 		restoringDocument = null;
 		clearTabDocumentImage(threadId, target.instanceId);
-		if (restore) restoreDocument(image);
+		// Back leaves a keyboard reader on the cell image or diagram they opened.
+		if (restore) documentRestore.restore(image, {}, () => { if (leafBodyEl) focusWidgetAt(leafBodyEl, image); });
 	}
 	// Collapsing the pane to its rail closes the image; a tab switch, or leaving for chat, keeps it with its tab.
 	$effect(() => {
 		const tid = threadId, instanceId = activeTab?.instanceId;
 		if (mode === 'rail' && tid && instanceId) untrack(() => clearTabDocumentImage(tid, instanceId));
 	});
-	$effect(() => () => documentRestore?.abort());
+	$effect(() => () => documentRestore.abort());
 	$effect(() => {
 		if (restoringDocument === null || restoringDocument.instanceId === activeTab?.instanceId) return;
-		documentRestore?.abort();
+		documentRestore.abort();
 		restoringDocument = null;
 	});
 	$effect(() => {
@@ -193,7 +187,7 @@
 				: null;
 			if (place) {
 				restoringDocument = { instanceId: signal.instanceId, covered: !signal.shown };
-				restoreDocument(place, {
+				documentRestore.restore(place, {
 					mode: 'tab-return',
 					onPlaced: () => {
 						if (restoringDocument?.instanceId === signal.instanceId && activeTab?.instanceId === signal.instanceId) restoringDocument = null;

@@ -72,6 +72,46 @@ describe('ImageLightbox', () => {
 		expect(host.querySelector('.level')!.textContent).toBe('50%');
 	});
 
+	it('opens an image with a readable scale there when it does not fit, with Fit one press away', async () => {
+		const img = await loaded({ readableScale: 0.75 });
+		expect(width(img)).toBeCloseTo(750);
+		expect(button('Fit').getAttribute('aria-pressed')).toBe('false');
+		button('Fit').click();
+		await settle();
+		expect(width(img)).toBeCloseTo(500);
+		expect(button('Fit').getAttribute('aria-pressed')).toBe('true');
+	});
+
+	it('opens at Fit when the image already fits at its readable scale', async () => {
+		expect(width(await loaded({ readableScale: 0.4 }))).toBeCloseTo(500);
+		expect(button('Fit').getAttribute('aria-pressed')).toBe('true');
+	});
+
+	it('marks Fit whenever the shown scale is Fit: at a near-Fit snap, and after the window outgrows a kept zoom', async () => {
+		// Within a point of Fit the readable scale snaps to Fit.
+		expect(width(await loaded({ readableScale: 0.505 }))).toBeCloseTo(500);
+		expect(button('Fit').getAttribute('aria-pressed')).toBe('true');
+		unmount(component!);
+		component = null;
+		host.replaceChildren();
+
+		// A kept zoom of 75% in a viewport where Fit is 50%; the viewport then shrinks to where Fit is 80%, so the shown scale clamps to Fit.
+		const observers: Array<() => void> = [];
+		globalThis.ResizeObserver = class { constructor(callback: () => void) { observers.push(callback); } observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
+		const img = await loaded({ readableScale: 0.75 });
+		expect(width(img)).toBeCloseTo(750);
+		expect(button('Fit').getAttribute('aria-pressed')).toBe('false');
+		sizes.width = 848;
+		sizes.height = 448;
+		for (const notify of observers) notify();
+		await settle();
+		expect(host.querySelector('.level')!.textContent).toBe('80%');
+		expect(button('Zoom out').disabled).toBe(true);
+		expect(button('Fit').getAttribute('aria-pressed')).toBe('true');
+		sizes.width = 548;
+		sizes.height = 400;
+	});
+
 	it('keeps a saved camera hidden until its scale and offsets are both restored', async () => {
 		const img = render({ place: { scale: 1, scrollLeft: 123, scrollTop: 45 } });
 		Object.defineProperty(img, 'naturalWidth', { configurable: true, value: NATURAL.width });
@@ -258,6 +298,96 @@ describe('ImageLightbox', () => {
 		api!.revealFraction(0.9, 2);
 		expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({ behavior: 'auto' }));
 		viewport.reduced.set(false);
+	});
+
+	it('centres a revealed place above the covering sheet', async () => {
+		component = mount(ImageLightbox, { target: host, props: { src: '/a.png', alt: 'a', visibleBottom: () => 200 } });
+		flushSync();
+		const region = host.querySelector<HTMLElement>('.viewport')!;
+		const scrollTo = vi.fn();
+		region.scrollTo = scrollTo as unknown as typeof region.scrollTo;
+		const img = host.querySelector<HTMLImageElement>('.pad img')!;
+		Object.defineProperty(img, 'naturalWidth', { configurable: true, value: NATURAL.width });
+		Object.defineProperty(img, 'naturalHeight', { configurable: true, value: NATURAL.height });
+		img.dispatchEvent(new Event('load'));
+		await settle();
+		vi.spyOn(region, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 548, 400));
+		vi.spyOn(img, 'getBoundingClientRect').mockReturnValue(new DOMRect(-300, -100, 1000, 500));
+		(component as unknown as { revealFraction: (x: number, y: number) => void }).revealFraction(0.5, 0.5);
+		expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({ top: 50 }));
+		expect(host.querySelector<HTMLElement>('.pad')!.style.getPropertyValue('--covered-height')).toBe('200px');
+	});
+
+	it('keeps a revealed place centred while the viewport settles, until the reader touches the image', async () => {
+		// The pane a viewer opens in may still be growing: a centre set at the first size is not the centre at the last.
+		let resized: () => void = () => {};
+		globalThis.ResizeObserver = class { constructor(callback: () => void) { resized = callback; } observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
+		component = mount(ImageLightbox, { target: host, props: { src: '/a.png', alt: 'a' } });
+		flushSync();
+		const region = host.querySelector<HTMLElement>('.viewport')!;
+		const scrollTo = vi.fn();
+		region.scrollTo = scrollTo as unknown as typeof region.scrollTo;
+		const img = host.querySelector<HTMLImageElement>('.pad img')!;
+		Object.defineProperty(img, 'naturalWidth', { configurable: true, value: NATURAL.width });
+		Object.defineProperty(img, 'naturalHeight', { configurable: true, value: NATURAL.height });
+		img.dispatchEvent(new Event('load'));
+		await settle();
+		vi.spyOn(region, 'getBoundingClientRect').mockReturnValue({ left: 0, top: 0, width: 548, height: 400, right: 548, bottom: 400, x: 0, y: 0, toJSON() {} } as DOMRect);
+		vi.spyOn(img, 'getBoundingClientRect').mockReturnValue({ left: -300, top: -100, width: 1000, height: 500, right: 700, bottom: 400, x: -300, y: -100, toJSON() {} } as DOMRect);
+		(component as unknown as { revealFraction: (x: number, y: number) => void }).revealFraction(0.5, 0.5);
+		expect(scrollTo).toHaveBeenCalledTimes(1);
+		expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({ behavior: 'smooth' }));
+		// The viewport changes size: the same place is centred again, at once.
+		resized();
+		expect(scrollTo).toHaveBeenCalledTimes(2);
+		expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({ behavior: 'auto' }));
+		// The reader takes hold of the image: it stays where they put it.
+		region.setPointerCapture = vi.fn();
+		region.dispatchEvent(new Event('pointerdown', { bubbles: true }));
+		resized();
+		expect(scrollTo).toHaveBeenCalledTimes(2);
+	});
+
+	it('leaves a revealed box alone on growth and corrects it when a shrink clips its margin', async () => {
+		let resized: () => void = () => {};
+		globalThis.ResizeObserver = class { constructor(callback: () => void) { resized = callback; } observe() {} disconnect() {} } as unknown as typeof ResizeObserver;
+		component = mount(ImageLightbox, { target: host, props: { src: '/a.png', alt: 'a', readableScale: 1 } });
+		flushSync();
+		const region = host.querySelector<HTMLElement>('.viewport')!;
+		const scrollTo = vi.fn();
+		region.scrollTo = scrollTo as unknown as typeof region.scrollTo;
+		const img = host.querySelector<HTMLImageElement>('.pad img')!;
+		Object.defineProperty(img, 'naturalWidth', { configurable: true, value: NATURAL.width });
+		Object.defineProperty(img, 'naturalHeight', { configurable: true, value: NATURAL.height });
+		img.dispatchEvent(new Event('load'));
+		await settle();
+		let view = new DOMRect(0, 0, 548, 400);
+		vi.spyOn(region, 'getBoundingClientRect').mockImplementation(() => view);
+		vi.spyOn(img, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 500));
+		(component as unknown as { revealRegion: (x: number, y: number, w: number, h: number) => void }).revealRegion(0.1, 0.1, 0.2, 0.2);
+		expect(scrollTo).toHaveBeenCalledTimes(1);
+		view = new DOMRect(0, 0, 600, 450);
+		resized();
+		expect(scrollTo).toHaveBeenCalledTimes(1);
+		view = new DOMRect(0, 0, 250, 150);
+		resized();
+		expect(scrollTo).toHaveBeenCalledTimes(2);
+	});
+
+	it('keeps opening zoom when the subject fits and zooms out to fit the whole subject when it does not', async () => {
+		const img = await loaded({ readableScale: 1 });
+		const view = host.querySelector<HTMLElement>('.viewport')!;
+		const scrollTo = vi.fn();
+		view.scrollTo = scrollTo as unknown as typeof view.scrollTo;
+		vi.spyOn(view, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 548, 400));
+		vi.spyOn(img, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 1000, 500));
+		const reveal = (component as unknown as { revealRegion: (x: number, y: number, w: number, h: number, subject: { x: number; y: number; w: number; h: number }) => void }).revealRegion;
+		reveal(0.4, 0.2, 0.05, 0.1, { x: 0.2, y: 0.2, w: 0.3, h: 0.1 });
+		expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({ left: 76, behavior: 'auto' }));
+		expect(width(img)).toBeCloseTo(1000);
+		reveal(0.4, 0.2, 0.05, 0.1, { x: 0.05, y: 0.2, w: 0.85, h: 0.1 });
+		expect(width(img)).toBeCloseTo(522 / 0.85);
+		expect(scrollTo).toHaveBeenLastCalledWith(expect.objectContaining({ left: 201, behavior: 'auto' }));
 	});
 
 	it('ignores a delayed failure detail after the source changes', async () => {

@@ -23,8 +23,12 @@ export function renderedFragment(html: string, context: ImageContext | null): Do
 			img.replaceWith(link);
 			continue;
 		}
-		// Not a `.cm-md-image`: that is the standalone image a click opens and the document holds its place by.
-		img.replaceWith(drawImage(document.createElement('span'), alt, imageContentUrl({ path, projectId: context.projectId, token: context.token, imageCacheKey: context.imageCacheKey })));
+		// Not a `.cm-md-image`, which the document holds its place by; a click on this one opens the viewer all the same (`widget-open.ts`).
+		const src = imageContentUrl({ path, projectId: context.projectId, token: context.token, imageCacheKey: context.imageCacheKey });
+		const wrap = document.createElement('span');
+		wrap.className = 'cm-md-cell-image';
+		Object.assign(wrap.dataset, { src, alt });
+		img.replaceWith(drawImage(wrap, alt, src));
 	}
 	if (context) {
 		for (const anchor of template.content.querySelectorAll('a[href]')) {

@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from doceditor import comments, comment_recipients, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle
-from doceditor.comment_creation import Anchor, CommentSelectionChanged, CreateReceipt
+from doceditor import comments, comment_recipients, diagram_pins, doc_images, feedback_batch_core, feedback_batches, image_regions, live_events, review_feedback, review_lifecycle
+from doceditor.comment_action_errors import CommentSelectionChanged, diagram_changed
+from doceditor.comment_creation import Anchor, CreateReceipt
 from doceditor.doc_text import read_doc_text
 from doceditor.quote_anchor import anchor_context, resolve_quote
 from doceditor.suggestion_overlap import check_agent_suggestion_fits
@@ -42,6 +43,8 @@ class CommentInput:
     review_request_id: str | None = None
     # A checked (x, y, w, h) in fractions of the image (DCOL-FR13.3).
     region: tuple[float, float, float, float] | None = None
+    # Source used to draw the diagram the person placed the pin on.
+    diagram_source: str | None = None
     # An agent comment is always immediate (the batch layer enforces it); a person's caller names the lane.
     delivery_policy: str = feedback_batch_core.IMMEDIATE
     tagged_agent_ids: list[str] = field(default_factory=list)
@@ -72,14 +75,24 @@ def _anchor(request: CommentInput, anchor: Anchor | None, duplicate: dict | None
     return request.quote, start, end, *(anchor_context(text, start, end, request.quote) or (None, None))
 
 
-def _image(db, request: CommentInput, quote: str | None) -> tuple[str | None, str]:
+def _image(db, request: CommentInput, quote: str | None, start: int | None) -> tuple[str | None, str]:
     """The (image_src, image_rev) a new region comment is placed on.
+
+    A pin on a mermaid diagram names no file: its revision is its block's source (``diagram_pins``).
 
     An image artifact is its own image; in a document it is the file the
     anchored markdown shows, resolved here and never taken from the client.
     """
     if image_regions.is_image_path(request.path):
         return None, image_regions.image_revision(image_regions.require_image(request.path))
+    try:
+        revision = diagram_pins.revision(read_doc_text(request.path), start)
+    except (OSError, ValueError):
+        revision = None
+    if revision is not None:
+        if request.browser and (request.diagram_source is None or diagram_pins.source_revision(request.diagram_source) != revision):
+            raise diagram_changed()
+        return None, revision
     if request.artifact_id is not None:
         artifact = registry_models.get_artifact(request.artifact_id, db=db)
         owner = artifact["parent_thread_id"] if artifact else None
@@ -114,7 +127,7 @@ def create_in_db(request: CommentInput, anchor: Anchor | None, identifier: str, 
         quote, start, end, prefix, suffix = _anchor(request, anchor, duplicate)
         image_src = image_rev = None
         if request.region is not None and duplicate is None:
-            image_src, image_rev = _image(db, request, quote)
+            image_src, image_rev = _image(db, request, quote, start)
         artifact_id = request.artifact_id
         registered = request.registration is not None
         if (request.author_kind == "agent" and request.replacement is not None and not request.parent_id

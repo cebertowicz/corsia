@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from doceditor import diagram_pins
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
 from core.corrections_recording import SOURCE_KIND_DOC_COMMENT
 from plans import admission, artifact_links, feedback_join, intent_creation, person_input, review_requests, service
@@ -140,10 +141,11 @@ def _description(batch: Any, items: list[dict[str, Any]]) -> str:
 def item_blocks(batch: Any, items: list[dict[str, Any]]) -> str:
     """Render a batch's items as its task description lists them, without the framing."""
     blocks: list[str] = []
-    # One marked-up copy per image, set by delivery on the batch's region comments.
-    # It leads, so a handoff cap that cuts the tail never drops it.
-    marked = (str(item["marked_image_line"]) for item in items if item.get("marked_image_line"))
-    blocks.extend(dict.fromkeys(marked))
+    # One line per image or diagram the comments are about, set by delivery on the batch's region comments.
+    # A line naming a marked-up image is short and leads. A diagram's carries its source, so it goes after
+    # the comments: a handoff cap cuts the tail, and the person's words must never be what it cuts.
+    subjects = list(dict.fromkeys(str(item["subject_line"]) for item in items if item.get("subject_line")))
+    blocks.extend(line for line in subjects if not line.startswith(diagram_pins.LINE_PREFIX))
     for item in items:
         if item["kind"] == "comment":
             if item.get("thread_context"):
@@ -185,6 +187,7 @@ def item_blocks(batch: Any, items: list[dict[str, Any]]) -> str:
                     f"{item['actor_display']}'s change. Read the current file before acting."
                 )
         blocks.append("\n".join(lines))
+    blocks.extend(line for line in subjects if line.startswith(diagram_pins.LINE_PREFIX))
     return "\n\n".join(blocks)
 
 

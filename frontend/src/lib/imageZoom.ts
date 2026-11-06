@@ -20,6 +20,16 @@ export function fitScale(image: Size, viewport: Size, margin = FIT_MARGIN): numb
 	return Math.min(1, room.width / image.width, room.height / image.height);
 }
 
+/**
+ * The scale a viewer opens at when the image has a readable one (a diagram, whose labels are body size at its own
+ * size): that scale, or null for Fit when the whole image already fits at it.
+ */
+export function readableOpen(readable: number | undefined, fit: number): number | null {
+	// Within a point of Fit it is Fit: the same picture, and Fit is the state that follows the window.
+	if (!(readable !== undefined && readable > 0) || fit >= readable - 0.01) return null;
+	return clampScale(Math.min(1, readable), fit);
+}
+
 /** Zoom stays between Fit and 8x; a tiny image that already fits at 100% cannot be shrunk further. */
 export function clampScale(scale: number, fit: number): number {
 	return Math.min(MAX_SCALE, Math.max(fit, scale));

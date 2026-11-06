@@ -9,7 +9,7 @@ import {
 } from './markdown-image';
 import { renderedFragment } from './rendered-images';
 import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-link';
-import { blockSource, isMermaidFence } from './widget-blocks';
+import { blockSource, isMermaidFence, mermaidSource } from './widget-blocks';
 
 class BulletWidget extends WidgetType {
 	toDOM() {
@@ -77,6 +77,7 @@ class MermaidWidget extends WidgetType {
 	toDOM() {
 		const el = document.createElement('div');
 		el.className = 'cm-md-mermaid';
+		el.dataset.diagramSource = this.code;
 		mermaidMounts.set(el, mountMermaid(el, this.code));
 		return el;
 	}
@@ -93,8 +94,7 @@ class MermaidWidget extends WidgetType {
  */
 function mermaidFence(node: SyntaxNodeRef, doc: EditorState['doc']): string | null {
 	if (!isMermaidFence(node, doc)) return null;
-	const text = node.node.getChild('CodeText');
-	return text ? doc.sliceString(text.from, text.to) : '';
+	return mermaidSource(node, doc);
 }
 
 const HEADING = /^ATXHeading(\d)$/;

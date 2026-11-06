@@ -696,6 +696,12 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		expect(document.body.querySelector('[data-comment-id="a"] .ct-num')!.textContent).toBe('1');
 	});
 
+	it('names a deleted diagram in the stale comment card', () => {
+		const pin = { ...text('pin', 10), region: BOX, regionNumber: 1, regionStale: true, orphaned: true };
+		render({ state: { kind: 'list' }, comments: [pin], images: { srcOf: () => null, diagramOf: () => null, isDiagram: () => true, colorOf: () => '#e5484d', onOpen: vi.fn() } });
+		expect(document.body.querySelector('[data-region-stale]')?.textContent).toContain('Diagram changed since this comment');
+	});
+
 	it('names each image beside its thumbnail by its alt text, and in the thumbnail\'s accessible name', () => {
 		const named = [onImage('a', 1, 10, { anchor: '![Settings screen](a.png)' }), onImage('c', 1, 40, { anchor: '![](c.png)' })];
 		render({ state: { kind: 'list' }, comments: named, images: images() });
