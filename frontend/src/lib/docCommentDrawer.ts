@@ -14,9 +14,9 @@ export function imageDrawerMotion(_node: Element, { leaving }: { leaving: boolea
 	return { duration: leaving ? token('--dur-drawer') * pace : 0 };
 }
 
-/** Authors with at least two open, placed suggestions can accept them together. */
+/** Authors with at least two open, placed suggestions whose text is unchanged can accept them together. */
 export function authorsWithOpenSuggestions(comments: DocComment[]) {
-	return Object.entries(comments.filter((comment) => !comment.resolved && !comment.orphaned && comment.replacement !== null && comment.replacement !== undefined)
+	return Object.entries(comments.filter((comment) => !comment.resolved && !comment.orphaned && !comment.textChanged && comment.replacement !== null && comment.replacement !== undefined)
 		.reduce<Record<string, DocComment[]>>((groups, comment) => ({ ...groups, [comment.author]: [...(groups[comment.author] ?? []), comment] }), {}))
 		.filter(([, suggestions]) => suggestions.length >= 2);
 }

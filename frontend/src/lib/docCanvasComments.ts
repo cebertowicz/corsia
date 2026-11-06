@@ -9,7 +9,10 @@ export type CanvasScrollTarget = { from: number; to: number; focus?: boolean; or
  * A refused card can still have its quote on a stale screen, which is why this is not `rangeFor` alone.
  */
 export function canvasCommentRange(comment: DocComment, text: string): { from: number; to: number } | null {
-	return comment.orphaned || unplaced(comment) ? null : rangeFor(comment, text);
+	if (comment.orphaned || unplaced(comment)) return null;
+	// A suggestion edited inside keeps its place: its range, not its quote, says where it is.
+	if (comment.textChanged && comment.from != null && comment.to != null && comment.to > comment.from && comment.to <= text.length) return { from: comment.from, to: comment.to };
+	return rangeFor(comment, text);
 }
 
 /** A live row never drawn yet (4.2): its offsets are the server's, so it has no highlight or jump. */
@@ -37,7 +40,7 @@ export function canvasFocusedCommentScrollTarget(current: CanvasScrollTarget | n
 
 /** A suggestion is drawn inline only while it is open: a decided, resolved or stale one has no marks. */
 const openSuggestion = (comment: DocComment) =>
-	comment.replacement != null && !comment.decision && !comment.resolved && !comment.review && !comment.orphaned;
+	comment.replacement != null && !comment.decision && !comment.resolved && !comment.review && !comment.orphaned && !comment.textChanged;
 
 /** The agent's presence colour: the thread that wrote the suggestion, the same source as its caret. */
 const suggestionColor = (comment: DocComment) => agentColor(comment.authorThreadId || comment.author);
@@ -81,6 +84,25 @@ export function commentSurfaceStatus(comments: DocComment[]) {
 }
 
 /**
+ * A live-tracked comment keeps its two ends where the text moves them: an edit inside its range keeps the thread on the words now inside
+ * (the server does the same, so a reload agrees), and text typed just outside is not part of it. An open suggestion is left out: its quote is
+ * the text it replaces, so rewriting it would change what it proposes. A decided suggestion behaves as it always has.
+ */
+function followsText(comment: DocComment, text: string): comment is DocComment & { from: number; to: number } {
+	return !!comment.drawn && !comment.review && comment.replacement == null && comment.from != null && comment.to != null && comment.to > comment.from && comment.to <= text.length;
+}
+
+/**
+ * An open suggestion whose range still holds text, but not the text it replaces (someone edited inside it): it stays at its line,
+ * its card says so, and Accept is off. The range is the live one the editor tracks, or the server's after a reload (`textChanged`).
+ */
+function textChangedAfter(comment: DocComment, text: string): boolean {
+	return comment.replacement != null && !comment.decision && !comment.review && (!!comment.drawn || !!comment.textChanged)
+		&& comment.from != null && comment.to != null && comment.to > comment.from && comment.to <= text.length
+		&& text.slice(comment.from, comment.to) !== comment.anchor;
+}
+
+/**
  * Use canonical resolved anchors, including resolved threads whose text survives.
  * The only place a listed comment's `orphaned` is set. The text on screen decides it, as before;
  * the server's own `orphaned` from a load is not an input. The one addition is a suggestion whose
@@ -92,9 +114,11 @@ export function commentSurfaceStatus(comments: DocComment[]) {
 export function commentsInDocumentOrder(comments: DocComment[], text: string, refused: Record<string, string> = {}): DocComment[] {
 	const at = (comment: DocComment) => (unplaced(comment) ? comment.from : canvasCommentRange(comment, text)?.from) ?? Infinity;
 	const sameImage = (a: DocComment, b: DocComment) => (a.regionNumber != null && b.regionNumber != null && a.imageSrc === b.imageSrc ? a.regionNumber - b.regionNumber : 0);
-	return comments.map((comment) => {
-		const orphaned = !comment.review && !unplaced(comment) && (comment.id in refused || rangeFor(comment, text) === null);
+	return comments.map((listed) => {
+		const comment = followsText(listed, text) ? { ...listed, anchor: text.slice(listed.from, listed.to) } : listed;
+		const changed = textChangedAfter(comment, text);
+		const orphaned = !comment.review && !unplaced(comment) && !changed && (comment.id in refused || rangeFor(comment, text) === null);
 		const detached = orphaned && (!comment.anchor || !text.includes(comment.anchor));
-		return { ...comment, orphaned, detached };
+		return { ...comment, orphaned, detached, textChanged: changed };
 	}).sort((a, b) => at(a) - at(b) || sameImage(a, b) || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id));
 }

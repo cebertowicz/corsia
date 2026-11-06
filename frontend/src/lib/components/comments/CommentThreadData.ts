@@ -15,6 +15,8 @@ export type CommentThreadData = {
 	createdAt?: string;
 	resolved: boolean;
 	orphaned?: boolean;
+	/** An open suggestion edited inside: it keeps its place and cannot be accepted. */
+	textChanged?: boolean;
 	acked?: boolean;
 	replacement?: string | null;
 	insertAfter?: boolean;
