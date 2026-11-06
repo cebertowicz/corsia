@@ -201,7 +201,28 @@ def filter_left_replies(db, items: list[dict], agent_id: str, *, person_owner: b
     return [item for item in items if keep(item)]
 
 
-def _withheld_authors(db, rows, recipient_id: str) -> set[str]:
+def comment_reader_model(db, thread_id: str, review_request_id: str | None) -> str | None:
+    """Resolve a listing reader, using the live fork's frozen target when applicable."""
+    if review_request_id is None:
+        row = db.execute("SELECT model,pending_model FROM threads WHERE id=?", (thread_id,)).fetchone()
+        return (row["pending_model"] or row["model"]) if row else None
+    row = db.execute(
+        "SELECT fork_id FROM doc_review_requests WHERE id=? AND reviewer_thread_id=? AND state='forked'",
+        (review_request_id, thread_id),
+    ).fetchone()
+    if row is None or not row["fork_id"]:
+        return None
+    from core.fork_runtime import running_fork
+
+    handle = running_fork(thread_id, row["fork_id"])
+    request = handle.request if handle else None
+    return request.target.catalog_id if request is not None else None
+
+
+_CURRENT_MODEL = object()
+
+
+def _withheld_authors(db, rows, recipient_id: str, *, reader_model=_CURRENT_MODEL) -> set[str]:
     """Agent authors whose own comment to this recipient would be refused under Local only."""
     from infra.local_only import send_needs_hold
 
@@ -210,12 +231,16 @@ def _withheld_authors(db, rows, recipient_id: str) -> set[str]:
     if not authors:
         return set()
     recipient = db.execute("SELECT id,model,pending_model,title FROM threads WHERE id=?", (recipient_id,)).fetchone()
+    if recipient is not None:
+        recipient = dict(recipient)
+        if reader_model is not _CURRENT_MODEL:
+            recipient.update(model=reader_model, pending_model=None)
     withheld = set()
     for author in authors:
         sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id=?", (author,)).fetchone()
         # Fail closed as locality_disposition does: an unreadable sender or recipient is withheld.
         if sender is None or recipient is None or send_needs_hold(
-                dict(sender), dict(recipient), db=db, emit_hold_event=False):
+                dict(sender), recipient, db=db, emit_hold_event=False):
             withheld.add(author)
     return withheld
 

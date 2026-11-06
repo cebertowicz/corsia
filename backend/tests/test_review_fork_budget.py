@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND, REVIEW_STEP_BUDGET
+from core.artifact_review_fork_kind import ARTIFACT_REVIEW_KIND
 from core.fork_tools import ForkToolBoundary
 from test_doc_review_requests import request, review_env, stored
 from test_checkpoint_provider_adapters import _request
@@ -39,7 +39,7 @@ async def native_review(provider, registry, calls, cancel, request_id, monkeypat
     ])
 
     async def agent():
-        return SimpleNamespace(max_iterations=3, tools=registry)
+        return SimpleNamespace(max_iterations=200, tools=registry)
 
     async def complete(**_kwargs):
         return next(responses)
@@ -60,15 +60,14 @@ async def cc_review(provider, calls, cancel):
     from core.fork_cc_result import result
 
     command = cold_command(replace(provider, binary="claude"), ARTIFACT_REVIEW_KIND)
-    limit = int(command[command.index("--max-turns") + 1])
-    assert limit == REVIEW_STEP_BUDGET
+    assert "--max-turns" not in command
     with bind_bridge(provider, ARTIFACT_REVIEW_KIND, cancel) as (_configured, handle):
         async def bound(operation, _call_id, _name, _arguments):
             return await operation()
 
         handle.tool_executor = bound
         for turn, (name, arguments) in enumerate(calls, 1):
-            assert turn < limit
+            assert turn >= 1
             response = await execute(handle, {"provider_tool_call_id": f"tool-{turn}",
                                               "name": name, "arguments": arguments})
             assert not str(response).startswith("Error:")
@@ -99,7 +98,7 @@ async def codex_review(provider, registry, calls, cancel):
             "threadId": "owned", "turnId": "turn",
             "item": {"id": f"tool-{index}", "type": "dynamicToolCall"},
         }})
-    assert len(limit.seen) == len(calls) and not limit.reached.is_set()
+    assert limit.limit is None and not limit.reached.is_set()
     assert not killed
 
 
@@ -122,7 +121,7 @@ async def test_ordinary_review_submits_before_shared_budget(review_env, tmp_path
                                  "review": True, "client_id": f"claim-{number}"}) for number in range(3)),
         ("doc_feedback_send", {"artifact_id": aid}),
     ]
-    assert len(calls) + 1 < REVIEW_STEP_BUDGET
+    assert len(calls) + 1 < 200
     cancel = asyncio.Event()
     if harness == "native":
         await native_review(provider, registry, calls, cancel, row["id"], monkeypatch)

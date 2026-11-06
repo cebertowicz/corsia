@@ -16,8 +16,8 @@ from prompts.artifact_review import instruction, requesting_task_block
 logger = logging.getLogger(__name__)
 _starting: set[str] = set()
 
-# A backstop for a fork that stops making progress without exiting. The step
-# budget ends an ordinary review well before it; past it the reviewer finishes.
+# A backstop for a fork that stops making progress without exiting; past it
+# the reviewer finishes the review.
 REVIEW_WALL_SECONDS = 30 * 60
 
 
@@ -95,7 +95,7 @@ async def start(request_id: str) -> None:
             _row, request = await asyncio.to_thread(_cold_request, request_id)
             await asyncio.to_thread(require_forkable, request_id)
         except ReviewNotForkable as refusal:
-            # A fork can't open a document's images, so the reviewer's own thread reviews it.
+            # An unreadable document is handed back to the reviewer's own thread.
             await ARTIFACT_REVIEW_KIND.limit_or_failure_handler(
                 request_id, reason=refusal.reason, state="handed_back",
             )
@@ -214,6 +214,9 @@ async def _review(request_id: str, request: Any, cancel_event: asyncio.Event) ->
             building = True
             _row, request = await asyncio.to_thread(_cold_request, request_id)
             building = False
+            handle = handles.get(request.fork_id)
+            if handle is not None:
+                handle.request = request
         request = await ARTIFACT_REVIEW_KIND.usage_binder(await _source(request))
         from core.fork_runtime import invoke_fork
 

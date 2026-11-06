@@ -72,16 +72,17 @@ async def test_review_refuses_send_spawn_and_file_write_before_dispatch(name):
     assert calls == []
 
 
-def test_read_cannot_bypass_document_scope_with_an_owned_parent(review_env):
+def test_read_uses_request_ownership_without_document_path_restriction(review_env):
     from doceditor.review_fork_scope import authorize_tool
 
     db, aid = review_env
     row = request(db, aid)
     fork_comment(db, aid, row["id"])
     comment = db.execute("SELECT id FROM doc_comments WHERE artifact_id=?", (aid,)).fetchone()
-    with pytest.raises(PermissionError, match="only read its requested document"):
-        authorize_tool(SimpleNamespace(fork_id=row["fork_id"], thread_id="reviewer", working_dir="/workspace"),
-                       "read_file", {"path": "/workspace/shared/unrelated.md", "parent_id": comment["id"]})
+    assert authorize_tool(
+        SimpleNamespace(fork_id=row["fork_id"], thread_id="reviewer", working_dir="/workspace"),
+        "read_file", {"path": "/workspace/shared/unrelated.md", "parent_id": comment["id"]},
+    ) == row["id"]
 
 
 @pytest.mark.asyncio
@@ -198,9 +199,10 @@ async def test_codex_missing_completed_identity_wakes_and_closes_waiting_session
         revoke_dynamic_tool_admission=lambda: None,
         _request_terminate=lambda: None,
     )
-    limit = CompletedItemLimit(ARTIFACT_REVIEW_KIND, None)
+    bounded = replace(ARTIFACT_REVIEW_KIND, step_limits={"native": 12, "claude-code": 12, "codex": 12})
+    limit = CompletedItemLimit(bounded, None)
     task = asyncio.create_task(run_session(
-        session, CodexForkCapture(kind=ARTIFACT_REVIEW_KIND), limit, asyncio.Event(),
+        session, CodexForkCapture(kind=bounded), limit, asyncio.Event(),
     ))
     await started.wait()
     await limit.observe(session, {"method": "item/completed", "params": {"item": {"type": "dynamicToolCall"}}})

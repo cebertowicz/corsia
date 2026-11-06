@@ -130,7 +130,6 @@ def test_empty_fork_sends_reviewers_existing_batch_and_receipt_counts_it(review_
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("name,arguments", [
-    ("read_file", {"path": "/unrelated.md"}),
     ("doc_comments_list", {"artifact_id": "unrelated"}),
     ("doc_comment_create", {"artifact_id": "unrelated", "body": "Out of scope"}),
     ("doc_feedback_send", {"artifact_id": "unrelated"}),

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.fork_runtime import FORK_HARNESSES, ForkKind
+from core.fork_runtime import ForkKind, native_iteration_limit
 from core.artifact_review_capture import (
     preserve_on_shutdown, provider_failure, review_end_handler, review_limit_or_failure_handler,
 )
@@ -12,15 +12,11 @@ from core.artifact_review_usage import bind_usage
 
 
 REVIEW_TOOL_ALLOWLIST = frozenset({
-    "read_file", "doc_comments_list", "doc_comment_create", "doc_feedback_send",
+    "read_file", "list_dir", "glob", "grep", "doc_comments_list", "doc_comment_create", "doc_feedback_send",
 })
 
 
-# One ordinary review: list, read, several comment turns, submit, and a
-# terminal reply. Twelve steps leaves room for a second read/comment pass.
-REVIEW_STEP_BUDGET = 12
-
-
+# Use the same harness limits as other disposable forks.
 async def execute_review_tool(
     agent: Any, name: str, arguments: dict[str, Any], cancel_event: Any, request: Any,
 ) -> str:
@@ -43,13 +39,13 @@ async def execute_review_tool(
 ARTIFACT_REVIEW_KIND = ForkKind(
     name="artifact_review",
     tool_allowlist=REVIEW_TOOL_ALLOWLIST,
-    tool_refusal="Artifact reviews may only read the document, create review comments, and submit them.",
+    tool_refusal="Artifact reviews may only write comments and feedback on the requested document.",
     over_room_text=(
         "{excess} tokens over the remaining review room and was not sent; "
         "leave your comments and call doc_feedback_send now."
     ),
     tool_executor=execute_review_tool,
-    step_limits={harness: REVIEW_STEP_BUDGET for harness in FORK_HARNESSES},
+    step_limits={"native": native_iteration_limit, "claude-code": None, "codex": None},
     end_handler=review_end_handler,
     limit_or_failure_handler=review_limit_or_failure_handler,
     usage_binder=bind_usage,
