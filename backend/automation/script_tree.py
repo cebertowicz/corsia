@@ -2,10 +2,12 @@
 
 ``python3 <entry>`` imports siblings from the entry's folder, and bash or node load
 them by relative path, so the approved bytes are the folder's, not only the entry's.
-Only directories named exactly ``__pycache__`` and files named ``.DS_Store`` are left out.
+Only the files in ``__pycache__`` directories and files named ``.DS_Store`` are left out.
 An authenticated run's sandbox refuses every ``__pycache__`` in the folder
-(``script_sandbox._folder_bytecode_deny``; not yet on Linux), so none is read; Finder writes ``.DS_Store`` when the folder is merely opened, and
-no interpreter loads it. Anything else the walk can't read as a regular file refuses the
+(``script_sandbox._folder_bytecode_deny``; not yet on Linux), so no cache file is read,
+but the sandbox judges a link by what it points at, so a link in a cache still refuses
+the folder. Finder writes ``.DS_Store`` when the folder is merely opened, and no
+interpreter loads it. Anything else the walk can't read as a regular file refuses the
 folder, so the hash covers everything a run can load from it.
 """
 from __future__ import annotations
@@ -50,7 +52,7 @@ def read_tree(entry: Path, denied: Callable[[Path], str | None] | None = None) -
 
 
 def _read_folder(dir_fd: int, folder: Path, relative: Path, denied: Callable[[Path], str | None] | None,
-                 files: dict[str, bytes]) -> None:
+                 files: dict[str, bytes], cache: bool = False) -> None:
     try:
         names = sorted(os.listdir(dir_fd))
     except OSError as exc:
@@ -61,10 +63,12 @@ def _read_folder(dir_fd: int, folder: Path, relative: Path, denied: Callable[[Pa
             mode = os.stat(name, dir_fd=dir_fd, follow_symlinks=False).st_mode
         except OSError as exc:
             raise ValueError(_unreadable(path, exc)) from exc
-        if (stat.S_ISDIR(mode) and name == "__pycache__") or (stat.S_ISREG(mode) and name == ".DS_Store"):
+        if stat.S_ISREG(mode) and (cache or name == ".DS_Store"):
             continue
         if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
             raise ValueError(_special(path))
+        # The name is matched in any case, as Python finds the cache on a case-insensitive disk.
+        in_cache = cache or (stat.S_ISDIR(mode) and name.casefold() == "__pycache__")
         _check(folder / path, denied)
         try:
             fd = os.open(name, _NO_FOLLOW | (os.O_DIRECTORY if stat.S_ISDIR(mode) else os.O_NONBLOCK),
@@ -73,7 +77,7 @@ def _read_folder(dir_fd: int, folder: Path, relative: Path, denied: Callable[[Pa
             raise ValueError(_special(path) if exc.errno == errno.ELOOP else _unreadable(path, exc)) from exc
         try:
             if stat.S_ISDIR(mode):
-                _read_folder(fd, folder, path, denied, files)
+                _read_folder(fd, folder, path, denied, files, in_cache)
                 continue
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise ValueError(_special(path))

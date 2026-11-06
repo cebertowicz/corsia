@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from automation.script_sandbox import ScriptSandboxError, _folder_bytecode_deny
+from automation.script_sandbox import _folder_bytecode_deny
 from connections import github_agent
 from connections.github_agent import AgentAccountView
 from connections.github_agent_home import BOT_ENV_NAMES, LOCKED_HOME
@@ -181,11 +181,10 @@ def test_only_an_authenticated_run_is_kept_off_python_bytecode_in_its_folder(run
     assert "__pycache__" not in plain["profile"]
 
 
-def test_the_bytecode_deny_matches_the_folder_literally():
-    assert _folder_bytecode_deny(Path("/w/a.b (c)+[d]")) == (
-        '(deny file-read* file-write* (regex #"^/w/a\\.b \\(c\\)\\+\\[d\\]/(.*/)?__pycache__(/.*)?$"))\n')
-    with pytest.raises(ScriptSandboxError, match="Rename the folder without it, then run the script again"):
-        _folder_bytecode_deny(Path('/w/a"b'))
+def test_the_bytecode_deny_matches_the_folder_and_cache_in_any_case():
+    cache = "__[Pp][Yy][Cc][Aa][Cc][Hh][Ee]__"
+    assert _folder_bytecode_deny(Path('/w/a.b (c)+"d')) == (
+        f'(deny file-read* file-write* (regex #"^/[Ww]/[Aa][.][Bb] .[Cc]...[Dd]/(.*/)?{cache}(/.*)?$"))\n')
 
 
 def test_a_run_with_no_cached_answer_waits_for_the_verification(run):

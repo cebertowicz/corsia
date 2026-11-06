@@ -53,6 +53,21 @@ def test_tree_refuses_what_it_cannot_cover_and_names_the_fix(tmp_path, make):
         script_tree.read_tree(entry)
 
 
+@pytest.mark.parametrize("cache", ["__pycache__", "__PyCache__"])
+def test_a_link_in_a_bytecode_cache_refuses_the_folder(tmp_path, cache):
+    # The sandbox judges a link by what it points at, so its __pycache__ deny can't stop one.
+    entry = tmp_path / "run.py"
+    entry.write_text("pass\n")
+    outside = tmp_path.parent / f"{tmp_path.name}-forged.pyc"
+    outside.write_bytes(b"\0forged")
+    (tmp_path / cache / "sub").mkdir(parents=True)
+    (tmp_path / cache / "sub" / "real.pyc").write_bytes(b"\0cache")
+    assert script_tree.read_tree(entry) == {"run.py": b"pass\n"}
+    (tmp_path / cache / "sub" / "helper.cpython-313.pyc").symlink_to(outside)
+    with pytest.raises(ValueError, match=f"{cache}/sub/helper.cpython-313.pyc in the script's folder is a link"):
+        script_tree.read_tree(entry)
+
+
 def test_tree_hash_is_canonical():
     assert script_tree.tree_sha256({"a": b"1", "b": b"2"}) == script_tree.tree_sha256({"b": b"2", "a": b"1"})
     assert script_tree.tree_sha256({"a": b"1", "b": b"2"}) != script_tree.tree_sha256({"a": b"12"})

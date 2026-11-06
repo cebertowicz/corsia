@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 import shlex
 import tempfile
 from contextlib import AsyncExitStack, asynccontextmanager
@@ -53,7 +52,7 @@ from tools.shell_guard import (
     safehouse_version_error,
 )
 from tools.shell_policy import load_shell_repo_policies
-from tools.sandbox_git import sandbox_literal
+from tools.sandbox_git import sandbox_any_case, sandbox_literal
 import tools.shell_sandbox as shell_sandbox
 from tools.unix_socket_policy import corsia_temp_root, corsia_temp_root_for_bind
 
@@ -283,14 +282,8 @@ def _folder_bytecode_deny(folder: Path) -> str:
     compile the reviewed source instead, whatever flags or environment a process in the
     run starts with.
     """
-    path = str(folder.resolve())
-    if '"' in path:
-        raise ScriptSandboxError(
-            "the script's folder path contains a double quote, which the sandbox cannot "
-            "express. Rename the folder without it, then run the script again"
-        )
-    escaped = re.sub(r"([.^$*+?()\[\]{}|\\])", r"\\\1", path)
-    return f'(deny file-read* file-write* (regex #"^{escaped}/(.*/)?__pycache__(/.*)?$"))\n'
+    cache = sandbox_any_case(Path("__pycache__"))
+    return f'(deny file-read* file-write* (regex #"^{sandbox_any_case(folder.resolve())}/(.*/)?{cache}(/.*)?$"))\n'
 
 
 def _script_profile(view: AgentAccountView, socket_dir: Path | None = None, folder: Path | None = None):
