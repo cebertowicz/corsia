@@ -1,9 +1,9 @@
 """Local-only thread policy at model-admission and agent-send boundaries.
 
-Each thread row stores its own effective ``local_only``. A new thread copies it
-from its parents and its creating agent; turning it on or off writes it down the
-family (``spawned_by`` / ``parent_thread_id``) in one statement, so every read
-is the plain column.
+Each thread row stores its own ``local_only``. A new thread inherits it from its
+parents, its creating agent, and their projects' cloud-off policies when crossing
+project boundaries. Turning it on or off writes it down the family (``spawned_by`` /
+``parent_thread_id``) in one statement.
 """
 
 from __future__ import annotations
@@ -84,13 +84,16 @@ def require_local_only_model(
     raise refusal
 
 
-def inherited_local_only(ids: tuple[str | None, ...], *, db: sqlite3.Connection) -> bool:
-    """Whether any of a new thread's parents or its creating agent is Local only."""
+def inherited_local_only(ids: tuple[str | None, ...], *, project_id: str | None, db: sqlite3.Connection) -> bool:
+    """Inherit thread restrictions and cloud-off policy across project boundaries."""
     found = [thread_id for thread_id in dict.fromkeys(ids) if thread_id]
     if not found:
         return False
     row = db.execute(
-        f"SELECT MAX(local_only) FROM threads WHERE id IN ({','.join('?' * len(found))})", found,
+        "SELECT MAX(CASE WHEN t.local_only OR "
+        "(t.project_id IS NOT ? AND COALESCE(p.cloud_models_off, 0)) THEN 1 ELSE 0 END) "
+        "FROM threads t LEFT JOIN project_inference_policies p ON p.project_id = t.project_id "
+        f"WHERE t.id IN ({','.join('?' * len(found))})", (project_id, *found),
     ).fetchone()
     return bool(row[0])
 

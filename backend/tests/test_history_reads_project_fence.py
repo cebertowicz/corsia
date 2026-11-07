@@ -218,16 +218,13 @@ async def test_unknown_caller_fails_closed(world):
     assert "beta private decision" not in out
 
 
-async def test_fail_closed_caller_on_a_thread_with_no_project_names_the_workspace_agent(world):
-    """The workspace-agent thread copy is reachable, not decoration: a caller whose own
-    thread row cannot be read is fenced from everything, so a thread that belongs to no
-    project is refused too, and the refusal names what it is."""
+async def test_fail_closed_caller_on_a_thread_with_no_project_uses_neutral_refusal(world):
+    """An unknown caller is fenced from a thread without implying its role."""
     _message(T_OPEN, 1, "workspace-level decision")
 
     out = await _history(T_OPEN, caller="no-such-thread")
 
-    assert f"`{T_OPEN}` belongs to a workspace agent, outside your scope" in out
-    assert "Host access doesn't open it. Ask the CORSIA agent." in out
+    assert f"`{T_OPEN}` is outside your scope. Host access doesn't open it. Ask the CORSIA agent." in out
     assert "request_host_access" not in out
     assert "workspace-level decision" not in out
 

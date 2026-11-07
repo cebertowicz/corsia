@@ -121,8 +121,9 @@ def create_fresh_thread(
     with write_transaction(db, scope="create_fresh_thread") as _db:
         _ensure_project_exists(_db, project_id)
         _refuse_outside_local_only_project(_db, spawned_by, project_id)
-        # Any Local-only parent or creating agent makes the new thread Local only.
-        local_only = inherited_local_only((spawned_by, parent_thread_id, actor_thread_id), db=_db)
+        # Preserve thread restrictions and carry project policy across project boundaries.
+        local_only = inherited_local_only((spawned_by, parent_thread_id, actor_thread_id),
+                                          project_id=project_id, db=_db)
         require_local_only_model(
             model,
             thread_local_only=local_only,

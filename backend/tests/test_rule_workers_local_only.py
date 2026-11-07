@@ -51,6 +51,23 @@ async def _admit(thread_id, *_args, **_kwargs):
 
 
 @pytest.mark.asyncio
+async def test_delegate_task_same_project_follows_project_policy(local_model, world):
+    import json
+    from infra.database import get_db, write_transaction
+    from tools.delegate_task import DelegateTaskTool
+
+    with write_transaction(None, scope="project_cloud_off") as db:
+        db.execute("INSERT INTO project_inference_policies(project_id,cloud_models_off) VALUES (?,1)",
+                   (world["project"],))
+    result = await DelegateTaskTool().execute(task="Delegate local work", model=LOCAL,
+                                              plan_node_id="none", _thread_id=OWNER)
+    receipt = json.loads(result)
+    assert receipt["ok"]
+    child = get_db().execute("SELECT local_only FROM threads WHERE id=?", (receipt["thread_id"],)).fetchone()
+    assert child[0] == 0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("policy", ["thread", "project"])
 async def test_ready_local_owner_starts_confined_on_own_model(local_model, world, policy):
     from automation import worker_runner
@@ -66,8 +83,8 @@ async def test_ready_local_owner_starts_confined_on_own_model(local_model, world
     assert await worker_runner.drive() == 1
     outcome, _, _, worker = starts(rule)[0]
     assert outcome == "started"
-    child = get_db().execute("SELECT model, confinement FROM threads WHERE id=?", (worker,)).fetchone()
-    assert tuple(child) == (LOCAL, "untrusted")
+    child = get_db().execute("SELECT model, confinement, local_only FROM threads WHERE id=?", (worker,)).fetchone()
+    assert tuple(child) == (LOCAL, "untrusted", int(policy == "thread"))
     assert local_model["bound"] == [LOCAL]
 
 

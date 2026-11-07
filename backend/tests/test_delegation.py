@@ -80,6 +80,22 @@ class TestDelegationDefaultCleanup:
         assert get_setting("corsia_agent_thread_id") is None
 
 class TestCreateThread:
+    def test_cloud_off_parent_creates_local_only_child(self, client, deleg_db, monkeypatch):
+        monkeypatch.setattr("infra.local_only._is_cloud", lambda *_args, **_kwargs: False)
+        monkeypatch.setattr("infra.state.broadcast_to_thread", lambda *a, **k: None)
+        deleg_db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('private','Private','t','t')")
+        deleg_db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('other','Other','t','t')")
+        deleg_db.execute("INSERT INTO project_inference_policies(project_id,cloud_models_off) VALUES ('private',1)")
+        deleg_db.execute("INSERT INTO threads (id,user_id,project_id,title,created_at,updated_at) "
+                         "VALUES ('private-parent','u-test','private','Parent','t','t')")
+        deleg_db.commit()
+        response = client.post("/api/delegation/threads", params={"token": _TOKEN},
+                               json={"title": "Child", "model": "omlx@local/qwen", "project_id": "other",
+                                     "thread_kind": "subagent", "spawned_by": "private-parent"})
+        assert response.status_code == 200, response.text
+        child = deleg_db.execute("SELECT local_only FROM threads WHERE id=?", (response.json()["thread_id"],)).fetchone()
+        assert child[0] == 1
+
     def test_auth_required(self, client):
         r = client.post("/api/delegation/threads", params={"token": "bad"}, json={})
         assert r.status_code == 401

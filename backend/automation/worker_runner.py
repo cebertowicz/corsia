@@ -189,7 +189,6 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None)
     """Everything the start reads from the database, or :class:`worker_inputs.StartRefused`."""
     from infra.config import WORKSPACE
     from infra.database import get_db
-    from infra.local_only import inherited_local_only
     from infra.queries import get_thread
     from events.rule_actions import reachable_workflows
     from llm.account_catalog import effective_status
@@ -210,7 +209,7 @@ def _prepare(row: Mapping[str, Any], run_input: Mapping[str, Any], shipped=None)
     rows = scoped_status_rows(**scope)
     status_row = next((item for item in rows if model in (item.get("id"), item.get("litellm_model"))), None)
     name = (status_row or {}).get("display_name") or (model_row or {}).get("display_name") or model
-    cause = locality_refusal(model_row, thread_local_only=inherited_local_only((owner["id"],), db=db),
+    cause = locality_refusal(model_row, thread_local_only=bool(owner["local_only"]),
                              project_id=project, db=db) if model_row else None
     if cause == "thread_local_only":
         raise inputs.StartRefused(f"refused: this chat is set to Local only and your model {name} is a "

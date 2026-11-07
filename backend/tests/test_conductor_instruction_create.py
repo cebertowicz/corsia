@@ -100,7 +100,11 @@ async def test_create_attach_idempotent_retry_and_revision(isolated_db, tmp_path
         before = db.execute("SELECT count(*) FROM context_bootloader_events").fetchone()[0]
     finally:
         db.close()
-    retry = json.loads(await tool.execute(**arguments))
+    retry_text = await tool.execute(**arguments)
+    retry = json.loads(retry_text)
+    # Pin: creation reports its path and revision without returning existing text.
+    assert retry["path"] == str(path) and retry["revision"]
+    assert content not in retry_text and "content" not in retry
     assert not retry["changed"]
     db = get_db()
     try:
