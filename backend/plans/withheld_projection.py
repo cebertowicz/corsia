@@ -63,7 +63,7 @@ def fences_thread(db, recipient: str | None, owner: str | None) -> bool:
     if row is None or row["project_id"] is None:
         return False
     fenced = fenced_project_ids(read_caller(recipient, db=db), db=db)
-    return fenced is ALL or str(row["project_id"]) in fenced
+    return fenced is ALL or (isinstance(fenced, frozenset) and str(row["project_id"]) in fenced)
 
 
 def for_thread(value: Any, *, recipient: str | None, owner: str | None, db) -> Any:
