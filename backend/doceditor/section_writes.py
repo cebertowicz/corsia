@@ -86,9 +86,16 @@ def _original(runs: list[_Run], at: int) -> tuple[int, int]:
 
 
 def _moved(runs: list[_Run], first: int, last: int, at: int) -> list[_Run]:
-    """The runs covering the edited text's [first, last), moved to begin at ``at``."""
+    """The runs covering the edited text's [first, last), moved to begin at ``at``.
+
+    Runs are sorted and contiguous, so it starts at the run holding ``first`` and stops past ``last``:
+    a replace_all over many occurrences costs the runs each occurrence covers, not every run each time.
+    """
     moved: list[_Run] = []
-    for start, end, low, high, kept in runs:
+    for index in range(max(bisect_right(runs, first, key=lambda run: run[0]) - 1, 0), len(runs)):
+        start, end, low, high, kept = runs[index]
+        if start >= last:
+            break
         lo, hi = max(start, first), min(end, last)
         if lo < hi:
             moved.append((at + lo - first, at + hi - first, low + lo - start if kept else low, high, kept))
