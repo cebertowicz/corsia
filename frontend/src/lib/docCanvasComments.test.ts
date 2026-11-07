@@ -160,7 +160,7 @@ describe('inline suggestions in the highlight ranges', () => {
 	it('marks a suggestion whose quote no longer matches the text on screen at the line it was on, not as a passage', () => {
 		const rows = commentsInDocumentOrder([suggestion('s1', 8, quote)], 'Before. The team changed its mind. After.');
 		expect(rows[0].orphaned).toBe(true);
-		expect(canvasCommentHighlights(rows, 'Before. The team changed its mind. After.', null, undefined)).toMatchObject([{ id: 's1', from: 8, to: 8, point: true, lost: true }]);
+		expect(canvasCommentHighlights(rows, 'Before. The team changed its mind. After.', null, undefined)).toMatchObject([{ id: 's1', from: 8, to: 8, point: true }]);
 	});
 });
 
@@ -267,10 +267,9 @@ describe('a comment whose text was deleted keeps a marker at the nearest line', 
 		expect(row).toMatchObject({ orphaned: true, detached: true });
 	});
 
-	it('draws a point marker flagged lost at the position the text was, with its reply-waiting dot', () => {
-		const replies = [{ id: 'r', author: 'Reviewer', text: 'Why?', at: 'now' }];
-		const rows = commentsInDocumentOrder([gone({ replies, newReplyIds: ['r'] })], text);
-		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 'gone', from: 18, to: 18, point: true, lost: true, replyWaiting: true }]);
+	it('keeps a point at the position the text was, so its margin card stays beside that line', () => {
+		const rows = commentsInDocumentOrder([gone()], text);
+		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 'gone', from: 18, to: 18, point: true }]);
 	});
 
 	it('draws no marker for a resolved comment, a review comment or one with no known position', () => {
@@ -316,7 +315,7 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 		const text = 'Lunch is at noon. Train leaves at .';
 		const rows = commentsInDocumentOrder([accepted()], text);
 		expect(rows[0]).toMatchObject({ orphaned: true, detached: true });
-		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 's1', point: true, lost: true }]);
+		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 's1', point: true }]);
 	});
 
 	it('draws nothing once it is resolved', () => {

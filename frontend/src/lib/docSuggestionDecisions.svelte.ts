@@ -84,6 +84,14 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 				});
 			}
 		}
+		/** Resolves a decided suggestion's card through `request`: on a refusal (`false`) the card says so until this opening ends. Answers whether it was taken. */
+		async function resolveDecided(id: string, request: () => unknown): Promise<boolean> {
+			const started = outcome;
+			started.errors = { ...started.errors, [id]: '' };
+			const taken = (await request()) !== false;
+			if (!taken) settle(started, (current) => { current.errors = { ...current.errors, [id]: 'Couldn’t resolve this. Try again.' }; });
+			return taken;
+		}
 		async function acceptAllFrom(author: string, id: string) {
 			if (acceptAllBusy !== null) return;
 			const started = outcome;
@@ -103,6 +111,7 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 		get acceptAllBusy() { return acceptAllBusy; },
 		get outcome() { return outcome; },
 		decideOne,
+		resolveDecided,
 		acceptAllFrom,
 	};
 }

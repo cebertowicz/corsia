@@ -4,7 +4,7 @@
 </script>
 
 <script lang="ts">
-	import type { Snippet } from 'svelte';
+	import { untrack, type Snippet } from 'svelte';
 	import { GAP, placeCards, type MarginItem } from '$lib/docMarginPlacement';
 	import { afterHold } from '$lib/docMarginHold.svelte';
 	import type { DocComment } from '$lib/stores/docComments';
@@ -73,7 +73,8 @@
 		const sizes = new ResizeObserver(schedule);
 		for (const el of [scroller, clip, ...bounds.querySelectorAll('.cm-content'), ...stackEl.querySelectorAll('[data-margin-card]')]) sizes.observe(el);
 		scroller.addEventListener('scroll', follow, { passive: true });
-		read();
+		// Untracked: read() both reads and writes `tops`, which would otherwise rerun this setup on every placement it makes.
+		untrack(read);
 		// The room below the text stays until the reading-line hold has ended (docMarginHold owns when), so a close can still scroll the reader's line
 		// back to where it was. It is asked a frame later, once a hold that this same change starts is running.
 		const area = bounds;

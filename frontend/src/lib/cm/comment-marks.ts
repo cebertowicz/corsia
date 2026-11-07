@@ -22,13 +22,10 @@ export interface CommentRange {
 	to: number;
 	id: string;
 	focused?: boolean;
-	replyWaiting?: boolean;
 	onMarkerFocus?: (ids: string[], opener: HTMLElement, anchor?: () => DOMRect | null, click?: MouseEvent) => void;
 	suggestion?: InlineSuggestion;
 	/** A point, not a passage: drawn as a margin marker only, with no highlight (its text was deleted, or an accepted suggestion deleted it). */
 	point?: boolean;
-	/** The comment's original text is gone from the document: its margin marker is drawn dashed. */
-	lost?: boolean;
 	/** A pin on an image or diagram region: drawn by its pin, never as a highlight on the whole block. */
 	region?: boolean;
 }
