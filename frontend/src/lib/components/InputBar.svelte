@@ -26,6 +26,7 @@
 	import { watchComposer } from './inputBarLifecycle';
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
+	import { REPLY_SEND_FAILURE, emitComposerSend, replySendBlock, type ComposerDeliveryIntent } from './composerSend';
 	import { onModelSheetRequest } from '$lib/stores/modelSheetRequest';
 	import { updateRestarting } from '$lib/update/store';
 
@@ -180,9 +181,7 @@
 		isMultiLine = false;
 	}
 
-	type DeliveryIntent = 'apply_now' | 'queue_after_turn';
-
-	async function handleSend(deliveryIntent: DeliveryIntent = 'apply_now'): Promise<SendOutcome> {
+	async function handleSend(deliveryIntent: ComposerDeliveryIntent = 'apply_now'): Promise<SendOutcome> {
 		if (!canSendToModel) return 'not_sent';
 		const prepared = prepareMessage();
 		const message = prepared instanceof Promise ? await prepared : prepared;
@@ -193,14 +192,7 @@
 			attachments: [...attachments],
 		};
 		const payloadComments = comments.map(({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }) => ({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }));
-		emitProductEvent('composer', 'sent', {
-			thread_id: threadId,
-			char_count: content.length,
-			attachment_count: attachments.length,
-			comment_count: payloadComments.length,
-			reply_count: payloadComments.filter(comment => !!comment.root_cid).length,
-			...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
-		});
+		emitComposerSend(threadId, content, attachments.length, payloadComments, deliveryIntent);
 		const inputId = sendMessage(threadId, content, modelId, attachments, undefined, deliveryIntent, payloadComments);
 		if (!inputId) {
 			toasts.show('Connection lost before CORSIA could accept this message.', 'error');
@@ -214,6 +206,20 @@
 		return 'sent';
 	}
 
+	export function sendReply(reply: ChatComment): void {
+		// A comment thread exists only on a message in a bound chat, so an unbound composer is never asked to send one.
+		if (!boundThreadId) throw new Error('Cannot send reply: no chat');
+		const blocked = replySendBlock($updateRestarting, canSendToModel);
+		if (blocked) { toasts.show(REPLY_SEND_FAILURE[blocked], 'error'); throw new Error(`Cannot send reply: ${blocked}`); }
+		const { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid } = reply;
+		const payload = [{ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }];
+		emitComposerSend(boundThreadId, '', 0, payload);
+		const inputId = sendMessage(boundThreadId, '', selection.modelId ?? undefined, [], undefined, 'apply_now', payload);
+		if (!inputId) {
+			toasts.show(REPLY_SEND_FAILURE.notAccepted, 'error');
+			throw new Error('Cannot send reply: not accepted');
+		}
+	}
 	const activeThread = $derived(selection.thread);
 	const hasReadySwitchDestination = $derived(readySwitchDestination(activeThread, selection.models));
 	// A thread outside the list (a worker, the Corsia agent) may have no model to gate on: the server holds or routes it.
@@ -332,7 +338,7 @@
 	}}
 >
 	<InputBarFileInputs bind:this={fileInputsRef} onFiles={handleFileSelect} />
-	<ChatCommentSelection bind:this={commentSelection} threadId={boundThreadId} {comments} surface={inputAreaEl} onChange={value => comments = value} />
+	<ChatCommentSelection bind:this={commentSelection} threadId={boundThreadId} {comments} surface={inputAreaEl} onChange={value => comments = value} onSendReply={sendReply} />
 
 	{#if uploadError}
 		<div class="upload-error">{uploadError} <button onclick={() => uploadError = ''}>✕</button></div>

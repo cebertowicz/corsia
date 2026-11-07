@@ -55,6 +55,26 @@ it('refreshes a loaded target that did not yet have its comment when the answer 
   stop();
 });
 
+it('announces each newly landed answer once, without announcing an existing answer again', async () => {
+  const oldAnswer = { author_kind: 'agent', assistant_message_id: 'old', user_message_id: 'sender', cid: 'c1.1', text: 'old', created_at: 't', unread: true };
+  const newAnswer = { ...oldAnswer, assistant_message_id: 'answer', text: 'new' };
+  const comment = { id: 'comment', cid: 'c1.1', user_message_id: 'sender', quote: 'text', answers: [oldAnswer] };
+  messages.set([row('target', 1, { chat_comments: [comment] }), row('answer', 2)] as never);
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, options: RequestInit) => {
+    const ids = JSON.parse(String(options.body)).message_ids as string[];
+    const refreshedComment = { ...comment, answers: [oldAnswer, newAnswer] };
+    if (ids.includes('target')) messages.set([row('target', 1, { chat_comments: [refreshedComment] }), row('answer', 2)] as never);
+    return { ok: true, json: async () => ({ messages: ids.map(id => id === 'answer' ? { id, chat_answer_cids: ['c1.1'] } : { id, chat_comments: [refreshedComment] }) }) };
+  }));
+  const announce = vi.fn();
+  const stop = watchChatCommentThreads(50, announce);
+  await state.handlers.get('turn_complete')!({ thread_id: 'thread', step_ids: ['answer'] });
+  await state.handlers.get('turn_complete')!({ thread_id: 'thread', step_ids: ['answer'] });
+  expect(announce).toHaveBeenCalledTimes(1);
+  expect(announce).toHaveBeenCalledWith('text');
+  stop();
+});
+
 it('refreshes a root when a reply answer arrives after its sending message has left the page', async () => {
   const comment = { id: 'root', cid: 'c1.1', user_message_id: 'sender', quote: 'text', note: '', from_off: 0, to_off: 4, created_at: 't', answers: [{ author_kind: 'user', user_message_id: 'reply-sender', cid: 'c2.1', text: 'reply', created_at: 't', unread: false }] };
   messages.set([row('target', 1, { chat_comments: [comment] }), row('answer', 3)] as never);

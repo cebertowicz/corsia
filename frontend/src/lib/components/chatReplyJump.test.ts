@@ -5,14 +5,14 @@ import { createChatReplyJumper } from './chatReplyJump';
 import type { RunLoad, RunStub } from '$lib/focusRuns';
 
 const destination = (id: string) => ({ pane: 'chat-replies', id, seq: 5, cid: 'c1' });
-const row = (id: string, thread = 't1') => ({ id, thread_id: thread, seq: 5 } as never);
+const row = (id: string, thread = 't1') => ({ id, thread_id: thread, seq: 5, chat_comments: [{ id: `comment-${id}`, cid: 'c1' }] } as never);
 let element: HTMLElement;
 
 beforeEach(() => {
 	activeThreadId.set('t1');
 	messages.set([]);
 	element = document.createElement('div');
-	element.innerHTML = '<div data-message-id="a"><div data-chat-comment="c1"></div></div><div data-message-id="b"><div data-chat-comment="c1"></div></div>';
+	element.innerHTML = '<div data-message-id="a"><span role="button" data-comment-ids="comment-a"></span></div><div data-message-id="b"><span role="button" data-comment-ids="comment-b"></span></div>';
 	document.body.append(element);
 	vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => { queueMicrotask(() => fn(0)); return 1; });
 	vi.stubGlobal('matchMedia', () => ({ matches: false }));
@@ -41,7 +41,7 @@ describe('reply navigation while the pager settles', () => {
 		expect(loadOlder).not.toHaveBeenCalled();
 		pager.loading = false;
 		jumper.resume();
-		await vi.waitFor(() => expect(element.querySelector('[data-chat-comment]')?.classList.contains('chat-reply-landed')).toBe(true));
+		await vi.waitFor(() => expect(element.querySelector('[data-comment-ids]')?.classList.contains('chat-reply-mark-landed')).toBe(true));
 		expect(loadOlder).toHaveBeenCalledTimes(1);
 	});
 
@@ -57,8 +57,8 @@ describe('reply navigation while the pager settles', () => {
 		messages.set([row('b')]);
 		pager.loading = false;
 		jumper.resume();
-		await vi.waitFor(() => expect(element.querySelector('[data-message-id="b"] [data-chat-comment]')?.classList.contains('chat-reply-landed')).toBe(true));
-		expect(element.querySelector('[data-message-id="a"] [data-chat-comment]')?.classList.contains('chat-reply-landed')).toBe(false);
+		await vi.waitFor(() => expect(element.querySelector('[data-message-id="b"] [data-comment-ids]')?.classList.contains('chat-reply-mark-landed')).toBe(true));
+		expect(element.querySelector('[data-message-id="a"] [data-comment-ids]')?.classList.contains('chat-reply-mark-landed')).toBe(false);
 	});
 
 	it('discards a queued click when the thread generation changes', async () => {
@@ -82,7 +82,7 @@ describe('reply navigation while the pager settles', () => {
 		pager.error = false;
 		messages.set([row('a')]);
 		jumper.resume();
-		await vi.waitFor(() => expect(element.querySelector('[data-chat-comment]')?.classList.contains('chat-reply-landed')).toBe(true));
+		await vi.waitFor(() => expect(element.querySelector('[data-comment-ids]')?.classList.contains('chat-reply-mark-landed')).toBe(true));
 		expect(loadOlder).toHaveBeenCalledTimes(1);
 	});
 
@@ -94,7 +94,7 @@ describe('reply navigation while the pager settles', () => {
 		pager.loading = false;
 		jumper.resume();
 		await vi.waitFor(() => expect(loadRun).toHaveBeenCalledTimes(1));
-		await vi.waitFor(() => expect(element.querySelector('[data-chat-comment]')?.classList.contains('chat-reply-landed')).toBe(true));
+		await vi.waitFor(() => expect(element.querySelector('[data-comment-ids]')?.classList.contains('chat-reply-mark-landed')).toBe(true));
 		expect(loadOlder).not.toHaveBeenCalled();
 	});
 
@@ -110,7 +110,7 @@ describe('reply navigation while the pager settles', () => {
 		messages.set([row('a')]);
 		loads = { last: load({ loading: false }) };
 		jumper.resume();
-		await vi.waitFor(() => expect(element.querySelector('[data-chat-comment]')?.classList.contains('chat-reply-landed')).toBe(true));
+		await vi.waitFor(() => expect(element.querySelector('[data-comment-ids]')?.classList.contains('chat-reply-mark-landed')).toBe(true));
 		expect(loadRun).not.toHaveBeenCalled();
 	});
 
@@ -125,6 +125,6 @@ describe('reply navigation while the pager settles', () => {
 		messages.set([row('a')]);
 		loads = { last: load({ error: false }) };
 		jumper.resume();
-		await vi.waitFor(() => expect(element.querySelector('[data-chat-comment]')?.classList.contains('chat-reply-landed')).toBe(true));
+		await vi.waitFor(() => expect(element.querySelector('[data-comment-ids]')?.classList.contains('chat-reply-mark-landed')).toBe(true));
 	});
 });

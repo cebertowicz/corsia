@@ -39,10 +39,10 @@ const surface = $state({ active: true });
 function setVisibility(value: 'visible' | 'hidden') {
 	Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value });
 }
-function render(onViewed: (id: string, replyId: string) => Promise<void>, viewEachUnread = true) {
+function render(onViewed: (id: string, replyId: string) => Promise<void>, chatSurface = true) {
 	vi.stubGlobal('IntersectionObserver', FakeObserver);
 	host = document.createElement('div'); document.body.appendChild(host);
-	component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, get onViewed() { return surface.active ? onViewed : undefined; }, viewEachUnread } });
+	component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, get onViewed() { return surface.active ? onViewed : undefined; }, chatSurface } });
 	flushSync();
 }
 function arrive(comment: Partial<CommentThreadData>) {
@@ -133,8 +133,7 @@ describe('CommentThread stamping', () => {
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
 		render(onViewed);
 		FakeObserver.live()[1].report(true);
-		await dwell();
-		expect(onViewed.mock.calls).toEqual([['c1', 'r2']]);
+		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2']]), { timeout: 3000 });
 	});
 
 	it('stamps chat replies independently when the later one is seen first', async () => {
@@ -142,8 +141,7 @@ describe('CommentThread stamping', () => {
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
 		render(onViewed);
 		FakeObserver.live()[1].report(true);
-		await dwell();
-		expect(onViewed.mock.calls).toEqual([['c1', 'r2']]);
+		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2']]), { timeout: 3000 });
 		FakeObserver.live()[1].report(false);
 		FakeObserver.live()[0].report(true);
 		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2'], ['c1', 'r1']]), { timeout: 3000 });

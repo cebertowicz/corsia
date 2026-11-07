@@ -30,9 +30,10 @@
 	import { arrivedDocComments } from '$lib/stores/docComments';
 	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
 
-	let { comment, header, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
+	let { comment, header, failure, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, flat = false, chatSurface = false, hideOrphan = flat, detachedNote = 'This text is no longer in the document', leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
 		comment: CommentThreadData;
 		header?: Snippet;
+		failure?: Snippet;
 		diagram?: boolean;
 		/** Keep resolved threads in the drawer's card presentation. */
 		drawerCard?: boolean;
@@ -53,10 +54,12 @@
 		keepReplyVisible?: boolean;
 		/** Document comment surfaces present threads on the sheet rather than as nested cards. */
 		flat?: boolean;
-		/** Chat answers have independent seen stamps for each comment. */
-		viewEachUnread?: boolean;
+		/** The chat surface's mode: each answer keeps its own seen stamp, the card opens through the read dwell instead of on arrival, a typed reply is kept after posting, and Agree/Resolve show only when the caller supplies them. */
+		chatSurface?: boolean;
 		/** The drawer's quote already says text changed; a flat popover still needs the state message. */
 		hideOrphan?: boolean;
+		/** What a detached comment's anchor no longer resolves to, in the caller's words: a chat message is not a document. */
+		detachedNote?: string;
 		/** Easing out of the list: a resolved card keeps its card form until it is gone, instead of switching to the resolved row first. */
 		leaving?: boolean;
 		/** Off where the caller scrolls its own list to the focused card. */
@@ -106,8 +109,8 @@
 	let replyPosting = $state(false);
 	/** A deleted text's quote is read in full unless it is long; then it is clamped with the Show more control chat comments use. */
 	let quoteOpen = $state(false);
-	let resolvedOpen = $state(untrack(() => !viewEachUnread && (!!comment.newComment || !!comment.newReplyIds?.length)));
-	$effect(() => { if (!viewEachUnread && (comment.newComment || comment.newReplyIds?.length)) resolvedOpen = true; });
+	let resolvedOpen = $state(untrack(() => !chatSurface && (!!comment.newComment || !!comment.newReplyIds?.length)));
+	$effect(() => { if (!chatSurface && (comment.newComment || comment.newReplyIds?.length)) resolvedOpen = true; });
 	let el = $state<HTMLElement>();
 	const agreedBy = $derived((comment.acknowledgedBy ?? []).map((ack) => ack.name).join(', '));
 	const agreeTransition = useLayoutCrossfade(() => el, () => !!agreedBy);
@@ -144,7 +147,7 @@
 	// One reply's own observer calls this with that reply's id, so nothing carries over from another element.
 	function stamp(replyId: string) {
 		if (!onViewed || document.visibilityState !== 'visible' || (!comment.newComment && !comment.newReplyIds?.length)) return;
-		if (viewEachUnread) {
+		if (chatSurface) {
 			if (stampedReplies.has(replyId)) return;
 			stampedReplies.add(replyId);
 			onViewed(comment.id, replyId).catch((err) => {
@@ -169,7 +172,7 @@
 	function advanceStamp() {
 		stampTimer = null;
 		const unread = new Set(comment.newReplyIds ?? []);
-		if (viewEachUnread) {
+		if (chatSurface) {
 			for (const replyId of unread) if (dwelled.has(replyId)) stamp(replyId);
 			return;
 		}
@@ -197,19 +200,20 @@
 	$effect(() => {
 		observeTick;
 		newestReply;
-		replyVisibility.sync(el, !!onViewed && viewEachUnread, JSON.parse(unreadKey));
+		replyVisibility.sync(el, !!onViewed && chatSurface, JSON.parse(unreadKey));
 	});
-	const { openThread, openFromFocus } = createThreadOpen(() => comment, () => viewEachUnread, stamp);
-	const onVisibilityChange = observeArrivedThread(() => el, () => comment.id, () => !viewEachUnread && !!onViewed, () => $arrivedDocComments.has(comment.id), openThread, () => { observeTick++; }, () => replyVisibility.clear(), cancelDwell);
+	const { openThread, openFromFocus } = createThreadOpen(() => comment, () => chatSurface, stamp);
+	const onVisibilityChange = observeArrivedThread(() => el, () => comment.id, () => !chatSurface && !!onViewed, () => $arrivedDocComments.has(comment.id), openThread, () => { observeTick++; }, () => replyVisibility.clear(), cancelDwell);
 
 	async function postReply() {
-		const t = replyText.trim();
+		const submittedText = replyText;
+		const t = submittedText.trim();
 		if (readOnly || !t || replyPosting) return;
 		replyPosting = true;
 		try {
 			const mentions = replyField?.mentions() ?? [];
 			await onReply?.(comment.id, t, [...new Set(mentions.map(item => item.agent_id))], mentions);
-			replyField?.clearTags(); replyText = ''; onReplySelection?.(null);
+			if (!chatSurface || replyText === submittedText) { replyField?.clearTags(); replyText = ''; onReplySelection?.(null); }
 		} catch {
 			// The caller reports the refusal; keep the reply for retry.
 		} finally {
@@ -253,6 +257,7 @@
 	<div class="ct resolved" class:drawerCard class:focused class:read-only={readOnly} bind:this={el} role="region" aria-label="Resolved comment by {author.name}" in:fade={{ duration: 150 }} onclick={openThread} onfocusin={openFromFocus}>
 		{@render header?.()}
 		{@render resolvedHead('check', `Resolved · ${comment.replies.length + 1} message${comment.replies.length ? 's' : ''}`)}
+		{@render failure?.()}
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} />
@@ -278,12 +283,12 @@
 			{#if comment.replies.length}
 				<span class="ct-reply-count">{comment.replies.length} {comment.replies.length === 1 ? 'reply' : 'replies'}</span>
 			{/if}
-			{#if !isSuggestion && !comment.resolved}
+			{#if !isSuggestion && !comment.resolved && (onAgree || !chatSurface)}
 				<button class="ct-act ack" transition:clipFade={{ axis: 'x' }} class:on={comment.acked} disabled={readOnly} onclick={(e) => { e.stopPropagation(); openThread(); onAgree?.(comment.id, !comment.acked); }} aria-label="Agree" title="Agree">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 11v9H4a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1z" /><path d="M7 11l4-7a2 2 0 0 1 3 2l-1 5h5a2 2 0 0 1 2 2.3l-1.2 6A2 2 0 0 1 16.8 21H7" /></svg>
 				</button>
 			{/if}
-			{#if (!isSuggestion && !comment.resolved) || decidedOpen}
+			{#if ((!isSuggestion && !comment.resolved) || decidedOpen) && (onResolve || !chatSurface)}
 				<button class="ct-act resolve" transition:clipFade={{ axis: 'x' }} disabled={readOnly} onclick={(e) => { e.stopPropagation(); openThread(); onResolve?.(comment.id, true); }} aria-label="Resolve" title="Resolve — close the thread">
 					<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
 				</button>
@@ -303,7 +308,7 @@
 			<CommentSuggestionActions orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />
 		{:else}
 			{#if comment.resolved}<div transition:clipFade><ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} /></div>{/if}
-			{#if comment.orphaned && !hideOrphan}{#if comment.detached && comment.anchor}<CommentQuote quote={plainQuote(comment.anchor)} lines={quoteOpen || !isLongMessageText(comment.anchor) ? null : 1} />{#if isLongMessageText(comment.anchor)}<button class="ct-link" data-quote-more aria-expanded={quoteOpen} onclick={(e) => { e.stopPropagation(); quoteOpen = !quoteOpen; }}>{quoteOpen ? 'Show less' : 'Show more'}</button>{/if}{/if}<div class="ct-orphan" data-detached={comment.detached || undefined}>{comment.detached ? 'This text is no longer in the document' : 'The text this comment was on has changed'}</div>{/if}
+			{#if comment.orphaned && !hideOrphan}{#if comment.detached && comment.anchor}<CommentQuote quote={plainQuote(comment.anchor)} lines={quoteOpen || !isLongMessageText(comment.anchor) ? null : 1} />{#if isLongMessageText(comment.anchor)}<button class="ct-link" data-quote-more aria-expanded={quoteOpen} onclick={(e) => { e.stopPropagation(); quoteOpen = !quoteOpen; }}>{quoteOpen ? 'Show less' : 'Show more'}</button>{/if}{/if}<div class="ct-orphan" data-detached={comment.detached || undefined}>{comment.detached ? detachedNote : 'The text this comment was on has changed'}</div>{/if}
 			{#if comment.regionStale}
 				<div class="ct-orphan" data-region-stale>{changedLabel(diagram)}{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
 			{/if}
@@ -314,11 +319,12 @@
 			<CommentReplyList fullNames={focused && !inMargin} replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />
 		{/if}
 
+		{@render failure?.()}
 		{#if !isSuggestion && agreedBy && !comment.resolved}
 			<div class="ct-agreed" transition:agreeTransition><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed: {agreedBy}</div>
 		{/if}
 		{#if !readOnly && !(hideReply && !replyText.trim())}
-			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />
+			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} posting={chatSurface && replyPosting} onSend={postReply} />
 		{/if}
 	</div>
 {/if}
