@@ -10,6 +10,8 @@ export interface CommentReply {
 	authorKind?: 'user' | 'agent';
 	text: string;
 	taggedAgents?: { id: string; name: string }[];
+	/** An agent asked the person here; the value is the person's own account name. */
+	taggedPerson?: string | null;
 	mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[];
 	at: string;
 	createdAt?: string;
@@ -25,15 +27,19 @@ export interface DocComment {
 	authorThreadId?: string | null;
 	text: string;
 	taggedAgents?: { id: string; name: string }[];
+	/** An agent asked the person here; the value is the person's own account name. */
+	taggedPerson?: string | null;
 	mentions?: import('$lib/components/comments/mentionSelection').MentionOccurrence[];
 	at: string;
 	createdAt?: string;
 	resolved: boolean;
 	orphaned?: boolean;
-	/** An orphaned comment whose quote no longer appears in the document text. */
+	/** The original text is gone: nothing of the quote is left to mark (a collapsed range, or a quote found nowhere in the document). One rule for a comment and for a decided suggestion that keeps its replies. */
 	detached?: boolean;
 	/** An open suggestion whose text was edited inside: it keeps its place and its quote, and cannot be accepted. */
 	textChanged?: boolean;
+	/** When the thread last changed; a resolve sets it. The server keeps no separate resolve time, so this orders the resolved list. */
+	updatedAt?: string;
 	acked?: boolean;
 	review?: boolean;
 	replacement?: string | null;
@@ -85,9 +91,11 @@ export function fromServer(r: ServerComment): DocComment {
 		authorThreadId: r.author_thread_id,
 		text: r.body,
 		taggedAgents: r.tagged_agents ?? [],
+		taggedPerson: r.tagged_person ?? null,
 		mentions: r.tagged_agent_mentions ?? [],
 		at: relLabel(r.created_at),
 		createdAt: r.created_at,
+		updatedAt: r.updated_at,
 		resolved: !!r.resolved,
 		orphaned: !!r.orphaned,
 		textChanged: !!r.text_changed,
@@ -99,7 +107,7 @@ export function fromServer(r: ServerComment): DocComment {
 		decidedBy: r.decided_by,
 		newReplyIds: r.new_reply_ids ?? [],
 		newComment: !!r.new_comment,
-		replies: (r.replies ?? []).map((x) => ({ id: x.id, author: x.author, authorKind: x.author_kind, text: x.body, taggedAgents: x.tagged_agents ?? [], mentions: x.tagged_agent_mentions ?? [], at: relLabel(x.created_at), createdAt: x.created_at })),
+		replies: (r.replies ?? []).map((x) => ({ id: x.id, author: x.author, authorKind: x.author_kind, text: x.body, taggedAgents: x.tagged_agents ?? [], taggedPerson: x.tagged_person ?? null, mentions: x.tagged_agent_mentions ?? [], at: relLabel(x.created_at), createdAt: x.created_at })),
 		...regionFromServer(r)
 	};
 }

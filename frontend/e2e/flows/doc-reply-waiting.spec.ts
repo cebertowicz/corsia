@@ -257,7 +257,14 @@ async function onlyThread(request: APIRequestContext, keepId: string): Promise<v
 
 // The frames belong to the replier's thread, not the conductor landing the app opens on.
 async function openThread(page: Page, title: string): Promise<void> {
-	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+	if ((page.viewportSize()?.width ?? 0) <= 768) {
+		// The first-run landing can close the phone sidebar after it opened (see loadPastFirstRunLanding), so open it again until its row can be pressed.
+		await expect(async () => {
+			if (!(await page.locator('aside.sidebar.open').count())) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+			await sidebarThread(page, title).click({ timeout: 2_000 });
+		}).toPass({ timeout: 25_000 });
+		return;
+	}
 	await sidebarThread(page, title).click();
 }
 
@@ -587,7 +594,7 @@ async function stackProblems(page: Page, parts: Record<string, ReturnType<Page['
 
 for (const theme of ['light', 'dark'] as const) {
 	for (const width of [1440, 393]) {
-		test(`${TAG} ${theme} ${width}px: row and margin markers clear only after thread disclosure`, async ({ page, request }) => {
+		test(`${TAG} ${theme} ${width}px: row and comments pill clear only after thread disclosure`, async ({ page, request }) => {
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 			await page.setViewportSize({ width, height: 900 });
 			await page.emulateMedia({ colorScheme: theme });
@@ -614,25 +621,25 @@ for (const theme of ['light', 'dark'] as const) {
 			if (width === 393) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await page.getByText(title, { exact: true }).first().click();
 			const replyMark = page.locator('.reply-mark');
-			const marginReply = page.locator('.cm-comment-marker svg circle');
+			const pillUnread = page.locator('.document-header .comment-status');
 			if (width === 393) {
 				// The artifact row remains mounted in the hidden pane while the document is active.
 				await expect(replyMark).toHaveCount(1);
-				await expect(marginReply).toBeVisible();
+				await expect(pillUnread).toHaveAttribute('aria-label', /1 unread/);
 				await page.getByRole('button', { name: 'Toggle panel' }).click();
 				await expect(replyMark).toBeVisible();
 				await page.getByRole('button', { name: 'Toggle panel' }).click();
 			} else {
 				await expect(replyMark).toBeVisible();
-				await expect(marginReply).toBeVisible();
+				await expect(pillUnread).toHaveAttribute('aria-label', /1 unread/);
 			}
-			// Opening the document alone keeps the passive markers intact.
-			await expect(marginReply).toBeVisible();
-			// Opening the thread from its marker shows its replies; showing the reply is what stamps it viewed.
-			await page.locator('.cm-comment-marker').first().press('Enter');
+			// Opening the document alone keeps the passive unread marks intact.
+			await expect(pillUnread).toHaveAttribute('aria-label', /1 unread/);
+			// Opening the thread from its highlight shows its replies; showing the reply is what stamps it viewed.
+			await page.locator('.cm-comment-anchor').first().click();
 			await expect(page.getByText('Reviewed.', { exact: true })).toBeVisible();
 			await expect(page.locator('.reply-mark')).toHaveCount(0);
-			await expect(page.locator('.cm-comment-marker svg circle')).toHaveCount(0);
+			await expect(pillUnread).not.toHaveAttribute('aria-label', /unread/);
 		});
 
 		test(`${TAG} ${theme} ${width}px: reply chip stacks above Needs you and the composer`, async ({ page, request }, testInfo) => {
@@ -779,6 +786,7 @@ for (const theme of ['light', 'dark'] as const) {
 for (const theme of ['light', 'dark'] as const) {
 	for (const width of [1440, 393]) {
 		test(`${TAG} ${theme} ${width}px: later replies remain passive and count in the document pill`, async ({ page, request }, testInfo) => {
+			test.setTimeout(60_000);
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 			skipMismatchedProject(width, testInfo.project.name);
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });

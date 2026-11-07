@@ -12,7 +12,10 @@ _V86 = """
     CREATE TABLE doc_comments (
         id TEXT PRIMARY KEY, artifact_id TEXT NOT NULL, parent_id TEXT,
         author_kind TEXT NOT NULL, resolved INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL, replacement TEXT, review INTEGER NOT NULL DEFAULT 0
+        created_at TEXT NOT NULL, replacement TEXT, review INTEGER NOT NULL DEFAULT 0,
+        -- Not v86-era: the one unread definition reads the person-tag mark, so this fixture needs
+        -- that column to read unread here. The proof below is the v87 stamp carry, untouched.
+        tagged_user_id TEXT
     );
     CREATE TABLE doc_comment_views (
         user_id TEXT NOT NULL, artifact_id TEXT NOT NULL,

@@ -5,8 +5,9 @@ import { EditorView } from '@codemirror/view';
 import { visibleRegion } from '$lib/cm/visible-region';
 
 vi.mock('$lib/stores/docSaveQueue', () => ({ flushDraft: vi.fn(), seedDraft: vi.fn() }));
-vi.mock('$lib/stores/docComments', () => ({ loadComments: vi.fn() }));
+vi.mock('$lib/stores/docComments', () => ({ docComments: { subscribe: (run: (value: object) => void) => { run({}); return () => {}; } }, loadComments: vi.fn() }));
 
+import { MARGIN_MIN } from '$lib/docCommentSurfaceState.svelte';
 import DocCommentSurface from './DocCommentSurface.svelte';
 
 let host: HTMLElement;
@@ -97,16 +98,22 @@ describe('the phone composer sheet over a commented cell', () => {
 		expect(visibleRegion(view).band.bottom).toBe(SCREEN - SHEET_HEIGHT);
 	});
 
-	it('draws the list as a modal sheet on a canvas under 900 px and inline, with no scrim, from 900 px', () => {
+	// The inline form is the margin column, and it starts where the text beside it keeps 45 characters per line (660 px), not at 900 px.
+	it('draws the list as a modal sheet on a canvas under MARGIN_MIN and as the margin column, with no scrim, from MARGIN_MIN', () => {
 		vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
-		openSheet({ kind: 'list' }, false, vi.fn(), 899);
+		// Each canvas is the column for its first pass, until it is measured; that holds the reader's row, which reads a text range's rects, and jsdom has none to give.
+		Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value: () => [] });
+		Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect(0, 0, 0, 0) });
+		openSheet({ kind: 'list' }, false, vi.fn(), MARGIN_MIN - 1);
 		expect(document.querySelector('[data-adaptive-drawer]')?.classList.contains('nonmodal')).toBe(false);
 		expect(document.querySelector('.drawer-panel')?.getAttribute('aria-modal')).toBe('true');
 		unmount(component!);
 		component = null;
 		document.body.replaceChildren();
-		openSheet({ kind: 'list' }, false, vi.fn(), 900);
+		openSheet({ kind: 'list' }, false, vi.fn(), MARGIN_MIN);
 		expect(document.querySelector('[data-adaptive-drawer]')).toBeNull();
 		expect(document.querySelector('[data-doc-comments-drawer]')).not.toBeNull();
+		delete (Range.prototype as { getClientRects?: unknown }).getClientRects;
+		delete (Range.prototype as { getBoundingClientRect?: unknown }).getBoundingClientRect;
 	});
 });

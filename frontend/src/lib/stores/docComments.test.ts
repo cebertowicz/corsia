@@ -12,9 +12,8 @@ vi.mock('$lib/api/docs', () => ({
 
 import { prepareCommentArrival, revealCommentArrival } from './docCommentArrivals';
 import {
-	docComments, commentLoads, fromServer, hasUnread, loadComments, flushPositions, markThreadViewed, remapComments, addComment, addReply,
+	docComments, commentLoads, fromServer, hasUnread, loadComments, flushPositions, markThreadViewed, remapComments, addComment, addReply, resolveComment,
 } from './docComments';
-import { canvasCommentHighlights } from '$lib/docCanvasComments';
 import { addRegionComment, moveRegion } from './imageRegionComments';
 
 afterEach(() => {
@@ -172,7 +171,7 @@ describe('comment-thread view projection', () => {
 
 describe('thread reply attention', () => {
 	const thread = (id: string, newReplyIds: string[]) => ({ id, anchor: 'quote', author: 'you', text: id, at: 'now', resolved: false, from: 0, to: 5, replies: [], newReplyIds });
-	const waiting = () => canvasCommentHighlights(get(docComments).artifact, 'quote text', null, () => {}).map((range) => [range.id, range.replyWaiting]);
+	const waiting = () => get(docComments).artifact.map((comment) => [comment.id, hasUnread(comment)]);
 
 	it('keeps one copy of reply attention: the marker and the ids agree after a stamp', async () => {
 		docComments.set({ artifact: [thread('a', ['a1', 'a2']), thread('b', ['b1'])] });
@@ -209,5 +208,34 @@ describe('prepared comment arrivals', () => {
 		expect(get(docComments).artifact).toBeUndefined();
 		revealCommentArrival('artifact', arrival);
 		expect(get(docComments).artifact.map((comment) => comment.id)).toEqual(['first']);
+	});
+});
+
+describe('resolving a comment', () => {
+	const row = { id: 'c', anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] };
+	const resolvedNow = () => get(docComments).artifact[0].resolved;
+	it('flips the flag at once and puts it back when the request fails', async () => {
+		let refuse!: (error: Error) => void;
+		mocks.patchComment.mockReturnValue(new Promise((_ok, no) => { refuse = no; }));
+		docComments.set({ artifact: [row] });
+		const answered = resolveComment('artifact', 'c');
+		expect(resolvedNow()).toBe(true);
+		refuse(new Error('Offline'));
+		expect(await answered).toBe(false);
+		expect(resolvedNow()).toBe(false);
+	});
+	it('with wait, keeps the old state until the request is answered, then changes it only if it was taken', async () => {
+		let accept!: (value: unknown) => void;
+		mocks.patchComment.mockReturnValueOnce(new Promise((ok) => { accept = ok; }));
+		docComments.set({ artifact: [row] });
+		const taken = resolveComment('artifact', 'c', true, true);
+		expect(resolvedNow()).toBe(false);
+		accept({});
+		expect(await taken).toBe(true);
+		expect(resolvedNow()).toBe(true);
+		docComments.set({ artifact: [row] });
+		mocks.patchComment.mockRejectedValueOnce(new Error('Offline'));
+		expect(await resolveComment('artifact', 'c', true, true)).toBe(false);
+		expect(resolvedNow()).toBe(false);
 	});
 });

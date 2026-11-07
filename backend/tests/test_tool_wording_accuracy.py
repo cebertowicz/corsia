@@ -2,7 +2,7 @@
 
 import pytest
 
-from tools import filesystem_edit
+from tools import filesystem_edit, filesystem_match
 from tools.catalog import TOOL_CATALOG
 from tools.delegation_model import DelegateSetModelTool
 from tools.filesystem_edit import MultiEditTool
@@ -52,14 +52,14 @@ def test_large_file_miss_compares_only_candidate_windows(monkeypatch):
     content = "".join(lines)
     old = "".join(lines[2500:2560]).replace("    value_2530", "  value_2530")
     calls = []
-    real_ratio = filesystem_edit.difflib.SequenceMatcher.ratio
+    real_ratio = filesystem_match.difflib.SequenceMatcher.ratio
 
     def counting_ratio(self):
         calls.append(len(self.b))
         return real_ratio(self)
 
-    monkeypatch.setattr(filesystem_edit.difflib.SequenceMatcher, "ratio", counting_ratio)
-    result = filesystem_edit._not_found_message(old, content, "big.py")
+    monkeypatch.setattr(filesystem_match.difflib.SequenceMatcher, "ratio", counting_ratio)
+    result = filesystem_match._not_found_message(old, content, "big.py")
 
     assert "(actual, line 2501)" in result
-    assert len(calls) <= filesystem_edit._MATCH_CANDIDATES
+    assert len(calls) <= filesystem_match._MATCH_CANDIDATES

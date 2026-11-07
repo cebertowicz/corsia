@@ -159,7 +159,7 @@ async def test_a_confined_worker_switched_to_another_harness_stays_confined(
     worker = receipt["thread_id"]
     child_db.execute("UPDATE threads SET model='claude-code/sonnet' WHERE id=?", (worker,))
     claude = launch_confinement(worker, None, child_db)
-    assert claude.confined and claude.add_dirs == (reviewed_dir,)
+    assert claude.confined and claude.read_dirs == (reviewed_dir,)
     assert claude.working_dir.endswith(f"{worker}/confined") and Path(claude.working_dir).is_dir()
 
     child_db.execute("UPDATE threads SET model='codex/gpt-5-codex' WHERE id=?", (worker,))

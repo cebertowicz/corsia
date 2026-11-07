@@ -227,8 +227,8 @@ VERDICT_OWED = (
 WORKER_STEP_TO_USER = (
     "A delegated worker cannot assign a step to the user: your parent judges "
     "your work and decides what reaches the user. Put the step up for review "
-    "with request_review, or draft a decision with plan_decision, which goes "
-    "to your parent first."
+    "with request_review, saying what the person must do; only a choice is a "
+    "decision (plan_decision, which goes to your parent first)."
 )
 
 

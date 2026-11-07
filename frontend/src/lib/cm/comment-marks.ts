@@ -22,13 +22,10 @@ export interface CommentRange {
 	to: number;
 	id: string;
 	focused?: boolean;
-	replyWaiting?: boolean;
 	onMarkerFocus?: (ids: string[], opener: HTMLElement, anchor?: () => DOMRect | null, click?: MouseEvent) => void;
 	suggestion?: InlineSuggestion;
 	/** A point, not a passage: drawn as a margin marker only, with no highlight (its text was deleted, or an accepted suggestion deleted it). */
 	point?: boolean;
-	/** The comment's original text is gone from the document: its margin marker is drawn dashed. */
-	lost?: boolean;
 	/** A pin on an image or diagram region: drawn by its pin, never as a highlight on the whole block. */
 	region?: boolean;
 }
@@ -103,6 +100,8 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	const quote = origin === 'quote-tap';
 	const boxOf = (current: EditorView) => boxAt(current, target, widget);
 	if (origin === 'comment-save' && within(boxOf(view), visibleRegion(view).band)) return;
+	// With comments in the margin the cards move to the line, so a visible line never makes the document scroll.
+	if (view.dom.closest('.doc')?.querySelector('.canvas-comment-drawer.margin') && within(boxOf(view), visibleRegion(view).band)) return;
 	// A drawn widget row is placed with the scroller inside CodeMirror's measure cycle: CodeMirror's own scroll target is the
 	// whole replaced block, which centres on the block's middle. Anything else, and a widget not drawn yet, goes to CodeMirror.
 	const jump = () => {

@@ -100,11 +100,13 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     notification = art or {"integration": "workspace", "type": artifact_type, "external_id": str(p)}
     from infra.guidance_targets import guidance_target
 
-    # Only guidance files are recorded; this asks no Git, so opening stays as cheap as before.
+    # Only guidance files are recorded. Whether history is off for the whole workspace asks Git, which
+    # the caller that shows history does off the database pool (api/files.py content).
     target = guidance_target(p, config.WORKSPACE)
+    recorded = target is not None and not target.fault
     return {"text": text, "size": st.st_size, "mtime": st.st_mtime,
             "revision": revision(raw), "writable": writable, "artifact": art,
-            "freshness": freshness, "history": target is not None and not target.fault,
+            "freshness": freshness, "history": recorded,
             "_notification": notification}
 
 

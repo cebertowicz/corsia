@@ -1,4 +1,4 @@
-import { showAllThreads } from '../support/commentDrawer';
+import { inResolved, showAllThreads } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
@@ -130,14 +130,14 @@ for (const [width, height, project] of layouts) {
 			await openComments(page, drawer);
 
 			await accept(loose).click();
-			await expect(row(loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible();
+			await inResolved(drawer, () => expect(row(loose).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			await expect(editor).toContainText('The first line is tight.');
 			await expect(strike(page, loose)).toHaveCount(0);
 			await expect(insert(page, loose)).toHaveCount(0);
 			await expect.poll(storedText).toBe(PROSE.replace('is loose', 'is tight'));
 
 			await reject(fine).click();
-			await expect(row(fine).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible();
+			await inResolved(drawer, () => expect(row(fine).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
 			await expect(strike(page, fine)).toHaveCount(0);
 			await expect(insert(page, fine)).toHaveCount(0);
 			await expect(editor).toContainText('The second line is fine.');

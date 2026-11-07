@@ -132,21 +132,18 @@ describe('markdown tasks', () => {
 		expect(view.dom.querySelector('.cm-comment-anchor')?.textContent).toContain('annotated');
 	});
 
-	it('puts the threads of nearby lines in one margin marker and opens them', async () => {
+	it('gives each commented line one empty position entry for its threads', async () => {
 		const view = mount('one comment\nsecond comment\n', { comments: true });
-		const onMarkerFocus = vi.fn();
 		view.dispatch({ effects: setCommentRanges.of([
-			{ from: 0, to: 3, id: 'one', onMarkerFocus },
-			{ from: 4, to: 11, id: 'two', onMarkerFocus },
-			{ from: 12, to: 18, id: 'three', onMarkerFocus },
+			{ from: 0, to: 3, id: 'one' },
+			{ from: 4, to: 11, id: 'two' },
+			{ from: 12, to: 18, id: 'three' },
 		]) });
 		await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
-		// No layout in jsdom: both lines sit within one coarse-pointer target height, so one cluster.
-		const markers = view.dom.querySelectorAll<HTMLButtonElement>('.cm-comment-marker');
-		expect(markers).toHaveLength(1);
-		expect(markers[0].textContent).toBe('3');
-		markers[0].click();
-		expect(onMarkerFocus).toHaveBeenCalledWith(['one', 'two', 'three'], markers[0], undefined, expect.any(MouseEvent));
+		const lines = [...view.dom.querySelectorAll<HTMLElement>('.cm-comment-line')];
+		expect(lines.map((line) => line.dataset.commentIds)).toEqual(['one,two', 'three']);
+		expect(lines.every((line) => line.textContent === '')).toBe(true);
+		expect(view.dom.querySelector('.cm-comment-marker')).toBeNull();
 	});
 
 	it('continues a task as an unchecked task through the existing markdown continuation', () => {

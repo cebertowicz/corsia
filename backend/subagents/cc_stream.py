@@ -63,7 +63,6 @@ class CCStreamSession:
         corsia_thread_id: str | None = None,
         reconstructed_transcript_path: str | None = None,
         confinement: str = CONFINEMENT_NONE,
-        add_dirs: tuple[str, ...] = (),
     ) -> None:
         self.transport_generation_id = str(uuid.uuid4())
         self.binary = binary
@@ -79,7 +78,6 @@ class CCStreamSession:
         self.working_dir = working_dir
         self.claude_dir = claude_dir
         self.confinement = confinement
-        self.add_dirs = add_dirs
         self._on_event = on_event
         self._on_exit = on_exit
         self._extra_args = extra_args or []
@@ -109,7 +107,6 @@ class CCStreamSession:
             model=self.model,
             effort=self.effort,
             confinement=self.confinement,
-            add_dirs=self.add_dirs,
         )
 
     def build_cmd(self) -> list[str]:

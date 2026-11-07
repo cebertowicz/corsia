@@ -372,6 +372,8 @@ async def thread_status(thread_id: str, token: str, messages: int = 5):
     result = await run_in_db(read_delegate_status, thread_id, user["id"], n, reader, person_messages=True)
     if result is None:
         raise HTTPException(404, "Thread not found")
+    if isinstance(result, dict):
+        return result
     thread_row, active, conductor_scopes, recent, _checkpoint = result
 
     truth = await read_runtime_for(

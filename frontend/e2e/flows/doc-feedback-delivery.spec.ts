@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
-import { showAllThreads } from '../support/commentDrawer';
+import { showAllThreads, showResolved } from '../support/commentDrawer';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 import { deliveredBatches, headerSend, heldIn, leaveUnsent, setDeliveryPreference } from '../support/heldComments';
 
@@ -83,7 +83,7 @@ test('@surface:doc-feedback-delivery sends a held user batch from the header in 
 	const title = `feedback-delivery-${stamp}`;
 	const threadId = await createSession(request, title);
 	const token = encodeURIComponent(TEST_TOKEN);
-	// The marker sits by the lower viewport edge: body text may sit under the transient notice, but this control may not.
+	// The commented text sits by the lower viewport edge: body text may sit under the transient notice, but a comment card may not.
 	const longDocument = [...Array.from({ length: 28 }, (_, index) => `Paragraph ${index + 1} fills the canvas behind the transient delivery notice.`), 'A comment that will become due.'].join('\n\n');
 	const commentOffset = longDocument.lastIndexOf('comment');
 	const rootsResponse = await request.get(`/api/files/tree?token=${token}`);
@@ -116,7 +116,7 @@ test('@surface:doc-feedback-delivery sends a held user batch from the header in 
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	await page.locator('.cm-scroller').evaluate((scroller) => { scroller.scrollTop = scroller.scrollHeight; });
-	await expect(page.locator('.cm-comment-marker')).toBeVisible();
+	await expect(page.locator('.cm-comment-anchor')).toBeVisible();
 	// The held batch waits for the header's Send, which goes once the batch is delivered.
 	await expect(headerSend(page)).toHaveText('Send 1 comment');
 	await expectHeaderSendFits(headerSend(page));
@@ -134,7 +134,7 @@ test('@surface:doc-feedback-delivery sends a held user batch from the header in 
 	const confirmation = page.locator('.document-canvas .delivery-confirmation .toast--success');
 	await expect(confirmation).toContainText('1 comment sent');
 	await captureDeliveryFrame(page, 'canvas-confirmation');
-	// Body text may sit behind this transient notice, but no control, marker, pin, composer, or scrollbar may.
+	// Body text may sit behind this transient notice, but no control, comment card, pin, composer, or scrollbar may.
 	const [confirmationBox, canvasBox] = await Promise.all([
 		confirmation.boundingBox(),
 		page.locator('.document-canvas').boundingBox(),
@@ -149,7 +149,7 @@ test('@surface:doc-feedback-delivery sends a held user batch from the header in 
 		const noticeBox = notice.getBoundingClientRect();
 		const intersects = (box: DOMRect) => noticeBox.left < box.right && noticeBox.right > box.left
 			&& noticeBox.top < box.bottom && noticeBox.bottom > box.top;
-		const blocked = Array.from(canvas.querySelectorAll<HTMLElement>('button, [role="button"], .cm-comment-marker, [data-region-thumb]'))
+		const blocked = Array.from(canvas.querySelectorAll<HTMLElement>('button, [role="button"], [data-margin-card], [data-region-thumb]'))
 			.filter((element) => {
 				const style = getComputedStyle(element);
 				return !notice.contains(element) && style.display !== 'none' && style.visibility !== 'hidden' && intersects(element.getBoundingClientRect());
@@ -159,10 +159,10 @@ test('@surface:doc-feedback-delivery sends a held user batch from the header in 
 		const gutter = scroller ? scroller.offsetWidth - scroller.clientWidth : 0;
 		const scrollerBox = scroller?.getBoundingClientRect();
 		const scrollbar = gutter > 0 && !!scrollerBox && intersects(new DOMRect(scrollerBox.right - gutter, scrollerBox.top, gutter, scrollerBox.height));
-		return { blocked, markerCount: canvas.querySelectorAll('.cm-comment-marker').length, scrollbar };
+		return { blocked, anchorCount: canvas.querySelectorAll('.cm-comment-anchor').length, scrollbar };
 	});
-	expect(overlap.markerCount, 'the lower canvas edge includes the comment marker worst case').toBeGreaterThan(0);
-	expect(overlap.blocked, 'canvas confirmation never covers an interactive control or marker').toEqual([]);
+	expect(overlap.anchorCount, 'the lower canvas edge includes the commented text worst case').toBeGreaterThan(0);
+	expect(overlap.blocked, 'canvas confirmation never covers an interactive control or comment card').toEqual([]);
 	expect(overlap.scrollbar, 'canvas confirmation never covers the editor scrollbar').toBe(false);
 	expect(await page.evaluate(() => document.querySelector('.toast-container')?.textContent ?? '')).not.toContain('1 comment sent');
 	await expect(headerSend(page)).toHaveCount(0);
@@ -218,6 +218,8 @@ for (const deliverImmediately of [false, true]) test(`@surface:doc-reopen-feedba
 	const comment = page.getByRole('region', { name: /^Comment by / });
 	await expect(comment).toContainText('Please revisit this comment.');
 	await comment.getByRole('button', { name: 'Resolve', exact: true }).click();
+	// A resolved thread leaves the open list for the drawer's Resolved entry.
+	await showResolved(page.getByRole('region', { name: 'Document comments', exact: true }));
 	const resolved = page.getByRole('region', { name: /^Resolved comment by / });
 	await expect(resolved).toBeVisible();
 	await resolved.getByRole('button', { name: 'Resolved · 1 message' }).click();

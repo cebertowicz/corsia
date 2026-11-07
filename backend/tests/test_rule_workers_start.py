@@ -59,7 +59,8 @@ async def test_a_matching_rule_starts_one_review_worker_that_reads_only_its_inpu
     launch = _launch(worker)
     start_dir = world["folder"] / "workers" / str(_decision(rule))
     assert launch["confinement"] == "untrusted"
-    assert launch["add_dirs"] == [str(world["staging"].resolve()), str(start_dir)]
+    from infra.thread_confinement import read_dirs
+    assert read_dirs(worker, get_db()) == (str(world["staging"].resolve()), str(start_dir))
 
     await settle_all()
     assert starts(rule)[0][0] == "returned"

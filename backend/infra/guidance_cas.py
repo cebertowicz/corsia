@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -14,18 +13,16 @@ from infra.guidance_save_types import SaveResult
 def stale_path(
     expected: dict[Path, str | None] | None,
     *,
-    binary_safe_history: bool,
     read_bytes: Callable[[Path], bytes | None],
 ) -> Path | None:
-    """Return the first destination whose current content differs from its expectation."""
+    """Return the first destination whose current content differs from its expectation.
+
+    Every expectation is :func:`digest` of the destination's own bytes, so this reads bytes too: a
+    text read turns CRLF and a lone CR into LF and would refuse a file nobody changed."""
     for path, want in (expected or {}).items():
         try:
-            if binary_safe_history:
-                content = read_bytes(path)
-                current = hashlib.sha256(content).hexdigest() if content is not None else None
-            else:
-                current = digest(path.read_text()) if path.exists() else None
-        except (OSError, UnicodeDecodeError):
+            current = digest(read_bytes(path))
+        except OSError:
             current = ""
         if current != want:
             return path
@@ -33,9 +30,9 @@ def stale_path(
 
 
 def stale_result(
-    expected: dict[Path, str | None] | None, *, binary_safe_history: bool,
+    expected: dict[Path, str | None] | None, *,
     read_bytes: Callable[[Path], bytes | None],
 ) -> SaveResult | None:
     """Return a stale result when the destination changed after the caller read it."""
-    path = stale_path(expected, binary_safe_history=binary_safe_history, read_bytes=read_bytes)
+    path = stale_path(expected, read_bytes=read_bytes)
     return SaveResult("stale", "deferred-destination-changed", line=SAVE_STALE.format(path=path)) if path else None

@@ -128,6 +128,7 @@ class SearchHistoryTool(Tool):
     ) -> str:
         from infra.database import get_db
         from memory.checkpoint_search import search_checkpoints
+        from infra.project_fence import HISTORY_NOTICE, thread_refusal
 
         if not query or not query.strip():
             return "Error: search_history requires a non-empty query. Provide 1-3 precise keywords."
@@ -145,9 +146,16 @@ class SearchHistoryTool(Tool):
 
         def _query():
             db = get_db()
+            from infra.project_fence import HistoryFence
+
+            fence = HistoryFence.for_reader(reader, db=db)
+            subject = fence.wholly_fenced(db, thread_id) if thread_id else None
+            if subject is not None:
+                db.close()
+                return [], [], thread_refusal(subject, thread_id, caller=reader.thread_id), False
             rows = search_messages_fts(
                 db, query, thread_id=thread_id, sender=sender, limit=limit,
-                reader=reader,
+                reader=reader, fence=fence,
             )
             cp_rows = (
                 search_checkpoints(
@@ -160,11 +168,19 @@ class SearchHistoryTool(Tool):
                 if search_checkpoints_here
                 else None
             )
+            # One fixed line, never a count: what was left out is not for the caller
+            # to measure (R15). It stays on an empty result, which is the case where
+            # an agent would otherwise conclude there was nothing to find.
+            notice = fence.any_walled and not thread_id
             db.close()
-            return rows, cp_rows
+            return rows, cp_rows, None, notice
 
-        rows, cp_rows = await run_in_db(_query)
+        rows, cp_rows, refusal, notice = await run_in_db(_query)
+        if refusal is not None:
+            return refusal
         formatted = format_history_results(rows, query, thread_id, sender)
+        if notice:
+            formatted = f"{formatted}\n\n{HISTORY_NOTICE}"
         if include_checkpoints and not caller_resolved:
             return (
                 f"{formatted}\n\nCheckpoint generations were NOT searched: "

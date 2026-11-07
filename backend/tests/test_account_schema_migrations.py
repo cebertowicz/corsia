@@ -810,6 +810,12 @@ def test_genuine_deployed80_upgrades_to_fresh83_once_and_keeps_every_row(tmp_pat
         # 180 -> 181 only adds the comment writer line.
         from infra.migration_180_to_181_comment_writer_line import migrate_180_to_181
         migrate_180_to_181(db)
+        # 181 -> 182 only adds the comment's person-tag mark.
+        from infra.migration_181_to_182_comment_tagged_user import migrate_181_to_182
+        migrate_181_to_182(db)
+        # 182 -> 183 only adds a nullable column (threads.local_only_cut_seq).
+        from infra.migration_182_to_183_local_only_cut import migrate_182_to_183
+        migrate_182_to_183(db)
         db.commit()
         with closing(sqlite3.connect(":memory:")) as fresh:
             initialize_schema(fresh)
@@ -943,7 +949,7 @@ def test_the_ladder_keeps_stored_names_at_78_and_the_account_steps_after_it() ->
     from infra.migration_82_to_83_account_rollover import migrate_82_to_83
     from infra.migration_166_to_167_uniform_signin import migrate_166_to_167
 
-    assert SCHEMA_VERSION == 181
+    assert SCHEMA_VERSION == 183
     assert MIGRATIONS[_LADDER_END] is migrate_166_to_167
     assert (MIGRATIONS[78], MIGRATIONS[79], MIGRATIONS[80], MIGRATIONS[81]) == (migrate_78_to_79, migrate_79_to_80, migrate_80_to_81, migrate_81_to_82)
     assert MIGRATIONS[82] is migrate_82_to_83

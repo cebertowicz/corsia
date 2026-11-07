@@ -141,9 +141,7 @@ async def on_tool_boundary_violation(ctx: CCEventContext, ev: dict) -> None:
 async def on_init(ctx: CCEventContext, ev: dict) -> None:
     ctx.live.initialized = True
     ctx.live.provider_reported_model = ev.get("model") or None
-    violation = tool_boundary._tool_boundary_violation_from_init(
-        ev, tool_boundary.admitted_native_tools(ctx.live),
-    )
+    violation = tool_boundary._tool_boundary_violation_from_init(ev)
     if violation is not None:
         metadata, content = violation
         await on_tool_boundary_violation(ctx, {

@@ -94,7 +94,7 @@ def test_migration_40_staging_copy_matches_the_live_schema_while_current() -> No
     from infra.migration_39_to_40_placement_marks import STAGING_40_DDL
     from infra.schema import SCHEMA_VERSION
 
-    if SCHEMA_VERSION == 181:
+    if SCHEMA_VERSION == 183:
         assert STAGING_40_DDL == STAGING_SCHEMA_SQL
 
 
@@ -617,6 +617,36 @@ def _repo(tmp_path) -> Path:
     return repo
 
 
+def _change_after_the_first_read(monkeypatch, path: Path, replacement: bytes) -> None:
+    """Make another writer change ``path`` on disk right after the first time anything reads it.
+
+    A placement's expectation must be bound to the read its new text was built from, and which read that
+    is depends on the caller, so the first ``read_text`` or ``read_bytes`` of the file trips the change.
+    """
+    real_bytes, real_text, once = Path.read_bytes, Path.read_text, {"done": False}
+
+    def changed() -> None:
+        if once["done"]:
+            return
+        once["done"] = True
+        path.write_bytes(replacement)
+
+    def read_bytes(self: Path) -> bytes:
+        data = real_bytes(self)
+        if self == path:
+            changed()
+        return data
+
+    def read_text(self: Path, *args, **kwargs) -> str:
+        text = real_text(self, *args, **kwargs)
+        if self == path:
+            changed()
+        return text
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    monkeypatch.setattr(Path, "read_text", read_text)
+
+
 def _log(repo: Path) -> list[str]:
     return subprocess.run(
         ["git", "-C", str(repo), "log", "--format=%s"], capture_output=True,
@@ -670,6 +700,7 @@ def test_placement_save_commits_its_path_after_recording_outside_edits(tmp_path)
 
 def test_placement_save_inside_an_enclosing_repository_writes_nothing(tmp_path) -> None:
     workspace = _repo(tmp_path) / "inner"
+    workspace.mkdir()
     target = workspace / "context" / "x.md"
     result = _placement_save(workspace, target, "x", None)
     assert result.outcome == "history-off"

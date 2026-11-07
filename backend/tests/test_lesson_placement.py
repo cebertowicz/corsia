@@ -1073,6 +1073,30 @@ async def test_a_trial_placed_again_after_its_review_was_settled_is_offered_agai
     assert _state(env, again) == ("retired", "written")
 
 
+async def test_an_unchanged_trial_saved_with_crlf_endings_still_takes_its_new_review(env: Env) -> None:
+    """The file's text already matches, so only the review reference is written, compared against the
+    bytes on disk rather than their translated text."""
+    from plans import closure
+
+    _place(env, _entry(env))
+    await _drain(env.worker)
+    [review] = _reviews(env)
+    closure.close_node(
+        review["id"], reason="closed early", actor_id=None, provenance="test", db=env.db,
+    )
+    env.db.commit()
+    path = _skill(env)
+    path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+    again = _entry(env, [{"kind": "turn", "reference": "turn-30"}], "it did help after all")
+
+    _place(env, again)
+    await _drain(env.worker)
+
+    assert [row["state"] for row in _reviews(env)] == ["closed", "pending"]
+    _one_open_review_offers(env)
+    assert _state(env, again) == ("retired", "written")
+
+
 async def test_the_same_trial_placed_with_another_date_moves_its_reviews_wake(env: Env) -> None:
     _place(env, _entry(env))
     await _drain(env.worker)

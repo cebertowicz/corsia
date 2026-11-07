@@ -154,28 +154,28 @@ export async function addReply(artifactId: string, commentId: string, text: stri
 		const list = (all[artifactId] ?? []).map((c) => {
 			if (c.id !== commentId) return c;
 			if (c.replies.some((r) => r.id === row.id)) return c;
-			return { ...c, replies: [...c.replies, { id: row.id, author, text, taggedAgents: row.tagged_agents ?? [], mentions: row.tagged_agent_mentions ?? [], at: 'just now' }] };
+			return { ...c, replies: [...c.replies, { id: row.id, author, text, taggedAgents: row.tagged_agents ?? [], taggedPerson: row.tagged_person ?? null, mentions: row.tagged_agent_mentions ?? [], at: 'just now' }] };
 		});
 		return { ...all, [artifactId]: list };
 	});
 }
 
-function patchFlag(artifactId: string, commentId: string, field: 'resolved' | 'acked', value: boolean) {
+/** Flips a flag at once and puts it back when the request fails. With `wait` the flag changes only once the request is answered: the caller shows the old state until then. Resolves true when the server took it. */
+function patchFlag(artifactId: string, commentId: string, field: 'resolved' | 'acked', value: boolean, wait = false): Promise<boolean> {
 	let prev: boolean | undefined;
-	docComments.update((all) => {
+	const set = (next: boolean | undefined) => docComments.update((all) => {
 		const list = (all[artifactId] ?? []).map((c) => {
 			if (c.id !== commentId) return c;
-			prev = !!c[field];
-			return { ...c, [field]: value };
+			prev ??= !!c[field];
+			return { ...c, [field]: next };
 		});
 		return { ...all, [artifactId]: list };
 	});
-	patchComment(commentId, { [field]: value }).catch((e) => {
+	if (!wait) set(value);
+	return patchComment(commentId, { [field]: value }).then(() => { if (wait) set(value); return true; }, (e) => {
 		console.error(`comment ${field} failed`, e);
-		docComments.update((all) => {
-			const list = (all[artifactId] ?? []).map((c) => (c.id === commentId ? { ...c, [field]: prev } : c));
-			return { ...all, [artifactId]: list };
-		});
+		if (!wait) set(prev);
+		return false;
 	});
 }
 
@@ -189,8 +189,8 @@ export async function markThreadViewed(artifactId: string, rootId: string, seenR
 	}));
 }
 
-export function resolveComment(artifactId: string, commentId: string, resolved = true) {
-	patchFlag(artifactId, commentId, 'resolved', resolved);
+export function resolveComment(artifactId: string, commentId: string, resolved = true, wait = false): Promise<boolean> {
+	return patchFlag(artifactId, commentId, 'resolved', resolved, wait);
 }
 
 export function ackComment(artifactId: string, commentId: string, acked = true) {

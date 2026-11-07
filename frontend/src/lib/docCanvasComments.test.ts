@@ -160,7 +160,7 @@ describe('inline suggestions in the highlight ranges', () => {
 	it('marks a suggestion whose quote no longer matches the text on screen at the line it was on, not as a passage', () => {
 		const rows = commentsInDocumentOrder([suggestion('s1', 8, quote)], 'Before. The team changed its mind. After.');
 		expect(rows[0].orphaned).toBe(true);
-		expect(canvasCommentHighlights(rows, 'Before. The team changed its mind. After.', null, undefined)).toMatchObject([{ id: 's1', from: 8, to: 8, point: true, lost: true }]);
+		expect(canvasCommentHighlights(rows, 'Before. The team changed its mind. After.', null, undefined)).toMatchObject([{ id: 's1', from: 8, to: 8, point: true }]);
 	});
 });
 
@@ -267,10 +267,9 @@ describe('a comment whose text was deleted keeps a marker at the nearest line', 
 		expect(row).toMatchObject({ orphaned: true, detached: true });
 	});
 
-	it('draws a point marker flagged lost at the position the text was, with its reply-waiting dot', () => {
-		const replies = [{ id: 'r', author: 'Reviewer', text: 'Why?', at: 'now' }];
-		const rows = commentsInDocumentOrder([gone({ replies, newReplyIds: ['r'] })], text);
-		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 'gone', from: 18, to: 18, point: true, lost: true, replyWaiting: true }]);
+	it('keeps a point at the position the text was, so its margin card stays beside that line', () => {
+		const rows = commentsInDocumentOrder([gone()], text);
+		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 'gone', from: 18, to: 18, point: true }]);
 	});
 
 	it('draws no marker for a resolved comment, a review comment or one with no known position', () => {
@@ -316,7 +315,7 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 		const text = 'Lunch is at noon. Train leaves at .';
 		const rows = commentsInDocumentOrder([accepted()], text);
 		expect(rows[0]).toMatchObject({ orphaned: true, detached: true });
-		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 's1', point: true, lost: true }]);
+		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 's1', point: true }]);
 	});
 
 	it('draws nothing once it is resolved', () => {
@@ -336,6 +335,35 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 		expect(canvasCommentHighlights([row], after, null, undefined, 's1')).toMatchObject([{ from: 34, to: 37, suggestion: undefined }]);
 		const [other] = commentsInDocumentOrder([open], after);
 		expect(other.orphaned).toBe(true);
+	});
+
+	describe('while its own Accept is in flight, before the document holds the edit', () => {
+		// The quote is still where it was: only a replacement that is really in the text, in place of the quote, reads as accepted.
+		const before = 'Train leaves at very important text today.';
+		const open = (anchor: string, replacement: string) => comment('s3', 16, anchor, { replacement, drawn: true });
+
+		it('does not read a deletion as accepted', () => {
+			const [row] = commentsInDocumentOrder([open('very important text ', '')], before, {}, 's3');
+			expect(row.decision).toBeUndefined();
+			expect(canvasCommentHighlights([row], before, null, undefined, 's3')).toMatchObject([{ id: 's3', from: 16, suggestion: { busy: true } }]);
+		});
+
+		it('does not read a replacement that is a prefix of its quote as accepted', () => {
+			const [row] = commentsInDocumentOrder([open('very important text', 'very important')], before, {}, 's3');
+			expect(row.decision).toBeUndefined();
+			expect(row).toMatchObject({ from: 16, to: 35 });
+		});
+
+		it('reads a deletion as accepted once the text no longer holds the quote', () => {
+			const [row] = commentsInDocumentOrder([open('very important text ', '')], 'Train leaves at today.', {}, 's3');
+			expect(row.decision).toBe('accepted');
+		});
+
+		it('reads a prefix replacement as accepted once the text no longer holds the quote', () => {
+			const [row] = commentsInDocumentOrder([open('very important text', 'very important')], 'Train leaves at very important today.', {}, 's3');
+			expect(row.decision).toBe('accepted');
+			expect(row).toMatchObject({ from: 16, to: 30 });
+		});
 	});
 
 	describe('an accepted insertion sits on the text it inserted', () => {

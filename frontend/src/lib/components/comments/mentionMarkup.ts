@@ -4,7 +4,9 @@ import type { MentionOccurrence } from './mentionSelection';
 export type TaggedAgent = { id: string; name: string };
 
 /** Render only explicitly identified occurrences; never infer identity from a display name. */
-export function renderMentions(text: string, taggedAgents: TaggedAgent[], occurrences: MentionOccurrence[] = []): string {
+export function renderMentions(
+	text: string, taggedAgents: TaggedAgent[], occurrences: MentionOccurrence[] = [], taggedPerson: string | null = null,
+): string {
 	if (typeof document === 'undefined') return renderMarkdown(text);
 	const agents = new Map(taggedAgents.map(agent => [agent.id, agent]));
 	const valid = [...occurrences].sort((a, b) => a.start - b.start).filter((item, index, all) =>
@@ -43,6 +45,11 @@ export function renderMentions(text: string, taggedAgents: TaggedAgent[], occurr
 	for (const agent of taggedAgents) {
 		if (shown.has(agent.id) || valid.some(item => item.agent_id === agent.id)) continue;
 		const span = document.createElement('span'); span.className = 'comment-mention'; span.dataset.agentId = agent.id; span.textContent = `@${agent.name}`;
+		if (root.textContent) root.append(' '); root.append(span);
+	}
+	// A tag of the person is not an agent tag: it marks the comment, and carries no agent identity.
+	if (taggedPerson) {
+		const span = document.createElement('span'); span.className = 'comment-mention'; span.dataset.personTag = '1'; span.textContent = `@${taggedPerson}`;
 		if (root.textContent) root.append(' '); root.append(span);
 	}
 	return DOMPurify.sanitize(root.innerHTML, { ADD_ATTR: ['target'] });

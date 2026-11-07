@@ -610,6 +610,9 @@ async def test_delegate_status_tool_reads_runtime_truth_and_recent_messages(
         "VALUES ('proj-status','Status Project','status-target','t','t')"
     )
     deleg_db.execute(
+        "UPDATE threads SET project_id = 'proj-status' WHERE id = 'sender-self'"
+    )
+    deleg_db.execute(
         "INSERT INTO threads (id,user_id,model,title,project_id,created_at,updated_at) "
         "VALUES ('status-target', 'u-test', 'anthropic/claude-3-5-sonnet', "
         "'Status Target', 'proj-status','t','t')"

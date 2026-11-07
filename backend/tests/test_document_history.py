@@ -63,6 +63,49 @@ def test_workspace_without_repository_has_no_versions(tmp_path):
     assert list_versions(workspace, "sample.md") == ([], False)
 
 
+@pytest.fixture(params=["enclosing", "elsewhere"])
+def workspace_with_no_repository_of_its_own(tmp_path, request):
+    """A workspace whose history is off for good, the two states a guidance save records nothing for:
+    inside an enclosing repository, or with a Git directory that resolves elsewhere."""
+    outer = tmp_path / "outer"
+    workspace = outer / "workspace"
+    (workspace / "context").mkdir(parents=True)
+    (workspace / "context" / "demo.md").write_text("text\n")
+    git(outer, "init", "-q")
+    if request.param == "elsewhere":
+        (workspace / ".git").mkdir()
+    return workspace
+
+
+def test_a_workspace_with_no_repository_of_its_own_reads_history_off(workspace_with_no_repository_of_its_own):
+    """The read side classifies those states as history off, so nothing asks for a retry that can only
+    repeat the refusal."""
+    workspace = workspace_with_no_repository_of_its_own
+    assert list_versions(workspace, "context/demo.md") == ([], False)
+    assert document_history.history_off(workspace) is True
+    assert document_history.repository(workspace) is None
+
+
+def test_the_history_route_reports_history_off_not_unavailable(workspace_with_no_repository_of_its_own, monkeypatch):
+    from api import files_history
+    from infra.guidance_targets import GuidanceTarget
+
+    class DB:
+        def close(self):
+            pass
+
+    workspace = workspace_with_no_repository_of_its_own
+    path = workspace / "context" / "demo.md"
+    monkeypatch.setattr(files_history, "get_db", DB)
+    monkeypatch.setattr(files_history.config, "WORKSPACE", workspace)
+    monkeypatch.setattr(files_history, "checked_read_path", lambda *_: (path, []))
+    monkeypatch.setattr("infra.guidance_targets.guidance_target", lambda *_: GuidanceTarget("context, workspace scope"))
+    assert files_history.history(str(path), "person", None, None) == {"versions": [], "truncated": False}
+    with pytest.raises(HTTPException) as missing:
+        files_history.history(str(path), "person", None, None, "a" * 40)
+    assert missing.value.status_code == 404
+
+
 def test_list_reports_truncation_past_the_cap(repo, monkeypatch):
     monkeypatch.setattr(document_history, "HISTORY_CAP", 2)
     path = repo / "sample.md"

@@ -5,9 +5,9 @@ import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
 
 /**
  * The document canvas's side padding. At phone width with a touch pointer the text keeps the same 24px inset on both
- * sides (the 44px comment marker's hit box reaches over the text's edge instead of widening the left inset), and the
+ * sides (no comment icon widens the left inset), and the
  * document header clears the app header, which is taller by the device's top safe area. A fine pointer at desktop
- * width keeps the one-sided rail: 24px left, nothing right.
+ * width keeps the one-sided inset: 24px left, nothing right.
  */
 
 const INSET = 24;
@@ -18,7 +18,7 @@ const TEXT = '# Heading padding probe\n\nA paragraph of ordinary prose that is l
 const WIDTHS = [393, 1440, 560];
 
 for (const width of WIDTHS) {
-	test(`@flow:doc-canvas-phone-padding ${width}px: the text keeps equal side insets, markers keep their hit box, and the header clears the app header`, async ({ page }, info) => {
+	test(`@flow:doc-canvas-phone-padding ${width}px: the text keeps equal side insets and the header clears the app header`, async ({ page }, info) => {
 		const mobile = info.project.name.includes('mobile');
 		test.skip(mobile !== (width === 393), 'a touch pointer runs the phone width; a fine pointer runs the desktop widths');
 		await page.setViewportSize({ width, height: mobile ? 852 : 960 });
@@ -58,12 +58,11 @@ for (const width of WIDTHS) {
 		await page.getByText(title, { exact: true }).first().click();
 		await expect(page.locator('.cm-content')).toContainText('Tail line here.');
 		await expect(page.getByRole('button', { name: /^1 thread\b/ })).toBeEnabled();
-		await expect(page.locator('.cm-comment-marker')).toHaveCount(1);
+		await expect(page.locator('.cm-comment-anchor')).toHaveCount(1);
 
 		const measured = await page.evaluate(() => new Promise<{
 			left: number; right: number; padLeft: number; padRight: number;
-			marker: { left: number; right: number; top: number; width: number; height: number };
-			glyph: { left: number; right: number };
+			anchor: { left: number; top: number; height: number };
 			scrollerLeft: number; gutter: number;
 			headerTop: number; appHeaderBottom: number; toolsHit: boolean;
 		}>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -71,8 +70,7 @@ for (const width of WIDTHS) {
 			const rect = line.getBoundingClientRect();
 			const scroller = document.querySelector('.cm-scroller')!.getBoundingClientRect();
 			const content = getComputedStyle(document.querySelector('.cm-content')!);
-			const marker = document.querySelector<HTMLElement>('.cm-comment-marker')!.getBoundingClientRect();
-			const glyph = document.querySelector('.cm-comment-marker svg')!.getBoundingClientRect();
+			const anchor = document.querySelector<HTMLElement>('.cm-comment-anchor')!.getBoundingClientRect();
 			const header = document.querySelector('.document-header')!.getBoundingClientRect();
 			const tool = document.querySelector<HTMLElement>('.document-tools button')!;
 			const tools = tool.getBoundingClientRect();
@@ -80,8 +78,7 @@ for (const width of WIDTHS) {
 			resolve({
 				left: rect.left - scroller.left, right: scroller.right - rect.right,
 				padLeft: Number.parseFloat(content.paddingLeft), padRight: Number.parseFloat(content.paddingRight),
-				marker: { left: marker.left, right: marker.right, top: marker.top, width: marker.width, height: marker.height },
-				glyph: { left: glyph.left, right: glyph.right },
+				anchor: { left: anchor.left, top: anchor.top, height: anchor.height },
 				scrollerLeft: scroller.left,
 				gutter: Number.parseFloat(getComputedStyle(document.querySelector('.leaf-body.document-canvas')!).paddingLeft),
 				headerTop: header.top, appHeaderBottom: document.querySelector('.shell-header')!.getBoundingClientRect().bottom,
@@ -95,20 +92,15 @@ for (const width of WIDTHS) {
 			// Measured from the scroller's own edges: the canvas can still be settling at a fractional offset, which moves both edges alike.
 			expect(Math.abs(measured.left - measured.right), `the left (${measured.left}) and right (${measured.right}) insets match`).toBeLessThanOrEqual(0.5);
 			expect(measured.gutter, 'the phone page gutter').toBe(12);
-			expect(measured.marker.width, 'marker hit width').toBeCloseTo(44, 0);
-			expect(measured.marker.height, 'marker hit height').toBeCloseTo(44, 0);
-			expect(measured.glyph.right - measured.scrollerLeft, 'the glyph sits clear of the text').toBeLessThanOrEqual(measured.left);
-			expect(measured.glyph.left, 'the glyph is inside the canvas').toBeGreaterThanOrEqual(measured.scrollerLeft);
-			expect(measured.marker.right - measured.scrollerLeft, 'the hit box reaches over the text edge').toBeGreaterThan(measured.left);
+			expect(measured.anchor.left, 'the highlight is inside the text column').toBeGreaterThanOrEqual(measured.scrollerLeft + measured.left);
 			expect(measured.appHeaderBottom, 'the app header is taller than its nominal height by the safe area').toBeGreaterThan(64);
 			expect(measured.headerTop, 'the document header starts below the app header').toBeGreaterThanOrEqual(measured.appHeaderBottom);
 			expect(measured.toolsHit, 'the document tools are not under the app header').toBe(true);
-			// A tap on the part of the box that overlaps the text opens the thread rather than placing a caret.
-			await page.mouse.click(measured.marker.right - 4, measured.marker.top + 22);
+			// A tap on the highlight opens the thread rather than placing a caret.
+			await page.mouse.click(measured.anchor.left + 6, measured.anchor.top + measured.anchor.height / 2);
 			await expect(page.getByText('A comment', { exact: true }).first()).toBeVisible();
 		} else {
-			expect([measured.padLeft, measured.padRight], 'a fine pointer keeps the one-sided rail').toEqual([INSET, 0]);
-			expect(measured.marker.width, 'marker hit width').toBeCloseTo(24, 0);
+			expect([measured.padLeft, measured.padRight], 'a fine pointer keeps the one-sided inset').toEqual([INSET, 0]);
 			expect(measured.gutter, 'the page gutter is unchanged').toBe(20);
 		}
 	});

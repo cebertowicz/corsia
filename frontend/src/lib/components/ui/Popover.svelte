@@ -43,6 +43,7 @@
 	let hidden = $state(true);
 	type Side = 'left' | 'right' | 'above' | 'below' | 'avoid-above' | 'avoid-below';
 	let rememberedSide: Side | null = null;
+	let rememberedPointer: { right: boolean; below: boolean } | null = null;
 	let rememberedKey: unknown;
 	let anchorSeen: DOMRect | null | undefined;
 	let lastScrollInput = 0;
@@ -95,11 +96,15 @@
 			'avoid-below': [under, (avoided?.bottom ?? rect.bottom) + gap],
 			'avoid-above': [under, (avoided?.top ?? rect.top) - height - gap],
 		};
+		// The side holds until the person moves the anchor: growing while they type clamps the surface rather than flipping it away from where they are looking.
+		const key = sideKey ?? anchor;
+		if (key !== rememberedKey || moved) { rememberedKey = key; rememberedSide = null; rememberedPointer = null; }
 		if (placement === 'pointer') {
 			// Opened by a click: `rect` is the clicked line's box at the pointer's x. The card's top sits `--space-1` under that box (the line's own half-leading, so no glyph of the next line peeks out) and to the pointer's right; near the right edge it flips left, near the bottom it flips above the line.
 			const reach = 12, drop = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--space-1')) || 4;
-			const beside = rect.right + reach + width <= area.right - gap ? rect.right + reach : rect.left - reach - width;
-			const down = rect.bottom + drop + height <= area.bottom - gap ? rect.bottom + drop : rect.top - drop - height;
+			rememberedPointer ??= { right: rect.right + reach + width <= area.right - gap, below: rect.bottom + drop + height <= area.bottom - gap };
+			const beside = rememberedPointer.right ? rect.right + reach : rect.left - reach - width;
+			const down = rememberedPointer.below ? rect.bottom + drop : rect.top - drop - height;
 			style = `left: ${Math.max(area.left + gap, Math.min(beside, area.right - width - gap))}px; top: ${Math.max(area.top + gap, Math.min(down, area.bottom - height - gap))}px; max-width: ${width}px;`;
 			if (onPlace) void tick().then(() => requestAnimationFrame(() => { if (surface) onPlace(surface); }));
 			return;
@@ -125,9 +130,6 @@
 			// No room beside or outside the avoided rectangle: above the anchor. Otherwise it stays below it, clamped into the canvas.
 			side = 'above';
 		}
-		// The side holds until the person moves the anchor: growing while they type clamps the surface rather than flipping it away from where they are looking.
-		const key = sideKey ?? anchor;
-		if (key !== rememberedKey || moved) { rememberedKey = key; rememberedSide = null; }
 		rememberedSide ??= side;
 		let [left, top] = spots[rememberedSide];
 		top = Math.max(area.top + gap, Math.min(top, area.bottom - height - gap));
@@ -137,7 +139,7 @@
 		if (onPlace) void tick().then(() => requestAnimationFrame(() => { if (surface) onPlace(surface); }));
 	}
 	$effect(() => {
-		if (!open) { rememberedSide = null; return; }
+		if (!open) { rememberedSide = null; rememberedPointer = null; return; }
 		window.addEventListener(ANCHOR_MOVED, position);
 		return () => window.removeEventListener(ANCHOR_MOVED, position);
 	});

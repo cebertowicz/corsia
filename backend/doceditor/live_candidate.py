@@ -32,7 +32,7 @@ async def build_candidate(live, operation):
         if unchanged:
             receipt = "No changes needed"
     elif operation.kind == "edit":
-        from tools.filesystem_edit import match_edits
+        from tools.filesystem_match import match_edits
         text, receipt = match_edits(str(fork["text"]), operation.edits, str(live.path),
                                    multi=operation.multi_edit, error_path=operation.edit_path)
         if text is None:

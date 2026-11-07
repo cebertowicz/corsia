@@ -9,11 +9,13 @@ vi.mock('$lib/api/commentSuggestions', async (importOriginal) => ({
 	...await importOriginal<typeof import('$lib/api/commentSuggestions')>(), decideSuggestion: mocks.decideSuggestion,
 }));
 vi.mock('$lib/stores/docSaveQueue', () => ({ flushDraft: mocks.flushDraft, seedDraft: mocks.seedDraft }));
-vi.mock('$lib/stores/docComments', () => ({ loadComments: mocks.loadComments }));
+vi.mock('$lib/stores/docComments', () => ({ docComments: { subscribe: (run: (value: object) => void) => { run({}); return () => {}; } }, loadComments: mocks.loadComments }));
 
 import DocCommentSurface from './DocCommentSurface.svelte';
 import { SuggestionRefused } from '$lib/api/commentSuggestions';
 import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
+import { paneCollapsed } from '$lib/stores/paneCollapsed';
+import { sidebarCollapsed } from '$lib/stores/ui';
 
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
@@ -38,10 +40,29 @@ function render(overrides: Record<string, unknown> = {}) {
 	});
 	flushSync(); return { onSuggestionAccepted, onSuggestionBusy };
 }
+// A desktop canvas too narrow for the margin column: 600 px wide (under MARGIN_MIN), so a thread opens as a card on its text, as it did
+// before the column, whatever the sidebar and the Workspace panel are doing.
+let canvases: HTMLElement[] = [];
+function noRoomCanvas(): HTMLElement {
+	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+	const box = (parent: HTMLElement, className: string, rect: DOMRect) => {
+		const el = parent.appendChild(document.createElement('div'));
+		el.className = className; el.getBoundingClientRect = () => rect;
+		return el;
+	};
+	const app = box(document.body, 'app-content', new DOMRect(0, 0, 1000, 800));
+	box(app, 'chat-col', new DOMRect(0, 0, 400, 800));
+	const body = box(app, 'leaf-body', new DOMRect(400, 0, 600, 800));
+	const doc = box(body, 'doc', new DOMRect(400, 0, 600, 800));
+	canvases.push(app);
+	return box(doc, 'bounds', new DOMRect(0, 0, 600, 800));
+}
 afterEach(() => {
 	if (component) unmount(component);
 	component = null;
 	host?.remove();
+	canvases.forEach((canvas) => canvas.remove()); canvases = [];
+	vi.unstubAllGlobals();
 	suggestionRefusals.set({});
 	vi.clearAllMocks();
 });
@@ -55,60 +76,103 @@ describe('DocCommentSurface suggestions', () => {
 		},
 	);
 
-	it('lists all comments in a canvas region with resolved/open filters and text navigation', () => {
+	it('shows open threads as cards in the margin, with text navigation, and lists only resolved ones behind its own entry', () => {
 		const onFocus = vi.fn();
 		render({ state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }], onFocus });
-		const drawer = document.body.querySelector('[data-doc-comments-drawer]');
+		const drawer = document.body.querySelector<HTMLElement>('[data-doc-comments-drawer]');
 		expect(drawer).not.toBeNull();
 		expect(document.body.querySelector('[data-popover]')).toBeNull();
-		const quote = drawer!.querySelector<HTMLButtonElement>('[data-comment-jump]');
-		quote!.click();
+		expect([...drawer!.querySelectorAll('[data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['comment-1']);
+		drawer!.querySelector<HTMLButtonElement>('[data-comment-jump]')!.click();
 		expect(onFocus).toHaveBeenCalledWith(suggestion.id);
-		drawer!.querySelector<HTMLButtonElement>('[data-drawer-filter]')!.click(); flushSync();
-		const resolved = [...drawer!.querySelectorAll('button')].find((button) => button.textContent?.trim() === 'Resolved');
-		resolved!.click(); flushSync();
-		expect(drawer!.querySelectorAll('[data-comment-id]')).toHaveLength(1);
-		expect(drawer!.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-2');
+		expect(drawer!.querySelector('[data-drawer-filter]')).toBeNull();
+		expect(drawer!.querySelector('.margin-aside')).toBeNull();
+		drawer!.querySelector<HTMLButtonElement>('[data-aside-kind="resolved"]')!.click(); flushSync();
+		const list = drawer!.querySelector('.margin-aside')!;
+		expect([...list.querySelectorAll('[data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['comment-2']);
 	});
 
-	it('keeps a resolved unread card in Open until the list is reopened', async () => {
-		const comments = writable([{ ...suggestion, resolved: true, newReplyIds: ['reply'], replies: [{ id: 'reply', author: 'agent', text: 'Answer', at: 'now' }] }]);
-		const state = writable<{ kind: 'list' } | null>({ kind: 'list' });
-		const liveComments = fromStore(comments), liveState = fromStore(state);
-		render({ get state() { return liveState.current; }, get comments() { return liveComments.current; } });
-		const card = () => document.body.querySelector('[data-comment-id="comment-1"]');
-		expect(card()).not.toBeNull();
-		comments.update((rows) => rows.map((row) => ({ ...row, newReplyIds: [] }))); flushSync();
-		expect(card()).not.toBeNull();
-		state.set(null); flushSync();
-		state.set({ kind: 'list' }); flushSync(); await tick();
-		expect(card()).toBeNull();
+	it('shows no Reply field and no quote line on a margin card nobody picked, and both on the picked one', () => {
+		const rest = { ...secondSuggestion, replacement: null, anchor: 'beta', text: 'A plain comment', replies: [{ id: 'r1', author: 'agent-1', authorKind: 'agent' as const, text: 'One reply', at: 'now' }] };
+		render({ state: { kind: 'list' }, comments: [suggestion, rest], focusedId: rest.id });
+		const card = (id: string) => document.body.querySelector<HTMLElement>(`[data-doc-comments-drawer] [data-comment-id="${id}"]`)!;
+		// Unpicked: author, text, the edit and its Accept/Reject; the jump to the text stays for the keyboard but is out of sight.
+		expect(card(suggestion.id).querySelector('.ct-input')).toBeNull();
+		expect(card(suggestion.id).querySelector('[data-comment-jump]')?.classList.contains('rest')).toBe(true);
+		expect(card(suggestion.id).textContent).toContain('Prefer this wording');
+		expect(card(suggestion.id).querySelector('.ct-suggestion-accept')).not.toBeNull();
+		// Picked: the field and the quote line, as before.
+		expect(card(rest.id).querySelector('.ct-input')).not.toBeNull();
+		expect(card(rest.id).querySelector('[data-comment-jump]')?.classList.contains('rest')).toBe(false);
+		expect(card(rest.id).textContent).toContain('1 reply');
 	});
 
-	it('opens on Open and switches filters from the named menu', () => {
+	it('counts open threads in the header, and the resolved entry is the only way to the resolved list', () => {
 		render({ state: { kind: 'list' }, comments: [suggestion, { ...secondSuggestion, resolved: true }] });
 		const drawer = document.body.querySelector<HTMLElement>('[data-doc-comments-drawer]')!;
 		expect(drawer.querySelector('.drawer-heading')?.textContent).toContain('1 open');
-		const menu = drawer.querySelector<HTMLButtonElement>('[data-drawer-filter]')!;
-		expect(menu.textContent?.trim()).toBe('Filter');
-		expect(menu.querySelector('svg')).not.toBeNull();
-		menu.click(); flushSync();
-		const resolved = [...drawer.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find((button) => button.textContent === 'Resolved')!;
-		resolved.click(); flushSync();
-		expect(drawer.querySelector('.drawer-heading')?.textContent).toContain('1 resolved');
-		expect(drawer.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-2');
+		const entry = drawer.querySelector<HTMLButtonElement>('[data-aside-kind="resolved"]')!;
+		expect(entry.textContent?.trim()).toBe('Resolved · 1');
+		expect(entry.getAttribute('aria-expanded')).toBe('false');
+		entry.click(); flushSync();
+		expect(entry.getAttribute('aria-expanded')).toBe('true');
+		expect(drawer.querySelector('.margin-aside')?.getAttribute('aria-label')).toBe('Resolved comments');
 	});
 
-	it('offers the open comments when the resolved filter has none', () => {
-		render({ state: { kind: 'list' }, comments: [suggestion] });
+	it('lists resolved threads newest first', () => {
+		const resolved = (id: string, updatedAt: string) => ({ ...suggestion, id, anchor: id, replacement: null, resolved: true, updatedAt });
+		render({ state: { kind: 'list' }, comments: [resolved('old', '2026-11-01T10:00:00Z'), resolved('newest', '2026-11-05T10:00:00Z'), resolved('middle', '2026-11-03T10:00:00Z')] });
 		const drawer = document.body.querySelector<HTMLElement>('[data-doc-comments-drawer]')!;
-		drawer.querySelector<HTMLButtonElement>('[data-drawer-filter]')!.click(); flushSync();
-		[...drawer.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find((button) => button.textContent === 'Resolved')!.click(); flushSync();
-		const showOpen = [...drawer.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.trim() === 'Show open · 1')!;
-		expect(showOpen).not.toBeNull();
-		showOpen.click(); flushSync();
-		expect(drawer.querySelector('.drawer-heading')?.textContent).toContain('1 open');
-		expect(drawer.querySelector('[data-comment-id]')?.getAttribute('data-comment-id')).toBe('comment-1');
+		drawer.querySelector<HTMLButtonElement>('[data-aside-kind="resolved"]')!.click(); flushSync();
+		expect([...drawer.querySelectorAll('.margin-aside [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['newest', 'middle', 'old']);
+	});
+
+	it('opens the column without hiding the sidebar or the Workspace panel', () => {
+		sidebarCollapsed.set(false); paneCollapsed.set(false);
+		render({ state: { kind: 'list' }, comments: [suggestion] });
+		expect(document.body.querySelector('.canvas-comment-drawer.margin')).not.toBeNull();
+		expect(get(sidebarCollapsed)).toBe(false);
+		expect(get(paneCollapsed)).toBe(false);
+		unmount(component!); component = null; host.remove();
+		expect(get(sidebarCollapsed)).toBe(false);
+		expect(get(paneCollapsed)).toBe(false);
+	});
+
+	it('keeps a thread whose original text was deleted as a card in the column, labelled and marked like any text change', () => {
+		const deleted = { ...suggestion, replacement: null, orphaned: true, detached: true };
+		render({ state: { kind: 'list' }, comments: [deleted, secondSuggestion] });
+		const card = document.body.querySelector<HTMLElement>('[data-margin-card="comment-1"]');
+		expect(card).not.toBeNull();
+		expect(card!.querySelector('.ct-orphan')?.textContent).toBe('This text is no longer in the document');
+		expect(card!.querySelector('.ct.orphaned')).not.toBeNull();
+		expect(document.body.querySelector('.aside-button[data-aside-kind="lost"], .orphans-button')).toBeNull();
+		expect(document.body.querySelector('[data-margin-card="comment-2"]')).not.toBeNull();
+	});
+
+	it('has no resolved entry while nothing is resolved', () => {
+		render({ state: { kind: 'list' }, comments: [suggestion] });
+		expect(document.body.querySelector('[data-aside-kind]')).toBeNull();
+		expect(document.body.querySelector('[data-margin-card="comment-1"]')).not.toBeNull();
+	});
+
+	it('lists the open threads in the sheet that has no margin, with the resolved ones behind an entry, newest first', async () => {
+		const resolved = (id: string, updatedAt: string) => ({ ...suggestion, id, anchor: id, replacement: null, resolved: true, updatedAt });
+		render({ narrow: true, state: { kind: 'list' }, comments: [suggestion, resolved('old', '2026-11-01T10:00:00Z'), resolved('new', '2026-11-05T10:00:00Z')] });
+		const ids = () => [...document.body.querySelectorAll('[data-doc-comments-drawer] [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'));
+		expect(ids()).toEqual(['comment-1']);
+		expect(document.body.querySelector('[data-doc-comments-drawer] .drawer-heading')?.textContent).toContain('1 open');
+		const entry = document.body.querySelector<HTMLButtonElement>('[data-doc-comments-drawer] [data-aside-kind="resolved"]')!;
+		expect(entry.textContent).toContain('Resolved · 2');
+		entry.click();
+		await tick();
+		expect(ids()).toEqual(['comment-1', 'new', 'old']);
+		expect(document.body.querySelector('[data-drawer-filter]')).toBeNull();
+	});
+
+	it('has no resolved entry and no empty-resolved text in the sheet while nothing is resolved', () => {
+		render({ narrow: true, state: { kind: 'list' }, comments: [suggestion] });
+		expect(document.body.querySelector('[data-doc-comments-drawer] [data-aside-kind]')).toBeNull();
+		expect(document.body.querySelector('[data-doc-comments-drawer]')!.textContent).not.toContain('No resolved comments');
 	});
 
 	it('has no Send footer: each held lane is sent from its own header or bar', () => {
@@ -333,7 +397,7 @@ describe('DocCommentSurface suggestions', () => {
 			const { comments, set } = stateOf(comment);
 			const live = fromStore(comments);
 			const onClose = vi.fn();
-			render({ anchor: reading, onClose, get comments() { return live.current; }, ...extra });
+			render({ anchor: reading, bounds: noRoomCanvas(), onClose, get comments() { return live.current; }, ...extra });
 			return { set, onClose };
 		}
 
@@ -343,7 +407,7 @@ describe('DocCommentSurface suggestions', () => {
 			const refused = fromStore(suggestionRefusals);
 			drawn = new DOMRect(520, 100, 20, 20);
 			const onClose = vi.fn();
-			render({ anchor: reading, onClose, get comments() { return [{ ...suggestion, orphaned: 'comment-1' in (refused.current['artifact-1'] ?? {}) }]; } });
+			render({ anchor: reading, bounds: noRoomCanvas(), onClose, get comments() { return [{ ...suggestion, orphaned: 'comment-1' in (refused.current['artifact-1'] ?? {}) }]; } });
 			await vi.waitFor(() => expect(popover().style.left).toBe('548px'));
 			const before = placed();
 			// The editor stops drawing the text once the suggestion is refused as stale.
@@ -411,7 +475,7 @@ describe('DocCommentSurface suggestions', () => {
 		const original = HTMLElement.prototype.scrollIntoView;
 		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
 		try {
-			render({ state: { kind: 'list' }, narrow: true, focusedId: suggestion.id, comments: [{ ...suggestion, replacement: null }] });
+			render({ state: { kind: 'thread', id: suggestion.id }, narrow: true, focusedId: suggestion.id, comments: [{ ...suggestion, replacement: null }] });
 			await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>('.ct-input')).not.toBeNull());
 			expect(document.activeElement?.classList.contains('ct-input')).not.toBe(true);
 		} finally {
@@ -420,7 +484,7 @@ describe('DocCommentSurface suggestions', () => {
 	});
 	it('focuses Reply without turning input clicks into text navigation', async () => {
 		const onFocus = vi.fn();
-		render({ state: { kind: 'list' }, comments: [{ ...suggestion, replacement: null }], onFocus });
+		render({ state: { kind: 'list' }, focusedId: suggestion.id, comments: [{ ...suggestion, replacement: null }], onFocus });
 		document.body.querySelector<HTMLTextAreaElement>('.ct-input')!.focus();
 		await vi.waitFor(() => expect(document.activeElement?.classList.contains('ct-input')).toBe(true));
 		document.body.querySelector<HTMLTextAreaElement>('.ct-input')!.click();
@@ -431,7 +495,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({ state: { kind: 'list' }, onClose, restoreFocus });
 		window.addEventListener('keydown', documentEscape);
 		try {
-			document.body.querySelector('[data-drawer-filter]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+			document.body.querySelector('[data-drawer-focus-home]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
 			expect(onClose).toHaveBeenCalledOnce();
 			expect(restoreFocus).toHaveBeenCalledOnce();
 			expect(documentEscape).not.toHaveBeenCalled();
@@ -494,17 +558,20 @@ describe('DocCommentSurface suggestions', () => {
 		mocks.decideSuggestion.mockRejectedValue(new SuggestionRefused('The text changed on the server', 409, 'stale'));
 		// As DocViewer lists them: a refused card shows as orphaned (commentsInDocumentOrder).
 		const refused = fromStore(suggestionRefusals);
-		const { onSuggestionAccepted } = render({ get comments() { return [{ ...suggestion, orphaned: 'comment-1' in (refused.current['artifact-1'] ?? {}) }]; } });
+		const { onSuggestionAccepted } = render({ bounds: noRoomCanvas(), get comments() { return [{ ...suggestion, orphaned: 'comment-1' in (refused.current['artifact-1'] ?? {}) }]; } });
 		const card = () => document.body.querySelector<HTMLElement>('.ct')!;
 		const accept = () => document.body.querySelector<HTMLButtonElement>('.ct-suggestion-accept')!;
+		// The canvas is measured after the first paint; the card is the one that stays once it has been.
+		await tick();
 		const before = card();
-		expect(document.body.querySelector('h3')?.textContent).toBe('Open comments');
+		// A thread card draws no section heading (the card says it itself), so the group is read off its own note.
+		expect(document.body.querySelector('.ct-orphan')).toBeNull();
 		expect(accept().disabled).toBe(false);
 		accept().click();
-		await vi.waitFor(() => expect(document.body.querySelector('h3')?.textContent).toBe('Text changed'));
+		await vi.waitFor(() => expect(document.body.querySelector('.ct-orphan')).not.toBeNull());
 		expect(document.body.querySelector('[role="alert"]')?.textContent).toBe('The text changed on the server');
 		expect(get(suggestionRefusals)).toEqual({ 'artifact-1': { 'comment-1': 'The text changed on the server' } });
-		// The heading changed, but the card did not move: anything typed in it stays where it was.
+		// The card's note changed, but the card did not move: anything typed in it stays where it was.
 		expect(card()).toBe(before);
 		// The refusal is the card's state; nothing has to come back from the server to show it.
 		expect(mocks.loadComments).not.toHaveBeenCalled();
@@ -685,8 +752,30 @@ describe('DocCommentSurface comments on images inside a document', () => {
 	];
 	const images = () => ({ srcOf: vi.fn((comment: { id: string }) => `/img/${comment.id}`), colorOf: vi.fn(() => '#e5484d'), onOpen: vi.fn() });
 
-	it('lists each image\'s comments together under its thumbnail, in number order, at the image\'s place', () => {
+	// The margin column keeps the thumbnail: one heads each image card, in document order. Grouping every comment of an image together under one thumbnail, in number order, and the orphaned card, are the sheet's list (the next two tests).
+	it('in the margin column, a thumbnail heads each image card, in document order', () => {
 		render({ state: { kind: 'list' }, comments, images: images() });
+		expect(document.body.querySelector('.canvas-comment-drawer.margin')).not.toBeNull();
+		const ids = [...document.body.querySelectorAll('[data-doc-comments-drawer] [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'));
+		expect(ids).toEqual(['before', 'b', 'between', 'a', 'c', 'gone']);
+		const thumbs = [...document.body.querySelectorAll<HTMLButtonElement>('[data-region-thumb]')];
+		expect(thumbs.map((thumb) => thumb.nextElementSibling?.getAttribute('data-comment-id'))).toEqual(['b', 'a', 'c', 'gone']);
+		expect(thumbs.map((thumb) => thumb.getAttribute('aria-label'))).toEqual(['Mock: image with comment 2', 'Mock: image with comment 1', 'Mock: image with comment 1', 'Mock: image with comment 3']);
+	});
+
+	it('in the margin column, a card\'s thumbnail opens its image', () => {
+		const groups = images();
+		render({ state: { kind: 'list' }, comments, images: groups });
+		const thumbs = [...document.body.querySelectorAll<HTMLButtonElement>('[data-region-thumb]')];
+		thumbs[0].click();
+		expect(groups.onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'b' }));
+		thumbs[1].click();
+		expect(groups.onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'a' }));
+	});
+
+	it('lists each image\'s comments together under its thumbnail, in number order, at the image\'s place', () => {
+		// The sheet's list groups every comment of an image under one thumbnail, in number order, and lists the orphaned card; the margin column's own thumbnails are the two tests above.
+		render({ narrow: true, state: { kind: 'list' }, comments, images: images() });
 		const ids = [...document.body.querySelectorAll('[data-doc-comments-drawer] [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'));
 		expect(ids).toEqual(['before', 'a', 'b', 'between', 'c', 'gone']);
 		const thumbs = [...document.body.querySelectorAll<HTMLButtonElement>('[data-region-thumb]')];
@@ -718,9 +807,9 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const onFocus = vi.fn();
 		render({ state: { kind: 'list' }, comments, images: groups, onFocus });
 		const thumbs = [...document.body.querySelectorAll<HTMLButtonElement>('[data-region-thumb]')];
-		thumbs[0].click();
+		thumbs[1].click();
 		expect(groups.onOpen).toHaveBeenCalledWith(expect.objectContaining({ id: 'a' }));
-		expect(thumbs[2].disabled).toBe(true);
+		expect(thumbs[3].disabled).toBe(true);
 		document.body.querySelector<HTMLButtonElement>('[data-comment-id="b"] [data-move-pin]')!.click();
 		expect(groups.onOpen).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'b' }), { id: 'b', move: true });
 		document.body.querySelector<HTMLButtonElement>('[data-comment-id="a"] .ct-num')!.click();
@@ -732,7 +821,7 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const comments = writable([plain, { ...plain, id: 'comment-2', anchor: 'other text' }]);
 		const state = fromStore(comments);
 		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
-		render({ state: { kind: 'list' }, get comments() { return state.current; } });
+		render({ state: { kind: 'list' }, focusedId: 'comment-1', get comments() { return state.current; } });
 		const field = document.body.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
 		field.value = 'half a reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
 		expect(document.body.querySelector('.drawer-heading')?.textContent).toContain('2 open');
@@ -763,8 +852,9 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		// It eases out (still mounted, as the card, while it does) and is removed once the ease is done.
 		expect(document.body.querySelector('[data-comment-id="comment-1"]')).not.toBeNull();
 		expect(document.body.querySelector('[data-comment-id="comment-1"] [data-resolved-note]')).not.toBeNull();
-		await vi.waitFor(() => expect(document.body.querySelector('[data-comment-id="comment-1"]')).toBeNull());
-		expect(document.body.querySelector('[data-comment-id="comment-2"]')).not.toBeNull();
+		// The picked card is the one the person typed in, so it goes on to the Resolved list the column keeps for the selected thread; what leaves is its place among the open cards.
+		await vi.waitFor(() => expect(document.body.querySelector('.margin-stack [data-comment-id="comment-1"]')).toBeNull());
+		expect(document.body.querySelector('.margin-stack [data-comment-id="comment-2"]')).not.toBeNull();
 		expect(document.body.querySelector('.drawer-heading')?.textContent).toContain('1 open');
 	});
 
@@ -774,26 +864,62 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const state = fromStore(comments);
 		const onResolve = vi.fn();
 		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
-		render({ state: { kind: 'list' }, get comments() { return state.current; }, onResolve });
+		render({ state: { kind: 'list' }, focusedId: 'comment-1', get comments() { return state.current; }, onResolve });
 		const field = document.body.querySelector<HTMLTextAreaElement>('[data-comment-id="comment-1"] textarea')!;
 		field.value = 'half a reply'; field.dispatchEvent(new Event('input', { bubbles: true })); flushSync();
 		comments.set([{ ...plain, resolved: true }]); flushSync();
 		document.body.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] [data-resolved-note] .reopen')!.click();
 		expect(onResolve).toHaveBeenCalledWith('comment-1', false);
 	});
-	it('closes the card when a decided suggestion that kept its replies is resolved, and not for any other comment', () => {
+	it('closes the card when a decided suggestion that kept its replies is resolved, once the request is answered, and not for any other comment', async () => {
 		const decided = { ...suggestion, decision: 'accepted' as const, replies: [{ id: 'r1', author: 'agent-1', text: 'Thanks', at: 'now' }] };
-		const onResolve = vi.fn(), onClose = vi.fn();
-		render({ comments: [decided], onResolve, onClose });
+		let answer!: (taken: boolean) => void;
+		const onResolve = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; })), onClose = vi.fn(), restoreFocus = vi.fn();
+		render({ bounds: noRoomCanvas(), comments: [decided], onResolve, onClose, restoreFocus });
 		document.body.querySelector<HTMLButtonElement>('.ct-act.resolve')!.click();
-		expect(onResolve).toHaveBeenCalledWith('comment-1', true);
-		expect(onClose).toHaveBeenCalledOnce();
+		expect(onResolve).toHaveBeenCalledWith('comment-1', true, true);
+		await Promise.resolve();
+		expect(onClose).not.toHaveBeenCalled();
+		answer(true);
+		await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+		expect(restoreFocus).toHaveBeenCalledOnce();
 		unmount(component!); component = null; host.remove();
 		const plain = { ...suggestion, replacement: undefined };
-		const onCloseAgain = vi.fn();
-		render({ comments: [plain], onResolve, onClose: onCloseAgain });
+		const onCloseAgain = vi.fn(), plainResolve = vi.fn();
+		render({ comments: [plain], onResolve: plainResolve, onClose: onCloseAgain });
 		document.body.querySelector<HTMLButtonElement>('.ct-act.resolve')!.click();
+		expect(plainResolve).toHaveBeenCalledWith('comment-1', true);
+		await Promise.resolve();
 		expect(onCloseAgain).not.toHaveBeenCalled();
+	});
+	it('keeps the margin column up when a decided suggestion picked from its text is resolved', async () => {
+		const decided = { ...suggestion, decision: 'accepted' as const, replies: [{ id: 'r1', author: 'agent-1', text: 'Thanks', at: 'now' }] };
+		const other = { ...suggestion, id: 'comment-2', replacement: undefined };
+		const onResolve = vi.fn(async () => true), onClose = vi.fn(), restoreFocus = vi.fn();
+		render({ state: { kind: 'thread', id: decided.id }, comments: [decided, other], onResolve, onClose, restoreFocus });
+		expect(document.body.querySelector('.canvas-comment-drawer.margin')).not.toBeNull();
+		document.body.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] .ct-act.resolve')!.click();
+		await vi.waitFor(() => expect(onResolve).toHaveBeenCalledWith('comment-1', true, true));
+		await Promise.resolve(); await Promise.resolve();
+		expect(onClose).not.toHaveBeenCalled();
+		expect(document.body.querySelector('[data-comment-id="comment-2"]')).not.toBeNull();
+	});
+
+	it.each([false, true])('keeps a decided card and its focus when the request to resolve it is refused (phone width: %s)', async (narrow) => {
+		const decided = { ...suggestion, decision: 'accepted' as const, replies: [{ id: 'r1', author: 'agent-1', text: 'Thanks', at: 'now' }] };
+		const onResolve = vi.fn(async () => false), onClose = vi.fn(), restoreFocus = vi.fn();
+		render({ comments: [decided], onResolve, onClose, restoreFocus, narrow });
+		const resolve = document.body.querySelector<HTMLButtonElement>('.ct-act.resolve')!;
+		resolve.focus(); resolve.click();
+		await vi.waitFor(() => expect(onResolve).toHaveBeenCalledOnce());
+		await Promise.resolve(); await Promise.resolve();
+		expect(onClose).not.toHaveBeenCalled();
+		expect(restoreFocus).not.toHaveBeenCalled();
+		expect(document.body.querySelector('.ct-act.resolve')).toBe(resolve);
+		await vi.waitFor(() => expect(document.body.textContent).toContain('Couldn’t resolve this. Try again.'));
+		// The sheet holds focus for its own card; a refusal must not hand it to the page.
+		expect(document.activeElement).not.toBe(document.body);
+		if (!narrow) expect(document.activeElement).toBe(resolve);
 	});
 
 	it('does not offer accept-all for suggestions that were already decided', () => {

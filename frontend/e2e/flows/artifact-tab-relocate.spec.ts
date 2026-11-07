@@ -24,7 +24,7 @@ test('@flow:artifact-tab-relocate keeps an open document tab at its relocated pa
 	await postLinks(page, request, `[Open document](<${a.docPath}>)`);
 	await page.getByRole('link', { name: 'Open document', exact: true }).click();
 	await expect(page.locator('.cm-content')).toContainText(a.body);
-	await expect(page.locator('.cm-comment-marker')).toHaveCount(1);
+	await expect(page.locator('.cm-comment-anchor')).toHaveCount(1);
 
 	const relocatedName = `relocated-${a.name}`;
 	const relocatedPath = path.join(path.dirname(a.docPath), relocatedName);
@@ -35,8 +35,8 @@ test('@flow:artifact-tab-relocate keeps an open document tab at its relocated pa
 
 	await expect(page.locator('.tab-title').filter({ hasText: relocatedName })).toHaveText(relocatedName);
 	await expect(page.locator('.cm-content')).toContainText(a.body);
-	await expect(page.locator('.cm-comment-marker')).toHaveCount(1);
-	await page.locator('.cm-comment-marker').click();
+	await expect(page.locator('.cm-comment-anchor')).toHaveCount(1);
+	await page.locator('.cm-comment-anchor').click();
 	await expect(page.getByText(commentText, { exact: true }).first()).toBeVisible();
 	await page.screenshot({ path: testInfo.outputPath('relocated-tab.png'), fullPage: true });
 });

@@ -293,7 +293,7 @@ def test_cc_eviction_prepares_the_same_provider_resume(
     )
     monkeypatch.setattr(
         "subagents.harness_tool_bridge.dynamic_tool_definitions",
-        lambda _registry: (),
+        lambda _registry, _confined=False: (),
     )
 
     first = prepare_cc_destination_payload(

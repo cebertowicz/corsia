@@ -349,7 +349,7 @@
 				return id ? liveAnchor(id)() : null;
 			}, click)),
 		}));
-		const sig = ranges.map((r) => `${r.from}:${r.to}:${r.id}:${r.focused ? 1 : 0}:${r.replyWaiting ? 1 : 0}:${r.point ? 1 : 0}:${r.lost ? 1 : 0}:${JSON.stringify(r.suggestion ?? null)}`).join('|');
+		const sig = ranges.map((r) => `${r.from}:${r.to}:${r.id}:${r.focused ? 1 : 0}:${r.point ? 1 : 0}:${JSON.stringify(r.suggestion ?? null)}`).join('|');
 		if (sig === lastPainted) return;
 		lastPainted = sig;
 		curHighlights = ranges;

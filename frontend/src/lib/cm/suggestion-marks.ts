@@ -133,6 +133,7 @@ const theme = EditorView.baseTheme({
 	'.cm-suggestion-insert::after': { content: 'attr(data-insert)' },
 	// Presentation only: never part of the document or a copy.
 	'.cm-suggestion-insert-after': { marginLeft: '0.25em' },
+	'.cm-suggestion-insert-below': { display: 'block', marginLeft: 0 },
 	'.cm-suggestion-focus': {
 		backgroundColor: 'color-mix(in srgb, var(--suggestion-color) 12%, transparent)',
 		borderRadius: '2px',

@@ -124,7 +124,7 @@
 </div>
 
 <style>
-	.image-viewer { --doc-rail: 0px; position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; padding-bottom: var(--capsule-clearance, 0px); }
+	.image-viewer { --doc-inset: 0px; position: relative; height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; padding-bottom: var(--capsule-clearance, 0px); }
 	.stale-row { display: flex; }
 	.stale-control {
 		display: inline-flex; align-items: center; height: 28px; padding: 0 8px; border: 0;

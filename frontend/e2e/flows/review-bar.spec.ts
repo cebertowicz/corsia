@@ -391,38 +391,18 @@ journey('the comments drawer keeps 44px touch targets', [['393 light', 'phone', 
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer).toBeVisible();
 	const close = drawer.getByRole('button', { name: 'Close comments', exact: true });
-	const filters = drawer.locator('[data-drawer-filter]');
 	const jump = drawer.locator('[data-comment-jump]').first();
-	expect(await filters.count()).toBe(1);
+	await expect(drawer.locator('[data-drawer-filter]'), 'a text document has no filter').toHaveCount(0);
 	await settled(page);
-	const targets = [close, jump, ...(await filters.all())];
-	for (const target of targets) expect((await target.boundingBox())!.height, 'touch target').toBeGreaterThanOrEqual(44);
-	// A real tap opens the menu, selects a filter, and leaves every drawer control reachable.
-	const openFilter = drawer.getByRole('button', { name: 'Filter comments: Open', exact: true });
-	// Locator tap scrolls the current phone-sheet control into view and targets its live centre.
-	await openFilter.tap();
-	await expect(openFilter).toHaveAttribute('aria-expanded', 'true');
-	await openFilter.tap();
-	await expect(openFilter).toHaveAttribute('aria-expanded', 'false');
+	for (const target of [close, jump]) expect((await target.boundingBox())!.height, 'touch target').toBeGreaterThanOrEqual(44);
+	// A real tap on a quote jump leaves every drawer control reachable.
 	const jumpBox = (await jump.boundingBox())!;
 	await page.touchscreen.tap(jumpBox.x + jumpBox.width / 2, jumpBox.y + jumpBox.height / 2);
 	await expect(drawer).toBeVisible();
-	// A quote jump moves the phone sheet to its half detent. Wait for that finite
-	// transition before calculating a touch coordinate, rather than tapping where
-	// the filter was while the sheet was still moving.
+	// A quote jump moves the phone sheet to its half detent. Wait for that finite transition before measuring the close control.
 	await settled(page);
-	await expect(hitAtCentre(filters)).resolves.toBe(true);
+	await expect(hitAtCentre(close)).resolves.toBe(true);
 	await shot(page, 'rs-09-half-sheet-after-quote-tap', info);
-	const reopenedBox = (await filters.boundingBox())!;
-	await page.touchscreen.tap(reopenedBox.x + reopenedBox.width / 2, reopenedBox.y + reopenedBox.height / 2);
-	await expect(filters).toHaveAttribute('aria-expanded', 'true');
-	const menu = drawer.getByRole('menu', { name: 'Filter comments', exact: true });
-	await expect(menu.getByRole('menuitemradio')).toHaveCount(3);
-	await shot(page, 'rs-10-filter-menu-open', info);
-	await menu.getByRole('menuitemradio', { name: 'Resolved', exact: true }).click();
-	await expect(filters).toHaveText('Filter');
-	await expect(filters).toHaveAttribute('aria-label', 'Filter comments: Resolved');
-	await expect(filters).toHaveAttribute('aria-expanded', 'false');
 	await shot(page, 'drawer-touch', info);
 	await close.click();
 	await expect(drawer).toBeHidden();
@@ -566,12 +546,11 @@ journey('held comments have the header Send, whole at every size, and the drawer
 	await expect(drawer.getByRole('button', { name: /^Send\b/ })).toHaveCount(0);
 	await settled(page);
 	if (mode === 'closed') {
-		const [sheet, column] = await Promise.all([
-			page.locator('[data-adaptive-drawer] .drawer-panel').boundingBox(),
-			page.locator('.leaf-body.document-canvas').boundingBox(),
-		]);
-		expect(sheet!.x, 'the narrow-canvas sheet starts at the document column').toBeCloseTo(column!.x, 0);
-		expect(sheet!.width, 'the narrow-canvas sheet spans only the document column').toBeCloseTo(column!.width, 0);
+		// This canvas has room for the margin column, so the list is that column inside the document canvas, not a sheet over it.
+		await expect(page.locator('[data-adaptive-drawer]')).toHaveCount(0);
+		const [list, column] = await Promise.all([drawer.boundingBox(), page.locator('.leaf-body.document-canvas').boundingBox()]);
+		expect(list!.x, 'the margin column starts inside the document column').toBeGreaterThanOrEqual(column!.x);
+		expect(list!.x + list!.width, 'the margin column ends inside the document column').toBeLessThanOrEqual(column!.x + column!.width + 0.5);
 	}
 	await shot(page, 'drawer-without-footer', info);
 	await drawer.getByRole('button', { name: 'Close comments', exact: true }).click();
@@ -668,7 +647,8 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 	await comments.click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	// Every quote is gone from the document, so Place again has nothing to place: the cards say so and the footer stays away.
-	await expect(drawer.getByText(/^Text changed:/)).toHaveCount(22);
+	// A margin card says "This text is no longer in the document"; a row in the list or sheet says "Text changed:".
+	await expect(drawer.getByText(/^(Text changed:|This text is no longer in the document$)/)).toHaveCount(22);
 	await expect(drawer.locator('[data-drawer-placement]')).toHaveCount(0);
 	await settled(page);
 	// Drawer geometry is covered by its focused recovery journey; this flow records the phone layout annotation below.

@@ -12,26 +12,22 @@ from subagents.managed_launch import claude_project_discovery_args
 
 #: A launch with every CORSIA tool, as every managed child had before confinement.
 CONFINEMENT_NONE = "none"
-#: A launch that may only Read, Grep and Glob its working directory and add-dirs.
+#: A launch whose only tools are CORSIA's confined read tools, checked per call.
 CONFINEMENT_UNTRUSTED = "untrusted"
 CONFINEMENTS = (CONFINEMENT_NONE, CONFINEMENT_UNTRUSTED)
-_CONFINEMENT_FIELDS = ("confinement", "add_dirs")
-#: The only tools an untrusted launch has: Claude Code's own, run inside the provider.
-UNTRUSTED_NATIVE_TOOLS = ("Read", "Grep", "Glob")
 
 
-def claude_untrusted_profile_args() -> list[str]:
-    """Return the fixed Claude Code tool profile for a confined untrusted child.
+def confined_claude_tool_names() -> list[str]:
+    """The bridged tool names a confined launch is offered: CORSIA's confined reads.
 
-    The caller supplies the reviewed paths with ``--add-dir``. Keeping this
-    profile separate from normal managed-session construction prevents an untrusted
-    child from inheriting CORSIA MCP access, local settings, or any tool other
-    than Read, Grep, and Glob.
+    The names come from the shared boundary (``tools.confined_reads``), so the
+    surface Claude Code is offered and the surface the boundary serves on every
+    call can never drift apart.
     """
-    return [
-        *confined_claude_controls(),
-        "--tools", ",".join(UNTRUSTED_NATIVE_TOOLS),
-    ]
+    from tools.catalog import MCP_CORSIA_PREFIX
+    from tools.confined_reads import UNTRUSTED_READ_TOOLS
+
+    return [f"{MCP_CORSIA_PREFIX}{name}" for name in sorted(UNTRUSTED_READ_TOOLS)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,23 +44,16 @@ class ClaudeInvocation:
     model: str | None = None
     effort: str | None = None
     confinement: str = CONFINEMENT_NONE
-    add_dirs: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        _require_confinement(self.confinement, self.add_dirs)
-        if self.confinement == CONFINEMENT_UNTRUSTED and self.mcp_config:
-            raise ValueError("a confined Claude Code launch has no CORSIA tool bridge")
+        _require_confinement(self.confinement)
+        if self.confinement == CONFINEMENT_UNTRUSTED and not self.mcp_config:
+            raise ValueError("a confined Claude Code launch needs the CORSIA tool bridge")
 
 
-def _require_confinement(confinement: object, add_dirs: object) -> None:
+def _require_confinement(confinement: object) -> None:
     if confinement not in CONFINEMENTS:
         raise ValueError(f"unknown Claude Code launch confinement: {confinement!r}")
-    if not isinstance(add_dirs, tuple) or any(
-        not isinstance(path, str) or not path for path in add_dirs
-    ):
-        raise ValueError("Claude Code add-dirs must be non-empty path strings")
-    if (confinement == CONFINEMENT_UNTRUSTED) != bool(add_dirs):
-        raise ValueError("only an untrusted launch has add-dirs, and it needs at least one")
 
 
 @dataclass(frozen=True)
@@ -72,7 +61,7 @@ class LaunchConfinement:
     """What one launch of a thread may reach, read once at the launch's start."""
 
     mode: str = CONFINEMENT_NONE
-    add_dirs: tuple[str, ...] = ()
+    read_dirs: tuple[str, ...] = ()  # the thread row's, which the tool boundary enforces
     working_dir: str | None = None  # an untrusted child's own directory
 
     @property
@@ -88,18 +77,15 @@ def permission_mode_for(confinement: str) -> str:
     return CONFINED_PERMISSION_MODE if confinement == CONFINEMENT_UNTRUSTED else "bypassPermissions"
 
 
-def stored_confinement(value: dict) -> tuple[str, tuple[str, ...]]:
+def stored_confinement(value: dict) -> str:
     """Read one stored launch's confinement; a record without one is unconfined.
 
     Raises ``ValueError`` for a malformed value, so no reader can mistake a
     damaged untrusted record for an unconfined one.
     """
     confinement = value.get("confinement", CONFINEMENT_NONE)
-    add_dirs = value.get("add_dirs", [])
-    if not isinstance(add_dirs, list):
-        raise ValueError("Claude Code add-dirs must be a list")
-    _require_confinement(confinement, tuple(add_dirs))
-    return str(confinement), tuple(add_dirs)
+    _require_confinement(confinement)
+    return str(confinement)
 
 
 def claude_invocation_metadata(invocation: ClaudeInvocation) -> dict[str, object]:
@@ -110,10 +96,7 @@ def claude_invocation_metadata(invocation: ClaudeInvocation) -> dict[str, object
     """
     value: dict[str, object] = asdict(invocation)
     if invocation.confinement == CONFINEMENT_NONE:
-        for field in _CONFINEMENT_FIELDS:
-            value.pop(field)
-    else:
-        value["add_dirs"] = list(invocation.add_dirs)
+        value.pop("confinement")
     return value
 
 
@@ -121,8 +104,8 @@ def claude_invocation_from_metadata(value: object) -> ClaudeInvocation | None:
     """Restore one exact launch description only from a complete valid record."""
     if not isinstance(value, dict):
         return None
-    plain = {key: item for key, item in value.items() if key not in _CONFINEMENT_FIELDS}
-    fields = set(ClaudeInvocation.__dataclass_fields__) - set(_CONFINEMENT_FIELDS)
+    plain = {key: item for key, item in value.items() if key != "confinement"}
+    fields = set(ClaudeInvocation.__dataclass_fields__) - {"confinement"}
     if set(plain) != fields or any(
         item is not None and not isinstance(item, str) for item in plain.values()
     ):
@@ -134,8 +117,7 @@ def claude_invocation_from_metadata(value: object) -> ClaudeInvocation | None:
     if not isinstance(permission_mode, str) or not permission_mode:
         return None
     try:
-        confinement, add_dirs = stored_confinement(value)
-        return ClaudeInvocation(**plain, confinement=confinement, add_dirs=add_dirs)
+        return ClaudeInvocation(**plain, confinement=stored_confinement(value))
     except ValueError:
         return None
 
@@ -169,11 +151,19 @@ def claude_transcript_prefix_proof(
 
 
 def _untrusted_args(invocation: ClaudeInvocation) -> list[str]:
-    """Read-only tools over the add-dirs; the profile sets the permission mode."""
-    args = [*claude_untrusted_profile_args(), "--disable-slash-commands"]
-    for path in invocation.add_dirs:
-        args += ["--add-dir", path]
-    return args
+    """Only CORSIA's confined read tools, over the bridge; the profile sets the mode.
+
+    ``dontAsk`` refuses any tool with no allow rule, and MCP tools are not exempt, so
+    the same names are allowed as offered.
+    """
+    tools = confined_claude_tool_names()
+    return [
+        *confined_claude_controls(mcp_tools=True),
+        "--tools", ",".join(tools),
+        "--allowedTools", *tools,
+        "--disable-slash-commands",
+        "--mcp-config", invocation.mcp_config,
+    ]
 
 
 def _managed_args(invocation: ClaudeInvocation) -> list[str]:

@@ -9,9 +9,6 @@ vi.mock('$lib/api/docs', () => ({ fetchComments: vi.fn(), postComment: vi.fn(), 
 import MarkdownEditor from './MarkdownEditor.svelte';
 import { docComments, remapComments } from '$lib/stores/docComments';
 
-const replyHighlights = writable([{ from: 0, to: 5, id: 'comment', replyWaiting: true }]);
-const liveReplyHighlights = fromStore(replyHighlights);
-
 let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 
@@ -101,25 +98,6 @@ describe('MarkdownEditor edits', () => {
 		expect(view.state.doc.toString()).toBe('Intro. The quick brown fox. Then more.');
 		expect(view.state.field(commentRanges)).toMatchObject([{ id: 'kept', from: 11, to: 16 }]);
 		expect(view.state.sliceDoc(11, 16)).toBe('quick');
-	});
-
-	it('repaints a reply marker when only replyWaiting changes', async () => {
-		replyHighlights.set([{ from: 0, to: 5, id: 'comment', replyWaiting: true }]);
-		host = document.createElement('div'); document.body.appendChild(host);
-		component = mount(MarkdownEditor, {
-			target: host,
-			props: {
-				value: 'alpha',
-				get highlights() { return liveReplyHighlights.current; },
-			},
-		});
-		flushSync();
-		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
-		expect(view.state.field(commentRanges)).toMatchObject([{ replyWaiting: true }]);
-
-		replyHighlights.set([{ from: 0, to: 5, id: 'comment', replyWaiting: false }]);
-		flushSync();
-		expect(view.state.field(commentRanges)).toMatchObject([{ replyWaiting: false }]);
 	});
 
 	describe('inline suggestions', () => {

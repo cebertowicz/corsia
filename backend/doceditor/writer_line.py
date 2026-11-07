@@ -8,7 +8,13 @@ ordinary call. A row lives only while it waits: ``settle`` deletes it when it po
 line, and the next row is woken at once. A rewrite settles in the same transaction as the comment
 write that lands it (``landed``), so one never commits without the other. A woken agent whose turn
 ends without either drops out of line, is told, and the next row is woken; so does one whose thread
-can no longer take input. The continuation sweep serves any line left waiting (``serve_waiting``).
+can no longer take input. The continuation sweep serves any line left waiting and settles any woken
+row whose wake reached no live turn (``serve_waiting``). A line step that fails drops the row it was
+serving with its agent told and an error reference, so no row is left stuck or retried unseen.
+
+A document section's line is the same line under the section's key (``writer_turns.section_key``):
+an agent's edit or suggestion saved while someone else changes that section (``section_writes``).
+Its wake is ``section_wake``'s, and its saved write is posted as is by making the same call again.
 
 Every function runs inside the caller's write transaction; ``BEGIN IMMEDIATE`` makes a line read
 and its write one step.
@@ -27,8 +33,10 @@ from loguru import logger
 
 from doceditor import comments as store, live_events, writer_turns
 from doceditor.note_names import document_name
-from doceditor.writer_line_text import describe, wake_text
+from doceditor.writer_line_count import publish_after_commit
+from doceditor.writer_line_text import TURN_ENDED, describe, wake_text
 from infra.database import write_transaction
+from infra.failure_reference import new_error_reference
 from infra.passive_changes import append_thread_context_note
 from infra.write_effects import after_commit
 from registry import models as registry_models
@@ -36,6 +44,7 @@ from registry import models as registry_models
 __all__ = ["Admitted", "Queued", "describe", "wake_text"]
 
 EVENT = "doc_comment.writer_turn"
+SECTION_EVENT = "doc_section.writer_turn"
 #: Turn states still able to answer a wake.
 _LIVE = "('running','waiting_retry')"
 
@@ -72,23 +81,6 @@ def active(db, root_id: str) -> list[sqlite3.Row]:
     return db.execute(
         "SELECT * FROM doc_comment_writer_line WHERE root_id=? ORDER BY saved_at,id", (root_id,),
     ).fetchall()
-
-
-def count(db, root_id: str) -> int:
-    return counts(db, [root_id]).get(root_id, 0)
-
-
-def counts(db, root_ids) -> dict[str, int]:
-    """How many writes wait on each of these threads, in one grouped read."""
-    roots = sorted(set(root_ids))
-    if not roots:
-        return {}
-    rows = db.execute(
-        f"""SELECT root_id, COUNT(*) AS waiting FROM doc_comment_writer_line
-            WHERE root_id IN ({",".join("?" * len(roots))}) GROUP BY root_id""",
-        roots,
-    ).fetchall()
-    return {str(row["root_id"]): int(row["waiting"]) for row in rows}
 
 
 def saved_entry(db, root_id: str, thread_id: str) -> sqlite3.Row | None:
@@ -156,7 +148,7 @@ def _queued(db, root_id: str, artifact_id: str, thread_id: str) -> Queued:
         holder = _title(db, agent)
     else:
         holder = _title(db, line[0]["agent_thread_id"])
-    _publish_after_commit(db, root_id, artifact_id)
+    publish_after_commit(db, root_id, artifact_id)
     return Queued(root_id, position, holder)
 
 
@@ -173,16 +165,29 @@ def landed(db, root_id: str, thread_id: str | None) -> None:
 
 
 def settle(db, row, outcome: str) -> None:
-    """The one end of a saved row: posted as is, rewritten, or dropped. The row is deleted."""
+    """The one end of a saved row: posted as is, rewritten, or dropped. The row is deleted.
+
+    A woken section row's end also clears its agent from the wake hint (``writer_turns``) once the
+    agent has no other woken section row.
+    """
     db.execute("DELETE FROM doc_comment_writer_line WHERE id=?", (row["id"],))
+    if row["state"] == "woken" and writer_turns.section_heading(str(row["root_id"])) is not None:
+        thread_id = str(row["agent_thread_id"])
+        if db.execute("""SELECT 1 FROM doc_comment_writer_line
+                         WHERE agent_thread_id=? AND state='woken' AND root_id LIKE 'section:%' LIMIT 1""",
+                      (thread_id,)).fetchone() is None:
+            after_commit(db, lambda: writer_turns.section_answered(thread_id))
     waited = (datetime.now(timezone.utc) - datetime.fromisoformat(str(row["saved_at"]))).total_seconds()
     _event(db, outcome, root_id=str(row["root_id"]), artifact_id=str(row["artifact_id"]), line_id=str(row["id"]),
            wakes=int(row["wakes"]), waited_seconds=round(waited, 3))
-    _publish_after_commit(db, str(row["root_id"]), str(row["artifact_id"]))
+    publish_after_commit(db, str(row["root_id"]), str(row["artifact_id"]))
 
 
 def _event(db, outcome: str, **properties) -> None:
     """One product event per line step, once its write commits: identities and counts only."""
+    if writer_turns.section_heading(properties["root_id"]) is not None:
+        # A section's key holds its heading, which is document text.
+        properties = {**properties, "root_id": None, "line": "section"}
     after_commit(db, lambda: live_events.emit("comment_writer_line", outcome=outcome, **properties))
 
 
@@ -224,8 +229,9 @@ def serve(db, root_id: str) -> list[str]:
             return []
         woken = next((row for row in line if row["state"] == "woken"), None)
         head = woken or line[0]
-        if store.get_comment(root_id, db=db) is None:
-            _drop(db, head, "the thread was deleted")
+        heading = writer_turns.section_heading(root_id)
+        if gone := _gone(db, head, heading):
+            _drop(db, head, gone)
             continue
         if reason := _unable(db, head):
             _drop(db, head, reason)
@@ -234,6 +240,9 @@ def serve(db, root_id: str) -> list[str]:
             return []
         wakes = head["wakes"] + 1
         message_id = f"writer-line-{head['id']}-{wakes}"
+        metadata = ({"kind": "comment_writer_turn", "comment_id": root_id, "line_id": head["id"]} if heading is None
+                    else {"kind": "section_writer_turn", "artifact_id": head["artifact_id"], "section": heading,
+                          "line_id": head["id"]})
         try:
             with write_transaction(db, scope="writer_line_wake"):
                 db.execute(
@@ -241,22 +250,46 @@ def serve(db, root_id: str) -> list[str]:
                     (wakes, message_id, head["id"]),
                 )
                 enqueue_event_wake(
-                    head["agent_thread_id"], EVENT, wake_text(db, head),
-                    metadata={"kind": "comment_writer_turn", "comment_id": root_id, "line_id": head["id"]},
-                    message_id=message_id, db=db,
+                    head["agent_thread_id"], EVENT if heading is None else SECTION_EVENT, wake_text(db, head),
+                    metadata=metadata, message_id=message_id, db=db,
                 )
         except (ValueError, SendRejected) as error:
             logger.warning("writer line {} could not wake {}: {}", head["id"], head["agent_thread_id"], error)
             _drop(db, head, "your thread could not be woken")
             continue
+        if heading is not None:
+            # After the commit, so an earlier row's end in the same sweep never clears this later wake.
+            woken_thread = str(head["agent_thread_id"])
+            after_commit(db, lambda: writer_turns.section_woken(woken_thread))
         _event(db, "woken", root_id=root_id, artifact_id=str(head["artifact_id"]), line_id=str(head["id"]), wakes=wakes)
-        _publish_after_commit(db, root_id, head["artifact_id"])
+        publish_after_commit(db, root_id, head["artifact_id"])
         return [str(head["agent_thread_id"])]
 
 
+def _gone(db, row, heading: str | None) -> str | None:
+    """Why a row's thread or document can no longer take its write; None while it can."""
+    if heading is None:
+        return None if store.get_comment(str(row["root_id"]), db=db) is not None else "the thread was deleted"
+    identity = db.execute("SELECT state FROM artifact_identities WHERE id=?", (row["artifact_id"],)).fetchone()
+    return None if identity is not None and identity["state"] != "tombstone" else "the document was deleted"
+
+
+_WOKEN = """SELECT line.*, m.delivery_state, m.active_turn_id, t.status AS turn_status
+   FROM doc_comment_writer_line line
+   LEFT JOIN messages m ON m.id=line.wake_message_id
+   LEFT JOIN active_turns t ON t.id=m.active_turn_id
+   WHERE line.state='woken'"""
+
+
 def serve_waiting(db) -> list[str]:
-    """The continuation sweep's pass: serve every line with a write waiting, so none waits on a lost serve."""
+    """The continuation sweep's pass, so no line waits on a lost serve or a failed turn-end step.
+
+    A woken row whose wake reached no live turn is settled as its turn's end would have settled it;
+    then every line with a write waiting is served.
+    """
     drives: list[str] = []
+    for row in db.execute(_WOKEN).fetchall():
+        drives.extend(_contained(db, str(row["root_id"]), lambda row=row: _settle_ended(db, row, None)))
     for row in db.execute("SELECT DISTINCT root_id FROM doc_comment_writer_line WHERE state='waiting'").fetchall():
         root_id = str(row["root_id"])
         drives.extend(_contained(db, root_id, lambda: serve(db, root_id)))
@@ -268,17 +301,10 @@ def settle_turn_end(db, thread_id: str, turn_id: str | None) -> list[str]:
 
     A wake still queued is yet to be read unless the thread can no longer take it, and one inside
     another live turn may still be answered there. Each row's step is contained, so a failure here
-    never rolls back the turn's own terminal settlement; that row is re-woken by restart recovery.
+    never rolls back the turn's own terminal settlement; the row it failed on drops out of line.
     """
     drives: list[str] = []
-    rows = db.execute(
-        """SELECT line.*, m.delivery_state, m.active_turn_id, t.status AS turn_status
-           FROM doc_comment_writer_line line
-           LEFT JOIN messages m ON m.id=line.wake_message_id
-           LEFT JOIN active_turns t ON t.id=m.active_turn_id
-           WHERE line.agent_thread_id=? AND line.state='woken'""",
-        (thread_id,),
-    ).fetchall()
+    rows = db.execute(f"{_WOKEN} AND line.agent_thread_id=?", (thread_id,)).fetchall()
     for row in rows:
         drives.extend(_contained(db, str(row["root_id"]), lambda row=row: _settle_ended(db, row, turn_id)))
     return drives
@@ -292,18 +318,38 @@ def _settle_ended(db, row, turn_id: str | None) -> list[str]:
         return []
     if row["active_turn_id"] != turn_id and row["turn_status"] in ("running", "waiting_retry"):
         return []
-    _drop(db, row, "your turn ended without posting it as is or rewriting it")
+    _drop(db, row, _unable(db, row) or TURN_ENDED)
     return serve(db, str(row["root_id"]))
 
 
-def _contained(db, root_id: str, step) -> list[str]:
-    """Run one line's step in its own savepoint: a failure is logged and undone, never raised into the caller's work."""
+def _contained(db, root_id: str, step, *, give_up: bool = True) -> list[str]:
+    """Run one line's step in its own savepoint; a failure is undone and logged, never raised into the caller's work.
+
+    The row the step was serving then drops out of line with its agent told, so it is neither left
+    stuck nor tried again on every sweep. A failure that took the caller's own transaction with it
+    (SQLite rolls all of it back on some errors) is raised instead: going on would write outside it.
+    """
+    outer = db.in_transaction
     try:
         with write_transaction(db, scope="writer_line_step"):
             return step()
     except Exception:
-        logger.exception("comment writer line on {} failed; left as it was", root_id)
-        return []
+        if outer and not db.in_transaction:
+            raise
+        reference = new_error_reference()
+        logger.exception("comment writer line on {} failed (reference {})", root_id, reference)
+    if give_up:
+        _contained(db, root_id, lambda: _drop_head(db, root_id, reference), give_up=False)
+    return []
+
+
+def _drop_head(db, root_id: str, reference: str) -> list[str]:
+    """Drop the row a failed step was serving: the line's woken row, else its first. The sweep serves the next."""
+    line = active(db, root_id)
+    if line:
+        head = next((row for row in line if row["state"] == "woken"), line[0])
+        _drop(db, head, f"an error stopped it (reference {reference}); write it again if it still applies")
+    return []
 
 
 def recover(db) -> list[str]:
@@ -321,6 +367,9 @@ def recover(db) -> list[str]:
                     OR (m.delivery_state='delivered' AND EXISTS (
                         SELECT 1 FROM active_turns t WHERE t.id=m.active_turn_id AND t.status IN {_LIVE}))))""",
     )
+    for row in db.execute(
+            "SELECT DISTINCT agent_thread_id FROM doc_comment_writer_line WHERE state='woken' AND root_id LIKE 'section:%'"):
+        writer_turns.section_woken(str(row["agent_thread_id"]))
     drives: list[str] = []
     for row in db.execute("SELECT DISTINCT root_id FROM doc_comment_writer_line").fetchall():
         drives.extend(serve(db, str(row["root_id"])))
@@ -330,38 +379,17 @@ def recover(db) -> list[str]:
 def _drop(db, row, reason: str) -> None:
     """Drop a row out of line and tell its agent what it had saved; a deleted agent has no one to tell."""
     if db.execute("SELECT 1 FROM threads WHERE id=?", (row["agent_thread_id"],)).fetchone() is not None:
+        from doceditor.doc_sections import name
+
         artifact = registry_models.get_artifact(str(row["artifact_id"]), db=db)
         drafts = "\n".join(describe(op) for op in json.loads(row["ops"]))
+        heading = writer_turns.section_heading(str(row["root_id"]))
+        where = "a comment thread" if heading is None else name(heading)
+        details = {"comment_id": row["root_id"]} if heading is None else {"section": heading}
         append_thread_context_note(
             db, thread_id=str(row["agent_thread_id"]),
-            summary=(f"Your saved write on a comment thread in {document_name(artifact)} dropped out of line and was "
+            summary=(f"Your saved write on {where} in {document_name(artifact)} dropped out of line and was "
                      f"not posted: {reason}. What you had saved:\n{drafts}"),
-            details={"comment_id": row["root_id"], "artifact_id": row["artifact_id"]},
+            details={**details, "artifact_id": row["artifact_id"]},
         )
     settle(db, row, "dropped")
-
-
-def _publish_after_commit(db, root_id: str, artifact_id: str | None) -> None:
-    """Tell the people on the thread how many agents wait, once this write commits."""
-    after_commit(db, lambda: publish(root_id, artifact_id))
-
-
-def publish(root_id: str, artifact_id: str | None, *, user_ids: set[str] | None = None) -> None:
-    from infra import state
-    from infra.database import get_db
-
-    users = user_ids if user_ids is not None else writer_turns.people_on(root_id)
-    if not users:
-        return
-    db = get_db()
-    try:
-        waiting = count(db, root_id)
-        if artifact_id is None:
-            row = db.execute("SELECT artifact_id FROM doc_comments WHERE id=?", (root_id,)).fetchone()
-            artifact_id = row["artifact_id"] if row else None
-    finally:
-        db.close()
-    for user_id in users:
-        state.broadcast_to_user(user_id, {
-            "type": "comment_line", "artifact_id": artifact_id, "comment_id": root_id, "waiting": waiting,
-        })

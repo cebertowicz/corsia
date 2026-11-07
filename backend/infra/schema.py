@@ -39,7 +39,7 @@ from infra.thread_updates_schema import THREAD_UPDATES_SCHEMA_SQL
 from infra.usage_schema import USAGE_SCHEMA_SQL
 from infra.webhook_delivery_schema import WEBHOOK_DELIVERY_SCHEMA_SQL
 from infra.write_hold_indexes import WRITE_HOLD_INDEX_SQL
-SCHEMA_VERSION = 181
+SCHEMA_VERSION = 183
 SCHEMA_SQL = f"""
     {SETTINGS_SCHEMA_SQL}
     {BULLETIN_SCHEMA_SQL}
@@ -63,6 +63,10 @@ SCHEMA_SQL = f"""
         parent_thread_id TEXT REFERENCES threads(id),
         spawned_by TEXT REFERENCES threads(id),
         local_only INTEGER NOT NULL DEFAULT 0,
+        -- The last message number when this thread left a Local only project. Its
+        -- history at or below it, and all of its checkpoints, stay behind the project
+        -- wall that infra.project_fence enforces. NULL means it never left one.
+        local_only_cut_seq INTEGER,
         confinement TEXT,
         confined_read_dirs TEXT,
         bootloader_files TEXT,

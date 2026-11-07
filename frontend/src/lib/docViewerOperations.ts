@@ -134,7 +134,7 @@ export function createThreadActions(artifactId: () => string | null, commentCrea
 			await submitDocumentComment(() => addReply(artifact, id, text, 'you', taggedAgentIds, threadId(), mentions));
 			commentCreated();
 		},
-		resolve(id: string, resolved: boolean) { const artifact = artifactId(); if (artifact) resolveComment(artifact, id, resolved); },
+		resolve(id: string, resolved: boolean, wait = false): Promise<boolean> { const artifact = artifactId(); return artifact ? resolveComment(artifact, id, resolved, wait) : Promise.resolve(false); },
 		agree(id: string, agreed: boolean) { const artifact = artifactId(); if (artifact) ackComment(artifact, id, agreed); },
 	};
 }

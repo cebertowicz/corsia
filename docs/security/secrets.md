@@ -47,7 +47,6 @@ Every result a CORSIA tool returns passes through a credential masker before it 
 - In Markdown, a value that is one plain lowercase word after a credential name. In code, a bare name assigned to a credential name. Both read as ordinary text, so they stay visible.
 - Transformed output. If a command base64-encodes or reverses a file, the result isn't masked.
 - Anything a command *does* with the value. Masking changes what the model sees, not what runs. `source .env && curl -H "Authorization: Bearer $TOKEN" …` uses the real value, and the command could send it anywhere.
-- An isolated worker on Claude Code reads files with Claude Code's own read tool, which doesn't pass through CORSIA's masker. See [Untrusted content](untrusted-content.md).
 - Text you type or paste into chat. Masking applies to tool results; a key you paste goes to the model provider as written.
 
 Masking also has a side effect: an agent that reads a file and writes the whole file back writes the literal text `[REDACTED]` in place of the value, and the value is lost. A targeted edit that names `[REDACTED]` fails instead, because that text isn't in the file.

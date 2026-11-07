@@ -408,3 +408,50 @@ async def test_another_script_cannot_connect_to_authenticated_run_socket(sandbox
         path = _script(sandbox, "other-auth.py", probe)
         run = await _run(path)
         assert run.returncode == 0, run.stderr
+
+
+#: Compile helper.py as it is, then give it new source of the same size and the old stamp,
+#: so only a run that reads the cache sees the old text.
+_PLANT_STALE_CACHE = (
+    "import os, py_compile\n"
+    "py_compile.compile('helper.py', doraise=True,\n"
+    "                   invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP)\n"
+    "stamp = os.stat('helper.py').st_mtime\n"
+    "with open('helper.py', 'w') as source:\n"
+    "    source.write(\"WHO = 'src'\\n\")\n"
+    "os.utime('helper.py', (stamp, stamp))\n"
+)
+#: The main process and two children whose cleared environment drops PYTHONPYCACHEPREFIX.
+_IMPORT_IN_EVERY_START = (
+    "import subprocess, sys\n"
+    "import helper\n"
+    "print('main', helper.WHO)\n"
+    "for argv, env in ((['env', '-i', sys.executable, 'child.py'], None),\n"
+    "                  ([sys.executable, 'child.py'], {})):\n"
+    "    child = subprocess.run(argv, env=env, capture_output=True, text=True)\n"
+    "    print(child.stdout.strip() or child.stderr.strip())\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_authenticated_run_never_loads_bytecode_planted_in_its_folder(sandbox, monkeypatch):
+    """A cache stamped to match reviewed source runs in a plain run, never in an authenticated one."""
+    from connections import github_agent
+
+    _account(monkeypatch, "ready", Path(os.environ["HOME"]) / "agent-gh")
+    monkeypatch.setattr(github_agent, "script_forwarder_credential", lambda view: "synthetic-secret")
+    _script(sandbox, "helper.py", "WHO = 'pyc'\n")
+    _script(sandbox, "child.py", "import helper\nprint('child', helper.WHO)\n")
+    planted = await _run(_script(sandbox, "plant.py", _PLANT_STALE_CACHE))
+    assert planted.returncode == 0, planted.stderr
+    entry = _script(sandbox, "run.py", _IMPORT_IN_EVERY_START)
+
+    plain = await _run(entry)
+    assert plain.returncode == 0, plain.stderr
+    # Control: the cache is valid, so without the deny every start loads it.
+    assert plain.stdout.decode().splitlines() == ["main pyc", "child pyc", "child pyc"]
+
+    run = await run_script(THREAD_ID, None, entry, run_id="bytecode", timeout_seconds=30,
+                           authenticated=True)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.decode().splitlines() == ["main src", "child src", "child src"]

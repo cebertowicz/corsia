@@ -119,6 +119,7 @@ describe('markdown images in the live preview', () => {
 		const view = mount(DOC, 0);
 		const at = DOC.indexOf(IMAGE);
 		view.dispatch({ changes: { from: at, insert: 'typed ' } });
+		if (!forceParsing(view, view.state.doc.length, 1_000)) throw new Error('markdown parser did not finish');
 		expect(view.contentDOM.textContent).not.toContain('![Mock screen]');
 		view.dispatch({ effects: setCommentRanges.of([{ from: at + 6, to: at + 6 + IMAGE.length, id: 'c1', focused: true }]), selection: { anchor: at + 6 } });
 		expect(view.contentDOM.textContent).not.toContain('![Mock screen]');
@@ -280,15 +281,13 @@ describe('markdown images in the live preview', () => {
 		});
 	});
 
-	it('keeps the margin marker of a comment anchored on an image, and the comment still opens from it', async () => {
-		const opened = vi.fn();
+	it('keeps the position entry of a comment anchored on an image', async () => {
 		const view = mount(DOC, 0);
 		const at = DOC.indexOf(IMAGE);
-		view.dispatch({ effects: setCommentRanges.of([{ from: at, to: at + IMAGE.length, id: 'c1', onMarkerFocus: opened }]) });
-		await vi.waitFor(() => expect(view.dom.querySelector('.cm-comment-rail button')).not.toBeNull());
-		view.dom.querySelector<HTMLButtonElement>('.cm-comment-rail button')!.click();
-		expect(opened).toHaveBeenCalled();
-		expect(opened.mock.calls[0][0]).toEqual(['c1']);
+		view.dispatch({ effects: setCommentRanges.of([{ from: at, to: at + IMAGE.length, id: 'c1' }]) });
+		await vi.waitFor(() => expect(view.dom.querySelector('.cm-comment-rail .cm-comment-line')).not.toBeNull());
+		expect((view.dom.querySelector('.cm-comment-rail .cm-comment-line') as HTMLElement).dataset.commentIds).toBe('c1');
+		expect(view.dom.querySelector('.cm-comment-rail button')).toBeNull();
 	});
 
 	it('never draws or fetches a web or data URL, and shows it as a link', () => {
