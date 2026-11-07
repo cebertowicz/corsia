@@ -285,11 +285,11 @@ class PlanDecisionTool(_OperationTool):
     @property
     def description(self) -> str:
         return (
-            "Author structured plan decisions for the user. Draft with context, "
-            "tradeoff, recommendation, rationale and 2-4 A/B/C/D options; the "
-            "parent tier reviews before raise. pick \"any\" is for independent items; "
-            "tradeoffs get their own decision. Reuse one mutation_id per logical "
-            "action and pass the decision's expected_revision on every change."
+            "Author structured plan decisions for the user, with 2-4 A/B/C/D "
+            "options; the parent tier reviews before raise. pick \"any\" is for "
+            "independent items; tradeoffs get their own decision. Decisions are for "
+            "choices: a step only the person's hands can take (sign in, pay) is "
+            "never one, even with a 'drop it' option; plan_update says where it goes."
         )
 
     @property
