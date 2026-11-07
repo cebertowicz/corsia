@@ -175,6 +175,14 @@ def _repeat(db, row, actor: ReviewActor, note: str | None, key: str, requesting:
         # A fork has already frozen its instruction; silently accepting a
         # later note would claim the reviewer saw it when it could not.
         raise ReviewRequestError(IN_REVIEW_REFUSAL)
+    if note and actor.kind == "agent":
+        # A note is review text this requester is writing now, so Local only holds it
+        # exactly as the create path holds a new request. It is refused before the
+        # client_ids update, so a retry of a refused note is refused again instead of
+        # finding its key recorded and returning success.
+        refusal = _locality_refusal(db, actor, row["reviewer_thread_id"])
+        if refusal is not None:
+            raise ReviewRequestError(refusal)
     keys.append(key)
     db.execute("UPDATE doc_review_requests SET client_ids=? WHERE id=?", (json.dumps(keys), row["id"]))
     if note:
@@ -228,7 +236,8 @@ def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: Rev
         if latest is not None and is_open(connection, latest):
             return _repeat(connection, latest, requester, note, key, requesting)
         # A review question is a message, so Local only holds it too, before anything is written.
-        # A retry of an already-created request returns above, so only a new request meets the refusal.
+        # A retry of an already-created request returns above; new text on an open request is held
+        # inside _repeat, so every route that carries this requester's text to the reviewer is checked.
         if requester.kind == "agent":
             refusal = _locality_refusal(connection, requester, reviewer_thread_id)
             if refusal is not None:

@@ -371,3 +371,91 @@ def test_a_persons_review_request_is_never_locality_checked(review_env, monkeypa
     result = request(db, artifact_id, kind="user")
     assert db.execute("SELECT COUNT(*) FROM doc_review_requests WHERE id=?", (result["id"],)).fetchone()[0] == 1
     db.close()
+
+
+def open_cloud_review(db, artifact_id, monkeypatch):
+    """A handed-back review whose reviewer has become cloud-bound, the state that takes a new note."""
+    from doceditor import review_requests
+
+    local_only_requester(db, monkeypatch, cloud=False)
+    first = request(db, artifact_id)
+    escalated = review_requests.escalate_fork(db, first["id"])
+    local_only_requester(db, monkeypatch, cloud=True)
+    return first, escalated
+
+
+def test_a_local_only_agent_cannot_add_a_note_to_an_open_cloud_review(review_env, monkeypatch):
+    """A note is review text written now, so the hold covers it and a refusal records nothing."""
+    from doceditor import review_requests
+
+    db, artifact_id = review_env
+    first, escalated = open_cloud_review(db, artifact_id, monkeypatch)
+    before = public.get_node(escalated["node_id"], db=db).description
+
+    with pytest.raises(review_requests.ReviewRequestError) as refused:
+        request(db, artifact_id, note="Also check the budget", key="second-key")
+
+    assert "Reviewer is cloud-bound or has no model selected" in str(refused.value)
+    assert "delegate_send" in str(refused.value)
+    assert json.loads(stored(db, first["id"])["client_ids"]) == ["review-key"]
+    assert public.get_node(escalated["node_id"], db=db).description == before
+    db.close()
+
+
+def test_a_refused_note_is_refused_again_on_retry(review_env, monkeypatch):
+    """A refused note records no key, so replaying the call is refused again, not silently accepted."""
+    from doceditor import review_requests
+
+    db, artifact_id = review_env
+    first, _ = open_cloud_review(db, artifact_id, monkeypatch)
+
+    for _attempt in range(2):
+        with pytest.raises(review_requests.ReviewRequestError, match="cloud-bound or has no model selected"):
+            request(db, artifact_id, note="Also check the budget", key="second-key")
+
+    assert json.loads(stored(db, first["id"])["client_ids"]) == ["review-key"]
+    db.close()
+
+
+def test_a_persons_note_on_an_open_cloud_review_goes_through(review_env, monkeypatch):
+    """The person who owns the chat can still add to a review an agent cannot."""
+    db, artifact_id = review_env
+    first, escalated = open_cloud_review(db, artifact_id, monkeypatch)
+
+    result = request(db, artifact_id, kind="user", note="Also check the budget", key="persons-key")
+
+    assert result["id"] == first["id"]
+    assert "Also check the budget" in public.get_node(escalated["node_id"], db=db).description
+    assert json.loads(stored(db, first["id"])["client_ids"]) == ["review-key", "persons-key"]
+    db.close()
+
+
+def test_a_not_local_only_agents_note_on_an_open_cloud_review_goes_through(review_env):
+    """The hold is on locality, not on notes: an unrestricted agent adds context as usual."""
+    db, artifact_id = review_env
+    from doceditor import review_requests
+
+    first = request(db, artifact_id)
+    escalated = review_requests.escalate_fork(db, first["id"])
+
+    request(db, artifact_id, note="Also check the budget", key="second-key")
+
+    assert "Also check the budget" in public.get_node(escalated["node_id"], db=db).description
+    assert json.loads(stored(db, first["id"])["client_ids"]) == ["review-key", "second-key"]
+    db.close()
+
+
+def test_a_local_only_agents_note_on_an_open_local_review_goes_through(review_env, monkeypatch):
+    """A reviewer on a local model still receives the note."""
+    db, artifact_id = review_env
+    local_only_requester(db, monkeypatch, cloud=False)
+    from doceditor import review_requests
+
+    first = request(db, artifact_id)
+    escalated = review_requests.escalate_fork(db, first["id"])
+
+    request(db, artifact_id, note="Also check the budget", key="second-key")
+
+    assert "Also check the budget" in public.get_node(escalated["node_id"], db=db).description
+    assert json.loads(stored(db, first["id"])["client_ids"]) == ["review-key", "second-key"]
+    db.close()
