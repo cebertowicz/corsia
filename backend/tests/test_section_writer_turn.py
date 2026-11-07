@@ -500,6 +500,24 @@ def test_edits_find_their_sections_as_they_are_applied_one_after_another():
     assert section_writes.edit_sections(text, edits) == ["## A", "## B"]
 
 
+
+def test_a_renamed_heading_does_not_rename_the_sections_later_edits_fall_in():
+    """Sections are named in the document the turns belong to: renaming the first of two ``## A`` headings
+    leaves the second ``## A\n2``, the section a later edit in it must hold."""
+    from doceditor import section_writes
+
+    text = "## A\none\n## A\ntwo\n"
+    edits = [{"old_string": "## A\none", "new_string": "## Z\none"}, {"old_string": "two", "new_string": "2"}]
+    assert section_writes.edit_sections(text, edits) == ["## A", "## A\n2"]
+
+
+def test_an_edit_matching_text_an_earlier_edit_wrote_holds_the_section_that_text_replaced():
+    from doceditor import section_writes
+
+    text = "## A\nfoo\n## B\nbar\n"
+    edits = [{"old_string": "bar", "new_string": "qux"}, {"old_string": "qux", "new_string": "q"}]
+    assert section_writes.edit_sections(text, edits) == ["## B"]
+
 @pytest.mark.asyncio
 async def test_a_woken_section_row_dropped_at_turn_end_leaves_the_agent_unwoken(doc, driven, steps):
     from doceditor import writer_turns

@@ -38,22 +38,34 @@ BASE_LIMIT = 20_000
 
 
 def edit_sections(text: str, edits: list[dict[str, Any]]) -> list[str]:
-    """The sections the edits' ``old_string`` matches fall in, matched as ``match_edits`` applies them:
+    """The sections of ``text`` the edits' ``old_string`` matches fall in, matched as ``match_edits`` applies them:
     exactly, each edit on the text the edits before it left.
 
-    The text is scanned for headings once per edit; each match is placed in it by bisect.
+    Sections are named in ``text`` as it is, the document whose section turns the call takes: an edit
+    that renames a heading must not rename the sections later edits fall in. The headings are scanned
+    once; each match is carried back to ``text`` by the original offsets of the characters it covers
+    (a replacement's characters all carry the span they replaced) and placed by bisect.
     """
+    sections = doc_sections.Sections(text)
+    lows, highs = list(range(len(text))), list(range(1, len(text) + 1))
     touched: dict[str, None] = {}
     for edit in edits:
-        old, every = edit["old_string"], bool(edit.get("replace_all"))
+        old, new, every = edit["old_string"], edit["new_string"], bool(edit.get("replace_all"))
         start = text.find(old) if old else -1
         if start < 0:
             continue
-        sections = doc_sections.Sections(text)
+        kept_lows: list[int] = []
+        kept_highs: list[int] = []
+        done = 0
         while start >= 0:
-            touched.update(dict.fromkeys(sections.between(start, start + len(old))))
-            start = text.find(old, start + len(old)) if every else -1
-        text = text.replace(old, edit["new_string"], -1 if every else 1)
+            low, high = lows[start], highs[start + len(old) - 1]
+            touched.update(dict.fromkeys(sections.between(low, high)))
+            kept_lows += lows[done:start] + [low] * len(new)
+            kept_highs += highs[done:start] + [high] * len(new)
+            done = start + len(old)
+            start = text.find(old, done) if every else -1
+        lows, highs = kept_lows + lows[done:], kept_highs + highs[done:]
+        text = text.replace(old, new, -1 if every else 1)
     return list(touched)
 
 
