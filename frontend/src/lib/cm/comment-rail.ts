@@ -6,8 +6,6 @@ interface Placed {
 	/** Top of the line's first visual row, in scroller coordinates. */
 	top: number;
 	ids: string[];
-	/** Every thread on this line has lost its text. */
-	orphan: boolean;
 	/** Height of one normal row. */
 	row: number;
 }
@@ -81,9 +79,8 @@ class CommentRail {
 		}
 		// A block widget that resizes (an image that loads) moves every line below it, commented or not.
 		for (const child of contentDOM.children) if (!child.classList.contains('cm-line')) drawnLines.add(child);
-		const orphans = new Set(state.field(commentRanges).filter((range) => range.lost).map((range) => range.id));
 		const placed = [...byLine.values()].sort((a, b) => a.at[0] - b.at[0] || a.at[1] - b.at[1])
-			.map((line): Placed => ({ top: line.top, row: line.row, ids: [...new Set(line.ids)], orphan: line.ids.every((id) => orphans.has(id)) }));
+			.map((line): Placed => ({ top: line.top, row: line.row, ids: [...new Set(line.ids)] }));
 		return { placed, drawn: [...drawnLines] };
 	}
 
@@ -109,7 +106,6 @@ class CommentRail {
 		placed.forEach((line, index) => {
 			const el = this.lines[index];
 			el.dataset.commentIds = line.ids.join(',');
-			if (line.orphan) el.dataset.orphan = 'true'; else delete el.dataset.orphan;
 			el.style.top = `${line.top}px`;
 			el.style.height = `${line.row}px`;
 		});

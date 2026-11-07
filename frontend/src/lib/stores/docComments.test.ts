@@ -14,7 +14,6 @@ import { prepareCommentArrival, revealCommentArrival } from './docCommentArrival
 import {
 	docComments, commentLoads, fromServer, hasUnread, loadComments, flushPositions, markThreadViewed, remapComments, addComment, addReply, resolveComment,
 } from './docComments';
-import { canvasCommentHighlights } from '$lib/docCanvasComments';
 import { addRegionComment, moveRegion } from './imageRegionComments';
 
 afterEach(() => {
@@ -172,7 +171,7 @@ describe('comment-thread view projection', () => {
 
 describe('thread reply attention', () => {
 	const thread = (id: string, newReplyIds: string[]) => ({ id, anchor: 'quote', author: 'you', text: id, at: 'now', resolved: false, from: 0, to: 5, replies: [], newReplyIds });
-	const waiting = () => canvasCommentHighlights(get(docComments).artifact, 'quote text', null, () => {}).map((range) => [range.id, range.replyWaiting]);
+	const waiting = () => get(docComments).artifact.map((comment) => [comment.id, hasUnread(comment)]);
 
 	it('keeps one copy of reply attention: the marker and the ids agree after a stamp', async () => {
 		docComments.set({ artifact: [thread('a', ['a1', 'a2']), thread('b', ['b1'])] });

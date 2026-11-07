@@ -66,10 +66,10 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 	let inlineEnd = -1;
 	return comments.filter((comment) => !comment.resolved || (comment.id === focusedId && !comment.decision)).flatMap((comment): CommentRange[] => {
 		const anchorRange = canvasCommentRange(comment, text);
-		// A comment whose original text is gone keeps a dashed margin marker at the line its text last was.
+		// A comment whose original text is gone keeps a point at the line its text last was, where its margin card sits.
 		if (!anchorRange && comment.detached && !comment.resolved && comment.regionNumber == null && comment.from != null) {
 			const at = Math.min(Math.max(comment.from, 0), text.length);
-			return [{ from: at, to: at, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasUnread(comment), onMarkerFocus, point: true, lost: true }];
+			return [{ from: at, to: at, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, point: true }];
 		}
 		if (!anchorRange) return [];
 		const range = comment.insertAfter && openSuggestion(comment) ? { from: anchorRange.to, to: anchorRange.to } : anchorRange;
@@ -79,7 +79,7 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 			if (inline) inlineEnd = range.to;
 			suggestion = { quote: comment.insertAfter ? '' : comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
 		}
-		return [{ ...range, id: comment.id, focused: comment.id === focusedId, replyWaiting: hasUnread(comment), onMarkerFocus, suggestion, region: !!comment.region, ...(range.from === range.to && !suggestion ? { point: true } : {}) }];
+		return [{ ...range, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, suggestion, region: !!comment.region, ...(range.from === range.to && !suggestion ? { point: true } : {}) }];
 	});
 }
 
