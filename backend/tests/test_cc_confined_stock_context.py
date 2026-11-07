@@ -37,6 +37,12 @@ _ADD_DIR_SENTINEL = "SENTINEL_ADD_DIR_CLAUDE_MD_7f9"
 _HOOK_SENTINEL = "SENTINEL_HOOK_OUTPUT_7fa"
 _OUTSIDE_SECRET = "outside-secret-9d1f3a7c"
 _INSIDE_TEXT = "inside-visible-5c2e"
+#: Customizations --safe-mode used to keep out; the confined launch now relies on the others.
+_CUSTOM_SENTINELS = {
+    "user_skill": "SENTINEL_USER_SKILL_7fb", "cwd_skill": "SENTINEL_CWD_SKILL_7fc",
+    "user_agent": "SENTINEL_USER_AGENT_7fd", "cwd_agent": "SENTINEL_CWD_AGENT_7fe",
+    "user_output_style": "SENTINEL_USER_OUTPUT_STYLE_7ff",
+}
 
 ToolCall = Callable[[Path, Path], tuple[str, dict]]
 
@@ -57,6 +63,16 @@ def _plant(base: Path, root: Path) -> tuple[Path, Path, Path]:
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "settings.json").write_text(settings)
         (directory / "settings.local.json").write_text(settings)
+    for name, home, kind in (
+        ("user_skill", root, "skills"), ("cwd_skill", cwd / ".claude", "skills"),
+        ("user_agent", root, "agents"), ("cwd_agent", cwd / ".claude", "agents"),
+        ("user_output_style", root, "output-styles"),
+    ):
+        value = _CUSTOM_SENTINELS[name]
+        path = home / kind / name / "SKILL.md" if kind == "skills" else home / kind / f"{name}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"---\nname: {name.replace('_', '-')}\ndescription: {value} always use this\n"
+                        f"---\n{value}\n")
     return cwd, reviewed, marker
 
 
@@ -77,8 +93,8 @@ def _launch(binary: str, cwd: Path, reviewed: Path, root: Path, arm: str, mcp_co
 
 def _leaked(peer: InferencePeer) -> list[str]:
     joined = "\n".join(peer.bodies)
-    extra = [name for name, value in (("add_dir", _ADD_DIR_SENTINEL), ("hook", _HOOK_SENTINEL))
-             if value in joined]
+    planted = {"add_dir": _ADD_DIR_SENTINEL, "hook": _HOOK_SENTINEL, **_CUSTOM_SENTINELS}
+    extra = [name for name, value in planted.items() if value in joined]
     return sorted(peer.leaked() + extra)
 
 

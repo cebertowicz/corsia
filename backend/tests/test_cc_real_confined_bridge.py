@@ -15,6 +15,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 
+from cc_runtime_fixtures import cc_target
 from cc_user_context_fixtures import InferencePeer, _completed_turn, _tool_use_turn
 from contract.matrix_environment import guarded_command
 from subagents.cc_event_tool_boundary import _mcp_server_is_starting
@@ -130,6 +131,8 @@ async def test_stock_cli_confined_bridge(case, isolated_db, monkeypatch):
         monkeypatch.setenv("BACKEND_PORT", str(port))
         server = uvicorn.Server(uvicorn.Config(app, log_level="error", lifespan="off"))
         serving = asyncio.create_task(server.serve(sockets=[sock]))
+        target = cc_target("sonnet")
+        monkeypatch.setattr("llm.resolution.resolve_execution_target", lambda *_a, **_k: target)
         db = get_db()
         config = None
         process = None
@@ -142,7 +145,8 @@ async def test_stock_cli_confined_bridge(case, isolated_db, monkeypatch):
                 working_dir=str(base), claude_dir=str(root), confinement=CONFINEMENT_UNTRUSTED,
             )
             live = _Live(session=session, parent_thread_id=None, name="cc", corsia_turn=identity,
-                         turn_active=True, tool_definitions=definitions, context_window=200000)
+                         turn_active=True, tool_definitions=definitions, context_window=200000,
+                         catalog_model_id=target.catalog_id)
             config = configure_cc_tool_bridge(live, thread_id=_THREAD, working_dir=str(base),
                                               registry=registry)
             session.mcp_config = config
