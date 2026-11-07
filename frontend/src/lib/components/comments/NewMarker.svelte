@@ -2,7 +2,7 @@
 	let { dotOnly = false, failedQuote = null }: { dotOnly?: boolean; failedQuote?: string | null } = $props();
 </script>
 
-<span class="ct-new" class:dot-only={dotOnly} class:failed={failedQuote !== null} role={failedQuote !== null ? 'img' : undefined} aria-label={failedQuote !== null ? `Reply not delivered on ${failedQuote}` : undefined}><span aria-hidden="true" class="ct-new-dot"></span><span class:visually-hidden={dotOnly || failedQuote !== null}>New</span></span>
+<span class="ct-new" class:dot-only={dotOnly} class:failed={failedQuote !== null} role={failedQuote !== null ? 'img' : undefined} aria-label={failedQuote !== null ? `Your reply on ${failedQuote} wasn’t delivered.` : undefined}><span aria-hidden="true" class="ct-new-dot"></span><span class:visually-hidden={dotOnly || failedQuote !== null}>New</span></span>
 
 <style>
 	.ct-new { display: inline-flex; align-items: baseline; gap: var(--space-1); font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--accent-text); }

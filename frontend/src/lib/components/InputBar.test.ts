@@ -1388,23 +1388,12 @@ describe('InputBar model readiness at the action seam', () => {
 describe('a comment reply the composer cannot send', () => {
 	const reply = { id: 'reply', messageId: 'message-1', seq: 3, from_off: 0, to_off: 4, quote: 'text', anchor_prefix: '', anchor_suffix: '', note: 'draft reply', root_user_message_id: 'user-1', root_cid: 'c1' };
 	// One sentence per known cause (COPY-STANDARD C11), each saying the typed reply is kept and what to do (C9).
-	const noChat = 'This reply has no chat to go to yet. Your reply stays here; send a message in this chat first, then reply again.';
 	const noModel = 'No model is ready to answer this reply. Your reply stays here; choose a model, then reply again.';
 	const restarting = 'CORSIA is restarting after an update, so it can’t answer this reply. Your reply stays here; try again once CORSIA is back.';
 	const notAccepted = 'CORSIA couldn’t send this reply because the connection closed before it arrived. Your reply stays here; send it again.';
 
 	// The thread keeps the draft when the send is refused, so the person needs the cause on screen and not only in the console.
-	it('says the reply has no chat yet when the chat is not bound', () => {
-		activeThreadId.set(null);
-		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
-		component = composer;
-		flushSync();
-		expect(() => composer.sendReply(reply)).toThrow('Cannot send reply');
-		expect(get(toasts).map(toast => toast.message)).toContain(noChat);
-		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
-	});
-
-	it('says it again while the chosen model cannot answer', () => {
+	it('says so while the chosen model cannot answer', () => {
 		models.set([{ id: 'model-down', name: 'Down model', size: '', backend: 'local', speed: '', status: 'unavailable' }]);
 		activeModelId.set('model-down');
 		threads.set([{

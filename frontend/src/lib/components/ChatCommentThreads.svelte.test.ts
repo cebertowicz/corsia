@@ -33,7 +33,7 @@ it('labels a detached chat comment on its card and keeps its unread reply', () =
 		comments: [{ id: 'one', cid: 'c1.1', from_off: 0, to_off: 1, anchor_prefix: '', anchor_suffix: '', user_message_id: 'send', created_at: '2026-10-27T00:00:00Z', note: 'Why?', quote: 'gone', answers: [{ author_kind: 'agent', user_message_id: 'send', cid: 'c1.1', assistant_message_id: 'answer', text: 'Answer', created_at: '2026-10-27T00:01:00Z', unread: true }] }],
 	} });
 	flushSync();
-	expect(host.textContent).toContain('The quoted text is no longer at this place in the message; the thread stays open here.');
+	expect(host.textContent).toContain('This text can’t be highlighted in the message.');
 	expect(host.textContent).toContain('New');
 });
 

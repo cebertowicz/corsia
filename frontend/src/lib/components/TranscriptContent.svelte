@@ -15,7 +15,7 @@
 	import { coreSettings } from '$lib/stores/settings';
 	import { chatReplyJump } from '$lib/stores/chatReplyJump';
 	import { activeToolsByThread, messages } from '$lib/stores/threads';
-	import { commentsAlreadyPlaced } from '$lib/chatCommentDelivery';
+	import { placedCommentEnvelopes } from '$lib/chatCommentDelivery';
 	import { INITIAL_TURN_STATE, turnStates } from '$lib/ws/turnState';
 	import { threadLiveStep, UNKNOWN_STEP } from './plans/planLiveStep';
 	import { createLiveLine } from './plans/liveLine.svelte';
@@ -80,8 +80,6 @@
 
 	const uid = $props.id();
 	const boundThreadId = $derived(threadId ?? null);
-	// Each rendered row asks for its loaded row by id; scanning the whole transcript per row made a render quadratic in its own length.
-	const loadedRowsById = $derived(new Map($messages.filter(row => row.thread_id === boundThreadId).map(row => [row.id, row] as const)));
 	const boundTurn = $derived(boundThreadId ? $turnStates.get(boundThreadId) ?? INITIAL_TURN_STATE : null);
 	const pausePresentation = $derived(attachPlanLimitPauses(entries, pauses, boundThreadId && boundTurn
 		? { threadId: boundThreadId, phase: boundTurn.phase, turnId: boundTurn.turnId } : undefined));
@@ -110,6 +108,8 @@
 		});
 		return ids;
 	});
+	// Comment-only sends already shown on the thread they answer get no row of their own; one pass per change answers every row.
+	const placedEnvelopes = $derived(placedCommentEnvelopes($messages, boundThreadId, visibleSources));
 	// Open runs (their `row:` and `after:` tokens); written only by clicks.
 	let expandedFolds = $state(new Set<string>());
 	// One instance serves every thread, and `after:start` names no thread: a thread change resets.
@@ -206,8 +206,7 @@
 {#snippet messageRow(entry: Extract<TranscriptEntry, { kind: 'message' }>)}
 	{@const msg = entry.message}
 	{@const isAgentInbound = msg.role === 'user' && msg.metadata?.sender_kind === 'agent'}
-	{@const original = loadedRowsById.get(msg.id)}
-	{#if !original || !commentsAlreadyPlaced(original, $messages, visibleSources)}
+	{#if !placedEnvelopes.has(msg.id)}
 	<div class="message {msg.role}" data-message-id={msg.id} data-message-seq={msg.seq} data-message-thread-id={boundThreadId} data-first-run-opening={msg.metadata?.first_run_opening === true ? '' : undefined} use:trackVisibleRow={{ seq: msg.seq, threadId: boundThreadId }} class:agent-inbound={isAgentInbound} class:human-user={msg.role === 'user' && !isAgentInbound}>
 		{#if msg.role === 'system'}
 			<SystemMessageRow {msg} />

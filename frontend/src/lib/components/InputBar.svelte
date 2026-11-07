@@ -209,8 +209,10 @@
 	}
 
 	export function sendReply(reply: ChatComment): void {
-		const blocked = replySendBlock(!!boundThreadId, $updateRestarting, canSendToModel);
-		if (blocked || !boundThreadId) { const cause = blocked ?? 'noChat'; toasts.show(REPLY_SEND_FAILURE[cause], 'error'); throw new Error(`Cannot send reply: ${cause}`); }
+		// A comment thread exists only on a message in a bound chat, so an unbound composer is never asked to send one.
+		if (!boundThreadId) throw new Error('Cannot send reply: no chat');
+		const blocked = replySendBlock($updateRestarting, canSendToModel);
+		if (blocked) { toasts.show(REPLY_SEND_FAILURE[blocked], 'error'); throw new Error(`Cannot send reply: ${blocked}`); }
 		const { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid } = reply;
 		const payload = [{ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }];
 		emitComposerSend(boundThreadId, '', 0, payload);

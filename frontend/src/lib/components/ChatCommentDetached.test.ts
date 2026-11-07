@@ -82,7 +82,7 @@ it('shows a comment whose text left the message as a thread under the message, w
 	expect(row()!.querySelector('[data-reply-comment="one"]')).not.toBeNull();
 	// The chat surface names its own state: the text is here, only the highlight was lost.
 	expect(row()!.querySelector('[data-comment-uuid="one"] [data-detached]')?.textContent)
-		.toBe('The quoted text is no longer at this place in the message; the thread stays open here.');
+		.toBe('This text can’t be highlighted in the message.');
 });
 
 it('replies from the detached thread on the same path the popover uses', async () => {
@@ -102,6 +102,9 @@ it('leaves a comment whose text is still in the message on its highlight alone',
 	messages.update(current => [{ ...current[0]!, chat_comments: [{ ...comment('Kept text'), from_off: from, to_off: from + 'Kept text'.length }] }] as never);
 	await vi.waitFor(() => expect(row()?.querySelector('.long-message-body [data-comment-ids="one"]')).not.toBeNull());
 	expect(row()!.querySelector('[data-comment-uuid="one"]')).toBeNull();
+	// Its name is a sentence with the quote set off, so a screen reader hears where the quoted text ends.
+	await vi.waitFor(() => expect(row()!.querySelector('.long-message-body [data-comment-ids="one"]')?.getAttribute('aria-label'))
+		.toBe('The comment on “Kept text” has a new reply.'));
 });
 
 it('does not repaint the highlights when a detached thread appears under the message', async () => {

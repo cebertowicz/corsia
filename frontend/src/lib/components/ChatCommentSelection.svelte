@@ -6,6 +6,7 @@
 	import { keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { toasts } from '$lib/stores/toast';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
+	import { quoteLabel } from './chatUnreadTargets';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
 	import Popover from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
@@ -183,8 +184,9 @@
 				const wraps = [...body.querySelectorAll<HTMLElement>('[data-comment-ids]')].filter(el => el.dataset.commentIds?.split(',').includes(comment.id));
 				const anchor = wraps.at(-1);
 				if (anchor) {
-					wraps[0].setAttribute('aria-label', failed ? `Reply not delivered on ${comment.quote}` : sending ? `Reply sending on ${comment.quote}` : `Commented text: ${comment.quote}. New`);
-					if (failed || !sending) dotCleanups.push(placeHighlightDot(body, anchor, failed ? comment.quote : null));
+					const quote = quoteLabel(comment.quote);
+					wraps[0].setAttribute('aria-label', failed ? `Your reply on ${quote} wasn’t delivered.` : sending ? `Your reply on ${quote} is sending.` : `The comment on ${quote} has a new reply.`);
+					if (failed || !sending) dotCleanups.push(placeHighlightDot(body, anchor, failed ? quote : null));
 				}
 			}
 		}
@@ -279,7 +281,7 @@
 		const comment = viewedComment;
 		if (!message || typeof message.seq !== 'number' || !comment) {
 			// The row this thread opened on was replaced or removed while the reply was being typed. Say so, then keep the rejection so the thread holds the draft.
-			toasts.show('CORSIA couldn’t send this reply because that comment is no longer in this chat. Comment on the text again.', 'error');
+			toasts.show('CORSIA couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.', 'error');
 			throw new Error('Comment is unavailable');
 		}
 		onSendReply({ id: crypto.randomUUID(), messageId: message.id, seq: message.seq, from_off: comment.from_off, to_off: comment.to_off, quote: comment.quote, anchor_prefix: comment.anchor_prefix, anchor_suffix: comment.anchor_suffix, note, root_user_message_id: comment.user_message_id, root_cid: comment.cid });

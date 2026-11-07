@@ -52,7 +52,7 @@
 		{#each comments as comment (`${comment.user_message_id}:${comment.cid}`)}
 			<div class="chat-comment-thread" data-chat-comment={comment.cid} data-comment-uuid={comment.id} tabindex="-1">
 				{#if !detached}<CommentQuote quote={comment.quote} />{/if}
-				<CommentThread comment={thread(comment)} readOnly={!onReply} flat hideOrphan={!detached} detachedNote="The quoted text is no longer at this place in the message; the thread stays open here." {keepReplyVisible} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { onReply?.(text); for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); }}>
+				<CommentThread comment={thread(comment)} readOnly={!onReply} flat hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { onReply?.(text); for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); }}>
 				{#snippet failure()}
 				{#each replies.pending(comment) as pending (pending.id)}
 					<div class="pending-reply" role="status">

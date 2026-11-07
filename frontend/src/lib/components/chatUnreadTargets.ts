@@ -1,6 +1,12 @@
 import type { ChatComment, Message } from '$lib/stores/threads';
 import type { AttentionDestination } from '$lib/api/attentionQueue';
 import { chatReplyIndex } from '$lib/chatCommentDelivery';
+// The same composition the comment cards use for a quote label: markdown marks out, whitespace flattened, then the shared snippet cut.
+import { clean, snippet } from '$lib/cm/widget-cells';
+import { plainQuote } from '$lib/plainQuote';
+
+/** A comment's quote as an accessible name reads it: cut like a card's quote label and set off in curly quotes, so a screen reader hears where it starts and ends. */
+export const quoteLabel = (quote: string) => `“${snippet(clean(plainQuote(quote)))}”`;
 
 export type UnreadTarget = { quote: string; distance: number; destination: AttentionDestination };
 

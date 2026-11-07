@@ -24,7 +24,6 @@ export function emitComposerSend(threadId: string, content: string, attachmentCo
  * and each sentence names what happens to the typed reply and what to do next (C9).
  */
 export const REPLY_SEND_FAILURE = {
-	noChat: 'This reply has no chat to go to yet. Your reply stays here; send a message in this chat first, then reply again.',
 	restarting: 'CORSIA is restarting after an update, so it can’t answer this reply. Your reply stays here; try again once CORSIA is back.',
 	noModel: 'No model is ready to answer this reply. Your reply stays here; choose a model, then reply again.',
 	notAccepted: 'CORSIA couldn’t send this reply because the connection closed before it arrived. Your reply stays here; send it again.',
@@ -33,8 +32,7 @@ export const REPLY_SEND_FAILURE = {
 export type ReplySendBlock = keyof typeof REPLY_SEND_FAILURE;
 
 /** The first known reason this reply cannot be sent, or null when it can. Reading it is what picks the sentence. */
-export function replySendBlock(bound: boolean, restarting: boolean, modelReady: boolean): ReplySendBlock | null {
-	if (!bound) return 'noChat';
+export function replySendBlock(restarting: boolean, modelReady: boolean): ReplySendBlock | null {
 	if (restarting) return 'restarting';
 	if (!modelReady) return 'noModel';
 	return null;
