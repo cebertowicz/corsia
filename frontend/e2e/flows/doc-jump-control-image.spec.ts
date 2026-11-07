@@ -68,7 +68,8 @@ for (const width of [393, 1440]) {
 
 			// Zoom with the viewer's own keyboard zoom (ImageLightbox's '+' and '='): in a leaf this narrow the bar clips its
 			// own zoom buttons, which is a finding for the viewer lane, not something this journey has to depend on.
-			await viewport.evaluate((el) => el.focus());
+			// Focus one of the viewer's own bar buttons first: while the chat composer holds focus the viewer ignores the key.
+			await overlay(page).getByRole('button', { name: 'Fit' }).focus();
 			for (let step = 0; step < 12; step += 1) await page.keyboard.press('+');
 			// Prove the keys did the zooming, so a later failure is not read as a missing control.
 			await expect.poll(async () => parseInt((await overlay(page).getByText(/^\d+%$/).first().textContent()) ?? '0', 10), { message: 'the viewer zoomed past its own size with the keyboard' }).toBeGreaterThan(100);

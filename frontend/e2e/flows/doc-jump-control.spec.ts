@@ -365,18 +365,16 @@ for (const theme of ['light', 'dark'] as const) {
 			// Where it lands matters as much as that it moved: the whole landed line sits inside the pane the reader can see,
 			// clear of its top edge, and stays there once the drawer has taken its width from the pane.
 			await expect.poll(async () => {
-				const inside = await page.evaluate((id) => {
-					// The pane is taken from the highlight's own editor: at 393 the chat composer is a CodeMirror too, so the
-					// page's first scroller is not the document's, and the marks are not under the 1440 '.doc' box.
-					const mark = document.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
-					const editor = mark?.closest('.cm-editor');
-					const scroller = editor?.querySelector<HTMLElement>('.cm-scroller');
-					if (!mark || !scroller) return null;
+				const inside = await page.locator(`[data-comment-id="${doc.roots[8]}"]`).evaluateAll((marks) => {
+					// Read from the marks themselves: at 393 the surface can sit behind a shadow root, where document.querySelector
+					// finds nothing while the locator pierces it, and the page's first scroller is the chat composer's.
+					const scroller = marks[0]?.closest('.cm-scroller');
+					if (!scroller) return null;
 					const pane = scroller.getBoundingClientRect();
-					const pieces = [...document.querySelectorAll<HTMLElement>(`[data-comment-id="${id}"]`)].filter((node) => editor?.contains(node)).map((node) => node.getBoundingClientRect());
+					const pieces = marks.map((node) => node.getBoundingClientRect());
 					if (!pieces.length) return null;
 					return { lineTop: Math.round(Math.min(...pieces.map((r) => r.top))), lineBottom: Math.round(Math.max(...pieces.map((r) => r.bottom))), paneTop: Math.round(pane.top), paneBottom: Math.round(pane.bottom) };
-				}, doc.roots[8]);
+				});
 				console.log('LANDING', JSON.stringify(inside));
 				const fits = !!inside && inside.lineTop >= inside.paneTop - 0.5 && inside.lineBottom <= inside.paneBottom + 0.5;
 				steadyInside = fits ? steadyInside + 1 : 0;
@@ -940,17 +938,13 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		// The thread is unread and its own line is inside the pane: this is the control's own absence, not a count that fell,
 		// and nothing can bring it further into view.
 		await expect.poll(() => unreadCountInStore(page, doc.artifactId)).toBe(1);
-		await expect.poll(() => page.evaluate((id) => {
-			// The pane comes from the unread thread's own editor, the same way the landing read does.
-			const mark = document.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
-			const editor = mark?.closest('.cm-editor');
-			const scroller = editor?.querySelector<HTMLElement>('.cm-scroller');
-			if (!mark || !scroller) return false;
+		await expect.poll(() => page.locator(`[data-comment-id="${doc.roots[2]}"]`).evaluateAll((marks) => {
+			const scroller = marks[0]?.closest('.cm-scroller');
+			if (!scroller) return false;
 			const pane = scroller.getBoundingClientRect();
-			const pieces = [...document.querySelectorAll<HTMLElement>(`[data-comment-id="${id}"]`)].filter((node) => editor?.contains(node)).map((node) => node.getBoundingClientRect());
-			if (!pieces.length) return false;
+			const pieces = marks.map((node) => node.getBoundingClientRect());
 			return Math.min(...pieces.map((r) => r.top)) >= pane.top - 0.5 && Math.max(...pieces.map((r) => r.bottom)) <= pane.bottom + 0.5;
-		}, doc.roots[2]), { message: 'the unread line sits inside the visible pane' }).toBe(true);
+		}), { message: 'the unread line sits inside the visible pane' }).toBe(true);
 		await expect(controlButton(page)).toHaveCount(0);
 		await page.screenshot({ path: stillPath(width, theme, 'hidden') });
 		await holdDwell(page, false);
