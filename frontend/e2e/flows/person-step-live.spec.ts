@@ -108,7 +108,7 @@ for (const action of ['done', 'closed'] as const) {
 }
 
 test('person-step live group focus off 393', async ({ page, request }, testInfo) => {
-  if (!out) throw new Error('PERSON_STEP_LIVE_OUT is required');
+  test.skip(!out, 'Capture-only; set PERSON_STEP_LIVE_OUT to render.');
   const output = path.join(out, testInfo.project.name);
   fs.mkdirSync(output, { recursive: true });
   await page.setViewportSize({ width: 393, height: 852 });
@@ -133,7 +133,7 @@ test('person-step live group focus off 393', async ({ page, request }, testInfo)
 for (const width of [393, 1440]) {
   for (const scene of ['waiting', 'group', 'done', 'closed'] as const) {
     test(`person-step live ${scene} ${width}`, async ({ page, request }, testInfo) => {
-      if (!out) throw new Error('PERSON_STEP_LIVE_OUT is required');
+      test.skip(!out, 'Capture-only; set PERSON_STEP_LIVE_OUT to render.');
       const output = path.join(out, testInfo.project.name);
       fs.mkdirSync(output, { recursive: true });
       await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });

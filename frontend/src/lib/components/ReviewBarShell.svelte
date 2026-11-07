@@ -66,7 +66,7 @@
 		return { duration: token('--dur-standard') * 0.7, easing: cubicIn, css: (_t: number, u: number) => `transform: translateY(${u * distance}px)` };
 	}
 	/**
-	 * How far the floating capsule (a touch screen at a narrow canvas) reaches up into the bar's container (its offset
+	 * How far the floating capsule (a phone-width touch screen at a narrow canvas) reaches up into the bar's container (its offset
 	 * parent, else the window), plus the capsule's side inset as the gap above it. Zero while the capsule sits in the
 	 * bar's own row, is tucked away, or is not there.
 	 */
@@ -265,7 +265,7 @@
 		.review-bar.noting :global(.rb-actions) { flex: 1 0 100%; order: 2; justify-content: flex-end; margin-left: 0; }
 	}
 
-	/* Solid, not glass: document text reads through any translucent fill, and the header's backdrop root stops the blur from reaching it. A touch screen at a narrow canvas gets the answer in a floating capsule at the canvas's bottom edge, with the status above its buttons (the capsule grows upward); the ask is one in-flow line. */
+	/* A touch screen at a narrow canvas gets 44px targets, and the ask is one in-flow line. */
 	@media (any-pointer: coarse) {
 		@container doc-canvas (max-width: 37.5rem) {
 			.review-bar { min-height: var(--rb-hit); }
@@ -288,6 +288,13 @@
 			:global(.document-header) .review-bar.receipt, :global(.document-header) .review-bar.stale { align-items: center; }
 			:global(.document-header) .review-bar.receipt .rb-icon, :global(.document-header) .review-bar.stale .rb-icon { margin-block: 0; }
 			:global(.document-header) .rb-receipt, :global(.document-header) .review-bar.stale .rb-text, :global(.document-header) .review-bar.stale .rb-sub { line-height: inherit; }
+			.rb-capsule :global(.btn) { min-height: var(--rb-hit); }
+		}
+	}
+
+	/* Solid, not glass: document text reads through any translucent fill, and the header's backdrop root stops the blur from reaching it. A phone-width touch screen at a narrow canvas gets the answer in a floating capsule at the canvas's bottom edge, with the status above its buttons (the capsule grows upward). The capsule is fixed to the window, which is the canvas only in the phone layout: a wider touch screen beside the chat keeps the answer in the bar's row. 48rem is the viewport store's 768px phone breakpoint at the default root size. */
+	@media (any-pointer: coarse) and (max-width: 48rem) {
+		@container doc-canvas (max-width: 37.5rem) {
 			.rb-row2 { display: contents; }
 			.rb-slot { animation-name: rb-grow-solid, rb-clip; }
 			/* The capsule slides from below the safe area and back, fully opaque the whole way (RSR-3): no ancestor fades, and its own motion is transform only. */
@@ -301,7 +308,7 @@
 			.rb-capsule.insheet.noting :global(.rb-actions) { flex: 1 0 100%; justify-content: flex-end; }
 			.rb-capsule.insheet.noting :global(.rb-actions .btn) { flex: 0 0 auto; min-width: max-content; }
 			.rb-capsule :global(.rb-actions) { flex: 1 1 auto; flex-wrap: wrap; margin-left: 0; }
-			.rb-capsule :global(.btn) { flex: 1 1 auto; min-width: 0; min-height: var(--rb-hit); }
+			.rb-capsule :global(.btn) { flex: 1 1 auto; min-width: 0; }
 			/* Writing a note: the capsule grows upward into two rows, the field across the full width (up to four lines), then Cancel and the send button right-aligned (PE B3). */
 			.rb-capsule :global(.rb-note) { flex: 1 0 100%; min-height: var(--rb-hit); max-height: calc(4lh + 2 * var(--space-2)); padding: var(--space-2); font-size: var(--text-input); line-height: var(--lh-normal); }
 			.review-bar.noting .rb-capsule :global(.rb-actions) { flex: 1 0 100%; justify-content: flex-end; }
