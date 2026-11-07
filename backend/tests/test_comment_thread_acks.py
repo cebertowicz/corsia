@@ -293,6 +293,48 @@ async def test_a_tag_brings_an_acknowledged_agent_back(integration_client, doc, 
     assert _row(root)["acknowledged_by"] == []
 
 
+def _deliver(comment_id, recipient):
+    from doceditor import feedback_batches
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        batch_id, = (row["id"] for row in db.execute(
+            """SELECT b.id FROM doc_feedback_batches b JOIN doc_feedback_batch_items i ON i.batch_id=b.id
+               WHERE i.comment_id=? AND b.recipient_id=?""", (comment_id, recipient)))
+        assert feedback_batches.close_batch(db, batch_id, "send")[0]
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_an_agreed_reply_that_tags_someone_new_reopens_the_agreed_thread(integration_client, doc, _registrable_roots):
+    owner, reviewer, root = await _owned_thread(integration_client, doc)
+    await _ack(owner, root)
+    await _ack(reviewer, root)
+    assert _row(root)["resolved"] == 1
+    newcomer = _mk_thread(integration_client, _OWNER, title="Newcomer")
+    _make_taggable(newcomer)
+
+    await _comment(reviewer, parent_id=root, body="Worth a second look.", tagged_agent_ids=[newcomer])
+
+    assert _row(root)["resolved"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_delivered_tag_reopens_the_agreed_thread_it_asks_to_agree_again(integration_client, doc, _registrable_roots):
+    owner, reviewer, root = await _owned_thread(integration_client, doc)
+    _make_taggable(owner)
+    await _ack(owner, root)
+    await _ack(reviewer, root)
+    asked = await _comment(reviewer, parent_id=root, body="Still sure?", tagged_agent_ids=[owner])
+    assert _row(root)["resolved"] == 1  # everyone in it still agrees until the tag reaches the owner
+
+    _deliver(asked["id"], owner)
+
+    assert _row(root)["resolved"] == 0
+
+
 @pytest.mark.asyncio
 async def test_the_persons_acknowledgement_counts(integration_client, doc, _registrable_roots):
     owner, _reviewer, root = await _owned_thread(integration_client, doc)

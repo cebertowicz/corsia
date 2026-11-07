@@ -126,6 +126,9 @@ def save_tags(db, comment: dict, agent_ids: list[str]) -> None:
             "INSERT INTO doc_comment_tags(comment_id,agent_id,agent_name) VALUES (?,?,?)",
             (comment["id"], agent_id, name),
         )
+    if agent_ids and comment.get("parent_id"):
+        from doceditor.comments import reopen_unless_agreed
+        reopen_unless_agreed(db, root_id(comment))
 
 
 def _person_names(db, rows: list[dict]) -> dict[str, str]:
@@ -209,6 +212,8 @@ def reinstate(db, comment: dict, agent_id: str) -> None:
     db.execute("""INSERT INTO doc_comment_recipient_state(root_id,agent_id,left_thread)
         VALUES (?,?,0) ON CONFLICT(root_id,agent_id) DO UPDATE SET left_thread=0""", (root_id(comment), agent_id))
     comment_acks.clear(db, root_id(comment), agent_id)
+    from doceditor.comments import reopen_unless_agreed
+    reopen_unless_agreed(db, root_id(comment))
 
 
 def filter_stopped_replies(db, items: list[dict], agent_id: str, *, person_owner: bool) -> list[dict]:

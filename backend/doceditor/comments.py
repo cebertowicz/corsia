@@ -173,6 +173,22 @@ def closed_by_agreement(connection, comment_id: str) -> bool:
     return row is not None and bool(row["resolved"] and row["closed_by_agreement"])
 
 
+def reopen_unless_agreed(connection, root_id: str, *, replier: str | None = None) -> None:
+    """Re-open a thread that closed on agreement once someone in it has not agreed.
+
+    Checked wherever that can change: a reply (``replier``, here), a tag that adds a participant
+    (``comment_recipients.save_tags``), and a delivered tag that asks an agent to agree again
+    (``comment_recipients.reinstate``).
+    """
+    from doceditor.feedback_comments import agreed
+
+    if not closed_by_agreement(connection, root_id):
+        return
+    if (replier is not None and replier not in comment_acks.acknowledgers(connection, root_id)) or not agreed(
+            connection, root_id):
+        update(root_id, {"resolved": False}, db=connection)
+
+
 def create_with_status(
     artifact_id: str,
     *,
@@ -230,12 +246,10 @@ def create_with_status(
         r = dict(row)
         _check_existing_identity(r, artifact_id, author, cid)
         created = inserted.rowcount == 1
-        if created and parent_id and (closed_by_decision(connection, r["parent_id"]) or (
-                closed_by_agreement(connection, r["parent_id"])
-                and replier not in comment_acks.acknowledgers(connection, r["parent_id"]))):
-            # The reply rule stated on comment_actions.reopen_fields; and a thread that closed because
-            # everyone had agreed re-opens when someone who has not agreed replies.
-            update(r["parent_id"], {"resolved": False}, db=connection)
+        if created and parent_id and closed_by_decision(connection, r["parent_id"]):
+            update(r["parent_id"], {"resolved": False}, db=connection)  # the rule on comment_actions.reopen_fields
+        elif created and parent_id:
+            reopen_unless_agreed(connection, r["parent_id"], replier=replier)
         if created:
             # Only a new top-level agent comment or suggestion names itself; replies and user comments do not.
             named = author_kind == "agent" and author_thread_id and not parent_id
