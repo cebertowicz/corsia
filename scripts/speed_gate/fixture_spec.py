@@ -52,7 +52,7 @@ SYNTHETIC_ROWS = {name: max(1, round(PRODUCTION_ROWS["doc_comments"] * SCALE)) f
     "doc_comment_tags", "doc_comment_mentions", "doc_comment_recipient_state",
 )}
 
-#: Schemas 181 and 183 postdate the census too. Synthetic stress shape, built by the generic pass: one
+#: Schemas 181 and 184 postdate the census too. Synthetic stress shape, built by the generic pass: one
 #: saved agent write and one acknowledgement per fixture comment; assumptions, not production counts.
 GENERIC_SYNTHETIC_ROWS = {name: max(1, round(PRODUCTION_ROWS["doc_comments"] * SCALE)) for name in (
     "doc_comment_writer_line", "doc_comment_acks",

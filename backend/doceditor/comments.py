@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from doceditor import comment_acks, comment_notifications, comment_recipients, feedback_reopens, feedback_settlement, feedback_state, live_events
+from doceditor import comment_acks, comment_notifications, comment_recipients, feedback_comments, feedback_reopens, feedback_settlement, feedback_state, live_events
 from infra.database import get_db, write_transaction
 
 _CLIENT_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
@@ -161,6 +161,11 @@ def closed_by_decision(connection, comment_id: str) -> bool:
     return root is not None and bool(root["decision"] and root["resolved"] and root["closed_by_decision"])
 
 
+def _resolved(connection, comment_id: str) -> bool:
+    row = connection.execute("SELECT resolved FROM doc_comments WHERE id=?", (comment_id,)).fetchone()
+    return row is not None and bool(row["resolved"])
+
+
 def create_with_status(
     artifact_id: str,
     *,
@@ -195,6 +200,9 @@ def create_with_status(
     x, y, w, h = region if region is not None else (None, None, None, None)
     with write_transaction(db, scope="create_doc_comment") as connection:
         number = _next_region_number(connection, cid, artifact_id, image_src, region)
+        root_id = _thread_root_id(connection, parent_id)
+        replier = author_thread_id if author_kind == "agent" else comment_acks.PERSON
+        agreed_before = bool(root_id) and feedback_comments.agreed(connection, root_id)
         inserted = connection.execute(
             """INSERT INTO doc_comments
                (id, artifact_id, parent_id, author, author_kind, author_thread_id,
@@ -204,7 +212,7 @@ def create_with_status(
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(id) DO NOTHING""",
             (
-                cid, artifact_id, _thread_root_id(connection, parent_id), author, author_kind, author_thread_id,
+                cid, artifact_id, root_id, author, author_kind, author_thread_id,
                 body, anchor_text, from_off, to_off, anchor_prefix, anchor_suffix,
                 1 if review else 0, replacement, int(insert_after), tagged_user_id, now, now,
                 x, y, w, h, number, image_rev, image_src,
@@ -216,8 +224,11 @@ def create_with_status(
         r = dict(row)
         _check_existing_identity(r, artifact_id, author, cid)
         created = inserted.rowcount == 1
-        if created and parent_id and closed_by_decision(connection, r["parent_id"]):
-            # The reply rule stated on comment_actions.reopen_fields.
+        if created and parent_id and (closed_by_decision(connection, r["parent_id"]) or (
+                agreed_before and _resolved(connection, r["parent_id"])
+                and replier not in comment_acks.acknowledgers(connection, r["parent_id"]))):
+            # The reply rule stated on comment_actions.reopen_fields; and a thread that closed because
+            # everyone had agreed re-opens when someone who has not agreed replies.
             update(r["parent_id"], {"resolved": False}, db=connection)
         if created:
             # Only a new top-level agent comment or suggestion names itself; replies and user comments do not.

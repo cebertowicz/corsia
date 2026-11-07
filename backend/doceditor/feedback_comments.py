@@ -83,6 +83,12 @@ def participants(db, root_id: str) -> set[str]:
     return people | agents
 
 
+def agreed(db, root_id: str) -> bool:
+    """Everyone in the thread has acknowledged it."""
+    people = participants(db, root_id)
+    return bool(people) and people <= comment_acks.acknowledgers(db, root_id)
+
+
 def recipients(
     db, comment: dict[str, Any], *, document_owner_only: bool = False,
 ) -> tuple[str, ...]:

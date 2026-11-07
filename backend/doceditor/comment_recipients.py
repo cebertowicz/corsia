@@ -198,7 +198,10 @@ def leave(db, comment: dict, agent_id: str) -> None:
     if not involved:
         raise ValueError("You are not on this comment thread")
     db.execute("""INSERT INTO doc_comment_recipient_state(root_id,agent_id,left_thread,notifications)
-        VALUES (?,?,1,0) ON CONFLICT(root_id,agent_id) DO UPDATE SET left_thread=1,notifications=0""", (root_id(comment), agent_id))
+        VALUES (?,?,1,0) ON CONFLICT(root_id,agent_id) DO UPDATE SET left_thread=1,notifications=0""", (root, agent_id))
+    from doceditor.comment_state_updates import resolve_after_leave
+
+    resolve_after_leave(db, root, agent_id)
 
 
 def reinstate(db, comment: dict, agent_id: str) -> None:

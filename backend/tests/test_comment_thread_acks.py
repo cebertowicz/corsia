@@ -108,6 +108,103 @@ async def test_two_participants_acknowledging_resolves_the_thread(integration_cl
     assert [ack["name"] for ack in row["acknowledged_by"]] == ["Doc Owner", "Reviewer"]
 
 
+@pytest.fixture
+def _fresh_turns():
+    from doceditor import writer_turns
+
+    writer_turns.reset()
+    yield
+    writer_turns.reset()
+
+
+def _notes(thread_id):
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return [row["summary"] for row in db.execute(
+            "SELECT summary FROM context_change_journal WHERE object_kind='thread_context' AND object_id=? ORDER BY seq",
+            (thread_id,))]
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_the_author_hears_only_resolved_when_an_agree_completes_its_thread(integration_client, doc, _registrable_roots):
+    owner, reviewer, root = await _owned_thread(integration_client, doc)
+    await _ack(reviewer, root)
+
+    await _ack(owner, root)
+
+    assert _row(root)["resolved"] == 1
+    assert _notes(reviewer) == [f"Doc Owner resolved your comment on {doc.stem}."]
+
+
+@pytest.mark.asyncio
+async def test_the_last_agree_resolves_at_once_even_while_a_person_holds_the_writer_turn(integration_client, doc, _registrable_roots, _fresh_turns):
+    from doceditor import writer_turns
+
+    owner, reviewer, root = await _owned_thread(integration_client, doc)
+    await _ack(owner, root)
+    writer_turns.take(object(), root, writer_turns.PersonHold("u1", "Steve", _row(root)["artifact_id"]))
+
+    await _ack(reviewer, root)
+
+    # Nothing waits on the in-memory turn, so a restart that drops it loses nothing.
+    writer_turns.reset()
+    assert _row(root)["resolved"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_reply_from_someone_who_has_not_agreed_reopens_a_thread_everyone_agreed(integration_client, doc, _registrable_roots, _fresh_turns):
+    from doceditor import writer_turns
+
+    owner, reviewer, root = await _owned_thread(integration_client, doc)
+    other = _mk_thread(integration_client, _OWNER, title="Other")
+    assert writer_turns.agent_claim(root, other)  # its reply was being written as the thread resolved
+    await _ack(owner, root)
+    await _ack(reviewer, root)
+    assert _row(root)["resolved"] == 1
+
+    await _comment(other, parent_id=root, body="One case this misses.")
+
+    row = _row(root)
+    assert row["resolved"] == 0 and row["acknowledged_by"] == []
+
+
+@pytest.mark.asyncio
+async def test_a_reply_from_someone_who_agreed_keeps_the_thread_resolved(integration_client, doc, _registrable_roots):
+    owner, reviewer, root = await _owned_thread(integration_client, doc)
+    await _ack(owner, root)
+    await _ack(reviewer, root)
+
+    await _comment(reviewer, parent_id=root, body="Thanks.")
+
+    assert _row(root)["resolved"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_last_holdout_leaving_resolves_the_thread(integration_client, doc, _registrable_roots):
+    from doceditor import comment_recipients
+    from infra.database import get_db, write_transaction
+
+    owner, reviewer, root = await _owned_thread(integration_client, doc)
+    other = _mk_thread(integration_client, _OWNER, title="Other")
+    await _comment(other, parent_id=root, body="Not sure.")
+    await _ack(owner, root)
+    await _ack(reviewer, root)
+    assert _row(root)["resolved"] == 0
+
+    db = get_db()
+    try:
+        with write_transaction(db, scope="test_leave") as connection:
+            comment_recipients.leave(connection, _row(root), other)
+    finally:
+        db.close()
+
+    assert _row(root)["resolved"] == 1
+
+
 @pytest.mark.asyncio
 async def test_a_tagged_agent_that_never_commented_counts(integration_client, doc, _registrable_roots):
     owner, reviewer, root = await _owned_thread(integration_client, doc)
