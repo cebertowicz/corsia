@@ -12,6 +12,9 @@ function clickedLine(target: Node, y: number): { top: number; bottom: number } |
 	return { top: text.top - leading, bottom: text.bottom + leading };
 }
 
+// A click in the text or on a margin marker opens its card at the pointer, and scrolls nothing (every width but a phone's, which keeps its sheet).
+export const clicked = (phone: boolean, click: MouseEvent | undefined, live: () => DOMRect | null) => phone ? null : clickAnchor(click, live);
+
 /**
  * The box a card opened by `click` sits against: the clicked line at the pointer's x. Null when no click opened it, for a
  * keyboard press on a button (a click with no pointer, `detail` 0), so the card opens beside the comment's text as before.

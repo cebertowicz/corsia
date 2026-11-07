@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { expect, type Page, type APIRequestContext } from '@playwright/test';
 import { openSuggestionDocument } from '../support/docSuggestions';
+import { ITEMS, TEXT, FIRST, ALPHA, BRAVO, LAST, SUGGESTION, card, geometry, open, pill, widen } from '../support/marginCards';
 import { TEST_TOKEN } from '../support/corsia';
 
 /**
@@ -13,58 +14,8 @@ import { TEST_TOKEN } from '../support/corsia';
  * (on a phone, the sheet). Replaces the marker specs: there is no margin icon to press any more.
  */
 
-const para = (n: number) => `Paragraph ${n} of the plan says that agents hand work to each other, and every handoff should carry the intent behind it so the next owner never has to guess what was meant by the person who asked.`;
-const FIVE = 'Paragraph 5 notes alpha alphax and bravo bravox so that two notes sit on one line, then it carries on for a while so that the paragraph wraps onto a few lines of the page.';
-const TEXT = `# Handoff plan\n\n${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((i) => (i === 5 ? FIVE : para(i))).join('\n\n')}\n`;
-// A comment, two comments on one line (the cluster), a suggestion, a suggestion, a comment, in document order.
 // A skill file must load as a skill, so the history document opens with its front matter.
 const SKILL_TEXT = `---\nname: demo\ndescription: A test skill.\n---\n\n${TEXT}`;
-const ITEMS = [
-	{ quote: 'Paragraph 1 of the plan', body: 'Which agents? Name them here.' },
-	{ quote: 'alpha alphax', body: 'Alpha needs a source.' },
-	{ quote: 'bravo bravox', body: 'Same for bravo.' },
-	{ quote: 'Paragraph 10 of the plan', body: 'This contradicts the intro. Pick one.' },
-	{ quote: 'Paragraph 3 of the plan', replacement: 'Paragraph 3 of the rollout plan', body: 'Clearer.' },
-	{ quote: 'Paragraph 8 of the plan', replacement: 'Paragraph 8 of the intro', body: 'Match the intro.' },
-];
-const [FIRST, ALPHA, BRAVO, LAST, SUGGESTION] = [0, 1, 2, 3, 4];
-
-type Doc = Awaited<ReturnType<typeof openSuggestionDocument>>;
-const pill = (page: Page) => page.getByRole('button', { name: /^\d+ (open )?threads?/i }).first();
-const card = (page: Page, doc: Doc, i: number) => page.locator(`[data-margin-card="${doc.ids[i]}"]`);
-const docWidth = (page: Page) => page.evaluate(() => Math.round(document.querySelector('.doc')?.getBoundingClientRect().width ?? 0));
-
-/** Folds the sidebar and the Workspace panel away until the canvas has room for the column, then shows the column. */
-async function widen(page: Page, doc: Doc) {
-	for (const name of ['Toggle sidebar', 'Toggle panel']) {
-		if ((await docWidth(page)) >= 800) break;
-		await page.getByRole('button', { name, exact: true }).click();
-		await expect.poll(() => docWidth(page)).toBeGreaterThan(600);
-	}
-	if (!(await page.locator('[data-margin-card]').count())) await pill(page).click();
-	await expect(page.locator('.canvas-comment-drawer.margin')).toBeVisible();
-	return doc;
-}
-
-/** Seeds the document and, on a desktop, widens the canvas so it has room for the column. */
-async function open(page: Page, request: APIRequestContext, { wide = true }: { wide?: boolean } = {}) {
-	const doc = await openSuggestionDocument(page, request, TEXT, ITEMS, { splitWidth: wide ? 5000 : 540 });
-	await expect(page.locator('.cm-scroller')).toBeVisible();
-	if (wide) {
-		await widen(page, doc);
-		await expect(card(page, doc, FIRST)).toBeVisible();
-	}
-	return doc;
-}
-
-/** Top of the first drawn row of a thread's highlight (comment) or struck text (suggestion), and of its card. */
-const geometry = (page: Page, ids: string[]) => page.evaluate((all) => all.map((id) => {
-	const wrap = document.querySelector<HTMLElement>(`[data-margin-card="${id}"]`);
-	const mark = [...document.querySelectorAll<HTMLElement>('.cm-comment-line, .cm-suggestion-del, .cm-suggestion-insert')]
-		.find((node) => (node.dataset.commentIds ?? node.dataset.suggestionId ?? '').split(',').includes(id));
-	const c = wrap?.getBoundingClientRect(), m = mark?.getBoundingClientRect();
-	return { id, card: c ? { top: c.top, bottom: c.bottom, left: c.left } : null, line: m ? m.top : null };
-}), ids);
 
 test.beforeEach(async ({ page }, info) => {
 	if (info.project.name === 'chromium-desktop') await page.setViewportSize({ width: 1440, height: 900 });

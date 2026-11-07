@@ -88,4 +88,37 @@ describe('comment surface state', () => {
 		surface.hover(null);
 		expect(surface.hovered).toBeNull();
 	});
+
+	describe('release: a picked margin card lets go', () => {
+		it('returns a card picked from rest to the column and clears the highlight, without pulling focus', () => {
+			const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+			surface.focusComment('c1', new DOMRect(), false, true);
+			expect(surface.state).toEqual({ kind: 'thread', id: 'c1' });
+			expect(surface.release()).toBe(true);
+			expect(surface.state).toEqual({ kind: 'list' });
+			expect(surface.quiet).toBe(true);
+			expect(get(focusedDocComment)).toBeNull();
+		});
+
+		it('clears the pick when the column is already showing (a pick leaves the list state with only the focus set)', () => {
+			const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+			surface.openList(document.createElement('button'));
+			surface.focusComment('c1', new DOMRect());
+			expect(get(focusedDocComment)).toBe('c1');
+			expect(surface.release()).toBe(true);
+			expect(surface.state).toEqual({ kind: 'list' });
+			expect(get(focusedDocComment)).toBeNull();
+		});
+
+		it('does nothing when nothing is picked, or without the margin column', () => {
+			const margin = createCommentSurfaceState(() => {}, undefined, () => true);
+			margin.openList(document.createElement('button'));
+			expect(margin.release()).toBe(false);
+			const popover = createCommentSurfaceState(() => {});
+			popover.focusComment('c1', new DOMRect());
+			expect(popover.release()).toBe(false);
+			expect(popover.state).toEqual({ kind: 'thread', id: 'c1' });
+			expect(get(focusedDocComment)).toBe('c1');
+		});
+	});
 });

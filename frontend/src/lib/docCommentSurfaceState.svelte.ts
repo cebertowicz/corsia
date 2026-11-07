@@ -102,6 +102,19 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		state = { ...state, id };
 		focusedDocComment.set(id);
 	}
+	/**
+	 * With the margin column up, the card the reader picked lets go: the column stays, the cards return to their lines and the
+	 * highlight eases back. A caret landing in plain text and Escape both end a pick this way. Answers whether it held one.
+	 */
+	function release() {
+		if (!marginUp?.()) return false;
+		const threadId = state?.kind === 'thread' && !state.ids ? state.id : null;
+		if (threadId === null && !(state?.kind === 'list' && get(focusedDocComment) !== null)) return false;
+		// Back to the column on its own: it is shown the way it is on load, so it does not pull focus off the text.
+		if (threadId !== null) { state = { kind: 'list' }; quiet = true; }
+		focusedDocComment.set(null);
+		return true;
+	}
 	function openOnLoad() {
 		if (state) return;
 		state = { kind: 'list' };
@@ -123,7 +136,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		get restoreFocus() { return restoreFocus; },
 		get sheetUp() { return sheetUp; }, set sheetUp(value: boolean) { sheetUp = value; },
 		get quiet() { return quiet; }, get hovered() { return hovered; }, hover(id: string | null) { hovered = id; },
-		close, openOnLoad, openDraft, focusComment, focusMarker, selectMarkerThread, focusRemainingThread, openList, restoreReplyFocus,
+		close, release, openOnLoad, openDraft, focusComment, focusMarker, selectMarkerThread, focusRemainingThread, openList, restoreReplyFocus,
 	};
 }
 
