@@ -24,7 +24,7 @@
 	let editingId = $state<string | null>(null);
 	let viewing = $state<{ messageId: string; commentId: string } | null>(null);
 	const viewedComment = $derived($messages.find(message => message.id === viewing?.messageId && message.thread_id === threadId)?.chat_comments?.find(comment => comment.id === viewing?.commentId));
-	const threadAnchor = () => viewing ? [...document.querySelectorAll<HTMLElement>('[data-comment-ids]')].find(el => el.dataset.commentIds?.split(',').includes(viewing!.commentId))?.getBoundingClientRect() ?? null : null;
+	const threadAnchor = () => viewing ? commentRect(viewing.commentId, viewing.messageId) : null;
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
 	let buttonWidth = $state(0);
@@ -48,12 +48,18 @@
 	const anchor = $derived.by(() => {
 		if (draft) return draft.rect;
 		if (!editing) return null;
-		return () => [...document.querySelectorAll<HTMLElement>('[data-comment-ids]')].find(el => el.dataset.commentIds?.split(',').includes(editing.id))?.getBoundingClientRect()
-			?? bodyOf(document.querySelector(`[data-message-id="${CSS.escape(editing.messageId)}"]`))?.getBoundingClientRect() ?? null;
+		return () => commentRect(editing.id, editing.messageId);
 	});
 
 	function bodyOf(row: Element | null): HTMLElement | null {
 		return row?.querySelector<HTMLElement>('.long-message-body, .bubble-content') ?? null;
+	}
+	/** Where a comment is drawn: its highlight; else, for text the message no longer shows, its thread under the message; else the message body. */
+	function commentRect(commentId: string, messageId: string): DOMRect | null {
+		const row = document.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+		return [...document.querySelectorAll<HTMLElement>('[data-comment-ids]')].find(el => el.dataset.commentIds?.split(',').includes(commentId))?.getBoundingClientRect()
+			?? row?.querySelector<HTMLElement>(`[data-comment-uuid="${CSS.escape(commentId)}"]`)?.getBoundingClientRect()
+			?? bodyOf(row)?.getBoundingClientRect() ?? null;
 	}
 	function close() {
 		pick = null; draft = null; editingId = null; viewing = null; typed = null;

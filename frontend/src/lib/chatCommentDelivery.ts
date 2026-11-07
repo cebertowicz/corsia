@@ -63,9 +63,8 @@ export type ChatReplyIndex = {
 };
 
 /**
- * Every reply send in one thread, keyed by the comment it answers, from a single pass over the loaded rows.
- * Each comment's pending and failed lists used to scan all rows again, which made a transcript render
- * quadratic in its own length; one pass per `$messages` change answers all of them.
+ * Every reply send in one thread, keyed by the comment it answers, from a single pass over the loaded rows,
+ * so one pass per `$messages` change answers every comment's pending and failed lists.
  */
 export function chatReplyIndex(rows: Message[], threadId: string): ChatReplyIndex {
 	// A failed send is hidden once a retry of it reaches the server, whether that retry landed or failed in turn.

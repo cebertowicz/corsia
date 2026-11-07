@@ -57,6 +57,8 @@ async function replyFromDetachedThread(onSendReply: Parameters<typeof mountTrans
 	const dialog = document.body.querySelector<HTMLElement>('[role="dialog"][aria-label="Comment thread"]');
 	const field = dialog?.querySelector<HTMLTextAreaElement>('.ct-input');
 	expect(field, 'the click opens that comment\u2019s thread with its reply field').toBeTruthy();
+	// jsdom lets a click through a hidden, clipped surface, so check the surface is shown: it has no highlight to sit on.
+	await vi.waitFor(() => expect(dialog!.closest('[data-popover]')?.getAttribute('aria-hidden'), 'the thread is shown, not hidden for want of a highlight').toBeNull());
 	field!.value = 'Because it changed';
 	field!.dispatchEvent(new Event('input', { bubbles: true }));
 	flushSync();
