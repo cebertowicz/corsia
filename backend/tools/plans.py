@@ -287,9 +287,9 @@ class PlanDecisionTool(_OperationTool):
         return (
             "Author structured plan decisions for the user, with 2-4 A/B/C/D "
             "options; the parent tier reviews before raise. pick \"any\" is for "
-            "independent items; tradeoffs get their own decision. A step only the "
-            "person's hands can take (sign in, pay) is a plan_update task with "
-            "assignee='user', not a decision, even with a 'drop it' option."
+            "independent items; tradeoffs get their own decision. Decisions are for "
+            "choices: a step only the person's hands can take (sign in, pay) is "
+            "never one, even with a 'drop it' option; plan_update says where it goes."
         )
 
     @property
