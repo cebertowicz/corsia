@@ -25,8 +25,8 @@ export function emitComposerSend(threadId: string, content: string, attachmentCo
  */
 export const REPLY_SEND_FAILURE = {
 	restarting: 'CORSIA is restarting after an update, so it can’t answer this reply. Your reply stays here; try again once CORSIA is back.',
-	noModel: 'No model is ready to answer this reply. Your reply stays here; choose a model, then reply again.',
-	notAccepted: 'CORSIA couldn’t send this reply because the connection closed before it arrived. Your reply stays here; send it again.',
+	noModel: 'This chat’s model can’t answer this reply. Your reply stays here; choose a model, then send it again.',
+	notAccepted: 'CORSIA couldn’t send this reply because the connection is unavailable. Your reply stays here; send it again.',
 } as const;
 
 export type ReplySendBlock = keyof typeof REPLY_SEND_FAILURE;
