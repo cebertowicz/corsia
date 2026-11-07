@@ -231,8 +231,8 @@ def _settle_closed(path: str | None, artifact_id: str | None, thread_id: str, ca
         db.close()
 
 
-UNSETTLED_NOTE = ("This write couldn't be recorded as your answer to the section wake, so you may still get a note "
-                  "that your saved write dropped out of line. This write already covers it; don't write it again.")
+UNSETTLED_NOTE = ("This write couldn't be recorded as your answer to the section wake. If you're later told your saved "
+                  "write dropped out of line, check whether this write already covers it before writing again.")
 
 
 async def settle_closed(path: str | None, thread_id: str, call: dict[str, Any],
@@ -249,8 +249,13 @@ async def settle_closed(path: str | None, thread_id: str, call: dict[str, Any],
     if not writer_turns.may_answer_section(thread_id):
         return None
     try:
-        await _drive(await run_in_db(_settle_closed, path, artifact_id, thread_id, call))
+        woken = await run_in_db(_settle_closed, path, artifact_id, thread_id, call)
     except Exception:
         logger.exception("section rows of {} on {} did not settle", thread_id, path or artifact_id)
         return UNSETTLED_NOTE
+    # The settle has committed, so this write is the answer; passing the line on is not the writer's to act on.
+    try:
+        await _drive(woken)
+    except Exception:
+        logger.exception("section writers after {} on {} were not woken", thread_id, path or artifact_id)
     return None

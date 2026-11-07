@@ -579,6 +579,31 @@ async def test_a_write_to_the_closed_document_that_cannot_settle_its_wake_says_s
 
 
 @pytest.mark.asyncio
+async def test_a_settled_wake_whose_next_writer_is_not_woken_carries_no_note(doc, driven, monkeypatch):
+    """The settle committed, so the write is the agent's answer: failing to pass the line on is not the writer's to act on."""
+    from doceditor import agent_comment_writes, live_runtime
+
+    scope, page, entry, path, context = doc
+    artifact_id = page.identity["artifact_id"]
+    await page.type_after("## Terms\n", "new ", entry.live)
+    _queued(await _edit(path, context, "old terms", "agent terms"))
+    await page.close()
+    await _settled()
+    [row] = _line(artifact_id, "## Terms")
+    assert row["state"] == "woken"
+
+    async def broken(*_args, **_kwargs):
+        raise RuntimeError("wake failed")
+
+    monkeypatch.setattr(agent_comment_writes, "_drive", broken)
+    monkeypatch.setattr(live_runtime, "_manager", None)
+    result = json.loads(await _edit(path, context, "old terms", "agent terms"))
+    assert "note" not in result
+    assert "agent terms" in path.read_text()
+    assert _line(artifact_id, "## Terms") == []
+
+
+@pytest.mark.asyncio
 async def test_an_agent_write_nobody_holds_takes_no_write_transaction_to_enter(doc, driven, monkeypatch):
     """The scale budget: statements per call, and write transactions, for a write touching ``k`` sections."""
     from contextlib import contextmanager
