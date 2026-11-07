@@ -6,6 +6,21 @@ import type { DocComment } from './stores/docComments';
 const comment = (id: string, from: number, anchor: string, overrides: Partial<DocComment> = {}): DocComment => ({
 	id, from, to: from + anchor.length, anchor, author: 'you', text: id, at: 'now', resolved: false, replies: [], ...overrides,
 });
+describe('local and server comment status', () => {
+	it.each([
+		{ text: 'The quick fox', end: 9, decision: null, orphaned: false, changed: false },
+		{ text: 'The quXick fox', end: 10, decision: null, orphaned: false, changed: true },
+		{ text: 'The  fox', end: 4, decision: null, orphaned: true, changed: false },
+		{ text: 'The  fox', end: 4, decision: 'rejected' as const, orphaned: false, changed: false },
+	])('matches the server case $text, decision $decision', ({ text, end, decision, orphaned, changed }) => {
+		const base = comment('case', 4, 'quick', { to: end, replacement: 'slow', decision, drawn: true });
+		const [local] = commentsInDocumentOrder([base], text);
+		const [snapshot] = commentsInDocumentOrder([{ ...base, statusText: text, orphaned, textChanged: changed }], text);
+		expect(local).toMatchObject({ orphaned, textChanged: changed });
+		expect(snapshot).toMatchObject({ orphaned, textChanged: changed });
+	});
+});
+
 describe('canvas comment order and navigation', () => {
 	it('orders by surviving text rather than open/resolved status and never finds a substitute quote', () => {
 		const text = 'first second first';
@@ -17,6 +32,14 @@ describe('canvas comment order and navigation', () => {
 		expect(rows[3].orphaned).toBe(true);
 		expect(canvasCommentHighlights(rows, text, 'resolved', undefined).map((range) => range.id)).toEqual(['resolved', 'middle', 'later']);
 	});
+	it('uses the server position after text is inserted before a legacy quote', () => {
+		const text = 'New material before. The quoted source stays here.';
+		const start = text.indexOf('quoted source');
+		const rows = commentsInDocumentOrder([comment('legacy', start, 'quoted source', { orphaned: false, statusText: text })], text);
+		expect(canvasCommentRange(rows[0], text)).toEqual({ from: start, to: start + 'quoted source'.length });
+		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 'legacy', from: start, to: start + 'quoted source'.length }]);
+	});
+
 	it('preserves an explicit scroll origin with the canonical comment range', () => {
 		const text = 'first second';
 		const rows = commentsInDocumentOrder([comment('second', 6, 'second')], text);
@@ -311,10 +334,11 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 's1', from: 34, to: 34, point: true }]);
 	});
 
-	it('reads as lost when the text its Accept put in is deleted later', () => {
+	it('keeps a decided conversation at its last position without calling it lost', () => {
 		const text = 'Lunch is at noon. Train leaves at .';
 		const rows = commentsInDocumentOrder([accepted()], text);
-		expect(rows[0]).toMatchObject({ orphaned: true, detached: true });
+		expect(rows[0]).toMatchObject({ orphaned: false, detached: false });
+		expect(commentSurfaceStatus(rows)).toMatchObject({ orphanedCount: 0, commentCount: 1 });
 		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 's1', point: true }]);
 	});
 

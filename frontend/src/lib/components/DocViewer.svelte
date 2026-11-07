@@ -305,6 +305,7 @@
 			{#if target && loadedArtifactId}
 				<DocPresenceStatus {target} artifactId={loadedArtifactId} {docState} root={docRoot}
 					textCurrent={liveConnection === null || liveConnection === 'connected' || liveConnection === 'refused'}
+					projectComment={(comment) => commentsInDocumentOrder([comment], editText, $suggestionRefusals[loadedArtifactId!], suggestionBusyId)[0]}
 					bind:ranges={presenceRanges} {onPrepareCleanReload}
 					onArrival={(frame) => void activity?.arrive(frame)}
 					onFeedback={(id, feedback) => feedbackStatus?.sync(id, feedback)} />

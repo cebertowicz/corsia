@@ -67,7 +67,7 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 	return comments.filter((comment) => !comment.resolved || (comment.id === focusedId && !comment.decision)).flatMap((comment): CommentRange[] => {
 		const anchorRange = canvasCommentRange(comment, text);
 		// A comment whose original text is gone keeps a point at the line its text last was, where its margin card sits.
-		if (!anchorRange && comment.detached && !comment.resolved && comment.regionNumber == null && comment.from != null) {
+		if (!anchorRange && (comment.detached || decidedOpen(comment)) && !comment.resolved && comment.regionNumber == null && comment.from != null) {
 			const at = Math.min(Math.max(comment.from, 0), text.length);
 			return [{ from: at, to: at, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, point: true }];
 		}
@@ -133,36 +133,25 @@ function acceptedDeletion(comment: DocComment, text: string): boolean {
 	return comment.decision === 'accepted' && comment.replacement === '' && !comment.review && comment.from != null && comment.from <= text.length;
 }
 
-/**
- * An open suggestion whose range still holds text, but not the text it replaces (someone edited inside it): it stays at its line,
- * its card says so, and Accept is off. The range is the live one the editor tracks, or the server's after a reload (`textChanged`).
- */
-function textChangedAfter(comment: DocComment, text: string): boolean {
-	return comment.replacement != null && !comment.decision && !comment.review && (!!comment.drawn || !!comment.textChanged)
-		&& comment.from != null && comment.to != null && comment.to > comment.from && comment.to <= text.length
-		&& text.slice(comment.from, comment.to) !== comment.anchor;
+/** Derive one displayed status for every comment consumer. */
+function commentStatus(comment: DocComment, text: string, refused: Record<string, string>): Pick<DocComment, 'orphaned' | 'textChanged' | 'detached'> {
+	const snapshotMatches = comment.statusText === text;
+	const changed = snapshotMatches ? !!comment.textChanged : comment.replacement != null && !comment.decision && !comment.review
+		&& (!!comment.drawn || !!comment.textChanged) && comment.from != null && comment.to != null
+		&& comment.to > comment.from && comment.to <= text.length && text.slice(comment.from, comment.to) !== comment.anchor;
+	const orphaned = comment.decision ? false : !comment.review && !unplaced(comment) && !changed
+		&& (comment.id in refused || (snapshotMatches ? !!comment.orphaned : rangeFor(comment, text) === null && !acceptedDeletion(comment, text)));
+	const collapsed = !!comment.drawn && comment.from != null && comment.from === comment.to;
+	const quote = anchoredQuote(comment);
+	return { orphaned, textChanged: changed, detached: orphaned && (collapsed || !quote || !text.includes(quote)) };
 }
 
-/**
- * Use canonical resolved anchors, including resolved threads whose text survives.
- * The only place a listed comment's `orphaned` is set. The text on screen decides it, as before;
- * the server's own `orphaned` from a load is not an input. The one addition is a suggestion whose
- * Accept the server refused (`refused`, from `suggestionRefusals`): that card shows as orphaned
- * until its refusal is cleared, even where a stale screen still shows its quote.
- * A live row not yet placed (4.2) is never orphaned; it sorts by the server's offset.
- * Orphaned cards sort after located ones. Comments on one image read in their tags' number order (FR13.6).
- */
+/** Order comments using one status for the marker, count, card, margin and drawer. */
 export function commentsInDocumentOrder(comments: DocComment[], text: string, refused: Record<string, string> = {}, accepting: string | null = null): DocComment[] {
 	const at = (comment: DocComment) => (unplaced(comment) ? comment.from : canvasCommentRange(comment, text)?.from) ?? Infinity;
 	const sameImage = (a: DocComment, b: DocComment) => (a.regionNumber != null && b.regionNumber != null && a.imageSrc === b.imageSrc ? a.regionNumber - b.regionNumber : 0);
 	return comments.map((listed) => {
 		const comment = followsText(listed, text) ? { ...listed, anchor: text.slice(listed.from, listed.to) } : onAppliedText(listed, text, accepting);
-		const changed = textChangedAfter(comment, text);
-		const orphaned = !comment.review && !unplaced(comment) && !changed && (comment.id in refused || (rangeFor(comment, text) === null && !acceptedDeletion(comment, text)));
-		// The original text is gone: the range collapsed (everything in it was deleted), or the quote is nowhere in the document.
-		const collapsed = !!comment.drawn && comment.from != null && comment.from === comment.to;
-		const quote = anchoredQuote(comment);
-		const detached = orphaned && (collapsed || !quote || !text.includes(quote));
-		return { ...comment, orphaned, detached, textChanged: changed };
+		return { ...comment, ...commentStatus(comment, text, refused) };
 	}).sort((a, b) => at(a) - at(b) || sameImage(a, b) || (a.createdAt ?? '').localeCompare(b.createdAt ?? '') || a.id.localeCompare(b.id));
 }

@@ -38,6 +38,8 @@ export interface DocComment {
 	detached?: boolean;
 	/** An open suggestion whose text was edited inside: it keeps its place and its quote, and cannot be accepted. */
 	textChanged?: boolean;
+	/** Text captured with the server's live status flags. */
+	statusText?: string;
 	/** When the thread last changed; a resolve sets it. The server keeps no separate resolve time, so this orders the resolved list. */
 	updatedAt?: string;
 	/** The person's own acknowledgement of the thread. */

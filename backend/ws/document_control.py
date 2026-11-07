@@ -151,7 +151,7 @@ async def _open(socket, user: dict, data: dict) -> None:
                                 "store_id": entry.live.store.store_id, "update": _encoded(entry.live.doc.get_update()),
                                 "vector": _encoded(entry.live.doc.get_state()), "digest": entry.live.digest,
                                 "writable": loaded["writable"], "request_id": data.get("request_id"),
-                                "ranges": anchors["ranges"], **state,
+                                "ranges": anchors["ranges"], "states": anchors["states"], **state,
                                 "setup_incarnation": manager.setup_incarnation, **failures})
     for failure in failures["blocking"]:
         provenance = {key: value for key, value in failure.items() if key not in {"kind", "message"}}

@@ -49,4 +49,6 @@ async def positions(entry, artifact_id: str, *, reload: bool = False) -> dict:
             live.track_range(row["id"], row["from_off"], row["to_off"])
     return {"ranges": [{"id": row["id"], "from_off": live.ranges[row["id"]][0],
                         "to_off": live.ranges[row["id"]][1]} for row in placed],
+            "states": [{"id": row["id"], "orphaned": bool(row.get("orphaned")),
+                        "text_changed": bool(row.get("text_changed"))} for row in rows],
             "digest": live.digest, "vector": live.doc.get_state()}

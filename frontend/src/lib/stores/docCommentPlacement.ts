@@ -29,6 +29,7 @@ class LivePlacement {
 	private positions = new Map<string, Positions>();
 	private server = new Map<string, string>();
 	private clean: boolean;
+	private needsStates = false;
 	private destroyed = false;
 	private stops: (() => void)[];
 
@@ -159,7 +160,9 @@ class LivePlacement {
 		} else if (frame.type === 'doc_ack') {
 			const became = this.session.durability.clean && !this.clean;
 			this.clean = this.session.durability.clean;
-			if (became && this.current().some(row => row.placement === 'placing')) this.ask();
+			if ((this.clean && this.needsStates) || (became && this.current().some(row => row.placement === 'placing'))) this.ask();
+		} else if (frame.type === 'doc_update' && this.needsStates && this.session.durability.clean) {
+			this.ask();
 		}
 		if (frame.type !== 'doc_ack') this.clean = this.session.durability.clean;
 	}
@@ -187,7 +190,10 @@ class LivePlacement {
 			this.next(true);
 			return;
 		}
-		if (digest === frame.digest) this.place(frame.ranges ?? [], text.length, reload);
+		if (digest === frame.digest) {
+			this.needsStates = false;
+			this.place(frame.ranges ?? [], text, reload, frame.states);
+		}
 		else if (session.durability.clean) {
 			// The ordering rule says a clean tab holds exactly the answer's text, so this is a defect, reported once.
 			console.error('Comment placement: the server text differs from a clean tab', {
@@ -205,8 +211,9 @@ class LivePlacement {
 		this.next();
 	}
 
-	private place(ranges: Range[], length: number, reload = false): void {
-		const found = new Map(ranges.filter(range => 0 <= range.from_off && range.from_off <= range.to_off && range.to_off <= length)
+	private place(ranges: Range[], snapshotText: string, reload = false, states?: DocumentFrame['states']): void {
+		const flags = new Map(states?.map(state => [state.id, state]) ?? []);
+		const found = new Map(ranges.filter(range => 0 <= range.from_off && range.from_off <= range.to_off && range.to_off <= snapshotText.length)
 			.map(range => [range.id, range]));
 		const keep = this.marked !== null; // a newer answer decides rows this one does not name
 		const { text } = this.session;
@@ -215,7 +222,9 @@ class LivePlacement {
 			this.positions.set(id, { from: Y.createRelativePositionFromTypeIndex(text, range.from_off, 0),
 				to: Y.createRelativePositionFromTypeIndex(text, range.to_off, -1) });
 		}
-		this.write(rows => rows.map(row => {
+		this.write(rows => rows.map(original => {
+			const state = flags.get(original.id);
+			const row = state ? { ...original, orphaned: state.orphaned, textChanged: state.text_changed, statusText: snapshotText } : original;
 			if (!(reload ? row.anchor && !row.review : placeable(row))) return row;
 			const range = found.get(row.id);
 			if (range) return { ...row, placement: 'placed', drawn: true, from: range.from_off, to: range.to_off };
@@ -239,6 +248,7 @@ class LivePlacement {
 
 	/** Drawn rows move only by their own relative positions, on every change to the text. */
 	private moved = (): void => {
+		this.needsStates = this.current().some(row => !!row.anchor && !row.review);
 		if (!this.positions.size) return;
 		const { doc } = this.session;
 		this.write(rows => rows.map(row => {

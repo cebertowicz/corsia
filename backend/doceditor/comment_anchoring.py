@@ -41,11 +41,11 @@ def _edited_place(comment: dict, text: str, tracked: tuple[int, int] | None) -> 
         place = tracked
     else:
         from_off, to_off = comment.get("from_off"), comment.get("to_off")
+        if from_off is None or to_off is None:
+            return None
         prefix, suffix = comment.get("anchor_prefix") or "", comment.get("anchor_suffix") or ""
         start, end = _cp_at_u16(text, from_off), _cp_at_u16(text, to_off)
         if not (prefix or suffix) or start is None or end is None:
-            return None
-        if not isinstance(from_off, int) or not isinstance(to_off, int):
             return None
         if text[max(0, start - len(prefix)):start] != prefix or text[end:end + len(suffix)] != suffix:
             return None

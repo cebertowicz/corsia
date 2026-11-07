@@ -4,6 +4,7 @@ import { EditorView } from '@codemirror/view';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DocActivityFrame } from '$lib/docPresence';
 import type { DocPresenceSurface } from '$lib/docPresenceRuntime';
+import type { DocComment } from '$lib/stores/docComments';
 
 const attached: { surface: DocPresenceSurface | null } = { surface: null };
 vi.mock('$lib/docPresenceRuntime', () => ({
@@ -29,12 +30,12 @@ let host: HTMLElement;
 let component: Record<string, unknown> | null = null;
 let view: EditorView | null = null;
 
-function render(root: HTMLElement | null) {
+function render(root: HTMLElement | null, projectComment?: (comment: DocComment) => DocComment) {
 	component = mount(DocPresenceStatus, {
 		target: host,
 		props: {
 			target: { threadId: 'thread-1', instanceId: 'tab-1' } as never, artifactId: 'artifact-1', docState: 'ready', root,
-			onPrepareCleanReload: async () => null, onFeedback: () => {},
+			onPrepareCleanReload: async () => null, onFeedback: () => {}, projectComment,
 		},
 	});
 	flushSync();
@@ -53,6 +54,16 @@ describe('presence surface hands a comment arrival to the editor it sits beside'
 		expect(view.state.field(typedReveals)[0].select).toMatchObject({
 			key: 'c1', from: 4, to: 15, sweepMs: selectSweepMs(11), holdMs: commentHoldMs(100),
 		});
+		root.remove();
+	});
+
+	it('uses the displayed comment status before selecting an arrival', async () => {
+		const root = document.createElement('div'); document.body.appendChild(root);
+		view = new EditorView({ state: EditorState.create({ doc: 'Say hello brave world.', extensions: [presenceMarks, createTypedReveal({ canType: () => true })] }), parent: root });
+		render(root, (row) => ({ ...row, orphaned: true }));
+		const prepared = await attached.surface!.prepare(frame);
+		expect(prepared.highlightSpan).toBeUndefined();
+		expect(attached.surface!.select!(frame, prepared)).toBeNull();
 		root.remove();
 	});
 

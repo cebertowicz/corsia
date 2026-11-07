@@ -110,6 +110,31 @@ describe('comment placement in a live document (4.2)', () => {
 		expect(row()).toMatchObject({ from: 9, to: 13 });
 	});
 
+	it('uses server flags from the matching live snapshot after an edit', async () => {
+		const doc = await opened();
+		doc.answer(doc.asks()[0], { states: [{ id: 'c1', orphaned: false, text_changed: false }] });
+		await vi.waitFor(() => expect(row().placement).toBe('placed'));
+		doc.remote(text => text.insert(8, 'X'));
+		await vi.waitFor(() => expect(doc.asks()).toHaveLength(2));
+		doc.answer(doc.asks()[1], { ranges: [{ id: 'c1', from_off: 6, to_off: 11 }],
+			states: [{ id: 'c1', orphaned: false, text_changed: true }] });
+		await vi.waitFor(() => expect(row()).toMatchObject({ orphaned: false, textChanged: true }));
+	});
+
+	it('refreshes server flags after a local edit is acknowledged', async () => {
+		const doc = await opened();
+		doc.answer(doc.asks()[0], { states: [{ id: 'c1', orphaned: false, text_changed: false }] });
+		await vi.waitFor(() => expect(row().placement).toBe('placed'));
+		doc.session.text.insert(8, 'X');
+		const update = doc.updates().at(-1)!;
+		doc.merge(update);
+		doc.ack(update);
+		await vi.waitFor(() => expect(doc.asks()).toHaveLength(2));
+		doc.answer(doc.asks()[1], { ranges: [{ id: 'c1', from_off: 6, to_off: 11 }],
+			states: [{ id: 'c1', orphaned: false, text_changed: true }] });
+		await vi.waitFor(() => expect(row()).toMatchObject({ orphaned: false, textChanged: true }));
+	});
+
 	it('never remaps or queues for saving a live row that is still being placed', async () => {
 		await opened();
 		expect(row()).toMatchObject({ placement: 'placing', drawn: false, from: 6, to: 10 });
@@ -294,13 +319,15 @@ describe('comment placement in a live document (4.2)', () => {
 		doc.answer(doc.asks()[0]);
 		await vi.waitFor(() => expect(row().placement).toBe('placed'));
 		doc.remote(text => text.insert(0, 'X '));
+		doc.answer(doc.asks()[1]);
+		await vi.waitFor(() => expect(row()).toMatchObject({ placement: 'placed', from: 8, to: 12 }));
 		await loadComments('artifact');
-		expect(doc.asks()).toHaveLength(1);
+		expect(doc.asks()).toHaveLength(2);
 		expect(row()).toMatchObject({ placement: 'placed', from: 8, to: 12 });
 		mocks.fetchComments.mockResolvedValue({ comments: [serverRow('c1', 'beta', 8)], feedback: {} });
 		await loadComments('artifact');
 		expect(row()).toMatchObject({ placement: 'placing', drawn: true, from: 8, to: 12 });
-		expect(doc.asks()).toHaveLength(2);
+		expect(doc.asks()).toHaveLength(3);
 	});
 
 	it('re-resolves orphaned placements once through the canonical request lifecycle', async () => {
