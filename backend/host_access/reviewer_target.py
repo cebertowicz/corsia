@@ -296,9 +296,7 @@ async def resolve_reviewer_target(
     except ReviewerUnavailableError as exc:
         _report_unavailable(exc, choice, requester_thread_id)
         if not choice.named:
-            # No reviewer was chosen: this is the requester's own model failing,
-            # which Settings cannot fix, so it stays an ordinary review failure.
-            raise HostAccessSupervisorError(str(exc)) from exc
+            raise ReviewerUnavailableError(str(exc), outage=exc.outage, named=False) from exc
         if choice.fallback_model is None:
             raise _refusal(exc, choice) from exc
         try:
