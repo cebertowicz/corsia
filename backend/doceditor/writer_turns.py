@@ -1,8 +1,12 @@
-"""Who holds a comment thread's writer turn right now.
+"""Who holds a comment thread's or a document section's writer turn right now.
 
 A thread (its root comment) has one writer turn. A person holds it while a page of theirs is on the
 thread: the card selected or its reply box in use (the browser's ``comment_turn`` frame, renewed at
 most once a minute). An agent holds it only inside one write call (``agent_comment_writes``).
+
+Each section of an open document (``doc_sections``) has one too, under its ``section_key``. A
+person holds it while their edits land in it (``ws/section_turn``; the page is the socket and the
+document), and an agent only inside one edit or suggestion call (``section_writes``).
 Turns are kept in memory only, so a restart releases them all; the agent writes waiting for a turn
 are durable in ``writer_line``.
 
@@ -33,6 +37,37 @@ _people: dict[str, dict[object, PersonHold]] = {}
 _page_root: dict[object, str] = {}
 _agents: dict[str, str] = {}
 _lock = threading.Lock()
+#: Agents with a woken section row: a hint that their next write may answer it, and that they have
+#: none to take a section turn past (``section_writes``); the line rows decide. Set when a row wakes,
+#: cleared by ``writer_line.settle``, the one end of a row.
+_section_wakes: set[str] = set()
+
+_SECTION = "section:"
+
+
+def section_key(artifact_id: str, heading: str) -> str:
+    """The turn of a document's section, named as ``doc_sections`` names it; it shares the comment line's keys."""
+    return f"{_SECTION}{artifact_id}:{heading}"
+
+
+def section_heading(key: str) -> str | None:
+    """The section name a section key holds; None for a comment thread's root."""
+    return key.split(":", 2)[2] if key.startswith(_SECTION) else None
+
+
+def section_woken(thread_id: str) -> None:
+    with _lock:
+        _section_wakes.add(thread_id)
+
+
+def may_answer_section(thread_id: str) -> bool:
+    with _lock:
+        return thread_id in _section_wakes
+
+
+def section_answered(thread_id: str) -> None:
+    with _lock:
+        _section_wakes.discard(thread_id)
 
 
 def person_holding(root_id: str) -> PersonHold | None:
@@ -103,6 +138,15 @@ def agent_claim(root_id: str, thread_id: str) -> bool:
         return True
 
 
+def agents_claim(root_ids: list[str], thread_id: str) -> bool:
+    """Give this agent every one of these turns, or none: False when a person or another agent holds any."""
+    with _lock:
+        if any(_people.get(root_id) or _agents.get(root_id, thread_id) != thread_id for root_id in root_ids):
+            return False
+        _agents.update(dict.fromkeys(root_ids, thread_id))
+        return True
+
+
 def agent_exit(root_id: str, thread_id: str) -> None:
     with _lock:
         if _agents.get(root_id) == thread_id:
@@ -115,3 +159,4 @@ def reset() -> None:
         _people.clear()
         _page_root.clear()
         _agents.clear()
+        _section_wakes.clear()

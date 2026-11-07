@@ -188,6 +188,15 @@ def _file_span(name: str, text: str, args: dict[str, Any]) -> dict[str, int] | N
     return None
 
 
+def _receipt(result_text: str) -> dict[str, Any] | None:
+    """The tool's JSON receipt, or None when its result is plain text."""
+    try:
+        receipt = json.loads(result_text)
+    except (TypeError, ValueError):
+        return None
+    return receipt if isinstance(receipt, dict) else None
+
+
 def observe_document_activity(
     thread_id: str,
     name: str | None,
@@ -208,11 +217,11 @@ def observe_document_activity(
         return None
 
     comment_id: str | None = None
-    try:
-        receipt = json.loads(result_text)
-    except (TypeError, ValueError):
-        receipt = None
-    live_receipt = (receipt if isinstance(receipt, dict) and receipt.get("live_document") is True
+    receipt = _receipt(result_text)
+    if receipt is not None and receipt.get("outcome") == "queued":
+        # Saved in a section's line, not written: nothing happened in the document yet.
+        return None
+    live_receipt = (receipt if receipt is not None and receipt.get("live_document") is True
                     and isinstance(receipt.get("digest"), str) else None)
     if canonical_name.startswith("doc_comment_"):
         context = _comment_context(canonical_name, args, result_text, db)

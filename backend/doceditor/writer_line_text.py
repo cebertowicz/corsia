@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from doceditor import comments as store
+from doceditor import comments as store, writer_turns
 from doceditor.note_names import document_name
 from registry import models as registry_models
 
@@ -16,6 +16,10 @@ SINCE_LIMIT = 20
 def describe(op: dict[str, Any]) -> str:
     """One saved write in the words a wake shows it."""
     kind = op.get("kind")
+    if kind in ("edit", "write", "suggest"):
+        from doceditor import section_wake
+
+        return section_wake.describe(op)
     if kind == "reply":
         return f'Reply: "{op["input"]["body"]}"'
     if kind == "decide":
@@ -39,6 +43,10 @@ def describe(op: dict[str, Any]) -> str:
 
 def wake_text(db, row) -> str:
     root_id = str(row["root_id"])
+    if writer_turns.section_heading(root_id) is not None:
+        from doceditor import section_wake
+
+        return section_wake.wake_text(db, row)
     root = store.get_comment(root_id, db=db) or {}
     artifact = registry_models.get_artifact(str(row["artifact_id"]), db=db)
     where = f'the comment thread on "{root.get("anchor_text")}"' if root.get("anchor_text") else "a comment thread"

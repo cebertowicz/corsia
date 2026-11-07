@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from doceditor.document_scope import MAX_TEXT_BYTES
 from doceditor.live_store import BrowserMessage, LiveStore
 from doceditor.live_text import clone, create, map_offsets, state_clocks, text_digest, utf16_length
+from doceditor.section_log import SectionLog
 
 if TYPE_CHECKING:
     from doceditor.live_publication_record import WriteActor
@@ -73,6 +74,8 @@ class LiveDocument:
         self.bases: dict[str, bytes] = {}
         # Reader hashes belong to this loaded identity, never to unloaded files.
         self.read_bases: dict[str, str] = {}
+        # When each reader last read, and what changed in each section since (section writer turns).
+        self.sections = SectionLog()
         self.acknowledge: Callable[[tuple[str, ...]], None] = lambda ids: None
         self.text_changed: Callable[[], None] = lambda: None
         # An empty message means the failure of that kind cleared.
@@ -318,6 +321,7 @@ class LiveDocument:
         self.failure_changed = lambda kind, message, provenance: None
         self.pending_changed = lambda: None
         self.read_bases.clear()
+        self.sections.clear()
         self._reservations.clear()
         self.acknowledge = lambda ids: None
         self.viewer_actor = lambda: None

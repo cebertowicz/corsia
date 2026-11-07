@@ -22,7 +22,7 @@ import asyncio
 from fastapi import WebSocket
 from loguru import logger
 
-from doceditor import agent_comment_writes, comments as store, writer_line, writer_turns
+from doceditor import agent_comment_writes, comments as store, writer_line_count, writer_turns
 from infra.auth import may_access_artifact
 from infra.database import get_db
 from infra.db_async import run_in_db
@@ -101,7 +101,7 @@ async def _apply(ws: WebSocket, user: dict, comment_id: str | None, on: bool) ->
             user_id=user["id"], name=str(user.get("name") or "someone"), artifact_id=artifact_id))
         _forget_lease(ws)
         _leases[ws] = asyncio.get_running_loop().call_later(writer_turns.LEASE_SECONDS, _expire, ws)
-        await run_in_db(writer_line.publish, root_id, artifact_id, user_ids={user["id"]})
+        await run_in_db(writer_line_count.publish, root_id, artifact_id, user_ids={user["id"]})
         await _serve(freed)
     except Exception as exc:
         logger.warning(f"comment_turn: frame for {comment_id} dropped: {exc}")

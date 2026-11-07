@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 
 import pytest
@@ -239,7 +240,10 @@ async def test_post_as_is_returns_the_saved_text_of_any_failed_write_and_still_t
     monkeypatch.setattr(agent_comment_writes, "_replay", first_fails)
     answer = json.loads(await DocCommentUpdateTool().execute(comment_id=root, post_as_is=True, _thread_id=b))
 
-    assert answer["failed"] == [{"write": 'Reply: "B one"', "error": "It couldn't be posted."}]
+    [failed] = answer["failed"]
+    assert failed["write"] == 'Reply: "B one"'
+    assert re.fullmatch(r"It couldn't be posted \(reference \w{6}\)\. Write it again if it still applies\.",
+                        failed["error"])
     assert [item["comment"]["body"] for item in answer["posted"]] == ["B two"]
     assert [reply["body"] for reply in _replies(root, b)] == ["B two"]
 
@@ -274,7 +278,8 @@ async def test_a_line_that_fails_to_serve_neither_blocks_other_lines_nor_loses_t
     drives = _sweep()
 
     assert "delivered-thread" in drives and c in drives and b not in drives
-    assert [r["state"] for r in _line(first)] == ["waiting"]
+    assert _line(first) == []  # dropped with B told, not served again on every sweep
+    assert any("an error stopped it (reference " in note and "B saved" in note for note in _notes(b))
     assert [r["state"] for r in _line(second)] == ["woken"]
 
 
@@ -295,3 +300,70 @@ async def test_a_failing_line_step_at_turn_end_never_undoes_the_turns_own_settle
 
     assert [r["status"] for r in _rows("SELECT status FROM active_turns WHERE id=?", turn_id)] == ["completed"]
     assert [(r["agent_thread_id"], r["state"]) for r in _line(root)][0] == (b, "woken")
+
+
+@pytest.mark.asyncio
+async def test_a_failing_line_step_at_turn_end_drops_that_row_with_its_agent_told_and_the_sweep_wakes_the_next(
+    integration_client, doc, _registrable_roots, driven, monkeypatch,
+):
+    from doceditor import writer_line
+
+    root, b, c = await _two_in_line(integration_client, doc)
+    turn_id = _wake_turn(b, _line(root)[0])
+    real_settle = writer_line._settle_ended
+
+    def broken(db, row, turn):
+        monkeypatch.setattr(writer_line, "_settle_ended", real_settle)
+        raise KeyError("ops")
+
+    monkeypatch.setattr(writer_line, "_settle_ended", broken)
+    _end(b, turn_id, "completed")
+
+    assert [r["agent_thread_id"] for r in _line(root)] == [c]
+    assert any("an error stopped it (reference " in note and "B saved" in note for note in _notes(b))
+    assert c in _sweep()
+    assert [(r["agent_thread_id"], r["state"]) for r in _line(root)] == [(c, "woken")]
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_settles_a_woken_row_whose_turn_ended_with_no_turn_end_step(
+    integration_client, doc, _registrable_roots, driven,
+):
+    """B's wake was read in a turn that is over, but nothing settled B's row: the sweep does."""
+    root, b, c = await _two_in_line(integration_client, doc)
+    _wake_turn(b, _line(root)[0], status="completed")
+
+    assert c in _sweep()
+
+    assert [(r["agent_thread_id"], r["state"]) for r in _line(root)] == [(c, "woken")]
+    assert any("your turn ended without posting it as is or rewriting it" in note and "B saved" in note
+               for note in _notes(b))
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_leaves_a_woken_row_whose_wake_is_queued_or_in_a_live_turn(
+    integration_client, doc, _registrable_roots, driven,
+):
+    root, b, c = await _two_in_line(integration_client, doc)
+    assert b not in _sweep() and c not in _sweep()  # B's wake is still queued
+    _wake_turn(b, _line(root)[0])  # now read in a running turn
+    assert c not in _sweep()
+    assert [(r["agent_thread_id"], r["state"]) for r in _line(root)] == [(b, "woken"), (c, "waiting")]
+
+
+def test_a_line_step_that_lost_the_callers_transaction_is_raised_not_contained():
+    """SQLite rolls back the whole transaction on some errors; carrying on would write outside it."""
+    from doceditor import writer_line
+
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE t(x)")
+    db.execute("BEGIN")
+    db.execute("INSERT INTO t VALUES (1)")
+
+    def full_disk():
+        db.rollback()  # what SQLite does itself on SQLITE_FULL inside a transaction
+        raise sqlite3.OperationalError("database or disk is full")
+
+    with pytest.raises(sqlite3.OperationalError):
+        writer_line._contained(db, "root-1", full_disk)
+    db.close()
