@@ -540,11 +540,9 @@ async def test_a_sweep_that_ends_an_agents_last_section_row_and_wakes_it_on_anot
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["edit", "suggest"])
-async def test_a_write_to_the_closed_document_that_cannot_settle_its_wake_lands_and_its_drop_says_to_check(
-    doc, driven, monkeypatch, kind,
-):
-    """The write lands with its ordinary result; the wake stays unanswered, and the note when it drops at
-    turn end tells the agent to check what it already wrote before writing it again."""
+async def test_a_write_to_the_closed_document_that_cannot_settle_its_wake_is_refused(doc, driven, monkeypatch, kind):
+    """Nothing lands that the line does not know answered the wake: the write is refused, the wake stays
+    unanswered, and the note when it drops at turn end says the turn ended without answering it."""
     from doceditor import live_runtime, section_writes, writer_line
     from infra.database import get_db, write_transaction
     from tools.documents import DocCommentCreateTool
@@ -564,18 +562,18 @@ async def test_a_write_to_the_closed_document_that_cannot_settle_its_wake_lands_
     await _settled()
     [row] = _line(artifact_id, "## Terms")
     assert row["state"] == "woken"
+    before = path.read_text()
+    comments = len(_rows("SELECT id FROM doc_comments WHERE artifact_id=?", artifact_id))
 
     def broken(*_args):
         raise RuntimeError("database is locked")
 
     monkeypatch.setattr(section_writes, "_settle_closed", broken)
     monkeypatch.setattr(live_runtime, "_manager", None)
-    result = json.loads(await write())
-    assert "note" not in result
-    if kind == "edit":
-        assert "agent terms" in path.read_text()
-    else:
-        assert result["comment"]["replacement"] == "terms"
+    result = await write()
+    assert result.startswith("Error") and "database is locked" in result
+    assert path.read_text() == before
+    assert len(_rows("SELECT id FROM doc_comments WHERE artifact_id=?", artifact_id)) == comments
     [still] = _line(artifact_id, "## Terms")
     assert still["state"] == "woken"
 
@@ -589,12 +587,14 @@ async def test_a_write_to_the_closed_document_that_cannot_settle_its_wake_lands_
     assert _line(artifact_id, "## Terms") == []
     [note] = _rows("""SELECT summary FROM context_change_journal WHERE object_kind='thread_context' AND object_id=?
                       AND summary LIKE '%dropped out of line%'""", scope["owner"])
-    assert writer_line.TURN_ENDED + writer_line.SECTION_CHECK in note["summary"]
+    assert writer_line.TURN_ENDED in note["summary"]
+    assert "check the document" not in note["summary"]
 
 
 @pytest.mark.asyncio
-async def test_a_settled_wake_whose_next_writer_is_not_woken_is_still_answered(doc, driven, monkeypatch):
-    """The settle committed, so the write is the agent's answer: failing to pass the line on is not the writer's to act on."""
+async def test_a_write_whose_settle_committed_lands_even_when_passing_the_line_on_fails(doc, driven, monkeypatch):
+    """The settle committed, so the write is the agent's answer: failing to pass the line on is not the writer's
+    to act on, so the write still lands, unlike a write whose settle failed."""
     from doceditor import agent_comment_writes, live_runtime
 
     scope, page, entry, path, context = doc

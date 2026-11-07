@@ -34,7 +34,7 @@ from loguru import logger
 from doceditor import comments as store, live_events, writer_turns
 from doceditor.note_names import document_name
 from doceditor.writer_line_count import publish_after_commit
-from doceditor.writer_line_text import SECTION_CHECK, TURN_ENDED, describe, wake_text
+from doceditor.writer_line_text import TURN_ENDED, describe, wake_text
 from infra.database import write_transaction
 from infra.failure_reference import new_error_reference
 from infra.passive_changes import append_thread_context_note
@@ -318,8 +318,7 @@ def _settle_ended(db, row, turn_id: str | None) -> list[str]:
         return []
     if row["active_turn_id"] != turn_id and row["turn_status"] in ("running", "waiting_retry"):
         return []
-    ended = TURN_ENDED if writer_turns.section_heading(str(row["root_id"])) is None else TURN_ENDED + SECTION_CHECK
-    _drop(db, row, _unable(db, row) or ended)
+    _drop(db, row, _unable(db, row) or TURN_ENDED)
     return serve(db, str(row["root_id"]))
 
 

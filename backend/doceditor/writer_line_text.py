@@ -13,8 +13,6 @@ from registry import models as registry_models
 SINCE_LIMIT = 20
 #: The drop note when the agent's turn ends with its wake unanswered.
 TURN_ENDED = "your turn ended without posting it as is or rewriting it"
-#: Added for a section row: a write whose settle failed still landed, so the agent checks before writing it twice.
-SECTION_CHECK = ". If you already wrote to this section after the wake, check the document: that write may cover it"
 
 
 def describe(op: dict[str, Any]) -> str:
