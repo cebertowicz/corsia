@@ -1076,7 +1076,11 @@ async def request_reviewed_lease(
                 if review.allowed:
                     try:
                         await _close_user_model_browsers(lease["user_id"])
-                    except HostAccessBrowserIsolationError:
+                    except HostAccessBrowserIsolationError as exc:
+                        logger.warning(
+                            "host-access browser isolation failed for lease {}: {}",
+                            lease["id"], exception_chain_summary(exc.__cause__ or exc),
+                        )
                         isolation_failed = True
                 # Keep the durable lease non-approvable until isolation finishes.
                 # A failed isolation records the verdict and block atomically.
