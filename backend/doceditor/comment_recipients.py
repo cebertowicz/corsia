@@ -7,6 +7,7 @@ import sqlite3
 from core.agent_roster_queries import agent_rows
 from doceditor import writer_line
 from doceditor.comment_action_errors import CommentActionError
+from infra.accounts import get_user
 from infra.queries import get_thread_for_user
 
 
@@ -127,8 +128,27 @@ def save_tags(db, comment: dict, agent_ids: list[str]) -> None:
         )
 
 
+def _person_names(db, rows: list[dict]) -> dict[str, str]:
+    """Display names of the accounts these rows tag, one key lookup per distinct account.
+
+    The name is the one that account's own comments carry as ``author``; an account that is
+    gone has none, so its tag shows no chip.
+    """
+    names = {}
+    for user_id in {str(row["tagged_user_id"]) for row in rows if row.get("tagged_user_id")}:
+        name = (get_user(user_id, db=db) or {}).get("name")
+        if name:
+            names[user_id] = name
+    return names
+
+
 def tags_for_comments(db, rows: list[dict]) -> None:
-    """Attach tag IDs to flat comment rows without per-row queries."""
+    """Attach tag IDs to flat comment rows without per-row queries.
+
+    ``tagged_agents`` and ``tagged_person`` are what a reader sees; ``tagged_agent_ids`` names who
+    a comment is delivered to, which is never the person (their tag is the comment's own
+    ``tagged_user_id``, not a row of this table).
+    """
     if not rows:
         return
     by_id = {row["id"]: row for row in rows}
@@ -136,6 +156,11 @@ def tags_for_comments(db, rows: list[dict]) -> None:
         row["tagged_agent_ids"] = []
         row["tagged_agents"] = []
         row["tagged_agent_mentions"] = []
+        row["tagged_person"] = None
+    names = _person_names(db, rows)
+    for row in rows:
+        if row.get("tagged_user_id"):
+            row["tagged_person"] = names.get(str(row["tagged_user_id"]))
     marks = ",".join("?" for _ in by_id)
     for tag in db.execute(f"SELECT comment_id,agent_id,agent_name FROM doc_comment_tags WHERE comment_id IN ({marks}) ORDER BY agent_id", tuple(by_id)):
         row = by_id[tag["comment_id"]]

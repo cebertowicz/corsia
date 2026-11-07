@@ -15,7 +15,7 @@ from infra.queries import get_thread_for_user
 from tools.artifact_tool_helpers import default_workspace, tool_path
 from tools.base import Tool
 from tools.delegation import _require_context, _tool_schema
-from tools.documents import _resolve_doc_target
+from tools.document_comment_target import resolve_doc_target as _resolve_doc_target
 
 
 _REQUESTED = (

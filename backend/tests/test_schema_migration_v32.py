@@ -12,7 +12,7 @@ from infra.schema import SCHEMA_VERSION
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 181
+    assert SCHEMA_VERSION == 182
 
 
 def _seed_v31(path) -> None:

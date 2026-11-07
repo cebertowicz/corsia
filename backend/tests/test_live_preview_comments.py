@@ -40,13 +40,13 @@ def doc(tmp_path, monkeypatch):
 
     # Import before get_db is patched, so no module first imported here binds the stand-in for good.
     import doceditor.live_tools  # noqa: F401
-    import tools.documents  # noqa: F401
+    import tools.document_comment_target  # noqa: F401
 
     monkeypatch.setattr("infra.db_async.run_in_db", run_in_db)
     monkeypatch.setattr("infra.database.get_db", lambda: SimpleNamespace(close=lambda: None))
     monkeypatch.setattr("infra.queries.get_thread",
                         lambda thread_id, db=None: {"title": "Agent Alpha", "project_id": None, "user_id": "user-1"})
-    monkeypatch.setattr("tools.documents._resolve_comment_target", resolve_target)
+    monkeypatch.setattr("tools.document_comment_target.resolve_comment_target", resolve_target)
     monkeypatch.setattr("doceditor.live_tools.find_live_artifact", lambda aid: entry if aid == "art-1" else None)
     monkeypatch.setattr(live_preview, "FLUSH_SECONDS", 0)
     return SimpleNamespace(live=live, workspace=tmp_path, seen=seen)

@@ -251,6 +251,7 @@ Source: `backend/infra/doc_comments_schema.py`.
 | `decided_in_bulk` | INTEGER | No | No | — | — |
 | `insert_after` | INTEGER | No | Yes | 0 | — |
 | `closed_by_decision` | INTEGER | No | Yes | 0 | — |
+| `tagged_user_id` | TEXT | No | No | — | — |
 
 Indexes: `idx_doc_comments_artifact` (artifact_id, created_at), `idx_doc_comments_decision_event` (decision_event_id), `idx_doc_comments_parent` (parent_id), `idx_doc_comments_region_number` (artifact_id, expression, region_number, partial unique), `idx_doc_comments_user_created` (created_at, id), `sqlite_autoindex_doc_comments_1` (id, unique).
 

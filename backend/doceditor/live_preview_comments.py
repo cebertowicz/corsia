@@ -39,7 +39,7 @@ def resolve_comment_entry(thread_id: str, workspace: Path | None, key: str, valu
     from doceditor.live_tools import find_live_artifact
     from infra.database import get_db
     from infra.queries import get_thread
-    from tools import documents
+    from tools import document_comment_target
     from tools.artifact_tool_helpers import default_workspace, tool_path
 
     db = get_db()
@@ -49,7 +49,7 @@ def resolve_comment_entry(thread_id: str, workspace: Path | None, key: str, valu
             raise PermissionError("no owner for this thread")
         kwargs = {key: tool_path(value, default_workspace(workspace)) if key == "doc_path" else value}
         parent_id = value if key == "parent_id" else None
-        artifact_id, _path, _register = documents._resolve_comment_target(
+        artifact_id, _path, _register = document_comment_target.resolve_comment_target(
             db, thread_id, {"user_id": thread["user_id"]}, parent_id, kwargs)
     finally:
         db.close()
