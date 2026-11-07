@@ -25,26 +25,43 @@ let host: HTMLElement;
 let components: unknown[] = [];
 
 /** The transcript row and the highlight surface, mounted the way the chat mounts them. */
-function mountTranscript(quote: string) {
+function mountTranscript(quote: string, onSendReply = vi.fn()) {
 	vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
 	vi.stubGlobal('CSS', { escape: (value: string) => value });
 	host = document.createElement('div');
 	host.innerHTML = '<div class="messages"><div class="message assistant" data-message-id="m1"><div id="message"></div></div></div><div id="mount"></div>';
 	document.body.append(host);
-	const row = { id: 'm1', thread_id: 'thread', role: 'assistant', content: CONTENT, chat_comments: [comment(quote)] };
+	const row = { id: 'm1', seq: 5, thread_id: 'thread', role: 'assistant', content: CONTENT, chat_comments: [comment(quote)] };
 	messages.set([row as never]);
 	components = [
 		mount(AssistantMessage, {
 			target: host.querySelector('#message')!,
 			props: { msg: row, expandedTools: new Set<string>(), expandedReasoning: new Set<string>(), onToggleToolBlock: () => {}, onToggleReasoning: () => {} },
 		}),
-		mount(ChatCommentSelection, { target: host.querySelector('#mount')!, props: { threadId: 'thread', comments: [], onChange: vi.fn(), onSendReply: vi.fn() } }),
+		mount(ChatCommentSelection, { target: host.querySelector('#mount')!, props: { threadId: 'thread', comments: [], onChange: vi.fn(), onSendReply } }),
 	];
 	flushSync();
 	return {
 		row: () => host.querySelector<HTMLElement>('.message[data-message-id="m1"]')!,
 		body: () => host.querySelector<HTMLElement>('.message[data-message-id="m1"] .long-message-body')!,
 	};
+}
+
+/** Replying from a detached thread has to behave like replying from a highlight: the same thread, the same immediate send. */
+async function replyFromDetachedThread(onSendReply: ReturnType<typeof vi.fn>) {
+	const { row } = mountTranscript('Gone text', onSendReply);
+	await vi.waitFor(() => expect(row()?.querySelector('[data-reply-comment="one"]')).not.toBeNull());
+	row()!.querySelector<HTMLElement>('[data-reply-comment="one"]')!.click();
+	flushSync();
+	// The thread popover is portaled to document.body, like every other popover.
+	const dialog = document.body.querySelector<HTMLElement>('[role="dialog"][aria-label="Comment thread"]');
+	const field = dialog?.querySelector<HTMLTextAreaElement>('.ct-input');
+	expect(field, 'the click opens that comment\u2019s thread with its reply field').toBeTruthy();
+	field!.value = 'Because it changed';
+	field!.dispatchEvent(new Event('input', { bubbles: true }));
+	flushSync();
+	dialog!.querySelector<HTMLElement>('[data-send-reply]')!.click();
+	flushSync();
 }
 
 afterEach(() => {
@@ -65,7 +82,15 @@ it('shows a comment whose text left the message as a thread under the message, w
 	expect(row()!.querySelector('[data-reply-comment="one"]')).not.toBeNull();
 	// The chat surface names its own state: the text is here, only the highlight was lost.
 	expect(row()!.querySelector('[data-comment-uuid="one"] [data-detached]')?.textContent)
-		.toBe('Couldn’t highlight this text in the message.');
+		.toBe('The quoted text is no longer at this place in the message; the thread stays open here.');
+});
+
+it('replies from the detached thread on the same path the popover uses', async () => {
+	const onSendReply = vi.fn();
+	await replyFromDetachedThread(onSendReply);
+	expect(onSendReply).toHaveBeenCalledTimes(1);
+	const sent = onSendReply.mock.calls[0][0];
+	expect(sent).toMatchObject({ messageId: 'm1', seq: 5, quote: 'Gone text', note: 'Because it changed', root_cid: 'c1', root_user_message_id: 'user-message' });
 });
 
 it('leaves a comment whose text is still in the message on its highlight alone', async () => {

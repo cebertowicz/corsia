@@ -241,7 +241,7 @@
 	$effect(() => {
 		void $activeThreadId;
 		replyAnnouncements = [];
-		return watchChatCommentThreads(MSG_PAGE_SIZE, quote => { replyAnnouncements = [...replyAnnouncements.slice(-2), `New reply on "${quote}"`]; });
+		return watchChatCommentThreads(MSG_PAGE_SIZE, quote => { replyAnnouncements = [...replyAnnouncements.slice(-2), `New reply on “${quote}”`]; });
 	});
 	/** Drop stale rows when the selected transcript's first page fails. */
 	function failFirstPage(threadId: string): void {

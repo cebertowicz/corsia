@@ -193,14 +193,7 @@
 			attachments: [...attachments],
 		};
 		const payloadComments = comments.map(({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }) => ({ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }));
-		emitProductEvent('composer', 'sent', {
-			thread_id: threadId,
-			char_count: content.length,
-			attachment_count: attachments.length,
-			comment_count: payloadComments.length,
-			reply_count: payloadComments.filter(comment => !!comment.root_cid).length,
-			...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
-		});
+		emitComposerSent(threadId, content, attachments.length, payloadComments, deliveryIntent);
 		const inputId = sendMessage(threadId, content, modelId, attachments, undefined, deliveryIntent, payloadComments);
 		if (!inputId) {
 			toasts.show('Connection lost before CORSIA could accept this message.', 'error');
@@ -214,13 +207,35 @@
 		return 'sent';
 	}
 
+	/** One composer-sent record for both send paths, so a reply sent from a comment thread counts with the same `reply_count` as one typed in the composer. */
+	function emitComposerSent(threadId: string, content: string, attachmentCount: number, payload: { root_cid?: string }[], deliveryIntent?: DeliveryIntent): void {
+		emitProductEvent('composer', 'sent', {
+			thread_id: threadId,
+			char_count: content.length,
+			attachment_count: attachmentCount,
+			comment_count: payload.length,
+			reply_count: payload.filter(comment => !!comment.root_cid).length,
+			...(deliveryIntent === 'queue_after_turn' ? { delivery_intent: deliveryIntent } : {}),
+		});
+	}
+
+	// One sentence per known cause (COPY-STANDARD C11), each naming what happens to the typed reply and what the person does next (C9).
+	const REPLY_NO_CHAT = 'This reply has no chat to go to yet. Your reply stays here; send a message in this chat first, then reply again.';
+	const REPLY_UPDATING = 'CORSIA is restarting after an update, so it can’t answer this reply. Your reply stays here; try again once CORSIA is back.';
+	const REPLY_NO_MODEL = 'No model is ready to answer this reply. Your reply stays here; choose a model, then reply again.';
+	const REPLY_NOT_ACCEPTED = 'CORSIA couldn’t send this reply because the connection closed before it arrived. Your reply stays here; send it again.';
+
 	export function sendReply(reply: ChatComment): void {
-		if (!boundThreadId || !canSendToModel) { toasts.show('CORSIA couldn’t send this reply because no model is ready to answer it. Your reply stays here; choose a model or wait for CORSIA to finish updating, then reply again.', 'error'); throw new Error('Cannot send reply'); }
+		if (!boundThreadId) { toasts.show(REPLY_NO_CHAT, 'error'); throw new Error('Cannot send reply: no chat bound'); }
+		if ($updateRestarting) { toasts.show(REPLY_UPDATING, 'error'); throw new Error('Cannot send reply: update restarting'); }
+		if (!canSendToModel) { toasts.show(REPLY_NO_MODEL, 'error'); throw new Error('Cannot send reply: no model ready'); }
 		const { id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid } = reply;
-		const inputId = sendMessage(boundThreadId, '', selection.modelId ?? undefined, [], undefined, 'apply_now', [{ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }]);
+		const payload = [{ id, seq, from_off, to_off, quote, anchor_prefix, anchor_suffix, note, root_user_message_id, root_cid }];
+		emitComposerSent(boundThreadId, '', 0, payload);
+		const inputId = sendMessage(boundThreadId, '', selection.modelId ?? undefined, [], undefined, 'apply_now', payload);
 		if (!inputId) {
-			toasts.show('Connection lost before CORSIA could accept this message.', 'error');
-			throw new Error('Cannot send reply');
+			toasts.show(REPLY_NOT_ACCEPTED, 'error');
+			throw new Error('Cannot send reply: not accepted');
 		}
 	}
 	const activeThread = $derived(selection.thread);

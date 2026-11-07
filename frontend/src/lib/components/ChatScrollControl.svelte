@@ -4,6 +4,9 @@
 	import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import type { AttentionDestination } from '$lib/api/attentionQueue';
 	import { unreadTargets, type UnreadTarget } from './chatUnreadTargets';
+	// The same composition the comment cards use for a quote label: markdown marks out, whitespace flattened, then the shared snippet cut.
+	import { clean, snippet } from '$lib/cm/widget-cells';
+	import { plainQuote } from '$lib/plainQuote';
 
 	let { threadId, userIsNearBottom, onScrollToBottom, onJumpToReply, scroller }: {
 		threadId: string | null;
@@ -50,7 +53,7 @@
 	const visible = $derived(!!target || unloaded || (!userIsNearBottom && !!threadId));
 	// The accessible name carries the same count the button shows, so the two can never disagree (COPY-STANDARD C5).
 	const countText = $derived(`${unreadCount} new ${unreadCount === 1 ? 'reply' : 'replies'}`);
-	const label = $derived(target ? `Go to the next new reply ${direction}: '${target.quote}'. ${countText}.`
+	const label = $derived(target ? `Go to the next new reply ${direction}: “${snippet(clean(plainQuote(target.quote)))}”. ${countText}.`
 		: unloaded ? `Go to the next new reply in older messages. ${countText}.`
 			: 'Scroll to the bottom');
 </script>

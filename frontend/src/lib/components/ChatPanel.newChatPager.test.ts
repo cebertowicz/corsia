@@ -179,7 +179,7 @@ describe('ChatPanel new chat', () => {
 		component = mount(ChatPanel, { target: host, props: { onOpenLightbox: () => {} } });
 		flushSync();
 		await (component as Record<string, any>).selectThread('thread-b');
-		const loadedLabel = `Go to the next new reply above: 'newer'. 2 new replies.`;
+		const loadedLabel = `Go to the next new reply above: “newer”. 2 new replies.`;
 		const olderLabel = 'Go to the next new reply in older messages. 1 new reply.';
 		await vi.waitFor(() => expect(host.innerHTML).toContain(loadedLabel));
 		host.querySelector<HTMLButtonElement>(`button[aria-label="${loadedLabel}"]`)!.click();

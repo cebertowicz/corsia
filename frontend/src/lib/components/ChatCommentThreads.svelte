@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { token } from '$lib/stores/auth';
-	import { failedChatReplies, pendingChatReplies } from '$lib/chatCommentDelivery';
+	import { chatReplyIndex } from '$lib/chatCommentDelivery';
 	import { requestDeliveryAction } from '$lib/deliveryActions';
 	import { isNavAgent, messages, threads, type ChatComment } from '$lib/stores/threads';
 	import { refreshChatReplyAttention } from '$lib/stores/chatReplyAttention';
@@ -12,6 +12,8 @@
 	import './comments/comment-link.css';
 
 	let { messageId, threadId, comments, onReply, keepReplyVisible = false, detached = false }: { messageId: string; threadId: string; comments: ChatComment[]; onReply?: (text: string) => void; keepReplyVisible?: boolean; detached?: boolean } = $props();
+	// Built once per change of the loaded rows, then read per comment: the pending and failed sends of this thread.
+	const replies = $derived(chatReplyIndex($messages, threadId));
 	const agentName = $derived.by(() => {
 		const current = $threads.find(item => item.id === threadId);
 		return current && isNavAgent(current) ? current.title : 'CORSIA';
@@ -24,7 +26,7 @@
 		return {
 			id: comment.cid, anchor: comment.quote, author: 'user', authorKind: 'user', text: comment.note,
 			at: formatTime(comment.created_at), createdAt: comment.created_at, resolved: false, orphaned: detached, detached,
-			replies: comment.answers.filter(answer => answer.author_kind !== 'user' || !failedChatReplies($messages, threadId, comment).some(failed => failed.id === answer.user_message_id)).map(answer => ({ id: answerId(answer), author: answer.author_kind === 'agent' ? agentName : 'user',
+			replies: comment.answers.filter(answer => answer.author_kind !== 'user' || !replies.failed(comment).some(failed => failed.id === answer.user_message_id)).map(answer => ({ id: answerId(answer), author: answer.author_kind === 'agent' ? agentName : 'user',
 				authorThreadId: answer.author_kind === 'agent' ? threadId : undefined, authorKind: answer.author_kind, text: answer.text, at: formatTime(answer.created_at), createdAt: answer.created_at })),
 			newReplyIds: comment.answers.filter(answer => answer.author_kind === 'agent' && answer.unread).map(answerId),
 		};
@@ -50,9 +52,9 @@
 		{#each comments as comment (`${comment.user_message_id}:${comment.cid}`)}
 			<div class="chat-comment-thread" data-chat-comment={comment.cid} data-comment-uuid={comment.id} tabindex="-1">
 				{#if !detached}<CommentQuote quote={comment.quote} />{/if}
-				<CommentThread comment={thread(comment)} readOnly={!onReply} flat hideOrphan={!detached} detachedNote="Couldn’t highlight this text in the message." {keepReplyVisible} viewEachUnread onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { onReply?.(text); for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); }}>
+				<CommentThread comment={thread(comment)} readOnly={!onReply} flat hideOrphan={!detached} detachedNote="The quoted text is no longer at this place in the message; the thread stays open here." {keepReplyVisible} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { onReply?.(text); for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); }}>
 				{#snippet failure()}
-				{#each pendingChatReplies($messages, threadId, comment) as pending (pending.id)}
+				{#each replies.pending(comment) as pending (pending.id)}
 					<div class="pending-reply" role="status">
 						{#each pending.metadata.reply_context.comments.filter((reply: { root_user_message_id?: string; root_cid?: string }) => reply.root_user_message_id === comment.user_message_id && reply.root_cid === comment.cid) as reply}
 							<CommentReplyList replies={[{ id: pending.id, author: 'user', authorKind: 'user', text: reply.note, at: formatTime(pending.created_at) }]} />
@@ -60,7 +62,7 @@
 						<span>Sending…</span>
 					</div>
 				{/each}
-				{#each failedChatReplies($messages, threadId, comment) as failed (failed.id)}
+				{#each replies.failed(comment) as failed (failed.id)}
 					<div class="failed-reply" role="status">
 						{#each failed.metadata.reply_context.comments.filter((reply: { root_user_message_id?: string; root_cid?: string }) => reply.root_user_message_id === comment.user_message_id && reply.root_cid === comment.cid) as reply}
 							<CommentReplyList replies={[{ id: failed.id, author: 'user', authorKind: 'user', text: reply.note, at: formatTime(failed.created_at) }]} />

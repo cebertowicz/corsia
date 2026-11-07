@@ -46,7 +46,7 @@ describe('CommentThread', () => {
 	it('keeps a draft typed while the previous reply was still sending', async () => {
 		let finish!: () => void;
 		const onReply = vi.fn(() => new Promise<void>((resolve) => { finish = resolve; }));
-		render(thread(), false, { onReply, viewEachUnread: true });
+		render(thread(), false, { onReply, chatSurface: true });
 		const input = host.querySelector<HTMLInputElement>('.ct-input')!;
 		type(input, 'first');
 		button('.ct-send').click();
@@ -156,7 +156,7 @@ describe('CommentThread', () => {
 	it('stamps an unread reply only after it is observed in the viewport', async () => {
 		visibleObserver();
 		const onViewed = vi.fn().mockResolvedValue(undefined);
-		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed, viewEachUnread: true });
+		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed, chatSurface: true });
 		await vi.waitFor(() => expect(onViewed).toHaveBeenCalledWith('c1', 'r1'), { timeout: 3000 });
 		vi.unstubAllGlobals();
 	});
@@ -165,7 +165,7 @@ describe('CommentThread', () => {
 		visibleObserver();
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 		const onViewed = vi.fn().mockRejectedValue(new Error('offline'));
-		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed, viewEachUnread: true });
+		render(thread({ newReplyIds: ['r1'], replies: [{ ...reply, id: 'r1', createdAt: '2026-10-16T18:00:00Z' }] }), false, { onViewed, chatSurface: true });
 		await vi.waitFor(() => expect(warn).toHaveBeenCalled(), { timeout: 3000 });
 		flushSync(); await Promise.resolve(); flushSync();
 		expect(onViewed).toHaveBeenCalledTimes(1);

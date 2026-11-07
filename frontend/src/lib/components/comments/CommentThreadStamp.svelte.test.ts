@@ -39,10 +39,10 @@ const surface = $state({ active: true });
 function setVisibility(value: 'visible' | 'hidden') {
 	Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => value });
 }
-function render(onViewed: (id: string, replyId: string) => Promise<void>, viewEachUnread = true) {
+function render(onViewed: (id: string, replyId: string) => Promise<void>, chatSurface = true) {
 	vi.stubGlobal('IntersectionObserver', FakeObserver);
 	host = document.createElement('div'); document.body.appendChild(host);
-	component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, get onViewed() { return surface.active ? onViewed : undefined; }, viewEachUnread } });
+	component = mount(CommentThread, { target: host, props: { get comment() { return state.comment; }, get onViewed() { return surface.active ? onViewed : undefined; }, chatSurface } });
 	flushSync();
 }
 function arrive(comment: Partial<CommentThreadData>) {

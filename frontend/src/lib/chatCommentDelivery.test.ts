@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatComment, Message } from '$lib/stores/threads';
-import { commentsAlreadyPlaced, failedChatReplies, pendingChatReplies } from './chatCommentDelivery';
+import { chatReplyIndex, commentsAlreadyPlaced } from './chatCommentDelivery';
 
 const root = { id: 'root', user_message_id: 'author', cid: 'c1' } as ChatComment;
 const row = (id: string, state: string, sender = 'author', cid = 'c1', thread = 'thread') => ({
@@ -11,15 +11,15 @@ const row = (id: string, state: string, sender = 'author', cid = 'c1', thread = 
 describe('failed comment replies', () => {
 	it('matches the failed send to its original comment and thread', () => {
 		const rows = [row('failed', 'failed'), row('delivered', 'delivered'), row('other-author', 'failed', 'other'), row('other-comment', 'failed', 'author', 'c2'), row('other-thread', 'failed', 'author', 'c1', 'elsewhere')];
-		expect(failedChatReplies(rows, 'thread', root).map(message => message.id)).toEqual(['failed']);
+		expect(chatReplyIndex(rows, 'thread').failed(root).map(message => message.id)).toEqual(['failed']);
 	});
 
 	it('clears a failure only after its retry is delivered', () => {
 		const failed = row('failed', 'failed');
 		const retry = { ...row('retry', 'delivered'), metadata: { ...row('retry', 'delivered').metadata, retried_from_message_id: 'failed' } } as Message;
-		expect(failedChatReplies([failed, retry], 'thread', root)).toEqual([]);
+		expect(chatReplyIndex([failed, retry], 'thread').failed(root)).toEqual([]);
 		const failedRetry = { ...retry, delivery_state: 'failed' } as Message;
-		expect(failedChatReplies([failed, failedRetry], 'thread', root)).toEqual([failedRetry]);
+		expect(chatReplyIndex([failed, failedRetry], 'thread').failed(root)).toEqual([failedRetry]);
 	});
 });
 
@@ -28,8 +28,8 @@ describe('pending comment replies', () => {
 		const optimistic = { ...row('optimistic', 'queued'), delivery_state: undefined, _optimistic: true } as Message;
 		const queued = row('queued', 'queued');
 		const rows = [optimistic, queued, row('delivered', 'delivered'), row('failed', 'failed'), row('other', 'queued', 'other')];
-		expect(pendingChatReplies(rows, 'thread', root).map(message => message.id)).toEqual(['optimistic', 'queued']);
-		expect(pendingChatReplies(rows, 'elsewhere', root)).toEqual([]);
+		expect(chatReplyIndex(rows, 'thread').pending(root).map(message => message.id)).toEqual(['optimistic', 'queued']);
+		expect(chatReplyIndex(rows, 'elsewhere').pending(root)).toEqual([]);
 	});
 
 	it('suppresses only the pending send already projected as a user answer', () => {
@@ -38,8 +38,8 @@ describe('pending comment replies', () => {
 		pending.metadata.reply_context.comments[0].note = 'same text';
 		other.metadata.reply_context.comments[0].note = 'same text';
 		const projected = { ...root, answers: [{ author_kind: 'user', user_message_id: 'send', cid: 'reply-cid', text: 'same text' }] } as ChatComment;
-		expect(pendingChatReplies([pending, other], 'thread', projected).map(message => message.id)).toEqual(['other-send']);
-		expect(pendingChatReplies([pending], 'thread', { ...projected, answers: [{ author_kind: 'agent', user_message_id: 'send', cid: 'reply-cid', text: 'same text' }] } as ChatComment)).toEqual([pending]);
+		expect(chatReplyIndex([pending, other], 'thread').pending(projected).map(message => message.id)).toEqual(['other-send']);
+		expect(chatReplyIndex([pending], 'thread').pending({ ...projected, answers: [{ author_kind: 'agent', user_message_id: 'send', cid: 'reply-cid', text: 'same text' }] } as ChatComment)).toEqual([pending]);
 	});
 });
 

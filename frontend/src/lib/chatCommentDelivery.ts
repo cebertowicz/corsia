@@ -26,21 +26,57 @@ export function commentsAlreadyPlaced(row: Message, rows: Message[], visibleTarg
 					|| root.answers.some(answer => answer.author_kind === 'user' && answer.user_message_id === candidate.id && answer.cid === copy.cid))))));
 }
 
-/** Find sends still awaiting delivery to this thread of a placed chat comment. */
-export function pendingChatReplies(rows: Message[], threadId: string, comment: ChatComment): Message[] {
-	return rows.filter(row => row.thread_id === threadId && row.role === 'user'
-		&& !comment.answers?.some(answer => answer.author_kind === 'user' && answer.user_message_id === row.id)
-		&& (row._optimistic || row.delivery_state === 'queued')
-		&& Array.isArray(row.metadata?.reply_context?.comments)
-		&& row.metadata.reply_context.comments.some((reply: { root_user_message_id?: string; root_cid?: string }) =>
-			reply.root_user_message_id === comment.user_message_id && reply.root_cid === comment.cid));
-}
+/** The comment a reply send answers, as one key: its root message and comment id. */
+const replyKey = (userMessageId?: string, cid?: string) => (userMessageId && cid ? `${userMessageId}:${cid}` : '');
 
-/** Find failed sends addressed to this thread of a placed chat comment. */
-export function failedChatReplies(rows: Message[], threadId: string, comment: ChatComment): Message[] {
-	return rows.filter(row => row.thread_id === threadId && row.role === 'user' && row.delivery_state === 'failed'
-		&& !rows.some(successor => successor.thread_id === threadId && successor.metadata?.retried_from_message_id === row.id && (successor.delivery_state === 'delivered' || successor.delivery_state === 'failed'))
-		&& Array.isArray(row.metadata?.reply_context?.comments)
-		&& row.metadata.reply_context.comments.some((reply: { root_user_message_id?: string; root_cid?: string }) =>
-			reply.root_user_message_id === comment.user_message_id && reply.root_cid === comment.cid));
+const addTo = (index: Map<string, Message[]>, key: string, seen: Set<string>, row: Message) => {
+	if (seen.has(`${key}|${row.id}`)) return;
+	seen.add(`${key}|${row.id}`);
+	const list = index.get(key);
+	if (list) list.push(row); else index.set(key, [row]);
+};
+
+export type ChatReplyIndex = {
+	/** Sends still awaiting delivery to this thread of this comment. */
+	pending(comment: ChatComment): Message[];
+	/** Failed sends addressed to this thread of this comment, with no later send already replacing them. */
+	failed(comment: ChatComment): Message[];
+};
+
+/**
+ * Every reply send in one thread, keyed by the comment it answers, from a single pass over the loaded rows.
+ * Each comment's pending and failed lists used to scan all rows again, which made a transcript render
+ * quadratic in its own length; one pass per `$messages` change answers all of them.
+ */
+export function chatReplyIndex(rows: Message[], threadId: string): ChatReplyIndex {
+	// A failed send is hidden once a retry of it reaches the server, whether that retry landed or failed in turn.
+	const superseded = new Set<string>();
+	for (const row of rows) {
+		if (row.thread_id !== threadId || !row.metadata?.retried_from_message_id) continue;
+		if (row.delivery_state === 'delivered' || row.delivery_state === 'failed') superseded.add(row.metadata.retried_from_message_id);
+	}
+	const pendingByKey = new Map<string, Message[]>();
+	const failedByKey = new Map<string, Message[]>();
+	const pendingSeen = new Set<string>();
+	const failedSeen = new Set<string>();
+	for (const row of rows) {
+		if (row.thread_id !== threadId || row.role !== 'user') continue;
+		const targets = row.metadata?.reply_context?.comments;
+		if (!Array.isArray(targets)) continue;
+		const sending = row._optimistic || row.delivery_state === 'queued';
+		const broken = row.delivery_state === 'failed' && !superseded.has(row.id);
+		if (!sending && !broken) continue;
+		for (const reply of targets) {
+			const key = replyKey(reply.root_user_message_id, reply.root_cid);
+			if (!key) continue;
+			if (sending) addTo(pendingByKey, key, pendingSeen, row);
+			if (broken) addTo(failedByKey, key, failedSeen, row);
+		}
+	}
+	const of = (index: Map<string, Message[]>) => (comment: ChatComment) => index.get(replyKey(comment.user_message_id, comment.cid)) ?? [];
+	// A comment's own send drops out once its text is recorded on that comment as a user answer; that check reads the comment's answers, not the transcript.
+	return {
+		pending: comment => of(pendingByKey)(comment).filter(row => !comment.answers?.some(answer => answer.author_kind === 'user' && answer.user_message_id === row.id)),
+		failed: of(failedByKey),
+	};
 }

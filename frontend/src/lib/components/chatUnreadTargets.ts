@@ -1,6 +1,6 @@
 import type { ChatComment, Message } from '$lib/stores/threads';
 import type { AttentionDestination } from '$lib/api/attentionQueue';
-import { pendingChatReplies } from '$lib/chatCommentDelivery';
+import { chatReplyIndex } from '$lib/chatCommentDelivery';
 
 export type UnreadTarget = { quote: string; distance: number; destination: AttentionDestination };
 
@@ -25,12 +25,14 @@ export function unreadTargets(root: HTMLElement, messages: Message[], threadId: 
 	let above: UnreadTarget | null = null;
 	let below: UnreadTarget | null = null;
 	let count = 0;
+	// One pass over the thread's sends for every comment, instead of a scan of all rows per comment.
+	const replies = threadId ? chatReplyIndex(messages, threadId) : null;
 	for (const message of messages) {
-		if (message.thread_id !== threadId) continue;
+		if (message.thread_id !== threadId || !message.chat_comments?.length || !replies) continue;
 		const row = root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(message.id)}"]`);
-		for (const comment of message.chat_comments ?? []) {
+		for (const comment of message.chat_comments) {
 			const unreadCount = comment.answers.filter(answer => answer.author_kind === 'agent' && answer.unread).length;
-			if (!threadId || !unreadCount || pendingChatReplies(messages, threadId, comment).length) continue;
+			if (!threadId || !unreadCount || replies.pending(comment).length) continue;
 			count += unreadCount;
 			// A jump needs the message's place in history, so a row that cannot carry one is counted but not selected.
 			if (!row || !comment.cid || typeof message.seq !== 'number') continue;

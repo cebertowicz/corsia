@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount, tick } from 'svelte';
 	import { messages } from '$lib/stores/threads';
-	import { failedChatReplies, pendingChatReplies } from '$lib/chatCommentDelivery';
+	import { chatReplyIndex } from '$lib/chatCommentDelivery';
 	import { clipChatSelection, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { toasts } from '$lib/stores/toast';
@@ -62,11 +62,6 @@
 	}
 	function requestClose() { if (!closing) { afterClose = close; closing = true; } }
 	function closed() { const finish = afterClose; afterClose = null; finish?.(); closing = false; }
-	function beginReply(message: (typeof $messages)[number], comment: NonNullable<(typeof $messages)[number]['chat_comments']>[number], target: HTMLElement) {
-		if (typeof message.seq !== 'number') return;
-		returnFocus = target;
-		draft = { messageId: message.id, seq: message.seq, anchor: { from_off: comment.from_off, to_off: comment.to_off, quote: comment.quote, anchor_prefix: comment.anchor_prefix, anchor_suffix: comment.anchor_suffix }, rect: target.getBoundingClientRect(), root_user_message_id: comment.user_message_id, root_cid: comment.cid };
-	}
 	function readSelection() {
 		if (open) return;
 		const selection = document.getSelection();
@@ -116,6 +111,8 @@
 	function paint() {
 		const root = messageRoot();
 		if (!root) return;
+		// One pass over the loaded sends for the whole pass, read per comment below.
+		const replies = threadId ? chatReplyIndex($messages, threadId) : null;
 		const focusedMark = document.activeElement instanceof HTMLElement && root.contains(document.activeElement)
 			? document.activeElement.closest<HTMLElement>('[data-comment-ids][role="button"]') : null;
 		const focusedId = focusedMark?.dataset.commentIds?.split(',')[0];
@@ -141,7 +138,7 @@
 			const target = byId.get(row.dataset.messageId ?? '');
 			const sent = target?.chat_comments ?? [];
 			const pending = comments.filter(comment => comment.messageId === row.dataset.messageId);
-			const marks = [...sent.map(comment => ({ ...comment, kind: threadId && pendingChatReplies($messages, threadId, comment).length ? 'pending' as const : 'placed' as const })), ...pending.map(comment => ({ ...comment, kind: editingId === comment.id ? 'focused' as const : 'pending' as const }))];
+			const marks = [...sent.map(comment => ({ ...comment, kind: replies?.pending(comment).length ? 'pending' as const : 'placed' as const })), ...pending.map(comment => ({ ...comment, kind: editingId === comment.id ? 'focused' as const : 'pending' as const }))];
 			if (draft && draft.messageId === row.dataset.messageId) marks.push({ ...draft.anchor, id: 'draft', kind: 'pending' } as typeof marks[number]);
 			const valid = marks.filter(comment => (body.textContent ?? '').slice(comment.from_off, comment.to_off) === comment.quote);
 			recordUnplaced(row.dataset.messageId, sent, valid);
@@ -179,8 +176,8 @@
 				}
 			}
 			for (const comment of sent) {
-				const failed = threadId !== null && failedChatReplies($messages, threadId, comment).length > 0;
-				const sending = threadId !== null && pendingChatReplies($messages, threadId, comment).length > 0;
+				const failed = !!replies?.failed(comment).length;
+				const sending = !!replies?.pending(comment).length;
 				const unread = comment.answers.some(answer => answer.author_kind === 'agent' && answer.unread);
 				if (!failed && !sending && !unread) continue;
 				const wraps = [...body.querySelectorAll<HTMLElement>('[data-comment-ids]')].filter(el => el.dataset.commentIds?.split(',').includes(comment.id));
@@ -216,7 +213,8 @@
 			const message = $messages.find(item => item.id === messageId && item.thread_id === threadId);
 			const comment = message?.chat_comments?.find(item => item.id === commentId);
 			if (open || sourceThread !== threadId || !messageRoot()?.contains(target)) return;
-			if (message && comment) beginReply(message, comment, target);
+			// One reply behavior: a thread's Reply opens that comment's thread, whose send goes straight through onSendReply, the same as the popover and the drawer. It never routes through the composer.
+			if (message && comment) { returnFocus = target; viewing = { messageId: message.id, commentId: comment.id }; }
 		};
 		const openHighlight = (ids: string[], source: HTMLElement) => {
 			const pending = comments.find(comment => ids.includes(comment.id));

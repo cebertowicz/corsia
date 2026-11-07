@@ -80,6 +80,8 @@
 
 	const uid = $props.id();
 	const boundThreadId = $derived(threadId ?? null);
+	// Each rendered row asks for its loaded row by id; scanning the whole transcript per row made a render quadratic in its own length.
+	const loadedRowsById = $derived(new Map($messages.filter(row => row.thread_id === boundThreadId).map(row => [row.id, row] as const)));
 	const boundTurn = $derived(boundThreadId ? $turnStates.get(boundThreadId) ?? INITIAL_TURN_STATE : null);
 	const pausePresentation = $derived(attachPlanLimitPauses(entries, pauses, boundThreadId && boundTurn
 		? { threadId: boundThreadId, phase: boundTurn.phase, turnId: boundTurn.turnId } : undefined));
@@ -204,7 +206,7 @@
 {#snippet messageRow(entry: Extract<TranscriptEntry, { kind: 'message' }>)}
 	{@const msg = entry.message}
 	{@const isAgentInbound = msg.role === 'user' && msg.metadata?.sender_kind === 'agent'}
-	{@const original = $messages.find(row => row.id === msg.id && row.thread_id === boundThreadId)}
+	{@const original = loadedRowsById.get(msg.id)}
 	{#if !original || !commentsAlreadyPlaced(original, $messages, visibleSources)}
 	<div class="message {msg.role}" data-message-id={msg.id} data-message-seq={msg.seq} data-message-thread-id={boundThreadId} data-first-run-opening={msg.metadata?.first_run_opening === true ? '' : undefined} use:trackVisibleRow={{ seq: msg.seq, threadId: boundThreadId }} class:agent-inbound={isAgentInbound} class:human-user={msg.role === 'user' && !isAgentInbound}>
 		{#if msg.role === 'system'}

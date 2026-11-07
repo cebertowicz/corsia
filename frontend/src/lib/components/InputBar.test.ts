@@ -1387,16 +1387,20 @@ describe('InputBar model readiness at the action seam', () => {
 
 describe('a comment reply the composer cannot send', () => {
 	const reply = { id: 'reply', messageId: 'message-1', seq: 3, from_off: 0, to_off: 4, quote: 'text', anchor_prefix: '', anchor_suffix: '', note: 'draft reply', root_user_message_id: 'user-1', root_cid: 'c1' };
-	const sentence = 'CORSIA couldn’t send this reply because no model is ready to answer it. Your reply stays here; choose a model or wait for CORSIA to finish updating, then reply again.';
+	// One sentence per known cause (COPY-STANDARD C11), each saying the typed reply is kept and what to do (C9).
+	const noChat = 'This reply has no chat to go to yet. Your reply stays here; send a message in this chat first, then reply again.';
+	const noModel = 'No model is ready to answer this reply. Your reply stays here; choose a model, then reply again.';
+	const restarting = 'CORSIA is restarting after an update, so it can’t answer this reply. Your reply stays here; try again once CORSIA is back.';
+	const notAccepted = 'CORSIA couldn’t send this reply because the connection closed before it arrived. Your reply stays here; send it again.';
 
 	// The thread keeps the draft when the send is refused, so the person needs the cause on screen and not only in the console.
-	it('says no model can answer it when the chat is not bound', () => {
+	it('says the reply has no chat yet when the chat is not bound', () => {
 		activeThreadId.set(null);
 		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
 		component = composer;
 		flushSync();
 		expect(() => composer.sendReply(reply)).toThrow('Cannot send reply');
-		expect(get(toasts).map(toast => toast.message)).toContain(sentence);
+		expect(get(toasts).map(toast => toast.message)).toContain(noChat);
 		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
 	});
 
@@ -1413,8 +1417,45 @@ describe('a comment reply the composer cannot send', () => {
 		component = composer;
 		flushSync();
 		expect(() => composer.sendReply(reply)).toThrow('Cannot send reply');
-		expect(get(toasts).map(toast => toast.message)).toContain(sentence);
+		expect(get(toasts).map(toast => toast.message)).toContain(noModel);
 		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+	});
+
+	it('says CORSIA is restarting while an update restart is in flight', () => {
+		updateStatus.set({
+			branch: 'dev', current_sha: 'a', remote_sha: 'b', commits_behind: 1,
+			available: true, checked_at: 1, error: null,
+			operation: { operation_id: 'update-1', kind: 'update', status: 'in_flight', phase: 'restarting' },
+		});
+		threads.set([{
+			id: 'thread-1', user_id: 'user-1', profile: 'default', title: 'Ready thread', model: 'model-1',
+			created_at: '2026-07-21T08:00:00Z', updated_at: '2026-07-21T08:00:01Z',
+			pending_model: null, switch_status: null, switch_operation_id: null, switch_error: null,
+		}]);
+		activeThreadId.set('thread-1');
+		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
+		component = composer;
+		flushSync();
+		expect(() => composer.sendReply(reply)).toThrow('Cannot send reply');
+		expect(get(toasts).map(toast => toast.message)).toContain(restarting);
+		expect(wsMocks.sendMessage).not.toHaveBeenCalled();
+	});
+
+	it('says the reply was not accepted when the send returns nothing', () => {
+		threads.set([{
+			id: 'thread-1', user_id: 'user-1', profile: 'default', title: 'Ready thread', model: 'model-1',
+			created_at: '2026-07-21T08:00:00Z', updated_at: '2026-07-21T08:00:01Z',
+			pending_model: null, switch_status: null, switch_operation_id: null, switch_error: null,
+		}]);
+		activeThreadId.set('thread-1');
+		wsMocks.sendMessage.mockReturnValue(undefined);
+		const composer = mount(InputBar, { target: host, props: { onSend: vi.fn() } }) as Record<string, any>;
+		component = composer;
+		flushSync();
+		expect(() => composer.sendReply(reply)).toThrow('Cannot send reply');
+		expect(get(toasts).map(toast => toast.message)).toContain(notAccepted);
+		// A reply sent from a thread is recorded like one sent from the composer, so reply_count still counts it.
+		expect(productEventMock).toHaveBeenCalledWith('composer', 'sent', expect.objectContaining({ thread_id: 'thread-1', comment_count: 1, reply_count: 1 }));
 	});
 });
 
