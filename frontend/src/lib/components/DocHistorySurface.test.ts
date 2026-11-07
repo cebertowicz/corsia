@@ -57,6 +57,15 @@ afterEach(() => {
 });
 
 describe('document history', () => {
+	it('explains why restore is unavailable for a read-only file and does not request it', async () => {
+		const applyRestore = vi.fn();
+		render({ within: wide(), readOnly: true, applyRestore }); await flush(); await open(2);
+		const restore = buttons('Restore')[0];
+		expect(restore.getAttribute('aria-disabled')).toBe('true');
+		expect(restore.getAttribute('aria-label')).toBe('Restore: this file is read-only');
+		await press();
+		expect(applyRestore).not.toHaveBeenCalled();
+	});
 	it('loads newest first, shows author, time, reason and the current mark', async () => {
 		render(); await flush();
 		expect(rows()).toHaveLength(4);

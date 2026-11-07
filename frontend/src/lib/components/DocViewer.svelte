@@ -80,6 +80,7 @@
 	let loadedArtifactId = $state<string | null>(null);
 	let readonly = $state(false);
 	let confirming = $state(false);
+	let serverReadOnly = $state(false); // Only the loaded content's own answer: not unsaved text awaiting its write check, and not an open refusal.
 	let freshness = $state<DocumentFreshness | null>(null);
 	const focusedComment = $derived($focusedDocComment);
 
@@ -96,7 +97,7 @@
 	bindViewerSession(() => liveSession, (state) => {
 		if (!state) { liveConnection = null; return; }
 		editText = state.text.toString();
-		readonly = !state.writable;
+		readonly = !state.writable; serverReadOnly = !state.writable;
 		liveConnection = state.connection;
 		liveGeneration = state.textGeneration;
 	});
@@ -197,7 +198,7 @@
 	function applyViewerContent(d: DocViewerTarget, content: ViewerContent, seq: number): void {
 		applyDocumentContent(d, content, seq, { loadSeq: () => loadSeq, shown: () => docState === 'ready', signal: onSignal,
 			feedback: () => feedbackStatus, apply: (value, awaiting) => {
-				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; confirming = false; history.setAvailable(value.history === true);
+				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; serverReadOnly = !value.writable; confirming = false; history.setAvailable(value.history === true);
 				freshness = value.freshness; docState = 'ready'; legacyAwaitingSave = awaiting;
 			},
 		});
@@ -234,8 +235,8 @@
 			replyNavigation.reset();
 			commentUI.close();
 			focusedDocComment.set(null); discardCommentDraft(commentDraftScope(prevTarget));
-			// These fields describe the mounted target, not its predecessor.
-			loadedArtifactId = withDraftArtifactId(d).artifactId;
+			// These fields describe the mounted target, not its predecessor; a reload of the same file keeps the server's known answer.
+			const nextId = withDraftArtifactId(d).artifactId; if (nextId !== loadedArtifactId) serverReadOnly = false; loadedArtifactId = nextId;
 			const opened = openFromDraft(existingDraft(d), loadedArtifactId);
 			readonly = opened.unsaved;
 			confirming = opened.confirming;
@@ -351,7 +352,7 @@
 		commentsAsSheet={isPaneDrawer()}
 		onStartComment={draftController.start}
 	/>
-	{#if history.open && history.available && target}<DocHistorySurface {target} applyRestore={history.restore} onRestored={async () => { (await onPrepareCleanReload())?.(); }} bind:restoring={() => history.restoring, history.setRestoring} narrow={isPaneDrawer()} within={docRoot?.closest<HTMLElement>('.leaf-body') ?? docRoot} {covered} onClose={history.close} />{/if}
+	{#if history.open && history.available && target}<DocHistorySurface {target} readOnly={serverReadOnly} applyRestore={history.restore} onRestored={async () => { (await onPrepareCleanReload())?.(); }} bind:restoring={() => history.restoring, history.setRestoring} narrow={isPaneDrawer()} within={docRoot?.closest<HTMLElement>('.leaf-body') ?? docRoot} {covered} onClose={history.close} />{/if}
 	<DocCommentSurface
 		reviewBar={reviewControls}
 		reviewVisible={commentUI.sheetUp}
