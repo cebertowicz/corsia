@@ -55,6 +55,50 @@ def test_workspace_git_snapshot_off_registered_worktree_unchanged(isolated_db, m
     assert json.loads(confined[confined.index('--settings') + 1])['includeGitInstructions'] is False
 
 
+def test_linked_workspace_worktree_suppresses_snapshot(monkeypatch, tmp_path):
+    from subagents.managed_launch import workspace_git_snapshot_disabled
+
+    workspace = tmp_path / 'workspace'
+    workspace.mkdir()
+    subprocess.run(['git', 'init', '-q', str(workspace)], check=True)
+    subprocess.run(['git', '-C', str(workspace), '-c', 'user.name=Test',
+                    '-c', 'user.email=test@example.invalid', 'commit', '-q',
+                    '--allow-empty', '-m', 'initial'], check=True)
+    worktree = workspace / 'linked'
+    subprocess.run(['git', '-C', str(workspace), 'worktree', 'add', '-q',
+                    '-b', 'linked', str(worktree)], check=True)
+    monkeypatch.setattr(config, 'WORKSPACE', workspace)
+    assert workspace_git_snapshot_disabled(str(worktree)) is True
+
+
+def test_nested_separate_git_repository_keeps_snapshot(monkeypatch, tmp_path):
+    from subagents.managed_launch import workspace_git_snapshot_disabled
+
+    subprocess.run(['git', 'init', '-q', str(tmp_path)], check=True)
+    nested = tmp_path / 'separate'
+    nested.mkdir()
+    subprocess.run(['git', 'init', '-q', str(nested)], check=True)
+    monkeypatch.setattr(config, 'WORKSPACE', tmp_path)
+    assert workspace_git_snapshot_disabled(str(nested)) is False
+
+
+def test_git_timeout_suppresses_snapshot_with_warning(monkeypatch, tmp_path, caplog):
+    import logging
+    from subagents.managed_launch import workspace_git_snapshot_disabled
+
+    monkeypatch.setattr(config, 'WORKSPACE', tmp_path)
+    (tmp_path / '.git').mkdir()
+
+    def timeout(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired('git', 5)
+
+    monkeypatch.setattr(subprocess, 'run', timeout)
+    with caplog.at_level(logging.WARNING, logger='subagents.managed_launch'):
+        assert workspace_git_snapshot_disabled(str(tmp_path)) is True
+    assert 'TimeoutExpired' in caplog.text
+    assert 'snapshot' in caplog.text.lower() and 'suppressed' in caplog.text.lower()
+
+
 def test_session_prepares_setting_once_off_event_loop(monkeypatch):
     import threading
     from subagents import managed_launch

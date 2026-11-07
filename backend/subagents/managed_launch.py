@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 import subprocess
 
+
+logger = logging.getLogger(__name__)
 
 _CODEX_PROJECT_DOC_CONTROL = "project_doc_max_bytes=0"
 _CODEX_NATIVE_SKILL_CONTROLS = (
@@ -174,18 +177,20 @@ def workspace_git_snapshot_disabled(working_dir: str | None) -> bool:
         return False
     if not (workspace / ".git").exists():
         return False
-    # An invalid nested .git marker does not stop Git from finding the workspace.
-    # Ask Git which repository it actually discovers; on failure suppress the
-    # snapshot, since an unverified marker cannot prove a separate repository.
+    # Resolve the shared Git directory so linked workspace worktrees match too.
     from infra.backend_git import git_argv
 
-    try:
+    def common_dir(directory: Path) -> Path:
         result = subprocess.run(
-            git_argv("rev-parse", "--show-toplevel"), cwd=cwd,
+            git_argv("rev-parse", "--git-common-dir"), cwd=directory,
             capture_output=True, text=True, timeout=5, check=True,
         )
-        return Path(result.stdout.strip()).resolve() == workspace
-    except (OSError, subprocess.SubprocessError):
+        return (directory / result.stdout.strip()).resolve()
+
+    try:
+        return common_dir(cwd) == common_dir(workspace)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("Git discovery failed (%s); snapshot suppressed", type(exc).__name__)
         return True
 
 
