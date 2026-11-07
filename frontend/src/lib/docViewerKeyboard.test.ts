@@ -15,12 +15,32 @@ function setup(overrides: Partial<DocumentKeyState> = {}) {
 		close: vi.fn(),
 		...overrides,
 	};
-	return { state, commentUI };
+	return { state, commentUI: state.commentUI };
 }
 
 describe('handleDocumentKey Escape', () => {
 	it('closes the phone comments sheet and leaves the document open when focus is outside the sheet', () => {
 		const { state, commentUI } = setup();
+		const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+		document.body.dispatchEvent(event);
+
+		handleDocumentKey(event, state);
+
+		expect(commentUI.close).toHaveBeenCalledOnce();
+		expect(commentUI.restoreFocus).toHaveBeenCalledOnce();
+		expect(state.close).not.toHaveBeenCalled();
+	});
+
+	it('closes a phone thread sheet before the document when focus is outside the sheet', () => {
+		const { state, commentUI } = setup({
+			commentUI: {
+				state: { kind: 'thread' },
+				anchor: null,
+				sheetUp: true,
+				close: vi.fn(),
+				restoreFocus: vi.fn(),
+			},
+		});
 		const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
 		document.body.dispatchEvent(event);
 

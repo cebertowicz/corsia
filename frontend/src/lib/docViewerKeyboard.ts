@@ -38,7 +38,10 @@ export function handleDocumentKey(event: KeyboardEvent, state: DocumentKeyState)
 	if (event.defaultPrevented || state.covered) return;
 	const { commentUI, draftController } = state;
 	// A raised phone sheet is the topmost layer even when focus has left it, so Escape closes it before the document.
-	if (event.key === 'Escape' && commentUI.state?.kind === 'list' && (commentUI.sheetUp || event.target === commentUI.anchor)) {
+	if (
+		event.key === 'Escape' &&
+		(commentUI.sheetUp || (commentUI.state?.kind === 'list' && event.target === commentUI.anchor))
+	) {
 		event.preventDefault();
 		commentUI.close();
 		commentUI.restoreFocus();
