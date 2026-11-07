@@ -22,6 +22,13 @@ vi.mock('$lib/stores/deviceDocument', () => ({ DeviceDocument: class {
 	subscribe(listener: (copy: unknown) => void) { listener(this); return () => {}; }
 } }));
 vi.mock('$lib/stores/deviceRecovery', () => ({ readDeviceRecovery: async () => [] }));
+// A phone keeps the composer as a sheet with a scrim; every wider width opens it as a popover at the selection.
+const phone = vi.hoisted(() => ({ store: null as null | import('svelte/store').Writable<boolean> }));
+vi.mock('$lib/stores/viewport', async original => {
+	const { writable } = await import('svelte/store');
+	phone.store = writable(false);
+	return { ...await original<typeof import('$lib/stores/viewport')>(), isMobile: phone.store };
+});
 const target = { instanceId: 'live-comment-viewer', path: '/documents/doc.md', name: 'doc.md', projectId: 'project', threadId: 'thread', artifactId: 'artifact' };
 let host: HTMLElement, component: ReturnType<typeof mount> | undefined, stop: () => void, server: Y.Doc;
 beforeEach(() => {
@@ -42,6 +49,7 @@ beforeEach(() => {
 		author: 'you', author_kind: 'user', created_at: '2026-10-07T00:00:00Z', parent_id: null, review: false, resolved: false, replies: [] }));
 });
 afterEach(async () => {
+	phone.store!.set(false);
 	vi.useRealTimers();
 	if (component) await unmount(component); component = undefined;
 	emit('doc_ack', { type: 'doc_ack', artifact_id: 'artifact', store_id: 'store', message_ids: wire.frames.flatMap(frame => frame.message_id ? [frame.message_id] : []) });
@@ -185,6 +193,7 @@ it('captures original selection before Comment and submits its reserved range af
 	await vi.waitFor(() => expect(document.querySelector('.composer')).toBeNull());
 });
 it('retains body across outside-close/reselection, rejects deleted identity and Cancel discards', async () => {
+	phone.store!.set(true);
 	await open(); await select(); await compose();
 	remote(text => { text.delete(6, 4); text.insert(6, 'beta'); });
 	const submit = document.querySelector<HTMLButtonElement>('.composer .submit')!;
@@ -206,6 +215,7 @@ it('retains body across outside-close/reselection, rejects deleted identity and 
 	expect(document.querySelector<HTMLTextAreaElement>('.composer textarea')?.value).toBe('');
 });
 it('highlights the selected text only while its composer is open: a close keeps the draft but clears it and reopening restores it', async () => {
+	phone.store!.set(true);
 	const marked = () => [...host.querySelectorAll('.cm-comment-pending')].map(node => node.textContent).join('');
 	await open(); await select(); await compose();
 	expect(marked()).toBe('beta');
@@ -242,6 +252,7 @@ it('keeps the open composer beside its text when an edit before it shifts the te
 	}
 });
 it('cancels the positions wait on outside close and ignores its late reply', async () => {
+	phone.store!.set(true);
 	await open(); await select(); await compose();
 	document.querySelector<HTMLButtonElement>('.composer .submit')!.click();
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));
@@ -275,6 +286,7 @@ it.each([
 	expect(released()).toEqual([expect.objectContaining({ client_id: ask.reserve.client_id })]);
 });
 it('after a store mismatch, reopening the composer and submitting sends one reservation and one post carrying the draft', async () => {
+	phone.store!.set(true);
 	await open(); await select(); await compose();
 	document.querySelector<HTMLButtonElement>('.composer .submit')!.click();
 	await vi.waitFor(() => expect(wire.frames.some(frame => frame.type === 'doc_positions')).toBe(true));

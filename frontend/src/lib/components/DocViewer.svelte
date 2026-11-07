@@ -12,7 +12,7 @@
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
 	import { createViewerCommentDraft } from '$lib/docViewerCommentDraft.svelte';
 	import { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
-	import { clicked } from '$lib/docViewerClickPoint';
+	import { createCommentOpeners } from '$lib/docViewerClickPoint';
 	import { createReplyNavigation } from '$lib/docReplyLanding.svelte';
 	import { createDocViewerImages } from '$lib/docViewerImages';
 	import { projects } from '$lib/stores/projects';
@@ -126,18 +126,9 @@
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
 	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it.
 	const revealDraft = (opening: boolean) => { const { draft } = draftController; if (draft && (editorSurface?.draftCovered(draft.from, opening) ?? opening)) scroll.value = { from: draft.from, to: draft.to, origin: 'comment-save' }; };
-	function focusComment(id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) {
-		const point = clicked($isMobile, click, anchor);
-		if (!commentUI.focusComment(id, point ?? anchor, viaSuggestion, !!point)) return;
-		if (point) scroll.stay(id); else scroll.toComment(id, false, 'navigation');
-	}
-	function showMarkerCards(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent) {
-		const point = clicked($isMobile, click, reading ?? (() => (opener.isConnected ? opener.getBoundingClientRect() : null)));
-		if (point) scroll.stay(ids[0]); else if (ids.length === 1) scroll.toComment(ids[0], false, 'navigation');
-		commentUI.focusMarker(ids, opener, point ?? reading, !!point);
-	}
+	const openCards = createCommentOpeners(commentUI, scroll);
 	// A marker over comments on parts of one image opens the image, at the comment when it is the only one (DCOL-FR13.5).
-	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent) { arrivedDocComments.set(new Set(ids)); images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => showMarkerCards(ids, opener, reading, click)); }
+	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent) { arrivedDocComments.set(new Set(ids)); images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => openCards.markers(ids, opener, reading, click)); }
 	function onDocEdit(mapPos: (p: number) => number) { if (loadedArtifactId) remapComments(loadedArtifactId, mapPos); images.remap(mapPos); }
 
 	const accent = $derived($projects.find((project) => project.id === target?.projectId)?.accent_color ?? null);
@@ -335,7 +326,7 @@
 		scrollTo={scroll.value}
 		onSave={flushNow}
 		onSelect={draftController.select}
-		onAnchorFocus={focusComment}
+		onAnchorFocus={openCards.comment}
 		onCaretAway={() => void commentUI.release()}
 		onSuggestionHover={commentUI.hover}
 		onEdit={onDocEdit}

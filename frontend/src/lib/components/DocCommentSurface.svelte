@@ -246,8 +246,7 @@
 	function escapeColumn() { if (margin && onRelease?.()) restoreFocus(); else closeDrawer(); }
 	// Resolving a decided suggestion ends its conversation, and its edit is already settled in the text, so its card closes with it (DRAFT-comment-fixes-3to6, Option A step 5; in the margin the card leaves the column by itself and the column stays up), but only once the request is answered: on a refusal the card stays as it was, with focus where it was, and says so through this opening's card errors, which reset with the decisions' when the surface reopens.
 	function resolveThread(id: string, resolved: boolean) {
-		const picked = surfaceState?.kind === 'thread' && surfaceState.id === id;
-		if (!(resolved && (picked || margin) && comments.find((item) => item.id === id)?.decision)) { void onResolve(id, resolved); return; }
+		if (!(resolved && (margin || (surfaceState?.kind === 'thread' && surfaceState.id === id)) && comments.find((item) => item.id === id)?.decision)) { void onResolve(id, resolved); return; }
 		void decisions.resolveDecided(id, () => onResolve(id, true, true)).then((taken) => {
 			if (!taken || margin || surfaceState?.kind !== 'thread' || surfaceState.id !== id) return;
 			onClose(); if (!cardAsSheet) restoreFocus();
