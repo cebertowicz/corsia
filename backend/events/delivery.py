@@ -113,15 +113,13 @@ def start_idle_after_commit(connection: sqlite3.Connection, thread_id: str) -> N
     """Start an idle recipient's Turn once ``connection``'s write commits.
 
     For a caller of ``enqueue_event_wake`` that has no drive of its own; a
-    running Turn is left to take the wake at its end.
+    running Turn is left to take the wake at its end. Outside a
+    ``write_transaction`` this raises, so the delivery fails instead of
+    reporting a wake nothing would start.
     """
-    from infra.database import TransactionOwnershipError
     from infra.write_effects import after_commit_merged
 
-    try:
-        after_commit_merged(connection, "event_wake_drive", [thread_id], _submit_idle_drives)
-    except TransactionOwnershipError:
-        logger.warning("event wake for {} queued without a drive: its transaction is not owned", thread_id)
+    after_commit_merged(connection, "event_wake_drive", [thread_id], _submit_idle_drives)
 
 
 def _submit_idle_drives(thread_ids: list[str]) -> None:
@@ -143,7 +141,7 @@ async def _drive_idle(thread_ids: list[str]) -> None:
             continue
         try:
             await drive_idle_thread(thread_id)
-        except Exception:  # noqa: BLE001 - the wake is durable in the FIFO
+        except Exception:  # noqa: BLE001 - committed already; logged per thread like every post-commit idle drive
             logger.exception("event wake drive failed for {}", thread_id)
 
 
