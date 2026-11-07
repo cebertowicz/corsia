@@ -13,8 +13,10 @@ import fcntl
 import json
 import os
 import shutil
+import signal
 import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -22,6 +24,7 @@ import pytest
 
 from infra.platform_paths import WorkspaceSelection
 from tests.registry_helpers import make_session
+from tests.test_project_repo_lock_recovery import _lock as _index_lock, _set_lsof as _fake_lsof
 
 SKILL_BODY = """---
 name: demo-skill
@@ -626,6 +629,55 @@ def test_an_index_sync_fault_keeps_the_commit_and_reports_a_partial_save(history
     assert f"Partly saved: commit {result.sha[:7]} landed" in result.line and rel in result.line
     assert "index.lock exists" in result.line
     assert events[-1]["index_unsynced"] == [rel]
+
+
+def _status(workspace: Path, rel: str) -> str:
+    return _git(["status", "--porcelain", "--", rel], cwd=workspace).strip()
+
+
+def _staged_behind_head(workspace: Path) -> list[str]:
+    return _git(["diff", "--cached", "--name-only", "HEAD"], cwd=workspace).split()
+
+
+def test_a_stale_index_lock_is_recovered_so_the_real_index_matches_head(history_scope, monkeypatch, tmp_path):
+    workspace, _ = history_scope
+    _fake_lsof(monkeypatch, tmp_path, "exit 1")  # nothing holds it: an orphan left by a crashed Git
+    lock = _index_lock(workspace / ".git")
+
+    result = _save(workspace, _history(workspace), "text\n")
+    rel = _history(workspace).relative_to(workspace).as_posix()
+
+    assert (result.outcome, result.reason, result.unsynced) == ("written", "", ())
+    assert not lock.exists()
+    assert _count(workspace) == 2
+    assert _status(workspace, rel) == "" and _staged_behind_head(workspace) == []
+
+
+def test_a_live_index_lock_is_left_in_place_and_the_save_reports_a_partial_save(history_scope, monkeypatch, tmp_path):
+    workspace, _ = history_scope
+    lock = _index_lock(workspace / ".git")
+    ready = tmp_path / "holder-ready"
+    holder = subprocess.Popen(
+        ["bash", "-c", 'exec 9> "$1"; touch "$2"; sleep 30', "_", str(lock), str(ready)],
+        text=True, start_new_session=True,
+    )
+    try:
+        deadline = time.monotonic() + 3
+        while not ready.exists() and holder.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.exists()
+        _fake_lsof(monkeypatch, tmp_path, f"printf '%s\\n' {holder.pid}")
+
+        result = _save(workspace, _history(workspace), "text\n")
+        rel = _history(workspace).relative_to(workspace).as_posix()
+
+        assert result.outcome == "written" and result.unsynced == (rel,)  # the commit still landed
+        assert _count(workspace) == 2
+        assert lock.exists()  # a live lock is never removed
+        assert "preserved" in result.line and rel in result.line
+    finally:
+        os.killpg(holder.pid, signal.SIGTERM)
+        holder.wait(timeout=3)
 
 
 def test_file_version_reads_a_status_fault_as_a_fault_never_clean(history_scope, monkeypatch):
