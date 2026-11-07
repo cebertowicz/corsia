@@ -218,7 +218,8 @@ async function stageWorkspace(page: Page, threadId: string, docPath: string, nam
 async function openThread(page: Page, title: string): Promise<void> {
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	await sidebarThread(page, title).click();
+	// A run's state holds several sessions with the same title, one per test: the newest is the first row.
+	await sidebarThread(page, title).first().click();
 }
 
 async function reloadComments(page: Page, artifactId: string): Promise<void> {
@@ -361,6 +362,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// The waiting reply it pointed at is brought into view, focused, and the comments list opens at it.
 			await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
 			await expect.poll(() => page.locator('.cm-scroller').evaluate((el) => el.scrollTop)).toBeGreaterThan(before);
+			let steadyInside = 0;
 			// Where it lands matters as much as that it moved: the whole landed line sits inside the pane the reader can see,
 			// clear of its top edge, and stays there once the drawer has taken its width from the pane.
 			await expect.poll(async () => {
@@ -583,6 +585,8 @@ for (const width of [1440, 393]) {
 			// The drawer takes focus back to the document itself: the thread it jumped to is read and on screen, so the band
 			// has nothing left to point at. The reader going back up makes the last thread a target, and the notice is drawn again.
 			await expect(page.locator('.doc .cm-content')).toBeFocused();
+			// Out of the editor first: a caret in the text keeps its own line in view and would hold the pane at the landing.
+			await page.locator('body').focus();
 			await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
 			await expectControl(page, '1 new');
 			await expectControlPoints(page, 1, 'below');
@@ -619,6 +623,8 @@ for (const width of [1440, 393]) {
 				}
 				await expect(backdrop).toHaveCount(0);
 				await expect(page.locator('.doc .cm-content')).toBeFocused();
+				// Out of the editor first: a caret in the text keeps its own line in view and would hold the pane at the landing.
+				await page.locator('body').focus();
 				await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
 				await expectControl(page, '1 new');
 				await saveMotionProbe(page);
@@ -755,8 +761,13 @@ for (const theme of ['light', 'dark'] as const) {
 			}
 
 			await holdDwell(page, false);
-			// Back to the document: one waiting reply is left and the control says so; the next tap goes to the second pin.
+			// Back to the document: one waiting reply is left. Its pin sits on the image the reader was just looking at, so the
+			// band shows nothing; it returns when the reader scrolls that image out of view, and the next tap goes to that pin.
 			await backToDocument(page);
+			await expect.poll(() => unreadCountInStore(page, seeded.artifactId)).toBe(1);
+			await expect(controlBox(page)).toHaveCount(0);
+			await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = el.scrollHeight; });
+			await holdDwell(page, true);
 			await expectControl(page, '1 new');
 
 			await holdDwell(page, true);
@@ -914,9 +925,15 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		await openThread(page, THREAD_TITLE);
 		await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 		await holdDwell(page, true);
-		// The line is in view at the top of the document and its reply is still marked unread, so this is the control's own
-		// absence and not a count that fell: the reader has nothing left to be taken to.
-		await expect(page.locator(`[data-comment-id="${doc.roots[2]}"] .ct-reply.new`)).toBeVisible();
+		// The thread is unread and its own line is inside the pane: this is the control's own absence, not a count that fell,
+		// and nothing can bring it further into view.
+		await expect.poll(() => unreadCountInStore(page, doc.artifactId)).toBe(1);
+		await expect.poll(() => page.evaluate((id) => {
+			const pane = document.querySelector<HTMLElement>('.cm-scroller')!.getBoundingClientRect();
+			const pieces = [...document.querySelectorAll<HTMLElement>(`[data-comment-id="${id}"]`)].map((node) => node.getBoundingClientRect());
+			if (!pieces.length) return false;
+			return Math.min(...pieces.map((r) => r.top)) >= pane.top - 0.5 && Math.max(...pieces.map((r) => r.bottom)) <= pane.bottom + 0.5;
+		}, doc.roots[2]), { message: 'the unread line sits inside the visible pane' }).toBe(true);
 		await expect(controlButton(page)).toHaveCount(0);
 		await page.screenshot({ path: stillPath(width, theme, 'hidden') });
 		await holdDwell(page, false);
