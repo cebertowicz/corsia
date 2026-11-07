@@ -3,7 +3,6 @@ import { EditorState, StateField, type Extension } from '@codemirror/state';
 import { Decoration, EditorView, WidgetType } from '@codemirror/view';
 import { commentMarks, commentRanges, setCommentRanges, type CommentRange } from './comment-marks';
 import { commentRail } from './comment-rail';
-import { railWidth } from './comment-clusters';
 
 const views: EditorView[] = [];
 
@@ -95,14 +94,6 @@ describe('comment rail', () => {
 		expect(view.state.field(commentRanges)).toMatchObject([{ id: 'gone', from: 12, to: 12 }]);
 		view.dispatch({ changes: { from: 6, to: 17 } });
 		expect(view.state.field(commentRanges)).toMatchObject([{ id: 'gone', from: 6, to: 6 }]);
-	});
-
-	it('reserves the pointer policy inset on the editor itself, so a mount outside the viewer agrees', () => {
-		const view = mount('alpha');
-		expect(view.dom.closest('.doc')).toBeNull();
-		expect(view.dom.style.getPropertyValue('--doc-rail')).toBe(`${railWidth()}px`);
-		view.destroy();
-		expect(view.dom.style.getPropertyValue('--doc-rail')).toBe('');
 	});
 
 	it('drops the line together with the highlight when an edit collapses its anchor', async () => {

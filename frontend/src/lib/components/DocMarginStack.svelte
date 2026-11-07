@@ -1,11 +1,12 @@
 <script module lang="ts">
-	/** The pending removal of a canvas's room below the text, per canvas: a column that comes back within it keeps the room. */
-	const restoring = new WeakMap<HTMLElement, number>();
+	/** Cancels the pending removal of a canvas's room below the text, per canvas: a column that comes back before it keeps the room. */
+	const restoring = new WeakMap<HTMLElement, () => void>();
 </script>
 
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 	import { GAP, placeCards, type MarginItem } from '$lib/docMarginPlacement';
+	import { afterHold } from '$lib/docMarginHold.svelte';
 	import type { DocComment } from '$lib/stores/docComments';
 	/** The margin column's cards: each open thread beside its text, stacked where a cluster would overlap. */
 	let { bounds, pinned, selectedId, behind, card }: { bounds: HTMLElement | null; pinned: DocComment[]; selectedId: string | null; behind: boolean; card: Snippet<[DocComment]> } = $props();
@@ -16,9 +17,10 @@
 		if (!stackEl || !bounds) return;
 		const scroller = bounds.querySelector<HTMLElement>('.cm-scroller'), clip = stackEl.closest<HTMLElement>('.drawer-comments');
 		if (!scroller || !clip) return;
-		clearTimeout(restoring.get(bounds));
+		restoring.get(bounds)?.();
+		restoring.delete(bounds);
 		const ids = pinned.map((comment) => comment.id), selected = selectedId;
-		let frame = 0, overhang = 0;
+		let frame = 0, overhang = parseFloat(bounds.style.getPropertyValue('--margin-overhang')) || 0;
 		// A card shows for as long as its own placed box reaches into the clip, and goes once that box has scrolled fully above the clip top; where its anchor is does not matter, so a card stacked far below its text stays reachable. One that would start above the clip sits at the clip top, under the header, and the cards below it shift down, so none is ever cut off under the header.
 		const follow = () => {
 			const scrolled = scroller.scrollTop;
@@ -62,13 +64,25 @@
 			for (let i = 0; i < 24 && high - low > 0.5; i++) { const mid = (low + high) / 2; if (lastBottomAt(mid) <= mid + clip.clientHeight) high = mid; else low = mid; }
 			const wanted = Math.max(0, Math.ceil(high) + 1 + Math.round(scroller.clientHeight - (scroller.scrollHeight - overhang)));
 			if (wanted !== overhang) { overhang = wanted; bounds!.style.setProperty('--margin-overhang', `${overhang}px`); }
-			frame = requestAnimationFrame(read);
 		};
+		// Placement is read once per frame only after something that moves a line or a card: the text or its commented lines change, or the
+		// scroller, clip or a card resizes. Scrolling moves every line equally, so it only needs follow().
+		const schedule = () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; read(); }); };
+		const mutations = new MutationObserver(schedule);
+		for (const el of bounds.querySelectorAll('.cm-content, .cm-comment-rail')) mutations.observe(el, { subtree: true, childList: true, attributes: true, characterData: true });
+		const sizes = new ResizeObserver(schedule);
+		for (const el of [scroller, clip, ...bounds.querySelectorAll('.cm-content'), ...stackEl.querySelectorAll('[data-margin-card]')]) sizes.observe(el);
 		scroller.addEventListener('scroll', follow, { passive: true });
 		read();
-		// The room below the text stays until the anchor hold has ended, so a close can still scroll the reader's line back to where it was.
+		// The room below the text stays until the reading-line hold has ended (docMarginHold owns when), so a close can still scroll the reader's line
+		// back to where it was. It is asked a frame later, once a hold that this same change starts is running.
 		const area = bounds;
-		return () => { cancelAnimationFrame(frame); scroller.removeEventListener('scroll', follow); restoring.set(area, window.setTimeout(() => area.style.removeProperty('--margin-overhang'), 1600)); };
+		return () => {
+			cancelAnimationFrame(frame); mutations.disconnect(); sizes.disconnect(); scroller.removeEventListener('scroll', follow);
+			let cancelHold = () => {};
+			const later = requestAnimationFrame(() => { cancelHold = afterHold(area, () => { restoring.delete(area); area.style.removeProperty('--margin-overhang'); }); });
+			restoring.set(area, () => { cancelAnimationFrame(later); cancelHold(); });
+		};
 	});
 </script>
 

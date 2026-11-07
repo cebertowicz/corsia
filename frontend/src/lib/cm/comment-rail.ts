@@ -1,6 +1,5 @@
 import { EditorView, ViewPlugin, type BlockInfo, type ViewUpdate } from '@codemirror/view';
 import { commentRanges } from './comment-marks';
-import { railWidth } from './comment-clusters';
 import { tableRowAt } from './widget-blocks';
 
 interface Placed {
@@ -29,9 +28,6 @@ class CommentRail {
 		this.dom.className = 'cm-comment-rail';
 		this.dom.setAttribute('aria-hidden', 'true');
 		view.scrollDOM.append(this.dom);
-		// The content padding still reserves the text's left inset through --doc-rail; set it here so an editor mounted outside the
-		// viewer reserves the same width the viewer's header takes.
-		view.dom.style.setProperty('--doc-rail', `${railWidth()}px`);
 		// A text size or line height change moves lines without a document or viewport change: regroup on any resize of the
 		// text, or of a commented line or image (the text's own height can be pinned by its minimum height while its lines change).
 		if (typeof ResizeObserver !== 'undefined') {
@@ -50,7 +46,6 @@ class CommentRail {
 		this.resize?.disconnect();
 		this.watched.clear();
 		this.dom.remove();
-		this.view.dom.style.removeProperty('--doc-rail');
 	}
 
 	private schedule() {

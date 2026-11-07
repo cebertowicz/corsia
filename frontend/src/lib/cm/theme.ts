@@ -16,12 +16,12 @@ export const docTheme = EditorView.theme({
 		overflow: 'auto'
 	},
 	'.cm-content': {
-		padding: '4px var(--doc-phone-inset, 0px) 40vh var(--doc-phone-inset, var(--doc-rail, 44px))',
+		padding: '4px var(--doc-phone-inset, 0px) 40vh var(--doc-inset, 24px)',
 		caretColor: 'var(--accent)',
 		maxWidth: '100%'
 	},
-	// --doc-phone-inset is set once on the canvas (DocViewer.css) for a touch pointer at phone width: the text keeps that
-	// inset on both sides, and the 44px marker hit box reaches into its edge. Unset, the one-sided rail applies.
+	// The text's left inset is --doc-inset (24px; the image viewer sets 0), the document header takes the same. --doc-phone-inset
+	// is set once on the canvas (DocViewer.css) for a touch pointer at phone width, so the text keeps that inset on the right too.
 	'.cm-line': { padding: '0 2px' },
 	'&.cm-focused': { outline: 'none' },
 	'.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
@@ -99,9 +99,8 @@ export const docTheme = EditorView.theme({
 	'.cm-comment-block-focused': { outlineColor: 'var(--amber)' },
 	// A mark on a whole table cell: the same underline, as a cell's own bottom edge.
 	'.cm-md-table td.cm-comment-anchor, .cm-md-table th.cm-comment-anchor': { borderBottomWidth: 'medium' },
-	// The text's left inset (--doc-rail: 24px for a fine pointer, 44px for a coarse or unknown one, decided by railWidth() and set by
-	// the rail and the viewer; the document header takes the same inset). The rail is a positioned layer holding one empty element per
-	// commented line, which the margin cards read their line from; it draws nothing and takes no pointer or focus.
+	// The rail is a positioned layer holding one empty element per commented line, which the margin cards read their line from;
+	// it draws nothing and takes no pointer or focus.
 	'.cm-comment-rail': { position: 'absolute', left: '0', top: '0', width: '0', height: '0', zIndex: '1', pointerEvents: 'none', visibility: 'hidden' },
 	'.cm-comment-line': { position: 'absolute', left: '0', width: '0' },
 	// The app's reduced-motion reset gives every element a 0.01ms transition on

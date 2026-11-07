@@ -235,10 +235,13 @@
 	 */
 	function drawerMotion(node: Element, options: { leaving: boolean }) { return imageDrawerMotion(node, options, isImage); }
 	function closeDrawer() { onClose(); restoreFocus(); }
-	// Resolving a decided suggestion ends its conversation, and its edit is already settled in the text, so its card closes with it (DRAFT-comment-fixes-3to6, Option A step 5), but only once the request is answered: on a refusal the card stays as it was, with focus where it was.
+	// Resolving a decided suggestion ends its conversation, and its edit is already settled in the text, so its card closes with it (DRAFT-comment-fixes-3to6, Option A step 5), but only once the request is answered: on a refusal the card stays as it was, with focus where it was, and says so.
+	let resolveErrors = $state<Record<string, string>>({});
 	function resolveThread(id: string, resolved: boolean) {
 		if (!(resolved && surfaceState?.kind === 'thread' && surfaceState.id === id && comments.find((item) => item.id === id)?.decision)) { void onResolve(id, resolved); return; }
+		resolveErrors = { ...resolveErrors, [id]: '' };
 		void Promise.resolve(onResolve(id, true, true)).then((taken) => {
+			if (taken === false) resolveErrors = { ...resolveErrors, [id]: 'Couldn’t resolve this. Try again.' };
 			if (taken === false || surfaceState?.kind !== 'thread' || surfaceState.id !== id) return;
 			onClose(); if (!narrow) restoreFocus();
 		});
@@ -271,7 +274,7 @@
 	// A refused accept (kind `stale`) goes to `suggestionRefusals` instead, which also shows its card as orphaned.
 	const cardErrors = $derived({
 		...(artifactId ? $suggestionRefusals[artifactId] : undefined),
-		...Object.fromEntries(Object.entries(decisions.outcome.errors).filter(([, message]) => message)),
+		...Object.fromEntries(Object.entries({ ...decisions.outcome.errors, ...resolveErrors }).filter(([, message]) => message)),
 	});
 </script>
 
@@ -360,7 +363,6 @@
 	.aside-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 	.aside-chevron { flex: none; transition: transform var(--dur-tight) var(--ease-snap); }
 	.aside-chevron.open { transform: rotate(180deg); }
-	/* The list takes the whole column under its entry and is opaque, so no card behind it shows partly; it is the filter popup's surface. */
 	/* The list fits its content up to the column's height under its entry, then scrolls; its head, with the close, stays put. It is opaque, so no card behind it shows partly: it is the filter popup's surface. */
 	.margin-aside { position: absolute; z-index: 2; left: var(--space-3); right: var(--space-2); display: flex; flex-direction: column; gap: var(--space-2); overflow: hidden; padding: var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--bg-elevated); box-shadow: var(--glass-rim), var(--shadow-chip); }
 	.margin-aside-body { min-height: 0; overflow: auto; overscroll-behavior: contain; }

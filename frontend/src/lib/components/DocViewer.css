@@ -36,7 +36,7 @@
    An above pill reserves nothing, since space at the top would push the text being read down as the pill appears. */
 .doc:has(.activity-pill[data-direction='below']) .doc-main { box-sizing: border-box; padding-bottom: calc(var(--touch-target) + var(--space-1)); }
 @media (max-width: 600px) {
-  /* A touch pointer at phone width keeps one 24px (the fine rail's) text inset on both sides instead of the 44px marker rail on the left only; the marker's hit box stays railWidth() and reaches into the text's edge. The editor, header and review bar read this; ArtifactLeaf's page gutter shares the condition. */
+  /* A touch pointer at phone width keeps the 24px text inset on the right as well as the left. The editor reads this; ArtifactLeaf's page gutter shares the condition. */
   @media (any-pointer: coarse) { .doc { --doc-phone-inset: 24px; } }
 }
 .ed-wrap { position: relative; height: 100%; min-height: 0; }

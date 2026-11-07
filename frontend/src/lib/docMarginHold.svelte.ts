@@ -3,6 +3,24 @@ import { fromStore } from 'svelte/store';
 import { EditorView } from '@codemirror/view';
 import { paneCollapsed } from '$lib/stores/paneCollapsed';
 
+/** What waits for the hold on each text area to end. A hold that replaces another takes its waiters over. */
+const waiting = new WeakMap<HTMLElement, Set<() => void>>();
+
+function release(area: HTMLElement | null) {
+	const queue = area ? waiting.get(area) : undefined;
+	if (!area || !queue) return;
+	waiting.delete(area);
+	for (const then of queue) then();
+}
+
+/** Run `then` once the reading-line hold on `area` has ended, or now when none is running. Returns a cancel. */
+export function afterHold(area: HTMLElement, then: () => void): () => void {
+	const queue = waiting.get(area);
+	if (!queue) { then(); return () => {}; }
+	queue.add(then);
+	return () => queue.delete(then);
+}
+
 /**
  * Keeps the reader's line where it is while the margin column and the shell change the text width.
  * Call it while a component initialises; it ends with the component.
@@ -13,17 +31,18 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 	// The reader's top line stays where it is while the column and the shell change the text width, on open and on close.
 	// The anchor is re-applied from a ResizeObserver, which runs after layout and before paint in each frame, so every painted frame holds it.
 	// The Workspace panel opened or closed by hand while the column is up changes the text width the same way, so it holds a line too: the row of the thread being read, so its card stays beside it (the cards above it stack up from that row), else the top row. 
-	let wasMargin = false, wasPane = false, stopHold: (() => void) | null = null;
+	let wasMargin = false, wasPane = false, stopHold: ((ended?: boolean) => void) | null = null;
 	$effect.pre(() => {
 		const now = margin(), pane = collapsed.current;
 		if (now === wasMargin && (!now || pane === wasPane)) return;
 		const byHand = now && wasMargin;
 		wasPane = pane;
 		wasMargin = now;
-		stopHold?.();
-		const dom = bounds()?.querySelector<HTMLElement>('.cm-editor');
+		stopHold?.(false);
+		const area = bounds();
+		const dom = area?.querySelector<HTMLElement>('.cm-editor');
 		const view = dom ? EditorView.findFromDOM(dom) : null;
-		if (!view) return;
+		if (!area || !view) return release(area);
 		const scroller = view.scrollDOM, box = scroller.getBoundingClientRect();
 		const x = box.left + box.width / 2;
 		const read = byHand && selectedId() ? bounds()?.querySelector(`.cm-comment-line[data-comment-ids*="${selectedId()}"]`)?.getBoundingClientRect().top : undefined;
@@ -43,7 +62,8 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 			return rect.height ? rect.top : null;
 		};
 		const offset = rowTop();
-		if (offset === null) return;
+		if (offset === null) return release(area);
+		if (!waiting.has(area)) waiting.set(area, new Set());
 		const hold = (here: number | null) => { if (here !== null && Math.abs(here - offset) > 0.5) scroller.scrollTop += here - offset; };
 		// A width change leaves the editor's height estimates for the lines it is not drawing stale until its next measure, which would be a frame late: measure first, then hold.
 		const observer = new ResizeObserver(() => {
@@ -53,7 +73,7 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		observer.observe(view.contentDOM);
 		observer.observe(scroller);
 		const timer = setTimeout(() => stopHold?.(), 1500);
-		stopHold = () => { observer.disconnect(); clearTimeout(timer); stopHold = null; };
+		stopHold = (ended = true) => { observer.disconnect(); clearTimeout(timer); stopHold = null; if (ended) release(area); };
 	});
 	onDestroy(() => stopHold?.());
 }

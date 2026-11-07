@@ -29,7 +29,6 @@
 	import { handleDocumentKey } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { createCommentSurfaceState, focusDocumentEditor, marginFits, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';
-	import { railWidth } from '$lib/cm/comment-clusters';
 	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
 	import { leavePreviousTarget, loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
@@ -279,7 +278,7 @@
 <svelte:window onkeydown={onKey} />
 <DocumentViewport instanceId={target?.instanceId} ready={docState === 'ready'} root={docRoot} />
 
-<div class="doc" style:--doc-rail="{railWidth()}px" use:docCanvasBounds bind:this={docRoot} in:fade={{ duration: $prefersReducedMotion ? 0 : 160, easing: cubicOut }}>
+<div class="doc" use:docCanvasBounds bind:this={docRoot} in:fade={{ duration: $prefersReducedMotion ? 0 : 160, easing: cubicOut }}>
 	<DocViewerStatus
 		title={target?.name ?? 'Document'}
 		commentsOpen={commentUI.state?.kind === 'list'}

@@ -30,9 +30,11 @@ export function createSuggestionDecisions(inputs: SuggestionDecisionInputs) {
 		const fresh = (): Outcome => ({ errors: {}, acceptAllError: '', skipped: [], acceptAllShownBusy: null });
 		let outcome = $state<Outcome>(fresh());
 		function settle(started: Outcome, change: (current: Outcome) => void) { if (started === outcome) change(outcome); }
-		// The reset ends this document's refusals too: reopening the comments offers Accept again.
+		// The reset ends this document's refusals too: reopening the comments offers Accept again. It follows the surface opening and
+		// closing only, never a move from one card or view to another inside it.
+		const open = $derived(inputs.open());
 		$effect(() => {
-			const artifact = inputs.artifactId(); inputs.open();
+			const artifact = inputs.artifactId(); void open;
 			outcome = fresh();
 			return () => { if (artifact) clearRefusals(artifact); };
 		});
