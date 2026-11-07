@@ -109,6 +109,42 @@ def enqueue_event_wake(
     )
 
 
+def start_idle_after_commit(connection: sqlite3.Connection, thread_id: str) -> None:
+    """Start an idle recipient's Turn once ``connection``'s write commits.
+
+    For a caller of ``enqueue_event_wake`` that has no drive of its own; a
+    running Turn is left to take the wake at its end. Outside a
+    ``write_transaction`` this raises, so the delivery fails instead of
+    reporting a wake nothing would start.
+    """
+    from infra.write_effects import after_commit_merged
+
+    after_commit_merged(connection, "event_wake_drive", [thread_id], _submit_idle_drives)
+
+
+def _submit_idle_drives(thread_ids: list[str]) -> None:
+    import infra.app_loop as app_loop
+
+    try:
+        app_loop.submit(_drive_idle(thread_ids))
+    except app_loop.AppLoopUnavailable:
+        # Before startup or after shutdown: startup recovery drives queued heads.
+        logger.debug("event wake drive for {} left to startup recovery", thread_ids)
+
+
+async def _drive_idle(thread_ids: list[str]) -> None:
+    from infra.admission_fence import is_fenced
+    from infra.thread_execution import drive_idle_thread
+
+    for thread_id in thread_ids:
+        if is_fenced(thread_id):
+            continue
+        try:
+            await drive_idle_thread(thread_id)
+        except Exception:  # noqa: BLE001 - committed already; logged per thread like every post-commit idle drive
+            logger.exception("event wake drive failed for {}", thread_id)
+
+
 async def deliver_to_thread(
     thread_id: str,
     internal_event: str,
