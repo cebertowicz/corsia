@@ -22,6 +22,7 @@ leaving is one write transaction with ``k`` line reads.
 from __future__ import annotations
 
 import json
+from bisect import bisect_right
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
@@ -44,29 +45,54 @@ def edit_sections(text: str, edits: list[dict[str, Any]]) -> list[str]:
     Sections are named in ``text`` as it is, the document whose section turns the call takes: an edit
     that renames a heading must not rename the sections later edits fall in. The headings are scanned
     once; each match is carried back to ``text`` by the original offsets of the characters it covers
-    (a replacement's characters all carry the span they replaced) and placed by bisect.
+    (a replacement's characters all carry the span they replaced) and placed by bisect. The offsets
+    are kept as runs, one per kept stretch or replacement, so the cost follows the edits, not the
+    document's length.
     """
     sections = doc_sections.Sections(text)
-    lows, highs = list(range(len(text))), list(range(1, len(text) + 1))
+    runs: list[_Run] = [(0, len(text), 0, 0, True)]
     touched: dict[str, None] = {}
     for edit in edits:
         old, new, every = edit["old_string"], edit["new_string"], bool(edit.get("replace_all"))
         start = text.find(old) if old else -1
         if start < 0:
             continue
-        kept_lows: list[int] = []
-        kept_highs: list[int] = []
-        done = 0
+        kept: list[_Run] = []
+        done = at = 0
         while start >= 0:
-            low, high = lows[start], highs[start + len(old) - 1]
+            low, high = _original(runs, start)[0], _original(runs, start + len(old) - 1)[1]
             touched.update(dict.fromkeys(sections.between(low, high)))
-            kept_lows += lows[done:start] + [low] * len(new)
-            kept_highs += highs[done:start] + [high] * len(new)
+            kept += _moved(runs, done, start, at)
+            at += start - done
+            if new:
+                kept.append((at, at + len(new), low, high, False))
+                at += len(new)
             done = start + len(old)
             start = text.find(old, done) if every else -1
-        lows, highs = kept_lows + lows[done:], kept_highs + highs[done:]
+        runs = kept + _moved(runs, done, len(text), at)
         text = text.replace(old, new, -1 if every else 1)
     return list(touched)
+
+
+# A stretch [start, end) of the edited text and where it came from in the original: kept characters
+# (True) start at the original offset ``low``; a replacement's (False) all carry the span low..high.
+_Run = tuple[int, int, int, int, bool]
+
+
+def _original(runs: list[_Run], at: int) -> tuple[int, int]:
+    """The original span the edited text's character ``at`` stands for."""
+    start, _end, low, high, kept = runs[bisect_right(runs, at, key=lambda run: run[0]) - 1]
+    return (low + at - start, low + at - start + 1) if kept else (low, high)
+
+
+def _moved(runs: list[_Run], first: int, last: int, at: int) -> list[_Run]:
+    """The runs covering the edited text's [first, last), moved to begin at ``at``."""
+    moved: list[_Run] = []
+    for start, end, low, high, kept in runs:
+        lo, hi = max(start, first), min(end, last)
+        if lo < hi:
+            moved.append((at + lo - first, at + hi - first, low + lo - start if kept else low, high, kept))
+    return moved
 
 
 def write_sections(text: str, content: str) -> list[str]:
