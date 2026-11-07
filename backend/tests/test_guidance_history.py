@@ -13,8 +13,10 @@ import fcntl
 import json
 import os
 import shutil
+import signal
 import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
 
@@ -22,6 +24,7 @@ import pytest
 
 from infra.platform_paths import WorkspaceSelection
 from tests.registry_helpers import make_session
+from tests.test_project_repo_lock_recovery import _lock as _index_lock, _set_lsof as _fake_lsof
 
 SKILL_BODY = """---
 name: demo-skill
@@ -626,6 +629,129 @@ def test_an_index_sync_fault_keeps_the_commit_and_reports_a_partial_save(history
     assert f"Partly saved: commit {result.sha[:7]} landed" in result.line and rel in result.line
     assert "index.lock exists" in result.line
     assert events[-1]["index_unsynced"] == [rel]
+
+
+def _broken_real_index_sync(guidance_git, monkeypatch) -> dict[str, bool]:
+    """Fail only the real-index sync, exactly as a held ``index.lock`` does; HEAD still moves."""
+    real, broken = guidance_git._git, {"on": False}
+
+    def failing(repo, *args, env=None, **kwargs):
+        if broken["on"] and args[0] == "update-index" and env is None:
+            raise guidance_git.GitFault("git update-index failed: index.lock exists")
+        return real(repo, *args, env=env, **kwargs)
+
+    monkeypatch.setattr(guidance_git, "_git", failing)
+    return broken
+
+
+def _index_entry(workspace: Path, rel: str) -> list[str]:
+    return _git(["ls-files", "-s", "--", rel], cwd=workspace).split()
+
+
+def _status(workspace: Path, rel: str) -> str:
+    return _git(["status", "--porcelain", "--", rel], cwd=workspace).strip()
+
+
+def _staged_behind_head(workspace: Path) -> list[str]:
+    return _git(["diff", "--cached", "--name-only", "HEAD"], cwd=workspace).split()
+
+
+def test_a_stale_index_lock_is_recovered_so_the_real_index_matches_head(history_scope, monkeypatch, tmp_path):
+    workspace, _ = history_scope
+    _fake_lsof(monkeypatch, tmp_path, "exit 1")  # nothing holds it: an orphan left by a crashed Git
+    lock = _index_lock(workspace / ".git")
+
+    result = _save(workspace, _history(workspace), "text\n")
+    rel = _history(workspace).relative_to(workspace).as_posix()
+
+    assert (result.outcome, result.reason, result.unsynced) == ("written", "", ())
+    assert not lock.exists()
+    assert _count(workspace) == 2
+    assert _status(workspace, rel) == "" and _staged_behind_head(workspace) == []
+
+
+def test_a_live_index_lock_is_left_in_place_and_the_save_reports_a_partial_save(history_scope, monkeypatch, tmp_path):
+    workspace, _ = history_scope
+    lock = _index_lock(workspace / ".git")
+    ready = tmp_path / "holder-ready"
+    holder = subprocess.Popen(
+        ["bash", "-c", 'exec 9> "$1"; touch "$2"; sleep 30', "_", str(lock), str(ready)],
+        text=True, start_new_session=True,
+    )
+    try:
+        deadline = time.monotonic() + 3
+        while not ready.exists() and holder.poll() is None and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert ready.exists()
+        _fake_lsof(monkeypatch, tmp_path, f"printf '%s\\n' {holder.pid}")
+
+        result = _save(workspace, _history(workspace), "text\n")
+        rel = _history(workspace).relative_to(workspace).as_posix()
+
+        assert result.outcome == "written" and result.unsynced == (rel,)  # the commit still landed
+        assert _count(workspace) == 2
+        assert lock.exists()  # a live lock is never removed
+        assert "preserved" in result.line and rel in result.line
+    finally:
+        os.killpg(holder.pid, signal.SIGTERM)
+        holder.wait(timeout=3)
+
+
+def test_a_path_one_save_left_behind_is_synced_by_the_next_save(history_scope, monkeypatch):
+    from infra import guidance_git
+
+    workspace, _ = history_scope
+    rel = _history(workspace).relative_to(workspace).as_posix()
+    _save(workspace, _history(workspace), "one\n")
+    broken = _broken_real_index_sync(guidance_git, monkeypatch)
+    broken["on"] = True
+
+    assert _save(workspace, _history(workspace), "two\n").unsynced == (rel,)
+    assert _status(workspace, rel) == f"MM {rel}"  # a plain commit here would write the old bytes back
+
+    broken["on"] = False
+    result = _save(workspace, _history(workspace, "shell"), "two\n")
+
+    assert (result.outcome, result.reason, result.unsynced) == ("written", "", ())
+    assert _status(workspace, rel) == "" and _staged_behind_head(workspace) == []
+    assert _count(workspace) == 4
+
+
+def test_a_path_the_person_staged_with_their_own_content_is_never_touched(history_scope, monkeypatch):
+    from infra import guidance_git
+
+    workspace, _ = history_scope
+    rel = _history(workspace).relative_to(workspace).as_posix()
+    # Only _commit writes the index here: the sweep of outside edits is its own tested behaviour.
+    monkeypatch.setattr(guidance_git, "_sweep_others", lambda *_args: [])
+    broken = _broken_real_index_sync(guidance_git, monkeypatch)
+    # The person commits their own context file, stages an edit of it, and stages a new file, all
+    # three different from HEAD and from what is on disk.
+    todo, notes = workspace / "context" / "todo.md", workspace / "context" / "notes.md"
+    todo.parent.mkdir(parents=True, exist_ok=True)
+    todo.write_text("committed\n")
+    _git(["add", "--", "context/todo.md"], cwd=workspace)
+    _git([*_IDENTITY, "commit", "-qm", "person"], cwd=workspace)
+    todo.write_text("staged\n")
+    _git(["add", "--", "context/todo.md"], cwd=workspace)
+    todo.write_text("still editing\n")
+    notes.write_text("new draft\n")
+    _git(["add", "--", "context/notes.md"], cwd=workspace)
+    notes.write_text("still editing too\n")
+    staged = [_index_entry(workspace, path) for path in ("context/todo.md", "context/notes.md")]
+
+    _save(workspace, _history(workspace), "one\n")
+    broken["on"] = True
+    assert _save(workspace, _history(workspace), "two\n").unsynced == (rel,)
+    broken["on"] = False
+
+    result = _save(workspace, _history(workspace, "shell"), "two\n")
+
+    assert (result.outcome, result.unsynced) == ("written", ())
+    assert [_index_entry(workspace, path) for path in ("context/todo.md", "context/notes.md")] == staged
+    assert todo.read_text() == "still editing\n" and notes.read_text() == "still editing too\n"
+    assert _status(workspace, rel) == ""  # and the left-behind save was still brought up to HEAD
+    assert _count(workspace) == 5
 
 
 def test_file_version_reads_a_status_fault_as_a_fault_never_clean(history_scope, monkeypatch):

@@ -22,6 +22,7 @@ from loguru import logger
 from infra.backend_git import GIT_CONFIG_ARGS
 from infra.guidance_cas import stale_result
 from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir, read_regular
+from infra.guidance_index_sync import index_lock_fault, left_behind_entries
 from infra.guidance_messages import (
     REASON_PREFIX, SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_UNRECORDED, UNRECORDED_REASON,
     commit_message, is_person_author, recorded_reason,
@@ -127,7 +128,11 @@ def _changed(repo: Path, specs: list[str]) -> list[str]:
 
 def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: str) -> _Commit | None:
     """Commit exactly ``files`` on HEAD, or None when nothing changed. One retry is safe: every failure
-    precedes the compare-and-swap ``update-ref``. A real-index sync fault after it is returned, not raised."""
+    precedes the compare-and-swap ``update-ref``. A real-index sync fault after it is returned, not raised.
+
+    The real-index sync is a second write HEAD does not need, so it is guarded twice over: a proven-stale
+    ``index.lock`` is cleared first, and guidance entries an earlier save left behind are synced with this
+    one, so a save never leaves the person's plain ``git commit`` able to write pre-save bytes back."""
     for attempt in (1, 2):
         head = _git(repo, "rev-parse", "--verify", "-q", "HEAD", ok=(0, 1)).strip() or None
         staged: list[tuple[str, tuple[str, ...]]] = []
@@ -156,8 +161,9 @@ def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: st
             if attempt == 2:
                 raise
     unsynced: list[str] = []
-    fault = ""
-    for rel, args in staged:
+    fault = index_lock_fault(_git, repo)
+    left_behind = left_behind_entries(_git, repo, sha, {rel for rel, _ in staged})
+    for rel, args in [*staged, *left_behind]:
         try:
             _git(repo, "update-index", *args)
         except GitFault as exc:
