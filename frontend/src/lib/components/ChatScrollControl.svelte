@@ -3,6 +3,7 @@
 	import { messages } from '$lib/stores/threads';
 	import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import type { AttentionDestination } from '$lib/api/attentionQueue';
+	import { emitProductEvent } from '$lib/product_events';
 	import { quoteLabel, unreadTargets, type UnreadTarget } from './chatUnreadTargets';
 
 	let { threadId, userIsNearBottom, onScrollToBottom, onJumpToReply, scroller }: {
@@ -44,7 +45,11 @@
 		// One landing path for both cases: the reply jumper loads whatever pages the answer is still waiting in,
 		// scrolls, focuses and emphasises the comment, and opens it when the comment carries a highlight.
 		const destination = target?.destination ?? (unloaded ? attention?.detail.destination : undefined);
-		if (destination) return onJumpToReply(destination);
+		if (destination) {
+			// Counts how often the control replaces the removed reply chip as the way to an unread reply.
+			emitProductEvent('chat', 'reply_jumped', { in_older_messages: !target });
+			return onJumpToReply(destination);
+		}
 		onScrollToBottom();
 	}
 	const visible = $derived(!!target || unloaded || (!userIsNearBottom && !!threadId));

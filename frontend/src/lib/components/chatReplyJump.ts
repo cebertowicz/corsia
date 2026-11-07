@@ -5,6 +5,7 @@ import { chatReplyJump } from '$lib/stores/chatReplyJump';
 import type { AttentionDestination } from '$lib/api/attentionQueue';
 import type { PagerState } from '$lib/messagePager';
 import type { RunLoad, RunStub } from '$lib/focusRuns';
+import { commentLanding } from './chatUnreadTargets';
 
 export type JumpPort = {
 	pager: () => PagerState;
@@ -61,13 +62,11 @@ export function createChatReplyJumper(port: JumpPort) {
 			return false;
 		}
 		const element = port.element();
-		const row = element?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(target.messageId)}"]`);
 		const comment = get(messages).find(message => message.id === target.messageId && message.thread_id === threadId)
 			?.chat_comments?.find(comment => comment.cid === target.cid && (!destination.user_message_id || comment.user_message_id === destination.user_message_id));
-		const mark = [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids][role="button"]') ?? [])]
-			.find(item => item.dataset.commentIds?.split(',').includes(comment?.id ?? ''));
 		// The highlight when the comment's text is still in the message; otherwise the detached thread rendered under it.
-		const landing = mark ?? (comment ? row?.querySelector<HTMLElement>(`[data-comment-uuid="${CSS.escape(comment.id)}"]`) ?? null : null);
+		const landing = element && comment ? commentLanding(element, target.messageId, comment) : null;
+		const mark = landing?.hasAttribute('data-comment-ids') ? landing : null;
 		chatReplyJump.set(null);
 		if (!landing) return false;
 		landing.scrollIntoView({ block: 'center' });

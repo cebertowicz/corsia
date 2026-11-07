@@ -52,3 +52,27 @@ it('treats highlights behind the header and composer as outside the visible view
 	expect(unreadTargets(root, rows, 't').below?.quote).toBe('b');
 	header.remove(); host.remove();
 });
+
+it('points at an unread reply inside a collapsed run, on its side of the first row in view', () => {
+	vi.stubGlobal('CSS', { escape: (value: string) => value });
+	const root = document.createElement('div');
+	// The commented message is loaded but its run is collapsed, so no row of it is drawn; the jumper opens the run.
+	root.innerHTML = '<div data-message-id="shown" data-message-seq="10">shown</div>';
+	vi.spyOn(root, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 200 } as DOMRect);
+	vi.spyOn(root.querySelector<HTMLElement>('[data-message-id="shown"]')!, 'getBoundingClientRect').mockReturnValue({ top: 120, bottom: 160 } as DOMRect);
+	const comment = (seq: number) => [{ id: 'run', seq, thread_id: 't', chat_comments: [{ id: 'run', cid: 'c-run', user_message_id: 'u-run', quote: 'in the run', answers: [{ author_kind: 'agent', unread: true }] }] }] as unknown as Message[];
+	const earlier = unreadTargets(root, comment(3), 't');
+	expect(earlier.above?.destination).toEqual({ pane: 'chat-replies', id: 'run', seq: 3, cid: 'c-run', user_message_id: 'u-run' });
+	expect(earlier.count).toBe(1);
+	expect(unreadTargets(root, comment(12), 't').below?.quote).toBe('in the run');
+});
+
+it('finds the highlight in the text row when the message also draws an activity row first', () => {
+	vi.stubGlobal('CSS', { escape: (value: string) => value });
+	const root = document.createElement('div');
+	root.innerHTML = '<div data-message-id="m">activity</div><div data-message-id="m"><span role="button" data-comment-ids="m">text</span></div>';
+	vi.spyOn(root, 'getBoundingClientRect').mockReturnValue({ top: 100, bottom: 200 } as DOMRect);
+	vi.spyOn(root.querySelector<HTMLElement>('[data-comment-ids="m"]')!, 'getBoundingClientRect').mockReturnValue({ top: 20, bottom: 40 } as DOMRect);
+	const rows = [{ id: 'm', seq: 4, thread_id: 't', chat_comments: [{ id: 'm', cid: 'c-m', user_message_id: 'u-m', quote: 'text', answers: [{ author_kind: 'agent', unread: true }] }] }] as unknown as Message[];
+	expect(unreadTargets(root, rows, 't').above).toMatchObject({ quote: 'text', distance: 60 });
+});
