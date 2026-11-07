@@ -11,6 +11,8 @@ from registry import models as registry_models
 
 #: Items posted since the save that a wake quotes; the rest are counted.
 SINCE_LIMIT = 20
+#: The drop note when the agent's turn ends with its wake unanswered.
+TURN_ENDED = "your turn ended without posting it as is or rewriting it"
 
 
 def describe(op: dict[str, Any]) -> str:
