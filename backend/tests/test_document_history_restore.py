@@ -203,8 +203,10 @@ async def test_a_workspace_with_no_repository_of_its_own_is_history_off(skill, s
         (workspace / ".git").mkdir()  # an empty marker: Git answers with the enclosing repository
 
     assert list_versions(workspace, path.relative_to(workspace).as_posix()) == ([], False)
-    # The open's own read asks no Git; the route that shows history does, off the database pool.
-    assert read_document(str(path), user_id, None, thread_id)["history"] is True
+    # The open's own read asks no Git and says nothing about history; the route decides it, off the
+    # database pool.
+    opened = read_document(str(path), user_id, None, thread_id)
+    assert opened["_recorded"] is True and "history" not in opened
     assert (await files.content("test", str(path), thread_id=thread_id))["history"] is False
     assert refusal(await restore(skill, first, sha(current))) == (409, "history_off")
     assert path.read_text() == current
@@ -259,7 +261,7 @@ async def test_a_read_only_file_refuses_with_its_own_kind(skill):
     assert context.read_text() == "Second text.\n"
 
 
-def test_document_open_says_whether_history_exists(history_scope):
+def test_document_open_says_whether_the_file_is_recorded(history_scope):
     from api.files_load import read_document
 
     workspace, thread_id = history_scope
@@ -273,8 +275,8 @@ def test_document_open_says_whether_history_exists(history_scope):
     path.write_text(SKILL_BODY)
     plain = workspace / 'notes.md'
     plain.write_text('notes')
-    assert read_document(str(path), user_id, None, thread_id)['history'] is True
-    assert read_document(str(plain), user_id, None, thread_id)['history'] is False
+    assert read_document(str(path), user_id, None, thread_id)['_recorded'] is True
+    assert read_document(str(plain), user_id, None, thread_id)['_recorded'] is False
 
 
 @pytest.mark.asyncio

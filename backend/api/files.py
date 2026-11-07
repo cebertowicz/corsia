@@ -85,11 +85,13 @@ async def content(token: str, path: str, project_id: str | None = None, thread_i
     from api.files_load import read_document
 
     result = await run_in_db(read_document, path, user["id"], project_id, thread_id)
-    if result["history"]:
+    history = result.pop("_recorded")
+    if history:
         from infra.document_history import history_off
 
         # One `git rev-parse` per guidance-file open, about 9 ms measured; any other document asks none.
-        result["history"] = not await run_off_db(history_off, Path(config.WORKSPACE))
+        history = not await run_off_db(history_off, Path(config.WORKSPACE))
+    result["history"] = history
     notification = result.pop("_notification")
     if thread_id:
         # Outside the db worker: the WS nudge needs the running event loop.
