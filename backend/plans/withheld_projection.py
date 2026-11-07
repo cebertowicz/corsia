@@ -55,14 +55,18 @@ def project(value: Any, key: str = "") -> Any:
     return value
 
 
-def fences_thread(db, recipient: str | None, owner: str | None) -> bool:
-    """Whether recipient is fenced from the project currently owning the text."""
+def fences_thread(db, recipient: str | None, owner: str | None, *, fenced=None) -> bool:
+    """Whether recipient is fenced from the project currently owning the text.
+
+    A caller checking many owners for one recipient passes its ``fenced`` set.
+    """
     if owner is None:
         return False
     row = db.execute("SELECT project_id FROM threads WHERE id=?", (owner,)).fetchone()
     if row is None or row["project_id"] is None:
         return False
-    fenced = fenced_project_ids(read_caller(recipient, db=db), db=db)
+    if fenced is None:
+        fenced = fenced_project_ids(read_caller(recipient, db=db), db=db)
     return fenced is ALL or (isinstance(fenced, frozenset) and str(row["project_id"]) in fenced)
 
 
@@ -73,14 +77,15 @@ def for_thread(value: Any, *, recipient: str | None, owner: str | None, db) -> A
 
 def dependencies(facts: dict, *, recipient: str | None, plan_owner: str | None, db) -> None:
     """Withhold foreign prerequisite text inside an otherwise visible plan."""
-    if fences_thread(db, recipient, plan_owner):
+    fenced = fenced_project_ids(read_caller(recipient, db=db), db=db)
+    if fences_thread(db, recipient, plan_owner, fenced=fenced):
         return  # The complete plan is projected at the read boundary.
     for node in facts["nodes"]:
         for cause in node.get("execution", {}).get("causes", []):
             if cause.get("reason_key") not in {"dependency", "dependency_failed"}:
                 continue
             reason = cause.get("reason")
-            if reason and fences_thread(db, recipient, cause.get("owner_id")):
+            if reason and fences_thread(db, recipient, cause.get("owner_id"), fenced=fenced):
                 cause["reason"] = project(reason)
                 if node.get("status_reason") == reason:
                     node["status_reason"] = project(reason)
