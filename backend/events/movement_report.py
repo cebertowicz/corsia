@@ -57,8 +57,9 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from events import report_payload
@@ -210,20 +211,57 @@ def validated(report: MovementReport | Mapping[str, Any]) -> MovementReport:
     return report_payload.revalidate(report, MovementReport)
 
 
+def _filter_local_only_paths(report: MovementReport, db: sqlite3.Connection) -> MovementReport:
+    """Remove other Local only projects' paths before any event consumer sees them."""
+    from infra import config
+    from llm.locality import cloud_off_project_ids
+    from tools.project_fence import Fence, _project_roots
+
+    cloud_off = cloud_off_project_ids(db=db)
+    if not cloud_off:
+        return report
+    thread = agent_scope_thread(report.scope)
+    if thread is not None:
+        row = db.execute("SELECT project_id FROM threads WHERE id=?", (thread,)).fetchone()
+        own = row[0] if row else None
+    else:
+        own = None if report.scope == "workspace" else report.scope
+    fenced = cloud_off - {own}
+    if not fenced:
+        return report
+    workspace = Path(config.WORKSPACE)
+    roots = Fence(tuple(_project_roots(workspace, db, lambda project, local: local and project != own)))
+
+    def visible(change: PrecedingChange) -> bool:
+        path = Path(change.ref).expanduser()
+        if not path.is_absolute():
+            path = workspace / path
+        return roots.matching_root(path) is None
+
+    return replace(report, moves=tuple(
+        replace(move, preceding_changes=tuple(c for c in move.preceding_changes if visible(c)))
+        for move in report.moves
+    ))
+
+
 def deliver_movement_report_sync(
     report: MovementReport | Mapping[str, Any], *, db: sqlite3.Connection | None = None,
 ) -> list[PlatformDelivery]:
     """Validate, then deliver one report: to the agent an ``agent:`` scope names, else to the scope's conductor."""
+    from infra.database import write_transaction
+
     parsed = validated(report)
-    if (thread := agent_scope_thread(parsed.scope)) is not None:
-        return deliver_direct_report_sync(
-            thread_id=thread, event_type=MOVEMENT_DIGEST_EVENT,
+    with write_transaction(db, scope="deliver_movement_report") as conn:
+        parsed = _filter_local_only_paths(parsed, conn)
+        if (thread := agent_scope_thread(parsed.scope)) is not None:
+            return deliver_direct_report_sync(
+                thread_id=thread, event_type=MOVEMENT_DIGEST_EVENT,
+                payload=parsed.as_event_payload(),
+                transaction_scope="deliver_movement_report", db=conn)
+        return deliver_measurement_report_sync(
+            scope=parsed.scope, event_type=MOVEMENT_DIGEST_EVENT,
             payload=parsed.as_event_payload(),
-            transaction_scope="deliver_movement_report", db=db)
-    return deliver_measurement_report_sync(
-        scope=parsed.scope, event_type=MOVEMENT_DIGEST_EVENT,
-        payload=parsed.as_event_payload(),
-        transaction_scope="deliver_movement_report", db=db)
+            transaction_scope="deliver_movement_report", db=conn)
 
 
 async def deliver_movement_report(

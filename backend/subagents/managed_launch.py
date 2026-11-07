@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
+import subprocess
 
 
 _CODEX_PROJECT_DOC_CONTROL = "project_doc_max_bytes=0"
@@ -162,7 +164,32 @@ def codex_app_server_governance_args() -> list[str]:
     return ["--strict-config", *disabled, *overrides]
 
 
-def claude_project_discovery_args() -> list[str]:
+def workspace_git_snapshot_disabled(working_dir: str | None) -> bool:
+    """Whether Claude would discover the workspace repository from this directory."""
+    from infra import config
+
+    workspace = Path(config.WORKSPACE).resolve()
+    cwd = Path(working_dir).resolve() if working_dir else Path.cwd().resolve()
+    if not cwd.is_relative_to(workspace):
+        return False
+    if not (workspace / ".git").exists():
+        return False
+    # An invalid nested .git marker does not stop Git from finding the workspace.
+    # Ask Git which repository it actually discovers; on failure suppress the
+    # snapshot, since an unverified marker cannot prove a separate repository.
+    from infra.backend_git import git_argv
+
+    try:
+        result = subprocess.run(
+            git_argv("rev-parse", "--show-toplevel"), cwd=cwd,
+            capture_output=True, text=True, timeout=5, check=True,
+        )
+        return Path(result.stdout.strip()).resolve() == workspace
+    except (OSError, subprocess.SubprocessError):
+        return True
+
+
+def claude_project_discovery_args(*, disable_git_snapshot: bool = False) -> list[str]:
     """Keep user/local settings but no instruction file or callable capability.
 
     The user source still carries login and model state. Its instruction
@@ -177,6 +204,7 @@ def claude_project_discovery_args() -> list[str]:
             "disableAllHooks": True,
             "disableBundledSkills": True,
             "disableSkillShellExecution": True,
+            **({"includeGitInstructions": False} if disable_git_snapshot else {}),
         },
         separators=(",", ":"),
         sort_keys=True,

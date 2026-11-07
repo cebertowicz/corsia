@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 
 from claude_controls import CONFINED_PERMISSION_MODE, confined_claude_controls
-from subagents.managed_launch import claude_project_discovery_args
+from subagents.managed_launch import claude_project_discovery_args, workspace_git_snapshot_disabled
 
 #: A launch with every CORSIA tool, as every managed child had before confinement.
 CONFINEMENT_NONE = "none"
@@ -159,6 +159,8 @@ def _untrusted_args(invocation: ClaudeInvocation) -> list[str]:
     tools = confined_claude_tool_names()
     return [
         *confined_claude_controls(mcp_tools=True),
+        *(["--settings", '{"includeGitInstructions":false}']
+          if workspace_git_snapshot_disabled(invocation.working_dir) else []),
         "--tools", ",".join(tools),
         "--allowedTools", *tools,
         "--disable-slash-commands",
@@ -168,7 +170,9 @@ def _untrusted_args(invocation: ClaudeInvocation) -> list[str]:
 
 def _managed_args(invocation: ClaudeInvocation) -> list[str]:
     """Project settings plus the CORSIA tool bridge, or no tools without one."""
-    args = claude_project_discovery_args()
+    args = claude_project_discovery_args(
+        disable_git_snapshot=workspace_git_snapshot_disabled(invocation.working_dir),
+    )
     if invocation.mcp_config:
         from tools.catalog import MCP_CORSIA_PREFIX
 
