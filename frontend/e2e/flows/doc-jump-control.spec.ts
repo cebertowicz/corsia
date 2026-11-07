@@ -367,12 +367,15 @@ for (const theme of ['light', 'dark'] as const) {
 			// clear of its top edge, and stays there once the drawer has taken its width from the pane.
 			await expect.poll(async () => {
 				const inside = await page.evaluate((id) => {
-					const pane = document.querySelector<HTMLElement>('.cm-scroller')!.getBoundingClientRect();
-					const pieces = [...document.querySelectorAll<HTMLElement>(`[data-comment-id="${id}"]`)].map((node) => node.getBoundingClientRect());
-					if (!pieces.length) return false;
-					return Math.min(...pieces.map((r) => r.top)) >= pane.top - 0.5 && Math.max(...pieces.map((r) => r.bottom)) <= pane.bottom + 0.5;
+					// Inside .doc: at 393 the chat composer is a CodeMirror too, and the first scroller in the page is not the document's.
+					const pane = document.querySelector<HTMLElement>('.doc .cm-scroller')!.getBoundingClientRect();
+					const pieces = [...document.querySelectorAll<HTMLElement>(`.doc [data-comment-id="${id}"]`)].map((node) => node.getBoundingClientRect());
+					if (!pieces.length) return null;
+					return { lineTop: Math.round(Math.min(...pieces.map((r) => r.top))), lineBottom: Math.round(Math.max(...pieces.map((r) => r.bottom))), paneTop: Math.round(pane.top), paneBottom: Math.round(pane.bottom) };
 				}, doc.roots[8]);
-				steadyInside = inside ? steadyInside + 1 : 0;
+				console.log('LANDING', JSON.stringify(inside));
+				const fits = !!inside && inside.lineTop >= inside.paneTop - 0.5 && inside.lineBottom <= inside.paneBottom + 0.5;
+				steadyInside = fits ? steadyInside + 1 : 0;
 				return steadyInside >= 2;
 			}, { message: 'the jumped-to line sits wholly inside the visible pane and stays there' }).toBe(true);
 			// The arrival reads that thread, and the one still waiting has its own line on screen: with nothing off-screen the control steps aside while the count still says one.
@@ -618,8 +621,11 @@ for (const width of [1440, 393]) {
 				await startMotionProbe(page);
 				if (route === 'Escape') await page.keyboard.press('Escape');
 				else {
-					// The document, not the backdrop's corner: at 1440 the shell sits over that corner and swallows the click.
-					await page.mouse.click(width / 2, 160);
+				// The strip of document above the sheet is what a scrim tap has to hit: at 393 the point mid-viewport is inside
+				// the sheet itself, so it opens nothing and closes nothing.
+					const back = (await backdrop.boundingBox())!;
+					const panel = await page.locator('.drawer-panel').first().boundingBox();
+					await page.mouse.click(back.x + 12, Math.max(back.y + 12, (panel?.y ?? back.y + 40) - 20));
 				}
 				await expect(backdrop).toHaveCount(0);
 				await expect(page.locator('.doc .cm-content')).toBeFocused();
@@ -662,7 +668,10 @@ for (const width of [1440, 393]) {
 		// Arriving from the chat's control opened the first thread, so only the other one is still new - and its line is the one
 		// the reader is standing on, so the notice steps aside while the count keeps saying one.
 		await expect.poll(() => unreadCountInStore(page, doc.artifactId)).toBe(1);
-		await expect(controlBox(page)).toHaveCount(0);
+		// Send the reader back up: the remaining thread's line is out of view again, and the notice is drawn with its count.
+		await page.locator('body').focus();
+		await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = 0; });
+		await expectControl(page, '1 new');
 		await holdDwell(page, false);
 	});
 }
@@ -929,8 +938,9 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		// and nothing can bring it further into view.
 		await expect.poll(() => unreadCountInStore(page, doc.artifactId)).toBe(1);
 		await expect.poll(() => page.evaluate((id) => {
-			const pane = document.querySelector<HTMLElement>('.cm-scroller')!.getBoundingClientRect();
-			const pieces = [...document.querySelectorAll<HTMLElement>(`[data-comment-id="${id}"]`)].map((node) => node.getBoundingClientRect());
+			// Inside .doc, for the same reason as the landing read: the chat composer is a CodeMirror too.
+			const pane = document.querySelector<HTMLElement>('.doc .cm-scroller')!.getBoundingClientRect();
+			const pieces = [...document.querySelectorAll<HTMLElement>(`.doc [data-comment-id="${id}"]`)].map((node) => node.getBoundingClientRect());
 			if (!pieces.length) return false;
 			return Math.min(...pieces.map((r) => r.top)) >= pane.top - 0.5 && Math.max(...pieces.map((r) => r.bottom)) <= pane.bottom + 0.5;
 		}, doc.roots[2]), { message: 'the unread line sits inside the visible pane' }).toBe(true);
