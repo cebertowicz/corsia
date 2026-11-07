@@ -22,8 +22,8 @@ class ReviewerUnavailableError(HostAccessSupervisorError):
     """A reviewer model cannot run, and nothing else was allowed to review.
 
     ``fallback`` is the requester's own model when fallback was tried and also
-    could not run. ``fallback_enabled`` and ``pinned`` let the refusal say which
-    remedy applies: a pinned (per-action) review never falls back.
+    could not run. ``named``, ``fallback_enabled`` and ``pinned`` let the refusal
+    say which remedy applies: a pinned (per-action) review never falls back.
     """
 
     def __init__(
@@ -31,12 +31,14 @@ class ReviewerUnavailableError(HostAccessSupervisorError):
         message: str,
         *,
         outage: ReviewerOutage,
+        named: bool = True,
         pinned: bool = False,
         fallback_enabled: bool = False,
         fallback: ReviewerOutage | None = None,
     ) -> None:
         super().__init__(message)
         self.outage = outage
+        self.named = named
         self.pinned = pinned
         self.fallback_enabled = fallback_enabled
         self.fallback = fallback

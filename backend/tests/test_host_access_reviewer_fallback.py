@@ -170,16 +170,23 @@ async def test_a_model_the_catalog_marks_unavailable_counts_as_cannot_run(outage
 
 
 @pytest.mark.asyncio
-async def test_with_no_chosen_reviewer_the_requesters_own_outage_is_an_ordinary_failure(outage):
-    from host_access.errors import HostAccessSupervisorError, ReviewerUnavailableError
+async def test_own_reviewer_outage_preserves_cause_and_reset(outage):
+    from host_access.errors import ReviewerUnavailableError
+    from host_access.reviewer_unavailable import application_guidance
 
     _configure(fallback=True, reviewer=None)
     outage.models[REQUESTER] = ("usage_limited", RESET)
 
-    with pytest.raises(HostAccessSupervisorError) as refused:
+    with pytest.raises(ReviewerUnavailableError) as refused:
         await _resolve()
 
-    assert not isinstance(refused.value, ReviewerUnavailableError)
+    error = refused.value
+    assert error.named is False
+    assert (error.outage.reason, error.outage.resets_at) == ("usage_limited", RESET)
+    guidance = application_guidance(error)
+    assert "chosen in Settings" not in guidance
+    assert "fallback" not in guidance
+    assert _until() in guidance
 
 
 @pytest.mark.asyncio
@@ -416,6 +423,29 @@ async def _tool_call() -> dict:
         _thread_id="root", purpose="Inspect host state",
         plan=["Read process state"], duration_seconds=60,
     ))
+
+
+@pytest.mark.asyncio
+async def test_own_reviewer_signed_out_returns_cause_and_guidance(outage, monkeypatch):
+    _configure(fallback=True, reviewer=None)
+    outage.models[REQUESTER] = ("account_signed_out", None)
+    calls = _verdict_capture(monkeypatch)
+
+    result = await _tool_call()
+
+    assert calls == []
+    assert result["state"] == "blocked"
+    assert result["reason"] == "reviewer_unavailable"
+    assert result["guidance"] == (
+        f"The requesting agent's own model ({_display_name(REQUESTER)}) reviews "
+        "host access because no reviewer is selected in Settings, but it can't "
+        "run right now (account signed out). Your application was not reviewed. "
+        "Tell the person once that they can choose a reviewer model in Settings "
+        "> System > Host Access Review. Set the task aside until the reviewer "
+        "is back, and continue other work."
+    )
+    assert "chosen in Settings" not in result["guidance"]
+    assert "fallback" not in result["guidance"]
 
 
 @pytest.mark.asyncio
@@ -675,6 +705,23 @@ async def test_a_refused_cloud_reviewer_is_never_invoked(cloud_off, monkeypatch)
 
     assert result["reason"] == "reviewer_unavailable"
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_own_reviewer_locality_refusal_names_only_local_fix(cloud_off, monkeypatch):
+    _configure(fallback=False, reviewer=None)
+    calls = _verdict_capture(monkeypatch)
+
+    result = await _tool_call()
+
+    assert calls == []
+    assert result["reason"] == "reviewer_unavailable"
+    assert result["guidance"].endswith(
+        "Tell the person once to choose a local reviewer model in "
+        "Settings > System > Host Access Review."
+    )
+    assert "fallback" not in result["guidance"]
+    assert "chosen in Settings" not in result["guidance"]
 
 
 @pytest.mark.asyncio

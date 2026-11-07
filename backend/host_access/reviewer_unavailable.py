@@ -80,6 +80,12 @@ def _unavailable_head(exc: ReviewerUnavailableError | None) -> str:
     """The first sentence: which reviewer(s) cannot run."""
     if exc is None:
         return "The host-access reviewer chosen in Settings can't run right now."
+    if not exc.named:
+        return (
+            f"The requesting agent's own model ({exc.outage.model_name}) reviews "
+            "host access because no reviewer is selected in Settings, but it "
+            f"can't run right now ({outage_cause(exc.outage)})."
+        )
     if exc.fallback is None:
         return (
             "The host-access reviewer chosen in Settings can't run right now "
@@ -102,7 +108,7 @@ def _locality_fix(exc: ReviewerUnavailableError) -> str | None:
     if exc.outage.reason not in LOCALITY_REFUSALS:
         return None
     fix = f"Tell the person once to choose a local reviewer model in {SETTINGS_PLACE}"
-    return f"{fix} or turn on reviewer fallback." if not exc.fallback_enabled else f"{fix}."
+    return f"{fix} or turn on reviewer fallback." if exc.named and not exc.fallback_enabled else f"{fix}."
 
 
 def application_guidance(
@@ -116,9 +122,13 @@ def application_guidance(
         f"until {moment}, or until the reviewer is back"
         if moment else "until the reviewer is back"
     )
+    notice = (
+        f"Tell the person once that they can choose a reviewer model in {SETTINGS_PLACE}."
+        if exc is not None and not exc.named else _TELL_THE_PERSON
+    )
     return (
         f"{_unavailable_head(exc)} Your {subject} was not reviewed. "
-        f"{_TELL_THE_PERSON} Set the task aside {wait}, and continue other work."
+        f"{notice} Set the task aside {wait}, and continue other work."
     )
 
 
