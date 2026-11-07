@@ -153,6 +153,8 @@ def make_held_subject(accounts, provider, monkeypatch, *, bound=True):
 @pytest_asyncio.fixture
 async def vendor_io(monkeypatch):
     from connections import codex_discovery, harness_models
+    # Startup imports ws before accepting input; keep that outside action timeouts.
+    import ws  # noqa: F401
 
     control = VendorIO()
     monkeypatch.setattr(codex_discovery, 'CodexAppServerSession', control.codex_session)
