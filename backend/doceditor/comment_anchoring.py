@@ -7,7 +7,7 @@ import sqlite3
 
 from doceditor import comments as store
 from doceditor.doc_text import read_doc_text
-from doceditor.quote_anchor import _cp_at_u16, anchor_context, reanchor
+from doceditor.quote_anchor import _cp_at_u16, anchor_context, reanchor, reanchor_edited
 
 log = logging.getLogger(__name__)
 
@@ -45,13 +45,29 @@ def _edited_place(comment: dict, text: str, tracked: tuple[int, int] | None) -> 
             return None
         prefix, suffix = comment.get("anchor_prefix") or "", comment.get("anchor_suffix") or ""
         start, end = _cp_at_u16(text, from_off), _cp_at_u16(text, to_off)
-        if not (prefix or suffix) or start is None or end is None:
+        if prefix and suffix:
+            place = reanchor_edited(text, comment["anchor_text"], from16=from_off, to16=to_off,
+                                    prefix=prefix, suffix=suffix)
+            if place is None:
+                return None
+        elif (prefix or suffix) and start is not None and end is not None and (
+            text[max(0, start - len(prefix)):start] == prefix and text[end:end + len(suffix)] == suffix
+        ):
+            place = (from_off, to_off)
+        else:
             return None
-        if text[max(0, start - len(prefix)):start] != prefix or text[end:end + len(suffix)] != suffix:
-            return None
-        place = (from_off, to_off)
     inside = _text_in_range(text, place[0], place[1])
     return place if inside and inside != comment["anchor_text"] else None
+
+
+def _resolve_place(comment: dict, text: str, quote: str, *, requote: bool) -> tuple[tuple[int, int] | None, str]:
+    if requote:
+        place = reanchor_edited(text, quote, from16=comment["from_off"], to16=comment["to_off"],
+                                prefix=comment.get("anchor_prefix"), suffix=comment.get("anchor_suffix"))
+        if place is not None:
+            return place, _text_in_range(text, *place)
+    return reanchor(text, quote, from16=comment["from_off"], to16=comment["to_off"],
+                    prefix=comment.get("anchor_prefix"), suffix=comment.get("anchor_suffix")), quote
 
 
 def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict]:
@@ -80,12 +96,9 @@ def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict
         if resolved is not None and undecided and not suggestion:
             quote = _text_in_range(text, resolved[0], resolved[1]) or quote
         if resolved is None:
-            resolved = reanchor(
-                text, quote, from16=comment["from_off"], to16=comment["to_off"],
-                prefix=comment.get("anchor_prefix"), suffix=comment.get("anchor_suffix"),
-            )
+            resolved, quote = _resolve_place(comment, text, quote, requote=undecided and not suggestion)
         edited = None
-        if undecided and suggestion and (tracked or resolved is None):
+        if undecided and suggestion:
             edited = _edited_place(comment, text, resolved if tracked else None)
         if edited is not None:
             inside = _text_in_range(text, edited[0], edited[1])

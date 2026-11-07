@@ -118,6 +118,47 @@ def anchor_context(
     return text[max(0, start - 32):start], text[end:end + 32]
 
 
+def reanchor_edited(
+    text: str, quote: str, *, from16: int | None, to16: int | None,
+    prefix: str | None, suffix: str | None,
+) -> tuple[int, int] | None:
+    """Recover an edited legacy range when its context and half its quote ends survive.
+
+    Only the result is known on a legacy document; keeping a flagged comment is
+    a safer error than detaching it, so compare non-overlapping ends in code points.
+    """
+    if not quote or not prefix or not suffix or from16 is None or to16 is None:
+        return None
+    if not isinstance(from16, int) or not isinstance(to16, int):
+        return None
+    starts = [(pos + len(prefix), _u16(text[:pos + len(prefix)]))
+              for pos in _overlapping_occurrences(text, prefix)]
+    ends = [(pos, _u16(text[:pos])) for pos in _overlapping_occurrences(text, suffix)]
+    if not starts or not ends:
+        return None
+    start_distance = min(abs(pos16 - from16) for _, pos16 in starts)
+    end_distance = min(abs(pos16 - to16) for _, pos16 in ends)
+    starts = [(pos, pos16) for pos, pos16 in starts if abs(pos16 - from16) == start_distance]
+    ends = [(pos, pos16) for pos, pos16 in ends if abs(pos16 - to16) == end_distance]
+    if len(starts) != 1 or len(ends) != 1:
+        return None
+    start, start16 = starts[0]
+    end, end16 = ends[0]
+    if start16 > from16 or end16 < from16 or end <= start:
+        return None
+    inside = text[start:end]
+    leading = 0
+    while leading < min(len(quote), len(inside)) and quote[leading] == inside[leading]:
+        leading += 1
+    trailing = 0
+    while (trailing < min(len(quote), len(inside)) - leading
+           and quote[-trailing - 1] == inside[-trailing - 1]):
+        trailing += 1
+    if 2 * (leading + trailing) < len(quote):
+        return None
+    return start16, end16
+
+
 def reanchor(
     text: str,
     quote: str,
