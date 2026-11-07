@@ -164,11 +164,13 @@ def landed(db, root_id: str, thread_id: str | None) -> None:
         settle(db, mine, "rewritten")
 
 
-def section_woken(db, thread_id: str) -> bool:
-    """Whether this agent has a woken section row, so its next write may answer it."""
-    return db.execute("""SELECT 1 FROM doc_comment_writer_line
-                          WHERE agent_thread_id=? AND state='woken' AND root_id LIKE 'section:%' LIMIT 1""",
-                      (thread_id,)).fetchone() is not None
+def section_woken(db, thread_id: str, artifact_id: str | None = None) -> bool:
+    """Whether this agent has a woken section row, on ``artifact_id`` when given, so its next write may answer it."""
+    on_document = " AND artifact_id=?" if artifact_id is not None else ""
+    return db.execute(f"""SELECT 1 FROM doc_comment_writer_line
+                           WHERE agent_thread_id=? AND state='woken' AND root_id LIKE 'section:%'{on_document}
+                           LIMIT 1""",
+                      (thread_id, *([artifact_id] if artifact_id is not None else []))).fetchone() is not None
 
 
 def settle(db, row, outcome: str) -> None:

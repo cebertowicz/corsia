@@ -657,6 +657,35 @@ async def test_a_write_to_the_closed_document_whose_text_cannot_be_read_is_refus
 
 
 @pytest.mark.asyncio
+async def test_a_wake_on_one_document_never_refuses_a_write_to_another(doc, driven, monkeypatch):
+    """A write to a document the agent has no woken row on cannot answer its wake, so that document's read is
+    never needed: a file the settle could not read still takes the write, and the wake stays unanswered."""
+    from doceditor import live_runtime, section_writes
+
+    scope, page, entry, path, context = doc
+    artifact_id = page.identity["artifact_id"]
+    await page.type_after("## Terms\n", "new ", entry.live)
+    _queued(await _edit(path, context, "old terms", "agent terms"))
+    await page.close()
+    await _settled()
+    [row] = _line(artifact_id, "## Terms")
+    assert row["state"] == "woken"
+    _write(scope, "other.md", "## Other\nold other\n")
+    other = scope["category"] / "other.md"
+
+    def unreadable(_path):
+        raise ValueError("doc too large to anchor against")
+
+    monkeypatch.setattr(section_writes, "read_doc_text", unreadable)
+    monkeypatch.setattr(live_runtime, "_manager", None)
+    result = await _edit(other, context, "old other", "agent other")
+    assert not result.startswith("Error"), result
+    assert other.read_text() == "## Other\nagent other\n"
+    [still] = _line(artifact_id, "## Terms")
+    assert still["state"] == "woken"
+
+
+@pytest.mark.asyncio
 async def test_a_write_whose_settle_committed_lands_even_when_passing_the_line_on_fails(doc, driven, monkeypatch):
     """The settle committed, so the write is the agent's answer: failing to pass the line on is not the writer's
     to act on, so the write still lands, unlike a write whose settle failed."""

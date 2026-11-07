@@ -264,7 +264,8 @@ def _settle_closed(path: str | None, artifact_id: str | None, thread_id: str, ca
         if not writer_line.section_woken(db, thread_id):
             return []
         artifact = resolve_file_identity(path, db=db) if path else get_artifact(artifact_id or "", db=db)
-        if artifact is None:
+        # A wake on another document is not this write's to answer, so this document's read must not refuse it.
+        if artifact is None or not writer_line.section_woken(db, thread_id, str(artifact["id"])):
             return []
         # A read that fails raises, so the write is refused like any other settle failure.
         text = read_doc_text(path or str(artifact["path"]))
