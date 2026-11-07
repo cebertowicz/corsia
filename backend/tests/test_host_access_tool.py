@@ -653,6 +653,21 @@ def test_scope_rejection_identifies_the_field_to_repair(category, expected):
     assert "private review" not in guidance
 
 
+def test_unsafe_effect_guidance_does_not_send_key_files_back_to_narrow_output():
+    from host_access.failure_reasons import safe_rejection
+    from host_access.review_policy import APPLICATION_REVIEW_SYSTEM_POLICY
+
+    # The reviewer rejects any read of a key-storing file whatever its output,
+    # so guidance that only says to narrow output strands the applicant.
+    assert "even just to check which keys are configured" in APPLICATION_REVIEW_SYSTEM_POLICY
+    category, guidance = safe_rejection("unsafe_effect")
+    assert category == "unsafe_effect"
+    assert "file that stores keys" in guidance
+    assert "do not apply again or reach the file another way" in guidance
+    assert "ask the user" in guidance
+    assert "named non-secret fields" in guidance
+
+
 @pytest.mark.asyncio
 async def test_legacy_rejection_uses_unknown_category_and_fixed_guidance(monkeypatch):
     from tools import host_access as host_access_tool
