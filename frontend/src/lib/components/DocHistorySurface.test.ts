@@ -196,8 +196,8 @@ describe('document history', () => {
 		expect(applyRestore).toHaveBeenCalledTimes(2);
 	});
 	it.each([
-		['invalid_skill', 'Couldn’t restore this version. Its text isn’t a valid skill, so nothing was restored. Copy any text you need from the changes below.'],
-		['context_read_only', 'Couldn’t restore this version. This file is read-only, so nothing was restored. Copy any text you need from the changes below.'],
+		['invalid_skill', 'Couldn’t restore this version. Its text isn’t a valid skill. Copy any text you need from the changes below.'],
+		['context_read_only', 'Couldn’t restore this version. This file is read-only. Copy any text you need from the changes below.'],
 	])('names the cause of a %s refusal and offers no way to ask again', async (kind, line) => {
 		const applyRestore = vi.fn().mockRejectedValue(new RequestRefused('422 refused', kind));
 		render({ within: wide(), applyRestore }); await flush(); await open(2);

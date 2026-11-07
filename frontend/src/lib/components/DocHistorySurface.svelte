@@ -36,8 +36,8 @@
 		unconfirmed: { line: 'Couldn’t confirm the restore. The newest version doesn’t hold this version’s text.', action: 'restore' },
 		history_off: { line: 'Couldn’t restore this version. This document’s history is off, so copy any text you need from the changes below.', action: null },
 		version_unavailable: { line: 'Couldn’t restore this version. This document’s history doesn’t include it. Reload history to see the versions it has.', action: 'reload' },
-		invalid_skill: { line: 'Couldn’t restore this version. Its text isn’t a valid skill, so nothing was restored. Copy any text you need from the changes below.', action: null },
-		context_read_only: { line: 'Couldn’t restore this version. This file is read-only, so nothing was restored. Copy any text you need from the changes below.', action: null },
+		invalid_skill: { line: 'Couldn’t restore this version. Its text isn’t a valid skill. Copy any text you need from the changes below.', action: null },
+		context_read_only: { line: 'Couldn’t restore this version. This file is read-only. Copy any text you need from the changes below.', action: null },
 	};
 
 	let load = $state<'loading' | 'error' | 'ready'>('loading');

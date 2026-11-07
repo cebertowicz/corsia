@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import fcntl
 import os
-import stat
 import subprocess
 import tempfile
 import time
@@ -22,7 +21,7 @@ from loguru import logger
 
 from infra.backend_git import GIT_CONFIG_ARGS
 from infra.guidance_cas import stale_result
-from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir
+from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir, read_regular
 from infra.guidance_messages import (
     REASON_PREFIX, SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_UNRECORDED, UNRECORDED_REASON,
     commit_message, is_person_author, recorded_reason,
@@ -173,18 +172,6 @@ def _is_text(data: bytes | None) -> bool:
     return data is None or (len(data) <= MAX_GUIDANCE_BYTES and b"\0" not in data[:8192])
 
 
-def _read(path: Path) -> bytes | None:
-    """A regular file's bytes, or None when absent; a symlink or other file type raises."""
-    try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    except FileNotFoundError:
-        return None
-    with os.fdopen(fd, "rb") as handle:
-        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-            raise OSError(f"{path} is not a regular file")
-        return handle.read()
-
-
 def _write_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
@@ -195,7 +182,7 @@ def _sweep(repo: Path, rels: list[str]) -> list[str]:
     records who made them, and the last CORSIA writer did not write these bytes."""
     names = sorted(rels)
     shown = ", ".join(names[:12]) + (f" and {len(names) - 12} more" if len(names) > 12 else "")
-    files = {rel: _read(repo / rel) for rel in names}
+    files = {rel: read_regular(repo / rel) for rel in names}
     done = _commit(repo, files, f"guidance sweep: {shown}\n\n{REASON_PREFIX}{UNRECORDED_REASON}\nScope: sweep", _OUTSIDE)
     if done is None:
         return []
@@ -212,7 +199,7 @@ def _sweep_others(repo: Path, workspace: Path, db, exclude: set[str]) -> list[st
         for rel in _changed(repo, sweep_pathspecs(workspace, db)):
             if len(found) == _SWEEP_LIMIT:
                 left += 1
-            elif rel not in exclude and classify_guidance_path(repo / rel, workspace=workspace, db=db) and _is_text(_read(repo / rel)):
+            elif rel not in exclude and classify_guidance_path(repo / rel, workspace=workspace, db=db) and _is_text(read_regular(repo / rel)):
                 found.append(rel)
         lines = _sweep(repo, found) if found else []
         return lines + ([f"{left} more changed guidance candidates wait for the next save."] if left else [])
@@ -306,7 +293,7 @@ def _save(
 ) -> SaveResult:
     def unrecorded(outcome: str, why: str, line: str | None) -> SaveResult:
         if not atomic:
-            if (stale := stale_result(expected, read_bytes=_read)) is not None:
+            if (stale := stale_result(expected, read_bytes=read_regular)) is not None:
                 return stale
             for path, data in writes.items():
                 if data is None:
@@ -340,9 +327,9 @@ def _save(
             lines = _sweep(repo, outside) if outside else []
         except Exception as exc:  # an unrecorded outside edit must never join the saver's commit
             return unrecorded("failed", str(exc), SAVE_FAILED.format(error=f"outside edits could not be recorded first ({exc})"))
-        if (stale := stale_result(expected, read_bytes=_read)) is not None:
+        if (stale := stale_result(expected, read_bytes=read_regular)) is not None:
             return stale
-        prior = {path: _read(path) for path in writes} if atomic else {}
+        prior = {path: read_regular(path) for path in writes} if atomic else {}
         for path, data in writes.items():
             if data is None:
                 path.unlink(missing_ok=True)
@@ -353,7 +340,7 @@ def _save(
             landed = _commit(repo, {rels[path]: data for path, data in writes.items()}, message, author)
         except GitFault as exc:
             for path, old in prior.items():  # HEAD never moved, so restoring prior bytes is safe
-                if _read(path) == writes[path]:
+                if read_regular(path) == writes[path]:
                     _write_bytes(path, old) if old is not None else path.unlink(missing_ok=True)
             return SaveResult("failed", str(exc), line="\n".join([*lines, SAVE_FAILED.format(error=exc)]))
         finally:

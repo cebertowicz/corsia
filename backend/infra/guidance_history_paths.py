@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 from pathlib import Path
 
 # Appended to a file's last commit when its working copy differs: two drafts can share it.
@@ -28,9 +30,19 @@ def bytes_before_text(path: Path) -> bytes | None:
     expectation and the comparison follow one rule: ``None`` is the file's absence, and a symlink or other
     file type raises.
     """
-    from infra.guidance_git import _read
+    return read_regular(path)
 
-    return _read(path)
+
+def read_regular(path: Path) -> bytes | None:
+    """A regular file's bytes, or None when absent; a symlink or other file type raises."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except FileNotFoundError:
+        return None
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise OSError(f"{path} is not a regular file")
+        return handle.read()
 
 
 def is_empty_git_dir(path: Path) -> bool:
