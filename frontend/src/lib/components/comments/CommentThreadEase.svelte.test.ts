@@ -24,7 +24,7 @@ function card(overrides: Partial<CommentThreadData>) {
 describe('CommentThread easing of the rows that change the card height', () => {
 	it('eases the Agreed line in, with the same clip and fade the resolved note has', () => {
 		const { comment, eased } = card({});
-		comment.acked = true; flushSync();
+		comment.acknowledgedBy = [{ id: 'ui', name: 'Steve', kind: 'user' }]; flushSync();
 		expect(eased).toContain(host.querySelector('.ct-agreed'));
 	});
 

@@ -4,6 +4,7 @@ import { writable } from 'svelte/store';
 
 vi.mock('$lib/stores/viewport', async (importOriginal) => ({ ...await importOriginal<object>(), prefersReducedMotion: writable(true) }));
 import CommentThread from './CommentThread.svelte';
+import type { CommentThreadData } from './CommentThreadData';
 
 let host: HTMLElement;
 let component: Record<string, unknown>;
@@ -15,10 +16,10 @@ describe('Agree reduced motion', () => {
 		const faded: Element[] = [];
 		const animate = Element.prototype.animate;
 		vi.spyOn(Element.prototype, 'animate').mockImplementation(function (this: Element, ...args) { faded.push(this); return animate.apply(this, args); });
-		const comment = $state({ id: 'c', anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, acked: false, replies: [] });
+		const comment = $state<CommentThreadData>({ id: 'c', anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, acked: false, replies: [] });
 		host = document.createElement('div'); document.body.append(host);
 		component = mount(CommentThread, { target: host, props: { comment } }); flushSync();
-		comment.acked = true; flushSync(); await tick();
+		comment.acknowledgedBy = [{ id: 'ui', name: 'Steve', kind: 'user' }]; flushSync(); await tick();
 		const card = host.querySelector('.ct');
 		const copy = Array.from(document.body.children).find((node) => node !== host && node.getAttribute('aria-hidden') === 'true');
 		expect(copy?.classList.contains('ct')).toBe(true);

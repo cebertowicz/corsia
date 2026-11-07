@@ -228,9 +228,20 @@ describe('CommentThread', () => {
 	});
 
 	it('keeps the reply field available after Agree', () => {
-		render(thread({ acked: true }));
+		render(thread({ acked: true, acknowledgedBy: [{ id: 'ui', name: 'Steve', kind: 'user' }] }));
 		expect(host.querySelector('.ct-input')).not.toBeNull();
-		expect(host.textContent).toContain('Agreed');
+		expect(host.textContent).toContain('Agreed: Steve');
+	});
+
+	it('names everyone who agreed, and lights Agree only for the person', () => {
+		const infra = { id: 'infra', name: 'Infrastructure', kind: 'agent' as const };
+		render(thread({ acked: false, acknowledgedBy: [infra] }));
+		expect(host.querySelector('.ct-agreed')?.textContent).toContain('Agreed: Infrastructure');
+		expect(button('.ct-act.ack').classList.contains('on')).toBe(false);
+		unmount(component!); component = null; host.remove();
+		render(thread({ acked: true, acknowledgedBy: [{ id: 'ui', name: 'Steve', kind: 'user' }, infra] }));
+		expect(host.querySelector('.ct-agreed')?.textContent).toContain('Agreed: Steve, Infrastructure');
+		expect(button('.ct-act.ack').classList.contains('on')).toBe(true);
 	});
 
 	it('toggles Agree', () => {

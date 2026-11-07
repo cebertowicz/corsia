@@ -21,7 +21,10 @@ export type CommentThreadData = {
 	detached?: boolean;
 	/** An open suggestion edited inside: it keeps its place and cannot be accepted. */
 	textChanged?: boolean;
+	/** The person's own acknowledgement: it lights their Agree. */
 	acked?: boolean;
+	/** Everyone who has acknowledged the thread, in order: the Agreed line names them. */
+	acknowledgedBy?: { id: string; name: string; kind: 'user' | 'agent' }[];
 	replacement?: string | null;
 	insertAfter?: boolean;
 	decision?: 'accepted' | 'rejected' | null;
