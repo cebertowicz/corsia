@@ -225,7 +225,8 @@ class LivePlacement {
 		this.write(rows => rows.map(original => {
 			const state = flags.get(original.id);
 			const row = state ? { ...original, orphaned: state.orphaned, textChanged: state.text_changed, statusText: snapshotText } : original;
-			if (!(reload ? row.anchor && !row.review : placeable(row))) return row;
+			// The gate reads the row as it was asked about: an answer that orphans it still settles its placement.
+			if (!(reload ? row.anchor && !row.review : placeable(original))) return row;
 			const range = found.get(row.id);
 			if (range) return { ...row, placement: 'placed', drawn: true, from: range.from_off, to: range.to_off };
 			if (keep) return row;
@@ -247,8 +248,8 @@ class LivePlacement {
 	}
 
 	/** Drawn rows move only by their own relative positions, on every change to the text. */
-	private moved = (): void => {
-		this.needsStates = this.current().some(row => !!row.anchor && !row.review);
+	private moved = (event: Y.YTextEvent): void => {
+		if (!this.needsStates) this.needsStates = this.editsInside(event.delta);
 		if (!this.positions.size) return;
 		const { doc } = this.session;
 		this.write(rows => rows.map(row => {
@@ -259,6 +260,18 @@ class LivePlacement {
 			return from === undefined || to === undefined || (from === row.from && to === row.to) ? row : { ...row, from, to };
 		}));
 	};
+
+	/** Only an edit inside a drawn range can change its flags (typing at an edge lands outside); delta indices are pre-edit, like the rows'. */
+	private editsInside(delta: Y.YTextEvent['delta']): boolean {
+		const spans = this.current().filter(row => row.drawn && !!row.anchor && !row.review && row.from !== undefined && row.to !== undefined);
+		let at = 0;
+		for (const op of spans.length ? delta : []) {
+			const end = at + (op.retain ?? op.delete ?? 0);
+			if (!op.retain && spans.some(row => op.delete ? at < row.to! && end > row.from! : row.from! < at && at < row.to!)) return true;
+			at = end;
+		}
+		return false;
+	}
 }
 
 /** Follows the live sessions; a reset or closed document drops its positions and Placing state. */
