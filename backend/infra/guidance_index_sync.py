@@ -22,10 +22,6 @@ from infra.guidance_states import GitFault
 from infra.project_repo_lock_recovery import GitIndexLockRecoveryError, recover_stale_git_index_lock
 
 Git = Callable[..., str]
-# One save repairs at most this many left-behind paths; the rest wait for the next save. The sweep
-# bounds its own walk the same way (``guidance_git._SWEEP_LIMIT``) so a commit's subprocess count
-# stays bounded whatever a person has staged.
-_REPAIR_LIMIT = 100
 
 
 def index_lock_fault(git: Git, repo: Path) -> str:
@@ -57,9 +53,9 @@ def left_behind_entries(git: Git, repo: Path, sha: str, skip: set[str]) -> list[
     deleted guidance file an earlier save left behind therefore keeps its existing reported remedy, and
     only writes are re-synced here. A read fault means nothing is known, so nothing is touched.
     """
-    from core.guidance_paths import _guidance_shapes  # the sweep's own bound for guidance paths
+    from core.guidance_paths import guidance_shapes  # the sweep's own bound for guidance paths
 
-    specs = [f":(glob){shape}" for shape in _guidance_shapes()]
+    specs = [f":(glob){shape}" for shape in guidance_shapes()]
     try:
         # A name holding a newline means the record did not split as ``-z`` promises: nothing is known
         # about it, so nothing is touched.
@@ -75,19 +71,22 @@ def left_behind_entries(git: Git, repo: Path, sha: str, skip: set[str]) -> list[
     except GitFault as exc:
         logger.warning("guidance left-behind index scan skipped: {}", exc)
         return []
-    repairs: list[tuple[str, tuple[str, ...]]] = []
-    for rel in sorted(behind)[:_REPAIR_LIMIT]:
+    candidates: list[str] = []
+    for rel in sorted(behind):
         entries, want = index.get(rel) or [], head.get(rel)
         if len(entries) != 1 or want is None:  # absent from the index, unmerged, or absent from HEAD
             continue
         (mode, blob, stage), = entries
         if stage != "0" or want == (mode, blob):
             continue
-        if (repo / rel).exists() and _worktree_blob(git, repo, rel) == want[1]:
-            repairs.append((rel, ("--add", "--cacheinfo", f"{want[0]},{want[1]},{rel}")))
-    if len(behind) > _REPAIR_LIMIT:
-        logger.warning("guidance left-behind index scan: {} paths behind, {} checked", len(behind), _REPAIR_LIMIT)
-    return repairs
+        if (repo / rel).exists():
+            candidates.append(rel)
+    on_disk = _worktree_blobs(git, repo, candidates)
+    return [
+        (rel, ("--add", "--cacheinfo", f"{head[rel][0]},{head[rel][1]},{rel}"))
+        for rel in candidates
+        if on_disk.get(rel) == head[rel][1]
+    ]
 
 
 def _names(out: str) -> list[str]:
@@ -116,12 +115,17 @@ def _index_entries(git: Git, repo: Path, paths: list[str]) -> dict[str, list[tup
     return entries
 
 
-def _worktree_blob(git: Git, repo: Path, rel: str) -> str:
-    """The raw bytes on disk as a blob id: the same unfiltered hash ``_commit`` wrote into HEAD.
+def _worktree_blobs(git: Git, repo: Path, paths: list[str]) -> dict[str, str]:
+    """The raw bytes on disk as blob ids, in one ``hash-object`` call: the same unfiltered hash
+    ``_commit`` wrote into HEAD.
 
-    "" when Git cannot read the file at all. Nothing is known about it then, and the entry is left alone.
+    Empty when Git cannot read every file. Nothing is known then, and every entry is left alone.
     """
+    if not paths:
+        return {}
     try:
-        return git(repo, "hash-object", "--no-filters", "--", rel).strip()
+        out = git(repo, "hash-object", "--no-filters", "--stdin-paths", data="".join(f"{p}\n" for p in paths).encode())
     except GitFault:
-        return ""
+        return {}
+    blobs = out.split()
+    return dict(zip(paths, blobs)) if len(blobs) == len(paths) else {}

@@ -66,7 +66,7 @@ def classify_guidance_path(path: str | Path, *, workspace: str | Path, db) -> st
     return None
 
 
-def _guidance_shapes() -> tuple[str, ...]:
+def guidance_shapes() -> tuple[str, ...]:
     """The lexical workspace shapes which may contain guidance, excluding unrelated trees."""
     return tuple(
         f"{prefix}{shape}"
@@ -85,7 +85,7 @@ def guidance_candidates(workspace: Path, db) -> list[Path]:
     """
     root = workspace.resolve(strict=False)
     candidates = {
-        path for shape in _guidance_shapes() for path in root.glob(shape) if path.is_file()
+        path for shape in guidance_shapes() for path in root.glob(shape) if path.is_file()
     }
     if db is not None:
         candidates.update(path for path in configured_source_paths(workspace, db) if path.is_file())
@@ -94,7 +94,7 @@ def guidance_candidates(workspace: Path, db) -> list[Path]:
 
 def sweep_pathspecs(workspace: Path, db) -> list[str]:
     """Workspace-relative Git pathspecs that can hold guidance, for the sweep."""
-    specs = [f":(glob){shape}" for shape in _guidance_shapes()]
+    specs = [f":(glob){shape}" for shape in guidance_shapes()]
     root = workspace.resolve(strict=False)
     for path in sorted(configured_source_paths(workspace, db)):
         if path.resolve(strict=False).is_relative_to(root):
