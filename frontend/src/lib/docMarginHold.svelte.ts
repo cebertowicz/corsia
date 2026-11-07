@@ -3,6 +3,9 @@ import { fromStore } from 'svelte/store';
 import { EditorView } from '@codemirror/view';
 import { paneCollapsed } from '$lib/stores/paneCollapsed';
 
+/** The reader's own input, which ends a hold. */
+const TAKE_OVER = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+
 /** What waits for the hold on each text area to end. A hold that replaces another takes its waiters over. */
 const waiting = new WeakMap<HTMLElement, Set<() => void>>();
 
@@ -79,7 +82,14 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		observer.observe(view.contentDOM);
 		observer.observe(scroller);
 		const timer = setTimeout(() => stopHold?.(), 1500);
-		stopHold = (ended = true) => { observer.disconnect(); clearTimeout(timer); stopHold = null; if (ended) release(area); };
+		// The reader taking over (scrolling, pressing a card, typing) ends the hold, or its next resize would pull them back.
+		const takeOver = () => stopHold?.();
+		for (const kind of TAKE_OVER) document.addEventListener(kind, takeOver, { capture: true, passive: true });
+		stopHold = (ended = true) => {
+			observer.disconnect(); clearTimeout(timer); stopHold = null;
+			for (const kind of TAKE_OVER) document.removeEventListener(kind, takeOver, { capture: true });
+			if (ended) release(area);
+		};
 	});
 	onDestroy(() => stopHold?.());
 }
