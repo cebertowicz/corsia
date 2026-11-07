@@ -263,9 +263,7 @@
 		const comment = comments.find((item) => item.id === id);
 		navigationNotice = comment?.orphaned || comment?.review ? 'This comment has no text to jump to. Its quote and discussion remain here.' : '';
 		const useHalf = sheetDrawer && !comment?.regionNumber && !comment?.orphaned && !comment?.review;
-		if (useHalf) detent = 'half';
-		if (useHalf) onFocus(id, 'top');
-		else onFocus(id);
+		if (useHalf) { detent = 'half'; onFocus(id, 'top'); } else onFocus(id);
 	}
 	const decisions = createSuggestionDecisions({
 		comments: () => comments, artifactId: () => artifactId, target: () => target, open: () => surfaceState !== null,
