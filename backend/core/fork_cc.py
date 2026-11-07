@@ -142,7 +142,7 @@ async def capture_warm_source(
     if not prefix:
         return warm_capture_refused(thread_id, "claude-code", "empty_prefix")
     if identity[6] != CONFINEMENT_NONE:
-        # A confined launch has no CORSIA tools a fork could use, and resuming
+        # A confined launch has only CORSIA's confined read tools, and resuming
         # its session must never widen what it may read.
         return warm_capture_refused(thread_id, "claude-code", "confined_launch")
     invocation = replace(invocation, binary=binary)

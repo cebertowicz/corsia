@@ -1,8 +1,12 @@
-"""CI-only proof for the Claude Code confined review-child profile.
+"""CI-only proof for the Claude Code confined worker's profile.
 
 This intentionally launches the stock CLI, not a mocked command builder.  The
 fixture controls the model responses and records the tool results the CLI sends
-back, so each denied operation fails this test if it starts succeeding.
+back, so each denied operation fails this test if it starts succeeding.  The
+confined profile admits no native Claude tool: reads go through CORSIA's
+confined read tools over the bridge, and this fixture runs no bridge, so it
+points the launch at an empty MCP config.  What a real bridge advertises and
+serves a confined child is proved in tests/test_cc_confined_bridged_reads.py.
 """
 
 from __future__ import annotations
@@ -29,7 +33,8 @@ from reviewer.reviewer_exact_source import (
     render_write_profile,
 )
 from subagents.cc_env import clean_claude_env
-from subagents.cc_invocation import claude_untrusted_profile_args
+from claude_controls import confined_claude_controls
+from subagents.cc_invocation import ClaudeInvocation, build_claude_cmd, confined_claude_tool_names
 
 
 CLAUDE_MD_MARKER = "REVIEW_CHILD_MUST_NOT_LOAD_THIS_CLAUDE_MD"
@@ -175,14 +180,33 @@ class _ReviewPeer:
         )
 
 
-def test_review_profile_args_leave_only_read_tools_available():
-    args = claude_untrusted_profile_args()
+def test_confined_profile_admits_no_native_tool():
+    """The confined profile's own argv, without spawning anything.
 
-    assert args == [
-        "--restricted", "--safe-mode", "--setting-sources", "",
+    The one tool set is CORSIA's confined read tools over the bridge, and the
+    profile strips settings, plugins and slash commands, with the bridge config
+    as the only MCP file the child may read.
+    """
+    argv = build_claude_cmd(
+        ClaudeInvocation(
+            binary="claude", permission_mode="dontAsk", session_id="sid",
+            mcp_config="empty.json", model="claude-sonnet-4-6",
+            confinement="untrusted",
+        ),
+        stream_input=False,
+    )
+
+    assert argv[argv.index("--restricted"):] == [
+        "--restricted", "--setting-sources", "",
         "--strict-mcp-config", "--permission-mode", "dontAsk",
-        "--tools", "Read,Grep,Glob",
+        "--tools", ",".join(confined_claude_tool_names()),
+        "--allowedTools", *confined_claude_tool_names(),
+        "--disable-slash-commands",
+        "--mcp-config", "empty.json",
+        "--model", "claude-sonnet-4-6",
     ]
+    assert confined_claude_controls()[:2] == ["--restricted", "--safe-mode"]
+    assert "--safe-mode" not in confined_claude_controls(mcp_tools=True)
 
 
 def test_review_peer_deduplicates_replayed_result_by_tool_use_id():
@@ -196,7 +220,15 @@ def test_review_peer_deduplicates_replayed_result_by_tool_use_id():
 
 
 @pytest.mark.integration
-async def test_review_child_profile_confines_stock_claude_to_the_fixed_head():
+async def test_confined_profile_leaves_stock_claude_no_native_tool():
+    """Run the real CLI with the confined worker's flags against a fixture peer.
+
+    The proof behind the confinement claim: the arg set, not a permission
+    prompt, is what leaves the child with no native tool at all -- including no
+    file read, because reads go through the CORSIA bridge this fixture does not
+    run. It also proves the profile cannot see the user's CLAUDE.md or fire any
+    hook of theirs, and that the fixed-head tree stays unread and unwritten.
+    """
     if not _can_apply_sandbox():
         _skip_or_fail("needs macOS sandbox-exec outside the agent shell; CI L3 provides it")
     binary = shutil.which("claude")
@@ -258,10 +290,18 @@ async def test_review_child_profile_confines_stock_claude_to_the_fixed_head():
         profile = render_write_profile([str(run_dir)], scope) + "(deny network*)" + (
             f'(allow network-outbound (remote ip "localhost:{port}"))'
         )
+        # The launch's own confinement flags: the bridge read tools are the only
+        # tool set, and this empty MCP config stands in for the bridge CORSIA
+        # would otherwise hand the child through --mcp-config.
+        empty_mcp = base / "empty-mcp-config.json"
+        empty_mcp.write_text(json.dumps({"mcpServers": {}}))
         command = [
             "/usr/bin/sandbox-exec", "-p", profile, binary, "-p", "Run each requested tool call.",
-            "--output-format", "stream-json", "--verbose", "--model", "claude-sonnet-4-6", "--add-dir", str(head_tree),
-            *claude_untrusted_profile_args(),
+            "--output-format", "stream-json", "--verbose", "--model", "claude-sonnet-4-6",
+            *confined_claude_controls(),
+            "--tools", ",".join(confined_claude_tool_names()),
+            "--allowedTools", *confined_claude_tool_names(),
+            "--disable-slash-commands", "--mcp-config", str(empty_mcp),
         ]
         process = await asyncio.create_subprocess_exec(
             *command, cwd=str(run_dir), env=env,
@@ -275,15 +315,17 @@ async def test_review_child_profile_confines_stock_claude_to_the_fixed_head():
 
         events = [json.loads(line) for line in stdout.decode().splitlines() if line.strip()]
         init = next(event for event in events if event.get("type") == "system" and event.get("subtype") == "init")
-        assert sorted(init["tools"]) == ["Glob", "Grep", "Read"]
+        # The child declares no tool of its own. The only names it may ever
+        # declare are CORSIA's bridge tools, and none is reachable here.
+        native = [name for name in init["tools"] if not name.startswith("mcp__corsia__")]
+        assert not native, f"the confined profile left native tools available: {native}"
 
         tool_results = [peer.results[f"review-check-{index}"] for index in range(1, len(checks) + 1)]
-        assert HEAD_CONTENT in _as_text(tool_results[0])
+        for (name, _), result in zip(checks, tool_results):
+            assert _denied(result), f"{name} unexpectedly succeeded: {_as_text(result)}"
+        assert HEAD_CONTENT not in _as_text(tool_results[0])
         for name, result in zip(("Read", "Grep", "Glob"), tool_results[1:4]):
-            assert _denied(result), f"{name} unexpectedly succeeded: {_as_text(result)}"
             assert OUTSIDE_CONTENT not in _as_text(result)
-        for name, result in zip(("Write", "Edit", "Task", "Bash", "mcp__corsia__read_file", "WebFetch"), tool_results[4:]):
-            assert _denied(result), f"{name} unexpectedly succeeded: {_as_text(result)}"
         assert not write_target.exists()
         assert (head_tree / "allowed.txt").read_text() == HEAD_CONTENT
         assert not hook_target.exists()

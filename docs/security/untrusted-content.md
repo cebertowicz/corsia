@@ -40,11 +40,11 @@ All of these reach the agent as ordinary tool output. The Messages tools' descri
 
 An agent that must read content from a source neither it nor you controls (an outside contributor's code, mail from an unknown sender) can hand the reading to an **untrusted** worker (`delegate_task` with confinement `untrusted`). That worker:
 
-- can only read and search files in the folders it was given, which must be folders its parent can already read. On Claude Code that means Claude Code's own Read, Grep and Glob, from an empty working folder, with no CORSIA tools and no credential (`backend/subagents/cc_invocation.py`, `cc_confinement.py`). On other harnesses it means CORSIA's `read_file`, `grep`, `glob` and `list_dir`, with every path checked as given and as resolved (`backend/tools/confined_reads.py`)
+- can only read and search files in the folders it was given, which must be folders its parent can already read. With Claude Code or Codex alike, it reads through CORSIA's `read_file`, `grep`, `glob` and `list_dir`, with every path checked as given and as resolved (`backend/tools/confined_reads.py`). On Claude Code those four are its only tools; it gets none of Claude Code's own. The worker runs from an empty working folder with no credential in its environment (`backend/subagents/cc_invocation.py`, `cc_confinement.py`)
 - can't write, run commands, use the web, send anything, or use a lease
 - hands back only its final answer, labelled as an isolated result; its errors reach the parent only as fixed CORSIA text (`backend/infra/thread_confinement.py`)
 
-**Limits:** the worker's answer goes back to the parent agent, which reads it and decides what to do. An injection that convinces the worker to write a misleading summary can still mislead the parent. On Claude Code the worker's reads don't go through CORSIA, so credential masking ([Secrets](secrets.md)) doesn't apply to what it reads. The Codex worker process itself isn't OS-sandboxed; CORSIA enforces its paths, and only Codex versions CORSIA has checked will start. Nothing forces an agent to use an isolated worker; the instructions agents receive tell them to.
+**Limits:** the worker's answer goes back to the parent agent, which reads it and decides what to do. An injection that convinces the worker to write a misleading summary can still mislead the parent. The Codex worker process itself isn't OS-sandboxed; CORSIA enforces its paths, and only Codex versions CORSIA has checked will start. Nothing forces an agent to use an isolated worker; the instructions agents receive tell them to.
 
 ## What limits the damage when an injection works
 

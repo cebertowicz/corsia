@@ -124,7 +124,7 @@ def test_settlement_keeps_provider_identity_with_its_launcher(monkeypatch, integ
         for thread in ("parent", "worker"):
             metadata = None
             if integration == "claude-code" and thread == "worker":
-                metadata = {"claude_invocation": {"confinement": "untrusted", "add_dirs": ["/src"],
+                metadata = {"claude_invocation": {"confinement": "untrusted",
                                                    "working_dir": "/worker/confined"}}
             models.register_artifact(integration=integration, type=kind, external_id=thread,
                                      parent_thread_id=thread, metadata=metadata, db=db)

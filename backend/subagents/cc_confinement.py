@@ -1,9 +1,10 @@
 """Where a confined Claude Code child runs and what it may read.
 
-A ``untrusted`` child reads only its own empty working directory and the
-add-dirs its parent could already read, and holds no credential. The
-confinement is stored on the thread row. A cold launch reads that row;
-a live process retains the confinement it was launched with.
+A ``untrusted`` child runs in its own empty working directory and reads only
+read dirs its parent could already read, through CORSIA's confined read
+tools; the tool boundary checks every call against the thread row's read dirs.
+It holds no credential. Every launch reads its read dirs from that row; a live
+process keeps only the mode and working directory it was launched with.
 """
 
 from __future__ import annotations
@@ -71,18 +72,20 @@ def drop_untrusted_credentials(env: dict[str, str]) -> None:
 def launch_confinement(thread_id: str, live, db) -> LaunchConfinement:
     """The one confinement read for a launch, made at its start.
 
-    A live process keeps the confinement it was launched with; otherwise the
-    thread's row (``infra.thread_confinement``) decides, including for a
-    worker made confined on another harness.
+    The read dirs always come from the thread's row (``infra.thread_confinement``),
+    the one copy the tool boundary enforces. A live process keeps the mode and
+    working directory it was launched with; otherwise the row decides those too,
+    including for a worker made confined on another harness.
     """
+    from infra.thread_confinement import ConfinementRecordDamaged, read_dirs
+    from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
+
+    launched = None
     invocation = getattr(getattr(live, "session", None), "invocation", None)
     if callable(invocation):
         launched = invocation()
         if launched.confinement == CONFINEMENT_NONE:
             return UNCONFINED
-        return LaunchConfinement(launched.confinement, launched.add_dirs, launched.working_dir)
-    from infra.thread_confinement import ConfinementRecordDamaged, read_dirs
-    from subagents.cc_invocation import CONFINEMENT_UNTRUSTED
 
     owned = db is None
     if owned:
@@ -94,6 +97,10 @@ def launch_confinement(thread_id: str, live, db) -> LaunchConfinement:
             dirs = read_dirs(thread_id, db)
         except ConfinementRecordDamaged as error:
             raise ConfinementRefused(str(error)) from error
+        if launched is not None:
+            if dirs is None:
+                raise ConfinementRefused("confined Claude Code child has no read dirs on its thread")
+            return LaunchConfinement(launched.confinement, dirs, launched.working_dir)
         if dirs is None:
             return UNCONFINED
         project_id = db.execute("SELECT project_id FROM threads WHERE id=?", (thread_id,)).fetchone()[0]
@@ -106,11 +113,11 @@ def launch_confinement(thread_id: str, live, db) -> LaunchConfinement:
 def launch_tools(working_dir: str | None, confined: bool) -> tuple[object, tuple]:
     """The CORSIA tool registry and definitions a launch installs and budgets.
 
-    An untrusted child has no tool bridge, so it gets neither, however it launches.
+    A confined launch builds the same registry as any other and is advertised
+    only its confined read tools; the boundary still refuses every other call
+    and every path outside its read roots when the call arrives.
     """
-    if confined:
-        return None, ()
     from subagents.harness_tool_bridge import build_tool_registry, dynamic_tool_definitions
 
     registry = build_tool_registry(working_dir)
-    return registry, dynamic_tool_definitions(registry)
+    return registry, dynamic_tool_definitions(registry, confined)

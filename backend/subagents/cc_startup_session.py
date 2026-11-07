@@ -6,7 +6,7 @@ from typing import Any
 
 from registry.cc_session import CCRegistrationChanged
 from registry.service import register_cc_session
-from subagents.cc_invocation import CONFINEMENT_NONE, permission_mode_for
+from subagents.cc_invocation import permission_mode_for
 from subagents.cc_runtime_errors import CCPreparedDestinationStale
 from subagents.cc_runtime_state import _Live
 from subagents.cc_startup_context import CCStartupContext
@@ -25,13 +25,13 @@ def build_starting_session(
 ):
     """Build the exact provider process frozen by destination preflight.
 
-    A confined launch gets no CORSIA tool bridge; its read-only profile and
-    add-dirs come from the launch record, so they survive every cold start.
+    A confined launch gets the same bridge as any other, advertised only its
+    confined read tools; its read dirs and working dir come from
+    ``launch_confinement``, which a cold start answers from the thread row.
     """
     from subagents.harness_tool_bridge import configure_cc_tool_bridge
 
-    confined = context.confinement != CONFINEMENT_NONE
-    mcp_config = None if confined else configure_cc_tool_bridge(
+    mcp_config = configure_cc_tool_bridge(
         live,
         thread_id=thread_id,
         working_dir=context.working_dir,
@@ -45,7 +45,6 @@ def build_starting_session(
         mcp_config=mcp_config,
         permission_mode=permission_mode_for(context.confinement),
         confinement=context.confinement,
-        add_dirs=context.add_dirs,
         working_dir=context.working_dir,
         claude_dir=live.claude_dir,
         model=context.model_alias,
