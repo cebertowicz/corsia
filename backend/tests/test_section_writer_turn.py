@@ -491,6 +491,16 @@ def test_replace_all_scans_the_headings_once(monkeypatch):
     assert len(scans) == 1
 
 
+def test_the_last_edit_keeps_no_offset_runs(monkeypatch):
+    """Only a later edit reads the runs, so a lone replace_all holds nothing per occurrence."""
+    from doceditor import section_writes
+
+    text = "## A\n" + "e" * 1000 + "\n## B\ne\n"
+    monkeypatch.setattr(section_writes, "_moved", lambda *args: pytest.fail("the last edit built runs"))
+    edits = [{"old_string": "e", "new_string": "E", "replace_all": True}]
+    assert section_writes.edit_sections(text, edits) == ["## A", "## B"]
+
+
 def test_edits_find_their_sections_as_they_are_applied_one_after_another():
     """Each edit matches the text the edits before it left, as ``match_edits`` applies them."""
     from doceditor import section_writes

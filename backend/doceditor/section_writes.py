@@ -47,28 +47,33 @@ def edit_sections(text: str, edits: list[dict[str, Any]]) -> list[str]:
     once; each match is carried back to ``text`` by the original offsets of the characters it covers
     (a replacement's characters all carry the span they replaced) and placed by bisect. The offsets
     are kept as runs, one per kept stretch or replacement, so the cost follows the edits, not the
-    document's length.
+    document's length. Only a later edit reads them, so the last edit keeps none: a lone replace_all
+    over many occurrences holds no per-occurrence state.
     """
     sections = doc_sections.Sections(text)
     runs: list[_Run] = [(0, len(text), 0, 0, True)]
     touched: dict[str, None] = {}
-    for edit in edits:
+    for index, edit in enumerate(edits):
         old, new, every = edit["old_string"], edit["new_string"], bool(edit.get("replace_all"))
         start = text.find(old) if old else -1
         if start < 0:
             continue
+        last = index == len(edits) - 1
         kept: list[_Run] = []
         done = at = 0
         while start >= 0:
             low, high = _original(runs, start)[0], _original(runs, start + len(old) - 1)[1]
             touched.update(dict.fromkeys(sections.between(low, high)))
-            kept += _moved(runs, done, start, at)
-            at += start - done
-            if new:
-                kept.append((at, at + len(new), low, high, False))
-                at += len(new)
+            if not last:
+                kept += _moved(runs, done, start, at)
+                at += start - done
+                if new:
+                    kept.append((at, at + len(new), low, high, False))
+                    at += len(new)
             done = start + len(old)
             start = text.find(old, done) if every else -1
+        if last:
+            break
         runs = kept + _moved(runs, done, len(text), at)
         text = text.replace(old, new, -1 if every else 1)
     return list(touched)
