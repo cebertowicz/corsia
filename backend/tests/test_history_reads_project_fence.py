@@ -175,12 +175,15 @@ async def test_agent_reads_the_history_of_its_own_project(world):
 
 
 async def test_agent_outside_a_project_is_refused_its_thread_history(world):
-    """A direct read naming a fenced thread refuses with the file tools' ordinary copy."""
+    """A direct read naming a fenced thread refuses with the thread copy: same wall, no
+    offer of a host-access lease, which cannot open history."""
     _message(T_BETA, 1, "beta private decision")
 
     out = await _history(T_BETA, caller=CALLER_ALPHA)
 
     assert f"`{T_BETA}` is in project `beta`, outside your scope" in out
+    assert "Host access doesn't open it. Ask the CORSIA agent." in out
+    assert "request_host_access" not in out
     assert "beta private decision" not in out
 
 
@@ -211,7 +214,22 @@ async def test_unknown_caller_fails_closed(world):
     out = await _history(T_BETA, caller="no-such-thread")
 
     assert "outside your scope" in out
+    assert "request_host_access" not in out
     assert "beta private decision" not in out
+
+
+async def test_fail_closed_caller_on_a_thread_with_no_project_names_the_workspace_agent(world):
+    """The workspace-agent thread copy is reachable, not decoration: a caller whose own
+    thread row cannot be read is fenced from everything, so a thread that belongs to no
+    project is refused too, and the refusal names what it is."""
+    _message(T_OPEN, 1, "workspace-level decision")
+
+    out = await _history(T_OPEN, caller="no-such-thread")
+
+    assert f"`{T_OPEN}` belongs to a workspace agent, outside your scope" in out
+    assert "Host access doesn't open it. Ask the CORSIA agent." in out
+    assert "request_host_access" not in out
+    assert "workspace-level decision" not in out
 
 
 async def test_corsia_agent_is_walled_from_local_only_history_only(world):

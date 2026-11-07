@@ -216,43 +216,51 @@ def fence_for_thread(thread_id: str | None, *, db=None) -> Fence:
 
     Which projects the caller is fenced from is the one rule in
     ``infra.project_fence.fenced_project_ids``, which the history readers apply to
-    the same set; this only turns those projects into paths. No thread is the
-    person's own session, so nothing is fenced from it. A thread id with no row is
-    fenced from every project, as a workspace agent is.
+    the same set; this only turns those projects into paths. The caller's facts are
+    read once with ``read_caller`` and every decision here comes from that value. No
+    thread is the person's own session, so nothing is fenced from it. A thread id with
+    no row is fenced from every project, as a workspace agent is.
     """
     if not thread_id:
         return Fence()
     from infra.config import WORKSPACE
-    from infra.corsia_agent import get_corsia_agent
     from infra.database import get_db
-    from infra.project_fence import ALL, fenced_project_ids
+    from infra.project_fence import ALL, fenced_project_ids, read_caller
 
     db = db or get_db()
     workspace = Path(WORKSPACE)
-    fenced = fenced_project_ids(thread_id, db=db)
-    corsia_agent = get_corsia_agent(db=db)
+    # One read of the caller's facts, so the project set and the inside-every-project
+    # rule below can never be computed from two different answers.
+    caller = read_caller(thread_id, db=db)
+    fenced = fenced_project_ids(caller, db=db)
+    corsia_agent = caller.is_corsia_agent
+    inside_all = caller.inside_every_project
 
     def fences(project_id: str | None, local_only: bool) -> bool:
         """Whether one project row, or a folder claiming none, is fenced from this caller."""
         if fenced is ALL:
             return True
+        if inside_all:
+            # Inside every project by rule — the CORSIA agent on its own Local only
+            # lock — so nothing is walled from it, not even a folder no project
+            # claims. Fencing those would refuse it the work it is locked to do.
+            return False
         if project_id is None:
             # A folder under ``projects/`` that claims no project row may still be a
             # project's folder, so every agent but one inside all of them fences it;
             # a Local only leak fences it for the CORSIA agent too.
-            return local_only if thread_id == corsia_agent else True
+            return local_only if corsia_agent else True
         return project_id in fenced
 
     if fenced is ALL:
         _failed_closed("caller_unknown", thread_id)
     roots = _project_roots(workspace, db, fences)
-    if thread_id == corsia_agent:
+    if corsia_agent:
         return Fence(_drop_nested(roots), thread_id)
-    own = db.execute("SELECT project_id FROM threads WHERE id = ?", (thread_id,)).fetchone()
-    if own and own["project_id"]:
+    if caller.project_id:
         agents = db.execute(
             "SELECT id FROM threads WHERE project_id IS NULL AND (agent_enabled = 1 OR id = ?) AND id != ?",
-            (corsia_agent, thread_id),
+            (caller.designated_agent, thread_id),
         )
         roots.extend(FencedRoot(workspace / ".threads" / row["id"]) for row in agents)
     return Fence(_drop_nested(roots), thread_id)

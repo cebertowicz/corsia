@@ -105,6 +105,72 @@ def test_cloud_corsia_agent_is_fenced_from_local_only_projects_and_local_one_fro
     assert fence_for_thread(CORSIA_AGENT).roots == ()
 
 
+def test_local_one_corsia_agent_fences_nothing_even_when_a_local_only_folder_is_lost(world):
+    """The fail-closed folder rule must not fence a caller that is inside every project.
+
+    While a Local only project's folder does not resolve, every folder no project
+    claims is treated as that project, because any of them could be it. A cloud CORSIA
+    agent is fenced from those folders; the same agent on its own Local only lock is
+    inside every project, so it is fenced from none of them: the fail-closed guess
+    protects a project the caller is already inside.
+    """
+    from tools.project_fence import fence_for_thread
+
+    world.db.execute("UPDATE threads SET local_only = 1 WHERE id = ?", (CORSIA_AGENT,))
+    (world.workspace / "projects" / "secret").rmdir()
+
+    assert fence_for_thread(CORSIA_AGENT).roots == ()
+
+    # The lost folder does fence the same caller once it is back on a cloud model, so
+    # the assertion above is the caller's rule at work and not an empty workspace.
+    world.db.execute("UPDATE threads SET local_only = 0 WHERE id = ?", (CORSIA_AGENT,))
+    assert _paths(fence_for_thread(CORSIA_AGENT)) == {world.workspace / "projects" / "legacy"}
+
+
+def test_one_fence_comes_from_one_read_of_the_caller(world):
+    """Every decision in one fence derives from one read of the caller's facts.
+
+    The split this pins: reading the caller's Local only lock in two statements lets a
+    lock change between them, so the fenced project set could come from the locked
+    answer while the inside-every-project rule came from the unlocked one, leaving a
+    CORSIA agent that is on a cloud model with no Local only deny rules for that call.
+    One read makes the two answers the same value, so the count is asserted and the
+    cloud agent's Local only fence is asserted from the same call.
+    """
+    from tools.project_fence import fence_for_thread
+
+    class CountingDb:
+        """Delegates to the real connection, counting reads of the caller's own row."""
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __getattr__(self, name):
+            return getattr(world.db, name)
+
+        def execute(self, statement, params=()):
+            if "FROM threads WHERE id = ?" in statement:
+                self.calls += 1
+            return world.db.execute(statement, params)
+
+    projects = world.workspace / "projects"
+    threads = world.workspace / ".threads"
+    for caller, expected in (
+        # The cloud-model workspace agent: one read, and it still loses Local only.
+        (CORSIA_AGENT, {projects / "secret"}),
+        # A project agent: one read as well, and the fence still keeps every other
+        # project and the workspace agents' folders out.
+        (ALPHA_AGENT, {
+            projects / "beta", projects / "secret", projects / "legacy",
+            threads / WORKSPACE_AGENT, threads / CORSIA_AGENT,
+        }),
+    ):
+        db = CountingDb()
+        fence = fence_for_thread(caller, db=db)
+        assert db.calls == 1, f"{caller}: caller row read {db.calls} times"
+        assert _paths(fence) == expected
+
+
 def test_no_caller_is_unfenced_and_an_unknown_thread_is_fenced_from_every_project(world, monkeypatch):
     from tools import project_fence
 
