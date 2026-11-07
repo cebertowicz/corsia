@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
 
-function setup(overrides: Partial<DocumentKeyState> & { sheetUp?: boolean } = {}) {
+function setup(overrides: Partial<DocumentKeyState> = {}) {
 	const anchor = document.createElement('button');
 	const commentUI = { state: { kind: 'list' }, anchor, sheetUp: true, close: vi.fn(), restoreFocus: vi.fn() };
 	const state: DocumentKeyState = {
@@ -39,6 +39,18 @@ describe('handleDocumentKey Escape', () => {
 		handleDocumentKey(event, state);
 
 		expect(state.commentUI.close).not.toHaveBeenCalled();
+		expect(state.close).toHaveBeenCalledOnce();
+	});
+
+	it('closes the document when the desktop comments list is open and focus is outside its anchor', () => {
+		const { state, commentUI } = setup();
+		state.commentUI.sheetUp = false;
+		const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
+		document.body.dispatchEvent(event);
+
+		handleDocumentKey(event, state);
+
+		expect(commentUI.close).not.toHaveBeenCalled();
 		expect(state.close).toHaveBeenCalledOnce();
 	});
 });
