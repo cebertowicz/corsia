@@ -10,13 +10,13 @@ from typing import Any, Callable
 from infra.db_async import run_in_db
 from infra.send_broadcast import broadcast_input_row, broadcast_newest_error
 from infra.send_post_admission import (
-    broadcast_passive,
+    publish_accepted_admission,
     publish_projection,
     request_boundary_for_admission,
     resolve_claimed_target,
     target_for as _target_for,
 )
-from infra.send_types import InboxQueuedInput, InputReceipt, SendRejected, SendResult
+from infra.send_types import InboxQueuedInput, SendRejected, SendResult
 from infra.input_preparation import admit_prepared_input
 from infra.thread_driver import InputAdmission
 from infra.thread_input_types import HeldAdmission
@@ -96,17 +96,6 @@ def _delivery_options(
         "broadcast_input": broadcast_input,
         "touch_session_on_insert": touch_thread_on_insert,
     }
-
-
-def _receipt(admission: InputAdmission) -> InputReceipt:
-    accepted = admission.accepted
-    return InputReceipt(
-        accepted.thread_id,
-        accepted.message_id,
-        accepted.input_order,
-        accepted.revision,
-        accepted.created_at,
-    )
 
 
 def _require_thread_identity(thread_id: str, thread_row: Any) -> None:
@@ -225,34 +214,26 @@ async def _deliver_admission(
     broadcast_input: bool,
     broadcast_exclude_ws: Any | None,
     on_admitted: Callable[[InboxQueuedInput], Awaitable[None]] | None,
+    human_origin: bool,
 ) -> SendResult | InboxQueuedInput:
     delivery_after_failed_prefix = await _raise_if_committed_failure(admission)
-    await broadcast_passive(admission, broadcast_input)
-    held = admission.accepted.delivery_error is not None
-    limited = admission.batch if isinstance(admission.batch, HeldAdmission) else None
-    if (
-        broadcast_input
-        and not admission.accepted.duplicate
-        and delivery_after_failed_prefix in (None, "queued")
-    ):
-        await publish_projection(
-            "input broadcast", admission,
-            lambda: broadcast_accepted_input(
-                admission, text, metadata, role=role,
-                exclude_ws=None if held else broadcast_exclude_ws,
-            ),
-        )
-    queued = InboxQueuedInput(
-        _receipt(admission),
-        held=limited,
-        admission_hold=admission.accepted.delivery_error if held else None,
-        duplicate=admission.accepted.duplicate, delivery_state=admission.accepted.delivery_state,
+    queued = await publish_accepted_admission(
+        admission, text, metadata, role=role,
+        broadcast_input=broadcast_input, broadcast_exclude_ws=broadcast_exclude_ws,
+        delivery_after_failed_prefix=delivery_after_failed_prefix, on_admitted=on_admitted,
     )
-    if on_admitted is not None:
-        await publish_projection("on_admitted", admission, lambda: on_admitted(queued))
+    held = queued.admission_hold is not None
+    limited = queued.held
     if limited is not None:
         from infra.turn_admission_driver import drive_turn_admission
 
+        if human_origin and not admission.accepted.duplicate:
+            from functools import partial
+            from infra.held_usage_recheck import request_held_usage_recheck
+
+            await publish_projection(
+                "human usage recheck", admission, partial(request_held_usage_recheck, limited),
+            )
         await drive_turn_admission(limited)
         return queued
     if admission.accepted.duplicate or held:
@@ -298,6 +279,7 @@ async def send_thread_input(
     content: str,
     *,
     role: str = "user",
+    human_origin: bool = False,
     user: dict | None = None,
     metadata: dict | None = None,
     delivery_intent: str = "apply_now",
@@ -368,7 +350,7 @@ async def send_thread_input(
         text=text, metadata=metadata, role=role,
         broadcast_input=broadcast_input,
         broadcast_exclude_ws=broadcast_exclude_ws,
-        on_admitted=on_admitted,
+        on_admitted=on_admitted, human_origin=human_origin,
     )
 
 

@@ -15,6 +15,23 @@ from ws.message_dispatch import _send_error, _send_input_accepted
 OwnedThread = Callable[[dict, str], Awaitable[object | None]]
 
 
+class _FeedReceipt:
+    def __init__(self, ws: WebSocket, thread_id: str, input_id: str):
+        self.ws, self.thread_id, self.input_id = ws, thread_id, input_id
+        self.sent = False
+
+    async def publish_held(self, result) -> None:
+        # A held input must be acknowledged before its usage control read.
+        # Non-held admission is provisional; delivery owns its final receipt.
+        if result.held is not None or result.admission_hold is not None:
+            await self.publish(result)
+
+    async def publish(self, result) -> None:
+        if not self.sent:
+            await _send_input_accepted(self.ws, self.thread_id, self.input_id, result)
+            self.sent = True
+
+
 async def _deliver_subagent_input(
     ws: WebSocket, child_thread_id: str, session: object, content: str,
     attachments: list | None, is_edited: bool, input_id: str,
@@ -30,6 +47,7 @@ async def _deliver_subagent_input(
         metadata["viewing_document"] = viewing_document
     if reply_context is not None:
         metadata["reply_context"] = reply_context
+    receipt = _FeedReceipt(ws, child_thread_id, input_id)
     try:
         result = await send_thread_input_fn(
             child_thread_id,
@@ -43,8 +61,10 @@ async def _deliver_subagent_input(
             touch_thread_on_insert=True,
             trim_content=False,
             native_mode="delegation",
+            human_origin=True,
+            on_admitted=receipt.publish_held,
         )
-        await _send_input_accepted(ws, child_thread_id, input_id, result)
+        await receipt.publish(result)
         return None
     except SendRejected as exc:
         return exc.detail

@@ -7,7 +7,7 @@ import { token } from '$lib/stores/auth';
 import { connectionState } from '$lib/stores/connection';
 import { _resetCheckpointsForTests } from '$lib/stores/checkpoints';
 import { clearAllContextUsage } from '$lib/stores/contextUsageByThread';
-import { _resetThreadModelTruthForTests, acceptThreadModelTruth, activeModelId, finishThreadModelSwitch, models, threadModelFor } from '$lib/stores/models';
+import { _resetThreadModelTruthForTests, acceptThreadModelTruth, activeModelId, _resetThreadModelRequestsForTests, models, threadModelFor } from '$lib/stores/models';
 import { threadCatalogs } from '$lib/stores/modelsState';
 import { subagentMeta, subagentThreadRows } from '$lib/stores/subagents';
 import { activeThreadId, reasoningEffort, threads } from '$lib/stores/threads';
@@ -62,7 +62,7 @@ beforeEach(() => {
 	document.body.appendChild(host);
 	token.set('tok');
 	connectionState.set('connected');
-	finishThreadModelSwitch('worker');
+	_resetThreadModelRequestsForTests();
 	_resetThreadModelTruthForTests();
 	acceptThreadModelTruth('worker', WORKER_MODEL, '2026-10-20T09:59:00.000000');
 	_resetCheckpointsForTests();

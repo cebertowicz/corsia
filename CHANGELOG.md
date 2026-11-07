@@ -33,6 +33,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Messages in Connected apps now says Enable and Turn off, and explains what Full Disk Access allows before you enable it.
 - First run's About you step now opens its document for you to review. Before, the document could not be created, so the step fell back to chat.
 - On a local model that runs short of memory partway through a reply, the context meter now measures the chat against what still fits in memory for the rest of that reply, the same limit CORSIA checks before each call, instead of showing it far emptier than it is.
+- On a narrow screen, opening another agent's chat from a chat now keeps it visible.
 - On a paired computer, the update screen no longer tells you to open CORSIA on your main computer during a normal restart; it says so only if the restart takes longer than usual.
 - On a phone, pressing Escape with the comments sheet open closes only the sheet, and the document stays open.
 - On a touch screen with a wide window, such as a tablet, the message box no longer covers Won’t do on a task for you.
@@ -42,6 +43,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Selecting text in a table cell works across the whole cell: you can drag over any part of it, and its comment button appears when you let go.
 - Setup asks you to sign in once for each of Claude Code and Codex. Settings > Providers shows a signed-out account with Sign in, Remove replaces turning an account off, and in the model picker a model whose account is signed out reads “signed out”.
 - Setup no longer offers to download the local model again while it loads after you press Retry on a model that couldn’t load.
+- Switching models now shows progress as soon as you choose in all chats. Sending a new message to a chat held by a Claude Code or Codex usage limit checks that account again; if usage has reset, queued messages resume in order.
 - The CORSIA agent now does your work itself by default, including email and messages on accounts connected outside projects. It suggests a separate agent from the start only for an area of your life with its own contacts and responsibilities, and for other work only when you say so, or once it keeps taking more of your time per finished task, getting fewer tasks right the first time, or costing more.
 - The update screen's percentage now moves in step with the real time each stage takes, from waiting for agents through the restart, instead of sitting near 12% and then racing to 100%. Watched from a paired computer, it keeps counting through the restart and startup and no longer leaps when the main computer answers.
 - In version history, Restore on a read-only file is unavailable, and the version you open says the file is read-only, instead of failing when you press it.

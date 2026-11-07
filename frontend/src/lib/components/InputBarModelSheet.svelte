@@ -114,7 +114,8 @@
 		const previousId = sel.modelId;
 		const dispatchId = getModelDispatchId(model);
 		if (modelMatchesId(model, previousId)) return;
-		if (target && !beginThreadModelSwitch(target)) return;
+		const request = target ? beginThreadModelSwitch(target, dispatchId) : null;
+		if (target && !request) return;
 		try {
 			if (!target) {
 				setActiveModel(dispatchId);
@@ -148,7 +149,7 @@
 				'error',
 			);
 		} finally {
-			if (target) finishThreadModelSwitch(target);
+			if (target && request) finishThreadModelSwitch(target, request);
 		}
 	}
 </script>

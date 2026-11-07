@@ -1,4 +1,4 @@
-import { get } from 'svelte/store';
+import { get, writable } from 'svelte/store';
 import { activeModelId, getModelDispatchId, models, workspaceModels } from './modelsState';
 import { plainErrorText } from '../plainError';
 import { activeThreadId, threads } from './threads';
@@ -94,7 +94,8 @@ export function pickerModels(all: Model[], current?: string | null): Model[] {
 }
 
 let _lastChosenModelId: string | null = null;
-const switchingThreadIds = new Set<string>();
+/** The unresolved HTTP request; accepted model and server operation stay canonical. */
+export const threadModelRequests = writable<ReadonlyMap<string, { identity: symbol; model: string }>>(new Map());
 
 export interface CommittedThreadModelSaveResult {
 	kind: 'committed';
@@ -108,14 +109,27 @@ export type ThreadModelSaveResult =
 	| CommittedThreadModelSaveResult
 	| PendingThreadModelSaveResult;
 
-export function beginThreadModelSwitch(threadId: string): boolean {
-	if (switchingThreadIds.has(threadId)) return false;
-	switchingThreadIds.add(threadId);
-	return true;
+/** Begin one request per thread and return the identity that alone may finish it. */
+export function beginThreadModelSwitch(threadId: string, model: string): symbol | null {
+	if (get(threadModelRequests).has(threadId)) return null;
+	const identity = Symbol(threadId);
+	threadModelRequests.update((requests) => new Map(requests).set(threadId, { identity, model }));
+	return identity;
 }
 
-export function finishThreadModelSwitch(threadId: string): void {
-	switchingThreadIds.delete(threadId);
+/** Remove feedback only for the HTTP request that has settled. */
+export function finishThreadModelSwitch(threadId: string, identity: symbol): void {
+	if (get(threadModelRequests).get(threadId)?.identity !== identity) return;
+	threadModelRequests.update((requests) => {
+		const next = new Map(requests);
+		next.delete(threadId);
+		return next;
+	});
+}
+
+/** Clear request ownership between isolated component tests. */
+export function _resetThreadModelRequestsForTests(): void {
+	threadModelRequests.set(new Map());
 }
 
 export function modelMatchesId(model: Model, id: string | null | undefined): boolean {

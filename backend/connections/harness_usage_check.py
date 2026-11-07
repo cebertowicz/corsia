@@ -117,6 +117,23 @@ def _capture(provider: str, account_id: str, *, db=None):
     return capture_discovery_context(provider, account_id=account_id, db=db)
 
 
+def _login_check_task(provider: str, account_id: str) -> asyncio.Task:
+    task = _CHECKS.get(account_id)
+    if task is None or task.done():
+        _LAST_STARTED[account_id] = time.monotonic()
+        task = _CHECKS[account_id] = asyncio.create_task(_check(provider, account_id))
+    return task
+
+
+def schedule_login_check(provider: str, receipt) -> None:
+    """Submit an explicit receipt check on the ingress loop without waiting on control I/O."""
+    from ws.ingress import track_background_task
+
+    # Establish the canonical single flight now; the tracked waiter owns its bound.
+    task = _login_check_task(provider, receipt.account_id)
+    track_background_task(asyncio.create_task(_wait_for_login(provider, receipt, task)))
+
+
 async def check_login(provider: str, receipt) -> str:
     """The control read of the login ``receipt`` names: ``pass`` when it answered, else ``fail`` or ``error``.
 
@@ -127,18 +144,18 @@ async def check_login(provider: str, receipt) -> str:
     login was replaced or signed out, and the answer is ``fail``.
     Waits at most ``_LOGIN_CHECK_SECONDS`` in all; a read still running then finishes on its own.
     """
+    return await _wait_for_login(provider, receipt, _login_check_task(provider, receipt.account_id))
+
+
+async def _wait_for_login(provider: str, receipt, task: asyncio.Task) -> str:
     account_id = receipt.account_id
     try:
         async with asyncio.timeout(_LOGIN_CHECK_SECONDS):
-            for _attempt in range(2):
-                task = _CHECKS.get(account_id)
-                if task is None or task.done():
-                    _LAST_STARTED[account_id] = time.monotonic()
-                    task = _CHECKS[account_id] = asyncio.create_task(_check(provider, account_id))
-                verdict, read_for = await asyncio.shield(task)
-                if read_for == receipt:
-                    return verdict
-            return "fail"
+            verdict, read_for = await asyncio.shield(task)
+            if read_for == receipt:
+                return verdict
+            verdict, read_for = await asyncio.shield(_login_check_task(provider, account_id))
+            return verdict if read_for == receipt else "fail"
     except TimeoutError:
         log.warning("%s login check timed out for account %s", provider, account_id)
         return "error"

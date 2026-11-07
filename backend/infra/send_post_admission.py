@@ -9,7 +9,8 @@ from collections.abc import Awaitable
 from typing import Callable
 
 from infra.db_async import run_in_db
-from infra.send_types import InboxQueuedInput, SendRejected
+from infra.send_types import InboxQueuedInput, InputReceipt, SendRejected
+from infra.thread_input_types import HeldAdmission
 from infra.thread_driver import InputAdmission
 from llm.resolution import ExecutionTarget
 
@@ -44,6 +45,36 @@ async def publish_projection(step: str, admission: InputAdmission, call: Callabl
             "post-admission %s failed for input %s",
             step, admission.accepted.message_id[:8],
         )
+
+
+async def publish_accepted_admission(
+    admission: InputAdmission, text: str, metadata: dict | None, *, role: str,
+    broadcast_input: bool, broadcast_exclude_ws: object,
+    delivery_after_failed_prefix: str | None, on_admitted: Callable | None,
+) -> InboxQueuedInput:
+    """Publish the durable input and its receipt before any delivery or control I/O."""
+    from functools import partial
+    from infra.send_service import broadcast_accepted_input
+
+    accepted = admission.accepted
+    held = accepted.delivery_error is not None
+    await broadcast_passive(admission, broadcast_input)
+    if broadcast_input and not accepted.duplicate and delivery_after_failed_prefix in (None, "queued"):
+        await publish_projection(
+            "input broadcast", admission,
+            partial(broadcast_accepted_input, admission, text, metadata, role=role,
+                    exclude_ws=None if held else broadcast_exclude_ws),
+        )
+    queued = InboxQueuedInput(
+        InputReceipt(accepted.thread_id, accepted.message_id, accepted.input_order,
+                     accepted.revision, accepted.created_at),
+        held=admission.batch if isinstance(admission.batch, HeldAdmission) else None,
+        admission_hold=accepted.delivery_error if held else None,
+        duplicate=accepted.duplicate, delivery_state=accepted.delivery_state,
+    )
+    if on_admitted is not None:
+        await publish_projection("on_admitted", admission, partial(on_admitted, queued))
+    return queued
 
 
 async def request_boundary_for_admission(

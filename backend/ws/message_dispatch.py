@@ -158,7 +158,7 @@ async def _send_native_input(
     try:
         result = await send_thread_input_fn(
             thread_id, thread_row, content,
-            user=user, metadata=metadata or None,
+            user=user, metadata=metadata or None, human_origin=True,
             delivery_intent=delivery_intent, input_id=input_id,
             persist_input=not is_retry, broadcast_input=True,
             touch_thread_on_insert=True, trim_content=False,
