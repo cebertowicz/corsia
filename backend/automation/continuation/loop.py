@@ -54,14 +54,16 @@ async def continuation_sweep_loop() -> None:
             else CONTINUATION_SWEEP_INTERVAL
         )
         # Row deadlines are durable: sleep until the next feedback batch is due, and wake early when a new one opens.
-        # A row already overdue after the sweep failed to deliver, so it keeps the ordinary cadence.
+        # Read from the instant the sweep checked: a row due by then failed to deliver and keeps the ordinary cadence,
+        # while one that came due as the sweep ran was never tried, so it goes at once.
         try:
-            until_due = await run_in_db(_seconds_to_next_feedback_deadline, datetime.now(timezone.utc))
+            until_due = await run_in_db(_seconds_to_next_feedback_deadline, now)
         except Exception as exc:  # noqa: BLE001
             logger.warning("continuation next-deadline read error: {}", exc)
             until_due = None
-        if until_due is not None and 0 < until_due < delay:
-            delay = until_due
+        if until_due is not None:
+            elapsed = (datetime.now(timezone.utc) - now).total_seconds()
+            delay = min(delay, max(0.0, until_due - elapsed))
         # asyncio.timeout waits inside this task; on 3.11 wait_for would start and drop a task every poll.
         try:
             async with asyncio.timeout(delay):
