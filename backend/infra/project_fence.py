@@ -81,6 +81,7 @@ _LOCAL_ONLY_COPY = (
 )
 #: Row R15: one fixed line on a search the wall narrowed, with no count to leak.
 HISTORY_NOTICE = "History from projects this agent can't read was left out."
+WITHHELD_LOCAL_ONLY = "Withheld: this project is Local only."
 
 
 def refusal_copy(

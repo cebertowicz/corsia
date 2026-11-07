@@ -87,6 +87,9 @@ def conductor_task_settled(connection, node_id: str, *, outcome: str) -> None:
         outcome=text.CONDUCTOR_TASK_OUTCOMES.get(outcome, outcome),
         detail=bounded(detail, 480),
     )
+    from plans.withheld_projection import for_plan
+
+    line = for_plan(line, recipient=recipient, plan_id=node["plan_id"], db=connection)
     plan_wake.append(
         connection,
         recipient=recipient,
@@ -253,6 +256,9 @@ def _notify(
         owner=owner,
         outcome=meaning.format(dependent=str(dependent["title"]), how=outcome),
     )
+    from plans.withheld_projection import for_plan
+
+    line = for_plan(line, recipient=recipient, plan_id=prerequisite["plan_id"], db=db)
     return plan_wake.append(
         db,
         recipient=recipient,

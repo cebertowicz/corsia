@@ -325,7 +325,9 @@ def _append(
 ) -> None:
     """Write one notice at the receiving plan owner's own boundary."""
     from plans.plan_events import append_owner_event
+    from plans.withheld_projection import notice
 
+    summary, details = notice(summary, details, parent_plan_id=plan_id, db=connection)
     append_owner_event(
         connection,
         plan_id=plan_id,
@@ -379,6 +381,11 @@ def _wake_parent(
     if revision is None:
         revision = int(service._plan_row(connection, child_plan_id)["revision"])
     details = {"node_id": node["id"], "worker_thread_id": worker, **(extra or {})}
+    from plans.withheld_projection import for_thread
+
+    recipient = str(plan["owner_id"])
+    line = for_thread(line, recipient=recipient, owner=worker, db=connection)
+    details = for_thread(details, recipient=recipient, owner=worker, db=connection)
     return plan_wake.append(
         connection,
         recipient=str(plan["owner_id"]),

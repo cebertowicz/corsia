@@ -112,7 +112,7 @@ def _current_operation(thread_id, actor_row, ensure, read: dict, reader):
             addressed = public.addressed_to(page, other, db=db)
             if read.get("node_id"):
                 attach_at_worker_read(db, addressed, thread_id=thread_id, node_id=read["node_id"])
-            return addressed
+            return public.withhold_for_thread(addressed, recipient=thread_id, owner=other, db=db)
         return page
     finally:
         db.close()
@@ -226,6 +226,9 @@ def _mutation_operation(
         )
         if operation in {"add", "insert"}:
             workflow_task_fields.append_add_notice(result.result, db, workflows)
+        public.withhold_admission(result.result, recipient=thread_id, plan_id=plan_id, db=db)
+        if isinstance(result.result.get("next"), dict):
+            public.withhold_next(result.result["next"], recipient=thread_id, plan_id=plan_id, db=db)
         attach_plan_result(db, result, thread_id, operation in NODE_OPERATIONS)
         return result
     finally:
