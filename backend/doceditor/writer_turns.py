@@ -37,10 +37,6 @@ _people: dict[str, dict[object, PersonHold]] = {}
 _page_root: dict[object, str] = {}
 _agents: dict[str, str] = {}
 _lock = threading.Lock()
-#: Agents with a woken section row: a hint that their next write may answer it, and that they have
-#: none to take a section turn past (``section_writes``); the line rows decide. Set when a row wakes,
-#: cleared by ``writer_line.settle``, the one end of a row.
-_section_wakes: set[str] = set()
 
 _SECTION = "section:"
 
@@ -53,21 +49,6 @@ def section_key(artifact_id: str, heading: str) -> str:
 def section_heading(key: str) -> str | None:
     """The section name a section key holds; None for a comment thread's root."""
     return key.split(":", 2)[2] if key.startswith(_SECTION) else None
-
-
-def section_woken(thread_id: str) -> None:
-    with _lock:
-        _section_wakes.add(thread_id)
-
-
-def may_answer_section(thread_id: str) -> bool:
-    with _lock:
-        return thread_id in _section_wakes
-
-
-def section_answered(thread_id: str) -> None:
-    with _lock:
-        _section_wakes.discard(thread_id)
 
 
 def person_holding(root_id: str) -> PersonHold | None:
@@ -159,4 +140,3 @@ def reset() -> None:
         _people.clear()
         _page_root.clear()
         _agents.clear()
-        _section_wakes.clear()
