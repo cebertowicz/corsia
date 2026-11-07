@@ -199,9 +199,12 @@ def get_prs_for_sha(repo: str, head_sha: str) -> list[dict[str, Any]] | None:
     The reliable fallback for check_suite routing: GitHub delivers
     ``check_suite.pull_requests`` EMPTY intermittently (and always cross-fork),
     which strands a green PR because the owner-wake + reviewer gate can't
-    resolve the PR number. ``GET /repos/{repo}/commits/{sha}/pulls`` always
-    resolves it. Uses the REST/core quota (separate from GraphQL) for the same
-    quota-resilience reason as the sibling check helpers.
+    resolve the PR number. ``GET /repos/{repo}/commits/{sha}/pulls`` resolves
+    a head in this repository. A fork head lives in another repository, so that
+    listing stays empty until the PR merges; the repository's open PRs still
+    carry its head SHA, so they are read when the listing is empty. Uses the
+    REST/core quota (separate from GraphQL) for the same quota-resilience
+    reason as the sibling check helpers.
 
     Returns compact PR metadata (``[]`` when the commit has no associated PR),
     or ``None`` on a fetch/parse error (never a silent empty-as-success).
@@ -209,17 +212,42 @@ def get_prs_for_sha(repo: str, head_sha: str) -> list[dict[str, Any]] | None:
     out = _run_gh(["api", f"repos/{repo}/commits/{head_sha}/pulls"], timeout=30.0)
     if out is None:
         return None  # command failed (rate-limit, auth error, etc.)
-    if not out.strip():
-        return []  # commit belongs to no PR
     try:
-        data = json.loads(out)
+        data = json.loads(out) if out.strip() else []
     except json.JSONDecodeError:
         log.warning("Failed to parse PR list for %s@%s", repo, head_sha[:8])
         return None
     if not isinstance(data, list):
         log.warning("Unexpected PR list JSON for %s@%s", repo, head_sha[:8])
         return None
+    if not data:
+        return _open_prs_with_head(repo, head_sha)
+    return _pr_metadata(data, repo, head_sha)
 
+
+def _open_prs_with_head(repo: str, head_sha: str) -> list[dict[str, Any]] | None:
+    """The open PRs whose head is ``head_sha``, from every page of the open-PR list."""
+    out = _run_gh(
+        ["api", f"repos/{repo}/pulls?state=open&per_page=100", "--paginate", "--jq", ".[]"],
+        timeout=60.0,
+    )
+    if out is None:
+        return None
+    data = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        try:
+            data.append(json.loads(line))
+        except json.JSONDecodeError:
+            log.warning("Failed to parse open PR entry for %s: %r", repo, line[:80])
+            return None
+    prs = _pr_metadata(data, repo, head_sha)
+    return None if prs is None else [pr for pr in prs if pr["head_sha"] == head_sha]
+
+
+def _pr_metadata(data: list[Any], repo: str, head_sha: str) -> list[dict[str, Any]] | None:
+    """Compact metadata for each PR entry, or ``None`` when an entry is malformed."""
     prs: list[dict[str, Any]] = []
     for pr in data:
         if not isinstance(pr, dict):

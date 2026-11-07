@@ -123,6 +123,22 @@ class TestResolver:
         payload = _check_suite_payload(pull_requests=[])
         assert identity.pr_number_from_check_suite_event(payload) == 704
 
+    def test_fork_head_resolves_through_the_open_pr_list(self, monkeypatch):
+        """A fork PR's suite has no pull_requests and its commit lists no PR until merge."""
+        import json
+
+        def run_gh(args, **kw):
+            if "/commits/" in args[1]:
+                return "[]"
+            return json.dumps({"number": 2065, "state": "open", "base": {"ref": "dev"},
+                               "head": {"ref": "fork-branch", "sha": "abc123"}})
+        monkeypatch.setattr("reviewer.gh_helpers._run_gh", run_gh)
+        payload = _check_suite_payload(pull_requests=[], head_branch="fork-branch")
+        assert identity.check_suite_pr_metadata_from_event(payload) == {
+            "number": 2065, "state": "open", "base_ref": "dev",
+            "head_ref": "fork-branch", "head_sha": "abc123",
+        }
+
     def test_empty_array_and_no_pr_for_sha(self, monkeypatch):
         monkeypatch.setattr("reviewer.gh_helpers.get_prs_for_sha", lambda repo, sha: [])
         payload = _check_suite_payload(pull_requests=[])
