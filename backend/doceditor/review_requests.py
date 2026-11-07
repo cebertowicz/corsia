@@ -175,6 +175,14 @@ def _repeat(db, row, actor: ReviewActor, note: str | None, key: str, requesting:
         # A fork has already frozen its instruction; silently accepting a
         # later note would claim the reviewer saw it when it could not.
         raise ReviewRequestError(IN_REVIEW_REFUSAL)
+    if note and actor.kind == "agent":
+        # A note is review text this requester is writing now, so Local only holds it
+        # exactly as the create path holds a new request. It is refused before the
+        # client_ids update, so a retry of a refused note is refused again instead of
+        # finding its key recorded and returning success.
+        refusal = _locality_refusal(db, actor, row["reviewer_thread_id"])
+        if refusal is not None:
+            raise ReviewRequestError(refusal)
     keys.append(key)
     db.execute("UPDATE doc_review_requests SET client_ids=? WHERE id=?", (json.dumps(keys), row["id"]))
     if note:
@@ -183,6 +191,24 @@ def _repeat(db, row, actor: ReviewActor, note: str | None, key: str, requesting:
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
     return get_request(db, row["id"])
+
+
+def _locality_refusal(db, requester: ReviewActor, reviewer_thread_id: str) -> str | None:
+    """The refusal when a Local only requester's review question can't reach a cloud reviewer.
+
+    A requester row that can't be read is not proof it isn't Local only, so it is held too.
+    """
+    from infra.local_only import send_held_text, send_needs_hold
+
+    sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id=?", (requester.id,)).fetchone()
+    recipient = db.execute("SELECT id,model,pending_model,title FROM threads WHERE id=?",
+                           (reviewer_thread_id,)).fetchone()
+    if (recipient is not None and sender is not None
+            and not send_needs_hold(dict(sender), dict(recipient), db=db, emit_hold_event=False)):
+        return None
+    return send_held_text((recipient["title"] if recipient else None) or reviewer_thread_id, "review request",
+                          "Send it with delegate_send, which holds the message for the person's approval, "
+                          "or ask a local agent for the review.")
 
 
 def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: ReviewActor,
@@ -209,6 +235,13 @@ def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: Rev
         latest = _latest(connection, artifact_id, reviewer_thread_id)
         if latest is not None and is_open(connection, latest):
             return _repeat(connection, latest, requester, note, key, requesting)
+        # A review question is a message, so Local only holds it too, before anything is written.
+        # A retry of an already-created request returns above; new text on an open request is held
+        # inside _repeat, so every route that carries this requester's text to the reviewer is checked.
+        if requester.kind == "agent":
+            refusal = _locality_refusal(connection, requester, reviewer_thread_id)
+            if refusal is not None:
+                raise ReviewRequestError(refusal)
         request_id = str(uuid.uuid4())
         request = {
             "id": request_id, "artifact_id": artifact_id,

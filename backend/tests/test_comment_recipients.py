@@ -295,6 +295,7 @@ def test_local_only_reply_to_other_agent_author_is_held(isolated_db):
     for name in ("owner", "cloud", "local"):
         seed_thread(db, name, model=None)
     db.execute("UPDATE threads SET local_only=1 WHERE id='local'")
+    db.commit()
     aid = seed_document(db, "owner")
     root, _ = add_comment(db, aid, author_kind="user", author_id=None)
     add_comment(db, aid, author_id="cloud", parent_id=root["id"])
@@ -304,50 +305,70 @@ def test_local_only_reply_to_other_agent_author_is_held(isolated_db):
             author_thread_id="local", parent_id=root["id"], db=connection,
         )
         result = feedback_batches.record_comment(connection, reply, created=created)
-    assert any("cloud" in refusal for refusal in result.get("tag_refusals", []))
-    assert not db.execute(
-        "SELECT 1 FROM doc_feedback_batch_items i JOIN doc_feedback_batches b ON b.id=i.batch_id "
-        "WHERE i.comment_id=? AND b.recipient_id='cloud'", (reply["id"],),
-    ).fetchone()
-    assert db.execute(
-        "SELECT 1 FROM doc_feedback_batch_items i JOIN doc_feedback_batches b ON b.id=i.batch_id "
-        "WHERE i.comment_id=? AND b.recipient_id='owner'", (reply["id"],),
-    ).fetchone()
+    # A participant reached through the thread is refused, and so is the thread's own owner.
+    assert any("cloud is cloud-bound or has no model selected" in refusal
+               for refusal in result.get("tag_refusals", []))
+    assert any("owner is cloud-bound or has no model selected" in refusal
+               for refusal in result.get("tag_refusals", []))
+    assert not batched_recipients(db, reply["id"]) & {"cloud", "owner"}
     db.close()
 
 
-def test_local_only_reply_keeps_owner_and_root_author_exempt(isolated_db):
+def batched_recipients(db, comment_id):
+    """The recipients a comment actually has batch rows for."""
+    return {str(row[0]) for row in db.execute(
+        "SELECT b.recipient_id FROM doc_feedback_batch_items i JOIN doc_feedback_batches b ON b.id=i.batch_id "
+        "WHERE i.comment_id=?", (comment_id,),
+    ).fetchall()}
+
+
+def test_local_only_reply_to_the_thread_owner_is_refused(isolated_db):
+    """The thread's owner is a recipient like any other: an unbound owner gets no Local only reply."""
     db = get_db()
-    for name in ("owner", "root-author", "local"):
+    for name in ("owner", "local"):
         seed_thread(db, name, model=None)
     db.execute("UPDATE threads SET local_only=1 WHERE id='local'")
+    db.commit()
+    aid = seed_document(db, "owner")
+    reply, result = add_comment(db, aid, author_id="local")
+    assert any("owner is cloud-bound or has no model selected" in refusal
+               for refusal in result.get("tag_refusals", []))
+    assert batched_recipients(db, reply["id"]) == set()
+    db.close()
+
+
+def test_local_only_reply_to_the_root_comment_author_is_refused(isolated_db, monkeypatch):
+    """The root comment's agent author is a recipient like any other; a local owner is still delivered."""
+    from infra import local_only
+
+    monkeypatch.setattr(local_only, "_is_cloud", lambda selector, **_kwargs: selector == "cloud")
+    db = get_db()
+    seed_thread(db, "owner", model="local")
+    seed_thread(db, "root-author", model="cloud")
+    seed_thread(db, "local", model="local")
+    db.execute("UPDATE threads SET local_only=1 WHERE id='local'")
+    db.commit()
     aid = seed_document(db, "owner")
     root, _ = add_comment(db, aid, author_id="root-author")
     reply, result = add_comment(db, aid, author_id="local", parent_id=root["id"])
-    assert "tag_refusals" not in result
-    for batch in result["batch_ids"]:
-        feedback_batches.close_batch(db, batch, "send")
-    rows = db.execute(
-        "SELECT recipient_id,state FROM doc_feedback_batches WHERE id IN "
-        "(SELECT batch_id FROM doc_feedback_batch_items WHERE comment_id=?)", (reply["id"],),
-    ).fetchall()
-    assert {tuple(row) for row in rows} == {("owner", "delivered"), ("root-author", "delivered")}
+    assert any("root-author is cloud-bound or has no model selected" in refusal
+               for refusal in result.get("tag_refusals", []))
+    assert batched_recipients(db, reply["id"]) == {"owner"}
     db.close()
 
 
-def test_disabling_legacy_exemption_holds_owner(isolated_db, monkeypatch):
+def test_reply_from_an_agent_that_is_not_local_only_reaches_a_cloud_owner(isolated_db, monkeypatch):
+    """Only a Local only sender is held: an ordinary agent's reply reaches the same cloud owner."""
+    from infra import local_only
+
+    monkeypatch.setattr(local_only, "_is_cloud", lambda selector, **_kwargs: selector == "cloud")
     db = get_db()
-    seed_thread(db, "owner", model=None)
-    seed_thread(db, "local", model=None)
-    db.execute("UPDATE threads SET local_only=1 WHERE id='local'")
+    seed_thread(db, "owner", model="cloud")
+    seed_thread(db, "writer", model="local")
     aid = seed_document(db, "owner")
-    monkeypatch.setattr(comment_recipients, "LEGACY_RECIPIENTS_SKIP_LOCALITY", False)
-    reply, result = add_comment(db, aid, author_id="local")
-    assert any("owner" in refusal for refusal in result.get("tag_refusals", []))
-    assert not db.execute(
-        "SELECT 1 FROM doc_feedback_batch_items i JOIN doc_feedback_batches b ON b.id=i.batch_id "
-        "WHERE i.comment_id=? AND b.recipient_id='owner'", (reply["id"],),
-    ).fetchone()
+    reply, result = add_comment(db, aid, author_id="writer")
+    assert "tag_refusals" not in result
+    assert batched_recipients(db, reply["id"]) == {"owner"}
     db.close()
 
 
@@ -502,10 +523,9 @@ def test_mixed_batch_admission_failure_keeps_standard_retry_note(isolated_db, mo
 
 
 @pytest.mark.parametrize("existing_role", ["owner", "participant"])
-@pytest.mark.parametrize("held_at_create", [True, False])
-def test_locality_preserves_existing_recipient_without_tag_effects(isolated_db, monkeypatch, existing_role, held_at_create):
+def test_tagged_reply_to_an_existing_recipient_keeps_its_tag_effects(isolated_db, monkeypatch, existing_role):
+    """A delivered tag is still a tag: the recipient is brought back and given the thread context."""
     from doceditor import feedback_delivery
-    from infra import local_only
 
     db = get_db()
     for name in ("owner", "writer", "recipient"):
@@ -513,7 +533,6 @@ def test_locality_preserves_existing_recipient_without_tag_effects(isolated_db, 
     recipient = "owner" if existing_role == "owner" else "recipient"
     aid = seed_document(db, "owner")
     root, _ = add_comment(db, aid, author_id=recipient)
-    monkeypatch.setattr(local_only, "send_needs_hold", lambda *args, **kwargs: held_at_create)
     with write_transaction(db, scope="ordinary_recipient") as connection:
         reply, created = comments.create_with_status(aid, body="Reply", author="Writer", author_kind="agent",
                                                      author_thread_id="writer", parent_id=root["id"], db=connection)
@@ -523,10 +542,7 @@ def test_locality_preserves_existing_recipient_without_tag_effects(isolated_db, 
     assert "tag_refusals" not in result
     batch = next(batch_id for batch_id in result["batch_ids"] if db.execute(
         "SELECT recipient_id FROM doc_feedback_batches WHERE id=?", (batch_id,)).fetchone()[0] == recipient)
-    monkeypatch.setattr(local_only, "send_needs_hold", lambda *args, **kwargs: True)
     seen = []
-    notes = []
-    monkeypatch.setattr(feedback_delivery, "undelivered_note", lambda *args, **kwargs: notes.append(args))
     original = feedback_delivery.create_feedback_node
     def capture(db, recipient_id, batch, *, items):
         seen.extend(items)
@@ -534,8 +550,9 @@ def test_locality_preserves_existing_recipient_without_tag_effects(isolated_db, 
     monkeypatch.setattr(feedback_delivery, "create_feedback_node", capture)
     feedback_batches.close_batch(db, batch, "send")
     assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == "delivered"
-    assert seen[0].get("suppress_tag") and "thread_context" not in seen[0]
-    assert notes == []
+    assert "thread_context" in seen[0]
+    assert db.execute("SELECT left_thread FROM doc_comment_recipient_state WHERE root_id=? AND agent_id=?",
+                      (root["id"], recipient)).fetchone()[0] == 0
     db.close()
 
 
@@ -556,8 +573,8 @@ def test_tag_locality_does_not_emit_held_event(isolated_db, monkeypatch):
     documents = []
     monkeypatch.setattr(live_events, "emit", lambda action, **properties: documents.append((action, properties)))
     sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id='writer'").fetchone()
-    refusal, exempt = comment_recipients.locality_disposition(db, comment, "recipient", sender, "owner")
-    assert refusal and not exempt
+    refusal = comment_recipients.locality_disposition(db, comment, "recipient", sender)
+    assert refusal
     assert events == []
     # The comment is refused, not held for approval, so it reports its own documents event instead.
     assert documents == [("comment_local_only_refused", {"comment_id": comment["id"], "reply": False})]
@@ -566,7 +583,8 @@ def test_tag_locality_does_not_emit_held_event(isolated_db, monkeypatch):
     db.close()
 
 
-def test_mixed_pending_batch_delivers_untagged_and_reports_refusal(isolated_db, monkeypatch):
+def test_a_local_only_pending_batch_is_refused_as_a_whole_and_reported_once(isolated_db, monkeypatch):
+    """Nothing in a held batch slips through: a reply, a tagged reply and a tagged root stop together."""
     from doceditor import feedback_delivery
     from infra import local_only
 
@@ -600,9 +618,9 @@ def test_mixed_pending_batch_delivers_untagged_and_reports_refusal(isolated_db, 
     assert len(notes) == 1 and "recipient is cloud-bound" in notes[0]
     # The refusal is sent whole: a retry can't clear Local only, so it never gets the retry wording.
     assert finals == [True]
-    assert tagged["id"] in notes[0] and ordinary_tagged["id"] not in notes[0]
-    assert db.execute("SELECT state FROM doc_feedback_batches WHERE id=?", (batch,)).fetchone()[0] == "delivered"
-    assert {row[0] for row in db.execute("SELECT comment_id FROM doc_feedback_batch_items WHERE batch_id=?", (batch,))} == {plain["id"], ordinary_tagged["id"]}
+    assert all(comment_id in notes[0] for comment_id in (plain["id"], ordinary_tagged["id"], tagged["id"]))
+    assert_refused_batch_settled(db, batch, tagged["id"])
+    assert not db.execute("SELECT 1 FROM doc_feedback_batch_items WHERE batch_id=?", (batch,)).fetchone()
     assert comments.get_comment(tagged["id"], db=db)["body"] == "Tagged"
     db.close()
 

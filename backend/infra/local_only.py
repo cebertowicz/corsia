@@ -199,6 +199,16 @@ def send_needs_hold(sender: dict, recipient: dict, *, db: sqlite3.Connection | N
     return True
 
 
+def send_held_text(name: str, what: str, alternative: str) -> str:
+    """What a surface says when Local only stopped one of its sends to ``name``.
+
+    One reason sentence everywhere a Local only send is refused; each surface names its own
+    ``what`` and the ``alternative`` that can still reach the recipient.
+    """
+    return (f"{name} is cloud-bound or has no model selected, and Local only applies to this chat or project, "
+            f"so the {what} wasn't delivered. {alternative}")
+
+
 def _emit(action: str, thread_id: str | None, properties: dict) -> None:
     from infra.product_events import emit_product_event
 

@@ -11,9 +11,6 @@ from infra.accounts import get_user
 from infra.queries import get_thread_for_user
 
 
-LEGACY_RECIPIENTS_SKIP_LOCALITY = True
-
-
 class TagValidationError(CommentActionError):
     """A tag the comment cannot carry; ``kind`` names which known cause it is."""
 
@@ -78,40 +75,33 @@ def save_mentions(db, comment: dict, mentions: list[dict]) -> None:
 
 
 def locality_disposition(
-    db, comment: dict, recipient_id: str, sender, owner_id: str | None, *, emit: bool = True,
-) -> tuple[str | None, bool]:
-    """Return the locality refusal and whether the pre-tag recipient path is exempt; `emit` counts a refusal."""
-    from infra.local_only import send_needs_hold
+    db, comment: dict, recipient_id: str, sender, *, emit: bool = True,
+) -> str | None:
+    """Return the locality refusal for delivering this comment to one recipient; `emit` counts a refusal.
 
-    root = db.execute("SELECT author_kind,author_thread_id FROM doc_comments WHERE id=?",
-                      (comment.get("parent_id"),)).fetchone() if comment.get("parent_id") else None
-    legacy_recipients = {owner_id} if owner_id else set()
-    if root and root["author_kind"] == "agent" and root["author_thread_id"]:
-        legacy_recipients.add(str(root["author_thread_id"]))
-    legacy_exempt = LEGACY_RECIPIENTS_SKIP_LOCALITY and recipient_id in legacy_recipients
-    tagged = bool(db.execute("SELECT 1 FROM doc_comment_tags WHERE comment_id=? AND agent_id=?",
-                             (comment["id"], recipient_id)).fetchone()) and comment.get("event") != "reopened"
-    if legacy_exempt and not tagged:
-        return None, True
+    Every agent recipient of an agent-authored comment is checked, whoever the comment thread
+    belongs to or who started it.
+    """
+    from infra.local_only import send_held_text, send_needs_hold
+
     recipient = db.execute("SELECT id,model,pending_model,title FROM threads WHERE id=?", (recipient_id,)).fetchone()
     name = (recipient["title"] if recipient else None) or recipient_id
     if sender is None:
         # The writing agent's row is gone, so its locality can't be read: fail closed.
         return (f"The agent that wrote this comment no longer exists, so its Local only setting can't be checked "
-                f"and the comment wasn't delivered to {name}."), legacy_exempt
+                f"and the comment wasn't delivered to {name}.")
     if recipient and send_needs_hold(dict(sender), dict(recipient), db=db, emit_hold_event=False):
-        refusal = (f"{name} is cloud-bound or has no model selected, and Local only applies to this chat or project, "
-                   "so the comment wasn't delivered. Send it with delegate_send, which holds it for the person's approval, "
-                   "or send it to a local agent.")
-        if emit and not legacy_exempt:
+        if emit:
             from doceditor import live_events
             from infra.write_effects import after_commit
 
             # Not local_only.send_held: that event means held for the person's approval, and this is not delivered.
             refused = {"comment_id": comment["id"], "reply": bool(comment.get("parent_id"))}
             after_commit(db, lambda: live_events.emit("comment_local_only_refused", **refused))
-        return refusal, legacy_exempt
-    return None, legacy_exempt
+        return send_held_text(name, "comment",
+                              "Send it with delegate_send, which holds it for the person's approval, "
+                              "or send it to a local agent.")
+    return None
 
 
 def root_id(comment: dict) -> str:
@@ -334,7 +324,7 @@ def prepare_notification(db, items: list[dict], agent_id: str) -> None:
         if item.get("kind") != "comment":
             continue
         root = root_id(item)
-        tagged = not item.get("suppress_tag") and item.get("event") != "reopened" and db.execute(
+        tagged = item.get("event") != "reopened" and db.execute(
             "SELECT 1 FROM doc_comment_tags WHERE comment_id=? AND agent_id=?",
             (item["id"], agent_id),
         ).fetchone()
