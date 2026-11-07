@@ -121,8 +121,11 @@
 		setActiveSurface(threadId, 'chat');
 		void returnToPlanNode(activeTab?.kind === 'subagent' ? activeTab : null);
 	}
+	// Compact shows exactly one surface, so a visible chat column already *is* the
+	// chat surface: claiming it again here would overwrite an artifact the user
+	// selected inside chat, whose click bubbles up to this column.
 	function onChatClick() {
-		if (threadId) setActiveSurface(threadId, 'chat');
+		if (threadId && !compact) setActiveSurface(threadId, 'chat');
 	}
 	function onChatKeydown(event: KeyboardEvent) {
 		if (event.key === 'Enter' || event.key === ' ') onChatClick();
