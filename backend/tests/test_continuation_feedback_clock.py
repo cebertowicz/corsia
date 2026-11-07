@@ -58,6 +58,38 @@ async def test_loop_sweeps_again_when_an_open_batch_comes_due_and_when_one_is_wr
     assert asyncio.get_running_loop().time() - started < 4
 
 
+async def test_a_batch_that_comes_due_during_a_sweep_goes_on_the_next_sweep(isolated_db, monkeypatch):
+    sweeps: list[str] = []
+
+    async def slow_sweep(now, **_kwargs):
+        sweeps.append(now)
+        if len(sweeps) == 1:
+            # The batch's deadline passes while this sweep runs, after the instant it checked against.
+            await asyncio.sleep(0.6)
+
+    monkeypatch.setattr(loop, "sweep", slow_sweep)
+    monkeypatch.setattr(loop.restart_jitter, "RESTART_JITTER_SECONDS", 0)
+    db = get_db()
+    try:
+        seed_thread(db, "owner")
+        artifact_id = seed_document(db, "owner")
+        with write_transaction(db, scope="test_clock") as connection:
+            record_edit(
+                connection, artifact_id=artifact_id, recipient_id="owner", author_kind="agent", author_id="author",
+                actor_display="Author", path=Path("/workspace/shared/x.md"), before=b"a\n", after=b"b\n",
+            )
+        soon = (datetime.now(timezone.utc) + timedelta(seconds=0.3)).isoformat()
+        db.execute("UPDATE doc_feedback_batches SET closes_at=? WHERE state='open'", (soon,))
+        db.commit()
+    finally:
+        db.close()
+
+    started = asyncio.get_running_loop().time()
+    # The first sweep never tried the batch, so it is not a failed one left to the 60s cadence.
+    await _run_loop_until(sweeps, 2, timeout=5)
+    assert asyncio.get_running_loop().time() - started < 3
+
+
 async def test_sweep_soon_wakes_a_sleeping_loop(isolated_db, monkeypatch):
     sweeps: list[str] = []
 
