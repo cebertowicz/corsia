@@ -5,13 +5,26 @@ from __future__ import annotations
 from typing import Any
 
 from infra.held_admission import limited_admission
-from infra.thread_confinement import ChildOutput, Reader, checkpoint_for_reader, project_thread
+from infra.project_fence import HistoryFence, thread_refusal
+from infra.thread_confinement import (
+    ChildOutput,
+    Reader,
+    RestrictedRead,
+    checkpoint_for_reader,
+    project_thread,
+)
 
 
 def read_delegate_status(
     thread_id: str, user_id: str, message_count: int, reader: Reader, *, person_messages: bool = False,
 ):
-    """One status snapshot for tools and APIs, with the same transcript boundary."""
+    """One status snapshot for tools and APIs, with the same transcript boundary.
+
+    A thread whose current project the caller is fenced from is refused here, in the
+    caller's own restricted-read shape, so neither surface can serve a status of it.
+    Recent messages a cut hides are dropped in SQL, so they never count toward
+    ``message_count``.
+    """
     from infra.checkpoint_queries import latest_for_thread
     from infra.conductor import get_coordination_scopes
     from infra.database import get_db
@@ -22,19 +35,32 @@ def read_delegate_status(
         thread_row = get_thread_for_user(thread_id, user_id, db=db)
         if not thread_row:
             return None
+        fence = HistoryFence.for_reader(reader, db=db)
+        subject = fence.wholly_fenced(db, thread_id)
+        if subject is not None:
+            return RestrictedRead(
+                thread_refusal(subject, thread_id, caller=reader.thread_id)
+            ).payload()
         active = db.execute(
             "SELECT id, status, started_at FROM active_turns WHERE thread_id=? AND status='running' "
             "ORDER BY started_at DESC LIMIT 1", (thread_id,),
         ).fetchone()
         child = ChildOutput.of(thread_row, reader)
+        hidden = fence.hidden_below(dict(thread_row).get("local_only_cut_seq"))
         if child.confined:
-            final = child.final_reply(db) if message_count else None
+            # A confined child shares one reply, read without its transcript position,
+            # so on a thread with a cut the safe answer is no messages rather than an
+            # unchecked one: a cut only ever fences more.
+            final = None if hidden is not None else (child.final_reply(db) if message_count else None)
             recent = [] if final is None else [final]
         else:
+            below = "AND seq IS NOT NULL AND seq > ? " if hidden is not None else ""
+            args = (thread_id, message_count) if hidden is None else (thread_id, hidden, message_count)
             rows = db.execute(
                 "SELECT id, role, content, metadata, created_at FROM messages WHERE thread_id=? "
                 + ("" if person_messages else "AND delivery_state='delivered' ")
-                + "ORDER BY created_at DESC LIMIT ?", (thread_id, message_count),
+                + below
+                + "ORDER BY created_at DESC LIMIT ?", args,
             ).fetchall() if message_count else []
             recent = [_status_message(row, person_messages) for row in reversed(rows)]
         checkpoint = latest_for_thread(thread_id, db=db)

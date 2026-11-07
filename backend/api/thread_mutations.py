@@ -128,6 +128,10 @@ def _write_project_patch(db, thread_id, project_id, old_project_id, now):
 
     if project_id and not db.execute("SELECT id FROM projects WHERE id=?", (project_id,)).fetchone():
         return {"error": "bad_project_id", "detail": f"Project not found: {project_id}"}
+    if project_id != old_project_id:
+        from infra.project_fence import record_local_only_cut
+
+        record_local_only_cut(db, thread_id=thread_id, from_project_id=old_project_id)
     db.execute("UPDATE threads SET project_id=?,updated_at=? WHERE id=?", (project_id, now, thread_id))
     refresh_thread_holds(thread_id, db=db)
     context_changed = project_id != old_project_id

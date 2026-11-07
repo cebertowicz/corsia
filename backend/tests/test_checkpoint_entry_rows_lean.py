@@ -140,7 +140,12 @@ def test_search_tool_returns_the_reference_hits(corpus, monkeypatch):
     import memory.checkpoint_search as search
 
     new = search.search_checkpoints(corpus, "cache", reader=Reader.agent("t1"), limit=10)
-    monkeypatch.setattr(search, "entry_rows_matching", lambda db, match, user, thread, limit, per_thread, caller: _reference_rows(db, match, user, thread, limit, per_thread))
+    monkeypatch.setattr(
+        search, "entry_rows_matching",
+        lambda db, match, user, thread, limit, per_thread, caller, fence=None: _reference_rows(
+            db, match, user, thread, limit, per_thread
+        ),
+    )
     old = search.search_checkpoints(corpus, "cache", reader=Reader.agent("t1"), limit=10)
 
     assert new == old and new

@@ -179,6 +179,13 @@ class GetCheckpointsTool(Tool):
                     restriction = read_restriction(db, reader, str(target))
                     if restriction is not None:
                         return restriction
+                    from infra.project_fence import HistoryFence, thread_refusal
+
+                    subject = HistoryFence.for_reader(reader, db=db).wholly_fenced(db, str(target))
+                    if subject is not None:
+                        return RestrictedRead(
+                            thread_refusal(subject, str(target), caller=reader.thread_id)
+                        )
                 return recent_checkpoints(
                     db, str(target), reader=reader, limit=limit
                 )

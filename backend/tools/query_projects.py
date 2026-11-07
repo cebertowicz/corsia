@@ -137,37 +137,17 @@ class GetThreadHistoryTool(Tool):
 
         def _query():
             db = get_db()
-            thread_row = db.execute("SELECT id, title, confinement FROM threads WHERE id = ?", (thread_id,)).fetchone()
-            if not thread_row:
-                db.close()
-                return None, None
-            from infra.thread_confinement import Reader, transcript_restriction
+            from infra.thread_confinement import Reader
+            from tools.query_helpers import thread_history_rows
 
-            restriction = transcript_restriction(Reader.from_tool(kwargs), thread_row)
-            if restriction is not None:
+            try:
+                return thread_history_rows(
+                    db, thread_id, reader=Reader.from_tool(kwargs), role=role, limit=limit,
+                    oldest_first=oldest_first, from_seq=from_seq, to_seq=to_seq,
+                    tool_output=tool_output,
+                )
+            finally:
                 db.close()
-                return thread_row, restriction
-            where = ["thread_id = ?", "delivery_state = 'delivered'", "seq IS NOT NULL"]
-            params: list[Any] = [thread_id]
-            if role:
-                where.append("role = ?")
-                params.append(role)
-            if from_seq is not None:
-                where.append("seq >= ?")
-                params.append(from_seq)
-            if to_seq is not None:
-                where.append("seq <= ?")
-                params.append(to_seq)
-            if tool_output == "omit":
-                where.append("role <> 'tool'")
-            order = "ASC" if oldest_first else "DESC"
-            rows = db.execute(
-                f"SELECT seq, role, content, metadata, created_at FROM messages "
-                f"WHERE {' AND '.join(where)} ORDER BY seq {order} LIMIT ?",
-                (*params, limit),
-            ).fetchall()
-            db.close()
-            return thread_row, rows
 
         thread_row, rows = await run_in_db(_query)
 
@@ -177,6 +157,8 @@ class GetThreadHistoryTool(Tool):
 
         if isinstance(rows, RestrictedRead):
             return rows.reason
+        if isinstance(rows, str):
+            return rows
         if not rows:
             return f"No messages found in thread '{thread_id}'"
         if not oldest_first:
@@ -348,6 +330,10 @@ class SetConversationProjectTool(Tool):
 
                 now = utc_now_iso()
                 changed = project_id != conv["project_id"]
+                if changed:
+                    from infra.project_fence import record_local_only_cut
+
+                    record_local_only_cut(db, thread_id=conversation_id, from_project_id=conv["project_id"])
                 db.execute(
                     "UPDATE threads SET project_id = ?, updated_at = ? WHERE id = ?",
                     (project_id, now, conversation_id),

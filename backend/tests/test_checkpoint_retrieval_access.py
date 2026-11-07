@@ -261,7 +261,8 @@ def test_search_tool_labels_only_older_epoch_as_historical(fresh_db):
     """The search presentation reserves historical for an older epoch."""
     fresh_db.execute(
         "CREATE TABLE messages (id TEXT PRIMARY KEY, thread_id TEXT,"
-        " role TEXT, content TEXT, metadata TEXT, created_at TEXT, delivery_state TEXT)"
+        " role TEXT, content TEXT, metadata TEXT, created_at TEXT, delivery_state TEXT,"
+        " seq INTEGER)"
     )
     _install_checkpoint(
         fresh_db, thread_id="t1", narrative="Current event routing.", checkpoint_id="cp-current"
@@ -292,7 +293,8 @@ def test_search_reports_omitted_checkpoints_rather_than_hiding_them(fresh_db):
     # message history, so supply the empty table that half needs.
     fresh_db.execute(
         "CREATE TABLE messages (id TEXT PRIMARY KEY, thread_id TEXT,"
-        " role TEXT, content TEXT, metadata TEXT, created_at TEXT, delivery_state TEXT)"
+        " role TEXT, content TEXT, metadata TEXT, created_at TEXT, delivery_state TEXT,"
+        " seq INTEGER)"
     )
     fresh_db.commit()
     _install_checkpoint(
