@@ -88,7 +88,8 @@ def test_parent_project_policy_inherits_local_only(policy, expected) -> None:
     if policy is not None:
         db.execute("INSERT INTO project_inference_policies(project_id,cloud_models_off) VALUES ('p',?)", (policy,))
     _thread(db, "parent", project_id="p")
-    assert inherited_local_only(("parent",), db=db) is expected
+    assert inherited_local_only(("parent",), project_id=None, db=db) is expected
+    assert inherited_local_only(("parent",), project_id="p", db=db) is False
 
 
 def test_refusal_is_typed_and_not_a_value_error() -> None:

@@ -165,6 +165,29 @@ def test_local_only_child_inherits_parent_scope(fresh_db, monkeypatch):
     assert child["local_only"] == 1
 
 
+def test_project_policy_follows_switch_for_same_project_child(fresh_db):
+    from infra.fresh_threads import create_fresh_thread
+    from llm.locality import locality_refusal, set_project_cloud_models_off
+
+    fresh_db.execute("INSERT INTO projects(id,name) VALUES ('p','Project')")
+    fresh_db.execute("INSERT INTO threads(id,user_id,project_id) VALUES ('parent','u-test','p')")
+    set_project_cloud_models_off('p', cloud_models_off=True, db=fresh_db)
+    same = create_fresh_thread(user_id='u-test', thread_id='same', project_id='p',
+                               spawned_by='parent', db=fresh_db)
+    cross = create_fresh_thread(user_id='u-test', thread_id='cross',
+                                actor_thread_id='parent', db=fresh_db)
+    assert same['local_only'] == 0
+    assert cross['local_only'] == 1
+    cloud = {'backend': 'api'}
+    assert locality_refusal(cloud, thread_local_only=bool(same['local_only']),
+                            project_id='p', db=fresh_db) == 'project_cloud_off'
+    set_project_cloud_models_off('p', cloud_models_off=False, db=fresh_db)
+    assert locality_refusal(cloud, thread_local_only=bool(same['local_only']),
+                            project_id='p', db=fresh_db) is None
+    assert locality_refusal(cloud, thread_local_only=bool(cross['local_only']),
+                            project_id=None, db=fresh_db) == 'thread_local_only'
+
+
 def test_local_only_child_refuses_non_local_initial_model(fresh_db, monkeypatch):
     """Creation rejects a non-local model before the child row is written."""
     from infra import fresh_threads

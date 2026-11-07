@@ -51,7 +51,7 @@ async def _admit(thread_id, *_args, **_kwargs):
 
 
 @pytest.mark.asyncio
-async def test_delegate_task_inherits_owner_project_cloud_off(local_model, world):
+async def test_delegate_task_same_project_follows_project_policy(local_model, world):
     import json
     from infra.database import get_db, write_transaction
     from tools.delegate_task import DelegateTaskTool
@@ -64,7 +64,7 @@ async def test_delegate_task_inherits_owner_project_cloud_off(local_model, world
     receipt = json.loads(result)
     assert receipt["ok"]
     child = get_db().execute("SELECT local_only FROM threads WHERE id=?", (receipt["thread_id"],)).fetchone()
-    assert child[0] == 1
+    assert child[0] == 0
 
 
 @pytest.mark.asyncio
@@ -84,7 +84,7 @@ async def test_ready_local_owner_starts_confined_on_own_model(local_model, world
     outcome, _, _, worker = starts(rule)[0]
     assert outcome == "started"
     child = get_db().execute("SELECT model, confinement, local_only FROM threads WHERE id=?", (worker,)).fetchone()
-    assert tuple(child) == (LOCAL, "untrusted", 1)
+    assert tuple(child) == (LOCAL, "untrusted", int(policy == "thread"))
     assert local_model["bound"] == [LOCAL]
 
 
