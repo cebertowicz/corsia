@@ -68,10 +68,19 @@ describe('version history in the viewer', () => {
 	it('tells History a file the server says is read-only, so Restore says why instead of sending', async () => {
 		await openOldVersion(false);
 		expect(restore()?.getAttribute('aria-label')).toBe('Restore: this file is read-only');
+		expect(document.body.textContent).toContain("This file is read-only, so an earlier version can't be restored.");
+	});
+
+	it('keeps the server\'s read-only answer while the same file reloads', async () => {
+		await openOldVersion(false);
+		api.fetchContent.mockReturnValue(new Promise(() => {}));
+		(component as unknown as { reload: () => void }).reload(); await flush();
+		expect(restore()?.getAttribute('aria-label')).toBe('Restore: this file is read-only');
 	});
 
 	it('leaves Restore available on a file the server says is writable', async () => {
 		await openOldVersion(true);
-		expect(restore()?.getAttribute('aria-disabled')).not.toBe('true');
+		expect(restore()).toBeTruthy();
+		expect(restore()!.getAttribute('aria-disabled')).not.toBe('true');
 	});
 });

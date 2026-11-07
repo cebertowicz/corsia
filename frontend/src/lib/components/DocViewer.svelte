@@ -235,10 +235,10 @@
 			replyNavigation.reset();
 			commentUI.close();
 			focusedDocComment.set(null); discardCommentDraft(commentDraftScope(prevTarget));
-			// These fields describe the mounted target, not its predecessor.
-			loadedArtifactId = withDraftArtifactId(d).artifactId;
+			// These fields describe the mounted target, not its predecessor; a reload of the same file keeps the server's known answer.
+			const nextId = withDraftArtifactId(d).artifactId; if (nextId !== loadedArtifactId) serverReadOnly = false; loadedArtifactId = nextId;
 			const opened = openFromDraft(existingDraft(d), loadedArtifactId);
-			readonly = opened.unsaved; serverReadOnly = false;
+			readonly = opened.unsaved;
 			confirming = opened.confirming;
 			if (opened.text !== null) editText = opened.text;
 			freshness = null;
@@ -255,7 +255,7 @@
 					if (seq !== loadSeq) return;
 					handleViewerFailure(e, opened, { signal, reloadAttention: () => { void reloadAttentionQueue(); },
 						fail: (failure) => { openRefusal = failure.refusal; docState = failure.state;
-							if (failure.text !== null) editText = failure.text; readonly = failure.readonly; serverReadOnly = false; confirming = false; },
+							if (failure.text !== null) editText = failure.text; readonly = failure.readonly; confirming = false; },
 					});
 				});
 		});

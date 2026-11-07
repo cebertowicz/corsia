@@ -264,6 +264,7 @@
 
 {#snippet versionDiff()}
 	{#if offline}<div class="status" role="status">Showing the last loaded history. Restore needs a connection to CORSIA.<Button size="sm" onclick={retry}>Retry</Button></div>
+	{:else if readOnly && !isCurrent}<div class="status" role="status">This file is read-only, so an earlier version can't be restored.</div>
 	{:else if refusal}<div class="status" role="status">{REFUSALS[refusal].line}{#if REFUSALS[refusal].action === 'restore'}<Button size="sm" onclick={restore}>Retry</Button>{:else if REFUSALS[refusal].action === 'reload'}<Button size="sm" onclick={reload}>Reload history</Button>{/if}</div>{/if}
 	<div class="scroll" bind:this={diffScroll}>
 		{#if versionLoad === 'loading'}<p class="status">Loading history…</p>
