@@ -121,6 +121,16 @@ run_corsia_agent_cli() {
             "$PYTHON" -m cli agent "$@")
 }
 
+run_import_cli() {
+    # Bringing an earlier install over is a person's action, so it goes with the
+    # same short-lived service token: the running backend does every write.
+    local svc
+    svc="$(mint_service_token)" || return 1
+    (cd "$BACKEND_DIR" \
+        && CORSIA_SOURCES_SERVICE_TOKEN="$svc" BACKEND_PORT="$BACKEND_PORT" \
+            "$PYTHON" -m cli import "$@")
+}
+
 run_local_setup_cli() {
     # The serving backend is the only owner of local setup, so its model updates
     # reach the installer-open browser. With no backend the CLI says to start it.

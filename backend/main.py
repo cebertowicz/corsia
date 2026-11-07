@@ -96,6 +96,7 @@ from api.registry_pane import router as registry_pane_router
 from api.registry_ownership import router as registry_ownership_router
 from api.doc_reviews import router as doc_reviews_router
 from api.cli_install import router as cli_install_router
+from api.earlier_install import router as earlier_install_router
 from api.google import router as google_router
 from api.microsoft import router as microsoft_router
 from api.messages import router as messages_router
@@ -213,6 +214,7 @@ app.include_router(measurement_where_to_look_router, dependencies=[Depends(refre
 app.include_router(mcp_router)
 app.include_router(projects_router)
 app.include_router(project_repos_router)
+app.include_router(earlier_install_router)
 app.include_router(fs_browse_router)
 app.include_router(files_router)
 app.include_router(files_revision_router)

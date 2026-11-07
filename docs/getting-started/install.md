@@ -88,6 +88,7 @@ For the source install, `corsia` means `~/.corsia/scripts/corsia`. The installer
 |---|---|
 | `corsia start` / `open` / `stop` / `restart` / `status` / `logs` | Run and inspect the backend; `open` opens CORSIA in your browser |
 | `corsia sources` / `sources recheck` | Show each model source with a fix for anything missing |
+| `corsia import <folder>` / `import <folder> --apply` | Show, then bring over, an earlier CORSIA's projects, skills and shared documents |
 | `corsia setup local` / `setup server` | Switch between this-computer-only and an always-on server |
 | `corsia service install` / `uninstall` | Install or remove the always-on service: launchd on a Mac, a systemd user service on Linux |
 | `corsia user …` / `corsia token …` | Manage accounts and API tokens |

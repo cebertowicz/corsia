@@ -539,6 +539,11 @@ case "${1:-status}" in
         run_corsia_agent_cli "$@"
         exit $?
         ;;
+    import)
+        shift
+        run_import_cli "$@"
+        exit $?
+        ;;
     setup)
         # Record the choice, then a bare restart: it re-renders the service
         # definition before any drain, so a refusal leaves the old one serving.
@@ -600,6 +605,7 @@ case "${1:-status}" in
         echo "  user <sub>          Accounts: add|passwd|list"
         echo "  token <sub>         API tokens: create|list|revoke|service"
         echo "  sources [recheck]   Which model sources are ready, one fix each"
+        echo "  import <path>       Show what an earlier CORSIA offers; --apply brings it over"
         echo "  setup local|server  This computer only, or reachable from other devices"
         echo ""
         echo "Launchd service (this checkout's durable instance):"
