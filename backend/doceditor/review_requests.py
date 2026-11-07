@@ -185,6 +185,24 @@ def _repeat(db, row, actor: ReviewActor, note: str | None, key: str, requesting:
     return get_request(db, row["id"])
 
 
+def _locality_refusal(db, requester: ReviewActor, reviewer_thread_id: str) -> str | None:
+    """The refusal when a Local only requester's review question can't reach a cloud reviewer.
+
+    A requester row that can't be read is not proof it isn't Local only, so it is held too.
+    """
+    from infra.local_only import send_held_text, send_needs_hold
+
+    sender = db.execute("SELECT id,local_only,project_id FROM threads WHERE id=?", (requester.id,)).fetchone()
+    recipient = db.execute("SELECT id,model,pending_model,title FROM threads WHERE id=?",
+                           (reviewer_thread_id,)).fetchone()
+    if (recipient is not None and sender is not None
+            and not send_needs_hold(dict(sender), dict(recipient), db=db, emit_hold_event=False)):
+        return None
+    return send_held_text((recipient["title"] if recipient else None) or reviewer_thread_id, "review request",
+                          "Send it with delegate_send, which holds the message for the person's approval, "
+                          "or ask a local agent for the review.")
+
+
 def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: ReviewActor,
                    note: str | None, client_id: str, *, live_node_id: str | None = None) -> dict:
     """Queue one reviewer task, with retry-safe notes and no preemption."""
@@ -209,6 +227,12 @@ def request_review(db, artifact_id: str, reviewer_thread_id: str, requester: Rev
         latest = _latest(connection, artifact_id, reviewer_thread_id)
         if latest is not None and is_open(connection, latest):
             return _repeat(connection, latest, requester, note, key, requesting)
+        # A review question is a message, so Local only holds it too, before anything is written.
+        # A retry of an already-created request returns above, so only a new request meets the refusal.
+        if requester.kind == "agent":
+            refusal = _locality_refusal(connection, requester, reviewer_thread_id)
+            if refusal is not None:
+                raise ReviewRequestError(refusal)
         request_id = str(uuid.uuid4())
         request = {
             "id": request_id, "artifact_id": artifact_id,

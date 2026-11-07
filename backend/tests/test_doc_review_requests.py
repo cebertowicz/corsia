@@ -331,3 +331,43 @@ def test_fork_comment_immediately_joins_an_ordinary_open_batch(review_env):
     batch = db.execute("SELECT state,author_id,item_count FROM doc_feedback_batches").fetchone()
     assert tuple(batch) == ("open", "reviewer", 1)
     assert "review_request_id" not in {row[1] for row in db.execute("PRAGMA table_info(doc_feedback_batches)")}
+
+
+def local_only_requester(db, monkeypatch, *, cloud: bool) -> None:
+    """Make the requester a Local only agent and say whether the reviewer's model reads as cloud-bound."""
+    from infra import local_only
+
+    monkeypatch.setattr(local_only, "_is_cloud", lambda *_args, **_kwargs: cloud)
+    db.execute("UPDATE threads SET local_only=1 WHERE id='requester'")
+    db.commit()
+
+
+def test_a_local_only_agent_cannot_request_a_cloud_reviewer(review_env, monkeypatch):
+    """A review question is a message: Local only refuses it before any request is written."""
+    from doceditor import review_requests
+
+    db, artifact_id = review_env
+    local_only_requester(db, monkeypatch, cloud=True)
+    with pytest.raises(review_requests.ReviewRequestError) as refused:
+        request(db, artifact_id)
+    assert "Reviewer is cloud-bound or has no model selected" in str(refused.value)
+    assert db.execute("SELECT COUNT(*) FROM doc_review_requests").fetchone()[0] == 0
+    db.close()
+
+
+def test_a_local_only_agent_can_request_a_local_reviewer(review_env, monkeypatch):
+    """The hold is on locality, not on review requests: a local reviewer is asked as usual."""
+    db, artifact_id = review_env
+    local_only_requester(db, monkeypatch, cloud=False)
+    result = request(db, artifact_id)
+    assert db.execute("SELECT COUNT(*) FROM doc_review_requests WHERE id=?", (result["id"],)).fetchone()[0] == 1
+    db.close()
+
+
+def test_a_persons_review_request_is_never_locality_checked(review_env, monkeypatch):
+    """A person asking from a Local only chat still asks a cloud reviewer: only agents are checked."""
+    db, artifact_id = review_env
+    local_only_requester(db, monkeypatch, cloud=True)
+    result = request(db, artifact_id, kind="user")
+    assert db.execute("SELECT COUNT(*) FROM doc_review_requests WHERE id=?", (result["id"],)).fetchone()[0] == 1
+    db.close()
