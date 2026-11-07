@@ -7,6 +7,15 @@ export function focusableElements(root: HTMLElement): HTMLElement[] {
 	return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE));
 }
 
+/**
+ * Whether a closing surface may hand focus back: nothing holds focus, it fell to <body> or to an element that was
+ * removed, or it is still inside the surface. Anywhere else the person moved it, and it stays where they put it.
+ * The one rule for every closing overlay (Modal, focus traps, the comment sheet, the host-access control).
+ */
+export function focusStillOurs(surface: Element | null, active: Element | null): boolean {
+	return !active || active === document.body || !active.isConnected || !!surface?.contains(active);
+}
+
 export interface FocusTrapOptions {
 	/** Called when Escape is pressed inside the trap. */
 	onEscape?: () => void;
@@ -75,9 +84,7 @@ export function focusTrap(node: HTMLElement, options: FocusTrapOptions = {}) {
 			// ours to give: on <body> or inside the trap. <body>.focus() blurs whatever holds
 			// focus, and a trap that outlives an outro (the dock drawer's 260ms) would
 			// otherwise pull focus off the control that already took it back.
-			const active = document.activeElement;
-			const focusMoved = active instanceof HTMLElement && active !== document.body && !node.contains(active);
-			if (focusMoved) return;
+			if (!focusStillOurs(node, document.activeElement)) return;
 			if (previousFocus && previousFocus !== document.body && previousFocus.isConnected) previousFocus.focus();
 		},
 	};

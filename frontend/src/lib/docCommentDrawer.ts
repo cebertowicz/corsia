@@ -101,14 +101,6 @@ export function openerFocus(opener: Element | null, active: Element | null): HTM
 	return opener.matches(control) ? opener as HTMLElement : opener.querySelector<HTMLElement>(control);
 }
 
-/**
- * Whether a closing sheet should send focus back to what opened it: only while focus is still inside the sheet or was
- * lost to the page, as Modal does, never from where the person moved it while the sheet's outro ran.
- */
-export function sheetKeepsFocus(sheet: Element | null, active: Element | null): boolean {
-	return !active || active === document.body || !!sheet?.contains(active);
-}
-
 export function drawerKeys(element: HTMLElement, onClose: () => void) {
 	function onKey(event: KeyboardEvent) {
 		if (event.key !== 'Escape') return;

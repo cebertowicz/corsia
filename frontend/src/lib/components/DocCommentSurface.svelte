@@ -22,7 +22,8 @@
 	import { createSuggestionDecisions } from '$lib/docSuggestionDecisions.svelte';
 	import type { DocComment } from '$lib/stores/docComments';
 	import { retainUnreadList } from '$lib/docUnreadList.svelte';
-	import { COMMENT_FILTERS as FILTERS, byCommentNumber, clickedOpener, drawerFooterHeight, drawerKeys, imageDrawerMotion, observeCanvasWidth, observeSheetTyping, onSheetMoved, openerFocus, presence, scrollListToCard, sheetKeepsFocus } from '$lib/docCommentDrawer';
+	import { COMMENT_FILTERS as FILTERS, byCommentNumber, clickedOpener, drawerFooterHeight, drawerKeys, imageDrawerMotion, observeCanvasWidth, observeSheetTyping, onSheetMoved, openerFocus, presence, scrollListToCard } from '$lib/docCommentDrawer';
+	import { focusStillOurs } from '$lib/actions/focusTrap';
 	import { restingTop, trackOverlaySheet } from '$lib/cm/visible-region';
 	import { createCellLabels, type WidgetLabelReader } from '$lib/docCommentLabels';
 	import { createCommentSheet } from '$lib/docCommentSheet.svelte';
@@ -244,7 +245,7 @@
 		});
 	}
 	function finishSheetClose() {
-		const returnFocus = sheetKeepsFocus(listSheet ?? draftSheet, document.activeElement);
+		const returnFocus = focusStillOurs(listSheet ?? draftSheet, document.activeElement);
 		sheet.finishClose();
 		if (!sheet.open && returnFocus) void tick().then(() => restoreFocus());
 	}

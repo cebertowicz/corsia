@@ -1,5 +1,6 @@
 import { tick } from 'svelte';
 
+import { focusStillOurs } from '$lib/actions/focusTrap';
 import type { HostAccessLeaseDecision } from '$lib/api/hostAccess';
 
 export type FocusRestoreIntent = {
@@ -22,21 +23,10 @@ export async function restoreComposerFocusAfterLeaseRemoval(
 	intent: FocusRestoreIntent,
 	isCurrentThread: () => boolean,
 ): Promise<void> {
-	const activeElement = document.activeElement;
-	const focusWasAbandoned = activeElement === null
-		|| activeElement === document.body
-		|| !activeElement.isConnected
-		|| intent.control.contains(activeElement);
-	if (!focusWasAbandoned) return;
+	if (!focusStillOurs(intent.control, document.activeElement)) return;
 
 	await tick();
 	if (!isCurrentThread()) return;
-	const currentFocus = document.activeElement;
-	if (
-		currentFocus !== null
-		&& currentFocus !== document.body
-		&& currentFocus.isConnected
-		&& !intent.control.contains(currentFocus)
-	) return;
+	if (!focusStillOurs(intent.control, document.activeElement)) return;
 	document.querySelector<HTMLElement>('[role="textbox"][aria-label="Message CORSIA"]')?.focus();
 }
