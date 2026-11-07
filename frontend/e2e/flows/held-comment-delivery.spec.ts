@@ -38,9 +38,9 @@ async function captureFrame(page: Page, state: string, viewport: '1440' | '393')
 		await page.screenshot({ path: join(framesOut, `${state}-${viewport}-${theme}.png`), animations: 'disabled', scale: 'css' });
 		const preference = (await readDeliveryPreference(page.request)).immediate;
 		const evidence = await page.evaluate((preference) => {
-			const marker = document.querySelector('.cm-comment-marker');
-			const box = marker?.getBoundingClientRect();
-			const ancestors = []; let parent = marker?.parentElement;
+			const anchor = document.querySelector('.cm-comment-anchor');
+			const box = anchor?.getBoundingClientRect();
+			const ancestors = []; let parent = anchor?.parentElement;
 			while (parent) {
 				const style = getComputedStyle(parent);
 				if (/(hidden|clip|auto|scroll)/.test(style.overflowX)) {
@@ -67,7 +67,7 @@ async function captureFrame(page: Page, state: string, viewport: '1440' | '393')
 				toggle: document.querySelector('[aria-label="Deliver comments immediately"]')?.getAttribute('aria-pressed'),
 				toast: document.querySelector('.toast')?.textContent,
 				headerTools,
-				marker: box ? { text: marker?.textContent, left: box.left, right: box.right, ancestors } : null,
+				anchor: box ? { text: anchor?.textContent, left: box.left, right: box.right, ancestors } : null,
 			};
 		}, preference);
 		writeFileSync(join(framesOut, `${state}-${viewport}-${theme}.json`), JSON.stringify(evidence, null, 2));

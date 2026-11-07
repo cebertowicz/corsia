@@ -508,13 +508,6 @@
       "raw_shadows": 0,
       "row_menu_buttons": 0
     },
-    "frontend/src/lib/cm/comment-clusters.ts": {
-      "raw_colors": 0,
-      "raw_px": 0,
-      "heavy_borders": 0,
-      "raw_shadows": 0,
-      "row_menu_buttons": 0
-    },
     "frontend/src/lib/cm/comment-marks.ts": {
       "raw_colors": 0,
       "raw_px": 0,

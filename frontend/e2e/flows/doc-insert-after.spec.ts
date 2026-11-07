@@ -2,7 +2,7 @@ import path from 'node:path';
 import { expect } from '@playwright/test';
 import { test } from '../support/test';
 import { openSuggestionDocument } from '../support/docSuggestions';
-import { showAllThreads } from '../support/commentDrawer';
+import { inResolved, showAllThreads } from '../support/commentDrawer';
 import { layouts } from '../support/liveConcurrency';
 
 const text = '# About you\n\n# Work\n\n# Preferences\n';
@@ -31,7 +31,7 @@ for (const [width, height, project] of layouts) {
 		await accept(ids[0]).click();
 		await accept(ids[1]).click();
 		await reject(ids[2]).click();
-		await expect(row(ids[2]).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible();
+		await inResolved(drawer, () => expect(row(ids[2]).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
 		await expect.poll(storedText).toBe('# About you\nFirst fact\nSecond fact\n\n# Work\n\n# Preferences\n');
 		await page.screenshot({ path: process.env.CORSIA_INSERT_FRAMES ? path.join(process.env.CORSIA_INSERT_FRAMES, `insert-decided-${width}.png`) : info.outputPath(`insert-decided-${width}.png`) });
 	});

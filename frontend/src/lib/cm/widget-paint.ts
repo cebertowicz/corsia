@@ -102,7 +102,12 @@ export function wrapRange(range: Range, mark: Mark, interactivePending = false) 
 		wraps.push(wrap);
 	}
 	const last = wraps[wraps.length - 1];
-	if (mark.suggestion && last) last.after(suggestionInsert(mark, mark.suggestion));
+	if (mark.suggestion && last) {
+		const insert = suggestionInsert(mark, mark.suggestion);
+		last.after(insert);
+		// Struck text with nothing after it in its cell: the replacement goes under it, so the cell is as wide as the wider of the two, not both side by side, and the columns beside it keep their share of the table.
+		if (!insert.nextSibling?.textContent?.trim()) insert.classList.add('cm-suggestion-insert-below');
+	}
 }
 
 /** The inserted text of a suggestion in a cell: drawn by CSS from an attribute, so it is neither selectable nor part of the cell's text. */

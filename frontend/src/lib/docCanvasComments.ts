@@ -121,7 +121,10 @@ function onAppliedText(comment: DocComment, text: string, accepting: string | nu
 	const replacement = comment.replacement;
 	if (comment.decision === 'accepted') return { ...comment, to: comment.from + replacement.length };
 	const from = comment.insertAfter ? comment.from + comment.anchor.length : comment.from;
-	return comment.id === accepting && !comment.decision && text.startsWith(replacement, from)
+	// The replacement standing at `from` is not enough for a non-insertion: a deletion (empty) and a replacement that begins with its own quote both
+	// match before the edit lands, so the quote must also be gone from there.
+	const edited = comment.insertAfter || !text.startsWith(comment.anchor, from);
+	return comment.id === accepting && !comment.decision && edited && text.startsWith(replacement, from)
 		? { ...comment, from, to: from + replacement.length, decision: 'accepted' } : comment;
 }
 

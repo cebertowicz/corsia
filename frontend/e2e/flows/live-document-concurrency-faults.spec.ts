@@ -1,6 +1,7 @@
 import { test } from '../support/test';
 import { expect, type APIRequestContext } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
+import { inResolved } from '../support/commentDrawer';
 import { createComment, openLiveDocument, renderedCount, seedLiveDocument, serverText, typeAtDocumentEnd, type LiveDocument } from '../support/liveDocument';
 import { liveFaultEvidence, liveFaultsEnabled, refuseLiveFaultOnce } from '../support/liveFault';
 import {
@@ -192,7 +193,7 @@ for (const [width, height, project] of layouts) {
 
 			// The one refusal is spent: the same Accept now flushes, applies once and keeps the typed text.
 			await row.getByRole('button', { name: 'Accept', exact: true }).click();
-			await expect(row.getByRole('region', { name: /^accepted suggestion by / })).toBeVisible();
+			await inResolved(page.getByRole('region', { name: 'Document comments', exact: true }), () => expect(row.getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			expect(decisions).toBe(1);
 			await expect.poll(() => renderedCount(page, 'tight line')).toBe(1);
 			expect(await renderedCount(page, typed)).toBe(1);

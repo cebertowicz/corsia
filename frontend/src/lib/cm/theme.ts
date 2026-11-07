@@ -16,12 +16,12 @@ export const docTheme = EditorView.theme({
 		overflow: 'auto'
 	},
 	'.cm-content': {
-		padding: '4px var(--doc-phone-inset, 0px) 40vh var(--doc-phone-inset, var(--doc-rail, 44px))',
+		padding: '4px var(--doc-phone-inset, 0px) 40vh var(--doc-inset, 24px)',
 		caretColor: 'var(--accent)',
 		maxWidth: '100%'
 	},
-	// --doc-phone-inset is set once on the canvas (DocViewer.css) for a touch pointer at phone width: the text keeps that
-	// inset on both sides, and the 44px marker hit box reaches into its edge. Unset, the one-sided rail applies.
+	// The text's left inset is --doc-inset (24px; the image viewer sets 0), the document header takes the same. --doc-phone-inset
+	// is set once on the canvas (DocViewer.css) for a touch pointer at phone width, so the text keeps that inset on the right too.
 	'.cm-line': { padding: '0 2px' },
 	'&.cm-focused': { outline: 'none' },
 	'.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
@@ -99,31 +99,10 @@ export const docTheme = EditorView.theme({
 	'.cm-comment-block-focused': { outlineColor: 'var(--amber)' },
 	// A mark on a whole table cell: the same underline, as a cell's own bottom edge.
 	'.cm-md-table td.cm-comment-anchor, .cm-md-table th.cm-comment-anchor': { borderBottomWidth: 'medium' },
-	// Markers live in a rail the content padding reserves (--doc-rail: 24px for a fine pointer,
-	// 44px for a coarse or unknown one, decided by railWidth() and set by the rail and the viewer;
-	// the document header takes the same inset, and every CSS fallback is the unknown-pointer 44px). The rail is a
-	// positioned layer, not a gutter: it adds no inline advance to any line, so text starts at the
-	// rail's inner edge whether or not a line is commented. Each button is the whole hit box; the
-	// glyph is 18px inside it.
-	'.cm-comment-rail': { position: 'absolute', left: '0', top: '0', width: '0', height: '0', zIndex: '1', pointerEvents: 'none' },
-	'.cm-comment-marker': {
-		position: 'absolute', boxSizing: 'border-box', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', margin: '0', padding: '0', border: '0', background: 'none',
-		color: 'var(--amber-text)', fontFamily: 'inherit', pointerEvents: 'auto', cursor: 'pointer'
-	},
-	'.cm-comment-marker svg': { borderRadius: 'var(--radius-xs)', transition: 'background-color 0.12s' },
-	// A comment whose original text is gone keeps its marker, dashed and in the muted text colour so it reads as not attached to text.
-	'.cm-comment-marker[data-lost="true"]': { color: 'var(--text-secondary)' },
-	'.cm-comment-marker[data-lost="true"] svg path': { strokeDasharray: '3 2.6' },
-	'.cm-comment-marker[data-lost="true"] .cm-comment-count': { borderStyle: 'dashed' },
-	'.cm-comment-count': {
-		boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', width: '18px', height: '18px', overflow: 'hidden',
-		border: '1.5px solid currentColor', borderRadius: 'var(--radius-xs)', fontSize: '11px', fontWeight: 'var(--fw-semibold)', lineHeight: '1', fontVariantNumeric: 'tabular-nums',
-		transition: 'background-color 0.12s'
-	},
-	// The count box is 18px, centred, at the button's top: centre the 6px dot on its top-right corner.
-	'.cm-comment-dot': { position: 'absolute', top: '-3px', left: 'calc(50% + 6px)', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--accent)' },
-	'.cm-comment-marker:hover svg, .cm-comment-marker:hover .cm-comment-count': { backgroundColor: 'color-mix(in srgb, var(--amber) 16%, transparent)' },
-	'.cm-comment-marker:focus-visible': { outline: '2px solid var(--accent)', outlineOffset: '-2px' },
+	// The rail is a positioned layer holding one empty element per commented line, which the margin cards read their line from;
+	// it draws nothing and takes no pointer or focus.
+	'.cm-comment-rail': { position: 'absolute', left: '0', top: '0', width: '0', height: '0', zIndex: '1', pointerEvents: 'none', visibility: 'hidden' },
+	'.cm-comment-line': { position: 'absolute', left: '0', width: '0' },
 	// The app's reduced-motion reset gives every element a 0.01ms transition on
 	// every property, so a height or class the editor has just written is not in
 	// the layout until the next frame. CodeMirror measures in the same task it

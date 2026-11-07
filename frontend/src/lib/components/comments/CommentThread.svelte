@@ -16,6 +16,7 @@
 	import CommentSuggestionActions from './CommentSuggestionActions.svelte';
 	import CommentQuote from './CommentQuote.svelte';
 	import { plainQuote } from '$lib/plainQuote';
+	import { isLongMessageText } from '$lib/messageCollapse';
 	import NewMarker from './NewMarker.svelte';
 	import CommentPlacementLine from './CommentPlacementLine.svelte';
 	import ReplyField from './ReplyField.svelte';
@@ -29,7 +30,7 @@
 	import { arrivedDocComments } from '$lib/stores/docComments';
 	import { decidedOpen as isDecidedOpen } from '$lib/docCanvasComments';
 
-	let { comment, header, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
+	let { comment, header, diagram = false, drawerCard = false, focused = false, linked = false, selectable = false, focusReply = false, showReply = false, hideReply = false, inMargin = false, keepReplyVisible = false, flat = false, viewEachUnread = false, hideOrphan = flat, leaving = false, scrollOnFocus = true, autoFocusSelection = true, onFocus, readOnly = false, onReply, onResolve, onAgree, onDecision, onViewed, onMovePin, tagColor = null, decisionError = '', reopenReachesOwner = false, kept = false, replyText = $bindable(''), replySelection = null, onReplySelection, selectedTags = createMentionSelection() }: {
 		comment: CommentThreadData;
 		header?: Snippet;
 		diagram?: boolean;
@@ -44,6 +45,10 @@
 		focusReply?: boolean;
 		/** A text jump exposes this thread's Reply field without moving focus from the document. */
 		showReply?: boolean;
+		/** An unpicked margin card has no Reply field; one holding an unsent draft keeps it. */
+		hideReply?: boolean;
+		/** A card in the margin column: focusing it adds the quote, replies and Reply field, and leaves the header's one row (names stay as they read at rest). */
+		inMargin?: boolean;
 		/** Scroll this reply into its owning sheet when a short visual viewport could hide it. */
 		keepReplyVisible?: boolean;
 		/** Document comment surfaces present threads on the sheet rather than as nested cards. */
@@ -99,6 +104,8 @@
 	const decidedOpen = $derived(isDecidedOpen(comment));
 	const suggestionDiff = $derived(isSuggestion ? lineDiff(comment.insertAfter ? '' : comment.anchor, comment.replacement!) : null);
 	let replyPosting = $state(false);
+	/** A deleted text's quote is read in full unless it is long; then it is clamped with the Show more control chat comments use. */
+	let quoteOpen = $state(false);
 	let resolvedOpen = $state(untrack(() => !viewEachUnread && (!!comment.newComment || !!comment.newReplyIds?.length)));
 	$effect(() => { if (!viewEachUnread && (comment.newComment || comment.newReplyIds?.length)) resolvedOpen = true; });
 	let el = $state<HTMLElement>();
@@ -236,7 +243,7 @@
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
 				{#if hasBody}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} />{/if}
-				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
+				{#if comment.replies.length}<CommentReplyList fullNames={focused} replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 			</div>
 		{/if}
 	</div>
@@ -248,7 +255,7 @@
 		{#if resolvedOpen}
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} />
-				{#if comment.replies.length}<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
+				{#if comment.replies.length}<CommentReplyList fullNames={focused} replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
 				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
@@ -265,7 +272,7 @@
 			{#if comment.regionNumber != null && selectable}<button type="button" class="ct-num" style:--region-color={tagColor} style:--disc-color={chipFill} aria-label="Show comment {comment.regionNumber} on the image" onclick={(e) => { e.stopPropagation(); onFocus?.(); }}>{comment.regionNumber}</button>
 			{:else if comment.regionNumber != null}<span class="ct-num" style:--region-color={tagColor} style:--disc-color={chipFill} aria-label="Comment {comment.regionNumber}">{comment.regionNumber}</span>{/if}
 			<Avatar name={author.name} color={avatarColor} hidden />
-			<CommentMeta {author} at={comment.at} createdAt={comment.createdAt} />
+			<CommentMeta {author} at={comment.at} createdAt={comment.createdAt} fullName={focused && !inMargin} />
 			{#if comment.newComment}<NewMarker />{/if}
 			{#if comment.replies.length}
 				<span class="ct-reply-count">{comment.replies.length} {comment.replies.length === 1 ? 'reply' : 'replies'}</span>
@@ -286,6 +293,8 @@
 		{#if decidedOpen}
 			<div class="ct-decided"><svg class="ct-{comment.decision === 'accepted' ? 'check' : 'cross'}" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={comment.decision === 'accepted' ? 'M20 6L9 17l-5-5' : 'M18 6L6 18M6 6l12 12'} /></svg>Suggestion {comment.decision}</div>
 			{#if hasBody}<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} />{/if}
+			<!-- A decided card's only action is Resolve, so its card error is a refused resolve. -->
+			{#if decisionError}<div class="ct-decision-error" role="alert">{decisionError}</div>{/if}
 		{:else if isSuggestion}
 			{#if suggestionDiff}<ToolDiff file="Suggested edit" lines={suggestionDiff} words />{/if}
 			{#if comment.textChanged}<div class="ct-orphan">The text changed after this suggestion</div>{:else if comment.orphaned}<div class="ct-orphan">The text this suggestion replaces has changed.</div>{/if}
@@ -293,7 +302,7 @@
 			<CommentSuggestionActions orphaned={!!comment.orphaned} textChanged={!!comment.textChanged} {readOnly} {decisionError} onDecide={(decision) => { openThread(); return onDecision?.(comment.id, decision); }} />
 		{:else}
 			{#if comment.resolved}<div transition:clipFade><ResolvedWhileReplying {readOnly} onReopen={() => onResolve?.(comment.id, false)} /></div>{/if}
-			{#if comment.orphaned && !hideOrphan}{#if comment.detached && comment.anchor}<CommentQuote quote={plainQuote(comment.anchor)} />{/if}<div class="ct-orphan" data-detached={comment.detached || undefined}>{comment.detached ? 'This text is no longer in the document' : 'The text this comment was on has changed'}</div>{/if}
+			{#if comment.orphaned && !hideOrphan}{#if comment.detached && comment.anchor}<CommentQuote quote={plainQuote(comment.anchor)} lines={quoteOpen || !isLongMessageText(comment.anchor) ? null : 1} />{#if isLongMessageText(comment.anchor)}<button class="ct-link" data-quote-more aria-expanded={quoteOpen} onclick={(e) => { e.stopPropagation(); quoteOpen = !quoteOpen; }}>{quoteOpen ? 'Show less' : 'Show more'}</button>{/if}{/if}<div class="ct-orphan" data-detached={comment.detached || undefined}>{comment.detached ? 'This text is no longer in the document' : 'The text this comment was on has changed'}</div>{/if}
 			{#if comment.regionStale}
 				<div class="ct-orphan" data-region-stale>{changedLabel(diagram)}{#if onMovePin && !readOnly}{' '}<button class="ct-link" data-move-pin onclick={(e) => { e.stopPropagation(); onMovePin(comment.id); }}>Move pin</button>{/if}</div>
 			{/if}
@@ -301,13 +310,13 @@
 		{/if}
 
 		{#if comment.replies.length && !leaving}
-			<CommentReplyList replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />
+			<CommentReplyList fullNames={focused && !inMargin} replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />
 		{/if}
 
 		{#if !isSuggestion && comment.acked && !comment.resolved}
 			<div class="ct-agreed" transition:agreeTransition><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed</div>
 		{/if}
-		{#if !readOnly}
+		{#if !readOnly && !(hideReply && !replyText.trim())}
 			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />
 		{/if}
 	</div>
@@ -315,7 +324,7 @@
 
 <style>
 	.ct {
-		background: color-mix(in srgb, var(--text-primary) 4%, transparent); border: 1px solid transparent; border-radius: var(--radius-sm);
+		background: var(--ct-bg, color-mix(in srgb, var(--text-primary) 4%, transparent)); border: 1px solid var(--ct-border, transparent); border-radius: var(--ct-radius, var(--radius-sm)); box-shadow: var(--ct-shadow, none);
 		padding: 8px 10px; display: flex; flex-direction: column; gap: 4px;
 		transition: border-color var(--dur-tight), box-shadow var(--dur-tight), background-color var(--dur-tight) var(--ease-snap); cursor: pointer;
 	}
@@ -334,7 +343,9 @@
 	.ct.orphaned { border-color: color-mix(in srgb, var(--amber) 35%, transparent); }
 
 	.ct-head { display: flex; align-items: center; gap: 7px; }
-	.ct-reply-count { display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-caption); color: var(--text-tertiary); }
+	/* An open thread's long name takes its own row (CommentMeta); a name that fits stays inline, and a header with no stacked name never wraps (a wrapping row would drop the truncated name's time and actions below it). */
+	.ct.focused .ct-head:has(:global(.ct-author.stacked)) { flex-wrap: wrap; row-gap: 1px; }
+	.ct-reply-count { flex: none; white-space: nowrap; display: inline-flex; align-items: center; gap: var(--space-1); font-size: var(--text-caption); color: var(--text-tertiary); }
 	/* Avatar owns the shared initials presentation. */
 	.ct-act { display: flex; padding: 3px; border-radius: var(--radius-2xs); background: none; border: none; color: var(--text-tertiary); cursor: pointer; transition: opacity var(--dur-tight), background var(--dur-tight), color var(--dur-tight); }
 	.ct-act.ack { margin-left: auto; }
@@ -343,7 +354,8 @@
 	.ct-act.resolve:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 	.ct-orphan { font-size: var(--text-caption); color: var(--amber); }
-	.ct-decided { display: flex; align-items: center; gap: 6px; font-size: var(--text-footnote); color: var(--text-secondary); text-transform: none; }
+	.ct-decision-error { font-size: var(--text-caption); color: var(--red-text); }
+	.ct-decided { display: flex; align-items: center; gap: var(--space-1); font-size: var(--text-footnote); color: var(--text-secondary); text-transform: none; }
 	/* An image comment's number, in its tag's colour and shape. */
 	.ct-num {
 		box-sizing: border-box; flex-shrink: 0; display: grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--radius-2xs);

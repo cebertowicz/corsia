@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import { ANCHOR_MOVED } from './Popover.svelte';
+import Popover, { ANCHOR_MOVED } from './Popover.svelte';
 import Fixture from './PopoverStickyFixture.svelte';
 
 it('keeps its opening side while it grows, then chooses again for a new anchor or open', async () => {
@@ -64,4 +64,22 @@ it('ignores a scroll that left its anchor in place, and answers one that moved i
   fixture.setRect(new DOMRect(400, 410, 50, 20)); window.dispatchEvent(new Event('scroll')); flushSync();
   expect(surface().style.top).toBe('52px');
  } finally { await unmount(fixture); host.remove(); elsewhere.remove(); width.mockRestore(); tall.mockRestore(); }
+});
+
+it('keeps the side a click-opened card chose while it grows, and does not flip above the line', async () => {
+ let height = 100;
+ const host = document.createElement('div'); document.body.appendChild(host);
+ const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(200);
+ const tall = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(() => height);
+ const line = new DOMRect(200, 100, 0, 20);
+ const mountAt = () => mount(Popover, { target: host, props: { anchor: line, open: true, onClose: vi.fn(), placement: 'pointer', children: (() => {}) as any } });
+ let card = mountAt(); flushSync();
+ try {
+  const surface = () => document.body.querySelector<HTMLElement>('.popover')!;
+  await vi.waitFor(() => expect(surface().style.top).toBe('124px'));
+  // Too tall to fit under the line: it stays under it, clamped into the screen, rather than jumping above the line.
+  height = window.innerHeight - 20; window.dispatchEvent(new Event(ANCHOR_MOVED)); flushSync();
+  expect(surface().style.top).toBe(`${window.innerHeight - height - 8}px`);
+  expect(surface().style.left).toBe('212px');
+ } finally { await unmount(card); host.remove(); width.mockRestore(); tall.mockRestore(); }
 });

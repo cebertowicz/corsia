@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-import { flushSync } from 'svelte';
+import { flushSync, tick } from 'svelte';
 import { createViewerHistory } from './docViewerHistory.svelte';
 import { restoreVersion } from '$lib/docHistory';
 import { existingDraft, flushDraft } from '$lib/stores/docSaveQueue';
@@ -15,7 +15,7 @@ const version = { id: 'a'.repeat(40), author: 'Author', savedAt: '2026-11-03T16:
 function create() {
 	let history!: ReturnType<typeof createViewerHistory>;
 	const dispose = $effect.root(() => {
-		history = createViewerHistory({ key: () => 'tab', target: () => target, closeComments: vi.fn(), root: () => undefined });
+		history = createViewerHistory({ key: () => 'tab', target: () => target, closeComments: vi.fn(), columnShown: () => false, showColumn: vi.fn(), root: () => undefined });
 	});
 	flushSync();
 	return { history, dispose };
@@ -41,7 +41,7 @@ it('offers History only for the tab whose open said it has history, and mirrors 
 	let key = $state('tab');
 	let history!: ReturnType<typeof createViewerHistory>;
 	const dispose = $effect.root(() => {
-		history = createViewerHistory({ key: () => key, target: () => target, closeComments: vi.fn(), root: () => undefined });
+		history = createViewerHistory({ key: () => key, target: () => target, closeComments: vi.fn(), columnShown: () => false, showColumn: vi.fn(), root: () => undefined });
 	});
 	flushSync();
 	expect(history.available).toBe(false);
@@ -84,5 +84,62 @@ it('names a missing saved revision as a document still loading', async () => {
 	const { history, dispose } = create();
 	await expect(history.restore(version)).rejects.toMatchObject({ kind: 'not_loaded' });
 	expect(restoreVersion).not.toHaveBeenCalled();
+	dispose();
+});
+
+function createWithColumn(initial: { shown: boolean }) {
+	const showColumn = vi.fn();
+	let history!: ReturnType<typeof createViewerHistory>;
+	const dispose = $effect.root(() => {
+		history = createViewerHistory({ key: () => 'tab', target: () => target, closeComments: vi.fn(() => { initial.shown = false; }), columnShown: () => initial.shown, showColumn, root: () => undefined });
+	});
+	flushSync();
+	return { history, dispose, showColumn };
+}
+
+it('brings the margin column back when History closes, if it was up when History opened', async () => {
+	const column = { shown: true };
+	const { history, dispose, showColumn } = createWithColumn(column);
+	history.toggle();
+	expect(history.open).toBe(true);
+	await tick();
+	expect(showColumn).not.toHaveBeenCalled();
+	history.toggle();
+	expect(history.open).toBe(false);
+	expect(showColumn).not.toHaveBeenCalled();
+	await tick();
+	expect(showColumn).toHaveBeenCalledTimes(1);
+	dispose();
+});
+
+it('brings the column back when History is closed from its own Close button too, and only once', async () => {
+	const { history, dispose, showColumn } = createWithColumn({ shown: true });
+	history.toggle();
+	history.close();
+	history.close();
+	await tick();
+	expect(showColumn).toHaveBeenCalledTimes(1);
+	dispose();
+});
+
+it('leaves the column closed when it was not up before History opened', async () => {
+	const { history, dispose, showColumn } = createWithColumn({ shown: false });
+	history.toggle();
+	history.toggle();
+	await tick();
+	expect(showColumn).not.toHaveBeenCalled();
+	dispose();
+});
+
+it('does not remember a column from an earlier opening', async () => {
+	const column = { shown: true };
+	const { history, dispose, showColumn } = createWithColumn(column);
+	history.toggle(); history.toggle();
+	await tick();
+	showColumn.mockClear();
+	column.shown = false;
+	history.toggle(); history.toggle();
+	await tick();
+	expect(showColumn).not.toHaveBeenCalled();
 	dispose();
 });

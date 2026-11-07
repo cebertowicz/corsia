@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { test } from '../support/test';
 import { expect } from '@playwright/test';
-import { replyField, showAllThreads } from '../support/commentDrawer';
+import { openResolved, replyField, showAllThreads } from '../support/commentDrawer';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 
 test('@flow:document-second-canvas a reply and a resolve made in one canvas appear in a second open canvas', async ({ page, request }, testInfo) => {
@@ -59,6 +59,9 @@ test('@flow:document-second-canvas a reply and a resolve made in one canvas appe
 	await expect(watched).toContainText('Reply from the other canvas.');
 
 	await written.getByRole('button', { name: 'Resolve', exact: true }).click();
+	// A resolved thread leaves the open cards for the Resolved list in both canvases.
+	await openResolved(writer.getByRole('region', { name: 'Document comments', exact: true }));
+	await openResolved(page.getByRole('region', { name: 'Document comments', exact: true }));
 	await expect(writer.getByRole('region', { name: /^Resolved comment by / })).toBeVisible();
 	await expect(page.getByRole('region', { name: /^Resolved comment by / })).toBeVisible();
 	await saveEvidenceScreenshot(page, testInfo, 'document-second-canvas-current', { fullPage: false });

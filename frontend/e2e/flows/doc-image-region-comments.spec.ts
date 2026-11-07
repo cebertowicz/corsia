@@ -11,7 +11,7 @@ import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedF
 import { expectBarFits } from '../support/docImageComments';
 
 // Comments on parts of an image inside a document (DCOL-FR13.3, 13.5, 13.6, 13.12): the viewer over the document,
-// the margin marker and drawer group back in it, and the one feedback batch both show and send.
+// the comments pill, the drawer group and the image itself back in it, and the one feedback batch both show and send.
 
 const NATURAL = { width: 1600, height: 1000 };
 const REPLACED_NATURAL = { width: 1200, height: 800 };
@@ -76,7 +76,8 @@ async function seedDocument(page: Page, request: APIRequestContext, label: strin
 const overlay = (page: Page) => page.locator('.image-overlay');
 const bar = (page: Page) => overlay(page).locator('.bar');
 const docImage = (page: Page) => page.locator('.cm-md-image img').first();
-const marker = (page: Page) => page.locator('.cm-comment-marker').first();
+/** The document's header pill names the thread the image carries: no margin icon stands beside the image any more. */
+const imageThread = (page: Page) => page.locator('.document-header .comment-status');
 const drawer = (page: Page) => page.locator('.canvas-comment-drawer, .drawer-panel[role="dialog"]');
 const tag = (page: Page, number: number) => overlay(page).locator(`[data-region-tag="${number}"]:not([inert])`);
 const viewerSend = (page: Page) => bar(page).getByRole('button', { name: /^Send/ });
@@ -182,25 +183,24 @@ async function commentOnRegion(page: Page, text: string, at = { x: 0.2, y: 0.25 
 	await page.keyboard.press('ControlOrMeta+Enter');
 	await expect(composer).toHaveCount(0);
 }
-/** On a phone the posted comment stays open in a sheet over the bar; Done puts it away, as before a user's next tap. */
+/** On a phone the posted comment stays open in a sheet over the bar; Close puts it away, as before a user's next tap. */
 async function putSheetAway(page: Page) {
 	if ((page.viewportSize()?.width ?? 1440) > 768) return;
 	const backdrop = page.locator('[data-adaptive-drawer].drawer-backdrop');
 	await expect(backdrop).toBeVisible();
 	const layer = () => page.evaluate(() => (history.state as { backLayer?: number } | null)?.backLayer ?? null);
 	const open = await layer();
-	await page.getByRole('button', { name: 'Done', exact: true }).click();
+	await page.getByRole('button', { name: 'Close', exact: true }).click();
 	await expect(backdrop).toHaveCount(0);
 	// The sheet pops its history entry asynchronously; a tap before that pop would be undone by it.
 	if (open !== null) await expect.poll(layer, { message: 'the sheet\'s history entry is gone' }).not.toBe(open);
 }
 const nextFrames = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 /**
- * Each margin marker sits at the top of its own image, in either theme, two frames after the theme changes: the rail
- * follows an image's size and place as it draws, with no waiting for things to settle. Leaving the viewer re-lays the
- * document out at its column's width first; that settles before the theme changes, so each switch is measured alone.
+ * The document, once its images have stopped moving, in both themes: evidence of the image and its comments after leaving the viewer.
+ * Leaving the viewer re-lays the document out at its column's width first; that settles before the theme changes.
  */
-async function expectMarkersBesideImages(page: Page, testInfo: TestInfo, name: string) {
+async function expectImagesSettled(page: Page, testInfo: TestInfo, name: string) {
 	let last = '';
 	await expect.poll(async () => {
 		const now = JSON.stringify(await page.locator('.cm-md-image').evaluateAll((images) => images.map((image) => image.getBoundingClientRect().toJSON())));
@@ -213,12 +213,7 @@ async function expectMarkersBesideImages(page: Page, testInfo: TestInfo, name: s
 		await page.emulateMedia({ colorScheme: scheme });
 		await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
 		await nextFrames(page);
-		const markers = page.locator('.cm-comment-marker');
-		for (let index = 0; index < await markers.count(); index++) {
-			const image = (await page.locator('.cm-md-image').nth(index).boundingBox())!;
-			const mark = (await markers.nth(index).boundingBox())!;
-			expect(Math.abs(mark.y - image.y), `${scheme}: marker ${index + 1} at ${mark.y}, its image's top at ${image.y}`).toBeLessThanOrEqual(2);
-		}
+		expect(await page.locator('.cm-comment-marker').count(), 'no margin icon stands beside an image').toBe(0);
 		await saveEvidenceScreenshot(page, testInfo, `${name}-${scheme}`, { fullPage: false });
 	}
 }
@@ -281,14 +276,14 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await page.keyboard.press('Escape');
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		await expect(marker(page)).toBeVisible();
+		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 (open )?threads?\b/);
 
 		const replaced = await request.put(`/api/files/content${query}`, {
 			data: { path: imagePath, text: svgImage(REPLACED_NATURAL), thread_id: seeded.sessionId },
 		});
 		expect(replaced.ok(), `image replace failed: ${replaced.status()}`).toBeTruthy();
 		await expect.poll(() => docImage(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(REPLACED_NATURAL.width);
-		await expect(marker(page)).toBeVisible();
+		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 (open )?threads?\b/);
 	});
 
 	test('reopens a replaced image and keeps its region comment on the fresh image', async ({ page, request }, testInfo) => {
@@ -302,16 +297,16 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await page.keyboard.press('Escape');
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		await expect(marker(page)).toBeVisible();
+		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 (open )?threads?\b/);
 
 		fs.writeFileSync(seeded.imagePath, syntheticPng(REPLACED_NATURAL.width, REPLACED_NATURAL.height));
 		await page.getByRole('button', { name: 'Close walkthrough.md' }).click();
 		await expect(page.getByRole('button', { name: 'Close walkthrough.md' })).toHaveCount(0);
 		await reopenDocument(page);
 		await expect.poll(() => docImage(page).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(REPLACED_NATURAL.width);
-		await expect(marker(page)).toBeVisible();
+		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 (open )?threads?\b/);
 
-		await marker(page).click();
+		await docImage(page).click();
 		await expect(overlay(page)).toBeVisible();
 		await expect.poll(() => overlay(page).locator('.frame img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(REPLACED_NATURAL.width);
 		await expect(tag(page, 1)).toBeVisible();
@@ -347,16 +342,14 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		expect(JSON.parse(sends.document[0]).delivery_policy).toBe('image-held');
 		await expect(docComments(page)).not.toHaveAttribute('aria-label', /not sent yet/);
 		await expect(headerSend(page)).toHaveCount(0);
-		await expect(marker(page)).toBeVisible();
-		await expectMarkersBesideImages(page, testInfo, 'doc-1440-04-document-marker');
+		await expect(imageThread(page)).toHaveAttribute('aria-label', /^1 (open )?threads?\b/);
+		await expectImagesSettled(page, testInfo, 'doc-1440-04-document');
 
-		// J3: the marker opens the viewer on its comment, its card at its tag.
-		await marker(page).click();
+		// J3: pressing the image opens the viewer with the comment's tag on it (no margin icon stands by the image; the drawer below opens one comment).
+		await docImage(page).click();
 		await expect(overlay(page)).toBeVisible();
-		await expect(tag(page, 1)).toHaveAttribute('aria-pressed', 'true');
-		await expect(page.locator('[data-popover]')).toContainText('The header crowds the logo');
-		await shoot(page, testInfo, 'doc-1440-05-marker-opens-card', true);
-		await page.keyboard.press('Escape');
+		await expect(tag(page, 1)).toBeVisible();
+		await shoot(page, testInfo, 'doc-1440-05-image-opens-viewer', true);
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
 
@@ -419,7 +412,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
 		await expect(docComments(page)).not.toHaveAttribute('aria-label', /not sent yet/);
-		await expectMarkersBesideImages(page, testInfo, 'doc-393-04-document-marker');
+		await expectImagesSettled(page, testInfo, 'doc-393-04-document');
 		await docComments(page).click();
 		await expect(page.locator('.drawer-panel[role="dialog"], .canvas-comment-drawer').getByText('Tap target too small')).toBeVisible();
 		await expect(drawerThumb(page)).toBeVisible();
@@ -438,7 +431,7 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		await shoot(page, testInfo, 'doc-393-06-document-sent', true);
 	});
 
-	for (const width of [1440, 393]) test(`many comments on two images: tags in the viewer, a marker per image, a drawer group per image (${width})`, async ({ page, request }, testInfo) => {
+	for (const width of [1440, 393]) test(`many comments on two images: tags in the viewer, a drawer group per image (${width})`, async ({ page, request }, testInfo) => {
 		mockOnly(testInfo);
 		test.setTimeout(240_000);
 		await page.setViewportSize({ width, height: width > 768 ? 900 : 852 });
@@ -466,11 +459,10 @@ test.describe('@flow:image-region-comments @surface:documents comments on images
 		if (width > 768) await page.keyboard.press('Escape');
 		await bar(page).getByRole('button', { name: 'Back to walkthrough.md' }).click();
 		await expect(overlay(page)).toHaveCount(0);
-		// A marker beside each image, and the document's row counting all six.
-		await expect(page.locator('.cm-comment-marker')).toHaveCount(2);
+		// The document's row counts all six.
 		await leaveUserCommentsUnsent(request, seeded.artifactId);
 		await expect(docComments(page)).toHaveAttribute('aria-label', unsentName(6));
-		await expectMarkersBesideImages(page, testInfo, `doc-${width}-many-02-document-two-markers`);
+		await expectImagesSettled(page, testInfo, `doc-${width}-many-02-document-two-images`);
 
 		// The drawer: one group per image, each under one thumbnail, comments in number order; scrolled to the second.
 		await docComments(page).click();

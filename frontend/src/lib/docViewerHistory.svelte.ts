@@ -1,4 +1,4 @@
-import { untrack } from 'svelte';
+import { tick, untrack } from 'svelte';
 import { restoreVersion, type DocVersion } from '$lib/docHistory';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { existingDraft, flushDraft } from '$lib/stores/docSaveQueue';
@@ -11,6 +11,10 @@ export function createViewerHistory(source: {
 	key: () => string;
 	target: () => DocViewerTarget | null;
 	closeComments: () => void;
+	/** The margin column is up beside the text now. */
+	columnShown: () => boolean;
+	/** Brings the column back, when it fits and has comments to show. */
+	showColumn: () => void;
 	root: () => HTMLElement | undefined;
 }) {
 	let open = $state(false);
@@ -18,10 +22,12 @@ export function createViewerHistory(source: {
 	let available = $state(false);
 	// A restore is pending, so the document's save line reads "Saving…"; the History surface sets it and reads it here.
 	let restoring = $state(false);
+	// The column was up when History opened (opening it closes the comments), so closing History puts it back.
+	let columnWas = false;
 
 	$effect(() => {
 		if (!source.key()) return;
-		return () => { open = false; available = false; restoring = false; };
+		return () => { open = false; available = false; restoring = false; columnWas = false; };
 	});
 
 	$effect(() => {
@@ -33,10 +39,20 @@ export function createViewerHistory(source: {
 		return widenForHistory(width, inset);
 	});
 
+	function close(): void {
+		if (!open) return;
+		open = false;
+		if (!columnWas) return;
+		columnWas = false;
+		// The canvas is only back to its own width once the widened History layout has gone.
+		void tick().then(source.showColumn);
+	}
 	function toggle(): void {
+		const showing = source.columnShown();
 		source.closeComments();
-		if (open) { open = false; return; }
+		if (open) { close(); return; }
 		if (!source.target()) return;
+		columnWas = showing;
 		open = true;
 		emitProductEvent('document', 'history_opened');
 	}
@@ -56,6 +72,6 @@ export function createViewerHistory(source: {
 		get restoring() { return restoring; },
 		setAvailable: (value: boolean) => { available = value; },
 		setRestoring: (busy: boolean) => { restoring = busy; },
-		close: () => { open = false; }, toggle, restore,
+		close, toggle, restore,
 	};
 }

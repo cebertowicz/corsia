@@ -4,10 +4,22 @@
 /* A pending-feedback footer reports its own height. The list keeps its existing capped height; only the pinned footer is added below it. */
 .doc:has(.canvas-comment-drawer), .doc:has(.canvas-history-drawer) { --doc-drawer-height: min(36%, 260px); grid-template-areas: 'header' 'editor' 'drawer'; grid-template-rows: auto minmax(0, 1fr) minmax(0, var(--doc-drawer-height)); }
 .doc:has(.canvas-comment-drawer .drawer-unsent) { --doc-drawer-height: calc(min(36%, 260px) + var(--doc-drawer-footer-height, 0px)); }
+/* Margin column, 280px of cards plus gutter, at any desktop width. */
+.doc:has(.canvas-comment-drawer.margin) { grid-template-areas: 'header header' 'editor drawer'; grid-template-columns: minmax(0, 1fr) 308px; grid-template-rows: auto minmax(0, 1fr); }
+/* The column grows in over the spring duration. */
+@keyframes margin-column-in { from { grid-template-columns: minmax(0, 1fr) 0px; } to { grid-template-columns: minmax(0, 1fr) 308px; } }
+/* And leaves the same way: the track closes over the same duration, so the text widens in one smooth step. */
+@media (prefers-reduced-motion: no-preference) {
+	.doc:has(.canvas-comment-drawer.margin) { animation: margin-column-in var(--dur-spring) var(--ease-material); }
+	.doc:has(.canvas-comment-drawer.margin.leaving) { animation: margin-column-out var(--dur-spring) var(--ease-material) forwards; }
+}
+@keyframes margin-column-out { from { grid-template-columns: minmax(0, 1fr) 308px; } to { grid-template-columns: minmax(0, 1fr) 0px; } }
 /* The bottom band has its own track, so notices do not cover the editor, its activity control or a drawer. */
 .doc:has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom'; grid-template-rows: auto minmax(0, 1fr) auto; }
 .doc:has(.canvas-comment-drawer):has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom' 'drawer'; grid-template-rows: auto minmax(0, 1fr) auto minmax(0, var(--doc-drawer-height)); }
 .doc:has(.canvas-history-drawer):has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom' 'drawer'; grid-template-rows: auto minmax(0, 1fr) auto minmax(0, var(--doc-drawer-height)); }
+/* A bottom band is one more row inside the margin layout, never a reason to drop the column below the text: this has to outrank the stacked bottom-band rule above, which is more specific than the margin rule at the top. */
+.doc:has(.canvas-comment-drawer.margin):has(.doc-bottom-band) { grid-template-areas: 'header header' 'editor drawer' 'bottom drawer'; grid-template-rows: auto minmax(0, 1fr) auto; }
 @container doc-canvas (min-width: 900px) {
   .doc:has(.canvas-comment-drawer) { grid-template-areas: 'header header' 'editor drawer'; grid-template-columns: minmax(0, 1fr) 320px; grid-template-rows: auto minmax(0, 1fr); }
   .doc:has(.canvas-comment-drawer):has(.doc-bottom-band) { grid-template-areas: 'header header' 'editor drawer' 'bottom drawer'; grid-template-rows: auto minmax(0, 1fr) auto; }
@@ -24,7 +36,7 @@
    An above pill reserves nothing, since space at the top would push the text being read down as the pill appears. */
 .doc:has(.activity-pill[data-direction='below']) .doc-main { box-sizing: border-box; padding-bottom: calc(var(--touch-target) + var(--space-1)); }
 @media (max-width: 600px) {
-  /* A touch pointer at phone width keeps one 24px (the fine rail's) text inset on both sides instead of the 44px marker rail on the left only; the marker's hit box stays railWidth() and reaches into the text's edge. The editor, header and review bar read this; ArtifactLeaf's page gutter shares the condition. */
+  /* A touch pointer at phone width keeps the 24px text inset on the right as well as the left. The editor reads this; ArtifactLeaf's page gutter shares the condition. */
   @media (any-pointer: coarse) { .doc { --doc-phone-inset: 24px; } }
 }
 .ed-wrap { position: relative; height: 100%; min-height: 0; }
@@ -59,3 +71,8 @@
 @container doc-canvas (min-width: 666px) {
   .doc:has(.history-version) > .doc-main { display: none; }
 }
+
+/* One scroll. The editor reserves room below its text for a stack of cards that runs past it (kept for a moment after the column closes), and the picked line is deeper. */
+.doc { --margin-overhang: 0px; }
+.doc .cm-content { margin-bottom: var(--margin-overhang); }
+.doc:has(.canvas-comment-drawer.margin) .cm-comment-focused { background-color: color-mix(in srgb, var(--amber) 48%, transparent); }

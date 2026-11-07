@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 
 const mocks = vi.hoisted(() => ({ retryPlacement: vi.fn() }));
-vi.mock('$lib/stores/docComments', () => ({ retryPlacement: mocks.retryPlacement }));
+vi.mock('$lib/stores/docComments', () => ({ docComments: { subscribe: (run: (value: object) => void) => { run({}); return () => {}; } }, retryPlacement: mocks.retryPlacement }));
 
 import CommentThread from './CommentThread.svelte';
 import CommentList from './CommentList.svelte';

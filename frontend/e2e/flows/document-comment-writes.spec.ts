@@ -2,7 +2,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { expectQuietSave, observeSaveCue } from '../support/docSaveCue';
-import { replyField, showAllThreads } from '../support/commentDrawer';
+import { openResolved, replyField, showAllThreads } from '../support/commentDrawer';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 async function seedCommentedDocument({ page, request }: { page: Page; request: APIRequestContext }) {
@@ -65,6 +65,7 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	await expect(comment).toContainText('Agreed');
 	await expect(await replyField(comment)).toBeVisible();
 	await comment.getByRole('button', { name: 'Resolve', exact: true }).click();
+	await openResolved(page.getByRole('region', { name: 'Document comments', exact: true }));
 	const resolved = page.getByRole('region', { name: /^Resolved comment by / });
 	await expect(resolved).toBeVisible();
 	await resolved.getByRole('button', { name: 'Resolved · 2 messages' }).click();

@@ -103,6 +103,8 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	const quote = origin === 'quote-tap';
 	const boxOf = (current: EditorView) => boxAt(current, target, widget);
 	if (origin === 'comment-save' && within(boxOf(view), visibleRegion(view).band)) return;
+	// With comments in the margin the cards move to the line, so a visible line never makes the document scroll.
+	if (view.dom.closest('.doc')?.querySelector('.canvas-comment-drawer.margin') && within(boxOf(view), visibleRegion(view).band)) return;
 	// A drawn widget row is placed with the scroller inside CodeMirror's measure cycle: CodeMirror's own scroll target is the
 	// whole replaced block, which centres on the block's middle. Anything else, and a widget not drawn yet, goes to CodeMirror.
 	const jump = () => {

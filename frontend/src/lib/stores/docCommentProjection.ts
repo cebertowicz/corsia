@@ -34,10 +34,12 @@ export interface DocComment {
 	createdAt?: string;
 	resolved: boolean;
 	orphaned?: boolean;
-	/** An orphaned comment whose quote no longer appears in the document text. */
+	/** The original text is gone: nothing of the quote is left to mark (a collapsed range, or a quote found nowhere in the document). One rule for a comment and for a decided suggestion that keeps its replies. */
 	detached?: boolean;
 	/** An open suggestion whose text was edited inside: it keeps its place and its quote, and cannot be accepted. */
 	textChanged?: boolean;
+	/** When the thread last changed; a resolve sets it. The server keeps no separate resolve time, so this orders the resolved list. */
+	updatedAt?: string;
 	acked?: boolean;
 	review?: boolean;
 	replacement?: string | null;
@@ -93,6 +95,7 @@ export function fromServer(r: ServerComment): DocComment {
 		mentions: r.tagged_agent_mentions ?? [],
 		at: relLabel(r.created_at),
 		createdAt: r.created_at,
+		updatedAt: r.updated_at,
 		resolved: !!r.resolved,
 		orphaned: !!r.orphaned,
 		textChanged: !!r.text_changed,

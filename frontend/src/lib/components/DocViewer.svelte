@@ -28,8 +28,7 @@
 	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { handleDocumentKey } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
-	import { createCommentSurfaceState, focusDocumentEditor } from '$lib/docCommentSurfaceState.svelte';
-	import { railWidth } from '$lib/cm/comment-clusters';
+	import { createCommentSurfaceState, focusDocumentEditor, marginFits, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';
 	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
 	import { leavePreviousTarget, loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
@@ -89,7 +88,7 @@
 	let feedbackStatus = $state<DocViewerStatus>();
 
 	const save = createDocSaveState(() => target);
-	const history = createViewerHistory({ key: () => targetKey, target: () => target, closeComments: () => commentUI.close(), root: () => docRoot });
+	const history = createViewerHistory({ key: () => targetKey, target: () => target, closeComments: () => commentUI.close(), columnShown: () => (commentUI.state?.kind === 'list' || commentUI.state?.kind === 'thread') && marginFits(docRoot, isPaneDrawer()), showColumn: () => { if (listedComments.length > 0 && marginFits(docRoot, isPaneDrawer())) commentUI.openOnLoad(); }, root: () => docRoot });
 	const liveSession = $derived(target ? $liveDocumentBindings[target.instanceId] : undefined);
 	let liveConnection = $state<LiveDocumentSession['connection'] | null>(null);
 	let liveGeneration = $state(0);
@@ -119,9 +118,10 @@
 	let docRoot = $state<HTMLElement>();
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
 
-	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey);
+	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey, () => marginFits(docRoot, isPaneDrawer()));
 	const reviewBarState = createReviewBarState();
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
+	openColumnOnLoad({ artifactId: () => loadedArtifactId, ready: () => docState === 'ready' && !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready', root: () => docRoot, paneDrawer: isPaneDrawer, hasComments: () => listedComments.length > 0, shown: () => !!commentUI.state, open: commentUI.openOnLoad });
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
 	// The phone draft sheet covers the editor's lower part: keep the draft's text where the band above the sheet shows it, on open and once a movement covers it.
 	const revealDraft = (opening: boolean) => { const { draft } = draftController; if (draft && (editorSurface?.draftCovered(draft.from, opening) ?? opening)) scroll.value = { from: draft.from, to: draft.to, origin: 'comment-save' }; };
@@ -136,7 +136,6 @@
 		const point = clicked(click, reading ?? (() => (opener.isConnected ? opener.getBoundingClientRect() : null)));
 		if (point) scroll.stay(ids[0]); else if (ids.length === 1) scroll.toComment(ids[0], false, 'navigation');
 		commentUI.focusMarker(ids, opener, point ?? reading, !!point);
-		arrivedDocComments.set(new Set(ids));
 	}
 	// A marker over comments on parts of one image opens the image, at the comment when it is the only one (DCOL-FR13.5).
 	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent) { arrivedDocComments.set(new Set(ids)); images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => showMarkerCards(ids, opener, reading, click)); }
@@ -279,7 +278,7 @@
 <svelte:window onkeydown={onKey} />
 <DocumentViewport instanceId={target?.instanceId} ready={docState === 'ready'} root={docRoot} />
 
-<div class="doc" style:--doc-rail="{railWidth()}px" use:docCanvasBounds bind:this={docRoot} in:fade={{ duration: $prefersReducedMotion ? 0 : 160, easing: cubicOut }}>
+<div class="doc" use:docCanvasBounds bind:this={docRoot} in:fade={{ duration: $prefersReducedMotion ? 0 : 160, easing: cubicOut }}>
 	<DocViewerStatus
 		title={target?.name ?? 'Document'}
 		commentsOpen={commentUI.state?.kind === 'list'}
@@ -361,6 +360,7 @@
 		anchorAtClick={commentUI.atClick}
 		bounds={docRoot}
 		narrow={isPaneDrawer()}
+		quiet={commentUI.quiet}
 		comments={listedComments}
 		widgetLabel={{ read: (from, to, quote) => editorSurface?.widgetLabel(from, to, quote), stamp: () => editorSurface?.widgetLabelStamp() }}
 		focusedId={shownFocus}

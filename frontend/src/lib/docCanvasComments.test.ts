@@ -338,6 +338,35 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 		expect(other.orphaned).toBe(true);
 	});
 
+	describe('while its own Accept is in flight, before the document holds the edit', () => {
+		// The quote is still where it was: only a replacement that is really in the text, in place of the quote, reads as accepted.
+		const before = 'Train leaves at very important text today.';
+		const open = (anchor: string, replacement: string) => comment('s3', 16, anchor, { replacement, drawn: true });
+
+		it('does not read a deletion as accepted', () => {
+			const [row] = commentsInDocumentOrder([open('very important text ', '')], before, {}, 's3');
+			expect(row.decision).toBeUndefined();
+			expect(canvasCommentHighlights([row], before, null, undefined, 's3')).toMatchObject([{ id: 's3', from: 16, suggestion: { busy: true } }]);
+		});
+
+		it('does not read a replacement that is a prefix of its quote as accepted', () => {
+			const [row] = commentsInDocumentOrder([open('very important text', 'very important')], before, {}, 's3');
+			expect(row.decision).toBeUndefined();
+			expect(row).toMatchObject({ from: 16, to: 35 });
+		});
+
+		it('reads a deletion as accepted once the text no longer holds the quote', () => {
+			const [row] = commentsInDocumentOrder([open('very important text ', '')], 'Train leaves at today.', {}, 's3');
+			expect(row.decision).toBe('accepted');
+		});
+
+		it('reads a prefix replacement as accepted once the text no longer holds the quote', () => {
+			const [row] = commentsInDocumentOrder([open('very important text', 'very important')], 'Train leaves at very important today.', {}, 's3');
+			expect(row.decision).toBe('accepted');
+			expect(row).toMatchObject({ from: 16, to: 30 });
+		});
+	});
+
 	describe('an accepted insertion sits on the text it inserted', () => {
 		const inserted = 'Train leaves at ten sharp.';
 		const insertion = (from: number, overrides: Partial<DocComment> = {}): DocComment =>
