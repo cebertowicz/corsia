@@ -3,10 +3,17 @@
 ``model_catalog`` and ``eligible_delegation_model`` ask ``scoped_turn_account`` *with the model*,
 so the project's opt-in rollover decision is part of the answer, and the tool advertises the
 ``runs_on`` entry it marks ``selected`` as "the account a delegated turn in this project runs on".
-Each launch boundary asks the same owner *without* the model, so it answers the account a turn
-starts from instead. These cases drive the real owners only: the projected ``runs_on`` entry, the
-binding ``create_child_thread`` writes through ``bind_model_account``, the account the Turn freezes
-through ``turn_account_id``, and the detached reviewer's own composition of the same owners.
+Child creation asks the same owner with the model too (``bind_model_account`` passes it to
+``select_account``), but that answer was reachable only when exactly one scope entry governed the
+thread, and a spawned child always has two: its own project and its actor's. So the guard, not a
+missing argument, blocked the projected account and the launch admitted the plain candidate
+instead. The Turn-freeze boundary asks the owner without the model and reads the binding once one
+exists. One distinct provider policy now answers that question, however many scopes named it; two
+distinct policies still do not, even when they are written identically, because a move would need
+both projects' switch and order and one project's preference must not silently win. These cases
+drive the real owners only: the projected ``runs_on`` entry, the binding ``create_child_thread``
+writes, the account the Turn freezes through ``turn_account_id``, and the detached reviewer's own
+composition of the same owners.
 
 Synthetic accounts only: no vendor call, login, secret or real account is touched.
 """
@@ -71,7 +78,7 @@ def _sign_out(db, account) -> None:
     db.commit()
 
 
-def _spawn(db, model: str, *, parent: str = "destination", project: str = PROJECT,
+def _spawn(db, model: str, *, parent: str = "destination", project: str | None = PROJECT,
            account_id: str | None = None) -> str:
     """Create the child the way a real spawn does, so its binding is the launched answer."""
     from subagents.child_thread import create_child_thread
@@ -90,6 +97,19 @@ def _turn_frozen(db, model: str) -> str | None:
     from infra.vendor_turn_binding import turn_account_id
 
     return turn_account_id("child", model, db=db)
+
+
+def _nothing_landed(db) -> None:
+    """A refused creation leaves no child and no binding behind."""
+    assert db.execute("SELECT COUNT(*) FROM threads WHERE id='child'").fetchone()[0] == 0
+    assert db.execute("SELECT COUNT(*) FROM thread_vendor_accounts WHERE thread_id='child'").fetchone()[0] == 0
+
+
+def _workspace_parent(db) -> None:
+    """A thread governed by no project, so only the workspace policy reaches its children."""
+    db.execute("INSERT INTO threads(id,user_id,model,created_at,updated_at) "
+               "VALUES ('workspace-parent','user','codex/test','t','t')")
+    db.commit()
 
 
 @pytest.fixture
@@ -212,9 +232,58 @@ def test_a_cross_project_child_never_binds_an_account_the_actor_denies(accounts)
     with pytest.raises(AccountAdmissionError) as refused:
         _spawn(db, "codex/test", parent="actor", project=PROJECT)
     assert refused.value.reason == "account_project_denied"
-    # The child is never created on an account one of its two governing projects denies.
-    assert db.execute("SELECT COUNT(*) FROM threads WHERE id='child'").fetchone()[0] == 0
-    assert db.execute("SELECT COUNT(*) FROM thread_vendor_accounts WHERE thread_id='child'").fetchone()[0] == 0
+    _nothing_landed(db)
+
+
+# --- the deliberate boundary: two policies still answer twice, on purpose -------------------
+
+
+def test_two_projects_with_the_same_policy_still_do_not_move(accounts):  # noqa: F811
+    """Distinct projects keep the plain candidate even when their policies are written identically."""
+    db, default, second, _third = accounts
+    _usable(db, "codex", default, "codex/test")
+    _usable(db, "codex", second, "codex/test")
+    for project in (PROJECT, ACTOR_PROJECT):
+        set_legacy_policy(project, "codex", allowlist=[default["id"], second["id"]],
+                          default_account_id=default["id"], switch_on_limit=True, db=db)
+    _sign_out(db, default)
+
+    projected, _runnable = _projected(db, "codex", "codex/test")
+    assert projected["account_id"] == second["id"]
+    with pytest.raises(AccountAdmissionError) as refused:
+        _spawn(db, "codex/test", parent="actor", project=PROJECT)
+    assert refused.value.reason == "account_signed_out"
+    _nothing_landed(db)
+
+
+def test_a_workspace_actor_into_a_project_does_not_move(accounts):  # noqa: F811
+    """An unprojected actor inherits the workspace policy yet still governs a second scope."""
+    db, default, second, _third = accounts
+    _workspace_parent(db)
+    _usable(db, "codex", default, "codex/test")
+    _usable(db, "codex", second, "codex/test")
+    set_legacy_policy(None, "codex", allowlist=[default["id"], second["id"]],
+                      default_account_id=default["id"], switch_on_limit=True, db=db)
+    _sign_out(db, default)
+
+    with pytest.raises(AccountAdmissionError) as refused:
+        _spawn(db, "codex/test", parent="workspace-parent", project=PROJECT)
+    assert refused.value.reason == "account_signed_out"
+    _nothing_landed(db)
+
+
+def test_two_workspace_scopes_are_one_policy_and_move(accounts):  # noqa: F811
+    """An unprojected child of an unprojected thread is governed by the workspace policy alone."""
+    db, default, second, _third = accounts
+    _workspace_parent(db)
+    _usable(db, "codex", default, "codex/test")
+    _usable(db, "codex", second, "codex/test")
+    set_legacy_policy(None, "codex", allowlist=[default["id"], second["id"]],
+                      default_account_id=default["id"], switch_on_limit=True, db=db)
+    _sign_out(db, default)
+
+    _spawn(db, "codex/test", parent="workspace-parent", project=None)
+    assert _bound(db, "codex") == second["id"]
 
 
 # --- the detached reviewer consumer ---------------------------------------------------------
