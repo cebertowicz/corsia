@@ -7,6 +7,8 @@ import json
 from typing import Any
 
 from infra.project_fence import ALL, WITHHELD_LOCAL_ONLY, fenced_project_ids, read_caller
+from llm.locality import cloud_off_project_ids
+from plans.current import READ_KEYS
 
 # These keys carry plan vocabulary rather than free-form text. Everything else
 # is withheld unless it is an identifier or a timestamp.
@@ -30,6 +32,9 @@ _ENUM_VALUES = {
     "severity": frozenset({"idle", "moving", "waiting", "blocked"}),
     "spawn_kind": frozenset({"delegated", "claude-code", "codex", "native"}),
 }
+# A page cursor and the reads a projection offers are built from ids and offsets,
+# and the reader needs them verbatim to continue.
+_PAGING_KEYS = READ_KEYS | {"cursor", "next_cursor"}
 
 
 def _timestamp(key: str, value: str) -> bool:
@@ -49,14 +54,15 @@ def project(value: Any, key: str = "") -> Any:
     if isinstance(value, (list, tuple)):
         return [project(item, key) for item in value]
     if isinstance(value, str):
-        if key == "id" or key.endswith(("_id", "_ids")) or value in _ENUM_VALUES.get(key, ()) or _timestamp(key, value):
+        if (key == "id" or key.endswith(("_id", "_ids")) or key in _PAGING_KEYS
+                or value in _ENUM_VALUES.get(key, ()) or _timestamp(key, value)):
             return value
         return WITHHELD_LOCAL_ONLY
     return value
 
 
 def fences_thread(db, recipient: str | None, owner: str | None, *, fenced=None) -> bool:
-    """Whether recipient is fenced from the project currently owning the text.
+    """Whether the text's current project is Local only and fenced from recipient.
 
     A caller checking many owners for one recipient passes its ``fenced`` set. A
     thread's own plan text is never across its fence, so that case reads nothing.
@@ -66,9 +72,12 @@ def fences_thread(db, recipient: str | None, owner: str | None, *, fenced=None) 
     row = db.execute("SELECT project_id FROM threads WHERE id=?", (owner,)).fetchone()
     if row is None or row["project_id"] is None:
         return False
+    project_id = str(row["project_id"])
+    if project_id not in cloud_off_project_ids(db=db):
+        return False
     if fenced is None:
         fenced = fenced_project_ids(read_caller(recipient, db=db), db=db)
-    return fenced is ALL or (isinstance(fenced, frozenset) and str(row["project_id"]) in fenced)
+    return fenced is ALL or (isinstance(fenced, frozenset) and project_id in fenced)
 
 
 def for_thread(value: Any, *, recipient: str | None, owner: str | None, db) -> Any:
