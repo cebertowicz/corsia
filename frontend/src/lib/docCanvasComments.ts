@@ -133,7 +133,19 @@ function acceptedDeletion(comment: DocComment, text: string): boolean {
 	return comment.decision === 'accepted' && comment.replacement === '' && !comment.review && comment.from != null && comment.from <= text.length;
 }
 
-/** Derive one displayed status for every comment consumer. */
+/**
+ * The one displayed status every consumer reads: marker, count, card, margin and drawer.
+ * When the text on screen is the text the server's live snapshot saw (`statusText`), the server's
+ * `orphaned` and `textChanged` decide; for unsaved edits the same rule runs locally:
+ * - textChanged: an open suggestion whose range still holds text, but not the text it replaces
+ *   (someone edited inside it). It stays at its line, its card says so, and Accept is off.
+ * - orphaned: a suggestion whose Accept the server refused (`refused`, from `suggestionRefusals`) shows
+ *   as orphaned until its refusal is cleared, even where a stale screen still shows its quote. A live row
+ *   not yet placed (4.2) is never orphaned. A decided suggestion is never lost: its text changed because
+ *   of the decision.
+ * - detached: orphaned, and the original text is gone: the range collapsed (everything in it was
+ *   deleted), or the quote is nowhere in the document.
+ */
 function commentStatus(comment: DocComment, text: string, refused: Record<string, string>): Pick<DocComment, 'orphaned' | 'textChanged' | 'detached'> {
 	const snapshotMatches = comment.statusText === text;
 	const changed = snapshotMatches ? !!comment.textChanged : comment.replacement != null && !comment.decision && !comment.review
@@ -146,7 +158,11 @@ function commentStatus(comment: DocComment, text: string, refused: Record<string
 	return { orphaned, textChanged: changed, detached: orphaned && (collapsed || !quote || !text.includes(quote)) };
 }
 
-/** Order comments using one status for the marker, count, card, margin and drawer. */
+/**
+ * Use canonical resolved anchors, including resolved threads whose text survives, each with its
+ * displayed status (`commentStatus`, the only place a listed comment's `orphaned` is set).
+ * Orphaned cards sort after located ones. Comments on one image read in their tags' number order (FR13.6).
+ */
 export function commentsInDocumentOrder(comments: DocComment[], text: string, refused: Record<string, string> = {}, accepting: string | null = null): DocComment[] {
 	const at = (comment: DocComment) => (unplaced(comment) ? comment.from : canvasCommentRange(comment, text)?.from) ?? Infinity;
 	const sameImage = (a: DocComment, b: DocComment) => (a.regionNumber != null && b.regionNumber != null && a.imageSrc === b.imageSrc ? a.regionNumber - b.regionNumber : 0);

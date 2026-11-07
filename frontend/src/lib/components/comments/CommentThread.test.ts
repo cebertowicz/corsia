@@ -403,8 +403,8 @@ describe('CommentThread', () => {
 		render(thread({ replacement: 'new text', textChanged: true }));
 		const accept = button('.ct-suggestion-accept');
 		expect(accept.disabled).toBe(true);
-		expect(accept.title).toBe('The text no longer matches this suggestion.');
-		expect(host.querySelector('.ct-orphan')?.textContent).toBe('The text no longer matches this suggestion.');
+		expect(accept.title).toBe('The text changed after this suggestion');
+		expect(host.querySelector('.ct-orphan')?.textContent).toBe('The text changed after this suggestion');
 		expect(host.querySelector<HTMLButtonElement>('.ct-suggestion-actions .ct-link')!.disabled).toBe(false);
 		expect(host.querySelector('.ct-input, .ct-compose')).not.toBeNull();
 	});
