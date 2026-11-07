@@ -22,6 +22,7 @@ leaving is one write transaction with ``k`` line reads.
 from __future__ import annotations
 
 import json
+from bisect import bisect_right
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
@@ -38,19 +39,72 @@ BASE_LIMIT = 20_000
 
 
 def edit_sections(text: str, edits: list[dict[str, Any]]) -> list[str]:
-    """The sections an edit's exact ``old_string`` matches fall in; a fuzzy match is not found here.
+    """The sections of ``text`` the edits' ``old_string`` matches fall in, matched as ``match_edits`` applies them:
+    exactly, each edit on the text the edits before it left.
 
-    The text is scanned for headings once; each match is placed in it by bisect.
+    Sections are named in ``text`` as it is, the document whose section turns the call takes: an edit
+    that renames a heading must not rename the sections later edits fall in. The headings are scanned
+    once; each match is carried back to ``text`` by the original offsets of the characters it covers
+    (a replacement's characters all carry the span they replaced) and placed by bisect. The offsets
+    are kept as runs, one per kept stretch or replacement, so the cost follows the edits, not the
+    document's length. Only a later edit reads them, so the last edit keeps none: a lone replace_all
+    over many occurrences holds no per-occurrence state.
     """
     sections = doc_sections.Sections(text)
+    runs: list[_Run] = [(0, len(text), 0, 0, True)]
     touched: dict[str, None] = {}
-    for edit in edits:
-        old = edit["old_string"]
+    for index, edit in enumerate(edits):
+        old, new, every = edit["old_string"], edit["new_string"], bool(edit.get("replace_all"))
         start = text.find(old) if old else -1
+        if start < 0:
+            continue
+        last = index == len(edits) - 1
+        kept: list[_Run] = []
+        done = at = 0
         while start >= 0:
-            touched.update(dict.fromkeys(sections.between(start, start + len(old))))
-            start = text.find(old, start + 1) if edit.get("replace_all") else -1
+            low, high = _original(runs, start)[0], _original(runs, start + len(old) - 1)[1]
+            touched.update(dict.fromkeys(sections.between(low, high)))
+            if not last:
+                kept += _moved(runs, done, start, at)
+                at += start - done
+                if new:
+                    kept.append((at, at + len(new), low, high, False))
+                    at += len(new)
+            done = start + len(old)
+            start = text.find(old, done) if every else -1
+        if last:
+            break
+        runs = kept + _moved(runs, done, len(text), at)
+        text = text.replace(old, new, -1 if every else 1)
     return list(touched)
+
+
+# A stretch [start, end) of the edited text and where it came from in the original: kept characters
+# (True) start at the original offset ``low``; a replacement's (False) all carry the span low..high.
+_Run = tuple[int, int, int, int, bool]
+
+
+def _original(runs: list[_Run], at: int) -> tuple[int, int]:
+    """The original span the edited text's character ``at`` stands for."""
+    start, _end, low, high, kept = runs[bisect_right(runs, at, key=lambda run: run[0]) - 1]
+    return (low + at - start, low + at - start + 1) if kept else (low, high)
+
+
+def _moved(runs: list[_Run], first: int, last: int, at: int) -> list[_Run]:
+    """The runs covering the edited text's [first, last), moved to begin at ``at``.
+
+    Runs are sorted and contiguous, so it starts at the run holding ``first`` and stops past ``last``:
+    a replace_all over many occurrences costs the runs each occurrence covers, not every run each time.
+    """
+    moved: list[_Run] = []
+    for index in range(max(bisect_right(runs, first, key=lambda run: run[0]) - 1, 0), len(runs)):
+        start, end, low, high, kept = runs[index]
+        if start >= last:
+            break
+        lo, hi = max(start, first), min(end, last)
+        if lo < hi:
+            moved.append((at + lo - first, at + hi - first, low + lo - start if kept else low, high, kept))
+    return moved
 
 
 def write_sections(text: str, content: str) -> list[str]:
@@ -120,10 +174,10 @@ def _alone(db, keys: list[str], thread_id: str) -> bool:
     by this call's ``_finish``, which holds the write lock; one woken in that instant is posted
     after this write, which the agent is told.
     """
-    if writer_turns.may_answer_section(thread_id):
-        return False
     waiting = db.execute(
-        f"SELECT 1 FROM doc_comment_writer_line WHERE root_id IN ({','.join('?' * len(keys))}) LIMIT 1", keys,
+        f"""SELECT 1 FROM doc_comment_writer_line WHERE root_id IN ({','.join('?' * len(keys))})
+            OR (agent_thread_id=? AND state='woken' AND root_id LIKE 'section:%') LIMIT 1""",
+        (*keys, thread_id),
     ).fetchone()
     return waiting is None and writer_turns.agents_claim(keys, thread_id)
 
@@ -212,15 +266,16 @@ def _settle_closed(path: str | None, artifact_id: str | None, thread_id: str, ca
 
     db = get_db()
     try:
+        if not writer_line.section_woken(db, thread_id):
+            return []
         artifact = resolve_file_identity(path, db=db) if path else get_artifact(artifact_id or "", db=db)
-        if artifact is None:
+        # A wake on another document is not this write's to answer, so this document's read must not refuse it.
+        if artifact is None or not writer_line.section_woken(db, thread_id, str(artifact["id"])):
             return []
-        try:
-            text = read_doc_text(path or str(artifact["path"]))
-            keys = (quote_sections(text, call.get("quote"), call.get("near")) if "replacement" in call
-                    else call_sections(text, call))
-        except (OSError, ValueError):
-            return []
+        # A read that fails raises, so the write is refused like any other settle failure.
+        text = read_doc_text(path or str(artifact["path"]))
+        keys = (quote_sections(text, call.get("quote"), call.get("near")) if "replacement" in call
+                else call_sections(text, call))
         if not keys:
             return []
         with write_transaction(db, scope="section_line_closed") as connection:
@@ -236,13 +291,13 @@ async def settle_closed(path: str | None, thread_id: str, call: dict[str, Any], 
     The document is found by ``path``, or by ``artifact_id`` for a suggestion.
 
     Settled as the write starts, since the file write that follows has no hook of its own; a write
-    that then fails tells the agent so in its own result. A settle that fails refuses the write, so
-    nothing lands that the line does not know answered the wake.
+    that then fails tells the agent so in its own result. A settle that fails, the document's read
+    included, refuses the write. A write that touches none of the agent's woken sections, or whose
+    edit matches nothing (the edit then fails), settles nothing. One indexed read when the agent has
+    no woken section row.
     """
     from doceditor.agent_comment_writes import _drive
 
-    if not writer_turns.may_answer_section(thread_id):
-        return
     woken = await run_in_db(_settle_closed, path, artifact_id, thread_id, call)
     # The settle has committed; a failure to wake the next writer is the line's, not this write's.
     try:

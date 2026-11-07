@@ -131,6 +131,17 @@ def _rows(sql: str, *args) -> list[dict]:
         db.close()
 
 
+def _woken(thread_id: str) -> bool:
+    from doceditor import writer_line
+    from infra.database import get_db
+
+    db = get_db()
+    try:
+        return writer_line.section_woken(db, thread_id)
+    finally:
+        db.close()
+
+
 def _line(artifact_id: str, heading: str) -> list[dict]:
     from doceditor import writer_turns
 
@@ -300,7 +311,7 @@ async def test_after_a_restart_the_wake_says_counts_are_unknown_and_a_write_to_t
     assert "better terms" in path.read_text()
     assert _line(artifact_id, "## Terms") == []
     assert _outcomes(steps)[-1] == "rewritten"
-    assert not writer_turns.may_answer_section(scope["owner"])
+    assert not _woken(scope["owner"])
     monkeypatch.setattr(live_runtime, "_manager", manager)
 
 
@@ -326,7 +337,7 @@ async def test_a_woken_agents_next_call_answers_its_wake_even_when_that_call_is_
     assert refused.startswith("Warning"), refused
     assert _line(artifact_id, "## Terms") == []
     assert _outcomes(steps) == ["queued", "woken", "rewritten"]
-    assert not writer_turns.may_answer_section(scope["owner"])
+    assert not _woken(scope["owner"])
     assert _rows("""SELECT 1 FROM context_change_journal WHERE object_kind='thread_context' AND object_id=?
                     AND summary LIKE '%dropped out of line%'""", scope["owner"]) == []
 
@@ -391,12 +402,12 @@ async def test_a_call_answers_only_the_rows_of_the_sections_it_touches(doc, driv
 
     assert _line(artifact_id, "## Scope") == []
     assert [row["state"] for row in _line(artifact_id, "## Terms")] == ["woken"]
-    assert writer_turns.may_answer_section(scope["owner"])
+    assert _woken(scope["owner"])
     assert _outcomes(steps).count("posted_as_is") == 1 and "rewritten" not in _outcomes(steps)
 
     await _edit(path, context, "old terms", "better terms")  # now the Terms row, rewritten
     assert _line(artifact_id, "## Terms") == []
-    assert not writer_turns.may_answer_section(scope["owner"])
+    assert not _woken(scope["owner"])
     assert _outcomes(steps)[-1] == "rewritten"
     await other.close()
 
@@ -480,8 +491,45 @@ def test_replace_all_scans_the_headings_once(monkeypatch):
     assert len(scans) == 1
 
 
+def test_the_last_edit_keeps_no_offset_runs(monkeypatch):
+    """Only a later edit reads the runs, so a lone replace_all holds nothing per occurrence."""
+    from doceditor import section_writes
+
+    text = "## A\n" + "e" * 1000 + "\n## B\ne\n"
+    monkeypatch.setattr(section_writes, "_moved", lambda *args: pytest.fail("the last edit built runs"))
+    edits = [{"old_string": "e", "new_string": "E", "replace_all": True}]
+    assert section_writes.edit_sections(text, edits) == ["## A", "## B"]
+
+
+def test_edits_find_their_sections_as_they_are_applied_one_after_another():
+    """Each edit matches the text the edits before it left, as ``match_edits`` applies them."""
+    from doceditor import section_writes
+
+    text = "## A\nfoo\n## B\nfoo\n"
+    edits = [{"old_string": "foo", "new_string": "bar"}, {"old_string": "foo", "new_string": "baz"}]
+    assert section_writes.edit_sections(text, edits) == ["## A", "## B"]
+
+
+
+def test_a_renamed_heading_does_not_rename_the_sections_later_edits_fall_in():
+    """Sections are named in the document the turns belong to: renaming the first of two ``## A`` headings
+    leaves the second ``## A\n2``, the section a later edit in it must hold."""
+    from doceditor import section_writes
+
+    text = "## A\none\n## A\ntwo\n"
+    edits = [{"old_string": "## A\none", "new_string": "## Z\none"}, {"old_string": "two", "new_string": "2"}]
+    assert section_writes.edit_sections(text, edits) == ["## A", "## A\n2"]
+
+
+def test_an_edit_matching_text_an_earlier_edit_wrote_holds_the_section_that_text_replaced():
+    from doceditor import section_writes
+
+    text = "## A\nfoo\n## B\nbar\n"
+    edits = [{"old_string": "bar", "new_string": "qux"}, {"old_string": "qux", "new_string": "q"}]
+    assert section_writes.edit_sections(text, edits) == ["## B"]
+
 @pytest.mark.asyncio
-async def test_a_woken_section_row_dropped_at_turn_end_clears_the_wake_hint(doc, driven, steps):
+async def test_a_woken_section_row_dropped_at_turn_end_leaves_the_agent_unwoken(doc, driven, steps):
     from doceditor import writer_turns
 
     scope, page, entry, path, context = doc
@@ -491,18 +539,18 @@ async def test_a_woken_section_row_dropped_at_turn_end_clears_the_wake_hint(doc,
     await page.close()
     await _settled()
     [row] = _line(artifact_id, "## Terms")
-    assert row["state"] == "woken" and writer_turns.may_answer_section(scope["owner"])
+    assert row["state"] == "woken" and _woken(scope["owner"])
 
     _end(scope["owner"], _wake_turn(scope["owner"], row), "completed")  # the turn ends without answering
 
     assert _line(artifact_id, "## Terms") == []
     assert _outcomes(steps)[-1] == "dropped"
-    assert not writer_turns.may_answer_section(scope["owner"])
+    assert not _woken(scope["owner"])
 
 
 @pytest.mark.asyncio
-async def test_a_sweep_that_ends_an_agents_last_section_row_and_wakes_it_on_another_keeps_the_hint(doc, driven, steps):
-    """The end's clear and the new wake's hint run after the sweep commits, in that order, so the live wake keeps its hint."""
+async def test_a_sweep_that_ends_an_agents_last_section_row_and_wakes_it_on_another_keeps_it_woken(doc, driven, steps):
+    """Ending one woken row in the same sweep that wakes the agent on another leaves the agent woken."""
     import uuid
 
     from doceditor import writer_line, writer_turns
@@ -515,7 +563,7 @@ async def test_a_sweep_that_ends_an_agents_last_section_row_and_wakes_it_on_anot
     await page.close()
     await _settled()
     [terms] = _line(artifact_id, "## Terms")
-    assert terms["state"] == "woken" and writer_turns.may_answer_section(scope["owner"])
+    assert terms["state"] == "woken" and _woken(scope["owner"])
 
     db = get_db()
     try:
@@ -535,7 +583,7 @@ async def test_a_sweep_that_ends_an_agents_last_section_row_and_wakes_it_on_anot
     assert _line(artifact_id, "## Terms") == []
     [scope_row] = _line(artifact_id, "## Scope")
     assert scope_row["state"] == "woken"
-    assert writer_turns.may_answer_section(scope["owner"])
+    assert _woken(scope["owner"])
 
 
 @pytest.mark.asyncio
@@ -589,6 +637,62 @@ async def test_a_write_to_the_closed_document_that_cannot_settle_its_wake_is_ref
                       AND summary LIKE '%dropped out of line%'""", scope["owner"])
     assert writer_line.TURN_ENDED in note["summary"]
     assert "check the document" not in note["summary"]
+
+
+@pytest.mark.asyncio
+async def test_a_write_to_the_closed_document_whose_text_cannot_be_read_is_refused(doc, driven, monkeypatch):
+    """A failed read is a failed settle: the write is refused and the wake stays unanswered."""
+    from doceditor import live_runtime, section_writes
+
+    scope, page, entry, path, context = doc
+    artifact_id = page.identity["artifact_id"]
+    await page.type_after("## Terms\n", "new ", entry.live)
+    _queued(await _edit(path, context, "old terms", "agent terms"))
+    await page.close()
+    await _settled()
+    [row] = _line(artifact_id, "## Terms")
+    assert row["state"] == "woken"
+    before = path.read_text()
+
+    def unreadable(_path):
+        raise ValueError("doc too large to anchor against")
+
+    monkeypatch.setattr(section_writes, "read_doc_text", unreadable)
+    monkeypatch.setattr(live_runtime, "_manager", None)
+    result = await _edit(path, context, "old terms", "agent terms")
+    assert result.startswith("Error") and "doc too large" in result
+    assert path.read_text() == before
+    [still] = _line(artifact_id, "## Terms")
+    assert still["state"] == "woken"
+
+
+@pytest.mark.asyncio
+async def test_a_wake_on_one_document_never_refuses_a_write_to_another(doc, driven, monkeypatch):
+    """A write to a document the agent has no woken row on cannot answer its wake, so that document's read is
+    never needed: a file the settle could not read still takes the write, and the wake stays unanswered."""
+    from doceditor import live_runtime, section_writes
+
+    scope, page, entry, path, context = doc
+    artifact_id = page.identity["artifact_id"]
+    await page.type_after("## Terms\n", "new ", entry.live)
+    _queued(await _edit(path, context, "old terms", "agent terms"))
+    await page.close()
+    await _settled()
+    [row] = _line(artifact_id, "## Terms")
+    assert row["state"] == "woken"
+    _write(scope, "other.md", "## Other\nold other\n")
+    other = scope["category"] / "other.md"
+
+    def unreadable(_path):
+        raise ValueError("doc too large to anchor against")
+
+    monkeypatch.setattr(section_writes, "read_doc_text", unreadable)
+    monkeypatch.setattr(live_runtime, "_manager", None)
+    result = await _edit(other, context, "old other", "agent other")
+    assert not result.startswith("Error"), result
+    assert other.read_text() == "## Other\nagent other\n"
+    [still] = _line(artifact_id, "## Terms")
+    assert still["state"] == "woken"
 
 
 @pytest.mark.asyncio

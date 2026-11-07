@@ -164,19 +164,18 @@ def landed(db, root_id: str, thread_id: str | None) -> None:
         settle(db, mine, "rewritten")
 
 
-def settle(db, row, outcome: str) -> None:
-    """The one end of a saved row: posted as is, rewritten, or dropped. The row is deleted.
+def section_woken(db, thread_id: str, artifact_id: str | None = None) -> bool:
+    """Whether this agent has a woken section row, on ``artifact_id`` when given, so its next write may answer it."""
+    on_document = " AND artifact_id=?" if artifact_id is not None else ""
+    return db.execute(f"""SELECT 1 FROM doc_comment_writer_line
+                           WHERE agent_thread_id=? AND state='woken' AND root_id LIKE 'section:%'{on_document}
+                           LIMIT 1""",
+                      (thread_id, *([artifact_id] if artifact_id is not None else []))).fetchone() is not None
 
-    A woken section row's end also clears its agent from the wake hint (``writer_turns``) once the
-    agent has no other woken section row.
-    """
+
+def settle(db, row, outcome: str) -> None:
+    """The one end of a saved row: posted as is, rewritten, or dropped. The row is deleted."""
     db.execute("DELETE FROM doc_comment_writer_line WHERE id=?", (row["id"],))
-    if row["state"] == "woken" and writer_turns.section_heading(str(row["root_id"])) is not None:
-        thread_id = str(row["agent_thread_id"])
-        if db.execute("""SELECT 1 FROM doc_comment_writer_line
-                         WHERE agent_thread_id=? AND state='woken' AND root_id LIKE 'section:%' LIMIT 1""",
-                      (thread_id,)).fetchone() is None:
-            after_commit(db, lambda: writer_turns.section_answered(thread_id))
     waited = (datetime.now(timezone.utc) - datetime.fromisoformat(str(row["saved_at"]))).total_seconds()
     _event(db, outcome, root_id=str(row["root_id"]), artifact_id=str(row["artifact_id"]), line_id=str(row["id"]),
            wakes=int(row["wakes"]), waited_seconds=round(waited, 3))
@@ -257,10 +256,6 @@ def serve(db, root_id: str) -> list[str]:
             logger.warning("writer line {} could not wake {}: {}", head["id"], head["agent_thread_id"], error)
             _drop(db, head, "your thread could not be woken")
             continue
-        if heading is not None:
-            # After the commit, so an earlier row's end in the same sweep never clears this later wake.
-            woken_thread = str(head["agent_thread_id"])
-            after_commit(db, lambda: writer_turns.section_woken(woken_thread))
         _event(db, "woken", root_id=root_id, artifact_id=str(head["artifact_id"]), line_id=str(head["id"]), wakes=wakes)
         publish_after_commit(db, root_id, head["artifact_id"])
         return [str(head["agent_thread_id"])]
@@ -367,9 +362,6 @@ def recover(db) -> list[str]:
                     OR (m.delivery_state='delivered' AND EXISTS (
                         SELECT 1 FROM active_turns t WHERE t.id=m.active_turn_id AND t.status IN {_LIVE}))))""",
     )
-    for row in db.execute(
-            "SELECT DISTINCT agent_thread_id FROM doc_comment_writer_line WHERE state='woken' AND root_id LIKE 'section:%'"):
-        writer_turns.section_woken(str(row["agent_thread_id"]))
     drives: list[str] = []
     for row in db.execute("SELECT DISTINCT root_id FROM doc_comment_writer_line").fetchall():
         drives.extend(serve(db, str(row["root_id"])))
