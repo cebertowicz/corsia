@@ -25,7 +25,7 @@ export function handleDocumentEscape(
 export interface DocumentKeyState {
 	/** The canvas shows an image viewer over the document; the document answers no keys. */
 	covered: boolean;
-	commentUI: { state: { kind: string } | null; anchor: unknown; sheetUp: boolean; close: () => void; restoreFocus: () => void };
+	commentUI: { state: { kind: string } | null; anchor: unknown; sheetUp: boolean; close: () => void; restoreFocus: () => void; release: () => boolean };
 	draftController: { draft: unknown; cancel: () => void; pending: unknown; select: (selection: null) => void };
 	paneOpen: boolean;
 	isPaneDrawer: boolean;
@@ -45,6 +45,11 @@ export function handleDocumentKey(event: KeyboardEvent, state: DocumentKeyState)
 		event.preventDefault();
 		commentUI.close();
 		commentUI.restoreFocus();
+		return;
+	}
+	// A card picked in the margin lets go before anything else closes (a draft or a pending selection still come first).
+	if (event.key === 'Escape' && !draftController.draft && !draftController.pending && commentUI.release()) {
+		event.preventDefault();
 		return;
 	}
 	handleDocumentEscape(event, {

@@ -29,6 +29,7 @@
 		onSave,
 		onSelect,
 		onAnchorFocus,
+		onCaretAway,
 		onSuggestionHover,
 		onEdit,
 		onLayout,
@@ -57,6 +58,7 @@
 		onSave: () => void;
 		onSelect: (selection: PendingSelection | null) => void;
 		onAnchorFocus: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) => void;
+		onCaretAway?: () => void;
 		onSuggestionHover?: (id: string | null) => void;
 		onEdit: (mapPos: (position: number) => number) => void;
 		onLayout: (mapPos?: (position: number) => number) => void;
@@ -104,7 +106,7 @@
 		</div>
 	{:else}
 		<div class="ed-wrap">
-			<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {commentsAsSheet} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+			<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {commentsAsSheet} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 			{#if saveError}
 				<div class="save-error" role="alert">{saveError}</div>
 			{/if}

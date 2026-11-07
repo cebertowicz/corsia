@@ -175,7 +175,7 @@
 {#if open}
 	<!-- Portaled to `document.body` so no pane clips it or paints over it; `bounds` still keeps it on its canvas.
 	     Clipping keeps it measurable without inherited visibility transitions delaying focus. -->
-	<div class="popover" class:fill data-popover use:portal in:menuPop|global out:menuPop onoutroend={onClosed} bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${hidden ? `${style} clip-path: inset(100%);` : style}`} role={surfaceRole ?? undefined} aria-hidden={hidden || undefined} inert={hidden}>{@render children()}</div>
+	<div class="popover" class:fill data-popover use:portal in:menuPop|global out:menuPop onoutroend={onClosed} onkeydown={onKey} bind:this={surface} style={`${cardWidth ? `width: ${cardWidth}; ` : ''}${hidden ? `${style} clip-path: inset(100%);` : style}`} role={surfaceRole ?? undefined} aria-hidden={hidden || undefined} inert={hidden}>{@render children()}</div>
 {/if}
 
 <style>

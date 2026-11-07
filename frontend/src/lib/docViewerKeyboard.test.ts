@@ -3,7 +3,7 @@ import { handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard
 
 function setup(overrides: Partial<DocumentKeyState> = {}) {
 	const anchor = document.createElement('button');
-	const commentUI = { state: { kind: 'list' }, anchor, sheetUp: true, close: vi.fn(), restoreFocus: vi.fn() };
+	const commentUI = { state: { kind: 'list' }, anchor, sheetUp: true, close: vi.fn(), restoreFocus: vi.fn(), release: vi.fn(() => false) };
 	const state: DocumentKeyState = {
 		covered: false,
 		commentUI,
@@ -39,6 +39,7 @@ describe('handleDocumentKey Escape', () => {
 				sheetUp: true,
 				close: vi.fn(),
 				restoreFocus: vi.fn(),
+				release: vi.fn(() => false),
 			},
 		});
 		const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
@@ -52,7 +53,7 @@ describe('handleDocumentKey Escape', () => {
 	});
 
 	it('closes the document when no comments sheet is open', () => {
-		const { state } = setup({ commentUI: { state: null, anchor: null, sheetUp: false, close: vi.fn(), restoreFocus: vi.fn() } as DocumentKeyState['commentUI'] });
+		const { state } = setup({ commentUI: { state: null, anchor: null, sheetUp: false, close: vi.fn(), restoreFocus: vi.fn(), release: vi.fn(() => false) } as DocumentKeyState['commentUI'] });
 		const event = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
 		document.body.dispatchEvent(event);
 

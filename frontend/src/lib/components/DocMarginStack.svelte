@@ -5,13 +5,17 @@
 
 <script lang="ts">
 	import { untrack, type Snippet } from 'svelte';
-	import { GAP, placeCards, type MarginItem } from '$lib/docMarginPlacement';
+	import { get } from 'svelte/store';
+	import { GAP, placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
+	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { afterHold } from '$lib/docMarginHold.svelte';
 	import type { DocComment } from '$lib/stores/docComments';
 	/** The margin column's cards: each open thread beside its text, stacked where a cluster would overlap. */
 	let { bounds, pinned, selectedId, behind, card }: { bounds: HTMLElement | null; pinned: DocComment[]; selectedId: string | null; behind: boolean; card: Snippet<[DocComment]> } = $props();
 	let stackEl = $state<HTMLElement>();
 	let tops = $state<Record<string, number>>({});
+	/** The card picked last, so only a new pick (not a re-layout) is brought into view when it grows. */
+	let pickedBefore: string | null = null;
 	// One scroll: the cards sit in document coordinates inside a clip below the column header and move with the editor's scroller.
 	$effect(() => {
 		if (!stackEl || !bounds) return;
@@ -20,6 +24,15 @@
 		restoring.get(bounds)?.();
 		restoring.delete(bounds);
 		const ids = pinned.map((comment) => comment.id), selected = selectedId;
+		// A card just picked grows by its reply field: for a moment after the pick, and while the reader is inside it, its lower end (the Send button) is kept in the clip by scrolling the text, which the cards ride with. The clip itself never scrolls.
+		const revealUntil = selected !== null && selected !== pickedBefore ? performance.now() + 800 : 0;
+		pickedBefore = selected;
+		const reveal = () => {
+			const el = selected ? stackEl!.querySelector<HTMLElement>(`[data-margin-card="${selected}"]`) : null;
+			if (!el || !(performance.now() < revealUntil || el.contains(document.activeElement))) return;
+			const shift = revealShift(el.getBoundingClientRect(), clip.getBoundingClientRect());
+			if (shift) scroller.scrollBy?.({ top: shift, behavior: get(prefersReducedMotion) ? 'auto' : 'smooth' });
+		};
 		let frame = 0, overhang = parseFloat(bounds.style.getPropertyValue('--margin-overhang')) || 0;
 		// A card shows for as long as its own placed box reaches into the clip, and goes once that box has scrolled fully above the clip top; where its anchor is does not matter, so a card stacked far below its text stays reachable. One that would start above the clip sits at the clip top, under the header, and the cards below it shift down, so none is ever cut off under the header.
 		const follow = () => {
@@ -64,6 +77,7 @@
 			for (let i = 0; i < 24 && high - low > 0.5; i++) { const mid = (low + high) / 2; if (lastBottomAt(mid) <= mid + clip.clientHeight) high = mid; else low = mid; }
 			const wanted = Math.max(0, Math.ceil(high) + 1 + Math.round(scroller.clientHeight - (scroller.scrollHeight - overhang)));
 			if (wanted !== overhang) { overhang = wanted; bounds!.style.setProperty('--margin-overhang', `${overhang}px`); }
+			reveal();
 		};
 		// Placement is read once per frame only after something that moves a line or a card: the text or its commented lines change, or the
 		// scroller, clip or a card resizes. Scrolling moves every line equally, so it only needs follow().

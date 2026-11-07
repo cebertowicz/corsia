@@ -1,3 +1,8 @@
+import { get } from 'svelte/store';
+import { isMobile } from '$lib/stores/viewport';
+import type { createCommentSurfaceState } from '$lib/docCommentSurfaceState.svelte';
+import type { createCommentScrollTarget } from '$lib/docViewerScrollTarget.svelte';
+
 /** The line box under the click: the text rect at the click's height, widened by the line's half-leading. A margin marker's own box stands in for its line. */
 function clickedLine(target: Node, y: number): { top: number; bottom: number } | null {
 	const el = target instanceof Element ? target : target.parentElement;
@@ -10,6 +15,25 @@ function clickedLine(target: Node, y: number): { top: number; bottom: number } |
 	if (!text) return null;
 	const leading = Math.max(0, (parseFloat(getComputedStyle(el).lineHeight) - text.height) / 2) || 0;
 	return { top: text.top - leading, bottom: text.bottom + leading };
+}
+
+// A click in the text or on a margin marker opens its card at the pointer, and scrolls nothing (every width but a phone's, which keeps its sheet).
+const clicked = (click: MouseEvent | undefined, live: () => DOMRect | null) => get(isMobile) ? null : clickAnchor(click, live);
+
+/** Opens a comment's card, or a margin marker's cards: at the click that asked for them, else beside their text, scrolled to. */
+export function createCommentOpeners(ui: ReturnType<typeof createCommentSurfaceState>, scroll: ReturnType<typeof createCommentScrollTarget>) {
+	return {
+		comment(id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) {
+			const point = clicked(click, anchor);
+			if (!ui.focusComment(id, point ?? anchor, viaSuggestion, !!point)) return;
+			if (point) scroll.stay(id); else scroll.toComment(id, false, 'navigation');
+		},
+		markers(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent) {
+			const point = clicked(click, reading ?? (() => (opener.isConnected ? opener.getBoundingClientRect() : null)));
+			if (point) scroll.stay(ids[0]); else if (ids.length === 1) scroll.toComment(ids[0], false, 'navigation');
+			ui.focusMarker(ids, opener, point ?? reading, !!point);
+		},
+	};
 }
 
 /**
