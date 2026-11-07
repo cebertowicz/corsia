@@ -6,7 +6,7 @@ import json
 import subprocess
 from unittest.mock import patch
 
-from reviewer.gh_helpers import get_check_runs_for_sha, get_commit_status_for_context
+from reviewer.gh_helpers import get_check_runs_for_sha, get_commit_status_for_context, get_prs_for_sha
 
 
 class TestGhTransport:
@@ -191,6 +191,55 @@ class TestGetCheckRunsForSha:
         assert "check-runs" in args_str
         assert "deadbeef01" in args_str
         assert "pr checks" not in args_str
+
+
+def _pull(number: int, head_sha: str, head_ref: str = "feature") -> dict:
+    return {"number": number, "state": "open", "base": {"ref": "dev"},
+            "head": {"ref": head_ref, "sha": head_sha}}
+
+
+class TestGetPrsForSha:
+    def _gh(self, commit_pulls: str | None, open_pulls: str | None):
+        calls: list[list[str]] = []
+
+        def run(args, **kw):
+            calls.append(args)
+            return commit_pulls if "/commits/" in args[1] else open_pulls
+        return calls, run
+
+    def test_same_repo_head_reads_only_the_commit_listing(self):
+        calls, run = self._gh(json.dumps([_pull(7, "abc")]), None)
+        with patch("reviewer.gh_helpers._run_gh", side_effect=run):
+            prs = get_prs_for_sha("o/r", "abc")
+        assert [pr["number"] for pr in prs] == [7]
+        assert [args[1] for args in calls] == ["repos/o/r/commits/abc/pulls"]
+
+    def test_fork_head_is_found_among_open_prs(self):
+        """A fork head is in another repository, so its commit lists no PR until it merges."""
+        open_pulls = "\n".join(json.dumps(p) for p in [_pull(5, "other"), _pull(2065, "abc", "fork-branch")])
+        calls, run = self._gh("[]", open_pulls)
+        with patch("reviewer.gh_helpers._run_gh", side_effect=run):
+            prs = get_prs_for_sha("o/r", "abc")
+        assert prs == [{"number": 2065, "state": "open", "base_ref": "dev",
+                        "head_ref": "fork-branch", "head_sha": "abc"}]
+        assert calls[1][1] == "repos/o/r/pulls?state=open&per_page=100"
+        assert "--paginate" in calls[1]
+
+    def test_head_with_no_open_pr_is_empty(self):
+        _, run = self._gh("", json.dumps(_pull(5, "other")))
+        with patch("reviewer.gh_helpers._run_gh", side_effect=run):
+            assert get_prs_for_sha("o/r", "abc") == []
+
+    def test_failed_open_pr_read_is_none(self):
+        """An unread open-PR list is a failed lookup, never "no PR"."""
+        _, run = self._gh("[]", None)
+        with patch("reviewer.gh_helpers._run_gh", side_effect=run):
+            assert get_prs_for_sha("o/r", "abc") is None
+
+    def test_malformed_open_pr_line_is_none(self):
+        _, run = self._gh("[]", "not-json")
+        with patch("reviewer.gh_helpers._run_gh", side_effect=run):
+            assert get_prs_for_sha("o/r", "abc") is None
 
 
 class TestGetCommitStatusForContext:
