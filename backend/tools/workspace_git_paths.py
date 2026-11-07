@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from tools.sandbox_git import sandbox_literal
+from tools.sandbox_git import sandbox_any_case, sandbox_literal
 
 
 def _git_pointer(path: Path, base: Path, prefix: str = "") -> Path | None:
@@ -63,22 +63,6 @@ def is_workspace_git_metadata(workspace: Path | None, path: Path) -> bool:
     return any(name == root or name.startswith(f"{root}/") for root in paths)
 
 
-def _any_case(path: Path) -> str:
-    """Spell ``path`` for a Seatbelt regex, which has no case-insensitive flag.
-
-    A literal rule misses a differently cased name that doesn't exist yet. Other
-    ASCII punctuation matches any one character, so an odd workspace path can
-    over-deny a sibling but can't break the profile.
-    """
-    def spell(char: str) -> str:
-        if char == ".":
-            return "[.]"
-        if char.isascii() and char.isalpha():
-            return f"[{char.upper()}{char.lower()}]"
-        return char if not char.isascii() or char.isdigit() or char in "/-_ " else "."
-    return "".join(spell(char) for char in str(path))
-
-
 def workspace_git_history_rules(workspace: Path | None) -> list[str]:
     """Deny reads and writes throughout the workspace's Git metadata."""
     return [
@@ -86,7 +70,7 @@ def workspace_git_history_rules(workspace: Path | None) -> list[str]:
         for path in workspace_git_history_paths(workspace)
         for rule in (
             f'(deny file-read* file-write* (subpath "{sandbox_literal(path)}"))',
-            f'(deny file-read* file-write* (regex #"^{_any_case(path)}(/|$)"))',
+            f'(deny file-read* file-write* (regex #"^{sandbox_any_case(path)}(/|$)"))',
         )
     ]
 
@@ -95,5 +79,5 @@ def workspace_git_rules(paths: tuple[Path, ...]) -> list[str]:
     """Render Seatbelt write denies for Git control paths; the last one is a directory."""
     if not paths:
         return []
-    exact = [f'(deny file-write* (regex #"^{_any_case(path)}$"))' for path in paths[:-1]]
-    return [*exact, f'(deny file-write* (regex #"^{_any_case(paths[-1])}(/|$)"))']
+    exact = [f'(deny file-write* (regex #"^{sandbox_any_case(path)}$"))' for path in paths[:-1]]
+    return [*exact, f'(deny file-write* (regex #"^{sandbox_any_case(paths[-1])}(/|$)"))']
