@@ -1,10 +1,13 @@
 """Who has acknowledged a comment thread: one row per thread and acknowledger.
 
 Each person and agent acknowledges a thread separately. The person is ``PERSON`` (the principal
-their comments are delivered as); an agent is its thread id. ``comment_state_updates`` is the one
-writer that records an acknowledgement and resolves the thread once everyone in it has one;
-``feedback_comments.participants`` says who is in it. An acknowledged agent gets no more wakes for
-the thread (``feedback_comments.recipients``, ``comment_recipients.filter_stopped_replies``).
+their comments are delivered as); an agent is its thread id. ``comment_state_updates`` records
+an acknowledgement and resolves the thread once everyone in it has one
+(``feedback_comments.participants`` says who is in it). Two state changes take acknowledgements
+back: re-opening the thread clears them all (``comments.update``), and a tag that brings an agent
+back clears its own (``comment_recipients.reinstate``). An acknowledged agent gets no more wakes for
+the thread (``feedback_comments.recipients``, ``comment_recipients.filter_stopped_replies``); the
+person's acknowledgement never stops replies reaching them.
 """
 
 from __future__ import annotations

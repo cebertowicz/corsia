@@ -95,7 +95,8 @@ def recipients(
     """Resolve feedback recipients, or only the document owner for a user reopen.
 
     An agent that left the thread or acknowledged it is not woken, unless this comment tags it;
-    the document owner still gets the person's comments.
+    the document owner still gets the person's comments. The person's own acknowledgement never
+    stops replies reaching them.
     """
     artifact = registry_models.get_artifact(comment["artifact_id"], db=db)
     owner = str(artifact.get("parent_thread_id") or "") if artifact else ""
@@ -111,7 +112,7 @@ def recipients(
         resolved.update(_agent_authors(db, root_id))
         # A held tag does not make someone a participant until its batch is delivered.
         resolved.update(_tagged_agents(db, root_id, delivered_only=True))
-    quiet = _left_agents(db, root_id) | comment_acks.acknowledgers(db, root_id)
+    quiet = _left_agents(db, root_id) | (comment_acks.acknowledgers(db, root_id) - {comment_acks.PERSON})
     resolved.difference_update(quiet - tagged)
     if comment["author_kind"] == "user":
         resolved.add(owner)

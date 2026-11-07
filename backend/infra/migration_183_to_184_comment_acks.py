@@ -2,7 +2,8 @@
 
 ``doc_comment_acks`` holds one row per thread and acknowledger, and replaces the shared
 ``doc_comments.acked`` flag. The flag never recorded who set it, so its rows are not carried:
-crediting them to anyone would invent an acknowledgement.
+crediting them to anyone would invent an acknowledgement. ``doc_comments.closed_by_agreement`` marks
+a thread that everyone's agreement resolved; no existing thread closed that way, so it starts at 0.
 
 Runs inside the runner's transaction; it never commits or rolls back.
 """
@@ -28,3 +29,5 @@ def migrate_183_to_184(conn: sqlite3.Connection) -> None:
     )""")
     if "acked" in columns:
         conn.execute("ALTER TABLE doc_comments DROP COLUMN acked")
+    if "closed_by_agreement" not in columns:
+        conn.execute("ALTER TABLE doc_comments ADD COLUMN closed_by_agreement INTEGER NOT NULL DEFAULT 0")

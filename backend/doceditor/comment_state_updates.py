@@ -58,7 +58,7 @@ def resolve_after_leave(connection, root_id: str, agent_id: str) -> None:
     """
     root = store.get_comment(root_id, db=connection)
     if root is not None and _everyone_acknowledged(connection, root):
-        update_comment(connection, root_id, {"resolved": True}, actor_thread_id=agent_id)
+        update_comment(connection, root_id, {"resolved": True, "closed_by_agreement": True}, actor_thread_id=agent_id)
 
 
 def update_comment(
@@ -95,7 +95,7 @@ def update_comment(
     _note_author(connection, before, patch, actor_thread_id=actor_thread_id, user_name=user_name,
                  acknowledged=agreed and not told_resolved)
     if root is not None:
-        resolved = update_comment(connection, str(root["id"]), {"resolved": True},
+        resolved = update_comment(connection, str(root["id"]), {"resolved": True, "closed_by_agreement": True},
                                   actor_thread_id=actor_thread_id, user_name=user_name)
         if root["id"] == comment_id:
             row = resolved

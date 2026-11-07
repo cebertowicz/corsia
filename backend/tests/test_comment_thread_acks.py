@@ -184,6 +184,42 @@ async def test_a_reply_from_someone_who_agreed_keeps_the_thread_resolved(integra
 
 
 @pytest.mark.asyncio
+async def test_a_thread_someone_resolved_stays_resolved_when_a_newcomer_replies(integration_client, doc, _registrable_roots):
+    from tools.documents import DocCommentUpdateTool
+
+    owner, reviewer, root = await _owned_thread(integration_client, doc)
+    other = _mk_thread(integration_client, _OWNER, title="Other")
+    await DocCommentUpdateTool().execute(comment_id=root, resolved=True, _thread_id=reviewer)
+    # Agreements given after someone resolved it do not make it a thread that closed on agreement.
+    await _ack(owner, root)
+    await _ack(reviewer, root)
+
+    await _comment(other, parent_id=root, body="One case this misses.")
+
+    assert _row(root)["resolved"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_persons_agree_never_stops_replies_reaching_them(integration_client, doc, _registrable_roots):
+    from doceditor import comments as store
+    from doceditor import feedback_comments
+    from infra.database import get_db
+
+    owner, _reviewer, root = await _owned_thread(integration_client, doc)
+    asked = store.create(_row(root)["artifact_id"], body="Is this right?", anchor_text=QUOTE)
+    await _comment(owner, parent_id=asked["id"], body="Checking.")
+    _person_ack(integration_client, asked["id"])
+    reply = await _comment(owner, parent_id=asked["id"], body="It was not; fixed.")
+
+    db = get_db()
+    try:
+        assert "ui" in feedback_comments.recipients(db, _row(reply["id"]))
+    finally:
+        db.close()
+    assert _row(asked["id"])["resolved"] == 0
+
+
+@pytest.mark.asyncio
 async def test_the_last_holdout_leaving_resolves_the_thread(integration_client, doc, _registrable_roots):
     from doceditor import comment_recipients
     from infra.database import get_db, write_transaction

@@ -62,7 +62,9 @@ DOC_COMMENTS_SCHEMA_SQL = """
         closed_by_decision INTEGER NOT NULL DEFAULT 0,
         -- The account an agent's tag of the person names: the account that agent works for
         -- (doceditor.comment_create_db). Never an agent tag, which stays a doc_comment_tags row.
-        tagged_user_id TEXT
+        tagged_user_id TEXT,
+        -- 1 while everyone's agreement is what resolved the thread; any other change to `resolved` clears it.
+        closed_by_agreement INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS idx_doc_comments_artifact
         ON doc_comments(artifact_id, created_at);

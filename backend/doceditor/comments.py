@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from doceditor import comment_acks, comment_notifications, comment_recipients, feedback_comments, feedback_reopens, feedback_settlement, feedback_state, live_events
+from doceditor import comment_acks, comment_notifications, comment_recipients, feedback_reopens, feedback_settlement, feedback_state, live_events
 from infra.database import get_db, write_transaction
 
 _CLIENT_ID_RE = re.compile(r"[A-Za-z0-9_-]+")
@@ -161,9 +161,16 @@ def closed_by_decision(connection, comment_id: str) -> bool:
     return root is not None and bool(root["decision"] and root["resolved"] and root["closed_by_decision"])
 
 
-def _resolved(connection, comment_id: str) -> bool:
-    row = connection.execute("SELECT resolved FROM doc_comments WHERE id=?", (comment_id,)).fetchone()
-    return row is not None and bool(row["resolved"])
+def closed_by_agreement(connection, comment_id: str) -> bool:
+    """Whether a thread is resolved because everyone in it agreed, not because someone resolved it.
+
+    The agreement sets ``closed_by_agreement`` (``comment_state_updates``); every other change to
+    ``resolved`` clears it (``update``).
+    """
+    row = connection.execute(
+        "SELECT resolved, closed_by_agreement FROM doc_comments WHERE id=?", (comment_id,)
+    ).fetchone()
+    return row is not None and bool(row["resolved"] and row["closed_by_agreement"])
 
 
 def create_with_status(
@@ -202,7 +209,6 @@ def create_with_status(
         number = _next_region_number(connection, cid, artifact_id, image_src, region)
         root_id = _thread_root_id(connection, parent_id)
         replier = author_thread_id if author_kind == "agent" else comment_acks.PERSON
-        agreed_before = bool(root_id) and feedback_comments.agreed(connection, root_id)
         inserted = connection.execute(
             """INSERT INTO doc_comments
                (id, artifact_id, parent_id, author, author_kind, author_thread_id,
@@ -225,7 +231,7 @@ def create_with_status(
         _check_existing_identity(r, artifact_id, author, cid)
         created = inserted.rowcount == 1
         if created and parent_id and (closed_by_decision(connection, r["parent_id"]) or (
-                agreed_before and _resolved(connection, r["parent_id"])
+                closed_by_agreement(connection, r["parent_id"])
                 and replier not in comment_acks.acknowledgers(connection, r["parent_id"]))):
             # The reply rule stated on comment_actions.reopen_fields; and a thread that closed because
             # everyone had agreed re-opens when someone who has not agreed replies.
@@ -258,15 +264,16 @@ def update(comment_id: str, fields: dict[str, Any], *, db=None) -> dict | None:
     thread takes back its acknowledgements: they were for the thread as it was settled.
     """
     allowed = {"resolved", "body", "from_off", "to_off", "anchor_text", "decision", "decided_by", "decided_by_thread_id", "decided_at", "decision_event_id", "decided_in_bulk",
-               "closed_by_decision", "region_x", "region_y", "region_w", "region_h", "image_rev"}
-    if "resolved" in fields and "closed_by_decision" not in fields:
-        fields = {**fields, "closed_by_decision": False}  # only a decision closes a thread as decided
+               "closed_by_decision", "closed_by_agreement", "region_x", "region_y", "region_w", "region_h", "image_rev"}
+    if "resolved" in fields:
+        # Only a decision closes a thread as decided, and only everyone's agreement as agreed.
+        fields = {"closed_by_decision": False, "closed_by_agreement": False, **fields}
     sets, params = [], []
     for k, v in fields.items():
         if k not in allowed:
             continue
         sets.append(f"{k}=?")
-        params.append(int(v) if k in ("resolved", "decided_in_bulk", "closed_by_decision") and isinstance(v, bool) else v)
+        params.append(int(v) if k in ("resolved", "decided_in_bulk", "closed_by_decision", "closed_by_agreement") and isinstance(v, bool) else v)
     if not sets:
         return None
     now = _now()
