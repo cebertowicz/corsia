@@ -292,8 +292,8 @@
 		}
 	}
 
-	/* Solid, not glass: document text reads through any translucent fill, and the header's backdrop root stops the blur from reaching it. A phone-width touch screen at a narrow canvas gets the answer in a floating capsule at the canvas's bottom edge, with the status above its buttons (the capsule grows upward). The capsule is fixed to the window, which is the canvas only in the phone layout: a wider touch screen beside the chat keeps the answer in the bar's row. */
-	@media (any-pointer: coarse) and (max-width: 768px) {
+	/* Solid, not glass: document text reads through any translucent fill, and the header's backdrop root stops the blur from reaching it. A phone-width touch screen at a narrow canvas gets the answer in a floating capsule at the canvas's bottom edge, with the status above its buttons (the capsule grows upward). The capsule is fixed to the window, which is the canvas only in the phone layout: a wider touch screen beside the chat keeps the answer in the bar's row. 48rem is the viewport store's 768px phone breakpoint at the default root size. */
+	@media (any-pointer: coarse) and (max-width: 48rem) {
 		@container doc-canvas (max-width: 37.5rem) {
 			.rb-row2 { display: contents; }
 			.rb-slot { animation-name: rb-grow-solid, rb-clip; }
