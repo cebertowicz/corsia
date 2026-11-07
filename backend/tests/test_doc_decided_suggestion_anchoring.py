@@ -54,6 +54,18 @@ def test_a_pending_suggestion_whose_text_changed_still_reads_orphaned(scope):
     assert _read(db, artifact_id, AFTER, suggestion["id"])["orphaned"] is True
 
 
+def test_pending_legacy_suggestion_moves_after_text_inserted_before_its_quote(scope):
+    db, artifact_id = scope
+    suggestion = _suggest(db, artifact_id)
+    text = "New material before. " + BEFORE
+
+    row = _read(db, artifact_id, text, suggestion["id"])
+
+    start = text.index("quoted source")
+    assert row["orphaned"] is False
+    assert (row["from_off"], row["to_off"]) == (start, start + len("quoted source"))
+
+
 def test_an_accepted_suggestion_is_found_on_its_replacement(scope):
     db, artifact_id = scope
     suggestion = _suggest(db, artifact_id)

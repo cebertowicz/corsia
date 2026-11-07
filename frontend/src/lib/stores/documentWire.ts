@@ -42,6 +42,7 @@ export interface DocumentFrame extends FailureObservation {
 	seq?: number;
 	reserved?: boolean;
 	ranges?: { id: string; from_off: number; to_off: number }[];
+	states?: { id: string; orphaned: boolean; text_changed: boolean }[];
 }
 
 /** A comment's own id, minted at capture so the live range and the posted comment share it. */

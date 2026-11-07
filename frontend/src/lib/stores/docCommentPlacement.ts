@@ -29,6 +29,7 @@ class LivePlacement {
 	private positions = new Map<string, Positions>();
 	private server = new Map<string, string>();
 	private clean: boolean;
+	private needsStates = false;
 	private destroyed = false;
 	private stops: (() => void)[];
 
@@ -159,7 +160,9 @@ class LivePlacement {
 		} else if (frame.type === 'doc_ack') {
 			const became = this.session.durability.clean && !this.clean;
 			this.clean = this.session.durability.clean;
-			if (became && this.current().some(row => row.placement === 'placing')) this.ask();
+			if ((this.clean && this.needsStates) || (became && this.current().some(row => row.placement === 'placing'))) this.ask();
+		} else if (frame.type === 'doc_update' && this.needsStates && this.session.durability.clean) {
+			this.ask();
 		}
 		if (frame.type !== 'doc_ack') this.clean = this.session.durability.clean;
 	}
@@ -187,7 +190,10 @@ class LivePlacement {
 			this.next(true);
 			return;
 		}
-		if (digest === frame.digest) this.place(frame.ranges ?? [], text.length, reload);
+		if (digest === frame.digest) {
+			this.needsStates = false;
+			this.place(frame.ranges ?? [], text, reload, frame.states);
+		}
 		else if (session.durability.clean) {
 			// The ordering rule says a clean tab holds exactly the answer's text, so this is a defect, reported once.
 			console.error('Comment placement: the server text differs from a clean tab', {
@@ -205,8 +211,9 @@ class LivePlacement {
 		this.next();
 	}
 
-	private place(ranges: Range[], length: number, reload = false): void {
-		const found = new Map(ranges.filter(range => 0 <= range.from_off && range.from_off <= range.to_off && range.to_off <= length)
+	private place(ranges: Range[], snapshotText: string, reload = false, states?: DocumentFrame['states']): void {
+		const flags = new Map(states?.map(state => [state.id, state]) ?? []);
+		const found = new Map(ranges.filter(range => 0 <= range.from_off && range.from_off <= range.to_off && range.to_off <= snapshotText.length)
 			.map(range => [range.id, range]));
 		const keep = this.marked !== null; // a newer answer decides rows this one does not name
 		const { text } = this.session;
@@ -215,8 +222,11 @@ class LivePlacement {
 			this.positions.set(id, { from: Y.createRelativePositionFromTypeIndex(text, range.from_off, 0),
 				to: Y.createRelativePositionFromTypeIndex(text, range.to_off, -1) });
 		}
-		this.write(rows => rows.map(row => {
-			if (!(reload ? row.anchor && !row.review : placeable(row))) return row;
+		this.write(rows => rows.map(original => {
+			const state = flags.get(original.id);
+			const row = state ? { ...original, orphaned: state.orphaned, textChanged: state.text_changed, statusText: snapshotText } : original;
+			// The gate reads the row as it was asked about (an earlier answer may have orphaned a row still Placing).
+			if (!(reload ? row.anchor && !row.review : placeable(original) || original.placement === 'placing')) return row;
 			const range = found.get(row.id);
 			if (range) return { ...row, placement: 'placed', drawn: true, from: range.from_off, to: range.to_off };
 			if (keep) return row;
@@ -238,7 +248,8 @@ class LivePlacement {
 	}
 
 	/** Drawn rows move only by their own relative positions, on every change to the text. */
-	private moved = (): void => {
+	private moved = (event: Y.YTextEvent): void => {
+		if (!this.needsStates) this.needsStates = this.editsInside(event.delta);
 		if (!this.positions.size) return;
 		const { doc } = this.session;
 		this.write(rows => rows.map(row => {
@@ -249,6 +260,18 @@ class LivePlacement {
 			return from === undefined || to === undefined || (from === row.from && to === row.to) ? row : { ...row, from, to };
 		}));
 	};
+
+	/** Only an edit inside a drawn range can change its flags (typing at an edge lands outside); delta indices are pre-edit, like the rows'. */
+	private editsInside(delta: Y.YTextEvent['delta']): boolean {
+		const spans = this.current().filter(row => row.drawn && !!row.anchor && !row.review && row.from !== undefined && row.to !== undefined);
+		let at = 0;
+		for (const op of spans.length ? delta : []) {
+			const end = at + (op.retain ?? op.delete ?? 0);
+			if (!op.retain && spans.some(row => op.delete ? at < row.to! && end > row.from! : row.from! < at && at < row.to!)) return true;
+			at = end;
+		}
+		return false;
+	}
 }
 
 /** Follows the live sessions; a reset or closed document drops its positions and Placing state. */

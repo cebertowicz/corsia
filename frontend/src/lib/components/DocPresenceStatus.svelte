@@ -19,6 +19,7 @@
 		type PreparedPresenceArrival,
 	} from '$lib/docPresenceRuntime';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
+	import type { DocComment } from '$lib/stores/docComments';
 
 	type DocState = 'loading' | 'ready' | 'error';
 	type PresenceParticipant = {
@@ -43,6 +44,7 @@
 		onPrepareCleanReload,
 		onFeedback,
 		onArrival,
+		projectComment = (comment: DocComment) => comment,
 		textCurrent = true,
 	}: {
 		target: DocViewerTarget;
@@ -54,6 +56,7 @@
 		onPrepareCleanReload: () => Promise<CleanReload | null>;
 		onFeedback: (artifactId: string, feedback: CommentFeedback) => void;
 		onArrival?: (frame: DocActivityFrame) => void;
+		projectComment?: (comment: DocComment) => DocComment;
 		/** False while the canvas's live text is away (opening or reconnecting), when an arrival cannot type in it. */
 		textCurrent?: boolean;
 	} = $props();
@@ -92,6 +95,10 @@
 			}));
 	});
 
+	function arrivalAnchor(comment: DocComment | null) {
+		return commentAnchor(comment ? projectComment(comment) : null);
+	}
+
 	function activityChars(frame: DocActivityFrame): number {
 		return frame.span ? Math.max(0, frame.span.to - frame.span.from) : 0;
 	}
@@ -107,7 +114,7 @@
 		if (frame.kind === 'comment' || frame.kind === 'suggestion') {
 			const arrival = await prepareCommentArrival(currentArtifactId, frame.comment_id);
 			const comment = arrival.comment;
-			const anchor = commentAnchor(comment);
+			const anchor = arrivalAnchor(comment);
 			// Select the anchor, hold while the agent writes, then the card: timings scale with the anchor and the body.
 			const delayMs = commentArrivalDelay(anchor ? anchor.to - anchor.from : activityChars(frame), comment?.text.length ?? 0);
 			return {
@@ -124,7 +131,7 @@
 	function select(frame: DocActivityFrame, prepared: PreparedPresenceArrival, currentArtifactId: string) {
 		const payload = prepared.payload as PresencePayload | undefined;
 		const comment = payload?.kind === 'comment' ? payload.arrival.comment : null;
-		const anchor = commentAnchor(comment);
+		const anchor = arrivalAnchor(comment);
 		if (!comment || !anchor) return null;
 		const agent = presenceFor(currentArtifactId, Date.now()).find((entry) => entry.id === frame.thread_id);
 		return arrivalSelectIn(root, {
@@ -145,7 +152,7 @@
 		if (prepared?.kind === 'comment') {
 			revealCommentArrival(currentArtifactId, prepared.arrival);
 			onFeedback(currentArtifactId, prepared.arrival.feedback);
-			onArrival?.({ ...frame, span: commentAnchor(prepared.arrival.comment) });
+			onArrival?.({ ...frame, span: arrivalAnchor(prepared.arrival.comment) });
 		}
 	}
 

@@ -110,6 +110,65 @@ describe('comment placement in a live document (4.2)', () => {
 		expect(row()).toMatchObject({ from: 9, to: 13 });
 	});
 
+	it('uses server flags from the matching live snapshot after an edit', async () => {
+		const doc = await opened();
+		doc.answer(doc.asks()[0], { states: [{ id: 'c1', orphaned: false, text_changed: false }] });
+		await vi.waitFor(() => expect(row().placement).toBe('placed'));
+		doc.remote(text => text.insert(8, 'X'));
+		await vi.waitFor(() => expect(doc.asks()).toHaveLength(2));
+		doc.answer(doc.asks()[1], { ranges: [{ id: 'c1', from_off: 6, to_off: 11 }],
+			states: [{ id: 'c1', orphaned: false, text_changed: true }] });
+		await vi.waitFor(() => expect(row()).toMatchObject({ orphaned: false, textChanged: true }));
+	});
+
+	it('settles a row the first answer reports orphaned, so the count and recovery see it', async () => {
+		const doc = await opened();
+		expect(row()).toMatchObject({ placement: 'placing', drawn: false });
+		doc.answer(doc.asks()[0], { ranges: [], states: [{ id: 'c1', orphaned: true, text_changed: false }] });
+		await vi.waitFor(() => expect(row()).toMatchObject({ orphaned: true, placement: undefined, drawn: false }));
+	});
+
+	it('settles a row an answer orphans while a newer ask is marked, once that newer answer lands', async () => {
+		const doc = await opened();
+		mocks.fetchComments.mockResolvedValue({ comments: [serverRow('c1', 'beta', 6), serverRow('c2', 'gamma', 11)], feedback: {} });
+		await loadComments('artifact');
+		const orphaned = { ranges: [], states: [{ id: 'c1', orphaned: true, text_changed: false }] };
+		doc.answer(doc.asks()[0], orphaned);
+		await vi.waitFor(() => expect(doc.asks()).toHaveLength(2));
+		expect(row()).toMatchObject({ orphaned: true, placement: 'placing' });
+		doc.answer(doc.asks()[1], orphaned);
+		await vi.waitFor(() => expect(row()).toMatchObject({ orphaned: true, placement: undefined, drawn: false }));
+	});
+
+	it('asks nothing for edits outside every comment, including at its edges', async () => {
+		const doc = await opened();
+		doc.answer(doc.asks()[0], { states: [{ id: 'c1', orphaned: false, text_changed: false }] });
+		await vi.waitFor(() => expect(row().placement).toBe('placed'));
+		for (const at of [() => 0, () => row().from!, () => row().to!, () => row().to! + 2]) {
+			doc.session.text.insert(at(), 'X');
+			const update = doc.updates().at(-1)!;
+			doc.merge(update);
+			doc.ack(update);
+		}
+		doc.remote(text => text.delete(0, 2));
+		await settled();
+		expect(doc.asks()).toHaveLength(1);
+	});
+
+	it('refreshes server flags after a local edit is acknowledged', async () => {
+		const doc = await opened();
+		doc.answer(doc.asks()[0], { states: [{ id: 'c1', orphaned: false, text_changed: false }] });
+		await vi.waitFor(() => expect(row().placement).toBe('placed'));
+		doc.session.text.insert(8, 'X');
+		const update = doc.updates().at(-1)!;
+		doc.merge(update);
+		doc.ack(update);
+		await vi.waitFor(() => expect(doc.asks()).toHaveLength(2));
+		doc.answer(doc.asks()[1], { ranges: [{ id: 'c1', from_off: 6, to_off: 11 }],
+			states: [{ id: 'c1', orphaned: false, text_changed: true }] });
+		await vi.waitFor(() => expect(row()).toMatchObject({ orphaned: false, textChanged: true }));
+	});
+
 	it('never remaps or queues for saving a live row that is still being placed', async () => {
 		await opened();
 		expect(row()).toMatchObject({ placement: 'placing', drawn: false, from: 6, to: 10 });

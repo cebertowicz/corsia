@@ -7,7 +7,7 @@ import asyncio
 import pytest
 
 from doc_feedback_helpers import add_comment, seed_document, seed_thread
-from doceditor import comment_actions, comment_anchoring, comments as store
+from doceditor import comment_actions, comment_anchoring, comments as store, suggestion_overlap
 from doceditor.live_comments import positions
 from doceditor.live_lane import Operation
 from doceditor.live_publication_record import WriteActor
@@ -131,6 +131,54 @@ async def test_an_open_suggestion_edited_inside_keeps_its_place_and_its_quote(ow
         await manager.close()
 
 
+@pytest.mark.parametrize(("text", "end", "decision", "orphaned", "changed"), [
+    ("The quick fox", 9, None, False, False),
+    ("The quXick fox", 10, None, False, True),
+    ("The  fox", 4, None, True, False),
+    ("The  fox", 4, "rejected", False, False),
+])
+def test_server_status_cases_match_the_local_projection_cases(text, end, decision, orphaned, changed):
+    row = {"id": "case", "parent_id": None, "review": False, "anchor_text": "quick", "from_off": 4,
+           "to_off": 9, "anchor_prefix": "The ", "anchor_suffix": " fox", "replacement": "slow",
+           "decision": decision, "resolved": False, "orphaned": False}
+    comment_anchoring.resolve_threads([row], text, ranges={"case": (4, end)})
+    assert bool(row.get("orphaned")) is orphaned
+    assert bool(row.get("text_changed")) is changed
+
+
+@pytest.mark.asyncio
+async def test_live_positions_reports_the_server_flags_for_an_edited_suggestion(ownership_scope, tmp_path, monkeypatch):
+    scope = ownership_scope
+    manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
+    try:
+        artifact, row = _comment_on(scope, entry, replacement="Replaced.")
+        _edit(entry, entry.live.text.index("Middle"), 0, "very ")
+        snapshot = await positions(entry, artifact)
+        states = {item["id"]: item for item in snapshot["states"]}
+        assert states[row["id"]] == {"id": row["id"], "orphaned": False, "text_changed": True}
+    finally:
+        await manager.close()
+
+
+@pytest.mark.asyncio
+async def test_decided_open_suggestion_with_deleted_text_has_same_flag_in_read_and_snapshot(ownership_scope, tmp_path, monkeypatch):
+    scope = ownership_scope
+    manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
+    try:
+        artifact, row = _comment_on(scope, entry, replacement="Replaced.")
+        store.create(artifact, body="Reply", parent_id=row["id"], announce=False, db=scope["db"])
+        with write_transaction(scope["db"], scope="test_decided_open_lost") as connection:
+            comment_actions.record_decision(row["id"], decision="reject", decided_by="Robin", decided_by_thread_id=None, db=connection)
+        assert not store.get_comment(row["id"], db=scope["db"])["resolved"]
+        _edit(entry, entry.live.text.index(QUOTE), len(QUOTE))
+        orphaned = _read(scope, entry, artifact)[row["id"]]["orphaned"]
+        assert orphaned is False
+        states = {item["id"]: item for item in (await positions(entry, artifact))["states"]}
+        assert states[row["id"]]["orphaned"] is orphaned
+    finally:
+        await manager.close()
+
+
 @pytest.mark.asyncio
 async def test_an_open_suggestion_with_all_its_text_deleted_still_orphans(ownership_scope, tmp_path, monkeypatch):
     scope = ownership_scope
@@ -153,6 +201,22 @@ async def _publish(scope, entry):
         while await asyncio.to_thread(entry.live.store.next_publication):
             await asyncio.sleep(0.01)
     await asyncio.wait_for(published(), 3)
+
+
+@pytest.mark.asyncio
+async def test_edited_suggestion_does_not_block_overlap_and_is_marked_stranded(ownership_scope, tmp_path, monkeypatch):
+    scope = ownership_scope
+    manager, entry, _ = await opened(scope, tmp_path, monkeypatch)
+    try:
+        artifact, row = _comment_on(scope, entry, replacement="Replaced.")
+        _edit(entry, entry.live.text.index("Middle"), 0, "very ")
+        assert _read(scope, entry, artifact)[row["id"]]["text_changed"] is True
+        start, end = entry.live.ranges[row["id"]]
+        suggestion_overlap.check_agent_suggestion_fits(scope["db"], artifact, str(entry.live.path), start, end)
+        await _publish(scope, entry)
+        assert store.get_comment(row["id"], db=scope["db"])["stranded_notified_at"] is not None
+    finally:
+        await manager.close()
 
 
 def _reloaded(scope, entry, artifact):
