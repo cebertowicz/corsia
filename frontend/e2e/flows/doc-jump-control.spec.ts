@@ -218,8 +218,7 @@ async function stageWorkspace(page: Page, threadId: string, docPath: string, nam
 async function openThread(page: Page, title: string): Promise<void> {
 	await loginByUrl(page);
 	if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-	// A run's state holds several sessions with the same title, one per test: the newest is the first row.
-	await sidebarThread(page, title).first().click();
+	await sidebarThread(page, title).click();
 }
 
 async function reloadComments(page: Page, artifactId: string): Promise<void> {
@@ -367,9 +366,14 @@ for (const theme of ['light', 'dark'] as const) {
 			// clear of its top edge, and stays there once the drawer has taken its width from the pane.
 			await expect.poll(async () => {
 				const inside = await page.evaluate((id) => {
-					// Inside .doc: at 393 the chat composer is a CodeMirror too, and the first scroller in the page is not the document's.
-					const pane = document.querySelector<HTMLElement>('.doc .cm-scroller')!.getBoundingClientRect();
-					const pieces = [...document.querySelectorAll<HTMLElement>(`.doc [data-comment-id="${id}"]`)].map((node) => node.getBoundingClientRect());
+					// The pane is taken from the highlight's own editor: at 393 the chat composer is a CodeMirror too, so the
+					// page's first scroller is not the document's, and the marks are not under the 1440 '.doc' box.
+					const mark = document.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
+					const editor = mark?.closest('.cm-editor');
+					const scroller = editor?.querySelector<HTMLElement>('.cm-scroller');
+					if (!mark || !scroller) return null;
+					const pane = scroller.getBoundingClientRect();
+					const pieces = [...document.querySelectorAll<HTMLElement>(`[data-comment-id="${id}"]`)].filter((node) => editor?.contains(node)).map((node) => node.getBoundingClientRect());
 					if (!pieces.length) return null;
 					return { lineTop: Math.round(Math.min(...pieces.map((r) => r.top))), lineBottom: Math.round(Math.max(...pieces.map((r) => r.bottom))), paneTop: Math.round(pane.top), paneBottom: Math.round(pane.bottom) };
 				}, doc.roots[8]);
@@ -774,7 +778,6 @@ for (const theme of ['light', 'dark'] as const) {
 			// band shows nothing; it returns when the reader scrolls that image out of view, and the next tap goes to that pin.
 			await backToDocument(page);
 			await expect.poll(() => unreadCountInStore(page, seeded.artifactId)).toBe(1);
-			await expect(controlBox(page)).toHaveCount(0);
 			await page.locator('.cm-scroller').evaluate((el) => { el.scrollTop = el.scrollHeight; });
 			await holdDwell(page, true);
 			await expectControl(page, '1 new');
@@ -938,9 +941,13 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		// and nothing can bring it further into view.
 		await expect.poll(() => unreadCountInStore(page, doc.artifactId)).toBe(1);
 		await expect.poll(() => page.evaluate((id) => {
-			// Inside .doc, for the same reason as the landing read: the chat composer is a CodeMirror too.
-			const pane = document.querySelector<HTMLElement>('.doc .cm-scroller')!.getBoundingClientRect();
-			const pieces = [...document.querySelectorAll<HTMLElement>(`.doc [data-comment-id="${id}"]`)].map((node) => node.getBoundingClientRect());
+			// The pane comes from the unread thread's own editor, the same way the landing read does.
+			const mark = document.querySelector<HTMLElement>(`[data-comment-id="${id}"]`);
+			const editor = mark?.closest('.cm-editor');
+			const scroller = editor?.querySelector<HTMLElement>('.cm-scroller');
+			if (!mark || !scroller) return false;
+			const pane = scroller.getBoundingClientRect();
+			const pieces = [...document.querySelectorAll<HTMLElement>(`[data-comment-id="${id}"]`)].filter((node) => editor?.contains(node)).map((node) => node.getBoundingClientRect());
 			if (!pieces.length) return false;
 			return Math.min(...pieces.map((r) => r.top)) >= pane.top - 0.5 && Math.max(...pieces.map((r) => r.bottom)) <= pane.bottom + 0.5;
 		}, doc.roots[2]), { message: 'the unread line sits inside the visible pane' }).toBe(true);

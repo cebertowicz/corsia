@@ -69,7 +69,9 @@ for (const width of [393, 1440]) {
 			// Zoom with the viewer's own keyboard zoom (ImageLightbox's '+' and '='): in a leaf this narrow the bar clips its
 			// own zoom buttons, which is a finding for the viewer lane, not something this journey has to depend on.
 			await viewport.evaluate((el) => el.focus());
-			for (let step = 0; step < 4; step += 1) await page.keyboard.press('+');
+			for (let step = 0; step < 12; step += 1) await page.keyboard.press('+');
+			// Prove the keys did the zooming, so a later failure is not read as a missing control.
+			await expect.poll(async () => parseInt((await overlay(page).getByText(/^\d+%$/).first().textContent()) ?? '0', 10), { message: 'the viewer zoomed past its own size with the keyboard' }).toBeGreaterThan(100);
 			await viewport.evaluate((el) => { el.scrollTop = 0; });
 			const offFrame = async () => {
 				const frame = (await viewport.boundingBox())!;
