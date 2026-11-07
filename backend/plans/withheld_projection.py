@@ -58,9 +58,10 @@ def project(value: Any, key: str = "") -> Any:
 def fences_thread(db, recipient: str | None, owner: str | None, *, fenced=None) -> bool:
     """Whether recipient is fenced from the project currently owning the text.
 
-    A caller checking many owners for one recipient passes its ``fenced`` set.
+    A caller checking many owners for one recipient passes its ``fenced`` set. A
+    thread's own plan text is never across its fence, so that case reads nothing.
     """
-    if owner is None:
+    if owner is None or owner == recipient:
         return False
     row = db.execute("SELECT project_id FROM threads WHERE id=?", (owner,)).fetchone()
     if row is None or row["project_id"] is None:

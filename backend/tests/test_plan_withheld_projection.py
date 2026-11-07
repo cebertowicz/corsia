@@ -73,3 +73,9 @@ def test_unreadable_recipient_fails_closed(db):
         "title": WITHHELD_LOCAL_ONLY, "id": "abc",
     }
     assert for_thread("visible", recipient=None, owner="owner", db=db) == "visible"
+
+
+def test_own_plan_text_reads_no_caller_facts(db, monkeypatch):
+    _threads(db, owner_project="project-b")
+    monkeypatch.setattr("infra.corsia_agent.get_corsia_agent", lambda **_kwargs: pytest.fail("caller read"))
+    assert for_thread({"title": "mine"}, recipient="owner", owner="owner", db=db) == {"title": "mine"}
