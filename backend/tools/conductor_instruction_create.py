@@ -109,7 +109,7 @@ def _save_bundle(writes: dict[Path, bytes], before: dict[Path, bytes | None], ac
     saved = save_guidance(
         writes, workspace=Path(config.WORKSPACE), target=GuidanceTarget("thread"),
         author=saver_author(thread_id=actor), reason=kwargs.get("reason"), evidence=kwargs.get("evidence"),
-        expected={path: digest(raw.decode()) if raw is not None else None for path, raw in before.items()},
+        expected={path: digest(raw) for path, raw in before.items()},
     )
     if saved.outcome == REFUSED:
         raise RosterChangeError(saved.line or "SKILL.md was refused")
