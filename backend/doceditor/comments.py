@@ -177,8 +177,9 @@ def reopen_unless_agreed(connection, root_id: str, *, replier: str | None = None
     """Re-open a thread that closed on agreement once someone in it has not agreed.
 
     Checked wherever that can change: a reply (``replier``, here), a tag that adds a participant
-    (``comment_recipients.save_tags``), and a delivered tag that asks an agent to agree again
-    (``comment_recipients.reinstate``).
+    (``comment_recipients.save_tags``), a delivered tag that asks an agent to agree again
+    (``comment_recipients.reinstate``), and an acknowledgement taken back
+    (``comment_state_updates.update_comment``).
     """
     from doceditor.feedback_comments import agreed
 

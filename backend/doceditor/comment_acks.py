@@ -32,12 +32,13 @@ def record(db, root_id: str, actor_id: str, name: str, acknowledged: bool) -> bo
     return cursor.rowcount > 0
 
 
-def clear(db, root_id: str, actor_id: str | None = None) -> None:
-    """Take back every acknowledgement on the thread, or only ``actor_id``'s."""
+def clear(db, root_id: str, actor_id: str | None = None) -> bool:
+    """Take back every acknowledgement on the thread, or only ``actor_id``'s; True when any was taken back."""
     if actor_id is None:
-        db.execute("DELETE FROM doc_comment_acks WHERE root_id=?", (root_id,))
+        cursor = db.execute("DELETE FROM doc_comment_acks WHERE root_id=?", (root_id,))
     else:
-        db.execute("DELETE FROM doc_comment_acks WHERE root_id=? AND actor_id=?", (root_id, actor_id))
+        cursor = db.execute("DELETE FROM doc_comment_acks WHERE root_id=? AND actor_id=?", (root_id, actor_id))
+    return cursor.rowcount > 0
 
 
 def acknowledgers(db, root_id: str) -> set[str]:

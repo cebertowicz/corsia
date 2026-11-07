@@ -336,6 +336,36 @@ async def test_a_delivered_tag_reopens_the_agreed_thread_it_asks_to_agree_again(
 
 
 @pytest.mark.asyncio
+async def test_a_delivered_tag_that_takes_back_an_agree_tells_open_cards(integration_client, doc, _registrable_roots, monkeypatch):
+    from doceditor import comment_notifications
+
+    owner, reviewer, root = await _owned_thread(integration_client, doc)
+    _make_taggable(owner)
+    await _ack(owner, root)
+    asked = await _comment(reviewer, parent_id=root, body="Are you sure?", tagged_agent_ids=[owner])
+    frames: list[str] = []
+    monkeypatch.setattr(comment_notifications, "broadcast_doc_comment_changed",
+                        lambda artifact_id, **_kwargs: frames.append(artifact_id))
+
+    _deliver(asked["id"], owner)
+
+    assert _row(root)["resolved"] == 0 and _row(root)["acknowledged_by"] == []
+    assert _row(root)["artifact_id"] in frames
+
+
+@pytest.mark.asyncio
+async def test_taking_back_an_agree_reopens_a_thread_everyone_agreed(integration_client, doc, _registrable_roots):
+    owner, reviewer, root = await _owned_thread(integration_client, doc)
+    await _ack(owner, root)
+    await _ack(reviewer, root)
+    assert _row(root)["resolved"] == 1
+
+    await _ack(owner, root, acked=False)
+
+    assert _row(root)["resolved"] == 0
+
+
+@pytest.mark.asyncio
 async def test_the_persons_acknowledgement_counts(integration_client, doc, _registrable_roots):
     owner, _reviewer, root = await _owned_thread(integration_client, doc)
     person_reply = integration_client.post(

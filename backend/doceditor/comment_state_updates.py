@@ -52,9 +52,9 @@ def _completed_root(connection, before: dict[str, Any]) -> dict[str, Any] | None
 def resolve_after_leave(connection, root_id: str, agent_id: str) -> None:
     """An agent left the thread: resolve it if everyone still in it has acknowledged it.
 
-    Agreement is settled only where its inputs change: an acknowledgement (``update_comment``), a
-    participant leaving (here), and a new reply, tag or re-asked acknowledgement
-    (``comments.reopen_unless_agreed`` re-opens a thread that closed on agreement).
+    Agreement is settled only where its inputs change: an acknowledgement given or taken back
+    (``update_comment``), a participant leaving (here), and a new reply, tag or re-asked
+    acknowledgement (``comments.reopen_unless_agreed`` re-opens a thread that closed on agreement).
     """
     root = store.get_comment(root_id, db=connection)
     if root is not None and _everyone_acknowledged(connection, root):
@@ -84,6 +84,8 @@ def update_comment(
         return None
     acknowledged = "acked" in patch and _acknowledge(
         connection, before, bool(patch["acked"]), actor_thread_id=actor_thread_id, user_name=user_name)
+    if acknowledged and not patch["acked"]:
+        store.reopen_unless_agreed(connection, str(before.get("parent_id") or before["id"]))
     if acknowledged:
         row = store.get_comment(comment_id, db=connection)
     if actor_thread_id and patch.get("resolved") is True and not before.get("resolved"):

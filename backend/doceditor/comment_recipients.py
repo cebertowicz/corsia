@@ -211,7 +211,9 @@ def reinstate(db, comment: dict, agent_id: str) -> None:
     """A delivered tag brings an agent back: it is on the thread again, and its acknowledgement is asked for again."""
     db.execute("""INSERT INTO doc_comment_recipient_state(root_id,agent_id,left_thread)
         VALUES (?,?,0) ON CONFLICT(root_id,agent_id) DO UPDATE SET left_thread=0""", (root_id(comment), agent_id))
-    comment_acks.clear(db, root_id(comment), agent_id)
+    if comment_acks.clear(db, root_id(comment), agent_id):
+        from doceditor.comment_notifications import announce_after_commit
+        announce_after_commit(db, comment["artifact_id"])
     from doceditor.comments import reopen_unless_agreed
     reopen_unless_agreed(db, root_id(comment))
 
