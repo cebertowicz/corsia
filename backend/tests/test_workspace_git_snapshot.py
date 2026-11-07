@@ -6,12 +6,13 @@ import subprocess
 
 from infra import config
 from infra.database import get_db
+from subagents.cc_git_snapshot import prepare_session_git_snapshot
 from subagents.cc_stream import CCStreamSession
 
 
 def _settings(cwd):
     session = CCStreamSession(binary='claude', session_id='session', working_dir=str(cwd))
-    asyncio.run(session.prepare_git_snapshot())
+    asyncio.run(prepare_session_git_snapshot(session, session.working_dir))
     cmd = session.build_cmd()
     return json.loads(cmd[cmd.index('--settings') + 1])
 
@@ -44,12 +45,12 @@ def test_workspace_git_snapshot_off_registered_worktree_unchanged(isolated_db, m
     assert 'includeGitInstructions' not in _settings(worktree)
     monkeypatch.chdir(project)
     session = CCStreamSession(binary='claude', session_id='session')
-    asyncio.run(session.prepare_git_snapshot())
+    asyncio.run(prepare_session_git_snapshot(session, session.working_dir))
     inherited = session.build_cmd()
     assert json.loads(inherited[inherited.index('--settings') + 1])['includeGitInstructions'] is False
     session = CCStreamSession(binary='claude', session_id='session', working_dir=str(project),
                               confinement='untrusted', mcp_config='{}')
-    asyncio.run(session.prepare_git_snapshot())
+    asyncio.run(prepare_session_git_snapshot(session, session.working_dir))
     confined = session.build_cmd()
     assert json.loads(confined[confined.index('--settings') + 1])['includeGitInstructions'] is False
 
@@ -69,8 +70,8 @@ def test_session_prepares_setting_once_off_event_loop(monkeypatch):
     session = CCStreamSession(binary='claude', session_id='session', working_dir='/workspace')
 
     async def prepare_twice():
-        await session.prepare_git_snapshot()
-        await session.prepare_git_snapshot()
+        await prepare_session_git_snapshot(session, session.working_dir)
+        await prepare_session_git_snapshot(session, session.working_dir)
 
     asyncio.run(prepare_twice())
     assert len(calls) == 1 and calls[0][0] == '/workspace' and calls[0][1] != loop_thread
@@ -109,7 +110,7 @@ def test_legacy_checkpoint_then_resume_reuses_setting(isolated_db, monkeypatch, 
         assert restored is not None and restored.disable_git_snapshot is True
         session = CCStreamSession(binary='claude', session_id='s', working_dir='/workspace')
         session.disable_git_snapshot = restored.disable_git_snapshot
-        await session.prepare_git_snapshot()
+        await prepare_session_git_snapshot(session, session.working_dir)
         assert session.invocation().disable_git_snapshot is True
 
     asyncio.run(checkpoint_then_resume())

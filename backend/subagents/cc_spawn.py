@@ -33,7 +33,8 @@ from subagents.cc_runtime_markers import (
 from subagents.cc_runtime_quiescence import cleanup_ephemeral_live
 from subagents.cc_runtime_state import Broadcast, _LIVE
 from subagents.cc_spawn_prepare import CCSpawnRequest, PreparedCCSpawn, prepare_spawn
-from subagents.cc_stream import CCStreamSession, prepare_session_git_snapshot
+from subagents.cc_git_snapshot import prepare_session_git_snapshot
+from subagents.cc_stream import CCStreamSession
 
 log = logging.getLogger("subagents.cc_runtime")
 #: Records a rule-started worker's id on its start before its first turn can run.

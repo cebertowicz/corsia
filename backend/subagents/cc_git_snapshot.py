@@ -35,6 +35,23 @@ def _store_if_missing(thread_id: str, session_id: str, value: bool) -> bool:
         return value
 
 
+async def prepare_session_git_snapshot(session, working_dir: str | None) -> None:
+    """Freeze the Git setting once, away from the event loop."""
+    if getattr(session, "disable_git_snapshot", None) is None:
+        from subagents.managed_launch import workspace_git_snapshot_disabled
+
+        session.disable_git_snapshot = await asyncio.to_thread(workspace_git_snapshot_disabled, working_dir)
+
+
+async def prepare_startup_git_snapshot(thread_id: str, session, context) -> None:
+    """Reuse a resumed session's stored setting before registering its successor."""
+    if context.prior_invocation is not None and context.resume_session_id:
+        session.disable_git_snapshot = await ensure_registered_git_snapshot(
+            thread_id, context.resume_session_id, context.prior_invocation,
+        )
+    await prepare_session_git_snapshot(session, context.working_dir)
+
+
 async def ensure_registered_git_snapshot(thread_id: str, session_id: str, invocation) -> bool:
     """Resolve a legacy setting off-loop and commit one value for all consumers."""
     if invocation.disable_git_snapshot is not None:

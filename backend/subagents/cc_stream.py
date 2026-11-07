@@ -16,6 +16,7 @@ from core._tool_result_delivery_support import ToolResultBindingError
 from core.fork_cc_context import CCForkContext
 from infra.write_admission import sqlite_errorname_tag
 from subagents.cc_confinement import drop_untrusted_credentials
+from subagents.cc_git_snapshot import prepare_session_git_snapshot
 from subagents.cc_invocation import CONFINEMENT_NONE, ClaudeInvocation, build_claude_cmd
 from subagents.cc_env import apply_claude_config_dir, clean_claude_env
 from subagents.cc_events import normalize_event
@@ -39,14 +40,6 @@ OnEvent = Callable[[dict], Awaitable[object | None]]
 OnExit = Callable[[int | None, str], Awaitable[None]]
 
 STDOUT_LIMIT = 16 * 1024 * 1024
-
-
-async def prepare_session_git_snapshot(session, working_dir: str | None) -> None:
-    """Freeze the Git setting once, away from the event loop."""
-    if getattr(session, "disable_git_snapshot", None) is None:
-        from subagents.managed_launch import workspace_git_snapshot_disabled
-
-        session.disable_git_snapshot = await asyncio.to_thread(workspace_git_snapshot_disabled, working_dir)
 
 
 class CCStreamSession:
@@ -139,10 +132,6 @@ class CCStreamSession:
             drop_untrusted_credentials(env)
         return env
 
-    async def prepare_git_snapshot(self) -> None:
-        """Freeze the Git setting before registering or starting this session."""
-        await prepare_session_git_snapshot(self, self.working_dir)
-
     async def start(self) -> None:
         """Spawn the process (stdin kept open) and launch the reader task."""
         if self._proc is not None:
@@ -153,7 +142,7 @@ class CCStreamSession:
         from subagents.vendor_write_admission import prepare_session_launch
 
         await run_in_db(prepare_session_launch, self, 'claude-code')
-        await self.prepare_git_snapshot()
+        await prepare_session_git_snapshot(self, self.working_dir)
         from subagents.cc_sessions import require_resume_in_root
 
         require_resume_in_root(self.resume_session_id, self.reconstructed_transcript_path, self.claude_dir)
