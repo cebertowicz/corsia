@@ -39,6 +39,8 @@ from infra.product_events import emit_product_event
 
 #: The largest checked payload an event carries; intake's own limit for all facts is 64 KB.
 MAX_RESULT = 48 * 1024
+#: The most of a spawn refusal or invalid result a ``detail`` fact carries to the owner.
+MAX_DETAIL = 500
 #: How a refusal reads in the owner's ``worker.no_result`` reason.
 REFUSAL_PREFIX = "refused: "
 NO_RESULT_NEXT = "The run ends without a result; a later event starts a new one."
@@ -83,6 +85,11 @@ def final_message(db: sqlite3.Connection, worker: str, turn_id: str) -> str | No
     return None if row is None else str(row["content"])
 
 
+def detail(text: str | None) -> dict[str, str]:
+    """The ``detail`` fact for what went wrong, bounded; none when there is no text."""
+    return {"detail": text[:MAX_DETAIL]} if text else {}
+
+
 def verdict(turn: Mapping[str, Any], text: str | None, schema: dict[str, Any],
             check: Mapping[str, Any] | None = None) -> tuple[str, dict[str, Any]]:
     """The start's outcome and the facts that say it, for one ended turn."""
@@ -107,7 +114,7 @@ def verdict(turn: Mapping[str, Any], text: str | None, schema: dict[str, Any],
             result = result["payload"]
         payload = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
     except ResultInvalid as exc:
-        return INVALID, {"reason": "invalid", "detail": str(exc)[:500]}
+        return INVALID, {"reason": "invalid", **detail(str(exc))}
     except Exception:  # noqa: BLE001 - a CORSIA defect must release, not consume, the identity
         logger.exception("CORSIA could not validate the worker result")
         return NO_RESULT, {"reason": f"Couldn’t validate the workflow result. {NO_RESULT_NEXT}"}

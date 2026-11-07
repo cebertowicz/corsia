@@ -344,7 +344,7 @@ async def _start(row: Mapping[str, Any], run_input: dict[str, Any]) -> int:
         return await _refuse(row, run_input, _FAILED, waited, made)
     if isinstance(started, str):
         logger.warning("worker start {} was refused: {}", row["id"], started)
-        return await _refuse(row, run_input, _SPAWN_FAILED, waited, made)
+        return await _refuse(row, run_input, _SPAWN_FAILED, waited, made, started)
     return 1
 
 
@@ -360,20 +360,23 @@ def _requeue(owner: str, decision_id: int) -> None:
 
 
 async def _refuse(row: Mapping[str, Any], run_input: Mapping[str, Any], reason: str,
-                  waited: bool, made: Mapping[str, str]) -> int:
+                  waited: bool, made: Mapping[str, str], detail: str | None = None) -> int:
     """End a refused start. One refused after its worker was ``made`` reports that worker
     and its check, as the start's own row does; the claimed ``row`` predates both."""
     if made:
         row, run_input = {**dict(row), "worker_thread_id": made["worker"]}, json.loads(made["check"])
-    await _end(row, {**run_input, "waited": waited}, REFUSED, reason)
+    await _end(row, {**run_input, "waited": waited}, REFUSED, reason, detail)
     return 0
 
 
-async def _end(row: Mapping[str, Any], kept: Mapping[str, Any], outcome: str, reason: str) -> None:
+async def _end(row: Mapping[str, Any], kept: Mapping[str, Any], outcome: str, reason: str,
+               detail: str | None = None) -> None:
     """End a start no worker result settles, reported with what its row ``kept``: the
-    claimed input or, once its worker was made, its check."""
+    claimed input or, once its worker was made, its check. ``detail`` is what refused it,
+    for the owner (the ``detail`` fact), never in ``reason``."""
     check = {"workflow": row["workflow_id"], "waited": row["id"] <= _state["waited"], **kept}
-    await _settle(worker_settle.settlement(row, check, outcome, {"reason": reason}))
+    said = {"reason": reason, **worker_settle.detail(detail)}
+    await _settle(worker_settle.settlement(row, check, outcome, said))
 
 
 async def _settle(item: worker_settle.Settle) -> None:
