@@ -8,27 +8,13 @@ proposal, or records why the lesson stays where it is.
 from __future__ import annotations
 
 import re
-from datetime import date
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-from core.placement_decide import (
-    SKILL_DESCRIPTION_WORDS,
-    Decision,
-    Destination,
-    ThreadPlace,
-    append_lesson,
-    append_to_reference,
-    append_to_skill,
-    over_cap,
-    says,
-    words,
-)
-from core import placement_room
+from core.placement_decide import Decision, Destination, ThreadPlace
+from core.placement_plan import ALREADY, commit_plan, relative_path
 from core.placement_room import Operation, Room
-from infra.guidance_history_paths import expected_hash
 from infra.placement_marks import log_outcome
 
 
@@ -116,11 +102,6 @@ def entry_text(entry: dict[str, Any]) -> str:
     )
 
 
-def _today() -> str:
-    """The lesson date, in the local time of the host the user runs CORSIA on."""
-    return date.today().isoformat()
-
-
 def refuse(entry: dict[str, Any], relative: str, errors: tuple[str, ...]) -> None:
     """Leave an invalid-skill placement reconsiderable: one ``unplaced`` line, the errors as its ref."""
     from infra.skill_save_validation import INVALID_SKILL_REASON
@@ -144,11 +125,11 @@ def write(
 
     path = destination.path
     assert path is not None
-    relative = _relative(path)
+    relative = relative_path(path)
     planned = commit_plan(place, decision, destination, room)
-    if planned == _ALREADY:
+    if planned == ALREADY:
         settle(
-            entry, "already", _ALREADY, mark="already",
+            entry, "already", ALREADY, mark="already",
             detail=relative, retire=f"already at {relative}",
             source_ref=f"file:{relative}", destination=relative,
         )
@@ -168,142 +149,6 @@ def write(
         detail=f"{relative} ({sha[:12]})", retire=f"placed at {relative} ({sha[:12]})",
         source_ref=f"commit:{sha}", destination=relative,
     )
-
-
-def room_request(
-    place: ThreadPlace, decision: Decision, destination: Destination
-) -> tuple[str, str] | None:
-    """The base text and numbered-file request when this write would pass its cap."""
-    path = destination.path
-    if path is None or destination.kind not in ("context", "skill") or not path.exists():
-        return None
-    current = path.read_text()
-    if decision.duplicate_of and says(current, decision.duplicate_of):
-        return None
-    if _over_cap(destination.kind, current, decision) is None:
-        return None
-    overflow = placement_room.overflow_file(destination.kind, path, place.reference_dir)
-    after = _new_text(destination.kind, current, decision)
-    return current, placement_room.build_prompt(
-        current, decision.text, placement_room.need(destination.kind, after),
-        _relative(overflow) if overflow is not None else None,
-    )
-
-
-def room_refusal(
-    place: ThreadPlace, decision: Decision, destination: Destination, room: Room
-) -> str | None:
-    """Why ``room`` cannot make room in its base text, or None when it can.
-
-    The same check the write runs, applied to the text the fork was shown,
-    so a room that can never apply goes back to the fork instead of settling
-    ``no-room`` after it is gone.
-    """
-    made = _made_room(place, decision, destination, room.base, room)
-    return made if isinstance(made, str) else None
-
-
-_ALREADY = "already-at-destination"
-_Plan = tuple[dict[Path, str], dict[Path, str | None], list[Operation]]
-
-
-def commit_plan(
-    place: ThreadPlace, decision: Decision, destination: Destination, room: Room | None,
-) -> _Plan | str:
-    """The one commit plan for this answer, or why it writes nothing.
-
-    ``write`` commits it and the answer-time loadability check validates it,
-    so both see the same bytes. ``_ALREADY`` when the file already says the
-    lesson; otherwise the ``unplaced`` reason.
-    """
-    path = destination.path
-    assert path is not None
-    current = path.read_text() if path.exists() else None
-    if decision.duplicate_of and current is not None and says(current, decision.duplicate_of):
-        return _ALREADY
-    over = _over_cap(destination.kind, current, decision)
-    if over is None:
-        # The expectation is the file's own bytes: the read above rewrites line endings it does not keep.
-        return {path: _new_text(destination.kind, current, decision)}, {path: expected_hash(path)}, []
-    if room is None:
-        return over
-    if current != room.base:
-        # The fork made room against text that is gone; only a fresh
-        # review can make room again, so the next checkpoint reconsiders.
-        return "destination-changed"
-    return _made_room(place, decision, destination, current, room)
-
-
-def _made_room(
-    place: ThreadPlace,
-    decision: Decision,
-    destination: Destination,
-    current: str | None,
-    room: Room,
-) -> tuple[dict[Path, str], dict[Path, str | None], list[Operation]] | str:
-    """The commit's files and expected digests after making room, or why not.
-
-    ``no-room`` when the operations do not check out; ``fold-lost-lesson`` when
-    a fold replaced the appended lesson but the file does not say it.
-    """
-    from infra.config import WORKSPACE
-
-    path = destination.path
-    if current is None or path is None:
-        return "no-room"
-    overflow = placement_room.overflow_file(destination.kind, path, place.reference_dir)
-    overflow_current = (
-        overflow.read_text() if overflow is not None and overflow.exists() else None
-    )
-    applied = placement_room.apply(
-        room, kind=destination.kind, current=current,
-        add_lesson=lambda text: _new_text(destination.kind, text, decision),
-        workspace=Path(WORKSPACE), destination=path, overflow=overflow,
-        overflow_current=overflow_current, day=_today(),
-    )
-    if applied is None:
-        return "no-room"
-    text, overflow_text, operations = applied
-    if any(op.op == "fold" for op in operations) and not says(text, decision.text):
-        return "fold-lost-lesson"
-    # Each expectation is the file's own bytes; the text reads above rewrite line endings they keep no record of.
-    writes, expected = {path: text}, {path: expected_hash(path)}
-    if overflow is not None and overflow_text is not None:
-        writes[overflow] = overflow_text
-        expected[overflow] = expected_hash(overflow)
-    return writes, expected, operations
-
-
-def _over_cap(kind: str, current: str | None, decision: Decision) -> str | None:
-    """The reason a write would pass its WORKSPACE-STANDARD cap, or None."""
-    if kind not in ("context", "skill"):
-        return None
-    if over_cap(kind, _new_text(kind, current, decision)):
-        return "over-cap-unplaced"
-    description = decision.skill_description or decision.text
-    if kind == "skill" and current is None and words(description) > SKILL_DESCRIPTION_WORDS:
-        return "over-cap-unplaced"
-    return None
-
-
-def _new_text(kind: str, current: str | None, decision: Decision) -> str:
-    if kind == "context":
-        return append_lesson(current, decision.text, _today())[0]
-    if kind == "skill":
-        return append_to_skill(
-            current, str(decision.skill_name), decision.text,
-            " ".join((decision.skill_description or "").split()) or None,
-        )
-    return append_to_reference(current or "", decision.text)
-
-
-def _relative(path: Path) -> str:
-    from infra.config import WORKSPACE
-
-    try:
-        return str(path.resolve().relative_to(Path(WORKSPACE).resolve()))
-    except ValueError:
-        return str(path)
 
 
 def _author(place: ThreadPlace) -> str:

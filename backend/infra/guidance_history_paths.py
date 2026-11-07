@@ -18,12 +18,15 @@ def digest(content: str | bytes | None) -> str | None:
     return hashlib.sha256(content if isinstance(content, bytes) else content.encode()).hexdigest()
 
 
-def expected_hash(path: Path) -> str | None:
-    """The compare-and-swap expectation for a file as it stands on disk: its bytes, or None when absent.
+def bytes_before_text(path: Path) -> bytes | None:
+    """The bytes to compare-and-swap against, read before the caller reads the file's text.
 
-    A caller that read the file as text still expects this hash: a text read turns CRLF and a lone CR
-    into LF, and that text is not what the destination holds."""
-    return digest(path.read_bytes()) if path.exists() else None
+    A caller builds its new content from that text read and passes :func:`digest` of these bytes, so a
+    change made after this read refuses the write instead of being overwritten by content built from
+    older text. Text is never the expectation: a text read turns CRLF and a lone CR into LF, which is not
+    what the destination holds. ``None`` is the file's absence.
+    """
+    return path.read_bytes() if path.exists() else None
 
 
 def is_empty_git_dir(path: Path) -> bool:
