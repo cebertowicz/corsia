@@ -225,8 +225,8 @@ class LivePlacement {
 		this.write(rows => rows.map(original => {
 			const state = flags.get(original.id);
 			const row = state ? { ...original, orphaned: state.orphaned, textChanged: state.text_changed, statusText: snapshotText } : original;
-			// The gate reads the row as it was asked about: an answer that orphans it still settles its placement.
-			if (!(reload ? row.anchor && !row.review : placeable(original))) return row;
+			// The gate reads the row as it was asked about (an earlier answer may have orphaned a row still Placing).
+			if (!(reload ? row.anchor && !row.review : placeable(original) || original.placement === 'placing')) return row;
 			const range = found.get(row.id);
 			if (range) return { ...row, placement: 'placed', drawn: true, from: range.from_off, to: range.to_off };
 			if (keep) return row;

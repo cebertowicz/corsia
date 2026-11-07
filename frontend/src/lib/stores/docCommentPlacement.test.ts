@@ -128,6 +128,18 @@ describe('comment placement in a live document (4.2)', () => {
 		await vi.waitFor(() => expect(row()).toMatchObject({ orphaned: true, placement: undefined, drawn: false }));
 	});
 
+	it('settles a row an answer orphans while a newer ask is marked, once that newer answer lands', async () => {
+		const doc = await opened();
+		mocks.fetchComments.mockResolvedValue({ comments: [serverRow('c1', 'beta', 6), serverRow('c2', 'gamma', 11)], feedback: {} });
+		await loadComments('artifact');
+		const orphaned = { ranges: [], states: [{ id: 'c1', orphaned: true, text_changed: false }] };
+		doc.answer(doc.asks()[0], orphaned);
+		await vi.waitFor(() => expect(doc.asks()).toHaveLength(2));
+		expect(row()).toMatchObject({ orphaned: true, placement: 'placing' });
+		doc.answer(doc.asks()[1], orphaned);
+		await vi.waitFor(() => expect(row()).toMatchObject({ orphaned: true, placement: undefined, drawn: false }));
+	});
+
 	it('asks nothing for edits outside every comment, including at its edges', async () => {
 		const doc = await opened();
 		doc.answer(doc.asks()[0], { states: [{ id: 'c1', orphaned: false, text_changed: false }] });
