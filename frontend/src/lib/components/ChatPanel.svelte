@@ -237,12 +237,12 @@
 	// A newer first-page read makes the older one stale: abort it, never download both.
 	const firstPageRead = supersedingRead();
 	onDestroy(firstPageRead.abort);
-	let replyAnnouncements = $state<string[]>([]);
-	// The live region announces what is added to it: keep the three newest, and clear them when the chat changes.
+	let replyAnnouncements = $state<{ id: number; text: string }[]>([]);
+	// The live region announces what is added to it: keep the three newest, keyed so each reply adds a node, and clear them when the chat changes.
 	$effect(() => {
 		void $activeThreadId;
 		replyAnnouncements = [];
-		return watchChatCommentThreads(MSG_PAGE_SIZE, quote => { replyAnnouncements = [...replyAnnouncements.slice(-2), `New reply on ${quoteLabel(quote)}`]; });
+		return watchChatCommentThreads(MSG_PAGE_SIZE, quote => { replyAnnouncements = [...replyAnnouncements.slice(-2), { id: (replyAnnouncements.at(-1)?.id ?? 0) + 1, text: `New reply on ${quoteLabel(quote)}` }]; });
 	});
 	/** Drop stale rows when the selected transcript's first page fails. */
 	function failFirstPage(threadId: string): void {
@@ -320,7 +320,7 @@
 	});
 </script>
 <div class="chat-shell">
-	<div class="reply-announcements" aria-live="polite" aria-relevant="additions">{#each replyAnnouncements as announcement}<div>{announcement}</div>{/each}</div>
+	<div class="reply-announcements" aria-live="polite" aria-relevant="additions">{#each replyAnnouncements as announcement (announcement.id)}<div>{announcement.text}</div>{/each}</div>
 	<ChatThreadBindings />
 	<div class="chat-content" use:toastAnchorSurface>
 		<MessageList

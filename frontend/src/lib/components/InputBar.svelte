@@ -26,7 +26,7 @@
 	import { watchComposer } from './inputBarLifecycle';
 	import { toasts } from '$lib/stores/toast';
 	import { emitProductEvent } from '$lib/product_events';
-	import { REPLY_SEND_FAILURE, emitComposerSend, replySendBlock } from './composerSend';
+	import { REPLY_SEND_FAILURE, emitComposerSend, replySendBlock, type ComposerDeliveryIntent } from './composerSend';
 	import { onModelSheetRequest } from '$lib/stores/modelSheetRequest';
 	import { updateRestarting } from '$lib/update/store';
 
@@ -181,9 +181,7 @@
 		isMultiLine = false;
 	}
 
-	type DeliveryIntent = 'apply_now' | 'queue_after_turn';
-
-	async function handleSend(deliveryIntent: DeliveryIntent = 'apply_now'): Promise<SendOutcome> {
+	async function handleSend(deliveryIntent: ComposerDeliveryIntent = 'apply_now'): Promise<SendOutcome> {
 		if (!canSendToModel) return 'not_sent';
 		const prepared = prepareMessage();
 		const message = prepared instanceof Promise ? await prepared : prepared;
