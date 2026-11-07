@@ -27,7 +27,7 @@ from loguru import logger
 
 from events import dead_letter, rule_zero, rules
 from events.connectors import EventTypeDecl, get_manifest
-from events.delivery import enqueue_event_wake
+from events.delivery import enqueue_event_wake, start_idle_after_commit
 from events.disposition import delivery_disposition
 from events.envelope import EventEnvelope, normalize
 from events.resolve import Target, lifecycle, resolve_targets
@@ -157,6 +157,7 @@ def _deliver_target(
             thread, envelope.type, _summary(envelope), wake_details,
             message_id=message_id, db=db,
         )
+        start_idle_after_commit(db, thread)
         return PlatformDelivery(event_id, thread, WOKE)
     if _digest_seen(db, thread, event_id):
         return PlatformDelivery(event_id, thread, DUPLICATE)
