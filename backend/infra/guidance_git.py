@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import fcntl
 import os
-import stat
 import subprocess
 import tempfile
 import time
@@ -22,11 +21,12 @@ from loguru import logger
 
 from infra.backend_git import GIT_CONFIG_ARGS
 from infra.guidance_cas import stale_result
-from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir
+from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir, read_regular
 from infra.guidance_messages import (
     REASON_PREFIX, SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_UNRECORDED, UNRECORDED_REASON,
     commit_message, is_person_author, recorded_reason,
 )
+from infra.guidance_states import HistoryOff, GitFault, NoRepository, _LockBusy, history_is_off
 from infra.guidance_save_types import SaveResult, _Commit
 from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
@@ -37,18 +37,6 @@ _GIT_CONFIG = (*GIT_CONFIG_ARGS, "-c", "commit.gpgsign=false", "-c", "safe.bareR
 _OUTSIDE = "Unknown editor <outside-edit@corsia.local>"
 MAX_GUIDANCE_BYTES = 1024 * 1024
 _SWEEP_LIMIT = 100
-
-
-class GitFault(RuntimeError):
-    """A Git or OS failure; callers surface it and never read it as clean."""
-
-
-class _LockBusy(GitFault):
-    pass
-
-
-class NoRepository(str):
-    """The reason :func:`workspace_repository` gives when the workspace has no repository of its own yet."""
 
 
 def _git_bytes(repo: Path, *args: str, env: dict[str, str] | None = None,
@@ -80,9 +68,9 @@ def workspace_repository(workspace: Path, *, create: bool = False) -> tuple[Path
     try:
         if (workspace / ".git").exists() and not (create and is_empty_git_dir(workspace / ".git")):
             top = Path(_git(workspace, "rev-parse", "--show-toplevel").strip()).resolve(strict=False)
-            return (workspace, None) if top == workspace else (None, "the workspace Git directory resolves elsewhere")
+            return (workspace, None) if top == workspace else (None, HistoryOff("the workspace Git directory resolves elsewhere"))
         if _git(workspace, "rev-parse", "--show-toplevel", ok=(0, 128)).strip():
-            return None, "the workspace is inside an enclosing repository"
+            return None, HistoryOff("the workspace is inside an enclosing repository")
         if not create:
             return None, NoRepository("the workspace has no repository yet")
         _git(workspace, "init", "--quiet")
@@ -184,18 +172,6 @@ def _is_text(data: bytes | None) -> bool:
     return data is None or (len(data) <= MAX_GUIDANCE_BYTES and b"\0" not in data[:8192])
 
 
-def _read(path: Path) -> bytes | None:
-    """A regular file's bytes, or None when absent; a symlink or other file type raises."""
-    try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    except FileNotFoundError:
-        return None
-    with os.fdopen(fd, "rb") as handle:
-        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
-            raise OSError(f"{path} is not a regular file")
-        return handle.read()
-
-
 def _write_bytes(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(data)
@@ -206,7 +182,7 @@ def _sweep(repo: Path, rels: list[str]) -> list[str]:
     records who made them, and the last CORSIA writer did not write these bytes."""
     names = sorted(rels)
     shown = ", ".join(names[:12]) + (f" and {len(names) - 12} more" if len(names) > 12 else "")
-    files = {rel: _read(repo / rel) for rel in names}
+    files = {rel: read_regular(repo / rel) for rel in names}
     done = _commit(repo, files, f"guidance sweep: {shown}\n\n{REASON_PREFIX}{UNRECORDED_REASON}\nScope: sweep", _OUTSIDE)
     if done is None:
         return []
@@ -223,7 +199,7 @@ def _sweep_others(repo: Path, workspace: Path, db, exclude: set[str]) -> list[st
         for rel in _changed(repo, sweep_pathspecs(workspace, db)):
             if len(found) == _SWEEP_LIMIT:
                 left += 1
-            elif rel not in exclude and classify_guidance_path(repo / rel, workspace=workspace, db=db) and _is_text(_read(repo / rel)):
+            elif rel not in exclude and classify_guidance_path(repo / rel, workspace=workspace, db=db) and _is_text(read_regular(repo / rel)):
                 found.append(rel)
         lines = _sweep(repo, found) if found else []
         return lines + ([f"{left} more changed guidance candidates wait for the next save."] if left else [])
@@ -317,7 +293,7 @@ def _save(
 ) -> SaveResult:
     def unrecorded(outcome: str, why: str, line: str | None) -> SaveResult:
         if not atomic:
-            if (stale := stale_result(expected, binary_safe_history=binary_safe_history, read_bytes=_read)) is not None:
+            if (stale := stale_result(expected, read_bytes=read_regular)) is not None:
                 return stale
             for path, data in writes.items():
                 if data is None:
@@ -334,6 +310,8 @@ def _save(
     if not binary_safe_history and not all(_is_text(data) for data in writes.values()):
         return unrecorded("ordinary", "not text up to 1 MB", None)
     repo, why = workspace_repository(workspace, create=True)
+    if repo is None and not history_is_off(why):
+        return unrecorded("failed", why or "", SAVE_FAILED.format(error=why))
     if repo is None:
         return unrecorded("history-off", why or "", SAVE_HISTORY_OFF.format(why=why))
     try:
@@ -351,9 +329,9 @@ def _save(
             lines = _sweep(repo, outside) if outside else []
         except Exception as exc:  # an unrecorded outside edit must never join the saver's commit
             return unrecorded("failed", str(exc), SAVE_FAILED.format(error=f"outside edits could not be recorded first ({exc})"))
-        if (stale := stale_result(expected, binary_safe_history=binary_safe_history, read_bytes=_read)) is not None:
+        if (stale := stale_result(expected, read_bytes=read_regular)) is not None:
             return stale
-        prior = {path: _read(path) for path in writes} if atomic else {}
+        prior = {path: read_regular(path) for path in writes} if atomic else {}
         for path, data in writes.items():
             if data is None:
                 path.unlink(missing_ok=True)
@@ -364,7 +342,7 @@ def _save(
             landed = _commit(repo, {rels[path]: data for path, data in writes.items()}, message, author)
         except GitFault as exc:
             for path, old in prior.items():  # HEAD never moved, so restoring prior bytes is safe
-                if _read(path) == writes[path]:
+                if read_regular(path) == writes[path]:
                     _write_bytes(path, old) if old is not None else path.unlink(missing_ok=True)
             return SaveResult("failed", str(exc), line="\n".join([*lines, SAVE_FAILED.format(error=exc)]))
         finally:

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { paneOpen, paneDragging } from '$lib/stores/paneOpen';
 	import { paneCollapsed, paneSnapping } from '$lib/stores/paneCollapsed';
+	import { paneOverlay } from '$lib/stores/artifactCanvas';
 	import { uiScope } from '$lib/stores/uiScope';
 	import { PANE_DRAWER_WIDTH, shouldOverlayPane } from '$lib/artifactSplitLayout';
 
@@ -27,6 +28,9 @@
 			overlay = !$paneCollapsed && shouldOverlayPane(
 				protectArtifactSplit, window.innerWidth, inlineCanvasWidth,
 			);
+			// Only the pane that may cover an artifact leaf owns the shared answer: no other pane overlays one,
+			// so a second writer could only overwrite the real one with "no".
+			if (protectArtifactSplit) paneOverlay.set(overlay);
 			// How much of the canvas's inline end the overlaid pane covers, so controls there can keep clear of it.
 			main.style.setProperty('--pane-overlay-inset', overlay ? `${PANE_DRAWER_WIDTH}px` : '0px');
 		};
@@ -40,6 +44,7 @@
 			observer.disconnect();
 			window.removeEventListener('resize', updateOverlay);
 			main.style.removeProperty('--pane-overlay-inset');
+			if (protectArtifactSplit) paneOverlay.set(false);
 		};
 	});
 </script>

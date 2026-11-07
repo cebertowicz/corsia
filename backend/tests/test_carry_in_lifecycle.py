@@ -207,7 +207,7 @@ def test_no_git_commit_means_no_saved_fact(c1, monkeypatch):
     _save(c1, "rule v1\n")
     assert len(_saved()) == 1
     assert _save(c1, "rule v1\n").outcome == "unchanged"
-    monkeypatch.setattr(guidance_git, "workspace_repository", lambda *_a, **_k: (None, "off"))
+    monkeypatch.setattr(guidance_git, "workspace_repository", lambda *_a, **_k: (None, guidance_git.HistoryOff("off")))
     assert _save(c1, "rule v2\n").outcome == "history-off"
     assert len(_saved()) == 1 and len(c1.drains) == 1
 

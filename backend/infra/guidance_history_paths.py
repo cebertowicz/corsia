@@ -2,14 +2,39 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
 from pathlib import Path
 
 # Appended to a file's last commit when its working copy differs: two drafts can share it.
 LOCAL_EDIT_MARK = "·dirty"
 
 
-def digest(text: str | None) -> str | None:
-    return None if text is None else hashlib.sha256(text.encode()).hexdigest()
+def digest(content: str | bytes | None) -> str | None:
+    """The one compare-and-swap hash: a file's content as the bytes it holds.
+
+    Text is its own bytes (``str.encode``), so a caller that read a file's bytes and one that holds
+    its text agree, while a read that turned CRLF into LF does not claim to be the file."""
+    if content is None:
+        return None
+    return hashlib.sha256(content if isinstance(content, bytes) else content.encode()).hexdigest()
+
+
+def read_regular(path: Path) -> bytes | None:
+    """A regular file's bytes, or None when absent; a symlink or other file type raises.
+
+    It is also the compare-and-swap expectation: a caller reads these bytes before the file's text and
+    passes :func:`digest` of them, so a change made after this read refuses the write instead of being
+    overwritten by content built from older text. Text is never the expectation: a text read turns CRLF
+    and a lone CR into LF, which is not what the destination holds."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except FileNotFoundError:
+        return None
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise OSError(f"{path} is not a regular file")
+        return handle.read()
 
 
 def is_empty_git_dir(path: Path) -> bool:

@@ -295,7 +295,7 @@ def test_atomic_delete_without_history_writes_nothing(history_scope, monkeypatch
     path = workspace / "context" / "demo.md"
     path.parent.mkdir()
     path.write_text("keep\n")
-    monkeypatch.setattr(guidance_git, "workspace_repository", lambda *_args, **_kwargs: (None, "off"))
+    monkeypatch.setattr(guidance_git, "workspace_repository", lambda *_args, **_kwargs: (None, guidance_git.HistoryOff("off")))
 
     result = save_guidance(
         {}, workspace=workspace, target=GuidanceTarget("context, workspace scope"),
@@ -403,6 +403,49 @@ def test_stale_edit_writes_nothing_and_says_so(history_scope):
     assert skill.read_text() == "moved\n"
 
 
+def test_a_crlf_destination_matches_the_revision_its_reader_read(history_scope):
+    """Every expectation is the destination's own bytes, so a guidance file with CRLF endings saves the
+    way an LF one does and a change under the save is still the only thing refused."""
+    from infra.guidance_git import digest
+
+    workspace, _ = history_scope
+    guide = _history(workspace)
+    guide.parent.mkdir()
+    guide.write_bytes(b"one\r\ntwo\r\n")
+
+    result = _save(workspace, guide, "one\r\nthree\r\n", expected={guide: digest(b"one\r\ntwo\r\n")})
+
+    assert result.outcome == "written", result.line
+    assert guide.read_bytes() == b"one\r\nthree\r\n"
+
+    moved = _save(workspace, guide, "four\r\n", expected={guide: digest(b"one\r\ntwo\r\n")})
+
+    assert moved.outcome == "stale"
+    assert guide.read_bytes() == b"one\r\nthree\r\n"
+
+
+@pytest.mark.asyncio
+async def test_edit_and_multi_edit_still_match_a_file_with_crlf_endings(history_scope):
+    """The file tools match the text they have always matched and hand their save the bytes behind it."""
+    from tools.filesystem_edit import EditFileTool, MultiEditTool
+
+    workspace, thread_id = history_scope
+    skill = workspace / ".threads" / thread_id / "skills" / "demo" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_bytes(SKILL_BODY.replace("\n", "\r\n").encode())
+
+    edited = await EditFileTool(workspace=workspace).execute(
+        str(skill), "Body text.", "Body text, edited.", reason="Clarify", _thread_id=thread_id,
+    )
+    multi = await MultiEditTool(workspace=workspace).execute(
+        str(skill), [{"old_string": "edited.", "new_string": "edited twice."}], _thread_id=thread_id,
+    )
+
+    assert "Saved and committed" in edited, edited
+    assert "Saved and committed" in multi, multi
+    assert "Body text, edited twice." in skill.read_text()
+
+
 @pytest.mark.parametrize("fallback", ["busy-lock", "history-off", "classifier-fault"])
 def test_a_stale_edit_is_refused_on_every_fallback_path(history_scope, monkeypatch, fallback):
     from infra import guidance_git
@@ -416,7 +459,7 @@ def test_a_stale_edit_is_refused_on_every_fallback_path(history_scope, monkeypat
         monkeypatch.setattr(guidance_git, "_LOCK_WAIT_SECONDS", 0.05)
         fcntl.flock(holder, fcntl.LOCK_EX)
     elif fallback == "history-off":
-        monkeypatch.setattr(guidance_git, "workspace_repository", lambda *_args, **_kwargs: (None, "off"))
+        monkeypatch.setattr(guidance_git, "workspace_repository", lambda *_args, **_kwargs: (None, guidance_git.HistoryOff("off")))
     else:
         monkeypatch.setattr("core.guidance_paths.classify_guidance_path", lambda *_args, **_kwargs: 1 / 0)
     try:

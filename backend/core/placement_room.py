@@ -268,7 +268,7 @@ def apply(
 
     ``add_lesson(text)`` appends the lesson unless a ``fold`` takes its place;
     a fold is trusted to carry it only after the caller finds the lesson in
-    the result (``placement_outcomes._made_room``, ``fold-lost-lesson``).
+    the result (``placement_plan._made_room``, ``fold-lost-lesson``).
     ``overflow_current`` is the overflow file as the caller read it (None when
     absent), the same read its expected digest comes from. Moved lines are
     copied verbatim by construction and the pointer names the overflow file,

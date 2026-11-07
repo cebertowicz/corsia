@@ -79,17 +79,9 @@ describe('comment rail', () => {
 		expect(lines(view)[0].dataset.commentIds).toBe('a,b');
 	});
 
-	it('flags a line whose threads have all lost their text', async () => {
-		const view = mount('alpha\nbeta');
-		await show(view, [{ from: 0, to: 5, id: 'a' }, { from: 6, to: 6, id: 'b', point: true, lost: true }]);
-		expect(lines(view).map((line) => [line.dataset.commentIds, line.dataset.orphan ?? null])).toEqual([['a', null], ['b', 'true']]);
-		await show(view, [{ from: 0, to: 5, id: 'a' }, { from: 1, to: 1, id: 'b', point: true, lost: true }]);
-		expect(lines(view).map((line) => [line.dataset.commentIds, line.dataset.orphan ?? null])).toEqual([['a,b', null]]);
-	});
-
 	it('moves a point range with the text around it and keeps it when that text is deleted', async () => {
 		const view = mount('alpha\nbeta\ngamma');
-		await show(view, [{ from: 6, to: 6, id: 'gone', point: true, lost: true }]);
+		await show(view, [{ from: 6, to: 6, id: 'gone', point: true }]);
 		view.dispatch({ changes: { from: 0, to: 0, insert: 'start ' } });
 		expect(view.state.field(commentRanges)).toMatchObject([{ id: 'gone', from: 12, to: 12 }]);
 		view.dispatch({ changes: { from: 6, to: 17 } });

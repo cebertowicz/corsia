@@ -135,7 +135,7 @@ def stage(
     or when the ``room`` that came cannot apply to that file, and a skill
     write the loader would refuse.
     """
-    from core.placement_outcomes import room_refusal, room_request
+    from core.placement_plan import room_refusal, room_request
     from infra.continuity_store import ContinuityError
 
     entry_id = int(entry["entry_id"])
@@ -223,7 +223,7 @@ def _check_loadable(
     would reject goes back to the fork instead of being reselected at every
     checkpoint.
     """
-    from core.placement_outcomes import commit_plan
+    from core.placement_plan import commit_plan
     from infra.skill_save_validation import invalid_skill_write
 
     if destination.kind != "skill" or destination.path is None:

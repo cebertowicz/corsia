@@ -35,6 +35,8 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - On a local model that runs short of memory partway through a reply, the context meter now measures the chat against what still fits in memory for the rest of that reply, the same limit CORSIA checks before each call, instead of showing it far emptier than it is.
 - On a paired computer, the update screen no longer tells you to open CORSIA on your main computer during a normal restart; it says so only if the restart takes longer than usual.
 - On a touch screen with a wide window, such as a tablet, the message box no longer covers Won’t do on a step that needs you.
+- Open comments and suggestions on a document now sit as cards in the margin beside their text, each level with the line it comments on, until they are resolved; suggestions have their own cards with Accept and Reject. Resolved comments are in a Resolved list, newest first. A comment whose text was deleted stays near where it was and says the text is gone. Where the window is too narrow for the margin, a comment opens beside where you clicked; on a phone, comments open in a sheet from the bottom of the screen.
+>>>>>>> origin/dev
 - Restart in oMLX's own dashboard now restarts CORSIA's local model server and loads the models it had loaded again, instead of saying the server isn't running under a supervisor. It takes effect once the local model server has been stopped and started since this update.
 - Review requests now let you choose Reject, Approve with changes, or Approve regardless of how many comments you left.
 - Selecting text in a table cell works across the whole cell: you can drag over any part of it, and its comment button appears when you let go.
@@ -49,7 +51,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - With "Roll over when an account hits its limit" on, a chat held on a limited account no longer asks you to move it: CORSIA checks your other accounts and moves the chat itself once one has room. Switch model is still there as a way out.
 - You can now open diagrams and images in table cells in the image viewer, zoom in, and comment on a specific part.
 - You can tag an agent in a document comment or reply. Agents hear about replies only on comment threads they wrote in or were tagged in, or on a document they own, and an agent can stop following a thread it no longer needs to.
-- You can now step through recorded versions of instruction files, see who changed them and why, and restore an earlier version.
+- You can now step through recorded versions of instruction files, see who changed them and why, and restore an earlier version. A restore that can't happen says why, and where a workspace records no versions of its own the panel says its history is off.
 - Your About you doc now gets each fact as its own suggestion, so you can accept or reject them one at a time, and its headings are left alone.
 
 ## v0.4.2 — Google sign-in works again, a shorter first chat, and steadier local models

@@ -5,7 +5,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from infra.guidance_git import GitFault, NoRepository, _git_bytes, workspace_repository
+from infra.guidance_git import _git_bytes, workspace_repository
+from infra.guidance_states import GitFault, history_is_off
 from infra.guidance_messages import parse_recorded_reason
 
 # The most versions one list returns; ``truncated`` says older ones exist.
@@ -13,16 +14,28 @@ HISTORY_CAP = 500
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 
 
-def _repository(workspace: Path) -> Path | None:
+def repository(workspace: Path) -> Path | None:
+    """The workspace's own repository, or None when it records no history of its own: none yet, inside an
+    enclosing repository, or a Git directory that resolves elsewhere — the states a guidance save
+    records nothing for. A Git fault raises ``GitFault``, because the next try may succeed."""
     repo, reason = workspace_repository(workspace.resolve())
-    if repo is None and not isinstance(reason, NoRepository):
+    if repo is None and not history_is_off(reason):
         raise GitFault(reason or "Workspace history unavailable")
     return repo
 
 
+def history_off(workspace: Path) -> bool:
+    """Whether to stop offering history for this workspace: it records none of its own. A Git fault is
+    not history off — the read says history is unavailable, where trying again can help."""
+    try:
+        return repository(workspace) is None
+    except GitFault:
+        return False
+
+
 def list_versions(workspace: Path, relative: str) -> tuple[list[dict[str, str | None]], bool]:
     """The newest versions that hold this file's text, and whether older ones exist past the cap."""
-    repo = _repository(workspace)
+    repo = repository(workspace)
     if repo is None or not _git_bytes(repo, "rev-parse", "--verify", "--quiet", "HEAD", ok=(0, 1)).strip():
         return [], False
     raw = _git_bytes(
@@ -37,9 +50,10 @@ def list_versions(workspace: Path, relative: str) -> tuple[list[dict[str, str | 
     return rows[:HISTORY_CAP], len(rows) > HISTORY_CAP
 
 
-def version_bytes(workspace: Path, relative: str, commit: str) -> bytes:
-    """One commit's bytes for this file; ``ValueError`` when that commit holds no such file."""
-    if not _COMMIT.fullmatch(commit) or (repo := _repository(workspace)) is None:
+def version_bytes(repo: Path, relative: str, commit: str) -> bytes:
+    """One commit's bytes for this file in ``repo``, the caller's one :func:`repository` lookup;
+    ``ValueError`` when that commit holds no such file."""
+    if not _COMMIT.fullmatch(commit):
         raise ValueError("Version unavailable")
     oid = _git_bytes(repo, "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}:{relative}", ok=(0, 1)).strip()
     if not oid:
@@ -47,15 +61,12 @@ def version_bytes(workspace: Path, relative: str, commit: str) -> bytes:
     return _git_bytes(repo, "cat-file", "blob", oid.decode())
 
 
-def version_text(workspace: Path, relative: str, commit: str) -> str:
-    return version_bytes(workspace, relative, commit).decode(errors="replace")
+def version_text(repo: Path, relative: str, commit: str) -> str:
+    return version_bytes(repo, relative, commit).decode(errors="replace")
 
 
-def restore_reason(workspace: Path, commit: str) -> str:
-    """The recorded reason for restoring ``commit``, with the year and zone so it stays true later and elsewhere."""
-    repo = _repository(workspace)
-    if repo is None:
-        raise ValueError("Version unavailable")
+def restore_reason(repo: Path, commit: str) -> str:
+    """The recorded reason for restoring ``commit`` from ``repo``, with the year and zone so it stays true later and elsewhere."""
     author, _, at = _git_bytes(repo, "log", "-1", "--format=%an%x00%at", commit).decode(errors="replace").strip().partition("\0")
     when = datetime.fromtimestamp(int(at)).astimezone()
     hour = int(when.strftime("%I"))

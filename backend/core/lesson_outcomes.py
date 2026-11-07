@@ -24,6 +24,7 @@ from core import placement_outcomes as outcomes
 from core.lesson_admission import Admission, TrialRefused, admit
 from core.lesson_trials import capture_hash
 from core.placement_decide import Decision, Destination, ThreadPlace
+from infra.guidance_history_paths import read_regular
 
 TRIAL_ACCEPTANCE = (
     "The trial lesson is retired, promoted or extended, with the evidence for that choice."
@@ -151,7 +152,10 @@ def _activate(
     assert path is not None and base is not None and place.tray is not None
     trial = lesson_files.read_trial(base)
     assert trial is not None
-    relative = outcomes._relative(path)
+    relative = outcomes.relative_path(path)
+    # Read the bytes before the text: they are what the save compares, and a change after this read
+    # refuses the write instead of being overwritten by text built from what I read.
+    raw = read_regular(path)
     current = _read(path)
     held = lesson_files.read_trial(current) if current else None
     # An unchanged version keeps the review it already has, so it stays offered.
@@ -159,7 +163,7 @@ def _activate(
             and held.behavioral_sha256 == trial.behavioral_sha256 else None)
     draft = lesson_files.with_review_ref(base, kept) if kept else base
     if current != draft and not _save(
-        entry, place, decision, relative, {path: draft}, {path: digest(current)}, "trial written",
+        entry, place, decision, relative, {path: draft}, {path: digest(raw)}, "trial written",
     ):
         return
     is_watch = trial.lesson.state == "watch"
@@ -178,12 +182,15 @@ def _activate(
     if node_id is None:
         return
     final = lesson_files.with_review_ref(base, node_id)
-    writes, expected = ({path: final}, {path: digest(draft)}) if final != draft else ({}, {})
+    # When the first save was skipped, the file still holds the bytes read above, not the draft's.
+    on_disk = digest(raw) if current == draft else digest(draft)
+    writes, expected = ({path: final}, {path: on_disk}) if final != draft else ({}, {})
     capture = lesson_files.capture_path(place.tray, admission.capture_id)
+    capture_raw = read_regular(capture)
     captured = _read(capture)
     superseded = lesson_files.superseded_capture(captured, trial.lesson.id) if captured else None
     if superseded is not None and superseded != captured:
-        writes[capture], expected[capture] = superseded, digest(captured)
+        writes[capture], expected[capture] = superseded, digest(capture_raw)
     if writes and not _save(entry, place, decision, relative, writes, expected, "trial offered"):
         return
     outcomes.settle(
@@ -206,8 +213,9 @@ def _capture(
     trial, reason = decision.trial, admission.hold
     assert trial is not None and reason is not None and place.tray is not None
     path = lesson_files.capture_path(place.tray, admission.capture_id)
-    relative = outcomes._relative(path)
+    relative = outcomes.relative_path(path)
     version = capture_hash(decision.text, trial)
+    raw = read_regular(path)  # the expectation of the text read below, taken before it
     current = _read(path)
     earlier = lesson_files.read_capture(current) if current else None
     # Evidence accumulates only while the hypothesis itself is unchanged.
@@ -222,7 +230,7 @@ def _capture(
         case_metadata=admission.case_metadata,
     )
     if current != text and not _save(
-        entry, place, decision, relative, {path: text}, {path: digest(current)},
+        entry, place, decision, relative, {path: text}, {path: digest(raw)},
         "hypothesis captured",
     ):
         return
