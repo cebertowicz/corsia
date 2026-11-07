@@ -35,7 +35,7 @@ def warm_command(
     )
 
 
-def cold_command(request: Any, kind: ForkKind) -> list[str]:
+def cold_command(request: Any, kind: ForkKind, *, disable_git_snapshot: bool = False) -> list[str]:
     """Build the one-shot cold command with the kind's explicit turn bound."""
     if not request.binary:
         raise ForkBinaryResolutionError("Claude Code fork requires its harness binary")
@@ -46,6 +46,7 @@ def cold_command(request: Any, kind: ForkKind) -> list[str]:
         working_dir=request.working_dir,
         model=request.target.transport_model,
         effort=request.reasoning_effort,
+        disable_git_snapshot=disable_git_snapshot,
     )
     return build_claude_cmd(
         invocation,

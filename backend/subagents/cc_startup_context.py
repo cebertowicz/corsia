@@ -37,6 +37,7 @@ class CCStartupContext:
     checkpoint_generation_id: str | None = None
     target_discovered_context_window: int | None = None
     confinement: str = CONFINEMENT_NONE
+    prior_invocation: Any | None = None
 
 
 def _install_prepared_transcript(destination: Any) -> Any | None:
@@ -99,6 +100,11 @@ def build_cc_startup_context(
         else (destination.cc_session_id if transcript is not None else None)
     )
     confinement = _launch_confinement(destination.confinement, destination.working_dir, session_id)
+    prior_invocation = None
+    if authority.source == "provider_resume":
+        from subagents.cc_runtime_helpers import _artifact_cc_session_invocation
+
+        prior_invocation = _artifact_cc_session_invocation(session_id, db)
     reconstruction = destination.seed_reconstruction
     if reconstruction is None:
         raise CCPreparedDestinationStale(
@@ -129,6 +135,7 @@ def build_cc_startup_context(
         launch_identity=destination.launch_identity,
         checkpoint_generation_id=checkpoint_generation_id,
         confinement=confinement,
+        prior_invocation=prior_invocation,
     )
 
 

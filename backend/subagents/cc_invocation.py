@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 
 from claude_controls import CONFINED_PERMISSION_MODE, confined_claude_controls
-from subagents.managed_launch import claude_project_discovery_args, workspace_git_snapshot_disabled
+from subagents.managed_launch import claude_project_discovery_args
 
 #: A launch with every CORSIA tool, as every managed child had before confinement.
 CONFINEMENT_NONE = "none"
@@ -44,6 +44,7 @@ class ClaudeInvocation:
     model: str | None = None
     effort: str | None = None
     confinement: str = CONFINEMENT_NONE
+    disable_git_snapshot: bool | None = None
 
     def __post_init__(self) -> None:
         _require_confinement(self.confinement)
@@ -97,6 +98,8 @@ def claude_invocation_metadata(invocation: ClaudeInvocation) -> dict[str, object
     value: dict[str, object] = asdict(invocation)
     if invocation.confinement == CONFINEMENT_NONE:
         value.pop("confinement")
+    if invocation.disable_git_snapshot is None:
+        value.pop("disable_git_snapshot")
     return value
 
 
@@ -104,8 +107,11 @@ def claude_invocation_from_metadata(value: object) -> ClaudeInvocation | None:
     """Restore one exact launch description only from a complete valid record."""
     if not isinstance(value, dict):
         return None
-    plain = {key: item for key, item in value.items() if key != "confinement"}
-    fields = set(ClaudeInvocation.__dataclass_fields__) - {"confinement"}
+    disabled = value.get("disable_git_snapshot")
+    if disabled is not None and not isinstance(disabled, bool):
+        return None
+    plain = {key: item for key, item in value.items() if key not in {"confinement", "disable_git_snapshot"}}
+    fields = set(ClaudeInvocation.__dataclass_fields__) - {"confinement", "disable_git_snapshot"}
     if set(plain) != fields or any(
         item is not None and not isinstance(item, str) for item in plain.values()
     ):
@@ -117,7 +123,7 @@ def claude_invocation_from_metadata(value: object) -> ClaudeInvocation | None:
     if not isinstance(permission_mode, str) or not permission_mode:
         return None
     try:
-        return ClaudeInvocation(**plain, confinement=stored_confinement(value))
+        return ClaudeInvocation(**plain, confinement=stored_confinement(value), disable_git_snapshot=disabled)
     except ValueError:
         return None
 
@@ -160,7 +166,7 @@ def _untrusted_args(invocation: ClaudeInvocation) -> list[str]:
     return [
         *confined_claude_controls(mcp_tools=True),
         *(["--settings", '{"includeGitInstructions":false}']
-          if workspace_git_snapshot_disabled(invocation.working_dir) else []),
+          if invocation.disable_git_snapshot else []),
         "--tools", ",".join(tools),
         "--allowedTools", *tools,
         "--disable-slash-commands",
@@ -171,7 +177,7 @@ def _untrusted_args(invocation: ClaudeInvocation) -> list[str]:
 def _managed_args(invocation: ClaudeInvocation) -> list[str]:
     """Project settings plus the CORSIA tool bridge, or no tools without one."""
     args = claude_project_discovery_args(
-        disable_git_snapshot=workspace_git_snapshot_disabled(invocation.working_dir),
+        disable_git_snapshot=bool(invocation.disable_git_snapshot),
     )
     if invocation.mcp_config:
         from tools.catalog import MCP_CORSIA_PREFIX

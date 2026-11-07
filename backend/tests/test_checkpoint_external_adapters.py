@@ -454,7 +454,7 @@ async def test_cc_durable_capture_survives_process_eviction(tmp_path, monkeypatc
     assert (
         source.transcript_sha256 == hashlib.sha256(transcript.read_bytes()).hexdigest()
     )
-    assert source.invocation == invocation
+    assert source.invocation == replace(invocation, disable_git_snapshot=False)
 
 
 @pytest.mark.asyncio
@@ -726,7 +726,7 @@ async def test_cc_tool_boundary_capture_freezes_matching_row_and_live_launch(
         assert source is not None
         assert reasons == []
         assert source.boundary == boundary
-        assert source.invocation == invocation
+        assert source.invocation == replace(invocation, disable_git_snapshot=False)
         assert source.transcript_bytes == len(
             json.dumps(previous, separators=(",", ":")).encode() + b"\n"
         )

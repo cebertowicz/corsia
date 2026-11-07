@@ -41,6 +41,14 @@ OnExit = Callable[[int | None, str], Awaitable[None]]
 STDOUT_LIMIT = 16 * 1024 * 1024
 
 
+async def prepare_session_git_snapshot(session, working_dir: str | None) -> None:
+    """Freeze the Git setting once, away from the event loop."""
+    if getattr(session, "disable_git_snapshot", None) is None:
+        from subagents.managed_launch import workspace_git_snapshot_disabled
+
+        session.disable_git_snapshot = await asyncio.to_thread(workspace_git_snapshot_disabled, working_dir)
+
+
 class CCStreamSession:
     """Drives one ``claude -p`` stream-json process over a kept-open stdin pipe."""
 
@@ -76,6 +84,7 @@ class CCStreamSession:
         self.effort = effort
         self.permission_mode = permission_mode
         self.working_dir = working_dir
+        self.disable_git_snapshot: bool | None = None
         self.claude_dir = claude_dir
         self.confinement = confinement
         self._on_event = on_event
@@ -107,6 +116,7 @@ class CCStreamSession:
             model=self.model,
             effort=self.effort,
             confinement=self.confinement,
+            disable_git_snapshot=self.disable_git_snapshot,
         )
 
     def build_cmd(self) -> list[str]:
@@ -129,6 +139,10 @@ class CCStreamSession:
             drop_untrusted_credentials(env)
         return env
 
+    async def prepare_git_snapshot(self) -> None:
+        """Freeze the Git setting before registering or starting this session."""
+        await prepare_session_git_snapshot(self, self.working_dir)
+
     async def start(self) -> None:
         """Spawn the process (stdin kept open) and launch the reader task."""
         if self._proc is not None:
@@ -139,6 +153,7 @@ class CCStreamSession:
         from subagents.vendor_write_admission import prepare_session_launch
 
         await run_in_db(prepare_session_launch, self, 'claude-code')
+        await self.prepare_git_snapshot()
         from subagents.cc_sessions import require_resume_in_root
 
         require_resume_in_root(self.resume_session_id, self.reconstructed_transcript_path, self.claude_dir)

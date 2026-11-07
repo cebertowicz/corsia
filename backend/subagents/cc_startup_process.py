@@ -27,7 +27,7 @@ from subagents.cc_startup_session import (
     install_starting_identity,
     restore_prior_identity,
 )
-from subagents.cc_stream import CCStreamSession
+from subagents.cc_stream import CCStreamSession, prepare_session_git_snapshot
 
 log = logging.getLogger(__name__)
 
@@ -363,6 +363,13 @@ async def launch_cc_process(
             finalize_fn=finalize_fn,
         )
         live.session = session
+        if context.prior_invocation is not None and context.resume_session_id:
+            from subagents.cc_git_snapshot import ensure_registered_git_snapshot
+
+            session.disable_git_snapshot = await ensure_registered_git_snapshot(
+                thread_id, context.resume_session_id, context.prior_invocation,
+            )
+        await prepare_session_git_snapshot(session, context.working_dir)
         # Fail before writing when the live handle or predecessor is already stale.
         _require_publishable(
             thread_id, held_lock, expected_live, continuing_identity, continuing_wait_scope,
