@@ -24,7 +24,7 @@ from core import placement_outcomes as outcomes
 from core.lesson_admission import Admission, TrialRefused, admit
 from core.lesson_trials import capture_hash
 from core.placement_decide import Decision, Destination, ThreadPlace
-from infra.guidance_history_paths import bytes_before_text
+from infra.guidance_history_paths import read_regular
 
 TRIAL_ACCEPTANCE = (
     "The trial lesson is retired, promoted or extended, with the evidence for that choice."
@@ -155,7 +155,7 @@ def _activate(
     relative = outcomes.relative_path(path)
     # Read the bytes before the text: they are what the save compares, and a change after this read
     # refuses the write instead of being overwritten by text built from what I read.
-    raw = bytes_before_text(path)
+    raw = read_regular(path)
     current = _read(path)
     held = lesson_files.read_trial(current) if current else None
     # An unchanged version keeps the review it already has, so it stays offered.
@@ -182,9 +182,11 @@ def _activate(
     if node_id is None:
         return
     final = lesson_files.with_review_ref(base, node_id)
-    writes, expected = ({path: final}, {path: digest(draft)}) if final != draft else ({}, {})
+    # When the first save was skipped, the file still holds the bytes read above, not the draft's.
+    on_disk = digest(raw) if current == draft else digest(draft)
+    writes, expected = ({path: final}, {path: on_disk}) if final != draft else ({}, {})
     capture = lesson_files.capture_path(place.tray, admission.capture_id)
-    capture_raw = bytes_before_text(capture)
+    capture_raw = read_regular(capture)
     captured = _read(capture)
     superseded = lesson_files.superseded_capture(captured, trial.lesson.id) if captured else None
     if superseded is not None and superseded != captured:
@@ -213,7 +215,7 @@ def _capture(
     path = lesson_files.capture_path(place.tray, admission.capture_id)
     relative = outcomes.relative_path(path)
     version = capture_hash(decision.text, trial)
-    raw = bytes_before_text(path)  # the expectation of the text read below, taken before it
+    raw = read_regular(path)  # the expectation of the text read below, taken before it
     current = _read(path)
     earlier = lesson_files.read_capture(current) if current else None
     # Evidence accumulates only while the hypothesis itself is unchanged.

@@ -100,15 +100,10 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     notification = art or {"integration": "workspace", "type": artifact_type, "external_id": str(p)}
     from infra.guidance_targets import guidance_target
 
-    # Only guidance files are recorded. Git is asked for one of those, and only to say history is off
-    # for the whole workspace, so opening any other document stays as cheap as before. Budget: one
-    # `git rev-parse` per guidance-file open, about 9 ms measured.
+    # Only guidance files are recorded. Whether history is off for the whole workspace asks Git, which
+    # the caller that shows history does off the database pool (api/files.py content).
     target = guidance_target(p, config.WORKSPACE)
     recorded = target is not None and not target.fault
-    if recorded:
-        from infra.document_history import history_off
-
-        recorded = not history_off(Path(config.WORKSPACE))
     return {"text": text, "size": st.st_size, "mtime": st.st_mtime,
             "revision": revision(raw), "writable": writable, "artifact": art,
             "freshness": freshness, "history": recorded,

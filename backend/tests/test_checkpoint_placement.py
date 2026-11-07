@@ -700,6 +700,7 @@ def test_placement_save_commits_its_path_after_recording_outside_edits(tmp_path)
 
 def test_placement_save_inside_an_enclosing_repository_writes_nothing(tmp_path) -> None:
     workspace = _repo(tmp_path) / "inner"
+    workspace.mkdir()
     target = workspace / "context" / "x.md"
     result = _placement_save(workspace, target, "x", None)
     assert result.outcome == "history-off"

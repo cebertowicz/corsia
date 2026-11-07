@@ -117,9 +117,12 @@ async def test_file_without_history_is_history_off(skill):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('failure', ['history-off', 'deferred-lock', 'commit-failure'])
+@pytest.mark.parametrize('failure', ['history-off', 'repository-fault', 'deferred-lock', 'commit-failure'])
 async def test_failures_leave_bytes_unchanged_and_never_say_saved(skill, monkeypatch, failure):
+    """Only a state with no history of its own is history off; a Git fault finding the repository fails
+    with a Retry that can work, like any other Git fault."""
     from infra import guidance_git
+    from infra.guidance_states import HistoryOff
 
     workspace, _thread, path, _user = skill
     first = await recorded(skill, SKILL_BODY)
@@ -133,7 +136,10 @@ async def test_failures_leave_bytes_unchanged_and_never_say_saved(skill, monkeyp
         return raise_error
 
     if failure == 'history-off':
-        monkeypatch.setattr(guidance_git, 'workspace_repository', lambda *_args, **_kwargs: (None, 'history off'))
+        monkeypatch.setattr(guidance_git, 'workspace_repository',
+                            lambda *_args, **_kwargs: (None, HistoryOff('the workspace is inside an enclosing repository')))
+    elif failure == 'repository-fault':
+        monkeypatch.setattr(guidance_git, 'workspace_repository', lambda *_args, **_kwargs: (None, 'git rev-parse timed out'))
     elif failure == 'deferred-lock':
         monkeypatch.setattr(guidance_git, '_acquire', fail(guidance_git._LockBusy('lock busy')))
     else:
@@ -197,9 +203,29 @@ async def test_a_workspace_with_no_repository_of_its_own_is_history_off(skill, s
         (workspace / ".git").mkdir()  # an empty marker: Git answers with the enclosing repository
 
     assert list_versions(workspace, path.relative_to(workspace).as_posix()) == ([], False)
-    assert read_document(str(path), user_id, None, thread_id)["history"] is False
+    # The open's own read asks no Git; the route that shows history does, off the database pool.
+    assert read_document(str(path), user_id, None, thread_id)["history"] is True
+    assert (await files.content("test", str(path), thread_id=thread_id))["history"] is False
     assert refusal(await restore(skill, first, sha(current))) == (409, "history_off")
     assert path.read_text() == current
+
+
+@pytest.mark.parametrize("reason, outcome", [
+    ("enclosing", "history-off"), ("no-repository", "history-off"), ("git-fault", "failed"),
+])
+def test_a_guidance_save_calls_history_off_only_what_the_read_does(history_scope, monkeypatch, reason, outcome):
+    """The save and the read share one classification: a Git fault finding the repository is a failed
+    save the next try may clear, never history off."""
+    from infra import guidance_git
+    from infra.guidance_states import HistoryOff, NoRepository
+
+    workspace, _thread = history_scope
+    why = {"enclosing": HistoryOff("the workspace is inside an enclosing repository"),
+           "no-repository": NoRepository("the workspace has no repository yet"),
+           "git-fault": "git rev-parse timed out"}[reason]
+    monkeypatch.setattr(guidance_git, "workspace_repository", lambda *_args, **_kwargs: (None, why))
+    context = workspace / "context" / "demo.md"
+    assert _save(workspace, context, "First text.\n").outcome == outcome
 
 
 @pytest.mark.asyncio
@@ -249,3 +275,26 @@ def test_document_open_says_whether_history_exists(history_scope):
     plain.write_text('notes')
     assert read_document(str(path), user_id, None, thread_id)['history'] is True
     assert read_document(str(plain), user_id, None, thread_id)['history'] is False
+
+
+@pytest.mark.asyncio
+async def test_document_open_asks_git_only_off_the_database_pool(skill, monkeypatch):
+    """Opening a document runs no Git on the database pool; the route asks once, off it."""
+    from api import files_load
+    from infra import db_async, document_history
+
+    _workspace, thread_id, path, user_id = skill
+    asked = []
+    monkeypatch.setattr(document_history, 'history_off', lambda workspace: asked.append(workspace) or False)
+    files_load.read_document(str(path), user_id, None, thread_id)
+    assert asked == []
+    off_db = []
+    real_off_db = db_async.run_off_db
+
+    async def counted(fn, *args, **kwargs):
+        off_db.append(fn)
+        return await real_off_db(fn, *args, **kwargs)
+
+    monkeypatch.setattr(files, 'run_off_db', counted)
+    assert (await files.content('test', str(path), thread_id=thread_id))['history'] is True
+    assert len(asked) == 1 and off_db == [document_history.history_off]

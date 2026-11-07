@@ -26,7 +26,7 @@ from infra.guidance_messages import (
     REASON_PREFIX, SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_UNRECORDED, UNRECORDED_REASON,
     commit_message, is_person_author, recorded_reason,
 )
-from infra.guidance_states import HistoryOff, GitFault, NoRepository, _LockBusy
+from infra.guidance_states import HistoryOff, GitFault, NoRepository, _LockBusy, history_is_off
 from infra.guidance_save_types import SaveResult, _Commit
 from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
@@ -310,6 +310,8 @@ def _save(
     if not binary_safe_history and not all(_is_text(data) for data in writes.values()):
         return unrecorded("ordinary", "not text up to 1 MB", None)
     repo, why = workspace_repository(workspace, create=True)
+    if repo is None and not history_is_off(why):
+        return unrecorded("failed", why or "", SAVE_FAILED.format(error=why))
     if repo is None:
         return unrecorded("history-off", why or "", SAVE_HISTORY_OFF.format(why=why))
     try:

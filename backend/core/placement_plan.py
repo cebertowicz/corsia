@@ -24,7 +24,7 @@ from core.placement_decide import (
 )
 from core import placement_room
 from core.placement_room import Operation, Room
-from infra.guidance_history_paths import bytes_before_text, digest
+from infra.guidance_history_paths import read_regular, digest
 
 ALREADY = "already-at-destination"
 _Plan = tuple[dict[Path, str], dict[Path, str | None], list[Operation]]
@@ -89,7 +89,7 @@ def commit_plan(
     """
     path = destination.path
     assert path is not None
-    raw = bytes_before_text(path)  # the expectation of the text read below, taken before it
+    raw = read_regular(path)  # the expectation of the text read below, taken before it
     current = path.read_text() if path.exists() else None
     if decision.duplicate_of and current is not None and says(current, decision.duplicate_of):
         return ALREADY
@@ -127,7 +127,7 @@ def _made_room(
     if current is None or path is None:
         return "no-room"
     overflow = placement_room.overflow_file(destination.kind, path, place.reference_dir)
-    overflow_raw = bytes_before_text(overflow) if overflow is not None else None
+    overflow_raw = read_regular(overflow) if overflow is not None else None
     overflow_current = (
         overflow.read_text() if overflow is not None and overflow.exists() else None
     )

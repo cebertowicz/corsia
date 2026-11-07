@@ -295,7 +295,7 @@ def test_atomic_delete_without_history_writes_nothing(history_scope, monkeypatch
     path = workspace / "context" / "demo.md"
     path.parent.mkdir()
     path.write_text("keep\n")
-    monkeypatch.setattr(guidance_git, "workspace_repository", lambda *_args, **_kwargs: (None, "off"))
+    monkeypatch.setattr(guidance_git, "workspace_repository", lambda *_args, **_kwargs: (None, guidance_git.HistoryOff("off")))
 
     result = save_guidance(
         {}, workspace=workspace, target=GuidanceTarget("context, workspace scope"),
@@ -459,7 +459,7 @@ def test_a_stale_edit_is_refused_on_every_fallback_path(history_scope, monkeypat
         monkeypatch.setattr(guidance_git, "_LOCK_WAIT_SECONDS", 0.05)
         fcntl.flock(holder, fcntl.LOCK_EX)
     elif fallback == "history-off":
-        monkeypatch.setattr(guidance_git, "workspace_repository", lambda *_args, **_kwargs: (None, "off"))
+        monkeypatch.setattr(guidance_git, "workspace_repository", lambda *_args, **_kwargs: (None, guidance_git.HistoryOff("off")))
     else:
         monkeypatch.setattr("core.guidance_paths.classify_guidance_path", lambda *_args, **_kwargs: 1 / 0)
     try:

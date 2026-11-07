@@ -182,7 +182,7 @@ def save_guided_write(
 ) -> str:
     """Blocking. Save an agent tool's guidance write through the history primitive.
 
-    ``expected`` is the file's bytes as the caller read them before its text read (``bytes_before_text``);
+    ``expected`` is the file's bytes as the caller read them before its text read (``read_regular``);
     never the text, which loses CRLF and lone CR and so would refuse an unchanged file."""
     from infra.config import WORKSPACE
 

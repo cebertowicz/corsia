@@ -20,21 +20,13 @@ def digest(content: str | bytes | None) -> str | None:
     return hashlib.sha256(content if isinstance(content, bytes) else content.encode()).hexdigest()
 
 
-def bytes_before_text(path: Path) -> bytes | None:
-    """The bytes to compare-and-swap against, read before the caller reads the file's text.
-
-    A caller builds its new content from that text read and passes :func:`digest` of these bytes, so a
-    change made after this read refuses the write instead of being overwritten by content built from
-    older text. Text is never the expectation: a text read turns CRLF and a lone CR into LF, which is not
-    what the destination holds. It is the save's own read (no symlink, regular file only), so the
-    expectation and the comparison follow one rule: ``None`` is the file's absence, and a symlink or other
-    file type raises.
-    """
-    return read_regular(path)
-
-
 def read_regular(path: Path) -> bytes | None:
-    """A regular file's bytes, or None when absent; a symlink or other file type raises."""
+    """A regular file's bytes, or None when absent; a symlink or other file type raises.
+
+    It is also the compare-and-swap expectation: a caller reads these bytes before the file's text and
+    passes :func:`digest` of them, so a change made after this read refuses the write instead of being
+    overwritten by content built from older text. Text is never the expectation: a text read turns CRLF
+    and a lone CR into LF, which is not what the destination holds."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
     except FileNotFoundError:
