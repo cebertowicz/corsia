@@ -17,6 +17,7 @@ from fastapi.responses import Response
 
 from cc_user_context_fixtures import InferencePeer, _completed_turn, _tool_use_turn
 from contract.matrix_environment import guarded_command
+from subagents.cc_event_tool_boundary import _mcp_server_is_starting
 from subagents.cc_invocation import CONFINEMENT_UNTRUSTED, build_claude_cmd
 from subagents.cc_stream import CCStreamSession
 from tools.confined_reads import UNTRUSTED_READ_TOOLS
@@ -180,7 +181,12 @@ async def test_stock_cli_confined_bridge(case, isolated_db, monkeypatch):
             assert peer.bodies, "CLI sent no inference request"
             [init] = [e for e in events if e.get("type") == "system" and e.get("subtype") == "init"]
             expected = {f"mcp__corsia__{name}" for name in UNTRUSTED_READ_TOOLS}
-            assert set(init["tools"]) == expected
+            # Init lists MCP tools only once the server has connected, which may come after it;
+            # a still-starting corsia server with no tools is the state the pump accepts.
+            servers = {server.get("name"): server.get("status") for server in init.get("mcp_servers", [])}
+            assert set(init["tools"]) == expected or (
+                not init["tools"] and _mcp_server_is_starting({"status": servers.get("corsia")})
+            ), (init["tools"], servers)
             for body in peer.bodies:
                 assert {tool["name"] for tool in json.loads(body).get("tools", [])} == expected
             results = [
