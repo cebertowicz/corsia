@@ -20,6 +20,12 @@ class _FeedReceipt:
         self.ws, self.thread_id, self.input_id = ws, thread_id, input_id
         self.sent = False
 
+    async def publish_held(self, result) -> None:
+        # A held input must be acknowledged before its usage control read.
+        # Non-held admission is provisional; delivery owns its final receipt.
+        if result.held is not None or result.admission_hold is not None:
+            await self.publish(result)
+
     async def publish(self, result) -> None:
         if not self.sent:
             await _send_input_accepted(self.ws, self.thread_id, self.input_id, result)
@@ -56,7 +62,7 @@ async def _deliver_subagent_input(
             trim_content=False,
             native_mode="delegation",
             human_origin=True,
-            on_admitted=receipt.publish,
+            on_admitted=receipt.publish_held,
         )
         await receipt.publish(result)
         return None
