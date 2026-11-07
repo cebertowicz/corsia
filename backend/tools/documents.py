@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +13,11 @@ from doceditor.comment_create_db import CommentInput
 from doceditor.document_save import DocumentSaveError
 
 from doceditor.comment_actions import (
-    CommentActionError, SUGGESTION_REASON_MAX_CHARS, validate_create,
+    CommentActionError, SUGGESTION_REASON_MAX_CHARS,
 )
 from doceditor.comment_action_errors import decision_only_error
 from doceditor.comment_resolve_rule import PERSON_COMMENT_RESOLVE_RULE
-from doceditor.comments import CrossArtifactIdError, validate_client_id
+from doceditor.comments import CrossArtifactIdError
 from doceditor.quote_anchor import QuoteResolveError
 from infra.auth import may_access_artifact
 from infra.database import get_db
@@ -31,77 +30,13 @@ from tools.base import Tool
 from tools.delegation import _require_context, _tool_schema
 from tools.document_comment_listing import select_comment_threads
 from tools.document_comment_leave import leave_comment_thread
+from tools.document_comment_target import (
+    json_result as _json,
+    resolve_comment_target as _resolve_comment_target,
+    resolve_doc_target as _resolve_doc_target,
+    validate_comment_request as _validate_comment_request,
+)
 from tools.document_regions import REGION_SCHEMA, region_result
-
-
-def _json(data: dict[str, Any]) -> str:
-    return json.dumps(data, sort_keys=True)
-
-
-def _resolve_doc_target(
-    *,
-    doc_path: str | None,
-    artifact_id: str | None,
-    actor_thread_id: str,
-    user_id: str,
-    db,
-    allow_register: bool,
-) -> tuple[str | None, str | None, dict[str, Any] | None]:
-    if artifact_id:
-        art = registry_models.get_artifact(artifact_id, db=db)
-        if art is None or art["state"] != "active":
-            raise ValueError(f"artifact_id does not resolve to an active artifact: {artifact_id}")
-        if not may_access_artifact(art["parent_thread_id"], user_id, db=db):
-            raise PermissionError("Artifact not found")
-        return art["id"], art["path"], None
-
-    normalized = registry_service.normalize_file_path(doc_path, db=db)
-    if normalized is None:
-        raise ValueError(f"doc_path is outside the registrable roots: {doc_path}")
-    canonical, _zone, _tmp = normalized
-    art = registry_service.resolve_file_identity(canonical, db=db)
-    if art is not None:
-        if not may_access_artifact(art["parent_thread_id"], user_id, db=db):
-            raise PermissionError("Artifact not found")
-        return art["id"], art["path"] or canonical, None
-    if not allow_register:
-        return None, canonical, None
-    return None, canonical, {"path": canonical}
-
-
-def _validate_comment_request(body, parent_id, review, quote, replacement, doc_path, artifact_id, client_id,
-                              region=None, insert_after=False):
-    """Map shared creation validation to the native-tool error surface."""
-    try:
-        text = validate_create(body=body, parent_id=parent_id, review=review, quote=quote,
-                               replacement=replacement, doc_path=doc_path, artifact_id=artifact_id, region=region,
-                               insert_after=insert_after)
-        return None, text, validate_client_id(client_id)
-    except (CommentActionError, ValueError) as exc:
-        return f"Error: {exc}", "", None
-
-
-def _resolve_comment_target(db, actor_thread_id, actor, parent_id, kwargs):
-    """Authorize the target without reading loop-owned anchor state."""
-    register_spec = doc_path = None
-    if parent_id:
-        parent = store.get_comment(parent_id, db=db)
-        art = registry_models.get_artifact(parent["artifact_id"], db=db) if parent else None
-        if parent is None or art is None or not may_access_artifact(
-            art["parent_thread_id"], actor["user_id"], db=db
-        ):
-            raise PermissionError("parent_id does not reference an accessible comment")
-        artifact_id = parent["artifact_id"]
-    else:
-        artifact_id, doc_path, register_spec = _resolve_doc_target(
-            doc_path=kwargs.get("doc_path"),
-            artifact_id=kwargs.get("artifact_id"),
-            actor_thread_id=actor_thread_id,
-            user_id=actor["user_id"],
-            db=db,
-            allow_register=True,
-        )
-    return artifact_id, doc_path, register_spec
 
 
 class DocCommentsListTool(Tool):
@@ -190,6 +125,7 @@ class DocCommentCreateTool(Tool):
                 "pass quote (the exact current text) and replacement (the new text); body is "
                 "an optional note. To add text without replacing it, quote the preceding text and set insert_after. "
                 "To tag agents, pass their thread IDs from agent_roster in tagged_agent_ids. "
+                "To say the person is needed on this comment, set tag_person. "
                 "To retry undelivered feedback, use doc_feedback_send.")
 
     @property
@@ -202,6 +138,9 @@ class DocCommentCreateTool(Tool):
             "near": {"type": ["string", "null"]},
             "parent_id": {"type": ["string", "null"], "description": "Comment ID to reply to; the reply needs body text."},
             "tagged_agent_ids": {"type": "array", "items": {"type": "string"}, "description": "Agent thread IDs from agent_roster to tag in this comment."},
+            "tag_person": {"type": "boolean", "description": (
+                "Tag the person in this comment. It shows their name on the comment and marks the thread "
+                "as needing them until they open it.")},
             "review": {"type": "boolean"},
             "client_id": {"type": ["string", "null"]},
             "replacement": {"type": ["string", "null"]},
@@ -261,6 +200,7 @@ class DocCommentCreateTool(Tool):
                 registration=target[2], submit=bool(kwargs.get("submit")), region=region,
                 review_request_id=kwargs.get("_review_request_id"),
                 tagged_agent_ids=kwargs.get("tagged_agent_ids") or [],
+                tag_person=bool(kwargs.get("tag_person")),
             )
             created = await agent_comment_writes.reply(request, client_id)
         except QuoteResolveError as exc:

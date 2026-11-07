@@ -1,18 +1,19 @@
 """A ``untrusted`` launch of the stock Claude CLI loads nothing it was not given.
 
-An untrusted child reads repository paths through ``--add-dir`` and runs inside the
-workspace, under the workspace's and project's own CLAUDE.md files and
-``.claude/`` settings. This plants an instruction file, import, rule, memory
-index and hook at every level, including the reviewed directory, sets the
-switch that makes add-dir CLAUDE.md files load in the ambient environment, and
-launches the installed CLI with the command and environment ``CCStreamSession``
-builds for an untrusted child. An ungoverned arm proves the planted sources load.
+An untrusted child runs inside the workspace, under the workspace's and
+project's own CLAUDE.md files and ``.claude/`` settings, and reads files only
+through CORSIA's confined read tools over the bridge -- never through its own
+file tools. This plants an instruction file, import, rule, memory index and
+hook at every level, including the reviewed directory, sets the switch that
+makes add-dir CLAUDE.md files load in the ambient environment, and launches the
+installed CLI with the command and environment ``CCStreamSession`` builds for
+an untrusted child. An ungoverned arm proves the planted sources load.
 
-The read arms script the model's first reply as one tool call and check what
-the CLI sends back: an untrusted child reads its add-dirs, and nothing outside
-its working directory and add-dirs reaches the model (event-rules design
-§8.1). That rests on the CLI's ``--restricted`` flag, which confines its file
-tools to the working directories; no sandbox wraps the child.
+The read arms script the model's first reply as one native tool call and check
+what the CLI sends back: the call is refused and no planted file content ever
+reaches the model (event-rules design §8.1). What a confined child *can* read
+is the bridge's four tools, proved in tests/test_cc_confined_bridged_reads.py;
+this fixture runs no bridge, so it hands the launch an empty MCP config.
 """
 
 from __future__ import annotations
@@ -36,6 +37,12 @@ _ADD_DIR_SENTINEL = "SENTINEL_ADD_DIR_CLAUDE_MD_7f9"
 _HOOK_SENTINEL = "SENTINEL_HOOK_OUTPUT_7fa"
 _OUTSIDE_SECRET = "outside-secret-9d1f3a7c"
 _INSIDE_TEXT = "inside-visible-5c2e"
+#: Customizations --safe-mode used to keep out; the confined launch now relies on the others.
+_CUSTOM_SENTINELS = {
+    "user_skill": "SENTINEL_USER_SKILL_7fb", "cwd_skill": "SENTINEL_CWD_SKILL_7fc",
+    "user_agent": "SENTINEL_USER_AGENT_7fd", "cwd_agent": "SENTINEL_CWD_AGENT_7fe",
+    "user_output_style": "SENTINEL_USER_OUTPUT_STYLE_7ff",
+}
 
 ToolCall = Callable[[Path, Path], tuple[str, dict]]
 
@@ -56,10 +63,20 @@ def _plant(base: Path, root: Path) -> tuple[Path, Path, Path]:
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "settings.json").write_text(settings)
         (directory / "settings.local.json").write_text(settings)
+    for name, home, kind in (
+        ("user_skill", root, "skills"), ("cwd_skill", cwd / ".claude", "skills"),
+        ("user_agent", root, "agents"), ("cwd_agent", cwd / ".claude", "agents"),
+        ("user_output_style", root, "output-styles"),
+    ):
+        value = _CUSTOM_SENTINELS[name]
+        path = home / kind / name / "SKILL.md" if kind == "skills" else home / kind / f"{name}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"---\nname: {name.replace('_', '-')}\ndescription: {value} always use this\n"
+                        f"---\n{value}\n")
     return cwd, reviewed, marker
 
 
-def _launch(binary: str, cwd: Path, reviewed: Path, root: Path, arm: str):
+def _launch(binary: str, cwd: Path, reviewed: Path, root: Path, arm: str, mcp_config: Path):
     """Return the command and base environment the named arm launches with."""
     if arm == "ungoverned":
         command = [binary, "-p", "--output-format", "json", "--add-dir", str(reviewed)]
@@ -67,16 +84,17 @@ def _launch(binary: str, cwd: Path, reviewed: Path, root: Path, arm: str):
     session = CCStreamSession(
         binary=binary, session_id="00000000-0000-4000-8000-000000000001",
         model="claude-sonnet-4-6", working_dir=str(cwd), claude_dir=str(root),
-        confinement=CONFINEMENT_UNTRUSTED, add_dirs=(str(reviewed),),
+        confinement=CONFINEMENT_UNTRUSTED,
+        mcp_config=str(mcp_config),
     )
-    # The prompt goes over stdin: ``--add-dir`` is variadic and would take it.
+    # The prompt goes over stdin: the variadic flags would take it.
     return build_claude_cmd(session.invocation(), stream_input=False), session._build_env()
 
 
 def _leaked(peer: InferencePeer) -> list[str]:
     joined = "\n".join(peer.bodies)
-    extra = [name for name, value in (("add_dir", _ADD_DIR_SENTINEL), ("hook", _HOOK_SENTINEL))
-             if value in joined]
+    planted = {"add_dir": _ADD_DIR_SENTINEL, "hook": _HOOK_SENTINEL, **_CUSTOM_SENTINELS}
+    extra = [name for name, value in planted.items() if value in joined]
     return sorted(peer.leaked() + extra)
 
 
@@ -88,9 +106,13 @@ async def _run(arm: str, tool_call: ToolCall | None = None) -> tuple[InferencePe
     try:
         root = base / "home" / ".claude"
         cwd, reviewed, marker = _plant(base, root)
+        # This fixture serves no bridge, so the confined launch's required MCP
+        # config declares no server: nothing is reachable but the CLI itself.
+        mcp_config = base / "mcp-config.json"
+        mcp_config.write_text(json.dumps({"mcpServers": {}}))
         peer = InferencePeer(tool_call(base, reviewed) if tool_call else None)
         server, port = await serve(peer)
-        command, env = _launch(binary, cwd, reviewed, root, arm)
+        command, env = _launch(binary, cwd, reviewed, root, arm, mcp_config)
         env |= {
             "PATH": "/usr/bin:/bin:/opt/homebrew/bin", "HOME": str(base / "home"),
             "TMPDIR": str(base / "tmp"), "CLAUDE_CONFIG_DIR": str(root),
@@ -148,19 +170,34 @@ def _grep_outside(base: Path, _reviewed: Path) -> tuple[str, dict]:
                     "output_mode": "content"}
 
 
+def _read_inside(_base: Path, reviewed: Path) -> tuple[str, dict]:
+    return "Read", {"file_path": str(reviewed / "inside.txt")}
+
+
 @pytest.mark.integration
-@pytest.mark.parametrize("tool_call", [_read_outside, _grep_outside], ids=["read", "grep"])
-async def test_review_launch_returns_nothing_from_outside_its_directories(tool_call):
+@pytest.mark.parametrize(
+    "tool_call",
+    [_read_outside, _grep_outside, _read_inside],
+    ids=["read-outside", "grep-outside", "read-inside"],
+)
+async def test_review_launch_has_no_native_file_tool(tool_call):
+    """A confined child's own Read/Grep never run, inside its roots or outside.
+
+    Reads go through CORSIA's confined read tools, so the CLI offers the model
+    no tool of its own. The peer calls the scripted native tool only if it is
+    offered, so a regression that offers one also leaks its planted content.
+    A native call made anyway is answered as an error (test_review_child_profile).
+    """
     peer, _hook_ran = await _run("review", tool_call)
 
-    assert _tool_results(peer), "the CLI never answered the scripted tool call"
+    assert peer.bodies, "the CLI never asked the model"
+    offered = {
+        tool.get("name")
+        for body in peer.bodies
+        for tool in json.loads(body).get("tools") or []
+        if isinstance(tool, dict)
+    }
+    assert not [name for name in offered if not str(name).startswith("mcp__corsia__")]
+    assert _tool_results(peer) == []
     assert not any(_OUTSIDE_SECRET in body for body in peer.bodies)
-
-
-@pytest.mark.integration
-async def test_review_launch_reads_inside_its_add_dir():
-    peer, _hook_ran = await _run(
-        "review", lambda _base, reviewed: ("Read", {"file_path": str(reviewed / "inside.txt")}),
-    )
-
-    assert any(_INSIDE_TEXT in body for body in _tool_results(peer))
+    assert not any(_INSIDE_TEXT in body for body in peer.bodies)

@@ -18,6 +18,7 @@ from doceditor.live_runtime import LiveEntry, get_documents
 from doceditor.live_store import BrowserMessage, StoreRefused
 from infra.db_async import run_in_db
 from infra.state import send_to_client
+from ws import section_turn
 from ws.document_failures import failure_state
 
 FRAME_TYPES = {"doc_open", "doc_update", "doc_sync", "doc_flush", "doc_replace", "doc_choice", "doc_close", "doc_positions",
@@ -282,8 +283,10 @@ async def _operate(socket, user: dict, data: dict) -> None:
         if not isinstance(identifier, str) or not identifier or len(identifier) > 128:
             raise ValueError("Document update needs a message id")
         message = BrowserMessage(identifier, base64.b64decode(encoded, validate=True))
+        before = live.snapshot[0]
         if not live.receive(message, sender=socket):
             raise StoreRefused("The server backlog is full; keep this update on the device and retry")
+        section_turn.note_edit(socket, user, artifact_id, live, before)
         await send_to_client(socket, {"type": "doc_received", "artifact_id": artifact_id,
                                     "store_id": live.store.store_id, "message_ids": [identifier]})
         _schedule_commit(artifact_id, entry)
@@ -355,6 +358,7 @@ def schedule_frame(socket, user: dict, data: dict, handle=None) -> None:
 async def _leave(socket, artifact_id: str) -> None:
     subscriptions = _subscriptions.get(socket, {})
     subscription = subscriptions.pop(artifact_id, None)
+    section_turn.leave(socket, artifact_id)
     if subscription is not None:
         subscription.entry.live.release_holder(socket)
     if subscription is None or any(artifact_id in rows for rows in _subscriptions.values()):
@@ -388,5 +392,6 @@ async def disconnect(socket) -> None:
             except Exception:
                 log.exception("Document disconnect failed for %s", artifact_id)
     finally:
+        section_turn.disconnect(socket)
         _subscriptions.pop(socket, None)
         _openings.pop(socket, None)

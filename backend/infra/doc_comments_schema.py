@@ -60,7 +60,10 @@ DOC_COMMENTS_SCHEMA_SQL = """
         decided_in_bulk INTEGER,
         insert_after INTEGER NOT NULL DEFAULT 0,
         -- 1 while the suggestion's decision is what resolved it; any other change to `resolved` clears it.
-        closed_by_decision INTEGER NOT NULL DEFAULT 0
+        closed_by_decision INTEGER NOT NULL DEFAULT 0,
+        -- The account an agent's tag of the person names: the account that agent works for
+        -- (doceditor.comment_create_db). Never an agent tag, which stays a doc_comment_tags row.
+        tagged_user_id TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_doc_comments_artifact
         ON doc_comments(artifact_id, created_at);
@@ -96,7 +99,9 @@ COMMENT_RECIPIENT_SCHEMA_SQL = """
 """
 # An agent's write saved while someone else holds the thread's writer turn (doceditor/writer_line.py).
 # A row lives only while it waits: it is deleted when it posts or drops out of line.
-# root_id has no foreign key: a deleted thread drops its line with the agent told, not silently.
+# root_id is a comment thread's root, or a document section's key ('section:<artifact>:<heading>',
+# doceditor/writer_turns.section_key). It has no foreign key: a deleted thread drops its line with the
+# agent told, not silently.
 WRITER_LINE_SCHEMA_SQL = """
     CREATE TABLE IF NOT EXISTS doc_comment_writer_line (
         id TEXT PRIMARY KEY,

@@ -12,6 +12,7 @@ from infra.migration_133_to_134_doc_stranded_suggestions import migrate_133_to_1
 from infra.migration_134_to_135_doc_decision_bulk import migrate_134_to_135
 from infra.migration_149_to_150_doc_insert_after import migrate_149_to_150
 from infra.migration_179_to_180_comment_replies_index import migrate_179_to_180
+from infra.migration_181_to_182_comment_tagged_user import migrate_181_to_182
 from infra.schema import SCHEMA_SQL, SCHEMA_VERSION
 
 _V111_DOC_COMMENTS = """
@@ -32,7 +33,7 @@ def _columns(db: sqlite3.Connection) -> list[str]:
 
 
 def test_registered_as_the_current_step():
-    assert SCHEMA_VERSION == 181
+    assert SCHEMA_VERSION == 182
     assert MIGRATIONS[111] is migrate_111_to_112
 
 
@@ -77,6 +78,7 @@ def test_fresh_schema_matches_a_migrated_one():
     migrate_134_to_135(migrated)
     migrate_149_to_150(migrated)
     migrate_179_to_180(migrated)
+    migrate_181_to_182(migrated)
 
     assert _columns(fresh) == _columns(migrated)
     index = "idx_doc_comments_region_number"
@@ -116,8 +118,8 @@ def test_a_v110_database_with_agent_use_terms_upgrades_through_v111_to_v112(isol
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.migrated, result.from_version, result.to_version) == (True, 110, 181)
-    assert _columns(db)[-len(REGION_COLUMNS) - 4:-4] == list(REGION_COLUMNS)  # then the step-134, 135, 150 and 180 columns
+    assert (result.migrated, result.from_version, result.to_version) == (True, 110, 182)
+    assert _columns(db)[-len(REGION_COLUMNS) - 5:-5] == list(REGION_COLUMNS)  # then the step-134, 135, 150, 180 and 182 columns
     assert tuple(db.execute("SELECT body, region_number FROM doc_comments").fetchone()) == ("text comment", None)
     assert endpoint_agent_use("external@legacy/glm-5.3") == "interactive_only"
     assert endpoint_agent_use("external@ordinary/glm-5.3") == "allowed"

@@ -154,7 +154,7 @@ export async function addReply(artifactId: string, commentId: string, text: stri
 		const list = (all[artifactId] ?? []).map((c) => {
 			if (c.id !== commentId) return c;
 			if (c.replies.some((r) => r.id === row.id)) return c;
-			return { ...c, replies: [...c.replies, { id: row.id, author, text, taggedAgents: row.tagged_agents ?? [], mentions: row.tagged_agent_mentions ?? [], at: 'just now' }] };
+			return { ...c, replies: [...c.replies, { id: row.id, author, text, taggedAgents: row.tagged_agents ?? [], taggedPerson: row.tagged_person ?? null, mentions: row.tagged_agent_mentions ?? [], at: 'just now' }] };
 		});
 		return { ...all, [artifactId]: list };
 	});

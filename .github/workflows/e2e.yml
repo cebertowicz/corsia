@@ -31,15 +31,18 @@ concurrency:
 
 jobs:
   e2e:
-    name: Playwright UI-E2E (mock)
+    name: Playwright UI-E2E (mock) ${{ matrix.shard }}/3
     runs-on: ubuntu-24.04
-    # One serial job runs both Playwright projects, desktop then phone (workers: 1, fullyParallel: false, because the mock backend is shared), so this one limit covers the whole suite. It restarts the backend from a captured seed before each spec file (244 times across both projects). Green full runs with that reset took 1h53m and 1h57m; 180 min is that plus about an hour of headroom.
+    # Inside a job the suite is serial (workers: 1, fullyParallel: false, because the mock backend is shared), so it is split
+    # into three Playwright shards, each on its own VM with its own mock backend. A serial run of both projects needs over
+    # 5h; a third of that is about 2h, and 180 min leaves an hour of headroom per shard.
     timeout-minutes: 180
 
     strategy:
       fail-fast: false
       matrix:
         run-index: ${{ fromJSON(github.event.inputs.runs || '[0]') }}
+        shard: [1, 2, 3]
 
     env:
       # A GitHub-hosted runner is a throwaway VM with no CORSIA install, so
@@ -118,9 +121,9 @@ jobs:
           E2E_GREP: ${{ inputs.grep }}
         run: |
           if [ -n "$E2E_GREP" ]; then
-            bash scripts/e2e-local --grep "$E2E_GREP"
+            bash scripts/e2e-local --grep "$E2E_GREP" --shard=${{ matrix.shard }}/3
           else
-            bash scripts/e2e-local
+            bash scripts/e2e-local --shard=${{ matrix.shard }}/3
           fi
 
       # Every failing test keeps its trace (playwright.config.ts retain-on-failure); a failure that does not
@@ -130,7 +133,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: failing-traces-${{ matrix.run-index }}
+          name: failing-traces-${{ matrix.run-index }}-${{ matrix.shard }}
           path: |
             frontend/test-results/**/trace.zip
             frontend/test-results/**/error-context.md
@@ -143,7 +146,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: browser-cleanup-screenshots-${{ matrix.run-index }}
+          name: browser-cleanup-screenshots-${{ matrix.run-index }}-${{ matrix.shard }}
           path: |
             frontend/test-results/**/browser-cleanup-notices.png
             frontend/test-results/*browser-cleanup-notice*/test-failed-*.png
@@ -153,7 +156,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: evidence-screenshots-${{ matrix.run-index }}
+          name: evidence-screenshots-${{ matrix.run-index }}-${{ matrix.shard }}
           path: |
             frontend/test-results/**/*.png
             !frontend/test-results/**/browser-cleanup-notices.png

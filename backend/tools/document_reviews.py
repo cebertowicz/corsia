@@ -14,7 +14,7 @@ from registry.registration_origin import RegistrationOrigin, origin_from_tool_co
 from tools.artifact_tool_helpers import default_workspace, tool_path
 from tools.base import Tool
 from tools.delegation import _require_context, _tool_schema
-from tools.documents import _json, _resolve_doc_target
+from tools.document_comment_target import json_result as _json, resolve_doc_target as _resolve_doc_target
 
 TOOL_DESCRIPTION = (
     "Ask an agent whose scope this document touches to review it. Runs a short private "

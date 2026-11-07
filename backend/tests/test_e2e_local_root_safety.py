@@ -244,3 +244,36 @@ def test_reuse_neither_deletes_nor_demands_fresh_roots(harness: Harness):
     assert "refusing" not in _output(result), _output(result)
     assert "Playwright is not installed" in _output(result)
     assert harness.port_calls() == ""
+
+
+@pytest.mark.parametrize(
+    ("args", "npm_args"),
+    [
+        ((), ["run", "e2e"]),
+        (("--grep", "chat send"), ["run", "e2e", "--", "--grep", "chat send"]),
+        (("--shard=2/3",), ["run", "e2e", "--", "--shard=2/3"]),
+        (("--grep", "chat", "--shard=2/3"), ["run", "e2e", "--", "--grep", "chat", "--shard=2/3"]),
+    ],
+)
+def test_playwright_arguments_follow_one_npm_separator(harness: Harness, args: tuple[str, ...], npm_args: list[str]):
+    """CI's shard split depends on ``--shard`` reaching Playwright, not npm."""
+    workspace = harness.tmp / "reused" / "workspace"
+    state = harness.tmp / "reused" / "state"
+    workspace.mkdir(parents=True)
+    state.mkdir()
+    (harness.repo / "frontend" / "node_modules" / "@playwright").mkdir(parents=True)
+    playwright = harness.repo / "frontend" / "node_modules" / ".bin" / "playwright"
+    playwright.parent.mkdir()
+    playwright.write_text("#!/bin/sh\n", encoding="utf-8")
+    playwright.chmod(0o755)
+    npm_log = harness.tmp / "npm-calls.log"
+    harness.shim("npm", f'printf "%s\\n" "$@" >> "{npm_log}"')
+    python = harness.shim("fake-python", "cat > /dev/null\necho token-for-reuse")
+
+    result = harness.run(
+        "--reuse", *args, CORSIA_E2E_PYTHON=str(python),
+        CORSIA_E2E_WORKSPACE=str(workspace), CORSIA_E2E_STATE_DIR=str(state),
+    )
+
+    assert result.returncode == 0, _output(result)
+    assert npm_log.read_text(encoding="utf-8").splitlines() == npm_args
