@@ -1,4 +1,4 @@
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import { get } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -105,7 +105,9 @@ describe('ChatPanel first-page failure', () => {
 		await vi.waitFor(() => expect(document.querySelector('[data-highlight-dot] .ct-new-dot')).not.toBeNull());
 		expect(host.textContent).not.toContain('recovered answer');
 		(host.querySelector('[data-comment-ids="comment"]') as HTMLElement).click();
-		await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('recovered answer'));
+		flushSync();
+		await tick();
+		expect(document.querySelector('[role="dialog"]')?.textContent).toContain('recovered answer');
 	});
 	it('drops the previous thread rows instead of passing them off as this one', async () => {
 		messages.set([
