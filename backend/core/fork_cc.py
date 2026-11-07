@@ -145,7 +145,10 @@ async def capture_warm_source(
         # A confined launch has only CORSIA's confined read tools, and resuming
         # its session must never widen what it may read.
         return warm_capture_refused(thread_id, "claude-code", "confined_launch")
-    invocation = replace(invocation, binary=binary)
+    from subagents.cc_git_snapshot import ensure_registered_git_snapshot
+
+    disabled = await ensure_registered_git_snapshot(thread_id, provider_id, invocation)
+    invocation = replace(invocation, binary=binary, disable_git_snapshot=disabled)
     launch_files = invocation.seed_file, invocation.mcp_config
     if not all(path and Path(path).is_file() for path in launch_files):
         return warm_capture_refused(thread_id, "claude-code", "launch_files_missing")
@@ -265,7 +268,10 @@ async def _invoke_fork(
     restored_seed = None
     try:
         if source is None:
-            argv = fork_cc_commands.cold_command(request, kind)
+            from subagents.managed_launch import workspace_git_snapshot_disabled
+
+            disabled = await asyncio.to_thread(workspace_git_snapshot_disabled, request.working_dir)
+            argv = fork_cc_commands.cold_command(request, kind, disable_git_snapshot=disabled)
             cwd = request.working_dir
         else:
             if source.restored_seed_text is not None:

@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
+from pathlib import Path
+import subprocess
 
+
+logger = logging.getLogger(__name__)
 
 _CODEX_PROJECT_DOC_CONTROL = "project_doc_max_bytes=0"
 _CODEX_NATIVE_SKILL_CONTROLS = (
@@ -162,7 +167,34 @@ def codex_app_server_governance_args() -> list[str]:
     return ["--strict-config", *disabled, *overrides]
 
 
-def claude_project_discovery_args() -> list[str]:
+def workspace_git_snapshot_disabled(working_dir: str | None) -> bool:
+    """Whether Claude would discover the workspace repository from this directory."""
+    from infra import config
+
+    workspace = Path(config.WORKSPACE).resolve()
+    cwd = Path(working_dir).resolve() if working_dir else Path.cwd().resolve()
+    if not cwd.is_relative_to(workspace):
+        return False
+    if not (workspace / ".git").exists():
+        return False
+    # Resolve the shared Git directory so linked workspace worktrees match too.
+    from infra.backend_git import git_argv
+
+    def common_dir(directory: Path) -> Path:
+        result = subprocess.run(
+            git_argv("rev-parse", "--git-common-dir"), cwd=directory,
+            capture_output=True, text=True, timeout=5, check=True,
+        )
+        return (directory / result.stdout.strip()).resolve()
+
+    try:
+        return common_dir(cwd) == common_dir(workspace)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("Git discovery failed (%s); snapshot suppressed", type(exc).__name__)
+        return True
+
+
+def claude_project_discovery_args(*, disable_git_snapshot: bool = False) -> list[str]:
     """Keep user/local settings but no instruction file or callable capability.
 
     The user source still carries login and model state. Its instruction
@@ -177,6 +209,7 @@ def claude_project_discovery_args() -> list[str]:
             "disableAllHooks": True,
             "disableBundledSkills": True,
             "disableSkillShellExecution": True,
+            **({"includeGitInstructions": False} if disable_git_snapshot else {}),
         },
         separators=(",", ":"),
         sort_keys=True,

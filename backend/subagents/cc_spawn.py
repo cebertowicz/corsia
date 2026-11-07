@@ -33,6 +33,7 @@ from subagents.cc_runtime_markers import (
 from subagents.cc_runtime_quiescence import cleanup_ephemeral_live
 from subagents.cc_runtime_state import Broadcast, _LIVE
 from subagents.cc_spawn_prepare import CCSpawnRequest, PreparedCCSpawn, prepare_spawn
+from subagents.cc_git_snapshot import prepare_session_git_snapshot
 from subagents.cc_stream import CCStreamSession
 
 log = logging.getLogger("subagents.cc_runtime")
@@ -127,6 +128,7 @@ async def _start_process(prepared: PreparedCCSpawn) -> None:
         corsia_thread_id=prepared.child_id,
     )
     live.session = session
+    await prepare_session_git_snapshot(session, prepared.working_dir)
     _previous_id, session_row = await run_in_db(
         persist_cc_session,
         prepared.child_id,

@@ -16,6 +16,7 @@ from core._tool_result_delivery_support import ToolResultBindingError
 from core.fork_cc_context import CCForkContext
 from infra.write_admission import sqlite_errorname_tag
 from subagents.cc_confinement import drop_untrusted_credentials
+from subagents.cc_git_snapshot import prepare_session_git_snapshot
 from subagents.cc_invocation import CONFINEMENT_NONE, ClaudeInvocation, build_claude_cmd
 from subagents.cc_env import apply_claude_config_dir, clean_claude_env
 from subagents.cc_events import normalize_event
@@ -76,6 +77,7 @@ class CCStreamSession:
         self.effort = effort
         self.permission_mode = permission_mode
         self.working_dir = working_dir
+        self.disable_git_snapshot: bool | None = None
         self.claude_dir = claude_dir
         self.confinement = confinement
         self._on_event = on_event
@@ -107,6 +109,7 @@ class CCStreamSession:
             model=self.model,
             effort=self.effort,
             confinement=self.confinement,
+            disable_git_snapshot=self.disable_git_snapshot,
         )
 
     def build_cmd(self) -> list[str]:
@@ -139,6 +142,7 @@ class CCStreamSession:
         from subagents.vendor_write_admission import prepare_session_launch
 
         await run_in_db(prepare_session_launch, self, 'claude-code')
+        await prepare_session_git_snapshot(self, self.working_dir)
         from subagents.cc_sessions import require_resume_in_root
 
         require_resume_in_root(self.resume_session_id, self.reconstructed_transcript_path, self.claude_dir)

@@ -673,7 +673,7 @@ async def test_cc_usable_body_retains_process_exit_diagnostic(monkeypatch, vendo
 
         return FakeProcess(stdout, returncode=7, stderr=b"quota/auth process terminal")
 
-    monkeypatch.setattr(fork_cc_commands, "cold_command", lambda _request, _kind: ["claude"])
+    monkeypatch.setattr(fork_cc_commands, "cold_command", lambda _request, _kind, **_kwargs: ["claude"])
     monkeypatch.setattr(cc, "_fork_env", lambda *_args: {})
     monkeypatch.setattr(cc, "_spawn_process", spawn)
     request = replace(_request(None), target=_target("claude-code"))
@@ -707,7 +707,7 @@ async def test_cc_process_context_limit_retains_partial_body(monkeypatch, vendor
 
         return FakeProcess(stdout, returncode=1, stderr=b"Prompt is too long")
 
-    monkeypatch.setattr(fork_cc_commands, "cold_command", lambda _request, _kind: ["claude"])
+    monkeypatch.setattr(fork_cc_commands, "cold_command", lambda _request, _kind, **_kwargs: ["claude"])
     monkeypatch.setattr(cc, "_fork_env", lambda *_args: {})
     monkeypatch.setattr(cc, "_spawn_process", spawn)
     request = replace(_request(None), target=_target("claude-code"))

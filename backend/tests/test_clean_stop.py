@@ -1325,6 +1325,7 @@ async def test_cc_stopped_continuation_never_builds_replacement_process(
         working_dir="/tmp",
         resume_session_id="provider-session",
         cc_session_id="provider-session",
+        prior_invocation=None,
         reconstruction=SimpleNamespace(
             snapshot_id="snapshot-stopped-continuation",
             snapshot=SimpleNamespace(to_dict=lambda: {}),

@@ -50,6 +50,7 @@ def _cc_launch_context(snapshot_id: str):
         working_dir="/tmp",
         resume_session_id="provider-session",
         cc_session_id="provider-session",
+        prior_invocation=None,
         reconstruction=SimpleNamespace(
             snapshot_id=snapshot_id,
             snapshot=SimpleNamespace(to_dict=lambda: {}),
