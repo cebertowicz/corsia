@@ -642,11 +642,24 @@ async def test_held_login_waits_past_the_command_bound_and_shows_no_vendor_outpu
 @both
 async def test_a_login_the_browser_never_returns_to_ends_failed_timed_out_and_the_vendor_is_killed(scripted_vendor_clis, provider, monkeypatch, tmp_path):
     from connections import account_controls
+    from connections.harness_process import killed_on_exit
+
+    spawn = account_controls._spawn
+
+    async def spawn_started(vendor, home, binary, action):
+        process = await spawn(vendor, home, binary, action)
+        if action == "login":
+            async with killed_on_exit(process):
+                await _started(scripted_vendor_clis["log"])
+        return process
 
     account = scripted_vendor_clis[provider]
     monkeypatch.setenv("LOGIN_HOLD", str(tmp_path / "never"))
     monkeypatch.setattr(account_controls, "_SIGNIN_WAIT_SECONDS", 0.3)
-    await account_controls.start_signin(account["id"])
+    # Start the held-login bound after the synthetic script has actually started.
+    with monkeypatch.context() as setup:
+        setup.setattr(account_controls, "_spawn", spawn_started)
+        await account_controls.start_signin(account["id"])
     await _started(scripted_vendor_clis["log"])
     process = account_controls._SIGNINS[account["id"]].process
     ended = await _finished(account["id"])
