@@ -5,6 +5,7 @@ import { chatReplyJump } from '$lib/stores/chatReplyJump';
 import type { AttentionDestination } from '$lib/api/attentionQueue';
 import type { PagerState } from '$lib/messagePager';
 import type { RunLoad, RunStub } from '$lib/focusRuns';
+import { commentLanding } from './chatUnreadTargets';
 
 export type JumpPort = {
 	pager: () => PagerState;
@@ -61,27 +62,22 @@ export function createChatReplyJumper(port: JumpPort) {
 			return false;
 		}
 		const element = port.element();
-		const row = element?.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(target.messageId)}"]`);
-		const card = row?.querySelector<HTMLElement>(`[data-chat-comment="${CSS.escape(target.cid)}"]`);
+		const comment = get(messages).find(message => message.id === target.messageId && message.thread_id === threadId)
+			?.chat_comments?.find(comment => comment.cid === target.cid && (!destination.user_message_id || comment.user_message_id === destination.user_message_id));
+		// The highlight when the comment's text is still in the message; otherwise the detached thread rendered under it.
+		const landing = element && comment ? commentLanding(element, target.messageId, comment) : null;
+		const mark = landing?.hasAttribute('data-comment-ids') ? landing : null;
 		chatReplyJump.set(null);
-		if (!card) return false;
-		const mark = [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids]') ?? [])]
-			.find(item => item.dataset.commentIds?.split(',').includes(card.dataset.commentUuid ?? ''));
-		const focus = mark ?? card;
-		const priorTabIndex = focus.getAttribute('tabindex');
-		focus.tabIndex = -1;
-		focus.scrollIntoView({ block: 'center' });
-		focus.focus({ preventScroll: true });
-		card.classList.add('chat-reply-landed');
-		mark?.classList.add('chat-reply-mark-landed');
-		const clear = () => {
-			card.classList.remove('chat-reply-landed');
-			mark?.classList.remove('chat-reply-mark-landed');
-			if (priorTabIndex === null) focus.removeAttribute('tabindex'); else focus.setAttribute('tabindex', priorTabIndex);
-		};
+		if (!landing) return false;
+		landing.scrollIntoView({ block: 'center' });
+		landing.focus({ preventScroll: true });
+		const landedClass = mark ? 'chat-reply-mark-landed' : 'chat-reply-landed';
+		landing.classList.add(landedClass);
+		mark?.click();
+		const clear = () => landing.classList.remove(landedClass);
 		if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
 			element?.addEventListener('scroll', clear, { once: true });
-			card.addEventListener('pointerdown', clear, { once: true });
+			landing.addEventListener('pointerdown', clear, { once: true });
 		} else window.setTimeout(clear, 2000);
 		return false;
 	}

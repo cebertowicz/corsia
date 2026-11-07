@@ -8,6 +8,7 @@
 	import MessageArtifactCards from './MessageArtifactCards.svelte';
 	import ToolActivityBlock from './ToolActivityBlock.svelte';
 	import ChatCommentThreads from './ChatCommentThreads.svelte';
+	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
 
 	let {
 		msg,
@@ -34,6 +35,16 @@
 		/** Holds whose ask card is on screen elsewhere in the transcript. */
 		renderedAsks?: ReadonlySet<string>;
 	} = $props();
+
+	// The comments the highlight pass could not anchor on this message's rendered text. They have no mark to
+	// open, so they show as a detached thread under the message: that is their surface, and the surface an
+	// unread reply jumps to.
+	const detachedComments = $derived.by(() => {
+		if (!msg.id) return [];
+		const unplaced = chatCommentPlacement.unplacedIds(msg.id);
+		if (!unplaced.length) return [];
+		return (msg.chat_comments ?? []).filter((comment: { id: string }) => unplaced.includes(comment.id));
+	});
 
 	let openingAnnouncement = $state('');
 	$effect(() => {
@@ -154,6 +165,7 @@
 	{/if}
 
 	{#if showContent && msg.content}
+	<div class="comment-mark-layer">
 	<div class="md-content long-message-body">
 		{#if msg.firstRunOpeningReveal}
 			<span class="sr-only" aria-live="polite" aria-atomic="true">{openingAnnouncement}</span>
@@ -167,9 +179,12 @@
 			{/if}
 		</div>
 	</div>
+	</div>
 	{/if}
 
-	<ChatCommentThreads messageId={msg.id} threadId={msg.thread_id} comments={msg.chat_comments ?? []} />
+	{#if showContent && msg.thread_id && detachedComments.length}
+		<ChatCommentThreads messageId={msg.id} threadId={msg.thread_id} comments={detachedComments} detached />
+	{/if}
 
 	{#if msg.cards?.length || browserChip}
 		<MessageArtifactCards cards={msg.cards ?? []} browser={browserChip} threadId={msg.thread_id} {hiddenHolds} {renderedAsks} />
@@ -187,6 +202,7 @@
 </div>
 
 <style>
+	.comment-mark-layer { position: relative; }
 	.sr-only {
 		position: absolute; inline-size: 0; block-size: 0; margin: 0; padding: 0;
 		overflow: hidden; clip-path: inset(50%); white-space: nowrap;
