@@ -25,11 +25,13 @@ let host: HTMLElement;
 let components: unknown[] = [];
 
 /** The transcript row and the highlight surface, mounted the way the chat mounts them. */
-function mountTranscript(quote: string, onSendReply = vi.fn()) {
+function mountTranscript(quote: string, onSendReply = vi.fn(), activityFirst = false) {
 	vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }));
 	vi.stubGlobal('CSS', { escape: (value: string) => value });
 	host = document.createElement('div');
-	host.innerHTML = '<div class="messages"><div class="message assistant" data-message-id="m1"><div id="message"></div></div></div><div id="mount"></div>';
+	// Focus mode can draw a message's activity line, which carries the same message id, above its text row.
+	const activity = activityFirst ? '<div class="block-line" data-message-id="m1"></div>' : '';
+	host.innerHTML = `<div class="messages">${activity}<div class="message assistant" data-message-id="m1"><div id="message"></div></div></div><div id="mount"></div>`;
 	document.body.append(host);
 	const row = { id: 'm1', seq: 5, thread_id: 'thread', role: 'assistant', content: CONTENT, chat_comments: [comment(quote)] };
 	messages.set([row as never]);
@@ -48,8 +50,8 @@ function mountTranscript(quote: string, onSendReply = vi.fn()) {
 }
 
 /** Replying from a detached thread has to behave like replying from a highlight: the same thread, the same immediate send. */
-async function replyFromDetachedThread(onSendReply: Parameters<typeof mountTranscript>[1]) {
-	const { row } = mountTranscript('Gone text', onSendReply);
+async function replyFromDetachedThread(onSendReply: Parameters<typeof mountTranscript>[1], activityFirst = false, send = true) {
+	const { row } = mountTranscript('Gone text', onSendReply, activityFirst);
 	await vi.waitFor(() => expect(row()?.querySelector('[data-reply-comment="one"]')).not.toBeNull());
 	row()!.querySelector<HTMLElement>('[data-reply-comment="one"]')!.click();
 	flushSync();
@@ -62,6 +64,7 @@ async function replyFromDetachedThread(onSendReply: Parameters<typeof mountTrans
 	field!.value = 'Because it changed';
 	field!.dispatchEvent(new Event('input', { bubbles: true }));
 	flushSync();
+	if (!send) return;
 	dialog!.querySelector<HTMLElement>('[data-send-reply]')!.click();
 	flushSync();
 }
@@ -93,6 +96,24 @@ it('replies from the detached thread on the same path the popover uses', async (
 	expect(onSendReply).toHaveBeenCalledTimes(1);
 	const sent = onSendReply.mock.calls[0][0];
 	expect(sent).toMatchObject({ messageId: 'm1', seq: 5, quote: 'Gone text', note: 'Because it changed', root_cid: 'c1', root_user_message_id: 'user-message' });
+});
+
+it('shows the detached thread when the message’s activity line is drawn above its text', async () => {
+	const onSendReply = vi.fn();
+	await replyFromDetachedThread(onSendReply, true);
+	expect(onSendReply).toHaveBeenCalledTimes(1);
+});
+
+it('keeps an unsent reply when the window narrows from the popover to the drawer', async () => {
+	vi.stubGlobal('innerWidth', 1440);
+	await replyFromDetachedThread(vi.fn(), false, false);
+	vi.stubGlobal('innerWidth', 500);
+	window.dispatchEvent(new Event('resize'));
+	flushSync();
+	await tick();
+	const field = document.body.querySelector<HTMLTextAreaElement>('[data-adaptive-drawer] .ct-input');
+	expect(field, 'the drawer replaces the popover').toBeTruthy();
+	expect(field!.value).toBe('Because it changed');
 });
 
 it('leaves a comment whose text is still in the message on its highlight alone', async () => {

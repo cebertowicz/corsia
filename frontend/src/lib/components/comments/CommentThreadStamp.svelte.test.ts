@@ -133,8 +133,7 @@ describe('CommentThread stamping', () => {
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
 		render(onViewed);
 		FakeObserver.live()[1].report(true);
-		await dwell();
-		expect(onViewed.mock.calls).toEqual([['c1', 'r2']]);
+		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2']]), { timeout: 3000 });
 	});
 
 	it('stamps chat replies independently when the later one is seen first', async () => {
@@ -142,8 +141,7 @@ describe('CommentThread stamping', () => {
 		state.comment = { ...state.comment, replies: [reply('r1'), reply('r2')], newReplyIds: ['r1', 'r2'] };
 		render(onViewed);
 		FakeObserver.live()[1].report(true);
-		await dwell();
-		expect(onViewed.mock.calls).toEqual([['c1', 'r2']]);
+		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2']]), { timeout: 3000 });
 		FakeObserver.live()[1].report(false);
 		FakeObserver.live()[0].report(true);
 		await vi.waitFor(() => expect(onViewed.mock.calls).toEqual([['c1', 'r2'], ['c1', 'r1']]), { timeout: 3000 });

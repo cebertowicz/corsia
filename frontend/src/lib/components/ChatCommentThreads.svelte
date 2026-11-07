@@ -11,7 +11,7 @@
 	import CommentReplyList from './comments/CommentReplyList.svelte';
 	import './comments/comment-link.css';
 
-	let { messageId, threadId, comments, onReply, keepReplyVisible = false, detached = false }: { messageId: string; threadId: string; comments: ChatComment[]; onReply?: (text: string) => void; keepReplyVisible?: boolean; detached?: boolean } = $props();
+	let { messageId, threadId, comments, onReply, keepReplyVisible = false, detached = false, replyDrafts = $bindable({}) }: { messageId: string; threadId: string; comments: ChatComment[]; onReply?: (text: string) => void; keepReplyVisible?: boolean; detached?: boolean; /** Unsent replies by comment id, caller-owned so a remount keeps them. */ replyDrafts?: Record<string, string> } = $props();
 	// Built once per change of the loaded rows, then read per comment: the pending and failed sends of this thread.
 	const replies = $derived(chatReplyIndex($messages, threadId));
 	const agentName = $derived.by(() => {
@@ -52,7 +52,7 @@
 		{#each comments as comment (`${comment.user_message_id}:${comment.cid}`)}
 			<div class="chat-comment-thread" data-chat-comment={comment.cid} data-comment-uuid={comment.id} tabindex="-1">
 				{#if !detached}<CommentQuote quote={comment.quote} />{/if}
-				<CommentThread comment={thread(comment)} readOnly={!onReply} flat hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { onReply?.(text); for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); }}>
+				<CommentThread comment={thread(comment)} readOnly={!onReply} flat hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} bind:replyText={() => replyDrafts[comment.id] ?? '', (text) => replyDrafts[comment.id] = text} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { onReply?.(text); for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); }}>
 				{#snippet failure()}
 				{#each replies.pending(comment) as pending (pending.id)}
 					<div class="pending-reply" role="status">

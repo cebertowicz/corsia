@@ -27,6 +27,8 @@
 	const threadAnchor = () => viewing ? commentRect(viewing.commentId, viewing.messageId) : null;
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
+	// Unsent replies in the open thread, by comment, held here for the same reason.
+	let replyDrafts = $state<Record<string, string>>({});
 	let buttonWidth = $state(0);
 	let narrow = $state(false);
 	const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
@@ -56,13 +58,14 @@
 	}
 	/** Where a comment is drawn: its highlight; else, for text the message no longer shows, its thread under the message; else the message body. */
 	function commentRect(commentId: string, messageId: string): DOMRect | null {
-		const row = document.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+		// The text row, not the activity line Focus mode can draw above it under the same id.
+		const row = document.querySelector(`.message[data-message-id="${CSS.escape(messageId)}"]`);
 		return [...document.querySelectorAll<HTMLElement>('[data-comment-ids]')].find(el => el.dataset.commentIds?.split(',').includes(commentId))?.getBoundingClientRect()
 			?? row?.querySelector<HTMLElement>(`[data-comment-uuid="${CSS.escape(commentId)}"]`)?.getBoundingClientRect()
 			?? bodyOf(row)?.getBoundingClientRect() ?? null;
 	}
 	function close() {
-		pick = null; draft = null; editingId = null; viewing = null; typed = null;
+		pick = null; draft = null; editingId = null; viewing = null; typed = null; replyDrafts = {};
 		window.getSelection()?.removeAllRanges();
 		const focus = returnFocus; returnFocus = null;
 		if (focus) void tick().then(() => focus.focus());
@@ -197,7 +200,7 @@
 			}
 		}
 		if (focusedId && focusedMessageId) {
-			const row = root.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(focusedMessageId)}"]`);
+			const row = root.querySelector<HTMLElement>(`.message[data-message-id="${CSS.escape(focusedMessageId)}"]`);
 			const replacement = [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids][role="button"]') ?? [])]
 				.find(mark => mark.dataset.commentIds?.split(',').includes(focusedId));
 			replacement?.focus({ preventScroll: true });
@@ -317,11 +320,11 @@
 {#if viewing && viewedComment && threadId && !open}
 	{#if narrow}
 		<AdaptiveDrawer ariaLabel="Comment thread" heading="Comments" doneLabel="Close" followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
-			<ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} keepReplyVisible />
+			<ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} bind:replyDrafts onReply={replyInThread} keepReplyVisible />
 		</AdaptiveDrawer>
 	{:else}
 		<Popover anchor={threadAnchor} bounds={messageRoot()} placement="bottom" open={!closing} surfaceRole={null} onClose={requestClose} onClosed={closed}>
-			<div role="dialog" aria-label="Comment thread"><ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} /></div>
+			<div role="dialog" aria-label="Comment thread"><ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} bind:replyDrafts onReply={replyInThread} /></div>
 		</Popover>
 	{/if}
 {/if}
