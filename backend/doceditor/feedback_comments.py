@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from doceditor import comment_acks
 from doceditor.feedback_state import USER_AUTHOR_ID
 from doceditor.note_names import document_name
 from events.envelope import normalize
@@ -37,10 +38,66 @@ def _recipient_for_author(comment: dict[str, Any]) -> str:
     )
 
 
+def _agent_authors(db, root_id: str) -> set[str]:
+    return {str(row["author_thread_id"]) for row in db.execute(
+        """SELECT DISTINCT author_thread_id FROM doc_comments
+           WHERE (id=? OR parent_id=?) AND author_kind='agent'
+             AND author_thread_id IS NOT NULL""", (root_id, root_id),
+    )}
+
+
+def _tagged_agents(db, root_id: str, *, delivered_only: bool) -> set[str]:
+    if not delivered_only:
+        return {str(row["agent_id"]) for row in db.execute(
+            """SELECT DISTINCT t.agent_id FROM doc_comment_tags t JOIN doc_comments c ON c.id=t.comment_id
+               WHERE c.id=? OR c.parent_id=?""", (root_id, root_id),
+        )}
+    return {str(row["agent_id"]) for row in db.execute(
+        """SELECT DISTINCT t.agent_id FROM doc_comment_tags t
+           JOIN doc_comments c ON c.id=t.comment_id
+           JOIN doc_feedback_batch_items i ON i.comment_id=c.id
+           JOIN doc_feedback_batches b ON b.id=i.batch_id AND b.recipient_id=t.agent_id
+           WHERE (c.id=? OR c.parent_id=?) AND b.state='delivered'
+             AND b.delivery_outcome='node'""", (root_id, root_id),
+    )}
+
+
+def _left_agents(db, root_id: str) -> set[str]:
+    return {str(row["agent_id"]) for row in db.execute(
+        "SELECT agent_id FROM doc_comment_recipient_state WHERE root_id=? AND left_thread=1", (root_id,),
+    )}
+
+
+def participants(db, root_id: str) -> set[str]:
+    """Everyone who commented on or is tagged into a thread, who must acknowledge it before it resolves.
+
+    The person counts by commenting or by an agent's tag of them; an agent by commenting or by any
+    tag, delivered or not, so the thread cannot resolve before a tagged agent has had its say. An
+    agent that left the thread is no longer in it, until a tag brings it back.
+    """
+    rows = db.execute(
+        "SELECT author_kind,tagged_user_id FROM doc_comments WHERE id=? OR parent_id=?", (root_id, root_id),
+    ).fetchall()
+    people = {USER_AUTHOR_ID} if any(row["author_kind"] == "user" or row["tagged_user_id"] for row in rows) else set()
+    agents = (_agent_authors(db, root_id) | _tagged_agents(db, root_id, delivered_only=False)) - _left_agents(db, root_id)
+    return people | agents
+
+
+def agreed(db, root_id: str) -> bool:
+    """Everyone in the thread has acknowledged it."""
+    people = participants(db, root_id)
+    return bool(people) and people <= comment_acks.acknowledgers(db, root_id)
+
+
 def recipients(
     db, comment: dict[str, Any], *, document_owner_only: bool = False,
 ) -> tuple[str, ...]:
-    """Resolve feedback recipients, or only the document owner for a user reopen."""
+    """Resolve feedback recipients, or only the document owner for a user reopen.
+
+    An agent that left the thread or acknowledged it is not woken, unless this comment tags it;
+    the document owner still gets the person's comments. The person's own acknowledgement never
+    stops replies reaching them.
+    """
     artifact = registry_models.get_artifact(comment["artifact_id"], db=db)
     owner = str(artifact.get("parent_thread_id") or "") if artifact else ""
     if document_owner_only:
@@ -52,24 +109,11 @@ def recipients(
     resolved = {owner, *tagged}
     if root is not None:
         resolved.add(_recipient_for_author(root))
-        resolved.update(str(row["author_thread_id"]) for row in db.execute(
-            """SELECT DISTINCT author_thread_id FROM doc_comments
-               WHERE (id=? OR parent_id=?) AND author_kind='agent'
-                 AND author_thread_id IS NOT NULL""", (root_id, root_id),
-        ))
+        resolved.update(_agent_authors(db, root_id))
         # A held tag does not make someone a participant until its batch is delivered.
-        resolved.update(str(row["agent_id"]) for row in db.execute(
-            """SELECT DISTINCT t.agent_id FROM doc_comment_tags t
-               JOIN doc_comments c ON c.id=t.comment_id
-               JOIN doc_feedback_batch_items i ON i.comment_id=c.id
-               JOIN doc_feedback_batches b ON b.id=i.batch_id AND b.recipient_id=t.agent_id
-               WHERE (c.id=? OR c.parent_id=?) AND b.state='delivered'
-                 AND b.delivery_outcome='node'""", (root_id, root_id),
-        ))
-    left = {str(row["agent_id"]) for row in db.execute(
-        "SELECT agent_id FROM doc_comment_recipient_state WHERE root_id=? AND left_thread=1", (root_id,),
-    )}
-    resolved.difference_update(left - tagged)
+        resolved.update(_tagged_agents(db, root_id, delivered_only=True))
+    quiet = _left_agents(db, root_id) | (comment_acks.acknowledgers(db, root_id) - {comment_acks.PERSON})
+    resolved.difference_update(quiet - tagged)
     if comment["author_kind"] == "user":
         resolved.add(owner)
     resolved.discard(author)

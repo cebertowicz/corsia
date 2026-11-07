@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, tick, unmount } from 'svelte';
 import { fromStore, get, writable } from 'svelte/store';
+import type { Acknowledger } from '$lib/api/docCommentTypes';
 
 const mocks = vi.hoisted(() => ({
 	decideSuggestion: vi.fn(), flushDraft: vi.fn(), seedDraft: vi.fn(), loadComments: vi.fn(),
@@ -817,7 +818,7 @@ describe('DocCommentSurface comments on images inside a document', () => {
 	});
 
 	it('keeps a thread being replied to in the Open list when someone else resolves it, until the reply is cleared', async () => {
-		const plain = { ...suggestion, replacement: undefined, acked: false };
+		const plain = { ...suggestion, replacement: undefined, acked: false, acknowledgedBy: [] as Acknowledger[] };
 		const comments = writable([plain, { ...plain, id: 'comment-2', anchor: 'other text' }]);
 		const state = fromStore(comments);
 		Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
@@ -831,7 +832,7 @@ describe('DocCommentSurface comments on images inside a document', () => {
 			eased.push([this, Array.isArray(keyframes) ? keyframes.length : 0]);
 			return { cancel() {}, finish() {}, addEventListener() {}, removeEventListener() {}, currentTime: 0, playState: 'finished', finished: Promise.resolve() } as unknown as Animation;
 		});
-		comments.set([{ ...plain, resolved: true, acked: true }, { ...plain, id: 'comment-2', anchor: 'other text' }]); flushSync();
+		comments.set([{ ...plain, resolved: true, acked: true, acknowledgedBy: [{ id: 'ui', name: 'Steve', kind: 'user' }] }, { ...plain, id: 'comment-2', anchor: 'other text' }]); flushSync();
 		const card = document.body.querySelector<HTMLElement>('[data-comment-id="comment-1"]')!;
 		expect(card).not.toBeNull();
 		expect(card.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('half a reply');

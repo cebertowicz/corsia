@@ -23,7 +23,7 @@ let history: string[][] = [];
 
 const serverComment = (id: string): ServerComment => ({
 	id, artifact_id: ART, parent_id: null, author: 'agent-a', author_kind: 'agent', body: 'A comment.',
-	anchor_text: 'x', from_off: 1, to_off: 4, review: 0, resolved: 0, acked: 0, orphaned: false,
+	anchor_text: 'x', from_off: 1, to_off: 4, review: 0, resolved: 0, orphaned: false,
 	created_at: '2026-10-08T20:00:00Z', updated_at: '2026-10-08T20:00:00Z', replies: [],
 } as ServerComment);
 

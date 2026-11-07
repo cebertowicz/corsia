@@ -5,7 +5,7 @@ import json
 import sqlite3
 
 from core.agent_roster_queries import agent_rows
-from doceditor import writer_line_count
+from doceditor import comment_acks, writer_line_count
 from doceditor.comment_action_errors import CommentActionError
 from infra.accounts import get_user
 from infra.queries import get_thread_for_user
@@ -126,6 +126,9 @@ def save_tags(db, comment: dict, agent_ids: list[str]) -> None:
             "INSERT INTO doc_comment_tags(comment_id,agent_id,agent_name) VALUES (?,?,?)",
             (comment["id"], agent_id, name),
         )
+    if agent_ids and comment.get("parent_id"):
+        from doceditor.comments import reopen_unless_agreed
+        reopen_unless_agreed(db, root_id(comment))
 
 
 def _person_names(db, rows: list[dict]) -> dict[str, str]:
@@ -198,28 +201,38 @@ def leave(db, comment: dict, agent_id: str) -> None:
     if not involved:
         raise ValueError("You are not on this comment thread")
     db.execute("""INSERT INTO doc_comment_recipient_state(root_id,agent_id,left_thread,notifications)
-        VALUES (?,?,1,0) ON CONFLICT(root_id,agent_id) DO UPDATE SET left_thread=1,notifications=0""", (root_id(comment), agent_id))
+        VALUES (?,?,1,0) ON CONFLICT(root_id,agent_id) DO UPDATE SET left_thread=1,notifications=0""", (root, agent_id))
+    from doceditor.comment_state_updates import resolve_after_leave
+
+    resolve_after_leave(db, root, agent_id)
 
 
 def reinstate(db, comment: dict, agent_id: str) -> None:
+    """A delivered tag brings an agent back: it is on the thread again, and its acknowledgement is asked for again."""
     db.execute("""INSERT INTO doc_comment_recipient_state(root_id,agent_id,left_thread)
         VALUES (?,?,0) ON CONFLICT(root_id,agent_id) DO UPDATE SET left_thread=0""", (root_id(comment), agent_id))
+    if comment_acks.clear(db, root_id(comment), agent_id):
+        from doceditor.comment_notifications import announce_after_commit
+        announce_after_commit(db, comment["artifact_id"])
+    from doceditor.comments import reopen_unless_agreed
+    reopen_unless_agreed(db, root_id(comment))
 
 
-def filter_left_replies(db, items: list[dict], agent_id: str, *, person_owner: bool) -> list[dict]:
-    """Do not deliver held replies after their recipient has left the thread."""
+def filter_stopped_replies(db, items: list[dict], agent_id: str, *, person_owner: bool) -> list[dict]:
+    """Do not deliver held replies after their recipient has left or acknowledged the thread."""
     roots = {root_id(item) for item in items if item.get("kind") == "comment"}
     if not roots:
         return items
-    left_roots = {
+    stopped_roots = {
         root for root in roots if db.execute(
-            "SELECT 1 FROM doc_comment_recipient_state WHERE root_id=? AND agent_id=? AND left_thread=1",
-            (root, agent_id),
+            """SELECT 1 FROM doc_comment_recipient_state WHERE root_id=? AND agent_id=? AND left_thread=1
+               UNION ALL SELECT 1 FROM doc_comment_acks WHERE root_id=? AND actor_id=?""",
+            (root, agent_id, root, agent_id),
         ).fetchone()
     }
     def keep(item: dict) -> bool:
         if (person_owner or item.get("kind") != "comment" or not item.get("parent_id")
-                or root_id(item) not in left_roots):
+                or root_id(item) not in stopped_roots):
             return True
         return bool(item.get("event") != "reopened" and db.execute(
             "SELECT 1 FROM doc_comment_tags WHERE comment_id=? AND agent_id=?", (item["id"], agent_id),

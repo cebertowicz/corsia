@@ -124,7 +124,6 @@ def _record_decision_row(
         "decided_in_bulk": bulk,
         "resolved": not replied,
         "closed_by_decision": not replied,
-        "acked": True,
     }, db=connection)
     if row is None:
         raise CommentActionError("not_found", "Comment not found")
@@ -199,7 +198,6 @@ def reopen_fields(comment: dict[str, Any], fields: dict[str, Any]) -> dict[str, 
                 "suggestion_decision_required",
                 "Accept or reject this suggestion instead of resolving it.",
             )
-        fields = {**fields, "acked": True}
     if fields.get("resolved") is not False or not comment.get("decision"):
         return fields
     if comment["decision"] == DECISIONS["accept"]:

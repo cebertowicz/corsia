@@ -8,7 +8,7 @@ import type { DocumentFreshness } from '$lib/docFreshness';
 import type { CommentList, ImageRegion, ServerComment } from './docCommentTypes';
 
 export type { ArtifactRow, DocContent, DocRevision } from './docTypes';
-export type { CommentFeedback, CommentList, ImageRegion, ServerComment } from './docCommentTypes';
+export type { Acknowledger, CommentFeedback, CommentList, ImageRegion, ServerComment } from './docCommentTypes';
 
 function tok(): string {
 	return encodeURIComponent(get(token) ?? '');

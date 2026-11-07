@@ -91,5 +91,5 @@ async def test_user_comments_replies_and_updates_name_nothing(
     updated = json.loads(await DocCommentUpdateTool().execute(
         comment_id=root["id"], acked=True, _thread_id=owner,
     ))
-    assert updated["comment"]["acked"] == 1
+    assert [ack["id"] for ack in updated["comment"]["acknowledged_by"]] == [owner]
     assert sent == [plain]

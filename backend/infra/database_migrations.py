@@ -240,6 +240,7 @@ from infra.migration_179_to_180_comment_replies_index import migrate_179_to_180
 from infra.migration_180_to_181_comment_writer_line import migrate_180_to_181
 from infra.migration_181_to_182_comment_tagged_user import migrate_181_to_182
 from infra.migration_182_to_183_local_only_cut import migrate_182_to_183
+from infra.migration_183_to_184_comment_acks import migrate_183_to_184
 from infra.migration_mcp_secrets import FROM_VERSION as MCP_SECRETS_FROM_VERSION
 from infra.migration_mcp_secrets import migrate_mcp_secrets
 
@@ -911,6 +912,7 @@ MIGRATIONS[179] = migrate_179_to_180
 MIGRATIONS[180] = migrate_180_to_181
 MIGRATIONS[181] = migrate_181_to_182
 MIGRATIONS[182] = migrate_182_to_183
+MIGRATIONS[183] = migrate_183_to_184
 
 
 def _connection_database_path(conn: sqlite3.Connection) -> Path | None:

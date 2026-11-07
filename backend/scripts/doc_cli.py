@@ -201,7 +201,8 @@ def _print_threads(threads: list) -> None:
         return
     for t in threads:
         flag = "✓" if t.get("resolved") else "•"
-        acked = " (acked)" if t.get("acked") and not t.get("resolved") else ""
+        names = ", ".join(ack["name"] for ack in t.get("acknowledged_by") or [])
+        acked = f" (acknowledged by {names})" if names and not t.get("resolved") else ""
         anchor = (f" [{t['anchor_text']}]" if t.get("anchor_text")
                   else (" [review]" if t.get("review") else ""))
         print(f"{flag} {t.get('id')} {t.get('author')} ({t.get('author_kind')}){anchor}{acked}")

@@ -9,16 +9,16 @@ from doceditor import comments
 
 
 BASE_ROWS = [
-    ("first", "original", 0, 6, 0, 0),
-    ("foreign", "original", 0, 6, 0, 0),
-    ("second", "original", 0, 6, 0, 0),
+    ("first", "original", 0, 6, 0),
+    ("foreign", "original", 0, 6, 0),
+    ("second", "original", 0, 6, 0),
 ]
 
 
 def _rows(path):
     with closing(sqlite3.connect(str(path))) as db:
         return db.execute(
-            "SELECT id,body,from_off,to_off,resolved,acked FROM doc_comments ORDER BY id"
+            "SELECT id,body,from_off,to_off,resolved FROM doc_comments ORDER BY id"
         ).fetchall()
 
 
@@ -40,7 +40,7 @@ def _change(operation, *, db=None):
     if operation == "create":
         return comments.create("document", body="new", client_id="new", db=db)
     if operation == "update":
-        return comments.update("first", {"body": "changed", "resolved": True, "acked": True}, db=db)
+        return comments.update("first", {"body": "changed", "resolved": True}, db=db)
     return comments.update_positions("document", [
         {"id": "first", "from_off": 10, "to_off": 16},
         {"id": "second", "from_off": 20, "to_off": 26},
@@ -153,14 +153,14 @@ def test_comment_result_is_durable_and_artifact_scoped(stored_comments, operatio
     result = _change(operation)
     if operation == "create":
         assert (result["id"], result["artifact_id"], result["body"]) == ("new", "document", "new")
-        assert _rows(stored_comments) == [*BASE_ROWS[:2], ("new", "new", None, None, 0, 0), BASE_ROWS[2]]
+        assert _rows(stored_comments) == [*BASE_ROWS[:2], ("new", "new", None, None, 0), BASE_ROWS[2]]
     elif operation == "update":
-        assert (result["body"], result["resolved"], result["acked"]) == ("changed", 1, 1)
-        assert _rows(stored_comments) == [("first", "changed", 0, 6, 1, 1), *BASE_ROWS[1:]]
+        assert (result["body"], result["resolved"]) == ("changed", 1)
+        assert _rows(stored_comments) == [("first", "changed", 0, 6, 1), *BASE_ROWS[1:]]
     else:
         assert result == 2
         assert _rows(stored_comments) == [
-            ("first", "original", 10, 16, 0, 0), BASE_ROWS[1], ("second", "original", 20, 26, 0, 0),
+            ("first", "original", 10, 16, 0), BASE_ROWS[1], ("second", "original", 20, 26, 0),
         ]
 
 

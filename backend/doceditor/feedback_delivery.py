@@ -136,7 +136,7 @@ def deliver_claimed(db, batch: Any) -> DeliveryResult:
         return DeliveryResult(outcome="ui")
     artifact = registry_models.get_artifact(str(_value(batch, "artifact_id")), db=db)
     before_filter = items
-    items = comment_recipients.filter_left_replies(
+    items = comment_recipients.filter_stopped_replies(
         db, items, recipient,
         person_owner=_value(batch, "author_kind") == "user" and bool(artifact)
         and artifact.get("parent_thread_id") == recipient,

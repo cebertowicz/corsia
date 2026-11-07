@@ -35,7 +35,7 @@ let view: EditorView;
 function serverComment(id: string): ServerComment {
 	return {
 		id, artifact_id: ART, parent_id: null, author: 'agent', author_kind: 'agent', body: 'c'.repeat(BODY),
-		anchor_text: 'anchored words', from_off: ANCHOR.from, to_off: ANCHOR.to, review: 0, resolved: 0, acked: 0, orphaned: false,
+		anchor_text: 'anchored words', from_off: ANCHOR.from, to_off: ANCHOR.to, review: 0, resolved: 0, orphaned: false,
 		created_at: '2026-10-10T20:00:00Z', updated_at: '2026-10-10T20:00:00Z', replies: [],
 	};
 }

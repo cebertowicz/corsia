@@ -151,7 +151,7 @@ async def test_native_tool_create_update_and_decision_each_send_one_frame(
     updated = json.loads(await DocCommentUpdateTool().execute(
         comment_id=created["comment"]["id"], acked=True, _thread_id=owner,
     ))
-    assert updated["comment"]["acked"] == 1
+    assert [ack["id"] for ack in updated["comment"]["acknowledged_by"]] == [owner]
     assert frames == [artifact_id] * 2
 
     suggestion = await _suggest(reviewer, doc)

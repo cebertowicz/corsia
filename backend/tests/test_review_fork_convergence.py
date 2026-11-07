@@ -22,7 +22,7 @@ def test_ended_continuation_keeps_visible_findings_for_ordinary_delivery(review_
     row = request(db, aid)
     fork_comment(db, aid, row["id"])
     visible = comments.list_for_artifact(aid, db=db)
-    assert len(visible) == 1 and not visible[0]["resolved"] and not visible[0]["acked"]
+    assert len(visible) == 1 and not visible[0]["resolved"] and not visible[0]["acknowledged_by"]
     continuation = review_requests.escalate_fork(db, row["id"], reason=reason)
     with write_transaction(db, scope="test_end_review_continuation"):
         public.close_review_node(db, continuation["node_id"], reason="The task ended without submission.")

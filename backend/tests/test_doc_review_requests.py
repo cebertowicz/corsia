@@ -146,8 +146,8 @@ def test_cancel_preserves_seen_and_replied_comments_and_ordinary_feedback(review
 
     assert review_requests.cancel(db, first["id"], actor)["state"] == "withdrawn"
 
-    kept = db.execute("SELECT resolved, acked FROM doc_comments WHERE id=?", (root,)).fetchone()
-    assert kept is not None and kept["resolved"] == 0 and kept["acked"] == 0
+    kept = db.execute("SELECT resolved FROM doc_comments WHERE id=?", (root,)).fetchone()
+    assert kept is not None and kept["resolved"] == 0
     assert db.execute("SELECT COUNT(*) FROM doc_comments WHERE id=?", (reply["id"],)).fetchone()[0] == 1
     assert db.execute("SELECT COUNT(*) FROM doc_comment_thread_views WHERE root_id=?", (root,)).fetchone()[0] == 1
     assert changed == []  # no comment write, so no comment-change announcement

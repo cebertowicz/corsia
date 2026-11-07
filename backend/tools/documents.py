@@ -229,7 +229,7 @@ class DocCommentUpdateTool(Tool):
     @property
     def description(self) -> str:
         return ("Resolve, acknowledge, edit, leave a comment thread, or accept/reject a document suggestion as the current agent thread. "
-                "You may edit only comments you wrote, and resolve or acknowledge only on a document you own or a "
+                "You may edit only comments you wrote, and resolve only on a document you own or a "
                 "comment you wrote; otherwise reply with doc_comment_create. " + PERSON_COMMENT_RESOLVE_RULE)
 
     @property
@@ -238,7 +238,9 @@ class DocCommentUpdateTool(Tool):
             "comment_id": {"type": "string"},
             "leave": {"type": "boolean", "description": "Leave this comment thread and stop its reply notifications; a tag can bring you back."},
             "resolved": {"type": ["boolean", "null"]},
-            "acked": {"type": ["boolean", "null"]},
+            "acked": {"type": ["boolean", "null"], "description": (
+                "Acknowledge the thread: agree without replying. It stops your wakes for this thread, and the "
+                "thread resolves once everyone who commented on or is tagged into it has acknowledged it.")},
             "body": {"type": ["string", "null"]},
             "from_off": {"type": ["integer", "null"]},
             "to_off": {"type": ["integer", "null"]},

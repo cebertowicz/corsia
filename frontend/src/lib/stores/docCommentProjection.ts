@@ -1,4 +1,4 @@
-import { type ImageRegion, type ServerComment } from '$lib/api/docs';
+import { type Acknowledger, type ImageRegion, type ServerComment } from '$lib/api/docs';
 import { relLabel } from '$lib/time';
 import type { Placement } from './docCommentPlacement';
 
@@ -40,7 +40,10 @@ export interface DocComment {
 	textChanged?: boolean;
 	/** When the thread last changed; a resolve sets it. The server keeps no separate resolve time, so this orders the resolved list. */
 	updatedAt?: string;
+	/** The person's own acknowledgement of the thread. */
 	acked?: boolean;
+	/** Everyone who has acknowledged the thread, in order. */
+	acknowledgedBy?: Acknowledger[];
 	review?: boolean;
 	replacement?: string | null;
 	insertAfter?: boolean;
@@ -99,7 +102,8 @@ export function fromServer(r: ServerComment): DocComment {
 		resolved: !!r.resolved,
 		orphaned: !!r.orphaned,
 		textChanged: !!r.text_changed,
-		acked: !!r.acked,
+		acked: (r.acknowledged_by ?? []).some((ack) => ack.kind === 'user'),
+		acknowledgedBy: r.acknowledged_by ?? [],
 		review: !!r.review,
 		replacement: r.replacement,
 		insertAfter: !!r.insert_after,

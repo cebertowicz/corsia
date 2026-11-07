@@ -27,7 +27,7 @@ let cleanups: Array<() => void> = [];
 
 const suggestion = (id: string, extra: Partial<ServerComment> = {}): ServerComment => ({
 	id, artifact_id: ART, parent_id: null, author: 'agent-a', author_kind: 'agent', author_thread_id: 'agent-a', body: 'Why.',
-	anchor_text: 'x', from_off: 1, to_off: 4, replacement: 'a longer replacement', review: 0, resolved: 0, acked: 0, orphaned: false,
+	anchor_text: 'x', from_off: 1, to_off: 4, replacement: 'a longer replacement', review: 0, resolved: 0, orphaned: false,
 	created_at: '2026-10-08T20:00:00Z', updated_at: '2026-10-08T20:00:00Z', replies: [], ...extra,
 } as ServerComment);
 
