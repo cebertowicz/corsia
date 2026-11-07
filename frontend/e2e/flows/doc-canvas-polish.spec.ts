@@ -166,7 +166,11 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 		expect(measured.text!.bottom).toBeLessThanOrEqual(measured.editor!.bottom);
 		expect(measured.editor!.height).toBeGreaterThan(measured.text!.height * 3);
 		if (mobile) {
-			expect(measured.header!.height).toBeCloseTo(measured.identity!.height + measured.actions!.height + measured.gap, 0);
+			// The status tools are inside the identity row, so their height is already included.
+			expect(measured.identity!.top).toBeGreaterThanOrEqual(measured.header!.top);
+			expect(measured.identity!.bottom).toBeLessThanOrEqual(measured.header!.bottom);
+			expect(measured.actions!.top).toBeGreaterThanOrEqual(measured.identity!.top);
+			expect(measured.actions!.bottom).toBeLessThanOrEqual(measured.identity!.bottom);
 			expect(measured.visibleLines.length).toBeGreaterThanOrEqual(3);
 			// A commented line also carries its "Comment" marker button.
 			expect(measured.visibleLines.some((line) => line?.includes(quote))).toBe(true);
@@ -198,7 +202,6 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 	await expect(page.getByRole('button', { name: 'Comment', exact: true })).toBeVisible();
 
 	// Removing a known quote in the real editor produces the recovery row without hiding it in details.
-	const edited = text.replace(quote, 'The selected text has been removed.');
 	if (mobile) {
 		// The Pixel profile puts CodeMirror on its Android input path, where one
 		// synthetic multi-kilobyte insertText can reach the DOM but not the editor
@@ -218,15 +221,14 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 			await writerContext.close();
 		}
 	} else {
-		await page.locator('.cm-content').click();
-		await expect(page.locator('.cm-content')).toBeFocused();
-		await page.keyboard.press('ControlOrMeta+A');
-		await page.keyboard.insertText(edited);
+		// Delete the anchored range itself: replacing the entire document correctly moves the live anchor onto the replacement.
+		await expect(page.locator('.cm-content')).toContainText(quote);
+		await deleteRenderedLine(page, quote);
 	}
 	await expect(page.locator('.cm-content')).not.toContainText(quote);
 	await expect(page.locator('.comment-status:has(.unplaced-dot)')).toBeVisible();
 	if (mobile) {
-		// At phone width the control is 44px tall; the dot must still sit on the comment icon, and the 12px padding must apply.
+		// At phone width the control is 44px tall; the dot stays on the icon and the compact toolbar padding applies.
 		const fit = await page.locator('.comment-status').evaluate((button) => {
 			const icon = button.querySelector('.tool-icon')!.getBoundingClientRect();
 			const dot = button.querySelector('.unplaced-dot')!.getBoundingClientRect();
@@ -234,7 +236,7 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 		});
 		expect(fit.dx).toBeLessThanOrEqual(8);
 		expect(fit.dy).toBeLessThanOrEqual(8);
-		expect(fit.padding).toBe('12px');
+		expect(fit.padding).toBe('8px');
 	}
 	await page.locator('.comment-status:has(.unplaced-dot)').click();
 	await expect(drawer).toBeVisible();

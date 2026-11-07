@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { GAP, placeCards } from './docMarginPlacement';
+import { GAP, placeCards, revealShift } from './docMarginPlacement';
 import { MARGIN_MIN, hasRoomForMargin } from './docCommentSurfaceState.svelte';
 
 const card = (id: string, y: number, h = 100) => ({ id, y, h });
@@ -53,5 +53,20 @@ describe('hasRoomForMargin: the one width rule', () => {
 		expect(hasRoomForMargin(MARGIN_MIN - 1)).toBe(false);
 		expect(hasRoomForMargin(1440)).toBe(true);
 		expect(hasRoomForMargin(393)).toBe(false);
+	});
+});
+
+describe('revealShift: the text scrolls so a grown card shows whole', () => {
+	const clip = { top: 100, bottom: 700 };
+	it('is nothing when the card already ends inside the clip with its gap', () => {
+		expect(revealShift({ top: 300, bottom: 500 }, clip)).toBe(0);
+		expect(revealShift({ top: 300, bottom: 700 - GAP }, clip)).toBe(0);
+	});
+	it('is how far the card reaches below the clip, gap included', () => {
+		expect(revealShift({ top: 500, bottom: 720 }, clip)).toBe(720 + GAP - 700);
+	});
+	it('never moves the card top above the clip top', () => {
+		expect(revealShift({ top: 120, bottom: 900 }, clip)).toBe(20);
+		expect(revealShift({ top: 90, bottom: 900 }, clip)).toBe(0);
 	});
 });

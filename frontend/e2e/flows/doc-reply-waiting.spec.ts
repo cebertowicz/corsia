@@ -856,10 +856,11 @@ for (const theme of ['light', 'dark'] as const) {
 			await loginByUrl(page);
 			await openThread(page, THREAD_TITLE);
 			const replyChip = page.locator('.attention-dock .reply-chip-notice');
+			const captureLanding = width !== 1440 || Boolean(process.env.REPLY_AWARENESS_SCREENSHOT_DIR);
 			await expect(replyChip).toBeVisible();
 			await expect(replyChip.getByRole('button')).toContainText('3 new replies · launch-plan.md');
 			await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
-			await shot(page, `04-reply-chip-${theme}-${width}`);
+			if (captureLanding) await shot(page, `04-reply-chip-${theme}-${width}`);
 			await replyChip.getByRole('button').click();
 			await documentReady(page);
 			await expect(page.locator(`[data-comment-id="${scenario.roots[0]}"]`)).toHaveClass(/focused/);
@@ -877,8 +878,10 @@ for (const theme of ['light', 'dark'] as const) {
 			// Being on screen never reads a document reply; only opening its thread does.
 			await expect(page.getByText(PASSAGES[0].reply, { exact: true }).last()).toBeVisible();
 			if (width === 1440) await expect(page.locator('.attention-dock .reply-chip-notice')).toContainText('2 new replies · launch-plan.md');
-			await shot(page, `05-open-in-document-${theme}-${width}`);
-			await shotRailClosed(page, `05-open-in-document-${theme}-${width}-rail-closed`, width);
+			if (captureLanding) {
+				await shot(page, `05-open-in-document-${theme}-${width}`);
+				await shotRailClosed(page, `05-open-in-document-${theme}-${width}-rail-closed`, width);
+			}
 			// What the dock reads next, on Chat (beside the document the 1440 frame above already shows it).
 			if (width === 393) {
 				await page.evaluate(async (id) => {
@@ -921,7 +924,7 @@ for (const theme of ['light', 'dark'] as const) {
 			// reply before leaving the document. The final chip must aggregate those with
 			// the three replies that arrived after the reader left.
 			await expect(chip).toContainText(`${width === 393 ? 6 : 5} new replies · launch-plan.md`);
-			await shot(page, `06-reply-chip-${theme}-${width}`);
+			if (captureLanding) await shot(page, `06-reply-chip-${theme}-${width}`);
 			await chip.click();
 			await documentReady(page);
 			await expect(page.locator(`[data-comment-id="${scenario.roots[0]}"]`)).toHaveClass(/focused/);
@@ -1014,7 +1017,7 @@ for (const width of [1440, 393]) {
 		await serveReplyQueue(page, request, scenario, threadId);
 		await loginByUrl(page);
 		await openThread(page, THREAD_TITLE);
-		// Replies never become a dock stop: the keyboard reaches the chip, then goes straight on to the composer.
+		// Replies never become a dock stop: the keyboard reaches the chip, then the phone plan control and composer.
 		await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
 		const chip = page.locator('.attention-dock .reply-chip-notice').getByRole('button');
 		await tabTo(page, '.attention-dock .reply-chip-notice button');
@@ -1023,9 +1026,17 @@ for (const width of [1440, 393]) {
 		await expect(chip).toHaveCSS('outline-style', 'solid');
 		await shot(page, `04b-reply-chip-focus-light-${width}`);
 		await page.keyboard.press('Tab');
+		if (width === 393) {
+			await expect(page.getByRole('button', { name: /^Open plan/ })).toBeFocused();
+			await page.keyboard.press('Tab');
+		}
 		await expect(chatComposer(page)).toBeFocused();
 		await shot(page, `04c-composer-focus-after-chip-light-${width}`);
 		await page.keyboard.press('Shift+Tab');
+		if (width === 393) {
+			await expect(page.getByRole('button', { name: /^Open plan/ })).toBeFocused();
+			await page.keyboard.press('Shift+Tab');
+		}
 		await expect(chip).toBeFocused();
 		// Enter opens the document on the first unread reply, the destination the old card's Open in document reached.
 		await page.keyboard.press('Enter');

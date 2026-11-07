@@ -922,6 +922,29 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		if (!narrow) expect(document.activeElement).toBe(resolve);
 	});
 
+	it('keeps a decided card in the column when its Resolve is refused there, and says so on the card', async () => {
+		const decided = { ...suggestion, decision: 'accepted' as const, replies: [{ id: 'r1', author: 'agent-1', text: 'Thanks', at: 'now' }] };
+		const onResolve = vi.fn(async () => false), onClose = vi.fn(), restoreFocus = vi.fn();
+		// The column is up with nothing picked: the surface is in its list state, which is where a Resolve pressed on a resting card comes from.
+		render({ state: { kind: 'list' }, comments: [decided], onResolve, onClose, restoreFocus });
+		const resolve = document.body.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] .ct-act.resolve')!;
+		resolve.click();
+		await vi.waitFor(() => expect(onResolve).toHaveBeenCalledWith('comment-1', true, true));
+		await vi.waitFor(() => expect(document.body.textContent).toContain('Couldn’t resolve this. Try again.'));
+		expect(onClose).not.toHaveBeenCalled();
+		expect(document.body.querySelector('[data-comment-id="comment-1"] .ct-act.resolve')).toBe(resolve);
+	});
+
+	it('opens a thread as a popover at a narrow width that is not a phone, and as a sheet on a phone', () => {
+		render({ narrow: true, phone: false, bounds: noRoomCanvas(), state: { kind: 'thread', id: suggestion.id } });
+		expect(document.body.querySelector('[data-popover]')).not.toBeNull();
+		expect(document.body.querySelector('[data-adaptive-drawer]')).toBeNull();
+		unmount(component!); component = null; host.remove();
+		render({ narrow: true, phone: true, bounds: noRoomCanvas(), state: { kind: 'thread', id: suggestion.id } });
+		expect(document.body.querySelector('[data-adaptive-drawer]')).not.toBeNull();
+		expect(document.body.querySelector('[data-popover]')).toBeNull();
+	});
+
 	it('does not offer accept-all for suggestions that were already decided', () => {
 		const decided = (id: string) => ({ ...suggestion, id, decision: 'accepted' as const, replies: [{ id: 'r', author: 'you', text: 'Thanks', at: 'now' }] });
 		render({ state: { kind: 'list' }, comments: [decided('a'), decided('b')] });
