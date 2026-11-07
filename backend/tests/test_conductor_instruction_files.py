@@ -63,6 +63,34 @@ def _audit_rows():
 
 
 @pytest.mark.asyncio
+async def test_pin_cross_scope_conductors_cannot_read_instruction_files(isolated_db, tmp_path, monkeypatch):
+    from core.workspace_layout import resolve_project_root, resolve_thread_root
+
+    actor, _, _, target, _ = _setup(tmp_path, monkeypatch)
+    (tmp_path / "workspace" / "projects" / "other").mkdir(parents=True)
+    db = get_db()
+    try:
+        db.execute("INSERT INTO projects (id,name,created_at,updated_at) VALUES ('third','Third','t','t')")
+        other_conductor = make_session(db, prefix="other-conductor", project_id="third")
+        assert set_project_conductor("third", other_conductor, db=db)
+        root = resolve_project_root(tmp_path / "workspace", "other-project", db=db)
+        assert root is not None
+        path = resolve_thread_root(root, target) / "context" / "ROLE.md"
+        db.execute("UPDATE threads SET bootloader_files=? WHERE id=?", (json.dumps([str(path)]), target))
+        db.commit()
+    finally:
+        db.close()
+    path.parent.mkdir(parents=True)
+    path.write_text("private instruction", encoding="utf-8")
+    tool = ConductorInstructionFileReadTool()
+    for caller in (actor, other_conductor):
+        for requested in (None, str(path)):
+            result = await tool.execute(target, requested, _thread_id=caller)
+            assert result == "Error: Conductor and target must share a scope."
+            assert "private instruction" not in result
+
+
+@pytest.mark.asyncio
 async def test_conductor_replaces_one_attached_file_and_audits(isolated_db, tmp_path, monkeypatch):
     conductor, target, _, _, path = _setup(tmp_path, monkeypatch)
     read = ConductorInstructionFileReadTool()

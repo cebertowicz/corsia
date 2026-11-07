@@ -71,8 +71,8 @@ _THREAD_ORDINARY_COPY = (
     "`{subject}` is in project `{name}`, outside your scope. "
     "Host access doesn't open it. Ask the CORSIA agent."
 )
-_THREAD_WORKSPACE_AGENT_COPY = (
-    "`{subject}` belongs to a workspace agent, outside your scope. "
+_THREAD_UNKNOWN_SCOPE_COPY = (
+    "`{subject}` is outside your scope. "
     "Host access doesn't open it. Ask the CORSIA agent."
 )
 _LOCAL_ONLY_COPY = (
@@ -98,7 +98,7 @@ def refusal_copy(
     already says host access does not open it, stays identical.
     """
     if project is None:
-        return (_THREAD_WORKSPACE_AGENT_COPY if history else _WORKSPACE_AGENT_COPY).format(subject=subject)
+        return (_THREAD_UNKNOWN_SCOPE_COPY if history else _WORKSPACE_AGENT_COPY).format(subject=subject)
     if not local_only:
         template = _THREAD_ORDINARY_COPY if history else _ORDINARY_COPY
         return template.format(subject=subject, name=project)
