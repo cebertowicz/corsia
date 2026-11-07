@@ -3,6 +3,7 @@
 	import { backOut } from 'svelte/easing';
 	import { onMount, tick } from 'svelte';
 	import type { Snippet } from 'svelte';
+	import { focusStillOurs } from '$lib/actions/focusTrap';
 	import { portal } from '$lib/actions/portal';
 	import { updateScreenVisible } from '$lib/update/screenStore';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
@@ -97,16 +98,7 @@
 
 		return () => {
 			mounted = false;
-			const activeElement = document.activeElement;
-			if (
-				previousFocus?.isConnected
-				&& (
-					activeElement === document.body
-					|| element.contains(activeElement)
-				)
-			) {
-				previousFocus.focus();
-			}
+			if (previousFocus?.isConnected && focusStillOurs(element, document.activeElement)) previousFocus.focus();
 		};
 	});
 </script>

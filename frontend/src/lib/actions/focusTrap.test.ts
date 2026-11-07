@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tick } from 'svelte';
-import { focusTrap } from './focusTrap';
+import { focusStillOurs, focusTrap } from './focusTrap';
 
 let outside: HTMLButtonElement;
 let node: HTMLElement;
@@ -101,5 +101,20 @@ describe('focusTrap', () => {
 		bar.focus();
 		trap.destroy();
 		expect(document.activeElement).toBe(bar);
+	});
+});
+
+describe('focusStillOurs', () => {
+	it('is ours while nothing, <body>, a removed element or the surface itself holds focus', () => {
+		const gone = document.createElement('button');
+		expect(focusStillOurs(node, null)).toBe(true);
+		expect(focusStillOurs(node, document.body)).toBe(true);
+		expect(focusStillOurs(node, gone)).toBe(true);
+		expect(focusStillOurs(node, node.querySelector('#mid'))).toBe(true);
+	});
+
+	it('is the person\'s once they moved it elsewhere on the page', () => {
+		expect(focusStillOurs(node, outside)).toBe(false);
+		expect(focusStillOurs(null, outside)).toBe(false);
 	});
 });

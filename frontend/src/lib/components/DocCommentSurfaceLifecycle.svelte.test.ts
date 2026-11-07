@@ -57,4 +57,28 @@ describe('comment sheet visibility', () => {
 		expect(onChange).toHaveBeenLastCalledWith(false);
 		host.remove();
 	});
+	it('leaves focus where the person put it while the sheet was closing', async () => {
+		const host = document.body.appendChild(document.createElement('div'));
+		const editor = document.body.appendChild(document.createElement('textarea'));
+		let state = $state<CommentSurfaceState>({ kind: 'draft' });
+		const restoreFocus = vi.fn();
+		const component = mount(DocCommentSurface, { target: host, props: {
+			get state() { return state; }, anchor: () => new DOMRect(), narrow: true, comments: [], focusedId: null,
+			draft: null, onClose: vi.fn(), restoreFocus, onFocus: vi.fn(), onSubmit: vi.fn(),
+			onReply: vi.fn(), onResolve: vi.fn(), onAgree: vi.fn(), target: null, artifactId: 'doc',
+		} });
+		flushSync();
+		const drawer = document.querySelector('.drawer-motion');
+		state = null;
+		flushSync();
+		// A slow outro: the person is already typing in the document when it ends.
+		editor.focus();
+		drawer!.dispatchEvent(new Event('outroend'));
+		flushSync();
+		await tick();
+		expect(restoreFocus).not.toHaveBeenCalled();
+		expect(document.activeElement).toBe(editor);
+		unmount(component);
+		editor.remove(); host.remove();
+	});
 });
