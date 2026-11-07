@@ -153,7 +153,7 @@ describe('widenForHistory (version history prototype)', () => {
 
 	it('at 1160, where the sheet stays, closes a Workspace panel the shell shows as an overlay (it would cover the rows) and hands it back; the sidebar stays', () => {
 		setWindowWidth(1160);
-	paneOverlay.set(true);
+		paneOverlay.set(true);
 		const release = widenForHistory(700, 40);
 		expect([get(paneCollapsed), get(sidebarCollapsed)]).toEqual([true, false]);
 		release();

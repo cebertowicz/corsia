@@ -50,9 +50,10 @@ def list_versions(workspace: Path, relative: str) -> tuple[list[dict[str, str | 
     return rows[:HISTORY_CAP], len(rows) > HISTORY_CAP
 
 
-def version_bytes(workspace: Path, relative: str, commit: str) -> bytes:
-    """One commit's bytes for this file; ``ValueError`` when that commit holds no such file."""
-    if not _COMMIT.fullmatch(commit) or (repo := repository(workspace)) is None:
+def version_bytes(repo: Path, relative: str, commit: str) -> bytes:
+    """One commit's bytes for this file in ``repo``, the caller's one :func:`repository` lookup;
+    ``ValueError`` when that commit holds no such file."""
+    if not _COMMIT.fullmatch(commit):
         raise ValueError("Version unavailable")
     oid = _git_bytes(repo, "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}:{relative}", ok=(0, 1)).strip()
     if not oid:
@@ -60,15 +61,12 @@ def version_bytes(workspace: Path, relative: str, commit: str) -> bytes:
     return _git_bytes(repo, "cat-file", "blob", oid.decode())
 
 
-def version_text(workspace: Path, relative: str, commit: str) -> str:
-    return version_bytes(workspace, relative, commit).decode(errors="replace")
+def version_text(repo: Path, relative: str, commit: str) -> str:
+    return version_bytes(repo, relative, commit).decode(errors="replace")
 
 
-def restore_reason(workspace: Path, commit: str) -> str:
-    """The recorded reason for restoring ``commit``, with the year and zone so it stays true later and elsewhere."""
-    repo = repository(workspace)
-    if repo is None:
-        raise ValueError("Version unavailable")
+def restore_reason(repo: Path, commit: str) -> str:
+    """The recorded reason for restoring ``commit`` from ``repo``, with the year and zone so it stays true later and elsewhere."""
     author, _, at = _git_bytes(repo, "log", "-1", "--format=%an%x00%at", commit).decode(errors="replace").strip().partition("\0")
     when = datetime.fromtimestamp(int(at)).astimezone()
     hour = int(when.strftime("%I"))

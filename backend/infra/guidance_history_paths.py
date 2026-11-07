@@ -24,9 +24,13 @@ def bytes_before_text(path: Path) -> bytes | None:
     A caller builds its new content from that text read and passes :func:`digest` of these bytes, so a
     change made after this read refuses the write instead of being overwritten by content built from
     older text. Text is never the expectation: a text read turns CRLF and a lone CR into LF, which is not
-    what the destination holds. ``None`` is the file's absence.
+    what the destination holds. It is the save's own read (no symlink, regular file only), so the
+    expectation and the comparison follow one rule: ``None`` is the file's absence, and a symlink or other
+    file type raises.
     """
-    return path.read_bytes() if path.exists() else None
+    from infra.guidance_git import _read
+
+    return _read(path)
 
 
 def is_empty_git_dir(path: Path) -> bool:

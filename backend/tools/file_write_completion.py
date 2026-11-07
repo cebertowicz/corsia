@@ -177,13 +177,13 @@ def save_guided_write(
     text: str,
     target,
     kwargs: dict,
-    expected: str | bytes | None = None,
+    expected: bytes | None = None,
     **write_args,
 ) -> str:
     """Blocking. Save an agent tool's guidance write through the history primitive.
 
-    ``expected`` is the content the caller read, as its bytes or as text; the save's compare-and-swap
-    hashes either to the same value the file's bytes hash today."""
+    ``expected`` is the file's bytes as the caller read them before its text read (``bytes_before_text``);
+    never the text, which loses CRLF and lone CR and so would refuse an unchanged file."""
     from infra.config import WORKSPACE
 
     results: list[str] = []

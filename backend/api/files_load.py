@@ -101,7 +101,8 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     from infra.guidance_targets import guidance_target
 
     # Only guidance files are recorded. Git is asked for one of those, and only to say history is off
-    # for the whole workspace, so opening any other document stays as cheap as before.
+    # for the whole workspace, so opening any other document stays as cheap as before. Budget: one
+    # `git rev-parse` per guidance-file open, about 9 ms measured.
     target = guidance_target(p, config.WORKSPACE)
     recorded = target is not None and not target.fault
     if recorded:

@@ -10,7 +10,7 @@ from infra import config
 from infra.auth import owns_thread
 from infra.database import get_db
 from infra.db_async import run_off_db
-from infra.document_history import history_off, list_versions, repository, restore_reason, version_bytes, version_text
+from infra.document_history import list_versions, repository, restore_reason, version_bytes, version_text
 from infra.guidance_git import GitFault
 
 # Each restore refusal's status and detail; the client words its line from ``kind``. Every refusal that
@@ -57,9 +57,9 @@ def history(path: str, user_id: str, project_id: str | None, thread_id: str | No
         if commit is None:
             versions, truncated = list_versions(config.WORKSPACE, relative)
             return {"versions": versions, "truncated": truncated}
-        if repository(config.WORKSPACE) is None:
+        if (repo := repository(config.WORKSPACE)) is None:
             raise HTTPException(404, "Version not found")
-        return {"text": version_text(config.WORKSPACE, relative, commit)}
+        return {"text": version_text(repo, relative, commit)}
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except GitFault as exc:
@@ -74,12 +74,12 @@ def _restore_source(path: str, version: str, user_id: str, project_id: str | Non
         return "history_off"
     if target.fault:
         return "failed"
-    workspace = Path(config.WORKSPACE)
     try:
-        if history_off(workspace):
+        # One repository lookup serves the whole read.
+        if (repo := repository(Path(config.WORKSPACE))) is None:
             return "history_off"
         # A commit's bytes never change, so reading before the save's lock is safe.
-        return version_bytes(workspace, relative, version).decode(), restore_reason(workspace, version)
+        return version_bytes(repo, relative, version).decode(), restore_reason(repo, version)
     except ValueError:
         return "version_unavailable"
     except GitFault:

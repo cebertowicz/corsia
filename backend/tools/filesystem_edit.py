@@ -11,6 +11,7 @@ from typing import Any
 from eval.tool_allowlist import carry_in_hides
 from infra.db_async import run_off_db
 from infra.guidance_targets import guidance_target
+from infra.guidance_history_paths import bytes_before_text
 from tools.base import Tool
 from tools.file_write_completion import (
     GUIDANCE_PARAMETERS,
@@ -18,7 +19,6 @@ from tools.file_write_completion import (
     managed_write,
     save_guided_write_and_announce,
 )
-from tools.filesystem_binary import compare_bytes_for_save
 from tools.filesystem_effects import list_bound_directory, open_bound_text
 from tools.filesystem_gate import _resolve_path_for_action
 from tools.filesystem_match import match_edits
@@ -111,7 +111,7 @@ class EditFileTool(Tool):
                 if result is not None:
                     return result
             # The save compares the file's bytes, so the expectation is read before the text read does.
-            expected = compare_bytes_for_save(file_path, guidance=target is not None)
+            expected = bytes_before_text(file_path) if target is not None else None
             with open_bound_text(file_path, writable=target is None) as (handle, _file_stat):
                 content = handle.read()
 
@@ -216,7 +216,7 @@ class MultiEditTool(Tool):
                 result = await write_live(file_path, kwargs, producer=self.name, edits=captured, edit_path=path)
                 if result is not None:
                     return result
-            expected = compare_bytes_for_save(file_path, guidance=target is not None)
+            expected = bytes_before_text(file_path) if target is not None else None
             with open_bound_text(file_path, writable=target is None) as (handle, _file_stat):
                 original = handle.read()
                 captured = tuple(TextEdit(edit["old_string"], edit["new_string"], bool(edit.get("replace_all"))) for edit in edits)

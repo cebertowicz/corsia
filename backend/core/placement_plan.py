@@ -73,12 +73,8 @@ def room_refusal(
     so a room that can never apply goes back to the fork instead of settling
     ``no-room`` after it is gone.
     """
-    made = _made_room(
-        place, decision, destination, room.base, room,
-        # This answer is only inspected for why a room cannot apply, so the expectation it plans is never
-        # sent; it is still read first, never rebuilt after the text.
-        path_bytes=bytes_before_text(destination.path) if destination.path is not None else None,
-    )
+    # This answer is only inspected for why a room cannot apply, so it plans no expectation and reads nothing for one.
+    made = _made_room(place, decision, destination, room.base, room, path_bytes=None)
     return made if isinstance(made, str) else None
 
 

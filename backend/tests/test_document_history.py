@@ -83,8 +83,7 @@ def test_a_workspace_with_no_repository_of_its_own_reads_history_off(workspace_w
     workspace = workspace_with_no_repository_of_its_own
     assert list_versions(workspace, "context/demo.md") == ([], False)
     assert document_history.history_off(workspace) is True
-    with pytest.raises(ValueError):
-        version_text(workspace, "context/demo.md", "a" * 40)
+    assert document_history.repository(workspace) is None
 
 
 def test_the_history_route_reports_history_off_not_unavailable(workspace_with_no_repository_of_its_own, monkeypatch):
