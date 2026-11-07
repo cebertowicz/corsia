@@ -93,7 +93,8 @@ def _stored_invocation(db, thread_id: str) -> dict:
 
 def _assert_confined(launch: dict, child_id: str) -> None:
     cmd = launch["cmd"]
-    profile = confined_claude_controls()
+    profile = confined_claude_controls(mcp_tools=True)
+    assert "--safe-mode" not in cmd  # it would drop the bridge's --mcp-config server
     start = cmd.index(profile[0])
     assert cmd[start:start + len(profile)] == profile
     assert cmd[cmd.index("--tools") + 1] == ",".join(confined_claude_tool_names())

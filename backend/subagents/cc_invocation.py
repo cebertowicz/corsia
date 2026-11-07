@@ -158,7 +158,7 @@ def _untrusted_args(invocation: ClaudeInvocation) -> list[str]:
     """
     tools = confined_claude_tool_names()
     return [
-        *confined_claude_controls(),
+        *confined_claude_controls(mcp_tools=True),
         "--tools", ",".join(tools),
         "--allowedTools", *tools,
         "--disable-slash-commands",

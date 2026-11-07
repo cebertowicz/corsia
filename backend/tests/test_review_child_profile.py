@@ -197,7 +197,7 @@ def test_confined_profile_admits_no_native_tool():
     )
 
     assert argv[argv.index("--restricted"):] == [
-        "--restricted", "--safe-mode", "--setting-sources", "",
+        "--restricted", "--setting-sources", "",
         "--strict-mcp-config", "--permission-mode", "dontAsk",
         "--tools", ",".join(confined_claude_tool_names()),
         "--allowedTools", *confined_claude_tool_names(),
@@ -206,6 +206,7 @@ def test_confined_profile_admits_no_native_tool():
         "--model", "claude-sonnet-4-6",
     ]
     assert confined_claude_controls()[:2] == ["--restricted", "--safe-mode"]
+    assert "--safe-mode" not in confined_claude_controls(mcp_tools=True)
 
 
 def test_review_peer_deduplicates_replayed_result_by_tool_use_id():
