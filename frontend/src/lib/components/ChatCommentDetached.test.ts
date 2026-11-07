@@ -48,7 +48,7 @@ function mountTranscript(quote: string, onSendReply = vi.fn()) {
 }
 
 /** Replying from a detached thread has to behave like replying from a highlight: the same thread, the same immediate send. */
-async function replyFromDetachedThread(onSendReply: ReturnType<typeof vi.fn>) {
+async function replyFromDetachedThread(onSendReply: Parameters<typeof mountTranscript>[1]) {
 	const { row } = mountTranscript('Gone text', onSendReply);
 	await vi.waitFor(() => expect(row()?.querySelector('[data-reply-comment="one"]')).not.toBeNull());
 	row()!.querySelector<HTMLElement>('[data-reply-comment="one"]')!.click();
