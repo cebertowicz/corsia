@@ -38,18 +38,22 @@ BASE_LIMIT = 20_000
 
 
 def edit_sections(text: str, edits: list[dict[str, Any]]) -> list[str]:
-    """The sections an edit's exact ``old_string`` matches fall in; a fuzzy match is not found here.
+    """The sections the edits' ``old_string`` matches fall in, matched as ``match_edits`` applies them:
+    exactly, each edit on the text the edits before it left.
 
-    The text is scanned for headings once; each match is placed in it by bisect.
+    The text is scanned for headings once per edit; each match is placed in it by bisect.
     """
-    sections = doc_sections.Sections(text)
     touched: dict[str, None] = {}
     for edit in edits:
-        old = edit["old_string"]
+        old, every = edit["old_string"], bool(edit.get("replace_all"))
         start = text.find(old) if old else -1
+        if start < 0:
+            continue
+        sections = doc_sections.Sections(text)
         while start >= 0:
             touched.update(dict.fromkeys(sections.between(start, start + len(old))))
-            start = text.find(old, start + 1) if edit.get("replace_all") else -1
+            start = text.find(old, start + len(old)) if every else -1
+        text = text.replace(old, edit["new_string"], -1 if every else 1)
     return list(touched)
 
 
@@ -120,10 +124,10 @@ def _alone(db, keys: list[str], thread_id: str) -> bool:
     by this call's ``_finish``, which holds the write lock; one woken in that instant is posted
     after this write, which the agent is told.
     """
-    if writer_turns.may_answer_section(thread_id):
-        return False
     waiting = db.execute(
-        f"SELECT 1 FROM doc_comment_writer_line WHERE root_id IN ({','.join('?' * len(keys))}) LIMIT 1", keys,
+        f"""SELECT 1 FROM doc_comment_writer_line WHERE root_id IN ({','.join('?' * len(keys))})
+            OR (agent_thread_id=? AND state='woken' AND root_id LIKE 'section:%') LIMIT 1""",
+        (*keys, thread_id),
     ).fetchone()
     return waiting is None and writer_turns.agents_claim(keys, thread_id)
 
@@ -212,15 +216,15 @@ def _settle_closed(path: str | None, artifact_id: str | None, thread_id: str, ca
 
     db = get_db()
     try:
+        if not writer_line.section_woken(db, thread_id):
+            return []
         artifact = resolve_file_identity(path, db=db) if path else get_artifact(artifact_id or "", db=db)
         if artifact is None:
             return []
-        try:
-            text = read_doc_text(path or str(artifact["path"]))
-            keys = (quote_sections(text, call.get("quote"), call.get("near")) if "replacement" in call
-                    else call_sections(text, call))
-        except (OSError, ValueError):
-            return []
+        # A read that fails raises, so the write is refused like any other settle failure.
+        text = read_doc_text(path or str(artifact["path"]))
+        keys = (quote_sections(text, call.get("quote"), call.get("near")) if "replacement" in call
+                else call_sections(text, call))
         if not keys:
             return []
         with write_transaction(db, scope="section_line_closed") as connection:
@@ -236,13 +240,13 @@ async def settle_closed(path: str | None, thread_id: str, call: dict[str, Any], 
     The document is found by ``path``, or by ``artifact_id`` for a suggestion.
 
     Settled as the write starts, since the file write that follows has no hook of its own; a write
-    that then fails tells the agent so in its own result. A settle that fails refuses the write, so
-    nothing lands that the line does not know answered the wake.
+    that then fails tells the agent so in its own result. A settle that fails, the document's read
+    included, refuses the write. A write that touches none of the agent's woken sections, or whose
+    edit matches nothing (the edit then fails), settles nothing. One indexed read when the agent has
+    no woken section row.
     """
     from doceditor.agent_comment_writes import _drive
 
-    if not writer_turns.may_answer_section(thread_id):
-        return
     woken = await run_in_db(_settle_closed, path, artifact_id, thread_id, call)
     # The settle has committed; a failure to wake the next writer is the line's, not this write's.
     try:
