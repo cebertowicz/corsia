@@ -2,8 +2,11 @@ import { tick } from 'svelte';
 import type { DocViewerTarget } from '$lib/docViewerTarget';
 import { hasUnread, type DocComment } from '$lib/stores/docComments';
 import { canvasCommentScrollTarget, type CanvasScrollTarget } from '$lib/docCanvasComments';
-import { nextUnreadThread } from '$lib/docReplyChip';
 
+/**
+ * The document surface's jump landing: the one way a notice (the jump control, or an arrival landing) moves the reader to
+ * an unread thread. Its text is scrolled to, its card opened, and a comment on an image opens the image at its pin.
+ */
 export function createReplyNavigation(source: {
 	target: () => DocViewerTarget | null;
 	ready: () => boolean;
@@ -13,22 +16,21 @@ export function createReplyNavigation(source: {
 	openImageOr: (id: string, otherwise: () => void) => void;
 	onLanded: () => void;
 }) {
-	let lastReplyStep: string | null = null;
 	const first = () => source.comments().find(hasUnread) ?? null;
 	const landing = (thread: DocComment | null) => thread
 		? canvasCommentScrollTarget(source.comments(), source.text(), thread.id, false, 'quote-tap') : null;
 	createReplyLanding({
 		target: source.target, ready: source.ready, first, landing: () => landing(first()),
-		open: (thread, target) => { source.show(thread, target); lastReplyStep = thread?.id ?? null; source.onLanded(); },
+		open: (thread, target) => { source.show(thread, target); source.onLanded(); },
 	});
-	function step(beforeText?: () => void, excludeId?: string) {
-		const thread = nextUnreadThread(source.comments(), lastReplyStep, excludeId);
+	/** Goes to one thread the reader chose: the nearest the jump control is pointing at, wherever it sits in the document. */
+	function goTo(id: string, beforeText?: () => void) {
+		const thread = source.comments().find((item) => item.id === id);
 		if (!thread) return;
-		lastReplyStep = thread.id;
 		const target = landing(thread);
 		source.openImageOr(thread.id, () => { beforeText?.(); source.show(thread, target); });
 	}
-	return { step, reset: () => { lastReplyStep = null; } };
+	return { goTo };
 }
 
 export function createReplyLanding(source: {
