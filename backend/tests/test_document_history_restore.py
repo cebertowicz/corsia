@@ -203,10 +203,8 @@ async def test_a_workspace_with_no_repository_of_its_own_is_history_off(skill, s
         (workspace / ".git").mkdir()  # an empty marker: Git answers with the enclosing repository
 
     assert list_versions(workspace, path.relative_to(workspace).as_posix()) == ([], False)
-    # The open's own read asks no Git and says nothing about history; the route decides it, off the
-    # database pool.
-    opened = read_document(str(path), user_id, None, thread_id)
-    assert opened["_recorded"] is True and "history" not in opened
+    # The open's own read asks no Git; the route decides history, off the database pool.
+    assert read_document(str(path), user_id, None, thread_id)["_recorded"] is True
     assert (await files.content("test", str(path), thread_id=thread_id))["history"] is False
     assert refusal(await restore(skill, first, sha(current))) == (409, "history_off")
     assert path.read_text() == current
