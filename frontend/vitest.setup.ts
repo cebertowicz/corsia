@@ -43,6 +43,20 @@ if (typeof window !== 'undefined' && typeof window.matchMedia !== 'function') {
 	})) as unknown as typeof window.matchMedia;
 }
 
+// jsdom lacks these browser APIs used by comment highlight navigation and placement.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+	globalThis.ResizeObserver = class ResizeObserver {
+		observe() {}
+		unobserve() {}
+		disconnect() {}
+	};
+}
+if (typeof globalThis.CSS === 'undefined') {
+	(globalThis as unknown as { CSS: { escape: (value: string) => string } }).CSS = {
+		escape: value => value.replace(/[^a-zA-Z0-9_-]/g, char => `\\${char}`),
+	};
+}
+
 const localStorageDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
 
 if (

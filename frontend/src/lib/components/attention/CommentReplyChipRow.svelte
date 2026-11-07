@@ -3,7 +3,6 @@
 	import UnreadReplyChip from '$lib/components/comments/UnreadReplyChip.svelte';
 	import { activeThreadId } from '$lib/stores/threads';
 	import { visibleQueue } from '$lib/stores/attentionDock.svelte';
-	import { chatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { unreadItemsForThread } from './replyItems';
 
 	let {
@@ -12,11 +11,7 @@
 		onOpenDocument?: (destination: AttentionDestination, threadId?: string | null) => void;
 	} = $props();
 
-	// Unread comment notices belong to the agent who wrote them. They stay separate from Needs you.
-	const unreadItems = $derived([
-		...unreadItemsForThread($visibleQueue, $activeThreadId),
-		...($chatReplyAttention?.threadId === $activeThreadId ? $chatReplyAttention.items : []),
-	]);
+	const unreadItems = $derived(unreadItemsForThread($visibleQueue, $activeThreadId).filter(item => item.detail.destination.pane !== 'chat-replies'));
 	const unreadCount = $derived(unreadItems.reduce((total, item) => total + item.detail.unread_count, 0));
 	const documents = $derived.by(() => {
 		const unique = new Map<string, CommentReplyItem>();
