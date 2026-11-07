@@ -16,15 +16,13 @@ export const test = base.extend<{ seedPerTest: boolean; seededBackend: void; del
 		async ({ seedPerTest }, use, testInfo) => {
 			const file = `${testInfo.project.name}:${testInfo.file}`;
 			if (SEED_ENABLED && (seedPerTest || !filesReset.has(file))) {
-				// The restart is the file's setup, not the test's work: give the test back the time it took.
-				const started = Date.now();
 				await resetBackendToSeed();
-				testInfo.setTimeout(testInfo.timeout + (Date.now() - started));
 				filesReset.add(file);
 			}
 			await use();
 		},
-		{ auto: true },
+		// The restart is the file's setup, not the test's work: its own budget covers the reset's 60 s wait for a serving backend.
+		{ auto: true, timeout: 90_000 },
 	],
 	// The person's "Deliver comments immediately" choice lives on the server, so a test that turns it off must not leave it off.
 	deliveryPreferenceOn: [
