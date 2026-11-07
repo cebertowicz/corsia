@@ -501,6 +501,84 @@ async def test_a_woken_section_row_dropped_at_turn_end_clears_the_wake_hint(doc,
 
 
 @pytest.mark.asyncio
+async def test_a_sweep_that_ends_an_agents_last_section_row_and_wakes_it_on_another_keeps_the_hint(doc, driven, steps):
+    """The end's clear and the new wake's hint run after the sweep commits, in that order, so the live wake keeps its hint."""
+    import uuid
+
+    from doceditor import writer_line, writer_turns
+    from infra.database import get_db, write_transaction
+
+    scope, page, entry, path, context = doc
+    artifact_id = page.identity["artifact_id"]
+    await page.type_after("## Terms\n", "new ", entry.live)
+    _queued(await _edit(path, context, "old terms", "agent terms"))
+    await page.close()
+    await _settled()
+    [terms] = _line(artifact_id, "## Terms")
+    assert terms["state"] == "woken" and writer_turns.may_answer_section(scope["owner"])
+
+    db = get_db()
+    try:
+        with write_transaction(db, scope="test_section_sweep") as connection:
+            # The Terms wake could not reach the agent, so the sweep ends that row; the agent also waits in Scope's line.
+            connection.execute("UPDATE messages SET delivery_state='failed' WHERE id=?", (terms["wake_message_id"],))
+            connection.execute(
+                """INSERT INTO doc_comment_writer_line(id,root_id,artifact_id,agent_thread_id,user_id,ops,saved_at)
+                   VALUES (?,?,?,?,?,'[]','2026-11-07T00:00:00+00:00')""",
+                (uuid.uuid4().hex, writer_turns.section_key(artifact_id, "## Scope"), artifact_id, scope["owner"],
+                 terms["user_id"]))
+        with write_transaction(db, scope="writer_line_sweep") as connection:
+            writer_line.serve_waiting(connection)
+    finally:
+        db.close()
+
+    assert _line(artifact_id, "## Terms") == []
+    [scope_row] = _line(artifact_id, "## Scope")
+    assert scope_row["state"] == "woken"
+    assert writer_turns.may_answer_section(scope["owner"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["edit", "suggest"])
+async def test_a_write_to_the_closed_document_that_cannot_settle_its_wake_says_so_in_its_result(
+    doc, driven, monkeypatch, kind,
+):
+    """The write lands; its own result says the wake stays unanswered, so a later drop note isn't a surprise."""
+    from doceditor import live_runtime, section_writes
+    from tools.documents import DocCommentCreateTool
+
+    scope, page, entry, path, context = doc
+    artifact_id = page.identity["artifact_id"]
+
+    async def write() -> str:
+        if kind == "edit":
+            return await _edit(path, context, "old terms", "agent terms")
+        return await DocCommentCreateTool().execute(
+            body="Tighter", artifact_id=artifact_id, quote="old terms", replacement="terms", **context)
+
+    await page.type_after("## Terms\n", "new ", entry.live)
+    await write()
+    await page.close()
+    await _settled()
+    [row] = _line(artifact_id, "## Terms")
+    assert row["state"] == "woken"
+
+    def broken(*_args):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(section_writes, "_settle_closed", broken)
+    monkeypatch.setattr(live_runtime, "_manager", None)
+    result = json.loads(await write())
+    assert result["note"] == section_writes.UNSETTLED_NOTE
+    if kind == "edit":
+        assert "agent terms" in path.read_text()
+    else:
+        assert result["comment"]["replacement"] == "terms"
+    [still] = _line(artifact_id, "## Terms")
+    assert still["state"] == "woken"
+
+
+@pytest.mark.asyncio
 async def test_an_agent_write_nobody_holds_takes_no_write_transaction_to_enter(doc, driven, monkeypatch):
     """The scale budget: statements per call, and write transactions, for a write touching ``k`` sections."""
     from contextlib import contextmanager

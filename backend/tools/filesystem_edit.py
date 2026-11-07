@@ -23,7 +23,7 @@ from tools.file_write_completion import (
 from tools.filesystem_effects import list_bound_directory, open_bound_text
 from tools.filesystem_gate import _resolve_path_for_action
 from doceditor.live_lane import TextEdit
-from doceditor.live_tools import write_live
+from doceditor.live_tools import with_note, write_live
 
 
 _MATCH_CANDIDATES = 5
@@ -195,10 +195,10 @@ class EditFileTool(Tool):
             file_path = authorized.resolved
             target = await asyncio.to_thread(guidance_target, file_path)
             if target is None:
-                result = await write_live(file_path, kwargs, producer=self.name,
-                                          edits=(TextEdit(old_string, new_string, replace_all),), edit_path=path)
-                if result is not None:
-                    return result
+                live = await write_live(file_path, kwargs, producer=self.name,
+                                        edits=(TextEdit(old_string, new_string, replace_all),), edit_path=path)
+                if live.result is not None:
+                    return live.result
             with open_bound_text(file_path, writable=target is None) as (handle, _file_stat):
                 content = handle.read()
 
@@ -207,12 +207,12 @@ class EditFileTool(Tool):
                     return success
                 write_args = {"reviewed": authorized.reviewed, "producer": self.name, "success": success}
                 if target is None:
-                    return announce_published_write(
+                    return with_note(announce_published_write(
                         await run_off_db(
                             managed_write, file_path, new_content, kwargs,
                             notify=False, handle=handle, **write_args,
                         )
-                    )
+                    ), live.note)
             return await save_guided_write_and_announce(
                 file_path, new_content, target, kwargs, expected=content, **write_args,
             )
@@ -300,9 +300,9 @@ class MultiEditTool(Tool):
             target = await asyncio.to_thread(guidance_target, file_path)
             if target is None:
                 captured = tuple(TextEdit(edit["old_string"], edit["new_string"], bool(edit.get("replace_all"))) for edit in edits)
-                result = await write_live(file_path, kwargs, producer=self.name, edits=captured, edit_path=path)
-                if result is not None:
-                    return result
+                live = await write_live(file_path, kwargs, producer=self.name, edits=captured, edit_path=path)
+                if live.result is not None:
+                    return live.result
             with open_bound_text(file_path, writable=target is None) as (handle, _file_stat):
                 original = handle.read()
                 captured = tuple(TextEdit(edit["old_string"], edit["new_string"], bool(edit.get("replace_all"))) for edit in edits)
@@ -311,12 +311,12 @@ class MultiEditTool(Tool):
                     return success
                 write_args = {"reviewed": authorized.reviewed, "producer": self.name, "success": success}
                 if target is None:
-                    return announce_published_write(
+                    return with_note(announce_published_write(
                         await run_off_db(
                             managed_write, file_path, content, kwargs,
                             notify=False, handle=handle, **write_args,
                         )
-                    )
+                    ), live.note)
             return await save_guided_write_and_announce(
                 file_path, content, target, kwargs, expected=original, **write_args,
             )

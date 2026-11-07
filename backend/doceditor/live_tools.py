@@ -5,6 +5,7 @@ import hashlib
 import json
 from dataclasses import asdict
 from pathlib import Path
+from typing import NamedTuple
 
 from doceditor.live_admission import falls_back_to_plain
 from doceditor.live_lane import EditRefused, Operation, TextEdit
@@ -68,10 +69,17 @@ def _section_call(producer: str, edit_path: str | None, path: Path, content: str
     return call
 
 
+class LiveWrite(NamedTuple):
+    """``result`` is the whole tool result, or None when the caller writes the file itself (nobody
+    has it open); ``note`` then goes on that write's receipt (``with_note``)."""
+    result: str | None
+    note: str | None = None
+
+
 async def write_live(path: Path, kwargs: dict, *, producer: str, content: str | None = None,
                      edits: tuple[TextEdit, ...] = (), description: str | None = None,
-                     edit_path: str | None = None) -> str | None:
-    """Return None for legacy files; a live tool always awaits its own lane result.
+                     edit_path: str | None = None) -> LiveWrite:
+    """A live tool always awaits its own lane result; a legacy file is the caller's to write.
 
     An agent write to a section someone else is changing is saved in that section's line instead
     (``section_writes``), and the receipt says so with outcome ``queued``.
@@ -84,13 +92,14 @@ async def write_live(path: Path, kwargs: dict, *, producer: str, content: str | 
     if entry is None:
         refused = _refused_store(path)
         if refused is None and thread_id:
-            await section_writes.settle_closed(str(path), thread_id, call)
-        return refused
+            return LiveWrite(None, await section_writes.settle_closed(str(path), thread_id, call))
+        return LiveWrite(refused)
     if not thread_id:
         raise ValueError("Live document writes require a current thread")
     if entry.publisher.stop_cause is not None:
         # A store found damaged refuses every write; saving one in a line would hide that refusal.
-        return (await _submit(entry, path, kwargs, thread_id, producer, content, edits, description, edit_path))[0]
+        return LiveWrite((await _submit(entry, path, kwargs, thread_id, producer, content, edits, description,
+                                        edit_path))[0])
     text = entry.live.snapshot[0]
     headings = section_writes.call_sections(text, call)
     kind = "write" if content is not None else "edit"
@@ -100,9 +109,20 @@ async def write_live(path: Path, kwargs: dict, *, producer: str, content: str | 
     if isinstance(outcome, tuple):
         if outcome[1]:
             entry.live.sections.changed(headings, thread_id)
-        return outcome[0]
-    return json.dumps({"registry_managed": True, "live_document": True, "path": str(path),
-                       "artifact_id": entry.artifact_id, "outcome": "queued", "result": outcome.text})
+        return LiveWrite(outcome[0])
+    return LiveWrite(json.dumps({"registry_managed": True, "live_document": True, "path": str(path),
+                                 "artifact_id": entry.artifact_id, "outcome": "queued", "result": outcome.text}))
+
+
+def with_note(result: str, note: str | None) -> str:
+    """``result`` (a write receipt) carrying ``note`` for the agent; an error or plain-text result is left as is."""
+    if note is None:
+        return result
+    try:
+        receipt = json.loads(result)
+    except (TypeError, ValueError):
+        return result
+    return json.dumps({**receipt, "note": note}) if isinstance(receipt, dict) else result
 
 
 async def _submit(entry, path: Path, kwargs: dict, thread_id: str, producer: str, content: str | None,

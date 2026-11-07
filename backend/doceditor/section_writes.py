@@ -231,18 +231,26 @@ def _settle_closed(path: str | None, artifact_id: str | None, thread_id: str, ca
         db.close()
 
 
-async def settle_closed(path: str | None, thread_id: str, call: dict[str, Any], artifact_id: str | None = None) -> None:
+UNSETTLED_NOTE = ("This write couldn't be recorded as your answer to the section wake, so you may still get a note "
+                  "that your saved write dropped out of line. This write already covers it; don't write it again.")
+
+
+async def settle_closed(path: str | None, thread_id: str, call: dict[str, Any],
+                        artifact_id: str | None = None) -> str | None:
     """A woken agent is writing to the document after everyone closed it: that answers its wake.
     The document is found by ``path``, or by ``artifact_id`` for a suggestion.
 
     Settled as the write starts, since the file write that follows has no hook of its own; a write
-    that then fails tells the agent so in its own result.
+    that then fails tells the agent so in its own result. Returns the note that write's result
+    carries when the settle failed, else None.
     """
     from doceditor.agent_comment_writes import _drive
 
     if not writer_turns.may_answer_section(thread_id):
-        return
+        return None
     try:
         await _drive(await run_in_db(_settle_closed, path, artifact_id, thread_id, call))
     except Exception:
         logger.exception("section rows of {} on {} did not settle", thread_id, path or artifact_id)
+        return UNSETTLED_NOTE
+    return None

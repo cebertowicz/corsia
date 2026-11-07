@@ -258,7 +258,10 @@ def serve(db, root_id: str) -> list[str]:
             _drop(db, head, "your thread could not be woken")
             continue
         if heading is not None:
-            writer_turns.section_woken(str(head["agent_thread_id"]))
+            # After the commit, in order with any end that clears this agent's hint in the same sweep, so a
+            # later wake is never cleared by an earlier row's end.
+            woken_thread = str(head["agent_thread_id"])
+            after_commit(db, lambda: writer_turns.section_woken(woken_thread))
         _event(db, "woken", root_id=root_id, artifact_id=str(head["artifact_id"]), line_id=str(head["id"]), wakes=wakes)
         publish_after_commit(db, root_id, head["artifact_id"])
         return [str(head["agent_thread_id"])]
