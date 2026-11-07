@@ -79,6 +79,11 @@ def append_input(
     from infra.passive_changes import materialize_pending_digest
     from infra.thread_inputs import thread_admission_state
 
+    from plans.withheld_projection import wake_content
+
+    source_plan_id = metadata.get("plan_id")
+    if isinstance(source_plan_id, str):
+        content = wake_content(content, recipient=recipient, plan_id=source_plan_id, db=db)
     state = thread_admission_state(db, recipient, allow_unavailable=True)
     if state is None:
         return None
@@ -212,8 +217,10 @@ def selected_fact(db, reconciled, executor: str) -> dict:
 def with_next(db, plan_id: str, executor: str, line: str, **facts) -> str:
     """Return one wake's text: what happened, then the same facts a close returns."""
     from plans import close_next
+    from plans.withheld_projection import wake_next
 
     block = close_next.executor_next(db, plan_id, executor)
+    block = wake_next(block, recipient=executor, plan_id=plan_id, db=db)
     return f"{line}\n{json.dumps({**facts, 'next': block}, sort_keys=True)}"
 
 

@@ -77,6 +77,10 @@ def read(
     position = _decode(cursor, plan_id=str(plan_row["id"]), section=section)
     clock = position["a"] if position is not None else (clock or service._now())
     facts = _facts(db, plan_row, actor, clock)
+    from plans.withheld_projection import dependencies
+
+    dependencies(facts, recipient=actor.thread_id if actor.kind == "thread" else None,
+                 plan_owner=plan_row["owner_id"] if plan_row["owner_kind"] == "thread" else None, db=db)
     if section is not None:
         return _page(facts, section, position)
     return {
@@ -106,6 +110,10 @@ def node_detail(db, plan_row, node_id: str, *, actor, clock: str | None = None) 
     if durable is not None and durable["archived_at"] is not None:
         return node_history.retired_detail(db, durable, clock=clock)
     facts = _facts(db, plan_row, actor, clock, detail_id=node_id)
+    from plans.withheld_projection import dependencies
+
+    dependencies(facts, recipient=actor.thread_id if actor.kind == "thread" else None,
+                 plan_owner=plan_row["owner_id"] if plan_row["owner_kind"] == "thread" else None, db=db)
     node = next((n for n in facts["nodes"] if n["id"] == node_id), None)
     if durable is None or node is None:
         raise PlanError(f"node {node_id!r} is not in this plan; read plan_read() for its rows")

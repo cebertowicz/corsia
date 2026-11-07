@@ -48,7 +48,10 @@ def notify(
             ),
             "artifact_ids": [] if evidence is None else list(evidence["artifact_ids"]),
         })
+    from plans.withheld_projection import for_thread
+
     owner = str(plan["owner_id"])
+    steps = for_thread(steps, recipient=owner, owner=worker_thread_id, db=db)
     return plan_wake.append(
         db,
         recipient=owner,

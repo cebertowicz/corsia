@@ -50,6 +50,11 @@ class WatchExpirySource:
                 or public.event_wake(db, watch)
                 or public.late_wake(watch.condition.get("value"), now)
             )
+            if summary is not None:
+                summary = public.withhold_for_plan(
+                    summary, recipient=watch.owner_thread, plan_id=watch.plan_id,
+                    node_id=watch.plan_node_id, db=db,
+                )
             requests.append(
                 TriggerRequest(
                     kind=self.kind,

@@ -164,7 +164,7 @@ def read_checkpoint_status(*, actor: PlanActor, db) -> dict[str, Any] | None:
 
 
 #: The follow-up reads a plan projection offers, each written as its owner calls it.
-_READ_KEYS = frozenset({"detail_read", "continue_read", "full_read", "status_read"})
+READ_KEYS = frozenset({"detail_read", "continue_read", "full_read", "status_read"})
 
 
 def addressed_to(result: dict[str, Any] | None, thread_id: str, *, db) -> dict[str, Any]:
@@ -192,7 +192,7 @@ def _readdress(value, thread_id: str):
         return value
     readdressed = {}
     for key, item in value.items():
-        if key in _READ_KEYS and isinstance(item, str) and item.startswith("plan_read("):
+        if key in READ_KEYS and isinstance(item, str) and item.startswith("plan_read("):
             rest = item[len("plan_read("):]
             item = f"plan_read(thread_id='{thread_id}'{'' if rest == ')' else ', '}{rest}"
         readdressed[key] = _readdress(item, thread_id)
