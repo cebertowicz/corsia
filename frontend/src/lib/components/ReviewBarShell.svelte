@@ -66,7 +66,7 @@
 		return { duration: token('--dur-standard') * 0.7, easing: cubicIn, css: (_t: number, u: number) => `transform: translateY(${u * distance}px)` };
 	}
 	/**
-	 * How far the floating capsule (a touch screen at a narrow canvas) reaches up into the bar's container (its offset
+	 * How far the floating capsule (a phone-width touch screen at a narrow canvas) reaches up into the bar's container (its offset
 	 * parent, else the window), plus the capsule's side inset as the gap above it. Zero while the capsule sits in the
 	 * bar's own row, is tucked away, or is not there.
 	 */
@@ -265,8 +265,8 @@
 		.review-bar.noting :global(.rb-actions) { flex: 1 0 100%; order: 2; justify-content: flex-end; margin-left: 0; }
 	}
 
-	/* Solid, not glass: document text reads through any translucent fill, and the header's backdrop root stops the blur from reaching it. A touch screen at a narrow canvas gets the answer in a floating capsule at the canvas's bottom edge, with the status above its buttons (the capsule grows upward); the ask is one in-flow line. */
-	@media (any-pointer: coarse) {
+	/* Solid, not glass: document text reads through any translucent fill, and the header's backdrop root stops the blur from reaching it. A phone-width touch screen at a narrow canvas gets the answer in a floating capsule at the canvas's bottom edge, with the status above its buttons (the capsule grows upward); the ask is one in-flow line. The capsule is fixed to the window, which is the canvas only in the phone layout: a wider touch screen beside the chat keeps the bar in its row. */
+	@media (any-pointer: coarse) and (max-width: 48rem) {
 		@container doc-canvas (max-width: 37.5rem) {
 			.review-bar { min-height: var(--rb-hit); }
 			.review-bar.ask { min-height: 0; }
