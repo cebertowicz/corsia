@@ -415,7 +415,9 @@ const CASES: Array<{ id: string; scene: keyof typeof SCENES; focus: boolean[] }>
 const BARE: Record<string, string[]> = { before: ["1440-light", "393-dark"], "canvas-reference": ["1440-light"] };
 
 // Focus is a persisted server setting: put it back whatever a case turned off, failing midway included.
-test.afterEach(async ({ request }) => {
+// Unroute before the page closes, so a pass-through fetch still in flight at teardown cannot fail the case.
+test.afterEach(async ({ page, request }) => {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
   await setFocusMode(request, true);
 });
 
@@ -485,24 +487,19 @@ for (const size of SIZES) {
             }),
           );
           await page.route("**/api/plans/operator/thread-states*", async (route) => {
-            try {
-              const res = await route.fetch();
-              const body = (await res.json()) as { states?: Record<string, unknown> };
-              const owed = world.steps.filter((s) => !world.settled[s.id]).map((s) => ({ kind: "hold", title: s.title, node_id: s.id }));
-              const states = { ...(body.states ?? {}) };
-              states[threadId] = {
-                ...((states[threadId] as object) ?? {}),
-                state: owed.length ? "needs_input" : "moving",
-                label_key: null,
-                paused: false,
-                attention_items: owed,
-                has_update: false,
-              };
-              await route.fulfill({ response: res, json: { ...body, states } });
-            } catch (error) {
-              if (page.isClosed()) return;
-              throw error;
-            }
+            const res = await route.fetch();
+            const body = (await res.json()) as { states?: Record<string, unknown> };
+            const owed = world.steps.filter((s) => !world.settled[s.id]).map((s) => ({ kind: "hold", title: s.title, node_id: s.id }));
+            const states = { ...(body.states ?? {}) };
+            states[threadId] = {
+              ...((states[threadId] as object) ?? {}),
+              state: owed.length ? "needs_input" : "moving",
+              label_key: null,
+              paused: false,
+              attention_items: owed,
+              has_update: false,
+            };
+            await route.fulfill({ response: res, json: { ...body, states } });
           });
           if (doc) {
             await page.route(`**/api/attention/${doc.id}/review`, (route) => {
@@ -535,47 +532,42 @@ for (const size of SIZES) {
           }
           if (scene.reviewTile) {
             await page.route("**/api/threads/*/messages*", async (route) => {
-              try {
-                const res = await route.fetch();
-                const body = await res.json();
-                for (const m of body?.messages ?? []) {
-                  if (m.role === "assistant" && String(m.content).startsWith("I drafted the sign-in proof plan")) {
-                    m.cards = [
-                      ...(scene.reviewStates
-                        ? [
-                            {
-                              kind: "ask", artifact_id: "artifact-retired", title: "Old sign-in proof plan", type: "markdown", icon: "file-text",
-                              name: "old-sign-in-proof-plan.md", path: "shared/planning/old.md", available: false, opens: false,
-                              hold_id: "hold-retired", state: "unavailable",
-                            },
-                            {
-                              kind: "ask", artifact_id: "artifact-counted", title: "Sign-in proof write-up", type: "markdown", icon: "file-text",
-                              name: "sign-in-proof-write-up.md", path: "shared/planning/write-up.md", available: true, opens: true,
-                              hold_id: "hold-counted", state: "changes_requested", feedback: { comments: 3, suggestions: 2, edits: 1 },
-                            },
-                          ]
-                        : []),
-                      {
-                        kind: "ask",
-                        artifact_id: "artifact-proof-plan",
-                        title: "Sign-in proof plan",
-                        type: "markdown",
-                        icon: "file-text",
-                        name: "sign-in-proof-plan.md",
-                        path: "shared/planning/sign-in-proof-plan.md",
-                        available: true,
-                        opens: true,
-                        hold_id: "hold-proof-plan",
-                        state: "needs_review",
-                      },
-                    ];
-                  }
+              const res = await route.fetch();
+              const body = await res.json();
+              for (const m of body?.messages ?? []) {
+                if (m.role === "assistant" && String(m.content).startsWith("I drafted the sign-in proof plan")) {
+                  m.cards = [
+                    ...(scene.reviewStates
+                      ? [
+                          {
+                            kind: "ask", artifact_id: "artifact-retired", title: "Old sign-in proof plan", type: "markdown", icon: "file-text",
+                            name: "old-sign-in-proof-plan.md", path: "shared/planning/old.md", available: false, opens: false,
+                            hold_id: "hold-retired", state: "unavailable",
+                          },
+                          {
+                            kind: "ask", artifact_id: "artifact-counted", title: "Sign-in proof write-up", type: "markdown", icon: "file-text",
+                            name: "sign-in-proof-write-up.md", path: "shared/planning/write-up.md", available: true, opens: true,
+                            hold_id: "hold-counted", state: "changes_requested", feedback: { comments: 3, suggestions: 2, edits: 1 },
+                          },
+                        ]
+                      : []),
+                    {
+                      kind: "ask",
+                      artifact_id: "artifact-proof-plan",
+                      title: "Sign-in proof plan",
+                      type: "markdown",
+                      icon: "file-text",
+                      name: "sign-in-proof-plan.md",
+                      path: "shared/planning/sign-in-proof-plan.md",
+                      available: true,
+                      opens: true,
+                      hold_id: "hold-proof-plan",
+                      state: "needs_review",
+                    },
+                  ];
                 }
-                await route.fulfill({ response: res, json: body });
-              } catch (error) {
-                if (page.isClosed()) return;
-                throw error;
               }
+              await route.fulfill({ response: res, json: body });
             });
           }
           const socket = await routeSocket(page, threadId, world);
@@ -651,6 +643,12 @@ for (const size of SIZES) {
             await chip(first).click();
             await expect(page.getByRole("button", { name: "Done", exact: true })).toBeVisible({ timeout: 15_000 });
             await expect(page.getByRole("button", { name: "Won’t do", exact: true })).toBeVisible();
+            // A touch screen at a narrow canvas keeps 44px answer targets, whether the answer floats (phone) or stays in the bar's row.
+            const touchNarrow = await page.evaluate(() => {
+              const canvas = document.querySelector(".leaf-body.document-canvas");
+              return matchMedia("(any-pointer: coarse)").matches && !!canvas && canvas.getBoundingClientRect().width <= 600;
+            });
+            if (touchNarrow) for (const name of ["Done", "Won’t do"]) expect((await page.getByRole("button", { name, exact: true }).boundingBox())!.height, `${name} touch target`).toBeGreaterThanOrEqual(44);
             await shot(page, `do-document-${size.w}-${theme}`);
           }
 
