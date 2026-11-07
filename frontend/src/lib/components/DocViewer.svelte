@@ -351,7 +351,7 @@
 		commentsAsSheet={isPaneDrawer()}
 		onStartComment={draftController.start}
 	/>
-	{#if history.open && history.available && target}<DocHistorySurface {target} applyRestore={history.restore} onRestored={async () => { (await onPrepareCleanReload())?.(); }} bind:restoring={() => history.restoring, history.setRestoring} narrow={isPaneDrawer()} within={docRoot?.closest<HTMLElement>('.leaf-body') ?? docRoot} {covered} onClose={history.close} />{/if}
+	{#if history.open && history.available && target}<DocHistorySurface {target} readOnly={readonly} applyRestore={history.restore} onRestored={async () => { (await onPrepareCleanReload())?.(); }} bind:restoring={() => history.restoring, history.setRestoring} narrow={isPaneDrawer()} within={docRoot?.closest<HTMLElement>('.leaf-body') ?? docRoot} {covered} onClose={history.close} />{/if}
 	<DocCommentSurface
 		reviewBar={reviewControls}
 		reviewVisible={commentUI.sheetUp}

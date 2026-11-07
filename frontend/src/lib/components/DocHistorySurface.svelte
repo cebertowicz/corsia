@@ -13,9 +13,10 @@
 	import { RequestRefused } from '$lib/api/docs';
 	import { emitProductEvent } from '$lib/product_events';
 
-	let { target, narrow, within = null, covered = false, onClose, applyRestore, onRestored, restoring = $bindable(false) }: {
+	let { target, narrow, readOnly = false, within = null, covered = false, onClose, applyRestore, onRestored, restoring = $bindable(false) }: {
 		target: DocViewerTarget;
 		narrow: boolean;
+		readOnly?: boolean;
 		within?: HTMLElement | null;
 		covered?: boolean;
 		onClose: () => void;
@@ -89,7 +90,7 @@
 		return lineDiff(before ? texts[before.id] : '', texts[shown.id]);
 	});
 	// Why Restore is unavailable, said in its accessible name; it stays focusable so the reason can be reached.
-	const restoreBlock = $derived(offline ? 'needs a connection to CORSIA' : isCurrent ? 'this is the current version' : '');
+	const restoreBlock = $derived(offline ? 'needs a connection to CORSIA' : isCurrent ? 'this is the current version' : readOnly ? 'this file is read-only' : '');
 
 	$effect(() => {
 		versionRetry;
