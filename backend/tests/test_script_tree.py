@@ -62,7 +62,10 @@ def test_a_link_in_a_bytecode_cache_refuses_the_folder(tmp_path, cache):
     outside.write_bytes(b"\0forged")
     (tmp_path / cache / "sub").mkdir(parents=True)
     (tmp_path / cache / "sub" / "real.pyc").write_bytes(b"\0cache")
-    assert script_tree.read_tree(entry) == {"run.py": b"pass\n"}
+    # Only the exact name is Python's cache everywhere; on a case-sensitive disk another case is
+    # an ordinary folder a run can import from, so its files stay in the approval.
+    kept = {} if cache == "__pycache__" else {f"{cache}/sub/real.pyc": b"\0cache"}
+    assert script_tree.read_tree(entry) == {"run.py": b"pass\n", **kept}
     (tmp_path / cache / "sub" / "helper.cpython-313.pyc").symlink_to(outside)
     with pytest.raises(ValueError, match=f"{cache}/sub/helper.cpython-313.pyc in the script's folder is a link"):
         script_tree.read_tree(entry)

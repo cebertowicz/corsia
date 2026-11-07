@@ -67,8 +67,7 @@ def _read_folder(dir_fd: int, folder: Path, relative: Path, denied: Callable[[Pa
             continue
         if not (stat.S_ISDIR(mode) or stat.S_ISREG(mode)):
             raise ValueError(_special(path))
-        # The name is matched in any case, as Python finds the cache on a case-insensitive disk.
-        in_cache = cache or (stat.S_ISDIR(mode) and name.casefold() == "__pycache__")
+        in_cache = cache or (stat.S_ISDIR(mode) and name == "__pycache__")
         _check(folder / path, denied)
         try:
             fd = os.open(name, _NO_FOLLOW | (os.O_DIRECTORY if stat.S_ISDIR(mode) else os.O_NONBLOCK),
