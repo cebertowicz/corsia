@@ -540,11 +540,13 @@ async def test_a_sweep_that_ends_an_agents_last_section_row_and_wakes_it_on_anot
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["edit", "suggest"])
-async def test_a_write_to_the_closed_document_that_cannot_settle_its_wake_says_so_in_its_result(
+async def test_a_write_to_the_closed_document_that_cannot_settle_its_wake_lands_and_its_drop_says_to_check(
     doc, driven, monkeypatch, kind,
 ):
-    """The write lands; its own result says the wake stays unanswered, so a later drop note isn't a surprise."""
-    from doceditor import live_runtime, section_writes
+    """The write lands with its ordinary result; the wake stays unanswered, and the note when it drops at
+    turn end tells the agent to check what it already wrote before writing it again."""
+    from doceditor import live_runtime, section_writes, writer_line
+    from infra.database import get_db, write_transaction
     from tools.documents import DocCommentCreateTool
 
     scope, page, entry, path, context = doc
@@ -569,7 +571,7 @@ async def test_a_write_to_the_closed_document_that_cannot_settle_its_wake_says_s
     monkeypatch.setattr(section_writes, "_settle_closed", broken)
     monkeypatch.setattr(live_runtime, "_manager", None)
     result = json.loads(await write())
-    assert result["note"] == section_writes.UNSETTLED_NOTE
+    assert "note" not in result
     if kind == "edit":
         assert "agent terms" in path.read_text()
     else:
@@ -577,9 +579,21 @@ async def test_a_write_to_the_closed_document_that_cannot_settle_its_wake_says_s
     [still] = _line(artifact_id, "## Terms")
     assert still["state"] == "woken"
 
+    db = get_db()
+    try:
+        with write_transaction(db, scope="test_section_turn_end") as connection:
+            connection.execute("UPDATE messages SET delivery_state='delivered' WHERE id=?", (still["wake_message_id"],))
+            writer_line.settle_turn_end(connection, scope["owner"], None)
+    finally:
+        db.close()
+    assert _line(artifact_id, "## Terms") == []
+    [note] = _rows("""SELECT summary FROM context_change_journal WHERE object_kind='thread_context' AND object_id=?
+                      AND summary LIKE '%dropped out of line%'""", scope["owner"])
+    assert writer_line.TURN_ENDED + writer_line.SECTION_CHECK in note["summary"]
+
 
 @pytest.mark.asyncio
-async def test_a_settled_wake_whose_next_writer_is_not_woken_carries_no_note(doc, driven, monkeypatch):
+async def test_a_settled_wake_whose_next_writer_is_not_woken_is_still_answered(doc, driven, monkeypatch):
     """The settle committed, so the write is the agent's answer: failing to pass the line on is not the writer's to act on."""
     from doceditor import agent_comment_writes, live_runtime
 
@@ -597,8 +611,7 @@ async def test_a_settled_wake_whose_next_writer_is_not_woken_carries_no_note(doc
 
     monkeypatch.setattr(agent_comment_writes, "_drive", broken)
     monkeypatch.setattr(live_runtime, "_manager", None)
-    result = json.loads(await _edit(path, context, "old terms", "agent terms"))
-    assert "note" not in result
+    await _edit(path, context, "old terms", "agent terms")
     assert "agent terms" in path.read_text()
     assert _line(artifact_id, "## Terms") == []
 

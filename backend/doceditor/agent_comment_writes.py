@@ -168,13 +168,9 @@ async def _suggest(request: CommentInput, client_id: str | None):
     call = {"tool": "doc_comment_create", "quote": request.quote, "near": request.near, "body": request.body,
             "replacement": request.replacement, "insert_after": request.insert_after}
     if entry is None:
-        note = None
         if request.artifact_id and request.author_thread_id:  # closed: a woken agent's suggestion answers its wake
-            note = await section_writes.settle_closed(None, request.author_thread_id, call, request.artifact_id)
-        created = await _create(request, client_id)
-        if note is not None:
-            created[2]["note"] = note  # the feedback the tool result carries
-        return created
+            await section_writes.settle_closed(None, request.author_thread_id, call, request.artifact_id)
+        return await _create(request, client_id)
     text = entry.live.snapshot[0]
     headings = section_writes.quote_sections(text, request.quote, request.near)
     op = section_writes.saved_op("suggest", call, text, headings)

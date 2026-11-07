@@ -37,7 +37,7 @@ async def test_settled_live_receipt_survives_eviction_without_disk_observation(o
     scope = ownership_scope
     manager, entry, context = await opened(scope, tmp_path, monkeypatch)
     path = entry.live.path
-    receipt = (await write_live(path, context, producer="edit_file", edits=())).result
+    receipt = await write_live(path, context, producer="edit_file", edits=())
     assert json.loads(receipt)["live_document"]
     await manager.evict(entry.artifact_id, entry, can_evict=lambda: True)
     original = Path.read_bytes

@@ -231,31 +231,25 @@ def _settle_closed(path: str | None, artifact_id: str | None, thread_id: str, ca
         db.close()
 
 
-UNSETTLED_NOTE = ("This write couldn't be recorded as your answer to the section wake. If you're later told your saved "
-                  "write dropped out of line, check whether this write already covers it before writing again.")
-
-
-async def settle_closed(path: str | None, thread_id: str, call: dict[str, Any],
-                        artifact_id: str | None = None) -> str | None:
+async def settle_closed(path: str | None, thread_id: str, call: dict[str, Any], artifact_id: str | None = None) -> None:
     """A woken agent is writing to the document after everyone closed it: that answers its wake.
     The document is found by ``path``, or by ``artifact_id`` for a suggestion.
 
     Settled as the write starts, since the file write that follows has no hook of its own; a write
-    that then fails tells the agent so in its own result. Returns the note that write's result
-    carries when the settle failed, else None.
+    that then fails tells the agent so in its own result. A settle that fails leaves the row woken, and
+    its turn-end drop note tells the agent to check what it already wrote (writer_line_text.SECTION_CHECK).
     """
     from doceditor.agent_comment_writes import _drive
 
     if not writer_turns.may_answer_section(thread_id):
-        return None
+        return
     try:
         woken = await run_in_db(_settle_closed, path, artifact_id, thread_id, call)
     except Exception:
         logger.exception("section rows of {} on {} did not settle", thread_id, path or artifact_id)
-        return UNSETTLED_NOTE
-    # The settle has committed, so this write is the answer; passing the line on is not the writer's to act on.
+        return
+    # The settle has committed; a failure to wake the next writer is the line's, not this write's.
     try:
         await _drive(woken)
     except Exception:
         logger.exception("section writers after {} on {} were not woken", thread_id, path or artifact_id)
-    return None

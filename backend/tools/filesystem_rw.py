@@ -22,7 +22,7 @@ from tools.file_write_completion import (
 )
 from tools.filesystem_gate import _resolve_path_for_action
 import tools.pdf_read as pdf_read
-from doceditor.live_tools import record_read_base, with_note, write_live
+from doceditor.live_tools import record_read_base, write_live
 
 
 @dataclass(frozen=True)
@@ -371,12 +371,12 @@ class WriteFileTool(Tool):
             target = await asyncio.to_thread(guidance_target, file_path)
             if target is not None:
                 return await save_guided_write_and_announce(file_path, content, target, kwargs, **write_args)
-            live = await write_live(file_path, kwargs, producer=self.name, content=content, description=description)
-            if live.result is not None:
-                return live.result
-            return with_note(announce_published_write(
+            result = await write_live(file_path, kwargs, producer=self.name, content=content, description=description)
+            if result is not None:
+                return result
+            return announce_published_write(
                 await run_off_db(managed_write, file_path, content, kwargs, notify=False, **write_args)
-            ), live.note)
+            )
         except PermissionError as e:
             return f"Error: {e}"
         except Exception as e:

@@ -34,7 +34,7 @@ from loguru import logger
 from doceditor import comments as store, live_events, writer_turns
 from doceditor.note_names import document_name
 from doceditor.writer_line_count import publish_after_commit
-from doceditor.writer_line_text import describe, wake_text
+from doceditor.writer_line_text import SECTION_CHECK, TURN_ENDED, describe, wake_text
 from infra.database import write_transaction
 from infra.failure_reference import new_error_reference
 from infra.passive_changes import append_thread_context_note
@@ -258,8 +258,7 @@ def serve(db, root_id: str) -> list[str]:
             _drop(db, head, "your thread could not be woken")
             continue
         if heading is not None:
-            # After the commit, in order with any end that clears this agent's hint in the same sweep, so a
-            # later wake is never cleared by an earlier row's end.
+            # After the commit, so an earlier row's end in the same sweep never clears this later wake.
             woken_thread = str(head["agent_thread_id"])
             after_commit(db, lambda: writer_turns.section_woken(woken_thread))
         _event(db, "woken", root_id=root_id, artifact_id=str(head["artifact_id"]), line_id=str(head["id"]), wakes=wakes)
@@ -319,7 +318,8 @@ def _settle_ended(db, row, turn_id: str | None) -> list[str]:
         return []
     if row["active_turn_id"] != turn_id and row["turn_status"] in ("running", "waiting_retry"):
         return []
-    _drop(db, row, _unable(db, row) or "your turn ended without posting it as is or rewriting it")
+    ended = TURN_ENDED if writer_turns.section_heading(str(row["root_id"])) is None else TURN_ENDED + SECTION_CHECK
+    _drop(db, row, _unable(db, row) or ended)
     return serve(db, str(row["root_id"]))
 
 
