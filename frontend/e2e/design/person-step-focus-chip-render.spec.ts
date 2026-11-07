@@ -643,6 +643,12 @@ for (const size of SIZES) {
             await chip(first).click();
             await expect(page.getByRole("button", { name: "Done", exact: true })).toBeVisible({ timeout: 15_000 });
             await expect(page.getByRole("button", { name: "Won’t do", exact: true })).toBeVisible();
+            // A touch screen at a narrow canvas keeps 44px answer targets, whether the answer floats (phone) or stays in the bar's row.
+            const touchNarrow = await page.evaluate(() => {
+              const canvas = document.querySelector(".leaf-body.document-canvas");
+              return matchMedia("(any-pointer: coarse)").matches && !!canvas && canvas.getBoundingClientRect().width <= 600;
+            });
+            if (touchNarrow) for (const name of ["Done", "Won’t do"]) expect((await page.getByRole("button", { name, exact: true }).boundingBox())!.height, `${name} touch target`).toBeGreaterThanOrEqual(44);
             await shot(page, `do-document-${size.w}-${theme}`);
           }
 
