@@ -150,3 +150,62 @@ describe('visible document range targeting', () => {
 		expect(view.dispatch).toHaveBeenCalledOnce();
 	});
 });
+
+describe('a jump whose frame moves after it lands', () => {
+	// Opening the comments drawer takes width from the pane, which rewraps every line above the landing. The reveal's
+	// frame checks have stopped by then, so the landing itself has to be taken again from the pane's own resize.
+	function watching() {
+		const observers: Array<{ trigger: () => void; disconnected: boolean }> = [];
+		vi.stubGlobal('ResizeObserver', class {
+			private index = 0;
+			constructor(callback: () => void) { this.index = observers.push({ trigger: callback, disconnected: false }) - 1; }
+			observe() {}
+			disconnect() { observers[this.index].disconnected = true; }
+		});
+		return observers;
+	}
+
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('takes the place again when the pane moves it out of view, and stops watching on the reader scroll', () => {
+		const observers = watching();
+		let moved = false;
+		const { view, settle } = editorWithTarget((jumps) => (moved ? jumps >= 3 : jumps >= 1));
+
+		scrollToRange(view, 450, 454);
+		settle();
+		expect(view.dispatch).toHaveBeenCalledTimes(1);
+		const watch = observers.at(-1)!;
+		// Its first callback reports the size the box already has, which is not a move.
+		watch.trigger();
+		settle();
+		expect(view.dispatch).toHaveBeenCalledTimes(1);
+
+		moved = true;
+		watch.trigger();
+		settle();
+		expect(view.dispatch).toHaveBeenCalledTimes(3);
+
+		// The reader then scrolls: their place is theirs, and a later frame move must not pull them back.
+		view.scrollDOM.dispatchEvent(new Event('scroll'));
+		const before = view.dispatch.mock.calls.length;
+		watch.trigger();
+		settle();
+		expect(view.dispatch).toHaveBeenCalledTimes(before);
+		expect(watch.disconnected).toBe(true);
+	});
+
+	it('retires the watch of the jump the reader replaced', () => {
+		const observers = watching();
+		const { view, settle } = editorWithTarget((jumps) => jumps >= 1);
+
+		scrollToRange(view, 450, 454);
+		settle();
+		scrollToRange(view, 900, 904);
+		settle();
+
+		expect(observers).toHaveLength(2);
+		expect(observers[0].disconnected).toBe(true);
+		expect(observers[1].disconnected).toBe(false);
+	});
+});

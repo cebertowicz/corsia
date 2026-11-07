@@ -361,6 +361,18 @@ for (const theme of ['light', 'dark'] as const) {
 			// The waiting reply it pointed at is brought into view, focused, and the comments list opens at it.
 			await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
 			await expect.poll(() => page.locator('.cm-scroller').evaluate((el) => el.scrollTop)).toBeGreaterThan(before);
+			// Where it lands matters as much as that it moved: the whole landed line sits inside the pane the reader can see,
+			// clear of its top edge, and stays there once the drawer has taken its width from the pane.
+			await expect.poll(async () => {
+				const inside = await page.evaluate((id) => {
+					const pane = document.querySelector<HTMLElement>('.cm-scroller')!.getBoundingClientRect();
+					const pieces = [...document.querySelectorAll<HTMLElement>(`[data-comment-id="${id}"]`)].map((node) => node.getBoundingClientRect());
+					if (!pieces.length) return false;
+					return Math.min(...pieces.map((r) => r.top)) >= pane.top - 0.5 && Math.max(...pieces.map((r) => r.bottom)) <= pane.bottom + 0.5;
+				}, doc.roots[8]);
+				steadyInside = inside ? steadyInside + 1 : 0;
+				return steadyInside >= 2;
+			}, { message: 'the jumped-to line sits wholly inside the visible pane and stays there' }).toBe(true);
 			// The arrival reads that thread, and the one still waiting has its own line on screen: with nothing off-screen the control steps aside while the count still says one.
 			await expect.poll(() => unreadCountInStore(page, doc.artifactId)).toBe(1);
 			await expect(controlBox(page)).toHaveCount(0);

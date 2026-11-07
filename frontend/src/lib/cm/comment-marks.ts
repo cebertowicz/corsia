@@ -94,6 +94,9 @@ export function coveredByMove(view: EditorView, from: number, before: Box | null
 	return { band, covered: !!before && within(box, before) && !within(box, band) };
 }
 
+/** The frame watch of the jump that last moved the reader: one at a time, so a new jump retires the previous one. */
+const placedIn = new WeakMap<EditorView, () => void>();
+
 export function scrollToRange(view: EditorView, from: number, _to: number, origin: ScrollOrigin = 'navigation') {
 	const target = Math.min(from, view.state.doc.length);
 	const widget = widgetTarget(view, target);
@@ -124,9 +127,33 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 		if (view.dom.isConnected) run();
 	});
 	let steady = 0;
+	let settledPass = 0;
+	let done = false;
+	// The frame the reader is being placed in moves under a jump: opening the comments drawer takes width from the pane at
+	// 1440, every line above the landing rewraps, and the landing shifts after the frame checks have stopped. Watch the
+	// scroller's own box for as long as this jump holds the reader's place, and take the place again when that box moves;
+	// a reader scroll ends the watch, so nothing here pulls the reader back. Its first callback only reports the size the
+	// box already has, which is not a move.
+	let seenSize = false;
+	const stop = () => {
+		done = true;
+		watch?.disconnect();
+		visibleRegion(view).scroller.removeEventListener('scroll', onMove);
+		if (placedIn.get(view) === stop) placedIn.delete(view);
+	};
+	const onMove = () => stop();
+	const watch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => {
+		if (!seenSize) { seenSize = true; return; }
+		if (done) return;
+		steady = 0;
+		check(settledPass);
+	}) : null;
+	placedIn.get(view)?.();
+	placedIn.set(view, stop);
 	// CodeMirror refuses a dispatch during its measure cycle, so a repeat jump
 	// waits for the next frame.
 	const check = (pass: number) => nextFrame(() => {
+		settledPass = pass;
 		view.requestMeasure({
 			key: scrollToRange,
 			read(current) {
@@ -137,11 +164,13 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 					// A table drawn after the initial jump still needs its target cell revealed sideways.
 					if (steady === 0) widget?.reveal(view);
 					steady += 1;
-					if (steady < STEADY_CHECKS) check(pass);
+					if (steady < STEADY_CHECKS) { check(pass); return; }
+					// Settled. From here a scroll is the reader's own, and their place is theirs to keep.
+					visibleRegion(view).scroller.addEventListener('scroll', onMove, { passive: true });
 					return;
 				}
 				steady = 0;
-				if (pass >= MAX_SCROLL_PASSES) return;
+				if (pass >= MAX_SCROLL_PASSES) { stop(); return; }
 				nextFrame(() => {
 					jump();
 					check(pass + 1);
@@ -151,4 +180,5 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	});
 	jump();
 	check(0);
+	watch?.observe(visibleRegion(view).scroller);
 }
