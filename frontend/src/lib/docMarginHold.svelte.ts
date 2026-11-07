@@ -67,7 +67,13 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		const hold = (here: number | null) => { if (here !== null && Math.abs(here - offset) > 0.5) scroller.scrollTop += here - offset; };
 		// A width change leaves the editor's height estimates for the lines it is not drawing stale until its next measure, which would be a frame late: measure first, then hold.
 		const observer = new ResizeObserver(() => {
-			try { (view as unknown as { measure: () => void }).measure(); } catch { /* an update is in progress; the requested measure below follows it */ }
+			try {
+				(view as unknown as { measure: () => void }).measure();
+			} catch {
+				// Mid-update (or without that internal call), hold from the editor's own next measure instead of from stale estimates.
+				view.requestMeasure({ read: rowTop, write: hold });
+				return;
+			}
 			hold(rowTop());
 		});
 		observer.observe(view.contentDOM);

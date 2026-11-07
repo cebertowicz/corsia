@@ -904,6 +904,7 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		expect(onClose).not.toHaveBeenCalled();
 		expect(restoreFocus).not.toHaveBeenCalled();
 		expect(document.body.querySelector('.ct-act.resolve')).toBe(resolve);
+		await vi.waitFor(() => expect(document.body.textContent).toContain('Couldn’t resolve this. Try again.'));
 		// The sheet holds focus for its own card; a refusal must not hand it to the page.
 		expect(document.activeElement).not.toBe(document.body);
 		if (!narrow) expect(document.activeElement).toBe(resolve);
