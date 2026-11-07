@@ -235,14 +235,14 @@
 	 */
 	function drawerMotion(node: Element, options: { leaving: boolean }) { return imageDrawerMotion(node, options, isImage); }
 	function closeDrawer() { onClose(); restoreFocus(); }
-	// Resolving a decided suggestion ends its conversation, and its edit is already settled in the text, so its card closes with it (DRAFT-comment-fixes-3to6, Option A step 5), but only once the request is answered: on a refusal the card stays as it was, with focus where it was, and says so through this opening's card errors, which reset with the decisions' when the surface reopens.
+	// Resolving a decided suggestion ends its conversation, and its edit is already settled in the text, so its card closes with it (DRAFT-comment-fixes-3to6, Option A step 5; in the margin the card leaves the column by itself and the column stays up), but only once the request is answered: on a refusal the card stays as it was, with focus where it was, and says so through this opening's card errors, which reset with the decisions' when the surface reopens.
 	function resolveThread(id: string, resolved: boolean) {
 		if (!(resolved && surfaceState?.kind === 'thread' && surfaceState.id === id && comments.find((item) => item.id === id)?.decision)) { void onResolve(id, resolved); return; }
 		const started = decisions.outcome;
 		started.errors = { ...started.errors, [id]: '' };
 		void Promise.resolve(onResolve(id, true, true)).then((taken) => {
 			if (taken === false && started === decisions.outcome) started.errors = { ...started.errors, [id]: 'Couldn’t resolve this. Try again.' };
-			if (taken === false || surfaceState?.kind !== 'thread' || surfaceState.id !== id) return;
+			if (taken === false || margin || surfaceState?.kind !== 'thread' || surfaceState.id !== id) return;
 			onClose(); if (!narrow) restoreFocus();
 		});
 	}

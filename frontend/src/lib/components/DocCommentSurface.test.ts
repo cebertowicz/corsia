@@ -875,7 +875,7 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		const decided = { ...suggestion, decision: 'accepted' as const, replies: [{ id: 'r1', author: 'agent-1', text: 'Thanks', at: 'now' }] };
 		let answer!: (taken: boolean) => void;
 		const onResolve = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; })), onClose = vi.fn(), restoreFocus = vi.fn();
-		render({ comments: [decided], onResolve, onClose, restoreFocus });
+		render({ bounds: noRoomCanvas(), comments: [decided], onResolve, onClose, restoreFocus });
 		document.body.querySelector<HTMLButtonElement>('.ct-act.resolve')!.click();
 		expect(onResolve).toHaveBeenCalledWith('comment-1', true, true);
 		await Promise.resolve();
@@ -891,6 +891,18 @@ describe('DocCommentSurface comments on images inside a document', () => {
 		expect(plainResolve).toHaveBeenCalledWith('comment-1', true);
 		await Promise.resolve();
 		expect(onCloseAgain).not.toHaveBeenCalled();
+	});
+	it('keeps the margin column up when a decided suggestion picked from its text is resolved', async () => {
+		const decided = { ...suggestion, decision: 'accepted' as const, replies: [{ id: 'r1', author: 'agent-1', text: 'Thanks', at: 'now' }] };
+		const other = { ...suggestion, id: 'comment-2', replacement: undefined };
+		const onResolve = vi.fn(async () => true), onClose = vi.fn(), restoreFocus = vi.fn();
+		render({ state: { kind: 'thread', id: decided.id }, comments: [decided, other], onResolve, onClose, restoreFocus });
+		expect(document.body.querySelector('.canvas-comment-drawer.margin')).not.toBeNull();
+		document.body.querySelector<HTMLButtonElement>('[data-comment-id="comment-1"] .ct-act.resolve')!.click();
+		await vi.waitFor(() => expect(onResolve).toHaveBeenCalledWith('comment-1', true, true));
+		await Promise.resolve(); await Promise.resolve();
+		expect(onClose).not.toHaveBeenCalled();
+		expect(document.body.querySelector('[data-comment-id="comment-2"]')).not.toBeNull();
 	});
 
 	it.each([false, true])('keeps a decided card and its focus when the request to resolve it is refused (phone width: %s)', async (narrow) => {
