@@ -11,7 +11,7 @@
 		connectionDescriptionId?: string;
 		/** Every unresolved comment that couldn't be placed: the number the header pill reports, so the footer never disagrees with it. */
 		unplacedCount: number;
-		/** The unplaced comments Place again could place; detached ones (their text is gone) are not counted. Offers the action. */
+		/** Unplaced comments whose quote is present and can be submitted for placement. Offers the action. */
 		replaceableCount: number;
 	};
 	let { unplacedCount, replaceableCount, onReload, reloading = false, reloadError = false, unavailable = false, connectionDescriptionId, onFocusHome }: PlacementRecoveryProps & {

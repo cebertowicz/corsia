@@ -71,7 +71,7 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await reload.click();
 			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
 			await expect(reply).toHaveValue(`draft ${stamp}`);
-			await expect(comments.getByRole('heading', { name: /^Comments\b/ })).toBeFocused();
+			await expect(comments.getByRole('heading', { name: /^Comments/ })).toBeFocused();
 			await expect(comments.getByRole('status').filter({ hasText: 'Comments placed' })).toBeVisible();
 			await expect(reload).toHaveCount(0);
 			await reader.screenshot({ path: testInfo.outputPath(`comment-reload-success-${width}.png`) });

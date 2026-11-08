@@ -89,12 +89,15 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
  * resolved thread is never in it. The recovery's count is the part of that group Place again can attempt: an orphaned
  * unresolved comment whose quote remains in the text.
  */
-export function commentSurfaceStatus(comments: DocComment[]) {
+export function commentSurfaceStatus(comments: DocComment[], text: string) {
 	const lost = (comment: DocComment) => comment.orphaned && !comment.resolved;
 	return {
 		commentCount: comments.filter((comment) => !comment.resolved || hasUnread(comment)).length,
 		orphanedCount: comments.filter(lost).length,
-		replaceableCount: comments.filter((comment) => lost(comment) && !comment.detached).length,
+		replaceableCount: comments.filter((comment) => {
+			const quote = anchoredQuote(comment);
+			return lost(comment) && !!quote && text.includes(quote);
+		}).length,
 		placementReloading: comments.some((comment) => comment.placementReloading),
 		placementReloadError: comments.some((comment) => comment.placementReloadError),
 	};
