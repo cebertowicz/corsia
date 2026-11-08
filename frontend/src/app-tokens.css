@@ -33,6 +33,8 @@
   --space-7: 32px;
   --touch-target: 44px;
   --space-8: 48px;
+  /* The comment margin column: one width for every surface that shows threads beside text (a document's column, a wide chat's). */
+  --margin-column: 308px;
 
   --ease-snap: cubic-bezier(0.2, 0, 0, 1);
   --ease-material: cubic-bezier(0.4, 0, 0.2, 1);

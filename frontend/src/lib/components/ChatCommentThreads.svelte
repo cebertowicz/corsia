@@ -9,9 +9,10 @@
 	import CommentThread from './comments/CommentThread.svelte';
 	import type { CommentThreadData } from './comments/CommentThreadData';
 	import CommentReplyList from './comments/CommentReplyList.svelte';
+	import { chatReplyDrafts } from './chatReplyDrafts.svelte';
 	import './comments/comment-link.css';
 
-	let { messageId, threadId, comments, onReply, keepReplyVisible = false, detached = false, replyDrafts = $bindable({}) }: { messageId: string; threadId: string; comments: ChatComment[]; onReply?: (text: string) => void; keepReplyVisible?: boolean; detached?: boolean; /** Unsent replies by comment id, caller-owned so a remount keeps them. */ replyDrafts?: Record<string, string> } = $props();
+	let { messageId, threadId, comments, onReply, keepReplyVisible = false, detached = false, margin = false }: { messageId: string; threadId: string; comments: ChatComment[]; onReply?: (text: string) => void; keepReplyVisible?: boolean; detached?: boolean; /** The thread is a card in the transcript's margin column: no rail, since the card is its frame. */ margin?: boolean } = $props();
 	// Built once per change of the loaded rows, then read per comment: the pending and failed sends of this thread.
 	const replies = $derived(chatReplyIndex($messages, threadId));
 	const agentName = $derived.by(() => {
@@ -48,11 +49,11 @@
 </script>
 
 {#if comments?.length}
-	<div class="chat-comment-threads">
+	<div class="chat-comment-threads" class:margin>
 		{#each comments as comment (`${comment.user_message_id}:${comment.cid}`)}
 			<div class="chat-comment-thread" data-chat-comment={comment.cid} data-comment-uuid={comment.id} tabindex="-1">
 				{#if !detached}<CommentQuote quote={comment.quote} />{/if}
-				<CommentThread comment={thread(comment)} readOnly={!onReply} flat hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} bind:replyText={() => replyDrafts[comment.id] ?? '', (text) => replyDrafts[comment.id] = text} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { onReply?.(text); for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); }}>
+				<CommentThread comment={thread(comment)} readOnly={!onReply} flat hideOrphan={!detached} detachedNote="This text can’t be highlighted in the message." {keepReplyVisible} bind:replyText={() => chatReplyDrafts.get(comment.id), (text) => chatReplyDrafts.set(comment.id, text)} chatSurface onViewed={(_, replyId) => viewed(comment, replyId)} onReply={async (_, text) => { onReply?.(text); for (const answer of comment.answers.filter(item => item.author_kind === 'agent' && item.unread)) void viewed(comment, answerId(answer)).catch(error => console.warn('Could not record the viewed reply', error)); }}>
 				{#snippet failure()}
 				{#each replies.pending(comment) as pending (pending.id)}
 					<div class="pending-reply" role="status">
@@ -83,6 +84,8 @@
 	.pending-reply > span { color: var(--text-secondary); font-size: var(--text-footnote); margin-left: var(--space-3); }
 	.failed-reply > span { color: var(--red); font-size: var(--text-footnote); margin-left: var(--space-3); }
 	.chat-comment-threads { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-3); padding-left: var(--space-3); border-left: 1px solid var(--border); }
+	/* In a margin card the card is the frame, so the rail under the message is not drawn. */
+	.chat-comment-threads.margin { margin: 0; padding: 0; border: 0; }
 	.chat-comment-thread { display: flex; flex-direction: column; gap: var(--space-1); }
 	.reply-link { align-self: flex-start; min-width: var(--touch-target); text-align: left; padding: 0; margin: calc(-1 * var(--space-1)) 0 calc(-1 * var(--space-1)) calc(var(--space-3) - var(--chip-inline-padding)); }
 	.reply-label { display: inline-block; padding: var(--space-1) var(--chip-inline-padding); border-radius: var(--radius-sm); }

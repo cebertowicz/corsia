@@ -14,10 +14,13 @@
 	import { quoteLabel } from './chatUnreadTargets';
 	import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { useChatReplyJumper } from './chatReplyJumper.svelte';
-	import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHistory';
+	import { hydrateFetchedMessages } from '$lib/messageHistory';
+	import { createTranscriptPagerPort } from '$lib/chatTranscriptPagerPort';
 	import { adoptThreadSnapshot, retainDisplayedRows } from '$lib/stores/displayedThreads';
 	import { beginThreadOpen, failThreadOpen, markFirstPageRendered, type ThreadOpenSource } from '$lib/openTimingRuntime';
 	import MessageList from './MessageList.svelte';
+	import ChatMarginColumn from './ChatMarginColumn.svelte';
+	import { createChatCommentMargin } from './chatCommentMargin.svelte';
 	import { coreSettings } from '$lib/stores/settings';
 	import { adoptFirstPageRuns, adoptOlderPageRuns, type RunLoad, type RunStub } from '$lib/focusRuns';
 	import { loadRunRange } from '$lib/focusRunLoader';
@@ -45,7 +48,6 @@
 		PAGER_ABORT,
 		type MessagePage,
 		type TurnSummary,
-		type PagerPort,
 	} from '$lib/messagePager';
 	let {
 		isDraggingOver = false,
@@ -63,6 +65,10 @@
 		onAutoCreateThread?: () => Promise<void>;
 	} = $props();
 	let messagesEl = $state<HTMLDivElement | undefined>(undefined);
+	let chatCanvas = $state<HTMLDivElement | undefined>(undefined);
+	/** Whether this canvas has room for the comment margin beside its transcript, and which card is picked. */
+	const commentMargin = createChatCommentMargin(() => chatCanvas ?? null, () => $activeThreadId,
+		() => $messages.some(message => message.thread_id === $activeThreadId && !!message.chat_comments?.length));
 	let userIsNearBottom = $state(true);
 	let ignoreScrollEvents = $state(false);
 	let messageListRef: MessageList;
@@ -170,29 +176,10 @@
 	export async function setAndSend(text: string, preserveDraft = false): Promise<SendOutcome> {
 		return await inputBarRef?.setAndSend(text, preserveDraft) ?? 'not_sent';
 	}
-	const pagerPort: PagerPort = {
-		async fetchPage(cursor: string): Promise<MessagePage | null> {
-			const t = $token;
-			const sid = $activeThreadId;
-			if (!t || !sid) return null;
-			try {
-				const res = await fetch(
-					`/api/threads/${sid}/messages?token=${t}&limit=${MSG_PAGE_SIZE}&before=${cursor}${focusParam()}`
-				);
-				if (!res.ok) return null;
-				const data = await res.json() as MessagePage;
-				return { ...data, messages: hydrateFetchedMessages(data.messages ?? []) };
-			} catch (e) {
-				console.error('loadOlderMessages fetch failed:', e);
-				return null;
-			}
-		},
-		prepend(older: any[]) {
-			messages.update(current => mergeFetchedHistoryRows(current, older));
-		},
-		getScrollEl: () => messagesEl ?? null,
-		afterRender: () => tick(),
-	};
+	const pagerPort = createTranscriptPagerPort({
+		token: () => $token, threadId: () => $activeThreadId, pageSize: MSG_PAGE_SIZE,
+		querySuffix: focusParam, scrollEl: () => messagesEl ?? null,
+	});
 	async function loadOlderMessages(needsMore?: () => boolean) {
 		const gen = pagerGeneration;
 		const guardedPort = makeGuardedPort(() => pagerGeneration, gen, pagerPort);
@@ -322,10 +309,12 @@
 <div class="chat-shell">
 	<div class="reply-announcements" aria-live="polite" aria-relevant="additions">{#each replyAnnouncements as announcement (announcement.id)}<div>{announcement.text}</div>{/each}</div>
 	<ChatThreadBindings />
-	<div class="chat-content" use:toastAnchorSurface>
+	<div class="chat-content" bind:this={chatCanvas} use:toastAnchorSurface>
+		<div class="transcript-area">
 		<MessageList
 			bind:this={messageListRef}
 			bind:messagesEl
+			layoutRoot={chatCanvas}
 			bind:userIsNearBottom
 			bind:ignoreScrollEvents
 			hideScrollFab
@@ -342,6 +331,10 @@
 			onLoadRun={loadRun}
 			onRetryFirstLoad={retryFirstPage}
 		/>
+		{#if commentMargin.shown && $activeThreadId}
+			<ChatMarginColumn threadId={$activeThreadId} scroller={messagesEl ?? null} selectedId={commentMargin.selectedId} onSelect={(id) => commentMargin.selectedId = id} onSendReply={(reply) => inputBarRef?.sendReply(reply)} />
+		{/if}
+		</div>
 		{#if isDraggingOver}
 			<ChatDropOverlay />
 		{/if}
@@ -383,6 +376,8 @@
 		</ChatAttentionStack>
 		<InputBar
 			bind:this={inputBarRef}
+			marginComments={commentMargin.shown}
+			bind:selectedCommentId={commentMargin.selectedId}
 			onSend={scrollToBottom}
 			onTriggerWarm={triggerWarm}
 			{onAutoCreateThread}
@@ -397,4 +392,6 @@
 	.chat-content {
 		flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative;
 	}
+	/* The transcript and its comment margin column, side by side; the composer below spans the whole canvas. */
+	.transcript-area { flex: 1; display: flex; min-width: 0; min-height: 0; }
 </style>

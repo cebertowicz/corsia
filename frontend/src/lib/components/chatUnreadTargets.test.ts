@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { unreadTargets } from './chatUnreadTargets';
+import { commentLanding, unreadTargets } from './chatUnreadTargets';
 import type { Message } from '$lib/stores/threads';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -33,6 +33,15 @@ it('lands on the thread under a message whose text no longer matches the comment
 	// The target carries the jump's destination, so the one landing path can reach a page that is not loaded yet.
 	expect(result.above?.destination).toEqual({ pane: 'chat-replies', id: 'drifted', seq: 7, cid: 'c-drifted', user_message_id: 'u-1' });
 	expect(result.count).toBe(1);
+});
+
+it('lands on the message body in the row below when Focus draws the message\'s activity as its first row', () => {
+	vi.stubGlobal('CSS', { escape: (value: string) => value });
+	const root = document.createElement('div');
+	// Nothing painted and no thread under the message (its card is in the margin column): only the body its text left is there.
+	root.innerHTML = '<div data-message-id="m"><div class="activity">ran 3 tools</div></div><div data-message-id="m"><div class="long-message-body">the text</div></div>';
+	expect(commentLanding(root, 'm', { id: 'gone' })).toBe(root.querySelector('.long-message-body'));
+	expect(commentLanding(root, 'absent', { id: 'gone' })).toBeNull();
 });
 
 it('treats highlights behind the header and composer as outside the visible viewport', () => {
