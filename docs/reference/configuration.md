@@ -117,7 +117,6 @@ Generate it with `python scripts/docs/generate_config.py`; add `--check` to comp
 | `SHELL` | — | Selects the user's shell. | `backend/cli_location.py` |
 | `TIKTOKEN_CACHE_DIR` | — | Selects the tokenization cache directory. | `backend/core/token_estimation.py` |
 | `TZ` | — | Provides the timezone for provider usage limits. | `backend/subagents/provider_usage_limits.py` |
-| `UVICORN_LOG_CONFIG` | — | Selects a Uvicorn logging configuration; when set, CORSIA leaves Uvicorn's log format as configured. | `backend/infra/log_format.py` |
 | `XDG_CONFIG_HOME` | — | Selects the XDG configuration directory. | `backend/automation/script_sandbox.py`, `backend/infra/git_state_cache.py` |
 
 

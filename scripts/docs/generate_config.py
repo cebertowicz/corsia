@@ -104,7 +104,6 @@ DOCUMENTED = {
     "SHELL": "Selects the user's shell.",
     "TIKTOKEN_CACHE_DIR": "Selects the tokenization cache directory.",
     "TZ": "Provides the timezone for provider usage limits.",
-    "UVICORN_LOG_CONFIG": "Selects a Uvicorn logging configuration; when set, CORSIA leaves Uvicorn's log format as configured.",
     "XDG_CONFIG_HOME": "Selects the XDG configuration directory.",
 }
 INTERNAL = {
@@ -127,8 +126,7 @@ NOT_SETTINGS = {
 }
 
 STANDARD = {"PATH", "HOME", "SHELL", "TZ", "LANG", "LC_ALL", "APPDATA", "LOCALAPPDATA",
-            "XDG_CONFIG_HOME", "GH_CONFIG_DIR", "TIKTOKEN_CACHE_DIR", "CUSTOM_TIKTOKEN_CACHE_DIR",
-            "UVICORN_LOG_CONFIG"}
+            "XDG_CONFIG_HOME", "GH_CONFIG_DIR", "TIKTOKEN_CACHE_DIR", "CUSTOM_TIKTOKEN_CACHE_DIR"}
 DEVELOPMENT = {"CORSIA_TEST_MODE", "CORSIA_ALLOW_HOME_WORKSPACE_IN_CI", "CI", "GITHUB_ACTIONS"}
 MODEL = {"OMLX_BASE_URL", "CLAUDE_BIN", "CODEX_BIN", "CODEX_HOME"}
 

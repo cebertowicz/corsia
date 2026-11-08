@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from copy import deepcopy
 
 from uvicorn.config import LOGGING_CONFIG
+from uvicorn.logging import ColourizedFormatter
 
 LOGURU_FORMAT = "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level} | pid {process.id} | {module}:{function}:{line} - {message}"
 _LOG_FORMAT = "%(asctime)s.%(msecs)03d | %(levelname)s | pid %(process)d | %(module)s:%(funcName)s:%(lineno)d - %(message)s"
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+_UVICORN_FORMATTERS = (("uvicorn", "default"), ("uvicorn.error", "default"), ("uvicorn.access", "access"))
 
 
 def uvicorn_log_config() -> dict:
@@ -25,34 +26,27 @@ def uvicorn_log_config() -> dict:
     return config
 
 
-class _TraceFormatter(logging.Formatter):
-    """Add trace context without replacing the operator's formatter output."""
-
-    def __init__(self, original: logging.Formatter | None, *, access: bool) -> None:
-        super().__init__(_LOG_FORMAT, datefmt=_DATE_FORMAT)
-        self.original = original or logging.Formatter()
-        self.access = access
-
-    def format(self, record: logging.LogRecord) -> str:
-        message = self.original.format(record)
-        timestamp = self.formatTime(record, self.datefmt)
-        source = "uvicorn.access" if self.access else f"{record.module}:{record.funcName}:{record.lineno}"
-        return f"{timestamp}.{int(record.msecs):03d} | {record.levelname} | pid {record.process} | {source} - {message}"
-
-
-def has_custom_uvicorn_log_config() -> bool:
-    """An explicit Uvicorn logging config takes precedence over CORSIA's default format."""
-    return bool(os.environ.get("UVICORN_LOG_CONFIG")) or any(
-        arg == "--log-config" or arg.startswith("--log-config=") for arg in sys.argv[1:]
-    )
-
-
 def configure_uvicorn_logging() -> None:
-    """Add trace context to Uvicorn's default handlers without changing levels."""
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-        for handler in logging.getLogger(name).handlers:
-            if not isinstance(handler.formatter, _TraceFormatter):
-                handler.setFormatter(_TraceFormatter(handler.formatter, access=name == "uvicorn.access"))
+    """Give handlers Uvicorn built with its stock formats the traceable ones, keeping levels and handlers.
+
+    A logging config given to Uvicorn by flag, environment or code brings its own formats;
+    its handlers and the root stderr handler are then left as configured.
+    """
+    traced = uvicorn_log_config()["formatters"]
+    custom = False
+    for logger_name, key in _UVICORN_FORMATTERS:
+        for handler in logging.getLogger(logger_name).handlers:
+            formatter = handler.formatter
+            if not isinstance(formatter, ColourizedFormatter):
+                custom = True
+            elif formatter._fmt == LOGGING_CONFIG["formatters"][key]["fmt"]:
+                handler.setFormatter(type(formatter)(
+                    fmt=traced[key]["fmt"], datefmt=_DATE_FORMAT, use_colors=formatter.use_colors,
+                ))
+            elif formatter._fmt != traced[key]["fmt"]:
+                custom = True
+    if not custom:
+        configure_stdlib_logging()
 
 
 class _StderrHandler(logging.StreamHandler):

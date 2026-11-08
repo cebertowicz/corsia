@@ -29,9 +29,7 @@ from app_lifecycle import lifespan
 
 from infra import config  # noqa: F401
 from infra.access_log import install_access_log_redaction
-from infra.log_format import (
-    configure_stdlib_logging, configure_uvicorn_logging, has_custom_uvicorn_log_config, uvicorn_log_config,
-)
+from infra.log_format import configure_uvicorn_logging, uvicorn_log_config
 from infra.log_locals import drop_traceback_locals
 from infra.json_gzip import JsonGZipMiddleware
 from infra.config import FRONTEND_DIR
@@ -108,9 +106,7 @@ from api.keys import router as keys_router
 logger = logging.getLogger(__name__)
 
 LOG_CONFIG = uvicorn_log_config()
-if not has_custom_uvicorn_log_config():
-    configure_uvicorn_logging()
-    configure_stdlib_logging()
+configure_uvicorn_logging()
 install_access_log_redaction()
 drop_traceback_locals()
 app = FastAPI(title="CORSIA UI", lifespan=lifespan)

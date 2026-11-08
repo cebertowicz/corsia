@@ -63,12 +63,12 @@ capture.detach()
         assert re.match(prefix + r"[^ ]+:[^ ]+:\d+ - ", lines[0])
     access = [line for line in output.splitlines() if 'GET / HTTP/1.1' in line]
     assert len(access) == 1
-    assert re.match(prefix + r"uvicorn\.access - ", access[0])
+    assert re.match(prefix + r'uvicorn\.access - 127\.0\.0\.1:123 - "GET / HTTP/1\.1" 200 OK$', access[0])
     assert "hidden=value" not in output
 
 
-@pytest.mark.parametrize("custom_config", [False, True])
-def test_uvicorn_cli_respects_logging_options(tmp_path: Path, custom_config: bool) -> None:
+@pytest.mark.parametrize("mode", ["default", "quiet", "custom"])
+def test_uvicorn_cli_respects_logging_options(tmp_path: Path, mode: str) -> None:
     workspace, state = tmp_path / "workspace", tmp_path / "state"
     workspace.mkdir()
     state.mkdir()
@@ -78,8 +78,8 @@ def test_uvicorn_cli_respects_logging_options(tmp_path: Path, custom_config: boo
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
     log_path = tmp_path / "backend.log"
-    args = ["--log-level", "warning", "--no-access-log"]
-    if custom_config:
+    args = ["--log-level", "warning", "--no-access-log"] if mode == "quiet" else []
+    if mode == "custom":
         config = json.loads(json.dumps(LOGGING_CONFIG))
         config["formatters"]["default"]["fmt"] = "CUSTOM %(levelprefix)s %(message)s"
         config["formatters"]["access"]["fmt"] = 'CUSTOM %(client_addr)s %(request_line)s %(status_code)s'
@@ -108,7 +108,13 @@ def test_uvicorn_cli_respects_logging_options(tmp_path: Path, custom_config: boo
             process.wait(timeout=15)
         log.seek(0)
         output = log.read()
-    if custom_config:
+    if mode == "default":
+        prefix = rf"\d{{4}}-\d{{2}}-\d{{2}} \d{{2}}:\d{{2}}:\d{{2}}\.\d{{3}} \| INFO \| pid {process.pid} \| "
+        startup = next(line for line in output.splitlines() if "Application startup complete" in line)
+        assert re.match(prefix + r"[^ ]+:[^ ]+:\d+ - Application startup complete\.$", startup)
+        access = next(line for line in output.splitlines() if 'GET /api/health' in line)
+        assert re.match(prefix + r'uvicorn\.access - 127\.0\.0\.1:\d+ - "GET /api/health HTTP/1\.1" 200 OK$', access)
+    elif mode == "custom":
         access = next(line for line in output.splitlines() if 'GET /api/health' in line)
         assert re.match(r"CUSTOM 127\.0\.0\.1:\d+ GET /api/health HTTP/1\.1 200 OK$", access)
         assert "CUSTOM INFO:     Application startup complete" in output
