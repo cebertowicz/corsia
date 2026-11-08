@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import logging.config
 import os
 
 # An operator's LITELLM_LOCAL_MODEL_COST_MAP=true keeps the cost map offline. Otherwise
@@ -30,7 +29,8 @@ from app_lifecycle import lifespan
 
 from infra import config  # noqa: F401
 from infra.access_log import install_access_log_redaction
-from infra.log_locals import configure_stdlib_logging, drop_traceback_locals, uvicorn_log_config
+from infra.log_format import configure_uvicorn_logging, uvicorn_log_config
+from infra.log_locals import drop_traceback_locals
 from infra.json_gzip import JsonGZipMiddleware
 from infra.config import FRONTEND_DIR
 from infra.failure_reference import ReferencedHTTPException
@@ -106,10 +106,9 @@ from api.keys import router as keys_router
 logger = logging.getLogger(__name__)
 
 LOG_CONFIG = uvicorn_log_config()
-logging.config.dictConfig(LOG_CONFIG)
+configure_uvicorn_logging()
 install_access_log_redaction()
 drop_traceback_locals()
-configure_stdlib_logging()
 app = FastAPI(title="CORSIA UI", lifespan=lifespan)
 app.state.litellm_cost_map_offline = _COST_MAP_OFFLINE
 
