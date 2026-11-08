@@ -272,9 +272,7 @@
 	}
 	// Re-pin a live-edge transcript when the composer or attention rail grows; preserve a reader's history position.
 	let wasPinnedBeforeLayoutChange = $state(true);
-	$effect(() => {
-		wasPinnedBeforeLayoutChange = userIsNearBottom;
-	});
+	$effect(() => { wasPinnedBeforeLayoutChange = userIsNearBottom; });
 	$effect(() => observeLayoutGrowth(layoutRoot ?? messagesEl?.parentElement, () => wasPinnedBeforeLayoutChange, followBottom));
 	export const captureBottomOffset = () => scrollControl.captureBottomOffset();
 	export const restoreBottomOffset = () => scrollControl.restoreBottomOffset();
