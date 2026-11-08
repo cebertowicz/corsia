@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
 import pytest
 
@@ -113,7 +114,7 @@ async def test_checkpointed_long_history_starts_disposable_review_pass(review_en
 
 def _append_running_turn_with_step(db) -> int:
     """A running Turn with one finished tool step; returns its interior cut sequence."""
-    rows = [
+    rows: list[tuple[str, str, str, dict[str, Any]]] = [
         ("busy-u", "user", "investigate", {}),
         ("busy-a", "assistant", "reading", {"llm_tool_calls": [
             {"id": "call-1", "type": "function", "function": {"name": "Read", "arguments": "{}"}},
