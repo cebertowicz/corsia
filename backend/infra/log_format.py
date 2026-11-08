@@ -27,26 +27,26 @@ def uvicorn_log_config() -> dict:
 
 
 def configure_uvicorn_logging() -> None:
-    """Give handlers Uvicorn built with its stock formats the traceable ones, keeping levels and handlers.
+    """Make Uvicorn's lines traceable when it runs on its stock logging config, keeping levels.
 
-    A logging config given to Uvicorn by flag, environment or code brings its own formats;
-    its handlers and the root stderr handler are then left as configured.
+    Any other logging config, given by flag, environment or code, is left whole as configured,
+    with no root stderr handler added.
     """
     traced = uvicorn_log_config()["formatters"]
-    custom = False
+    stock = []
     for logger_name, key in _UVICORN_FORMATTERS:
         for handler in logging.getLogger(logger_name).handlers:
             formatter = handler.formatter
-            if not isinstance(formatter, ColourizedFormatter):
-                custom = True
-            elif formatter._fmt == LOGGING_CONFIG["formatters"][key]["fmt"]:
-                handler.setFormatter(type(formatter)(
-                    fmt=traced[key]["fmt"], datefmt=_DATE_FORMAT, use_colors=formatter.use_colors,
-                ))
-            elif formatter._fmt != traced[key]["fmt"]:
-                custom = True
-    if not custom:
-        configure_stdlib_logging()
+            # Stock means Uvicorn's own stream handler and formatter with its stock (or our traced) format.
+            if not (type(handler) is logging.StreamHandler and isinstance(formatter, ColourizedFormatter)
+                    and formatter._fmt in (LOGGING_CONFIG["formatters"][key]["fmt"], traced[key]["fmt"])):
+                return
+            stock.append((handler, formatter, key))
+    for handler, formatter, key in stock:
+        handler.setFormatter(type(formatter)(
+            fmt=traced[key]["fmt"], datefmt=_DATE_FORMAT, use_colors=formatter.use_colors,
+        ))
+    configure_stdlib_logging()
 
 
 class _StderrHandler(logging.StreamHandler):
