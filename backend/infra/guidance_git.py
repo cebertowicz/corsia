@@ -22,7 +22,7 @@ from loguru import logger
 from infra.backend_git import GIT_CONFIG_ARGS
 from infra.guidance_cas import stale_result
 from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir, read_regular, write_bytes as _write_bytes
-from infra.guidance_index_sync import consume_records, index_lock_fault, record_failure
+from infra.guidance_index_sync import CORSIA_COMMITTER, consume_records, index_lock_fault, record_failure, seed_legacy_records
 from infra.guidance_messages import (
     REASON_PREFIX, SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_UNRECORDED, UNRECORDED_REASON,
     commit_message, is_person_author, recorded_reason,
@@ -163,7 +163,7 @@ def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: st
                 repaired, notes = _repair(repo, set(files)) if repair_unchanged else ([], [])
                 return _Commit(head, changed=False, repaired=tuple(repaired), notes=tuple(notes)) if repaired or notes else None
             name, _, email = author.rpartition(" <")
-            identity = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email.rstrip(">"), "GIT_COMMITTER_NAME": "CORSIA", "GIT_COMMITTER_EMAIL": "corsia@localhost"}
+            identity = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email.rstrip(">"), "GIT_COMMITTER_NAME": "CORSIA", "GIT_COMMITTER_EMAIL": CORSIA_COMMITTER}
             sha = _git(repo, "commit-tree", tree, *(("-p", head) if head else ()), "-F", "-", data=message.encode(), env=identity).strip()
             _git(repo, "update-ref", "HEAD", sha, head or "0" * 40)
             break
@@ -383,6 +383,10 @@ def startup_sweep(workspace: Path) -> None:
         return
     try:
         with _locked(_acquire(repo)[0]) as db:
+            try:
+                seed_legacy_records(_git, repo)
+            except Exception:  # the recorded repairs and the sweep still run
+                logger.opt(exception=True).warning("guidance legacy index check failed")
             repaired, notes = _repair(repo)
             lines = ([f"Repaired guidance index: {', '.join(repaired)}."] if repaired else []) + notes
             lines += _sweep_others(repo, workspace, db, set())

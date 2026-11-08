@@ -268,3 +268,63 @@ def test_other_paths_are_repaired_but_not_reported(history_scope, monkeypatch, t
     assert rel not in shown and old_blob not in shown
     assert not _git(['diff', '--cached', '--name-only', 'HEAD', '--', rel], cwd=workspace)
     assert not records(workspace)
+
+
+def legacy_failed_saves(workspace, path, monkeypatch, tmp_path, count):
+    """Failed saves as a build without records left them: the stale entry and no record."""
+    failed_saves(workspace, path, monkeypatch, tmp_path, count)
+    (workspace / '.git' / 'corsia' / 'unsynced-index.json').unlink()
+
+
+def seed_and_repair(workspace):
+    from infra.guidance_git import _git as guidance_git
+    from infra.guidance_index_sync import consume_records, seed_legacy_records
+    seed_legacy_records(guidance_git, workspace)
+    return consume_records(guidance_git, workspace)
+
+
+def test_startup_repairs_entry_left_before_records(history_scope, monkeypatch, tmp_path):
+    workspace, _ = history_scope
+    path, rel = seed(workspace)
+    legacy_failed_saves(workspace, path, monkeypatch, tmp_path, count=3)
+    assert _git(['diff', '--cached', '--name-only', 'HEAD', '--', rel], cwd=workspace).strip() == rel
+    startup_sweep(workspace)
+    assert not _git(['diff', '--cached', '--name-only', 'HEAD', '--', rel], cwd=workspace)
+    assert (workspace / '.git' / 'corsia' / 'legacy-index-seeded').exists()
+    assert not records(workspace)
+
+
+def test_legacy_check_leaves_an_edit_on_disk_alone(history_scope, monkeypatch, tmp_path):
+    workspace, _ = history_scope
+    path, rel = seed(workspace)
+    legacy_failed_saves(workspace, path, monkeypatch, tmp_path, count=1)
+    path.write_text('edited after the save\n')
+    before = index_blob(workspace, rel)
+    repaired, notes = seed_and_repair(workspace)
+    assert not repaired and not notes
+    assert index_blob(workspace, rel) == before
+
+
+def test_legacy_check_stops_at_an_outside_commit(history_scope, monkeypatch, tmp_path):
+    workspace, _ = history_scope
+    path, rel = seed(workspace)
+    old = index_blob(workspace, rel)
+    path.write_text('outside\n')
+    _git(['add', '--', rel], cwd=workspace)
+    _git(['-c', 'user.name=Outside', '-c', 'user.email=outside@example.test', 'commit', '-q', '-m', 'outside'], cwd=workspace)
+    _git(['update-index', '--cacheinfo', ','.join([old.split()[0], old.split()[1], rel])], cwd=workspace)
+    before = index_blob(workspace, rel)
+    repaired, notes = seed_and_repair(workspace)
+    assert not repaired and not notes
+    assert index_blob(workspace, rel) == before
+
+
+def test_legacy_check_runs_once(history_scope, monkeypatch, tmp_path):
+    workspace, _ = history_scope
+    path, rel = seed(workspace)
+    seed_and_repair(workspace)
+    legacy_failed_saves(workspace, path, monkeypatch, tmp_path, count=1)
+    before = index_blob(workspace, rel)
+    repaired, notes = seed_and_repair(workspace)
+    assert not repaired and not notes
+    assert index_blob(workspace, rel) == before

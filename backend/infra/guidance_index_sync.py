@@ -20,6 +20,7 @@ from infra.guidance_states import GitFault
 from infra.project_repo_lock_recovery import GitIndexLockRecoveryError, recover_stale_git_index_lock
 
 Git = Callable[..., str]
+CORSIA_COMMITTER = "corsia@localhost"
 
 
 def index_lock_fault(git: Git, repo: Path) -> str:
@@ -108,6 +109,53 @@ def record_failure(git: Git, repo: Path, rel: str, before: str | None, sha: str)
     if current == old:
         records.append({"path": rel, "from": old, "to": _tree_entry(git, repo, sha, rel), "commit": sha})
         _write_records(path, records)
+
+
+def _legacy_record(git: Git, repo: Path, rel: str, head: str):
+    """The record a pre-record failed sync would have written, or None. It needs the file on disk equal to
+    HEAD and the index equal to the path's entry before some save in the unbroken run of CORSIA guidance
+    commits that ends at the path's last commit."""
+    valid, current = _index_entry(git, repo, rel)
+    target = _tree_entry(git, repo, head, rel)
+    if not valid or current == target:
+        return None
+    on_disk = repo / rel
+    if target is None:
+        if on_disk.exists():
+            return None
+    elif not on_disk.is_file() or git(repo, "hash-object", "--no-filters", "--", rel).strip() != target[1]:
+        return None
+    log = git(repo, "log", "--first-parent", "--no-renames", "--no-abbrev", "--format=%x01%ce", "--raw", "--", f":(literal){rel}")
+    for commit in filter(None, log.split("\x01")):
+        committer, _, raw = commit.partition("\n")
+        if committer.strip() != CORSIA_COMMITTER:
+            return None
+        line = next((row for row in raw.splitlines() if row.startswith(":")), None)
+        if line is None:
+            return None
+        old_mode, _new_mode, old_blob = line[1:].split()[:3]
+        before = None if set(old_mode) == {"0"} else [old_mode, old_blob]
+        if before == current:
+            return {"path": rel, "from": current, "to": target, "commit": head}
+    return None
+
+
+def seed_legacy_records(git: Git, repo: Path) -> None:
+    """Once per repository, record stale index entries that failed syncs left before records existed."""
+    git_dir = Path(git(repo, "rev-parse", "--absolute-git-dir").strip())
+    marker = git_dir / "corsia" / "legacy-index-seeded"
+    head = git(repo, "rev-parse", "--verify", "-q", "HEAD", ok=(0, 1)).strip()
+    if marker.exists() or not head:
+        return
+    staged = git(repo, "diff", "--cached", "--name-only", "--no-renames", "-z", head)
+    path = _records_path(git_dir)
+    records = _read_records(path)
+    known = {record["path"] for record in records}
+    found = [record for rel in filter(None, staged.split("\0")) if rel not in known
+             for record in [_legacy_record(git, repo, rel, head)] if record]
+    _write_records(path, records + found)
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.touch()
 
 
 def _take_index_lock(git_dir: Path):
