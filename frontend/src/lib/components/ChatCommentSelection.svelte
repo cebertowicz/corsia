@@ -5,7 +5,7 @@
 	import { clipChatSelection, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
-	import { quoteLabel, messageBody } from './chatUnreadTargets';
+	import { commentLanding, quoteLabel, messageBody } from './chatUnreadTargets';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
 	import Popover from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
@@ -54,13 +54,8 @@
 	function bodyOf(row: Element | null): HTMLElement | null {
 		return messageBody(row);
 	}
-	/** Where a comment is drawn: its highlight; else, for text the message no longer shows, its thread under the message; else the message body. */
 	function commentRect(commentId: string, messageId: string): DOMRect | null {
-		// The text row, not the activity line Focus mode can draw above it under the same id.
-		const row = document.querySelector(`.message[data-message-id="${CSS.escape(messageId)}"]`);
-		return [...document.querySelectorAll<HTMLElement>('[data-comment-ids]')].find(el => el.dataset.commentIds?.split(',').includes(commentId))?.getBoundingClientRect()
-			?? row?.querySelector<HTMLElement>(`[data-comment-uuid="${CSS.escape(commentId)}"]`)?.getBoundingClientRect()
-			?? bodyOf(row)?.getBoundingClientRect() ?? null;
+		return commentLanding(document, messageId, { id: commentId })?.getBoundingClientRect() ?? null;
 	}
 	function close() {
 		pick = null; draft = null; editingId = null; if (viewing) chatReplyDrafts.set(viewing.commentId, ''); viewing = null; typed = null;
