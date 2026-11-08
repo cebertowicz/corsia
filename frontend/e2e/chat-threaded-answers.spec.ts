@@ -3,6 +3,7 @@ import { expect, test } from './support/test';
 import { chatComposer, createSession, openAppPastLanding, sidebarThread, waitForWsConnected, TEST_TOKEN } from './support/corsia';
 import { injectMessage, seedMockResponses } from './support/mock';
 import { setFocusMode } from './support/focusMode';
+import { commentEditor, commentEditorClosed, commentPendingOnMessage } from './support/chatComments';
 
 test.use({ seedPerTest: true });
 
@@ -10,7 +11,7 @@ test.afterEach(async ({ request }) => {
   await setFocusMode(request, true);
 });
 
-for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat answers land on comments and the reply chip opens them (${mode})`, async ({ page, request }) => {
+for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat answers land on comments and the jump control opens them (${mode})`, async ({ page, request }) => {
   const focus = mode !== 'normal';
   test.skip(process.env.CORSIA_E2E_MOCK !== '1' || test.info().project.name === 'chromium-mobile');
   test.setTimeout(120_000);
@@ -48,8 +49,11 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
     const selection = getSelection()!; selection.removeAllRanges(); selection.addRange(range);
   }, target);
   await page.locator('.sel-comment').click();
-  await page.getByPlaceholder('Comment…').fill('Why?');
-  await page.getByPlaceholder('Comment…').press('Control+Enter');
+  await commentEditor(page).fill('Why?');
+  await commentEditor(page).press('Control+Enter');
+  // The comment popover closes on a transition; collapsing or scrolling under it leaves the next surface unopened.
+  await commentEditorClosed(page);
+  await commentPendingOnMessage(row, 'The selected phrase');
   if (mode === 'focus-collapsed') {
     const work = row.locator('xpath=ancestor::section[@data-work-block]');
     await expect(work).toHaveCount(1);
@@ -81,17 +85,22 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
     await sidebarThread(page, 'Threaded answers proof').click();
     await expect(row).toHaveCount(0);
   }
-  const chip = page.locator('.reply-chip-notice button').filter({ hasText: '1 new reply' });
-  await expect(chip).toHaveCount(1);
-  await expect(chip).toBeVisible({ timeout: 30_000 });
+  const frames = process.env.CHAT_COMMENT_FRAMES ?? path.resolve('test-results/chat-threaded-answers');
+  // There is no reply chip above the composer: the chat's jump control says a new reply is waiting and jumps to it.
+  await expect(page.locator('.reply-chip-notice')).toHaveCount(0);
+  const control = page.getByRole('button', { name: /next new reply/ });
+  await expect(control).toBeVisible({ timeout: 30_000 });
+  await expect(control).toContainText('1 new');
+  // The comment sits earlier in the transcript, so the control points up: to an unread reply above, or to the older page holding it.
+  await expect(control).toHaveAccessibleName(mode === 'normal' ? /next new reply in older messages/ : /next new reply above/);
   if (mode === 'focus') {
     await page.locator('.messages').evaluate((element) => { element.scrollTop = element.scrollHeight; });
     await expect.poll(async () => {
       const [box, scroller] = await Promise.all([row.boundingBox(), page.locator('.messages').boundingBox()]);
       return !!box && !!scroller && box.y + box.height <= scroller.y;
     }).toBe(true);
-    await page.waitForTimeout(2_000);
-    await expect(chip).toBeVisible();
+    // Read from the bottom of the transcript, the unread reply is still announced and still points up.
+    await expect(control).toHaveAccessibleName(/next new reply above/);
     const spacing = await page.evaluate((answer) => {
       const scroller = document.querySelector<HTMLElement>('.messages')!;
       const toggle = [...scroller.querySelectorAll<HTMLElement>('.fold-toggle')].at(-1);
@@ -105,14 +114,20 @@ for (const mode of ['normal', 'focus', 'focus-collapsed'] as const) test(`chat a
     }, answerId);
     console.log('focus-spacing', JSON.stringify(spacing));
   }
-  const frames = process.env.CHAT_COMMENT_FRAMES!;
-  await page.screenshot({ path: path.join(frames, `chip-${mode}.png`), animations: 'disabled' });
-  await chip.click();
-  const card = row.locator('[data-chat-comment="c2.1"]');
+  await page.screenshot({ path: path.join(frames, `unread-${mode}.png`), animations: 'disabled' });
+  // Activating it lands on the comment and opens its thread, where the answer reads.
+  await control.click();
+  // Nothing is added under the message: the thread is the surface the highlight opens.
+  await expect(row.locator('.chat-comment-thread')).toHaveCount(0);
+  const surface = page.getByRole('dialog', { name: 'Comment thread', exact: true });
+  await expect(surface).toBeVisible();
+  const card = surface.locator('[data-chat-comment="c2.1"]');
   await expect(card).toContainText('This is the answer.');
   await expect(card.locator('.ct-msg-author')).toHaveText('CORSIA');
   await expect(card.locator('.ct-msg-author')).not.toHaveText(thread);
   await page.screenshot({ path: path.join(frames, `landed-${mode}.png`), animations: 'disabled' });
-  await expect(chip).toHaveCount(0, { timeout: 10_000 });
+  // Opening the thread marks the reply read: the unread mark and the control's notice both go.
+  await expect(page.getByRole('button', { name: /next new reply/ })).toHaveCount(0, { timeout: 10_000 });
+  await expect(row.locator('[data-highlight-dot]')).toHaveCount(0);
   await page.screenshot({ path: path.join(frames, `read-${mode}.png`), animations: 'disabled' });
 });
