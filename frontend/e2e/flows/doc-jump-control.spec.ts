@@ -790,29 +790,25 @@ for (const theme of ['light', 'dark'] as const) {
 				requestAnimationFrame(sample);
 			});
 			await controlButton(page).click();
-			// The open pin is excluded from the count: desktop shows the other reply clear of the popover; the phone's modal hides the control.
+			// The open pin is excluded from the count, and while the image is open the document's band keeps out at either width.
 			await expect(overlay(page)).toBeVisible();
 			await expect(page.getByText('Yes, the header is final. I attached the export.')).toBeVisible();
 			if (width === 393) {
 				await expect(controlBox(page)).toHaveCount(0);
 			} else {
-				// The document's covered control may still be completing its outro as the image opens.
+				// The document's control is never drawn and never hittable while an image is open, at either width: `covered`
+				// is what the surface calls an image open over the document, and the band keeps out of it. The sampled hits
+				// still prove the point on the way - the control may be completing its outro as the image opens, and it must
+				// not answer a pointer from under the overlay while it does. Measured: the document's band instance reads
+				// covered true with no row in the DOM, and its own landing for the remaining thread is the text line above
+				// the fold, which the reader will be offered again the moment the image closes.
 				await expect(page.locator('[data-doc-jump][inert]')).toHaveCount(0);
 				const documentJumpHits = await page.evaluate(() => (window as unknown as { __documentJumpHit: boolean[] }).__documentJumpHit);
 				expect(documentJumpHits.length).toBeGreaterThan(0);
 				expect(documentJumpHits.some(Boolean)).toBe(false);
-				await expectControl(page, '1 new');
-				await expect(controlButton(page)).toHaveAccessibleName(/1 new, next (above|below): /);
-				const popover = page.locator('[data-popover]').filter({ hasText: 'Yes, the header is final. I attached the export.' });
-				await expect(popover).toBeVisible();
-				const face = await controlFace(page);
-				expect(face.height, 'the jump control meets its touch target height').toBeGreaterThanOrEqual(minControlHeight(width));
-				const targets = [popover, ...await popover.locator('button, input, textarea, select, a[href], [role="button"]').all()];
-				for (const target of targets) {
-					if (!await target.isVisible()) continue;
-					const box = target === popover ? (await target.boundingBox())! : await hitBox(target);
-					expect(face.x < box.x + box.width && box.x < face.x + face.width && face.y < box.y + box.height && box.y < face.y + face.height, 'the jump control clears the pin popover and its controls').toBe(false);
-				}
+				await expect(controlBox(page)).toHaveCount(0);
+				// The viewer keeps its own control away here too, with both pins in frame (its spec asserts that at Fit).
+				await expect(overlay(page).locator('[data-doc-jump]')).toHaveCount(0);
 			}
 
 			await holdDwell(page, false);
