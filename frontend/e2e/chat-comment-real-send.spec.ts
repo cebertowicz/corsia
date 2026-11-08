@@ -2,6 +2,7 @@ import path from 'node:path';
 import { expect, test, type Page } from './support/test';
 import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage, seedMockResponses } from './support/mock';
+import { commentEditor, commentEditorClosed, commentOnMessage, openCommentThread } from './support/chatComments';
 
 const text = 'First selected phrase. Second selected phrase.';
 const frames = process.env.CHAT_COMMENT_FRAMES ?? path.resolve('test-results/chat-comments-real');
@@ -26,8 +27,10 @@ async function select(page: Page, id: string, quote: string, note: string) {
   }, { id, quote });
   await expect(page.locator('.sel-comment')).toBeVisible();
   await page.locator('.sel-comment').click();
-  await page.getByPlaceholder('Comment…').fill(note);
-  await page.getByPlaceholder('Comment…').press('Control+Enter');
+  await commentEditor(page).fill(note);
+  await commentEditor(page).press('Control+Enter');
+  // The close transition clears the editing state when it ends; selecting or sending before that leaves the next surface unopened.
+  await commentEditorClosed(page);
 }
 
 for (const scenario of ['two-comments', 'comments-only', 'subagent'] as const) {
@@ -62,16 +65,28 @@ for (const scenario of ['two-comments', 'comments-only', 'subagent'] as const) {
     if (scenario !== 'comments-only') await composer.fill('Please address the comments');
     await composer.press('Enter');
     const count = scenario === 'two-comments' ? 2 : 1;
-    await expect(page.locator('.sent-comment')).toHaveCount(count);
+    const messageRow = page.locator(`[data-message-id="${id}"]`);
     let context: any;
+    let sentId = '';
     await expect.poll(async () => {
       const response = await request.get(`/api/threads/${thread}/messages?token=${encodeURIComponent(TEST_TOKEN)}`);
       const body = await response.json();
-      context = body.messages.find((m: any) => m.role === 'user' && m.metadata?.reply_context?.comments?.length === count)?.metadata.reply_context;
+      const sent = body.messages.find((m: any) => m.role === 'user' && m.metadata?.reply_context?.comments?.length === count);
+      context = sent?.metadata.reply_context;
+      sentId = sent?.id ?? '';
       return Boolean(context);
     }).toBe(true);
     expect(context.comments.map((c: any) => c.cid)).toEqual(context.comments.map((_: any, i: number) => expect.stringMatching(new RegExp(`^c[0-9]+\\.${i + 1}$`))));
     console.log(`STORED ${scenario} ${JSON.stringify(context)}`);
+    if (scenario === 'comments-only') {
+      // A send that carries comments and no typed text adds no user bubble: the comment lives on its highlight, and its note reads in the thread the highlight opens.
+      await expect(page.locator('.messages .message.user')).toHaveCount(0);
+      await expect(page.locator(`[data-message-id="${sentId}"]`)).toHaveCount(0);
+      await commentOnMessage(messageRow, 'First selected phrase');
+      await expect(await openCommentThread(messageRow, page, 'First selected phrase')).toContainText('First note');
+    } else {
+      await expect(page.locator('.sent-comment')).toHaveCount(count);
+    }
     await expect.poll(async () => {
       const response = await request.get(`/api/threads/${thread}/messages?token=${encodeURIComponent(TEST_TOKEN)}`);
       const body = await response.json();
@@ -83,7 +98,14 @@ for (const scenario of ['two-comments', 'comments-only', 'subagent'] as const) {
       await page.getByRole('button', { name: /Expand (?:1 event|Worked)/ }).click();
       await page.getByText('Comment worker', { exact: true }).first().click();
     }
-    await expect(page.locator('.sent-comment')).toHaveCount(count);
+    if (scenario === 'comments-only') {
+      // The same reading after a reload: no bubble was stored on screen, and the highlight still carries the comment.
+      await expect(page.locator('.messages .message.user')).toHaveCount(0);
+      await commentOnMessage(messageRow, 'First selected phrase');
+      await expect(await openCommentThread(messageRow, page, 'First selected phrase')).toContainText('First note');
+    } else {
+      await expect(page.locator('.sent-comment')).toHaveCount(count);
+    }
     await page.screenshot({ path: path.join(frames, `real-send-${scenario}-1440-light.png`), animations: 'disabled' });
   });
 }

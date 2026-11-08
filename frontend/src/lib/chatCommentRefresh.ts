@@ -5,7 +5,7 @@ import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/
 import type { CommentReplyItem } from '$lib/api/attentionQueue';
 import { on } from '$lib/ws';
 
-/** Refresh only loaded targets affected by newly committed comments or answers. */
+/** Ask the server what landed on a comment, then refresh only the rows it names as touched. */
 export function watchChatCommentThreads(pageSize: number, announce: (quote: string) => void = () => {}): () => void {
 	let generation = 0;
 	async function read(threadId: string, bearer: string, ids: string[]): Promise<{ rows: Message[]; replies: CommentReplyItem[] | null }> {
@@ -28,21 +28,26 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 		const bearer = get(token);
 		if (!threadId || frame?.thread_id !== threadId || !bearer) return;
 		const rows = get(messages).filter(row => row.thread_id === threadId);
-		const targets = rows.filter(row => row.role === 'assistant' && (row.chat_comments?.length || comments.some(c => c.seq === row.seq)));
-		const hasComments = targets.length > 0 || rows.some(row => row.metadata?.reply_context?.comments?.length);
-		if (!hasComments) return;
+		// The server identifies placed answers; do not parse tags in the client.
+		const stepIds = Array.isArray(frame.step_ids) ? frame.step_ids : frame.context_message_id ? [frame.context_message_id] : [];
+		const lastAssistant = [...rows].reverse().find(row => row.role === 'assistant');
+		const answerIds = comments.length ? [] : [...new Set<string>(stepIds.length ? stepIds : lastAssistant ? [lastAssistant.id] : [])];
+		// The loaded page cannot answer this. This socket never receives the added-message
+		// frame for its own send, and the commented row may not be loaded on this page at all,
+		// so only the server's own answer about the turn's rows proves a comment was answered.
+		if (!answerIds.length && !comments.length) return;
 		const current = ++generation;
 		const sequence = beginChatReplyAttentionRead();
 		try {
-			// The server identifies placed answers; do not parse tags in the client.
-			const stepIds = Array.isArray(frame.step_ids) ? frame.step_ids : frame.context_message_id ? [frame.context_message_id] : [];
-			const lastAssistant = [...rows].reverse().find(row => row.role === 'assistant');
-			const answerIds = comments.length ? [] : [...new Set<string>(stepIds.length ? stepIds : lastAssistant ? [lastAssistant.id] : [])];
 			const answers = await read(threadId, bearer, answerIds);
 			const cids = new Set(answers.rows.flatMap(row => row.chat_answer_cids ?? []));
 			const contextComments = rows.flatMap(row => row.metadata?.reply_context?.comments ?? []);
-			const changedTargets = rows.filter(row => row.role === 'assistant' && (comments.some(c => c.seq === row.seq) || contextComments.some(c => c.seq === row.seq && cids.has(c.cid)) || row.chat_comments?.some(c => cids.has(c.cid) || c.answers.some(answer => answer.cid && cids.has(answer.cid)))));
-			const targetRows = await read(threadId, bearer, changedTargets.map(row => row.id));
+			const knownTargets = rows.filter(row => row.role === 'assistant' && (comments.some(c => c.seq === row.seq) || contextComments.some(c => c.seq === row.seq && cids.has(c.cid)) || row.chat_comments?.some(c => cids.has(c.cid) || c.answers.some(answer => answer.cid && cids.has(answer.cid)))));
+			// The server names the message a landed reply sits on. A comment this page never carried is
+			// still a target: its row is what draws the notice and carries the quote to announce.
+			const namedTargets = (answers.replies ?? []).map(item => item.detail.destination.id);
+			const targetIds = [...new Set([...knownTargets.map(row => row.id), ...namedTargets])];
+			const targetRows = await read(threadId, bearer, targetIds);
 			const refreshed = [...answers.rows, ...targetRows.rows];
 			if (current !== generation || get(activeThreadId) !== threadId) return;
 			const byId = new Map(refreshed.map(row => [row.id, row]));
