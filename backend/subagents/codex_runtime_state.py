@@ -195,9 +195,10 @@ async def _drive_released(
 
 
 async def drain_detached_drives() -> None:
-    """Wait for every scheduled detached drive, for callers that need it done."""
-    while _DETACHED_DRIVES:
-        await asyncio.gather(*tuple(_DETACHED_DRIVES))
+    """Wait for every drive scheduled on this loop (no loop can await another's)."""
+    loop = asyncio.get_running_loop()
+    while drives := [task for task in _DETACHED_DRIVES if task.get_loop() is loop]:
+        await asyncio.gather(*drives)
 
 
 async def _release_live_writer_holds(thread_id: str) -> None:

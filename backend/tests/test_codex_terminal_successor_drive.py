@@ -116,3 +116,36 @@ async def test_errored_result_drained_under_the_transition_lock_drives_its_wake_
         "thread_id=? AND json_extract(metadata,'$.event_type')=?", THREAD, EVENT,
     ) == "delivered"
     assert fresh.start_turn.await_count + fresh.start.await_count == 1
+
+
+def test_drain_waits_only_for_drives_on_its_own_loop() -> None:
+    from subagents.codex_runtime_state import (
+        _DETACHED_DRIVES, drain_detached_drives, schedule_detached_drive,
+    )
+
+    # An earlier loop closed with its drive still pending: it can never finish.
+    earlier = asyncio.new_event_loop()
+
+    async def leave_a_drive_pending() -> asyncio.Task[None] | None:
+        return schedule_detached_drive(asyncio.sleep(HANG_GUARD_SECONDS), name="stranded")
+
+    try:
+        stranded = earlier.run_until_complete(leave_a_drive_pending())
+    finally:
+        earlier.close()
+    assert stranded is not None and not stranded.done()
+
+    drove: list[str] = []
+
+    async def drive() -> None:
+        drove.append("own")
+
+    async def drain_own() -> None:
+        schedule_detached_drive(drive(), name="own")
+        await asyncio.wait_for(drain_detached_drives(), HANG_GUARD_SECONDS)
+
+    try:
+        asyncio.run(drain_own())
+    finally:
+        _DETACHED_DRIVES.discard(stranded)
+    assert drove == ["own"]
