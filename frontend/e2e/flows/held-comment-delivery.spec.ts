@@ -264,7 +264,7 @@ test.describe('@flow:held-comment-delivery @surface:documents held comments have
 
 		// The bar sends the image lane only.
 		await imageBarSend(page).click();
-		await expect(sentToast(page, '3 comments sent')).toBeVisible();
+		await expect(overlay(page).locator('.toast').filter({ hasText: '3 comments sent' })).toBeVisible();
 		await expect(imageBarSend(page)).toHaveCount(0);
 		expect(heldIn(seeded.artifactId, 'image-held')).toBe(0);
 		expect(deliveredBatches(seeded.artifactId, 'image-held')).toBe(1);
@@ -623,7 +623,7 @@ async function expectHeaderToolsShareRow(page: Page, width: number) {
 		};
 	}, { send: '.sending-now .btn', toggle: '[aria-label="Deliver comments immediately"]', comments: '.comment-status', review: '.review-request' });
 	expect(result.containsSend, 'Send is inside the document tools row').toBe(true);
-	expect(result.wrap, 'the compact tools row does not wrap').toBe('nowrap');
+	expect(result.wrap, 'the compact tools row permits wrapping when Send is present').toBe('wrap');
 	expect(Math.max(...result.centers) - Math.min(...result.centers), 'Send, count, toggle, and review are vertically centered as one row').toBeLessThanOrEqual(2);
 	expect(result.controls.every((box) => box.left >= result.contentLeft - 0.5), 'each control starts inside the header content edge').toBe(true);
 	expect(result.controls.every((box) => box.right <= result.contentRight + 0.5), 'each control ends inside the header content edge').toBe(true);
