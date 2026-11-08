@@ -5,7 +5,7 @@ import { openLiveDocument, serverText, type LiveDocument } from '../support/live
 import { agentComment, holdRequest, markTexts, reviewerSession } from '../support/liveConcurrency';
 import { observeCreates, selectLine, storedComments, submitButton } from '../support/liveCommentProof';
 import { agentCreatesSharedDocument, demoteAgent } from '../support/sharedLiveDocument';
-import { readMockCallCount, readUnmatchedThreads, seedMockResponses } from '../support/mock';
+import { readMockCallCount, readUnmatchedThreads, seedMockResponses, waitForThreadReply } from '../support/mock';
 
 test.use({ seedPerTest: true });
 
@@ -26,12 +26,7 @@ async function seedFeedback(request: APIRequestContext, threadIds: string[], con
 async function waitForFeedback(request: APIRequestContext, threadIds: string[], content = 'Saw the comment.') {
 	await expect.poll(() => readMockCallCount(request), { timeout: 30_000 }).toBe(threadIds.length);
 	for (const threadId of threadIds) {
-		await expect.poll(async () => {
-			const response = await request.get(`/api/delegation/threads/${threadId}/status`, { params: { token: TEST_TOKEN } });
-			expect(response.ok()).toBeTruthy();
-			const state = await response.json();
-			return !state.turn_active && state.recent_messages.some((message: { content?: string }) => message.content === content);
-		}, { timeout: 30_000 }).toBe(true);
+		await waitForThreadReply(request, threadId, content);
 	}
 	expect(await readUnmatchedThreads(request)).toEqual([]);
 }

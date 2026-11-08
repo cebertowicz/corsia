@@ -4,7 +4,7 @@ import { agentComment, openLivePair, reviewerSession, suggest } from '../support
 import { deleteRenderedLine, seedLiveDocument } from '../support/liveDocument';
 import { beginComment, insertPrefix } from '../support/liveCommentProof';
 import { TEST_TOKEN } from '../support/corsia';
-import { readMockCallCount, readUnmatchedThreads, seedMockResponses } from '../support/mock';
+import { readMockCallCount, readUnmatchedThreads, seedMockResponses, waitForThreadReply } from '../support/mock';
 
 // Each case edits a document; its delayed owner wake must not enter the next case's mock seed.
 test.use({ seedPerTest: true });
@@ -116,18 +116,8 @@ for (const box of ['draft', 'reply'] as const) for (const [action, width, height
      return comments.find(comment => comment.id === root)?.replies.some(reply => reply.body === 'Remote reply') ?? false;
     }, { message: 'the queued reply posts after the writer turn releases' }).toBe(true);
     await expect.poll(() => readMockCallCount(request), { timeout: 30_000 }).toBe(3);
-    await expect.poll(async () => {
-     const status = await request.get(`/api/delegation/threads/${agent.id}/status`, { params: { token: TEST_TOKEN } });
-     expect(status.ok()).toBeTruthy();
-     const state = await status.json();
-     return !state.turn_active && state.recent_messages.some((message: { content?: string }) => message.content === 'Posted the reply.');
-    }, { timeout: 30_000, message: 'the queued reply turn finishes before reseeding' }).toBe(true);
-    await expect.poll(async () => {
-     const status = await request.get(`/api/delegation/threads/${doc.threadId}/status`, { params: { token: TEST_TOKEN } });
-     expect(status.ok()).toBeTruthy();
-     const state = await status.json();
-     return !state.turn_active && state.recent_messages.some((message: { content?: string }) => message.content === 'Saw the reply.');
-    }, { timeout: 30_000, message: 'the document owner finishes receiving the reply' }).toBe(true);
+    await waitForThreadReply(request, agent.id, 'Posted the reply.', { message: 'the queued reply turn finishes before reseeding' });
+    await waitForThreadReply(request, doc.threadId, 'Saw the reply.', { message: 'the document owner finishes receiving the reply' });
     expect(await readUnmatchedThreads(request)).toEqual([]);
     await reader.locator('.cm-comment-anchor').filter({ hasText: quote }).click();
     await expect(reader.getByText('Remote reply')).toBeVisible();

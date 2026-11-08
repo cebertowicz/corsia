@@ -3,7 +3,7 @@ import { expect } from '@playwright/test';
 import { sendChatMessage, TEST_TOKEN } from '../support/corsia';
 import { openLiveDocument } from '../support/liveDocument';
 import { agentCreatesSharedDocument, demoteAgent, openAgentBeside, streamedPieces } from '../support/sharedLiveDocument';
-import { readMockCallCount, readUnmatchedThreads, seedMockResponses, type MockReply } from '../support/mock';
+import { readMockCallCount, readUnmatchedThreads, seedMockResponses, waitForThreadReply, type MockReply } from '../support/mock';
 
 /**
  * Suggestions keep typing across a connection drop: three agents' About you inserts are typing in an open, in-view
@@ -112,12 +112,7 @@ for (const width of [1440, 393]) {
 				expect(Math.max(...series.slice(1).map((n, i) => n - series[i]))).toBeLessThanOrEqual(40);
 				expect(full).toContain(series[series.length - 1]);
 			}
-			await expect.poll(async () => {
-				const response = await request.get(`/api/delegation/threads/${owner.id}/status`, { params: { token: TEST_TOKEN } });
-				expect(response.ok()).toBeTruthy();
-				const status = await response.json();
-				return !status.turn_active && status.recent_messages.some((message: { content?: string }) => message.content === 'Reviewed the suggestions.');
-			}, { timeout: 30_000 }).toBe(true);
+			await waitForThreadReply(request, owner.id, 'Reviewed the suggestions.');
 			expect(await readUnmatchedThreads(request)).toEqual([]);
 		} finally {
 			await context.close();
