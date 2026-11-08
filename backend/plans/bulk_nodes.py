@@ -1,9 +1,8 @@
-"""Change or close many named nodes in one call, and report each one's outcome.
+"""Change, close or archive many named nodes in one call, and report each one's outcome.
 
-Both verbs here copy the shape ``archive_node`` already ships
-(``plans.archival.archive_nodes`` and ``plans.boundary_after.archive_many``),
-because that is the shape an agent already knows and the one the Later design
-names as the template (section 5):
+Every bulk verb runs through this module's per-id loop, refusal list and slot
+release (``plans.boundary_after.archive_many`` included), in the shape the Later
+design names as the template (section 5):
 
 * one connection and one write, so two hundred tasks cross the cut together;
 * each id through the same single-node function, with identical guards and audit,
@@ -68,16 +67,16 @@ def edit_many(
     """
     from plans import mutations
 
-    held = {node_id: slot for node_id, slot in _held_slots(db, node_ids).items()
-            if not service._node_row(db, node_id)["later"]}
+    # As the single edit does (``later_fields.edit_across_cut``): only an edit that
+    # puts tasks in Later takes the slot off them; a regroup or a promotion keeps it.
+    held = _held_slots(db, node_ids) if changed.get("later") is True else {}
     applied, reasons = _apply(db, node_ids, "edit", lambda node_id: mutations.edit_node(
         node_id, **changed, **common,
     ))
     return {
         "changed": applied,
         "refused": _refused(node_ids, reasons),
-        **(_free_slot(plan_id, held, applied, common, acting, closed=False)
-           if changed.get("later") is True else {}),
+        **_free_slot(plan_id, held, applied, common, acting, closed=False),
     }
 
 
