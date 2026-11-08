@@ -378,7 +378,8 @@ def present_plan(
     users = frozenset(node["id"] for node in projected.nodes if node["assignee"] == "user")
     next_ids = node_state.next_node_ids([node for node in nodes if node["id"] not in users])
     progress = {**projected.progress, "distribution": counts}
-    display = plan_header.plan_display(projected.plan, counts, nodes, users)
+    below_cut = frozenset(str(node["id"]) for node in projected.nodes if node.get("later"))
+    display = plan_header.plan_display(projected.plan, counts, nodes, users, below_cut)
     # Each outside-wait row reads the same value as the sidebar and chip (EW11).
     for node in nodes:
         if node_wait := wait_summary.from_nodes([node]):

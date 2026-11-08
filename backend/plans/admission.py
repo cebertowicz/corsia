@@ -90,6 +90,16 @@ def select(
     except sqlite3.IntegrityError:
         return None, selection_conflict(db, node)
     attempts.bind_turn(db, node, attempt, executor)
+    if "later" in node.keys() and node["later"]:
+        # A running row never sits inside Later: taking the task up ends the
+        # set-aside, whatever route started it (Later design §2). The column test
+        # is for the migration ladder, whose older rungs have no cut yet.
+        from plans import later_fields
+
+        later_fields.flip(
+            db, node_id, later=False, reason="started",
+            actor_id=actor_id, provenance=provenance,
+        )
     if touch:
         service.touch_node(db, node_id)
     return attempt, None

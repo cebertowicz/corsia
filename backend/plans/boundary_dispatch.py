@@ -9,6 +9,7 @@ import plans.admission as admission
 import plans.boundary_after as after
 import plans.boundary_edges as boundary_edges
 import plans.boundary_fields as fields
+import plans.later_fields as later_fields
 import plans.lifecycle as lifecycle
 import plans.user_settle as user_settle
 import plans.user_step_settle as user_step_settle
@@ -136,11 +137,10 @@ def _dispatch_structure(plan_id, operation, params, common, db, workflow, actor)
         return workflow_fields.added(db, node, line, workflow_steps, causing_executor=acting)
     if operation == "edit":
         changed = fields.edit_fields(params)
-        mutations.edit_node(
-            params["node_id"], **changed, **fields.expected(params), **common,
-        )
-
-        return admission.result(params["node_id"], db=db)
+        if "later" not in changed:
+            mutations.edit_node(params["node_id"], **changed, **fields.expected(params), **common)
+            return admission.result(params["node_id"], db=db)
+        return later_fields.edit_across_cut(params, changed, common, acting)
     if operation == "split":
         return mutations.split_node(
             params["node_id"], title=fields.text(params, "title"),

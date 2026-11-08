@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from plans import aggregates, errors, intent_creation, service, writer_context
+from plans import aggregates, errors, intent_creation, later_fields, service, writer_context
 from plans.models import PlanNode
 
 _UNSET = object()
@@ -121,14 +121,14 @@ def edit_node(
     intent: str | None | object = _UNSET,
     watchdog_budget_seconds: int | None | object = _UNSET,
     difficulty_rerated: dict[str, str] | None = None,
-    size: str | None | object = _UNSET,
+    size: str | None | object = _UNSET, later: bool | object = _UNSET, reason: str | None = None,
     expected_revision: int | None = None,
     actor_id: str | None = None,
     provenance: str = "plan_mutation",
     db=None,
 ) -> PlanNode:
     """Amend durable node intent without replacing its stable identity."""
-    if all(value is None for value in (title, description, acceptance_criteria, difficulty_rerated)) and intent is _UNSET and watchdog_budget_seconds is _UNSET and size is _UNSET:
+    if all(value is None for value in (title, description, acceptance_criteria, difficulty_rerated)) and intent is _UNSET and watchdog_budget_seconds is _UNSET and size is _UNSET and later is _UNSET:
         raise service.PlanInputError("edit requires at least one changed field")
     if size is not _UNSET:
         from plans.size_fields import validate_size
@@ -141,6 +141,8 @@ def edit_node(
 
             raise service.PlanInputError(TASK_SIZE_REQUIRED)
         _assert_revision(node, expected_revision)
+        if later is not _UNSET:
+            later_fields.validate_carries_later(node["kind"])
         if node["assignee"] == "user" and description is not None:
             from plans.boundary_fields import _user_step_description
 
@@ -152,7 +154,8 @@ def edit_node(
             node, title, description, acceptance_criteria, intent, watchdog_budget_seconds, size,
         )
         size_changed = next_size != node["size"]
-        if not restated and difficulty_rerated is None and not size_changed:
+        crosses = later is not _UNSET and bool(later) != bool(node["later"])
+        if not restated and difficulty_rerated is None and not size_changed and not crosses:
             return service._node_from_row(connection, node)
         requirements_changed = (
             next_dod != node["acceptance_criteria"] or next_intent != node["intent"]
@@ -165,6 +168,7 @@ def edit_node(
                 # Editing the intent of a node that inherits one makes the node its own owner.
                 **({"intent_node_id": None} if intent is not _UNSET and node["intent_node_id"] else {}),
                 **({"size": next_size} if size_changed else {}),
+                **({"later": int(bool(later))} if crosses else {}),
             )
         else:
             # Re-rating and size declaration preserve requirements and selection.
@@ -172,6 +176,7 @@ def edit_node(
                 connection, node_id,
                 requirements_revision=node["requirements_revision"] + int(requirements_changed),
                 **({"size": next_size} if size_changed else {}),
+                **({"later": int(bool(later))} if crosses else {}),
             )
         updated = service._node_row(connection, node_id)
         if requirements_changed:
@@ -182,7 +187,7 @@ def edit_node(
             plan_wake.notify_intent_revised(connection, node_id, causing_executor=actor_id)
         _record_edit_events(
             connection, node_id, restated or requirements_changed, updated, next_title, next_dod,
-            difficulty_rerated, node["size"], next_size, actor_id, provenance,
+            difficulty_rerated, node["size"], next_size, actor_id, provenance, crosses, bool(later), reason,
         )
         return service._node_from_row(connection, updated)
 
@@ -190,8 +195,9 @@ def edit_node(
 def _record_edit_events(
     connection, node_id, restated, updated, title, acceptance_criteria,
     difficulty_rerated, prior_size, next_size, actor_id, provenance,
+    crosses=False, later=False, reason=None,
 ) -> None:
-    """Record independent restatement, re-rating, and size-declaration history."""
+    """Record independent restatement, re-rating, size-declaration and cut-crossing history."""
     if restated:
         service._event(
             connection, node_id, "node_restated", actor_id=actor_id, provenance=provenance,
@@ -210,6 +216,11 @@ def _record_edit_events(
         service._event(
             connection, node_id, "size_declared", actor_id=actor_id,
             provenance=provenance, payload={"from": prior_size, "to": next_size},
+        )
+    if crosses:
+        later_fields.record_event(
+            connection, node_id, later=later, reason=reason,
+            actor_id=actor_id, provenance=provenance,
         )
 
 
@@ -233,8 +244,7 @@ def insert_node(
     spawn_kind: str | None = None,
     watchdog_budget_seconds: int | None = None,
     actor_id: str | None = None,
-    provenance: str = "plan_mutation",
-    db=None,
+    provenance: str = "plan_mutation", db=None, later: bool = False,
 ) -> PlanNode:
     """Insert a DOD-bearing node before a sibling or append within a parent."""
     with service._connection(db) as connection, service._write(connection):
@@ -254,6 +264,7 @@ def insert_node(
             spawn_kind=spawn_kind,
             watchdog_budget_seconds=watchdog_budget_seconds, follow_up_of=None,
             actor_id=actor_id, provenance=provenance, node_id=service._id(),
+            later=later,
         )
 
 

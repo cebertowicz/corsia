@@ -300,11 +300,20 @@ def _overview(db, plan_row, facts: dict) -> dict[str, Any]:
             break
     open_rows = [_condition(n) for n in facts["leaves"] if n["state"] not in _TERMINAL]
     progress = facts["progress"]
+    # The cut, counted here so the status line and the pane's Later group answer
+    # from one pass: above the cut is what may still be offered to the executor,
+    # below it is work its owner set aside with no date.
+    open_tasks = [
+        node for node in facts["nodes"]
+        if node["kind"] == "task" and node["state"] not in _TERMINAL
+    ]
+    in_later = sum(1 for node in open_tasks if node.get("later"))
     overview = {
         "plan": {"id": plan["id"], "revision": plan["revision"], "state": plan["state"]},
         "progress": {
             "done": progress.get("done"), "total": progress.get("total"),
             "liveness": progress.get("liveness"),
+            "above_cut": len(open_tasks) - in_later, "later": in_later,
         },
         "severity": _severity(open_rows, facts),
         "current_task": current,

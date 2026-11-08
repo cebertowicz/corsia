@@ -154,6 +154,30 @@ UPKEEP_ADD_ROUTE = (
     f"{UPKEEP_LABEL} No plan task is selected and none can be started. Add the "
     "work with plan_update add, then start it."
 )
+#: The cut's count, one wording for both places that still has to say the work
+#: exists: the upkeep line and an idle listing. A leading separator keeps it off
+#: the label a round-trip reader recognises (``_label``).
+_IN_LATER = " · {later} in Later"
+_LATER_MARK = " · "
+
+
+def in_later(later: int) -> str:
+    """Return the Later count, or nothing when nothing is below the cut."""
+    return _IN_LATER.format(later=later) if later else ""
+
+
+def _label(value: str) -> str:
+    """The listing label alone, with any Later count taken off its tail.
+
+    ``listed_counts`` reads the counts back out of a label a result already
+    carries, and that label may end in the Later count.
+    """
+    return value.partition(_LATER_MARK)[0]
+
+
+def upkeep_add_route(later: int = 0) -> str:
+    """The no-selection add route, naming the Later pile when it is all that is left."""
+    return UPKEEP_ADD_ROUTE + in_later(later)
 
 
 def _named_tasks(tasks: list[tuple[str, str]]) -> str:
@@ -282,19 +306,25 @@ def listed_text(shown: int, total: int) -> str:
     return _LISTED.format(shown=shown, total=total)
 
 
-def idle_listed_text(shown: int, total: int, *, set_aside: int = 0) -> str:
-    """Return how many of an idle executor's open tasks a block lists."""
+def idle_listed_text(shown: int, total: int, *, set_aside: int = 0, later: int = 0) -> str:
+    """Return how many of an idle executor's open tasks a block lists.
+
+    ``later`` is the count below the cut, which the listing itself leaves out:
+    the executor still has that work, and silence about it would read as an
+    empty plan.
+    """
     label = _IDLE_LISTED_SET_ASIDE if set_aside else _IDLE_LISTED
-    return label.format(shown=shown, total=total)
+    return label.format(shown=shown, total=total) + in_later(later)
 
 
 def is_idle_listed_text(value: str) -> bool:
     """Whether a listing label names either idle-listing order."""
+    label = _label(value)
     try:
-        shown, total = listed_counts(value)
+        shown, total = listed_counts(label)
     except ValueError:
         return False
-    return value in (
+    return label in (
         idle_listed_text(shown, total), idle_listed_text(shown, total, set_aside=1),
     )
 
@@ -313,9 +343,10 @@ def listed_counts(text: str) -> tuple[int, int]:
     Raises:
         ValueError: ``text`` is not a label either produced.
     """
-    shown, _of, rest = text.partition(" of ")
+    label = _label(text)
+    shown, _of, rest = label.partition(" of ")
     counts = int(shown), int(rest.partition(" ")[0])
-    if text not in (
+    if label not in (
         listed_text(*counts), idle_listed_text(*counts), idle_listed_text(*counts, set_aside=1),
     ):
         raise ValueError("not an open-task listing label")

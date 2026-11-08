@@ -203,7 +203,8 @@ async def test_a_due_scheduled_task_wakes_its_agent_with_what_and_why(db):
     assert seen == [("owner", "plan.watch_expired", (
         f'Scheduled task "Tidy the index" is due (task {node.id}). '
         f"You set it aside 3 days ago: {REASON}. "
-        "Start it now, schedule it again with a reason, close it, or raise a decision."
+        "Start it now, schedule it again with a reason, close it, move it to Later, "
+        "or raise a decision."
     ))]
 
 

@@ -99,6 +99,7 @@ def read_from_facts(
 
 def read(
     plan: dict, counts: dict[str, int], nodes: list[dict], users: frozenset[str] = frozenset(),
+    later: frozenset[str] = frozenset(),
 ) -> dict[str, Any] | None:
     """Return the parts a still plan waits on, or ``None`` if anything can move.
 
@@ -111,6 +112,12 @@ def read(
     ``overdue_wait_entries`` names those leaves in plan order. ``paused_by_you``
     counts leaves the user paused. The plan is still only when every ready leaf
     the counts hold is shown to be the user's.
+
+    ``later`` is the set of node ids below the cut. A leaf in it is nobody's
+    stalled work: the agent set it aside with no date on purpose, so it is
+    neither "you scheduled N yourself" nor a reason the plan is not moving
+    (Later design §2). It is passed as ids because the cut is a row fact, not a
+    node field the presentation carries.
     """
     from plans import node_states, operator_node_state, operator_scheduled
 
@@ -118,6 +125,8 @@ def read(
     deadlines: list[tuple[str, str, dict[str, str] | None]] = []
     has_child_running = False
     for node in node_states.leaves(nodes):
+        if str(node["id"]) in later:
+            continue
         bucket = operator_node_state.leaf_bucket(node)
         causes = node["execution"]["causes"]
         has_child_running = has_child_running or child_running(causes)

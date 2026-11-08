@@ -71,7 +71,18 @@ def notice_for(db, thread_id: str, tool_name: str) -> str | None:
         waiting = _unsettled_tasks(db, plan, thread_id)
     if waiting:
         return _fit(text.upkeep_waiting(_named(waiting)))
-    return text.UPKEEP_ADD_ROUTE
+    return _add_route(db, plan, thread_id)
+
+
+def _add_route(db, plan, thread_id: str) -> str:
+    """The add route, with the Later count when the pile is all this executor has left.
+
+    The count keeps the line truthful: the work is on the plan, below the cut, so
+    the agent is told to add only what is genuinely new rather than to re-add what
+    it already set aside.
+    """
+    later = sum(1 for row in node_order.open_tasks(db, plan, thread_id) if row["later"])
+    return text.upkeep_add_route(later)
 
 
 def _unsettled_tasks(db, plan, thread_id: str) -> list:
@@ -87,6 +98,7 @@ def _unsettled_tasks(db, plan, thread_id: str) -> list:
         row for row in rows
         if row["kind"] == "task" and row["state"] in _UNSETTLED_STATES
         and row["id"] not in parents
+        and not row["later"]
         and admission_projection.executor_of(row, plan) == thread_id
     ]
 
@@ -98,8 +110,11 @@ def _open_tasks(db, plan, thread_id: str) -> tuple[list, list]:
     it is not something the agent can start: telling it to start one would ask
     it to clear a real wait just to quiet this line. Naming it instead keeps the
     agent from adding a duplicate of work that already has a task.
+
+    Work below the cut is not offered either: the agent put it there on purpose,
+    and ``_add_route`` is where its count is still told.
     """
-    rows = node_order.open_tasks(db, plan, thread_id)
+    rows = [row for row in node_order.open_tasks(db, plan, thread_id) if not row["later"]]
     if not rows:
         return [], []
     admitted = admission.project_many([(row, plan) for row in rows], db=db)

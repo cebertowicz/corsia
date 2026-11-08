@@ -363,7 +363,7 @@ def _idle_rows(idle: close_next_idle.IdleListing) -> Listing:
         rows.append(listed)
     return Listing(
         rows, idle.total,
-        lambda shown, total: text.idle_listed_text(shown, total, set_aside=idle.set_aside),
+        lambda shown, total: text.idle_listed_text(shown, total, set_aside=idle.set_aside, later=idle.later),
         text.idle_pick_up(idle.set_aside) if idle.pick_up else None,
     )
 

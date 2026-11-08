@@ -102,11 +102,20 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
             "Optional delegated-worker relationship kind."
         ),
     },
+    "later": {
+        "type": "boolean",
+        "description": (
+            "Not now: never auto-selected and never wakes you; you can still start it. "
+            "False brings it back."
+        ),
+    },
     "reason": {
         **TEXT,
         "description": (
             "Why work cannot advance or will not be done; on arm_watch, "
-            "schedules the task until the deadline (never with artifact_id)."
+            "schedules the task until the deadline (never with artifact_id); "
+            "on edit with later, why it's in Later, shown on its row — name the "
+            "person's cut if it's their ask."
         ),
     },
     "reason_key": {
