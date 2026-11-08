@@ -282,6 +282,7 @@ Source: `backend/infra/plan_schema.py`.
 | `size` | TEXT | No | No | — | — |
 | `acceptance_criteria` | TEXT | No | Yes | — | — |
 | `checkpoint_exception` | INTEGER | No | Yes | 0 | — |
+| `later` | INTEGER | No | Yes | 0 | — |
 | `state` | TEXT | No | Yes | 'pending' | — |
 | `assignee` | TEXT | No | No | — | — |
 | `spawn_kind` | TEXT | No | No | — | — |
@@ -400,5 +401,6 @@ Source: `backend/infra/plan_schema.py`.
 | `top_folded_failed` | INTEGER | No | Yes | 0 | — |
 | `top_folded_closed` | INTEGER | No | Yes | 0 | — |
 | `settled_events` | INTEGER | No | Yes | 0 | — |
+| `later_review_at` | TEXT | No | No | — | — |
 
 Indexes: `idx_plans_parent` (parent_plan_id), `sqlite_autoindex_plans_1` (id, unique), `sqlite_autoindex_plans_2` (owner_kind, owner_id, unique).

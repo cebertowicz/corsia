@@ -27,7 +27,7 @@ def _columns(db: sqlite3.Connection) -> dict[str, tuple]:
 
 
 def test_the_step_is_registered_at_182() -> None:
-    assert SCHEMA_VERSION == 184
+    assert SCHEMA_VERSION == 185
     assert MIGRATIONS[182] is migrate_182_to_183
 
 

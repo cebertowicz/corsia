@@ -50,7 +50,7 @@ def _now() -> str:
 _TOUCH_COLUMNS = frozenset({
     "state", "order_key", "title", "description", "intent", "intent_node_id", "acceptance_criteria",
     "watchdog_budget_seconds", "requirements_revision", "archived_at", "size",
-    "commitment_id", "spawned_thread_id", "spawn_kind", "sent_back",
+    "commitment_id", "spawned_thread_id", "spawn_kind", "sent_back", "later",
 })
 
 def touch_node(connection: sqlite3.Connection, node_id: str, *, at: str | None = None,
@@ -147,7 +147,7 @@ def _node_from_row(
         spawned_thread_id=row["spawned_thread_id"], follow_up_of=row["follow_up_of"],
         watchdog_budget_seconds=row["watchdog_budget_seconds"],
         requirements_revision=row["requirements_revision"],
-        commitment_id=row["commitment_id"], revision=row["revision"],
+        commitment_id=row["commitment_id"], revision=row["revision"], later=bool(row["later"]),
     )
 
 def _plan_row(connection: sqlite3.Connection, plan_id: str) -> sqlite3.Row:
@@ -253,7 +253,7 @@ def add_node(plan_id: str, *, kind: str, title: str, acceptance_criteria: str,
              checkpoint_exception: bool = False,
              assignee: str | None = None, spawn_kind: str | None = None,
              watchdog_budget_seconds: int | None = None, actor_id: str | None = None,
-             provenance: str = "plan_service", db=None,
+             provenance: str = "plan_service", db=None, later: bool = False,
              person_step: bool = True) -> PlanNode:
     """Add one DOD-bearing node at a valid tree position."""
     with plan_write.transaction(db) as connection:
@@ -265,7 +265,7 @@ def add_node(plan_id: str, *, kind: str, title: str, acceptance_criteria: str,
             workflow_step=workflow_step, difficulty=difficulty, size=size, intent=intent,
             intent_node_id=intent_node_id, checkpoint_exception=checkpoint_exception, assignee=assignee,
             spawn_kind=spawn_kind, watchdog_budget_seconds=watchdog_budget_seconds, follow_up_of=None,
-            actor_id=actor_id, provenance=provenance, node_id=_id(),
+            actor_id=actor_id, provenance=provenance, node_id=_id(), later=later,
             person_step=person_step,
         )
 
