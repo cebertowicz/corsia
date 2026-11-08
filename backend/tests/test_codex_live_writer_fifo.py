@@ -67,7 +67,7 @@ async def test_input_claimed_under_a_live_writer_is_delivered_after_its_release(
     from infra.database import get_db
     from infra.thread_execution import execute_claimed_batch
     from subagents.codex_runtime_errors import CodexLiveTurnBusy
-    from subagents.codex_runtime_terminal import release_and_drive_terminal
+    from subagents.codex_runtime_state import drain_detached_drives, release_and_drive_terminal
 
     session = _make_mock_app_session("provider-writer")
     session.steer = AsyncMock(return_value=False)
@@ -102,8 +102,9 @@ async def test_input_claimed_under_a_live_writer_is_delivered_after_its_release(
         patch("subagents.codex_app_server.CodexAppServerSession", return_value=fresh),
     ):
         await release_and_drive_terminal(
-            SimpleNamespace(thread_id=THREAD, live=live), settlement,
+            SimpleNamespace(thread_id=THREAD, live=live), settlement, None,
         )
+        await drain_detached_drives()
 
     assert _message("input-after-terminal")["delivery_state"] == "delivered"
     assert sum(m.await_count for m in (
@@ -273,7 +274,7 @@ def _refuse_successor_while_registered() -> None:
 
 async def _delivered_after_removal() -> dict:
     """Let the removal's own release run, with a fresh provider session to take the input."""
-    from subagents.codex_runtime_state import drain_live_writer_releases
+    from subagents.codex_runtime_state import drain_detached_drives
 
     fresh = _make_mock_app_session("provider-writer")
     conn = {"status": "available", "config": {"binary": "codex", "app_server": True}}
@@ -281,7 +282,7 @@ async def _delivered_after_removal() -> dict:
         patch("connections.models.get_connection", return_value=conn),
         patch("subagents.codex_app_server.CodexAppServerSession", return_value=fresh),
     ):
-        await drain_live_writer_releases()
+        await drain_detached_drives()
     return _message("window-input")
 
 

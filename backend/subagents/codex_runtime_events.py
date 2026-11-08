@@ -7,10 +7,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from automation.turn_end_effects import (
-    deliver_turn_end_after,
-    record_external_turn_end,
-)
+from automation.turn_end_effects import record_external_turn_end
 from core.reasoning_provenance import merge_reasoning_provenance_evidence
 from core.stop_causes import ContextOverflowEnd
 from infra.delivery_states import PROVIDER_MISSING_RESULT_REASON
@@ -36,10 +33,10 @@ from tools.tool_display import SettledResult, tool_done_frame, tool_start_frame
 from subagents.codex_runtime_terminal import (
     provider_reported_model_id as _provider_reported_model_id,
     publish_claimed_terminal as _publish_claimed_terminal,
-    release_and_drive_terminal,
     record_terminal_llm_usage as _record_terminal_llm_usage,
     settle_failed_turn_usage as _settle_failed_turn_usage,
 )
+from subagents.codex_runtime_state import release_and_drive_terminal
 from subagents.codex_usage_calls import on_call_usage as _on_call_usage
 from subagents import terminal_marker_writer
 
@@ -554,8 +551,7 @@ async def _on_result(ctx, ev: dict) -> None:
             failure = dict(outcome="error", error=ev.get("result") or "Codex turn failed") if is_error else {}
             effects = await record_external_turn_end(ctx.thread_id, turn_id=identity.turn_id, **failure)
     finally:
-        await deliver_turn_end_after(
-            effects, lambda: release_and_drive_terminal(ctx, settlement))
+        await release_and_drive_terminal(ctx, settlement, effects)
 
 
 async def _on_turn_failed(ctx, ev: dict) -> None:
@@ -606,8 +602,7 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
             clears_at=reset_at,
         )
     finally:
-        await deliver_turn_end_after(
-            effects, lambda: release_and_drive_terminal(ctx, settlement))
+        await release_and_drive_terminal(ctx, settlement, effects)
 
 
 async def _on_provider_tool_violation(ctx, ev: dict) -> None:
