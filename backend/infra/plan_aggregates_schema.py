@@ -78,6 +78,9 @@ PRE_AGGREGATE_NODE_COLUMNS: tuple[str, ...] = (
     "spawn_kind", "owner_thread_id", "executor_thread_id", "spawned_thread_id",
     "follow_up_of", "requirements_revision", "commitment_id",
     "watchdog_budget_seconds", "revision", "created_at", "updated_at", "archived_at",
+    # The cut is a real column, not a roll-up: moving it changes what may be
+    # offered, so it moves the plan's revision like `size` does.
+    "later",
 )
 
 NODE_UPDATE_TRIGGER_SQL = f"""

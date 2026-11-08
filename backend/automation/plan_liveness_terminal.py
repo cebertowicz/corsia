@@ -20,6 +20,19 @@ def _stopped_open(after) -> bool:
     )
 
 
+def _stopped_below_cut(connection, thread_id: str, after) -> bool:
+    """Return whether the Turn ended with open work only below the plan's Later cut.
+
+    That work arms no wake, since the cut never wakes its owner, yet it is
+    unfinished, so a delegated worker left holding it has stopped, not returned.
+    """
+    from plans import public
+
+    return (after is None or after["status"] != liveness.ARMED) and bool(
+        public.later_leaves(connection, thread_id)
+    )
+
+
 def on_thread_turn_complete(
     thread_id: str,
     *,
@@ -93,8 +106,7 @@ def on_thread_turn_complete(
         told = public.on_worker_turn_end(
             connection, thread_id, changed_plan_ids=effects.changed_plan_ids,
         )
-        if not told and after is not None and _stopped_open(after):
-            public.notify_stopped_open(
-                connection, thread_id, wake_id=str(after["id"]),
-            )
+        if not told and (_stopped_open(after) or _stopped_below_cut(connection, thread_id, after)):
+            wake_id = str(after["id"]) if after is not None else f"later:{thread_id}"
+            public.notify_stopped_open(connection, thread_id, wake_id=wake_id)
         return wake

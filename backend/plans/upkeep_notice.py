@@ -64,14 +64,16 @@ def notice_for(db, thread_id: str, tool_name: str) -> str | None:
     if held is not None:
         title, wait = held
         return _fit(text.upkeep_held(_cut(title, TITLE_MAX_BYTES), _cut(wait, WAIT_MAX_BYTES)))
-    startable, waiting = _open_tasks(db, plan, thread_id)
+    startable, waiting, later = _open_tasks(db, plan, thread_id)
     if startable:
         return _fit(text.upkeep_start(_named(startable), int(startable[0]["revision"])))
     if not waiting:
         waiting = _unsettled_tasks(db, plan, thread_id)
     if waiting:
         return _fit(text.upkeep_waiting(_named(waiting)))
-    return text.UPKEEP_ADD_ROUTE
+    # The Later count keeps the add route truthful: the work is on the plan, below
+    # the cut, so the agent adds only what is genuinely new.
+    return text.upkeep_add_route(later)
 
 
 def _unsettled_tasks(db, plan, thread_id: str) -> list:
@@ -87,25 +89,31 @@ def _unsettled_tasks(db, plan, thread_id: str) -> list:
         row for row in rows
         if row["kind"] == "task" and row["state"] in _UNSETTLED_STATES
         and row["id"] not in parents
+        and not row["later"]
         and admission_projection.executor_of(row, plan) == thread_id
     ]
 
 
-def _open_tasks(db, plan, thread_id: str) -> tuple[list, list]:
-    """Return this executor's open tasks split into startable and waiting, in plan order.
+def _open_tasks(db, plan, thread_id: str) -> tuple[list, list, int]:
+    """Return this executor's open tasks split into startable and waiting, in plan order, and its Later count.
 
     A held or waiting task is still the executor's work, so it stays open, but
     it is not something the agent can start: telling it to start one would ask
     it to clear a real wait just to quiet this line. Naming it instead keeps the
     agent from adding a duplicate of work that already has a task.
+
+    Work below the cut is not offered either: the agent put it there on purpose,
+    so it is only counted, from the same traversal, for the add route to tell.
     """
-    rows = node_order.open_tasks(db, plan, thread_id)
+    everything = node_order.open_tasks(db, plan, thread_id)
+    rows = [row for row in everything if not row["later"]]
+    later = len(everything) - len(rows)
     if not rows:
-        return [], []
+        return [], [], later
     admitted = admission.project_many([(row, plan) for row in rows], db=db)
     startable = [row for row in rows if not admitted[str(row["id"])]["causes"]]
     waiting = [row for row in rows if admitted[str(row["id"])]["causes"]]
-    return startable, waiting
+    return startable, waiting, later
 
 
 def _named(rows: list) -> list[tuple[str, str]]:

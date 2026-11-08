@@ -347,7 +347,8 @@ async def test_the_due_review_wakes_its_owner_by_name(db):
     assert seen == [("owner", "plan.watch_expired", (
         f'Scheduled task "Review trial lesson: cite-the-head" is due (task {node_id}). '
         "You set it aside 14 days ago: Its review date. "
-        "Start it now, schedule it again with a reason, close it, or raise a decision."
+        "Start it now, schedule it again with a reason, close it, move it to Later, "
+        "or raise a decision."
     ))]
     assert _node(db, node_id)["state"] == "pending"
 

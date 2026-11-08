@@ -46,13 +46,18 @@ def display_from_facts(
 
 def plan_display(
     plan: dict, counts: dict[str, int], nodes: list[dict], users: frozenset[str] = frozenset(),
+    later: frozenset[str] = frozenset(),
 ) -> dict:
-    """Adapt full node presentation to the canonical plan-header reducer."""
+    """Adapt full node presentation to the canonical plan-header reducer.
+
+    ``later`` names the nodes below the cut, which the stillness reader leaves out
+    (``plans.not_moving.read``).
+    """
     leaves = [node for node in nodes if node.get("branch_progress") is None]
     return display_from_facts(
         plan,
         counts,
-        still=not_moving.read(plan, counts, nodes, users),
+        still=not_moving.read(plan, counts, nodes, users, later),
         working=any(
             node["display"]["label_key"] == "working" and node["id"] not in users
             for node in leaves

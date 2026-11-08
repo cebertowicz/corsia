@@ -378,7 +378,10 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # fields and add/insert wording; bounds and item shape remain enforced server-side.
 # 9,152 -> 9,372 (+220, AL1 AX): publish the minimal quote item shape and add/insert
 # wording so an agent can supply a prior person's authority without a blind retry.
-_PUBLISHED_BYTES = {"plan_update": 9_481, "plan_decision": 3_100}
+# plan_update 9,372 -> 9,487 (+115, Later S1): `later` publishes at the field for add, insert,
+# edit, arm_watch and block_node, and `reason` names where it becomes required and what to
+# write there; an agent never told of the cut cannot park work, so the words are the feature.
+_PUBLISHED_BYTES = {"plan_update": 9_487, "plan_decision": 3_100}
 
 
 def test_the_operation_text_names_each_neighboring_settlement_choice():
