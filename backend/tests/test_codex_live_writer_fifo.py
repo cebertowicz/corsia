@@ -67,7 +67,7 @@ async def test_input_claimed_under_a_live_writer_is_delivered_after_its_release(
     from infra.database import get_db
     from infra.thread_execution import execute_claimed_batch
     from subagents.codex_runtime_errors import CodexLiveTurnBusy
-    from subagents.codex_runtime_terminal import release_and_drive_terminal
+    from subagents.codex_runtime_terminal import drain_terminal_drivers, release_and_drive_terminal
 
     session = _make_mock_app_session("provider-writer")
     session.steer = AsyncMock(return_value=False)
@@ -104,6 +104,7 @@ async def test_input_claimed_under_a_live_writer_is_delivered_after_its_release(
         await release_and_drive_terminal(
             SimpleNamespace(thread_id=THREAD, live=live), settlement,
         )
+        await drain_terminal_drivers()
 
     assert _message("input-after-terminal")["delivery_state"] == "delivered"
     assert sum(m.await_count for m in (
