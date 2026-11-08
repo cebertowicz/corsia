@@ -108,12 +108,13 @@ def _context(thread_id: str):
 
 
 def _commit(thread_id: str, paths: list[str], message: str) -> str:
+    from core.guidance_paths import classify_guidance_path
     from infra.guidance_git import _acquire, _commit as commit, _git, _locked
     from infra.guidance_messages import saver_author
 
     repo, fence, projects = _context(thread_id)
     checked = [_check_path(repo, path, fence, projects, history=False) for path in paths]
-    with _locked(_acquire(repo)[0]):
+    with _locked(_acquire(repo)[0]) as db:
         files = {}
         for path in checked:
             data = _read_file(repo, path)
@@ -122,10 +123,12 @@ def _commit(thread_id: str, paths: list[str], message: str) -> str:
             files[path] = data
         if _git(repo, "check-ignore", "--", *checked, ok=(0, 1)).strip():
             raise ValueError("Path is ignored by Git.")
-        result = commit(repo, files, message, saver_author(thread_id=thread_id))
+        guidance = [path for path in checked if classify_guidance_path(repo / path, workspace=repo, db=db)]
+        result = commit(repo, files, message, saver_author(thread_id=thread_id), repair_paths=guidance)
     if result is None:
         return "No changes to commit."
-    return "\n".join([f"Committed {result.sha}.", *result.unsynced_line()])
+    summary = f"Committed {result.sha}." if result.changed else "No changes to commit."
+    return "\n".join([summary, *result.unsynced_line()])
 
 
 def _history(thread_id: str, path: str, count: int) -> str:

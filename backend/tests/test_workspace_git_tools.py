@@ -40,6 +40,33 @@ def repo(tmp_path, monkeypatch):
     return tmp_path
 
 
+def test_same_bytes_workspace_commit_reports_index_repair(repo):
+    path = repo / "skills" / "demo" / "SKILL.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("before\n")
+    git(repo, "add", "skills/demo/SKILL.md")
+    git(repo, "commit", "-qm", "seed")
+    old = git(repo, "rev-parse", "HEAD:skills/demo/SKILL.md").strip()
+    path.write_text("saved\n")
+    workspace_git._commit("thread", ["skills/demo/SKILL.md"], "save")
+    git(repo, "update-index", "--cacheinfo", f"100644,{old},skills/demo/SKILL.md")
+    result = workspace_git._commit("thread", ["skills/demo/SKILL.md"], "same bytes")
+    assert "No changes to commit." in result and "Repaired guidance index: skills/demo/SKILL.md" in result
+    assert not git(repo, "diff", "--cached", "--name-only", "HEAD", "--", "skills/demo/SKILL.md")
+
+
+def test_same_bytes_workspace_commit_leaves_ordinary_index_entry(repo):
+    rel = "projects/own/file.txt"
+    path = repo / rel
+    old = git(repo, "rev-parse", f"HEAD:{rel}").strip()
+    path.write_text("saved\n")
+    workspace_git._commit("thread", [rel], "save")
+    git(repo, "update-index", "--cacheinfo", f"100644,{old},{rel}")
+    result = workspace_git._commit("thread", [rel], "same bytes")
+    assert result == "No changes to commit."
+    assert git(repo, "diff", "--cached", "--name-only", "HEAD", "--", rel).strip() == rel
+
+
 def test_commit_exact_files_and_history(repo):
     own = repo / "projects/own/file.txt"
     other = repo / "projects/Café/secret.txt"
