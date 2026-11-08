@@ -67,7 +67,10 @@ capture.detach()
     assert "hidden=value" not in output
 
 
-@pytest.mark.parametrize("mode", ["default", "quiet", "custom"])
+_STOCK_ACCESS = r'INFO:     127\.0\.0\.1:\d+ - "GET /api/health HTTP/1\.1" 200 OK$'
+
+
+@pytest.mark.parametrize("mode", ["default", "quiet", "custom", "file", "mixed"])
 def test_uvicorn_cli_respects_logging_options(tmp_path: Path, mode: str) -> None:
     workspace, state = tmp_path / "workspace", tmp_path / "state"
     workspace.mkdir()
@@ -77,12 +80,17 @@ def test_uvicorn_cli_respects_logging_options(tmp_path: Path, mode: str) -> None
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))
         port = sock.getsockname()[1]
-    log_path = tmp_path / "backend.log"
+    log_path, file_log = tmp_path / "backend.log", tmp_path / "uvicorn-file.log"
     args = ["--log-level", "warning", "--no-access-log"] if mode == "quiet" else []
-    if mode == "custom":
+    if mode in ("custom", "file", "mixed"):
         config = json.loads(json.dumps(LOGGING_CONFIG))
-        config["formatters"]["default"]["fmt"] = "CUSTOM %(levelprefix)s %(message)s"
-        config["formatters"]["access"]["fmt"] = 'CUSTOM %(client_addr)s %(request_line)s %(status_code)s'
+        if mode in ("custom", "mixed"):
+            config["formatters"]["access"]["fmt"] = 'CUSTOM %(client_addr)s %(request_line)s %(status_code)s'
+        if mode == "custom":
+            config["formatters"]["default"]["fmt"] = "CUSTOM %(levelprefix)s %(message)s"
+        if mode == "file":
+            config["handlers"]["default"] = {"class": "logging.FileHandler", "formatter": "default",
+                                             "filename": str(file_log)}
         config_path = tmp_path / "logging.json"
         config_path.write_text(json.dumps(config))
         args = ["--log-config", str(config_path)]
@@ -114,10 +122,22 @@ def test_uvicorn_cli_respects_logging_options(tmp_path: Path, mode: str) -> None
         assert re.match(prefix + r"[^ ]+:[^ ]+:\d+ - Application startup complete\.$", startup)
         access = next(line for line in output.splitlines() if 'GET /api/health' in line)
         assert re.match(prefix + r'uvicorn\.access - 127\.0\.0\.1:\d+ - "GET /api/health HTTP/1\.1" 200 OK$', access)
-    elif mode == "custom":
-        access = next(line for line in output.splitlines() if 'GET /api/health' in line)
-        assert re.match(r"CUSTOM 127\.0\.0\.1:\d+ GET /api/health HTTP/1\.1 200 OK$", access)
-        assert "CUSTOM INFO:     Application startup complete" in output
-    else:
+    elif mode == "quiet":
         assert "Application startup complete" not in output
         assert 'GET /api/health' not in output
+    else:
+        # A logging config other than Uvicorn's stock one is left exactly as configured.
+        access = next(line for line in output.splitlines() if 'GET /api/health' in line)
+        startup_source = file_log.read_text() if mode == "file" else output
+        startup = next(line for line in startup_source.splitlines() if "Application startup complete" in line)
+        if mode == "custom":
+            assert re.match(r"CUSTOM 127\.0\.0\.1:\d+ GET /api/health HTTP/1\.1 200 OK$", access)
+            assert startup == "CUSTOM INFO:     Application startup complete."
+        elif mode == "mixed":
+            assert re.match(r"CUSTOM 127\.0\.0\.1:\d+ GET /api/health HTTP/1\.1 200 OK$", access)
+            assert startup == "INFO:     Application startup complete."
+        else:
+            assert re.match(_STOCK_ACCESS, access)
+            assert startup == "INFO:     Application startup complete."
+        if mode == "file":
+            assert " | pid " not in startup_source
