@@ -292,8 +292,14 @@ def _thread_accounts(thread_id, user_id):
         rows = db.execute("SELECT b.provider,b.account_id,h.reason FROM thread_vendor_accounts b "
                           "LEFT JOIN thread_vendor_account_holds h ON h.thread_id=b.thread_id AND h.provider=b.provider "
                           "WHERE b.thread_id=? ORDER BY b.provider", (thread_id,)).fetchall()
-        return {"accounts": [_safe(accounts.get_account(row["account_id"], db=db)) | {"hold_reason": row["reason"]}
-                             for row in rows]}
+        numbered = {provider: accounts.list_accounts(provider=provider, include_removed=True, db=db)
+                    for provider in {row["provider"] for row in rows}}
+        result = []
+        for row in rows:
+            account = accounts.get_account(row["account_id"], db=db)
+            result.append(_safe(account) | {"hold_reason": row["reason"],
+                                            "label": account_label(account, rows=numbered[row["provider"]], db=db)})
+        return {"accounts": result}
     finally:
         db.close()
 

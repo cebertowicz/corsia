@@ -55,16 +55,23 @@ def _accounts(choices, *, db):
 
 def _batch(ids, *, db) -> dict[str, AccountReadiness]:
     from connections.account_policy import account_reason, turn_account
+    from connections.account_rollover import NOT_PERMITTED
     from connections.vendor_accounts import AccountError
 
     targets = _targets(ids, db=db)
     choices = {}
     for thread_id, target in targets.items():
         try:
-            choices[thread_id] = turn_account(
-                target['harness'], thread_id=thread_id,
-                model=str(target['model'] or '').strip(), db=db,
-            )
+            # No ``model`` here on purpose: passing it lets a limit- or denial-driven move answer for
+            # an account other than the one this thread's held head will claim, which then reads as
+            # readiness for a head launch admission refuses. Only a project denial is a cause the
+            # claim itself moves off, so only that cause follows the move; every other reason is
+            # what this head waits on, and the held-input notice names its recovery from this read.
+            choice = turn_account(target['harness'], thread_id=thread_id, db=db)
+            if choice[1] == NOT_PERMITTED:
+                choice = turn_account(target['harness'], thread_id=thread_id,
+                                      model=str(target['model'] or '').strip(), db=db)
+            choices[thread_id] = choice
         except AccountError:
             # A deleted selected account is absent evidence, not a readiness result.
             # Preserve the existing unread projection rather than letting this
