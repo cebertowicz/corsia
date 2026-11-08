@@ -87,6 +87,17 @@ def _overlapping_occurrences(text: str, sub: str) -> list[int]:
     return offs
 
 
+def _with_u16(text: str, positions: list[int]) -> list[tuple[int, int]]:
+    """Pair ascending code-point positions with their UTF-16 offsets in one pass."""
+    paired: list[tuple[int, int]] = []
+    last = last16 = 0
+    for pos in positions:
+        last16 += _u16(text[last:pos])
+        last = pos
+        paired.append((pos, last16))
+    return paired
+
+
 def _cp_at_u16(text: str, offset16: object) -> int | None:
     """Return a code-point boundary for a UTF-16 offset, if it is one.
 
@@ -131,9 +142,8 @@ def reanchor_edited(
         return None
     if not isinstance(from16, int) or not isinstance(to16, int):
         return None
-    starts = [(pos + len(prefix), _u16(text[:pos + len(prefix)]))
-              for pos in _overlapping_occurrences(text, prefix)]
-    ends = [(pos, _u16(text[:pos])) for pos in _overlapping_occurrences(text, suffix)]
+    starts = _with_u16(text, [pos + len(prefix) for pos in _overlapping_occurrences(text, prefix)])
+    ends = _with_u16(text, _overlapping_occurrences(text, suffix))
     if not starts or not ends:
         return None
     start_distance = min(abs(pos16 - from16) for _, pos16 in starts)
@@ -144,7 +154,7 @@ def reanchor_edited(
         return None
     start, start16 = starts[0]
     end, end16 = ends[0]
-    if start16 > from16 or end16 < from16 or end <= start:
+    if end <= start:
         return None
     inside = text[start:end]
     leading = 0

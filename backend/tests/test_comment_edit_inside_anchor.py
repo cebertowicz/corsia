@@ -430,8 +430,14 @@ def test_an_edited_suggestion_keeps_its_place_on_reload_and_loses_it_when_its_su
     assert reloaded["orphaned"] is False and reloaded["text_changed"] is True
     assert (reloaded["from_off"], reloaded["to_off"]) == (4, 21) and reloaded["anchor_text"] == "quoted source"
 
-    # The text around it changed too: nothing says the stored place is still its place.
+    # Text added before it moves it; its surroundings still find it.
     threads, _ = comment_anchoring.anchored_threads(artifact, None, db, text="Other words. The quoted NEW source stays here.")
+    moved = next(thread for thread in threads if thread["id"] == row["id"])
+    assert moved["orphaned"] is False and moved["text_changed"] is True
+    assert (moved["from_off"], moved["to_off"]) == (17, 34)
+
+    # The text around it changed too: nothing says where its place is now.
+    threads, _ = comment_anchoring.anchored_threads(artifact, None, db, text="Other words. A quoted NEW source stays here.")
     lost = next(thread for thread in threads if thread["id"] == row["id"])
     assert lost["orphaned"] is True and not lost.get("text_changed")
 

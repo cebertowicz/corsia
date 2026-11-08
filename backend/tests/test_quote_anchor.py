@@ -204,6 +204,15 @@ def test_context_bounded_edit_requires_retained_quote_ends(old, new, kept):
     assert result == ((2, 2 + len(new)) if kept else None)
 
 
+def test_context_bounded_edit_survives_text_added_before_it():
+    from doceditor import quote_anchor
+
+    text = "Added The quoted NEW source stays here."
+    result = quote_anchor.reanchor_edited(text, "quoted source", from16=4, to16=17,
+                                          prefix="The ", suffix=" stays here.")
+    assert result == (10, 27) and text[10:27] == "quoted NEW source"
+
+
 def test_context_bounded_edit_orphans_equal_distance_prefix_or_suffix():
     from doceditor import quote_anchor
 
