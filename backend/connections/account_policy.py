@@ -257,7 +257,12 @@ def select_account(thread_id: str, provider: str, *, account_id: str | None = No
         identity = _candidate(thread_id, provider, account_id, projects, db=connection)
         existing = connection.execute("SELECT account_id FROM thread_vendor_accounts WHERE thread_id=? AND provider=?",
                                       (thread_id, provider)).fetchone()
-        if account_id is None and model is not None and existing is None and len(projects) == 1:
+        # One provider policy governs this thread however many scopes named it, so its model can
+        # answer the account: a child spawned in its own project gets the projected one. Two
+        # different policies would need two order and switch reads to move, so those children keep
+        # the plain candidate and admit_account still weighs every governed project, refusing rather
+        # than preferring one project over the other.
+        if account_id is None and model is not None and existing is None and len(set(projects)) == 1:
             identity = _turn_identity(provider, thread_id=thread_id, project_id=projects[0], account_id=None,
                                       model=model, db=connection)
         identity = admit_account(provider, identity, projects, execution=False, db=connection)
