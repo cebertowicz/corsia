@@ -14,7 +14,8 @@
 	import { quoteLabel } from './chatUnreadTargets';
 	import { beginChatReplyAttentionRead, setChatReplyAttention } from '$lib/stores/chatReplyAttention';
 	import { useChatReplyJumper } from './chatReplyJumper.svelte';
-	import { hydrateFetchedMessages, mergeFetchedHistoryRows } from '$lib/messageHistory';
+	import { hydrateFetchedMessages } from '$lib/messageHistory';
+	import { createTranscriptPagerPort } from '$lib/chatTranscriptPagerPort';
 	import { adoptThreadSnapshot, retainDisplayedRows } from '$lib/stores/displayedThreads';
 	import { beginThreadOpen, failThreadOpen, markFirstPageRendered, type ThreadOpenSource } from '$lib/openTimingRuntime';
 	import MessageList from './MessageList.svelte';
@@ -45,7 +46,6 @@
 		PAGER_ABORT,
 		type MessagePage,
 		type TurnSummary,
-		type PagerPort,
 	} from '$lib/messagePager';
 	let {
 		isDraggingOver = false,
@@ -170,29 +170,10 @@
 	export async function setAndSend(text: string, preserveDraft = false): Promise<SendOutcome> {
 		return await inputBarRef?.setAndSend(text, preserveDraft) ?? 'not_sent';
 	}
-	const pagerPort: PagerPort = {
-		async fetchPage(cursor: string): Promise<MessagePage | null> {
-			const t = $token;
-			const sid = $activeThreadId;
-			if (!t || !sid) return null;
-			try {
-				const res = await fetch(
-					`/api/threads/${sid}/messages?token=${t}&limit=${MSG_PAGE_SIZE}&before=${cursor}${focusParam()}`
-				);
-				if (!res.ok) return null;
-				const data = await res.json() as MessagePage;
-				return { ...data, messages: hydrateFetchedMessages(data.messages ?? []) };
-			} catch (e) {
-				console.error('loadOlderMessages fetch failed:', e);
-				return null;
-			}
-		},
-		prepend(older: any[]) {
-			messages.update(current => mergeFetchedHistoryRows(current, older));
-		},
-		getScrollEl: () => messagesEl ?? null,
-		afterRender: () => tick(),
-	};
+	const pagerPort = createTranscriptPagerPort({
+		token: () => $token, threadId: () => $activeThreadId, pageSize: MSG_PAGE_SIZE,
+		querySuffix: focusParam, scrollEl: () => messagesEl ?? null,
+	});
 	async function loadOlderMessages(needsMore?: () => boolean) {
 		const gen = pagerGeneration;
 		const guardedPort = makeGuardedPort(() => pagerGeneration, gen, pagerPort);
