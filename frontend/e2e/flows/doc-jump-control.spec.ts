@@ -254,24 +254,26 @@ async function controlFace(page: Page) {
 /** Its height is the touch target under a finger and chat's control size under a mouse. */
 const minControlHeight = (width: number) => (width === 393 ? 44 : 36);
 
-/** Where the jumped-to thing actually is, and the pane that has to hold it. The document draws a thread as a card in the
- * margin or canvas and as inline marks keyed by every comment in the thread, so all three are tried; what comes back is
- * logged so a failure says which surface was read. */
-async function landedBox(page: Page, id: string): Promise<{ from: string; top: number; bottom: number; paneTop: number; paneBottom: number } | null> {
-	for (const selector of [`.canvas-comment-drawer[data-comment-id="${id}"]`, '[data-margin-card]', '[data-comment-ids]']) {
-		const box = await page.locator(selector).evaluateAll((nodes, wanted) => {
-			const mine = nodes.filter((node) => node.dataset.commentId === wanted
-				|| (node.dataset.commentIds ?? '').split(',').includes(wanted)
-				|| !!node.querySelector(`[data-comment-id="${wanted}"]`));
-			const scroller = mine[0]?.closest('.cm-scroller');
-			if (!scroller) return null;
-			const pane = scroller.getBoundingClientRect();
-			const rects = mine.map((node) => node.getBoundingClientRect());
-			return { top: Math.round(Math.min(...rects.map((r) => r.top))), bottom: Math.round(Math.max(...rects.map((r) => r.bottom))), paneTop: Math.round(pane.top), paneBottom: Math.round(pane.bottom) };
-		}, id);
-		if (box) return { from: selector, ...box };
-	}
-	return null;
+/** Where the jump actually landed, in the region the reader can see: the thread's own card, or the text it marks,
+ * whichever is painted. A zero-area node — the gutter rail line a thread owns — is not something a reader sees, so it
+ * never answers this, and the pane is the measured node's own scroll container, since the card and the inline text live
+ * in different ones. `whole` is the verdict: wholly inside, or taller than the pane with its top inside. */
+async function landedBox(page: Page, id: string): Promise<{ from: string; top: number; bottom: number; paneTop: number; paneBottom: number; whole: boolean } | null> {
+	return page.evaluate((wanted) => {
+		const cards = [...document.querySelectorAll<HTMLElement>(`[data-comment-id="${wanted}"]`)];
+		const marks = [...document.querySelectorAll<HTMLElement>('[data-comment-ids]')].filter((node) => (node.dataset.commentIds ?? '').split(',').includes(wanted));
+		for (const node of [...cards, ...marks]) {
+			const rect = node.getBoundingClientRect();
+			if (rect.width < 1 || rect.height < 1) continue;
+			let host: HTMLElement | null = node.parentElement;
+			while (host && !/(auto|scroll)/.test(getComputedStyle(host).overflowY)) host = host.parentElement;
+			if (!host) continue;
+			const pane = host.getBoundingClientRect();
+			const fits = rect.top >= pane.top - 0.5 && (rect.bottom <= pane.bottom + 0.5 || rect.height >= pane.height);
+			return { from: `${node.tagName}.${String(node.className).slice(0, 32)}`, top: Math.round(rect.top), bottom: Math.round(rect.bottom), paneTop: Math.round(pane.top), paneBottom: Math.round(pane.bottom), whole: fits };
+		}
+		return null;
+	}, id);
 }
 
 /** Where the design's states are photographed: outside the e2e script's own scratch tree, so they survive its cleanup. */
@@ -387,7 +389,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await expect.poll(async () => {
 				const inside = await landedBox(page, doc.roots[8]);
 				console.log('LANDING', JSON.stringify(inside));
-				const fits = !!inside && inside.top >= inside.paneTop - 0.5 && inside.bottom <= inside.paneBottom + 0.5;
+				const fits = !!inside?.whole;
 				steadyInside = fits ? steadyInside + 1 : 0;
 				return steadyInside >= 2;
 			}, { message: 'the jumped-to line sits wholly inside the visible pane and stays there' }).toBe(true);
@@ -949,7 +951,7 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		// The thread is unread and its own line is inside the pane: this is the control's own absence, not a count that fell,
 		// and nothing can bring it further into view.
 		await expect.poll(() => unreadCountInStore(page, doc.artifactId)).toBe(1);
-		await expect.poll(() => landedBox(page, doc.roots[2]).then((box) => !!box && box.top >= box.paneTop - 0.5 && box.bottom <= box.paneBottom + 0.5), { message: 'the unread line sits inside the visible pane' }).toBe(true);
+		await expect.poll(() => landedBox(page, doc.roots[2]).then((box) => !!box?.whole), { message: 'the unread line sits inside the visible pane' }).toBe(true);
 		await expect(controlButton(page)).toHaveCount(0);
 		await page.screenshot({ path: stillPath(width, theme, 'hidden') });
 		await holdDwell(page, false);
