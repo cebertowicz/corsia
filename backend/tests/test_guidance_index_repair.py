@@ -146,7 +146,9 @@ def test_head_moved_drops_record(history_scope, monkeypatch, tmp_path):
     guidance_git(workspace, 'update-index', '--add', '--cacheinfo', f'100644,{blob},{rel}', env=env)
     tree = guidance_git(workspace, 'write-tree', env=env).strip()
     parent = guidance_git(workspace, 'rev-parse', 'HEAD').strip()
-    sha = guidance_git(workspace, 'commit-tree', tree, '-p', parent, '-m', 'external').strip()
+    identity = {f'GIT_{role}_{field}': value for role in ('AUTHOR', 'COMMITTER')
+                for field, value in (('NAME', 'Outside'), ('EMAIL', 'outside@example.test'))}
+    sha = guidance_git(workspace, 'commit-tree', tree, '-p', parent, '-m', 'external', env=identity).strip()
     guidance_git(workspace, 'update-ref', 'HEAD', sha, parent)
     repaired, notes = consume_records(guidance_git, workspace)
     assert not repaired and any('HEAD entry changed' in note for note in notes)
