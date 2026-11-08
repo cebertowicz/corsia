@@ -68,6 +68,8 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		return changed;
 	}
 	function pickComment(id: string, rect: CommentAnchor, viaSuggestion: boolean, clicked: boolean) {
+		// state.id identifies this surface's card, which may stay open after resolution; the shared focus store
+		// identifies the highlighted thread and clears when it resolves.
 		// The drawer is nonmodal: a caret landing in commented text (a click, or
 		// Escape collapsing a selection) keeps it open rather than swapping it
 		// for that comment's popover. Pressing a suggestion in the editor still

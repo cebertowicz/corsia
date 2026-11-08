@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import type { CommentRange } from '$lib/cm/comment-marks';
 import MarkdownEditor from './MarkdownEditor.svelte';
+import * as geometry from '$lib/cm/comment-anchor-geometry';
+import { focusedDocComment } from '$lib/stores/docCommentFocus';
 
 const DOC = 'intro\n\n| Item | Owner |\n|---|---|\n| Alpha | Dana |\n| Bravo | Eli |\n\nafter\n';
 const DANA = DOC.indexOf('Dana');
@@ -31,6 +33,8 @@ beforeEach(() => {
 afterEach(async () => {
 	if (component) await unmount(component);
 	component = undefined;
+	focusedDocComment.set(null);
+	vi.restoreAllMocks();
 	host?.remove();
 	const layout = Range.prototype as Partial<Pick<Range, 'getClientRects' | 'getBoundingClientRect'>>;
 	delete layout.getClientRects;
@@ -53,6 +57,20 @@ describe('a click on comments drawn inside a table', () => {
 		// The click goes on with them, so the cards open at it, as a click on one comment's text does.
 		expect(onMarkerFocus).toHaveBeenCalledWith(['a', 'b'], expect.any(HTMLElement), expect.any(Function), expect.any(MouseEvent));
 		expect(onAnchorFocus).not.toHaveBeenCalled();
+	});
+
+	it('anchors a marker to the focused thread or the first surviving candidate', async () => {
+		const onMarkerFocus = vi.fn();
+		const rows = vi.spyOn(geometry, 'rowsOf').mockReturnValue(new DOMRect());
+		mountEditor([comment('a', onMarkerFocus), { ...comment('b', onMarkerFocus), to: DANA + 3 }]);
+		(await painted()).click();
+		const anchor = onMarkerFocus.mock.calls[0][2] as () => DOMRect | null;
+		focusedDocComment.set('a');
+		anchor();
+		expect(rows).toHaveBeenLastCalledWith(expect.anything(), DANA, DANA + 4, null);
+		focusedDocComment.set('gone');
+		anchor();
+		expect(rows).toHaveBeenLastCalledWith(expect.anything(), DANA, DANA + 3, null);
 	});
 });
 
