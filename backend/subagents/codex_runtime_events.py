@@ -7,10 +7,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from automation.turn_end_effects import (
-    deliver_turn_end_after,
-    record_external_turn_end,
-)
+from automation.turn_end_effects import record_external_turn_end
 from core.reasoning_provenance import merge_reasoning_provenance_evidence
 from core.stop_causes import ContextOverflowEnd
 from infra.delivery_states import PROVIDER_MISSING_RESULT_REASON
@@ -554,8 +551,7 @@ async def _on_result(ctx, ev: dict) -> None:
             failure = dict(outcome="error", error=ev.get("result") or "Codex turn failed") if is_error else {}
             effects = await record_external_turn_end(ctx.thread_id, turn_id=identity.turn_id, **failure)
     finally:
-        await deliver_turn_end_after(
-            effects, lambda: release_and_drive_terminal(ctx, settlement))
+        await release_and_drive_terminal(ctx, settlement, effects)
 
 
 async def _on_turn_failed(ctx, ev: dict) -> None:
@@ -606,8 +602,7 @@ async def _on_turn_failed(ctx, ev: dict) -> None:
             clears_at=reset_at,
         )
     finally:
-        await deliver_turn_end_after(
-            effects, lambda: release_and_drive_terminal(ctx, settlement))
+        await release_and_drive_terminal(ctx, settlement, effects)
 
 
 async def _on_provider_tool_violation(ctx, ev: dict) -> None:

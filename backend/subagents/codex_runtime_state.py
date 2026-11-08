@@ -161,25 +161,35 @@ def schedule_live_writer_release(thread_id: str) -> asyncio.Task[None] | None:
     )
 
 
-async def release_and_drive_terminal(ctx, settlement) -> None:
-    """Release the completed live generation, then drive its successor detached.
+async def release_and_drive_terminal(ctx, settlement, effects) -> None:
+    """Release the completed live generation, then drive the rest detached:
+    its successor first, then the threads its Turn end woke.
 
     The terminal arrives in the provider-event chain, which a transition-lock
-    holder (a steer, Stop or checkpoint) may be draining, and the successor's
-    dispatch takes that lock: driving it inline left it running undriven (#1981).
+    holder (a steer, Stop or checkpoint) may be draining. The successor's
+    dispatch takes that lock, and so does the thread's own drive when an errored
+    Turn left its input unanswered: driving either inline left the thread
+    running undriven (#1981).
     """
     release = finalize_live(ctx.thread_id, ctx.live)
     schedule_detached_drive(
-        _drive_released(ctx.thread_id, settlement, release),
+        _drive_released(ctx.thread_id, settlement, release, effects),
         name=f"codex-terminal-drive:{ctx.thread_id}",
     )
 
 
-async def _drive_released(thread_id: str, settlement, release: asyncio.Task[None] | None) -> None:
-    try:
+async def _drive_released(
+    thread_id: str, settlement, release: asyncio.Task[None] | None, effects,
+) -> None:
+    from automation.turn_end_effects import deliver_turn_end_after
+
+    async def drive_successor() -> None:
         await drive_turn_settlement(settlement)
         if release is not None:
             await release
+
+    try:
+        await deliver_turn_end_after(effects, drive_successor)
     except Exception:
         log.exception("codex_runtime: terminal drive for %s failed", thread_id)
 

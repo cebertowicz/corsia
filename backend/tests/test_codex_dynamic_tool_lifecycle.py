@@ -1187,6 +1187,9 @@ async def test_natural_terminal_settles_missing_tool_result_before_removing_live
         lambda _sid, payload: broadcasts.append(payload),
     )
     await _deliver_terminal(on_event, live, dict(terminal_event))
+    from subagents.codex_runtime_state import drain_detached_drives
+
+    await drain_detached_drives()  # the terminal drives its woken threads detached
     assert driven == ([thread_id] if expected_status == "error" else [])
 
     db = get_db()
