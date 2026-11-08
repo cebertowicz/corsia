@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -116,7 +117,7 @@ class CreateProjectTool(Tool):
         # the repository first. The person's path through initialize_project stays
         # unchecked: those are the person's own repositories.
         if isinstance(repo_path_str, str) and repo_path_str.strip():
-            if refusal := repo_config_refusal(Path(repo_path_str)):
+            if refusal := await asyncio.to_thread(repo_config_refusal, Path(repo_path_str)):
                 return f"❌ {refusal}"
 
         def _run():

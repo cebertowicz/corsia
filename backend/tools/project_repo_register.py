@@ -24,6 +24,7 @@ compensated flow Project settings uses — with two agent-specific restrictions:
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -108,7 +109,7 @@ class ProjectRepoRegisterTool(Tool):
         # A repository's own Git config can name a program the backend would then
         # run, so an agent may only attach a checkout inside the allowlist, and
         # before any Git command runs in it. Project settings stays unchecked.
-        if refusal := repo_config_refusal(target):
+        if refusal := await asyncio.to_thread(repo_config_refusal, target):
             return f"Error: {refusal}"
 
         body = RepoAdd(mode="link", path=str(target), name=name)

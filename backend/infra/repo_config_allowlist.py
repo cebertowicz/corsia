@@ -20,6 +20,7 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 
+from host_access.credential_sanitizer import sanitize_credential_text
 from infra.backend_git import git_argv
 
 _CONFIG_TIMEOUT_SECONDS = 5
@@ -133,13 +134,15 @@ def _pointer_target(pointer: Path, raw: str) -> Path | None:
 
     The ``.git`` file of a linked checkout writes ``gitdir: <path>``, `commondir`
     writes the path alone; both may be relative to the folder holding the pointer.
+    Git reads the path literally — no ``~`` expansion — so this does too, or the
+    check could read a different config from the one Git then uses.
     """
     target = raw.strip()
     if target.startswith("gitdir:"):
         target = target[len("gitdir:"):].strip()
     if not target or "\n" in target:
         return None
-    path = Path(target).expanduser()
+    path = Path(target)
     return (path if path.is_absolute() else pointer.parent / path).resolve(strict=False)
 
 
@@ -177,6 +180,7 @@ def _config_key_names(config_file: Path) -> list[str] | None:
 def _refusal_line(keys: list[str]) -> str:
     """Return the refusal naming the first three keys in order, then a count."""
     listed = ", ".join(keys[:3])
+    # The key names come from _scan_repo_config already credential-masked.
     if len(keys) == 1:
         return (
             f"Not registered: this repository's Git config sets {listed}, which isn't "
@@ -212,7 +216,9 @@ def _scan_repo_config(repo: Path) -> tuple[list[str], bool]:
             unreadable = True
             continue
         offenders.update(name for name in names if not _key_is_allowed(name))
-    return sorted(offenders), unreadable
+    # A subsection can hold a URL with credentials in it (``url.<url>.insteadof``),
+    # so a key name is masked like any other text before it is reported.
+    return sorted({sanitize_credential_text(name) for name in offenders}), unreadable
 
 
 def refused_repo_config_keys(repo_path: Path) -> list[str]:

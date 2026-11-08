@@ -203,7 +203,8 @@ class CorsiaApiTool(Tool):
             return "Error: method must be GET, POST, PUT, PATCH or DELETE."
         try:
             user_id = await run_in_db(conductor_user, actor)
-            scope, payload = _scope(method, path, query or {}, body, actor=actor)
+            # Off the event loop: a repository registration runs Git to read its config.
+            scope, payload = await asyncio.to_thread(_scope, method, path, query or {}, body, actor=actor)
             from main import app
 
             result = await call_application(app, scope, payload, user_id, actor)

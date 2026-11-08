@@ -264,6 +264,51 @@ def test_a_linked_worktree_is_checked_through_its_common_config(tmp_path) -> Non
     assert refusal is not None and "filter.lfs.process" in refusal, refusal
 
 
+def test_a_tilde_pointer_is_read_as_literally_as_git_reads_it(tmp_path, monkeypatch) -> None:
+    # A clean Git directory where ``~`` would expand to, and a widened one where Git
+    # actually looks: ``~/real`` relative to the checkout.
+    home = tmp_path / "home"
+    home.mkdir()
+    _git_repo(tmp_path / "clean")
+    (tmp_path / "clean" / ".git").rename(home / "real")
+    monkeypatch.setenv("HOME", str(home))
+
+    repo = tmp_path / "pointed"
+    (repo / "~").mkdir(parents=True)
+    _git_repo(tmp_path / "widened")
+    (tmp_path / "widened" / ".git").rename(repo / "~" / "real")
+    with (repo / "~" / "real" / "config").open("a", encoding="utf-8") as handle:
+        handle.write(f'[filter "x"]\n\tclean = {PROGRAM}\n')
+    (repo / ".git").write_text("gitdir: ~/real\n", encoding="utf-8")
+    git_dir = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--absolute-git-dir"],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    assert Path(git_dir) == (repo / "~" / "real").resolve()
+
+    refusal = repo_config_refusal(repo)
+
+    assert refusal is not None and "filter.x.clean" in refusal, refusal
+
+
+def test_a_credential_inside_a_key_name_is_masked(tmp_path) -> None:
+    secret = "s3cr3t-value"
+    repo = tmp_path / "credential-key"
+    _git_repo(repo)
+    _append_config(
+        repo,
+        f'[url "https://someone:{secret}@example.invalid/"]\n'
+        "\tinsteadOf = https://example.invalid/\n",
+    )
+
+    refusal = repo_config_refusal(repo)
+    keys = refused_repo_config_keys(repo)
+
+    assert refusal is not None and "insteadof" in refusal, refusal
+    assert secret not in refusal, refusal
+    assert keys and not any(secret in key for key in keys), keys
+
+
 @pytest.mark.parametrize("broken", ["unreadable", "unparsable", "missing"])
 def test_a_config_that_cannot_be_checked_is_refused(tmp_path, broken) -> None:
     repo = tmp_path / f"broken-{broken}"
