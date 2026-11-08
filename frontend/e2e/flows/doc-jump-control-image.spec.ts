@@ -66,13 +66,16 @@ for (const width of [393, 1440]) {
 			await expect(pin).toBeVisible();
 			await expect(overlay(page).locator('[data-doc-jump]')).toHaveCount(0);
 
-			// Zoom with the viewer's own keyboard zoom (ImageLightbox's '+' and '='): in a leaf this narrow the bar clips its
-			// own zoom buttons, which is a finding for the viewer lane, not something this journey has to depend on.
-			// The viewer's zoom keys belong to its viewport (tabindex 0), not to the window: focus it, or the keys go elsewhere.
-			await viewport.evaluate((el) => el.focus());
+			// Zoom with the viewer's own keyboard zoom (ImageLightbox's '+' and '='), which belong to its viewport
+			// (tabindex 0) and are taken by nobody else while the viewer is open. Proof is the image itself getting wider
+			// than its fitted size: the bar's percentage readout is not drawn in a leaf this narrow — the bar clips its own
+			// zoom buttons and its readout there, which is a finding for the viewer lane, not something this journey has
+			// to depend on.
+			const imageWidth = () => overlay(page).locator('.viewport img').first().evaluate((el) => el.getBoundingClientRect().width);
+			const fitted = await imageWidth();
+			expect(fitted, 'the image is drawn at its fitted size').toBeGreaterThan(1);
 			for (let step = 0; step < 12; step += 1) await page.keyboard.press('+');
-			// Prove the keys did the zooming, so a later failure is not read as a missing control.
-			await expect.poll(async () => parseInt((await overlay(page).getByText(/^\d+%$/).first().textContent()) ?? '0', 10), { message: 'the viewer zoomed past its own size with the keyboard' }).toBeGreaterThan(100);
+			await expect.poll(async () => await imageWidth() > fitted * 1.5, { message: 'the viewer zoomed past its own size with the keyboard' }).toBe(true);
 			await viewport.evaluate((el) => { el.scrollTop = 0; });
 			const offFrame = async () => {
 				const frame = (await viewport.boundingBox())!;

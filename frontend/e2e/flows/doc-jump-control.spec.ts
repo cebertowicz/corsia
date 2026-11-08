@@ -257,23 +257,46 @@ const minControlHeight = (width: number) => (width === 393 ? 44 : 36);
 /** Where the jump actually landed, in the region the reader can see: the thread's own card, or the text it marks,
  * whichever is painted. A zero-area node — the gutter rail line a thread owns — is not something a reader sees, so it
  * never answers this, and the pane is the measured node's own scroll container, since the card and the inline text live
- * in different ones. `whole` is the verdict: wholly inside, or taller than the pane with its top inside. */
-async function landedBox(page: Page, id: string): Promise<{ from: string; top: number; bottom: number; paneTop: number; paneBottom: number; whole: boolean } | null> {
+ * in different ones. What is measured is the node's TEXT, by Range: a card's padding is not something the reader came
+ * to read, and the drawer parks a focused thread against the pane's edge (`CommentThread.svelte` scrolls with
+ * `block: 'nearest'`), which cuts the card's box by its own padding without hiding a word. `whole` is the verdict:
+ * wholly inside, or taller than the pane with its top inside. */
+async function landedBox(page: Page, id: string): Promise<{ from: string; top: number; bottom: number; paneTop: number; paneBottom: number; whole: boolean; roomBelow: number } | null> {
 	return page.evaluate((wanted) => {
 		const cards = [...document.querySelectorAll<HTMLElement>(`[data-comment-id="${wanted}"]`)];
 		const marks = [...document.querySelectorAll<HTMLElement>('[data-comment-ids]')].filter((node) => (node.dataset.commentIds ?? '').split(',').includes(wanted));
 		for (const node of [...cards, ...marks]) {
-			const rect = node.getBoundingClientRect();
+			const range = document.createRange();
+			range.selectNodeContents(node);
+			const rect = range.getBoundingClientRect();
 			if (rect.width < 1 || rect.height < 1) continue;
 			let host: HTMLElement | null = node.parentElement;
 			while (host && !/(auto|scroll)/.test(getComputedStyle(host).overflowY)) host = host.parentElement;
 			if (!host) continue;
 			const pane = host.getBoundingClientRect();
 			const fits = rect.top >= pane.top - 0.5 && (rect.bottom <= pane.bottom + 0.5 || rect.height >= pane.height);
-			return { from: `${node.tagName}.${String(node.className).slice(0, 32)}`, top: Math.round(rect.top), bottom: Math.round(rect.bottom), paneTop: Math.round(pane.top), paneBottom: Math.round(pane.bottom), whole: fits };
+			return { from: `${node.tagName}.${String(node.className).slice(0, 32)}`, top: Math.round(rect.top), bottom: Math.round(rect.bottom), paneTop: Math.round(pane.top), paneBottom: Math.round(pane.bottom), whole: fits, roomBelow: Math.round(host.scrollHeight - host.clientHeight - host.scrollTop) };
 		}
 		return null;
 	}, id);
+}
+
+/** The line the reader came to read: the document's own line box that holds a thread's anchor text, against the pane
+ * that holds it. A thread's inline marks (`cm-comment-anchor`) carry no thread id and CodeMirror splits them wherever
+ * the text breaks, so the line is the smallest thing that can honestly be named for a thread here. */
+async function anchorBox(page: Page, anchorText: string): Promise<{ from: string; top: number; bottom: number; paneTop: number; paneBottom: number; whole: boolean } | null> {
+	return page.evaluate((wanted) => {
+		const node = [...document.querySelectorAll<HTMLElement>('.cm-line')].find((el) => (el.textContent ?? '').includes(wanted));
+		if (!node) return null;
+		const range = document.createRange();
+		range.selectNodeContents(node);
+		const rect = range.getBoundingClientRect();
+		let host: HTMLElement | null = node.parentElement;
+		while (host && !/(auto|scroll)/.test(getComputedStyle(host).overflowY)) host = host.parentElement;
+		if (!host) return null;
+		const pane = host.getBoundingClientRect();
+		return { from: 'DIV.cm-line', top: Math.round(rect.top), bottom: Math.round(rect.bottom), paneTop: Math.round(pane.top), paneBottom: Math.round(pane.bottom), whole: rect.top >= pane.top - 0.5 && rect.bottom <= pane.bottom + 0.5 };
+	}, anchorText);
 }
 
 /** Where the design's states are photographed: outside the e2e script's own scratch tree, so they survive its cleanup. */
@@ -387,9 +410,9 @@ for (const theme of ['light', 'dark'] as const) {
 			// Where it lands matters as much as that it moved: the whole landed line sits inside the pane the reader can see,
 			// clear of its top edge, and stays there once the drawer has taken its width from the pane.
 			await expect.poll(async () => {
-				const inside = await landedBox(page, doc.roots[8]);
-				console.log('LANDING', JSON.stringify(inside));
-				const fits = !!inside?.whole;
+				const landed = await landedBox(page, doc.roots[8]);
+				console.log('LANDED', JSON.stringify(landed));
+				const fits = landed?.whole === true;
 				steadyInside = fits ? steadyInside + 1 : 0;
 				return steadyInside >= 2;
 			}, { message: 'the jumped-to line sits wholly inside the visible pane and stays there' }).toBe(true);
@@ -948,10 +971,13 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		await openThread(page, THREAD_TITLE);
 		await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 		await holdDwell(page, true);
+		await expect.poll(() => unreadCountInStore(page, doc.artifactId)).toBe(1);
+		// Put the reader on the thread's own line: a document paints only the lines around the reader, so the way to
+		// stand on it is to read one's way to it, the same scroll a person makes.
+		await page.locator('.cm-line').filter({ hasText: SECTIONS[2].anchor }).first().evaluate((el) => el.scrollIntoView({ block: 'center' }));
 		// The thread is unread and its own line is inside the pane: this is the control's own absence, not a count that fell,
 		// and nothing can bring it further into view.
-		await expect.poll(() => unreadCountInStore(page, doc.artifactId)).toBe(1);
-		await expect.poll(() => landedBox(page, doc.roots[2]).then((box) => !!box?.whole), { message: 'the unread line sits inside the visible pane' }).toBe(true);
+		await expect.poll(async () => (await anchorBox(page, SECTIONS[2].anchor))?.whole === true, { message: `the unread line (${SECTIONS[2].anchor}) sits inside the visible pane` }).toBe(true);
 		await expect(controlButton(page)).toHaveCount(0);
 		await page.screenshot({ path: stillPath(width, theme, 'hidden') });
 		await holdDwell(page, false);
