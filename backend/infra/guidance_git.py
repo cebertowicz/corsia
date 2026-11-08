@@ -126,13 +126,13 @@ def _changed(repo: Path, specs: list[str]) -> list[str]:
     return [record[3:] for record in out.split("\0") if record]
 
 
-def _repair(repo: Path) -> tuple[list[str], list[str]]:
+def _repair(repo: Path, shown: set[str] | None = None) -> tuple[list[str], list[str]]:
+    """Repair every recorded path; report only ``shown`` ones, so a caller never learns another scope's paths."""
     try:
-        return consume_records(_git, repo)
+        return consume_records(_git, repo, shown)
     except Exception as exc:  # a repair fault must not fail a landed save
-        note = f"Guidance index repair failed: {exc}."
-        logger.warning("{}", note)
-        return [], [note]
+        logger.warning("Guidance index repair failed: {}.", exc)
+        return [], ["Guidance index repair could not run; the server log has the error."]
 
 
 def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: str, *, repair_unchanged: bool = True) -> _Commit | None:
@@ -160,7 +160,7 @@ def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: st
                     staged.append((rel, args))
                 tree = _git(repo, "write-tree", env=env).strip()
             if head and tree == _git(repo, "rev-parse", f"{head}^{{tree}}").strip():
-                repaired, notes = _repair(repo) if repair_unchanged else ([], [])
+                repaired, notes = _repair(repo, set(files)) if repair_unchanged else ([], [])
                 return _Commit(head, changed=False, repaired=tuple(repaired), notes=tuple(notes)) if repaired or notes else None
             name, _, email = author.rpartition(" <")
             identity = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email.rstrip(">"), "GIT_COMMITTER_NAME": "CORSIA", "GIT_COMMITTER_EMAIL": "corsia@localhost"}
@@ -187,7 +187,7 @@ def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: st
                 logger.warning("{}", fault)
     if unsynced:
         logger.warning("guidance commit {} landed; index sync failed for {}: {}", sha, unsynced, fault)
-    repaired, notes = _repair(repo)
+    repaired, notes = _repair(repo, set(files))
     return _Commit(sha, tuple(unsynced), fault, repaired=tuple(repaired), notes=tuple(notes))
 
 

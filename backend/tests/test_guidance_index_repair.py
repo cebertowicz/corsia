@@ -232,3 +232,39 @@ def test_unmerged_entry_is_preserved(history_scope):
     before = index_blob(workspace, rel)
     _commit(workspace, {rel: path.read_bytes()}, 'same', 'T <t@t>')
     assert index_blob(workspace, rel) == before
+
+
+def test_git_fault_keeps_record_for_next_attempt(history_scope, monkeypatch, tmp_path):
+    import infra.guidance_index_sync as sync
+    from infra.guidance_states import GitFault
+
+    workspace, _ = history_scope
+    path, rel = seed(workspace)
+    failed_saves(workspace, path, monkeypatch, tmp_path)
+    pending = records(workspace)
+    before = index_blob(workspace, rel)
+    consume = sync._consume_one
+
+    def fault(*args):
+        raise GitFault('git update-index failed: transient')
+
+    monkeypatch.setattr(sync, '_consume_one', fault)
+    result = _save(workspace, path, path.read_text())
+    assert rel in result.line and 'transient' in result.line
+    assert records(workspace) == pending and index_blob(workspace, rel) == before
+    monkeypatch.setattr(sync, '_consume_one', consume)
+    _save(workspace, path, path.read_text())
+    assert not _git(['diff', '--cached', '--name-only', 'HEAD', '--', rel], cwd=workspace)
+    assert not records(workspace)
+
+
+def test_other_paths_are_repaired_but_not_reported(history_scope, monkeypatch, tmp_path):
+    workspace, _ = history_scope
+    path, rel = seed(workspace)
+    failed_saves(workspace, path, monkeypatch, tmp_path)
+    old_blob = index_blob(workspace, rel).split()[1]
+    result = _commit(workspace, {'unrelated.txt': b'other\n'}, 'other', 'T <t@t>')
+    shown = '\n'.join(result.unsynced_line())
+    assert rel not in shown and old_blob not in shown
+    assert not _git(['diff', '--cached', '--name-only', 'HEAD', '--', rel], cwd=workspace)
+    assert not records(workspace)

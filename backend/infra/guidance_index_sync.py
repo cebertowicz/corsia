@@ -155,30 +155,34 @@ def _consume_one(git: Git, repo: Path, git_dir: Path, record):
             lock.unlink(missing_ok=True)
 
 
-def consume_records(git: Git, repo: Path):
-    """Consume recorded failures, leaving a held-lock record for a later attempt."""
+def consume_records(git: Git, repo: Path, shown: set[str] | None = None):
+    """Consume recorded failures, keeping any record a fault or held lock left unrepaired for a later attempt.
+    Every outcome is logged; only those for ``shown`` paths (all when None) are returned to the caller."""
     git_dir = Path(git(repo, "rev-parse", "--absolute-git-dir").strip())
     path = _records_path(git_dir)
     records = _read_records(path)
-    repaired, notes = [], []
+    kept, repaired, notes = [], [], []
     for number, record in enumerate(records):
         rel = record["path"]
         try:
             changed, reason = _consume_one(git, repo, git_dir, record)
         except (FileExistsError, GitIndexLockRecoveryError) as exc:
-            notes.append(f"Guidance index repair skipped {rel}: {exc}")
-            _write_records(path, records[number:])
+            notes.append((rel, f"Guidance index repair skipped {rel}: {exc}"))
+            kept.extend(records[number:])
             break
         except (GitFault, OSError) as exc:
-            notes.append(f"Guidance index repair failed for {rel}: {exc}.")
+            notes.append((rel, f"Guidance index repair failed for {rel}: {exc}."))
+            kept.append(record)
             continue
         if changed:
             old = record["from"]
-            repaired.append(f"{rel} (old staged blob: {old[1] if old else 'absent'})")
+            repaired.append((rel, f"{rel} (old staged blob: {old[1] if old else 'absent'})"))
         elif reason:
-            notes.append(f"Guidance index repair skipped {rel}: {reason}.")
-    else:
-        _write_records(path, [])
-    for note in notes:
+            notes.append((rel, f"Guidance index repair skipped {rel}: {reason}."))
+    _write_records(path, kept)
+    for _rel, note in notes:
         logger.warning("{}", note)
-    return repaired, notes
+    if repaired:
+        logger.info("Repaired guidance index: {}", ", ".join(line for _rel, line in repaired))
+    return ([line for rel, line in repaired if shown is None or rel in shown],
+            [line for rel, line in notes if shown is None or rel in shown])
