@@ -209,6 +209,31 @@ async def test_a_due_scheduled_task_wakes_its_agent_with_what_and_why(db):
 
 
 @pytest.mark.asyncio
+async def test_a_date_the_agent_armed_still_fires_after_the_task_moves_to_later(db):
+    plan, node = _task(db)
+    due = _due(days=3, minutes=1)
+    _schedule(db, plan, node, condition={"type": "deadline", "value": due})
+    mutate(
+        plan.id, "edit", {
+            "node_id": node.id, "later": True,
+            "expected_revision": service._node_row(db, node.id)["revision"],
+        },
+        actor=OWNER, provenance="test.scheduled_wait", mutation_id=uuid.uuid4().hex, db=db,
+    )
+    db.commit()
+    seen, deliver = _deliveries()
+
+    await runner.sweep(
+        _sweep_at(due), db=db, sources=[WatchExpirySource()], deliver=deliver,
+    )
+
+    # The cut adds no wake of its own, but a date the agent armed is a real date.
+    assert [(thread, event) for thread, event, _summary in seen] == [
+        ("owner", "plan.watch_expired"),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_an_event_watch_keeps_the_fixed_wake(db):
     plan, node = _task(db)
     due = _due(minutes=5)

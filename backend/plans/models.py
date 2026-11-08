@@ -52,8 +52,9 @@ class PlanNode:
     requirements_revision: int
     commitment_id: str
     revision: int
-    #: Below the cut: never auto-selected and never wakes its owner, until it is
-    #: started or `later` is set false (`plans.later_fields`).
+    #: Below the cut: never auto-selected, and the cut itself never wakes its
+    #: owner (a watch the owner armed still fires), until it is started or
+    #: `later` is set false (`plans.later_fields`).
     later: bool
 
     def as_dict(self) -> dict:

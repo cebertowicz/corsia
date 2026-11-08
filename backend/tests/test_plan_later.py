@@ -1,7 +1,7 @@
 """The Later cut an agent draws under its own tasks.
 
 `later` is one flag on one task: auto-selection skips it, no wake of the owner
-counts it, its reason rides the event, and starting the task takes it back. The
+counts it (a watch the owner armed still fires), its reason rides the event, and starting the task takes it back. The
 status line counts both sides of the cut, and the set-aside expiry wake names it
 as the alternative to moving a date again. Every test here drives the real
 mutation boundary or the real reader, so a predicate dropped from one place fails.
