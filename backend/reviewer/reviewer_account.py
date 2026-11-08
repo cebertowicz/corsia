@@ -74,17 +74,24 @@ def resolve_scope_reviewer_account(target, project_id: str | None, *, db) -> str
 
     provider, project = target.harness, project_id
     identity, reason = scope_account(provider, project_id=project, db=db)
-    if reason or identity is None:
+    if identity is None:
+        # No account to move from: not configured, no scope policy, or every account denied.
         raise _unavailable(reason or "account_not_configured")
     base = harness_base_row(target.catalog_id, db=db)
     if base is None:
-        raise _unavailable("model_not_in_catalog")
+        raise _unavailable(reason or "model_not_in_catalog")
     # The target already carries the model's catalog availability, including the
     # provider-owned review selector the user catalog hides; the account decision
     # below adds only what is account-specific.
     base = {**base, "status": "ready", "status_reason": None}
-    # Only a project with the opt-in switch moves off a limited account.
-    identity = rollover_destination(provider, identity, base, project, db=db) or identity
+    # Only a project with the opt-in switch moves off a limited account, and it is asked
+    # even when this scope's own account is signed out, removed or denied: that refusal is
+    # the source's own cause, and an opted-in project has already said a permitted sibling
+    # runs this model instead. With no move to make, that cause stays the visible refusal.
+    destination = rollover_destination(provider, identity, base, project, db=db) or identity
+    if reason and destination == identity:
+        raise _unavailable(reason)
+    identity = destination
     if identity not in {item["id"] for item in permitted_accounts(provider, project_ids=[project], db=db)}:
         raise _unavailable("account_project_denied")
     decision = account_model_status(get_account(identity, db=db), base, project_ids=[project], db=db)
