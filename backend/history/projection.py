@@ -91,20 +91,22 @@ def _project_source(
     through: HistoryBoundary | None,
     include_unfinished_turn: bool,
 ) -> PortableHistoryProjection:
+    # Legality is a property of the source: a checkpoint cut inside a Turn
+    # that is still running stays legal when the render omits that Turn.
+    _validate_render_boundaries(
+        thread_id=thread_id,
+        epoch=source.epoch,
+        rows=source.rows,
+        source_turns=source.turns,
+        start_exclusive=start_exclusive,
+        through=through,
+    )
     source_turns = source.turns
     if not include_unfinished_turn:
         source_turns = [
             turn for turn in source_turns
             if turn.status not in _NONTERMINAL_TURN_STATES
         ]
-    _validate_render_boundaries(
-        thread_id=thread_id,
-        epoch=source.epoch,
-        rows=source.rows,
-        source_turns=source_turns,
-        start_exclusive=start_exclusive,
-        through=through,
-    )
     lower = start_exclusive.seq if start_exclusive is not None else 0
     upper = through.seq if through is not None else None
     selected = _selected_source_turns(
