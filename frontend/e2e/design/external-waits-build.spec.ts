@@ -4,6 +4,7 @@
  * The real app on the disposable mock E2E instance. Real threads, agents and one real document come from
  * the API; the plan-state reads (chat list thread states, the open thread's plan) are supplied by intercepting
  * them with the server's wire shape at the branch head. Run through `scripts/e2e-local` in mock mode.
+ * Frames go to WAITS_OUT; without it the spec only asserts and writes nothing into the checkout.
  */
 import { test, expect } from '../support/test';
 import { createDocument } from '../support/documentOpen';
@@ -19,8 +20,7 @@ import path from 'node:path';
 
 process.env.TZ = 'America/Los_Angeles';
 
-const OUT = process.env.WAITS_OUT
-	?? path.resolve(process.cwd(), '../shared/planning/renders/plans-external-waits-build');
+const OUT = process.env.WAITS_OUT;
 const AFTER = true;
 
 test.use({ timezoneId: 'America/Los_Angeles', locale: 'en-US', seedPerTest: true });
@@ -234,6 +234,7 @@ async function view(page: Page, width: number, height: number, scheme: 'light' |
 }
 
 async function shot(page: Page, name: string) {
+	if (!OUT) return;
 	await page.waitForTimeout(400);
 	await page.screenshot({ path: path.join(OUT, `${name}.png`), animations: 'disabled' });
 }
