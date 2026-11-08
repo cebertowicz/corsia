@@ -507,3 +507,15 @@ def test_legacy_suggestion_with_fully_replaced_same_length_text_is_orphaned(db_s
     found = next(thread for thread in threads if thread["id"] == row["id"])
     assert found["orphaned"] is True
     assert found["anchor_text"] == "quoted source"
+
+
+@pytest.mark.parametrize("replacement", [None, "better wording"])
+def test_legacy_intact_quote_wins_over_an_edited_lookalike_added_before_it(replacement):
+    row = {"id": "one", "parent_id": None, "review": False, "anchor_text": "abcdefghij",
+           "from_off": 1, "to_off": 11, "anchor_prefix": "P", "anchor_suffix": "S",
+           "replacement": replacement}
+    comment_anchoring.resolve_threads([row], "PabcdefSPabcdefghijS")
+    assert row["orphaned"] is False
+    assert (row["from_off"], row["to_off"]) == (9, 19)
+    assert row["anchor_text"] == "abcdefghij"
+    assert not row.get("text_changed")

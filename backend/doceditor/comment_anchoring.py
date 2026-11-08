@@ -60,14 +60,28 @@ def _edited_place(comment: dict, text: str, tracked: tuple[int, int] | None) -> 
     return place if inside and inside != comment["anchor_text"] else None
 
 
+def _held(comment: dict, text: str, place: tuple[int, int] | None) -> bool:
+    """Both stored context strings still surround ``place``."""
+    if place is None:
+        return False
+    start, end = _cp_at_u16(text, place[0]), _cp_at_u16(text, place[1])
+    if start is None or end is None:
+        return False
+    prefix, suffix = comment.get("anchor_prefix") or "", comment.get("anchor_suffix") or ""
+    return text[max(0, start - len(prefix)):start] == prefix and text[end:end + len(suffix)] == suffix
+
+
 def _resolve_place(comment: dict, text: str, quote: str, *, requote: bool) -> tuple[tuple[int, int] | None, str]:
-    if requote:
-        place = reanchor_edited(text, quote, from16=comment["from_off"], to16=comment["to_off"],
-                                prefix=comment.get("anchor_prefix"), suffix=comment.get("anchor_suffix"))
-        if place is not None:
-            return place, _text_in_range(text, *place)
-    return reanchor(text, quote, from16=comment["from_off"], to16=comment["to_off"],
-                    prefix=comment.get("anchor_prefix"), suffix=comment.get("anchor_suffix")), quote
+    """The unchanged quote with both context strings wins; otherwise an edited range between them may stand in."""
+    place = reanchor(text, quote, from16=comment["from_off"], to16=comment["to_off"],
+                     prefix=comment.get("anchor_prefix"), suffix=comment.get("anchor_suffix"))
+    if not requote or _held(comment, text, place):
+        return place, quote
+    edited = reanchor_edited(text, quote, from16=comment["from_off"], to16=comment["to_off"],
+                             prefix=comment.get("anchor_prefix"), suffix=comment.get("anchor_suffix"))
+    if edited is None:
+        return place, quote
+    return edited, _text_in_range(text, *edited)
 
 
 def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict]:
@@ -98,7 +112,7 @@ def resolve_threads(threads: list[dict], text: str, *, ranges=None) -> list[dict
         if resolved is None:
             resolved, quote = _resolve_place(comment, text, quote, requote=undecided and not suggestion)
         edited = None
-        if undecided and suggestion:
+        if undecided and suggestion and (tracked or not _held(comment, text, resolved)):
             edited = _edited_place(comment, text, resolved if tracked else None)
         if edited is not None:
             inside = _text_in_range(text, edited[0], edited[1])
