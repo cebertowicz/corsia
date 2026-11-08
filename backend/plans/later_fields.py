@@ -91,16 +91,25 @@ def edit_across_cut(params: dict, changed: dict, common: dict, acting: str | Non
     ``next`` block a park returns, so an agent never holds a slot its own edit
     moved out from under it (Later design §2). Any other answer is the node and
     its admission truth, as before an edit could name the cut.
+
+    An edit that also changes the task's requirements has already released the
+    attempt itself, and does not reselect a Later task, so the slot counts as
+    freed whichever release ran.
     """
     from plans import admission, close_next
     from plans import mutations
     from plans.boundary_fields import expected
 
+    import plans.admission_attempts as attempts
+
     node_id, db = params["node_id"], common["db"]
     before = service._node_row(db, node_id)
     slot = close_next.slot_before(db, before)
+    held = attempts.open_attempt(db, node_id) is not None
     mutations.edit_node(node_id, **changed, **expected(params), **common)
-    if not changed["later"] or not admission.release(node_id, "later", db=db):
+    if changed["later"] and held:
+        admission.release(node_id, "later", db=db)
+    if not changed["later"] or not held or attempts.open_attempt(db, node_id) is not None:
         return admission.result(node_id, db=db)
     admission.reconcile_plan(
         slot.plan_id, actor_id=common["actor_id"], provenance=common["provenance"],

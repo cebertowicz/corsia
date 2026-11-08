@@ -301,9 +301,9 @@ def triage_jumped(
     )
 
 
-def listed_text(shown: int, total: int) -> str:
-    """Return how many of the executor's other open tasks a block lists."""
-    return _LISTED.format(shown=shown, total=total)
+def listed_text(shown: int, total: int, *, later: int = 0) -> str:
+    """Return how many of the executor's other open tasks a block lists, then the Later count."""
+    return _LISTED.format(shown=shown, total=total) + in_later(later)
 
 
 def idle_listed_text(shown: int, total: int, *, set_aside: int = 0, later: int = 0) -> str:

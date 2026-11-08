@@ -26,6 +26,7 @@ from typing import Any
 MOTION_KEYS = ("active", "review_parent_agent")
 #: Open buckets whose leaves cannot move on their own.
 STILL_KEYS = ("review_human", "waiting", "blocked", "paused")
+_OPEN_KEYS = frozenset((*MOTION_KEYS, "pending_ready", *STILL_KEYS))
 #: How long past its deadline a wait may sit before it reads overdue. Only an
 #: armed watch stays a wait, and the expiry sweep retires it on its own: measured
 #: on production over 14 days (834 expiries), the sweep fires 45s after the
@@ -42,6 +43,21 @@ NAMED_OVERDUE = 3
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def above_cut(counts: dict[str, int], later_buckets: list[str]) -> dict[str, int]:
+    """Return the leaf counts without the open leaves below the Later cut.
+
+    A Later leaf is nobody's stalled work, so every stillness reader skips its
+    facts and takes its bucket off the counts those facts are checked against;
+    otherwise one parked ready task would read as the agent's motion (Later
+    design §2). A settled leaf keeps its flag but is no open bucket, so it stays.
+    """
+    left = dict(counts)
+    for bucket in later_buckets:
+        if bucket in _OPEN_KEYS:
+            left[bucket] -= 1
+    return left
 
 
 def read_from_facts(
@@ -123,11 +139,13 @@ def read(
 
     user_ready = user_blocked = paused_by_user = set_aside = 0
     deadlines: list[tuple[str, str, dict[str, str] | None]] = []
+    later_buckets: list[str] = []
     has_child_running = False
     for node in node_states.leaves(nodes):
-        if str(node["id"]) in later:
-            continue
         bucket = operator_node_state.leaf_bucket(node)
+        if str(node["id"]) in later:
+            later_buckets.append(bucket)
+            continue
         causes = node["execution"]["causes"]
         has_child_running = has_child_running or child_running(causes)
         if bucket == "pending_ready" and node["id"] in users:
@@ -143,7 +161,7 @@ def read(
                 leaf = {"title": str(node["title"]), "node_id": str(node["id"])}
                 deadlines.append((*found, leaf))
     return read_from_facts(
-        counts,
+        above_cut(counts, later_buckets),
         user_ready=user_ready,
         user_blocked=user_blocked,
         paused_by_user=paused_by_user,

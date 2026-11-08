@@ -205,6 +205,47 @@ def test_the_cut_crosses_alongside_a_restatement_in_one_bump(db):
     assert len(_events(db, brief.id)) == 1
 
 
+def test_parking_the_slot_task_while_restating_it_keeps_it_parked(db):
+    plan = owner_plan(db)
+    held = task(db, plan.id, "Held work")
+    other = task(db, plan.id, "Next thing")
+    select(db, plan.id, held.id)
+    queue_active(db, other.id)
+
+    result = plan_update(db, plan.id, "edit", {
+        "node_id": held.id, "acceptance_criteria": "Published and read",
+        "later": True, "reason": "After the cut",
+        "expected_revision": revision(db, held.id),
+    })
+
+    # The requirements change releases the attempt; offering the slot back is
+    # auto-selection, so it must not start the task the same edit just parked.
+    assert _later(db, held.id) == 1
+    assert _events(db, held.id) == [{"later": True, "reason": "After the cut"}]
+    assert next_block(result)["selected"]["id"] == other.id
+    assert (db.execute(
+        "SELECT COUNT(*) FROM plan_node_attempts WHERE node_id=? AND released_at IS NULL",
+        (held.id,),
+    ).fetchone()[0]) == 0
+
+
+def test_restating_parked_work_does_not_start_it(db):
+    plan = owner_plan(db)
+    later = task(db, plan.id, "Someday", later=True)
+    queue_active(db, later.id)
+
+    plan_update(db, plan.id, "edit", {
+        "node_id": later.id, "acceptance_criteria": "Published and read",
+        "expected_revision": revision(db, later.id),
+    })
+
+    assert _later(db, later.id) == 1
+    assert (db.execute(
+        "SELECT COUNT(*) FROM plan_node_attempts WHERE node_id=? AND released_at IS NULL",
+        (later.id,),
+    ).fetchone()[0]) == 0
+
+
 # --- starting takes it out of Later ----------------------------------------
 
 
@@ -344,6 +385,61 @@ def test_the_idle_listing_lists_only_above_cut_work_then_counts_the_pile(db):
     assert row_ids(block) == [held.id]
     assert later.id not in row_ids(block)
     assert block["open_tasks_listed"] == f"{idle_listed(1, 1)} · 1 in Later"
+
+
+def test_a_busy_executors_listing_leaves_later_work_out_and_counts_it(db):
+    from tests.plan_close_next_helpers import close, listed, row_ids
+
+    plan = owner_plan(db)
+    active = task(db, plan.id, "In the slot")
+    following = task(db, plan.id, "Ready next")
+    waiting = task(db, plan.id, "Waiting on legal")
+    later = task(db, plan.id, "Someday", later=True)
+    select(db, plan.id, active.id)
+    queue_active(db, following.id)
+    queue_active(db, waiting.id)
+    pause(db, plan.id, waiting.id)
+    db.commit()
+
+    block = next_block(close(db, plan.id, "mark_done", active.id))
+
+    assert block["selected"]["id"] == following.id
+    assert row_ids(block) == [waiting.id]
+    assert block["open_tasks_listed"] == f"{listed(1, 1)} · 1 in Later"
+
+
+def test_when_only_later_work_is_left_the_listing_only_counts_it(db):
+    from tests.plan_close_next_helpers import close, listed, row_ids
+
+    plan = owner_plan(db)
+    active = task(db, plan.id, "In the slot")
+    later = task(db, plan.id, "Someday", later=True)
+    select(db, plan.id, active.id)
+    db.commit()
+
+    block = next_block(close(db, plan.id, "mark_done", active.id))
+
+    assert later.id not in row_ids(block)
+    assert block["open_tasks_listed"] == f"{listed(0, 0)} · 1 in Later"
+
+
+@pytest.mark.parametrize("parked", ["ready", "blocked"])
+def test_a_parked_leaf_does_not_hide_that_the_rest_needs_the_person(parked):
+    from plans import operator_node_state, operator_plan_display
+    from tests.test_plan_not_moving import _leaf
+
+    agent_hold = {"placed": True, "kind": "blocked", "owner_kind": "thread", "owner_id": "agent"}
+    causes = (agent_hold,) if parked == "blocked" else ()
+    nodes = [_leaf("theirs", "review", review="human_review"), _leaf("someday", parked, *causes)]
+    counts = dict.fromkeys(operator_node_state.DISTRIBUTION_KEYS, 0)
+    for node in nodes:
+        counts[operator_node_state.leaf_bucket(node)] += 1
+
+    display = operator_plan_display.plan_display(
+        {"state": "active"}, counts, nodes, frozenset(), frozenset({"someday"}),
+    )
+
+    assert display["not_moving"]["need_you"] == 1
 
 
 def test_the_status_line_counts_both_sides_of_the_cut(db):

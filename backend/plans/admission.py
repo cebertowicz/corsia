@@ -90,10 +90,9 @@ def select(
     except sqlite3.IntegrityError:
         return None, selection_conflict(db, node)
     attempts.bind_turn(db, node, attempt, executor)
-    if "later" in node.keys() and node["later"]:
+    if _below_cut(node):
         # A running row never sits inside Later: taking the task up ends the
-        # set-aside, whatever route started it (Later design §2). The column test
-        # is for the migration ladder, whose older rungs have no cut yet.
+        # set-aside, whatever route started it (Later design §2).
         from plans import later_fields
 
         later_fields.flip(
@@ -103,6 +102,11 @@ def select(
     if touch:
         service.touch_node(db, node_id)
     return attempt, None
+
+
+def _below_cut(node) -> bool:
+    """Whether the row sits below the Later cut; older migration rungs have no cut yet."""
+    return "later" in node.keys() and bool(node["later"])
 
 
 def release(node_id: str, reason: str, *, db) -> bool:
@@ -235,10 +239,13 @@ def reselect_and_reconcile(
     earlier queued task. `select` leaves an ineligible task or an occupied
     slot unchanged. A retired (archived or closed) task cannot be selected, so
     its plan is only reconciled: settling a call left open on a task closed
-    since then must not refuse the terminal write it runs inside.
+    since then must not refuse the terminal write it runs inside. A task below
+    the Later cut is only reconciled too: this offer is auto-selection, which
+    never takes Later work, and selecting it would clear the cut the same edit
+    or the agent just set (Later design §2).
     """
     node = service._node_row(db, node_id)
-    if not node_states.retired(node):
+    if not node_states.retired(node) and not _below_cut(node):
         select(node_id, actor_id=actor_id, provenance=provenance, db=db, touch=False)
     return reconcile_plan(
         node["plan_id"], actor_id=actor_id, provenance=provenance,
