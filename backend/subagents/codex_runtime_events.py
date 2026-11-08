@@ -36,10 +36,10 @@ from tools.tool_display import SettledResult, tool_done_frame, tool_start_frame
 from subagents.codex_runtime_terminal import (
     provider_reported_model_id as _provider_reported_model_id,
     publish_claimed_terminal as _publish_claimed_terminal,
-    release_and_drive_terminal,
     record_terminal_llm_usage as _record_terminal_llm_usage,
     settle_failed_turn_usage as _settle_failed_turn_usage,
 )
+from subagents.codex_runtime_state import release_and_drive_terminal
 from subagents.codex_usage_calls import on_call_usage as _on_call_usage
 from subagents import terminal_marker_writer
 

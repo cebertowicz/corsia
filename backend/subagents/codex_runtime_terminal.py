@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
-from functools import partial
 
 from core.stop_causes import PlanLimitStop, frame_cause
 from core.turn_core import (
     TerminalSettlement,
     TurnIdentity,
     TurnTerminalResult,
-    drive_turn_settlement,
     settle_turn_terminal,
 )
 import infra.provider_usage as provider_usage
@@ -31,7 +28,6 @@ from plans.public import record_turn_fallback, report_unrecordable_call
 from subagents.codex_runtime_state import (
     _LiveCodex,
     context_receipt_identity,
-    finalize_live,
 )
 from subagents.codex_terminal_context import (  # noqa: F401 - public re-export
     context_usage_with_snapshot,
@@ -92,49 +88,6 @@ def preserve_committed_terminal(terminal) -> Iterator[None]:
             raise
         settlement = terminal if isinstance(terminal, TerminalSettlement) else None
         raise CommittedTerminalFailure(settlement, error) from error
-
-
-_TERMINAL_DRIVERS: set[asyncio.Task[None]] = set()
-
-
-async def release_and_drive_terminal(ctx, settlement) -> None:
-    """Release the completed live generation, then drive its successor in its own task.
-
-    The terminal arrives in the provider-event chain, which a transition-lock
-    holder (a steer, Stop or checkpoint) may be draining. The successor's
-    dispatch takes that same lock, so driving it here would wait on its own
-    drainer and leave the successor Turn running with no driver (#1981).
-    """
-    release = finalize_live(ctx.thread_id, ctx.live)
-    task = asyncio.create_task(
-        _drive_released(settlement, release), name=f"codex-terminal-drive:{ctx.thread_id}",
-    )
-    _TERMINAL_DRIVERS.add(task)
-    task.add_done_callback(partial(_observe_terminal_driver, thread_id=ctx.thread_id))
-
-
-async def _drive_released(settlement, release: asyncio.Task[None] | None) -> None:
-    await drive_turn_settlement(settlement)
-    if release is not None:
-        await release
-
-
-def _observe_terminal_driver(task: asyncio.Task[None], *, thread_id: str) -> None:
-    _TERMINAL_DRIVERS.discard(task)
-    if task.cancelled() or task.exception() is None:
-        return
-    error = task.exception()
-    log.error(
-        "codex_runtime: terminal successor drive failed for %s", thread_id,
-        exc_info=(type(error), error, error.__traceback__),
-    )
-
-
-async def drain_terminal_drivers() -> None:
-    """Wait for every scheduled terminal drive, for callers that need it done."""
-    while _TERMINAL_DRIVERS:
-        await asyncio.gather(*tuple(_TERMINAL_DRIVERS), return_exceptions=True)
-
 
 
 async def finish_interrupted_if_still_owned(

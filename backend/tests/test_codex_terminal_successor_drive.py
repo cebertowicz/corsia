@@ -63,7 +63,6 @@ async def test_result_drained_under_the_transition_lock_drives_its_successor_aft
         arm_delivery_event_barrier,
         release_delivery_event_barrier,
     )
-    from subagents.codex_runtime_terminal import drain_terminal_drivers
 
     live = _active_live(THREAD, _make_mock_app_session("provider-writer"), pending_tool=False)
     _queue("input-behind-result")
@@ -84,7 +83,9 @@ async def test_result_drained_under_the_transition_lock_drives_its_successor_aft
                 live.delivery_event_tail.cancel()  # unwind the deadlock so the test can end
                 await asyncio.gather(drain, return_exceptions=True)
         assert done, "the drained result waited on the transition lock its drainer holds"
-        await drain_terminal_drivers()
+        from subagents.codex_runtime_state import drain_detached_drives
+
+        await drain_detached_drives()
 
     assert _delivery_state("input-behind-result") == "delivered"
     assert fresh.start_turn.await_count + fresh.start.await_count == 1
