@@ -82,10 +82,16 @@
 		// Placement is read once per frame only after something that moves a line or a card: the text or its commented lines change, or the
 		// scroller, clip or a card resizes. Scrolling moves every line equally, so it only needs follow().
 		const schedule = () => { if (!frame) frame = requestAnimationFrame(() => { frame = 0; read(); }); };
-		const mutations = new MutationObserver(schedule);
+		const sizes = new ResizeObserver(schedule), sized = new WeakSet<Element>();
+		const size = (el: Element) => { if (!sized.has(el)) { sized.add(el); sizes.observe(el); } };
+		// A node that comes or goes after setup (a page of older rows, a new message) is watched for resize from then on, or let go.
+		const mutations = new MutationObserver((records) => {
+			for (const record of records) for (const node of record.removedNodes) if (node instanceof Element && sized.delete(node)) sizes.unobserve(node);
+			if (records.some((record) => record.addedNodes.length)) source.resized().forEach(size);
+			schedule();
+		});
 		for (const el of source.moved()) mutations.observe(el, { subtree: true, childList: true, attributes: true, characterData: true });
-		const sizes = new ResizeObserver(schedule);
-		for (const el of [scroller, clip, ...source.resized(), ...stackEl.querySelectorAll('[data-margin-card]')]) sizes.observe(el);
+		for (const el of [scroller, clip, ...source.resized(), ...stackEl.querySelectorAll('[data-margin-card]')]) size(el);
 		scroller.addEventListener('scroll', follow, { passive: true });
 		// Untracked: read() both reads and writes `tops`, which would otherwise rerun this setup on every placement it makes.
 		untrack(read);

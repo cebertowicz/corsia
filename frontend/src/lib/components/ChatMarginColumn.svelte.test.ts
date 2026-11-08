@@ -101,13 +101,19 @@ it('picks a card when the reader moves into its Reply field, so the column keeps
 	expect(picks).toEqual(['lost']);
 });
 
-it('re-places the cards when a transcript row grows with no change to its markup, as an image loading does', () => {
+it('re-places the cards when a transcript row grows with no change to its markup, as an image loading does', async () => {
 	const watched: Element[] = [];
 	vi.stubGlobal('ResizeObserver', class { observe(el: Element) { watched.push(el); } unobserve() {} disconnect() {} });
 	transcript(); thread();
 	component = mount(ChatMarginColumn, { target: clip, props: { threadId: 'thread', scroller, selectedId: null, onSelect: () => {}, onSendReply: vi.fn() } });
 	flushSync();
 	expect(watched).toContain(scroller.querySelector('[data-message-id="m1"]'));
+	// A row that arrives after the column is up (a page of older rows above it) is watched too, so it growing later moves the cards.
+	const older = document.createElement('div');
+	older.dataset.messageId = 'm0';
+	scroller.prepend(older);
+	await tick();
+	expect(watched).toContain(older);
 });
 
 it('keeps the cards in place while a reply streams in, rather than rebuilding the column on every tick', () => {
@@ -118,7 +124,7 @@ it('keeps the cards in place while a reply streams in, rather than rebuilding th
 	flushSync();
 	const card = clip.querySelector('[data-margin-card="kept"]');
 	const observed = watched.length;
-	// The typewriter's tick: a new message object, the same comments.
+	// The typewriter's tick: a new message object, the same comments. The column's setup is not run again, so nothing is observed afresh.
 	for (const pos of [1, 2, 3]) { messages.update(current => current.map(message => ({ ...message, typewriterPos: pos }))); flushSync(); }
 	expect(watched).toHaveLength(observed);
 	expect(clip.querySelector('[data-margin-card="kept"]')).toBe(card);
