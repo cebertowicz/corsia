@@ -17,9 +17,10 @@ export type DocJumpTarget = { id: string; label: string; distance: number };
 export type DocJumpTargets = { count: number; target: DocJumpTarget | null; direction: 'above' | 'below' | null };
 
 /** Which box decides whether a landing is on screen: the editor's scrollport, the margin column that clips its own
- * cards, or the frame (an image open over the document, which pans instead of scrolling). */
+ * cards, or the frame (the viewport of an image open over the document, which pans either way and clips on all four
+ * sides). */
 type View = 'text' | 'column' | 'frame';
-type Box = { top: number; bottom: number; left: number };
+type Box = { top: number; bottom: number; left: number; right: number };
 
 /** Where an unread thread is drawn, if anywhere: its painted pieces, or the one card or pin that stands for it. */
 type Landing = { elements: HTMLElement[]; view: View };
@@ -86,7 +87,7 @@ export function docJumpTargets(root: HTMLElement, threads: DocComment[]): DocJum
 	const views: Record<View, Box> = {
 		text: (scroller ?? root).getBoundingClientRect(),
 		column: (column ?? scroller ?? root).getBoundingClientRect(),
-		frame: root.getBoundingClientRect(),
+		frame: (root.querySelector<HTMLElement>('.viewport') ?? root).getBoundingClientRect(),
 	};
 	const landings = landingsById(root);
 	let above: DocJumpTarget | null = null;
@@ -104,6 +105,16 @@ export function docJumpTargets(root: HTMLElement, threads: DocComment[]): DocJum
 		const bottom = Math.max(...rects.map((rect) => rect.bottom));
 		if (bottom <= view.top) above = nearer(above, { ...threadTarget(thread), distance: view.top - bottom });
 		else if (top >= view.bottom) below = nearer(below, { ...threadTarget(thread), distance: top - view.bottom });
+		else if (landing.view === 'frame') {
+			// A pin panned off sideways is off screen too; the arrow points to the half of the frame it sits level with.
+			const left = Math.min(...rects.map((rect) => rect.left));
+			const right = Math.max(...rects.map((rect) => rect.right));
+			const distance = right <= view.left ? view.left - right : left >= view.right ? left - view.right : null;
+			if (distance === null) continue;
+			const side = { ...threadTarget(thread), distance };
+			if (top + bottom < view.top + view.bottom) above = nearer(above, side);
+			else below = nearer(below, side);
+		}
 	}
 	if (undrawn && !above && !below) {
 		const at = offsetAtTop(scroller, views.text.top);

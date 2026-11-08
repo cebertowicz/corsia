@@ -195,6 +195,24 @@ describe('a jump whose frame moves after it lands', () => {
 		expect(watch.disconnected).toBe(true);
 	});
 
+	it('never moves the reader from a check the pane queued before the reader scrolled', () => {
+		const observers = watching();
+		let moved = false;
+		const { view, settle } = editorWithTarget((jumps) => (moved ? jumps >= 3 : jumps >= 1));
+
+		scrollToRange(view, 450, 454);
+		settle();
+		const watch = observers.at(-1)!;
+		watch.trigger();
+		moved = true;
+		// The pane moves and queues a check; the reader scrolls before its frame runs.
+		watch.trigger();
+		view.scrollDOM.dispatchEvent(new Event('scroll'));
+		settle();
+
+		expect(view.dispatch).toHaveBeenCalledTimes(1);
+	});
+
 	it('retires the watch of the jump the reader replaced', () => {
 		const observers = watching();
 		const { view, settle } = editorWithTarget((jumps) => jumps >= 1);

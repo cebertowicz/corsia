@@ -133,6 +133,34 @@ describe('docJumpTargets', () => {
 		expect(result).toMatchObject({ direction: 'below', target: { id: 'pin', label: 'pin 3' } });
 	});
 
+	it("reads a pin in an open image against the image's viewport, on all four sides", () => {
+		const root = document.createElement('div');
+		root.innerHTML = '<div class="viewport"></div>';
+		// The viewer's toolbar sits above its viewport, so the root reaches higher than what shows the image.
+		paint(root, 60, VIEW.bottom);
+		const viewport = root.querySelector<HTMLElement>('.viewport')!;
+		viewport.getBoundingClientRect = () => ({ top: VIEW.top, bottom: VIEW.bottom, left: 0, right: 400 }) as DOMRect;
+		const pin = (id: string, top: number, left: number) => {
+			const tag = document.createElement('button');
+			tag.dataset.regionTag = id;
+			tag.dataset.commentId = id;
+			tag.getBoundingClientRect = () => ({ top, bottom: top + 20, left, right: left + 20, width: 20, height: 20 }) as DOMRect;
+			viewport.appendChild(tag);
+		};
+		document.body.appendChild(root);
+		roots.push(root);
+		const unread = (id: string) => thread(id, { anchor: '', regionNumber: 1 });
+
+		pin('shown', 300, 100);
+		expect(docJumpTargets(root, [unread('shown')]).target).toBeNull();
+		pin('right', 380, 450);
+		expect(docJumpTargets(root, [unread('right')])).toMatchObject({ direction: 'below', target: { id: 'right', distance: 50 } });
+		pin('left', 120, -60);
+		expect(docJumpTargets(root, [unread('left')])).toMatchObject({ direction: 'above', target: { id: 'left', distance: 40 } });
+		pin('toolbar', 70, 100);
+		expect(docJumpTargets(root, [unread('toolbar')])).toMatchObject({ direction: 'above', target: { id: 'toolbar', distance: 10 } });
+	});
+
 	it('gives the thread the tap goes to out of the same list', () => {
 		const threads = [thread('a'), thread('b')];
 		const canvasEl = canvas();

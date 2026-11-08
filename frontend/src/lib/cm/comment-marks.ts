@@ -152,7 +152,9 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 	placedIn.set(view, stop);
 	// CodeMirror refuses a dispatch during its measure cycle, so a repeat jump
 	// waits for the next frame.
+	// A retired jump may still have a frame or a measure queued: each one checks `done` first, so it never moves the reader.
 	const check = (pass: number) => nextFrame(() => {
+		if (done) return;
 		settledPass = pass;
 		view.requestMeasure({
 			key: scrollToRange,
@@ -160,6 +162,7 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 				return within(boxOf(current), visibleRegion(current).band);
 			},
 			write(onScreen) {
+				if (done) return;
 				if (onScreen) {
 					// A table drawn after the initial jump still needs its target cell revealed sideways.
 					if (steady === 0) widget?.reveal(view);
@@ -172,6 +175,7 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 				steady = 0;
 				if (pass >= MAX_SCROLL_PASSES) { stop(); return; }
 				nextFrame(() => {
+					if (done) return;
 					jump();
 					check(pass + 1);
 				});
