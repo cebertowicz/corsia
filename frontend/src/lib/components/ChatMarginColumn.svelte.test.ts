@@ -1,7 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { flushSync, mount, tick, unmount } from 'svelte';
 import { get } from 'svelte/store';
 import { messages } from '$lib/stores/threads';
+import { toasts } from '$lib/stores/toast';
 import ChatMarginColumn from './ChatMarginColumn.svelte';
 import ChatCommentThreads from './ChatCommentThreads.svelte';
 import { chatReplyDrafts } from './chatReplyDrafts.svelte';
@@ -85,6 +86,27 @@ it('lists only this thread\'s comments and rides the transcript it is given', ()
 	flushSync();
 	expect(sent).toHaveLength(1);
 	expect(sent[0]).toMatchObject({ messageId: 'm1', quote: 'runs at 2 AM', note: 'Please change it', root_user_message_id: 's1', root_cid: 'c1' });
+});
+
+it('says why a card\'s reply is refused when its message has no place in history, and keeps the reply', async () => {
+	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+	transcript(); thread();
+	messages.update(current => current.map(message => ({ ...message, seq: undefined })));
+	const sent: unknown[] = [];
+	component = mount(ChatMarginColumn, { target: clip, props: { threadId: 'thread', scroller, selectedId: null, onSelect: () => {}, onSendReply: (reply: unknown) => sent.push(reply) } });
+	flushSync();
+	const card = clip.querySelectorAll<HTMLElement>('[data-margin-card]')[0];
+	card.querySelector<HTMLTextAreaElement>('textarea')!.value = 'Please change it';
+	card.querySelector<HTMLTextAreaElement>('textarea')!.dispatchEvent(new Event('input', { bubbles: true }));
+	flushSync();
+	card.querySelector<HTMLElement>('[data-send-reply]')!.click();
+	await tick();
+	flushSync();
+	expect(sent).toHaveLength(0);
+	expect(get(toasts).map(toast => toast.message)).toContain('CORSIA couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.');
+	expect(card.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Please change it');
+	for (const toast of get(toasts)) toasts.dismiss(toast.id);
+	chatReplyDrafts.set('kept', '');
 });
 
 it('keeps an unsent reply when the canvas narrows and the same thread opens in its popover', () => {

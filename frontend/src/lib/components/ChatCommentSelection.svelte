@@ -2,9 +2,8 @@
 	import { onMount, tick, untrack } from 'svelte';
 	import { messages } from '$lib/stores/threads';
 	import { chatReplyIndex } from '$lib/chatCommentDelivery';
-	import { clipChatSelection, replyToComment, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
+	import { clipChatSelection, sendCommentReply, type ChatComment, type ChatCommentAnchor } from '$lib/chatCommentAnchors';
 	import { keepingSelection, unpaint, wrapRange } from '$lib/cm/widget-paint';
-	import { toasts } from '$lib/stores/toast';
 	import { chatCommentPlacement } from './chatCommentPlacement.svelte';
 	import { quoteLabel, messageBody } from './chatUnreadTargets';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
@@ -217,6 +216,8 @@
 	$effect(() => { void comments; void editingId; void draft; void $messages; void marginComments; schedule(); });
 	// A picked card belongs to the transcript it was picked in, so changing thread drops the pick. Untracked: close() reads the open thread, and opening one must not close it.
 	$effect(() => { void threadId; untrack(() => { close(); selectedCommentId = null; }); chatCommentPlacement.forget(recorded); recorded = []; });
+	// The column coming up while a thread is open hands that thread to its card: picked there, with its unsent reply, so it is never open twice.
+	$effect(() => { if (marginComments) untrack(() => { if (viewing) { selectedCommentId = viewing.commentId; viewing = null; returnFocus = null; } }); });
 	onMount(() => {
 		const update = () => { narrow = window.innerWidth <= 768; };
 		update(); window.addEventListener('resize', update);
@@ -293,15 +294,8 @@
 		document.querySelector<HTMLElement>(`[data-message-id="${CSS.escape(comment.messageId)}"] .cm-comment-focused`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 	}
 	function replyInThread(note: string): void {
-		const message = $messages.find(item => item.id === viewing?.messageId && item.thread_id === threadId);
-		// The row this thread opened on was replaced or removed while the reply was being typed, or carries no place in history to answer into.
-		// Say so, then keep the rejection so the thread holds the draft.
-		const draft = message && viewedComment ? replyToComment(message, viewedComment, note) : null;
-		if (!draft) {
-			toasts.show('CORSIA couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.', 'error');
-			throw new Error('Comment is unavailable');
-		}
-		onSendReply(draft);
+		// The row this thread opened on may have been replaced or removed while the reply was being typed.
+		sendCommentReply($messages.find(item => item.id === viewing?.messageId && item.thread_id === threadId), viewedComment, note, onSendReply);
 	}
 	async function submit(note: string) {
 		const currentDraft = draft; const currentEditing = editing;

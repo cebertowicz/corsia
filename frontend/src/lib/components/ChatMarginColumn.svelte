@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { messages } from '$lib/stores/threads';
-	import { replyToComment, type ChatComment as ReplyDraft } from '$lib/chatCommentAnchors';
+	import { sendCommentReply, type ChatComment as ReplyDraft } from '$lib/chatCommentAnchors';
 	import type { MarginAnchorSource } from '$lib/docMarginSource';
 	import DocMarginStack from './DocMarginStack.svelte';
 	import ChatCommentThreads from './ChatCommentThreads.svelte';
@@ -20,7 +20,6 @@
 		onSelect: (id: string) => void;
 		onSendReply: (reply: ReplyDraft) => void;
 	} = $props();
-	type Entry = (typeof entries)[number];
 	/** Every comment of this thread's loaded messages, in transcript order: every one is a card. */
 	const entries = $derived($messages
 		.filter(message => message.thread_id === threadId)
@@ -37,10 +36,6 @@
 		resized: () => [],
 		room: () => (scroller ? { el: scroller, property: '--margin-overhang' } : null),
 	};
-	function reply(entry: Entry, note: string): void {
-		const draft = replyToComment(entry.message, entry.comment, note);
-		if (draft) onSendReply(draft);
-	}
 </script>
 
 <div class="chat-margin">
@@ -50,7 +45,7 @@
 				<!-- Picking the card is the same pick as its highlight; the thread inside it owns the keyboard. -->
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
 				<div class="chat-margin-card" role="presentation" class:selected={selectedId === entry.id} onclick={() => onSelect(entry.id)}>
-					<ChatCommentThreads messageId={entry.message.id} {threadId} comments={[entry.comment]} margin onReply={(text) => reply(entry, text)} />
+					<ChatCommentThreads messageId={entry.message.id} {threadId} comments={[entry.comment]} margin onReply={(text) => sendCommentReply(entry.message, entry.comment, text, onSendReply)} />
 				</div>
 			{/snippet}
 		</DocMarginStack>
