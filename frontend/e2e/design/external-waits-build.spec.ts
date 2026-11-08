@@ -4,6 +4,7 @@
  * The real app on the disposable mock E2E instance. Real threads, agents and one real document come from
  * the API; the plan-state reads (chat list thread states, the open thread's plan) are supplied by intercepting
  * them with the server's wire shape at the branch head. Run through `scripts/e2e-local` in mock mode.
+ * Frames go to WAITS_OUT; without it the spec only asserts and writes nothing into the checkout.
  */
 import { test, expect } from '../support/test';
 import { createDocument } from '../support/documentOpen';
@@ -19,8 +20,7 @@ import path from 'node:path';
 
 process.env.TZ = 'America/Los_Angeles';
 
-const OUT = process.env.WAITS_OUT
-	?? path.resolve(process.cwd(), '../shared/planning/renders/plans-external-waits-build');
+const OUT = process.env.WAITS_OUT;
 const AFTER = true;
 
 test.use({ timezoneId: 'America/Los_Angeles', locale: 'en-US', seedPerTest: true });
@@ -234,6 +234,7 @@ async function view(page: Page, width: number, height: number, scheme: 'light' |
 }
 
 async function shot(page: Page, name: string) {
+	if (!OUT) return;
 	await page.waitForTimeout(400);
 	await page.screenshot({ path: path.join(OUT, `${name}.png`), animations: 'disabled' });
 }
@@ -366,12 +367,16 @@ test('frame 3: Focus chip at 393 with a long label', async ({ page, request }) =
 	far.setDate(far.getDate() + 2);
 	far.setHours(9, 0, 0, 0);
 	const weekday = far.toLocaleDateString('en-US', { weekday: 'long' });
-	await page.clock.install({ time: Date.now() });
+	// The elapsed time is the server's open time. The plan reads are intercepted, so the real server sees
+	// nothing open; it answers here for a wait that has been open exactly 2 h 14 min, so the chip reads that
+	// for the minute after the answer arrives.
+	await page.route('**/api/open-time', async (route) => {
+		const { items } = route.request().postDataJSON() as { items: { id: string }[] };
+		const answer = { seconds: 134 * 60, open_now: true, as_of: new Date().toISOString() };
+		await route.fulfill({ json: { items: Object.fromEntries(items.map((item) => [item.id, answer])) } });
+	});
 	const { by } = await boot(page, request, [{ ...r2Wait('waiting', far.getTime(), LONG_LABEL), waitSince: 134 }]);
 	const chip = await r2Chat(page, request, by('Release watcher'));
-	// The agent has now waited 2 h 14 min since its turn ended; the clock moves, nothing else does.
-	await page.clock.fastForward(133 * 60_000);
-	await page.clock.runFor(61_000);
 	await view(page, 393, 852, 'light');
 	const face = chip.locator('.wait-face');
 	await expect(face).toHaveAttribute('title', /2\s?h 14\s?min? so far/);

@@ -112,11 +112,7 @@ def _requester_model(db, requester_thread_id: str | None) -> str | None:
 
 
 def _requester_reviewer_account(db, target, requester_thread_id: str | None) -> str | None:
-    """Pick the requester's project-policy account for a harness reviewer.
-
-    The reviewer is a non-thread consumer bound to the requester's project
-    policy, rather than the requester's moved account.
-    """
+    """Pick the account the requester's next turn uses for a harness reviewer."""
     if target.harness not in {"claude-code", "codex"}:
         return None
     if not requester_thread_id:
@@ -130,7 +126,7 @@ def _requester_reviewer_account(db, target, requester_thread_id: str | None) -> 
 
     project = thread_scope(requester_thread_id, db=db)["project_id"]
     try:
-        return resolve_scope_reviewer_account(target, project, db=db)
+        return resolve_scope_reviewer_account(target, project, db=db, thread_id=requester_thread_id)
     except CCUnavailableError as exc:
         reason = getattr(exc, "reason", "unavailable")
         raise ReviewerUnavailableError(

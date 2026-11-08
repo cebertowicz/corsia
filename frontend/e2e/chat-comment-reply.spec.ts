@@ -1,10 +1,14 @@
 import { expect, test } from './support/test';
 import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage, seedMockResponses } from './support/mock';
+import { closeCommentThread, commentEditor, commentEditorClosed, commentOnMessage, commentPendingOnMessage, openCommentThread } from './support/chatComments';
 
-test('reply from the thread and edit the pending highlight before sending', async ({ page, request }) => {
+test('edit the queued comment, then reply from the thread its highlight opens', async ({ page, request }) => {
   test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires disposable mock instance');
+  test.setTimeout(120_000);
   if ((page.viewportSize()?.width ?? 0) <= 768) await page.setViewportSize({ width: 393, height: 852 });
+  const narrow = (page.viewportSize()?.width ?? 0) <= 768;
+  const quote = 'selected phrase';
   const capture = async (stage: string) => {
     const directory = process.env.CORSIA_REPLY_CAPTURE_DIR;
     if (!directory) return;
@@ -22,7 +26,7 @@ test('reply from the thread and edit the pending highlight before sending', asyn
   const id = await injectMessage(request, thread, { role: 'assistant', content: 'A selected phrase for a comment.', metadata: { for_user: true } }, TEST_TOKEN);
   await openAppPastLanding(page);
   await page.addStyleTag({ content: '.version-overlay { display: none !important; }' });
-  if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  if (narrow) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
   await sidebarThread(page, title).click();
   await waitForWsConnected(page);
   const row = page.locator(`[data-message-id="${id}"]`);
@@ -38,39 +42,49 @@ test('reply from the thread and edit the pending highlight before sending', asyn
     const selection = getSelection()!; selection.removeAllRanges(); selection.addRange(range);
   });
   await page.locator('.sel-comment').click();
-  await page.getByPlaceholder('Comment…').fill('First comment');
+  await commentEditor(page).fill('First comment');
   await page.getByRole('button', { name: 'Comment', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'New comment' })).toBeHidden();
-  await expect(page.getByRole('button', { name: /Edit comment/ })).toBeVisible();
+  await commentEditorClosed(page);
+  await commentPendingOnMessage(row, quote);
+  // A queued comment is edited from the same highlight that will open its thread.
+  if (narrow) await row.locator('.cm-comment-pending').tap();
+  else await row.locator('.cm-comment-pending').click();
+  await expect(page.getByRole('dialog', { name: 'Edit comment' })).toBeVisible();
+  await page.getByLabel('Comment', { exact: true }).fill('Edited first comment');
+  await capture('edit');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'Edit comment' })).toHaveCount(0);
+  await commentEditorClosed(page);
+  await expect(page.locator('.comment-chip').filter({ hasText: quote })).toHaveCount(1);
   await seedMockResponses(request, [{ content: 'Received comment' }]);
   await chatComposer(page).fill('Please address this');
   await page.getByRole('button', { name: 'Send message' }).click();
-  const comment = row.locator('.chat-comment-thread').first();
-  await expect(comment.getByText('First comment')).toBeVisible();
+  // The thread never opens by itself and adds no rows under the message: the comment stays on its highlight.
+  await expect(row.locator('.chat-comment-thread')).toHaveCount(0);
+  await commentOnMessage(row, quote);
+  const surface = await openCommentThread(row, page, quote);
+  await expect(surface.getByText('Edited first comment')).toBeVisible();
   await capture('thread');
-  const replyButton = comment.getByRole('button', { name: /Reply to comment/ });
-  if ((page.viewportSize()?.width ?? 0) <= 768) await replyButton.tap();
-  else await replyButton.click();
-  await expect(page.getByRole('dialog', { name: 'Reply' })).toBeVisible();
-  await page.getByRole('textbox', { name: 'Reply' }).fill('Draft reply');
+  // Replying from the open thread, on both the popover and the phone drawer.
+  const replyField = surface.getByPlaceholder('Reply…');
+  await expect(replyField).toBeVisible();
+  await replyField.fill('Draft reply');
   await capture('compose');
-  await page.getByRole('button', { name: 'Reply', exact: true }).click();
-  await expect(page.getByRole('button', { name: /Edit reply/ })).toBeVisible();
-  await expect(chatComposer(page)).toBeFocused();
-  await row.locator('.cm-comment-pending').first().evaluate((element) => element.scrollIntoView({ block: 'center' }));
-  if ((page.viewportSize()?.width ?? 0) <= 768) await row.locator('.cm-comment-pending').first().tap();
-  else await row.locator('.cm-comment-pending').first().click();
-  await page.getByRole('textbox', { name: 'Reply' }).fill('Edited reply');
-  await capture('edit');
-  await page.getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Edit reply' })).toHaveCount(0);
+  await surface.getByRole('button', { name: 'Send reply' }).click();
+  // The reply reads in the thread, and a reply send adds no user bubble of its own.
+  await expect(surface.getByText('Draft reply')).toBeVisible();
+  await expect(page.locator('.messages .message.user')).toHaveCount(1);
+  await closeCommentThread(page, surface);
   await seedMockResponses(request, [{ content: 'Received reply' }]);
   await chatComposer(page).fill('Please consider my reply');
   await page.getByRole('button', { name: 'Send message' }).click();
-  await expect(comment.getByText('Edited reply')).toBeVisible();
+  await expect(page.locator('.messages .message.user')).toHaveCount(2);
   await capture('sent');
   await page.reload();
-  if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
+  if (narrow) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
   await sidebarThread(page, title).click();
-  await expect(row.locator('.chat-comment-thread').getByText('Edited reply')).toBeVisible();
+  const reopened = await openCommentThread(row, page, quote);
+  await expect(reopened.getByText('Edited first comment')).toBeVisible();
+  await expect(reopened.getByText('Draft reply')).toBeVisible();
 });

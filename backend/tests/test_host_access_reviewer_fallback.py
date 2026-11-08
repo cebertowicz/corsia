@@ -56,7 +56,7 @@ class _Outage:
         self.accounts: dict[str, str] = {}
         monkeypatch.setattr(reviewer_account, "resolve_scope_reviewer_account", self._resolve)
 
-    def _resolve(self, target, project_id, *, db):
+    def _resolve(self, target, project_id, *, db, thread_id=None):
         from reviewer.failures import CCUnavailableError
 
         self.calls.append(target.catalog_id)

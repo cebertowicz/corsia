@@ -51,7 +51,7 @@ def _allowed_result(
     }
 
 
-def test_configured_state_root_requires_elevation_under_protected_mode(
+def test_configured_state_root_is_blocked_under_protected_mode(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -63,11 +63,12 @@ def test_configured_state_root_requires_elevation_under_protected_mode(
     monkeypatch.setattr(config, "STATE_ROOT", state_root)
     monkeypatch.setattr(gate, "is_path_allowed", lambda *_a, **_k: True)
 
-    assert gate._path_requires_elevation(
-        lexical=state_path,
-        resolved=state_path,
-        for_write=False,
-    ) is True
+    with pytest.raises(gate.HostAccessBlocked, match="No host-access lease can open it"):
+        gate._path_requires_elevation(
+            lexical=state_path,
+            resolved=state_path,
+            for_write=False,
+        )
     stale_workspace_state = config.WORKSPACE / ".corsia" / "state.db"
     assert gate._path_requires_elevation(
         lexical=stale_workspace_state,

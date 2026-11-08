@@ -1,8 +1,8 @@
 """Account selection and launch environment for the PR reviewer.
 
-The reviewer has no thread, so it is a non-thread consumer of the account
-contract: ``scope_account`` names the account its project would use,
-``account_model_status`` decides whether the configured model can run on it,
+The PR reviewer has no thread and uses ``scope_account``; a lease reviewer
+uses ``turn_account`` for the requesting thread. ``account_model_status``
+decides whether the configured model can run on the selected account,
 ``admit_operation`` freezes the account's login and homes, and the CLI
 environment is built from those homes. Nothing here keeps a second picker or
 a second readiness check, and no failure falls back to the ambient CLI login.
@@ -64,27 +64,46 @@ def _reviewer_project_id(db) -> str | None:
     return None
 
 
-def resolve_scope_reviewer_account(target, project_id: str | None, *, db) -> str:
-    """Pick the project-policy account for a detached reviewer consumer."""
-    from connections.account_policy import permitted_accounts, scope_account
+def resolve_scope_reviewer_account(target, project_id: str | None, *, db, thread_id: str | None = None) -> str:
+    """Pick the thread's turn account, or the project-policy account for a detached reviewer."""
+    from connections.account_policy import permitted_accounts, scope_account, turn_account
     from connections.account_rollover import rollover_destination
     from connections.vendor_accounts import get_account
     from llm.account_catalog import account_model_status
     from llm.model_status import harness_base_row
 
     provider, project = target.harness, project_id
-    identity, reason = scope_account(provider, project_id=project, db=db)
-    if reason or identity is None:
+    if thread_id is None:
+        identity, reason = scope_account(provider, project_id=project, db=db)
+    else:
+        identity, reason = turn_account(provider, thread_id=thread_id, model=target.catalog_id, db=db)
+    # The detached reviewer's source comes from project policy, which holds no
+    # view of a per-turn move, so its lifecycle reason waits for the rollover
+    # check below. With no source account the identity is None and that still
+    # refuses here. A thread's turn account already applied that move, a pending
+    # choice included, so its cause refuses unchanged.
+    deferred_reason = (
+        reason if thread_id is None and identity is not None and reason else None
+    )
+    if (reason or identity is None) and deferred_reason is None:
         raise _unavailable(reason or "account_not_configured")
     base = harness_base_row(target.catalog_id, db=db)
     if base is None:
-        raise _unavailable("model_not_in_catalog")
+        # Same reason precedence as the refusal above: an account cause on the
+        # source is not replaced by a catalog one it never reached.
+        raise _unavailable(reason or "model_not_in_catalog")
     # The target already carries the model's catalog availability, including the
     # provider-owned review selector the user catalog hides; the account decision
     # below adds only what is account-specific.
     base = {**base, "status": "ready", "status_reason": None}
-    # Only a project with the opt-in switch moves off a limited account.
-    identity = rollover_destination(provider, identity, base, project, db=db) or identity
+    # Thread selection already applied rollover, including pending-move rules.
+    if thread_id is None:
+        rolled = rollover_destination(provider, identity, base, project, db=db) or identity
+        # The waited reason belongs to the source, so it refuses when rollover
+        # finds no other account; a moved identity carries no reason of its own.
+        if deferred_reason is not None and rolled == identity:
+            raise _unavailable(deferred_reason)
+        identity = rolled
     if identity not in {item["id"] for item in permitted_accounts(provider, project_ids=[project], db=db)}:
         raise _unavailable("account_project_denied")
     decision = account_model_status(get_account(identity, db=db), base, project_ids=[project], db=db)

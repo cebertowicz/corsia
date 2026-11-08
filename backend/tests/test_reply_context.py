@@ -413,14 +413,16 @@ def _project(metadata):
     )["metadata"]
 
 
-def test_broadcast_strips_the_reply_context_entirely():
+def test_broadcast_carries_the_reply_context_and_strips_the_other_private_keys():
+    # The transcript draws a send's comments from this key, so the live echo must carry
+    # what the stored row and the history page already return.
     metadata = {KEY: {
         "in_view": [[1, 2, 2]], "first_unread": {"seq": 2},
         "dropped": [{"field": "in_view"}],
-    }, "edited": True}
-    assert _project(metadata) == {"edited": True}
+    }, "runtime_context": {"step": 1}, "reply_via_post_update": 1, "edited": True}
+    assert _project(metadata) == {KEY: metadata[KEY], "edited": True}
     # The stored row is untouched.
-    assert KEY in metadata
+    assert KEY in metadata and "runtime_context" in metadata
 
 
 # --- the websocket send -------------------------------------------------------------
