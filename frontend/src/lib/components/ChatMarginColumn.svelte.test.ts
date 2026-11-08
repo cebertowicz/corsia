@@ -88,6 +88,28 @@ it('lists only this thread\'s comments and rides the transcript it is given', ()
 	expect(sent[0]).toMatchObject({ messageId: 'm1', quote: 'runs at 2 AM', note: 'Please change it', root_user_message_id: 's1', root_cid: 'c1' });
 });
 
+it('picks a card when the reader moves into its Reply field, so the column keeps its Send button in view', () => {
+	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+	transcript(); thread();
+	const picks: string[] = [];
+	component = mount(ChatMarginColumn, { target: clip, props: { threadId: 'thread', scroller, selectedId: null, onSelect: (id: string) => picks.push(id), onSendReply: vi.fn() } });
+	flushSync();
+	// The field stops its click from reaching the card, so the pick comes from focus, the way a keyboard reader arrives too.
+	const field = clip.querySelectorAll<HTMLElement>('[data-margin-card]')[1].querySelector<HTMLTextAreaElement>('textarea')!;
+	field.click();
+	field.focus();
+	expect(picks).toEqual(['lost']);
+});
+
+it('re-places the cards when a transcript row grows with no change to its markup, as an image loading does', () => {
+	const watched: Element[] = [];
+	vi.stubGlobal('ResizeObserver', class { observe(el: Element) { watched.push(el); } unobserve() {} disconnect() {} });
+	transcript(); thread();
+	component = mount(ChatMarginColumn, { target: clip, props: { threadId: 'thread', scroller, selectedId: null, onSelect: () => {}, onSendReply: vi.fn() } });
+	flushSync();
+	expect(watched).toContain(scroller.querySelector('[data-message-id="m1"]'));
+});
+
 it('says why a card\'s reply is refused when its message has no place in history, and keeps the reply', async () => {
 	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 	transcript(); thread();

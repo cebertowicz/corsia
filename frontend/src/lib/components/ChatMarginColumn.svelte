@@ -33,7 +33,8 @@
 			return entry && scroller ? commentLanding(scroller, entry.message.id, entry.comment) : null;
 		},
 		moved: () => (scroller ? [scroller] : []),
-		resized: () => [],
+		// Its rows: one that grows with no change to the DOM (an image loading) moves every highlight below it.
+		resized: () => (scroller ? [...scroller.children] : []),
 		room: () => (scroller ? { el: scroller, property: '--margin-overhang' } : null),
 	};
 </script>
@@ -42,9 +43,9 @@
 	<div class="chat-margin-clip">
 		<DocMarginStack source={anchors} pinned={entries} {selectedId} behind={false}>
 			{#snippet card(entry)}
-				<!-- Picking the card is the same pick as its highlight; the thread inside it owns the keyboard. -->
+				<!-- Picking the card is the same pick as its highlight; the thread inside it owns the keyboard, and moving into it (its Reply field included) picks the card, as a document card does, so the stack keeps it in view. -->
 				<!-- svelte-ignore a11y_no_static_element_interactions -->
-				<div class="chat-margin-card" role="presentation" class:selected={selectedId === entry.id} onclick={() => onSelect(entry.id)}>
+				<div class="chat-margin-card" role="presentation" class:selected={selectedId === entry.id} onclick={() => onSelect(entry.id)} onfocusin={() => onSelect(entry.id)}>
 					<ChatCommentThreads messageId={entry.message.id} {threadId} comments={[entry.comment]} margin onReply={(text) => sendCommentReply(entry.message, entry.comment, text, onSendReply)} />
 				</div>
 			{/snippet}
