@@ -24,3 +24,21 @@ def test_thread_account_label_matches_settings_after_earlier_account_removed(acc
     settings = next(row for row in listed.json()['accounts'] if row['id'] == third['id'])
     account = next(row for row in bound.json()['accounts'] if row['id'] == third['id'])
     assert account['label']['text'] == settings['label']['text'] == 'Third'
+
+
+def test_thread_account_label_reads_the_bound_accounts_own_provider(accounts):  # noqa: F811
+    """A binding row whose provider column names another vendor still answers with the account's label."""
+    from api.vendor_accounts import router
+    from infra.auth import require_user
+
+    db, _default, _second, third = accounts
+    db.execute("INSERT INTO thread_vendor_accounts (thread_id, provider, account_id) VALUES (?,?,?)",
+               ('destination', 'claude-code', third['id']))
+    db.commit()
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[require_user] = lambda: {'id': 'user'}
+    with TestClient(app) as client:
+        bound = client.get('/api/threads/destination/vendor-account')
+    assert bound.status_code == 200
+    assert [row['label']['text'] for row in bound.json()['accounts'] if row['id'] == third['id']] == ['Third']

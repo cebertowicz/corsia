@@ -292,14 +292,13 @@ def _thread_accounts(thread_id, user_id):
         rows = db.execute("SELECT b.provider,b.account_id,h.reason FROM thread_vendor_accounts b "
                           "LEFT JOIN thread_vendor_account_holds h ON h.thread_id=b.thread_id AND h.provider=b.provider "
                           "WHERE b.thread_id=? ORDER BY b.provider", (thread_id,)).fetchall()
+        bound = [(row, accounts.get_account(row["account_id"], db=db)) for row in rows]
+        # Number each label among the account's own provider rows, as Settings does.
         numbered = {provider: accounts.list_accounts(provider=provider, include_removed=True, db=db)
-                    for provider in {row["provider"] for row in rows}}
-        result = []
-        for row in rows:
-            account = accounts.get_account(row["account_id"], db=db)
-            result.append(_safe(account) | {"hold_reason": row["reason"],
-                                            "label": account_label(account, rows=numbered[row["provider"]], db=db)})
-        return {"accounts": result}
+                    for provider in {account["provider"] for _row, account in bound}}
+        return {"accounts": [_safe(account) | {"hold_reason": row["reason"],
+                                               "label": account_label(account, rows=numbered[account["provider"]], db=db)}
+                             for row, account in bound]}
     finally:
         db.close()
 
