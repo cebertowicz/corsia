@@ -308,7 +308,7 @@
 						comments={imageComments}
 						{target}
 						place={shownImage.camera ?? null}
-						onBack={() => closeImage()} onReplyStep={(excludeId) => viewer?.stepToUnreadReply(() => closeImage(false), excludeId)}
+						onBack={() => closeImage()} onReplyJump={(id) => viewer?.jumpToUnread(id, () => closeImage(false))}
 						onPlace={(camera) => recordDocumentImageCamera(target.instanceId, camera)}
 					/>
 				{/if}

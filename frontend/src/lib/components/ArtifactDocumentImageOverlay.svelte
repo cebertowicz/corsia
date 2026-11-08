@@ -14,7 +14,7 @@
 	import type { DocumentImageComments } from '$lib/docViewerImages';
 	import type { TabDocumentImage } from '$lib/stores/tabViewState';
 
-	let { image, comments, target, place = null, onBack, onPlace, onReplyStep }: {
+	let { image, comments, target, place = null, onBack, onPlace, onReplyJump }: {
 		image: TabDocumentImage;
 		/** From the document under the image as it is now; none when it cannot hold comments. */
 		comments?: DocumentImageComments;
@@ -22,7 +22,8 @@
 		place?: ImageViewportPlace | null;
 		onBack: () => void;
 		onPlace: (place: ImageViewportPlace) => void;
-		onReplyStep: (excludeId?: string) => void;
+		/** Goes to one unread thread the jump control is pointing at: its pin, or its text once the image is closed. */
+		onReplyJump: (id: string) => void;
 	} = $props();
 
 	let destroyed = false;
@@ -42,6 +43,7 @@
 	let sheetUp = $state(false);
 	let selectedThread = $state<string | null>(null);
 	let loaded = $state(false);
+	let overlayRoot = $state<HTMLElement>();
 	let bottomBand = $state<HTMLDivElement>();
 	let viewer = $state<ReturnType<typeof ImageCommentLightbox>>();
 	// A document confirmation already showing belongs to the document underneath this viewer.
@@ -62,7 +64,7 @@
 	leaveImageOnExit(() => ({ feedback: comments?.feedback, artifactId: comments?.artifactId, key: target.instanceId }));
 </script>
 
-<div class="image-overlay">
+<div class="image-overlay" bind:this={overlayRoot}>
 	<!-- Keyed on this opening of the image, so opening another one, or the same one again, starts its comments afresh,
 	     and another tab's (even of the same image) starts at that tab's own camera. -->
 	{#key image.viewId}
@@ -103,7 +105,7 @@
 	{/key}
 	{#if comments}
 		<div class="viewer-band" bind:this={bottomBand}>
-			<DocBottomBand artifactId={comments.artifactId} threads={unread} ready={loaded} covered={hasDraft} sheetModalOpen={sheetUp} ignoreConfirmationId={priorConfirmation} onStep={() => onReplyStep(selectedThread ?? undefined)} />
+			<DocBottomBand artifactId={comments.artifactId} threads={unread} root={overlayRoot} ready={loaded} covered={hasDraft} sheetModalOpen={sheetUp} ignoreConfirmationId={priorConfirmation} onJump={(thread) => onReplyJump(thread.id)} />
 		</div>
 	{/if}
 </div>

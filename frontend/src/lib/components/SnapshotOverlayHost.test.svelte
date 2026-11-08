@@ -7,5 +7,5 @@
 </script>
 
 {#if image}
-	<ArtifactDocumentImageOverlay {image} {comments} target={{ threadId: 'thread', instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, artifactId: 'art-img' }} onBack={() => {}} onPlace={() => {}} onReplyStep={() => {}} />
+	<ArtifactDocumentImageOverlay {image} {comments} target={{ threadId: 'thread', instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, artifactId: 'art-img' }} onBack={() => {}} onPlace={() => {}} onReplyJump={() => {}} />
 {/if}

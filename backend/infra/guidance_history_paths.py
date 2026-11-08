@@ -20,6 +20,12 @@ def digest(content: str | bytes | None) -> str | None:
     return hashlib.sha256(content if isinstance(content, bytes) else content.encode()).hexdigest()
 
 
+def write_bytes(path: Path, data: bytes) -> None:
+    """Write guidance bytes, creating their parent directory when needed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
 def read_regular(path: Path) -> bytes | None:
     """A regular file's bytes, or None when absent; a symlink or other file type raises.
 

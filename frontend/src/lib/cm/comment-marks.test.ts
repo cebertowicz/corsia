@@ -2,6 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { MAX_SCROLL_PASSES, scrollToRange } from './comment-marks';
+import { widgetTarget } from './widget-scroll';
+
+vi.mock('./widget-scroll', () => ({ widgetTarget: vi.fn(() => null) }));
+// The reading place is the editor's own; these stand-in editors have no line blocks to take it from.
+vi.mock('$lib/documentReadingPlace', () => ({ releasePlace: vi.fn() }));
 
 type MeasureRequest = NonNullable<Parameters<EditorView['requestMeasure']>[0]>;
 
@@ -148,5 +153,96 @@ describe('visible document range targeting', () => {
 		scrollToRange(view, 450, 454);
 
 		expect(view.dispatch).toHaveBeenCalledOnce();
+	});
+});
+
+describe('a jump whose frame moves after it lands', () => {
+	// Opening the comments drawer takes width from the pane, which rewraps every line above the landing. The reveal's
+	// frame checks have stopped by then, so the landing itself has to be taken again from the pane's own resize.
+	function watching() {
+		const observers: Array<{ trigger: () => void; disconnected: boolean }> = [];
+		vi.stubGlobal('ResizeObserver', class {
+			private index = 0;
+			constructor(callback: () => void) { this.index = observers.push({ trigger: callback, disconnected: false }) - 1; }
+			observe() {}
+			disconnect() { observers[this.index].disconnected = true; }
+		});
+		return observers;
+	}
+
+	afterEach(() => vi.unstubAllGlobals());
+
+	it('takes the place again when the pane moves it out of view, and stops watching on the reader scroll', () => {
+		const observers = watching();
+		let moved = false;
+		const { view, settle } = editorWithTarget((jumps) => (moved ? jumps >= 3 : jumps >= 1));
+
+		scrollToRange(view, 450, 454);
+		settle();
+		expect(view.dispatch).toHaveBeenCalledTimes(1);
+		const watch = observers.at(-1)!;
+		// Its first callback reports the size the box already has, which is not a move.
+		watch.trigger();
+		settle();
+		expect(view.dispatch).toHaveBeenCalledTimes(1);
+
+		moved = true;
+		watch.trigger();
+		settle();
+		expect(view.dispatch).toHaveBeenCalledTimes(3);
+
+		// The reader then scrolls: their place is theirs, and a later frame move must not pull them back.
+		view.scrollDOM.dispatchEvent(new Event('scroll'));
+		const before = vi.mocked(view.dispatch).mock.calls.length;
+		watch.trigger();
+		settle();
+		expect(view.dispatch).toHaveBeenCalledTimes(before);
+		expect(watch.disconnected).toBe(true);
+	});
+
+	it('never moves the reader from a check the pane queued before the reader scrolled', () => {
+		const observers = watching();
+		let moved = false;
+		const { view, settle } = editorWithTarget((jumps) => (moved ? jumps >= 3 : jumps >= 1));
+
+		scrollToRange(view, 450, 454);
+		settle();
+		const watch = observers.at(-1)!;
+		watch.trigger();
+		moved = true;
+		// The pane moves and queues a check; the reader scrolls before its frame runs.
+		watch.trigger();
+		view.scrollDOM.dispatchEvent(new Event('scroll'));
+		settle();
+
+		expect(view.dispatch).toHaveBeenCalledTimes(1);
+	});
+
+	it('never moves the reader from a table row placement queued before the reader jumped elsewhere', () => {
+		watching();
+		const widget = { start: 440, box: () => ({ top: 1400, bottom: 1420 }) as DOMRect, reveal: vi.fn() };
+		vi.mocked(widgetTarget).mockReturnValueOnce(widget);
+		const { view, settle } = editorWithTarget((jumps) => jumps >= 1);
+
+		scrollToRange(view, 450, 454);
+		scrollToRange(view, 900, 904);
+		settle();
+
+		expect(widget.reveal).not.toHaveBeenCalled();
+		expect(view.scrollDOM.scrollTop).toBe(0);
+	});
+
+	it('retires the watch of the jump the reader replaced', () => {
+		const observers = watching();
+		const { view, settle } = editorWithTarget((jumps) => jumps >= 1);
+
+		scrollToRange(view, 450, 454);
+		settle();
+		scrollToRange(view, 900, 904);
+		settle();
+
+		expect(observers).toHaveLength(2);
+		expect(observers[0].disconnected).toBe(true);
+		expect(observers[1].disconnected).toBe(false);
 	});
 });

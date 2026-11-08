@@ -30,8 +30,14 @@ class _Commit:
     sha: str
     unsynced: tuple[str, ...] = ()
     fault: str = ""
+    changed: bool = True
+    repaired: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
 
     def unsynced_line(self) -> list[str]:
         command = shlex.join(["git", "reset", "-q", "--", *self.unsynced])
         paths = ", ".join(self.unsynced)
-        return [SAVE_UNSYNCED.format(sha=self.sha[:7], paths=paths, error=self.fault, command=command)] if self.unsynced else []
+        lines = [SAVE_UNSYNCED.format(sha=self.sha[:7], paths=paths, error=self.fault, command=command)] if self.unsynced else []
+        if self.repaired:
+            lines.append(f"Repaired guidance index: {', '.join(self.repaired)}.")
+        return [*lines, *self.notes]
