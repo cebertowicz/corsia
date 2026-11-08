@@ -1,6 +1,7 @@
 import { inResolved, replyField, showAllThreads } from '../support/commentDrawer';
 import { test } from '../support/test';
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { TEST_TOKEN } from '../support/corsia';
 import { createComment, renderedCount, seedLiveDocument, serverText, typeAtDocumentEnd, type LiveDocument } from '../support/liveDocument';
 import {
 	agentComment, holdPositionsAnswer, holdRequest, layouts, markTexts, openLivePair, recordMarkTexts, reviewerSession, suggest, textDigest, watchPlacementReports,
@@ -22,6 +23,26 @@ async function expectConverged(pages: Page[], document: LiveDocument, request: P
 		const file = await serverText(request, document);
 		return [...once.map(text => file.split(text).length - 1), ...absent.map(text => file.split(text).length - 1)];
 	}, { timeout: 20_000, message: 'the file holds the converged text' }).toEqual([...once.map(() => 1), ...absent.map(() => 0)]);
+}
+
+async function personSuggestion(request: APIRequestContext, document: LiveDocument, quote: string, replacement: string, body: string) {
+	const from = document.body.indexOf(quote);
+	expect(from).toBeGreaterThanOrEqual(0);
+	const response = await request.post(`/api/artifacts/${document.artifactId}/comments`, {
+		params: { token: TEST_TOKEN },
+		data: { body, anchor_text: quote, replacement, from_off: from, to_off: from + quote.length, delivery_policy: 'immediate' },
+	});
+	expect(response.ok(), await response.text()).toBeTruthy();
+	return (await response.json()).comment as { id: string; author: string };
+}
+
+async function expectOverlapRefusal(request: APIRequestContext, document: LiveDocument, reviewerId: string, existingId: string) {
+	const response = await request.post('/api/delegation/docs/comments', {
+		params: { token: TEST_TOKEN },
+		data: { artifact_id: document.artifactId, quote: 'brown fox jumps', replacement: 'brown dog jumps', body: 'Overlapping', as_session_id: reviewerId },
+	});
+	expect(response.status()).toBe(409);
+	expect((await response.json()).detail).toContain(`This overlaps an open suggestion (${existingId})`);
 }
 
 function drawerRow(page: Page, id: string): Locator {
@@ -134,8 +155,9 @@ for (const [width, height, project] of layouts) {
 		const sentence = `The quick brown fox jumps ${stamp}.`;
 		const document = await seedLiveDocument(request, `overlap-${stamp}`, `# Overlap ${stamp}\n\n${sentence}\n\nwriter line ${stamp}\n`);
 		const reviewer = await reviewerSession(request, stamp);
-		const red = await suggest(request, document, reviewer.id, 'quick brown fox', 'quick red fox', `Red ${stamp}`);
-		const dog = await suggest(request, document, reviewer.id, 'brown fox jumps', 'brown dog jumps', `Dog ${stamp}`);
+		const red = await personSuggestion(request, document, 'quick brown fox', 'quick red fox', `Red ${stamp}`);
+		await expectOverlapRefusal(request, document, reviewer.id, red.id);
+		const dog = await personSuggestion(request, document, 'brown fox jumps', 'brown dog jumps', `Dog ${stamp}`);
 		const pair = await openLivePair(browser, document, width, height);
 		try {
 			const { reader, writer } = pair;
@@ -144,14 +166,14 @@ for (const [width, height, project] of layouts) {
 			await expect(reader.locator('.cm-content')).toContainText(remote);
 			await reader.getByRole('button', { name: /^2 threads\b/ }).click();
 			await showAllThreads(reader.getByRole('region', { name: 'Document comments', exact: true }));
-			await drawerRow(reader, red).getByRole('button', { name: 'Accept', exact: true }).click();
+			await drawerRow(reader, red.id).getByRole('button', { name: 'Accept', exact: true }).click();
 			// A decided suggestion leaves the open cards for the Resolved list.
-			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(drawerRow(reader, red).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
+			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(drawerRow(reader, red.id).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			// The accepted replacement removed the overlapping suggestion's quote, so it can no longer be accepted.
-			await expect(drawerRow(reader, dog)).toContainText('The text this suggestion replaces has changed.');
-			await expect(drawerRow(reader, dog).getByRole('button', { name: 'Accept', exact: true })).toBeDisabled();
-			await drawerRow(reader, dog).getByRole('button', { name: 'Reject', exact: true }).click();
-			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(drawerRow(reader, dog).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
+			await expect(drawerRow(reader, dog.id)).toContainText('The text this suggestion replaces has changed.');
+			await expect(drawerRow(reader, dog.id).getByRole('button', { name: 'Accept', exact: true })).toBeDisabled();
+			await drawerRow(reader, dog.id).getByRole('button', { name: 'Reject', exact: true }).click();
+			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(drawerRow(reader, dog.id).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());
 			await expectConverged([reader, writer], document, request, [`The quick red fox jumps ${stamp}.`, remote], ['brown', 'dog jumps']);
 			await reader.screenshot({ path: testInfo.outputPath(`live-overlap-decided-${width}.png`) });
 		} finally {
@@ -165,18 +187,19 @@ for (const [width, height, project] of layouts) {
 		const stamp = `${width}-${Date.now()}`;
 		const document = await seedLiveDocument(request, `overlap-all-${stamp}`, `# Overlap all ${stamp}\n\nThe quick brown fox jumps ${stamp}.\n`);
 		const reviewer = await reviewerSession(request, stamp);
-		const red = await suggest(request, document, reviewer.id, 'quick brown fox', 'quick red fox', `Red ${stamp}`);
-		const dog = await suggest(request, document, reviewer.id, 'brown fox jumps', 'brown dog jumps', `Dog ${stamp}`);
+		const red = await personSuggestion(request, document, 'quick brown fox', 'quick red fox', `Red ${stamp}`);
+		await expectOverlapRefusal(request, document, reviewer.id, red.id);
+		const dog = await personSuggestion(request, document, 'brown fox jumps', 'brown dog jumps', `Dog ${stamp}`);
 		const pair = await openLivePair(browser, document, width, height);
 		try {
 			const { reader, writer } = pair;
 			await reader.getByRole('button', { name: /^2 threads\b/ }).click();
 			const drawer = reader.getByRole('region', { name: 'Document comments', exact: true });
 			await showAllThreads(drawer);
-			await drawer.getByRole('button', { name: `Accept all from ${reviewer.title}`, exact: true }).click();
-			await inResolved(drawer, () => expect(drawerRow(reader, red).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
+			await drawer.getByRole('button', { name: `Accept all from ${red.author}`, exact: true }).click();
+			await inResolved(drawer, () => expect(drawerRow(reader, red.id).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			await expect(drawer.getByText('1 skipped', { exact: true })).toBeVisible();
-			await expect(drawerRow(reader, dog).getByRole('region', { name: /^accepted suggestion by / })).toHaveCount(0);
+			await expect(drawerRow(reader, dog.id).getByRole('region', { name: /^accepted suggestion by / })).toHaveCount(0);
 			await expectConverged([reader, writer], document, request, [`The quick red fox jumps ${stamp}.`], ['brown', 'dog jumps']);
 		} finally {
 			await pair.close();
