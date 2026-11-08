@@ -489,18 +489,17 @@ def test_local_commits_after_the_pr_head_are_kept(repo):
     assert _reasons(report) == {"mine": "ahead_of_pr"} and mine.is_dir()
 
 
-def test_merged_pr_worktree_is_removed_at_merge_despite_scratch_and_a_running_turn(
+def test_merged_pr_worktree_is_removed_at_merge_despite_scratch_and_tool_caches(
     repo, monkeypatch,
 ):
-    # The owner merges from inside its own turn, seconds after its last edit,
-    # leaving tool caches and a PR-body draft behind: none of that keeps it.
+    # The owner merges seconds after its last edit, leaving tool caches and a
+    # PR-body draft behind: none of that keeps an idle owner's worktree.
     (repo / ".git" / "info" / "exclude").write_text("*.db\n")
     mine = _add(repo, f"{UUID}-feature", "feature")
     (mine / ".mypy_cache").mkdir()
     (mine / ".mypy_cache" / "x.json").write_text("x")
     (mine / "seeded.db").write_text("local\n")
     (mine / ".pr-body.md").write_text("draft\n")
-    monkeypatch.setattr(worktree_reaper_checks, "_load_active_threads", lambda: {UUID})
     monkeypatch.setattr(worktree_reaper, "ProcessProbe", FakeProbe)
     sha = _git(mine, "rev-parse", "HEAD")
 
@@ -542,6 +541,30 @@ def test_merged_worktree_in_use_by_a_live_process_is_kept(repo, monkeypatch):
     )
 
     assert _reasons(report) == {"mine": "in_use"} and mine.is_dir()
+
+
+def test_merged_worktree_with_a_running_owner_turn_waits_for_the_idle_pass(
+    repo, monkeypatch,
+):
+    # The owner merges inside its own turn and keeps verifying in that
+    # worktree: removing it there loses its venv and its last verification run.
+    mine = _add(repo, f"{UUID}-feature", "feature")
+    monkeypatch.setattr(worktree_reaper, "ProcessProbe", FakeProbe)
+    monkeypatch.setattr(worktree_reaper_checks, "_load_active_threads", lambda: {UUID})
+    sha = _git(mine, "rev-parse", "HEAD")
+
+    report = worktree_reaper_pr.reap_merged_pr(
+        _merged(repo, "feature", sha), policies=[_policy(repo)],
+    )
+
+    assert _reasons(report) == {f"{UUID}-feature": "thread_active"} and mine.is_dir()
+    assert set(worktree_reaper_store.pr_terminal_heads()) == {str(mine)}
+
+    monkeypatch.setattr(worktree_reaper_checks, "_load_active_threads", lambda: set())
+    nightly = _run(repo)  # no aging: a merged worktree has no idle clock
+
+    assert nightly.removed == 1 and not mine.exists()
+    assert worktree_reaper_store.pr_terminal_heads() == {}
 
 
 # --- failure paths ---------------------------------------------------------
