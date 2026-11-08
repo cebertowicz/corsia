@@ -165,7 +165,7 @@ def edit_node(
             next_dod != node["acceptance_criteria"] or next_intent != node["intent"]
         )
         # One write however many fields change, so one revision bump: touch_node is
-        # its only writer. A restated intent outranks a regroup's re-derivation.
+        # its only writer.
         columns = {**(moved.columns if moved else {}),
                    **({"size": next_size} if size_changed else {}),
                    **({"later": int(bool(later))} if crosses else {})}

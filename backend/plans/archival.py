@@ -174,40 +174,6 @@ def release_held(connection, node, *, actor_id: str | None,
     settle_watches(connection, node["id"])
 
 
-def archive_nodes(node_ids, *, actor_id: str | None = None,
-                  provenance: str = "plan_service", db=None) -> dict:
-    """Archive many nodes in one write, reporting each outcome separately.
-
-    One refusal must not discard the rest of the work: a plan cleanup names the
-    nodes an owner believes are done, and a single live child somewhere in that
-    list is a fact about one node, not a reason to keep the other forty. So each
-    id is archived or refused on its own and both lists come back.
-
-    The ids are applied in the caller's order, which is what makes the obvious
-    retry work: naming a child before its parent cleans the whole branch in one
-    call, because the child is already archived when the parent's guard runs.
-
-    Returns:
-        ``{"archived": [{"node_id": ...}], "refused": [{"node_id", "reason"}]}``.
-    """
-    archived: list[dict] = []
-    refused: list[dict] = []
-    with service._connection(db) as connection, service._write(connection):
-        for node_id in node_ids:
-            try:
-                # Each node gets the identical guards and audit trail as the
-                # single-node call; nothing is relaxed for being in a list.
-                archive_node(
-                    node_id, actor_id=actor_id, provenance=provenance,
-                    db=connection,
-                )
-            except (service.PlanError, service.PlanInputError) as refusal:
-                refused.append({"node_id": node_id, "reason": str(refusal)})
-            else:
-                archived.append({"node_id": node_id})
-    return {"archived": archived, "refused": refused}
-
-
 def _naming(refusal: str, ids) -> str:
     """Append the exact blocking ids to a refusal, bounded and ordered.
 

@@ -28,6 +28,7 @@ from plans.aggregates_recount import stored_mismatches
 from plans.boundary import PlanActor
 from plans.later_fields import LATER_ON_BRANCH
 from tests.plan_close_next_helpers import OWNER, owner_plan, plan_update, revision, row
+from tests.plan_writer_authorizer import raw_plan_seed
 from tests.test_plan_reconcile_release import db, seed_threads  # noqa: F401 - fixtures
 
 #: A worker thread may move its own plan's tasks (``boundary.authorize_thread_owner``).
@@ -193,6 +194,29 @@ def test_reparent_two_levels_down_into_itself_is_refused(db):
         _move(db, plan.id, outer.id, deep.id)
 
     assert "Outer can't move inside its own branch (Deep is beneath it)." in str(refused.value)
+    assert row(db, outer.id)["parent_id"] is None
+
+
+def test_reparent_into_itself_through_an_archived_row_is_refused(db):
+    """The cycle walk follows stored parents, not the live chain.
+
+    A live row can still hang under an archived one (an older plan's stranded
+    rows), and the live ancestor chain stops at the archived row -- so a walk
+    over it would miss the node above and write a real parent cycle.
+    """
+    plan = owner_plan(db)
+    outer = _phase(db, plan.id, "Outer")
+    retired = _phase(db, plan.id, "Retired", parent_id=outer.id)
+    stranded = _phase(db, plan.id, "Stranded", parent_id=retired.id)
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET archived_at='2026-01-01T00:00:00+00:00' WHERE id=?",
+                   (retired.id,))
+    db.commit()
+
+    with pytest.raises(service.PlanError) as refused:
+        _move(db, plan.id, outer.id, stranded.id)
+
+    assert "Outer can't move inside its own branch (Stranded is beneath it)." in str(refused.value)
     assert row(db, outer.id)["parent_id"] is None
 
 
@@ -365,21 +389,29 @@ def test_reparent_a_settled_task_moves_its_done_figure_between_branches(db):
 # --- the intent the branch owns --------------------------------------------
 
 
-def test_reparent_rederives_an_inherited_intent_only(db):
+def test_reparent_keeps_the_intent_the_node_serves(db):
+    """A follow-up serves its source's intent wherever it hangs.
+
+    ``intent_node_id`` names the node a row was made from, not its branch, so a
+    move under a branch with its own intent changes neither pointer nor the
+    requirements revision -- the same row added there would not inherit either.
+    """
     plan = owner_plan(db)
     first = _phase(db, plan.id, "First")
     second = _phase(db, plan.id, "Second")
-    inheriting = _node(
-        db, plan.id, "Inheriting", parent_id=first.id,
-        intent_node_id=first.id,
+    source = _node(db, plan.id, "Source", parent_id=first.id, intent="The source outcome.")
+    follow_up = _node(
+        db, plan.id, "Follow-up", parent_id=first.id, intent_node_id=source.id,
     )
     owning = _node(db, plan.id, "Owning", parent_id=first.id, intent="Its own outcome.")
     own_before = revision(db, owning.id)
+    requirements_before = row(db, follow_up.id)["requirements_revision"]
 
-    _move(db, plan.id, inheriting.id, second.id)
+    _move(db, plan.id, follow_up.id, second.id)
     _move(db, plan.id, owning.id, second.id)
 
-    assert row(db, inheriting.id)["intent_node_id"] == second.id
+    assert row(db, follow_up.id)["intent_node_id"] == source.id
+    assert row(db, follow_up.id)["requirements_revision"] == requirements_before
     assert row(db, owning.id)["intent_node_id"] is None
     assert row(db, owning.id)["intent"] == "Its own outcome."
     assert revision(db, owning.id) == own_before + 1

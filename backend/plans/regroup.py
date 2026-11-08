@@ -7,7 +7,11 @@ fixed at creation, so tidying meant closing the row and adding it back, which
 costs its history, its dependencies, its holds and waits, its cost record and
 its identity. A regroup costs none of that: the node keeps its id, its events,
 its ``commitment_id`` (the immutable original obligation that anchors cost
-history), its dependencies, holds, waits and Later flag.
+history), its dependencies, holds, waits and Later flag. It keeps the intent it
+serves too: ``intent_node_id`` names the node a row was made from (a follow-up's
+source, a worker plan's step above), never the branch it hangs under, so where
+the row hangs has no bearing on it -- exactly as a row added at that position
+would not inherit the branch's intent either.
 
 Two things make the write non-trivial. Nothing had to guard a node's ancestors
 before, because nothing could re-hang one -- ``plans.hierarchy`` cycles are
@@ -23,7 +27,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import plans.aggregates_move as aggregates_move
-import plans.intent_creation as intent_creation
 import plans.node_creation as node_creation
 import plans.node_states as node_states
 import plans.service as service
@@ -48,10 +51,6 @@ UNDER_TASK = (
 #: The cause, the fact that makes it so, and the fix -- in the caller's own words
 #: back at it, because a refused move usually means the ids were mixed up.
 CYCLE = "{title} can't move inside its own branch ({parent} is beneath it)."
-
-#: Returned by ``_inherited_intent`` when the node keeps the owner it has.
-_KEEP = object()
-
 
 @dataclass(frozen=True)
 class Move:
@@ -89,7 +88,6 @@ def plan(connection, node, parent_id) -> Move | None:
             # Last among its new siblings, by creation's own rule, so a moved row
             # is placed exactly where a row added there would have been.
             "order_key": node_creation._next_order(connection, node["plan_id"], parent_id),
-            **_intent_columns(connection, node, parent_id),
         },
         from_parent=old,
         to_parent=parent_id,
@@ -150,25 +148,3 @@ def _holds(connection, parent_id: str | None) -> bool:
         f" AND {node_states.unarchived_sql('plan_nodes')}",
         (parent_id,),
     ).fetchone() is not None
-
-
-def _intent_columns(connection, node, parent_id) -> dict[str, Any]:
-    """Re-derive the inherited intent a moved node now serves, or leave it alone.
-
-    Only a node that inherits an intent moves with its branch: a node that owns
-    its intent owns it wherever it stands, which is ``mutations.edit_node``'s
-    rule for a restated intent too. Top level is no branch, so a worker plan's
-    tasks keep inheriting the step above the plan; a node with nothing to inherit
-    and no intent of its own is left pointing where it did rather than stranded
-    with neither, which no creation path can produce.
-    """
-    if node["intent_node_id"] is None:
-        return {}
-    found = (
-        intent_creation.canonical(connection, parent_id)["id"]
-        if parent_id is not None
-        else intent_creation.inherited_node_id(connection, node["plan_id"])
-    )
-    if found is None and not (node["intent"] or "").strip():
-        return {}
-    return {"intent_node_id": found}
