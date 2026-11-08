@@ -379,7 +379,7 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
     });
 
     const openChild = page.getByRole("button", {
-      name: `Open ${delegatedTitle} subagent beside this thread`,
+      name: `Open the agent working on ${delegatedTitle} beside this chat`,
     });
     await openChild.click();
     await expect(
@@ -429,7 +429,7 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
       await returnedInlineToggle.click();
       await expect(
         page.getByRole("button", {
-          name: `Open ${delegatedTitle} subagent beside this thread`,
+          name: `Open the agent working on ${delegatedTitle} beside this chat`,
         }),
       ).toBeVisible();
     } else {
@@ -437,7 +437,7 @@ test.describe("@flow:contextual-plan @surface:chat @surface:plans contextual thr
       // comments pane stood in its place), so what returns is the opener's
       // focus, not the tree's expansion.
       const returnedOpenChild = page.getByRole("button", {
-        name: `Open ${delegatedTitle} subagent beside this thread`,
+        name: `Open the agent working on ${delegatedTitle} beside this chat`,
       });
       await expect(returnedOpenChild).toBeVisible();
       await expect(row(delegatedTitle).getByRole("button", {
