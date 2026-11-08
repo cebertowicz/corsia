@@ -337,3 +337,30 @@ def test_a_deferred_reason_grants_no_launch(scope, monkeypatch):
         resolve_scope_reviewer_account(_target(provider), PROJECT, db=db)
     assert outside.value.reason == "account_project_denied"
     _refuses_build_no_environment(scope, monkeypatch)
+
+
+def test_a_pending_choice_is_not_moved_by_the_reviewer(scope):
+    """A choice made during a running turn stays the thread's answer, reviewer included.
+
+    Not a reviewer journey of its own: the lease-caller tests cover the thread path from the
+    requester's side. It is here because the waited lifecycle reason is gated on the same branch, and
+    a move past a turn account would override that choice with the sibling this project permits.
+    """
+    from reviewer.failures import CCUnavailableError
+    from reviewer.reviewer_account import resolve_scope_reviewer_account
+
+    db, provider, default, second = scope
+    _usable(db, provider, default, MODEL[provider])
+    _usable(db, provider, second, MODEL[provider])
+    _policy(db, provider, allowlist=[default["id"], second["id"]], default_id=default["id"], switch=True)
+    _limited(db, provider, second)
+    db.execute("INSERT INTO threads(id,user_id,title,model,project_id,created_at,updated_at) "
+               "VALUES ('requester','user','requester',?,?,'t','t')", (MODEL[provider], PROJECT))
+    db.execute("INSERT INTO thread_vendor_accounts(thread_id,provider,account_id,pending_account_id) "
+               "VALUES ('requester',?,?,?)", (provider, default["id"], second["id"]))
+    db.commit()
+
+    with pytest.raises(CCUnavailableError) as refused:
+        resolve_scope_reviewer_account(_target(provider), PROJECT, db=db, thread_id="requester")
+
+    assert refused.value.reason == "usage_limited"

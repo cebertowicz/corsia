@@ -297,10 +297,8 @@ def _reviewer_target(provider: str, model: str) -> SimpleNamespace:
 def test_reviewer_takes_its_own_project_move_off_a_signed_out_default(accounts):  # noqa: F811
     """The detached reviewer's opt-in move is its project's, not the first account's lifecycle state.
 
-    Replaces the diagnostic characterization of the early refusal, which was never the acceptance
-    regression (owner-authorized for this correction). A signed-out source now reaches
-    ``rollover_destination``, so the hidden-selector base below it is read and the permitted
-    signed-in destination is the answer.
+    A signed-out source reaches ``rollover_destination``, so the hidden-selector base below it
+    is read and the permitted signed-in destination is the answer.
     """
     from reviewer.reviewer_account import resolve_scope_reviewer_account
 
