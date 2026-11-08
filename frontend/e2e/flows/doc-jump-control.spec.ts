@@ -184,11 +184,16 @@ function tidy(artifactId: string): void {
 	]);
 }
 
+let previousFixtureThread: string | undefined;
 async function onlyThread(request: APIRequestContext, keepId: string): Promise<void> {
-	const listed = await (await request.get('/api/threads', { params: { token: TEST_TOKEN } })).json();
-	for (const thread of (listed.threads ?? []) as Array<{ id: string }>) {
-		if (thread.id !== keepId) await request.delete(`/api/threads/${thread.id}`, { params: { token: TEST_TOKEN } });
-	}
+	const previous = previousFixtureThread;
+	previousFixtureThread = keepId;
+	if (!previous) return;
+	await expect.poll(async () => {
+		const response = await request.delete(`/api/threads/${previous}`, { params: { token: TEST_TOKEN } });
+		if (response.status() !== 409) expect(response.ok(), await response.text()).toBeTruthy();
+		return response.status();
+	}, { message: `delete prior fixture thread ${previous}`, timeout: 20_000 }).not.toBe(409);
 }
 
 /** A long document of twelve threads, each asked by the reader; `replied` are answered by someone else. */
@@ -1231,7 +1236,7 @@ test.describe('the jump control and the document toolbar', () => {
 	test(`${TAG} held Send desktop pane 420`, async ({ page, request }, info) => {
 		test.setTimeout(90_000);
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1' || info.project.name.endsWith('mobile'));
-		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.setViewportSize({ width: 1600, height: 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
 		const threadId = await createSession(request, threadTitle);
 		await onlyThread(request, threadId);

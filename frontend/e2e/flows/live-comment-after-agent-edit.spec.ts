@@ -1,11 +1,13 @@
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Browser, type Page } from '@playwright/test';
-import { createSession, loginByUrl, sendChatMessage } from '../support/corsia';
+import { createSession, loginByUrl, sendChatMessage, TEST_TOKEN } from '../support/corsia';
 import { openLiveDocument, serverText, type LiveDocument } from '../support/liveDocument';
 import { agentComment, holdRequest, markTexts, reviewerSession } from '../support/liveConcurrency';
 import { observeCreates, selectLine, storedComments, submitButton } from '../support/liveCommentProof';
 import { agentCreatesSharedDocument, demoteAgent } from '../support/sharedLiveDocument';
-import { readMockCallCount, seedMockResponses } from '../support/mock';
+import { readMockCallCount, readUnmatchedThreads, seedMockResponses } from '../support/mock';
+
+test.use({ seedPerTest: true });
 
 /**
  * A person selects text and types a comment while an agent edits inside that text. The comment posts, anchored on
@@ -16,6 +18,23 @@ import { readMockCallCount, seedMockResponses } from '../support/mock';
 const LOST = 'The text you selected changed or was removed. Select the text again; your draft will carry over.';
 const promoted: string[] = [];
 const commentBox = (page: Page) => page.locator('.composer').filter({ has: page.getByPlaceholder('Comment, or @ to tag an agent') });
+
+async function seedFeedback(request: APIRequestContext, threadIds: string[], content = 'Saw the comment.') {
+	await seedMockResponses(request, threadIds.map(match_thread => ({ match_thread, content, finish_reason: 'stop' })));
+}
+
+async function waitForFeedback(request: APIRequestContext, threadIds: string[], content = 'Saw the comment.') {
+	await expect.poll(() => readMockCallCount(request), { timeout: 30_000 }).toBe(threadIds.length);
+	for (const threadId of threadIds) {
+		await expect.poll(async () => {
+			const response = await request.get(`/api/delegation/threads/${threadId}/status`, { params: { token: TEST_TOKEN } });
+			expect(response.ok()).toBeTruthy();
+			const state = await response.json();
+			return !state.turn_active && state.recent_messages.some((message: { content?: string }) => message.content === content);
+		}, { timeout: 30_000 }).toBe(true);
+	}
+	expect(await readUnmatchedThreads(request)).toEqual([]);
+}
 
 test.beforeEach(({}, info) => { test.skip(info.project.name === 'chromium-mobile', 'Desktop layout only: the desktop app runs WebKit at 1440.'); });
 test.afterEach(async ({ request }) => {
@@ -76,12 +95,14 @@ for (const item of cases) {
 			const anchor = item.anchor(quote);
 			await expect(commentBox(viewer)).not.toContainText(LOST);
 			await expect(submitButton(viewer)).toBeEnabled();
+			await seedFeedback(request, [agent.id]);
 			await submitButton(viewer).click();
 			await expect(viewer.getByPlaceholder('Comment, or @ to tag an agent')).toHaveCount(0);
 			expect(creates).toHaveLength(1);
 			expect(creates[0]).toMatchObject({ body: text, anchor_text: anchor });
 			await expect.poll(() => storedComments(request, live)).toEqual([expect.objectContaining({ body: text, anchor_text: anchor })]);
 			await expect.poll(async () => (await markTexts(viewer)).join(''), { timeout: 20_000 }).toBe(anchor);
+			await waitForFeedback(request, [agent.id]);
 			await viewer.screenshot({ path: testInfo.outputPath(`${item.name.replace(/ /g, '-')}-${testInfo.project.name}-1440.png`), animations: 'disabled' });
 		} finally { await context.close(); }
 	});
@@ -100,6 +121,7 @@ test('@surface:live-document @comment-proof a comment posts when the agent edits
 		await submitButton(viewer).click();
 		await held.arrived;
 		await agentEdits(request, viewer, agent, live, 'alpha beta', 'ALPHA beta');
+		await seedFeedback(request, [agent.id]);
 		held.release();
 		const anchor = quote.replace('alpha', 'ALPHA');
 		await expect(viewer.getByPlaceholder('Comment, or @ to tag an agent')).toHaveCount(0);
@@ -107,6 +129,7 @@ test('@surface:live-document @comment-proof a comment posts when the agent edits
 		await expect.poll(() => storedComments(request, live)).toEqual([expect.objectContaining({ body: text, anchor_text: anchor })]);
 		expect(creates.length).toBeGreaterThanOrEqual(1);
 		await expect.poll(async () => (await markTexts(viewer)).join(''), { timeout: 20_000 }).toBe(anchor);
+		await waitForFeedback(request, [agent.id]);
 		await viewer.screenshot({ path: testInfo.outputPath(`race-${testInfo.project.name}-1440.png`), animations: 'disabled' });
 	} finally { await context.close(); }
 });
@@ -141,9 +164,11 @@ test('@surface:live-document @comment-proof a reply on an existing thread posts'
 		const card = viewer.locator('.popover .ct').filter({ hasText: `Existing thread ${stamp}` });
 		await expect(card).toBeVisible();
 		await card.getByPlaceholder('Reply…').fill(text);
+		await seedFeedback(request, [live.threadId, reviewer.id], 'Saw the reply.');
 		await card.getByRole('button', { name: 'Send reply' }).click();
 		await expect(card).toContainText(text);
 		await expect(card.getByPlaceholder('Reply…')).toHaveValue('');
+		await waitForFeedback(request, [live.threadId, reviewer.id], 'Saw the reply.');
 		await viewer.screenshot({ path: testInfo.outputPath(`reply-${testInfo.project.name}-1440.png`), animations: 'disabled' });
 	} finally { await context.close(); }
 });

@@ -257,11 +257,19 @@ async function documentReady(page: Page): Promise<void> {
 	await expect(page.locator('.doc').getByRole('button', { name: /^\d+ threads?\b/ })).toBeVisible();
 }
 
-// Frames show one clean fixture: the other tests' sessions would otherwise crowd the sidebar.
+// Clean up this worker's prior fixture without touching another worker's active thread.
+let previousFixtureThread: string | undefined;
 async function onlyThread(request: APIRequestContext, keepId: string): Promise<void> {
+	const previous = previousFixtureThread;
+	previousFixtureThread = keepId;
+	if (!previous) return;
 	const listed = await (await request.get(`/api/threads?token=${TEST_TOKEN}`)).json();
 	for (const thread of (listed.threads ?? []) as Array<{ id: string }>) {
-		if (thread.id !== keepId) await request.delete(`/api/threads/${thread.id}?token=${TEST_TOKEN}`);
+		if (thread.id === previous) await expect.poll(async () => {
+			const response = await request.delete(`/api/threads/${thread.id}?token=${TEST_TOKEN}`);
+			if (response.status() !== 409) expect(response.ok(), await response.text()).toBeTruthy();
+			return response.status();
+		}, { message: `delete prior fixture thread ${previous}`, timeout: 20_000 }).not.toBe(409);
 	}
 }
 

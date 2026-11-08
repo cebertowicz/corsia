@@ -3,7 +3,7 @@ import { expect, type Page } from '@playwright/test';
 import { sendChatMessage, TEST_TOKEN } from '../support/corsia';
 import { openLiveDocument, routeLiveSocket } from '../support/liveDocument';
 import { agentCreatesSharedDocument, demoteAgent, openAgentBeside, streamedPieces } from '../support/sharedLiveDocument';
-import { readMockCallCount, seedMockResponses } from '../support/mock';
+import { readMockCallCount, readUnmatchedThreads, seedMockResponses } from '../support/mock';
 
 /**
  * A suggestion that lands while the open, in-view document is disconnected misses its change and activity frames. When the
@@ -48,6 +48,8 @@ for (const width of [1440, 393]) {
 				{ content: 'Read complete.', finish_reason: 'stop', match_thread: author.id },
 				{ tool_call_stream: { id: `sg-${stamp}`, name: 'doc_comment_create', pieces: streamedPieces(JSON.stringify(args)), delay_ms: 350 }, finish_reason: 'tool_calls', match_thread: author.id },
 				{ content: 'Suggested.', finish_reason: 'stop', match_thread: author.id },
+				// The suggestion selects feedback work for the document owner.
+				{ content: 'Reviewed the suggestion.', finish_reason: 'stop', match_thread: owner.id },
 			]);
 			const before = await readMockCallCount(request);
 			await sendChatMessage(author.page, 'Read this document.');
@@ -70,6 +72,13 @@ for (const width of [1440, 393]) {
 			expect(series[0]).toBeLessThan(20);
 			expect(Math.max(...series.slice(1).map((n, i) => n - series[i]))).toBeLessThanOrEqual(40);
 			expect(series[series.length - 1]).toBe((HEADING + INSERT).length);
+			await expect.poll(async () => {
+				const response = await request.get(`/api/delegation/threads/${owner.id}/status`, { params: { token: TEST_TOKEN } });
+				expect(response.ok()).toBeTruthy();
+				const status = await response.json();
+				return !status.turn_active && status.recent_messages.some((message: { content?: string }) => message.content === 'Reviewed the suggestion.');
+			}, { timeout: 30_000 }).toBe(true);
+			expect(await readUnmatchedThreads(request)).toEqual([]);
 		} finally {
 			await agentsContext.close();
 			await viewerContext.close();
