@@ -32,7 +32,9 @@
 </div>
 
 <style>
-	.doc-jump { display: flex; align-items: center; min-width: 0; min-height: var(--touch-target); max-width: 100%; }
+	/* The image host draws its region layer over the whole surface (`ImageRegionLayer`: position absolute, inset 0, z-index 1)
+	 * so that a stroke can start anywhere on the picture; the control has to answer a tap above it. */
+	.doc-jump { position: relative; z-index: 2; display: flex; align-items: center; min-width: 0; min-height: var(--touch-target); max-width: 100%; }
 	/* The same control chat's transcript uses: the same tokens, shape and size (ChatScrollControl). */
 	.doc-jump-control {
 		display: inline-flex; width: auto; height: var(--touch-target); padding: 0 var(--space-3);
