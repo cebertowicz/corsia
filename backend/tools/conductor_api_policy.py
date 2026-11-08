@@ -92,6 +92,8 @@ def refused_repo_link(path: str, method: str, body: Any) -> str | None:
     if resolved == WORKSPACE.resolve() or WORKSPACE.resolve() in resolved.parents:
         return None
     return "corsia_api links only a directory inside the workspace"
+
+
 def refused_repo_config(path: str, method: str, body: Any) -> str | None:
     """B17: registering a repository through corsia_api takes the config check too.
 

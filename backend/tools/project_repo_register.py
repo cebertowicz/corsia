@@ -68,6 +68,7 @@ class ProjectRepoRegisterTool(Tool):
         from api.project_repos import RepoAdd, register_source_repo
         from infra.db_async import run_in_db
         from infra.repo_config_allowlist import repo_config_refusal
+
         thread_id = kwargs.get("_thread_id")
         project_id = kwargs.get("_thread_project_id")
         if not isinstance(thread_id, str) or not thread_id:

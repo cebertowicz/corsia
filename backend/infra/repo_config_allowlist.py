@@ -179,15 +179,17 @@ def _refusal_line(keys: list[str]) -> str:
     listed = ", ".join(keys[:3])
     if len(keys) == 1:
         return (
-            f"Not registered: this repository's Git config sets {listed}, which can "
-            f"run a program. Remove it (git config --local --unset {listed}), or add "
-            "the repository yourself in Project settings."
+            f"Not registered: this repository's Git config sets {listed}, which isn't "
+            "among the Git settings an agent may register (some settings can run a "
+            f"program). Remove it (git config --local --unset {listed}), or add the "
+            "repository yourself in Project settings."
         )
     extra = f" and {len(keys) - 3} more" if len(keys) > 3 else ""
     return (
         f"Not registered: this repository's Git config sets {listed}{extra}, which "
-        "can run a program. Remove each one (git config --local --unset <key>), or "
-        "add the repository yourself in Project settings."
+        "isn't among the Git settings an agent may register (some settings can run a "
+        "program). Remove each one (git config --local --unset <key>), or add the "
+        "repository yourself in Project settings."
     )
 
 
