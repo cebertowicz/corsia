@@ -199,6 +199,7 @@ describe('DocCommentSurface suggestions', () => {
 			get placementRecovery() { return { onReload: () => true, unplacedCount: liveCounts.current.unplaced, replaceableCount: liveCounts.current.replaceable, reloading: liveReloading.current }; },
 		});
 		expect(document.body.querySelector('[data-drawer-placement] [role="status"]')?.textContent).toBe("2 comments couldn't be placed");
+		expect(document.body.querySelector('[data-drawer-focus-home]')?.textContent).toBe('Comments 2 open');
 		document.body.querySelector<HTMLButtonElement>('[aria-label="Reload comment placements"]')!.click();
 		reloading.set(true); flushSync();
 		counts.set({ unplaced: 1, replaceable: 0 }); flushSync();
