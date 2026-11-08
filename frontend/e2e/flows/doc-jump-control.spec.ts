@@ -450,14 +450,15 @@ for (const width of [1440, 393]) {
 		await expect(page.locator(`[data-comment-id="${doc.roots[8]}"]`)).toHaveClass(/focused/);
 		await expect(page.getByText(token)).toBeVisible();
 
-		// Leave the comments the way the surface lets a reader leave them. The jump had opened a sheet — at 1440 the
-		// document's own leaf is about 420px wide, so its comments open as a sheet, not beside the text — and one Close
-		// click steps back to that sheet instead of dismissing it. Measured after that click: [role=dialog] and the
-		// backdrop are still on screen and `sheetModalOpen` is still true, so the band is right to stay away from a
-		// sheet covering the text; the journey has to be out of the sheet before it can ask what the band says.
-		await page.getByRole('button', { name: 'Close comments' }).click();
+		// Leave the comments with the keyboard, which this spec's own focus legs prove at both widths: while a sheet is
+		// up over the text the band is right to stay away, so the journey has to be out of it before it can ask what the
+		// band says. Measured on the Close button instead: at 1440 it steps back to the sheet with `[role=dialog]` and
+		// the backdrop still on screen, at 393 it closes the comments, and a keystroke sent after that closes them lands
+		// on the workbench and takes the document away with it. Escape, pressed while the sheet still has focus, leaves
+		// the same surface at either width and hands the document the focus back.
 		await page.keyboard.press('Escape');
 		await expect(page.locator('[role="dialog"]')).toHaveCount(0);
+		await expect(page.locator('.doc .cm-content')).toBeFocused();
 		const statement = "INSERT INTO doc_comments (id, artifact_id, parent_id, author, author_kind, author_thread_id, body, created_at, updated_at) VALUES (lower(hex(randomblob(16))), ?, ?, ?, 'agent', ?, ?, ?, ?)";
 		// The control's own arrival read the long reply; 120 more on another thread make the large count.
 		sqlite(Array.from({ length: 120 }, (_, index) => [statement, [doc.artifactId, doc.roots[10], REPLIER, threadId, `Update ${index + 1}.`, null, null]]));
