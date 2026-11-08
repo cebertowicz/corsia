@@ -103,6 +103,8 @@ def mutate(
     neither is a caller parameter.
     """
     fields.validate_operation_params(operation, params)
+    if actor.kind == "user" and operation == "close_node" and "node_ids" in params:
+        raise service.PlanInputError("user cannot bulk close nodes; close one node at a time")
     mutation_id = _required_mutation_id(mutation_id)
     changed = False
     drives: tuple[str, ...] = ()

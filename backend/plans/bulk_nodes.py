@@ -68,14 +68,16 @@ def edit_many(
     """
     from plans import mutations
 
-    held = _held_slots(db, node_ids)
+    held = {node_id: slot for node_id, slot in _held_slots(db, node_ids).items()
+            if not service._node_row(db, node_id)["later"]}
     applied, reasons = _apply(db, node_ids, "edit", lambda node_id: mutations.edit_node(
         node_id, **changed, **common,
     ))
     return {
         "changed": applied,
         "refused": _refused(node_ids, reasons),
-        **_free_slot(plan_id, held, applied, common, acting, closed=False),
+        **(_free_slot(plan_id, held, applied, common, acting, closed=False)
+           if changed.get("later") is True else {}),
     }
 
 
@@ -89,10 +91,11 @@ def close_many(
         ``{"closed": [{"node_id", "revision"}], "refused": [{"node_id", "reason"}]}``,
         each in the caller's order, plus ``next`` when the call freed a slot.
     """
-    from plans import closure
+    from plans import boundary_after, closure
     from plans.workflow_fields import refuse_required_skip
 
     held = _held_slots(db, node_ids)
+    summaries: dict[str, dict] = {}
 
     def close_one(node_id: str):
         # The same guard the single close runs, per node: a workflow run's required
@@ -100,9 +103,15 @@ def close_many(
         # being done also fails its run (``plans.run_end``), so refusing it here is
         # what keeps a bulk cleanup from quietly ending a run.
         refuse_required_skip(db, node_id)
-        return closure.close_node(node_id, reason=reason, **common)
+        node = closure.close_node(node_id, reason=reason, **common)
+        summaries[node_id] = boundary_after.after_close(
+            node_id, service.CLOSED, {}, common, executor=acting, bulk=True,
+        )
+        return node
 
     applied, reasons = _apply(db, node_ids, "close_node", close_one)
+    for entry in applied:
+        entry.update(summaries[entry["node_id"]])
     return {
         "closed": applied,
         "refused": _refused(node_ids, reasons),
@@ -168,7 +177,7 @@ def _held_slots(db, node_ids) -> dict:
 
 def _free_slot(
     plan_id: str, held: dict, applied: list[dict], common: dict,
-    acting: str | None, *, closed: bool,
+    acting: str | None, *, closed: bool, archived: bool = False,
 ) -> dict:
     """Release every slot this call took off a task, reconcile once, and report next.
 
@@ -180,7 +189,7 @@ def _free_slot(
 
     db = common["db"]
     done = {entry["node_id"] for entry in applied}
-    reason = service.CLOSED if closed else "later"
+    reason = "archived" if archived else service.CLOSED if closed else "later"
     freed = [
         node_id for node_id in held
         if node_id in done and admission.release(node_id, reason, db=db)
@@ -191,6 +200,8 @@ def _free_slot(
         plan_id, actor_id=common["actor_id"], provenance=common["provenance"],
         causing_executor=acting, db=db,
     )
+    if archived:
+        return {}
     # A task moved below the cut stays open, so it is no closed task to leave out of
     # the listing; a closed one is, and its row is what the listing is read for.
     last = freed[-1]

@@ -165,8 +165,7 @@ OPERATION_REQUIRED_FIELDS = {
         "node_id", "title", "acceptance_criteria", "size", "expected_revision",
     },
     # Two valid bodies, which one required set cannot express: one node with
-    # its revision, or ``node_ids`` alone. ``_validate_archive_target`` is the
-    # enforcement and ``plan_operation_docs`` publishes the choice.
+    # its revision, or ``node_ids`` alone. ``bulk_fields`` validates the latter.
     "archive_node": set(),
     "close_node": set(),
     "mark_done": {"node_id", "expected_revision"},
@@ -204,23 +203,10 @@ OPERATION_REQUIRED_FIELDS = {
 }
 
 
-#: How many nodes one bulk call may change, whichever verb it uses: a cleanup
-#: pass is bounded so a single call cannot walk an unbounded plan in one transaction.
-MAX_ARCHIVE_NODES = bulk_fields.MAX_BULK_NODES
-
 _ARCHIVE_TARGET = (
     "archive_node requires node_id with its expected_revision, or node_ids to "
     "retire many nodes in one call"
 )
-_ARCHIVE_BULK_ALONE = (
-    "archive_node with node_ids takes no node_id, expected_revision or "
-    "next_node_id: a bulk archive has no single node those describe"
-)
-_ARCHIVE_IDS = (
-    f"node_ids must be a list of 1 to {MAX_ARCHIVE_NODES} plan node ids"
-)
-
-
 def validate_operation_params(operation: str, params: dict) -> None:
     """Reject cross-operation fields and require revision evidence."""
 
@@ -242,9 +228,8 @@ def validate_operation_params(operation: str, params: dict) -> None:
         raise PlanInputError(later_fields.REASON_WITHOUT_LATER)
     if operation in {"add", "insert"}:
         return
-    if operation == "archive_node":
-        _validate_archive_target(params)
-        return
+    if operation == "archive_node" and not bulk_fields.is_bulk(params) and "node_id" not in params:
+        raise PlanInputError(_ARCHIVE_TARGET)
     if bulk_fields.is_bulk(params) and operation in bulk_fields.BULK_OPERATIONS:
         # The many-node body: no single node here has a revision to name.
         bulk_fields.validate_bulk(params, operation)
@@ -252,31 +237,7 @@ def validate_operation_params(operation: str, params: dict) -> None:
     _require_revision(params)
 
 
-def _validate_archive_target(params: dict) -> None:
-    """Require exactly one archive shape: one node with evidence, or many ids.
-
-    A bulk archive takes no position on any node's state -- archive never does
-    -- so there is no single revision it could carry, and asking for one per id
-    would make the cheap cleanup this exists for the expensive one it replaces.
-    """
-    # Presence, not value, picks the shape: dispatch routes on the key, so a
-    # null `node_ids` must be refused here rather than reach the bulk writer.
-    if "node_ids" not in params:
-        if "node_id" not in params:
-            raise PlanInputError(_ARCHIVE_TARGET)
-        _require_revision(params)
-        return
-    if {"node_id", "expected_revision", "next_node_id"} & set(params):
-        raise PlanInputError(_ARCHIVE_BULK_ALONE)
-    ids = params["node_ids"]
-    if (
-        not isinstance(ids, list)
-        or not 1 <= len(ids) <= MAX_ARCHIVE_NODES
-        or any(not isinstance(value, str) or not value.strip() for value in ids)
-    ):
-        raise PlanInputError(_ARCHIVE_IDS)
-
-
+# Single-node operations require the caller's revision evidence.
 def _require_revision(params: dict) -> None:
     """Require the node revision every single-node write is computed against."""
     if "expected_revision" not in params:

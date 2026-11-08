@@ -814,13 +814,10 @@ _CASES = {
         "reorder", {"node_id": NODE, "expected_revision": REV, "order_key": "3"},
     ),
     ("boundary_fields.py", "_ARCHIVE_TARGET"): _operation("archive_node", {}),
-    ("boundary_fields.py", "_ARCHIVE_BULK_ALONE"): _operation(
+    ("bulk_fields.py", '"archive_node with node_ids takes no node_id, expected_revision or " "next_node_id: a bulk archive has no single node those describe"'): _operation(
         # The shape is refused before any id is read, so literal values do;
         # `_resolved` substitutes only top-level scalars and needs a node_id.
         "archive_node", {"node_ids": ["node-1"], "expected_revision": 1},
-    ),
-    ("boundary_fields.py", "_ARCHIVE_IDS"): _operation(
-        "archive_node", {"node_ids": []},
     ),
     # --- plans/closure.py ---
     ("closure.py", "REASON_REQUIRED"): _blank_close_reason,
@@ -832,6 +829,10 @@ _CASES = {
         ' f" to hand it to {spawned_thread_id}"',
     ): _attach_over_another_worker,
     # --- plans/boundary.py ---
+    ("boundary.py", '"user cannot bulk close nodes; close one node at a time"'): lambda db, scene: partial(
+        mutate, scene.plan_id, "close_node", {"node_ids": [scene.pending], "reason": "Skip"},
+        actor=_USER, provenance="test", mutation_id=_mid(), db=db,
+    ),
     ("boundary.py", '"mutation_id is required"'): _operation(
         "activate", {"node_id": NODE, "expected_revision": REV},
         mutation_id="   ",

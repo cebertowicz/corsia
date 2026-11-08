@@ -2,7 +2,7 @@
 
 Two verbs can name one node or many, and one required-parameter set cannot say
 so, so the choice is enforced here rather than in the schema -- the way
-``archive_node`` already does it (``plans.boundary_fields._validate_archive_target``).
+``archive_node`` also does it.
 Presence of ``node_ids`` picks the body, because dispatch routes on the key and
 a null ``node_ids`` must be refused here rather than reach the writer.
 
@@ -21,13 +21,10 @@ import plans.later_fields as later_fields
 import plans.service as service
 
 PlanInputError = service.PlanInputError
-#: The verbs with a one-node body and a many-node body. ``archive_node`` has both
-#: too and keeps its own validator beside the guards it enforces.
-BULK_OPERATIONS = frozenset({"edit", "close_node"})
+#: The verbs with a one-node body and a many-node body.
+BULK_OPERATIONS = frozenset({"edit", "close_node", "archive_node"})
 #: How many nodes one bulk call may change, whichever verb it uses: the bound
 #: that stops a single call walking an unbounded plan inside one transaction.
-#: ``plans.boundary_fields`` names this the archive cap, and every bulk verb now
-#: shares it.
 MAX_BULK_NODES = 200
 
 #: Everything a bulk body may name besides ``node_ids``. A bulk verb does one
@@ -37,6 +34,7 @@ MAX_BULK_NODES = 200
 _BULK_KEYS = {
     "edit": frozenset({"node_ids", "later", "parent_id", "reason"}),
     "close_node": frozenset({"node_ids", "reason"}),
+    "archive_node": frozenset({"node_ids"}),
 }
 _NOUN = {"edit": "edit", "close_node": "close"}
 
@@ -50,8 +48,7 @@ _NEEDS = {
 def _alone(operation: str, extras: list[str]) -> str:
     """The archive's refusal, in this verb's words, naming what the caller passed.
 
-    ``archive_node`` established the sentence (``_ARCHIVE_BULK_ALONE``): say
-    which fields a bulk body cannot carry, then why they cannot describe it.
+    Name the fields a bulk body cannot carry, then why they cannot describe it.
     """
     return (
         f"{operation} with node_ids takes no {', '.join(extras)}: a bulk "
@@ -98,6 +95,11 @@ def validate_bulk(params: dict[str, Any], operation: str) -> None:
     """
     extras = sorted(set(params) - _BULK_KEYS[operation])
     if extras:
+        if operation == "archive_node":
+            raise PlanInputError(
+                "archive_node with node_ids takes no node_id, expected_revision or "
+                "next_node_id: a bulk archive has no single node those describe"
+            )
         raise PlanInputError(_alone(operation, extras))
     ids = params["node_ids"]
     if (
@@ -112,6 +114,8 @@ def validate_bulk(params: dict[str, Any], operation: str) -> None:
 
 def _carries_work(params: dict[str, Any], operation: str) -> bool:
     """Whether the bulk body says what to do to the ids it named."""
+    if operation == "archive_node":
+        return True
     if operation == "close_node":
         return "reason" in params
     return "later" in params or "parent_id" in params

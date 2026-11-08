@@ -151,7 +151,7 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     "node_ids": {
         "type": "array",
         "minItems": 1,
-        "maxItems": public.MAX_ARCHIVE_NODES,
+        "maxItems": public.MAX_BULK_NODES,
         "uniqueItems": True,
         "items": TEXT,
         "description": "Several node ids at once.",

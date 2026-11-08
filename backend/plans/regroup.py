@@ -22,7 +22,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import plans.aggregates as aggregates
 import plans.aggregates_move as aggregates_move
 import plans.intent_creation as intent_creation
 import plans.node_creation as node_creation
@@ -127,8 +126,16 @@ def _refuse(connection, node, parent_id: str) -> None:
     # exactly what an `add` under the same node would; the task check above is
     # this module's only because the hint to make a branch is a regroup's own.
     node_creation._validate_parent(connection, node["plan_id"], parent_id)
-    if any(str(row["id"]) == node["id"] for row in aggregates.ancestors(connection, parent_id)):
-        raise service.PlanInputError(CYCLE.format(title=node["title"], parent=parent["title"]))
+    current: str | None = parent_id
+    seen = set()
+    while current is not None:
+        if current == node["id"] or current in seen:
+            raise service.PlanInputError(CYCLE.format(title=node["title"], parent=parent["title"]))
+        seen.add(current)
+        ancestor = connection.execute(
+            "SELECT parent_id FROM plan_nodes WHERE id=?", (current,),
+        ).fetchone()
+        current = ancestor["parent_id"] if ancestor is not None else None
 
 
 def _holds(connection, parent_id: str | None) -> bool:

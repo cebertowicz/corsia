@@ -21,9 +21,7 @@ from plans import service
 EVENT = "node_later"
 
 #: Shown when the cut is asked for on a branch. It names the alternative rather
-#: than only refusing, because putting a whole branch below the cut is a real act,
-#: and since bulk `edit` ships it is also one call: the refusal points at the field
-#: that does it (design §4), which slice 1 could not yet say.
+#: than only refusing: the caller can pass the branch's open task ids in one call.
 LATER_ON_BRANCH = (
     "Later applies to tasks. To put this branch in Later, pass its open task ids"
     " in node_ids."

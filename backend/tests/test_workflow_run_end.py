@@ -148,6 +148,21 @@ async def test_a_run_is_sized_once_and_hard_if_reaches_the_start_reply(isolated_
     assert (await run.start("plain"))["notice"] == STEPS_CREATED
 
 
+async def test_bulk_closing_last_optional_step_reports_the_run_summary(isolated_db, tmp_path, monkeypatch):
+    optional = "    - {id: polish, check: Polished, difficulty: {default: routine}}\n"
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, optional)})
+    reply = await run.start("ship")
+    phase = reply["node"]["id"]
+    step = reply["steps"][0]["id"]
+
+    result = await run.update("close_node", {"node_ids": [step], "reason": "Nothing to polish"})
+
+    assert result["closed"][0]["run_summary"].startswith(
+        "Run ship completed: 0 done, 1 skipped, 0 not run, 0 failed"
+    )
+    assert _ended(run, phase)[0]["outcome"] == "completed"
+
+
 async def test_the_last_close_records_the_run_once_and_the_closing_reply_says_so(isolated_db, tmp_path, monkeypatch):
     run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, PLAIN)})
     reply = await run.start("ship")
