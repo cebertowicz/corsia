@@ -430,7 +430,92 @@ def test_an_edited_suggestion_keeps_its_place_on_reload_and_loses_it_when_its_su
     assert reloaded["orphaned"] is False and reloaded["text_changed"] is True
     assert (reloaded["from_off"], reloaded["to_off"]) == (4, 21) and reloaded["anchor_text"] == "quoted source"
 
-    # The text around it changed too: nothing says the stored place is still its place.
+    # Text added before it moves it; its surroundings still find it.
     threads, _ = comment_anchoring.anchored_threads(artifact, None, db, text="Other words. The quoted NEW source stays here.")
+    moved = next(thread for thread in threads if thread["id"] == row["id"])
+    assert moved["orphaned"] is False and moved["text_changed"] is True
+    assert (moved["from_off"], moved["to_off"]) == (17, 34)
+
+    # The text around it changed too: nothing says where its place is now.
+    threads, _ = comment_anchoring.anchored_threads(artifact, None, db, text="Other words. A quoted NEW source stays here.")
     lost = next(thread for thread in threads if thread["id"] == row["id"])
     assert lost["orphaned"] is True and not lost.get("text_changed")
+
+
+@pytest.mark.parametrize("replacement", [None, "better wording"])
+def test_legacy_inside_edit_keeps_comment_or_suggestion(db_scope, replacement):
+    db, artifact = db_scope
+    row, _ = add_comment(db, artifact, replacement=replacement)
+    store.update_positions(artifact, [{"id": row["id"], "from_off": 4, "to_off": 17,
+                                       "anchor_prefix": "The ", "anchor_suffix": " stays here."}], db=db)
+    threads, _ = comment_anchoring.anchored_threads(artifact, None, db, text="The quoted NEW source stays here.")
+    found = next(thread for thread in threads if thread["id"] == row["id"])
+    assert found["orphaned"] is False
+    assert (found["from_off"], found["to_off"]) == (4, 21)
+    assert found["anchor_text"] == ("quoted NEW source" if replacement is None else "quoted source")
+    if replacement is not None:
+        assert found["text_changed"] is True
+
+
+def test_legacy_inside_edit_after_emoji_uses_utf16(db_scope):
+    db, artifact = db_scope
+    row, _ = add_comment(db, artifact)
+    store.update_positions(artifact, [{"id": row["id"], "from_off": 3, "to_off": 16,
+                                       "anchor_prefix": "😀 ", "anchor_suffix": " stays."}], db=db)
+    threads, _ = comment_anchoring.anchored_threads(artifact, None, db, text="😀 quoted NEW source stays.")
+    found = next(thread for thread in threads if thread["id"] == row["id"])
+    assert found["orphaned"] is False
+    assert (found["from_off"], found["to_off"]) == (3, 20)
+    assert found["anchor_text"] == "quoted NEW source"
+
+
+@pytest.mark.parametrize("text,orphaned,span", [
+    ("The another thing stays here.", True, (4, 17)),
+    ("The  stays here.", True, (4, 17)),
+    ("Added The quoted source stays here.", False, (10, 23)),
+])
+def test_legacy_replacement_deletion_and_insert_before(db_scope, text, orphaned, span):
+    db, artifact = db_scope
+    row, _ = add_comment(db, artifact)
+    store.update_positions(artifact, [{"id": row["id"], "from_off": 4, "to_off": 17,
+                                       "anchor_prefix": "The ", "anchor_suffix": " stays here."}], db=db)
+    threads, _ = comment_anchoring.anchored_threads(artifact, None, db, text=text)
+    found = next(thread for thread in threads if thread["id"] == row["id"])
+    assert found["orphaned"] is orphaned
+    assert (found["from_off"], found["to_off"]) == span
+
+
+@pytest.mark.parametrize("replacement", [None, "better wording"])
+def test_legacy_quote_extended_at_end_is_reanchored(replacement):
+    row = {"id": "one", "parent_id": None, "review": False, "anchor_text": "source",
+           "from_off": 2, "to_off": 8, "anchor_prefix": "A ", "anchor_suffix": " stays.",
+           "replacement": replacement}
+    comment_anchoring.resolve_threads([row], "A sources stays.")
+    assert row["orphaned"] is False
+    assert (row["from_off"], row["to_off"]) == (2, 9)
+    assert row["anchor_text"] == ("sources" if replacement is None else "source")
+    if replacement is not None:
+        assert row["text_changed"] is True
+
+
+def test_legacy_suggestion_with_fully_replaced_same_length_text_is_orphaned(db_scope):
+    db, artifact = db_scope
+    row, _ = add_comment(db, artifact, replacement="better wording")
+    store.update_positions(artifact, [{"id": row["id"], "from_off": 4, "to_off": 17,
+                                       "anchor_prefix": "The ", "anchor_suffix": " stays here."}], db=db)
+    threads, _ = comment_anchoring.anchored_threads(artifact, None, db, text="The another thing stays here.")
+    found = next(thread for thread in threads if thread["id"] == row["id"])
+    assert found["orphaned"] is True
+    assert found["anchor_text"] == "quoted source"
+
+
+@pytest.mark.parametrize("replacement", [None, "better wording"])
+def test_legacy_intact_quote_wins_over_an_edited_lookalike_added_before_it(replacement):
+    row = {"id": "one", "parent_id": None, "review": False, "anchor_text": "abcdefghij",
+           "from_off": 1, "to_off": 11, "anchor_prefix": "P", "anchor_suffix": "S",
+           "replacement": replacement}
+    comment_anchoring.resolve_threads([row], "PabcdefSPabcdefghijS")
+    assert row["orphaned"] is False
+    assert (row["from_off"], row["to_off"]) == (9, 19)
+    assert row["anchor_text"] == "abcdefghij"
+    assert not row.get("text_changed")

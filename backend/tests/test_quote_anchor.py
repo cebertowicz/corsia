@@ -188,3 +188,44 @@ def test_read_orphans_a_contextless_comment_whose_quote_was_deleted(tmp_path, mo
     assert gone["orphaned"] is True and (gone["from_off"], gone["to_off"]) == (25, 31)
     assert persisted == [{"id": "kept", "from_off": 5, "to_off": 11,
                           "anchor_prefix": "keep ", "anchor_suffix": " here / other there"}]
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "kept"),
+    [("quoted source", "quoted NEW source", True), ("source", "sources", True),
+     ("quoted source", "another thing", False), ("quoted source", "quoted thing", True),
+     ("abcdefgh", "abcdXXXX", False), ("abcdefgh", "abcdeXXX", True)],
+)
+def test_context_bounded_edit_requires_retained_quote_ends(old, new, kept):
+    from doceditor import quote_anchor
+
+    result = quote_anchor.reanchor_edited(f"A {new} stays.", old, from16=2,
+                                          to16=2 + len(old), prefix="A ", suffix=" stays.")
+    assert result == ((2, 2 + len(new)) if kept else None)
+
+
+def test_context_bounded_edit_survives_text_added_before_it():
+    from doceditor import quote_anchor
+
+    text = "Added The quoted NEW source stays here."
+    result = quote_anchor.reanchor_edited(text, "quoted source", from16=4, to16=17,
+                                          prefix="The ", suffix=" stays here.")
+    assert result == (10, 27) and text[10:27] == "quoted NEW source"
+
+
+def test_context_bounded_edit_orphans_equal_distance_prefix_or_suffix():
+    from doceditor import quote_anchor
+
+    assert quote_anchor.reanchor_edited("PxxxPquoted NEW sourceS", "quoted source", from16=3,
+                                        to16=20, prefix="P", suffix="S") is None
+    assert quote_anchor.reanchor_edited("Pquoted NEW sourceSxxxS", "quoted source", from16=1,
+                                        to16=20, prefix="P", suffix="S") is None
+
+
+def test_context_bounded_edit_requires_both_contexts_and_nonempty_text():
+    from doceditor import quote_anchor
+
+    assert quote_anchor.reanchor_edited("A stays.", "quoted source", from16=2, to16=15,
+                                        prefix="A ", suffix="stays.") is None
+    assert quote_anchor.reanchor_edited("A quoted NEW source stays.", "quoted source", from16=2,
+                                        to16=15, prefix=None, suffix=" stays.") is None
