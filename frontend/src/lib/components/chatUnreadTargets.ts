@@ -10,17 +10,22 @@ export const quoteLabel = (quote: string) => `“${snippet(clean(plainQuote(quot
 
 export type UnreadTarget = { quote: string; distance: number; destination: AttentionDestination };
 
+/** The body a message's text is drawn in, wherever that row is. */
+export const messageBody = (row: Element | null | undefined): HTMLElement | null => row?.querySelector<HTMLElement>('.long-message-body, .bubble-content') ?? null;
+
 /**
  * Where a comment is on screen: its painted highlight, or — when the quote no longer matches the
- * message and there is nothing to paint — the detached thread shown under the message. Both are
- * focusable, and the reply jumper lands on whichever exists. In Focus a message can draw as two rows
+ * message and there is nothing to paint — the detached thread shown under the message, or the message body
+ * its text left when the thread is held elsewhere (a card in the transcript's margin column). The first two
+ * are focusable, and the reply jumper lands on whichever exists. In Focus a message can draw as two rows
  * (its activity in a run, its text below), so every row carrying its id is searched.
  */
 export function commentLanding(root: ParentNode, messageId: string, comment: Pick<ChatComment, 'id'>): HTMLElement | null {
 	const rows = `[data-message-id="${CSS.escape(messageId)}"]`;
 	return [...root.querySelectorAll<HTMLElement>(`${rows} [data-comment-ids][role="button"]`)]
 		.find(mark => mark.dataset.commentIds?.split(',').includes(comment.id))
-		?? root.querySelector<HTMLElement>(`${rows} [data-comment-uuid="${CSS.escape(comment.id)}"]`);
+		?? root.querySelector<HTMLElement>(`${rows} [data-comment-uuid="${CSS.escape(comment.id)}"]`)
+		?? messageBody(root.querySelector(rows));
 }
 
 /** Find the nearest rendered unread highlight on each side of the transcript viewport. */

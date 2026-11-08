@@ -1,3 +1,5 @@
+import type { ChatComment as StoredComment } from '$lib/chatCommentTypes';
+
 export interface ChatComment extends ChatCommentAnchor {
 	id: string;
 	messageId: string;
@@ -13,6 +15,20 @@ export interface ChatCommentAnchor {
 	quote: string;
 	anchor_prefix: string;
 	anchor_suffix: string;
+}
+
+/**
+ * The send a reply to a stored comment carries: that comment's own anchor plus the new note, in the shape
+ * the composer's send takes. Null for a message that carries no place in history, which is what a send needs.
+ */
+export function replyToComment(message: { id: string; seq?: number | null }, comment: StoredComment, note: string): ChatComment | null {
+	if (typeof message.seq !== 'number') return null;
+	return {
+		id: crypto.randomUUID(), messageId: message.id, seq: message.seq,
+		from_off: comment.from_off, to_off: comment.to_off, quote: comment.quote,
+		anchor_prefix: comment.anchor_prefix, anchor_suffix: comment.anchor_suffix, note,
+		root_user_message_id: comment.user_message_id, root_cid: comment.cid,
+	};
 }
 
 /** Clip a selection to the first message body and capture its rendered-text coordinates. */

@@ -31,8 +31,10 @@
 	import { updateRestarting } from '$lib/update/store';
 
 	import { corsiaAgentId } from '$lib/utils/conductor';
-		let { threadId = undefined, onSend, onTriggerWarm, onAutoCreateThread }: {
+		let { threadId = undefined, onSend, onTriggerWarm, onAutoCreateThread, marginComments = false, selectedCommentId = $bindable(null) }: {
 			threadId?: string | null;
+			marginComments?: boolean;
+			selectedCommentId?: string | null;
 			onSend: () => void;
 			onTriggerWarm?: () => void;
 			onAutoCreateThread?: () => Promise<void>;
@@ -338,7 +340,7 @@
 	}}
 >
 	<InputBarFileInputs bind:this={fileInputsRef} onFiles={handleFileSelect} />
-	<ChatCommentSelection bind:this={commentSelection} threadId={boundThreadId} {comments} surface={inputAreaEl} onChange={value => comments = value} onSendReply={sendReply} />
+	<ChatCommentSelection bind:this={commentSelection} threadId={boundThreadId} {comments} surface={inputAreaEl} {marginComments} bind:selectedCommentId onChange={value => comments = value} onSendReply={sendReply} />
 
 	{#if uploadError}
 		<div class="upload-error">{uploadError} <button onclick={() => uploadError = ''}>✕</button></div>
