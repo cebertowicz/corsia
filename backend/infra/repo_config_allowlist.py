@@ -24,6 +24,7 @@ from host_access.credential_sanitizer import sanitize_credential_text
 from infra.backend_git import git_argv
 
 _CONFIG_TIMEOUT_SECONDS = 5
+_GITDIR_PREFIX = "gitdir: "
 
 # The whole allowlist. Anything not listed here is refused, so a key Git learns to
 # read tomorrow is refused until it is deliberately admitted.
@@ -102,7 +103,9 @@ def _local_config_files(repo: Path) -> list[Path] | None:
         git_dir = marker.resolve(strict=False)
     elif marker.is_file():
         raw = _read_pointer(marker)
-        git_dir = None if raw is None else _pointer_target(marker, raw)
+        if raw is None or not raw.startswith(_GITDIR_PREFIX):
+            return None
+        git_dir = _pointer_target(marker, raw[len(_GITDIR_PREFIX):])
     if git_dir is None:
         return None
 
@@ -130,17 +133,16 @@ def _local_config_files(repo: Path) -> list[Path] | None:
 
 
 def _pointer_target(pointer: Path, raw: str) -> Path | None:
-    """Resolve one Git pointer file's target, relative to the file's own folder.
+    """Resolve one Git pointer path, relative to the folder holding the pointer file.
 
-    The ``.git`` file of a linked checkout writes ``gitdir: <path>``, `commondir`
-    writes the path alone; both may be relative to the folder holding the pointer.
-    Git reads the path literally — no ``~`` expansion — so this does too, or the
-    check could read a different config from the one Git then uses.
+    The ``.git`` file of a linked checkout writes ``gitdir: <path>`` (the caller takes
+    off that exact prefix, as Git requires it); ``commondir`` writes the path alone.
+    Git drops only trailing line endings and reads the rest literally — spaces kept,
+    no ``~`` expansion — so this does too, or the check could read a different config
+    from the one Git then uses.
     """
-    target = raw.strip()
-    if target.startswith("gitdir:"):
-        target = target[len("gitdir:"):].strip()
-    if not target or "\n" in target:
+    target = raw.rstrip("\r\n")
+    if not target or "\n" in target or "\0" in target:
         return None
     path = Path(target)
     return (path if path.is_absolute() else pointer.parent / path).resolve(strict=False)

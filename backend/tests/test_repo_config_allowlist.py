@@ -291,6 +291,67 @@ def test_a_tilde_pointer_is_read_as_literally_as_git_reads_it(tmp_path, monkeypa
     assert refusal is not None and "filter.x.clean" in refusal, refusal
 
 
+def _clean_and_widened_git_dirs(tmp_path: Path, clean: Path, widened: Path) -> None:
+    """Put a clean Git directory where a lax parser would look, a widened one where Git does."""
+    for name, target in (("clean-src", clean), ("widened-src", widened)):
+        _git_repo(tmp_path / name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name / ".git").rename(target)
+    with (widened / "config").open("a", encoding="utf-8") as handle:
+        handle.write(f'[filter "x"]\n\tclean = {PROGRAM}\n')
+
+
+@pytest.mark.parametrize("pointer, clean_name, widened_name", [
+    ("gitdir:  real\n", "real", " real"),
+    ("gitdir: real \n", "real", "real "),
+])
+def test_spaces_in_a_gitdir_pointer_are_kept_as_git_keeps_them(
+    tmp_path, pointer, clean_name, widened_name,
+) -> None:
+    repo = tmp_path / "pointed"
+    _clean_and_widened_git_dirs(tmp_path, repo / clean_name, repo / widened_name)
+    (repo / ".git").write_text(pointer, encoding="utf-8")
+    git_dir = subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "--absolute-git-dir"],
+        check=True, capture_output=True, text=True,
+    ).stdout.rstrip("\n")
+    assert Path(git_dir) == (repo / widened_name).resolve()
+
+    refusal = repo_config_refusal(repo)
+
+    assert refusal is not None and "filter.x.clean" in refusal, refusal
+
+
+def test_a_gitdir_pointer_git_refuses_is_refused(tmp_path) -> None:
+    repo = tmp_path / "no-space"
+    _clean_and_widened_git_dirs(tmp_path, repo / "real", tmp_path / "unused")
+    (repo / ".git").write_text(f"gitdir:{repo / 'real'}\n", encoding="utf-8")
+
+    assert repo_config_refusal(repo) is not None
+
+
+def test_a_commondir_is_read_literally_with_no_gitdir_prefix(tmp_path) -> None:
+    repo = tmp_path / "common"
+    _git_repo(repo)
+    linked = tmp_path / "linked"
+    subprocess.run(
+        ["git", "-C", str(repo), "worktree", "add", "-b", "wt", str(linked)],
+        check=True, capture_output=True, text=True,
+    )
+    worktree_git_dir = repo / ".git" / "worktrees" / "linked"
+    _clean_and_widened_git_dirs(tmp_path, tmp_path / "shared", tmp_path / "shared ")
+    (worktree_git_dir / "commondir").write_text(f"{tmp_path / 'shared'} \n", encoding="utf-8")
+    common = subprocess.run(
+        ["git", "-C", str(linked), "rev-parse", "--git-common-dir"],
+        check=True, capture_output=True, text=True,
+    ).stdout.rstrip("\n")
+    assert Path(common).resolve() == (tmp_path / "shared ").resolve()
+
+    refusal = repo_config_refusal(linked)
+
+    assert refusal is not None and "filter.x.clean" in refusal, refusal
+
+
 def test_a_credential_inside_a_key_name_is_masked(tmp_path) -> None:
     secret = "s3cr3t-value"
     repo = tmp_path / "credential-key"
