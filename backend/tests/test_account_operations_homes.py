@@ -651,7 +651,7 @@ def test_sign_in_rollback_changes_no_generation_or_evidence(accounts):
 
 
 @pytest.mark.parametrize('provider', ['codex', 'claude-code'])
-@pytest.mark.parametrize('operation', ['checkpoint', 'detached'])
+@pytest.mark.parametrize('operation', ['checkpoint', 'artifact_review', 'detached'])
 def test_admitted_operation_freezes_writer_homes_and_rejects_same_row_new_login(vendors, tmp_path, provider, operation):
     from connections.vendor_accounts import set_account_state
     from core.checkpoint_types import CheckpointProviderForkRequest
@@ -661,7 +661,7 @@ def test_admitted_operation_freezes_writer_homes_and_rejects_same_row_new_login(
 
     db, row, _ = _launched_session(vendors, provider, tmp_path)
     target = _target(provider)
-    if operation == 'checkpoint':
+    if operation != 'detached':  # every fork kind homes the same way; the Codex fork passes its kind's name
         request = CheckpointProviderForkRequest('checkpoint', 'destination', target, 'instruction', None,
             str(tmp_path), vendor_account_id=row['id'], vendor_account_bound=True)
         frozen = admit_fork(request)

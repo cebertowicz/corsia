@@ -10,6 +10,7 @@ from connections.account_evidence import discovery_record, store_record
 from connections.account_home import missing_home_reason, source_auth_exists, source_auth_path
 from connections.account_policy import AccountAdmissionError
 from connections.account_receipts import ReceiptFence, receipt_is_current
+from connections.account_runtime import OPERATION_KINDS
 from connections.vendor_accounts import get_account
 from infra.database import write_transaction
 from infra.moved_state_paths import under_current
@@ -17,7 +18,8 @@ from infra.time import utc_now_iso
 
 CHANGED = 'codex_auth_projection_changed'
 SOURCE_MISSING = 'codex_auth_source_missing'
-KINDS = frozenset({'live', 'discovery', 'checkpoint', 'detached'})
+# Every operation kind owns a temporary home, so the two lists cannot drift.
+KINDS = frozenset({'live', 'discovery', *OPERATION_KINDS})
 
 
 def _paths(account, home):
