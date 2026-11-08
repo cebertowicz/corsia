@@ -446,7 +446,7 @@ test.describe('@flow:host-access @surface:shell reviewed host access', () => {
 
 			await messages.evaluate((element) => { element.scrollTop = 0; });
 			await messages.dispatchEvent('scroll');
-			const scrollToBottom = page.getByRole('button', { name: 'Scroll to bottom' });
+			const scrollToBottom = page.getByRole('button', { name: /^Scroll to (the )?bottom$/ });
 			await expect(scrollToBottom).toBeVisible();
 			const scrollBox = await scrollToBottom.boundingBox();
 			expect(
