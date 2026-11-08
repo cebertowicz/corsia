@@ -170,7 +170,7 @@ for (const [width, height, project] of layouts) {
 			// A decided suggestion leaves the open cards for the Resolved list.
 			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(drawerRow(reader, red.id).getByRole('region', { name: /^accepted suggestion by / })).toBeVisible());
 			// The accepted replacement removed the overlapping suggestion's quote, so it can no longer be accepted.
-			await expect(drawerRow(reader, dog.id)).toContainText('The text this suggestion replaces has changed.');
+			await expect(drawerRow(reader, dog.id)).toContainText('The text changed after this suggestion');
 			await expect(drawerRow(reader, dog.id).getByRole('button', { name: 'Accept', exact: true })).toBeDisabled();
 			await drawerRow(reader, dog.id).getByRole('button', { name: 'Reject', exact: true }).click();
 			await inResolved(reader.getByRole('region', { name: 'Document comments', exact: true }), () => expect(drawerRow(reader, dog.id).getByRole('region', { name: /^rejected suggestion by / })).toBeVisible());

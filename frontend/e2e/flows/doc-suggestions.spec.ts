@@ -28,7 +28,7 @@ test('@flow:document-suggestions an agent\'s suggestions are refused when stale,
 	test.setTimeout(90_000);
 	await setEvidenceViewport(page, testInfo);
 	const { artifactId, accept, docPath, drawer, editor, fine, loose, openComments, params, reject, reviewerId, reviewerTitle, row, stale, storedText, text } = await openSuggestionFlow(page, request);
-	const refusedNote = 'The text this suggestion replaces has changed.';
+	const refusedNote = 'The text changed after this suggestion';
 	await openComments();
 	for (const id of [loose, fine, stale]) await expect(accept(id)).toBeEnabled();
 	await expect(drawer.getByRole('button', { name: `Accept all from ${reviewerTitle}`, exact: true })).toBeEnabled();
