@@ -1067,7 +1067,7 @@ def _terminal_boundary_profile(
                     f'(deny file-write* process-exec (literal "{_sandbox_path(path)}"))'
                     for path in safehouse_paths
                 ),
-                path_policy.hard_floor_sandbox_rules(),
+                path_policy.hard_floor_sandbox_rules(include_state=True),
             ]
         )
         if external_agent:

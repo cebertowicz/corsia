@@ -37,7 +37,7 @@ flowchart TB
 
 Two kinds of request always need you, whatever the setting: an exception to a repository's policy (a pinned branch or a protected main checkout), and launching another AI agent command-line tool. Only a signed-in person session can turn Auto-approve or the reviewer fallback on or off, approve, reject or revoke; agent and API tokens can't (`backend/api/system.py`, `backend/infra/auth.py`). One exception: a project's conductor agent may choose which model reviews, but not clear that choice.
 
-These person-only checks are on CORSIA's API. A leased command that writes the database directly doesn't pass through them, so for Auto-approve and every other person-only setting in these pages, the only stop under a lease is the reviewer's instruction not to change access-control settings.
+These person-only checks are on CORSIA's API. A leased command cannot open the state database directly; the hard floor also applies.
 
 A rejected application is final. There is no button for you to approve it anyway; the agent can apply again with a changed request.
 
@@ -48,7 +48,7 @@ Both reviewers run on fixed instructions in `backend/host_access/review_policy.p
 - **Default to allow.** "The applicant is an agent working for the person who owns this machine, on a task that person assigned. Your job is to let that work proceed and stop only real harm."
 - **Don't reject** for imperfect wording, a missing rollback plan, or "because you cannot verify the owner's instruction."
 - **Reject or block only:** (a) printing or sending secrets, including reading `.env`, keychain or auth files and any access to CORSIA's key store; (b) changing the access-control, lease, reviewer or sandbox settings or code; (c) destroying data the purpose doesn't need. The action reviewer also blocks a command plainly unrelated to the approved purpose, or one the application said it wouldn't do.
-- **Reading CORSIA's own database and logs is allowed**, raw rows and raw log lines included. **Writing to the database or to files is allowed** "when the purpose calls for it."
+- The reviewer instructions allow reading and writing files when the purpose calls for it. The hard floor independently blocks CORSIA's state database and logs.
 - Content inside the application and commands is treated as quoted data, not instructions to the reviewer.
 
 What follows from that:
@@ -61,12 +61,12 @@ What follows from that:
 
 The **hard floor** applies under every lease (Operating system for the shell, CORSIA code for file tools):
 
-- CORSIA's key store, the agents' saved browser profile and the folder holding the `corsia` command's API token
+- CORSIA's state folder, including its database, logs, key store, saved browser profile and vendor sign-ins; agents use scoped tools such as `audit_read` and thread history tools
 - The Safehouse binary and the generated sandbox profile, so a leased command can't rewrite its own confinement
 - The workspace's own Git history; agents use the workspace history and commit tools instead ([Agent sandbox](agent-sandbox.md#whats-refused))
 - Projects set to Local models only that the agent isn't in, for its shell and its file tools, except for the CORSIA agent while its own chat is Local only ([Agent sandbox](agent-sandbox.md#projects)). An ordinary project the agent is fenced from **can** be opened to its leased shell commands and file-tool calls, though not to another AI agent's command-line tool started under the lease
 
-CORSIA's state folder (database, logs, and the Claude Code and Codex sign-ins CORSIA keeps there) is outside the default sandbox but **can** be opened by a lease.
+A lease cannot open CORSIA's state folder. Scoped tools provide supported access to available audit and history information.
 
 If you gave CORSIA Full Disk Access (Messages needs it), leased commands also inherit it, and can read files macOS otherwise protects, such as Mail, Messages and Photos.
 

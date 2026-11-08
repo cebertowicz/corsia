@@ -126,10 +126,10 @@ class ProtectedHostPathPolicy:
         )
 
     def hard_floor_denial(self, path: Path) -> str | None:
-        """Return the non-leaseable denial for credentials or workspace Git metadata.
+        """Return non-leaseable denials for state, credentials and workspace Git.
 
         Symlinks and ``..`` are traced component-wise, so a route into a
-        credential root is refused as well as the canonical path.
+        protected root is refused as well as the canonical path.
         """
         try:
             candidate = canonical(path)
@@ -142,6 +142,8 @@ class ProtectedHostPathPolicy:
                 return _CREDENTIAL_DENIAL
             if resolution_touches(root, path, loop_touches=False):
                 return _CREDENTIAL_DENIAL
+        if (candidate is not None and contains(self.state_root, candidate)) or resolution_touches(self.state_root, path, loop_touches=False):
+            return self._state_denial()
         if candidate is not None and is_workspace_git_metadata(self.workspace, candidate):
             return "Workspace Git history is blocked; use workspace_history or workspace_commit." + _NO_LEASE
         return None
@@ -212,16 +214,11 @@ class ProtectedHostPathPolicy:
         return None
 
     def _state_denial(self) -> str:
-        """Name the resolved state root and the one route that opens it.
-
-        Naming the resolved path is the whole discovery win, and it holds on
-        every installation. Anything that depends on how a particular machine
-        is laid out belongs in that installation's agent context instead.
-        """
+        """Name the state root, the non-leaseable floor and scoped alternatives."""
         return (
-            f"CORSIA runtime state ({self.state_root}) requires reviewed host "
-            "access. Request a temporary host-access lease, then retry the "
-            "exact action."
+            f"CORSIA runtime state ({self.state_root}) is blocked." + _NO_LEASE
+            + " Use scoped tools such as audit_read for logs and usage and "
+            "thread history tools for conversation history."
         )
 
     def ordinary_denial(self, path: Path, *, for_write: bool) -> str | None:
@@ -230,8 +227,7 @@ class ProtectedHostPathPolicy:
         # symlink loop, while this boundary deliberately treats an unresolved
         # loop as requiring reviewed host access.
         if message := self.hard_floor_denial(path):
-            # Credential roots (the key store inside the state root) outrank
-            # the lease-eligible state-root answer.
+            # Credential roots retain their more specific guidance.
             return message
         if resolution_touches(self.state_root, path):
             return self._state_denial()
@@ -263,10 +259,11 @@ class ProtectedHostPathPolicy:
                 return f"{path} — {message}"
         return None
 
-    def hard_floor_sandbox_rules(self) -> str:
-        """Render what holds under a lease: credentials, browser, the caller's Local only fence, workspace Git."""
+    def hard_floor_sandbox_rules(self, *, include_state: bool = False) -> str:
+        """Render the shared floor and, for agent leases, the runtime state floor."""
         floor = hard_floor_rules(self.credential_roots, self.home, sandbox_literal)
-        return "\n".join([floor, *self.fence.local_only_rules(sandbox_literal), *workspace_git_history_rules(self.workspace)])
+        state = [f'(deny file-read* file-write* (subpath "{sandbox_literal(self.state_root)}"))'] if include_state else []
+        return "\n".join([floor, *state, *self.fence.local_only_rules(sandbox_literal), *workspace_git_history_rules(self.workspace)])
 
     def sandbox_rules(self) -> str:
         """Render protected Seatbelt rules from the protected path inventory."""

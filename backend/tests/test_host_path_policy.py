@@ -31,13 +31,7 @@ def test_protected_policy_denies_sensitive_paths_but_preserves_safe_ssh_files(
     assert policy.denial(home / ".ssh" / "id_ed25519", for_write=False)
     assert policy.denial(home / ".ssh", for_write=False)
     assert policy.denial(home / ".corsia" / "state.db", for_write=False)
-    assert (
-        policy.denial(
-            state_root / "project.json",
-            for_write=False,
-        )
-        is None
-    )
+    assert "No host-access lease" in policy.denial(state_root / "project.json", for_write=False)
     assert policy.ordinary_denial(
         state_root / "project.json",
         for_write=False,
@@ -339,7 +333,7 @@ def test_hard_floor_denials_say_that_no_lease_will_open_them(tmp_path) -> None:
 
 
 def test_state_root_denial_names_the_resolved_path(tmp_path) -> None:
-    """The lease-eligible denial names where the state root actually is."""
+    """The hard-floor denial names the state root and supported tools."""
     policy = _token_policy(tmp_path)
     state_root = tmp_path / "state"
 
@@ -347,8 +341,23 @@ def test_state_root_denial_names_the_resolved_path(tmp_path) -> None:
 
     assert message is not None
     assert str(state_root) in message
-    assert "requires reviewed host access" in message
-    assert "No host-access lease can open it." not in message
+    assert "audit_read" in message
+    assert "No host-access lease can open it." in message
+
+
+def test_state_root_denial_covers_logs_and_workspace_symlinks(tmp_path) -> None:
+    policy = _token_policy(tmp_path)
+    state = tmp_path / "state"
+    state.mkdir()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    alias = workspace / "state-link"
+    alias.symlink_to(state, target_is_directory=True)
+    for path in (state / "corsia.db", state / "logs" / "x.log", alias / "corsia.db"):
+        for for_write in (False, True):
+            message = policy.ordinary_denial(path, for_write=for_write)
+            assert message and "No host-access lease can open it." in message
+            assert "audit_read" in message and "thread history" in message
 
 
 def test_denied_paths_are_read_back_from_the_os_denial_output() -> None:
@@ -371,10 +380,10 @@ def test_denied_paths_are_read_back_from_the_os_denial_output() -> None:
     assert len(found) == 2
 
 
-def test_shell_output_guidance_separates_hard_floor_from_lease_eligible(
+def test_shell_output_guidance_identifies_state_and_other_hard_floor(
     tmp_path,
 ) -> None:
-    """The two denial classes must lead an agent to opposite next steps."""
+    """State and other hard-floor denials both exclude lease access."""
     policy = _token_policy(tmp_path)
     state_root = tmp_path / "state"
 
@@ -384,13 +393,13 @@ def test_shell_output_guidance_separates_hard_floor_from_lease_eligible(
     assert hard is not None
     assert "No host-access lease can open it." in hard
 
-    leaseable = policy.denial_guidance_for_output(
+    state_guidance = policy.denial_guidance_for_output(
         f"sqlite3: {state_root / 'corsia.db'}: Operation not permitted"
     )
-    assert leaseable is not None
-    assert str(state_root) in leaseable
-    assert "requires reviewed host access" in leaseable
-    assert "No host-access lease can open it." not in leaseable
+    assert state_guidance is not None
+    assert str(state_root) in state_guidance
+    assert "audit_read" in state_guidance
+    assert "No host-access lease can open it." in state_guidance
 
 
 def test_shell_output_guidance_stays_silent_on_unrelated_failures(
@@ -409,18 +418,11 @@ def test_shell_output_guidance_stays_silent_on_unrelated_failures(
     )
 
 
-def test_composed_shell_denial_leads_with_the_path_then_the_next_step(
+def test_shell_denial_guidance_names_path_and_next_step(
     tmp_path,
     monkeypatch,
 ) -> None:
-    """Compose exactly what shell.py emits, using both real producers.
-
-    Not a full shell run: the sandbox refusal itself cannot be provoked
-    in-process. This pins the contract between the two halves of the guidance —
-    the resolved path first, then the state-aware next step — so a change to
-    either cannot silently drop the path an agent needs.
-    """
-    from tools.host_access_gate import protected_scope_denial
+    """The path-specific shell guidance names the hard floor and scoped route."""
     from tools import host_path_policy
 
     state_root = tmp_path / "state"
@@ -436,22 +438,16 @@ def test_composed_shell_denial_leads_with_the_path_then_the_next_step(
     combined_output = (
         f"sqlite3: {state_root / 'corsia.db'}: Operation not permitted"
     )
-    composed = host_path_policy.denial_guidance_prefix(
-        combined_output
-    ) + protected_scope_denial(
-        "this command was blocked by the protected-mode sandbox",
-        lease_active=False,
-    )
+    composed = host_path_policy.denial_guidance_prefix(combined_output)
 
     assert str(state_root) in composed
-    assert "request a host-access lease" in composed
-    # The path must arrive before the generic next-step template.
-    assert composed.index(str(state_root)) < composed.index("Blocked by protected scope")
+    assert "No host-access lease can open it." in composed
+    assert "audit_read" in composed
     # An ordinary failure contributes no prefix at all.
     assert host_path_policy.denial_guidance_prefix("bash: nope: not found") == ""
 
 
-def test_key_store_folder_is_hard_floor_inside_the_lease_eligible_state_root(
+def test_key_store_guidance_is_more_specific_than_state_root(
     tmp_path,
 ) -> None:
     """Stored key values never get the lease-eligible message."""
@@ -468,14 +464,15 @@ def test_key_store_folder_is_hard_floor_inside_the_lease_eligible_state_root(
                 assert no_lease in message, (path, for_write)
                 assert "requires reviewed host access" not in message
 
-    # Only the keys folder moved to the hard floor.
-    for sibling in (state_root / "corsia.db", state_root / "keys-backup" / "a"):
+    # State siblings are also hard-floor paths with separate guidance.
+    for sibling in (state_root / "corsia.db", state_root / "logs" / "x.log"):
         message = policy.ordinary_denial(sibling, for_write=False)
         assert message is not None
         assert str(state_root) in message
-        assert "requires reviewed host access" in message
-        assert no_lease not in message
-        assert policy.denial(sibling, for_write=False) is None
+        assert "audit_read" in message
+        assert no_lease in message
+        assert policy.denial(sibling, for_write=False) == message
+    assert "Stored secrets" in policy.hard_floor_denial(values)
 
 
 def test_key_store_folder_cannot_be_reached_by_symlink_or_dotdot(tmp_path) -> None:

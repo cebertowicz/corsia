@@ -33,7 +33,7 @@ On macOS: [Agent Safehouse](https://github.com/eugene1g/agent-safehouse), an ind
 ## Secrets
 
 **9. Can an agent read my API keys, SSH keys, cookies, Keychain, `.env` files?**
-- Your Claude Code and Codex sign-ins: not without a lease. CORSIA keeps them in its state folder, which a lease can open ([Secrets](secrets.md#where-keys-live)).
+- Your Claude Code and Codex sign-ins: not directly, even with a lease. CORSIA keeps them in its protected state folder ([Secrets](secrets.md#where-keys-live)).
 - Keys in CORSIA's key store: not directly, even with a lease. A leased command can leave something behind that runs later outside the sandbox and can read them; only the reviewers stand in the way ([Host access](host-access.md#what-no-lease-opens)).
 - The agents' GitHub account token, if you set that account up: yes. It is outside the key store and agent shells can read it, so they can use `gh` and `git` as that account ([Secrets](secrets.md#where-keys-live)).
 - SSH private keys, Keychains, your browsers' cookies: not without a lease, and a lease reviewer is told to block reading keychain and auth files. It can **use** keys loaded in your SSH agent.
@@ -91,7 +91,7 @@ Partly, yes. The reviewer is a separate call that sees only the request, not the
 Down: an application is blocked, and a command under an active lease is denied. Wrong: nothing catches it except you. No measurement of wrong approvals or wrong blocks is published; the README reports how often it said yes and no in one week. See [Host access](host-access.md#when-something-fails).
 
 **24. Can an agent approve its own access, or talk the reviewer into it?**
-Not through CORSIA's API: approval needs a signed-in person session, or the reviewer's own allow when **Auto-approve** is on, and only a person session can change that setting there. A leased command could write the setting to the database directly, and only the reviewer's instruction against changing access-control settings stops that. An agent can also try to talk the reviewer into it, and the reviewer is built to say yes to a plausible purpose (question 18). It can also miss what it is told to block, so it is **not** a defense against a tricked agent asking for ordinary personal files with a good story. See [Host access](host-access.md).
+Not through CORSIA's API: approval needs a signed-in person session, or the reviewer's own allow when **Auto-approve** is on, and only a person session can change that setting there. A leased command cannot directly open the state database. An agent can also try to talk the reviewer into approval, and the reviewer is built to say yes to a plausible purpose (question 18). It can also miss what it is told to block, so it is **not** a defense against a tricked agent asking for ordinary personal files with a good story. See [Host access](host-access.md).
 
 **25. What does automatic approval change, and what's the safe default?**
 The setting is **Auto-approve**, under **Settings → System → Host access review**. With it on, an application the reviewer allows becomes active at once; the model's verdict is the only approval. With it off, every allowed application waits for you. Off is the safe setting. See [Host access](host-access.md#approval-modes).

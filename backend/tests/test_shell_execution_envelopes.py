@@ -298,7 +298,7 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
     )
     assert keys_deny in leased
     assert browser_profile_deny in leased
-    assert f'(subpath "{state_root_text}")' not in leased
+    assert f'(deny file-read* file-write* (subpath "{state_root_text}"))' in leased
     # The rest of ~/.corsia stays reachable under a lease; only the token folder closes.
     assert f'(subpath "{(Path.home() / ".corsia").resolve(strict=False)}")' not in leased
     assert (
@@ -360,6 +360,7 @@ def test_leased_execution_profile_contains_only_permanent_invariant_denials(
         "(deny mach-priv-task-port)",
         keys_deny,
         browser_profile_deny,
+        f'(deny file-read* file-write* (subpath "{state_root_text}"))',
         token_folder_deny,
         *credential_pins,
         *(line for line in browser_rules.splitlines() if line.startswith("(deny ")),
@@ -833,7 +834,7 @@ def test_leased_safehouse_effectively_allows_direct_private_key_use(
 
 
 @pytest.mark.integration
-def test_leased_safehouse_denies_the_key_store_but_reads_sibling_state(
+def test_leased_safehouse_denies_key_store_and_sibling_state(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -869,8 +870,14 @@ def test_leased_safehouse_denies_the_key_store_but_reads_sibling_state(
         )
 
     sibling = run(state_root / "sibling.txt")
-    assert sibling.returncode == 0, sibling.stderr
-    assert sibling.stdout == "diagnostic\n"
+    assert sibling.returncode != 0
+    assert "diagnostic" not in sibling.stdout
+    write = subprocess.run(
+        shell_guard.safehouse_argv(f"printf changed > {shlex.quote(str(state_root / 'sibling.txt'))}", cwd, profile, leased=True),
+        capture_output=True, text=True, env=shell_guard.safehouse_subprocess_env("thread-1"), timeout=20,
+    )
+    assert write.returncode != 0
+    assert (state_root / "sibling.txt").read_text(encoding="utf-8") == "diagnostic\n"
     denied = run(state_root / "keys" / "x")
     assert denied.returncode != 0
     assert "stored-secret" not in denied.stdout
