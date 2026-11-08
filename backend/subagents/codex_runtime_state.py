@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core.continuity_accounting import ContinuityAccounting
+from core.turn_core import drive_turn_settlement
 from llm.resolution import Harness
 from infra.context_receipts import (
     ContextReceiptIdentity,
@@ -175,8 +176,6 @@ async def release_and_drive_terminal(ctx, settlement) -> None:
 
 
 async def _drive_released(thread_id: str, settlement, release: asyncio.Task[None] | None) -> None:
-    from core.turn_core import drive_turn_settlement
-
     try:
         await drive_turn_settlement(settlement)
         if release is not None:

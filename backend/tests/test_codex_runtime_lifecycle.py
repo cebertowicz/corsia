@@ -95,7 +95,7 @@ def _applied_terminal_owner(monkeypatch):
         commit_turn_terminal,
     )
     monkeypatch.setattr(
-        codex_runtime_terminal,
+        codex_runtime_state,
         "drive_turn_settlement",
         drive_turn_settlement,
     )
@@ -964,7 +964,7 @@ class TestResultMarkers:
             commit_turn_terminal,
         )
         monkeypatch.setattr(
-            codex_runtime_terminal,
+            codex_runtime_state,
             "drive_turn_settlement",
             drive_turn_settlement,
         )
