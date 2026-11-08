@@ -145,7 +145,7 @@ async def test_protected_read_reaches_lower_gate_then_uses_ordinary_path(
 
 
 @pytest.mark.asyncio
-async def test_state_root_requires_review_but_consumed_permit_can_read(
+async def test_state_root_denial_without_permit(
     tmp_path,
     monkeypatch,
 ):
@@ -175,27 +175,13 @@ async def test_state_root_requires_review_but_consumed_permit_can_read(
         _thread_id="thread-1",
         _thread_project_id="project-1",
     )
-    assert "requires reviewed host access" in ordinary
-
-    async def reviewed(**_kwargs):
-        return SimpleNamespace(resolved_path=target.resolve(strict=False))
-
-    monkeypatch.setattr(
-        host_access_gate,
-        "consume_current_action_permit",
-        reviewed,
-    )
-    elevated = await ReadFileTool(workspace=workspace).execute(
-        path=str(target),
-        _thread_id="thread-1",
-        _thread_project_id="project-1",
-    )
-    assert "reviewed-state" in elevated
+    assert "No host-access lease can open it." in ordinary
+    assert "audit_read" in ordinary
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("write", [False, True])
-@pytest.mark.parametrize("floor", ["keys/values.json", "keys/new.json"])
+@pytest.mark.parametrize("floor", ["keys/values.json", "keys/new.json", "corsia.db", "logs/x.log"])
 async def test_key_store_is_refused_with_a_permit_and_leaves_it_unconsumed(
     floor,
     write,
@@ -250,42 +236,12 @@ async def test_key_store_is_refused_with_a_permit_and_leaves_it_unconsumed(
         gate._current_action_permit.reset(token)
 
     assert "No host-access lease can open it." in result
+    if not floor.startswith("keys/"):
+        assert "audit_read" in result
     assert "private-material" not in result
     assert target.read_text(encoding="utf-8") == "private-material\n"
     assert consumed == []
 
-
-@pytest.mark.asyncio
-async def test_state_root_regression_permit_still_reads_database_file(
-    tmp_path,
-    monkeypatch,
-):
-    from infra import config
-    from tools import host_access_gate
-    from tools.filesystem_rw import ReadFileTool
-
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    state_dir = tmp_path / "state"
-    state_dir.mkdir()
-    target = state_dir / "corsia.db"
-    target.write_text("diagnostic-data\n", encoding="utf-8")
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(config, "WORKSPACE", workspace)
-    monkeypatch.setattr(config, "STATE_ROOT", state_dir)
-    _configure_sandbox(monkeypatch, workspace)
-
-    async def reviewed(**_kwargs):
-        return SimpleNamespace(resolved_path=target.resolve(strict=False))
-
-    monkeypatch.setattr(host_access_gate, "consume_current_action_permit", reviewed)
-    result = await ReadFileTool(workspace=workspace).execute(
-        path=str(target),
-        _thread_id="thread-1",
-        _thread_project_id="project-1",
-    )
-
-    assert "diagnostic-data" in result
 
 
 @pytest.mark.asyncio
@@ -363,21 +319,21 @@ async def test_state_root_lexical_symlink_cannot_bypass_ordinary_review(
         _thread_project_id="project-1",
     )
 
-    assert "requires reviewed host access" in result
+    assert "No host-access lease can open it." in result
 
     composed = await ReadFileTool(workspace=workspace).execute(
         path=str(composed_alias / "notes.txt"),
         _thread_id="thread-1",
         _thread_project_id="project-1",
     )
-    assert "requires reviewed host access" in composed
+    assert "No host-access lease can open it." in composed
 
     dotdot = await ReadFileTool(workspace=workspace).execute(
         path=str(state_alias / ".." / "public" / "notes.txt"),
         _thread_id="thread-1",
         _thread_project_id="project-1",
     )
-    assert "requires reviewed host access" in dotdot
+    assert "No host-access lease can open it." in dotdot
 
 
 @pytest.mark.asyncio

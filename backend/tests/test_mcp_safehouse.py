@@ -293,14 +293,13 @@ def test_mcp_safehouse_path_denial_names_private_state_recovery(monkeypatch):
     monkeypatch.setattr(
         "tools.host_path_policy.current_protected_host_path_policy",
         lambda: SimpleNamespace(
-            denial_guidance_for_paths=lambda _paths: "/state/keys/value — requires reviewed host access",
+            denial_guidance_for_paths=lambda _paths: "/state/keys/value — Stored secrets are closed to every agent route. No host-access lease can open it.",
         ),
     )
 
     assert _mcp_denial_guidance("denied") == (
-        "/state/keys/value — CORSIA private state is blocked for local MCP apps. "
-        "Nothing was returned. Use the app's own working directory or a supported "
-        "non-private integration."
+        "/state/keys/value — Stored secrets are closed to every agent route. "
+        "No host-access lease can open it."
     )
 
 

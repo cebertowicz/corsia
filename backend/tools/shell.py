@@ -443,7 +443,7 @@ class BashTool(Tool):
 
             output_parts, stdout_text, stderr_text = foreground_output_parts(owned)
             combined_output = stdout_text + stderr_text
-            if owned.returncode != 0 and not leased and is_sandbox_denial(
+            if owned.returncode != 0 and is_sandbox_denial(
                 combined_output,
                 lambda: shell_sandbox.available_for_denial(is_safehouse_available),
             ):
@@ -457,13 +457,13 @@ class BashTool(Tool):
                 if not repo_guidance and not chained_guidance:
                     output_parts.append(
                         "\n"
-                        + await run_in_db(lambda: denial_guidance_prefix(combined_output, thread_id, canonical_cwd))
-                        + protected_scope_denial(
+                        + (guidance := await run_in_db(lambda: denial_guidance_prefix(combined_output, thread_id, canonical_cwd)))
+                        + ("" if leased or "No host-access lease can open it." in guidance else protected_scope_denial(
                             ("the sandbox may restrict access to the path" if linux else
                              "this command was blocked by the protected-mode sandbox"),
                             lease_active=await _thread_has_live_lease(thread_id),
                             conditional=linux,
-                        )
+                        ))
                     )
 
             result = "\n".join(output_parts) if output_parts else "(no output)"

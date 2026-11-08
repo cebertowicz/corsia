@@ -24,7 +24,7 @@ Every known limit of CORSIA's security, with what it means for you and what to d
 | Masking doesn't stop commands from using a value ([Secrets](secrets.md)) | `source .env && curl …` uses and can send the real key | Same |
 | An isolated worker on Claude Code reads files without masking ([Untrusted content](untrusted-content.md)) | Credentials in the folders it reads reach the model unmasked | Don't point isolated workers at folders holding keys |
 | Your loaded SSH keys and GitHub CLI login are usable from agent shells ([Agent sandbox](agent-sandbox.md)) | Without an agents' GitHub account, agents can `git push` and call GitHub as you. With one, GitHub pushes and `gh` run as that account, but a command that sets its own SSH command can still use your key | Remove keys from your SSH agent, or set up a separate agents' GitHub account. Agent shells can read that account's token, so give it access only to the repositories agents need |
-| Claude Code and Codex sign-ins sit in CORSIA's state folder ([Secrets](secrets.md#where-keys-live)) | A leased command can read them; only the reviewers, told to block reading auth files, stand in the way | Keep leases short and specific; keep Auto-approve off where that matters |
+| Claude Code and Codex sign-ins sit in CORSIA's state folder ([Secrets](secrets.md#where-keys-live)) | Agent shells and leased commands cannot directly read them; other programs running as your user can | Don't run untrusted programs as the same user |
 
 ## Sending and connected apps
 
