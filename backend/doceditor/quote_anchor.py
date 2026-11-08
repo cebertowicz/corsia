@@ -122,7 +122,7 @@ def reanchor_edited(
     text: str, quote: str, *, from16: int | None, to16: int | None,
     prefix: str | None, suffix: str | None,
 ) -> tuple[int, int] | None:
-    """Recover an edited legacy range when its context and half its quote ends survive.
+    """Recover an edited legacy range when its context and more than half its quote ends survive.
 
     Only the result is known on a legacy document; keeping a flagged comment is
     a safer error than detaching it, so compare non-overlapping ends in code points.
@@ -154,7 +154,7 @@ def reanchor_edited(
     while (trailing < min(len(quote), len(inside)) - leading
            and quote[-trailing - 1] == inside[-trailing - 1]):
         trailing += 1
-    if 2 * (leading + trailing) < len(quote):
+    if 2 * (leading + trailing) <= len(quote):
         return None
     return start16, end16
 

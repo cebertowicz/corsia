@@ -193,7 +193,8 @@ def test_read_orphans_a_contextless_comment_whose_quote_was_deleted(tmp_path, mo
 @pytest.mark.parametrize(
     ("old", "new", "kept"),
     [("quoted source", "quoted NEW source", True), ("source", "sources", True),
-     ("quoted source", "another thing", False), ("quoted source", "quoted thing", True)],
+     ("quoted source", "another thing", False), ("quoted source", "quoted thing", True),
+     ("abcdefgh", "abcdXXXX", False), ("abcdefgh", "abcdeXXX", True)],
 )
 def test_context_bounded_edit_requires_retained_quote_ends(old, new, kept):
     from doceditor import quote_anchor
