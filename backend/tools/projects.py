@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from infra.db_async import run_in_db
+from infra.repo_config_allowlist import repo_config_refusal
 from tools.base import Tool
 
 
@@ -108,6 +110,14 @@ class CreateProjectTool(Tool):
 
         if status not in VALID_PROJECT_STATUSES:
             return f"❌ Invalid status '{status}'. Must be one of: {sorted(VALID_PROJECT_STATUSES)}"
+
+        # An agent attaching a repository at creation hits the same repository-config
+        # check project_repo_register does, and it runs here so nothing executes in
+        # the repository first. The person's path through initialize_project stays
+        # unchecked: those are the person's own repositories.
+        if isinstance(repo_path_str, str) and repo_path_str.strip():
+            if refusal := repo_config_refusal(Path(repo_path_str)):
+                return f"❌ {refusal}"
 
         def _run():
             db = get_db()

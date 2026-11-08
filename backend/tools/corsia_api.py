@@ -17,6 +17,7 @@ from tools.conductor_api_policy import (
     contains_forbidden_fields,
     off_limits_reason,
     refused_body_field,
+    refused_repo_config,
     refused_repo_link,
     registered_routes,
     route_class,
@@ -70,7 +71,11 @@ def _scope(method: str, path: str, query: dict, body: dict | None, *, actor: str
         raise ApiCallError("Protected file paths are off-limits; use the native scoped file tools")
     if contains_forbidden_fields(query) or contains_forbidden_fields(body):
         raise ApiCallError("Credential and host-access fields are off-limits; use the human settings surface")
-    if refusal := refused_body_field(path, method, body) or refused_repo_link(path, method, body):
+    if refusal := (
+        refused_body_field(path, method, body)
+        or refused_repo_link(path, method, body)
+        or refused_repo_config(path, method, body)
+    ):
         raise ApiCallError(refusal)
     # Legacy signatures require a query argument; this literal carries no
     # authentication authority. Only the revocable task-local principal does.

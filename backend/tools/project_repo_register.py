@@ -15,7 +15,11 @@ compensated flow Project settings uses — with two agent-specific restrictions:
 * pin/protection are not agent-settable, so registering can never switch a
   branch in the user's real checkout. The policy defaults (pin to the current
   branch, protect the base checkout) come from the shared procedure, and
-  changing them stays a Project-settings decision.
+  changing them stays a Project-settings decision; and
+* the repository's own Git config must stay inside the registration allowlist,
+  because the backend runs Git in a registered checkout outside the agent
+  sandbox. Adding a repository whose config is wider stays a Project-settings
+  action for the user.
 """
 
 from __future__ import annotations
@@ -62,11 +66,8 @@ class ProjectRepoRegisterTool(Tool):
         from fastapi import HTTPException
 
         from api.project_repos import RepoAdd, register_source_repo
-        from core.registered_repos import format_registered_repo_policy
         from infra.db_async import run_in_db
-        from infra.product_events import emit_product_event
-        from infra.project_repo_policy import RepoPolicy
-
+        from infra.repo_config_allowlist import repo_config_refusal
         thread_id = kwargs.get("_thread_id")
         project_id = kwargs.get("_thread_project_id")
         if not isinstance(thread_id, str) or not thread_id:
@@ -103,6 +104,12 @@ class ProjectRepoRegisterTool(Tool):
         if refusal := (await run_in_db(lambda: fence_for_thread(thread_id))).refusal(target):
             return f"Error: {refusal}"
 
+        # A repository's own Git config can name a program the backend would then
+        # run, so an agent may only attach a checkout inside the allowlist, and
+        # before any Git command runs in it. Project settings stays unchecked.
+        if refusal := repo_config_refusal(target):
+            return f"Error: {refusal}"
+
         body = RepoAdd(mode="link", path=str(target), name=name)
         try:
             repo = await run_in_db(
@@ -113,29 +120,38 @@ class ProjectRepoRegisterTool(Tool):
         except (ValueError, OSError, RuntimeError) as exc:
             return f"Error: {exc}"
 
-        policy = RepoPolicy(
-            project_id=project_id,
-            repo_name=str(repo["name"]),
-            path=Path(str(repo["path"])),
-            pinned_branch=repo.get("pinned_branch"),
-            protect_base_checkout=bool(repo.get("protect_base_checkout")),
-        )
-        emit_product_event(
-            "project_repo",
-            "registered",
-            thread_id=thread_id,
-            properties={
-                "project_id": project_id,
-                "repo_name": policy.repo_name,
-                "repo_path": str(policy.path),
-                "pinned_branch": policy.pinned_branch,
-                "protect_base_checkout": policy.protect_base_checkout,
-            },
-        )
-        return (
-            f"Registered repository '{policy.repo_name}'\n"
-            f"- {format_registered_repo_policy(policy.repo_name, policy)}"
-        )
+        return _registered_reply(project_id, repo, thread_id)
+
+
+def _registered_reply(project_id: str, repo: dict[str, Any], thread_id: str) -> str:
+    """Report one finished registration and record it as a product event."""
+    from core.registered_repos import format_registered_repo_policy
+    from infra.product_events import emit_product_event
+    from infra.project_repo_policy import RepoPolicy
+
+    policy = RepoPolicy(
+        project_id=project_id,
+        repo_name=str(repo["name"]),
+        path=Path(str(repo["path"])),
+        pinned_branch=repo.get("pinned_branch"),
+        protect_base_checkout=bool(repo.get("protect_base_checkout")),
+    )
+    emit_product_event(
+        "project_repo",
+        "registered",
+        thread_id=thread_id,
+        properties={
+            "project_id": project_id,
+            "repo_name": policy.repo_name,
+            "repo_path": str(policy.path),
+            "pinned_branch": policy.pinned_branch,
+            "protect_base_checkout": policy.protect_base_checkout,
+        },
+    )
+    return (
+        f"Registered repository '{policy.repo_name}'\n"
+        f"- {format_registered_repo_policy(policy.repo_name, policy)}"
+    )
 
 
 __all__ = ["ProjectRepoRegisterTool"]
