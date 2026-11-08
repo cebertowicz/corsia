@@ -171,7 +171,7 @@ async def test_mcp_wrapper_rewrites_private_path_denial(monkeypatch):
     monkeypatch.setattr(
         "tools.host_path_policy.current_protected_host_path_policy",
         lambda: SimpleNamespace(
-            denial_guidance_for_paths=lambda _paths: "/state/corsia.db — requires reviewed host access",
+            denial_guidance_for_paths=lambda _paths: "/state/corsia.db — CORSIA runtime state (/state) is blocked. No host-access lease can open it. Use audit_read.",
         ),
     )
 

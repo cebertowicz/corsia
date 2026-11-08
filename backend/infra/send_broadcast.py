@@ -10,7 +10,6 @@ from typing import Any, Callable
 from loguru import logger
 
 from core.installed_context import INSTALLED_SOURCES
-from core.reply_context import REPLY_CONTEXT_KEY
 from core.viewing_context import VIEWING_DOCUMENT_KEY, VIEWING_DOCUMENT_TARGET_KEY
 from infra.database import get_db
 from infra.db_async import run_in_db
@@ -30,8 +29,6 @@ _PRIVATE_METADATA_KEYS = (
     VIEWING_DOCUMENT_KEY,
     VIEWING_DOCUMENT_TARGET_KEY,
     INSTALLED_SOURCES,
-    # The sender's own context for the agent; no client reads it back.
-    REPLY_CONTEXT_KEY,
 )
 
 

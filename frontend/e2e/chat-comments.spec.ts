@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { expect, test, type Page } from './support/test';
-import { chatComposer, createSession, openAppPastLanding, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
+import { chatComposer, createSession, openAppPastLanding, sendButton, sidebarThread, TEST_TOKEN, waitForWsConnected } from './support/corsia';
 import { injectMessage } from './support/mock';
+import { commentEditor, commentEditorClosed, commentPendingOnMessage } from './support/chatComments';
 
 const text = 'First selected phrase. Second selected phrase. Third selected phrase.';
 const quotes = ['First selected phrase', 'Second selected phrase', 'Third selected phrase'];
@@ -98,17 +99,22 @@ for (const size of [1440, 393]) for (const scheme of ['light', 'dark'] as const)
 			for (let index = 0; index < quotes.length; index++) {
 				await select(page, id, quotes[index]);
 				await page.locator('.sel-comment').click();
-				await page.getByPlaceholder('Comment…').fill(notes[index]);
-				await page.getByPlaceholder('Comment…').press('Control+Enter');
+				await commentEditor(page).fill(notes[index]);
+				await commentEditor(page).press('Control+Enter');
+				await commentEditorClosed(page);
+				await commentPendingOnMessage(page.locator(`[data-message-id="${id}"]`), quotes[index]);
 				await expect(page.locator('.comment-chip')).toHaveCount(index + 1);
 			}
 			await page.locator('.comment-chip').first().click();
-			await page.getByPlaceholder('Comment…').fill('Edited first note');
-			await page.getByPlaceholder('Comment…').press('Control+Enter');
+			await commentEditor(page).fill('Edited first note');
+			await commentEditor(page).press('Control+Enter');
+			await commentEditorClosed(page);
 			await expect(page.locator('.comment-chip')).toHaveCount(3);
 			await page.screenshot({ path: path.join(frames, `chips-${size}-${scheme}.png`) });
 			await chatComposer(page).fill('Please address these comments');
-			await chatComposer(page).press('Enter');
+			// On a phone Enter is a newline in the composer, so the send control is what sends there.
+			if (size === 393) await sendButton(page).click();
+			else await chatComposer(page).press('Enter');
 			await expect(page.locator('.sent-comment')).toHaveCount(3);
 			await expect(page.getByText('Edited first note')).toBeVisible();
 			await page.screenshot({ path: path.join(frames, `sent-${size}-${scheme}.png`) });

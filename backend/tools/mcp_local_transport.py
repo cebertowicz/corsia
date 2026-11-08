@@ -74,7 +74,7 @@ def _mcp_denial_guidance(text: str) -> str | None:
     path, separator, message = guidance.partition(" — ")
     if not separator:
         return None
-    if "requires reviewed host access" in message:
+    if message.startswith("CORSIA runtime state ("):
         return (
             f"{path} — CORSIA private state is blocked for local MCP apps. Nothing was returned. "
             "Use the app's own working directory or a supported non-private integration."
