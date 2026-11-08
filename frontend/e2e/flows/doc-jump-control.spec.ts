@@ -972,9 +972,16 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 		await holdDwell(page, true);
 		await expect.poll(() => unreadCountInStore(page, doc.artifactId)).toBe(1);
-		// Put the reader on the thread's own line: a document paints only the lines around the reader, so the way to
-		// stand on it is to read one's way to it, the same scroll a person makes.
-		await page.locator('.cm-line').filter({ hasText: SECTIONS[2].anchor }).first().evaluate((el) => el.scrollIntoView({ block: 'center' }));
+		// Put the reader on the thread's own line. A document paints only the lines around the reader — at 393 that line
+		// is not in the page yet — so reach it the way a reader does: scroll toward it until it is drawn, then stand on it.
+		const unreadLine = page.locator('.cm-line').filter({ hasText: SECTIONS[2].anchor }).first();
+		await page.locator('.doc-main').hover();
+		await expect.poll(async () => {
+			if (await unreadLine.count() > 0) return true;
+			await page.mouse.wheel(0, 500);
+			return false;
+		}, { message: `the document paints the unread line (${SECTIONS[2].anchor})`, timeout: 30_000 }).toBe(true);
+		await unreadLine.evaluate((el) => el.scrollIntoView({ block: 'center' }));
 		// The thread is unread and its own line is inside the pane: this is the control's own absence, not a count that fell,
 		// and nothing can bring it further into view.
 		await expect.poll(async () => (await anchorBox(page, SECTIONS[2].anchor))?.whole === true, { message: `the unread line (${SECTIONS[2].anchor}) sits inside the visible pane` }).toBe(true);
