@@ -23,14 +23,18 @@ export function createJumpRead(root: () => HTMLElement | undefined, threads: () 
 			read = next;
 		};
 		const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(() => { frame = 0; write(docJumpTargets(canvas, threads())); }); };
-		const scroller = canvas.querySelector<HTMLElement>('.cm-scroller');
 		const observer = new MutationObserver(schedule);
 		observer.observe(canvas, { childList: true, subtree: true, attributes: true });
-		scroller?.addEventListener('scroll', schedule, { passive: true });
+		// The element that scrolls is not the same surface twice: the document pans its CodeMirror scroller, the image
+		// viewer pans its own viewport. Naming either class would make this read know who is mounting it, and neither
+		// mount site holds the element to pass in, so listen on the root in the capture phase instead - a scroll on any
+		// descendant reaches it, whoever ends up scrolling. The schedule is one frame deep and answers nothing when the
+		// answer is unchanged, so hearing a scroll that moves no line costs a frame.
+		canvas.addEventListener('scroll', schedule, { capture: true, passive: true });
 		void tick().then(schedule);
 		return () => {
 			observer.disconnect();
-			scroller?.removeEventListener('scroll', schedule);
+			canvas.removeEventListener('scroll', schedule, { capture: true });
 			cancelAnimationFrame(frame);
 		};
 	});

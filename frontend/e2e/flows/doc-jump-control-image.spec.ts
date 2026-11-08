@@ -76,14 +76,63 @@ for (const width of [393, 1440]) {
 			expect(fitted, 'the image is drawn at its fitted size').toBeGreaterThan(1);
 			for (let step = 0; step < 12; step += 1) await page.keyboard.press('+');
 			await expect.poll(async () => await imageWidth() > fitted * 1.5, { message: 'the viewer zoomed past its own size with the keyboard' }).toBe(true);
-			await viewport.evaluate((el) => { el.scrollTop = 0; });
+			// Two pans that actually move the viewport, each with its own correct answer, so a read that only hears the
+			// document's scroller shows up as a failure instead of a coin flip. Between them the leg counts mutations
+			// inside the overlay that are not the band's own row: if the control arrives with nothing else changing,
+			// the pan is what produced it.
 			const offFrame = async () => {
 				const frame = (await viewport.boundingBox())!;
 				const box = await pin.boundingBox();
 				return !box || box.y >= frame.y + frame.height - 1;
 			};
+			const panTo = (target: 'middle' | 'top') => pin.evaluate((el, want) => {
+				const vp = el.closest<HTMLElement>('.viewport') ?? el.closest<HTMLElement>('.image-overlay')?.querySelector<HTMLElement>('.viewport');
+				if (!vp) throw new Error('no image viewport pans this pin');
+				const before = vp.scrollTop;
+				if (want === 'middle') vp.scrollTop = before + (el.getBoundingClientRect().top - vp.getBoundingClientRect().top) - vp.clientHeight / 2;
+				else vp.scrollTop = 0;
+				return { before, after: vp.scrollTop };
+			}, target);
+
+			// Pan so that a pin sits mid-frame: with the unread thread on screen the viewer has nothing to offer.
+			const centred = await panTo('middle');
+			expect(centred.after, 'the pan moved the image viewport').not.toBe(centred.before);
+			await expect(pin).toBeInViewport();
+			await expect(overlay(page).locator('[data-doc-jump]')).toHaveCount(0);
+
+			const mutinies = await page.evaluate(() => {
+				const host = document.querySelector('.image-overlay')!;
+				const store = window as unknown as { __overlayMutations?: { n: number; kinds: string[] } };
+				store.__overlayMutations = { n: 0, kinds: [] };
+				const byBand = (node: Node | null) => {
+					const el = node as HTMLElement | null;
+					return !!el?.closest?.('[data-doc-jump]') || !!el?.closest?.('[data-doc-bottom-band]') || Array.from((el as HTMLElement | null)?.addedNodes ?? []).every((added) => (added as HTMLElement).closest?.('[data-doc-jump]') || (added as HTMLElement).closest?.('[data-doc-bottom-band]'));
+				};
+				new MutationObserver((records) => {
+					for (const record of records) {
+						if (byBand(record.target)) continue;
+						if (record.type === 'attributes') {
+							store.__overlayMutations!.n += 1;
+							if (store.__overlayMutations!.kinds.length < 4) store.__overlayMutations!.kinds.push(`attr:${(record.target as HTMLElement).tagName}.${record.attributeName ?? ''}`);
+							continue;
+						}
+						const nodes = [...Array.from(record.addedNodes), ...Array.from(record.removedNodes)];
+						if (nodes.length && nodes.every((added) => (added as HTMLElement).closest?.('[data-doc-jump]') || (added as HTMLElement).closest?.('[data-doc-bottom-band]'))) continue;
+						store.__overlayMutations!.n += 1;
+						if (store.__overlayMutations!.kinds.length < 4) store.__overlayMutations!.kinds.push(`${record.type}:${(record.target as HTMLElement).tagName ?? ''}`);
+					}
+				}).observe(host, { childList: true, subtree: true, attributes: true });
+				return true;
+			});
+			expect(mutinies).toBe(true);
+
+			// Pan back to the top: the unread pin falls below the frame, and that scroll alone must answer the control.
+			const panned = await panTo('top');
+			expect(panned.after, 'the pan back to the top moved the image viewport').not.toBe(panned.before);
 			await expect.poll(offFrame, { message: 'the unread pin is scrolled out of the image frame' }).toBe(true);
 			await expect(control).toHaveText(/1 new/);
+			const quiet = await page.evaluate(() => (window as unknown as { __overlayMutations?: { n: number; kinds: string[] } }).__overlayMutations);
+			expect(quiet?.n, `the control arrived from the pan alone, unrelated overlay mutations: ${JSON.stringify(quiet?.kinds)}`).toBe(0);
 			await expect(control).toHaveAccessibleName(/1 new, next (above|below): /);
 
 			// Its face is the touch target and it stays clear of the viewer's own controls.
