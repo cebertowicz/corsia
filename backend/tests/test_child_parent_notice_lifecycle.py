@@ -86,6 +86,22 @@ def test_a6_names_close_for_a_step_that_was_only_replaced(db):
     assert "close_node, not fail" in content and "archive" in content
 
 
+def test_a6_a_worker_that_parks_its_last_step_in_later_is_told_to_its_parent(db):
+    """Later is not a return: the parent still waits on the step, so it must hear the stop."""
+    from plans import later_fields
+
+    _step, _plan, node = delegated(db)
+    service.transition_node(node.id, "active", actor_id="worker", db=db)
+    begin_worker_turn(db)
+
+    later_fields.flip(
+        db, node.id, later=True, reason="Not now", actor_id="worker", provenance="test",
+    )
+    end_worker_turn(db)
+
+    assert [str(row["id"]).split(":")[1] for row in wakes(db)] == ["child_stopped_open"]
+
+
 def test_a6_a_rebriefed_worker_that_closes_replaced_steps_is_nobodys_failure(db):
     """#2232 re-brief: the replaced steps close, a new one starts, the parent hears no failure."""
     _step, plan, first = delegated(db)

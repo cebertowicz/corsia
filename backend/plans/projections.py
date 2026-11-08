@@ -184,7 +184,10 @@ def delegated_step(connection, parent_plan_id: str, worker: str):
 #: with live children is never counted itself.
 #: ``{open_only}`` is ``AND n.folded=0`` once the aggregate columns exist (older migration rungs run first).
 #: ``{later_only}`` is the same story for the Later cut (schema 185): work below the
-#: cut is nobody's actionable leaf, so it must not wake the owner every 180 s.
+#: cut is nobody's actionable leaf, so it must not wake the owner every 180 s --
+#: except in a delegated worker's plan, which owes its parent a return: parked
+#: work there is still unfinished (``delegated_work_returned``), so it stays live
+#: and a worker that stops with only Later work left is told to its parent.
 _LIVE_LEAVES_SQL = f"""
     SELECT n.* FROM plan_nodes n
     WHERE n.plan_id=? AND n.archived_at IS NULL{{open_only}}{{later_only}}
@@ -287,7 +290,12 @@ def actionable_leaves(connection, plan, *, executor: str | None = None):
 
     sql = _LIVE_LEAVES_SQL.format(
         open_only=" AND n.folded=0" if aggregates.ready(connection) else "",
-        later_only=" AND n.later=0" if node_states.later_ready(connection) else "",
+        later_only=(
+            " AND n.later=0"
+            if node_states.later_ready(connection)
+            and not live_delegation(connection, plan["owner_id"], plan["parent_plan_id"])
+            else ""
+        ),
     )
     rows = connection.execute(sql, (plan["id"],)).fetchall()
     parent_reviews = delegation_harvest.parent_reviews(connection, plan)
