@@ -1022,21 +1022,27 @@ for (const width of [1440, 393]) {
 		// Replies never become a dock stop: the keyboard reaches the chip, then the phone plan control and composer.
 		await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
 		const chip = page.locator('.attention-dock .reply-chip-notice').getByRole('button');
+		const planChip = page.getByRole('button', { name: /^Open plan/ });
 		await tabTo(page, '.attention-dock .reply-chip-notice button');
 		await expect(chip).toBeFocused();
 		await expect(chip).toContainText('3 new replies · launch-plan.md');
 		await expect(chip).toHaveCSS('outline-style', 'solid');
 		await shot(page, `04b-reply-chip-focus-light-${width}`);
+		// The plan control mounts with the thread's plan snapshot, after the hand-off it sits beside, and Tab can
+		// only reach it once it is in the DOM. Wait on it before the keystroke instead of racing its mount;
+		// measured, a Tab sent before the mount lands on the composer and the assertion reports 'inactive'.
+		if (width === 393) await expect(planChip).toBeVisible();
 		await page.keyboard.press('Tab');
 		if (width === 393) {
-			await expect(page.getByRole('button', { name: /^Open plan/ })).toBeFocused();
+			await expect(planChip).toBeFocused();
 			await page.keyboard.press('Tab');
 		}
 		await expect(chatComposer(page)).toBeFocused();
 		await shot(page, `04c-composer-focus-after-chip-light-${width}`);
 		await page.keyboard.press('Shift+Tab');
 		if (width === 393) {
-			await expect(page.getByRole('button', { name: /^Open plan/ })).toBeFocused();
+			await expect(planChip).toBeVisible();
+			await expect(planChip).toBeFocused();
 			await page.keyboard.press('Shift+Tab');
 		}
 		await expect(chip).toBeFocused();
