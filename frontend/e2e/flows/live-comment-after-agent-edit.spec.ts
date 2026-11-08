@@ -15,7 +15,7 @@ import { readMockCallCount, seedMockResponses } from '../support/mock';
 
 const LOST = 'The text you selected changed or was removed. Select the text again; your draft will carry over.';
 const promoted: string[] = [];
-const commentBox = (page: Page) => page.locator('.composer').filter({ has: page.getByPlaceholder('Comment…') });
+const commentBox = (page: Page) => page.locator('.composer').filter({ has: page.getByPlaceholder('Comment, or @ to tag an agent') });
 
 test.beforeEach(({}, info) => { test.skip(info.project.name === 'chromium-mobile', 'Desktop layout only: the desktop app runs WebKit at 1440.'); });
 test.afterEach(async ({ request }) => {
@@ -71,13 +71,13 @@ for (const item of cases) {
 			const creates = observeCreates(viewer, live.artifactId);
 			await selectLine(viewer, quote);
 			await viewer.locator('.sel-comment').click();
-			await viewer.getByPlaceholder('Comment…').fill(text);
+			await viewer.getByPlaceholder('Comment, or @ to tag an agent').fill(text);
 			if (item.edit) { const [from, to] = item.edit(stamp); await agentEdits(request, viewer, agent, live, from, to); }
 			const anchor = item.anchor(quote);
 			await expect(commentBox(viewer)).not.toContainText(LOST);
 			await expect(submitButton(viewer)).toBeEnabled();
 			await submitButton(viewer).click();
-			await expect(viewer.getByPlaceholder('Comment…')).toHaveCount(0);
+			await expect(viewer.getByPlaceholder('Comment, or @ to tag an agent')).toHaveCount(0);
 			expect(creates).toHaveLength(1);
 			expect(creates[0]).toMatchObject({ body: text, anchor_text: anchor });
 			await expect.poll(() => storedComments(request, live)).toEqual([expect.objectContaining({ body: text, anchor_text: anchor })]);
@@ -96,13 +96,13 @@ test('@surface:live-document @comment-proof a comment posts when the agent edits
 		const held = await holdRequest(viewer, `**/api/artifacts/${live.artifactId}/comments*`);
 		await selectLine(viewer, quote);
 		await viewer.locator('.sel-comment').click();
-		await viewer.getByPlaceholder('Comment…').fill(text);
+		await viewer.getByPlaceholder('Comment, or @ to tag an agent').fill(text);
 		await submitButton(viewer).click();
 		await held.arrived;
 		await agentEdits(request, viewer, agent, live, 'alpha beta', 'ALPHA beta');
 		held.release();
 		const anchor = quote.replace('alpha', 'ALPHA');
-		await expect(viewer.getByPlaceholder('Comment…')).toHaveCount(0);
+		await expect(viewer.getByPlaceholder('Comment, or @ to tag an agent')).toHaveCount(0);
 		await expect(viewer.getByText('The document changed before your comment could be attached.')).toHaveCount(0);
 		await expect.poll(() => storedComments(request, live)).toEqual([expect.objectContaining({ body: text, anchor_text: anchor })]);
 		expect(creates.length).toBeGreaterThanOrEqual(1);
@@ -119,11 +119,11 @@ test('@surface:live-document @comment-proof deleting all of the selected text as
 		const creates = observeCreates(viewer, live.artifactId);
 		await selectLine(viewer, quote);
 		await viewer.locator('.sel-comment').click();
-		await viewer.getByPlaceholder('Comment…').fill(text);
+		await viewer.getByPlaceholder('Comment, or @ to tag an agent').fill(text);
 		await agentEdits(request, viewer, agent, live, quote, 'XYZ');
 		await expect(commentBox(viewer)).toContainText(LOST);
 		await expect(submitButton(viewer)).toBeDisabled();
-		await expect(viewer.getByPlaceholder('Comment…')).toHaveValue(text);
+		await expect(viewer.getByPlaceholder('Comment, or @ to tag an agent')).toHaveValue(text);
 		expect(creates).toHaveLength(0);
 		expect(await storedComments(request, live)).toEqual([]);
 		await viewer.screenshot({ path: testInfo.outputPath(`delete-all-${testInfo.project.name}-1440.png`), animations: 'disabled' });
