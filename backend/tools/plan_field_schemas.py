@@ -105,8 +105,8 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     "later": {
         "type": "boolean",
         "description": (
-            "Not now: never auto-selected; only a date you armed on it wakes you. "
-            "You can still start it; false brings it back."
+            "Not now: never auto-picked; only a date you armed wakes you. "
+            "Startable; false brings it back."
         ),
     },
     "reason": {
