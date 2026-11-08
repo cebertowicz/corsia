@@ -113,6 +113,7 @@ export function scrollToRange(view: EditorView, from: number, _to: number, origi
 				key: widget,
 				read: (current) => ({ box: widget.box(current), ...visibleRegion(current) }),
 				write: ({ box, band, scroller }, current) => {
+					if (done) return;
 					widget.reveal(current);
 					if (box) scroller.scrollTop += box.top - (quote ? band.top + QUOTE_MARGIN : (band.top + band.bottom - (box.bottom - box.top)) / 2);
 				},

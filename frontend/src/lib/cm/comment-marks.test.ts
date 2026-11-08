@@ -2,6 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { MAX_SCROLL_PASSES, scrollToRange } from './comment-marks';
+import { widgetTarget } from './widget-scroll';
+
+vi.mock('./widget-scroll', () => ({ widgetTarget: vi.fn(() => null) }));
+// The reading place is the editor's own; these stand-in editors have no line blocks to take it from.
+vi.mock('$lib/documentReadingPlace', () => ({ releasePlace: vi.fn() }));
 
 type MeasureRequest = NonNullable<Parameters<EditorView['requestMeasure']>[0]>;
 
@@ -211,6 +216,20 @@ describe('a jump whose frame moves after it lands', () => {
 		settle();
 
 		expect(view.dispatch).toHaveBeenCalledTimes(1);
+	});
+
+	it('never moves the reader from a table row placement queued before the reader jumped elsewhere', () => {
+		watching();
+		const widget = { start: 440, box: () => ({ top: 1400, bottom: 1420 }) as DOMRect, reveal: vi.fn() };
+		vi.mocked(widgetTarget).mockReturnValueOnce(widget);
+		const { view, settle } = editorWithTarget((jumps) => jumps >= 1);
+
+		scrollToRange(view, 450, 454);
+		scrollToRange(view, 900, 904);
+		settle();
+
+		expect(widget.reveal).not.toHaveBeenCalled();
+		expect(view.scrollDOM.scrollTop).toBe(0);
 	});
 
 	it('retires the watch of the jump the reader replaced', () => {
