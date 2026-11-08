@@ -69,7 +69,7 @@ def _operation_schema(
     required_fields: dict[str, set[str]],
     field_schemas: dict[str, dict[str, Any]],
     *,
-    patch_operation: str,
+    patch_operation: str | None,
     operation_preamble: str,
 ) -> dict[str, Any]:
     """Publish exact per-operation constraints without repeating field schemas."""
@@ -155,7 +155,12 @@ def update_schema(operations: Iterable[str]) -> dict[str, Any]:
         public.OPERATION_FIELDS,
         required_fields,
         MUTATION_FIELD_SCHEMAS,
-        patch_operation="edit",
+        # No minimum: `edit` now has two bodies, and the smaller one
+        # (`{"node_ids": [...], "later": true}`) is two keys. A change that names
+        # nothing is refused by `plans.boundary_fields.edit_fields`, in the same
+        # words for either body, which is where the rule belongs now that a key
+        # count cannot tell the two apart.
+        patch_operation=None,
         operation_preamble=_UPDATE_OPERATION_PREAMBLE,
     )
 

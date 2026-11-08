@@ -49,7 +49,7 @@ def _now() -> str:
 #: Columns a caller may set with the revision bump (named by code, never input).
 _TOUCH_COLUMNS = frozenset({
     "state", "order_key", "title", "description", "intent", "intent_node_id", "acceptance_criteria",
-    "watchdog_budget_seconds", "requirements_revision", "archived_at", "size",
+    "watchdog_budget_seconds", "requirements_revision", "archived_at", "size", "parent_id",
     "commitment_id", "spawned_thread_id", "spawn_kind", "sent_back", "later",
 })
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import plans.bulk_fields as bulk_fields
 import plans.service as service
 from plans import later_fields
 from plans.size_fields import require_task_size, validate_size
@@ -63,17 +64,9 @@ OPERATION_FIELDS = {
     "resume": {"expected_revision"},
     "insert": _CREATE | {"before_node_id"},
     "edit": {
-        "node_id",
-        "title",
-        "description",
-        "acceptance_criteria",
-        "intent",
-        "watchdog_budget_seconds",
-        "difficulty_rerated",
-        "size",
-        "later",
-        "reason",
-        "expected_revision",
+        "node_id", "node_ids", "parent_id", "title", "description",
+        "acceptance_criteria", "intent", "watchdog_budget_seconds",
+        "difficulty_rerated", "size", "later", "reason", "expected_revision",
     },
     "split": {
         "node_id",
@@ -99,7 +92,7 @@ OPERATION_FIELDS = {
         "expected_revision",
     },
     "archive_node": {"node_id", "node_ids", "expected_revision"} | _NEXT,
-    "close_node": {"node_id", "reason", "expected_revision"} | _NEXT,
+    "close_node": {"node_id", "node_ids", "reason", "expected_revision"} | _NEXT,
     # The user supplies no evidence: user_settle records their one-tap verdict.
     # The agent schema makes evidence required (tools.plan_schemas).
     "mark_done": {"node_id", "evidence", "verification_result", "expected_revision"} | _NEXT,
@@ -161,7 +154,9 @@ OPERATION_REQUIRED_FIELDS = {
     "pause": {"expected_revision"},
     "resume": {"expected_revision"},
     "insert": {"title", "acceptance_criteria"},
-    "edit": {"node_id", "expected_revision"},
+    # Two valid bodies, which one required set cannot express: one node with its
+    # revision, or ``node_ids`` alone (``plans.bulk_fields`` enforces both bodies).
+    "edit": set(),
     "split": {"node_id", "title", "acceptance_criteria", "size", "expected_revision"},
     "reorder": {"node_id", "order_key", "expected_revision"},
     "add_dependency": {"node_id", "depends_on_node_id", "expected_revision"},
@@ -173,7 +168,7 @@ OPERATION_REQUIRED_FIELDS = {
     # its revision, or ``node_ids`` alone. ``_validate_archive_target`` is the
     # enforcement and ``plan_operation_docs`` publishes the choice.
     "archive_node": set(),
-    "close_node": {"node_id", "reason", "expected_revision"},
+    "close_node": set(),
     "mark_done": {"node_id", "expected_revision"},
     "activate": {"node_id", "expected_revision"},
     "start": {"node_id", "expected_revision"},
@@ -209,9 +204,9 @@ OPERATION_REQUIRED_FIELDS = {
 }
 
 
-#: How many nodes one bulk archive may retire. A cleanup pass is bounded so a
-#: single call cannot walk an unbounded plan inside one transaction.
-MAX_ARCHIVE_NODES = 200
+#: How many nodes one bulk call may change, whichever verb it uses: a cleanup
+#: pass is bounded so a single call cannot walk an unbounded plan in one transaction.
+MAX_ARCHIVE_NODES = bulk_fields.MAX_BULK_NODES
 
 _ARCHIVE_TARGET = (
     "archive_node requires node_id with its expected_revision, or node_ids to "
@@ -249,6 +244,10 @@ def validate_operation_params(operation: str, params: dict) -> None:
         return
     if operation == "archive_node":
         _validate_archive_target(params)
+        return
+    if bulk_fields.is_bulk(params) and operation in bulk_fields.BULK_OPERATIONS:
+        # The many-node body: no single node here has a revision to name.
+        bulk_fields.validate_bulk(params, operation)
         return
     _require_revision(params)
 
@@ -357,6 +356,8 @@ def edit_fields(params: dict[str, Any]) -> dict[str, Any]:
         )
         if key in params
     }
+    if "parent_id" in params:
+        fields["parent_id"] = bulk_fields.reparent_target(params)
     if "size" in params:
         fields["size"] = validate_size(params["size"])
     if "later" in params:

@@ -43,23 +43,31 @@ _OPERATION_NOTES = {
 _ALTERNATE_SHAPES = {
     "add": "title, acceptance_criteria; task size, intent",
     "insert": "title, acceptance_criteria; task size, intent",
-    "archive_node": "node_id, expected_revision for one node; or node_ids alone for many",
+    "archive_node": "one: node_id, expected_revision; many: node_ids",
+    "edit": "one: node_id, expected_revision + the change; many: node_ids,"
+            " later/parent_id",
+    "close_node": "one: node_id, expected_revision, reason; many: node_ids, reason",
 }
 
 #: Keys most operations need. Stated once, so each line lists only its extras.
 _COMMON_KEYS = frozenset({"node_id", "expected_revision"})
 
-PARAMS_DESCRIPTION = "Operation arguments go here, expected_revision included."
+PARAMS_DESCRIPTION = "Operation arguments go here."
 
 
 def _shape(operation: str, required: set[str]) -> str:
     """Return one operation's required keys, relative to the common pair."""
     alternate = _ALTERNATE_SHAPES.get(operation)
+    note = _OPERATION_NOTES.get(operation)
     if alternate:
-        return alternate
+        # A verb with two bodies still carries its note: which choice it is stays
+        # beside its shape, where the agent is already reading it.
+        return alternate + (f" ({note})" if note else "")
     if _COMMON_KEYS <= required:
         extras = sorted(required - _COMMON_KEYS)
-        text = "+ " + ", ".join(extras) if extras else "node_id, expected_revision"
+        # "+" is defined by the header line, so a verb that adds nothing says so
+        # instead of repeating the pair it shares with most of the vocabulary.
+        text = "+ " + ", ".join(extras) if extras else "+ none"
     else:
         text = ", ".join(sorted(required))
     note = _OPERATION_NOTES.get(operation)

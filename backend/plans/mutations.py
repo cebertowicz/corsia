@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from plans import aggregates, errors, intent_creation, later_fields, service, writer_context
+from plans import aggregates, errors, intent_creation, later_fields, regroup, service, writer_context
 from plans.models import PlanNode
 
 _UNSET = object()
@@ -122,13 +122,16 @@ def edit_node(
     watchdog_budget_seconds: int | None | object = _UNSET,
     difficulty_rerated: dict[str, str] | None = None,
     size: str | None | object = _UNSET, later: bool | object = _UNSET, reason: str | None = None,
+    parent_id: str | None | object = _UNSET,
     expected_revision: int | None = None,
     actor_id: str | None = None,
     provenance: str = "plan_mutation",
     db=None,
 ) -> PlanNode:
-    """Amend durable node intent without replacing its stable identity."""
-    if all(value is None for value in (title, description, acceptance_criteria, difficulty_rerated)) and intent is _UNSET and watchdog_budget_seconds is _UNSET and size is _UNSET and later is _UNSET:
+    """Amend durable node intent, or re-hang the node under another branch, in one write."""
+    given: list[object] = [v for v in (title, description, acceptance_criteria, difficulty_rerated) if v is not None]
+    given += [v for v in (intent, watchdog_budget_seconds, size, later, parent_id) if v is not _UNSET]
+    if not given:
         raise service.PlanInputError("edit requires at least one changed field")
     if size is not _UNSET:
         from plans.size_fields import validate_size
@@ -141,6 +144,7 @@ def edit_node(
 
             raise service.PlanInputError(TASK_SIZE_REQUIRED)
         _assert_revision(node, expected_revision)
+        moved = regroup.plan(connection, node, parent_id) if parent_id is not _UNSET else None
         if later is not _UNSET:
             later_fields.validate_carries_later(node["kind"])
         if node["assignee"] == "user" and description is not None:
@@ -155,29 +159,25 @@ def edit_node(
         )
         size_changed = next_size != node["size"]
         crosses = later is not _UNSET and bool(later) != bool(node["later"])
-        if not restated and difficulty_rerated is None and not size_changed and not crosses:
+        if not (restated or size_changed or crosses or moved) and difficulty_rerated is None:
             return service._node_from_row(connection, node)
         requirements_changed = (
             next_dod != node["acceptance_criteria"] or next_intent != node["intent"]
         )
+        # One write however many fields change, so one revision bump: touch_node is
+        # its only writer. A restated intent outranks a regroup's re-derivation.
+        columns = {**(moved.columns if moved else {}),
+                   **({"size": next_size} if size_changed else {}),
+                   **({"later": int(bool(later))} if crosses else {})}
         if restated:
-            service.touch_node(
-                connection, node_id, title=next_title, description=next_description, intent=next_intent,
-                acceptance_criteria=next_dod, watchdog_budget_seconds=next_watchdog,
-                requirements_revision=node["requirements_revision"] + int(requirements_changed),
-                # Editing the intent of a node that inherits one makes the node its own owner.
-                **({"intent_node_id": None} if intent is not _UNSET and node["intent_node_id"] else {}),
-                **({"size": next_size} if size_changed else {}),
-                **({"later": int(bool(later))} if crosses else {}),
-            )
-        else:
-            # Re-rating and size declaration preserve requirements and selection.
-            service.touch_node(
-                connection, node_id,
-                requirements_revision=node["requirements_revision"] + int(requirements_changed),
-                **({"size": next_size} if size_changed else {}),
-                **({"later": int(bool(later))} if crosses else {}),
-            )
+            columns.update(title=next_title, description=next_description, intent=next_intent,
+                           acceptance_criteria=next_dod, watchdog_budget_seconds=next_watchdog,
+                           # A node given its own intent stops inheriting one.
+                           **({"intent_node_id": None} if intent is not _UNSET
+                              and node["intent_node_id"] else {}))
+        revision = node["requirements_revision"] + int(requirements_changed)
+        service.touch_node(connection, node_id, requirements_revision=revision, **columns)
+        regroup.finish(connection, node, moved, actor_id=actor_id, provenance=provenance)
         updated = service._node_row(connection, node_id)
         if requirements_changed:
             from plans import admission, plan_wake

@@ -289,22 +289,50 @@ def test_allowed_sites_are_all_still_present_and_typed() -> None:
 
 
 def test_no_runtime_delete_replace_or_parent_rewrite() -> None:
-    """N3: nothing deletes or replaces a node row, and nothing rewrites its parent or plan."""
+    """N3: nothing deletes or replaces a node row, and only the one writer re-hangs one.
+
+    A node's parent used to be immutable after creation, so this pin could simply
+    forbid the write. A regroup (design §4) made the move an operation, which moves
+    the invariant rather than weakening it: the parent may change only through
+    ``touch_node``, the single UPDATE that also bumps the revision, and only from
+    ``plans.regroup`` -- which re-derives the branch it left and the branch it
+    joined in the same call (``plans.aggregates_move``). That half is proved by
+    behaviour, in ``tests/test_plan_regroup.py``, where every move ends with
+    ``aggregates_recount.stored_mismatches`` empty; a move written anywhere else
+    would carry no recount and drift the counts, which is what the recount assertion
+    would then catch. ``plan_id`` stays unwritten: a regroup re-hangs a node inside
+    its own plan.
+    """
     writes, _scripts = _scan()
     plan_writes = [w for w in writes if w.target == "plan_nodes"]
     assert not [w for w in plan_writes if w.verb in {"DELETE", "REPLACE"}]
+    # No literal SQL in the runtime writes a parent or a plan: the only column
+    # list that can carry them is ``_TOUCH_COLUMNS``, checked just below.
     assert not [w for w in plan_writes if {"parent_id", "plan_id"} & set(w.columns)]
-    from plans import service
+    from plans import aggregates, service
 
-    assert not {"parent_id", "plan_id"} & set(service._TOUCH_COLUMNS)
-    # touch_node's reachable aggregate-input columns, as r3 section 4 lists them.
-    assert AGGREGATE_COLUMNS & set(service._TOUCH_COLUMNS) == {
-        "state", "archived_at", "spawned_thread_id", "sent_back",
+    # The one column list a caller can reach the UPDATE with. ``parent_id`` joins
+    # it because a regroup re-hangs a task through the same write that restates
+    # its title; ``plan_id`` never does, so a task can never leave its plan.
+    assert "parent_id" in service._TOUCH_COLUMNS
+    assert "plan_id" not in service._TOUCH_COLUMNS
+    # And the move is deliberately invisible to the ordinary aggregate hook:
+    # ``apply`` measures the moved row against its own old figures, which a move
+    # leaves untouched, so it would push nothing and leave both branches wrong.
+    # ``plans.aggregates_move`` re-derives them instead, in the same call.
+    assert "parent_id" not in aggregates.INPUT_COLUMNS
+    # touch_node's reachable aggregate-input columns, as r3 section 4 lists them,
+    # plus the parent a regroup now moves through the same write.
+    reachable = AGGREGATE_COLUMNS & set(service._TOUCH_COLUMNS)
+    assert reachable == {
+        "state", "archived_at", "spawned_thread_id", "sent_back", "parent_id",
     }
     from plans import aggregates
 
-    # The hook runs on exactly the touch_node columns that are aggregate inputs.
-    assert aggregates.INPUT_COLUMNS == AGGREGATE_COLUMNS & set(service._TOUCH_COLUMNS)
+    # The hook runs on exactly those inputs except the parent: a move leaves the
+    # moved row's own figures untouched, so the hook would see no change and push
+    # nothing. ``plans.aggregates_move`` re-derives both branches instead.
+    assert aggregates.INPUT_COLUMNS == reachable - {"parent_id"}
 
 
 def test_indirect_writers_never_name_the_plan_table() -> None:

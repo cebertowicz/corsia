@@ -60,6 +60,36 @@ def _negative_order_key(db, scene):
     )
 
 
+def _regroup_into_own_branch(depth: int):
+    """Move a branch inside itself, `depth` levels down from it.
+
+    Depth one is the direct child; depth two proves the walk up the tree, not one
+    comparison against the node's own id.
+    """
+
+    def build(db, scene):
+        outer = service.add_node(
+            scene.plan_id, kind="phase", title="Outer", acceptance_criteria="O",
+            intent="Hold the branch.", db=db,
+        )
+        parent = outer
+        for index in range(depth):
+            parent = service.add_node(
+                scene.plan_id, kind="phase", title=f"Level {index}",
+                acceptance_criteria="L", intent="Hold the branch.",
+                parent_id=parent.id, db=db,
+            )
+        db.commit()
+        return partial(
+            _mutate, db, scene.plan_id, "edit", {
+                "node_id": outer.id, "expected_revision": _revision(db, outer.id),
+                "parent_id": parent.id,
+            }, _mid(),
+        )
+
+    return build
+
+
 def _size_before_migration(db, scene):
     """A pre-v51 plan-node table cannot persist a declared size yet."""
     db.execute("DROP INDEX idx_plan_nodes_workflow_ref")
@@ -635,6 +665,32 @@ _CASES = {
     ("mutations.py", "TASK_SIZE_REQUIRED"): _operation(
         "edit", {"node_id": NODE, "expected_revision": REV, "size": None},
     ),
+    # --- plans/regroup.py ---
+    ("regroup.py", "SELF_PARENT"): _operation(
+        "edit", {"node_id": NODE, "expected_revision": REV, "parent_id": NODE},
+    ),
+    ("regroup.py", "NOT_IN_PLAN"): _operation(
+        # The same rule for a node that was never in this plan as for one in
+        # another: a regroup cannot move a task to a branch it cannot see.
+        "edit", {"node_id": NODE, "expected_revision": REV, "parent_id": "no-such-node"},
+    ),
+    ("regroup.py", "UNDER_TASK"): _operation(
+        "edit", {"node_id": NODE, "expected_revision": REV, "parent_id": OWN},
+    ),
+    ("regroup.py", 'CYCLE.format(title=node["title"], parent=parent["title"])'):
+        _regroup_into_own_branch(2),
+    # --- plans/bulk_fields.py ---
+    ("bulk_fields.py", "_alone(operation, extras)"): _operation(
+        "edit", {"node_ids": [OWN], "node_id": NODE, "later": True},
+    ),
+    ("bulk_fields.py", "_IDS"): _operation("edit", {"node_ids": [], "later": True}),
+    ("bulk_fields.py", "_NEEDS[operation]"): _operation(
+        # Naming ids is not a change. The bulk close's own version of this site
+        # asks for its reason; both are the one raise, reached here by `edit`.
+        "edit", {"node_ids": [OWN]},
+    ),
+    ("bulk_fields.py", '"parent_id must be a node id, or null to move to top level"'):
+        _operation("edit", {"node_id": OWN, "expected_revision": REV, "parent_id": 47}),
     # --- plans/user_ask.py ---
     ("user_ask.py", "DECISION_HOLDS"): _user_block_on_open_decision,
     (

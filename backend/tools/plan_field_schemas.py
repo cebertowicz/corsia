@@ -51,7 +51,9 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
     },
     "parent_id": {
         **NULLABLE_TEXT,
-        "description": "Optional parent node id in this plan.",
+        "description": (
+            "Optional parent node id in this plan; null for top level."
+        ),
     },
     "description": {
         **NULLABLE_TEXT,
@@ -152,9 +154,7 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
         "maxItems": public.MAX_ARCHIVE_NODES,
         "uniqueItems": True,
         "items": TEXT,
-        "description": (
-            "archive_node: several node ids at once."
-        ),
+        "description": "Several node ids at once.",
     },
     "expected_revision": {**_NODE_REVISION, "description": (
         "The target node revision from plan_read; for pause or resume, the plan revision."
@@ -187,7 +187,11 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
             "additionalProperties": False,
             "properties": {
                 "node_id": TEXT,
-                "expected_revision": _NODE_REVISION,
+                # Its own words: these are the other nodes a correction waits on,
+                # not the one its call targets.
+                "expected_revision": {
+                    **_NODE_REVISION, "description": "That node's revision.",
+                },
             },
             "required": ["node_id", "expected_revision"],
         },

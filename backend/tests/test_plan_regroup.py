@@ -22,6 +22,7 @@ import json
 
 import pytest
 
+import plans.dependencies as dependencies
 from plans import service, writer_context
 from plans.aggregates_recount import stored_mismatches
 from plans.boundary import PlanActor
@@ -35,11 +36,27 @@ BRANCH_INTENT = "Deliver the branch."
 TASK_DOD = "Verified by the owner"
 
 
-def _phase(db, plan_id: str, title: str = "Branch", *, intent: str | None = BRANCH_INTENT):
+def _phase(db, plan_id: str, title: str = "Branch", *, intent: str | None = BRANCH_INTENT,
+           parent_id: str | None = None):
     return service.add_node(
         plan_id, kind="phase", title=title, acceptance_criteria=f"{title} is verified",
-        intent=intent, db=db,
+        intent=intent, parent_id=parent_id, db=db,
     )
+
+
+def _accepted(db, node_id: str) -> None:
+    """Settle a task the way its owner does, so its branch counts it as done.
+
+    ``accepted`` needs review evidence for the current requirements, so the scene
+    settles through the real Mark done rather than forcing the transition.
+    """
+    plan = row(db, node_id)["plan_id"]
+    service.transition_node(node_id, "active", db=db)
+    db.commit()
+    plan_update(db, plan, "mark_done", {
+        "node_id": node_id, "expected_revision": revision(db, node_id),
+        "evidence": "Verified by the owner in the scene",
+    })
 
 
 def _node(db, plan_id: str, title: str, *, parent_id: str | None = None, **kwargs):
@@ -126,7 +143,8 @@ def test_reparent_between_branches_leaves_the_rest_of_the_node_alone(db):
     second = _phase(db, plan.id, "Second")
     task = _node(db, plan.id, "Task", parent_id=first.id, later=True)
     obligation = row(db, task.id)["commitment_id"]
-    dependency = _node(db, plan.id, "Prerequisite")
+    prerequisite = _node(db, plan.id, "Prerequisite")
+    dependencies.add_dependency(task.id, prerequisite.id, db=db)
     service._event(
         db, task.id, "node_later", actor_id=None, provenance="test",
         payload={"later": True, "reason": "after launch"},
@@ -143,7 +161,10 @@ def test_reparent_between_branches_leaves_the_rest_of_the_node_alone(db):
     assert db.execute(
         "SELECT 1 FROM plan_node_events WHERE node_id=? AND event='node_later'", (task.id,),
     ).fetchone() is not None
-    assert dependency["id"]
+    assert db.execute(
+        "SELECT 1 FROM plan_node_dependencies WHERE node_id=? AND depends_on_node_id=?",
+        (task.id, prerequisite.id),
+    ).fetchone() is not None
 
 
 # --- the refusals -----------------------------------------------------------
@@ -152,7 +173,7 @@ def test_reparent_between_branches_leaves_the_rest_of_the_node_alone(db):
 def test_reparent_into_its_own_branch_is_refused(db):
     plan = owner_plan(db)
     branch = _phase(db, plan.id, "Outcomes")
-    child = _node(db, plan.id, "Step", parent_id=branch.id)
+    child = _phase(db, plan.id, "Step", parent_id=branch.id)
 
     with pytest.raises(service.PlanError) as refused:
         _move(db, plan.id, branch.id, child.id)
@@ -165,16 +186,13 @@ def test_reparent_into_its_own_branch_is_refused(db):
 def test_reparent_two_levels_down_into_itself_is_refused(db):
     plan = owner_plan(db)
     outer = _phase(db, plan.id, "Outer")
-    inner = service.add_node(
-        plan.id, kind="phase", title="Inner", acceptance_criteria="Verified",
-        parent_id=outer.id, intent=BRANCH_INTENT, db=db,
-    )
-    leaf = _node(db, plan.id, "Leaf", parent_id=inner.id)
+    inner = _phase(db, plan.id, "Inner", parent_id=outer.id)
+    deep = _phase(db, plan.id, "Deep", parent_id=inner.id)
 
     with pytest.raises(service.PlanError) as refused:
-        _move(db, plan.id, outer.id, leaf.id)
+        _move(db, plan.id, outer.id, deep.id)
 
-    assert "Outer can't move inside its own branch (Leaf is beneath it)." in str(refused.value)
+    assert "Outer can't move inside its own branch (Deep is beneath it)." in str(refused.value)
     assert row(db, outer.id)["parent_id"] is None
 
 
@@ -229,8 +247,7 @@ def test_reparent_into_a_finished_branch_is_refused(db):
     plan = owner_plan(db)
     branch = _phase(db, plan.id, "Done branch")
     done = _node(db, plan.id, "Finished", parent_id=branch.id)
-    service.transition_node(done.id, "accepted", verification_result="passed",
-                            verified_by="user", db=db)
+    _accepted(db, done.id)
     db.commit()
     task = _node(db, plan.id, "Task")
 
@@ -298,7 +315,9 @@ def test_reparent_to_top_level_hands_the_figures_to_the_plan(db):
 
     after = db.execute("SELECT top_open, top_roots FROM plans WHERE id=?", (plan.id,)).fetchone()
     assert stored_mismatches(db, plan.id) == []
-    assert after["top_open"] == before["top_open"]
+    # The move put an open task on the top level, so the plan gained a root and an
+    # open one: the figures the branch used to carry are now the plan's.
+    assert after["top_open"] == before["top_open"] + 1
     assert after["top_roots"] == before["top_roots"] + 1
 
 
@@ -332,8 +351,7 @@ def test_reparent_a_settled_task_moves_its_done_figure_between_branches(db):
     left = _phase(db, plan.id, "Left")
     right = _phase(db, plan.id, "Right")
     done = _node(db, plan.id, "Done", parent_id=left.id)
-    service.transition_node(done.id, "accepted", verification_result="passed",
-                            verified_by="user", db=db)
+    _accepted(db, done.id)
     db.commit()
     assert row(db, left.id)["prop_done"] == 1
 
