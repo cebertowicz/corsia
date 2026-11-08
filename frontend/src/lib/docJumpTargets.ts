@@ -43,6 +43,10 @@ function landingsById(root: ParentNode): Map<string, Landing> {
 		else if (current.view === landing.view) current.elements.push(landing.elements[0]);
 	};
 	for (const el of root.querySelectorAll<HTMLElement>('[data-comment-ids], [data-margin-card], [data-region-tag][data-comment-id]')) {
+		// An image opened over the document is its own surface, not the text: the same comment is drawn there too, and
+		// reading that copy would say the thread is on screen in the document while the reader is looking at the image.
+		// Only what the document itself paints decides whether the band has somewhere to take the reader.
+		if (el.closest('.image-overlay')) continue;
 		if (el.dataset.marginCard) {
 			if (el.matches('.margin-card.placed:not(.under)') && !el.closest('.margin-stack.behind')) put(el.dataset.marginCard, { elements: [el], view: 'column' });
 			continue;
