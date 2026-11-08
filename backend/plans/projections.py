@@ -184,10 +184,8 @@ def delegated_step(connection, parent_plan_id: str, worker: str):
 #: with live children is never counted itself.
 #: ``{open_only}`` is ``AND n.folded=0`` once the aggregate columns exist (older migration rungs run first).
 #: ``{later_only}`` is the same story for the Later cut (schema 185): work below the
-#: cut is nobody's actionable leaf, so it must not wake the owner every 180 s --
-#: except in a delegated worker's plan, which owes its parent a return: parked
-#: work there is still unfinished (``delegated_work_returned``), so it stays live
-#: and a worker that stops with only Later work left is told to its parent.
+#: cut is nobody's actionable leaf, so it never wakes its owner (``later_leaves``
+#: reads the other side of the cut).
 _LIVE_LEAVES_SQL = f"""
     SELECT n.* FROM plan_nodes n
     WHERE n.plan_id=? AND n.archived_at IS NULL{{open_only}}{{later_only}}
@@ -290,12 +288,7 @@ def actionable_leaves(connection, plan, *, executor: str | None = None):
 
     sql = _LIVE_LEAVES_SQL.format(
         open_only=" AND n.folded=0" if aggregates.ready(connection) else "",
-        later_only=(
-            " AND n.later=0"
-            if node_states.later_ready(connection)
-            and not live_delegation(connection, plan["owner_id"], plan["parent_plan_id"])
-            else ""
-        ),
+        later_only=" AND n.later=0" if node_states.later_ready(connection) else "",
     )
     rows = connection.execute(sql, (plan["id"],)).fetchall()
     parent_reviews = delegation_harvest.parent_reviews(connection, plan)
@@ -314,6 +307,28 @@ def actionable_leaves(connection, plan, *, executor: str | None = None):
         if _is_actionable(row, projected[str(row["id"])], parent_reviews=parent_reviews)
     ]
     return actionable, projected
+
+
+def later_leaves(connection, thread_id: str) -> list:
+    """Return the open leaf work below the cut in this thread's active plan.
+
+    Nobody's actionable work, so no liveness wake counts it, yet it is
+    unfinished: a delegated worker that stops with only this left has not
+    returned, and its parent must hear the stop.
+    """
+    if not node_states.later_ready(connection):
+        return []
+    plan = connection.execute(
+        "SELECT id FROM plans WHERE owner_kind='thread' AND owner_id=? AND state='active'",
+        (thread_id,),
+    ).fetchone()
+    if plan is None:
+        return []
+    sql = _LIVE_LEAVES_SQL.format(
+        open_only=" AND n.folded=0" if aggregates.ready(connection) else "",
+        later_only=" AND n.later=1",
+    )
+    return connection.execute(sql, (plan["id"],)).fetchall()
 
 
 def liveness_signal(thread_id: str, *, db=None) -> PlanLivenessSignal:
