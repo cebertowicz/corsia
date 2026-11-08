@@ -22,7 +22,7 @@ from loguru import logger
 from infra.backend_git import GIT_CONFIG_ARGS
 from infra.guidance_cas import stale_result
 from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir, read_regular, write_bytes as _write_bytes
-from infra.guidance_index_sync import index_lock_fault, recovery_args, startup_candidates
+from infra.guidance_index_sync import consume_records, index_lock_fault, record_failure
 from infra.guidance_messages import (
     REASON_PREFIX, SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_UNRECORDED, UNRECORDED_REASON,
     commit_message, is_person_author, recorded_reason,
@@ -126,35 +126,22 @@ def _changed(repo: Path, specs: list[str]) -> list[str]:
     return [record[3:] for record in out.split("\0") if record]
 
 
-def _repair(repo: Path, rels: list[str], fault: str = "") -> tuple[list[str], list[str]]:
-    repaired, notes = [], []
-    fault = (fault or index_lock_fault(_git, repo)) if rels else ""
-    for rel in rels:
-        try:
-            if fault:
-                notes.append(f"Guidance index repair skipped {rel}: {fault}")
-                continue
-            repair, reason = recovery_args(_git, repo, rel)
-            if repair:
-                _git(repo, "update-index", *repair[0])
-                repaired.append(f"{rel} (old staged blob: {repair[1] or 'absent'})")
-            elif reason:
-                notes.append(f"Guidance index repair skipped {rel}: {reason}.")
-        except Exception as exc:  # a repair fault must not fail a landed save
-            notes.append(f"Guidance index repair failed for {rel}: {exc}.")
-    for note in notes:
+def _repair(repo: Path) -> tuple[list[str], list[str]]:
+    try:
+        return consume_records(_git, repo)
+    except Exception as exc:  # a repair fault must not fail a landed save
+        note = f"Guidance index repair failed: {exc}."
         logger.warning("{}", note)
-    return repaired, notes
+        return [], [note]
 
 
-def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: str, *, repair_paths: list[str] | None = None, repair_unchanged: bool = True) -> _Commit | None:
+def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: str, *, repair_unchanged: bool = True) -> _Commit | None:
     """Commit exactly ``files`` on HEAD, or return recovery results for an unchanged tree.
     One retry is safe: every failure precedes the compare-and-swap ``update-ref``.
     A real-index sync fault after it is returned, not raised.
 
     The real-index sync is a second write HEAD does not need: a proven-stale ``index.lock`` is cleared
     first, so a stale lock can no longer fail every later save's sync."""
-    paths = list(files) if repair_paths is None else repair_paths
     for attempt in (1, 2):
         head = _git(repo, "rev-parse", "--verify", "-q", "HEAD", ok=(0, 1)).strip() or None
         staged: list[tuple[str, tuple[str, ...]]] = []
@@ -173,7 +160,7 @@ def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: st
                     staged.append((rel, args))
                 tree = _git(repo, "write-tree", env=env).strip()
             if head and tree == _git(repo, "rev-parse", f"{head}^{{tree}}").strip():
-                repaired, notes = _repair(repo, paths if repair_unchanged else [])
+                repaired, notes = _repair(repo) if repair_unchanged else ([], [])
                 return _Commit(head, changed=False, repaired=tuple(repaired), notes=tuple(notes)) if repaired or notes else None
             name, _, email = author.rpartition(" <")
             identity = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email.rstrip(">"), "GIT_COMMITTER_NAME": "CORSIA", "GIT_COMMITTER_EMAIL": "corsia@localhost"}
@@ -193,9 +180,14 @@ def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: st
         except GitFault as exc:
             unsynced.append(rel)
             fault = fault or str(exc)
+            try:
+                record_failure(_git, repo, rel, head, sha)
+            except Exception as record_exc:  # the commit already landed
+                fault += f"; could not record index recovery for {rel}: {record_exc}"
+                logger.warning("{}", fault)
     if unsynced:
         logger.warning("guidance commit {} landed; index sync failed for {}: {}", sha, unsynced, fault)
-    repaired, notes = _repair(repo, paths, fault)
+    repaired, notes = _repair(repo)
     return _Commit(sha, tuple(unsynced), fault, repaired=tuple(repaired), notes=tuple(notes))
 
 
@@ -391,7 +383,7 @@ def startup_sweep(workspace: Path) -> None:
         return
     try:
         with _locked(_acquire(repo)[0]) as db:
-            repaired, notes = _repair(repo, startup_candidates(_git, repo, workspace, db))
+            repaired, notes = _repair(repo)
             lines = ([f"Repaired guidance index: {', '.join(repaired)}."] if repaired else []) + notes
             lines += _sweep_others(repo, workspace, db, set())
         if lines:

@@ -40,16 +40,17 @@ def repo(tmp_path, monkeypatch):
     return tmp_path
 
 
-def test_same_bytes_workspace_commit_reports_index_repair(repo):
+def test_same_bytes_workspace_commit_reports_index_repair(repo, monkeypatch, tmp_path):
+    from tests.test_guidance_index_repair import held_index
+
     path = repo / "skills" / "demo" / "SKILL.md"
     path.parent.mkdir(parents=True)
     path.write_text("before\n")
     git(repo, "add", "skills/demo/SKILL.md")
     git(repo, "commit", "-qm", "seed")
-    old = git(repo, "rev-parse", "HEAD:skills/demo/SKILL.md").strip()
     path.write_text("saved\n")
-    workspace_git._commit("thread", ["skills/demo/SKILL.md"], "save")
-    git(repo, "update-index", "--cacheinfo", f"100644,{old},skills/demo/SKILL.md")
+    with held_index(repo, monkeypatch, tmp_path):
+        workspace_git._commit("thread", ["skills/demo/SKILL.md"], "save")
     result = workspace_git._commit("thread", ["skills/demo/SKILL.md"], "same bytes")
     assert "No changes to commit." in result and "Repaired guidance index: skills/demo/SKILL.md" in result
     assert not git(repo, "diff", "--cached", "--name-only", "HEAD", "--", "skills/demo/SKILL.md")

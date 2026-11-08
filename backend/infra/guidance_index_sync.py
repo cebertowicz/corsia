@@ -1,20 +1,16 @@
-"""Keep the workspace's real Git index in step with a guidance commit (issue #2322).
+"""Record failed guidance index syncs and recover them under Git's index lock.
 
-:func:`infra.guidance_git._commit` commits from a temporary ``GIT_INDEX_FILE`` and moves HEAD with
-``update-ref``, so the person's own ``.git/index`` is a second, separate write that can fail on its own.
-A stale ``index.lock`` makes every one of those syncs fail, the real index keeps the pre-save bytes, and
-the person's next plain ``git commit`` writes those bytes back over the save. This module clears a
-proven-stale lock through the one shared fail-closed rule, so the save's own sync can run.
-
-It never removes a lock outside that rule and never writes the index: :mod:`infra.guidance_git` stays
-the only writer of guidance history. A deliberately staged version matching a parent in the CORSIA
-run, including an earlier CORSIA save or a preceding human commit, is indistinguishable from a failed
-sync: the index is reset to HEAD while the disk and HEAD bytes remain unchanged.
-A concurrent stage can be overwritten between the repair check and write, or after a save moves HEAD and before its index sync.
+Guidance commits move HEAD separately from the real index. A failed index sync is
+recorded only when the index still equals the pre-save entry. A recovery compares
+that record with the current index and HEAD while holding Git's index lock.
 """
 
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -44,76 +40,145 @@ def index_lock_fault(git: Git, repo: Path) -> str:
     return ""
 
 
-def startup_candidates(git: Git, repo: Path, workspace: Path, db) -> list[str]:
-    """Find index differences only within the existing guidance path specs."""
-    from core.guidance_paths import classify_guidance_path, sweep_pathspecs
-
-    specs = sweep_pathspecs(workspace, db)
-    head = git(repo, "rev-parse", "--verify", "-q", "HEAD", ok=(0, 1)).strip()
-    candidates = git(repo, "diff", "--cached", "--name-only", "--no-renames", "-z", head, "--", *specs).split("\0") if head and specs else []
-    return [rel for rel in candidates if rel and classify_guidance_path(repo / rel, workspace=workspace, db=db)]
-
-
-def _tree_entry(git: Git, repo: Path, revision: str, rel: str):
+def _tree_entry(git: Git, repo: Path, revision: str | None, rel: str):
+    if not revision:
+        return None
     raw = git(repo, "ls-tree", "-z", revision, "--", f":(literal){rel}")
     if not raw:
         return None
-    metadata, _name = raw.rstrip("\0").split("\t", 1)
+    metadata, name = raw.rstrip("\0").split("\t", 1)
     mode, kind, blob = metadata.split()
-    return (mode, blob) if kind == "blob" else None
+    return [mode, blob] if name == rel and kind == "blob" else None
 
 
-def _previous_blobs(git: Git, repo: Path, rel: str):
-    """Yield parent entries in the uninterrupted path-specific CORSIA run."""
-    history = git(repo, "log", "--first-parent", "--diff-merges=first-parent", "--no-renames",
-                  "--raw", "--no-abbrev", "-z", "--format=commit:%H%x00%ce", "HEAD", "--", f":(literal){rel}")
-    records = iter(history.split("\0"))
-    commit = next(records)
-    while commit:
-        email = next(records)
-        if email != "corsia@localhost":
-            break
-        record = next(records).lstrip("\n")
-        parent = None
-        while record.startswith(":"):
-            old_mode, _new_mode, old_blob, _new_blob, _status = record[1:].split()
-            path = next(records)  # NUL-delimited, even when the name contains whitespace.
-            if path == rel and old_mode.startswith(("100", "120")):
-                parent = (old_mode, old_blob)
-            record = next(records)
-        yield parent
-        commit = record
-
-
-def recovery_args(git: Git, repo: Path, rel: str):
-    """Return update-index arguments with the old blob, or why the path is preserved."""
-    head = _tree_entry(git, repo, "HEAD", rel)
-    raw = git(repo, "ls-files", "--stage", "-z", "--", f":(literal){rel}")
+def _index_entry(git: Git, repo: Path, rel: str, env=None):
+    raw = git(repo, "ls-files", "--stage", "-z", "--", f":(literal){rel}", env=env)
     entries = []
     for record in filter(None, raw.split("\0")):
-        metadata, _name = record.split("\t", 1)
+        metadata, name = record.split("\t", 1)
         mode, blob, stage = metadata.split()
-        entries.append((mode, blob, stage))
+        if name == rel:
+            entries.append((mode, blob, stage))
     if any(stage != "0" for _, _, stage in entries):
-        return None, "unmerged index entry"
-    index = (entries[0][0], entries[0][1]) if entries else None
-    if index == head:
-        return None, ""
-    if index is not None and head is not None and index[1] == head[1]:
-        return None, "index blob matches HEAD; staged mode preserved"
-    if head is None:
-        return None, "path is absent from HEAD"
-    path = repo / rel
+        return False, None
+    return True, list(entries[0][:2]) if entries else None
+
+
+def _records_path(git_dir: Path) -> Path:
+    return git_dir / "corsia" / "unsynced-index.json"
+
+
+def _read_records(path: Path):
     try:
-        if path.is_symlink() or not path.is_file():
-            return None, "disk path is not a regular file"
-        disk_mode = "100755" if path.stat().st_mode & 0o111 else "100644"
-        disk_blob = git(repo, "hash-object", "--stdin", data=path.read_bytes()).strip()
-    except OSError as exc:
-        raise GitFault(f"cannot read {rel}: {exc}") from exc
-    if (disk_mode, disk_blob) != head:
-        return None, "disk differs from HEAD"
-    parents = _previous_blobs(git, repo, rel)
-    if not any((index is None and parent is None) or (index is not None and parent is not None and index[1] == parent[1]) for parent in parents):
-        return None, "index does not match a CORSIA save parent"
-    return (("--add", "--cacheinfo", f"{head[0]},{head[1]},{rel}"), index[1] if index else None), ""
+        return json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return []
+
+
+def _write_records(path: Path, records) -> None:
+    if not records:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, name = tempfile.mkstemp(prefix="unsynced-index-", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            json.dump(records, stream, ensure_ascii=True)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(name, path)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
+def record_failure(git: Git, repo: Path, rel: str, before: str | None, sha: str) -> None:
+    """Record only an index entry equal to the parent of the failed save."""
+    old = _tree_entry(git, repo, before, rel)
+    valid, current = _index_entry(git, repo, rel)
+    if not valid:
+        return
+    git_dir = Path(git(repo, "rev-parse", "--absolute-git-dir").strip())
+    path = _records_path(git_dir)
+    records = _read_records(path)
+    for record in records:
+        if record["path"] == rel and record["to"] == old and record["from"] == current:
+            record.update(to=_tree_entry(git, repo, sha, rel), commit=sha)
+            _write_records(path, records)
+            return
+    if current == old:
+        records.append({"path": rel, "from": old, "to": _tree_entry(git, repo, sha, rel), "commit": sha})
+        _write_records(path, records)
+
+
+def _take_index_lock(git_dir: Path):
+    lock = git_dir / "index.lock"
+    try:
+        return os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+    except FileExistsError:
+        recover_stale_git_index_lock(git_dir)
+        return os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666)
+
+
+def _consume_one(git: Git, repo: Path, git_dir: Path, record):
+    lock = git_dir / "index.lock"
+    fd = _take_index_lock(git_dir)
+    owns_lock = True
+    try:
+        index = git_dir / "index"
+        with tempfile.TemporaryDirectory(prefix="corsia-index-", dir=git_dir) as scratch:
+            copy = Path(scratch) / "index"
+            env = {"GIT_INDEX_FILE": str(copy)}
+            if index.exists():
+                shutil.copy2(index, copy)
+                os.fchmod(fd, index.stat().st_mode & 0o777)
+            else:
+                git(repo, "read-tree", "--empty", env=env)
+            rel = record["path"]
+            valid, current = _index_entry(git, repo, rel, env=env)
+            if not valid or current != record["from"]:
+                return False, "index entry changed"
+            if _tree_entry(git, repo, "HEAD", rel) != record["to"]:
+                return False, "HEAD entry changed"
+            target = record["to"]
+            args = ("--add", "--cacheinfo", f"{target[0]},{target[1]},{rel}") if target else ("--force-remove", "--", rel)
+            git(repo, "update-index", *args, env=env)
+            with os.fdopen(fd, "wb", closefd=False) as stream, copy.open("rb") as source:
+                shutil.copyfileobj(source, stream)
+                stream.flush()
+                os.fsync(fd)
+            os.replace(lock, index)
+            owns_lock = False
+            return True, ""
+    finally:
+        os.close(fd)
+        if owns_lock:
+            lock.unlink(missing_ok=True)
+
+
+def consume_records(git: Git, repo: Path):
+    """Consume recorded failures, leaving a held-lock record for a later attempt."""
+    git_dir = Path(git(repo, "rev-parse", "--absolute-git-dir").strip())
+    path = _records_path(git_dir)
+    records = _read_records(path)
+    repaired, notes = [], []
+    for number, record in enumerate(records):
+        rel = record["path"]
+        try:
+            changed, reason = _consume_one(git, repo, git_dir, record)
+        except (FileExistsError, GitIndexLockRecoveryError) as exc:
+            notes.append(f"Guidance index repair skipped {rel}: {exc}")
+            _write_records(path, records[number:])
+            break
+        except (GitFault, OSError) as exc:
+            notes.append(f"Guidance index repair failed for {rel}: {exc}.")
+            continue
+        if changed:
+            old = record["from"]
+            repaired.append(f"{rel} (old staged blob: {old[1] if old else 'absent'})")
+        elif reason:
+            notes.append(f"Guidance index repair skipped {rel}: {reason}.")
+    else:
+        _write_records(path, [])
+    for note in notes:
+        logger.warning("{}", note)
+    return repaired, notes
