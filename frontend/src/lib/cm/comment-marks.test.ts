@@ -188,7 +188,7 @@ describe('a jump whose frame moves after it lands', () => {
 
 		// The reader then scrolls: their place is theirs, and a later frame move must not pull them back.
 		view.scrollDOM.dispatchEvent(new Event('scroll'));
-		const before = view.dispatch.mock.calls.length;
+		const before = vi.mocked(view.dispatch).mock.calls.length;
 		watch.trigger();
 		settle();
 		expect(view.dispatch).toHaveBeenCalledTimes(before);
