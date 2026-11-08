@@ -25,7 +25,7 @@ export function commentLanding(root: ParentNode, messageId: string, comment: Pic
 	return [...root.querySelectorAll<HTMLElement>(`${rows} [data-comment-ids][role="button"]`)]
 		.find(mark => mark.dataset.commentIds?.split(',').includes(comment.id))
 		?? root.querySelector<HTMLElement>(`${rows} [data-comment-uuid="${CSS.escape(comment.id)}"]`)
-		?? messageBody(root.querySelector(rows));
+		?? [...root.querySelectorAll(rows)].map(messageBody).find(body => body !== null) ?? null;
 }
 
 /** Find the nearest rendered unread highlight on each side of the transcript viewport. */

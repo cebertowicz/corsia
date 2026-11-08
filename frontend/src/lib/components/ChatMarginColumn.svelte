@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { messages } from '$lib/stores/threads';
+	import { messages, type ChatComment, type Message } from '$lib/stores/threads';
 	import { sendCommentReply, type ChatComment as ReplyDraft } from '$lib/chatCommentAnchors';
 	import type { MarginAnchorSource } from '$lib/docMarginSource';
 	import DocMarginStack from './DocMarginStack.svelte';
@@ -20,10 +20,19 @@
 		onSelect: (id: string) => void;
 		onSendReply: (reply: ReplyDraft) => void;
 	} = $props();
-	/** Every comment of this thread's loaded messages, in transcript order: every one is a card. */
-	const entries = $derived($messages
-		.filter(message => message.thread_id === threadId)
-		.flatMap(message => (message.chat_comments ?? []).map(comment => ({ id: comment.id, message, comment }))));
+	/**
+	 * Every comment of this thread's loaded messages, in transcript order: every one is a card. A store change that leaves
+	 * them and their message's place alone (a streaming reply's every tick) keeps the same list, so the column is not rebuilt for it.
+	 */
+	type Entry = { id: string; message: Message; comment: ChatComment };
+	let shown: Entry[] = [];
+	const entries = $derived.by(() => {
+		const next: Entry[] = $messages
+			.filter(message => message.thread_id === threadId)
+			.flatMap(message => (message.chat_comments ?? []).map(comment => ({ id: comment.id, message, comment })));
+		const same = next.length === shown.length && next.every((item, i) => item.comment === shown[i].comment && item.message.id === shown[i].message.id && item.message.seq === shown[i].message.seq);
+		return same ? shown : (shown = next);
+	});
 	const anchors: MarginAnchorSource = {
 		scroller: () => scroller,
 		clip: (stack) => stack.closest<HTMLElement>('.chat-margin-clip'),

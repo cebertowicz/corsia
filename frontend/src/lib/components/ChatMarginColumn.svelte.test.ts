@@ -110,6 +110,24 @@ it('re-places the cards when a transcript row grows with no change to its markup
 	expect(watched).toContain(scroller.querySelector('[data-message-id="m1"]'));
 });
 
+it('keeps the cards in place while a reply streams in, rather than rebuilding the column on every tick', () => {
+	const watched: Element[] = [];
+	vi.stubGlobal('ResizeObserver', class { observe(el: Element) { watched.push(el); } unobserve() {} disconnect() {} });
+	transcript(); thread();
+	component = mount(ChatMarginColumn, { target: clip, props: { threadId: 'thread', scroller, selectedId: null, onSelect: () => {}, onSendReply: vi.fn() } });
+	flushSync();
+	const card = clip.querySelector('[data-margin-card="kept"]');
+	const observed = watched.length;
+	// The typewriter's tick: a new message object, the same comments.
+	for (const pos of [1, 2, 3]) { messages.update(current => current.map(message => ({ ...message, typewriterPos: pos }))); flushSync(); }
+	expect(watched).toHaveLength(observed);
+	expect(clip.querySelector('[data-margin-card="kept"]')).toBe(card);
+	// A new comment is a change: it gets its card.
+	messages.update(current => current.map(message => ({ ...message, chat_comments: [...message.chat_comments!, { ...message.chat_comments![0], id: 'added', cid: 'c3' }] })));
+	flushSync();
+	expect([...clip.querySelectorAll<HTMLElement>('[data-margin-card]')].map(item => item.dataset.marginCard)).toEqual(['kept', 'lost', 'added']);
+});
+
 it('says why a card\'s reply is refused when its message has no place in history, and keeps the reply', async () => {
 	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 	transcript(); thread();
