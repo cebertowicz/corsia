@@ -116,7 +116,8 @@ def edit_across_cut(params: dict, changed: dict, common: dict, acting: str | Non
         causing_executor=acting, db=db,
     )
     result = admission.result(node_id, db=db)
-    result.update(close_next.next_fields(db, before, slot, None, acting=acting))
+    # The parked task stays open, so it is no closed task to leave out: it counts as Later.
+    result.update(close_next.next_fields(db, None, slot, None, acting=acting))
     return result
 
 

@@ -373,12 +373,12 @@ def present_plan(
         if node["id"] in leaf_ids
         and node_state.shown_condition(node) in node_state.CURRENT_CONDITIONS
     ]
-    # The user's own task is never the agent's next step (#2181): admission,
-    # liveness and ordering already refuse it to the agent, so the pick must too.
+    # The user's own task and Later work are never the agent's next step (#2181, Later
+    # design §2): admission, liveness and ordering already refuse them, so the pick must too.
     users = frozenset(node["id"] for node in projected.nodes if node["assignee"] == "user")
-    next_ids = node_state.next_node_ids([node for node in nodes if node["id"] not in users])
-    progress = {**projected.progress, "distribution": counts}
     below_cut = frozenset(str(node["id"]) for node in projected.nodes if node.get("later"))
+    next_ids = node_state.next_node_ids([n for n in nodes if n["id"] not in users | below_cut])
+    progress = {**projected.progress, "distribution": counts}
     display = plan_header.plan_display(projected.plan, counts, nodes, users, below_cut)
     # Each outside-wait row reads the same value as the sidebar and chip (EW11).
     for node in nodes:

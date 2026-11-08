@@ -313,10 +313,26 @@ def test_moving_the_slot_task_below_the_cut_frees_the_slot_and_reports_next(db):
 
     assert _later(db, held.id) == 1
     assert next_block(result)["selected"]["id"] == other.id
+    # The parked task stays open: it is counted in Later, not left out as if closed.
+    assert next_block(result)["open_tasks_listed"].endswith(" · 1 in Later")
     assert (db.execute(
         "SELECT COUNT(*) FROM plan_node_attempts WHERE node_id=? AND released_at IS NULL",
         (held.id,),
     ).fetchone()[0]) == 0
+
+
+def test_parking_the_only_task_counts_it_in_later(db):
+    from tests.plan_close_next_helpers import listed
+
+    plan = owner_plan(db)
+    held = task(db, plan.id, "Held work")
+    select(db, plan.id, held.id)
+
+    result = plan_update(db, plan.id, "edit", {
+        "node_id": held.id, "later": True, "expected_revision": revision(db, held.id),
+    })
+
+    assert next_block(result)["open_tasks_listed"] == f"{listed(0, 0)} · 1 in Later"
 
 
 def test_a_later_flip_on_a_task_that_holds_no_slot_reports_no_next(db):
@@ -451,6 +467,19 @@ def test_the_status_line_counts_both_sides_of_the_cut(db):
 
     assert thin["progress"]["above_cut"] == 1
     assert thin["progress"]["later"] == 1
+
+
+def test_the_status_never_offers_later_work_as_the_next_step(db):
+    plan = owner_plan(db)
+    later = task(db, plan.id, "Someday", later=True)
+    following = task(db, plan.id, "Ready next")
+    db.commit()
+
+    thin = status_context.projection(db, service._plan_row(db, plan.id), actor=OWNER)
+
+    # The Later task ranks first, so without the cut it would be offered here.
+    assert thin["next_step"]["id"] == following.id
+    assert later.id != thin["next_step"]["id"]
 
 
 def test_the_status_counts_move_when_the_cut_moves(db):

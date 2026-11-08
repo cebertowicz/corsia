@@ -327,7 +327,7 @@ def _open_rows(db, closed, plan, executor: str, holder) -> Listing:
         idle = close_next_idle.idle_listing(plan, everything, projections, now)
         if idle is not None:
             return _idle_rows(idle)
-    # A wake composes this block with no closed task to leave out.
+    # A wake or a park composes this block with no closed task to leave out.
     excluded = set() if closed is None else {str(closed["id"])}
     if holder is not None:
         excluded.add(str(holder["node_id"]))
