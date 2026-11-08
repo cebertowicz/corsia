@@ -8,6 +8,11 @@ import { hitBox } from '../support/hitBox';
 
 // The image viewer's control is the document's control: one rule, one look. It appears only while an unread pin is
 // off-frame, and steps aside the moment that pin is on screen, where the pin's own marker answers for it.
+// Both sessions are seeded against one backend that outlives the test, and both rows are opened by their title
+// text, so a fixed name lets a later test click an earlier test's row and read a document that is not its own.
+const RUN = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+let titleSeq = 0;
+
 for (const width of [393, 1440]) {
 	for (const theme of ['light', 'dark'] as const) {
 		test(`@surface:doc-jump-control-image ${theme} ${width}px: the viewer's control follows the pin, off-frame then in view`, async ({ page, request }, testInfo) => {
@@ -17,10 +22,10 @@ for (const width of [393, 1440]) {
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			await page.emulateMedia({ colorScheme: theme });
 			const seeded = await seedImageDocument(page, request, 'image-reply', width === 393 ? null : 420);
-			const sessionTitle = 'Walkthrough review';
+			const sessionTitle = `Walkthrough review ${RUN}-${(titleSeq += 1)}`;
 			const renamed = await request.patch(`/api/threads/${seeded.sessionId}`, { params: { token: TEST_TOKEN }, data: { title: sessionTitle } });
 			expect(renamed.ok(), await renamed.text()).toBeTruthy();
-			const writerTitle = 'Maya Chen';
+			const writerTitle = `Maya Chen ${RUN}-${(titleSeq += 1)}`;
 			const writerId = await createSession(request, writerTitle);
 			const image = '![Mock screen](shots/screen.png)';
 			const from = DOC.indexOf(image);
@@ -40,7 +45,7 @@ for (const width of [393, 1440]) {
 			const writer = await page.context().newPage();
 			await writer.setViewportSize({ width: 1440, height: 900 });
 			await loginByUrl(writer);
-			await writer.getByText(writerTitle, { exact: true }).first().click();
+			await writer.getByText(writerTitle, { exact: true }).click();
 			await waitForWsConnected(writer);
 			await seedMockResponses(request, [
 				{ tool_calls: [{ id: `image-reply-${roots[1]}`, name: 'doc_comment_create', arguments: JSON.stringify({ parent_id: roots[1], body: 'The save button stays in place.' }) }], finish_reason: 'tool_calls', match_thread: writerId },
@@ -55,7 +60,7 @@ for (const width of [393, 1440]) {
 
 			await loginByUrl(page);
 			if (width === 393) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-			await page.getByText(sessionTitle, { exact: true }).first().click();
+			await page.getByText(sessionTitle, { exact: true }).click();
 			await page.locator('.cm-md-image img').first().click();
 			await expect(overlay(page)).toBeVisible();
 			const viewport = overlay(page).locator('.viewport');

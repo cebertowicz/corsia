@@ -46,6 +46,21 @@ const CHAT = [
 ] as Array<{ role: string; content: string; metadata?: Record<string, unknown> }>;
 
 const IMAGE_THREAD_TITLE = 'Walkthrough review';
+
+// One backend serves every test in the run and outlives each of them, so a fixed session title means the
+// sidebar carries several rows with the same words by the later tests: `sidebarThread`'s exact getByText then
+// hits strict mode, and a `.first()` on a title opens whichever row the list happens to put first, which is
+// another test's document. Each test titles its own session, and every place that opens a thread by title
+// uses that test's title, so a collision fails visibly instead of reading somebody else's state.
+const RUN = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+let titleSeq = 0;
+let threadTitle = '';
+let imageThreadTitle = '';
+test.beforeEach(() => {
+	titleSeq += 1;
+	threadTitle = `${THREAD_TITLE} ${RUN}-${titleSeq}`;
+	imageThreadTitle = `${IMAGE_THREAD_TITLE} ${RUN}-${titleSeq}`;
+});
 const IMAGE_CHAT = [
 	{ role: 'user', content: 'Can you check the header and the save button on the new walkthrough screen?' },
 	{ role: 'assistant', content: 'I looked at both and answered on the pins in walkthrough.md.', metadata: { for_user: true } },
@@ -344,7 +359,7 @@ for (const theme of ['light', 'dark'] as const) {
 			skipMismatchedProject(width, testInfo.project.name);
 			await page.setViewportSize(size);
 			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, THREAD_TITLE);
+			const threadId = await createSession(request, threadTitle);
 			await onlyThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `j1-${theme}-${width}`, 'launch-plan.md', [8, 10]);
 			const heldFrom = TEXT.indexOf(SECTIONS[0].anchor);
@@ -352,7 +367,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await seedHeldComments(request, doc.artifactId, 1, 'Review', { text: SECTIONS[0].anchor, from: heldFrom, to: heldFrom + SECTIONS[0].anchor.length });
 			tidy(doc.artifactId);
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-			await openThread(page, THREAD_TITLE);
+			await openThread(page, threadTitle);
 			await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 			// Opened at the top: both replies are below the fold, so the bottom band offers the jump once.
 			await expectControl(page, '2 new');
@@ -437,13 +452,13 @@ for (const width of [1440, 393]) {
 		skipMismatchedProject(width, testInfo.project.name);
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
-		const threadId = await createSession(request, THREAD_TITLE);
+		const threadId = await createSession(request, threadTitle);
 		await onlyThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `extremes-${width}`, 'launch-plan.md', []);
 		const token = 'launchreadiness'.repeat(20);
 		addAgentReply(doc.artifactId, doc.roots[8], threadId, token);
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-		await openThread(page, THREAD_TITLE);
+		await openThread(page, threadTitle);
 		await expectControl(page, '1 new');
 		await holdDwell(page, true);
 		await controlButton(page).click();
@@ -477,11 +492,11 @@ for (const width of [1440, 393]) {
 		skipMismatchedProject(width, testInfo.project.name);
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
-		const threadId = await createSession(request, THREAD_TITLE);
+		const threadId = await createSession(request, threadTitle);
 		await onlyThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `viewed-partial-${width}`, 'launch-plan.md', [8, 10]);
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-		await openThread(page, THREAD_TITLE);
+		await openThread(page, threadTitle);
 		await expectControl(page, '2 new');
 		const viewedRoute = `**/api/artifacts/${doc.artifactId}/comments/${doc.roots[8]}/viewed`;
 		await page.route(viewedRoute, route => route.fulfill({ status: 500, body: 'Unavailable' }));
@@ -517,11 +532,11 @@ for (const width of [1440, 393]) {
 		skipMismatchedProject(width, testInfo.project.name);
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
-		const threadId = await createSession(request, THREAD_TITLE);
+		const threadId = await createSession(request, threadTitle);
 		await onlyThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `fetch-failure-${width}`, 'launch-plan.md', [8, 10]);
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-		await openThread(page, THREAD_TITLE);
+		await openThread(page, threadTitle);
 		await expectControl(page, '2 new');
 		const route = `**/api/artifacts/${doc.artifactId}/comments?*`;
 		for (const failure of ['server', 'permission', 'offline'] as const) {
@@ -553,12 +568,12 @@ for (const width of [1440, 393]) {
 		skipMismatchedProject(width, testInfo.project.name);
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
-		const threadId = await createSession(request, THREAD_TITLE);
+		const threadId = await createSession(request, threadTitle);
 		await onlyThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `activity-${width}`, 'launch-plan.md', [8, 10]);
 		const reviewerId = await createSession(request, 'Review colleague');
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-		await openThread(page, THREAD_TITLE);
+		await openThread(page, threadTitle);
 		await expectControl(page, '2 new');
 		// Activity is emitted by the settled tool call, not by the direct comment API.
 		const reviewer = await page.context().newPage();
@@ -605,11 +620,11 @@ for (const width of [1440, 393]) {
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 			skipMismatchedProject(width, testInfo.project.name);
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-			const threadId = await createSession(request, THREAD_TITLE);
+			const threadId = await createSession(request, threadTitle);
 			await onlyThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `keyboard-${width}-${key}`, 'launch-plan.md', [8, 10]);
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-			await openThread(page, THREAD_TITLE);
+			await openThread(page, threadTitle);
 			await expectControl(page, '2 new');
 			await page.locator('body').focus();
 			let reached = false;
@@ -653,11 +668,11 @@ for (const width of [1440, 393]) {
 				skipMismatchedProject(width, testInfo.project.name);
 				await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 				await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
-				const threadId = await createSession(request, THREAD_TITLE);
+				const threadId = await createSession(request, threadTitle);
 				await onlyThread(request, threadId);
 				const doc = await seedTextDocument(page, request, threadId, `focus-${width}-${route}-${reduced}`, 'launch-plan.md', [8, 10]);
 				await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-				await openThread(page, THREAD_TITLE);
+				await openThread(page, threadTitle);
 				await expectControl(page, '2 new');
 				await holdDwell(page, true);
 				await controlButton(page).focus();
@@ -692,11 +707,11 @@ for (const width of [1440, 393]) {
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1', 'Requires isolated synthetic state');
 		skipMismatchedProject(width, testInfo.project.name);
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
-		const threadId = await createSession(request, THREAD_TITLE);
+		const threadId = await createSession(request, threadTitle);
 		await onlyThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `modal-${width}`, 'launch-plan.md', [8, 10]);
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-		await openThread(page, THREAD_TITLE);
+		await openThread(page, threadTitle);
 		await expectControl(page, '2 new');
 		const box = (await controlButton(page).boundingBox())!;
 		await holdDwell(page, true);
@@ -736,7 +751,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await freezeClock(page);
 			const seeded = await seedImageDocument(page, request, 'launch-walkthrough', width === 393 ? null : 420);
 			await onlyThread(request, seeded.sessionId);
-			sqlite([['UPDATE threads SET title=? WHERE id=?', [IMAGE_THREAD_TITLE, seeded.sessionId]]]);
+			sqlite([['UPDATE threads SET title=? WHERE id=?', [imageThreadTitle, seeded.sessionId]]]);
 			const image = '![Mock screen](shots/screen.png)';
 			const from = DOC.indexOf(image);
 			const ids: string[] = [];
@@ -754,7 +769,7 @@ for (const theme of ['light', 'dark'] as const) {
 			for (const message of IMAGE_CHAT) await injectMessage(request, seeded.sessionId, message, TEST_TOKEN);
 			await loginByUrl(page);
 			if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-			await page.getByText(IMAGE_THREAD_TITLE).first().click();
+			await sidebarThread(page, imageThreadTitle).click();
 			await expect(page.locator('.cm-md-image img').first()).toBeVisible();
 			// Read from below the image, where both pins are off frame: with a pin on screen there is nothing to be taken to and
 			// the band would rightly show nothing.
@@ -845,11 +860,11 @@ for (const theme of ['light', 'dark'] as const) {
 			skipMismatchedProject(width, testInfo.project.name);
 			await page.setViewportSize(size);
 			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, THREAD_TITLE);
+			const threadId = await createSession(request, threadTitle);
 			await onlyThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `j3-${theme}-${width}`, 'launch-plan.md', [2, 6, 10]);
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'chat');
-			await openThread(page, THREAD_TITLE);
+			await openThread(page, threadTitle);
 			await page.evaluate(async () => (await import('/src/lib/stores/attentionDock.svelte.ts')).reload());
 			// The chat's notice names the document; the document's own control, drawn once it opens, does not.
 			const chatChip = page.locator('.reply-chip-notice').filter({ hasText: 'launch-plan.md' }).getByRole('button');
@@ -882,11 +897,11 @@ for (const theme of ['light', 'dark'] as const) {
 			skipMismatchedProject(width, testInfo.project.name);
 			await page.setViewportSize(size);
 			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, THREAD_TITLE);
+			const threadId = await createSession(request, threadTitle);
 			await onlyThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `j4-${theme}-${width}`, LONG_NAME, [11]);
 			await stageWorkspace(page, threadId, doc.docPath, LONG_NAME, 'artifact');
-			await openThread(page, THREAD_TITLE);
+			await openThread(page, threadTitle);
 			await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 			await expectControl(page, '1 new');
 
@@ -928,11 +943,11 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: theme });
 		const still = (state: string) => stillPath(width, theme, state);
-		const threadId = await createSession(request, THREAD_TITLE);
+		const threadId = await createSession(request, threadTitle);
 		await onlyThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `sight-${theme}-${width}`, 'launch-plan.md', [8, 10]);
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-		await openThread(page, THREAD_TITLE);
+		await openThread(page, threadTitle);
 		await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 		// Nothing is read while the reader moves, so every state below is the control's own, not a count falling.
 		await holdDwell(page, true);
@@ -968,11 +983,11 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		skipMismatchedProject(width, testInfo.project.name);
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: theme });
-		const threadId = await createSession(request, THREAD_TITLE);
+		const threadId = await createSession(request, threadTitle);
 		await onlyThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `hidden-${theme}-${width}`, 'launch-plan.md', [2]);
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-		await openThread(page, THREAD_TITLE);
+		await openThread(page, threadTitle);
 		await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 		await holdDwell(page, true);
 		await expect.poll(() => unreadCountInStore(page, doc.artifactId)).toBe(1);
@@ -1003,13 +1018,13 @@ for (const theme of ['light', 'dark'] as const) {
 			skipMismatchedProject(width, testInfo.project.name);
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, THREAD_TITLE);
+			const threadId = await createSession(request, threadTitle);
 			await onlyThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `multi-${theme}-${width}`, 'launch-plan.md', [8]);
 			addAgentReply(doc.artifactId, doc.roots[8], threadId, 'The handover is ready.');
 			addAgentReply(doc.artifactId, doc.roots[8], threadId, 'I added the final owner.');
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-			await openThread(page, THREAD_TITLE);
+			await openThread(page, threadTitle);
 			await expectControl(page, '3 new');
 
 			if (width === 393) {
@@ -1052,11 +1067,11 @@ test.describe('jump control motion evidence', () => {
 				skipMismatchedProject(width, testInfo.project.name);
 				await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 				await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
-				const threadId = await createSession(request, THREAD_TITLE);
+				const threadId = await createSession(request, threadTitle);
 				await onlyThread(request, threadId);
 				const doc = await seedTextDocument(page, request, threadId, `motion-${width}-${reduced}`, 'launch-plan.md', []);
 				await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-				await openThread(page, THREAD_TITLE);
+				await openThread(page, threadTitle);
 				await expect(controlBox(page)).toHaveCount(0);
 				const durations = await page.evaluate(async () => {
 					const { ms } = await import('/src/lib/popoverMotion.ts');
@@ -1114,14 +1129,14 @@ test.describe('the jump control and held Send controls', () => {
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith('mobile'));
 			await page.setViewportSize({ width: 393, height: 852 });
 			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, THREAD_TITLE);
+			const threadId = await createSession(request, threadTitle);
 			await onlyThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `r5-send-${theme}`, 'launch-plan.md', [8, 10]);
 			await holdDocumentComments(request);
 			const from = TEXT.indexOf(SECTIONS[0].anchor);
 			await seedHeldComments(request, doc.artifactId, 1, 'Review', { text: SECTIONS[0].anchor, from, to: from + SECTIONS[0].anchor.length });
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-			await openThread(page, THREAD_TITLE);
+			await openThread(page, threadTitle);
 			await expectControl(page, '2 new');
 			const send = headerSend(page);
 			await expect(send).toBeVisible();
@@ -1159,11 +1174,11 @@ test.describe('the jump control and held Send controls', () => {
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith('mobile'));
 			await page.setViewportSize({ width: 393, height: 852 });
 			await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
-			const threadId = await createSession(request, THREAD_TITLE);
+			const threadId = await createSession(request, threadTitle);
 			await onlyThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `r5-scrim-${reduced}`, 'launch-plan.md', [8, 10]);
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-			await openThread(page, THREAD_TITLE);
+			await openThread(page, threadTitle);
 			await expectControl(page, '2 new');
 			await page.evaluate(() => {
 				const chip = document.querySelector<HTMLElement>('[data-doc-jump]')!;
@@ -1203,11 +1218,11 @@ test.describe('the jump control and the document toolbar', () => {
 			test.skip(process.env.CORSIA_E2E_MOCK !== '1' || !info.project.name.endsWith('mobile'));
 			await page.setViewportSize({ width: 393, height: 852 });
 			await page.emulateMedia({ colorScheme: theme });
-			const threadId = await createSession(request, THREAD_TITLE);
+			const threadId = await createSession(request, threadTitle);
 			await onlyThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `r6-no-held-${theme}`, 'launch-plan.md', [8, 10]);
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-			await openThread(page, THREAD_TITLE);
+			await openThread(page, threadTitle);
 			await expectControl(page, '2 new');
 			await expect(page.locator('.document-header .sending-now')).toHaveCount(0);
 
@@ -1218,14 +1233,14 @@ test.describe('the jump control and the document toolbar', () => {
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1' || info.project.name.endsWith('mobile'));
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
-		const threadId = await createSession(request, THREAD_TITLE);
+		const threadId = await createSession(request, threadTitle);
 		await onlyThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, 'r6-held-420', 'launch-plan.md', [8, 10]);
 		await holdDocumentComments(request);
 		const from = TEXT.indexOf(SECTIONS[0].anchor);
 		await seedHeldComments(request, doc.artifactId, 1, 'Review', { text: SECTIONS[0].anchor, from, to: from + SECTIONS[0].anchor.length });
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
-		await openThread(page, THREAD_TITLE);
+		await openThread(page, threadTitle);
 		await expectControl(page, '2 new');
 		await page.waitForTimeout(600);
 		const geometry = await headerSend(page).evaluate(node => {
