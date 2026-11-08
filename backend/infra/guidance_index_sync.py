@@ -65,13 +65,24 @@ def _tree_entry(git: Git, repo: Path, revision: str, rel: str):
 
 def _previous_blobs(git: Git, repo: Path, rel: str):
     """Yield parent entries in the uninterrupted path-specific CORSIA run."""
-    history = git(repo, "log", "--first-parent", "--format=%H%x00%ce", "HEAD", "--", f":(literal){rel}")
-    for line in history.splitlines():
-        commit, email = line.split("\0", 1)
+    history = git(repo, "log", "--first-parent", "--diff-merges=first-parent", "--no-renames",
+                  "--raw", "--no-abbrev", "-z", "--format=commit:%H%x00%ce", "HEAD", "--", f":(literal){rel}")
+    records = iter(history.split("\0"))
+    commit = next(records)
+    while commit:
+        email = next(records)
         if email != "corsia@localhost":
             break
-        parents = git(repo, "rev-list", "--parents", "-n", "1", commit).split()
-        yield _tree_entry(git, repo, parents[1], rel) if len(parents) > 1 else None
+        record = next(records).lstrip("\n")
+        parent = None
+        while record.startswith(":"):
+            old_mode, _new_mode, old_blob, _new_blob, _status = record[1:].split()
+            path = next(records)  # NUL-delimited, even when the name contains whitespace.
+            if path == rel and old_mode.startswith(("100", "120")):
+                parent = (old_mode, old_blob)
+            record = next(records)
+        yield parent
+        commit = record
 
 
 def recovery_args(git: Git, repo: Path, rel: str):

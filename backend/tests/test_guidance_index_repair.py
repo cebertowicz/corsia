@@ -8,7 +8,8 @@ from contextlib import contextmanager
 
 import pytest
 
-from infra.guidance_git import _commit, startup_sweep
+from infra.guidance_git import _commit, _git as guidance_git, startup_sweep
+from infra.guidance_index_sync import _previous_blobs, recovery_args
 from tests.test_guidance_history import history_scope, _fake_lsof, _git, _history, _save
 from tests.test_project_repo_lock_recovery import _lock as _index_lock
 
@@ -245,3 +246,50 @@ def test_startup_does_not_touch_non_guidance(history_scope, monkeypatch, tmp_pat
     startup_sweep(workspace)
     assert index_blob(workspace, other.name) == before
     assert not _git(['diff', '--cached', '--name-only', 'HEAD', '--', rel], cwd=workspace)
+
+
+def test_history_walk_uses_one_log_for_unmatched_staged_blob(history_scope):
+    workspace, _ = history_scope
+    path = workspace / 'guidance with space\nand newline.txt'
+    rel = path.name
+    blobs = []
+    for n in range(6):
+        path.write_text(f'save {n}\n')
+        _git(['add', '--', rel], cwd=workspace)
+        _git(['-c', 'user.name=CORSIA', '-c', 'user.email=corsia@localhost', 'commit', '-qm', f'save {n}'], cwd=workspace)
+        blobs.append(_git(['rev-parse', f'HEAD:{rel}'], cwd=workspace).strip())
+    assert list(_previous_blobs(guidance_git, workspace, rel)) == [('100644', blob) for blob in reversed(blobs[:-1])] + [None]
+    path.write_text('person staged\n')
+    _git(['add', '--', rel], cwd=workspace)
+    path.write_text('save 5\n')
+    calls = []
+
+    def recording_git(repo, *args, **kwargs):
+        calls.append(args[0])
+        return guidance_git(repo, *args, **kwargs)
+
+    result, reason = recovery_args(recording_git, workspace, rel)
+    assert result is None and reason == 'index does not match a CORSIA save parent'
+    assert calls.count('log') == 1 and 'rev-list' not in calls
+    assert calls.count('ls-tree') == 1
+
+
+def test_corsia_merge_yields_first_parent_entry(history_scope):
+    workspace, _ = history_scope
+    path = workspace / 'merge path.txt'
+    rel = path.name
+    path.write_text('baseline\n')
+    _git(['add', '--', rel], cwd=workspace)
+    _git(['-c', 'user.name=Person', '-c', 'user.email=person@example.org', 'commit', '-qm', 'baseline'], cwd=workspace)
+    baseline = _git(['rev-parse', f'HEAD:{rel}'], cwd=workspace).strip()
+    branch = _git(['branch', '--show-current'], cwd=workspace).strip()
+    _git(['switch', '-c', 'merge-side'], cwd=workspace)
+    path.write_text('side\n')
+    _git(['add', '--', rel], cwd=workspace)
+    _git(['-c', 'user.name=Person', '-c', 'user.email=person@example.org', 'commit', '-qm', 'side'], cwd=workspace)
+    _git(['switch', branch], cwd=workspace)
+    (workspace / 'merge-marker').write_text('main\n')
+    _git(['add', '--', 'merge-marker'], cwd=workspace)
+    _git(['-c', 'user.name=Person', '-c', 'user.email=person@example.org', 'commit', '-qm', 'main'], cwd=workspace)
+    _git(['-c', 'user.name=CORSIA', '-c', 'user.email=corsia@localhost', 'merge', '--no-ff', '-qm', 'merge', 'merge-side'], cwd=workspace)
+    assert list(_previous_blobs(guidance_git, workspace, rel)) == [('100644', baseline)]
