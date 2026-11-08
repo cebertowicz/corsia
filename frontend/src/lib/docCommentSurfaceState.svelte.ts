@@ -43,7 +43,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 	let sheetUp = $state(false);
 	function restoreReplyFocus(root: () => HTMLElement | undefined) {
 		restoreFocus = () => void tick().then(() => {
-			const button = root()?.querySelector<HTMLElement>('[data-doc-reply-chip] button');
+			const button = root()?.querySelector<HTMLElement>('[data-doc-jump] button');
 			if (button) button.focus({ preventScroll: true }); else restoreEditor();
 		});
 	}
