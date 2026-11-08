@@ -314,6 +314,7 @@
 		<MessageList
 			bind:this={messageListRef}
 			bind:messagesEl
+			layoutRoot={chatCanvas}
 			bind:userIsNearBottom
 			bind:ignoreScrollEvents
 			hideScrollFab

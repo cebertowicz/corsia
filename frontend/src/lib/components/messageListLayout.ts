@@ -3,14 +3,13 @@
  * under a transcript the user was pinned to. Returns the observer's cleanup.
  */
 export function observeLayoutGrowth(
-	messagesEl: HTMLElement | undefined,
+	container: HTMLElement | null | undefined,
 	wasPinned: () => boolean,
 	followBottom: () => void,
 ): (() => void) | undefined {
-	if (typeof ResizeObserver === 'undefined' || !messagesEl) return;
-	// This transcript's own reserved band: its container holds its composer.
+	if (typeof ResizeObserver === 'undefined' || !container) return;
+	// This transcript's own reserved band: `container` is the panel holding its composer.
 	// Reading a sibling's floater would re-pin it from another panel (#1949).
-	const container = messagesEl.parentElement;
 	const layoutOwners = [
 		container?.querySelector<HTMLElement>('.input-floater'),
 		container?.querySelector<HTMLElement>('.chat-attention-stack'),

@@ -12,6 +12,7 @@
 	import CommentComposer from './comments/CommentComposer.svelte';
 	import ChatCommentThreads from './ChatCommentThreads.svelte';
 	import { placeHighlightDot } from './comments/highlightDot';
+	import { chatReplyDrafts } from './chatReplyDrafts.svelte';
 	import './commentAnchors.css';
 
 	let { threadId, comments, onChange, onSendReply, surface, marginComments = false, selectedCommentId = $bindable(null) }: { threadId: string | null; comments: ChatComment[]; onChange: (comments: ChatComment[]) => void; onSendReply: (reply: ChatComment) => void; surface?: HTMLElement; /** The threads show as cards in the transcript's margin column, so a highlight picks its card instead of opening a popover. */ marginComments?: boolean; /** The thread whose margin card is picked, shared with the column. */ selectedCommentId?: string | null } = $props();
@@ -27,8 +28,6 @@
 	const threadAnchor = () => viewing ? commentRect(viewing.commentId, viewing.messageId) : null;
 	// Text typed in the open popover, tied to its target; kept here because the narrow/wide branch remounts the composer.
 	let typed = $state<{ target: string | number; text: string } | null>(null);
-	// Unsent replies in the open thread, by comment, held here for the same reason.
-	let replyDrafts = $state<Record<string, string>>({});
 	let buttonWidth = $state(0);
 	let narrow = $state(false);
 	const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
@@ -65,7 +64,7 @@
 			?? bodyOf(row)?.getBoundingClientRect() ?? null;
 	}
 	function close() {
-		pick = null; draft = null; editingId = null; viewing = null; typed = null; replyDrafts = {};
+		pick = null; draft = null; editingId = null; if (viewing) chatReplyDrafts.set(viewing.commentId, ''); viewing = null; typed = null;
 		window.getSelection()?.removeAllRanges();
 		const focus = returnFocus; returnFocus = null;
 		if (focus) void tick().then(() => focus.focus());
@@ -216,8 +215,8 @@
 		void tick().then(() => requestAnimationFrame(() => { queued = false; paint(); }));
 	}
 	$effect(() => { void comments; void editingId; void draft; void $messages; void marginComments; schedule(); });
-	// A picked card belongs to the transcript it was picked in, so changing thread drops the pick. Untracked: the write itself must not re-run this.
-	$effect(() => { void threadId; close(); untrack(() => { selectedCommentId = null; }); chatCommentPlacement.forget(recorded); recorded = []; });
+	// A picked card belongs to the transcript it was picked in, so changing thread drops the pick. Untracked: close() reads the open thread, and opening one must not close it.
+	$effect(() => { void threadId; untrack(() => { close(); selectedCommentId = null; }); chatCommentPlacement.forget(recorded); recorded = []; });
 	onMount(() => {
 		const update = () => { narrow = window.innerWidth <= 768; };
 		update(); window.addEventListener('resize', update);
@@ -329,11 +328,11 @@
 {#if viewing && viewedComment && threadId && !open}
 	{#if narrow}
 		<AdaptiveDrawer ariaLabel="Comment thread" heading="Comments" doneLabel="Close" followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
-			<ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} bind:replyDrafts onReply={replyInThread} keepReplyVisible />
+			<ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} keepReplyVisible />
 		</AdaptiveDrawer>
 	{:else}
 		<Popover anchor={threadAnchor} bounds={messageRoot()} placement="bottom" open={!closing} surfaceRole={null} onClose={requestClose} onClosed={closed}>
-			<div role="dialog" aria-label="Comment thread"><ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} bind:replyDrafts onReply={replyInThread} /></div>
+			<div role="dialog" aria-label="Comment thread"><ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} /></div>
 		</Popover>
 	{/if}
 {/if}

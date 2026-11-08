@@ -1,7 +1,10 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
+import { get } from 'svelte/store';
 import { messages } from '$lib/stores/threads';
 import ChatMarginColumn from './ChatMarginColumn.svelte';
+import ChatCommentThreads from './ChatCommentThreads.svelte';
+import { chatReplyDrafts } from './chatReplyDrafts.svelte';
 
 vi.mock('$lib/stores/attentionDock.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
 
@@ -82,4 +85,25 @@ it('lists only this thread\'s comments and rides the transcript it is given', ()
 	flushSync();
 	expect(sent).toHaveLength(1);
 	expect(sent[0]).toMatchObject({ messageId: 'm1', quote: 'runs at 2 AM', note: 'Please change it', root_user_message_id: 's1', root_cid: 'c1' });
+});
+
+it('keeps an unsent reply when the canvas narrows and the same thread opens in its popover', () => {
+	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+	transcript(); thread();
+	component = mount(ChatMarginColumn, { target: clip, props: { threadId: 'thread', scroller, selectedId: null, onSelect: () => {}, onSendReply: vi.fn() } });
+	flushSync();
+	const field = clip.querySelectorAll<HTMLElement>('[data-margin-card]')[1].querySelector<HTMLTextAreaElement>('textarea')!;
+	field.value = 'The one in the closet';
+	field.dispatchEvent(new Event('input', { bubbles: true }));
+	flushSync();
+
+	// Narrowing unmounts the column; the popover shows the same thread on its own.
+	unmount(component);
+	const popover = document.createElement('div');
+	document.body.append(popover);
+	const lost = get(messages)[0].chat_comments!.find(comment => comment.id === 'lost')!;
+	component = mount(ChatCommentThreads, { target: popover, props: { messageId: 'm1', threadId: 'thread', comments: [lost], onReply: vi.fn() } });
+	flushSync();
+	expect(popover.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('The one in the closet');
+	chatReplyDrafts.set('lost', '');
 });

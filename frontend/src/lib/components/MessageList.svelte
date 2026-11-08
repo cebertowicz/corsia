@@ -30,8 +30,10 @@
 	import { createFocusWorkBlock } from './focusWorkBlock.svelte';
 	import { visibleChatAnswerRows } from '$lib/chatAnswerText';
 
-	let { messagesEl = $bindable(), userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), hideScrollFab = false, onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
+	let { messagesEl = $bindable(), layoutRoot = undefined, userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), hideScrollFab = false, onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
+		/** The panel holding this transcript's composer, when the transcript is not its direct child (it sits beside the comment margin). */
+		layoutRoot?: HTMLElement | null;
 		userIsNearBottom: boolean;
 		ignoreScrollEvents: boolean;
 		hideScrollFab?: boolean;
@@ -273,7 +275,7 @@
 	$effect(() => {
 		wasPinnedBeforeLayoutChange = userIsNearBottom;
 	});
-	$effect(() => observeLayoutGrowth(messagesEl, () => wasPinnedBeforeLayoutChange, followBottom));
+	$effect(() => observeLayoutGrowth(layoutRoot ?? messagesEl?.parentElement, () => wasPinnedBeforeLayoutChange, followBottom));
 	export const captureBottomOffset = () => scrollControl.captureBottomOffset();
 	export const restoreBottomOffset = () => scrollControl.restoreBottomOffset();
 </script>
