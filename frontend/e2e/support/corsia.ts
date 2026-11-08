@@ -153,6 +153,29 @@ export async function createSession(request: APIRequestContext, title: string) {
 	return body.thread_id as string;
 }
 
+// The fixture thread the previous call in this worker kept, so the next call can retire exactly that one.
+let previousFixtureThread: string | undefined;
+
+/**
+ * Keeps `keepId` as the only fixture thread this worker holds: it deletes the thread the previous call kept and
+ * remembers this one. Nothing else is touched, so another worker's active thread survives. A remembered thread that
+ * is already gone needs no delete — one worker runs the spec files in sequence and the next file resets the backend.
+ */
+export async function replacePreviousFixtureThread(request: APIRequestContext, keepId: string): Promise<void> {
+	const previous = previousFixtureThread;
+	previousFixtureThread = keepId;
+	if (!previous) return;
+	const listed = await (await request.get(`/api/threads?token=${encodeURIComponent(TEST_TOKEN)}`)).json();
+	for (const thread of (listed.threads ?? []) as Array<{ id: string }>) {
+		if (thread.id === previous) await expect.poll(async () => {
+			// The backend refuses a delete with 409 while a turn still runs on the thread; retry until that turn ends.
+			const response = await request.delete(`/api/threads/${thread.id}?token=${encodeURIComponent(TEST_TOKEN)}`);
+			if (response.status() !== 409) expect(response.ok(), await response.text()).toBeTruthy();
+			return response.status();
+		}, { message: `delete prior fixture thread ${previous}`, timeout: 20_000 }).not.toBe(409);
+	}
+}
+
 
 export function chatComposer(page: Page) {
 	return page.getByRole('textbox', { name: 'Message CORSIA' });
