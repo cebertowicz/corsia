@@ -58,10 +58,11 @@
 </div>
 
 <style>
-	/* The transcript's own column, ending above the composer so no card hides behind it, as the document's column ends above its footer. */
+	/* The transcript's own column, ending above the composer (its rule included, since the composer spans the whole chat) so no card hides
+	   behind it, as the document's column ends above its footer. Its gutters are the document column's. */
 	.chat-margin {
 		flex: none; width: var(--margin-column); min-height: 0; display: flex; flex-direction: column;
-		border-left: 1px solid var(--border-subtle); padding-left: var(--space-3); padding-bottom: calc(var(--input-bar-height, 100px) + var(--space-4));
+		border-left: 1px solid var(--border-subtle); padding: 0 var(--space-2) 0 var(--space-3); margin-bottom: calc(var(--input-bar-height, 100px) + var(--space-4));
 	}
 	.chat-margin-clip { position: relative; flex: 1; min-height: 0; overflow: clip; }
 	/* The document margin card's treatment; the thread itself stays flat inside it. */
