@@ -17,6 +17,8 @@ interface Opening {
 	controller: AbortController;
 	/** Existing-session reconnects must reopen the same artifact, never replace this binding. */
 	expectedArtifactId?: string;
+	/** The identity this open's snapshot read just registered, so the live open need not register it again. */
+	registeredArtifactId?: string;
 	resolve: (outcome: LiveOpenOutcome) => void;
 	reject: (error: Error) => void;
 	/** A first open waits for the socket until this time; reconnect opens have none. */
@@ -59,7 +61,8 @@ function send(frame: Record<string, unknown>): boolean {
 function requestOpen(opening: Opening): void {
 	const id = crypto.randomUUID(), { target } = opening.binding;
 	const frame = { type: 'doc_open', request_id: id, path: target.path, project_id: target.projectId, thread_id: target.threadId,
-		...(opening.expectedArtifactId ? { expected_artifact_id: opening.expectedArtifactId } : {}) };
+		...(opening.expectedArtifactId ? { expected_artifact_id: opening.expectedArtifactId } : {}),
+		...(opening.registeredArtifactId ? { registered_artifact_id: opening.registeredArtifactId } : {}) };
 	if (send(frame)) {
 		clearTimeout(opening.timer);
 		openings.set(id, opening);
@@ -80,13 +83,13 @@ function awaitConnection(opening: Opening): void {
 	}, Math.max(0, opening.deadline! - Date.now()));
 }
 
-export function openLiveDocument(target: DocViewerTarget): Promise<LiveOpenOutcome> {
+export function openLiveDocument(target: DocViewerTarget, registeredArtifactId?: string): Promise<LiveOpenOutcome> {
 	const existing = bindings.get(target.instanceId);
 	if (existing?.session) return Promise.resolve(existing.session);
 	const binding = existing ?? { target, session: null };
 	bindings.set(target.instanceId, binding);
 	return new Promise((resolve, reject) => {
-		const opening: Opening = { binding, controller: new AbortController(), deadline: Date.now() + LIVE_OPEN_WAIT_MS,
+		const opening: Opening = { binding, controller: new AbortController(), deadline: Date.now() + LIVE_OPEN_WAIT_MS, registeredArtifactId,
 			resolve: value => { clearTimeout(opening.timer); resolve(value); },
 			reject: error => { clearTimeout(opening.timer); reject(error); } };
 		requestOpen(opening);
