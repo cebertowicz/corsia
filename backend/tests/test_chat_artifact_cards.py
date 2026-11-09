@@ -820,14 +820,10 @@ def test_a_reference_card_carries_the_artifact_type_the_canvas_uses_for_images(d
 
 
 def test_a_long_unbroken_run_beside_a_link_does_not_blow_up_the_link_scan() -> None:
-    """A link plus a 200k-character run costs what the text costs, not its square.
+    """A link plus a 200k-character run (a hash, a base64 blob) costs what the text costs.
 
-    The URL scan used to restart at every character of an unbroken run of scheme
-    characters — a long hash, a base64 blob, a minified line — and backtrack over the
-    rest of it, so one message page of that shape held the GIL for minutes. A bare wall
-    clock is timing-dependent, so the test measures growth: eight times the text costs
-    about eight times as long for a linear scan and about sixty-four times for the
-    quadratic one, with the bound set far above the linear figure.
+    The test measures growth, not a wall clock: eight times the text costs about eight
+    times as long when linear and about sixty-four times when quadratic.
     """
     from registry import path_cards
 
@@ -846,14 +842,7 @@ def test_a_long_unbroken_run_beside_a_link_does_not_blow_up_the_link_scan() -> N
 
 
 def test_nested_schemes_in_one_token_cost_what_the_text_costs() -> None:
-    """``a://a://a://`` inside one token is read once, not once per separator.
-
-    Every separator inside an unbroken token ends at the same character, so the first URL
-    already blanks the whole token and the rest of its separators have nothing left to
-    read. A scan that measured each of them again grew fourfold per doubling — 64 ms at
-    2,000 separators, 1,056 ms at 8,000 — while this one doubles with the text, as the
-    pattern it replaces did.
-    """
+    """``a://a://a://`` inside one token is read once, not once per separator."""
     from registry import path_cards
 
     def scan(separators: int) -> float:
@@ -871,7 +860,7 @@ def test_nested_schemes_in_one_token_cost_what_the_text_costs() -> None:
 
 
 def test_the_link_scan_masks_the_same_spaces_it_always_did() -> None:
-    """The masked spans stay what the old pattern matched, so bare paths still surface.
+    """A URL is masked from its scheme's first letter to the end of its token.
 
     ``1.https://x`` masks from the scheme's first letter and leaves the leading ``1.``
     for the bare-path scan to see; ``file://`` with nothing after it is no URL, and
