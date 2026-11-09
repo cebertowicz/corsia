@@ -1,0 +1,63 @@
+import { describe, expect, it } from 'vitest';
+import { placedCommentEnvelopes } from '$lib/chatCommentDelivery';
+import { buildTranscriptPresentation, isRunExpanded, runTokens } from './transcriptFocusModel';
+
+const base = { thread_id: 'thread', created_at: '2026-11-09T17:00:00Z' };
+const target = {
+  ...base, id: 'target', role: 'assistant', content: 'A visible answer', metadata: { for_user: true },
+  chat_comments: [{ cid: 'root', user_message_id: 'root-message', answers: [1, 2, 3].map(n => ({
+    author_kind: 'user', user_message_id: `send-${n}`, cid: `answer-${n}`,
+  })) }],
+};
+const work = (n: number) => ({ ...base, id: `work-${n}`, role: 'assistant', content: '', metadata: { turn_id: `t${n}` } });
+const send = (n: number, options: Record<string, unknown> = {}) => ({
+  ...base, id: `send-${n}`, role: 'user', content: '', delivery_state: 'delivered',
+  metadata: { reply_context: { comments: [{ id: `comment-${n}`, cid: `answer-${n}`, root_user_message_id: 'root-message', root_cid: 'root' }] } },
+  ...options,
+});
+const last = { ...base, id: 'last', role: 'assistant', content: 'Done', metadata: { for_user: true } };
+
+function presentation(sends: any[]) {
+  const rows: any[] = [target];
+  sends.forEach((row, i) => rows.push(work(i + 1), row));
+  rows.push(work(4), last);
+  const placed = placedCommentEnvelopes(rows, 'thread', new Set(['target', 'last']));
+  return { placed, entries: buildTranscriptPresentation(rows, true, null, undefined, [], placed) };
+}
+
+describe('Focus comment sends', () => {
+  it('joins work across three placed sends', () => {
+    const { entries, placed } = presentation([send(1), send(2), send(3)]);
+    expect([...placed]).toEqual(['send-1', 'send-2', 'send-3']);
+    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message']);
+  });
+  it('keeps a fallback send between two work blocks', () => {
+    const fallback = send(2, { metadata: { reply_context: { comments: [{ id: 'unplaced', cid: 'unplaced' }] } } });
+    const { entries } = presentation([send(1), fallback, send(3)]);
+    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message', 'fold', 'message']);
+    expect(entries[2]).toMatchObject({ message: { id: 'send-2' } });
+  });
+  it('joins across an optimistic send with a shown target', () => {
+    const { entries, placed } = presentation([send(1, { _optimistic: true })]);
+    expect(placed.has('send-1')).toBe(true);
+    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message']);
+  });
+  it('keeps a previously expanded inner stub open after merging', () => {
+    const stub = (firstId: string, lastId: string, firstSeq: number, lastSeq: number) => ({
+      firstId, lastId, firstSeq, lastSeq, count: 2, weight: 2, turnIds: [], kinds: [], continuesOlder: false,
+    });
+    const stubs = [stub('a', 'b', 2, 3), stub('c', 'd', 5, 6), stub('e', 'f', 8, 9)];
+    const rows: any[] = [{ ...target, seq: 1 }, { ...send(1), seq: 4 }, { ...send(2), seq: 7 }, { ...last, seq: 10 }];
+    const placed = placedCommentEnvelopes(rows, 'thread', new Set(['target', 'last']));
+    const before = buildTranscriptPresentation(rows, true, null, undefined, stubs);
+    const expanded = new Set(runTokens(before, 3, true));
+    const after = buildTranscriptPresentation(rows, true, null, undefined, stubs, placed);
+    expect(isRunExpanded(runTokens(after, 1, true), expanded)).toBe(true);
+  });
+  it('keeps a failed send with an unseen target in place', () => {
+    const failed = send(2, { delivery_state: 'failed', metadata: { reply_context: { comments: [{ id: 'unplaced', root_cid: 'missing', root_user_message_id: 'missing' }] } } });
+    const { entries, placed } = presentation([send(1), failed, send(3)]);
+    expect(placed.has('send-2')).toBe(false);
+    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message', 'fold', 'message']);
+  });
+});

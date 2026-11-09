@@ -143,19 +143,18 @@
 			? { turnId: renderedThreadId ? $turnStates.get(renderedThreadId)?.turnId ?? null : null }
 			: null,
 	);
-	const transcriptEntries = $derived(mergeTranscriptUpdates(
-		buildTranscriptPresentation(transcriptMessages, focusMode, liveTurn, undefined,
-			focusMode ? focusRuns.filter((run) => runHasMore(run, runLoads[run.lastId])) : []),
-		(revealingOpening ? [] : renderedThreadId ? $threadUpdateCards[renderedThreadId]?.cards ?? [] : []).filter((card) => card.after_seq >= windowFloor),
-		{
-			focusMode, divider: renderedThreadId ? $visitDividers[renderedThreadId]?.divider ?? null : null,
-			pauses: pauseDescriptors, turnSummaries,
-			sourceContext: renderedThreadId ? {
-				threadId: renderedThreadId, phase: $turnStates.get(renderedThreadId)?.phase ?? 'idle',
-				turnId: $turnStates.get(renderedThreadId)?.turnId ?? null,
-			} : undefined,
-		},
-	));
+	const transcriptWithPlaced = (placed: ReadonlySet<string>) => mergeTranscriptUpdates(
+			buildTranscriptPresentation(transcriptMessages, focusMode, liveTurn, undefined,
+				focusMode ? focusRuns.filter((run) => runHasMore(run, runLoads[run.lastId])) : [], placed),
+			(revealingOpening ? [] : renderedThreadId ? $threadUpdateCards[renderedThreadId]?.cards ?? [] : []).filter((card) => card.after_seq >= windowFloor),
+			{
+				focusMode, divider: renderedThreadId ? $visitDividers[renderedThreadId]?.divider ?? null : null,
+				pauses: pauseDescriptors, turnSummaries,
+				sourceContext: renderedThreadId ? { threadId: renderedThreadId,
+					phase: $turnStates.get(renderedThreadId)?.phase ?? 'idle', turnId: $turnStates.get(renderedThreadId)?.turnId ?? null } : undefined,
+			},
+		);
+	const transcriptEntries = $derived(transcriptWithPlaced(new Set()));
 	const initialLanding = new InitialLandingIntent((landing) => {
 		if (landing.target === 'divider') {
 			landedVisit = landing.threadId;
@@ -311,6 +310,7 @@
 	<!-- Every transcript row, live work included, renders through the body's Focus classification. -->
 		<MessageListBody
 			{transcriptEntries}
+			{transcriptWithPlaced}
 			{pendingEntries}
 			retryRows={focusMode ? messageRows.filter(needsWakeRetry) : []}
 			{expandedTools}

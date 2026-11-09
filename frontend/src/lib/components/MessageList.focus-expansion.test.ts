@@ -76,6 +76,34 @@ afterEach(() => {
 	coreSettings.set(null);
 });
 
+describe('comment-only sends across server stubs', () => {
+	it('opens the combined range once without repeating its pieces or drawing placed sends', () => {
+		const first = { ...said('target', 1, '10:00:00'), thread_id: A, chat_comments: [{
+			id: 'root-id', cid: 'root', user_message_id: 'root-message', quote: 'target', note: 'note', from_off: 0, to_off: 6,
+			anchor_prefix: '', anchor_suffix: '', created_at: '2026-10-02T10:00:00Z',
+			answers: [{ author_kind: 'user', user_message_id: 'send', cid: 'answer', text: 'reply', created_at: '2026-10-02T10:00:00Z', unread: false }],
+		}] };
+		const envelope = { ...human('send', 3, '10:01:00', 't1', '10:01:00'), thread_id: A, content: '', metadata: { reply_context: { comments: [{ id: 'c', cid: 'answer' }] } } };
+		const last = { ...said('last', 5, '10:03:00'), thread_id: A };
+		const rows = [first, envelope, last] as Message[];
+		const part = (id: string, seq: number) => ({ firstId: id, lastId: id, firstSeq: seq, lastSeq: seq, count: 1, weight: 1, turnIds: [], kinds: ['steps'], continuesOlder: false });
+		const onLoadRun = vi.fn();
+		messages.set(rows);
+		const props = renderList({ focusRuns: [part('a', 2), part('b', 4)], runLoads: {}, historyComplete: true, onLoadRun });
+		expect(toggles()).toHaveLength(1);
+		toggles()[0].click(); flushSync();
+		expect(onLoadRun).toHaveBeenCalledWith(expect.objectContaining({ firstId: 'a', lastId: 'b' }));
+		messages.set([first, { ...work('a', 2, '10:00:30'), thread_id: A }, envelope, { ...work('b', 4, '10:02:00'), thread_id: A }, last] as Message[]);
+		props.runLoads = { b: { oldestId: 'a', coveredFirstId: 'a', hasMore: false, loading: false, error: false } };
+		flushSync();
+		expect(host.querySelector('[data-message-id="send"]')).toBeNull();
+		expect(host.querySelectorAll('[data-message-id="a"]')).toHaveLength(1);
+		expect(host.querySelectorAll('[data-message-id="b"]')).toHaveLength(1);
+		expect(toggles()).toHaveLength(1);
+		expect(faces()[0]).toContain('2 steps');
+	});
+});
+
 describe('Focus run expansion belongs to one thread', () => {
 	it('leaves the next thread\'s first run closed after the first thread\'s was opened', () => {
 		messages.set([...startsWithRun(A), ...startsWithRun(B)]);

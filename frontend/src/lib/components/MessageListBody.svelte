@@ -5,9 +5,11 @@
 	import type { PlanLimitPauseDescriptor } from './planLimitPause';
 	import type { RunLoad, RunStub } from '$lib/focusRuns';
 	import type { WorkBlockLive } from './workBlockLive';
+	import type { TranscriptEntry } from './transcriptFocusModel';
 
 	let {
 		transcriptEntries,
+		transcriptWithPlaced,
 		pendingEntries,
 		retryRows = [],
 		expandedTools,
@@ -27,6 +29,7 @@
 		onLoadRun,
 	}: {
 		transcriptEntries: any[];
+		transcriptWithPlaced?: (placed: ReadonlySet<string>) => TranscriptEntry[];
 		pendingEntries: any[];
 		/** Focus: context updates that could not be delivered, each with its Retry. */
 		retryRows?: any[];
@@ -50,6 +53,7 @@
 
 <TranscriptContent
 	entries={transcriptEntries}
+	{transcriptWithPlaced}
 	{expandedTools}
 	{expandedReasoning}
 	{onToggleToolBlock}
