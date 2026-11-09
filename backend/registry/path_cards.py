@@ -22,7 +22,15 @@ _FENCE = re.compile(r"^(```|~~~).*?^\1", re.MULTILINE | re.DOTALL)
 _MARKDOWN_LINK = re.compile(r"\[[^\]\n]*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 # File paths in prose or inline code; URLs are masked before this scan.
 _BARE_PATH = re.compile(r"(?<![\w/.:~%-])((?:/|(?:\.{1,2}/))?(?:[\w@%+=,.~-]+/)*[\w@%+=,~-][\w@%+=,.~-]*\.[A-Za-z0-9]{1,8})(?![\w/])")
-_URL = re.compile(r"[a-z][a-z\d+.-]*://[^\s<>()]+", re.IGNORECASE)
+#: The separator every URL scheme is followed by, the characters a scheme is spelled with
+#: (``_SCHEME_RUN``, the runs the scan walks), and the characters a scheme starts with
+#: (``_SCHEME_START``). Both read a character in its casefolded form, which is what
+#: ``re.IGNORECASE`` compares a class against, so ``ſftp`` reads as a scheme here and to
+#: the pattern it replaces.
+_SCHEME_SEP = "://"
+_SCHEME_RUN = re.compile(r"[a-z\d+.-]+", re.IGNORECASE)
+_SCHEME_START = frozenset("abcdefghijklmnopqrstuvwxyz")
+_URL_TAIL = re.compile(r"[^\s<>()]+")
 _BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
 _SCHEME = re.compile(r"^[a-z][a-z\d+.-]*:", re.IGNORECASE)
 # ``file.md:12`` or ``file.md:12:3``, a place in a file as agents cite it, names that file.
@@ -77,15 +85,55 @@ def _names_file(target: str) -> bool:
     return "." in scheme.group() and bool(_LINE_SUFFIX.match(path))
 
 
+def _mask_urls(body: str) -> str:
+    """Blank every URL out of ``body`` in one left-to-right pass.
+
+    The pattern this replaces, ``[a-z][a-z\\d+.-]*://[^\\s<>()]+``, carries no left boundary:
+    on an unbroken run of scheme characters — a long hash, a base64 blob, a minified
+    line — the engine restarted at every character of the run and backtracked over the
+    rest of it, quadratic in the run's length, so one page read held the GIL for seconds.
+    Here every run of scheme characters is found by one C-level scan and only a run that a
+    separator follows is read further, so the cost follows the length of the text and never
+    the length of a run squared. A blanked span is the span that pattern matched: the run
+    from its first letter through the URL's last non-space character, and an occurrence
+    with nothing after it (``file://`` at the end of a line) is no URL in either reading. A
+    run with no letter (``1://``) is no URL either, so it stays visible to the bare-path
+    scan. The tail of a match always ends the unbroken token it starts in, so a token
+    carries at most one URL and everything after it is already blank: nested separators
+    inside one token (``http://a?u=http://b``, ``a://a://a://``) are skipped rather than
+    read again, which is the non-overlapping behaviour that pattern had.
+    """
+    if _SCHEME_SEP not in body:  # no URL anywhere: one C-level search instead of a pass
+        return body
+    masked: list[str] | None = None
+    blanked_until = 0  # end of the last blanked span; that token holds no second URL
+    for run in _SCHEME_RUN.finditer(body):
+        if run.start() < blanked_until:
+            continue
+        if not body.startswith(_SCHEME_SEP, run.end()):
+            continue
+        letter = next(
+            (index for index, char in enumerate(run.group()) if char.casefold() in _SCHEME_START),
+            None,
+        )
+        if letter is None:  # no scheme here, so its tail is not worth reading
+            continue
+        tail = _URL_TAIL.match(body, run.end() + len(_SCHEME_SEP))
+        if tail is None:
+            continue
+        if masked is None:
+            masked = list(body)
+        start = run.start() + letter
+        masked[start:tail.end()] = [" "] * (tail.end() - start)
+        blanked_until = tail.end()
+    return body if masked is None else "".join(masked)
+
+
 def targets(text: str) -> list[str]:
     """Link targets and bare paths outside fenced code, in the order text names them."""
     body = _FENCE.sub("", text or "")
     found: list[tuple[int, str]] = [(m.start(), m.group(1)) for m in _MARKDOWN_LINK.finditer(body)]
-    bare_body = _MARKDOWN_LINK.sub(lambda m: " " * len(m.group()), body)
-    # Every URL has "://". Without one, skip the scan: it retries from each character of an
-    # unbroken run of word characters, quadratic in the run's length, on every page read.
-    if "://" in bare_body:
-        bare_body = _URL.sub(lambda m: " " * len(m.group()), bare_body)
+    bare_body = _mask_urls(_MARKDOWN_LINK.sub(lambda m: " " * len(m.group()), body))
     found += [(m.start(), m.group(1)) for m in _BARE_PATH.finditer(bare_body)]
     ordered: list[str] = []
     seen: set[str] = set()

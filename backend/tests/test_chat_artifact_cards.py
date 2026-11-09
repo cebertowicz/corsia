@@ -817,3 +817,77 @@ def test_a_reference_card_carries_the_artifact_type_the_canvas_uses_for_images(d
     by_id = {c["artifact_id"]: c for c in cards}
     assert (by_id[png]["type"], by_id[png]["icon"], by_id[png]["opens"]) == ("image", "image", True)
     assert by_id[doc]["type"] != "image"
+
+
+def test_a_long_unbroken_run_beside_a_link_does_not_blow_up_the_link_scan() -> None:
+    """A link plus a 200k-character run costs what the text costs, not its square.
+
+    The URL scan used to restart at every character of an unbroken run of scheme
+    characters — a long hash, a base64 blob, a minified line — and backtrack over the
+    rest of it, so one message page of that shape held the GIL for minutes. A bare wall
+    clock is timing-dependent, so the test measures growth: eight times the text costs
+    about eight times as long for a linear scan and about sixty-four times for the
+    quadratic one, with the bound set far above the linear figure.
+    """
+    from registry import path_cards
+
+    def scan(size: int) -> float:
+        text = f"see https://example.com/x and {'a' * size}"
+        started = time.perf_counter()
+        path_cards._mask_urls(text)
+        return time.perf_counter() - started
+
+    small = min(scan(25_000) for _ in range(3))
+    large = min(scan(200_000) for _ in range(3))
+    assert large < 1.0, f"the scan took {large:.3f} s on 200k characters"
+    assert large / max(small, 1e-9) < 24, (
+        f"the scan grew {large / small:.1f}x for 8x the text, which is quadratic"
+    )
+
+
+def test_nested_schemes_in_one_token_cost_what_the_text_costs() -> None:
+    """``a://a://a://`` inside one token is read once, not once per separator.
+
+    Every separator inside an unbroken token ends at the same character, so the first URL
+    already blanks the whole token and the rest of its separators have nothing left to
+    read. A scan that measured each of them again grew fourfold per doubling — 64 ms at
+    2,000 separators, 1,056 ms at 8,000 — while this one doubles with the text, as the
+    pattern it replaces did.
+    """
+    from registry import path_cards
+
+    def scan(separators: int) -> float:
+        text = "see " + ("a" + ":" + "//") * separators + " end"
+        started = time.perf_counter()
+        path_cards._mask_urls(text)
+        return time.perf_counter() - started
+
+    small = min(scan(8_000) for _ in range(3))
+    large = min(scan(64_000) for _ in range(3))
+    assert large < 1.0, f"the scan took {large:.3f} s on 8,000 separators x 8"
+    assert large / max(small, 1e-9) < 24, (
+        f"the scan grew {large / small:.1f}x for 8x the separators, which is quadratic"
+    )
+
+
+def test_the_link_scan_masks_the_same_spaces_it_always_did() -> None:
+    """The masked spans stay what the old pattern matched, so bare paths still surface.
+
+    ``1.https://x`` masks from the scheme's first letter and leaves the leading ``1.``
+    for the bare-path scan to see; ``file://`` with nothing after it is no URL, and
+    ``1://`` has no scheme letter, so neither is masked and a path beside them is found.
+    Nested separators — ``a://b://c``, a URL inside a query string — blank the whole token
+    once, and a digit-led token keeps its second separator's URL visible to the scan.
+    """
+    from registry import path_cards
+
+    masked = path_cards._mask_urls("see 1.https://x/y and /a/b.md")
+    assert masked == "see 1." + " " * len("https://x/y") + " and /a/b.md"
+    assert path_cards._mask_urls("endpoints file:// and /a/b.md") == "endpoints file:// and /a/b.md"
+    assert path_cards._mask_urls("counters 1:// and /a/b.md") == "counters 1:// and /a/b.md"
+    nested = path_cards._mask_urls("see a://b://c and /a/b.md")
+    assert nested == "see " + " " * len("a://b://c") + " and /a/b.md"
+    query = path_cards._mask_urls("open https://example.com/?u=http://x/y then /a/b.md")
+    assert query == "open " + " " * len("https://example.com/?u=http://x/y") + " then /a/b.md"
+    assert path_cards._mask_urls("counters 1://2://x.md") == "counters 1://2://x.md"
+    assert path_cards.targets("see https://example.com/x, 1.https://y/z and /a/b.md") == ["/a/b.md"]
