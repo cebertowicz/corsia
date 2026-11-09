@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { type Page, type APIRequestContext } from '@playwright/test';
 import { test, expect } from '../support/test';
+import { isolatedDb, setDebugVersionOverlay } from '../support/heldComments';
 import { scanBreakpoints, captureWidths } from './breakpoints.mjs';
 async function scrollScreen(page: Page, selector: string, scroll: 'top' | 'bottom') {
   await page.evaluate(({ selector, scroll }) => {
@@ -23,7 +24,19 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
   if (!/^[a-z0-9-]+$/.test(name) || !path.isAbsolute(output)) throw new Error('Invalid scenario or non-absolute output path');
   const scenario = await import(`./${name}.ts`);
   if (typeof scenario.seed !== 'function' || typeof scenario.scrollAnchor !== 'string') throw new Error('Scenario must export seed and scrollAnchor');
+  await setDebugVersionOverlay(request, false);
+  isolatedDb(['cursor = connection.execute("UPDATE models SET display_name=? WHERE id=?", ("Claude Sonnet 5.5", "mock-test-model"))', 'assert cursor.rowcount == 1']);
   const context = page.context();
+  // Keep the disposable account ID intact while giving its greeting a review identity.
+  await context.routeWebSocket('**/ws', socket => {
+    const server = socket.connectToServer();
+    server.onMessage(message => {
+      if (typeof message !== 'string') return socket.send(message);
+      const payload = JSON.parse(message);
+      if (payload.type === 'auth_ok' && payload.user) payload.user.name = 'Jordan';
+      socket.send(JSON.stringify(payload));
+    });
+  });
   let captured = page;
   let open: ((page: Page) => Promise<void>) | undefined;
   const breakpoints = scanBreakpoints(path.resolve('src'));
@@ -42,6 +55,9 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
       open = await scenario.seed(captured, request);
       if (typeof open !== 'function') throw new Error('Scenario seed must return an open function');
     }
+    await expect(captured.locator('.version-overlay')).toHaveCount(0);
+    await expect(captured.getByText('Mock Test Model', { exact: true })).toHaveCount(0);
+    await expect(captured.locator('body')).not.toContainText(/\be2e\b/i);
     for (const theme of ['light', 'dark'] as const) {
       await captured.emulateMedia({ colorScheme: theme });
       await expect(captured.locator('html')).toHaveAttribute('data-theme', theme);

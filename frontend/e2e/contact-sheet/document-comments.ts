@@ -50,6 +50,7 @@ export async function seed(page: Page, request: APIRequestContext) {
   const resolved = await comment(tableCell, 'This explanation now includes the expected behavior.');
   const patch = await request.patch(`/api/comments/${resolved}`, { params, data: { resolved: true } });
   expect(patch.ok(), await patch.text()).toBeTruthy();
+  isolatedDb(['cursor = connection.execute("UPDATE doc_comments SET author=? WHERE artifact_id=? AND author_kind=?", (sys.argv[2], sys.argv[3], "user"))', 'assert cursor.rowcount == 2'], 'Jordan Lee', artifact);
   async function open(target: Page) {
     await target.addInitScript(({ thread, artifact, docPath }) => {
       localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({ threads: { [thread]: { tabs: [{ instanceId: 'contact-sheet', artifactId: artifact, path: docPath, title: 'review.md', loadedRevision: null, latestRevision: null, status: 'loading' }], activeTabId: 'contact-sheet', visible: true, activeSurface: 'artifact' } }, splitWidth: null }));
