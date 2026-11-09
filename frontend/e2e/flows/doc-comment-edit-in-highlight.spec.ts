@@ -35,7 +35,7 @@ const popover = (page: Page) => page.locator('[data-popover]');
 
 /**
  * Puts the caret in the highlight as the person does and checks the card opened (`shown`), then edits there. On a phone
- * the tap opens the sheet, which covers the text; closing it and tapping the text again is editing, and opens nothing.
+ * the tap places the caret and opens the sheet, which covers the text; Close returns to typing there.
  * Below the margin width the click opens the popover, and the first key typed closes it.
  */
 async function editInsideHighlight(page: Page, shown: () => Promise<void>, mode: 'margin' | 'popover' | 'phone' = 'margin') {
@@ -46,11 +46,10 @@ async function editInsideHighlight(page: Page, shown: () => Promise<void>, mode:
 	if (phone) {
 		await sheet(page).getByRole('button', { name: 'Close', exact: true }).click();
 		await expect(sheet(page)).toHaveCount(0);
-		await highlight(page).tap();
 	}
 	// The card opens a beat after the caret lands: what is typed after it must still reach the text.
 	await page.waitForTimeout(400);
-	if (phone) await expect(sheet(page), 'a tap in the text the caret is already in edits it').toHaveCount(0);
+	if (phone) await expect(sheet(page), 'Close returns to typing at the tapped place').toHaveCount(0);
 	await expect.poll(() => focusIn(page), { message: 'the editor keeps the focus' }).toBe('editor');
 	await page.keyboard.type('QWE');
 	await expect.poll(() => highlighted(page), { message: 'typed text lands inside the highlight, which stays on it' }).toContain('QWE');
@@ -108,7 +107,7 @@ test('@flow:doc-comment-edit-in-highlight below the margin width, a click opens 
 	await editInsideHighlight(page, () => expect(popover(page)).toContainText(ITEMS[FIRST].body), 'popover');
 });
 
-test('@flow:doc-comment-edit-in-highlight on a phone, a tap on a highlight opens its sheet, and once it is closed the text there edits', async ({ page, request }, info) => {
+test('@flow:doc-comment-edit-in-highlight on a phone, a tap on a highlight places the caret and opens its sheet, and Close returns to typing there', async ({ page, request }, info) => {
 	test.skip(!info.project.name.includes('mobile'), 'The sheet is the phone layout.');
 	test.setTimeout(120_000);
 	await page.setViewportSize({ width: 393, height: 852 });
