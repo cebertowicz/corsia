@@ -37,6 +37,7 @@ export async function seed(page: Page, request: APIRequestContext) {
     if ((target.viewportSize()?.width ?? 0) <= 768) await target.getByRole('button', { name: 'Toggle sidebar' }).click();
     await sidebarThread(target, title).click();
     await expect(target.locator('.sent-comment')).toBeVisible();
+    await expect(target.locator('button.model-chip .model-chip-name')).toHaveText('Claude Sonnet 5.5');
   }
   await open(page);
   return open;
