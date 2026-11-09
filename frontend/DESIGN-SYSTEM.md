@@ -19,7 +19,7 @@ support, and the live token split in `app-tokens.css` + `app.css`.
   status, action, card, accent) has one treatment taken from it. New and
   converted screens match it and never use a treatment §0.2 lists as out. A
   screen not yet converted keeps its own look for anything added to it until
-  its pass (§0).
+  its pass, except §0.2 items 7 and 9, which no addition may use (§0).
 - **Use the live primitives** in `frontend/src/lib/components/ui/`: `Button`,
   `Field`, `IconButton`, `Message`, `Modal`, `Section`, `Toggle`.
   Don't roll your own. (`StatePill` still exists; on new and converted
@@ -47,7 +47,8 @@ support, and the live token split in `app-tokens.css` + `app.css`.
 **Status:** approved look, 2026-10-15. Every other screen is brought into line
 with it, one screen at a time. Until a screen is, anything added to it matches
 that screen's own current look, element by element, and moves to §0 only when
-the whole screen does. Where the screen already uses both looks for the
+the whole screen does. The two exceptions are §0.2 items 7 and 9, which are
+refused on every screen. Where the screen already uses both looks for the
 same role (an error as coloured text in one place and a banner in another),
 the addition uses §0's. Where an older section below disagrees, it
 carries a **Superseded by §0** note at that point, and this section wins.
@@ -97,7 +98,8 @@ first needs it, from what that screen gets approved with.
 
 These are the old treatments the chat view removed. Review refuses them on
 new and converted screens; a screen not yet converted keeps them until its
-pass:
+pass, except items 7 and 9, which CI's design-token ratchet
+(`scripts/design_token_ratchet.py`) refuses on every screen:
 
 1. A box around content (a border, tint or shadow) that isn't a pane, an input or a frosted card.
 2. A tinted alert banner.
