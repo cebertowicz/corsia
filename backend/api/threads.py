@@ -32,16 +32,12 @@ from infra.queries import (
 
 router = APIRouter(prefix="/api", tags=["threads"])
 
-#: Thread columns the chat list does not carry. `SELECT s.*` shipped every column on every
-#: row, and an unread column still costs its name once per thread: on the production-scale
-#: fixture (560 visible threads) these 19 columns are 306 KB of the 804 KB body, 38%. Each is
-#: turn, model-switch, compaction, confinement or local-only engine state that no caller of
-#: this route reads: the frontend keeps the row as its own `Thread`
-#: (frontend/src/lib/stores/threads.ts declares the four switch fields it does show and none of
-#: these), every backend test that names these columns reads them from a database row or from
-#: another table, and the one script that fetches this route (scripts/speed_gate) measures the
-#: message read. The value is still served by the route that owns it: thread detail, the
-#: model-switch and local-only routes, and the roster read.
+#: Thread columns the chat list does not carry: turn, model-switch, compaction, confinement and
+#: local-only engine state that no caller of this route reads. An unread column still costs its
+#: name once per listed thread. The frontend keeps each row as its `Thread`
+#: (frontend/src/lib/stores/threads.ts), which declares none of these; thread detail and the
+#: routes that own each value (model switch, local-only, roster) still serve them. Any other
+#: `threads` column reaches the list unless it is named here.
 _LIST_INTERNAL_COLUMNS = (
     "agent_roster_updated_at",
     "confinement",
