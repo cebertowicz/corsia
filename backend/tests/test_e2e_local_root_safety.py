@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -161,6 +162,73 @@ def test_a_root_the_backend_guard_refuses_is_never_created(harness: Harness):
     assert not workspace.exists(), _output(result)
     assert not state.exists()
     _assert_refused(harness, result)
+
+
+def test_owned_mode_refuses_non_http_listener_before_provisioning(harness: Harness):
+    workspace = harness.tmp / "workspace"
+    state = harness.tmp / "state"
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        result = harness.run(
+            CORSIA_E2E_OWNED_PROCESSES_ONLY="1", CORSIA_E2E_BACKEND_PORT=str(port),
+            CORSIA_E2E_WORKSPACE=str(workspace), CORSIA_E2E_STATE_DIR=str(state),
+        )
+        assert result.returncode != 0
+        assert "backend port" in _output(result)
+        assert not workspace.exists() and not state.exists()
+        assert harness.port_calls() == ""
+        with socket.create_connection(("127.0.0.1", port), timeout=2):
+            pass
+
+
+def test_owned_mode_cleanup_never_sweeps_listener(harness: Harness):
+    # Extract and execute the actual lifecycle functions, with an explicitly
+    # started child and an unrelated real listener present during cleanup.
+    script = (harness.repo / "scripts" / "e2e-local").read_text(encoding="utf-8")
+    functions = script[script.index("cleanup() {"):script.index("\nREUSE=0")]
+    fake_python = harness.shim("backend-child", "exec sleep 60")
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        port = listener.getsockname()[1]
+        command = functions + '''
+boot_backend "$WORKSPACE" "$BOOT_LOG"
+child=$BOOT_PID
+kill_backend
+if kill -0 "$child" 2>/dev/null; then exit 10; fi
+boot_backend "$WORKSPACE" "$BOOT_LOG"
+child=$BOOT_PID
+cleanup
+if kill -0 "$child" 2>/dev/null; then exit 11; fi
+'''
+        result = subprocess.run(
+            ["bash", "-c", command], env=harness.env(
+                OWNED_PROCESSES_ONLY="1", REPO_ROOT=str(harness.repo),
+                VENV_PY=str(fake_python), WORKSPACE=str(harness.tmp),
+                STATE_ROOT=str(harness.tmp), BOOT_PORT=str(port),
+                BOOT_LOG=str(harness.tmp / "boot.log"),
+            ), capture_output=True, text=True, timeout=15,
+        )
+        assert result.returncode == 0, _output(result)
+        assert harness.port_calls() == ""
+        with socket.create_connection(("127.0.0.1", port), timeout=2):
+            pass
+
+
+def test_owned_mode_prepares_free_port_without_sweeping(harness: Harness):
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    result = harness.run(
+        CORSIA_E2E_OWNED_PROCESSES_ONLY="1", CORSIA_E2E_BACKEND_PORT=str(port),
+        CORSIA_E2E_WORKSPACE=str(harness.tmp / "workspace"),
+        CORSIA_E2E_STATE_DIR=str(harness.tmp / "state"),
+    )
+    assert PREP_DONE in _output(result), _output(result)
+    assert "lsof" not in harness.port_calls()
+    assert "kill" not in harness.port_calls()
 
 
 def test_fresh_caller_roots_are_prepared(harness: Harness):
