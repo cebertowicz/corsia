@@ -157,9 +157,9 @@ def update_schema(operations: Iterable[str]) -> dict[str, Any]:
         MUTATION_FIELD_SCHEMAS,
         # No minimum: `edit` now has two bodies, and the smaller one
         # (`{"node_ids": [...], "later": true}`) is two keys. A change that names
-        # nothing is refused by `plans.boundary_fields.edit_fields`, in the same
-        # words for either body, which is where the rule belongs now that a key
-        # count cannot tell the two apart.
+        # nothing is refused at runtime, where the body is known: one node by
+        # `plans.boundary_fields.edit_fields`, many by
+        # `plans.bulk_fields.validate_bulk`. A key count cannot tell the two apart.
         patch_operation=None,
         operation_preamble=_UPDATE_OPERATION_PREAMBLE,
     )

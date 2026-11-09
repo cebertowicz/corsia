@@ -27,6 +27,7 @@ from typing import Any
 import plans.aggregates_move as aggregates_move
 import plans.node_creation as node_creation
 import plans.node_states as node_states
+import plans.run_end as run_end
 import plans.service as service
 
 #: The move's own event, with ``{"from": old parent, "to": new parent}``. The one
@@ -49,6 +50,13 @@ UNDER_TASK = (
 #: The cause, the fact that makes it so, and the fix -- in the caller's own words
 #: back at it, because a refused move usually means the ids were mixed up.
 CYCLE = "{title} can't move inside its own branch ({parent} is beneath it)."
+#: A run's steps come from its definition and its end is read from them by
+#: ``parent_id`` (``plans.run_end``), so a step moved away would end the run without
+#: it -- the skip ``workflow_fields.refuse_required_skip`` refuses for a close.
+RUN_STEP = (
+    "{title} is a step of a workflow run, so it stays in its run: finish it there, "
+    "or close it with a reason if the run lets it be skipped."
+)
 
 @dataclass(frozen=True)
 class Move:
@@ -70,14 +78,17 @@ def plan(connection, node, parent_id) -> Move | None:
     """Return the write that re-hangs ``node``, or None when it is already there.
 
     Raises:
-        PlanInputError: ``parent_id`` names this node, a node of another plan or
-            no node, a task, or a descendant of the node being moved.
+        PlanInputError: ``node`` is a workflow run's step, or ``parent_id`` names
+            this node, a node of another plan or no node, a task, or a descendant
+            of the node being moved.
         PlanError: The new parent is retired or finished, the same refusals an
             ``add`` under it would give (``node_creation._validate_parent``).
     """
     old = node["parent_id"]
     if parent_id == old:
         return None
+    if node["workflow_step"] is not None:
+        raise service.PlanInputError(RUN_STEP.format(title=node["title"]))
     if parent_id is not None:
         _refuse(connection, node, parent_id)
     return Move(
@@ -107,6 +118,10 @@ def finish(connection, before, moved: Move | None, *, actor_id: str | None, prov
         connection, before["id"], EVENT, actor_id=actor_id, provenance=provenance,
         payload={"from": moved.from_parent, "to": moved.to_parent},
     )
+    # Work moved out of a run may have been the run's last open work: it ends here,
+    # as it would have when that work settled. Work moved in is what an `add` there
+    # would be, which keeps the run open until it settles.
+    run_end.record_from(connection, moved.from_parent)
 
 
 def _refuse(connection, node, parent_id: str) -> None:

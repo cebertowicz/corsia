@@ -463,3 +463,39 @@ async def test_the_persons_wont_do_on_a_required_step_fails_the_run(isolated_db,
         assert closure.settled_reasons(db, [service._node_row(db, polish)]) == {polish: "Closed because required task review was not done."}
     finally:
         db.close()
+
+
+async def test_a_run_step_stays_in_its_run_when_regrouped(isolated_db, tmp_path, monkeypatch):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, PLAIN)})
+    reply = await run.start("ship")
+    phase = reply["node"]["id"]
+    draft = reply["steps"][0]["id"]
+    other = (await run.update("add", {"kind": "phase", "title": "Elsewhere", "acceptance_criteria": "Done"}))["node"]["id"]
+
+    for target in (None, other):
+        refused = await run.update("edit", _args(run, draft, parent_id=target))
+        assert isinstance(refused, str) and "stays in its run" in refused, refused
+    assert run.rows("SELECT parent_id FROM plan_nodes WHERE id=?", draft)[0]["parent_id"] == phase
+
+
+async def test_moving_the_last_open_work_out_of_a_run_records_the_run(isolated_db, tmp_path, monkeypatch):
+    run = Run(tmp_path, monkeypatch, {"ship": (SHIP_BODY, PLAIN)})
+    reply = await run.start("ship")
+    phase = reply["node"]["id"]
+    draft, review, polish = (step["id"] for step in reply["steps"])
+    added = await run.update("add", {
+        "title": "Unrelated note", "acceptance_criteria": "Filed", "size": "XS", "parent_id": phase,
+        "intent": "Keep a stray note out of the release run",
+    })
+    assert not isinstance(added, str), added
+    stray = added["node"]["id"]
+    await _finish(run, draft)
+    await _finish(run, review)
+    await run.update("close_node", _args(run, polish, reason="Nothing to polish"))
+    assert _ended(run, phase) == []
+
+    moved = await run.update("edit", _args(run, stray, parent_id=None))
+    assert not isinstance(moved, str), moved
+
+    (record,) = _ended(run, phase)
+    assert record["outcome"] == "completed"

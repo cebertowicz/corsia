@@ -90,6 +90,25 @@ def _regroup_into_own_branch(depth: int):
     return build
 
 
+def _regroup_a_run_step(db, scene):
+    """Move a workflow step to another branch: a run's step stays in its run."""
+    branch = service.add_node(
+        scene.plan_id, kind="phase", title="Elsewhere", acceptance_criteria="E",
+        intent="Hold the branch.", db=db,
+    )
+    step = service.add_node(
+        scene.plan_id, kind="task", title="Build", acceptance_criteria="B",
+        intent="Build it.", size="S", workflow_step="build", difficulty="routine", db=db,
+    )
+    db.commit()
+    return partial(
+        _mutate, db, scene.plan_id, "edit", {
+            "node_id": step.id, "expected_revision": _revision(db, step.id),
+            "parent_id": branch.id,
+        }, _mid(),
+    )
+
+
 def _size_before_migration(db, scene):
     """A pre-v51 plan-node table cannot persist a declared size yet."""
     db.execute("DROP INDEX idx_plan_nodes_workflow_ref")
@@ -679,6 +698,7 @@ _CASES = {
     ),
     ("regroup.py", 'CYCLE.format(title=node["title"], parent=parent["title"])'):
         _regroup_into_own_branch(2),
+    ("regroup.py", 'RUN_STEP.format(title=node["title"])'): _regroup_a_run_step,
     # --- plans/bulk_fields.py ---
     ("bulk_fields.py", "_alone(operation, extras)"): _operation(
         "edit", {"node_ids": [OWN], "node_id": NODE, "later": True},
