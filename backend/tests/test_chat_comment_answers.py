@@ -157,7 +157,7 @@ def test_route_stamps_the_newest_seen_answer_and_checks_ownership(isolated_db):
     assert unread_and_stamps() == (1, ["2026-01-04"])
 
 
-def test_viewing_each_reply_answer_clears_its_own_unread_entry(isolated_db):
+def test_viewing_one_answer_to_several_replies_clears_it_once(isolated_db):
     from doceditor.reply_attention import chat_reply_items
     from infra.chat_comment_index import place_comments
     from main import app
@@ -178,18 +178,21 @@ def test_viewing_each_reply_answer_clears_its_own_unread_entry(isolated_db):
         db.commit()
     finally:
         db.close()
-    client = TestClient(app)
-    for cid, remaining in [('c2.1', 1), ('c2.2', 0)]:
-        response = client.post(f'/api/threads/thread/messages/followup/comments/{cid}/viewed',
-                               headers={'Authorization': f'Bearer {OWNER_TOKEN}'},
-                               json={'assistant_message_id': 'shared-answer'})
-        assert response.status_code == 200
-        db = get_db()
-        try:
-            items = chat_reply_items(db, OWNER_USER, 'thread')
-            assert (items[0]['detail']['unread_count'] if items else 0) == remaining
-        finally:
-            db.close()
+    db = get_db()
+    try:
+        assert chat_reply_items(db, OWNER_USER, 'thread')[0]['detail']['unread_count'] == 1
+    finally:
+        db.close()
+    # The thread shows the shared answer once, under c2.1; viewing it there clears it.
+    response = TestClient(app).post('/api/threads/thread/messages/followup/comments/c2.1/viewed',
+                                    headers={'Authorization': f'Bearer {OWNER_TOKEN}'},
+                                    json={'assistant_message_id': 'shared-answer'})
+    assert response.status_code == 200
+    db = get_db()
+    try:
+        assert chat_reply_items(db, OWNER_USER, 'thread') == []
+    finally:
+        db.close()
 
 
 @pytest.mark.parametrize("operation", ["purge", "delete"])
