@@ -1261,7 +1261,7 @@ async def test_days_serve_the_outcome_count_so_far_today_flagged_partial_and_nev
 
 
 @pytest.mark.asyncio
-async def test_a_token_total_is_comparable_in_every_period_a_per_outcome_rate_is_not(isolated_db):
+async def test_a_token_total_is_comparable_in_every_period_a_per_outcome_rate_is_not(isolated_db, measurement_clock):
     """The comparability break belongs to the per-outcome unit; a plain token total spans it."""
     from api.measurement import measurement_series
     from infra.database import get_db
@@ -1317,7 +1317,7 @@ async def test_the_token_total_starts_at_its_first_recorded_period(isolated_db):
 
 
 @pytest.mark.asyncio
-async def test_first_try_misses_only_a_rejection_or_a_failed_or_changed_attempt(isolated_db):
+async def test_first_try_misses_only_a_rejection_or_a_failed_or_changed_attempt(isolated_db, measurement_clock):
     """A re-selection is not a second try.
 
     The served figure counted ``attempt_ordinal > 1``, so a node re-selected after its
