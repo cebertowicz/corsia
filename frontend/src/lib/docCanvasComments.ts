@@ -60,9 +60,9 @@ const suggestionColor = (comment: DocComment) => agentColor(comment.authorThread
 /**
  * The highlight ranges for the editor. An open suggestion rides on its range (`suggestion`), drawn in place of
  * the anchor highlight. Of suggestions that overlap, the earliest in document order is inline and the rest are
- * card-only. `accepting` is the id whose Accept is in flight.
+ * card-only. `accepting` is the id whose Accept is in flight. A comment on part of an image carries its pin, in `colorOf`'s colour.
  */
-export function canvasCommentHighlights(comments: DocComment[], text: string, focusedId: string | null, onMarkerFocus: CommentRange['onMarkerFocus'], accepting: string | null = null): CommentRange[] {
+export function canvasCommentHighlights(comments: DocComment[], text: string, focusedId: string | null, onMarkerFocus: CommentRange['onMarkerFocus'], accepting: string | null = null, colorOf?: (comment: DocComment) => string): CommentRange[] {
 	let inlineEnd = -1;
 	return comments.filter((comment) => !comment.resolved || (comment.id === focusedId && !comment.decision)).flatMap((comment): CommentRange[] => {
 		const anchorRange = canvasCommentRange(comment, text);
@@ -79,7 +79,8 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 			if (inline) inlineEnd = range.to;
 			suggestion = { quote: comment.insertAfter ? '' : comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
 		}
-		return [{ ...range, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, suggestion, region: !!comment.region, ...(range.from === range.to && !suggestion ? { point: true } : {}) }];
+		const pin = comment.region && comment.regionNumber != null && colorOf ? { region: comment.region, number: comment.regionNumber, color: colorOf(comment) } : undefined;
+		return [{ ...range, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, suggestion, region: !!comment.region, ...(pin ? { pin } : {}), ...(range.from === range.to && !suggestion ? { point: true } : {}) }];
 	});
 }
 

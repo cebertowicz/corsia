@@ -3,6 +3,7 @@ import { Decoration, type DecorationSet, EditorView } from '@codemirror/view';
 import { visibleRegion, type Box } from './visible-region';
 import { widgetTarget } from './widget-scroll';
 import { releasePlace } from '$lib/documentReadingPlace';
+import type { ImageRegion } from '$lib/api/docs';
 
 /** An open suggestion on a comment range (`suggestion-marks.ts` draws it in place of the anchor highlight). */
 export interface InlineSuggestion {
@@ -28,6 +29,8 @@ export interface CommentRange {
 	point?: boolean;
 	/** A pin on an image or diagram region: drawn by its pin, never as a highlight on the whole block. */
 	region?: boolean;
+	/** What that pin draws (`image-pins.ts`): its box or point on the image, its number and its author's colour. */
+	pin?: { region: ImageRegion; number: number; color: string };
 }
 
 export const setCommentRanges = StateEffect.define<CommentRange[]>();

@@ -20,6 +20,7 @@
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
 	import { commentRail } from '$lib/cm/comment-rail';
+	import { imagePins } from '$lib/cm/image-pins';
 	import { widgetComments } from '$lib/cm/widget-comments';
 	import { cardQuoteLabel, widgetCommentLabel } from '$lib/cm/widget-cells';
 	import type { SelectionLabel } from '$lib/stores/commentDraft';
@@ -216,6 +217,7 @@
 				suggestionMarks(() => ({ focus: (id, click) => onAnchorFocus?.(id, liveAnchor(id), true, click), hover: (id) => onSuggestionHover?.(id) })),
 				commentRail,
 				widgetComments({ onSelect: (sel) => onSelect?.(sel), onFocus: focusWidgetComments }),
+				imagePins({ onFocus: focusWidgetComments }),
 				presenceMarks,
 				typedReveal,
 				EditorView.lineWrapping,

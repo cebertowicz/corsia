@@ -59,6 +59,16 @@ describe('canvas comment order and navigation', () => {
 		expect(fallback).toMatchObject({ from: 0, to: text.length, commentId: 'pin' });
 		expect(canvasFocusedCommentScrollTarget(fallback, rows, text, 'pin', false)).toBe(fallback);
 	});
+	it('gives an image comment its pin on the image: region, number and its author colour; a whole-image comment has none', () => {
+		const text = '![image](image.jpg)';
+		const region = { x: 0.3, y: 0.4, w: 0, h: 0 };
+		const rows = [comment('pin', 0, text, { imageSrc: 'image.jpg', region, regionNumber: 2 }), comment('whole', 0, text)];
+		const colorOf = (row: DocComment) => (row.id === 'pin' ? '#123456' : '#000000');
+		expect(canvasCommentHighlights(rows, text, null, undefined, null, colorOf).map((range) => [range.id, range.pin])).toEqual([
+			['pin', { region, number: 2, color: '#123456' }], ['whole', undefined],
+		]);
+		expect(canvasCommentHighlights(rows, text, null, undefined)[0].pin).toBeUndefined();
+	});
 	it('keeps unanchored review and orphaned cards after located cards with stable ties', () => {
 		const rows = commentsInDocumentOrder([
 			comment('b', 0, 'text'), comment('review', -1, '', { review: true }), comment('a', 0, 'text'),
