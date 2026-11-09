@@ -8,6 +8,27 @@ import { buildTranscriptPresentation } from './transcriptFocusModel';
 let instance: Record<string, unknown> | undefined;
 afterEach(() => { if (instance) unmount(instance); instance = undefined; messages.set([]); coreSettings.set(null as any); document.body.innerHTML = ''; });
 
+it('keeps placed replies hidden if regrouping cannot preserve a visible target', () => {
+  const base = { thread_id: 'thread', created_at: '2026-11-09T17:00:00Z' };
+  const rows: any[] = [
+    { ...base, id: 'target', role: 'assistant', content: 'Target', metadata: { for_user: true }, chat_comments: [{
+      cid: 'root', user_message_id: 'root-message', answers: [{ author_kind: 'user', user_message_id: 'send', cid: 'answer', text: 'Reply' }],
+    }] },
+    { ...base, id: 'send', role: 'user', content: '', delivery_state: 'delivered', metadata: { reply_context: { comments: [{ id: 'reply', cid: 'answer' }] } } },
+  ];
+  messages.set(rows);
+  coreSettings.set({ features: { focus_mode: true } } as any);
+  const baseline = buildTranscriptPresentation(rows, true);
+  const host = document.createElement('div'); document.body.appendChild(host);
+  instance = mount(TranscriptContent, { target: host, props: {
+    entries: baseline, transcriptWithPlaced: () => [], threadId: 'thread', renderedStreaming: false, historyComplete: true,
+    expandedTools: new Set<string>(), expandedReasoning: new Set<string>(), onToggleToolBlock: () => {}, onToggleReasoning: () => {}, onOpenLightbox: () => {},
+  }});
+  flushSync();
+  expect(host.querySelector('[data-message-id="target"]')).not.toBeNull();
+  expect(host.querySelector('[data-message-id="send"]')).toBeNull();
+});
+
 it('keeps an expanded comment target visible when the adjacent runs merge', () => {
   const base = { thread_id: 'thread', created_at: '2026-11-09T17:00:00Z' };
   const rows: any[] = [

@@ -109,10 +109,10 @@
 				&& isRunExpanded(runTokens(merged, index, historyComplete), expandedFolds) ? entry.items : [];
 			for (const item of items) for (const row of sourceMembers(item.message)) stillVisible.add(row.id);
 		});
-		// Never hide a target that was visible in the first presentation.
+		// Preserve visible targets if regrouping loses an expansion identity.
 		return [...visibleSources].every(id => placedEnvelopes.has(id) || stillVisible.has(id))
 			? { entries: merged, placed: placedEnvelopes }
-			: { entries: baselineEntries, placed: new Set<string>() };
+			: { entries: baselineEntries, placed: placedEnvelopes };
 	});
 	const renderedEntries = $derived(focusPresentation.entries);
 	const stubPauses = $derived(stubPauseTurns(renderedEntries, pauses, turnSummaries));
