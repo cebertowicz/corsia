@@ -2,7 +2,8 @@
 # Capture a responsive screenshot sheet using the disposable mock frontend.
 # Usage: scripts/contact-sheet <scenario> [--out DIR]
 # Add a scenario under frontend/e2e/contact-sheet: export seed(page, request)
-# and scrollAnchor (a selector inside the screen's scrollable content).
+# to create the fixture, open it on page, and return an async open(page) function;
+# also export scrollAnchor (a selector inside the screen's scrollable content).
 # Writes index.html and screenshots to DIR (default: contact-sheet/<scenario>).
 # Captures light and dark, top and bottom, around CSS width thresholds.
 set -euo pipefail

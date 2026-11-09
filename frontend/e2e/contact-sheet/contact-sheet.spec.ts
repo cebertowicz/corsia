@@ -25,6 +25,7 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
   if (typeof scenario.seed !== 'function' || typeof scenario.scrollAnchor !== 'string') throw new Error('Scenario must export seed and scrollAnchor');
   const context = page.context();
   let captured = page;
+  let open: ((page: Page) => Promise<void>) | undefined;
   const breakpoints = scanBreakpoints(path.resolve('src'));
   const widths = selectedWidths ?? captureWidths(breakpoints);
   const groups: string[] = [];
@@ -36,7 +37,11 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
       captured = await context.newPage();
     }
     await captured.setViewportSize({ width, height: 900 });
-    await scenario.seed(captured, request);
+    if (open) await open(captured);
+    else {
+      open = await scenario.seed(captured, request);
+      if (typeof open !== 'function') throw new Error('Scenario seed must return an open function');
+    }
     for (const theme of ['light', 'dark'] as const) {
       await captured.emulateMedia({ colorScheme: theme });
       await expect(captured.locator('html')).toHaveAttribute('data-theme', theme);
@@ -55,6 +60,7 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
   return captured;
 }
 
+test.use({ seedPerTest: true });
 test.skip(!process.env.CONTACT_SHEET_SCENARIO, 'Run through scripts/contact-sheet');
 test('capture contact sheet', async ({ page, request }) => {
   test.skip(process.env.CONTACT_SHEET_REGRESSION === '1', 'Regression test only');
@@ -63,10 +69,12 @@ test('capture contact sheet', async ({ page, request }) => {
 });
 
 test('chat composer initializes at the captured width', async ({ page, request }) => {
-  test.skip(process.env.CONTACT_SHEET_REGRESSION !== '1' || process.env.CONTACT_SHEET_SCENARIO !== 'chat', 'Chat regression only');
+  test.skip(process.env.CONTACT_SHEET_SCENARIO !== 'chat', 'Chat regression only');
   test.setTimeout(120_000);
-  const captured = await capture(page, request, 'chat', process.env.CONTACT_SHEET_OUT ?? '', [1440, 393]);
+  const output = path.join(process.env.CONTACT_SHEET_OUT ?? '', 'regression');
+  const captured = await capture(page, request, 'chat', output, [1440, 1440, 393]);
+  await expect(captured.locator('aside.sidebar').getByText(/^Review conversation \d+$/, { exact: true })).toHaveCount(1);
   await captured.getByRole('button', { name: 'Attach', exact: true }).click();
-  await captured.screenshot({ path: path.join(process.env.CONTACT_SHEET_OUT ?? '', 'composer-393.png') });
   await expect(captured.locator('.mobile-attach-row')).toBeVisible();
+  await captured.screenshot({ path: path.join(output, 'composer-393.png') });
 });
