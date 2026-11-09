@@ -9,27 +9,34 @@
 	import { GAP, placeCards, revealShift, type MarginItem } from '$lib/docMarginPlacement';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { afterHold } from '$lib/docMarginHold.svelte';
-	import { codeMarginSource, type MarginAnchorSource } from '$lib/docMarginSource';
-	/** The margin column's cards: each open thread beside its text, stacked where a cluster would overlap. */
-	let { bounds = null, source = codeMarginSource(() => bounds), pinned, selectedId, behind, card }: { bounds?: HTMLElement | null; source?: MarginAnchorSource; pinned: T[]; selectedId: string | null; behind: boolean; card: Snippet<[T]> } = $props();
+	import { codeMarginSource, type MarginAnchorSource, type MarginComposer } from '$lib/docMarginSource';
+	/**
+	 * The margin column's cards: each open thread beside its text, stacked where a cluster would overlap. A composer (a new
+	 * comment, or an unsent one being edited) is a card too, level with the text it is written on: it keeps its line as a
+	 * picked card does, and the cards around it make room.
+	 */
+	let { bounds = null, source = codeMarginSource(() => bounds), pinned, selectedId, behind, card, composer = null }: { bounds?: HTMLElement | null; source?: MarginAnchorSource; pinned: T[]; selectedId: string | null; behind: boolean; card: Snippet<[T]>; composer?: MarginComposer | null } = $props();
+	/** A composer opens ready to type, as its popover does; the column brings it into view, so focusing it never scrolls. */
+	const takeFocus = (node: HTMLElement) => { queueMicrotask(() => node.querySelector<HTMLElement>('textarea, [contenteditable="true"]')?.focus({ preventScroll: true })); };
 	let stackEl = $state<HTMLElement>();
 	let tops = $state<Record<string, number>>({});
 	/** The card picked last, so only a new pick (not a re-layout) is brought into view when it grows. */
 	let pickedBefore: string | null = null;
-	// One scroll. A clip inside the scroller's own content (the document's column, drawn on the canvas) scrolls with the text natively:
-	// the cards sit beside their lines and nothing follows. A clip beside the scroller (the chat's column) holds the cards in document
+	// One scroll. A clip inside the scroller's own content (a column drawn on the canvas, the document's and the chat's) scrolls with the
+	// text natively: the cards sit beside their lines and nothing follows. A clip beside the scroller holds the cards in document
 	// coordinates below its header and moves them with the scroller.
 	$effect(() => {
 		if (!stackEl) return;
 		const scroller = source.scroller(), clip = source.clip(stackEl), room = source.room();
 		if (!scroller || !clip || !room) return;
-		// Read each time: the document's column is moved into the scroller once it has mounted, after this setup has run.
+		// Read each time: a column is moved into the scroller once it has mounted, after this setup has run.
 		const onCanvas = () => scroller.contains(clip);
 		let followed = false;
 		const area = room.el;
 		restoring.get(area)?.();
 		restoring.delete(area);
-		const ids = pinned.map((comment) => comment.id), selected = selectedId;
+		const writing = composer;
+		const ids = [...pinned.map((comment) => comment.id), ...(writing ? [writing.id] : [])], selected = writing?.id ?? selectedId;
 		// A card just picked grows by its reply field: for a moment after the pick, and while the reader is inside it, its lower end (the Send button) is kept in the clip by scrolling the text, which the cards ride with. The clip itself never scrolls.
 		const revealUntil = selected !== null && selected !== pickedBefore ? performance.now() + 800 : 0;
 		pickedBefore = selected;
@@ -71,9 +78,10 @@
 			const clipTop = clip.getBoundingClientRect().top, scrolled = onCanvas() ? 0 : scroller.scrollTop;
 			const items: MarginItem[] = [], loose: MarginItem[] = [];
 			for (const id of ids) {
-				const mark = source.anchor(id), card = stackEl!.querySelector<HTMLElement>(`[data-margin-card="${id}"]`);
-				if (mark && card) {
-					items.push({ id, y: Math.max(0, mark.getBoundingClientRect().top - clipTop + scrolled), h: card.offsetHeight });
+				const at = id === writing?.id ? writing.anchor()?.top : source.anchor(id)?.getBoundingClientRect().top;
+				const card = stackEl!.querySelector<HTMLElement>(`[data-margin-card="${id}"]`);
+				if (at !== undefined && card) {
+					items.push({ id, y: Math.max(0, at - clipTop + scrolled), h: card.offsetHeight });
 				} else if (card) loose.push({ id, y: 0, h: card.offsetHeight });
 			}
 			// A thread with no line at all (its text and its place both gone) sits after the last card that has one.
@@ -99,6 +107,10 @@
 		const size = (el: Element) => { if (!sized.has(el)) { sized.add(el); sizes.observe(el); } };
 		// A node that comes or goes after setup (a page of older rows, a new message) is watched for resize from then on, or let go.
 		const mutations = new MutationObserver((records) => {
+			// The cards' own changes (typing in one) move no line; a card that grows is a resize, watched below. A column drawn
+			// inside the scroller it watches (the chat's) would otherwise re-place every card on every key.
+			records = records.filter((record) => !stackEl!.contains(record.target));
+			if (!records.length) return;
 			for (const record of records) for (const node of record.removedNodes) if (node instanceof Element && sized.delete(node)) sizes.unobserve(node);
 			if (records.some((record) => record.addedNodes.length)) source.resized().forEach(size);
 			schedule();
@@ -119,10 +131,13 @@
 	});
 </script>
 
-<div class="margin-stack" class:behind bind:this={stackEl}>{#each pinned as comment (comment.id)}<div class="margin-card" class:placed={tops[comment.id] !== undefined} data-margin-card={comment.id} style:top="{tops[comment.id] ?? 0}px">{@render card(comment)}</div>{/each}</div>
+<div class="margin-stack" class:behind bind:this={stackEl}>{#each pinned as comment (comment.id)}<div class="margin-card" class:placed={tops[comment.id] !== undefined} data-margin-card={comment.id} style:top="{tops[comment.id] ?? 0}px">{@render card(comment)}</div>{/each}{#if composer}<div class="margin-card margin-composer" class:placed={tops[composer.id] !== undefined} data-margin-card={composer.id} style:top="{tops[composer.id] ?? 0}px" use:takeFocus>{@render composer.body()}</div>{/if}</div>
 
 <style>
-	.margin-stack { position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
+	/* The cards take the Frosted card role through these tokens, which the thread card reads; their corners are the comment popover's. A negative spread keeps each card's lift below it, not spread sideways over its neighbour or the text. */
+	.margin-stack { --ct-bg: var(--glass-thin); --ct-border: var(--border); --ct-radius: var(--radius); --ct-shadow: var(--glass-rim), 0 10px 14px -10px color-mix(in srgb, black 22%, transparent); position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
+	/* A composer is drawn as a card, in the same frame. */
+	.margin-composer { background: var(--ct-bg); border: 1px solid var(--ct-border); border-radius: var(--ct-radius); box-shadow: var(--ct-shadow); padding: 8px 10px; }
 	/* The open list covers the whole column, so the cards under it are not drawn: none can show a corner below its edge. */
 	.margin-stack.behind, .margin-stack.behind .margin-card.placed { visibility: hidden; }
 	/* The cards go and come back with the box: they fade as it pops, and are hidden (not drawn) only once it has finished. */

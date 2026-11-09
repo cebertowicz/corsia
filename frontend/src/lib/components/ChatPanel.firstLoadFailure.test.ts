@@ -102,7 +102,7 @@ describe('ChatPanel first-page failure', () => {
 		await (component as Record<string, any>).fetchThreadMessages('thread-b');
 		await vi.waitFor(() => expect(get(messages).find(message => message.id === 'target')?.chat_comments?.[0]?.answers).toMatchObject([{ text: 'recovered answer', author_kind: 'agent', unread: true }]));
 		await vi.waitFor(() => expect(host.innerHTML).toContain('data-comment-ids="comment"'));
-		await vi.waitFor(() => expect(document.querySelector('[data-highlight-dot] .ct-new-dot')).not.toBeNull());
+		await vi.waitFor(() => expect(document.querySelector('[data-highlight-dot] [aria-label="New reply"]')).not.toBeNull());
 		expect(host.textContent).not.toContain('recovered answer');
 		(host.querySelector('[data-comment-ids="comment"]') as HTMLElement).click();
 		flushSync();

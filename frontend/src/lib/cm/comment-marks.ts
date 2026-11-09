@@ -31,12 +31,17 @@ export interface CommentRange {
 	region?: boolean;
 	/** What that pin draws (`image-pins.ts`): its box or point on the image, its number and its author's colour. */
 	pin?: { region: ImageRegion; number: number; color: string };
+	/** The thread has a reply the reader has not opened: its highlight carries the new-reply sign (`comment-new-signs.ts`). */
+	unread?: boolean;
 }
 
 export const setCommentRanges = StateEffect.define<CommentRange[]>();
 
 const anchor = Decoration.mark({ class: 'cm-comment-anchor' });
 const anchorFocused = Decoration.mark({ class: 'cm-comment-anchor cm-comment-focused' });
+/** An unread thread's highlight names its thread, so its sign can find where the highlight ends. */
+const markOf = (range: CommentRange) => !range.unread ? (range.focused ? anchorFocused : anchor)
+	: Decoration.mark({ class: range.focused ? 'cm-comment-anchor cm-comment-focused' : 'cm-comment-anchor', attributes: { 'data-comment-new': range.id } });
 
 // A suggestion with an empty quote is a pure insertion: its range is a point.
 const located = (range: CommentRange) => range.from < range.to || (range.suggestion !== undefined && range.from === range.to) || (!!range.point && range.from === range.to);
@@ -66,7 +71,7 @@ export const commentMarks = [
 	commentRanges,
 	EditorView.decorations.compute([commentRanges], (state): DecorationSet =>
 		Decoration.set(state.field(commentRanges).filter((range) => !range.suggestion && !range.point)
-			.map((range) => (range.focused ? anchorFocused : anchor).range(range.from, range.to)), true)),
+			.map((range) => markOf(range).range(range.from, range.to)), true)),
 ];
 
 // A far jump lands on estimated line heights. The lines it reveals are measured

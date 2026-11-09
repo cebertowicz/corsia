@@ -72,6 +72,7 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 			return [{ from: at, to: at, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, point: true }];
 		}
 		if (!anchorRange) return [];
+		const unread = !!comment.newComment || !!comment.newReplyIds?.length;
 		const range = comment.insertAfter && openSuggestion(comment) ? { from: anchorRange.to, to: anchorRange.to } : anchorRange;
 		let suggestion: InlineSuggestion | undefined;
 		if (openSuggestion(comment)) {
@@ -80,7 +81,7 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 			suggestion = { quote: comment.insertAfter ? '' : comment.anchor, insert: comment.replacement!, color: suggestionColor(comment), inline, busy: comment.id === accepting };
 		}
 		const pin = comment.region && comment.regionNumber != null && colorOf ? { region: comment.region, number: comment.regionNumber, color: colorOf(comment) } : undefined;
-		return [{ ...range, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, suggestion, region: !!comment.region, ...(pin ? { pin } : {}), ...(range.from === range.to && !suggestion ? { point: true } : {}) }];
+		return [{ ...range, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, suggestion, region: !!comment.region, ...(pin ? { pin } : {}), ...(range.from === range.to && !suggestion ? { point: true } : {}), ...(unread ? { unread } : {}) }];
 	});
 }
 

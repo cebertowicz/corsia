@@ -9,7 +9,7 @@
 	import { peerFade } from '$lib/popoverMotion';
 	import type { CommentLoad } from '$lib/stores/docComments';
 	import AdaptiveDrawer from './ui/AdaptiveDrawer.svelte';
-	import Popover from './ui/Popover.svelte';
+	import Popover, { anchorRect } from './ui/Popover.svelte';
 	import CommentComposer from './comments/CommentComposer.svelte';
 	import CommentList from './comments/CommentList.svelte';
 	import SuggestionStatus from './comments/SuggestionStatus.svelte';
@@ -181,6 +181,8 @@
 	const allShown = $derived(view === 'all' ? comments : view === 'resolved' ? comments.filter(isResolved).sort(byNewest) : comments.filter((comment) => !isResolved(comment)));
 	/** Every open thread is a card in the margin, a deleted anchor's and a review conversation's included. */
 	const pinned = $derived(allShown);
+	/** With the column up a new comment is written in it, level with its selection, so the text it is on stays uncovered. */
+	const marginDraft = $derived(margin && surfaceState?.kind === 'draft' ? { id: 'draft', anchor: () => anchorRect(anchor), body: content } : null);
 	const resolvedList = $derived(comments.filter((comment) => isResolved(comment) && !comment.review).sort(byNewest));
 	const displayed = $derived.by(() => {
 		const showing = sheet.state;
@@ -315,7 +317,7 @@
 	<div class="drawer-comments" class:margin-clip={margin}>
 		{#if image && image.showThumbnail !== false && displayed.some((comment) => comment.region)}<ImageRegionThumb src={image.src} alt={image.alt} comments={displayed} colorOf={image.colorOf} onOpen={image.onOpen} />{/if}
 		<div class="peers">{#key view}<div class="peer" in:peerFade out:peerFade>
-		{#if allShown.length && margin}<DocMarginStack {bounds} {pinned} {selectedId} behind={false}>{#snippet card(comment)}{@render threadList([comment], true, true, true)}{/snippet}</DocMarginStack>{:else if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : view === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if image && filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
+		{#if (allShown.length || marginDraft) && margin}<DocMarginStack {bounds} {pinned} {selectedId} composer={marginDraft} behind={false}>{#snippet card(comment)}{@render threadList([comment], true, true, true)}{/snippet}</DocMarginStack>{:else if displayed.length}{@render content()}{:else if load?.state !== 'loading' && load?.state !== 'error'}<p class="drawer-status">{comments.length === 0 ? 'No comments yet.' : view === 'open' ? 'No open comments.' : 'No resolved comments.'}{#if image && filter === 'resolved' && openCount}<button type="button" class="drawer-empty-action" onclick={() => filter = 'open'}>Show open · {openCount}</button>{/if}</p>{/if}
 		{#if !margin && !image && resolvedList.length}{@render sheetResolved()}{/if}
 		</div>{/key}</div>
 	</div>
@@ -324,9 +326,8 @@
 
 {#if surfaceState || sheet.closing}
 	{#if margin && surfaceState}
-		<section class="canvas-comment-drawer margin" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:marginOnCanvas={bounds} use:listDrawerShown use:drawerKeys={escapeColumn} onclickcapture={(event) => opener = clickedOpener(event)} out:marginOut|global>{@render listBody()}</section>
+		<section class="canvas-comment-drawer margin" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:marginOnCanvas={{ root: bounds, scroller: '.cm-scroller' }} use:listDrawerShown use:drawerKeys={escapeColumn} onclickcapture={(event) => opener = clickedOpener(event)} out:marginOut|global>{@render listBody()}</section>
 		{#if resolvedDrawer.mounted}<AdaptiveDrawer ariaLabel="Resolved comments" heading="Resolved" headingMeta={String(resolvedList.length)} doneLabel="Close" opaque within={column} {covered} open={resolvedOpen} onClose={resolvedDrawer.close} onClosed={resolvedDrawer.closed}><div class="resolved-drawer" use:drawerKeys={resolvedDrawer.close}>{@render threadList(resolvedList, true, true, false, true)}</div></AdaptiveDrawer>{/if}
-		{#if surfaceState.kind === 'draft'}{@render cardPopover()}{/if}
 	{:else if sheet.state?.kind === 'list' && sheetDrawer}
 		<AdaptiveDrawer bind:panel={listSheet} ariaLabel="Document comments" initialFocusSelector={focusedIds ? '[data-comment-id].focused .ct-num' : '[data-drawer-autofocus]'} headless fill opaque {detent} onDetent={(next) => detent = next} followKeyboard={narrow} within={column} {covered} open={sheet.open} onClose={sheet.close} onClosed={finishSheetClose}><section class="canvas-comment-drawer sheet" data-doc-comments-drawer aria-label="Document comments" bind:this={drawer} use:listDrawerShown use:drawerKeys={closeDrawer} onclickcapture={(event) => opener = clickedOpener(event)}>{@render listBody()}</section></AdaptiveDrawer>
 	{:else if surfaceState?.kind === 'list'}
@@ -341,10 +342,8 @@
 	.rb-sheet-host.above { margin: 0 2px 0 -4px; padding-top: 0; }
 	.rb-sheet-host:empty, .rb-sheet-host[hidden] { display: none; }
 	.canvas-comment-drawer { grid-area: drawer; display: flex; flex-direction: column; gap: var(--space-1); min-height: 0; min-width: 0; padding: var(--space-1) var(--space-2) 0; border-top: 1px solid var(--border-subtle); }
-	/* The wide layout's cards take the Frosted card role through these tokens, which the thread card reads; every other caller of the card keeps its own. Their corners are the comment popover's. */
-	/* A negative spread keeps each card's lift below it, not spread sideways over its neighbour or the text. */
 	/* The column is drawn in the editor's scroller (`marginOnCanvas`), in the room the editor keeps right of its text (DocViewer.css), with no box, rule or heading of its own; until it is there it is not drawn. */
-	.canvas-comment-drawer.margin { --ct-bg: var(--glass-thin); --ct-border: var(--border); --ct-radius: var(--radius); --ct-shadow: var(--glass-rim), 0 10px 14px -10px color-mix(in srgb, black 22%, transparent); display: none; position: absolute; z-index: 1; top: 0; right: var(--space-2); width: calc(var(--margin-column) - var(--space-3) - var(--space-2)); padding: 0; border: 0; }
+	.canvas-comment-drawer.margin { display: none; position: absolute; z-index: 1; top: 0; right: var(--space-2); width: calc(var(--margin-column) - var(--space-3) - var(--space-2)); padding: 0; border: 0; }
 	.canvas-comment-drawer.margin:global(.on-canvas) { display: flex; }
 	/* The resolved drawer's cards share the margin cards' corners. */
 	.resolved-drawer { --ct-radius: var(--radius); }

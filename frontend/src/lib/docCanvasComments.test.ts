@@ -40,6 +40,14 @@ describe('canvas comment order and navigation', () => {
 		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 'legacy', from: start, to: start + 'quoted source'.length }]);
 	});
 
+	it('marks the highlight of a thread with a reply or comment the reader has not opened', () => {
+		const text = 'one two three';
+		const rows = commentsInDocumentOrder([
+			comment('replied', 0, 'one', { newReplyIds: ['r1'] }), comment('started', 4, 'two', { newComment: true }), comment('read', 8, 'three', { newReplyIds: [] }),
+		], text);
+		expect(canvasCommentHighlights(rows, text, null, undefined).map((range) => [range.id, range.unread ?? false])).toEqual([['replied', true], ['started', true], ['read', false]]);
+	});
+
 	it('preserves an explicit scroll origin with the canonical comment range', () => {
 		const text = 'first second';
 		const rows = commentsInDocumentOrder([comment('second', 6, 'second')], text);

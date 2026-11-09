@@ -12,9 +12,10 @@
 	import ChatCommentThreads from './ChatCommentThreads.svelte';
 	import { placeHighlightDot } from './comments/highlightDot';
 	import { chatReplyDrafts } from './chatReplyDrafts.svelte';
+	import type { MarginComposer } from '$lib/docMarginSource';
 	import './commentAnchors.css';
 
-	let { threadId, comments, onChange, onSendReply, surface, marginComments = false, selectedCommentId = $bindable(null) }: { threadId: string | null; comments: ChatComment[]; onChange: (comments: ChatComment[]) => void; onSendReply: (reply: ChatComment) => void; surface?: HTMLElement; /** The threads show as cards in the transcript's margin column, so a highlight picks its card instead of opening a popover. */ marginComments?: boolean; /** The thread whose margin card is picked, shared with the column. */ selectedCommentId?: string | null } = $props();
+	let { threadId, comments, onChange, onSendReply, surface, marginComments = false, selectedCommentId = $bindable(null), marginComposer = $bindable(null) }: { threadId: string | null; comments: ChatComment[]; onChange: (comments: ChatComment[]) => void; onSendReply: (reply: ChatComment) => void; surface?: HTMLElement; /** The threads show as cards in the transcript's margin column, so a highlight picks its card instead of opening a popover. */ marginComments?: boolean; /** The thread whose margin card is picked, shared with the column. */ selectedCommentId?: string | null; /** The comment being written, drawn by the column as a card level with its text while the column is up. */ marginComposer?: MarginComposer | null } = $props();
 	function messageRoot(): HTMLElement | null {
 		return surface?.closest('.subagent-conversation')?.querySelector<HTMLElement>('.messages') ?? document.querySelector<HTMLElement>('.messages');
 	}
@@ -45,6 +46,10 @@
 		const wanted = pick.rect.right - buttonWidth;
 		return bounds ? Math.max(bounds.left + 8, Math.min(wanted, bounds.right - 8 - buttonWidth)) : wanted;
 	});
+	// With the column up a comment is written in it, level with its text, so the text stays uncovered; there is no popover to close.
+	const inMargin = $derived(open && marginComments && !narrow);
+	$effect(() => { marginComposer = inMargin ? { id: 'composer', anchor: writingRect, body: marginBody } : null; });
+	$effect(() => { if (closing && inMargin) closed(); });
 	const anchor = $derived.by(() => {
 		if (draft) return draft.rect;
 		if (!editing) return null;
@@ -56,6 +61,13 @@
 	}
 	function commentRect(commentId: string, messageId: string): DOMRect | null {
 		return commentLanding(document, messageId, { id: commentId })?.getBoundingClientRect() ?? null;
+	}
+	/** Where the comment being written is now: its highlight, which rides the transcript, not the place it was picked. */
+	function writingRect(): DOMRect | null {
+		if (editing) return commentRect(editing.id, editing.messageId);
+		if (!draft) return null;
+		const row = document.querySelector(`[data-message-id="${CSS.escape(draft.messageId)}"]`);
+		return [...(row?.querySelectorAll<HTMLElement>('[data-comment-ids]') ?? [])].find(el => el.dataset.commentIds?.split(',').includes('draft'))?.getBoundingClientRect() ?? draft.rect;
 	}
 	function close() {
 		pick = null; draft = null; editingId = null; if (viewing) chatReplyDrafts.set(viewing.commentId, ''); viewing = null; typed = null;
@@ -325,16 +337,22 @@
 		</Popover>
 	{/if}
 {/if}
-{#if open}
+{#snippet composerBody()}
+	<CommentComposer mentions={false} quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : editing?.note ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} onSubmit={submit} onCancel={requestClose} />
+{/snippet}
+{#snippet marginBody()}
+	{#key target}<div role="dialog" aria-label={heading}>{@render composerBody()}</div>{/key}
+{/snippet}
+{#if open && !inMargin}
 	{#key target}
 		{#if narrow}
 			<AdaptiveDrawer ariaLabel={heading} {heading} doneLabel="Close" followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
-				<CommentComposer mentions={false} quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : editing?.note ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} onSubmit={submit} onCancel={requestClose} />
+				{@render composerBody()}
 			</AdaptiveDrawer>
 		{:else}
 			<Popover {anchor} bounds={messageRoot()} placement="bottom" open={!closing} initialFocus="textarea" surfaceRole={null} onClose={requestClose} onClosed={closed}>
 				<div role="dialog" aria-label={heading}>
-					<CommentComposer mentions={false} quote={editing?.quote ?? draft?.anchor.quote ?? ''} body={typed && typed.target === target ? typed.text : editing?.note ?? ''} onBody={text => { if (target !== undefined) typed = { target, text }; }} fieldLabel={isReply ? 'Reply' : 'Comment'} placeholder={isReply ? 'Reply…' : 'Comment…'} submitLabel={editing ? 'Save' : isReply ? 'Reply' : 'Comment'} submittingLabel={editing ? 'Saving…' : isReply ? 'Replying…' : 'Posting…'} onSubmit={submit} onCancel={requestClose} />
+					{@render composerBody()}
 				</div>
 			</Popover>
 		{/if}

@@ -1,3 +1,5 @@
+import type { Snippet } from 'svelte';
+
 /**
  * What a margin stack needs from the text its cards sit beside, with nothing about that text in it:
  * a document answers with its editor's lines, a chat with its transcript's highlights. `docMarginPlacement`
@@ -18,6 +20,9 @@ export type MarginAnchorSource = {
 	/** Where the room kept below the text lives, and its reading-line hold; null while the surface has no canvas yet. */
 	room: () => { el: HTMLElement; property: string } | null;
 };
+
+/** A composer drawn as a card in the margin column: its key among the cards, where the text it is written on is now, and what it draws. */
+export type MarginComposer = { id: string; anchor: () => DOMRect | null; body: Snippet };
 
 /**
  * The document's own source: the editor's scroller, its commented lines and its suggestion deletions, the

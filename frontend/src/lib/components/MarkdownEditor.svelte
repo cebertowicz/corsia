@@ -21,6 +21,7 @@
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
 	import { commentRail } from '$lib/cm/comment-rail';
 	import { imagePins } from '$lib/cm/image-pins';
+	import { commentNewSigns } from '$lib/cm/comment-new-signs';
 	import { widgetComments } from '$lib/cm/widget-comments';
 	import { cardQuoteLabel, widgetCommentLabel } from '$lib/cm/widget-cells';
 	import type { SelectionLabel } from '$lib/stores/commentDraft';
@@ -218,6 +219,7 @@
 				commentRail,
 				widgetComments({ onSelect: (sel) => onSelect?.(sel), onFocus: focusWidgetComments }),
 				imagePins({ onFocus: focusWidgetComments }),
+				commentNewSigns,
 				presenceMarks,
 				typedReveal,
 				EditorView.lineWrapping,

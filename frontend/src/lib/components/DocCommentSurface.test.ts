@@ -145,10 +145,12 @@ describe('DocCommentSurface suggestions', () => {
 		expect([...document.body.querySelectorAll('.resolved-drawer [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['newest', 'middle', 'old']);
 	});
 
-	it.each([true, false])('keeps the margin cards up beside the composer while a new comment is written over the column (%s)', (overColumn) => {
+	it.each([true, false])('keeps the margin cards up while a new comment is written, the composer a card among them when the column is up (%s)', (overColumn) => {
 		render({ state: { kind: 'draft' }, draftOverColumn: overColumn, draft: { text: 'old text' }, comments: [suggestion] });
-		expect(document.body.querySelector('[data-popover] .ct-input, [data-popover] textarea')).not.toBeNull();
 		expect(document.body.querySelector('.canvas-comment-drawer.margin [data-comment-id="comment-1"]') !== null).toBe(overColumn);
+		// With the column up the composer is in it, level with the selection, and nothing covers the text; without it, a popover.
+		expect(document.body.querySelector('.canvas-comment-drawer.margin [data-margin-card="draft"] textarea, .canvas-comment-drawer.margin [data-margin-card="draft"] .ct-input') !== null).toBe(overColumn);
+		expect(document.body.querySelector('[data-popover] .ct-input, [data-popover] textarea') !== null).toBe(!overColumn);
 	});
 
 	it('opens the column without hiding the sidebar or the Workspace panel', () => {

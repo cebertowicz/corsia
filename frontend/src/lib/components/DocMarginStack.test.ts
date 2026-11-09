@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRawSnippet, flushSync, mount, unmount } from 'svelte';
 import DocMarginStack from './DocMarginStack.svelte';
 import type { DocComment } from '$lib/stores/docComments';
+import type { MarginAnchorSource, MarginComposer } from '$lib/docMarginSource';
 
-const card = createRawSnippet<[DocComment]>((comment) => ({ render: () => `<p>${comment().id}</p>` }));
+const card = createRawSnippet<[{ id: string }]>((comment) => ({ render: () => `<p>${comment().id}</p>` }));
 const thread = (id: string) => ({ id, anchor: 'quote', author: 'you', text: id, at: 'now', resolved: false, replies: [] }) as DocComment;
 
 let component: ReturnType<typeof mount> | null = null;
@@ -39,7 +40,7 @@ describe('DocMarginStack', () => {
 
 	it.each([
 		['inside the scroller (the document canvas): the cards ride the native scroll and nothing follows it', true, ''],
-		['beside the scroller (the chat column): the stack follows the scroll', false, 'translateY(-200px)'],
+		['beside the scroller: the stack follows the scroll', false, 'translateY(-200px)'],
 	])('with its clip %s', (_where, inside, transform) => {
 		vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 		const bounds = document.createElement('div');
@@ -54,5 +55,28 @@ describe('DocMarginStack', () => {
 		Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 200 });
 		scroller.dispatchEvent(new Event('scroll'));
 		expect(clip.querySelector<HTMLElement>('.margin-stack')!.style.transform).toBe(transform);
+	});
+
+	it('draws a comment being written as a card level with its text, picked, and ready to type', async () => {
+		vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+		const scroller = document.createElement('div');
+		const clip = document.createElement('div');
+		scroller.append(clip);
+		document.body.append(scroller);
+		const mark = document.createElement('span');
+		scroller.append(mark);
+		mark.getBoundingClientRect = () => ({ top: 40 }) as DOMRect;
+		const source: MarginAnchorSource = { scroller: () => scroller, clip: () => clip, anchor: (id) => id === 'a' ? mark : null, moved: () => [], resized: () => [], room: () => ({ el: scroller, property: '--margin-overhang' }) };
+		const body = createRawSnippet(() => ({ render: () => '<div><textarea aria-label="Comment"></textarea></div>' }));
+		const composer: MarginComposer = { id: 'composer', anchor: () => ({ top: 160 }) as DOMRect, body };
+		component = mount(DocMarginStack, { target: clip, props: { source, pinned: [thread('a')], selectedId: null, behind: false, card, composer } });
+		flushSync();
+		await Promise.resolve();
+
+		const writing = clip.querySelector<HTMLElement>('[data-margin-card="composer"]')!;
+		expect(writing.classList.contains('margin-composer')).toBe(true);
+		expect(writing.style.top).toBe('160px');
+		expect(clip.querySelector<HTMLElement>('[data-margin-card="a"]')!.style.top).toBe('40px');
+		expect(document.activeElement).toBe(writing.querySelector('textarea'));
 	});
 });
