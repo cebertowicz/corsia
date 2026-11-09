@@ -303,6 +303,25 @@ def test_the_verdict_is_what_the_engine_decides_for_the_current_version(section,
     assert (verdict["word"], verdict["reason"], verdict["look"]) == ("not_enough_data", "no_baseline", 0)
 
 
+def test_an_unrelated_reached_record_never_reaches_the_section(section, db) -> None:
+    """The section reads only the current version's record: an older version's reached verdict stays out."""
+    from core.workflow_verdict_evaluator import reached_detail, write_verdicts
+    from core.workflow_verdict_read import read_snapshot
+    from core.workflow_verdict_rules import Evaluation, Verdict, freeze_plan
+    from core.workflow_verdict_types import subject_of
+
+    assert reached_detail(db, []) == {}  # no subjects of interest reads no records at all
+    history = next(item for item in read_snapshot(db, now=NOW, workflow_refs=[CLOSE]).workflows
+                   if item.ref == CLOSE)
+    older = history.versions()[0]  # V3: superseded by the current version, so not this entry's verdict
+    write_verdicts(db, [Evaluation(subject_of("workflow", CLOSE, older), "root", freeze_plan(history, older),
+                                   Verdict("revert", "quality_fell", 3, (), {}), False)])
+    assert reached_detail(db, [subject_of("workflow", CLOSE, older)])[
+        subject_of("workflow", CLOSE, older)]["word"] == "revert"
+    verdict = entry_by_ref(read(), CLOSE)["verdict"]
+    assert "revert" not in json.dumps(verdict) and verdict["word"] == "not_enough_data"
+
+
 def test_a_reached_verdict_is_read_from_its_record_and_never_redecided(section, db) -> None:
     """A stored keep/revert is the verdict: ``compute`` skips it, so the record is the only source."""
     from core.workflow_verdict_evaluator import write_verdicts

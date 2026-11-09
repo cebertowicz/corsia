@@ -59,13 +59,15 @@ def reached_detail(db: sqlite3.Connection, subjects: Iterable[str]) -> dict[str,
     :func:`core.workflow_verdict_rules.compute` never recomputes a subject that has a reached verdict
     (VR-3), so a read that shows where a comparison stands reads the record instead of deciding again.
     The detail is :func:`detail_text`'s JSON: a look always, the deciding inputs and per-measure calls
-    while they fit the record's size limit, so a thin record yields a thin detail.
+    while they fit the record's size limit, so a thin record yields a thin detail. An empty subject list
+    reads nothing, as :func:`core.workflow_verdict_read.recorded_verdicts` does: a caller with no subjects
+    of interest never gets the install's whole reached history.
     """
-    where, params = "", {"reached": REACHED_EVENT}
     encoded = json_ids(subjects)
-    if encoded != "[]":
-        where, params = " AND subject_key IN (SELECT value FROM json_each(:subjects))", {
-            **params, "subjects": encoded}
+    if encoded == "[]":
+        return {}
+    where = " AND subject_key IN (SELECT value FROM json_each(:subjects))"
+    params = {"reached": REACHED_EVENT, "subjects": encoded}
     found: dict[str, dict[str, Any]] = {}
     for row in db.execute(f"""
         SELECT subject_key, attributes FROM outcome_events
