@@ -191,9 +191,9 @@
 			const hit = curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to);
 			const arrived = !!hit && hit.id !== caretIn;
 			caretIn = hit?.id ?? null;
-			// Where cards open as the phone sheet, which covers the text, only a tap that brings the caret into a comment opens it: a caret
-			// already there, or moved in by typing or the arrow keys, is editing. A caret in a suggestion opens none; a press on its insert does (suggestionMarks).
-			const opens = commentsAsSheet ? arrived && !!click && !hit?.suggestion : cardsCoverText?.() ? !!click : arrived || !!click;
+			// Where a card would cover the text (the phone sheet, the popover), only a tap or click opens it; typing and the arrow keys
+			// are editing. On the phone a caret in a suggestion opens none; a press on its insert does (suggestionMarks).
+			const opens = commentsAsSheet ? !!click && !hit?.suggestion : cardsCoverText?.() ? !!click : arrived || !!click;
 			if (hit && opens && v.coordsAtPos(r.from)) {
 				onAnchorFocus?.(hit.id, liveAnchor(hit.id), hit.suggestion ? true : undefined, click);
 			} else if (!hit) onCaretAway?.();

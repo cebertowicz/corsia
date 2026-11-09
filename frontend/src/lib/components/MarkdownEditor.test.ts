@@ -177,7 +177,7 @@ describe('MarkdownEditor edits', () => {
 			expect(onAnchorFocus).toHaveBeenCalledTimes(2);
 		});
 
-		it('where cards open as the phone sheet, only a tap that brings the caret into a comment opens it; a caret already there, or moved in by keys, is editing', async () => {
+		it('where cards open as the phone sheet, every tap on a comment opens it; a caret moved in by keys or typing is editing', async () => {
 			const onAnchorFocus = vi.fn();
 			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, commentsAsSheet: true });
 			// The press the editor reports once the pointer is up, with the caret where it landed.
@@ -194,11 +194,12 @@ describe('MarkdownEditor edits', () => {
 			await tap(8);
 			expect(onAnchorFocus).toHaveBeenCalledOnce();
 			expect(onAnchorFocus).toHaveBeenCalledWith('plain', expect.anything(), undefined, expect.any(MouseEvent));
-			// The sheet closed and the person taps into the same text again to edit it, then types.
-			await tap(9);
-			view.dispatch({ changes: { from: 9, insert: 'x' }, selection: { anchor: 10 }, userEvent: 'input.type' }); flushSync();
+			// The sheet closed and the person types where the tap left the caret; typing opens nothing. A second tap opens it again.
+			view.dispatch({ changes: { from: 8, insert: 'x' }, selection: { anchor: 9 }, userEvent: 'input.type' }); flushSync();
 			expect(onAnchorFocus).toHaveBeenCalledOnce();
-			expect(view.state.doc.toString()).toBe('quick broxwn fox');
+			await tap(10);
+			expect(onAnchorFocus).toHaveBeenCalledTimes(2);
+			expect(view.state.doc.toString()).toBe('quick brxown fox');
 		});
 
 		it('where cards open as a popover over the text, the caret arriving by keys opens none, and typing is reported so an open one can close', () => {
