@@ -47,7 +47,9 @@ support, and the live token split in `app-tokens.css` + `app.css`.
 **Status:** approved look, 2026-10-15. Every other screen is brought into line
 with it, one screen at a time. Until a screen is, anything added to it matches
 that screen's own current look, element by element, and moves to §0 only when
-the whole screen does. Where an older section below disagrees, it
+the whole screen does. Where the screen already uses both looks for the
+same role (an error as coloured text in one place and a banner in another),
+the addition uses §0's. Where an older section below disagrees, it
 carries a **Superseded by §0** note at that point, and this section wins.
 
 **Converted screens:** the chat view. A screen counts as converted only once
