@@ -80,14 +80,19 @@ def unread_items(db, user_id: str) -> list[dict]:
 def chat_reply_items(db, user_id: str, thread_id: str) -> list[dict]:
     """Read unread chat replies only for the displayed thread."""
     params = (user_id, user_id, thread_id)
-    rows = db.execute(f"""WITH unread AS (
+    # One agent message answering several cids of one thread is one unread answer, as the thread shows it.
+    rows = db.execute(f"""WITH answers AS (
         SELECT a.thread_id,COALESCE(c.root_user_message_id,a.user_message_id) AS user_message_id,
-               COALESCE(c.root_cid,a.cid) AS cid,a.answered_at,c.target_message_id,target.seq AS target_seq,
-               ROW_NUMBER() OVER (PARTITION BY a.thread_id ORDER BY a.answered_at,a.user_message_id,a.cid) AS position,
-               COUNT(*) OVER (PARTITION BY a.thread_id) AS unread_count,
-               MAX(a.answered_at) OVER (PARTITION BY a.thread_id) AS newest_at
+               COALESCE(c.root_cid,a.cid) AS cid,MIN(a.answered_at) AS answered_at,
+               c.target_message_id,target.seq AS target_seq
           {UNREAD_FROM}
          WHERE {UNREAD_WHERE} AND a.thread_id=?
+         GROUP BY a.thread_id,2,3,a.assistant_message_id
+    ), unread AS (
+        SELECT *,ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY answered_at,user_message_id,cid) AS position,
+               COUNT(*) OVER (PARTITION BY thread_id) AS unread_count,
+               MAX(answered_at) OVER (PARTITION BY thread_id) AS newest_at
+          FROM answers
     ) SELECT * FROM unread WHERE position=1""", params).fetchall()
     return [{'detail': {
         'title': '', 'unread_count': row['unread_count'], 'newest_at': row['newest_at'],

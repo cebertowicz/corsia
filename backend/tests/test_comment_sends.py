@@ -138,16 +138,16 @@ def test_replies_are_admitted_and_answered_in_the_root_thread(thread_rows):
     assert threads[0]['cid'] == 'c1.1'
     entries = threads[0]['answers']
     assert [item['text'] for item in entries if item['author_kind'] == 'user'] == ['follow-up', 'another']
+    # One agent message tagging both follow-ups is one answer in the thread.
     answers = [item for item in entries if item['author_kind'] == 'agent']
-    assert {item['cid'] for item in answers} == {'c2.1', 'c2.2'}
-    assert all(item['user_message_id'] == 'reply-send' and item['unread'] for item in answers)
+    assert [(item['cid'], item['text']) for item in answers] == [('c2.1', 'both')]
+    assert answers[0]['user_message_id'] == 'reply-send' and answers[0]['unread']
     detail = chat_reply_items(db, 'person', THREAD)[0]['detail']
-    assert detail['unread_count'] == 2
+    assert detail['unread_count'] == 1
     assert detail['destination']['user_message_id'] == 'root-send'
     assert detail['destination']['cid'] == 'c1.1'
-    db.execute("INSERT INTO chat_comment_views VALUES ('person','reply-send','c2.1',?)", (answers[0]['created_at'],))
-    assert chat_reply_items(db, 'person', THREAD)[0]['detail']['unread_count'] == 1
-    db.execute("INSERT INTO chat_comment_views VALUES ('person','reply-send','c2.2',?)", (answers[1]['created_at'],))
+    db.executemany("INSERT INTO chat_comment_views VALUES ('person','reply-send',?,?)",
+                   [(cid, answers[0]['created_at']) for cid in ('c2.1', 'c2.2')])
     assert chat_reply_items(db, 'person', THREAD) == []
 
 

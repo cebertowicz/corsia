@@ -62,6 +62,18 @@ def _stamp(user_id: str, thread_id: str, message_id: str, cid: str, assistant_me
                 "ON CONFLICT(user_message_id, cid, user_id) DO UPDATE SET seen_at=MAX(seen_at, excluded.seen_at)",
                 (user_id, message_id, cid, thread_id, message_id, cid, assistant_message_id),
             )
+            # The thread shows that message's answers to its other cids as this same answer, so they are seen too.
+            db.execute(
+                "INSERT INTO chat_comment_views "
+                "SELECT ?, a.user_message_id, a.cid, a.answered_at FROM chat_comment_answers a "
+                "JOIN chat_comments c ON c.thread_id=a.thread_id AND c.user_message_id=a.user_message_id AND c.cid=a.cid "
+                "JOIN chat_comments seen ON seen.thread_id=a.thread_id AND seen.user_message_id=? AND seen.cid=? "
+                "WHERE a.thread_id=? AND a.assistant_message_id=? "
+                "AND COALESCE(c.root_user_message_id,c.user_message_id)=COALESCE(seen.root_user_message_id,seen.user_message_id) "
+                "AND COALESCE(c.root_cid,c.cid)=COALESCE(seen.root_cid,seen.cid) "
+                "ON CONFLICT(user_message_id, cid, user_id) DO UPDATE SET seen_at=MAX(seen_at, excluded.seen_at)",
+                (user_id, message_id, cid, thread_id, assistant_message_id),
+            )
             return True
     finally:
         db.close()

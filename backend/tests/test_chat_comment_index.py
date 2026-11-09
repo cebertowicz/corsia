@@ -228,3 +228,65 @@ def test_unread_projections_agree_for_missing_rows_and_new_answers(isolated_db):
         assert not any(answer['unread'] for answer in page[0].get('chat_comments', [])[0]['answers'])
     finally:
         db.close()
+
+
+def test_one_agent_message_answering_a_comment_and_its_reply_shows_once(isolated_db):
+    from api.chat_comment_views import _stamp
+    from doceditor.reply_attention import chat_reply_items
+
+    db = get_db()
+    try:
+        seed_thread(db, 'thread')
+        db.execute("UPDATE threads SET user_id='person' WHERE id='thread'")
+        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('target','thread','assistant','text','t',1)")
+        root = {'reply_context': {'comments': [{'cid': 'c1.1', 'seq': 1, 'from_off': 0, 'to_off': 4, 'quote': 'text', 'note': 'why?'}]}}
+        reply = {'reply_context': {'comments': [{'cid': 'c3.1', 'seq': 1, 'from_off': 0, 'to_off': 4, 'quote': 'text', 'note': 'and?',
+                                                 'root_user_message_id': 'user', 'root_cid': 'c1.1'}]}}
+        db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq) VALUES ('user','thread','user','',?,'t',2)", (json.dumps(root),))
+        db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq) VALUES ('reply','thread','user','',?,'u',3)", (json.dumps(reply),))
+        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('answer','thread','assistant','[c1.1][c3.1] because','v',4)")
+        place_comments(db, 'thread', 'user', root, 't')
+        place_comments(db, 'thread', 'reply', reply, 'u')
+        db.execute("INSERT INTO chat_comment_answers VALUES ('thread','user','c1.1','answer','v')")
+        db.execute("INSERT INTO chat_comment_answers VALUES ('thread','reply','c3.1','answer','v')")
+        db.commit()
+        page = [{'id': 'target', 'role': 'assistant'}]
+        attach_comments(db, 'thread', 'person', page)
+        answers = page[0]['chat_comments'][0]['answers']
+        assert [(answer['author_kind'], answer['text']) for answer in answers] == [('user', 'and?'), ('agent', 'because')]
+        assert answers[1]['unread'] is True
+        assert chat_reply_items(db, 'person', 'thread')[0]['detail']['unread_count'] == 1
+    finally:
+        db.close()
+    assert _stamp('person', 'thread', 'user', 'c1.1', 'answer')
+    db = get_db()
+    try:
+        assert chat_reply_items(db, 'person', 'thread') == []
+        page = [{'id': 'target', 'role': 'assistant'}]
+        attach_comments(db, 'thread', 'person', page)
+        assert page[0]['chat_comments'][0]['answers'][1]['unread'] is False
+    finally:
+        db.close()
+
+
+def test_one_agent_message_keeps_distinct_sections_for_a_comment_and_its_reply(isolated_db):
+    db = get_db()
+    try:
+        seed_thread(db, 'thread')
+        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('target','thread','assistant','text','t',1)")
+        root = {'reply_context': {'comments': [{'cid': 'c1.1', 'seq': 1, 'from_off': 0, 'to_off': 4, 'quote': 'text', 'note': 'why?'}]}}
+        reply = {'reply_context': {'comments': [{'cid': 'c3.1', 'seq': 1, 'note': 'and?', 'root_user_message_id': 'user', 'root_cid': 'c1.1'}]}}
+        db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq) VALUES ('user','thread','user','',?,'t',2)", (json.dumps(root),))
+        db.execute("INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq) VALUES ('reply','thread','user','',?,'u',3)", (json.dumps(reply),))
+        db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('answer','thread','assistant',?,'v',4)",
+                   ('[c1.1] first\n\n[c3.1] second',))
+        place_comments(db, 'thread', 'user', root, 't')
+        place_comments(db, 'thread', 'reply', reply, 'u')
+        db.execute("INSERT INTO chat_comment_answers VALUES ('thread','user','c1.1','answer','v')")
+        db.execute("INSERT INTO chat_comment_answers VALUES ('thread','reply','c3.1','answer','v')")
+        page = [{'id': 'target', 'role': 'assistant'}]
+        attach_comments(db, 'thread', 'person', page)
+        agent = [answer['text'] for answer in page[0]['chat_comments'][0]['answers'] if answer['author_kind'] == 'agent']
+        assert agent == ['first\n\nsecond']
+    finally:
+        db.close()
