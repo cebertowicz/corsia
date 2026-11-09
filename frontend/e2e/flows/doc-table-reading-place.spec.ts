@@ -3,7 +3,7 @@ import { expect, type Browser, type Page } from '@playwright/test';
 import { test } from '../support/test';
 import { createComment, openLiveDocument, seedLiveDocument, type LiveDocument } from '../support/liveDocument';
 import { installPaintedFrames, type EachPaintedFrame } from '../support/paintedFrames';
-import { widen, type Doc } from '../support/marginCards';
+import { pill, widen, type Doc } from '../support/marginCards';
 
 /**
  * A table-heavy document stays still under the reader: a status page of wide tables whose rows wrap onto several lines.
@@ -252,3 +252,37 @@ for (const [width, height, cards] of CLICK_LAYOUTS) {
 		if (cards === 'opens') for (const step of results) expect(Math.abs(step.textTop - first.textTop), `${step.step}: the clicked title stays near its place`).toBeLessThanOrEqual(48);
 	});
 }
+
+// The column opening holds the reader's top row, and the editor's own place holder holds it too: with a row cut off at the
+// top edge, both take the next row (the first one wholly in view), so the cut-off row growing as the text narrows moves only itself.
+test('@surface:live-document the column opening with a row cut off at the top keeps the next row in place at 1440', async ({ browser, request }, testInfo) => {
+	test.skip(testInfo.project.name.endsWith('-mobile'), 'The column needs a wide canvas.');
+	test.setTimeout(120_000);
+	const document = await seedLiveDocument(request, 'table-cut-open-1440', body());
+	await createComment(request, document, 'steer2-r2 title:', 'Is this row right?');
+	const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+	const results: Array<{ step: string } & Placement> = [];
+	try {
+		const page = await context.newPage();
+		await openLiveDocument(page, document, '# Briefing');
+		await widen(page, document as unknown as Doc);
+		await page.getByRole('button', { name: 'Close comments' }).click();
+		await expect(page.locator('.canvas-comment-drawer.margin')).toHaveCount(0);
+		await page.locator('.cm-scroller').hover();
+		await page.mouse.wheel(0, 40);
+		// steer2-r3 starts 30 px above the scroller's top edge, so steer2-r4 is the first row wholly in view.
+		await readAtRow(page, 'steer2-r3', -30);
+		results.push({ step: 'before', ...await placement(page, 'steer2-r4') });
+		await pill(page).click();
+		await expect(page.locator('.canvas-comment-drawer.margin')).toBeVisible();
+		for (const ms of [100, 400, 1_500]) {
+			await page.waitForTimeout(ms);
+			results.push({ step: `after ${ms} ms`, ...await placement(page, 'steer2-r4') });
+		}
+	} finally {
+		testInfo.annotations.push({ type: 'cut-open', description: JSON.stringify(results) });
+		await context.close();
+	}
+	const first = results[0];
+	for (const step of results) expect(Math.abs(step.rowTop - first.rowTop), `${step.step}: the first row wholly in view stays put`).toBeLessThanOrEqual(2);
+});

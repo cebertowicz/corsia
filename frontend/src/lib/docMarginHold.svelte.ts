@@ -3,6 +3,7 @@ import { fromStore } from 'svelte/store';
 import { EditorView } from '@codemirror/view';
 import { paneCollapsed } from '$lib/stores/paneCollapsed';
 import { drawnTableAt, tableRowAt, tableRowAtHeight } from '$lib/cm/widget-blocks';
+import { placeAnchorAt } from '$lib/documentReadingPlace';
 
 /** The reader's own input, which ends a hold. */
 const TAKE_OVER = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
@@ -52,11 +53,15 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		const scroller = view.scrollDOM, box = scroller.getBoundingClientRect();
 		const x = box.left + box.width / 2;
 		const read = now && selectedId() ? bounds()?.querySelector(`.cm-comment-line[data-comment-ids*="${selectedId()}"]`)?.getBoundingClientRect().top : undefined;
-		const y = read !== undefined && read > box.top && read < box.bottom ? read + 2 : box.top + 4;
+		const picked = read !== undefined && read > box.top && read < box.bottom;
+		const y = picked ? read + 2 : box.top + 4;
 		let pos = view.posAtCoords({ x, y }, false);
-		// A table is one block to the editor and its rows rewrap with the width: anchor the drawn row at that height, not the table's top.
+		// A table is one block to the editor and its rows rewrap with the width: anchor a drawn row, not the table's top. The picked
+		// thread's row is the one clicked; the top row follows the reader's-place rule the editor's own holder uses, so both aim at one row.
 		const table = drawnTableAt(view, pos);
-		const row = table && tableRowAtHeight(view, table, y);
+		let row: { pos: number } | null = null;
+		if (table && picked) row = tableRowAtHeight(view, table, y);
+		else if (table) ({ row, from: pos } = placeAnchorAt(view, box.top, box.bottom));
 		if (row) pos = row.pos;
 		// A blank line at the top does not rewrap and holds nothing the reader reads; anchor the first text row below it instead.
 		const doc = view.state.doc;

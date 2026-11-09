@@ -39,6 +39,24 @@ function measureNow(view: EditorView): void {
 	view.lineBlockAtHeight(0);
 }
 
+/**
+ * What the reader's place anchors on at a scroller edge (`edge` and `bottom` are the scroller's top and bottom on screen):
+ * the line block there, or inside a drawn table the row there. Every holder of the reader's place uses this one rule.
+ */
+export function placeAnchorAt(view: EditorView, edge: number, bottom: number): { from: number; row: { pos: number; rect: DOMRect } | null } {
+	const block = view.lineBlockAtHeight(edge - view.documentTop), table = drawnTableAt(view, block.from);
+	let row = table && tableRowAtHeight(view, table, edge);
+	// A row cut off at the edge is context above the reader; the place is the next row, the first one wholly started in view,
+	// or the line after the table when the cut-off row is its last, so that the cut-off row growing or shrinking moves only itself.
+	let from = block.from;
+	if (row && row.rect.top < edge - 0.5 && row.rect.bottom < bottom) {
+		const next = tableRowAtHeight(view, table!, row.rect.bottom);
+		if (next && next.pos !== row.pos) row = next;
+		else if (block.to < view.state.doc.length) [row, from] = [null, view.lineBlockAt(block.to + 1).from];
+	}
+	return { from: row ? row.pos : from, row: row || null };
+}
+
 /** Reads the reader's place: the line at the scroller's top edge, at the current offset or at `scrollTop`. */
 export function captureDocumentPlace(view: EditorView, scrollTop?: number): TextDocumentPlace {
 	measureNow(view);
@@ -46,19 +64,10 @@ export function captureDocumentPlace(view: EditorView, scrollTop?: number): Text
 	const at = scrollTop ?? scroller.scrollTop;
 	// At another offset the text sits lower by the difference.
 	const shift = scroller.scrollTop - at;
-	const edge = scroller.getBoundingClientRect().top - shift;
-	const block = view.lineBlockAtHeight(edge - view.documentTop), table = drawnTableAt(view, block.from);
-	let row = table && tableRowAtHeight(view, table, edge);
-	// A row cut off at the edge is context above the reader; the place is the next row, the first one wholly started in view,
-	// or the line after the table when the cut-off row is its last, so that the cut-off row growing or shrinking moves only itself.
-	let line = block;
-	if (row && row.rect.top < edge - 0.5 && row.rect.bottom < scroller.getBoundingClientRect().bottom - shift) {
-		const next = tableRowAtHeight(view, table!, row.rect.bottom);
-		if (next && next.pos !== row.pos) row = next;
-		else if (block.to < view.state.doc.length) [row, line] = [null, view.lineBlockAt(block.to + 1)];
-	}
-	if (row) return { from: row.pos, top: row.rect.top + shift - frameTop(view), scrollTop: at };
-	return { from: line.from, top: view.documentTop + shift + line.top - frameTop(view), scrollTop: at };
+	const box = scroller.getBoundingClientRect();
+	const { from, row } = placeAnchorAt(view, box.top - shift, box.bottom - shift);
+	if (row) return { from, top: row.rect.top + shift - frameTop(view), scrollTop: at };
+	return { from, top: view.documentTop + shift + view.lineBlockAt(from).top - frameTop(view), scrollTop: at };
 }
 
 /**
