@@ -25,10 +25,6 @@ def authorize(db, plan, operation: str, params: dict[str, Any], actor) -> None:
     if not projections.live_delegation(db, worker, parent_plan_id):
         return
     if actor.thread_id != worker:
-        from plans.conductor_add import thread_may_mutate
-
-        if thread_may_mutate(db, plan, operation, params, actor):
-            return
         parent = db.execute(
             "SELECT owner_id FROM plans WHERE id=?", (parent_plan_id,),
         ).fetchone()

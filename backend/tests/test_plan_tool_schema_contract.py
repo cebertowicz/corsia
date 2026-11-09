@@ -383,6 +383,9 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # plan_update 9,372 -> 9,487 (+115, Later S1): `later` publishes at the field for add, insert,
 # edit, arm_watch and block_node, and `reason` names where it becomes required and what to
 # write there; an agent never told of the cut cannot park work, so the words are the feature.
+# plan_update 9,487 -> 9,620 (+133): a conductor or the CORSIA agent pauses and resumes another
+# agent's plan, which needs the two operations listed and expected_revision to name the plan
+# revision for them; the pause-is-the-user's sentence they replace is gone.
 _PUBLISHED_BYTES = {"plan_update": 9_620, "plan_decision": 3_100}
 
 

@@ -395,8 +395,10 @@ caused it; a close still drops the edge, so the dependent is ready.
 
 ### Setting a task aside
 
-Pause is the user's (`plans/pause_authority.py`): an agent's `pause` or
-`pause_node` is refused with one line naming what to do instead. An agent
+The user, or a coordinator (a conductor or the CORSIA agent) on another
+agent's plan, pauses and resumes a plan (`plans/pause_authority.py`); any
+other agent's `pause`, and every agent's `pause_node`, is refused with one
+line naming what to do instead. An agent
 schedules a task instead (`plans/scheduled_wait.py`): `arm_watch` with a
 `reason` and a deadline, any distance out, arms an ordinary watch whose
 `watch_armed` event carries `scheduled.reason`. The row reads the date, then

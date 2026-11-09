@@ -1,4 +1,4 @@
-"""Pause is the user's (pause contract rule 1, #1969).
+"""Who pauses and resumes a plan (pause contract rule 1, #1969).
 
 The user or a coordinator pauses or resumes a plan. An agent that wants to come back to a task
 later schedules it instead (``plans.scheduled_wait``), and a pause call tells

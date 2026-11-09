@@ -29,6 +29,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Chat comment replies stay with the highlighted text. A dot marks a new or undelivered reply, and you can jump to it or retry it from the thread.
 - Comment replies in a document stay marked new until you open their thread; scrolling past them no longer marks them read. A thread with unread replies opens with them showing, including resolved threads and decided suggestions.
 - Commenting on an image in a document keeps the document at its reading position while you post, reply, and return from the image. On a phone, the image toolbar keeps all its controls on one row when Send appears.
+- Conductors and the CORSIA agent now hand work to the agent that owns it, as a task in its plan, instead of doing it themselves, and message that agent only when the work outranks what it is doing. They can also pause and resume agents and re-order the tasks in their plans.
 - Email and web addresses written as plain text in a document, such as an email draft's From and To lines, no longer disappear when you view it.
 - GitHub rules for completed checks now work by default when a repository webhook is connected, and temporary failures get another chance to deliver the event.
 - If the first setup chat ends without a visible reply, CORSIA now gives the agent one more chance to send it.
