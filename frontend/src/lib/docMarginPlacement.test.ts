@@ -56,17 +56,16 @@ describe('hasRoomForMargin: the one width rule', () => {
 	});
 });
 
-describe('revealShift: the text scrolls so a grown card shows whole', () => {
-	const clip = { top: 100, bottom: 700 };
-	it('is nothing when the card already ends inside the clip with its gap', () => {
-		expect(revealShift({ top: 300, bottom: 500 }, clip)).toBe(0);
-		expect(revealShift({ top: 300, bottom: 700 - GAP }, clip)).toBe(0);
+describe('revealShift: the text scrolls so a grown card shows its lower end', () => {
+	const view = { bottom: 700 };
+	it('is nothing when the card already ends inside the view with its gap', () => {
+		expect(revealShift({ bottom: 500 }, view)).toBe(0);
+		expect(revealShift({ bottom: 700 - GAP }, view)).toBe(0);
 	});
-	it('is how far the card reaches below the clip, gap included', () => {
-		expect(revealShift({ top: 500, bottom: 720 }, clip)).toBe(720 + GAP - 700);
+	it('is how far the card reaches below the view, gap included', () => {
+		expect(revealShift({ bottom: 720 }, view)).toBe(720 + GAP - 700);
 	});
-	it('never moves the card top above the clip top', () => {
-		expect(revealShift({ top: 120, bottom: 900 }, clip)).toBe(20);
-		expect(revealShift({ top: 90, bottom: 900 }, clip)).toBe(0);
+	it('is that far even for a card taller than the view, whose top then goes above it', () => {
+		expect(revealShift({ bottom: 1900 }, view)).toBe(1900 + GAP - 700);
 	});
 });

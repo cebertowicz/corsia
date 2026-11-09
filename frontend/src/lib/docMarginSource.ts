@@ -11,6 +11,8 @@ export type MarginAnchorSource = {
 	scroller: () => HTMLElement | null;
 	/** The clip the cards sit in: its top is their origin, its height their room. Read from the stack mounted inside it. */
 	clip: (stack: HTMLElement) => HTMLElement | null;
+	/** Where the reader sees the scroller's content, for a column drawn on it: a picked card is brought into it. The scroller's own box unless something floats over its edge. */
+	view?: () => { top: number; bottom: number } | null;
 	/** The element a card is placed beside: the first line of its comment's anchor, or null when the comment has no line at all. */
 	anchor: (id: string) => Element | null;
 	/** Nodes whose change moves a line: watched for mutation. */

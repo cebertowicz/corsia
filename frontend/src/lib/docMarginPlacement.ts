@@ -1,10 +1,10 @@
 /** The gap (px) kept between two stacked margin cards. */
 export const GAP = 8;
 
-/** How far (px) the text scrolls up so a card that reaches below the clip shows whole, never past what keeps the card's own top in view. */
-export function revealShift(card: { top: number; bottom: number }, clip: { top: number; bottom: number }): number {
-	const over = card.bottom + GAP - clip.bottom;
-	return over > 0.5 ? Math.max(0, Math.min(over, card.top - clip.top)) : 0;
+/** How far (px) the text scrolls up so a card that reaches below the view shows its lower end (its Send button); a card taller than the view lets its top go. */
+export function revealShift(card: { bottom: number }, view: { bottom: number }): number {
+	const over = card.bottom + GAP - view.bottom;
+	return over > 0.5 ? over : 0;
 }
 
 /** A margin card: its comment id, the y of its anchor line in document coordinates, and its height. */

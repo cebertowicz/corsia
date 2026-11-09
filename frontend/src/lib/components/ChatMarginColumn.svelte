@@ -40,6 +40,12 @@
 	const anchors: MarginAnchorSource = {
 		scroller: () => scroller,
 		clip: (stack) => stack.closest<HTMLElement>('.chat-margin'),
+		// The composer floats over the transcript's lower edge, so a picked card is brought above it.
+		view: () => {
+			if (!scroller) return null;
+			const box = scroller.getBoundingClientRect();
+			return { top: box.top, bottom: box.bottom - (parseFloat(getComputedStyle(scroller).getPropertyValue('--input-bar-height')) || 100) };
+		},
 		// Where the comment is drawn: its highlight, or the message body its text left once nothing is painted any more.
 		anchor: (id) => {
 			const entry = entries.find(item => item.id === id);

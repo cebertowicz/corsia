@@ -36,13 +36,14 @@
 		restoring.delete(area);
 		const writing = composer;
 		const ids = [...pinned.map((comment) => comment.id), ...(writing ? [writing.id] : [])], selected = writing?.id ?? selectedId;
-		// A card just picked grows by its reply field: for a moment after the pick, and while the reader is inside it, its lower end (the Send button) is kept in the clip by scrolling the text, which the cards ride with. The clip itself never scrolls.
+		// A card just picked grows by its reply field: for a moment after the pick, and while the reader is inside it, its lower end (the Send button) is kept in view by scrolling the text, which the cards ride with. The clip itself never scrolls. A column on the canvas scrolls inside the text, so its view is the scroller's, not its own box.
 		const revealUntil = selected !== null && selected !== pickedBefore ? performance.now() + 800 : 0;
 		pickedBefore = selected;
 		const reveal = () => {
 			const el = selected ? stackEl!.querySelector<HTMLElement>(`[data-margin-card="${selected}"]`) : null;
 			if (!el || !(performance.now() < revealUntil || el.contains(document.activeElement))) return;
-			const shift = revealShift(el.getBoundingClientRect(), clip.getBoundingClientRect());
+			const view = onCanvas() ? source.view?.() ?? scroller.getBoundingClientRect() : clip.getBoundingClientRect();
+			const shift = revealShift(el.getBoundingClientRect(), view);
 			if (shift) scroller.scrollBy?.({ top: shift, behavior: get(prefersReducedMotion) ? 'auto' : 'smooth' });
 		};
 		let frame = 0, overhang = parseFloat(area.style.getPropertyValue(room.property)) || 0;
