@@ -116,6 +116,31 @@ describe('threadPlanStates', () => {
 		expect(get(threadPlanStates).b?.state).toBe('moving');
 	});
 
+	it('reads a thread named at any moment as a read ends', async () => {
+		// Name 'b' a few microtasks after the read is released, at each depth in turn,
+		// so one lands between the read ending and the next one being allowed to start.
+		for (let depth = 0; depth < 8; depth++) {
+			resetThreadPlanStatesForTests();
+			mocks.read.mockReset();
+			let release: (value: unknown) => void = () => {};
+			mocks.read
+				.mockReturnValueOnce(new Promise((resolve) => (release = resolve)))
+				.mockResolvedValue({ b: { state: 'moving', label_key: 'working' } });
+			watchThreadPlanStates(['a', 'b']);
+			await settle();
+			release({});
+			let hop: () => void = () => void reloadThreadPlanStates(['b']);
+			for (let i = 0; i < depth; i++) {
+				const next = hop;
+				hop = () => queueMicrotask(next);
+			}
+			queueMicrotask(hop);
+			await settle();
+			await settle();
+			expect(get(threadPlanStates).b?.state, `named ${depth} microtasks after release`).toBe('moving');
+		}
+	});
+
 	it('reads a lone nudge at once when no read is out', async () => {
 		mocks.read.mockResolvedValue({});
 		watchThreadPlanStates(['a']);
