@@ -71,11 +71,16 @@ export interface TreeNode {
 	owner_name?: string;
 	freshness?: Pick<DocumentFreshness, 'state'>;
 }
-export interface TreeRoot {
+/** A doc root as listed: enough to tell where a path sits, without its files. */
+export interface ScopeRoot {
 	id: string;
 	label: string;
 	kind: 'workspace' | 'repo';
 	path: string;
+}
+
+/** A root with its walked files, as the Files panel lists them. */
+export interface TreeRoot extends ScopeRoot {
 	nodes: TreeNode[];
 	capped: boolean;
 }
@@ -83,6 +88,18 @@ export interface TreeRoot {
 export async function fetchTree(projectId?: string | null): Promise<TreeRoot[]> {
 	const q = projectId ? `&project_id=${encodeURIComponent(projectId)}` : '';
 	const data = await ok(await fetch(`/api/files/tree?token=${tok()}${q}`));
+	return data.roots;
+}
+
+/**
+ * The scope's doc roots with no file listing.
+ *
+ * A link target only resolves against the root paths, so opening a document from
+ * chat asks for these and leaves the server walking nothing.
+ */
+export async function fetchRoots(projectId?: string | null): Promise<ScopeRoot[]> {
+	const q = projectId ? `&project_id=${encodeURIComponent(projectId)}` : '';
+	const data = await ok(await fetch(`/api/files/tree?token=${tok()}${q}&nodes=false`));
 	return data.roots;
 }
 

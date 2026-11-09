@@ -1,6 +1,6 @@
 import { get } from 'svelte/store';
 import { openUrl } from '@tauri-apps/plugin-opener';
-import { fetchRevision, fetchTree, type DocRevision, type TreeRoot } from '$lib/api/docs';
+import { fetchRoots, fetchRevision, type DocRevision, type ScopeRoot } from '$lib/api/docs';
 import { openArtifactTab } from '$lib/stores/artifactWorkspace';
 import { defaultTabTitle } from '$lib/artifactTabTitle';
 import { openSubagentRequest } from '$lib/stores/subagents';
@@ -14,7 +14,7 @@ import { SETTINGS_SECTIONS, requestSettingsSection, type SettingsSection } from 
 export interface LinkResolverDeps {
 	activeThreadId: () => string | null;
 	projectId: () => string | null;
-	fetchTree: (projectId: string | null) => Promise<TreeRoot[]>;
+	fetchRoots: (projectId: string | null) => Promise<ScopeRoot[]>;
 	fetchRevision: (path: string, projectId: string | null) => Promise<DocRevision>;
 	openArtifact: (threadId: string, input: { artifactId: string | null; path: string; title: string }) => void;
 	showError: (message: string) => void;
@@ -51,7 +51,7 @@ function normalizePath(root: string, target: string): string | null {
 	return resolved === root || resolved.startsWith(`${root}/`) ? resolved : null;
 }
 
-function workspacePath(href: string, roots: TreeRoot[]): string | null {
+function workspacePath(href: string, roots: ScopeRoot[]): string | null {
 	const target = targetPath(href);
 	if (!target) return null;
 	const workspaces = roots.filter((root) => root.kind === 'workspace');
@@ -163,7 +163,7 @@ async function routeLinkTarget(href: string, deps: LinkResolverDeps): Promise<Li
 	}
 	try {
 		const projectId = deps.projectId();
-		const path = workspacePath(href, await deps.fetchTree(projectId));
+		const path = workspacePath(href, await deps.fetchRoots(projectId));
 		if (!path) {
 			deps.showError("Couldn't find the linked workspace document");
 			return failed('workspace_document', 'not_found');
@@ -202,7 +202,7 @@ function defaultDeps(): LinkResolverDeps {
 	return {
 		activeThreadId: () => get(activeThreadId),
 		projectId: () => get(uiScope)?.id ?? null,
-		fetchTree,
+		fetchRoots,
 		fetchRevision: (path, projectId) => fetchRevision(path, projectId),
 		openArtifact: openArtifactTab,
 		showError: (message) => toasts.show(message, 'error'),
