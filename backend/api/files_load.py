@@ -14,6 +14,7 @@ from registry import service as registry_service
 from registry.file_types import image_media_type
 from registry.path_access import ReadRefused, checked_read, shared_context_path
 from registry.doc_freshness import artifact_freshness
+from registry.write_preparation import registered_unchanged
 
 #: Typed ``detail.code`` of the 415 a text open answers for an image file.
 IMAGE_FILE_CODE = "image_file"
@@ -63,8 +64,12 @@ def checked_read_path(path: str, project_id: str | None, db) -> tuple[Path, list
 
 
 def read_document(path: str, user_id: str, project_id: str | None, thread_id: str | None,
-                  *, live_open: bool = False) -> dict:
-    """Validate one existing file, read its bytes, and resolve canonical identity."""
+                  *, live_open: bool = False, registered_artifact_id: str | None = None) -> dict:
+    """Validate one existing file, read its bytes, and resolve canonical identity.
+
+    ``registered_artifact_id`` is the identity this open's snapshot read just registered: when that
+    registration still stands unchanged, this read takes no write.
+    """
     db = get_db()
     try:
         if thread_id and not owns_thread(thread_id, user_id, db=db):
@@ -91,7 +96,8 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
             _live_open_setup(p, project_id, thread_id, db)
         artifact_type = registry_service.classify(p)
         if thread_id:
-            art = registry_service.register_write_strict(thread_id, str(p), db=db)
+            art = registered_artifact_id and registered_unchanged(thread_id, str(p), registered_artifact_id, db=db)
+            art = art or registry_service.register_write_strict(thread_id, str(p), db=db)
         else:
             art = registry_service.resolve_file_identity(str(p), db=db)
         freshness = artifact_freshness(art, p, db=db)

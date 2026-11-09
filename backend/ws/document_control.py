@@ -103,7 +103,8 @@ async def _open(socket, user: dict, data: dict) -> None:
     if manager is None:
         raise OpenRefused("service_unavailable", "Live document service is unavailable")
     path, project_id, thread_id = data["path"], data.get("project_id"), data.get("thread_id")
-    loaded = await run_in_db(read_document, path, user["id"], project_id, thread_id, live_open=True)
+    loaded = await run_in_db(read_document, path, user["id"], project_id, thread_id, live_open=True,
+                             registered_artifact_id=data.get("registered_artifact_id"))
     artifact = loaded["artifact"]
     if artifact is None:
         await send_to_client(socket, {"type": "doc_opened", "live": False, "request_id": data.get("request_id")})

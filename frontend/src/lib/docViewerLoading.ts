@@ -123,7 +123,7 @@ async function load(options: LoadOptions): Promise<void> {
 	});
 	if (!isCurrent()) return;
 	options.onSnapshot(existingDraft(target)?.editText ?? response.text);
-	const live = await openLiveDocument(effective);
+	const live = await openLiveDocument(effective, response.artifact?.id);
 	if (!isCurrent()) return;
 	if (live && typeof live !== 'string') {
 		options.onReady({ text: live.text.toString(), artifactId: live.artifactId, writable: live.writable,
