@@ -40,6 +40,8 @@
 		pendingSel,
 		commentSheetOpen = false,
 		commentsAsSheet = false,
+		cardsCoverText,
+		onTyping,
 		onStartComment,
 		tabInstanceId = null,
 		onDocumentPlace,
@@ -71,6 +73,9 @@
 		commentSheetOpen?: boolean;
 		/** Cards open as the phone sheet (the pane-drawer width): a caret in a suggestion is editing and opens none. */
 		commentsAsSheet?: boolean;
+		/** Cards open as a popover over the text now: only a click opens one. */
+		cardsCoverText?: () => boolean;
+		onTyping?: () => void;
 		onStartComment: () => void;
 		tabInstanceId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
@@ -106,7 +111,7 @@
 		</div>
 	{:else}
 		<div class="ed-wrap">
-			<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {commentsAsSheet} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+			<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {commentsAsSheet} {cardsCoverText} {onTyping} {onSuggestionHover} {onEdit} {onLayout} {readOnly} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 			{#if saveError}
 				<div class="save-error" role="alert">{saveError}</div>
 			{/if}

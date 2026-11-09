@@ -201,6 +201,17 @@ describe('MarkdownEditor edits', () => {
 			expect(view.state.doc.toString()).toBe('quick broxwn fox');
 		});
 
+		it('where cards open as a popover over the text, the caret arriving by keys opens none, and typing is reported so an open one can close', () => {
+			const onAnchorFocus = vi.fn(), onTyping = vi.fn();
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, onTyping, cardsCoverText: () => true });
+			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select' }); flushSync();
+			expect(onAnchorFocus).not.toHaveBeenCalled();
+			view.dispatch({ changes: { from: 8, insert: 'x' }, selection: { anchor: 9 }, userEvent: 'input.type' }); flushSync();
+			expect(onTyping).toHaveBeenCalledOnce();
+			view.dispatch({ changes: { from: 8, to: 9 } }); flushSync();
+			expect(onTyping).toHaveBeenCalledOnce();
+		});
+
 		it('reports the pointer on a suggestion to the viewer', () => {
 			const onSuggestionHover = vi.fn();
 			open({ highlights: [suggestion('red')], onSuggestionHover });

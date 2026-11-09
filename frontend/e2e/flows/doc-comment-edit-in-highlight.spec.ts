@@ -5,7 +5,8 @@ import { ITEMS, FIRST, card, open } from '../support/marginCards';
 /**
  * Text under a comment's highlight is the document's text, so it edits like any other: a click or tap into it, or the arrow keys,
  * put the caret there, and typing, Backspace, Delete and paste change it while the comment stays on it. The card the caret
- * picks still opens (the margin card, the popover below the margin width, the phone sheet) without taking the keystrokes.
+ * picks still opens without taking the keystrokes: the margin card beside the text; below the margin width, the popover a click
+ * opens, which closes on the first key so it never covers what is typed; on a phone, the sheet a tap opens.
  */
 
 const QUOTE = ITEMS[FIRST].quote;
@@ -30,11 +31,15 @@ const paste = (page: Page, text: string) => page.evaluate((text) => {
 
 const sheet = (page: Page) => page.locator('[data-adaptive-drawer] .drawer-panel');
 
+const popover = (page: Page) => page.locator('[data-popover]');
+
 /**
  * Puts the caret in the highlight as the person does and checks the card opened (`shown`), then edits there. On a phone
- * (`phone`) the tap opens the sheet, which covers the text; closing it and tapping the text again is editing, and opens nothing.
+ * the tap opens the sheet, which covers the text; closing it and tapping the text again is editing, and opens nothing.
+ * Below the margin width the click opens the popover, and the first key typed closes it.
  */
-async function editInsideHighlight(page: Page, shown: () => Promise<void>, phone = false) {
+async function editInsideHighlight(page: Page, shown: () => Promise<void>, mode: 'margin' | 'popover' | 'phone' = 'margin') {
+	const phone = mode === 'phone';
 	await expect(highlight(page)).toHaveText(QUOTE);
 	if (phone) await highlight(page).tap(); else await highlight(page).click();
 	await shown();
@@ -49,11 +54,12 @@ async function editInsideHighlight(page: Page, shown: () => Promise<void>, phone
 	await expect.poll(() => focusIn(page), { message: 'the editor keeps the focus' }).toBe('editor');
 	await page.keyboard.type('QWE');
 	await expect.poll(() => highlighted(page), { message: 'typed text lands inside the highlight, which stays on it' }).toContain('QWE');
+	if (mode === 'popover') await expect(popover(page), 'the first key typed closes the popover over the text').toHaveCount(0);
 	await page.keyboard.press('ArrowLeft');
 	await page.keyboard.press('ArrowLeft');
 	await page.keyboard.press('Backspace');
 	await page.keyboard.press('Delete');
-	if (!phone) await shown();
+	if (mode === 'margin') await shown();
 	// The caret sat between Q and W: Backspace takes the Q, Delete the W.
 	await expect.poll(async () => (await highlighted(page)).replace('E', ''), { message: 'Backspace and Delete remove the characters around the caret' }).toBe(QUOTE);
 	expect(await focusIn(page)).toBe('editor');
@@ -82,8 +88,8 @@ async function editInsideHighlight(page: Page, shown: () => Promise<void>, phone
 	await page.waitForTimeout(400);
 	await page.keyboard.type('U');
 	await expect.poll(() => highlighted(page), { message: 'typed after the arrow keys moved the caret into the highlight' }).toMatch(/^PaUragraph/);
-	// Away and back by the keys picks the card again where it does not cover the text; on a phone typing and the keys never open the sheet.
-	if (phone) await expect(sheet(page)).toHaveCount(0); else await shown();
+	// Away and back by the keys picks the card again where it sits beside the text; where it would cover the text (popover, sheet) the keys and typing open none.
+	if (phone) await expect(sheet(page)).toHaveCount(0); else if (mode === 'popover') await expect(popover(page)).toHaveCount(0); else await shown();
 }
 
 test('@flow:doc-comment-edit-in-highlight with the margin column up, text in a highlight edits and its card is picked', async ({ page, request }, info) => {
@@ -94,12 +100,12 @@ test('@flow:doc-comment-edit-in-highlight with the margin column up, text in a h
 	await editInsideHighlight(page, () => expect(card(page, doc, FIRST).locator('.ct.focused')).toHaveCount(1));
 });
 
-test('@flow:doc-comment-edit-in-highlight below the margin width, text in a highlight edits while its popover is open', async ({ page, request }, info) => {
+test('@flow:doc-comment-edit-in-highlight below the margin width, a click opens the popover, the first key closes it, and text in the highlight edits', async ({ page, request }, info) => {
 	test.skip(info.project.name !== 'chromium-desktop', 'The popover is the narrow canvas on a desktop.');
 	test.setTimeout(120_000);
 	await page.setViewportSize({ width: 900, height: 900 });
 	await open(page, request, { wide: false });
-	await editInsideHighlight(page, () => expect(page.locator('[data-popover]')).toContainText(ITEMS[FIRST].body));
+	await editInsideHighlight(page, () => expect(popover(page)).toContainText(ITEMS[FIRST].body), 'popover');
 });
 
 test('@flow:doc-comment-edit-in-highlight on a phone, a tap on a highlight opens its sheet, and once it is closed the text there edits', async ({ page, request }, info) => {
@@ -107,5 +113,5 @@ test('@flow:doc-comment-edit-in-highlight on a phone, a tap on a highlight opens
 	test.setTimeout(120_000);
 	await page.setViewportSize({ width: 393, height: 852 });
 	await open(page, request, { wide: false });
-	await editInsideHighlight(page, () => expect(sheet(page)).toBeVisible(), true);
+	await editInsideHighlight(page, () => expect(sheet(page)).toBeVisible(), 'phone');
 });

@@ -43,6 +43,8 @@
 		onAnchorFocus,
 		onCaretAway,
 		commentsAsSheet = false,
+		cardsCoverText,
+		onTyping,
 		onSuggestionHover,
 		onEdit,
 		onLayout,
@@ -73,6 +75,10 @@
 		onCaretAway?: () => void;
 		/** Cards open as the phone sheet here, so a caret in a suggestion opens none and the editor keeps the focus to edit. */
 		commentsAsSheet?: boolean;
+		/** Cards open as a popover over the text now (no margin column): only a click on a highlight opens one, never the caret arriving by keys. */
+		cardsCoverText?: () => boolean;
+		/** The person typed or deleted in the text. */
+		onTyping?: () => void;
 		onSuggestionHover?: (id: string | null) => void;
 		onEdit?: (mapPos: (pos: number) => number) => void;
 		onLayout?: (mapPos?: (pos: number) => number) => void;
@@ -187,7 +193,7 @@
 			caretIn = hit?.id ?? null;
 			// Where cards open as the phone sheet, which covers the text, only a tap that brings the caret into a comment opens it: a caret
 			// already there, or moved in by typing or the arrow keys, is editing. A caret in a suggestion opens none; a press on its insert does (suggestionMarks).
-			const opens = commentsAsSheet ? arrived && !!click && !hit?.suggestion : arrived || !!click;
+			const opens = commentsAsSheet ? arrived && !!click && !hit?.suggestion : cardsCoverText?.() ? !!click : arrived || !!click;
 			if (hit && opens && v.coordsAtPos(r.from)) {
 				onAnchorFocus?.(hit.id, liveAnchor(hit.id), hit.suggestion ? true : undefined, click);
 			} else if (!hit) onCaretAway?.();
@@ -242,6 +248,7 @@
 					if (u.docChanged) {
 						value = u.state.doc.toString();
 						if (!syncing) onEdit?.((p) => u.changes.mapPos(p));
+						if (u.transactions.some((t) => t.isUserEvent('input') || t.isUserEvent('delete'))) onTyping?.();
 					}
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) announceMoved();
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) onLayout?.(u.docChanged ? (p) => u.changes.mapPos(p) : undefined);

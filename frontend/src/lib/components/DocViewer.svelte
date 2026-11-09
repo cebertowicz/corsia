@@ -121,6 +121,9 @@
 
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey, () => marginFits(docRoot, isPaneDrawer()));
 	const reviewBarState = createReviewBarState();
+	// Below the margin width a card opened from the text is a popover over it: the caret leaving or a key typed in the text closes it, so it never covers what is being written.
+	const cardsCoverText = () => !$isMobile && !marginFits(docRoot, isPaneDrawer());
+	const closeTextCard = () => { if (cardsCoverText() && commentUI.state?.kind === 'thread' && commentUI.state.fromText) commentUI.close(); };
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	openColumnOnLoad({ artifactId: () => loadedArtifactId, ready: () => docState === 'ready' && !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready', root: () => docRoot, paneDrawer: isPaneDrawer, hasComments: () => listedComments.length > 0, shown: () => !!commentUI.state, open: commentUI.openOnLoad });
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
@@ -327,7 +330,9 @@
 		onSave={flushNow}
 		onSelect={draftController.select}
 		onAnchorFocus={openCards.comment}
-		onCaretAway={() => void commentUI.release()}
+		onCaretAway={() => { if (!commentUI.release()) closeTextCard(); }}
+		onTyping={closeTextCard}
+		{cardsCoverText}
 		onSuggestionHover={commentUI.hover}
 		onEdit={onDocEdit}
 		onLayout={(mapPos) => activity?.editorChanged(mapPos)}
