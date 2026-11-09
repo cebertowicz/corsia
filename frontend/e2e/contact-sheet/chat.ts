@@ -32,7 +32,12 @@ export async function seed(page: Page, request: APIRequestContext) {
     content: 'I added a note about the review.',
     metadata: { reply_context: { comments: [{ id: 'c1', seq: 1, from_off: 0, to_off: quote.length, quote, anchor_prefix: '', anchor_suffix: '', note: 'Can the table remain readable on a small phone?', cid: 'c1' }] } },
   }, TEST_TOKEN);
-  await openAppPastLanding(page);
-  await sidebarThread(page, title).click();
-  await expect(page.locator('.sent-comment')).toBeVisible();
+  async function open(target: Page) {
+    await openAppPastLanding(target);
+    if ((target.viewportSize()?.width ?? 0) <= 768) await target.getByRole('button', { name: 'Toggle sidebar' }).click();
+    await sidebarThread(target, title).click();
+    await expect(target.locator('.sent-comment')).toBeVisible();
+  }
+  await open(page);
+  return open;
 }

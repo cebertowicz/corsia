@@ -50,13 +50,18 @@ export async function seed(page: Page, request: APIRequestContext) {
   const resolved = await comment(tableCell, 'This explanation now includes the expected behavior.');
   const patch = await request.patch(`/api/comments/${resolved}`, { params, data: { resolved: true } });
   expect(patch.ok(), await patch.text()).toBeTruthy();
-  await page.addInitScript(({ thread, artifact, docPath }) => {
-    localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({ threads: { [thread]: { tabs: [{ instanceId: 'contact-sheet', artifactId: artifact, path: docPath, title: 'review.md', loadedRevision: null, latestRevision: null, status: 'loading' }], activeTabId: 'contact-sheet', visible: true, activeSurface: 'artifact' } }, splitWidth: null }));
-  }, { thread, artifact, docPath });
-  await loginByUrl(page, { waitForComposer: false });
-  await sidebarThread(page, title).click();
-  await expect(page.locator('.cm-content')).toBeVisible();
-  const images = page.locator('.cm-md-image img, .cm-md-table td img');
-  await expect(images).toHaveCount(2);
-  for (let i = 0; i < 2; i++) await expect.poll(() => images.nth(i).evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
+  async function open(target: Page) {
+    await target.addInitScript(({ thread, artifact, docPath }) => {
+      localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({ threads: { [thread]: { tabs: [{ instanceId: 'contact-sheet', artifactId: artifact, path: docPath, title: 'review.md', loadedRevision: null, latestRevision: null, status: 'loading' }], activeTabId: 'contact-sheet', visible: true, activeSurface: 'artifact' } }, splitWidth: null }));
+    }, { thread, artifact, docPath });
+    await loginByUrl(target, { waitForComposer: false });
+    if ((target.viewportSize()?.width ?? 0) <= 768) await target.getByRole('button', { name: 'Toggle sidebar' }).click();
+    await sidebarThread(target, title).click();
+    await expect(target.locator('.cm-content')).toBeVisible();
+    const images = target.locator('.cm-md-image img, .cm-md-table td img');
+    await expect(images).toHaveCount(2);
+    for (let i = 0; i < 2; i++) await expect.poll(() => images.nth(i).evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
+  }
+  await open(page);
+  return open;
 }
