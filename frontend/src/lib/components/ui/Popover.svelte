@@ -159,6 +159,13 @@
 		});
 		return () => { cancelled = true; };
 	});
+	// Content growing inside the card (a reply being typed) clamps it again, so its foot and Send stay on screen.
+	$effect(() => {
+		if (!open || !surface) return;
+		const observer = new ResizeObserver(() => position());
+		observer.observe(surface);
+		return () => observer.disconnect();
+	});
 	// A new anchor (a card that stops following its text) is placed at once, not at the next scroll or edit.
 	$effect(() => {
 		void anchor;
