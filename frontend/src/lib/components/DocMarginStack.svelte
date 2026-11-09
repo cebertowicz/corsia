@@ -31,7 +31,6 @@
 		if (!scroller || !clip || !room) return;
 		// Read each time: a column is moved into the scroller once it has mounted, after this setup has run.
 		const onCanvas = () => scroller.contains(clip);
-		let followed = false;
 		const area = room.el;
 		restoring.get(area)?.();
 		restoring.delete(area);
@@ -50,12 +49,10 @@
 		// A card shows for as long as its own placed box reaches into the clip, and goes once that box has scrolled fully above the clip top; where its anchor is does not matter, so a card stacked far below its text stays reachable. One that would start above the clip sits at the clip top, under the header, and the cards below it shift down, so none is ever cut off under the header.
 		const follow = () => {
 			if (onCanvas()) {
-				// Anything a follow laid out before the move is undone once.
-				if (followed) for (const el of [stackEl!, ...stackEl!.querySelectorAll<HTMLElement>('[data-margin-card]')]) { el.style.transform = ''; el.classList.remove('under'); }
-				followed = false;
+				// Anything a follow laid out before the move is undone, by this setup or an earlier one: the classes outlive a setup.
+				for (const el of [stackEl!, ...stackEl!.querySelectorAll<HTMLElement>('[data-margin-card]')]) { el.style.transform = ''; el.classList.remove('under'); }
 				return;
 			}
-			followed = true;
 			const scrolled = scroller.scrollTop;
 			stackEl!.style.transform = `translateY(${-scrolled}px)`;
 			const cards = [...stackEl!.querySelectorAll<HTMLElement>('[data-margin-card]')].map((el) => ({ el, top: el.offsetTop, h: el.offsetHeight, out: el.offsetTop + el.offsetHeight <= scrolled })).sort((a, b) => a.top - b.top);
