@@ -7,13 +7,11 @@ first and pass the result, so no disk access happens under the writer lock.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from infra.database import get_db
 from registry import service
 from registry.file_identity import FileIdentity, PreparedFileWrite
-from registry.identity_bridge import written_row
-from registry.identity_metadata import parse_metadata, sha256_file
+from registry.identity_metadata import sha256_file
 
 
 def prepare_file_write(
@@ -40,47 +38,6 @@ def prepare_file_write(
         if not db:
             _db.close()
     return PreparedFileWrite(identity, sha256_file(path), moved_from)
-
-
-def registered_unchanged(thread_id: str, abs_path: str, artifact_id: str, *, db) -> dict[str, Any] | None:
-    """This thread's row for a file whose registration would change nothing, read without a writer.
-
-    A document open registers its read twice in a row: the HTTP snapshot, then the live open. When
-    the first left ``artifact_id`` registered to this thread exactly as ``register_write_strict``
-    would leave it again, the second would only restamp it. Returns the row
-    ``register_write_strict`` would return, or None to register as usual.
-    """
-    from registry.registration_writer import _owner_registration, _ownership_is_released
-
-    prepared = prepare_file_write(abs_path, thread_id, db=db)
-    if prepared is None:
-        return None
-    identity = prepared.identity
-    existing = service.find_file_identity(identity, db=db)
-    if (existing is None or existing["id"] != artifact_id or existing["state"] != "active"
-            or existing["external_id"] != identity.external_id or existing["path"] != identity.canonical
-            or existing["title"] != Path(identity.canonical).name):
-        return None
-    current = parse_metadata(existing["metadata"])
-    if current.get("zone") != identity.zone or prepared.metadata({}, current):
-        return None
-    row = db.execute(
-        "SELECT relationship_state, retired_at, surfacing, origin_plan_node_id FROM artifact_registrations "
-        "WHERE artifact_id=? AND parent_thread_id=?",
-        (artifact_id, thread_id),
-    ).fetchone()
-    if row is None or row["retired_at"] is not None or row["surfacing"] == "settled" or row["origin_plan_node_id"]:
-        return None
-    # Registration keeps the current owner and makes every other reader a subscriber; an unowned,
-    # never-released file would pass to this thread, which is a change.
-    owner = _owner_registration(db, artifact_id)
-    if owner is not None and owner["parent_thread_id"] == thread_id:
-        return written_row(db, artifact_id, thread_id)
-    if row["relationship_state"] != "subscriber-recent":
-        return None
-    if owner is None and not _ownership_is_released(db, artifact_id):
-        return None
-    return written_row(db, artifact_id, thread_id)
 
 
 def apply_prepared_recovery(prepared: PreparedFileWrite, thread_id: str, db) -> dict | None:

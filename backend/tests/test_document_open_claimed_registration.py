@@ -55,6 +55,11 @@ async def test_claimed_live_open_takes_no_write_and_a_wrong_claim_registers(owne
         assert writes and other["artifact"]["id"] == artifact_id
         assert db.execute("SELECT relationship_state FROM artifact_registrations WHERE artifact_id=? "
                           "AND parent_thread_id=?", (artifact_id, scope["other"])).fetchone()[0] == "subscriber-recent"
+
+        # A subscriber's own snapshot read registered it, so its claimed open takes no write either.
+        subscribed, writes = live_open(scope["other"], artifact_id)
+        assert writes == []
+        assert subscribed["artifact"] == other["artifact"]
     finally:
         get_db().set_trace_callback(None)
         await manager.close()
