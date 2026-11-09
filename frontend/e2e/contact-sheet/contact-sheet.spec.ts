@@ -44,7 +44,7 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
     }
     groups.push(`<section><h2>${width}px</h2><div>${figures.join('\n')}</div></section>`);
   }
-  const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>${name} contact sheet</title><style>body{font:16px system-ui;margin:24px;background:#eee;color:#111}section>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}figure{margin:0;background:white;padding:8px}img{width:100%;height:auto}figcaption{padding:8px}</style><h1>${name}</h1><p>Viewport widths: ${widths.join(', ')} px. Media thresholds: ${breakpoints.media.join(', ')} px.</p><p>Container thresholds: ${breakpoints.container.join(', ')} px. A viewport width near a container threshold does not establish coverage of that container.</p>${groups.join('\n')}</html>`;
+  const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>${name} contact sheet</title><style>body{font:16px system-ui;margin:24px;background:#eee;color:#111}section>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}figure{margin:0;background:white;padding:8px}img{width:100%;height:auto}figcaption{padding:8px}</style><h1>${name}</h1><p>Viewport widths: ${widths.join(', ')} px. Widths cover both sides of media-query boundaries.</p><p>Container coverage depends on the scenario content and panes it opens.</p>${groups.join('\n')}</html>`;
   fs.writeFileSync(path.join(output, 'index.html'), html);
   console.log(`Contact sheet: ${path.join(output, 'index.html')}`);
 }
