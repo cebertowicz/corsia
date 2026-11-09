@@ -24,7 +24,7 @@ import {
 } from './threadPlanStates';
 
 async function settle(): Promise<void> {
-	for (let i = 0; i < 5; i++) await Promise.resolve();
+	for (let i = 0; i < 10; i++) await Promise.resolve();
 }
 
 beforeEach(() => {
@@ -89,6 +89,40 @@ describe('threadPlanStates', () => {
 		releaseOld({ a: { state: 'moving', label_key: 'working' } });
 		await settle();
 		expect(get(threadPlanStates).a?.state).toBe('blocked_on_you');
+	});
+
+	it('folds nudges that arrive during a read into one read after it, which shows the latest state', async () => {
+		let releaseFirst: (value: unknown) => void = () => {};
+		mocks.read
+			.mockReturnValueOnce(new Promise((resolve) => (releaseFirst = resolve)))
+			.mockResolvedValueOnce({
+				a: { state: 'blocked_on_you', label_key: 'needs_you' },
+				b: { state: 'moving', label_key: 'working' },
+			});
+		watchThreadPlanStates(['a', 'b', 'c']);
+		await settle();
+		const nudge = (id: string) => mocks.handlers.get('plans_changed')?.({ plans: [{ owner: { kind: 'thread', id } }] });
+		nudge('a');
+		nudge('b');
+		nudge('a');
+		mocks.handlers.get('thread_updates_changed')?.({ thread_ids: ['b'] });
+		await settle();
+		expect(mocks.read).toHaveBeenCalledOnce();
+
+		releaseFirst({ a: { state: 'moving', label_key: 'working' } });
+		await settle();
+		expect(mocks.read.mock.calls.map(([, chunk]) => chunk)).toEqual([['a', 'b', 'c'], ['a', 'b']]);
+		expect(get(threadPlanStates).a?.state).toBe('blocked_on_you');
+		expect(get(threadPlanStates).b?.state).toBe('moving');
+	});
+
+	it('reads a lone nudge at once when no read is out', async () => {
+		mocks.read.mockResolvedValue({});
+		watchThreadPlanStates(['a']);
+		await settle();
+		mocks.handlers.get('plans_changed')?.({ plans: [{ owner: { kind: 'thread', id: 'a' } }] });
+		// Synchronously, with no timer: a single notice adds no delay.
+		expect(mocks.read).toHaveBeenCalledTimes(2);
 	});
 
 	it('re-reads only the listed thread a host-access nudge names', async () => {

@@ -6,7 +6,9 @@
  * `plans_changed`, `thread_updates_changed`, `host_access_changed` or `held_reply_changed` nudge
  * names (the update dot's seen state, an access request), and in full on
  * reconnect and on sign-in. A failed read keeps the last reading, and the next
- * trigger retries.
+ * trigger retries. One read is out at a time: threads named while it is out join
+ * one read that starts when it ends, so a burst of nudges costs at most two
+ * reads and the last one reads the server's state after the burst.
  */
 import { get, writable } from 'svelte/store';
 import { readThreadPlanStates, type ThreadPlanStateEntry } from '$lib/api/plans';
@@ -33,30 +35,43 @@ export function planSetAsideUntil(entry: ThreadPlanStateEntry | undefined): stri
 }
 
 let listed = new Set<string>();
-let seq = 0;
-/** The newest read that has written each thread, so a slow older read never overwrites it. */
-const appliedSeq = new Map<string, number>();
 let stopAmbient: (() => void) | null = null;
 /** Under the server's per-read cap, and short enough for any URL limit. */
 const CHUNK = 100;
+/** Threads named since the read that is out started; the next read covers them all. */
+let pending = new Set<string>();
+let draining: Promise<void> | null = null;
 
-async function load(ids: string[]): Promise<void> {
-	for (let start = 0; start < ids.length; start += CHUNK) {
-		await loadChunk(ids.slice(start, start + CHUNK));
+function load(ids: string[]): Promise<void> {
+	for (const id of ids) pending.add(id);
+	if (!draining && pending.size > 0) {
+		const run: Promise<void> = drain().finally(() => {
+			if (draining === run) draining = null;
+		});
+		draining = run;
+	}
+	return draining ?? Promise.resolve();
+}
+
+/** Reads run one after another, so a newer reading always lands after an older one. */
+async function drain(): Promise<void> {
+	while (pending.size > 0) {
+		const ids = [...pending];
+		pending = new Set();
+		for (let start = 0; start < ids.length; start += CHUNK) {
+			await loadChunk(ids.slice(start, start + CHUNK));
+		}
 	}
 }
 
 async function loadChunk(ids: string[]): Promise<void> {
 	const bearer = get(token);
-	if (!bearer || ids.length === 0) return;
-	const mine = ++seq;
+	if (!bearer) return;
 	const states = await readThreadPlanStates(bearer, ids);
 	if (states === null) return;
 	threadPlanStates.update((current) => {
 		const next = { ...current };
 		for (const id of ids) {
-			if ((appliedSeq.get(id) ?? 0) > mine) continue;
-			appliedSeq.set(id, mine);
 			if (states[id]) next[id] = states[id];
 			else delete next[id];
 		}
@@ -134,7 +149,7 @@ export function stopThreadPlanStates(): void {
 
 export function resetThreadPlanStatesForTests(): void {
 	stopThreadPlanStates();
-	seq = 0;
-	appliedSeq.clear();
+	pending = new Set();
+	draining = null;
 	threadPlanStates.set({});
 }
