@@ -66,13 +66,13 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 	let inlineEnd = -1;
 	return comments.filter((comment) => !comment.resolved || (comment.id === focusedId && !comment.decision)).flatMap((comment): CommentRange[] => {
 		const anchorRange = canvasCommentRange(comment, text);
+		const unread = !!comment.newComment || !!comment.newReplyIds?.length;
 		// A comment whose original text is gone keeps a point at the line its text last was, where its margin card sits.
 		if (!anchorRange && (comment.detached || decidedOpen(comment)) && !comment.resolved && comment.regionNumber == null && comment.from != null) {
 			const at = Math.min(Math.max(comment.from, 0), text.length);
-			return [{ from: at, to: at, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, point: true }];
+			return [{ from: at, to: at, id: comment.id, focused: comment.id === focusedId, onMarkerFocus, point: true, ...(unread ? { unread } : {}) }];
 		}
 		if (!anchorRange) return [];
-		const unread = !!comment.newComment || !!comment.newReplyIds?.length;
 		const range = comment.insertAfter && openSuggestion(comment) ? { from: anchorRange.to, to: anchorRange.to } : anchorRange;
 		let suggestion: InlineSuggestion | undefined;
 		if (openSuggestion(comment)) {

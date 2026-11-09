@@ -7,7 +7,12 @@ import { viewerBadgeTags } from '$lib/imageGutter';
 
 /** Where a pin's image is drawn: the markdown it comes from and its box, in scroller coordinates. */
 type Drawn = { from: number; to: number; left: number; top: number; width: number; height: number };
-type Placed = { range: CommentRange & { pin: NonNullable<CommentRange['pin']> }; x: number; y: number };
+type Pinned = CommentRange & { pin: NonNullable<CommentRange['pin']> };
+/** A pin, or the sign of a thread whose text was deleted (no `pin`), and where it is drawn in scroller coordinates. */
+type Placed = { range: CommentRange; x: number; y: number };
+
+/** Half the disc (`.cm-image-pin .disc`, theme.ts). */
+const PIN_RADIUS = 11;
 
 const overlaps = (a: { from: number; to: number }, b: { from: number; to: number }) => a.from < b.to && a.to > b.from;
 
@@ -35,7 +40,9 @@ function drawnImages(view: EditorView): Drawn[] {
 /**
  * The numbered pins of image and diagram comments, drawn on the image in the document where it is: an image in the text, in a
  * table cell, or a diagram, at any width. Each is the image viewer's disc, in its author's colour; a press opens that thread as a
- * press on a highlight does. The layer sits in the scroller, so the pins move with the text.
+ * press on a highlight does. A thread whose text was deleted has the same sign, unnumbered, just past the end of the line nearest
+ * where its text was (shown only where no margin card stands for it, DocViewer.css). The layer sits in the scroller, so the signs
+ * move with the text and none takes room in a line.
  */
 export function imagePins(hooks: { onFocus: (ids: string[], opener: HTMLElement, click?: MouseEvent) => void }) {
 	return ViewPlugin.fromClass(class {
@@ -73,13 +80,25 @@ export function imagePins(hooks: { onFocus: (ids: string[], opener: HTMLElement,
 		}
 
 		private read(view: EditorView): Placed[] {
-			const pinned = view.state.field(commentRanges).filter((range): range is Placed['range'] => !!range.pin);
-			if (!pinned.length) return [];
-			return drawnImages(view).flatMap((image) => {
+			const ranges = view.state.field(commentRanges);
+			const pinned = ranges.filter((range): range is Pinned => !!range.pin);
+			const removed = ranges.filter((range) => range.point && !range.suggestion).flatMap((range) => this.removedAt(view, range));
+			if (!pinned.length) return removed;
+			return [...removed, ...drawnImages(view).flatMap((image) => {
 				const mine = pinned.filter((range) => overlaps(range, image)).sort((a, b) => a.pin.number - b.pin.number);
 				const tags = viewerBadgeTags(mine.map((range) => range.pin.region), { width: image.width, height: image.height });
 				return mine.map((range, index) => ({ range, x: image.left + tags[index].x, y: image.top + tags[index].y }));
-			});
+			})];
+		}
+
+		/** Just past the end of the line a deleted passage's thread is placed at, inside the text column, when that line is drawn. */
+		private removedAt(view: EditorView, range: CommentRange): Placed[] {
+			if (range.from < view.viewport.from || range.from > view.viewport.to) return [];
+			const end = view.coordsAtPos(view.state.doc.lineAt(range.from).to, -1);
+			if (!end) return [];
+			const scroller = view.scrollDOM.getBoundingClientRect(), content = view.contentDOM.getBoundingClientRect();
+			const x = Math.min(end.right + PIN_RADIUS + 4, content.right - PIN_RADIUS);
+			return [{ range, x: x - scroller.left + view.scrollDOM.scrollLeft, y: (end.top + end.bottom) / 2 - scroller.top + view.scrollDOM.scrollTop }];
 		}
 
 		private write(placed: Placed[]) {
@@ -103,12 +122,14 @@ export function imagePins(hooks: { onFocus: (ids: string[], opener: HTMLElement,
 				pin.dataset.commentId = range.id;
 				pin.classList.toggle('selected', !!range.focused);
 				pin.setAttribute('aria-pressed', String(!!range.focused));
-				pin.setAttribute('aria-label', `Comment ${range.pin.number}`);
+				pin.classList.toggle('removed', !range.pin);
+				pin.setAttribute('aria-label', range.pin ? `Comment ${range.pin.number}` : 'Text removed');
 				pin.style.left = `${x}px`;
 				pin.style.top = `${y}px`;
-				pin.style.setProperty('--region-color', range.pin.color);
-				pin.style.setProperty('--disc-color', badgeFill(range.pin.color));
-				pin.firstElementChild!.textContent = String(range.pin.number);
+				// A deleted passage's sign takes the amber its card is edged in.
+				pin.style.setProperty('--region-color', range.pin?.color ?? 'var(--amber)');
+				pin.style.setProperty('--disc-color', range.pin ? badgeFill(range.pin.color) : 'var(--amber)');
+				pin.firstElementChild!.textContent = range.pin ? String(range.pin.number) : '';
 			});
 		}
 	});

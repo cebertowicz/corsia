@@ -62,6 +62,9 @@ const IMAGE = '![chart](chart.png)';
 const point = { x: 0.5, y: 0.25, w: 0, h: 0 };
 
 afterEach(() => {
+	vi.restoreAllMocks();
+	Reflect.deleteProperty(Range.prototype, 'getClientRects');
+	Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect');
 	views.splice(0).forEach((view) => view.destroy());
 	document.body.innerHTML = '';
 });
@@ -108,5 +111,28 @@ describe('image pins', () => {
 		expect(pin?.textContent).toBe('3');
 		const [tag] = viewerBadgeTags([point], { width: 300, height: 150 });
 		expect([pin.style.left, pin.style.top]).toEqual([`${60 + tag.x}px`, `${300 + tag.y}px`]);
+	});
+
+	it('draws the same sign, unnumbered, past the end of the line a deleted passage\'s thread sits at, and opens it on a press', async () => {
+		const doc = 'First line.\nThe second line.\n';
+		// The editor measures its text lines with ranges, which this DOM does not lay out.
+		const layout = Range.prototype as Partial<Pick<Range, 'getClientRects' | 'getBoundingClientRect'>>;
+		layout.getClientRects = () => [] as unknown as DOMRectList;
+		layout.getBoundingClientRect = () => box(0, 0, 0, 0)() as DOMRect;
+		const { view, onFocus } = mount(doc, StateField.define({ create: () => Decoration.none, update: (value) => value }));
+		view.contentDOM.getBoundingClientRect = box(20, 0, 700, 600);
+		const lineEnd = doc.indexOf('\n', 12);
+		vi.spyOn(view, 'coordsAtPos').mockImplementation((pos) => pos === lineEnd ? { left: 180, right: 180, top: 40, bottom: 60 } : null);
+		await show(view, [{ from: 16, to: 16, id: 'gone', point: true }, { from: 0, to: 5, id: 'kept' }]);
+		const [sign] = pins(view);
+		expect(pins(view)).toHaveLength(1);
+		expect(sign.dataset.commentId).toBe('gone');
+		expect(sign.classList.contains('removed')).toBe(true);
+		expect(sign.textContent).toBe('');
+		expect(sign.getAttribute('aria-label')).toBe('Text removed');
+		// Centred on the line, a disc's width past its last character, so no character is covered and no line moves.
+		expect([sign.style.left, sign.style.top]).toEqual(['195px', '50px']);
+		sign.click();
+		expect(onFocus).toHaveBeenCalledWith(['gone'], sign, expect.any(MouseEvent));
 	});
 });

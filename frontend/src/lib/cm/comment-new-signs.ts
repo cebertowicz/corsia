@@ -5,7 +5,7 @@ import { placeHighlightDot } from '$lib/components/comments/highlightDot';
 /**
  * The new-reply sign on each unread thread's highlight, as the chat draws it: pinned over the end of the highlight, out of
  * the text's flow. A highlight is found where it is drawn: the editor's own mark, the painted text of a table cell or
- * diagram, or an image comment's sign. Signs are placed again whenever the editor redraws its lines.
+ * diagram, or the sign of an image comment or of a thread whose text was deleted (`image-pins.ts`). Signs are placed again whenever the editor redraws its lines.
  */
 class NewSigns {
 	private placed: { anchor: Element; cleanup: () => void }[] = [];
@@ -27,7 +27,7 @@ class NewSigns {
 
 	private anchors(view: EditorView): { anchors: HTMLElement[]; missing: boolean } {
 		let missing = false;
-		const anchors = view.state.field(commentRanges).filter((range) => range.unread && !range.point).flatMap((range) => {
+		const anchors = view.state.field(commentRanges).filter((range) => range.unread).flatMap((range) => {
 			const id = CSS.escape(range.id);
 			const mark = [...view.contentDOM.querySelectorAll<HTMLElement>(`[data-comment-new="${id}"]`)].at(-1)
 				?? [...view.contentDOM.querySelectorAll<HTMLElement>('[data-comment-ids]')].filter((el) => el.dataset.commentIds?.split(',').includes(range.id)).at(-1)

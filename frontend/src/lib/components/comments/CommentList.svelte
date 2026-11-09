@@ -8,7 +8,7 @@
 	import { leaveRow } from '$lib/actions/leaveRow';
 	import { commentTurn } from '$lib/ws/commentTurn';
 	type Comment = CommentThreadData & { review?: boolean };
-	/** A card whose text was deleted draws that text itself (quote and "no longer in the document"), so its header carries no quote line of its own. Mirrors the `hideOrphan` the card is given. */
+	/** A card whose text was deleted draws that text itself (quote and "Text removed"), so its header carries no quote line of its own. Mirrors the `hideOrphan` the card is given. */
 	const showsOwnQuote = (comment: Comment) => !!comment.orphaned && !!comment.detached && !!comment.anchor && !(documentOrder && !underTextChanged);
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');

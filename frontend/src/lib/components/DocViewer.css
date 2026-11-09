@@ -69,3 +69,5 @@
 .doc { --margin-overhang: 0px; }
 .doc .cm-content { margin-bottom: var(--margin-overhang); }
 .doc:has(.canvas-comment-drawer.margin) .cm-comment-focused { background-color: color-mix(in srgb, var(--amber) 48%, transparent); }
+/* A thread whose text was deleted has its card at the line in the margin; only without a margin does its sign stand for it (`image-pins.ts`). */
+.doc:has(.canvas-comment-drawer.margin) .cm-image-pin.removed { display: none; }

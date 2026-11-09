@@ -133,7 +133,7 @@ test('@flow:doc-margin-cards a thread whose text was deleted keeps its card at t
 	await page.keyboard.press('Backspace');
 	await expect(card(page, doc, FIRST)).toHaveCount(1);
 	await expect(card(page, doc, FIRST).locator('.ct.orphaned')).toHaveCount(1);
-	await expect(card(page, doc, FIRST).locator('.ct-orphan')).toHaveText('This text is no longer in the document');
+	await expect(card(page, doc, FIRST).locator('.ct-orphan')).toHaveText('Text removed');
 	expect(await page.locator('.margin-aside-orphans, .orphans-button').count()).toBe(0);
 });
 

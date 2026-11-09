@@ -169,7 +169,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({ state: { kind: 'list' }, comments: [deleted, secondSuggestion] });
 		const card = document.body.querySelector<HTMLElement>('[data-margin-card="comment-1"]');
 		expect(card).not.toBeNull();
-		expect(card!.querySelector('.ct-orphan')?.textContent).toBe('This text is no longer in the document');
+		expect(card!.querySelector('.ct-orphan')?.textContent).toBe('Text removed');
 		expect(card!.querySelector('.ct.orphaned')).not.toBeNull();
 		expect(document.body.querySelector('.aside-button[data-aside-kind="lost"], .orphans-button')).toBeNull();
 		expect(document.body.querySelector('[data-margin-card="comment-2"]')).not.toBeNull();

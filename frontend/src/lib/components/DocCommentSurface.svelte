@@ -124,7 +124,7 @@
 	const wantsRoom = $derived(!narrow && !image && (surfaceState?.kind === 'list' || surfaceState?.kind === 'thread' || (surfaceState?.kind === 'draft' && draftOverColumn)));
 	const margin = $derived(wantsRoom && roomForMargin);
 	const selectedId = $derived(surfaceState?.kind === 'thread' ? surfaceState.id : focusedId);
-	// A thread whose text is gone keeps its card in the column at the nearest line, labelled "This text is no longer in the document" (CommentThread). A review conversation never had text: its card, labelled "Review comment", sits after the last card that has a line.
+	// A thread whose text is gone keeps its card in the column at the nearest line, labelled "Text removed" with a dashed edge (CommentThread). A review conversation never had text: its card, labelled "Review comment", sits after the last card that has a line.
 	const resolvedDrawer = createResolvedDrawer({ margin: () => margin, resolved: () => resolvedList, open: () => resolvedOpen, setOpen: (open) => resolvedOpen = open, setCount: (count) => resolvedCount = count, entry: () => bounds?.querySelector<HTMLElement>('[data-resolved-entry]') ?? null });
 	holdReadingLine({ margin: () => margin, bounds: () => bounds, selectedId: () => selectedId });
 	let detent = $state<'full' | 'half'>('full');
