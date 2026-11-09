@@ -451,7 +451,7 @@ def test_size_rows_pair_each_reason_with_its_nearest_boundary_date() -> None:
 
 
 @pytest.mark.asyncio
-async def test_delayed_agent_early_period_is_a_measured_zero(isolated_db) -> None:
+async def test_delayed_agent_early_period_is_a_measured_zero(isolated_db, measurement_clock) -> None:
     """A later scope cannot move an install-wide instrument start boundary."""
     db = get_db()
     try:

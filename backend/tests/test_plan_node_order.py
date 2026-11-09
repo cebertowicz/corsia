@@ -92,7 +92,7 @@ def test_full_ordered_read_looks_up_bodies_by_id_without_scanning_every_plan(db)
 
     steps = [
         row["detail"] for row in db.execute(
-            f"EXPLAIN QUERY PLAN {node_order._FULL_ORDERED_SQL}", (plan.id,),
+            f"EXPLAIN QUERY PLAN {node_order._full_ordered_sql(db)}", (plan.id,),
         )
     ]
 

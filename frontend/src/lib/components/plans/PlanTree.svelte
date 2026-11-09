@@ -325,7 +325,7 @@
 		{:else if item.kind === 'cluster'}
 			<!-- Tasks sharing one moment: one time line, their rows listed beneath it. -->
 			<div class="cluster" role="listitem" style={depthStyle(depthOffset + item.depth + 1)}>
-				<div class="time-line">{item.members.length}<span class="sr-only">{' tasks'}</span> at {formatMoment(new Date(item.at), now, { clock: true, plain: true })}</div>
+				<div class="time-line" in:blockSlot|global={{ off: !userDisclosure }} out:blockSlot|global={{ off: !userDisclosure }}>{item.members.length}<span class="sr-only">{' tasks'}</span> at {formatMoment(new Date(item.at), now, { clock: true, plain: true })}</div>
 				<div role="list">
 					{#each item.members as member (member.id)}
 						{@render row(member, 1, 'reason')}

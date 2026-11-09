@@ -11,7 +11,6 @@ from core.turn_core import (
     TerminalSettlement,
     TurnIdentity,
     TurnTerminalResult,
-    drive_turn_settlement,
     settle_turn_terminal,
 )
 import infra.provider_usage as provider_usage
@@ -29,7 +28,6 @@ from plans.public import record_turn_fallback, report_unrecordable_call
 from subagents.codex_runtime_state import (
     _LiveCodex,
     context_receipt_identity,
-    finalize_live,
 )
 from subagents.codex_terminal_context import (  # noqa: F401 - public re-export
     context_usage_with_snapshot,
@@ -90,15 +88,6 @@ def preserve_committed_terminal(terminal) -> Iterator[None]:
             raise
         settlement = terminal if isinstance(terminal, TerminalSettlement) else None
         raise CommittedTerminalFailure(settlement, error) from error
-
-
-async def release_and_drive_terminal(ctx, settlement) -> None:
-    """Release the completed live generation before starting its successor."""
-    release = finalize_live(ctx.thread_id, ctx.live)
-    await drive_turn_settlement(settlement)
-    if release is not None:
-        await release
-
 
 
 async def finish_interrupted_if_still_owned(

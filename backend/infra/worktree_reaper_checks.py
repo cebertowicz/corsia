@@ -152,8 +152,10 @@ def candidate_verdict(
 ) -> str | RemovalVerdict | None:
     """Return a skip reason, salvage verdict, or clean removal verdict.
 
-    Merged clean worktrees retain their immediate removal path. Tracked edits
-    require the long idle clock and salvage even for merged worktrees.
+    Merged clean worktrees retain their immediate removal path, and tracked
+    edits require the long idle clock and salvage even for merged worktrees.
+    The owner's running turn is checked on the merged path too: such a
+    worktree is kept and the later idle pass reaps it once the owner is idle.
     """
     reason = _entry_reason(candidate.entry)
     if reason:
@@ -173,7 +175,7 @@ def candidate_verdict(
     if isinstance(verdict, str):
         return verdict
     return (ctx.probe.skip_reason(candidate.path)
-            or (None if merged else ctx.thread_skip_reason(candidate.owner_thread))
+            or ctx.thread_skip_reason(candidate.owner_thread)
             or verdict)
 
 
@@ -189,9 +191,10 @@ def recheck_before_removal(
     A pass can run for minutes after the first check, so nothing cached is
     trusted here: registration, locks, the idle clock, the worktree status,
     live processes and running turns are all read again, under the same
-    ``merged`` rules as the first check. The open-PR set is the exception:
-    the caller re-reads it just before taking the repo lock, so a slow ``gh``
-    call never holds that lock. ``expected_head`` (the merged PR's
+    ``merged`` rules as the first check, which exempt only the idle clock and
+    untracked files. The open-PR set is the exception: the caller re-reads it
+    just before taking the repo lock, so a slow ``gh`` call never holds that
+    lock. ``expected_head`` (the merged PR's
     head, or the head recorded at merge time) must still contain the
     worktree's current HEAD.
     """
@@ -227,7 +230,7 @@ def recheck_before_removal(
         return verdict
     ctx.probe.refresh()
     return (ctx.probe.skip_reason(candidate.path)
-            or (None if merged else ctx.thread_skip_reason(candidate.owner_thread, fresh=True))
+            or ctx.thread_skip_reason(candidate.owner_thread, fresh=True)
             or verdict)
 
 

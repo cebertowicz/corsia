@@ -125,7 +125,8 @@ def _commit(thread_id: str, paths: list[str], message: str) -> str:
         result = commit(repo, files, message, saver_author(thread_id=thread_id))
     if result is None:
         return "No changes to commit."
-    return "\n".join([f"Committed {result.sha}.", *result.unsynced_line()])
+    summary = f"Committed {result.sha}." if result.changed else "No changes to commit."
+    return "\n".join([summary, *result.unsynced_line()])
 
 
 def _history(thread_id: str, path: str, count: int) -> str:

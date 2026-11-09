@@ -116,10 +116,13 @@ def _waits_elsewhere(connection, plan) -> bool:
     Such a worker waits on that event or owner, not on its parent, and the
     parent already hears the wait through the child-watch and child-blocker
     digests. Other ready work left in its plan does not change that (#2637).
+    A wait armed on work below the Later cut counts too: it still fires.
     """
-    from plans import projections
+    from plans import admission, projections
 
     _actionable, projected = projections.actionable_leaves(connection, plan)
+    later = projections.later_leaves(connection, str(plan["owner_id"]))
+    projected = projected | admission.project_many([(row, plan) for row in later], db=connection)
     return any(
         cause["kind"] == "waiting" or (cause.get("placed") and cause["kind"] == "blocked")
         for projection in projected.values()
@@ -147,10 +150,10 @@ def notify_stopped_open(connection, thread_id: str, *, wake_id: str) -> None:
         "SELECT * FROM plans WHERE owner_kind='thread' AND owner_id=?",
         (thread_id,),
     ).fetchone()
-    if plan is None or _waits_elsewhere(connection, plan):
+    if plan is None:
         return
     delegation = _delegation(connection, str(plan["id"]))
-    if delegation is None:
+    if delegation is None or _waits_elsewhere(connection, plan):
         return
     parent_plan_id, worker = delegation
     step = projections.delegated_step(connection, parent_plan_id, worker)

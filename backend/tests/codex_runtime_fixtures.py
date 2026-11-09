@@ -186,7 +186,19 @@ def _active_live_with_persisted_tool(thread_id: str, session: object):
 
 
 def _run(coro):
-    return asyncio.run(coro)
+    """Run ``coro``, then the drives its terminals detached, on one loop.
+
+    ``asyncio.run`` cancels what is left when ``coro`` returns, and a detached
+    drive cancelled mid-dispatch can start a Turn that outlives the loop."""
+    from subagents.codex_runtime_state import drain_detached_drives
+
+    async def run_and_drain():
+        try:
+            return await coro
+        finally:
+            await drain_detached_drives()
+
+    return asyncio.run(run_and_drain())
 
 
 async def locked_spawn(spawn, thread_id: str, *args, **kwargs):

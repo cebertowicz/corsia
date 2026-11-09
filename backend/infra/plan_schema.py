@@ -54,6 +54,10 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         archived_at TEXT{column_ddl(PLAN_AGGREGATE_COLUMNS)},
+        -- When this plan's next weekly review of its Later pile is due (ISO
+        -- time), or null when none is armed. Slice 3 arms it; nothing reads it
+        -- yet, so it is declared here while the cut itself ships.
+        later_review_at TEXT,
         UNIQUE(owner_kind, owner_id)
     );
     CREATE INDEX IF NOT EXISTS idx_plans_parent ON plans(parent_plan_id);
@@ -81,6 +85,10 @@ STRUCTURED_PLAN_SCHEMA_SQL = f"""
             CHECK (length(trim(acceptance_criteria)) > 0),
         checkpoint_exception INTEGER NOT NULL DEFAULT 0
             CHECK (checkpoint_exception IN (0, 1)),
+        -- The cut line: 1 means below it, so auto-selection skips the row and
+        -- nothing about it wakes its owner. Ranking, never lifecycle: `state`
+        -- keeps its seven values and every state matrix is unchanged.
+        later INTEGER NOT NULL DEFAULT 0 CHECK (later IN (0, 1)),
         state TEXT NOT NULL DEFAULT 'pending'
             CHECK (state IN (
                 'pending', 'active', 'review_requested', 'accepted',

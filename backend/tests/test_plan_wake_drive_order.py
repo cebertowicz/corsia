@@ -35,6 +35,15 @@ def order(lineage, monkeypatch):
     return events
 
 
+async def _deliver_codex_terminal_and_drive(handler, event: dict, live) -> None:
+    """Deliver one Codex terminal, then let its detached terminal drive finish."""
+    from subagents.codex_runtime_state import drain_detached_drives
+    from tests.test_external_harness_plan_liveness import _deliver_codex_terminal
+
+    await _deliver_codex_terminal(handler, event, live)
+    await drain_detached_drives()
+
+
 @pytest.mark.parametrize(
     ("event", "kind"),
     [
@@ -47,11 +56,8 @@ def test_a_codex_childs_parent_is_driven_after_its_terminal_release(
     lineage, order, monkeypatch, event, kind,
 ):
     from codex_runtime_fixtures import _reset_runtime, _run
-    from subagents import codex_runtime, codex_runtime_events
-    from tests.test_external_harness_plan_liveness import (
-        _bind_active_turn,
-        _deliver_codex_terminal,
-    )
+    from subagents import codex_runtime, codex_runtime_state
+    from tests.test_external_harness_plan_liveness import _bind_active_turn
 
     _reset_runtime()
     delegated(lineage, with_worker_node=kind == "child_turn_errored")
@@ -60,16 +66,17 @@ def test_a_codex_childs_parent_is_driven_after_its_terminal_release(
         parent_thread_id="parent", name="codex",
     )
     _bind_active_turn(live, "worker")
-    release = codex_runtime_events.release_and_drive_terminal
+    settle = codex_runtime_state.drive_turn_settlement
 
-    async def recorded_release(ctx, settlement) -> None:
+    async def recorded_settlement(settlement):
         order.append("release:start")
-        await release(ctx, settlement)
+        result = await settle(settlement)
         order.append("release:done")
+        return result
 
-    monkeypatch.setattr(codex_runtime_events, "release_and_drive_terminal", recorded_release)
+    monkeypatch.setattr(codex_runtime_state, "drive_turn_settlement", recorded_settlement)
 
-    _run(_deliver_codex_terminal(
+    _run(_deliver_codex_terminal_and_drive(
         codex_runtime._make_on_event(live, "worker", MagicMock()), event, live,
     ))
 
@@ -80,15 +87,12 @@ def test_a_codex_childs_parent_is_driven_after_its_terminal_release(
 
 
 def test_a_codex_release_failure_still_drives_the_parent_it_woke(
-    lineage, order, monkeypatch,
+    lineage, order, monkeypatch, caplog,
 ):
     """The woken parent is durable work: a release that raises must not strand it."""
     from codex_runtime_fixtures import _reset_runtime, _run
-    from subagents import codex_runtime, codex_runtime_events
-    from tests.test_external_harness_plan_liveness import (
-        _bind_active_turn,
-        _deliver_codex_terminal,
-    )
+    from subagents import codex_runtime, codex_runtime_state
+    from tests.test_external_harness_plan_liveness import _bind_active_turn
 
     _reset_runtime()
     delegated(lineage)
@@ -98,19 +102,20 @@ def test_a_codex_release_failure_still_drives_the_parent_it_woke(
     )
     _bind_active_turn(live, "worker")
 
-    async def failing_release(ctx, settlement) -> None:
+    async def failing_settlement(settlement):
         order.append("release:start")
         raise RuntimeError("release failed")
 
-    monkeypatch.setattr(codex_runtime_events, "release_and_drive_terminal", failing_release)
+    monkeypatch.setattr(codex_runtime_state, "drive_turn_settlement", failing_settlement)
 
-    with pytest.raises(RuntimeError, match="release failed"):
-        _run(_deliver_codex_terminal(
-            codex_runtime._make_on_event(live, "worker", MagicMock()),
-            {"kind": "turn_failed", "cause": "process_exited"}, live,
-        ))
+    caplog.set_level(logging.ERROR, logger="subagents.codex_runtime_state")
+    _run(_deliver_codex_terminal_and_drive(
+        codex_runtime._make_on_event(live, "worker", MagicMock()),
+        {"kind": "turn_failed", "cause": "process_exited"}, live,
+    ))
 
     assert order == ["release:start", "drive:parent", "drive:worker"]
+    assert any("terminal drive for worker failed" in message for message in caplog.messages)
 
 
 async def test_cc_result_keeps_event_db_but_uses_canonical_terminal_owner(

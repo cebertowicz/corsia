@@ -56,6 +56,8 @@ Pygments==2.20.0
 # Inspect AI is the runner / scorer-host; OTel is the in-process tracer used
 # by the seam-latency scorer and null-tool protocol.
 inspect-ai==0.3.239
+# inspect-ai 0.3.239 imports acp.helpers, which agent-client-protocol 1.0.0 removed.
+agent-client-protocol==0.10.1
 opentelemetry-api==1.42.1
 opentelemetry-proto==1.43.0
 opentelemetry-sdk==1.42.1

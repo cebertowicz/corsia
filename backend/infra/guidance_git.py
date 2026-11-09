@@ -21,8 +21,8 @@ from loguru import logger
 
 from infra.backend_git import GIT_CONFIG_ARGS
 from infra.guidance_cas import stale_result
-from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir, read_regular
-from infra.guidance_index_sync import index_lock_fault
+from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir, read_regular, write_bytes as _write_bytes
+from infra.guidance_index_sync import CORSIA_COMMITTER, consume_records, index_lock_fault, record_failure, seed_legacy_records
 from infra.guidance_messages import (
     REASON_PREFIX, SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_UNRECORDED, UNRECORDED_REASON,
     commit_message, is_person_author, recorded_reason,
@@ -126,9 +126,19 @@ def _changed(repo: Path, specs: list[str]) -> list[str]:
     return [record[3:] for record in out.split("\0") if record]
 
 
-def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: str) -> _Commit | None:
-    """Commit exactly ``files`` on HEAD, or None when nothing changed. One retry is safe: every failure
-    precedes the compare-and-swap ``update-ref``. A real-index sync fault after it is returned, not raised.
+def _repair(repo: Path, shown: set[str] | None = None) -> tuple[list[str], list[str]]:
+    """Repair every recorded path; report only ``shown`` ones, so a caller never learns another scope's paths."""
+    try:
+        return consume_records(_git, repo, shown)
+    except Exception as exc:  # a repair fault must not fail a landed save
+        logger.warning("Guidance index repair failed: {}.", exc)
+        return [], ["Guidance index repair could not run; the server log has the error."]
+
+
+def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: str, *, repair_unchanged: bool = True) -> _Commit | None:
+    """Commit exactly ``files`` on HEAD, or return recovery results for an unchanged tree.
+    One retry is safe: every failure precedes the compare-and-swap ``update-ref``.
+    A real-index sync fault after it is returned, not raised.
 
     The real-index sync is a second write HEAD does not need: a proven-stale ``index.lock`` is cleared
     first, so a stale lock can no longer fail every later save's sync."""
@@ -150,9 +160,10 @@ def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: st
                     staged.append((rel, args))
                 tree = _git(repo, "write-tree", env=env).strip()
             if head and tree == _git(repo, "rev-parse", f"{head}^{{tree}}").strip():
-                return None
+                repaired, notes = _repair(repo, set(files)) if repair_unchanged else ([], [])
+                return _Commit(head, changed=False, repaired=tuple(repaired), notes=tuple(notes)) if repaired or notes else None
             name, _, email = author.rpartition(" <")
-            identity = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email.rstrip(">"), "GIT_COMMITTER_NAME": "CORSIA", "GIT_COMMITTER_EMAIL": "corsia@localhost"}
+            identity = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email.rstrip(">"), "GIT_COMMITTER_NAME": "CORSIA", "GIT_COMMITTER_EMAIL": CORSIA_COMMITTER}
             sha = _git(repo, "commit-tree", tree, *(("-p", head) if head else ()), "-F", "-", data=message.encode(), env=identity).strip()
             _git(repo, "update-ref", "HEAD", sha, head or "0" * 40)
             break
@@ -160,25 +171,28 @@ def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: st
             if attempt == 2:
                 raise
     unsynced: list[str] = []
-    fault = index_lock_fault(_git, repo)
+    lock_fault = fault = index_lock_fault(_git, repo)
     for rel, args in staged:
         try:
+            if lock_fault:
+                raise GitFault(lock_fault)
             _git(repo, "update-index", *args)
         except GitFault as exc:
             unsynced.append(rel)
             fault = fault or str(exc)
+            try:
+                record_failure(_git, repo, rel, head, sha)
+            except Exception as record_exc:  # the commit already landed
+                fault += f"; could not record index recovery for {rel}: {record_exc}"
+                logger.warning("{}", fault)
     if unsynced:
         logger.warning("guidance commit {} landed; index sync failed for {}: {}", sha, unsynced, fault)
-    return _Commit(sha, tuple(unsynced), fault)
+    repaired, notes = _repair(repo, set(files))
+    return _Commit(sha, tuple(unsynced), fault, repaired=tuple(repaired), notes=tuple(notes))
 
 
 def _is_text(data: bytes | None) -> bool:
     return data is None or (len(data) <= MAX_GUIDANCE_BYTES and b"\0" not in data[:8192])
-
-
-def _write_bytes(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
 
 
 def _sweep(repo: Path, rels: list[str]) -> list[str]:
@@ -187,10 +201,10 @@ def _sweep(repo: Path, rels: list[str]) -> list[str]:
     names = sorted(rels)
     shown = ", ".join(names[:12]) + (f" and {len(names) - 12} more" if len(names) > 12 else "")
     files = {rel: read_regular(repo / rel) for rel in names}
-    done = _commit(repo, files, f"guidance sweep: {shown}\n\n{REASON_PREFIX}{UNRECORDED_REASON}\nScope: sweep", _OUTSIDE)
+    done = _commit(repo, files, f"guidance sweep: {shown}\n\n{REASON_PREFIX}{UNRECORDED_REASON}\nScope: sweep", _OUTSIDE, repair_unchanged=False)
     if done is None:
         return []
-    return [f"Swept and committed {shown} as {done.sha[:7]} with Reason: unrecorded.", *done.unsynced_line()]
+    return ([f"Swept and committed {shown} as {done.sha[:7]} with Reason: unrecorded."] if done.changed else []) + done.unsynced_line()
 
 
 def _sweep_others(repo: Path, workspace: Path, db, exclude: set[str]) -> list[str]:
@@ -352,9 +366,9 @@ def _save(
         finally:
             timing["commit_ms"] = (time.monotonic() - started) * 1000
         if landed is not None:
-            lines += landed.unsynced_line() or [done.format(sha=landed.sha[:7])]
+            lines += ([done.format(sha=landed.sha[:7])] if landed.changed and not landed.unsynced else []) + landed.unsynced_line()
         lines += _sweep_others(repo, workspace, db, set(rels.values()))
-        if landed is None:
+        if landed is None or not landed.changed:
             return SaveResult("unchanged", line="\n".join(lines) or None)
         return SaveResult(
             "written", "index-unsynced" if landed.unsynced else "", sha=landed.sha,
@@ -369,7 +383,13 @@ def startup_sweep(workspace: Path) -> None:
         return
     try:
         with _locked(_acquire(repo)[0]) as db:
-            lines = _sweep_others(repo, workspace, db, set())
+            try:
+                seed_legacy_records(_git, repo)
+            except Exception:  # the recorded repairs and the sweep still run
+                logger.opt(exception=True).warning("guidance legacy index check failed")
+            repaired, notes = _repair(repo)
+            lines = ([f"Repaired guidance index: {', '.join(repaired)}."] if repaired else []) + notes
+            lines += _sweep_others(repo, workspace, db, set())
         if lines:
             logger.info("startup guidance sweep: {}", "; ".join(lines))
     except Exception:  # startup must not fail on history

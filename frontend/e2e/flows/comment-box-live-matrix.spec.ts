@@ -38,7 +38,7 @@ for (const box of ['draft', 'reply'] as const) for (const [action, width, height
     await expect(reader.getByPlaceholder('Reply…')).toBeVisible();
     await reader.getByPlaceholder('Reply…').fill('draft body');
    }
-   const input = reader.getByPlaceholder(box === 'draft' ? 'Comment…' : 'Reply…');
+   const input = reader.getByPlaceholder(box === 'draft' ? 'Comment, or @ to tag an agent' : 'Reply…');
    await input.focus();
    await input.evaluate((field: HTMLTextAreaElement) => field.setSelectionRange(5, 5));
    if (action === 'far') {

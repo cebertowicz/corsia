@@ -294,26 +294,18 @@ def _reviewer_target(provider: str, model: str) -> SimpleNamespace:
     return SimpleNamespace(harness=provider, catalog_id=model)
 
 
-def test_reviewer_characterization_refuses_before_its_own_move(accounts, monkeypatch):  # noqa: F811
-    """Characterizes today's reviewer refusal (passes on base); it is not the acceptance regression.
+def test_reviewer_takes_its_own_project_move_off_a_signed_out_default(accounts):  # noqa: F811
+    """The detached reviewer's opt-in move is its project's, not the first account's lifecycle state.
 
-    It pins where the refusal happens: the reason gate at reviewer_account.py:76 fires before the
-    reviewer's own ``rollover_destination`` call, so the hidden-selector base override below it is
-    never reached and is not this surface's cause.
+    A signed-out source reaches ``rollover_destination``, so the hidden-selector base below it
+    is read and the permitted signed-in destination is the answer.
     """
-    from reviewer.failures import CCUnavailableError
     from reviewer.reviewer_account import resolve_scope_reviewer_account
 
     db, default, second, _third = accounts
     _rollover_on_with_signed_out_default(db, "codex", "codex/test", default, second)
 
-    def no_base(*_args, **_kwargs):
-        raise AssertionError("the reviewer read its hidden-selector base before deciding the account")
-
-    monkeypatch.setattr("llm.model_status.harness_base_row", no_base)
-    with pytest.raises(CCUnavailableError) as refused:
-        resolve_scope_reviewer_account(_reviewer_target("codex", "codex/test"), PROJECT, db=db)
-    assert refused.value.reason == "account_signed_out"
+    assert resolve_scope_reviewer_account(_reviewer_target("codex", "codex/test"), PROJECT, db=db) == second["id"]
 
 
 def test_reviewer_moves_off_a_limited_default_with_the_switch_on(accounts):  # noqa: F811

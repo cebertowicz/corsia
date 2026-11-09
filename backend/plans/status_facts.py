@@ -43,7 +43,10 @@ def facts(
     owner = {"kind": plan_row["owner_kind"], "id": plan_row["owner_id"]}
     presented = operator_nodes.present_plan(projected, owner, targets, states, tree)
     nodes = presented["nodes"] if presented is not None else []
-    durable = {str(row["id"]): (row["created_at"], row["size"]) for row in tree.rows}
+    durable = {
+        str(row["id"]): (row["created_at"], row["size"], _later_of(row))
+        for row in tree.rows
+    }
     return shaped(plan_row, presented, nodes, durable, clock, tree.shape.parents)
 
 
@@ -58,19 +61,27 @@ def full_facts(db, plan_row, actor, clock: str, *, costs: bool = True) -> dict[s
     presented = operator_nodes.present_plan(projected, owner, targets, states)
     nodes = presented["nodes"] if presented is not None else []
     durable = {
-        str(row["id"]): (row["created_at"], row["size"])
+        str(row["id"]): (row["created_at"], row["size"], row["later"])
         for row in db.execute(
-            "SELECT id,created_at,size FROM plan_nodes WHERE plan_id=?", (str(plan_row["id"]),)
+            "SELECT id,created_at,size,later FROM plan_nodes WHERE plan_id=?", (str(plan_row["id"]),)
         ).fetchall()
     }
     return shaped(plan_row, presented, nodes, durable, clock, node_states.parent_ids(nodes))
 
 
+def _later_of(row) -> int:
+    """The row's cut flag, or 0 where the schema rung has no cut yet."""
+    return row["later"] if "later" in row.keys() else 0
+
+
 def shaped(plan_row, presented, nodes, durable, clock: str, parent_ids) -> dict[str, Any]:
     for node in nodes:
-        created_at, size = durable.get(node["id"], (None, None))
+        created_at, size, later = durable.get(node["id"], (None, None, 0))
         node["created_at"] = created_at
         node["size"] = size
+        # The cut, from the durable row: the status counts and the "you scheduled
+        # N yourself" note both ask which side of it a leaf sits on.
+        node["later"] = bool(later)
     leaves = [node for node in nodes if node["id"] not in parent_ids]
     titles = {node["id"]: node["title"] for node in nodes}
     parents = {node["id"]: node["parent_id"] for node in nodes}

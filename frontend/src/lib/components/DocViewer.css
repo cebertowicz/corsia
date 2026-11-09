@@ -4,16 +4,16 @@
 /* A pending-feedback footer reports its own height. The list keeps its existing capped height; only the pinned footer is added below it. */
 .doc:has(.canvas-comment-drawer), .doc:has(.canvas-history-drawer) { --doc-drawer-height: min(36%, 260px); grid-template-areas: 'header' 'editor' 'drawer'; grid-template-rows: auto minmax(0, 1fr) minmax(0, var(--doc-drawer-height)); }
 .doc:has(.canvas-comment-drawer .drawer-unsent) { --doc-drawer-height: calc(min(36%, 260px) + var(--doc-drawer-footer-height, 0px)); }
-/* Margin column, 280px of cards plus gutter, at any desktop width. */
-.doc:has(.canvas-comment-drawer.margin) { grid-template-areas: 'header header' 'editor drawer'; grid-template-columns: minmax(0, 1fr) 308px; grid-template-rows: auto minmax(0, 1fr); }
+/* The comment margin column (`--margin-column`: 280px of cards plus gutter), at any desktop width. */
+.doc:has(.canvas-comment-drawer.margin) { grid-template-areas: 'header header' 'editor drawer'; grid-template-columns: minmax(0, 1fr) var(--margin-column); grid-template-rows: auto minmax(0, 1fr); }
 /* The column grows in over the spring duration. */
-@keyframes margin-column-in { from { grid-template-columns: minmax(0, 1fr) 0px; } to { grid-template-columns: minmax(0, 1fr) 308px; } }
+@keyframes margin-column-in { from { grid-template-columns: minmax(0, 1fr) 0px; } to { grid-template-columns: minmax(0, 1fr) var(--margin-column); } }
 /* And leaves the same way: the track closes over the same duration, so the text widens in one smooth step. */
 @media (prefers-reduced-motion: no-preference) {
 	.doc:has(.canvas-comment-drawer.margin) { animation: margin-column-in var(--dur-spring) var(--ease-material); }
 	.doc:has(.canvas-comment-drawer.margin.leaving) { animation: margin-column-out var(--dur-spring) var(--ease-material) forwards; }
 }
-@keyframes margin-column-out { from { grid-template-columns: minmax(0, 1fr) 308px; } to { grid-template-columns: minmax(0, 1fr) 0px; } }
+@keyframes margin-column-out { from { grid-template-columns: minmax(0, 1fr) var(--margin-column); } to { grid-template-columns: minmax(0, 1fr) 0px; } }
 /* The bottom band has its own track, so notices do not cover the editor, its activity control or a drawer. */
 .doc:has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom'; grid-template-rows: auto minmax(0, 1fr) auto; }
 .doc:has(.canvas-comment-drawer):has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom' 'drawer'; grid-template-rows: auto minmax(0, 1fr) auto minmax(0, var(--doc-drawer-height)); }

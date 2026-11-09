@@ -21,7 +21,7 @@ for (const width of [375, 393]) for (const colorScheme of ['light', 'dark'] as c
 		await toolbar.locator('[data-image-comment]').click();
 		const region = (await page.locator('.image-overlay [data-image-regions]').boundingBox())!;
 		await page.mouse.click(region.x + region.width * 0.3, region.y + region.height * 0.4);
-		const composer = page.getByPlaceholder('Comment…');
+		const composer = page.getByPlaceholder('Comment, or @ to tag an agent');
 		await expect(composer).toBeVisible();
 		await composer.fill('A comment with forty ordinary characters.');
 		await composer.press('ControlOrMeta+Enter');

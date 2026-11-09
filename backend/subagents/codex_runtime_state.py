@@ -3,9 +3,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import Coroutine
 from dataclasses import dataclass, field
+from typing import Any
 
 from core.continuity_accounting import ContinuityAccounting
+from core.turn_core import drive_turn_settlement
 from llm.resolution import Harness
 from infra.context_receipts import (
     ContextReceiptIdentity,
@@ -130,32 +133,72 @@ def finalize_live(thread_id: str, live: _LiveCodex | None = None) -> asyncio.Tas
     return schedule_live_writer_release(thread_id)
 
 
-_HOLD_RELEASES: set[asyncio.Task[None]] = set()
+_DETACHED_DRIVES: set[asyncio.Task[None]] = set()
+
+
+def schedule_detached_drive(drive: Coroutine[Any, Any, None], *, name: str) -> asyncio.Task[None] | None:
+    """Run one drive in its own task, so it waits for any transition lock its
+    caller still holds (or is waiting on) instead of re-entering it."""
+    try:
+        task = asyncio.get_running_loop().create_task(drive, name=name)
+    except RuntimeError:
+        drive.close()
+        return None
+    _DETACHED_DRIVES.add(task)
+    task.add_done_callback(_DETACHED_DRIVES.discard)
+    return task
 
 
 def schedule_live_writer_release(thread_id: str) -> asyncio.Task[None] | None:
     """After a writer's removal, lift its refused successors' holds and drive them.
 
-    A separate task, so the drive waits for any transition lock the removal's
-    caller still holds instead of re-entering it. The lift is a write serialized
-    after the removal, which is what closes the lost-wakeup window against a
-    hold written while the handle was still registered.
+    The lift is a write serialized after the removal, which is what closes the
+    lost-wakeup window against a hold written while the handle was still
+    registered.
     """
+    return schedule_detached_drive(
+        _release_live_writer_holds(thread_id), name=f"codex-live-writer-release:{thread_id}",
+    )
+
+
+async def release_and_drive_terminal(ctx, settlement, effects) -> None:
+    """Release the completed live generation, then drive the rest detached:
+    its successor first, then the threads its Turn end woke.
+
+    The terminal arrives in the provider-event chain, which a transition-lock
+    holder (a steer, Stop or checkpoint) may be draining. The successor's
+    dispatch takes that lock, and so does the thread's own drive when an errored
+    Turn left its input unanswered: driving either inline left the thread
+    running undriven (#1981).
+    """
+    release = finalize_live(ctx.thread_id, ctx.live)
+    schedule_detached_drive(
+        _drive_released(ctx.thread_id, settlement, release, effects),
+        name=f"codex-terminal-drive:{ctx.thread_id}",
+    )
+
+
+async def _drive_released(
+    thread_id: str, settlement, release: asyncio.Task[None] | None, effects,
+) -> None:
+    from automation.turn_end_effects import deliver_turn_end_after
+
+    async def drive_successor() -> None:
+        await drive_turn_settlement(settlement)
+        if release is not None:
+            await release
+
     try:
-        task = asyncio.get_running_loop().create_task(
-            _release_live_writer_holds(thread_id), name=f"codex-live-writer-release:{thread_id}",
-        )
-    except RuntimeError:
-        return None
-    _HOLD_RELEASES.add(task)
-    task.add_done_callback(_HOLD_RELEASES.discard)
-    return task
+        await deliver_turn_end_after(effects, drive_successor)
+    except Exception:
+        log.exception("codex_runtime: terminal drive for %s failed", thread_id)
 
 
-async def drain_live_writer_releases() -> None:
-    """Wait for every scheduled live-writer release, for callers that need it done."""
-    if _HOLD_RELEASES:
-        await asyncio.gather(*tuple(_HOLD_RELEASES))
+async def drain_detached_drives() -> None:
+    """Wait for every drive scheduled on this loop (no loop can await another's)."""
+    loop = asyncio.get_running_loop()
+    while drives := [task for task in _DETACHED_DRIVES if task.get_loop() is loop]:
+        await asyncio.gather(*drives)
 
 
 async def _release_live_writer_holds(thread_id: str) -> None:

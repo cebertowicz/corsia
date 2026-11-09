@@ -134,7 +134,8 @@ def wake_summary(db, watch) -> str | None:
     return (
         f'Scheduled task "{row["title"]}" is due (task {watch.plan_node_id}). '
         f"You set it aside {_duration(aside.total_seconds())} ago: {reason}. "
-        "Start it now, schedule it again with a reason, close it, or raise a decision."
+        "Start it now, schedule it again with a reason, close it, move it to Later, "
+        "or raise a decision."
     )
 
 

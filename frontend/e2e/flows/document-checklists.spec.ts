@@ -89,7 +89,7 @@ test.describe('@flow:document-checklists @surface:documents GFM document checkli
 		// Both the toggled task and the seeded done task are struck through.
 		await expect(page.locator('.cm-md-task-done')).toHaveCount(2);
 		await expect.poll(() => fixture.editor.evaluate((el) => document.activeElement === el)).toBe(true);
-		await expect(page.getByRole('button', { name: 'Comment' })).toHaveCount(0);
+		await expect(page.getByRole('button', { name: 'Comment', exact: true })).toHaveCount(0);
 		await page.keyboard.type(' continued');
 		await expect(fixture.editor).toContainText('continued');
 

@@ -230,6 +230,48 @@ describe('PlanTree fold rows', () => {
 	});
 });
 
+describe('Dated group disclosure motion', () => {
+	it('grows and shrinks both single and clustered members on request', async () => {
+		const date = new Date(Date.now() + 48 * 3_600_000).toISOString();
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: [
+			node({ id: 'one', title: 'One', scheduled_until: new Date(Date.now() + 72 * 3_600_000).toISOString() }),
+			node({ id: 'two', title: 'Two', scheduled_until: date }),
+			node({ id: 'three', title: 'Three', scheduled_until: date }),
+		] }) });
+		flushSync();
+		animate.mockClear();
+		await press(/^Show 3$/);
+		expect(animate.mock.calls.filter(([frames], i) => (animate.mock.contexts[i] as HTMLElement).classList.contains('tree-row') && frames[0]?.height === '0px')).toHaveLength(3);
+		animate.mockClear();
+		await press(/^Collapse$/);
+		expect(animate.mock.calls.filter(([frames], i) => (animate.mock.contexts[i] as HTMLElement).classList.contains('tree-row') && frames.at(-1)?.height === '0px')).toHaveLength(3);
+	});
+
+	it.each([false, true])('moves the shared date heading with its rows (reduced motion: %s)', async (isReduced) => {
+		reduced.store?.set(isReduced);
+		const date = new Date(Date.now() + 48 * 3_600_000).toISOString();
+		component = mount(PlanTree, { target: host, props: withFolds({ nodes: [
+			node({ id: 'two', title: 'Two', scheduled_until: date }),
+			node({ id: 'three', title: 'Three', scheduled_until: date }),
+		] }) });
+		flushSync();
+		animate.mockClear();
+		await press(/^Show 2$/);
+		const heading = host.querySelector('.time-line');
+		const headingCall = () => animate.mock.calls.find((_call, i) => animate.mock.contexts[i] === heading);
+		const opened = headingCall();
+		expect(opened).toBeTruthy();
+		expect(opened![0][0]).toMatchObject(isReduced ? { opacity: 0 } : { height: '0px', opacity: 0 });
+		if (isReduced) expect(opened![0].every((frame: Keyframe) => frame.height === undefined)).toBe(true);
+		animate.mockClear();
+		await press(/^Collapse$/);
+		const closed = headingCall();
+		expect(closed).toBeTruthy();
+		expect(closed![0].at(-1)).toMatchObject(isReduced ? { opacity: 0 } : { height: '0px', opacity: 0 });
+		if (isReduced) expect(closed![0].every((frame: Keyframe) => frame.height === undefined)).toBe(true);
+	});
+});
+
 describe('PlanTree disclosure motion', () => {
 	function mountDisclosures() {
 		component = mount(PlanTree, {

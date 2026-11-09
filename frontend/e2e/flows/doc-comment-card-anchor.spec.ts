@@ -54,11 +54,16 @@ async function placeTarget(page: Page, fraction: number) {
 	// CodeMirror draws only the lines near the viewport, so bring the section into the DOM first.
 	await scrolling.evaluate((element, index) => { element.scrollTop = (element.scrollHeight - element.clientHeight) * (index / 5); }, SECTIONS.indexOf(SECTION));
 	await expect(line).toHaveCount(1);
-	await scrolling.evaluate((element, args) => {
-		const area = element.getBoundingClientRect();
-		const row = [...document.querySelectorAll<HTMLElement>('.cm-line')].find((candidate) => candidate.textContent?.includes(args.text))!.getBoundingClientRect();
-		element.scrollTop += row.top - (area.top + area.height * args.fraction);
-	}, { fraction, text: `The ${SECTION} target is right here` });
+	// CodeMirror measures the lines it has just drawn a frame or more later, which can move the line again on a busy host: correct until the line holds its place across a frame.
+	await expect.poll(() => scrolling.evaluate((element, args) => new Promise<number>((settled) => {
+		const offset = () => {
+			const area = element.getBoundingClientRect();
+			const row = [...document.querySelectorAll<HTMLElement>('.cm-line')].find((candidate) => candidate.textContent?.includes(args.text))!.getBoundingClientRect();
+			return row.top - (area.top + area.height * args.fraction);
+		};
+		element.scrollTop += offset();
+		requestAnimationFrame(() => requestAnimationFrame(() => settled(Math.abs(offset()))));
+	}), { fraction, text: `The ${SECTION} target is right here` }), { message: 'the target line holds its place in the canvas' }).toBeLessThan(2);
 }
 
 /** Where the text column ends: the rightmost text drawn on any line the canvas shows, not the editor's own width. */
@@ -252,8 +257,13 @@ for (const { name: layout, width, height, expanded } of layouts) {
 			await expect(page.getByPlaceholder('Comment, or @ to tag an agent')).toBeVisible();
 			await expectBesideAnchor(page, line, line, 'composer before scrolling', expanded);
 			await saveEvidenceScreenshot(page, testInfo, `comment-card-composer-${tag}`, { fullPage: false });
+			// The line still sits where placeTarget put it, so the wheel below keeps it inside the canvas.
+			const canvas = await box(page.locator('.cm-scroller'));
+			const before = await drawnBox(line);
+			expect(before.y + before.height + 120, 'the line has room to move down 120 px inside the canvas').toBeLessThan(canvas.y + canvas.height);
 			// The reader's wheel, not a script's scrollTop: the composer's box holds focus, and only the reader's own scroll moves it.
 			await wheelCanvas(page, -120);
+			await expect.poll(async () => Math.round((await drawnBox(line)).y - before.y), { message: 'the wheel moved the line down 120 px' }).toBe(120);
 			await expectBesideAnchor(page, line, line, 'composer after scrolling the canvas', expanded);
 			await saveEvidenceScreenshot(page, testInfo, `comment-card-composer-scrolled-${tag}`, { fullPage: false });
 		});
