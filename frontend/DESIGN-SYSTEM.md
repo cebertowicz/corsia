@@ -89,7 +89,8 @@ first needs it, from what that screen gets approved with.
 ### 0.2 Treatments that are out
 
 These are the old treatments the chat view removed. Review refuses them on
-any screen:
+new and converted screens; a screen not yet converted keeps them until its
+pass:
 
 1. A box around content (a border, tint or shadow) that isn't a pane, an input or a frosted card.
 2. A tinted alert banner.
@@ -1090,8 +1091,8 @@ border-bottom.
 
 ### 4.5 Badge
 
-**Superseded by §0** for counts and statuses (§0.2 item 4): never put either
-in a badge.
+**Superseded by §0** for counts and statuses (§0.2 item 4): on a new or
+converted screen, never put either in a badge.
 
 Smaller / less-formal than StatePill — a colored pill that semantically
 labels (e.g., "local", "tailscale", "active") rather than visualizing a
