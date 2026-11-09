@@ -262,7 +262,7 @@
 			<div class="ct-res-body" transition:slide={{ duration: 150 }}>
 				<CommentMarkdownBody text={comment.text} taggedAgents={comment.taggedAgents} mentions={comment.mentions} taggedPerson={comment.taggedPerson} />
 				{#if comment.replies.length}<CommentReplyList fullNames={focused} replies={comment.replies} newReplyIds={new Set(comment.newReplyIds ?? [])} {collapseReplyIds} onNewestReplyRendered={(element) => (newestReply = element)} />{/if}
-				{#if !readOnly}<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />{/if}
+				{#if !readOnly}<ReplyField {selectedTags} fit={!inMargin} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} onSend={postReply} />{/if}
 				<div class="ct-res-acts">
 					<button class="ct-link" disabled={readOnly} onclick={() => onResolve?.(comment.id, false)}>Re-open</button>
 					{#if reopenReachesOwner}<span class="ct-res-hint">Re-open asks the agent to revisit.</span>{/if}
@@ -324,7 +324,7 @@
 			<div class="ct-agreed" transition:agreeTransition><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5" /></svg> Agreed: {agreedBy}</div>
 		{/if}
 		{#if !readOnly && !(hideReply && !replyText.trim())}
-			<ReplyField {selectedTags} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} posting={chatSurface && replyPosting} onSend={postReply} />
+			<ReplyField {selectedTags} fit={!inMargin} bind:this={replyField} bind:value={replyText} selection={replySelection} onSelection={onReplySelection} keepVisible={keepReplyVisible} posting={chatSurface && replyPosting} onSend={postReply} />
 		{/if}
 	</div>
 {/if}

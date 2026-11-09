@@ -35,7 +35,11 @@
 	}
 }
 
-/* A multi-line field grows from one line to about six, then scrolls (the autosize action sets the height). */
+/*
+ * A multi-line field grows from one line to six, then scrolls (the autosize action sets the height). The space above and
+ * below the text is transparent border, not padding: padding scrolls with the text, so a scrolled field would show a slice
+ * of the line above in it. The outline, drawn over the border's outer pixel, is the visible edge.
+ */
 textarea.text-field,
 .field.chip .c textarea,
 .field.nested .c textarea {
@@ -43,11 +47,15 @@ textarea.text-field,
 	--tf-pad-y: var(--space-1);
 	min-height: var(--space-7);
 	max-height: calc(6lh + 2 * var(--tf-pad-y) + 0.125rem);
-	padding: var(--tf-pad-y) var(--space-4);
+	padding: 0 var(--space-4);
+	border-width: calc(var(--tf-pad-y) + 1px) 1px;
+	border-color: transparent;
+	outline: 1px solid var(--border);
+	outline-offset: -1px;
 	line-height: var(--lh-snug);
 	resize: none;
 	overflow-y: auto;
-	transition: border-color var(--dur-tight), height var(--dur-tight) var(--ease-snap);
+	transition: outline-color var(--dur-tight), height var(--dur-tight) var(--ease-snap);
 }
 
 /* On touch the one-line height is the touch target: the padding centres the line, so the cap stays six lines. */
@@ -89,6 +97,20 @@ textarea.text-field,
 .field.chip.has-error .c :is(input, select, textarea),
 .field.nested.has-error .c :is(input, select, textarea) {
 	border-color: var(--red-text);
+}
+
+/* The multi-line field's edge is its outline (above), so focus and error colour that instead of the border. */
+textarea.text-field:focus,
+.field.chip .c textarea:focus,
+.field.nested .c textarea:focus {
+	border-color: transparent;
+	outline: 1px solid var(--accent);
+}
+textarea.text-field[aria-invalid='true'],
+.field.chip.has-error .c textarea,
+.field.nested.has-error .c textarea {
+	border-color: transparent;
+	outline-color: var(--red-text);
 }
 
 .text-field:disabled,

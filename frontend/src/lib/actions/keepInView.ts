@@ -5,7 +5,7 @@
  * itself), so a field the person is typing into never ends up below the
  * visible edge of a sheet that owns its own scroller.
  */
-function scroller(node: HTMLElement): HTMLElement | null {
+export function scroller(node: HTMLElement): HTMLElement | null {
 	for (let parent = node.parentElement; parent; parent = parent.parentElement) {
 		if (/auto|scroll/.test(getComputedStyle(parent).overflowY)) return parent;
 	}
