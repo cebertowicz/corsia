@@ -89,10 +89,14 @@ test('a wide chat holds the thread as a card beside its text, and the highlight 
 	await expect(row.locator('.chat-comment-thread')).toHaveCount(0);
 	await expect(card.getByText('A note on the phrase')).toBeVisible();
 
-	// The highlight picks its card instead of opening a popover, as a highlight picks a card in a document.
-	await row.locator('.cm-comment-anchor').filter({ hasText: QUOTE }).click();
+	// The highlight picks its card instead of opening a popover, as a highlight picks a card in a document, and the text clicked
+	// stays where it was: the column is already up, so picking moves the card to the text, never the text.
+	const highlight = row.locator('.cm-comment-anchor').filter({ hasText: QUOTE });
+	await highlight.click();
 	await expect(card).toHaveClass(/selected/);
 	await expect(page.getByRole('dialog', { name: 'Comment thread' })).toHaveCount(0);
+	await page.waitForTimeout(500);
+	expect(Math.abs((await highlight.boundingBox())!.y - mark.y), 'the clicked text stays put').toBeLessThanOrEqual(2);
 	await capture(page, 'chat-margin-1440');
 
 	// Answering from the card is the flat thread's own Reply, and it reads back in the card.

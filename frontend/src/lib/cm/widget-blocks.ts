@@ -1,4 +1,4 @@
-import type { EditorView } from '@codemirror/view';
+import { BlockType, type BlockInfo, type EditorView } from '@codemirror/view';
 import type { EditorState, Text } from '@codemirror/state';
 import type { SyntaxNode, SyntaxNodeRef } from '@lezer/common';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
@@ -121,6 +121,30 @@ export function tableRowAt(view: EditorView, el: Element, pos: number): { rect: 
 	const index = Math.max(0, Math.min(line === 0 ? 0 : line - 1, (table?.rows.length ?? 1) - 1));
 	const tr = table?.rows[index];
 	return tr ? { rect: tr.getBoundingClientRect(), index } : null;
+}
+
+/**
+ * The drawn row of a rendered table at screen height `y` (the first whose bottom is below it, else the last), with the start of
+ * the source line it is drawn from: the inverse of `tableRowAt`. The delimiter line is not drawn, so body row `i` is line `i + 1`.
+ */
+export function tableRowAtHeight(view: EditorView, el: Element, y: number): { pos: number; rect: DOMRect } | null {
+	if (!(el instanceof HTMLElement) || !el.matches(TABLE)) return null;
+	const block = blockRange(view, el), rows = el.querySelector('table')?.rows;
+	if (!block || !rows?.length) return null;
+	let index = 0;
+	while (index < rows.length - 1 && rows[index].getBoundingClientRect().bottom <= y) index++;
+	const lines = view.state.sliceDoc(block.from, block.to).split('\n');
+	const line = Math.min(index === 0 ? 0 : index + 1, lines.length - 1);
+	let pos = block.from;
+	for (let i = 0; i < line; i++) pos += lines[i].length + 1;
+	return { pos, rect: rows[index].getBoundingClientRect() };
+}
+
+/** The drawn table an editor line block stands for, or null when that block is no table or is not drawn. */
+export function drawnTableAt(view: EditorView, block: BlockInfo): HTMLElement | null {
+	if (block.type !== BlockType.WidgetRange) return null;
+	for (const el of view.contentDOM.querySelectorAll<HTMLElement>(TABLE)) if (blockRange(view, el)?.from === block.from) return el;
+	return null;
 }
 
 /** The box a position inside a rendered table (its row) or diagram (the whole diagram) is drawn at, when that block is on screen. */

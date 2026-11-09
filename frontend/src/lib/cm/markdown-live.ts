@@ -10,6 +10,7 @@ import {
 import { renderedFragment } from './rendered-images';
 import { linkDecoration, openLinkOnAltEnter, openLinkOnClick } from './markdown-link';
 import { blockSource, isMermaidFence, mermaidSource } from './widget-blocks';
+import { BlockWidget, priorWidget } from './block-widget';
 
 class BulletWidget extends WidgetType {
 	toDOM() {
@@ -36,10 +37,10 @@ class HrWidget extends WidgetType {
  * The table always stays rendered — it never drops to raw pipe/dash source.
  * Its cell images resolve and load the way a standalone image does (`markdown-image.ts`).
  */
-class TableWidget extends WidgetType {
+class TableWidget extends BlockWidget {
 	readonly images: ImageContext | null;
-	constructor(readonly src: string, images: ImageContext | null) {
-		super();
+	constructor(readonly src: string, images: ImageContext | null, prior: TableWidget | null = null) {
+		super(prior);
 		// The context provider is live; retain this render's values so a refresh can compare them with the next one.
 		this.images = images && { ...images };
 	}
@@ -55,7 +56,7 @@ class TableWidget extends WidgetType {
 		// the document. Keep this widget on that single sanitized renderer.
 		el.append(renderedFragment(renderMarkdown(this.src), this.images));
 		el.dataset.srcLength = String(this.src.length); // the source range the widget stands for, for `widget-comments.ts`
-		return el;
+		return this.drew(el);
 	}
 	ignoreEvent() { return true; }
 }
@@ -71,15 +72,15 @@ const mermaidMounts = new WeakMap<HTMLElement, MermaidMount>();
  * 'strict'`); a malformed diagram shows an inline error rather than blanking the
  * doc. See `$lib/mermaid`.
  */
-class MermaidWidget extends WidgetType {
-	constructor(readonly code: string) { super(); }
+class MermaidWidget extends BlockWidget {
+	constructor(readonly code: string, prior: MermaidWidget | null = null) { super(prior); }
 	eq(o: MermaidWidget) { return o.code === this.code; }
 	toDOM() {
 		const el = document.createElement('div');
 		el.className = 'cm-md-mermaid';
 		el.dataset.diagramSource = this.code;
 		mermaidMounts.set(el, mountMermaid(el, this.code));
-		return el;
+		return this.drew(el);
 	}
 	destroy(dom: HTMLElement) {
 		mermaidMounts.get(dom)?.destroy();
@@ -207,7 +208,7 @@ const markdownInlinePreview = ViewPlugin.fromClass(
  * come from a state field (CodeMirror forbids them from view plugins), and the
  * replaced range spans whole lines so the widget cleanly takes the table's place.
  */
-function buildTableDecorations(state: EditorState): DecorationSet {
+function buildTableDecorations(state: EditorState, prior?: DecorationSet): DecorationSet {
 	const decos: Range<Decoration>[] = [];
 	const { doc } = state;
 	const images = state.facet(imageContext)();
@@ -216,7 +217,7 @@ function buildTableDecorations(state: EditorState): DecorationSet {
 			if (node.name !== 'Table') return;
 			const { from, to } = blockSource(doc, node);
 			const src = doc.sliceString(from, to);
-			decos.push(Decoration.replace({ widget: new TableWidget(src, images), block: true }).range(from, to));
+			decos.push(Decoration.replace({ widget: new TableWidget(src, images, priorWidget(prior, from, to, TableWidget)), block: true }).range(from, to));
 			return false;
 		}
 	});
@@ -233,13 +234,14 @@ function buildTableDecorations(state: EditorState): DecorationSet {
  * once against the partial tree and never sees those nodes — leaving real-world
  * docs (a table 40 lines down) stuck on raw markdown until the next edit.
  */
-function syntaxDecorationField(build: (state: EditorState) => DecorationSet, refreshesImages = false): StateField<DecorationSet> {
+function syntaxDecorationField(build: (state: EditorState, prior?: DecorationSet) => DecorationSet, refreshesImages = false): StateField<DecorationSet> {
 	return StateField.define<DecorationSet>({
-		create: build,
+		create: (state) => build(state),
 		update(deco, tr) {
 			const imageRefresh = refreshesImages && tr.effects.some((effect) => effect.is(refreshMarkdownImages));
-			if (tr.docChanged || imageRefresh || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return build(tr.state);
-			return deco.map(tr.changes);
+			const mapped = deco.map(tr.changes);
+			if (tr.docChanged || imageRefresh || syntaxTree(tr.state) !== syntaxTree(tr.startState)) return build(tr.state, mapped);
+			return mapped;
 		},
 		provide: (f) => EditorView.decorations.from(f)
 	});
@@ -253,7 +255,7 @@ const markdownTableDecorations = syntaxDecorationField(buildTableDecorations, tr
  * the replaced range spans whole lines so the widget cleanly takes the block's
  * place.
  */
-function buildMermaidDecorations(state: EditorState): DecorationSet {
+function buildMermaidDecorations(state: EditorState, prior?: DecorationSet): DecorationSet {
 	const decos: Range<Decoration>[] = [];
 	const { doc } = state;
 	syntaxTree(state).iterate({
@@ -262,7 +264,7 @@ function buildMermaidDecorations(state: EditorState): DecorationSet {
 			const code = mermaidFence(node, doc);
 			if (code === null) return; // a non-mermaid fence: left as styled code
 			const { from, to } = blockSource(doc, node);
-			decos.push(Decoration.replace({ widget: new MermaidWidget(code), block: true }).range(from, to));
+			decos.push(Decoration.replace({ widget: new MermaidWidget(code, priorWidget(prior, from, to, MermaidWidget)), block: true }).range(from, to));
 			return false;
 		}
 	});
