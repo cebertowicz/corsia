@@ -19,9 +19,12 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from plans import aggregates_recount, current, node_order, node_states, open_tree, service, status
+from plans import (
+    aggregates_recount, current, node_order, node_states, open_tree, open_tree_many, service, status,
+)
 from plans.boundary import PlanActor
-from plans.errors import PlanError
+from plans.errors import PlanError, UnknownPlan
+from tests.plan_writer_authorizer import raw_plan_seed
 from tests.test_plan_aggregates_property import World, run_sequence
 
 SEQUENCES = int(os.environ.get("CORSIA_PLAN_EQUIVALENCE_SEQUENCES", "120"))
@@ -233,3 +236,78 @@ def test_paging_the_folded_routes_reaches_exactly_the_rows_the_full_projection_f
         assert set(reached) == expected - hidden, f"seed {seed}: reached vs folded"
         reached_total += len(reached)
     assert reached_total
+
+
+def test_the_batched_read_gives_each_plan_what_load_gives_it() -> None:
+    """``load_many`` lists, per plan, the same rows in the same order with the same ``Shape``.
+
+    The chat list reads many plans at once and lists no folded rows; ``load`` stays the
+    live path for a pane read, so it is the reference. The seed set must contain the
+    shape an ordinary sequence produces: an open row whose stored counters stand for
+    folded children nothing loads.
+    """
+    folded_children = 0
+    for seed in range(SEQUENCES):
+        world = run_sequence(seed)
+        world.db.commit()
+        db, plan_id = world.db, world.plan.id
+        reference = open_tree.load(db, plan_id)
+        batched = open_tree_many.load_many(db, [plan_id])[plan_id]
+        assert [str(row["id"]) for row in batched.rows] == [
+            str(row["id"]) for row in reference.rows
+        ], f"seed {seed}: listed rows"
+        assert [path for _row, path in batched.listed] == [
+            path for _row, path in reference.listed
+        ], f"seed {seed}: ancestor paths"
+        assert batched.shape == reference.shape, f"seed {seed}: shape"
+        assert _dump(list(batched.plan)) == _dump(list(reference.plan)), f"seed {seed}: plan row"
+
+        rows = {str(row["id"]): row for row in batched.rows}
+        folded_children += any(
+            row["child_folded_done"] + row["child_folded_failed"] + row["child_folded_closed"] > 0
+            for row in rows.values()
+        )
+    assert folded_children, "no seed listed an open row with folded children"
+
+
+def test_the_batched_read_lists_a_settled_ancestor_of_open_work_as_load_does() -> None:
+    """Open work under a settled ancestor: the ancestor walk lists the ancestor, flat.
+
+    Built on purpose — the plan operations keep a parent of open work in work, so no
+    seeded sequence produces this. The settled ancestor is the row ``_fetch_missing``
+    exists for, and the one place a batched read could lose it is the per-plan grouping.
+    """
+    children: list = []
+    for seed in range(20):
+        world = run_sequence(seed)
+        world.db.commit()
+        db, plan_id = world.db, world.plan.id
+        children = [row for row in open_tree.load(db, plan_id).rows if row["parent_id"] is not None]
+        if children:
+            break
+    assert children, "no seed listed an open row beneath a parent"
+    ancestor_id = str(children[0]["parent_id"])
+    with raw_plan_seed(db):
+        db.execute(
+            "UPDATE plan_nodes SET state=?, folded=0 WHERE id=?", (open_tree._SETTLED[0], ancestor_id),
+        )
+    db.commit()
+    reference = open_tree.load(db, plan_id)
+    batched = open_tree_many.load_many(db, [plan_id])[plan_id]
+    assert any(
+        str(row["id"]) == ancestor_id and row["state"] in open_tree._SETTLED for row in reference.rows
+    ), "the settled ancestor is not listed, so this covers nothing"
+    assert [str(row["id"]) for row in batched.rows] == [str(row["id"]) for row in reference.rows]
+    assert [path for _row, path in batched.listed] == [path for _row, path in reference.listed]
+    assert batched.shape == reference.shape
+
+
+def test_the_batched_read_names_a_plan_once_and_refuses_an_unknown_one() -> None:
+    """A repeated id reads one plan; an id no plan owns raises what ``load`` raises."""
+    world = run_sequence(3)
+    world.db.commit()
+    assert list(open_tree_many.load_many(world.db, [world.plan.id, world.plan.id])) == [world.plan.id]
+    with pytest.raises(UnknownPlan):
+        open_tree_many.load_many(world.db, ["no-such-plan"])
+    with pytest.raises(UnknownPlan):
+        open_tree_many.load_many(world.db, [world.plan.id, "no-such-plan"])

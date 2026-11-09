@@ -17,7 +17,7 @@ from collections.abc import Iterable
 from dataclasses import asdict
 
 from infra.packed_rows import fetch_all
-from plans import artifact_links, hierarchy, node_waits, open_tree, projections, rollup, service
+from plans import artifact_links, hierarchy, node_waits, open_tree, open_tree_many, projections, rollup, service
 from plans.models import PlanState
 
 _ID_CHUNK = 400
@@ -127,7 +127,20 @@ def rollup_plans(
     connection, plan_rows, memo: dict[str, PlanState], *, child_depth: int | None = 0,
     window: open_tree.FoldWindow | None = None,
 ) -> list[rollup.PlanRollup]:
-    """Project sibling plans over their open trees, each with the folded rows ``window`` lists."""
+    """Project sibling plans over their open trees, each with the folded rows ``window`` lists.
+
+    A read that lists no folded rows (``cap`` 0, the chat list) loads every plan's open
+    rows in one statement per chunk of plans: the window it asks for is empty by
+    definition, so the per-plan loads cost only their own round trips.
+    """
+    if window is None or window.cap == 0:
+        trees = open_tree_many.load_many(connection, [str(plan["id"]) for plan in plan_rows])
+        return [
+            rollup_open(
+                connection, trees[str(plan["id"])], memo, child_depth=child_depth, window=window,
+            )
+            for plan in plan_rows
+        ]
     return [
         rollup_open(
             connection, open_tree.load(connection, str(plan["id"]), fold_window=window), memo,
