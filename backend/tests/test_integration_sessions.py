@@ -148,7 +148,11 @@ class TestSessionList:
             rows = db.execute(*reads[0]).fetchall()
             expected = []
             for row in rows:
-                item = dict(row)
+                # The response is the row minus the columns the list does not carry
+                # (`threads_api._LIST_INTERNAL_COLUMNS`): the mirror reads the route's own
+                # list so this test tracks the response contract instead of the table shape.
+                item = {key: value for key, value in dict(row).items()
+                        if key not in threads_api._LIST_INTERNAL_COLUMNS}
                 item["archived"] = 1 if row["lifecycle_state"] == "archived" and row["archived_reason"] == "user" else 0
                 expected.append(item)
             add_local_only_payload_fields(expected, db=db)
