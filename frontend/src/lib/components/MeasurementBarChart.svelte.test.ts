@@ -84,6 +84,11 @@ describe('MeasurementBarChart', () => {
 		expect(states.map((n) => Number(n.getAttribute('x')))).toEqual([xs[1] - 3.5, xs[3] - 3.5]);
 	});
 
+	it('distinguishes unrecorded workflow values from values withheld for small samples', () => {
+		const geometry = phoneGeometry({ ...props([point(0, null, 1)]), missingText: 'not recorded' });
+		expect(geometry.items.some((item) => item.kind === 'text' && item.text === 'not recorded')).toBe(true);
+	});
+
 	it('draws the moving average only for periods whose window is inside the data, and haloes the labels', () => {
 		const chart = render([point(0, 30), point(1, 31), point(2, 32), point(3, 33, 100, 31.5), point(4, 34, 100, 32.5)]);
 		const phone = chart.querySelector('.mob svg')!;

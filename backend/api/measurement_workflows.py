@@ -55,6 +55,7 @@ from infra.database import get_db
 from infra.db_async import run_bulk
 from plans import node_cost_scoped, run_end
 from tools.workflow_task_fields import version_short_hash
+from api.measurement_workflow_history import weekly as _weekly
 
 router = APIRouter()
 
@@ -117,9 +118,13 @@ def workflow_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope,
     in_window = _started_in_window(db, root_ids, grain, window)
     full = read_snapshot(db, now=now or datetime.now(timezone.utc),
                          workflow_refs=sorted({str(row["workflow_ref"]) for row in roots}))
+    scoped = _window_runs(db, full, root_ids)
+    windowed = replace(scoped, workflows=tuple(
+        replace(history, runs=tuple(run for run in history.runs if run.run_id in in_window))
+        for history in scoped.workflows))
     return {"window": {"from": window.first, "to": grain.period_end(window.last)},
             "coverage": _coverage(db, scope.params(user_id), grain, window, parents, root_ids),
-            "workflows": _entries(db, _window_runs(db, full, in_window), full, grain)}
+            "workflows": _entries(db, windowed, full, grain, scoped)}
 
 
 def _window_runs(db: sqlite3.Connection, full: Snapshot, keep: frozenset[str]) -> Snapshot:
@@ -163,16 +168,17 @@ def _started_in_window(db: sqlite3.Connection, run_ids: frozenset[str], grain: G
     return frozenset(str(row["id"]) for row in rows)
 
 
-def _entries(db: sqlite3.Connection, windowed: Snapshot, full: Snapshot, grain: Grain) -> list[dict[str, Any]]:
+def _entries(db: sqlite3.Connection, windowed: Snapshot, full: Snapshot, grain: Grain,
+             scoped: Snapshot) -> list[dict[str, Any]]:
     """One entry per workflow, biggest first, each with its runs in start order.
 
     ``windowed`` carries the runs to list, ``full`` the history the excluded count and the verdict are read
     from: a run outside the window is not listed, but it is still a run the engine has or has not compared.
     """
-    runs = [run for history in windowed.workflows for run in history.runs]
-    if not runs:
+    history_runs = [run for history in scoped.workflows for run in history.runs]
+    if not history_runs:
         return []
-    ids = [run.run_id for run in runs]
+    ids = [run.run_id for run in history_runs]
     records = run_end.records(db, ids)
     titles = _step_titles(db, {node_id for record in records.values()
                                for step in record["steps"] for node_id in step["node_ids"]})
@@ -184,9 +190,19 @@ def _entries(db: sqlite3.Connection, windowed: Snapshot, full: Snapshot, grain: 
     by_ref = {history.ref: history for history in full.workflows}
     rows = {run.run_id: _run_row(run, records.get(run.run_id), titles, agents.get(run.run_id),
                                  working.get(run.run_id), parse_zone(grain.zone))
-            for run in runs}
-    entries = [_entry(history, rows, labels, by_ref[history.ref], verdicts.get(history.ref))
-               for history in windowed.workflows]
+            for run in history_runs}
+    history_by_ref = {history.ref: history for history in scoped.workflows}
+    entries = []
+    for history in windowed.workflows:
+        all_runs = history_by_ref[history.ref].runs
+        if not all_runs:
+            continue
+        entry = _entry(history, rows, labels, by_ref[history.ref], verdicts.get(history.ref))
+        entry["history"] = [rows[run.run_id] for run in sorted(all_runs, key=lambda run: (parse_ts(run.started_at), run.run_id))]
+        entry["weekly"] = _weekly(entry["history"])
+        entry["steps"] = sorted({titles[node_id] for run in all_runs if (record := records.get(run.run_id))
+                                 for step in record["steps"] for node_id in step["node_ids"] if node_id in titles})
+        entries.append(entry)
     return sorted(entries, key=lambda entry: (-len(entry["runs"]), entry["ref"]))
 
 
@@ -205,7 +221,21 @@ def _entry(history: WorkflowHistory, rows: Mapping[str, dict[str, Any]], labels:
         "runs": [rows[run.run_id] for run in sorted(history.runs, key=lambda run: (parse_ts(run.started_at), run.run_id))],
         "excluded": dict(full_history.excluded),
         "verdict": verdict,
+        "runs_needed": _runs_needed(verdict),
     }
+
+
+def _runs_needed(verdict: Mapping[str, Any] | None) -> int | None:
+    """Distance to the engine's next minimum only when it exposes both inputs."""
+    if not verdict or verdict.get("word") != "collecting":
+        return None
+    inputs = verdict.get("inputs") or {}
+    if not isinstance(inputs, Mapping):
+        return None
+    minimum, count = inputs.get("minimum"), inputs.get("n")
+    if type(minimum) is not int or type(count) is not int:
+        return None
+    return max(0, minimum - count)
 
 
 def _verdicts(db: sqlite3.Connection, full: Snapshot) -> dict[str, dict[str, Any] | None]:
@@ -246,12 +276,22 @@ def _run_row(run: Run, record: Mapping[str, Any] | None, titles: Mapping[str, st
         "run_id": run.run_id,  # the run's root plan node, which is what the plan surface opens
         "started": parse_ts(run.started_at).astimezone(zone).date().isoformat(),
         "version": version_short_hash(run.version),
+        "version_id": run.version,
         "agent": agent,
         "cost": run.cost,
         "minutes": None if working is None else round(working / 60, 1),
         "failed_step": _failed_step(record, titles),
+        "focus_node_id": _failed_step_id(record) or run.run_id,
         "caught": _caught(run, record),
         "gate_rounds": _gate_rounds(record),
+        "corrections": None if run.terminal_at is None else len({
+            (fact.source_kind, fact.source_id) for fact in run.corrections if fact.is_correction and
+            fact.source_kind in _PERSON_SOURCES | {SOURCE_KIND_SENT_BACK}}),
+        "ended": record is not None,
+        "first_try": None if record is None else all(
+            step["state"] == STEP_DONE and int(step["rounds"]) == 0 and
+            step.get("gate_answer") != "changes_requested"
+            for step in record["steps"] if step["required"]),
         "owner_measure": None,  # No per-run owner measure exists yet: read_snapshot fills Run.kpi_rows only through a KpiReader, which nothing on dev passes.
     }
 
@@ -262,11 +302,16 @@ def _failed_step(record: Mapping[str, Any] | None, titles: Mapping[str, str]) ->
     ``plans.run_end`` owns whether the run failed at all, and records its steps in definition order;
     this names the first required step it did not settle as done and reads that node's title.
     """
+    node_id = _failed_step_id(record)
+    return titles.get(node_id) if node_id else None
+
+
+def _failed_step_id(record: Mapping[str, Any] | None) -> str | None:
     if record is None or record.get("outcome") != RUN_FAILED:
         return None
     for step in record["steps"]:
         if step["required"] and step["state"] != STEP_DONE and step["node_ids"]:
-            return titles.get(str(step["node_ids"][-1]))
+            return str(step["node_ids"][-1])
     return None
 
 
@@ -281,7 +326,8 @@ def _caught(run: Run, record: Mapping[str, Any] | None) -> str | None:
     """
     if record is not None and any(step["required"] and step["state"] == STEP_FAILED for step in record["steps"]):
         return CAUGHT_AGENT
-    if any(fact.source_kind == SOURCE_KIND_SENT_BACK for fact in run.corrections):
+    if (any(fact.source_kind == SOURCE_KIND_SENT_BACK for fact in run.corrections) or
+            record is not None and any(step.get("gate_answer") == "changes_requested" for step in record["steps"])):
         return CAUGHT_SENT_BACK
     if any(fact.is_correction and fact.source_kind in _PERSON_SOURCES for fact in run.corrections):
         return CAUGHT_LATER

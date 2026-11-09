@@ -277,6 +277,44 @@ def entry_by_ref(body: dict[str, Any], ref: str) -> dict[str, Any]:
     return next(entry for entry in body["workflows"] if entry["ref"] == ref)
 
 
+def test_runs_needed_uses_only_the_engine_inputs() -> None:
+    from api.measurement_workflows import _runs_needed
+
+    assert _runs_needed({"word": "collecting", "inputs": {"minimum": 20, "n": 7}}) == 13
+    assert _runs_needed({"word": "not_enough_data", "inputs": {"minimum": 20}}) is None
+    assert _runs_needed({"word": "collecting", "inputs": {"minimum": 20}}) is None
+
+
+def test_workflow_with_only_older_runs_remains_visible(db) -> None:
+    seed()
+    later = NOW + timedelta(days=90)
+    grain = resolve_grain("weeks", "UTC", now=later)
+    body = workflow_runs(db, "steve", MeasurementScope("all", None), grain, now=later)
+    close = entry_by_ref(body, CLOSE)
+    assert close["runs"] == []
+    assert close["history"]
+    assert close["weekly"]
+
+
+def test_history_and_weekly_values_use_scoped_run_records(section) -> None:
+    close = entry_by_ref(section, CLOSE)
+    history = {run["run_id"]: run for run in close["history"]}
+    assert "close-v3-old" in history
+    assert "close-unversioned" not in history
+    week = next(point for point in close["weekly"] if point["start"] == "2026-10-12"
+                and point["version"] == history["close-v4-b"]["version"])
+    assert week["runs"] == 2
+    assert week["failed"] == 1
+    assert week["gate_rounds"] == pytest.approx(1.5)
+    assert week["minutes"] == pytest.approx(12.5)
+
+
+def test_history_does_not_cross_selected_agent_scope(section) -> None:
+    root = read(MeasurementScope("alpha", "root"))
+    assert {entry["ref"] for entry in root["workflows"]} == {CLOSE}
+    assert all(run["agent"]["id"] == "root" for entry in root["workflows"] for run in entry["history"])
+
+
 def test_the_runs_the_engine_never_compared_are_counted_with_its_reason(section) -> None:
     # The unversioned run of this workflow is excluded by read_snapshot; the count is its dict, not a re-count.
     assert entry_by_ref(section, CLOSE)["excluded"] == {"unversioned": 1}
@@ -370,6 +408,18 @@ def test_a_clean_run_carries_its_date_version_agent_cost_minutes_and_one_gate_ro
     assert row["cost"] is not None and row["cost"] > 0.0
 
 
+def test_weekly_groups_versions_by_full_identity_even_when_display_hash_collides() -> None:
+    from api.measurement_workflows import _weekly
+
+    common = {"started": "2026-10-07", "version": "abc1234", "ended": True,
+              "failed_step": None, "first_try": True, "corrections": 0, "gate_rounds": 1,
+              "cost": None, "minutes": None, "owner_measure": None}
+    rows = [dict(common, version_id="abc1234+first"), dict(common, version_id="abc1234+second")]
+    result = _weekly(rows)
+    assert {point["version_id"] for point in result} == {"abc1234+first", "abc1234+second"}
+    assert [point["runs"] for point in result] == [1, 1]
+
+
 def test_a_run_the_agent_failed_names_the_step_and_says_the_agent_caught_it(section) -> None:
     rows = rows_by_id(section)
     assert (rows["close-v4-b"]["failed_step"], rows["close-v4-b"]["caught"]) == ("Gather statements", "agent_closed")
@@ -381,6 +431,9 @@ def test_a_send_back_at_the_gate_counts_two_rounds_and_is_how_the_run_was_caught
     rows = rows_by_id(section)
     assert (rows["close-v4-c"]["caught"], rows["close-v4-c"]["gate_rounds"]) == ("sent_back", 2)
     assert rows["close-v4-c"]["failed_step"] is None
+    assert rows["close-v4-c"]["first_try"] is False
+    assert rows["close-v4-b"]["first_try"] is False
+    assert rows["close-v3-a"]["first_try"] is True
 
 
 def test_a_person_correction_after_the_run_settled_reads_corrected_later(section) -> None:
