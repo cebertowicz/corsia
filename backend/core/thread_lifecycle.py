@@ -55,8 +55,10 @@ from infra.constants import (
 from thread.runtime_boundary import bump_history_epoch
 from infra.thread_driver import delete_thread_turns
 from infra.thread_inputs import invalidate_markers_for_archive
-# The marker's one home, which the retention-sweep SQL and the stub-index
-# predicate are built from; re-exported here for the readers that import it.
+# Its one home is infra/tool_retention_marker.py, whose SQL text the scoped
+# reader's predicate and the stub-index predicate are built from; the sweep in
+# core.thread_lifecycle_trims.py binds its own predicate. Re-exported here
+# because every existing reader imports the marker from this module.
 from infra.tool_retention_marker import TOOL_TRIM_MARKER  # noqa: F401
 from core.thread_lifecycle_paths import thread_dir as _thread_dir
 from core.thread_lifecycle_plans import (

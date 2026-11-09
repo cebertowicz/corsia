@@ -5,10 +5,10 @@ Four claims, and the first two are the whole reason the indexes exist.
 * The stub pass's own statement — captured from what ``scan_before_scope``
   executes, not a copied string — searches ``idx_messages_retention_stub``, so
   the pass is bounded by the stubs a thread holds instead of by its whole
-  history. The marker as a bound parameter does not qualify: SQLite matches a
-  partial index against the statement's expression tree, and a parameter is a
-  variable there. The parameterized test below pins that fallback, so a future
-  tidy-up cannot silently rebind the marker and restore the walk.
+  history. The marker has to reach SQLite inside the statement text for that to
+  happen at all, which is why ``infra/tool_retention_marker.py`` builds the
+  predicate as text: the reader's ``WHERE`` and the index predicate are both
+  built from that one string.
 * The Turn-provenance halves each seek their own index, because the OR across
   them gets no MULTI-INDEX OR at a real Turn count.
 * A fresh schema and a migrated one carry identical indexes.
@@ -189,22 +189,6 @@ def test_stub_pass_searches_the_partial_index():
         assert not any("idx_messages_session_seq" in step for step in plan), plan
 
 
-def test_bound_marker_falls_back_to_the_walk():
-    """Why the marker stays in the statement text: a parameter never qualifies."""
-    parameterized = (
-        "SELECT json_group_array(seq) FROM (SELECT seq FROM messages "
-        "WHERE thread_id = ? AND delivery_state = 'delivered' AND seq < ? "
-        "AND (role = 'tool' AND substr(content, 1, ?) = ?) ORDER BY seq)"
-    )
-    with closing(_schema(with_indexes=True)) as db:
-        _seed(db)
-        plan = _plan(
-            db, parameterized, _THREAD, 3, len(TOOL_TRIM_MARKER), TOOL_TRIM_MARKER,
-        )
-        assert any("idx_messages_session_seq" in step for step in plan), plan
-        assert not any(_STUB_INDEX in step for step in plan), plan
-
-
 def test_provenance_halves_seek_their_own_indexes():
     with closing(_schema(with_indexes=True)) as db:
         _seed(db)
@@ -232,7 +216,7 @@ def test_stub_pass_still_reports_covered_stubs():
 def test_model_switch_token_keeps_unpositioned_rows_out():
     """(next_message_seq, message_count, max_seq, retention_stub_count), literal.
 
-    Six seeded rows, one of them unpositioned; four of them positioned, of
+    Six seeded rows, one of them unpositioned; five of them positioned, of
     which two are stubs — and the unpositioned stub stays out of the count, as
     the shipped joined aggregate's ``ON`` clause kept it out.
     """

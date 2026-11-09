@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -145,12 +146,91 @@ def test_turn_with_rows_on_both_sides_still_refuses(half: str):
             scan_before_scope(db, THREAD, _scope_from(db, 5))
 
 
-def test_stub_marker_is_the_text_the_retention_sweep_writes():
-    """The reader, the index and the sweep test one string, not two near-misses."""
-    assert TOOL_TRIM_MARKER == "[tool output trimmed"
+SWEEP_NOW = datetime(2026, 7, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _run_retention_sweep(db: sqlite3.Connection) -> int:
+    """Run the shipped tool-payload trim and return how many rows it rewrote."""
+    from core import thread_lifecycle_trims
+    from core.thread_lifecycle import LifecycleConfig, RetentionReport, _iso
+
+    db.execute(
+        "UPDATE messages SET created_at=? WHERE thread_id=?",
+        (_iso(SWEEP_NOW - timedelta(days=40)), THREAD),
+    )
+    db.commit()
+    report = RetentionReport()
+    thread_lifecycle_trims._trim_tool_payloads(
+        db, SWEEP_NOW, LifecycleConfig(tool_trim_after_days=30), report
+    )
+    return int(report.tool_trimmed)
+
+
+def _cover_with_checkpoint(db: sqlite3.Connection, through_seq: int) -> None:
+    """One installed checkpoint over seq <= ``through_seq``, as retention sees it."""
+    from core.thread_lifecycle import _iso
+
+    boundary = db.execute(
+        "SELECT id FROM messages WHERE thread_id=? AND seq=?", (THREAD, through_seq)
+    ).fetchone()
+    epoch = db.execute(
+        "SELECT history_epoch FROM threads WHERE id=?", (THREAD,)
+    ).fetchone()[0]
+    db.execute(
+        "INSERT INTO checkpoints "
+        "(id,thread_id,history_epoch,through_seq,through_message_id,trigger,mode,"
+        "status,source_harness,source_model,writer_harness,writer_model,"
+        "continuity_base_revision,continuity_base_snapshot_json,raw_result,"
+        "started_at,captured_at,installed_at,ended_at) "
+        "VALUES (?,?,?,?,?,'pressure','warm','installed','native','test-model',"
+        "'native','test-model',0,'[]','retained checkpoint',?,?,?,?)",
+        (f"{THREAD}-cp-{epoch}-{through_seq}", THREAD, epoch, through_seq, boundary["id"],
+         *[_iso(SWEEP_NOW)] * 4),
+    )
+    db.commit()
+
+
+def _stub_seqs(db: sqlite3.Connection) -> tuple[int, ...]:
+    """Every stub position in the thread, by the marker's own SQL text."""
+    from infra.tool_retention_marker import TOOL_TRIM_CONTENT_SQL
+
+    return tuple(
+        int(row[0])
+        for row in db.execute(
+            f"SELECT seq FROM messages WHERE thread_id=? AND seq IS NOT NULL "
+            f"AND {TOOL_TRIM_CONTENT_SQL} ORDER BY seq",
+            (THREAD,),
+        )
+    )
+
+
+def test_the_real_sweep_stubs_exactly_the_rows_the_stub_pass_finds():
+    """Sweep, reader and index are one contract, so all three run in this test.
+
+    The sweep selects the rows it may rewrite with ``substr(m.content,1,?) != ?``
+    — the marker bound as parameters, which is right for a write that is not
+    index-backed — while the reader and ``idx_messages_retention_stub`` use the
+    marker as statement text. That is exactly how a near-miss marker could serve
+    one side and not the other, so the claim is tested by running the shipped
+    trim and then asking the shipped pass what it sees.
+    """
     with closing(_db()) as db:
-        stored = db.execute(
-            "SELECT substr(content,1,?) FROM messages WHERE id='m3'",
-            (len(TOOL_TRIM_MARKER),),
-        ).fetchone()[0]
-        assert stored == TOOL_TRIM_MARKER
+        _cover_with_checkpoint(db, through_seq=9)
+        # m3, m7 and m12 arrived already stubbed; m8 is the covered tool payload
+        # still holding its bytes, and it is the only row the sweep rewrites.
+        assert _run_retention_sweep(db) == 1
+        assert _stub_seqs(db) == (3, 7, 8, 12)
+        # The pass reports the swept row as covered history, in seq order, and
+        # nothing from the scope itself (seq 12 sits above this scope).
+        assert scan_before_scope(db, THREAD, _scope_from(db, 10)) == (3, 7, 8)
+
+        seen: list[str] = []
+        db.set_trace_callback(seen.append)
+        try:
+            scan_before_scope(db, THREAD, _scope_from(db, 10))
+        finally:
+            db.set_trace_callback(None)
+        stub_selects = [sql for sql in seen if TOOL_TRIM_MARKER in sql]
+        assert stub_selects, f"the stub pass did not run: {seen}"
+        plan = [str(row[3]) for row in db.execute("EXPLAIN QUERY PLAN " + stub_selects[0])]
+        assert any("idx_messages_retention_stub" in step for step in plan), plan
