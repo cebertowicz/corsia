@@ -242,7 +242,9 @@ for (const [width, height, cards] of CLICK_LAYOUTS) {
 		expect(last.textTop, 'the clicked title is not above the view').toBeGreaterThanOrEqual(last.bandTop - 1);
 		expect(last.textTop + 24, 'the clicked title is not below the view').toBeLessThanOrEqual(last.bandBottom);
 		// Beside a wide canvas the card comes to the text, never the reverse; only the phone sheet may move the text above it,
-		// and a column opening narrows the text, so there the title only has to stay in view.
+		// and a column opening narrows the text, so there the title stays near where it was (rewrapping moves it a line or two;
+		// without the hold it moved over 450 px).
 		if (cards === 'popover' || cards === 'margin') for (const step of results) expect(Math.abs(step.textTop - first.textTop), `${step.step}: the clicked title stays put`).toBeLessThanOrEqual(2);
+		if (cards === 'opens') for (const step of results) expect(Math.abs(step.textTop - first.textTop), `${step.step}: the clicked title stays near its place`).toBeLessThanOrEqual(48);
 	});
 }

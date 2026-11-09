@@ -1,4 +1,4 @@
-import { BlockType, type BlockInfo, type EditorView } from '@codemirror/view';
+import type { EditorView } from '@codemirror/view';
 import type { EditorState, Text } from '@codemirror/state';
 import type { SyntaxNode, SyntaxNodeRef } from '@lezer/common';
 import { ensureSyntaxTree, syntaxTree } from '@codemirror/language';
@@ -140,19 +140,22 @@ export function tableRowAtHeight(view: EditorView, el: Element, y: number): { po
 	return { pos, rect: rows[index].getBoundingClientRect() };
 }
 
-/** The drawn table an editor line block stands for, or null when that block is no table or is not drawn. */
-export function drawnTableAt(view: EditorView, block: BlockInfo): HTMLElement | null {
-	if (block.type !== BlockType.WidgetRange) return null;
-	for (const el of view.contentDOM.querySelectorAll<HTMLElement>(TABLE)) if (blockRange(view, el)?.from === block.from) return el;
+/** The drawn table whose source holds a position, or null when the position is in no table or its table is not drawn. */
+export function drawnTableAt(view: EditorView, pos: number): HTMLElement | null {
+	for (const el of view.contentDOM.querySelectorAll<HTMLElement>(TABLE)) {
+		const block = blockRange(view, el);
+		if (block && pos >= block.from && pos <= block.to) return el;
+	}
 	return null;
 }
 
 /** The box a position inside a rendered table (its row) or diagram (the whole diagram) is drawn at, when that block is on screen. */
 export function widgetBoxAt(view: EditorView, pos: number): DOMRect | null {
-	for (const el of view.contentDOM.querySelectorAll<HTMLElement>(`${TABLE}, ${DIAGRAM}`)) {
+	const table = drawnTableAt(view, pos);
+	if (table) return tableRowAt(view, table, pos)?.rect ?? null;
+	for (const el of view.contentDOM.querySelectorAll<HTMLElement>(DIAGRAM)) {
 		const block = blockRange(view, el);
-		if (!block || pos < block.from || pos > block.to) continue;
-		return el.matches(TABLE) ? tableRowAt(view, el, pos)?.rect ?? null : el.getBoundingClientRect();
+		if (block && pos >= block.from && pos <= block.to) return el.getBoundingClientRect();
 	}
 	return null;
 }

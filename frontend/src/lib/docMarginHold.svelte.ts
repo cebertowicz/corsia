@@ -55,8 +55,7 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		const y = read !== undefined && read > box.top && read < box.bottom ? read + 2 : box.top + 4;
 		let pos = view.posAtCoords({ x, y }, false);
 		// A table is one block to the editor and its rows rewrap with the width: anchor the drawn row at that height, not the table's top.
-		const block = view.lineBlockAt(pos);
-		const table = drawnTableAt(view, block);
+		const table = drawnTableAt(view, pos);
 		const row = table && tableRowAtHeight(view, table, y);
 		if (row) pos = row.pos;
 		// A blank line at the top does not rewrap and holds nothing the reader reads; anchor the first text row below it instead.
@@ -67,7 +66,7 @@ export function holdReadingLine(inputs: { margin: () => boolean; bounds: () => H
 		// The anchor's row is read from the browser's own layout of its character (a DOM range), not from the editor's height estimates, which can lag a frame while the text rewraps.
 		const rowTop = (): number | null => {
 			if (row) {
-				const drawn = drawnTableAt(view, block);
+				const drawn = drawnTableAt(view, pos);
 				return (drawn && tableRowAt(view, drawn, pos)?.rect.top) ?? null;
 			}
 			const { node, offset: at } = view.domAtPos(pos);

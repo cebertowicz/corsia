@@ -28,7 +28,7 @@ function frameTop(view: EditorView): number {
 
 /** How far below the frame edge the line block holding `from` starts, or inside a drawn table the row holding it. */
 export function placeTop(view: EditorView, from: number): number {
-	const pos = Math.min(from, view.state.doc.length), block = view.lineBlockAt(pos), table = drawnTableAt(view, block);
+	const pos = Math.min(from, view.state.doc.length), block = view.lineBlockAt(pos), table = drawnTableAt(view, pos);
 	const row = table && tableRowAt(view, table, pos);
 	return (row ? row.rect.top : view.documentTop + block.top) - frameTop(view);
 }
@@ -47,7 +47,7 @@ export function captureDocumentPlace(view: EditorView, scrollTop?: number): Text
 	// At another offset the text sits lower by the difference.
 	const shift = scroller.scrollTop - at;
 	const edge = scroller.getBoundingClientRect().top - shift;
-	const block = view.lineBlockAtHeight(edge - view.documentTop), table = drawnTableAt(view, block);
+	const block = view.lineBlockAtHeight(edge - view.documentTop), table = drawnTableAt(view, block.from);
 	let row = table && tableRowAtHeight(view, table, edge);
 	// A row cut off at the edge is context above the reader; the place is the next row, the first one wholly started in view,
 	// so that the cut-off row growing or shrinking moves only itself.
