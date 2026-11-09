@@ -30,7 +30,7 @@ import ImageCommentLightbox from './ImageCommentLightbox.svelte';
 import DocFeedbackStatus from './DocFeedbackStatus.svelte';
 import ImageViewer from './ImageViewer.svelte';
 import ArtifactDocumentImageOverlay from './ArtifactDocumentImageOverlay.svelte';
-import { DocFeedback } from '$lib/docFeedback.svelte';
+import { DocFeedback, SENT_HOLD_MS } from '$lib/docFeedback.svelte';
 import { docComments } from '$lib/stores/docComments';
 import { isMobile } from '$lib/stores/viewport';
 
@@ -208,6 +208,33 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(sendIn(shown.target.querySelector('.bar')!)).toBeNull();
 		expect(doc.component.controller().documentHeld).toBe(1);
 		expect(footerIn(shown.target)).toBeNull();
+	});
+
+	it('gives keyboard focus to the Comment control when the bar\'s Send goes, even after a settle that outlasts the Sent line', async () => {
+		let finishRead!: () => void;
+		const read = new Promise<void>((resolve) => { finishRead = resolve; });
+		const doc = documentStatus(null, () => read);
+		doc.component.sync('art-doc', pending(2, { image: 2 }));
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(2, { image: 2 }) });
+		mocks.send.mockResolvedValue(sentAll(pending(0), 2));
+		flushSync();
+		const shown = await viewer({
+			src: SRC, alt: 'Mock', artifactId: 'art-doc', docName: 'notes.md', onBack: vi.fn(),
+			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
+		});
+		vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+		const send = sendIn(shown.target.querySelector('.bar')!)!;
+		send.focus();
+		send.click();
+		await settle();
+		// The Sent line ends while the owning reader is still settling the send.
+		vi.advanceTimersByTime(SENT_HOLD_MS + 1);
+		flushSync();
+		finishRead();
+		await settle();
+		vi.useRealTimers();
+		expect(sendIn(shown.target.querySelector('.bar')!)).toBeNull();
+		expect(document.activeElement).toBe(shown.target.querySelector('[data-image-comment]'));
 	});
 
 	it('keeps the comments pill beside a held Send, which takes its short wording in the bar on a phone', async () => {

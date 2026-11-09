@@ -20,10 +20,12 @@
 
 	async function send() {
 		if (!lane) return;
+		// The image Send disappears once its comments go. Keep keyboard focus on the viewer's durable Comment control.
+		// Decide by where focus is when the send settles, not by the Sent line, which can end before a slow settle does.
+		const viewer = compact && lane === 'image-held' && sender?.contains(document.activeElement) ? sender.closest('.image-comments') : null;
 		await feedback.sendLane(lane);
-		// The image Send disappears after success. Keep keyboard focus on the viewer's durable Comment control.
-		if (compact && lane === 'image-held' && feedback.sentLane === lane) {
-			sender?.closest('.image-comments')?.querySelector<HTMLButtonElement>('[data-image-comment]')?.focus();
+		if (viewer && (document.activeElement === null || document.activeElement === document.body)) {
+			viewer.querySelector<HTMLButtonElement>('[data-image-comment]')?.focus();
 		}
 	}
 </script>
