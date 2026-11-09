@@ -12,8 +12,7 @@ Four claims, and the first two are the whole reason the indexes exist.
 * The Turn-provenance halves each seek their own index, because the OR across
   them gets no MULTI-INDEX OR at a real Turn count.
 * A fresh schema and a migrated one carry identical indexes.
-* The model-switch token's stub count still excludes an unpositioned row, which
-  the shipped joined aggregate excluded in its ``ON`` clause.
+* The model-switch token's stub count excludes an unpositioned row.
 
 Like the v84 and v96 indexes, plans are read with no planner statistics,
 because production databases never run ANALYZE.
@@ -217,8 +216,8 @@ def test_model_switch_token_keeps_unpositioned_rows_out():
     """(next_message_seq, message_count, max_seq, retention_stub_count), literal.
 
     Six seeded rows, one of them unpositioned; five of them positioned, of
-    which two are stubs — and the unpositioned stub stays out of the count, as
-    the shipped joined aggregate's ``ON`` clause kept it out.
+    which two are stubs — and the unpositioned stub stays out of the count,
+    because the token reads positioned rows only.
     """
     with closing(_schema(with_indexes=True)) as db:
         _seed(db)

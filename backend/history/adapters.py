@@ -8,7 +8,7 @@ from typing import Any
 
 from core.message_history import frame_agent_envelope
 from core.reasoning_provenance import anthropic_thinking_blocks_for_replay
-from core.thread_lifecycle import TOOL_TRIM_MARKER
+from infra.tool_retention_marker import TOOL_TRIM_MARKER
 from history.tool_argument_projection import (
     project_checkpoint_tool_call,
     render_checkpoint_tool_call,

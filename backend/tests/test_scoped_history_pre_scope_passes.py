@@ -112,7 +112,7 @@ def test_stub_pass_reports_the_covered_region_stubs():
 
 
 def test_stub_pass_leaves_unpositioned_rows_out():
-    """A delivered stub with no position is outside the token, as it was."""
+    """A delivered stub with no position is outside the token."""
     with closing(_db()) as db:
         db.execute(
             "INSERT INTO messages (id,thread_id,role,content,metadata,created_at,"
@@ -207,12 +207,12 @@ def _stub_seqs(db: sqlite3.Connection) -> tuple[int, ...]:
 def test_the_real_sweep_stubs_exactly_the_rows_the_stub_pass_finds():
     """Sweep, reader and index are one contract, so all three run in this test.
 
-    The sweep selects the rows it may rewrite with ``substr(m.content,1,?) != ?``
-    — the marker bound as parameters, which is right for a write that is not
-    index-backed — while the reader and ``idx_messages_retention_stub`` use the
-    marker as statement text. That is exactly how a near-miss marker could serve
-    one side and not the other, so the claim is tested by running the shipped
-    trim and then asking the shipped pass what it sees.
+    The sweep, the reader and ``idx_messages_retention_stub`` all test the
+    marker through ``TOOL_TRIM_CONTENT_SQL``, the sweep negated because it is
+    looking for payloads that are not stubs yet, so a marker change cannot serve
+    one of them and not the others. What still needs proving is that the negation
+    and the index behave as written, so this runs the shipped trim, then asks the
+    shipped pass what it sees and how SQLite served it.
     """
     with closing(_db()) as db:
         _cover_with_checkpoint(db, through_seq=9)
