@@ -62,7 +62,7 @@ def test_v117_registers_and_widens_kind_keeping_rows(tmp_path) -> None:
             "VALUES ('s2','t','w','script','300','n',1,'t','c','u')"
         )
         indexes = _indexes(db)
-    assert (result.migrated, result.from_version, result.to_version) == (True, 116, 185)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 116, 186)
     assert row == ("s1", "cadence", 2, 5, None, None, None)
     assert {"idx_automation_schedules_due", "idx_automation_schedules_scope"} <= indexes
 

@@ -79,7 +79,7 @@ def test_a_full_v148_install_takes_the_step_and_ends_where_a_fresh_install_start
     db.executescript(_V140.split("CREATE TABLE automation_schedules")[0])
     db.execute("PRAGMA user_version=148")
     db.commit()
-    assert migrate_to_current(db, SCHEMA_VERSION).to_version == 185
+    assert migrate_to_current(db, SCHEMA_VERSION).to_version == 186
     fresh = sqlite3.connect(":memory:")
     initialize_schema(fresh)
     sync_shipped_rules(db)

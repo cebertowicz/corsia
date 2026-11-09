@@ -39,6 +39,6 @@ def test_an_upgraded_database_has_the_column() -> None:
     with closing(_dev_139()) as db:
         assert "requesting_node_id" not in _columns(db)
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.from_version, result.to_version) == (139, 185)
+        assert (result.from_version, result.to_version) == (139, 186)
         assert "requesting_node_id" in _columns(db)
         assert migrate_to_current(db, SCHEMA_VERSION).migrated is False

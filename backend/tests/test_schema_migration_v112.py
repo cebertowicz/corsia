@@ -120,7 +120,7 @@ def test_a_v110_database_with_agent_use_terms_upgrades_through_v111_to_v112(isol
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.migrated, result.from_version, result.to_version) == (True, 110, 185)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 110, 186)
     assert _columns(db)[-len(REGION_COLUMNS) - 6:-6] == list(REGION_COLUMNS)  # then the step-134, 135, 150, 180, 182 and 184 columns
     assert tuple(db.execute("SELECT body, region_number FROM doc_comments").fetchone()) == ("text comment", None)
     assert endpoint_agent_use("external@legacy/glm-5.3") == "interactive_only"

@@ -40,7 +40,7 @@ def test_a_full_v142_install_takes_the_step_and_ends_where_a_fresh_install_start
 
     result = migrate_to_current(db, SCHEMA_VERSION)
 
-    assert (result.migrated, result.from_version, result.to_version) == (True, 142, 185)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 142, 186)
     schema = "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"
     assert db.execute(schema).fetchall() == fresh.execute(schema).fetchall()
     assert _index_sql(db) is not None

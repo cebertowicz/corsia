@@ -82,7 +82,7 @@ def test_v146_migrates_a_v145_batch_table_to_the_fresh_lane_shape() -> None:
 
         result = migrate_to_current(db, SCHEMA_VERSION)
 
-        assert (result.migrated, result.from_version, result.to_version) == (True, 145, 185)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 145, 186)
         assert db.execute("SELECT delivery_policy FROM doc_feedback_batches WHERE id='batch-1'").fetchone() == (
             "immediate",
         )

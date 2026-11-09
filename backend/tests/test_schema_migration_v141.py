@@ -122,7 +122,7 @@ def test_a_full_v140_install_takes_the_step_and_ends_where_a_fresh_install_start
     db.execute("PRAGMA user_version=140")
     db.commit()
     result = migrate_to_current(db, SCHEMA_VERSION)
-    assert (result.migrated, result.from_version, result.to_version) == (True, 140, 185)
+    assert (result.migrated, result.from_version, result.to_version) == (True, 140, 186)
     fresh = sqlite3.connect(":memory:")
     initialize_schema(fresh)
     schema = "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"

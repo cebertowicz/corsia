@@ -41,7 +41,7 @@ def test_startup_migration_creates_the_table_and_keeps_threads(tmp_path) -> None
         db.commit()
     with closing(sqlite3.connect(path)) as db:
         result = migrate_to_current(db, SCHEMA_VERSION)
-        assert (result.migrated, result.from_version, result.to_version) == (True, 118, 185)
+        assert (result.migrated, result.from_version, result.to_version) == (True, 118, 186)
         assert "recorded_revision" in _columns(db)
         assert db.execute("SELECT id FROM threads").fetchall() == [("kept",)]
         assert not migrate_to_current(db, SCHEMA_VERSION).migrated

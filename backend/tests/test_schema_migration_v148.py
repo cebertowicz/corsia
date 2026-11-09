@@ -76,7 +76,7 @@ def test_v148_upgrade_matches_a_fresh_install_and_enforces_one_fact_per_subject(
         _fact(db, "learning_loop.correction_outcome", "message:one", "b")
         _fact(db, "measurement.correction", "message:one", "c")
         db.commit()
-        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 185
+        assert migrate_to_current(db, SCHEMA_VERSION).to_version == 186
         assert _indexes(db) == sorted(_INDEXES)
         with pytest.raises(sqlite3.IntegrityError):
             _fact(db, "learning_loop.correction_triage", "message:one", "d")
