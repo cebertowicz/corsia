@@ -859,14 +859,15 @@ def test_nested_schemes_in_one_token_cost_what_the_text_costs() -> None:
     )
 
 
-def test_the_link_scan_masks_the_same_spaces_it_always_did() -> None:
+def test_the_link_scan_masks_each_url_token_from_its_scheme() -> None:
     """A URL is masked from its scheme's first letter to the end of its token.
 
     ``1.https://x`` masks from the scheme's first letter and leaves the leading ``1.``
     for the bare-path scan to see; ``file://`` with nothing after it is no URL, and
     ``1://`` has no scheme letter, so neither is masked and a path beside them is found.
     Nested separators — ``a://b://c``, a URL inside a query string — blank the whole token
-    once, and a digit-led token keeps its second separator's URL visible to the scan.
+    once, and ``1://2://x.md`` is left alone because neither ``1`` nor ``2`` is a scheme
+    letter.
     """
     from registry import path_cards
 
