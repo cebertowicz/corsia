@@ -186,3 +186,53 @@ def test_moving_a_working_task_out_of_a_waiting_branch_gives_it_its_slot_back(db
     assert admission.project(task.id, db=db)["condition"] != "blocked"
     assert _held(db, task.id)
     assert _blocked_events(db, task.id) == []
+
+
+# --- when a move reconciles -------------------------------------------------
+
+
+def _attempts(db, node_id: str) -> list[tuple]:
+    return [tuple(r) for r in db.execute(
+        "SELECT released_at IS NULL, release_reason FROM plan_node_attempts WHERE node_id=?"
+        " ORDER BY rowid", (node_id,),
+    ).fetchall()]
+
+
+def test_a_move_that_also_restates_the_working_task_keeps_its_slot(db):
+    plan = owner_plan(db)
+    queued = _node(db, plan.id, "Queued earlier")
+    branch = _phase(db, plan.id, "New home")
+    _node(db, plan.id, "Home step", parent_id=branch.id)
+    task = _node(db, plan.id, "Working")
+    plan_update(db, plan.id, "activate", {"node_id": task.id, "expected_revision": revision(db, task.id)})
+    assert _held(db, task.id)
+
+    _move(db, plan.id, task.id, branch.id, acceptance_criteria="The restated outcome is shown.")
+
+    # The requirements edit supersedes the attempt and gives the slot straight back;
+    # the move's reconcile runs after that, so the queued task never takes the work.
+    assert _attempts(db, task.id) == [(0, "requirements_changed"), (1, None)]
+    assert _attempts(db, queued.id) == []
+
+
+def test_a_bulk_regroup_reconciles_once_after_every_row_moves(db, monkeypatch):
+    plan = owner_plan(db)
+    prerequisite = _node(db, plan.id, "Prerequisite", assignee="user")
+    branch = _phase(db, plan.id, "Held branch")
+    _node(db, plan.id, "Held step", parent_id=branch.id)
+    _depends(db, branch.id, prerequisite.id)
+    task = _node(db, plan.id, "Working")
+    queued = _node(db, plan.id, "Queued next")
+    plan_update(db, plan.id, "activate", {"node_id": task.id, "expected_revision": revision(db, task.id)})
+    calls = []
+    real = admission.reconcile_plan
+    monkeypatch.setattr(admission, "reconcile_plan", lambda *a, **k: calls.append(a) or real(*a, **k))
+
+    result = _edits(db, plan.id, [task.id, queued.id], parent_id=branch.id)
+
+    assert [entry["node_id"] for entry in result["changed"]] == [task.id, queued.id]
+    assert len(calls) == 1
+    assert not _held(db, task.id)
+    # Moving the working task freed its slot, but the list also put the next task
+    # behind the prerequisite: one reconcile at the end never hands it the slot.
+    assert _attempts(db, queued.id) == []

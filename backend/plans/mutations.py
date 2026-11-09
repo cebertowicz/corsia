@@ -126,7 +126,7 @@ def edit_node(
     expected_revision: int | None = None,
     actor_id: str | None = None,
     provenance: str = "plan_mutation",
-    db=None,
+    db=None, reconcile_move: bool = True,
 ) -> PlanNode:
     """Amend durable node intent, or re-hang the node under another branch, in one write."""
     given: list[object] = [v for v in (title, description, acceptance_criteria, difficulty_rerated) if v is not None]
@@ -185,6 +185,8 @@ def edit_node(
             admission.release(node_id, "requirements_changed", db=connection)
             admission.reselect_and_reconcile(node_id, actor_id=actor_id, provenance=provenance, db=connection)
             plan_wake.notify_intent_revised(connection, node_id, causing_executor=actor_id)
+        elif moved and reconcile_move:
+            regroup.reconcile(connection, node, actor_id=actor_id, provenance=provenance)
         _record_edit_events(
             connection, node_id, restated or requirements_changed, updated, next_title, next_dod,
             difficulty_rerated, node["size"], next_size, actor_id, provenance, crosses, bool(later), reason,

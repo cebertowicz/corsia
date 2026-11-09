@@ -144,16 +144,28 @@ def finish(connection, before, moved: Move | None, *, actor_id: str | None, prov
         connection, before["id"], EVENT, actor_id=actor_id, provenance=provenance,
         payload={"from": moved.from_parent, "to": moved.to_parent},
     )
-    # The prerequisites holding the moved branch changed, as an edge change does:
-    # the same reconcile ``add_dependency`` runs, and the mover already knows.
-    admission.reconcile_plan(
-        str(before["plan_id"]), actor_id=actor_id, provenance=provenance,
-        causing_executor=actor_id, db=connection,
-    )
+    # The prerequisites holding the moved branch changed, as an edge change does, so
+    # the plan is reconciled -- by the caller, once, after its own releases
+    # (``mutations.edit_node``, ``bulk_nodes.edit_many``), never here mid-write.
     # Work moved out of a run may have been the run's last open work: it ends here,
     # as it would have when that work settled. Work moved in is what an `add` there
     # would be, which keeps the run open until it settles.
     run_end.record_from(connection, moved.from_parent)
+
+
+def reconcile(connection, node, *, actor_id: str | None, provenance: str) -> None:
+    """Reconcile the plan a move changed, once, after the edit's own releases.
+
+    The prerequisites holding the moved branch changed, as an edge change does, so
+    this is the reconcile ``add_dependency`` runs. ``mutations.edit_node`` calls it
+    last, and not when a requirements change already reconciled through
+    ``reselect_and_reconcile`` after giving the task its slot back; a bulk regroup
+    defers it and reconciles once for its whole list (``bulk_nodes.edit_many``).
+    """
+    admission.reconcile_plan(
+        str(node["plan_id"]), actor_id=actor_id, provenance=provenance,
+        causing_executor=actor_id, db=connection,
+    )
 
 
 def _refuse(connection, node, parent_id: str) -> None:
