@@ -10,7 +10,7 @@ from datetime import timedelta
 from typing import Any
 
 from plans import (
-    node_states, open_rollup, open_tree, operator_node_state, operator_nodes,
+    node_states, open_rollup, open_titles, open_tree, operator_node_state, operator_nodes,
     operator_projection, rollup,
 )
 from plans.status_time import parse as _parse
@@ -38,7 +38,7 @@ def facts(
     states = operator_node_state.project(
         [projected], targets, db=db, now=_parse(clock), costs=costs, memo=memo,
         detail_ids=frozenset(() if detail_id is None else (detail_id,)),
-        titles=open_tree.PlanTitles(db, plan_id, tree.rows),
+        titles=open_titles.PlanTitles(db, plan_id, tree.rows),
     )
     owner = {"kind": plan_row["owner_kind"], "id": plan_row["owner_id"]}
     presented = operator_nodes.present_plan(projected, owner, targets, states, tree)

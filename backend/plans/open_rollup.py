@@ -14,7 +14,8 @@ two equal (``tests/test_plan_open_tree_equivalence.py``).
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
+from typing import Any
 
 from infra.packed_rows import fetch_all
 from plans import artifact_links, hierarchy, node_waits, open_tree, open_tree_many, projections, rollup, service
@@ -75,14 +76,53 @@ def links(connection, node_ids: Iterable[str]) -> dict:
     return indexed
 
 
+@dataclass
+class GroupFacts:
+    """The per-node facts of a whole group of plans, read once for the group.
+
+    Every read here is keyed by node id and says nothing about which plan a node belongs to
+    (``completions``, ``links``, ``sent_back_feedback``, ``hierarchy.shown_worker_plans``,
+    ``node_waits.project``), so a read of many plans can ask once for all of them instead of
+    once per plan. Only ``rollup._dependent_titles`` stays per plan: its rule is that a plan
+    discloses no other plan's titles.
+    """
+
+    completed: dict[str, Any]
+    linked: dict[str, list[dict]]
+    waits: dict[str, tuple[list[str], str | None]]
+    child_plans: dict[str, Any]
+    feedback: dict[str, str]
+
+
+def read_facts(connection, rows: Iterable[Any]) -> GroupFacts:
+    """The group's feedback, worker plans, waits, completions and links, asked once each.
+
+    Pass the rows of more than one plan and every index is a superset of what each plan
+    would have read for itself, keyed by the same ids: a caller looks a fact up only for the
+    rows it lists, so a wider group changes what is fetched, never what is returned.
+    """
+    rows = list(rows)
+    return GroupFacts(
+        feedback=sent_back_feedback(connection, [
+            str(row["follow_up_of"]) for row in rows if row["follow_up_of"] is not None
+        ]),
+        child_plans=hierarchy.shown_worker_plans(connection, rows),
+        waits=node_waits.project(connection, rows),
+        completed=completions(connection, [str(row["id"]) for row in rows]),
+        linked=links(connection, [str(row["id"]) for row in rows]),
+    )
+
+
 def rollup_open(
     connection, tree: open_tree.OpenTree, memo: dict[str, PlanState], *,
     child_depth: int | None = 0, window: open_tree.FoldWindow | None = None,
+    facts: GroupFacts | None = None,
 ) -> rollup.PlanRollup:
     """Project the loaded rows as ``rollup.rollup_thread`` does the whole plan.
 
     Children are summaries at ``child_depth`` 0; deeper, each shown worker plan is read as
     an open tree of its own (with ``window``) and projected one level less deep.
+    ``facts`` is a group's already-read facts; without one this plan reads its own.
     """
     plan = tree.plan
     # A sent-back round is history of its task and never a row; nothing beneath it is one either.
@@ -92,14 +132,12 @@ def rollup_open(
         if str(row["id"]) not in rounds and rounds.isdisjoint(path)
     ]
     rows = [row for row, _path in listed]
-    ids = [str(row["id"]) for row in rows]
-    feedback = sent_back_feedback(connection, [
-        str(row["follow_up_of"]) for row in rows if row["follow_up_of"] is not None
-    ])
-    child_plans = hierarchy.shown_worker_plans(connection, rows)
-    waits = node_waits.project(connection, rows)
+    facts = facts or read_facts(connection, tree.rows)
+    feedback = facts.feedback
+    child_plans = facts.child_plans
+    waits = facts.waits
     titles = rollup._dependent_titles(connection, str(plan["id"]), rows)
-    completed, linked = completions(connection, ids), links(connection, ids)
+    completed, linked = facts.completed, facts.linked
     ordered: list[dict] = []
     for row, path in listed:
         node = rollup._node_rollup(
@@ -135,9 +173,13 @@ def rollup_plans(
     """
     if window is None or window.cap == 0:
         trees = open_tree_many.load_many(connection, [str(plan["id"]) for plan in plan_rows])
+        # One read of every per-node fact for the whole group, so a chat-list read of 80
+        # plans asks for these five facts five times instead of 400 times.
+        facts = read_facts(connection, [row for tree in trees.values() for row in tree.rows])
         return [
             rollup_open(
-                connection, trees[str(plan["id"])], memo, child_depth=child_depth, window=window,
+                connection, trees[str(plan["id"])], memo, child_depth=child_depth,
+                window=window, facts=facts,
             )
             for plan in plan_rows
         ]
