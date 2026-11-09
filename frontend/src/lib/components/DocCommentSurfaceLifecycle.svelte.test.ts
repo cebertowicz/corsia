@@ -57,6 +57,47 @@ describe('comment sheet visibility', () => {
 		expect(onChange).toHaveBeenLastCalledWith(false);
 		host.remove();
 	});
+	it('restores focus after the comments sheet is no longer modal', async () => {
+		const host = document.body.appendChild(document.createElement('div'));
+		let state = $state<CommentSurfaceState>({ kind: 'list' });
+		let modal = false;
+		const restoreFocus = vi.fn(() => expect(modal).toBe(false));
+		const component = mount(DocCommentSurface, { target: host, props: {
+			get state() { return state; }, anchor: () => new DOMRect(), narrow: true, comments: [], focusedId: null,
+			draft: null, onClose: () => { state = null; }, restoreFocus, onFocus: vi.fn(), onSubmit: vi.fn(),
+			onReply: vi.fn(), onResolve: vi.fn(), onAgree: vi.fn(), target: null, artifactId: 'doc',
+			onSheetModalChange: (value: boolean) => { modal = value; },
+		} });
+		flushSync();
+		const drawer = document.querySelector('.drawer-motion')!;
+		expect(modal).toBe(true);
+		document.querySelector<HTMLButtonElement>('button[aria-label="Close comments"]')!.click();
+		flushSync();
+		expect(restoreFocus).not.toHaveBeenCalled();
+		drawer.dispatchEvent(new Event('outroend'));
+		flushSync();
+		await tick();
+		expect(restoreFocus).toHaveBeenCalledOnce();
+		await unmount(component);
+		host.remove();
+	});
+	it('reports missing marker threads to their owner instead of closing the surface', async () => {
+		const host = document.body.appendChild(document.createElement('div'));
+		const onClose = vi.fn();
+		const onThreadMissing = vi.fn();
+		const component = mount(DocCommentSurface, { target: host, props: {
+			state: { kind: 'thread', id: 'a', ids: ['a', 'b'] } as CommentSurfaceState,
+			anchor: () => new DOMRect(), narrow: false,
+			comments: [{ id: 'b', from: 0, to: 4, anchor: 'text', author: 'you', text: 'Still here', at: 'now', resolved: false, replies: [] }],
+			focusedId: 'a', draft: null, onClose, onThreadMissing, restoreFocus: vi.fn(), onFocus: vi.fn(), onSubmit: vi.fn(),
+			onReply: vi.fn(), onResolve: vi.fn(), onAgree: vi.fn(), target: null, artifactId: 'doc',
+		} });
+		flushSync();
+		expect(onThreadMissing).toHaveBeenCalledWith(['b']);
+		expect(onClose).not.toHaveBeenCalled();
+		await unmount(component);
+		host.remove();
+	});
 	it('leaves focus where the person put it while the sheet was closing', async () => {
 		const host = document.body.appendChild(document.createElement('div'));
 		const editor = document.body.appendChild(document.createElement('textarea'));

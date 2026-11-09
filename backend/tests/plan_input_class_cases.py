@@ -621,6 +621,16 @@ _CASES = {
     ): _operation(
         "add", {"kind": "task", "title": "T", "acceptance_criteria": "DOD", "size": "large"},
     ),
+    # --- plans/later_fields.py ---
+    ("later_fields.py", '"later must be true or false"'): _operation(
+        "edit", {"node_id": NODE, "expected_revision": REV, "later": "yes"},
+    ),
+    ("later_fields.py", "LATER_ON_BRANCH"): _operation(
+        "add", {"kind": "phase", "title": "T", "acceptance_criteria": "DOD", "later": True},
+    ),
+    ("boundary_fields.py", "later_fields.REASON_WITHOUT_LATER"): _operation(
+        "edit", {"node_id": NODE, "expected_revision": REV, "reason": "Not this week"},
+    ),
     # --- plans/mutations.py ---
     ("mutations.py", "TASK_SIZE_REQUIRED"): _operation(
         "edit", {"node_id": NODE, "expected_revision": REV, "size": None},

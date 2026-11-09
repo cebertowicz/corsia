@@ -284,6 +284,7 @@ def create_node(
     intent: str | None = None,
     intent_node_id: str | None = None,
     commitment_id: str | None = None,
+    later: bool = False,
     person_step: bool = True,
     required_step: bool = False,
     workflow_by: str = "agent",
@@ -309,6 +310,11 @@ def create_node(
     )
     _insert_node_row(connection, base_values, workflow_ref, workflow_version, workflow_step, difficulty, size,
                      intent, intent_node_id)
+    if later:
+        # Born below the cut. The flag goes through the one revision writer rather
+        # than joining the creation insert's three migration-shaped column lists;
+        # it is ranking, so no aggregate is re-derived for it.
+        service.touch_node(connection, node_id, later=1)
     service._event(
         connection, node_id, "node_created", actor_id=actor_id, provenance=provenance,
         payload={

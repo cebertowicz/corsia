@@ -111,7 +111,7 @@
 	$effect(() => syncActiveDocumentEditor({ target, draft: save.draft, docState, artifactId: loadedArtifactId, text: editText, readonly: readonly || confirming }));
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined, suggestionBusyId));
-	const commentStatus = $derived(commentSurfaceStatus(listedComments));
+	const commentStatus = $derived(commentSurfaceStatus(listedComments, editText));
 	const unreadThreads = $derived(listedComments.filter(hasUnread));
 	const scroll = createCommentScrollTarget({
 		focused: () => focusedComment, comments: () => listedComments, text: () => editText, listOpen: () => commentUI.state?.kind === 'list',
@@ -145,7 +145,7 @@
 		show: (thread, landing) => { if (thread && landing) scroll.value = landing; if (thread) focusedDocComment.set(thread.id); commentUI.state = { kind: 'list' }; if (thread) arrivedDocComments.set(new Set([thread.id])); },
 		openImageOr: (id, otherwise) => { images.openOr([id], { id }, otherwise); arrivedDocComments.set(new Set([id])); }, onLanded: () => onLanded?.(),
 	});
-	export function stepToUnreadReply(beforeText?: () => void, excludeId?: string) { replyNavigation.step(beforeText, excludeId); }
+	export function jumpToUnread(id: string, beforeText?: () => void) { replyNavigation.goTo(id, beforeText); }
 	// A card for a comment on part of an image opens the image at its tag; any other card goes to its text.
 	function focusFromCard(id: string, placement?: 'top') { images.openOr([id], { id }, () => focusInText(id, placement)); }
 
@@ -221,7 +221,6 @@
 			prevTarget = leavePreviousTarget(prevTarget, d);
 
 			draftController.select(null);
-			replyNavigation.reset();
 			commentUI.close();
 			focusedDocComment.set(null); discardCommentDraft(commentDraftScope(prevTarget));
 			// These fields describe the mounted target, not its predecessor; a reload of the same file keeps the server's known answer.
@@ -312,7 +311,7 @@
 			{/if}
 		{/snippet}
 	</DocViewerStatus>
-	{#if target}<DocBottomBand artifactId={loadedArtifactId} threads={unreadThreads} ready={docState === 'ready'} {covered} sheetModalOpen={commentUI.sheetUp} onStep={() => { commentUI.restoreReplyFocus(() => docRoot); replyNavigation.step(); }} />{/if}
+	{#if target}<DocBottomBand artifactId={loadedArtifactId} threads={unreadThreads} root={docRoot} ready={docState === 'ready'} {covered} sheetModalOpen={commentUI.sheetUp} onJump={(thread) => { commentUI.restoreReplyFocus(() => docRoot); replyNavigation.goTo(thread.id); }} />{/if}
 	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />
 	<DocViewerEditorSurface
 		bind:this={editorSurface}

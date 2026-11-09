@@ -642,6 +642,26 @@ class TestMidTurnTailReplays:
         assert_provider_acceptable(to_native_history(full))
 
 
+def test_sealed_render_after_a_cut_inside_a_running_turn_is_empty() -> None:
+    """A checkpoint cut inside a still-running Turn stays a legal start.
+
+    The sealed render omits the unfinished Turn, so nothing follows the cut and
+    the seal is the cut itself; a ``through`` inside that Turn is still refused.
+    """
+    db = _db()
+    _seed_multi_step_turn(db)
+    db.execute("UPDATE active_turns SET status='running', ended_at=NULL WHERE id='turn-1'")
+    db.commit()
+    cut = _boundary(db, 3)
+
+    tail = render_portable_history("thread-1", db=db, start_exclusive=cut)
+
+    assert tail.turns == ()
+    assert tail.sealed_boundary == cut
+    with pytest.raises(PortableHistoryError):
+        render_portable_history("thread-1", db=db, through=cut)
+
+
 @pytest.mark.parametrize(
     ("provider_ids", "expected_seq"),
     [

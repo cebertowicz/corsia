@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 import plans.service as service
+from plans import later_fields
 from plans.size_fields import require_task_size, validate_size
 
 #: Re-exported so this module's raise sites read against one taxonomy. The class
@@ -38,6 +39,7 @@ _CREATE = {
     "watchdog_budget_seconds",
     "depends_on_node_id",
     "instructions_artifact_id",
+    "later",
 }
 
 #: Operations that end their executor's work on a task.
@@ -71,6 +73,8 @@ OPERATION_FIELDS = {
         "watchdog_budget_seconds",
         "difficulty_rerated",
         "size",
+        "later",
+        "reason",
         "expected_revision",
     },
     "split": {
@@ -240,6 +244,9 @@ def validate_operation_params(operation: str, params: dict) -> None:
         value = params["next_node_id"]
         if not isinstance(value, str) or not value.strip():
             raise PlanInputError("next_node_id must be a node id")
+    if operation == "edit" and "reason" in params and "later" not in params:
+        # A reason explains a Later row; with no flip it would explain nothing.
+        raise PlanInputError(later_fields.REASON_WITHOUT_LATER)
     if operation in {"add", "insert"}:
         return
     if operation == "archive_node":
@@ -320,6 +327,7 @@ def node_fields(
     if missing_intent:
         raise PlanInputError("task creation requires intent")
     size = require_task_size(params.get("size")) if kind == "task" or run else validate_size(params.get("size"))
+    later = later_fields.creation_flag(kind, params.get("later", False))
     return {
         "kind": kind,
         "title": text(params, "title"),
@@ -336,6 +344,7 @@ def node_fields(
         "assignee": params.get("assignee"),
         "spawn_kind": params.get("spawn_kind"),
         "watchdog_budget_seconds": params.get("watchdog_budget_seconds"),
+        "later": later,
         **({"before_node_id": params["before_node_id"]}
            if include_before and "before_node_id" in params else {}),
     }
@@ -352,6 +361,8 @@ def edit_fields(params: dict[str, Any]) -> dict[str, Any]:
     }
     if "size" in params:
         fields["size"] = validate_size(params["size"])
+    if "later" in params:
+        fields.update(later_fields.edit_fields(params, text))
     if "difficulty_rerated" in params:
         from plans.workflow_fields import rerating
 

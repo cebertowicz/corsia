@@ -64,7 +64,7 @@ for (const [width, height] of [[1440, 900], [393, 852]] as const) {
    await viewer.locator('.cm-scroller').evaluate(e => { e.scrollTop = e.scrollHeight * 0.45; });
    await selectLine(viewer, quote);
    await viewer.locator('.sel-comment').click();
-   const input = viewer.getByPlaceholder('Comment…');
+   const input = viewer.getByPlaceholder('Comment, or @ to tag an agent');
    await expect(input).toBeVisible();
    await input.fill('typing a comment');
    await viewer.evaluate(() => {
@@ -158,7 +158,7 @@ test(`@comment-box-outside-write a comment box on text in a table survives an ag
   for (let step = 1; step <= 12; step++) await viewer.mouse.move(from.x + ((to.x - from.x) * step) / 12, from.y + ((to.y - from.y) * step) / 12);
   await viewer.mouse.up();
   await viewer.locator('.sel-comment').click();
-  const input = viewer.getByPlaceholder('Comment…');
+  const input = viewer.getByPlaceholder('Comment, or @ to tag an agent');
   await expect(input).toBeVisible();
   await input.fill('typing a comment');
   await input.focus();
@@ -231,7 +231,7 @@ test(`@comment-box-outside-write a comment box in a long table document survives
   for (let step = 1; step <= 12; step++) await viewer.mouse.move(from.x + ((to.x - from.x) * step) / 12, from.y + ((to.y - from.y) * step) / 12);
   await viewer.mouse.up();
   await viewer.locator('.sel-comment').click();
-  const input = viewer.getByPlaceholder('Comment…');
+  const input = viewer.getByPlaceholder('Comment, or @ to tag an agent');
   await expect(input).toBeVisible();
   await input.fill('typing a comment');
   await input.focus();

@@ -86,6 +86,55 @@ def test_a6_names_close_for_a_step_that_was_only_replaced(db):
     assert "close_node, not fail" in content and "archive" in content
 
 
+def test_a6_a_worker_that_parks_its_last_step_in_later_is_told_to_its_parent(db):
+    """Later is not a return: the parent still waits on the step, so it must hear the stop.
+
+    The cut still never wakes the worker itself: its own liveness stays unarmed.
+    """
+    from automation import plan_liveness
+    from plans import later_fields
+
+    _step, _plan, node = delegated(db)
+    service.transition_node(node.id, "active", actor_id="worker", db=db)
+    begin_worker_turn(db)
+
+    later_fields.flip(
+        db, node.id, later=True, reason="Not now", actor_id="worker", provenance="test",
+    )
+    end_worker_turn(db)
+
+    assert [str(row["id"]).split(":")[1] for row in wakes(db)] == ["child_stopped_open"]
+    own = plan_liveness.wake_for("worker", db)
+    assert own is None or own["status"] != plan_liveness.ARMED
+
+
+def test_a6_a_worker_waiting_on_a_date_it_armed_below_the_cut_has_not_stopped(db):
+    """A dated wait on Later work still fires, so the worker waits on it, not on its parent."""
+    from plans import later_fields, watch_operations
+    from tests.child_parent_notice_helpers import DEADLINE, worker_actor
+
+    _step, plan, node = delegated(db)
+    service.transition_node(node.id, "active", actor_id="worker", db=db)
+    begin_worker_turn(db)
+
+    watch_operations.arm(
+        plan.id,
+        {
+            "node_id": node.id,
+            "condition": {"type": "deadline", "value": DEADLINE},
+            "expected_revision": service.get_node(node.id, db=db).revision,
+        },
+        worker_actor(),
+        db,
+    )
+    later_fields.flip(
+        db, node.id, later=True, reason="Not now", actor_id="worker", provenance="test",
+    )
+    end_worker_turn(db)
+
+    assert wakes(db) == []
+
+
 def test_a6_a_rebriefed_worker_that_closes_replaced_steps_is_nobodys_failure(db):
     """#2232 re-brief: the replaced steps close, a new one starts, the parent hears no failure."""
     _step, plan, first = delegated(db)

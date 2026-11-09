@@ -124,25 +124,27 @@ describe('ImageCommentLightbox', () => {
 		expect(post.mock.calls.map((args) => args[6])).toEqual(['old', 'new']);
 		clearTabViewState('thread', 'tab');
 	});
-	it('shows the document reply chip for replies arriving while its image is open', async () => {
-		const step = vi.fn();
+	it('shows the document jump control for replies arriving while its image is open', async () => {
+		const jump = vi.fn();
 		component = mount(ArtifactDocumentImageOverlay, { target: host, props: {
 			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0, viewId: {} },
 			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
 			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), refreshDiagram: vi.fn(async () => null) },
-			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: step,
+			onBack: vi.fn(), onPlace: vi.fn(), onReplyJump: jump,
 		} });
 		await settle();
 		const img = host.querySelector<HTMLImageElement>('.pad img')!;
 		img.dispatchEvent(new Event('load'));
 		await settle();
-		expect(host.querySelector('[data-doc-reply-chip]')).toBeNull();
+		expect(host.querySelector('[data-doc-jump]')).toBeNull();
 		docComments.update((current) => ({ ...current, 'art-img': current['art-img'].map((item, index) => index === 1 ? { ...item, newReplyIds: ['new-reply'] } : item) }));
-		await settle();
-		const chip = host.querySelector<HTMLButtonElement>('[data-doc-reply-chip] button');
-		expect(chip?.textContent).toContain('1 new reply');
-		chip!.click();
-		expect(step).toHaveBeenCalledOnce();
+		// The control reads the canvas on the next frame, so this waits a real turn rather than a microtask flush.
+		await vi.waitFor(() => expect(host.querySelector('[data-doc-jump]')).not.toBeNull());
+		const control = host.querySelector<HTMLButtonElement>('[data-doc-jump] button');
+		expect(control?.textContent).toContain('1 new');
+		expect(control?.getAttribute('aria-label')).toBe('1 new, next below: pin 3');
+		control!.click();
+		expect(jump).toHaveBeenCalledWith('second');
 	});
 
 	it('keeps an earlier document confirmation out of the viewer but shows a new viewer confirmation', async () => {
@@ -151,7 +153,7 @@ describe('ImageCommentLightbox', () => {
 			image: { src: SRC, alt: 'Mock screen', from: 0, to: 10, scrollTop: 0, top: 0, viewId: {} },
 			target: { instanceId: 'tab', path: '/doc.md', name: 'doc.md', projectId: null, threadId: null, artifactId: 'art-img' },
 			comments: { artifactId: 'art-img', projectId: null, readOnly: false, post: vi.fn(), refreshDiagram: vi.fn(async () => null) },
-			onBack: vi.fn(), onPlace: vi.fn(), onReplyStep: vi.fn(),
+			onBack: vi.fn(), onPlace: vi.fn(), onReplyJump: vi.fn(),
 		} });
 		await settle();
 		expect(host.querySelector('[data-doc-bottom-band]')).toBeNull();

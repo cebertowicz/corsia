@@ -46,6 +46,8 @@ class IdleListing:
     total: int
     set_aside: int
     pick_up: bool
+    #: Open tasks below the cut, which ``shown`` and ``total`` leave out.
+    later: int = 0
 
 
 def idle_listing(
@@ -56,31 +58,37 @@ def idle_listing(
     ``tasks`` is every open task of the executor in plan order, and
     ``projections`` their admission projections. A task a park just set aside
     is one of them, so it is listed rather than left out.
+
+    Work below the cut is left out and only counted (``later``): the executor
+    put it there on purpose, so it neither holds the idle answer nor reads as
+    work waiting on someone (Later design §2).
     """
-    if not tasks:
+    above = [row for row in tasks if not row["later"]]
+    if not above:
         return None
-    if any(projections[str(row["id"])]["condition"] not in HELD_CONDITIONS for row in tasks):
+    if any(projections[str(row["id"])]["condition"] not in HELD_CONDITIONS for row in above):
         return None
-    seconds = {str(row["id"]): _seconds_left(projections[str(row["id"])], now) for row in tasks}
+    seconds = {str(row["id"]): _seconds_left(projections[str(row["id"])], now) for row in above}
     waits = [
-        seconds[str(row["id"])] for row in tasks
+        seconds[str(row["id"])] for row in above
         if projections[str(row["id"])]["condition"] == "waiting"
     ]
-    set_aside = sum(_set_aside(projections[str(row["id"])]) for row in tasks)
+    set_aside = sum(_set_aside(projections[str(row["id"])]) for row in above)
     order = sorted(
-        range(len(tasks)),
+        range(len(above)),
         key=lambda index: _key(
-            projections[str(tasks[index]["id"])], seconds[str(tasks[index]["id"])], index,
+            projections[str(above[index]["id"])], seconds[str(above[index]["id"])], index,
         ),
     )
     imminent = any(left is not None and left <= IMMINENT_SECONDS for left in waits)
     return IdleListing(
-        shown=[tasks[index] for index in order[:IDLE_TASK_LIMIT]],
+        shown=[above[index] for index in order[:IDLE_TASK_LIMIT]],
         projections=projections,
         seconds=seconds,
-        total=len(tasks),
+        total=len(above),
         set_aside=set_aside,
         pick_up=plan["state"] == "active" and bool(waits) and not imminent,
+        later=len(tasks) - len(above),
     )
 
 

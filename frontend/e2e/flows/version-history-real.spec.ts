@@ -47,20 +47,20 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	// History is fetched only once it is opened, never on document ready.
 	await expect(page.getByRole('button', { name: 'History', exact: true })).toBeVisible();
 	expect(historyReads).toHaveLength(0);
-	const out = process.env.VH_OUT!;
-	fs.mkdirSync(out, { recursive: true });
+	const out = process.env.VH_OUT;
+	if (out) fs.mkdirSync(out, { recursive: true });
 	await page.route('**/api/files/history?*', async (route) => route.abort('internetdisconnected'), { times: 1 });
 	await page.getByRole('button', { name: 'History', exact: true }).click();
 	await expect(page.getByText('Couldn’t load history. Check the connection and try again.')).toBeVisible();
-	await page.screenshot({ path: path.join(out, `history-load-failure-${width}.png`), animations: 'disabled' });
+	if (out) await page.screenshot({ path: path.join(out, `history-load-failure-${width}.png`), animations: 'disabled' });
 	await page.getByRole('button', { name: 'Retry', exact: true }).click();
 	const drawer = page.locator('[data-doc-history-drawer]');
 	const rows = drawer.locator('.vrow');
 	await expect(rows).toHaveCount(3);
-	await page.screenshot({ path: path.join(out, `history-list-${width}.png`), animations: 'disabled' });
+	if (out) await page.screenshot({ path: path.join(out, `history-list-${width}.png`), animations: 'disabled' });
 	await rows.nth(1).click();
 	await expect(page.getByText('Second version.', { exact: false }).first()).toBeVisible();
-	await page.screenshot({ path: path.join(out, `history-version-${width}.png`), animations: 'disabled' });
+	if (out) await page.screenshot({ path: path.join(out, `history-version-${width}.png`), animations: 'disabled' });
 	const older = page.getByRole('button', { name: 'Older', exact: true });
 	if (await older.isVisible()) await older.click(); else await rows.nth(2).click();
 	await expect(page.getByText('First version.', { exact: false }).first()).toBeVisible();
@@ -68,7 +68,7 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	await page.getByRole('button', { name: 'Restore', exact: true }).click();
 	await expect(page.getByText('Couldn’t restore this version. The document changed since you opened it.')).toBeVisible();
 	await expect(page.locator('.cm-content')).toContainText('Agent edit after opening history.');
-	await page.screenshot({ path: path.join(out, `history-changed-since-${width}.png`), animations: 'disabled' });
+	if (out) await page.screenshot({ path: path.join(out, `history-changed-since-${width}.png`), animations: 'disabled' });
 	const count = () => Number(execFileSync('git', ['-C', root, 'rev-list', '--count', 'HEAD', '--', path.relative(root, file)], { encoding: 'utf8' }).trim());
 	const before = count();
 	// The open version covers this window's text, so the typing comes from a second window on the same document.
@@ -87,7 +87,7 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	await page.getByRole('button', { name: 'Retry', exact: true }).click();
 	await expect(page.getByRole('button', { name: 'Restoring…', exact: true })).toBeDisabled();
 	await expect.poll(count).toBe(before + 1);
-	await page.screenshot({ path: path.join(out, `history-restoring-${width}.png`), animations: 'disabled' });
+	if (out) await page.screenshot({ path: path.join(out, `history-restoring-${width}.png`), animations: 'disabled' });
 	await other.locator('.cm-content').click();
 	await other.keyboard.press('ControlOrMeta+End');
 	await other.keyboard.type(' Typed while restoring.');
@@ -97,7 +97,7 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	await expect(rows).toHaveCount(before + 2);
 	await expect(rows.first()).toContainText('Current');
 	await expect(rows.nth(1)).toContainText('Restored');
-	await page.screenshot({ path: path.join(out, `history-restored-${width}.png`), animations: 'disabled' });
+	if (out) await page.screenshot({ path: path.join(out, `history-restored-${width}.png`), animations: 'disabled' });
 	// Both writes are versions: the restore, then the typing that landed after it.
 	const log = execFileSync('git', ['-C', root, 'log', '--format=%B%x00', '-n', '2', '--', path.relative(root, file)], { encoding: 'utf8' }).split('\0');
 	expect(log[1]).toContain('Restored');

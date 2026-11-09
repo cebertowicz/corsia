@@ -356,7 +356,7 @@ async def test_the_failed_terminal_settles_usage_before_its_marker(monkeypatch) 
     async def publish(**kwargs):
         order.append("publish")
 
-    async def release(ctx, settlement):
+    async def release(ctx, settlement, effects):
         order.append("release")
 
     monkeypatch.setattr(codex_runtime_events, "_settle_failed_turn_usage", settle)

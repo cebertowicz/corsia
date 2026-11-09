@@ -317,7 +317,8 @@ def _open_rows(db, closed, plan, executor: str, holder) -> Listing:
     closed task and the slot holder, so ``k of N`` describes the list it labels.
     Ready tasks lead it, so one ranked below waits is still named. An executor
     with nothing in its slot and nothing ready gets the idle listing instead
-    (``plans.close_next_idle``).
+    (``plans.close_next_idle``). Either listing counts Later work but never lists
+    it, so parked work never reads as work to pick up (Later design §2).
     """
     everything = node_order.open_tasks(db, plan, executor)
     projections = admission.project_many([(row, plan) for row in everything], db=db)
@@ -326,13 +327,12 @@ def _open_rows(db, closed, plan, executor: str, holder) -> Listing:
         idle = close_next_idle.idle_listing(plan, everything, projections, now)
         if idle is not None:
             return _idle_rows(idle)
-    # A wake composes this block with no closed task to leave out.
+    # A wake or a park composes this block with no closed task to leave out.
     excluded = set() if closed is None else {str(closed["id"])}
     if holder is not None:
         excluded.add(str(holder["node_id"]))
-    tasks = close_next_idle.ready_first(
-        [row for row in everything if str(row["id"]) not in excluded], projections,
-    )
+    remaining = [row for row in everything if str(row["id"]) not in excluded]
+    tasks = close_next_idle.ready_first([row for row in remaining if not row["later"]], projections)
     shown = tasks[:NEXT_OPEN_TASK_LIMIT]
     rows = [
         _task_row(
@@ -341,7 +341,7 @@ def _open_rows(db, closed, plan, executor: str, holder) -> Listing:
         )
         for row in shown
     ]
-    return Listing(rows, len(tasks), text.listed_text)
+    return Listing(rows, len(tasks), lambda shown, total: text.listed_text(shown, total, later=len(remaining) - len(tasks)))
 
 
 def _idle_rows(idle: close_next_idle.IdleListing) -> Listing:
@@ -363,7 +363,7 @@ def _idle_rows(idle: close_next_idle.IdleListing) -> Listing:
         rows.append(listed)
     return Listing(
         rows, idle.total,
-        lambda shown, total: text.idle_listed_text(shown, total, set_aside=idle.set_aside),
+        lambda shown, total: text.idle_listed_text(shown, total, set_aside=idle.set_aside, later=idle.later),
         text.idle_pick_up(idle.set_aside) if idle.pick_up else None,
     )
 

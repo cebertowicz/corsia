@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from typing import Any
 
 import pytest
 
@@ -104,6 +106,63 @@ async def test_checkpointed_long_history_starts_disposable_review_pass(review_en
         assert row["fork_id"] in handles
         assert stored(db, row["id"])["state"] == "forked"
         assert stored(db, row["id"])["node_id"] is None
+    finally:
+        handle = handles.pop(row["fork_id"])
+        handle.cancel_event.set()
+        await handle.task
+
+
+def _append_running_turn_with_step(db) -> int:
+    """A running Turn with one finished tool step; returns its interior cut sequence."""
+    rows: list[tuple[str, str, str, dict[str, Any]]] = [
+        ("busy-u", "user", "investigate", {}),
+        ("busy-a", "assistant", "reading", {"llm_tool_calls": [
+            {"id": "call-1", "type": "function", "function": {"name": "Read", "arguments": "{}"}},
+        ]}),
+        ("busy-r", "tool", "contents", {"tool_call_id": "call-1", "assistant_step_id": "busy-a", "name": "Read"}),
+        ("busy-a2", "assistant", "still working", {}),
+    ]
+    db.execute(
+        "INSERT INTO active_turns(id,thread_id,execution_epoch,model,status,started_at,boot_epoch) "
+        "VALUES ('busy','reviewer',0,'test-model','running','t4','boot')"
+    )
+    db.executemany(
+        "INSERT INTO messages(id,thread_id,role,content,metadata,created_at,seq) VALUES (?,'reviewer',?,?,?,'t4',?)",
+        [(row_id, role, content, json.dumps({**meta, "turn_id": "busy"}), seq)
+         for seq, (row_id, role, content, meta) in enumerate(rows, start=1)],
+    )
+    db.execute("UPDATE threads SET next_message_seq=? WHERE id='reviewer'", (len(rows) + 1,))
+    db.commit()
+    return 3
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_inside_running_turn_starts_review_pass(review_env, monkeypatch, tmp_path):
+    """A reviewer checkpointed mid-Turn still forks, from its checkpoint with no sealed tail."""
+    from core import artifact_review_runtime as runtime
+    from core import artifact_review_source as source
+    from core.fork_runtime import handles
+
+    db, artifact_id = review_env
+    text_document(db, artifact_id, tmp_path)
+    cut_seq = _append_running_turn_with_step(db)
+    previous = _install_checkpoint(db, cut_seq, "busy-r")
+    projection = source.bounded_review_history("reviewer", previous, db=db)
+    assert projection.turns == ()
+    assert projection.sealed_boundary == HistoryBoundary.of_checkpoint(previous)
+    row = request(db, artifact_id)
+    _prepare_cold_target(monkeypatch)
+    entered = asyncio.Event()
+
+    async def run(_request_id, _cold_request, cancelled):
+        entered.set()
+        await cancelled.wait()
+
+    monkeypatch.setattr(runtime, "_run", run)
+    await runtime.start(row["id"])
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    try:
+        assert stored(db, row["id"])["state"] == "forked"
     finally:
         handle = handles.pop(row["fork_id"])
         handle.cancel_event.set()

@@ -92,6 +92,35 @@ def refused_repo_link(path: str, method: str, body: Any) -> str | None:
     if resolved == WORKSPACE.resolve() or WORKSPACE.resolve() in resolved.parents:
         return None
     return "corsia_api links only a directory inside the workspace"
+
+
+def refused_repo_config(path: str, method: str, body: Any) -> str | None:
+    """B17: registering a repository through corsia_api takes the config check too.
+
+    The backend runs Git inside a registered checkout outside the agent sandbox, so a
+    repository whose own Git config names a program cannot be attached through this
+    route any more than through the native registration tools. Two calls attach an
+    existing local directory: a link add, and project creation carrying a repo path
+    (``repo_path``, or its legacy alias ``path``). A create makes a fresh repository,
+    so it carries no config an agent wrote. The person's own session and CLI
+    api-token calls are not routed here and stay unchecked.
+    """
+    if method != "POST" or not isinstance(body, dict):
+        return None
+    target: Any = None
+    if re.search(r"^/api/projects/[^/]+/repos$", path) and body.get("mode") == "link":
+        target = body.get("path")
+    elif re.fullmatch(r"/api/projects", path):
+        target = body.get("repo_path") or body.get("path")
+    if not isinstance(target, str) or not target.strip():
+        return None
+    from pathlib import Path
+
+    from infra.repo_config_allowlist import repo_config_refusal
+
+    return repo_config_refusal(Path(target))
+
+
 _SECRET_KEY = re.compile(r"token$|password|secret|credential|api.?key|authorization|host.?access|cookie", re.I)
 # The one host-access setting a conductor may set (the reviewer model). Every other
 # host-access key, Auto-approve above all, stays refused. Matched exactly, never by pattern.

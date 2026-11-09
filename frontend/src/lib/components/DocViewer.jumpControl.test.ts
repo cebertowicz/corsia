@@ -27,7 +27,7 @@ vi.mock('$lib/stores/deviceRecovery', () => ({ readDeviceRecovery: async () => [
 const TEXT = 'Alpha opens the plan.\n\n![shot](shot.png)\n\nBeta closes the plan.\n';
 const IMAGE = { from: TEXT.indexOf('![shot]'), to: TEXT.indexOf('![shot]') + '![shot](shot.png)'.length };
 const BETA_AT = TEXT.indexOf('Beta');
-const target: DocViewerTarget = { instanceId: 'reply-chip-tab', path: '/documents/plan.md', name: 'plan.md', projectId: 'project', threadId: 'thread', artifactId: 'artifact' };
+const target: DocViewerTarget = { instanceId: 'jump-control-tab', path: '/documents/plan.md', name: 'plan.md', projectId: 'project', threadId: 'thread', artifactId: 'artifact' };
 let host: HTMLElement;
 let component: ReturnType<typeof mount> | undefined;
 
@@ -55,7 +55,14 @@ async function open(comments: ServerComment[], props: { onOpenImage?: (request: 
 	await vi.waitFor(() => expect(host.querySelector('.cm-content')?.textContent).toContain('Alpha opens the plan.'));
 	await vi.waitFor(() => expect(get(docComments).artifact?.length).toBe(comments.length));
 }
-const chip = () => host.querySelector<HTMLButtonElement>('[data-doc-reply-chip] button.tile.chip');
+const control = () => host.querySelector<HTMLButtonElement>('[data-doc-jump] button');
+const band = () => host.querySelector('[data-doc-bottom-band]');
+
+/** The document's unread answers, as the surface holds them: every thread cleared, or one thread's cleared. */
+const readThread = (id: string) => docComments.update((all) => ({
+	...all,
+	artifact: all.artifact.map((comment) => (id === '*' || comment.id === id) ? { ...comment, newComment: false, newReplyIds: [] } : comment),
+}));
 
 beforeEach(() => {
 	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -81,63 +88,75 @@ afterEach(async () => {
 	for (const mock of Object.values(api)) mock.mockReset();
 });
 
-describe('the document reply chip', () => {
-	it('shows the chat chip with the count of new replies in this document', async () => {
+describe('the document jump control', () => {
+	// Nothing is drawn at measured boxes here (jsdom has no layout), so every unread thread is a target the reader has not reached.
+	it('counts every unread answer in one control and names the one it points at', async () => {
 		await open([ALPHA, PIN_ONE, PIN_TWO, BETA]);
-		await vi.waitFor(() => expect(chip()).not.toBeNull());
-		expect(chip()!.textContent).toContain('4 new replies');
-		expect(chip()!.querySelector('.ct-new')?.textContent).toBe('New');
+		await vi.waitFor(() => expect(control()).not.toBeNull());
+		expect(control()!.textContent).toContain('4 new');
+		expect(control()!.getAttribute('aria-label')).toBe('4 new, next below: “Alpha”');
+		expect(band()!.querySelectorAll('[data-doc-jump]')).toHaveLength(1);
 	});
 
-	it('is absent when no reply is waiting', async () => {
+	it('is absent, band and all, when nothing is waiting or the document is covered', async () => {
 		await open([BETA]);
-		expect(host.querySelector('[data-doc-reply-chip]')).toBeNull();
-	});
-
-	it('is absent while an image covers the document', async () => {
+		expect(band()).toBeNull();
 		await open([ALPHA], { covered: true });
-		expect(host.querySelector('[data-doc-reply-chip]')).toBeNull();
+		expect(band()).toBeNull();
 	});
 
-	it('lands a text reply as arrival does: its thread focused', async () => {
+	it('goes to the thread it points at, focused as an arrival lands it', async () => {
 		await open([ALPHA, BETA]);
-		await vi.waitFor(() => expect(chip()).not.toBeNull());
-		chip()!.click();
+		await vi.waitFor(() => expect(control()).not.toBeNull());
+		control()!.click();
 		flushSync();
 		await vi.waitFor(() => expect(get(focusedDocComment)).toBe('alpha'));
 	});
 
-	it('opens the image at its pin for a reply on an image comment, then steps on, and round again', async () => {
+	it('opens the image at its pin, then points at the next pin once that one is read', async () => {
 		const onOpenImage = vi.fn();
 		await open([PIN_ONE, PIN_TWO], { onOpenImage });
-		await vi.waitFor(() => expect(chip()).not.toBeNull());
-		chip()!.click();
+		await vi.waitFor(() => expect(control()).not.toBeNull());
+		control()!.click();
 		await vi.waitFor(() => expect(onOpenImage).toHaveBeenCalledTimes(1));
 		expect(onOpenImage.mock.calls[0][0]).toMatchObject({ src: 'shot.png', focus: { id: 'pin-one' } });
-		chip()!.click();
+		readThread('pin-one');
+		// Its alt text is what the quote reads as, marks taken out the way a card's label does.
+		await vi.waitFor(() => expect(control()!.getAttribute('aria-label')).toBe('2 new, next below: “shot”'));
+		control()!.click();
 		await vi.waitFor(() => expect(onOpenImage).toHaveBeenCalledTimes(2));
 		expect(onOpenImage.mock.calls[1][0]).toMatchObject({ focus: { id: 'pin-two' } });
-		chip()!.click();
-		await vi.waitFor(() => expect(onOpenImage).toHaveBeenCalledTimes(3));
-		expect(onOpenImage.mock.calls[2][0]).toMatchObject({ focus: { id: 'pin-one' } });
 	});
 
-	it('steps aside while the comments sheet it opened is up, and is back, still counting, once it closes', async () => {
+	it('steps aside while the comments it opened are up, and is back, still counting, once they close', async () => {
 		await open([ALPHA, BETA]);
-		await vi.waitFor(() => expect(chip()).not.toBeNull());
-		chip()!.click();
+		await vi.waitFor(() => expect(control()).not.toBeNull());
+		control()!.click();
 		await vi.waitFor(() => expect(get(focusedDocComment)).toBe('alpha'));
-		await vi.waitFor(() => expect(host.querySelector('[data-doc-reply-chip]')).toBeNull());
+		await vi.waitFor(() => expect(control()).toBeNull());
 		document.querySelector<HTMLButtonElement>('button[aria-label="Close comments"]')!.click();
-		await vi.waitFor(() => expect(chip()?.textContent).toContain('1 new reply'), { timeout: 2000 });
+		await vi.waitFor(() => expect(control()?.textContent).toContain('1 new'), { timeout: 2000 });
 	});
 
-	it('counts down as replies are read and leaves with the last', async () => {
+	it('counts down as answers are read and leaves with the last', async () => {
 		await open([ALPHA, PIN_ONE]);
-		await vi.waitFor(() => expect(chip()?.textContent).toContain('2 new replies'));
-		docComments.update((all) => ({ ...all, artifact: all.artifact.map((comment) => comment.id === 'alpha' ? { ...comment, newReplyIds: [] } : comment) }));
-		await vi.waitFor(() => expect(chip()?.textContent).toContain('1 new reply'));
-		docComments.update((all) => ({ ...all, artifact: all.artifact.map((comment) => ({ ...comment, newReplyIds: [] })) }));
-		await vi.waitFor(() => expect(host.querySelector('[data-doc-reply-chip]')).toBeNull(), { timeout: 2000 });
+		await vi.waitFor(() => expect(control()?.textContent).toContain('2 new'));
+		readThread('alpha');
+		await vi.waitFor(() => expect(control()?.textContent).toContain('1 new'));
+		readThread('*');
+		await vi.waitFor(() => expect(band()).toBeNull(), { timeout: 2000 });
+	});
+
+	it('counts an agent suggestion the person has not read beside an answer, in the one total', async () => {
+		const suggestion = { ...root('sug', { from: BETA_AT, to: BETA_AT + 4 }, 'Beta', []), replacement: 'Beta closes the plan well.' };
+		api.fetchComments.mockResolvedValue({
+			comments: [ALPHA, { ...suggestion, author: 'Maya Chen', author_kind: 'agent', new_comment: true }],
+			feedback: { open_count: 2, owner_label: null, undelivered_batches: [] },
+		});
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(DocViewer, { target: host, props: { target } });
+		await vi.waitFor(() => expect(get(docComments).artifact?.length).toBe(2));
+		await vi.waitFor(() => expect(control()?.textContent).toContain('2 new'));
 	});
 });

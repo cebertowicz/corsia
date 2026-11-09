@@ -55,7 +55,7 @@ for (const kind of ['draft', 'reply'] as const) {
     await page.locator('.cm-scroller').evaluate(e => { e.scrollTop -= 100; });
     await expect.poll(async () => (await line.boundingBox())!.y).toBeGreaterThan(before + 50);
    }
-   const input = page.getByPlaceholder(kind === 'draft' ? 'Comment…' : 'Reply…');
+   const input = page.getByPlaceholder(kind === 'draft' ? 'Comment, or @ to tag an agent' : 'Reply…');
    await expect(input).toBeVisible(); await input.focus();
    const sample = async () => {
     const card = (await page.locator('[data-popover]').boundingBox())!;
@@ -92,7 +92,7 @@ test('@comment-box-steady phone uses a sheet while the new comment grows', async
  const doc = await seedLiveDocument(request, 'steady-phone', `lead text\n${quote}\ntail text\n`);
  await openLiveDocument(page, doc);
  await beginComment(page, quote);
- const input = page.getByPlaceholder('Comment…');
+ const input = page.getByPlaceholder('Comment, or @ to tag an agent');
  await expect(page.locator('[data-popover] .composer')).toHaveCount(0);
  await expect(page.getByRole('dialog', { name: 'Document comments' })).toBeVisible();
  for (let i = 0; i < 9; i++) { await input.pressSequentially(`line ${i}`); await input.press('Enter'); await expect(input).toBeFocused(); }

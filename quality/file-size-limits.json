@@ -38,7 +38,7 @@
     "backend/subagents/child_thread.py": 560,
     "backend/subagents/codex_app_server.py": 901,
     "backend/subagents/codex_runtime.py": 2304,
-    "backend/subagents/codex_runtime_events.py": 657,
+    "backend/subagents/codex_runtime_events.py": 652,
     "backend/tools/delegation.py": 451,
     "backend/tools/filesystem_effects.py": 658,
     "backend/tools/host_access_gate.py": 892,

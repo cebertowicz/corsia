@@ -46,17 +46,20 @@ let realRaf: typeof requestAnimationFrame;
 let realRO: typeof ResizeObserver;
 let observers: { callback: ResizeObserverCallback; targets: Element[] }[] = [];
 
-function mountPanel(): Panel {
-	// The transcript's own container, exactly as the chat shell composes it:
-	// `.messages` and `.input-floater` are siblings inside it.
+function mountPanel(besideMargin = false): Panel {
+	// The transcript's own container, as a subagent leaf composes it: `.messages` and
+	// `.input-floater` are siblings inside it. The chat shell instead wraps the transcript
+	// with its comment margin column and names the container as the transcript's layout root.
 	const container = document.createElement('div');
 	container.className = 'chat-content';
 	host.appendChild(container);
+	const transcriptArea = besideMargin ? container.appendChild(document.createElement('div')) : container;
 
 	const list = mount(MessageList, {
-		target: container,
+		target: transcriptArea,
 		props: {
 			messagesEl: undefined,
+			layoutRoot: besideMargin ? container : undefined,
 			userIsNearBottom: true,
 			ignoreScrollEvents: false,
 			onOpenLightbox: () => {},
@@ -262,6 +265,17 @@ describe('two transcripts beside each other (#1949)', () => {
 
 		expect(transcriptWrites).toEqual([]);
 		expect(neighboringWrites).toEqual([CONTENT]);
+	});
+
+	it('re-pins a transcript beside the comment margin when its panel\'s composer grows', () => {
+		const chat = mountPanel(true);
+		const writes = recordScrollWrites(chat.scroller);
+
+		chat.band.height = BAND + BAND_GROWTH;
+		fireObservers();
+		runFrames();
+
+		expect(writes).toEqual([CONTENT]);
 	});
 
 	it('re-pins only the transcript whose own composer grew', () => {

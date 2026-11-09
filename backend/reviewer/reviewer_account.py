@@ -77,18 +77,33 @@ def resolve_scope_reviewer_account(target, project_id: str | None, *, db, thread
         identity, reason = scope_account(provider, project_id=project, db=db)
     else:
         identity, reason = turn_account(provider, thread_id=thread_id, model=target.catalog_id, db=db)
-    if reason or identity is None:
+    # The detached reviewer's source comes from project policy, which holds no
+    # view of a per-turn move, so its lifecycle reason waits for the rollover
+    # check below. With no source account the identity is None and that still
+    # refuses here. A thread's turn account already applied that move, a pending
+    # choice included, so its cause refuses unchanged.
+    deferred_reason = (
+        reason if thread_id is None and identity is not None and reason else None
+    )
+    if (reason or identity is None) and deferred_reason is None:
         raise _unavailable(reason or "account_not_configured")
     base = harness_base_row(target.catalog_id, db=db)
     if base is None:
-        raise _unavailable("model_not_in_catalog")
+        # Same reason precedence as the refusal above: an account cause on the
+        # source is not replaced by a catalog one it never reached.
+        raise _unavailable(reason or "model_not_in_catalog")
     # The target already carries the model's catalog availability, including the
     # provider-owned review selector the user catalog hides; the account decision
     # below adds only what is account-specific.
     base = {**base, "status": "ready", "status_reason": None}
     # Thread selection already applied rollover, including pending-move rules.
     if thread_id is None:
-        identity = rollover_destination(provider, identity, base, project, db=db) or identity
+        rolled = rollover_destination(provider, identity, base, project, db=db) or identity
+        # The waited reason belongs to the source, so it refuses when rollover
+        # finds no other account; a moved identity carries no reason of its own.
+        if deferred_reason is not None and rolled == identity:
+            raise _unavailable(deferred_reason)
+        identity = rolled
     if identity not in {item["id"] for item in permitted_accounts(provider, project_ids=[project], db=db)}:
         raise _unavailable("account_project_denied")
     decision = account_model_status(get_account(identity, db=db), base, project_ids=[project], db=db)

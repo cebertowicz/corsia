@@ -20,21 +20,21 @@ CLOCK = "2026-10-08T12:00:00+00:00"
 _IDLE = (
     'Current plan status: {{"as_of":"{clock}","current_task":null,"next_step":null,'
     '"no_current_task":true,"note":"idle: nothing open","plan":{{"id":"{plan}","revision":1,'
-    '"state":"active"}},"progress":{{"done":0,"liveness":"idle","total":0}},"severity":"idle",'
+    '"state":"active"}},"progress":{{"above_cut":0,"done":0,"later":0,"liveness":"idle","total":0}},"severity":"idle",'
     '"status_read":"plan_read()"}}'
 )
 _PENDING = (
     'Current plan status: {{"as_of":"{clock}","current_task":null,"next_step":{{"condition":"ready",'
     '"detail_read":"plan_read(node_id=\'{first}\')","id":"{first}","reason":"Not started",'
     '"revision":1,"state":"pending","title":"First"}},"no_current_task":true,"plan":{{"id":"{plan}",'
-    '"revision":{revision},"state":"active"}},"progress":{{"done":0,"liveness":"idle","total":{total}}},'
+    '"revision":{revision},"state":"active"}},"progress":{{"above_cut":{total},"done":0,"later":0,"liveness":"idle","total":{total}}},'
     '"severity":"ready","status_read":"plan_read()"}}'
 )
 _ACTIVE = (
     'Current plan status: {{"as_of":"{clock}","current_task":null,"next_step":{{"condition":"ready",'
     '"detail_read":"plan_read(node_id=\'{first}\')","id":"{first}","reason":"Set aside",'
     '"revision":2,"state":"active","title":"First"}},"no_current_task":true,"plan":{{"id":"{plan}",'
-    '"revision":{revision},"state":"active"}},"progress":{{"done":0,"liveness":"idle","total":{total}}},'
+    '"revision":{revision},"state":"active"}},"progress":{{"above_cut":{total},"done":0,"later":0,"liveness":"idle","total":{total}}},'
     '"severity":"ready","status_read":"plan_read()"}}'
 )
 

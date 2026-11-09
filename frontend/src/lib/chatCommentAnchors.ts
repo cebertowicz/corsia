@@ -1,3 +1,6 @@
+import type { ChatComment as StoredComment } from '$lib/chatCommentTypes';
+import { toasts } from '$lib/stores/toast';
+
 export interface ChatComment extends ChatCommentAnchor {
 	id: string;
 	messageId: string;
@@ -13,6 +16,24 @@ export interface ChatCommentAnchor {
 	quote: string;
 	anchor_prefix: string;
 	anchor_suffix: string;
+}
+
+/**
+ * Send a reply to a stored comment: that comment's own anchor plus the new note, in the shape the composer's
+ * send takes. When the comment's message is gone or carries no place in history to answer into, say so and
+ * reject instead, so every thread the reply was typed in keeps it.
+ */
+export function sendCommentReply(message: { id: string; seq?: number | null } | undefined, comment: StoredComment | undefined, note: string, send: (reply: ChatComment) => void): void {
+	if (!message || !comment || typeof message.seq !== 'number') {
+		toasts.show('CORSIA couldn’t send this reply because its comment isn’t in this chat. Your reply stays here; comment on the text again.', 'error');
+		throw new Error('Comment is unavailable');
+	}
+	send({
+		id: crypto.randomUUID(), messageId: message.id, seq: message.seq,
+		from_off: comment.from_off, to_off: comment.to_off, quote: comment.quote,
+		anchor_prefix: comment.anchor_prefix, anchor_suffix: comment.anchor_suffix, note,
+		root_user_message_id: comment.user_message_id, root_cid: comment.cid,
+	});
 }
 
 /** Clip a selection to the first message body and capture its rendered-text coordinates. */

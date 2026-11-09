@@ -20,13 +20,26 @@ ACTIVE_TASK_PAGE_SIZE = 32
 
 #: One traversal powers every canonical plan-order reader. ``live`` projects
 #: only fields needed by ordered admission and compact next-work consumers;
-#: prose joins only through ``_FULL_ORDERED_SQL`` for explicit full-row reads.
+#: prose joins only through ``_full_ordered_sql`` for explicit full-row reads.
+#: ``{later_column}`` is the Later cut once schema 185 adds it; below that rung
+#: nothing is Later, so it projects the constant the cut would hold and every
+#: task stays a candidate, which is what a pre-cut plan already means.
 _LIVE_COLUMNS = """id,parent_id,order_key,kind,state,archived_at,assignee,
                executor_thread_id,owner_thread_id,requirements_revision,
-               revision,title"""
+               revision,title,{later_column}"""
 
-_LIVE_ALL_SQL = f"""    live AS (
-        SELECT {_LIVE_COLUMNS}
+
+def _live_columns(db) -> str:
+    """``_LIVE_COLUMNS`` with the Later cut projected for this database's rung."""
+    return _LIVE_COLUMNS.format(
+        later_column="later" if node_states.later_ready(db) else "0 AS later"
+    )
+
+
+def _live_all_sql(db) -> str:
+    """The whole-plan ``live`` projection over every unarchived row."""
+    return f"""    live AS (
+        SELECT {_live_columns(db)}
         FROM plan_nodes
         WHERE plan_id=? AND archived_at IS NULL
 """
@@ -48,7 +61,7 @@ _LIVE_OPEN_SQL = f"""    scope(id,parent_id) AS (
         JOIN scope ON parent.id=scope.parent_id
         WHERE {node_states.unarchived_sql("parent")}
     ), live AS (
-        SELECT {_LIVE_COLUMNS}
+        SELECT {{later_columns}}
         FROM plan_nodes
         WHERE id IN (SELECT id FROM scope)
 """
@@ -78,7 +91,9 @@ _ORDERED_TAIL_SQL = """    ), ranked AS (
     )
 """
 
-_ORDERED_CTE_SQL = "WITH RECURSIVE\n" + _LIVE_ALL_SQL + _ORDERED_TAIL_SQL
+def _ordered_cte_sql(db) -> str:
+    """The depth-first CTE over every unarchived row of one plan."""
+    return "WITH RECURSIVE\n" + _live_all_sql(db) + _ORDERED_TAIL_SQL
 
 
 def _open_cte(db) -> str:
@@ -95,7 +110,9 @@ def _open_cte(db) -> str:
         stale = "archived_at IS NULL AND folded=1 AND state='pending'"
     else:
         seed, stale = node_states.open_sql("plan_nodes"), "0"
-    sql = _LIVE_OPEN_SQL.replace(_SEED, seed).replace(_STALE, stale)
+    sql = (
+        _LIVE_OPEN_SQL.replace(_SEED, seed).replace(_STALE, stale)
+    ).format(later_columns=_live_columns(db))
     return "WITH RECURSIVE\n" + sql + _ORDERED_TAIL_SQL
 
 
@@ -104,13 +121,19 @@ _ORDER_BY_SQL = """ORDER BY ordered.stranded,
              CASE WHEN ordered.stranded=1 THEN ordered.order_key END,
              CASE WHEN ordered.stranded=1 THEN ordered.id END"""
 
+#: Auto-selection is the only reader of the ``active_tasks_only`` branch, so the
+#: Later cut lives here and nowhere else in admission: an explicit ``start`` or
+#: ``activate`` goes through ``select`` and ``validity.eligible``, which never see
+#: this SQL, so a Later task stays startable (Later design §2).
 _ORDERED_CURSOR_TAIL_SQL = """SELECT ordered.* FROM ordered
-    WHERE ?=0 OR (ordered.kind='task' AND ordered.state='active')
+    WHERE ?=0 OR (ordered.kind='task' AND ordered.state='active' AND ordered.later=0)
     """ + _ORDER_BY_SQL
 
 #: CROSS JOIN pins the plan's own rows as the outer loop. Left to choose, SQLite
 #: scanned every plan's nodes and probed this plan's rows for each one.
-_FULL_ORDERED_SQL = _ORDERED_CTE_SQL + """SELECT node.*, ordered.ancestor_path,
+def _full_ordered_sql(db) -> str:
+    """The order SQL that reads whole rows, for explicit full-row readers."""
+    return _ordered_cte_sql(db) + """SELECT node.*, ordered.ancestor_path,
            ordered.tree_position, ordered.stranded
     FROM ordered CROSS JOIN plan_nodes AS node ON node.id=ordered.id
     """ + _ORDER_BY_SQL
@@ -138,7 +161,7 @@ def _warn_stranded(rows) -> None:
 
 def ordered_nodes_with_paths(db, plan_id: str) -> list[tuple[object, tuple[str, ...]]]:
     """Return full live node rows and paths for consumers that need node bodies."""
-    rows = fetch_all(db, _FULL_ORDERED_SQL, (plan_id,))
+    rows = fetch_all(db, _full_ordered_sql(db), (plan_id,))
     _warn_stranded(rows)
     return [
         (row, tuple(json.loads(str(row["ancestor_path"]))))

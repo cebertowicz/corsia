@@ -100,7 +100,7 @@ describe('orphaned is the text on screen, plus a refused accept', () => {
 	])('never counts a resolved $name whose quote is gone as unplaced', ({ overrides }) => {
 		// A decision resolves its suggestion on the server; the header count is the list's open 'Text changed' group.
 		const rows = commentsInDocumentOrder([comment('done', 5, 'quote', { ...overrides, resolved: true }), comment('lost', 5, 'quote')], 'keep other here');
-		expect(commentSurfaceStatus(rows).orphanedCount).toBe(1);
+		expect(commentSurfaceStatus(rows, 'keep other here').orphanedCount).toBe(1);
 	});
 });
 
@@ -189,10 +189,10 @@ describe('inline suggestions in the highlight ranges', () => {
 
 describe('comment surface status', () => {
 	it('counts orphaned cards and reports the placement reload state', () => {
-		expect(commentSurfaceStatus([])).toEqual({ commentCount: 0, orphanedCount: 0, replaceableCount: 0, placementReloading: false, placementReloadError: false });
+		expect(commentSurfaceStatus([], '')).toEqual({ commentCount: 0, orphanedCount: 0, replaceableCount: 0, placementReloading: false, placementReloadError: false });
 		expect(commentSurfaceStatus([
 			comment('a', 0, 'x', { orphaned: true }), comment('b', 0, 'x', { placementReloading: true }), comment('c', 0, 'x', { placementReloadError: true }),
-		])).toEqual({ commentCount: 3, orphanedCount: 1, replaceableCount: 1, placementReloading: true, placementReloadError: true });
+		], 'x')).toEqual({ commentCount: 3, orphanedCount: 1, replaceableCount: 1, placementReloading: true, placementReloadError: true });
 	});
 
 	it('offers Place again only for orphaned comments whose quote remains in the text', () => {
@@ -202,15 +202,29 @@ describe('comment surface status', () => {
 		const refused = commentsInDocumentOrder([comment('refused', 8, 'quote')], 'refused quote', { refused: 'Refused' });
 
 		expect(deleted[0].detached).toBe(true);
-		expect(commentSurfaceStatus(deleted)).toMatchObject({ orphanedCount: 1, replaceableCount: 0 });
+		expect(commentSurfaceStatus(deleted, 'other')).toMatchObject({ orphanedCount: 1, replaceableCount: 0 });
 		for (const rows of [restored, elsewhere, refused]) {
 			expect(rows[0].detached).toBe(false);
-			expect(commentSurfaceStatus(rows)).toMatchObject({ orphanedCount: 1, replaceableCount: 1 });
+			expect(commentSurfaceStatus(rows, 'quote')).toMatchObject({ orphanedCount: 1, replaceableCount: 1 });
 		}
 	});
 
+	it('offers recovery for a returned quote while keeping the collapsed anchor at its last line', () => {
+		const original = comment('deleted', 4, 'quote', { to: 4, drawn: true });
+		const goneText = 'The  fox';
+		const returnedText = 'The  fox; quote returned';
+		const gone = commentsInDocumentOrder([original], goneText);
+		const returned = commentsInDocumentOrder([original], returnedText);
+
+		expect(gone[0]).toMatchObject({ orphaned: true, detached: true });
+		expect(commentSurfaceStatus(gone, goneText).replaceableCount).toBe(0);
+		expect(returned[0]).toMatchObject({ orphaned: true, detached: true });
+		expect(canvasCommentHighlights(returned, returnedText, null, undefined)).toMatchObject([{ id: 'deleted', from: 4, to: 4, point: true }]);
+		expect(commentSurfaceStatus(returned, returnedText).replaceableCount).toBe(1);
+	});
+
 	it('counts only open threads for the header pill', () => {
-		expect(commentSurfaceStatus([comment('a', 0, 'x'), comment('b', 0, 'x', { resolved: true }), comment('c', 0, 'x', { resolved: true, orphaned: true })]).commentCount).toBe(1);
+		expect(commentSurfaceStatus([comment('a', 0, 'x'), comment('b', 0, 'x', { resolved: true }), comment('c', 0, 'x', { resolved: true, orphaned: true })], 'x').commentCount).toBe(1);
 	});
 });
 
@@ -338,7 +352,7 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 		const text = 'Lunch is at noon. Train leaves at .';
 		const rows = commentsInDocumentOrder([accepted()], text);
 		expect(rows[0]).toMatchObject({ orphaned: false, detached: false });
-		expect(commentSurfaceStatus(rows)).toMatchObject({ orphanedCount: 0, commentCount: 1 });
+		expect(commentSurfaceStatus(rows, text)).toMatchObject({ orphanedCount: 0, commentCount: 1 });
 		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 's1', point: true }]);
 	});
 
@@ -349,7 +363,7 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 
 	it('is not counted as text that could not be placed', () => {
 		const rows = commentsInDocumentOrder([accepted()], after);
-		expect(commentSurfaceStatus(rows)).toMatchObject({ orphanedCount: 0, replaceableCount: 0, commentCount: 1 });
+		expect(commentSurfaceStatus(rows, after)).toMatchObject({ orphanedCount: 0, replaceableCount: 0, commentCount: 1 });
 	});
 
 	it('reads as accepted on its new text while its own Accept is in flight and the replacement already stands where the quote was', () => {

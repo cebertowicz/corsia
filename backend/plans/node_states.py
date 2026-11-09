@@ -11,6 +11,7 @@ of an import cycle.
 from __future__ import annotations
 
 import sqlite3
+import weakref
 from collections.abc import Iterable, Mapping
 
 _ACCEPTED_STATES = frozenset({"accepted", "accepted_with_followup"})
@@ -139,6 +140,27 @@ def listed_open_sql(alias: str) -> str:
     settled row with open work beneath it is.
     """
     return f"{unarchived_sql(alias)} AND {alias}.folded = 0"
+
+
+#: Per connection, the schema version at which ``plan_nodes.later`` was last seen.
+_LATER_READY: weakref.WeakKeyDictionary[sqlite3.Connection, int] = weakref.WeakKeyDictionary()
+
+
+def later_ready(connection: sqlite3.Connection) -> bool:
+    """Whether ``plan_nodes`` carries the Later cut (schema 185); older ladder rungs run plans code first.
+
+    The answer is kept per connection until its schema changes (``PRAGMA schema_version``),
+    exactly as ``plans.aggregates.ready`` keeps it for the aggregate columns. A read that
+    has no Later rows to exclude is what a pre-185 database already means, so a caller
+    without the column reads the pre-cut behaviour, never an error.
+    """
+    version = connection.execute("PRAGMA schema_version").fetchone()[0]
+    if _LATER_READY.get(connection) == version:
+        return True
+    found = any(row[1] == "later" for row in connection.execute("PRAGMA table_info(plan_nodes)"))
+    if found:
+        _LATER_READY[connection] = version
+    return found
 
 
 def outside_retired_branch_sql(alias: str) -> str:

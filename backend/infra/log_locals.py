@@ -12,13 +12,15 @@ import sys
 
 from loguru import logger
 
+from infra.log_format import LOGURU_FORMAT
+
 _DEFAULT_HANDLER_ID = 0
 
 
 def drop_traceback_locals() -> None:
-    """Replace loguru's default stderr handler with the same one minus ``diagnose``. Idempotent."""
+    """Format loguru's stderr handler without traceback locals. Idempotent."""
     try:
         logger.remove(_DEFAULT_HANDLER_ID)
     except ValueError:
         return  # already replaced, or removed by an entrypoint that set its own sinks
-    logger.add(sys.stderr, diagnose=False)
+    logger.add(sys.stderr, diagnose=False, format=LOGURU_FORMAT)
