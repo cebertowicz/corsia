@@ -54,6 +54,7 @@ export async function seed(page: Page, request: APIRequestContext) {
     localStorage.setItem('corsia:artifactWorkspace:v1', JSON.stringify({ threads: { [thread]: { tabs: [{ instanceId: 'contact-sheet', artifactId: artifact, path: docPath, title: 'review.md', loadedRevision: null, latestRevision: null, status: 'loading' }], activeTabId: 'contact-sheet', visible: true, activeSurface: 'artifact' } }, splitWidth: null }));
   }, { thread, artifact, docPath });
   await loginByUrl(page, { waitForComposer: false });
+  if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
   await sidebarThread(page, title).click();
   await expect(page.locator('.cm-content')).toBeVisible();
   const images = page.locator('.cm-md-image img, .cm-md-table td img');

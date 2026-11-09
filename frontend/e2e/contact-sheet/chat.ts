@@ -33,6 +33,7 @@ export async function seed(page: Page, request: APIRequestContext) {
     metadata: { reply_context: { comments: [{ id: 'c1', seq: 1, from_off: 0, to_off: quote.length, quote, anchor_prefix: '', anchor_suffix: '', note: 'Can the table remain readable on a small phone?', cid: 'c1' }] } },
   }, TEST_TOKEN);
   await openAppPastLanding(page);
+  if ((page.viewportSize()?.width ?? 0) <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
   await sidebarThread(page, title).click();
   await expect(page.locator('.sent-comment')).toBeVisible();
 }
