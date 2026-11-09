@@ -51,8 +51,8 @@ the whole screen does. Where an older section below disagrees, it
 carries a **Superseded by §0** note at that point, and this section wins.
 
 **Converted screens:** the chat view. A screen counts as converted only once
-it is on this list; the PR that brings a whole screen into line adds it here.
-Every screen not listed is unconverted.
+it is on this list; the PR that adds a new screen, or brings a whole screen
+into line, adds it here. Every screen not listed is unconverted.
 
 **What this section is.** For each role on the screen, it gives the treatment the approved chat view
 actually draws, with its tokens and the component that draws it. It describes
