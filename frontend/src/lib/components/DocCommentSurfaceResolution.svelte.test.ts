@@ -49,7 +49,7 @@ it('keeps a resolved card at its last anchor after shared focus clears', async (
 	flushSync();
 	await tick();
 	expect(get(focusedDocComment)).toBeNull();
-	expect(ui.state).toEqual({ kind: 'thread', id: 'a' });
+	expect(ui.state).toEqual({ kind: 'thread', id: 'a', fromText: true });
 	expect(onClose).not.toHaveBeenCalled();
 	expect(popover.getAttribute('aria-hidden')).toBeNull();
 	expect(popover.style.cssText).toBe(position);

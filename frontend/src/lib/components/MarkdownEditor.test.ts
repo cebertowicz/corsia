@@ -161,6 +161,46 @@ describe('MarkdownEditor edits', () => {
 			expect(onAnchorFocus).toHaveBeenCalledWith('plain', expect.anything(), undefined, undefined);
 		});
 
+		it('picks a comment once as the caret arrives in it: typing and the arrow keys inside it edit, and leaving and coming back picks it again', () => {
+			const onAnchorFocus = vi.fn(), onCaretAway = vi.fn();
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, onCaretAway });
+			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select' }); flushSync();
+			expect(onAnchorFocus).toHaveBeenCalledOnce();
+			view.dispatch({ changes: { from: 8, insert: 'x' }, selection: { anchor: 9 }, userEvent: 'input.type' }); flushSync();
+			view.dispatch({ changes: { from: 8, to: 9 }, selection: { anchor: 8 }, userEvent: 'delete.backward' }); flushSync();
+			view.dispatch({ selection: { anchor: 9 }, userEvent: 'select' }); flushSync();
+			expect(onAnchorFocus).toHaveBeenCalledOnce();
+			expect(view.state.doc.toString()).toBe('quick brown fox');
+			view.dispatch({ selection: { anchor: 2 }, userEvent: 'select' }); flushSync();
+			expect(onCaretAway).toHaveBeenCalledOnce();
+			view.dispatch({ selection: { anchor: 7 }, userEvent: 'select' }); flushSync();
+			expect(onAnchorFocus).toHaveBeenCalledTimes(2);
+		});
+
+		it('where cards open as the phone sheet, only a tap that brings the caret into a comment opens it; a caret already there, or moved in by keys, is editing', async () => {
+			const onAnchorFocus = vi.fn();
+			const view = open({ highlights: [{ from: 6, to: 11, id: 'plain' }], onAnchorFocus, commentsAsSheet: true });
+			// The press the editor reports once the pointer is up, with the caret where it landed.
+			const tap = async (at: number) => {
+				view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, detail: 1 }));
+				view.dispatch({ selection: { anchor: at }, userEvent: 'select.pointer' });
+				window.dispatchEvent(new MouseEvent('mouseup'));
+				await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+				flushSync();
+			};
+			view.dispatch({ selection: { anchor: 8 }, userEvent: 'select' }); flushSync();
+			expect(onAnchorFocus).not.toHaveBeenCalled();
+			view.dispatch({ selection: { anchor: 2 }, userEvent: 'select' }); flushSync();
+			await tap(8);
+			expect(onAnchorFocus).toHaveBeenCalledOnce();
+			expect(onAnchorFocus).toHaveBeenCalledWith('plain', expect.anything(), undefined, expect.any(MouseEvent));
+			// The sheet closed and the person taps into the same text again to edit it, then types.
+			await tap(9);
+			view.dispatch({ changes: { from: 9, insert: 'x' }, selection: { anchor: 10 }, userEvent: 'input.type' }); flushSync();
+			expect(onAnchorFocus).toHaveBeenCalledOnce();
+			expect(view.state.doc.toString()).toBe('quick broxwn fox');
+		});
+
 		it('reports the pointer on a suggestion to the viewer', () => {
 			const onSuggestionHover = vi.fn();
 			open({ highlights: [suggestion('red')], onSuggestionHover });

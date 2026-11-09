@@ -175,16 +175,24 @@
 		if (open) open(ids, opener, undefined, click); else onAnchorFocus?.(ids[0], liveAnchor(ids[0]), opener.dataset.suggestionId !== undefined || undefined, click);
 	}
 
+	/** The highlight the caret last came to rest in: a caret moving inside it (typing, Backspace, the arrow keys) is editing there, and does not pick its card again. */
+	let caretIn: string | null = null;
+
 	function handleSelection(v: EditorView, click?: MouseEvent) {
 		const r = v.state.selection.main;
 		if (r.empty) {
 			onSelect?.(null);
 			const hit = curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to);
-			// Where cards open as the phone sheet, a caret in a suggestion is editing: only a press on its insert (suggestionMarks) opens the card.
-			if (hit && !(hit.suggestion && commentsAsSheet) && v.coordsAtPos(r.from)) {
+			const arrived = !!hit && hit.id !== caretIn;
+			caretIn = hit?.id ?? null;
+			// Where cards open as the phone sheet, which covers the text, only a tap that brings the caret into a comment opens it: a caret
+			// already there, or moved in by typing or the arrow keys, is editing. A caret in a suggestion opens none; a press on its insert does (suggestionMarks).
+			const opens = commentsAsSheet ? arrived && !!click && !hit?.suggestion : arrived || !!click;
+			if (hit && opens && v.coordsAtPos(r.from)) {
 				onAnchorFocus?.(hit.id, liveAnchor(hit.id), hit.suggestion ? true : undefined, click);
 			} else if (!hit) onCaretAway?.();
 		} else {
+			caretIn = null;
 			emitSelection(v);
 		}
 	}

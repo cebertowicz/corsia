@@ -10,7 +10,8 @@ import { arrivedDocComments } from '$lib/stores/docComments';
 /** What a card is anchored to; the popover owns the union. */
 export type CommentAnchor = NonNullable<PopoverAnchor>;
 
-export type CommentSurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string; ids?: string[] } | { kind: 'list' } | null;
+/** `fromText`: the thread was picked in the document's text, which the person may be editing, so its card leaves the focus there. */
+export type CommentSurfaceState = { kind: 'draft' } | { kind: 'thread'; id: string; ids?: string[]; fromText?: true } | { kind: 'list' } | null;
 
 /**
  * Return focus to the document's editor. CodeMirror's own focus() re-applies its selection without scrolling;
@@ -79,7 +80,7 @@ export function createCommentSurfaceState(restoreEditor: () => void, draftScope?
 		if (state?.kind === 'list') { focusedDocComment.set(id); return changed; }
 		if (state?.kind === 'thread' && state.ids?.includes(id)) { state = { ...state, id }; focusedDocComment.set(id); return changed; }
 		focusedDocComment.set(id);
-		state = { kind: 'thread', id };
+		state = { kind: 'thread', id, fromText: true };
 		anchor = rect;
 		atClick = clicked;
 		restoreFocus = restoreEditor;
