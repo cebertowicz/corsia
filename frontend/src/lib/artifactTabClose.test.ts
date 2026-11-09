@@ -36,12 +36,12 @@ beforeEach(() => {
 });
 
 describe('requestArtifactTabClose', () => {
-	it('sends the open batch after a clean save, then closes the tab', async () => {
-		await requestArtifactTabClose('t1', doc, vi.fn());
+	it('closes the tab after a clean save without waiting for the open batch to send', async () => {
+		mocks.sendDocFeedback.mockReturnValue(new Promise(() => {}));
+		void requestArtifactTabClose('t1', doc, vi.fn());
+		await vi.waitFor(() => expect(mocks.closeArtifactTab).toHaveBeenCalledWith('t1', 'tab-1'));
 		expect(mocks.closeTabWithSaveGate).toHaveBeenCalledWith({ instanceId: 'tab-1' }, expect.any(Object));
 		expect(mocks.sendDocFeedback).toHaveBeenCalledWith('art-1');
-		expect(mocks.sendDocFeedback.mock.invocationCallOrder[0]).toBeLessThan(mocks.closeArtifactTab.mock.invocationCallOrder[0]);
-		expect(mocks.closeArtifactTab).toHaveBeenCalledWith('t1', 'tab-1');
 	});
 
 	it('neither sends nor closes when the pending save fails', async () => {
