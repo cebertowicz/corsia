@@ -273,6 +273,54 @@ def rows_by_id(body: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {row["run_id"]: row for workflow in body["workflows"] for row in workflow["runs"]}
 
 
+def entry_by_ref(body: dict[str, Any], ref: str) -> dict[str, Any]:
+    return next(entry for entry in body["workflows"] if entry["ref"] == ref)
+
+
+def test_the_runs_the_engine_never_compared_are_counted_with_its_reason(section) -> None:
+    # The unversioned run of this workflow is excluded by read_snapshot; the count is its dict, not a re-count.
+    assert entry_by_ref(section, CLOSE)["excluded"] == {"unversioned": 1}
+    assert entry_by_ref(section, INVOICE)["excluded"] == {}
+
+
+def test_the_verdict_is_what_the_engine_decides_for_the_current_version(section, db) -> None:
+    """The section's verdict equals ``decide`` on the same full history, at the same pinned clock."""
+    from core.workflow_verdict_read import read_snapshot
+    from core.workflow_verdict_rules import decide, freeze_plan
+    from core.workflow_verdict_types import subject_of
+
+    snapshot = read_snapshot(db, now=NOW, workflow_refs=[CLOSE])
+    history = next(item for item in snapshot.workflows if item.ref == CLOSE)
+    current = history.versions()[-1]  # version by first use, so the later one is current
+    assert current == V4 and history.versions() == [V3, V4]
+    subject = subject_of("workflow", CLOSE, current)
+    expected = decide(history, snapshot.plans.get(subject) or freeze_plan(history, current), NOW,
+                      history.successor(current))
+    verdict = entry_by_ref(section, CLOSE)["verdict"]
+    assert verdict == {"word": expected.word, "reason": expected.reason, "look": expected.look,
+                       "inputs": dict(expected.inputs)}
+    # The engine's own words for a workflow with no recorded plan or baseline, never a null standing in for one.
+    assert (verdict["word"], verdict["reason"], verdict["look"]) == ("not_enough_data", "no_baseline", 0)
+
+
+def test_a_reached_verdict_is_read_from_its_record_and_never_redecided(section, db) -> None:
+    """A stored keep/revert is the verdict: ``compute`` skips it, so the record is the only source."""
+    from core.workflow_verdict_evaluator import write_verdicts
+    from core.workflow_verdict_read import read_snapshot
+    from core.workflow_verdict_rules import Evaluation, Verdict, freeze_plan
+    from core.workflow_verdict_types import subject_of
+
+    history = next(item for item in read_snapshot(db, now=NOW, workflow_refs=[CLOSE]).workflows
+                   if item.ref == CLOSE)
+    current = history.versions()[-1]
+    subject = subject_of("workflow", CLOSE, current)
+    write_verdicts(db, [Evaluation(subject, "root", freeze_plan(history, current),
+                                   Verdict("keep", "quality_held", 2, (), {"baseline": V3}), False)])
+    assert subject in read_snapshot(db, now=NOW, workflow_refs=[CLOSE]).reached
+    assert entry_by_ref(read(), CLOSE)["verdict"] == {
+        "word": "keep", "reason": "quality_held", "look": 2, "inputs": {"baseline": V3}}
+
+
 def test_the_window_is_the_pages_current_window_and_coverage_counts_the_pages_tasks(section) -> None:
     assert section["window"] == WINDOW
     # The page's task set: every task accepted inside the window, whether or not a workflow ran it.

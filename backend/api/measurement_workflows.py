@@ -11,6 +11,7 @@ Every field is read from the module that owns the fact, so a correction to one r
 | a run's end, its steps and their rounds | ``plans.run_end.records`` (the ``workflow_run_ended`` record) |
 | working time | ``plans.node_cost_scoped.project``, the plan-node cost rollup's own ``execution.seconds`` |
 | a step's title, an agent's label | the plan node's ``title``, the thread's ``title`` (as ``/agents`` labels it) |
+| the runs never compared, and where the comparison stands | ``core.workflow_verdict_read.read_snapshot`` (``WorkflowHistory.excluded``) and ``workflow_verdict_rules.compute``; a reached verdict from its own record via ``workflow_verdict_evaluator.reached_detail`` |
 
 A fact with no source on this install reads ``null``, never 0: a run that has not ended has no step,
 gate or cost figure; a workflow's human name is not recorded anywhere (a skill's frontmatter carries only
@@ -19,6 +20,10 @@ no per-run reader until the KPI formula engine supplies one (``core.workflow_ver
 
 Only judged runs are listed: ``read_snapshot`` keeps unversioned and locally-edited runs in ``excluded``
 because no version comparison can use them, and the list is the same set the verdicts count.
+
+The run list is windowed; the excluded count and the verdict are not. They are read from the workflow's full
+history, because a run outside the window is still a run the engine has or has not compared, and the next
+look belongs to the whole version, not to the week being viewed.
 """
 from __future__ import annotations
 
@@ -40,8 +45,10 @@ from core.corrections_recording import (
 )
 from core.measurement_scope import Grain, MeasurementScope, Window, parse_zone, query_params, scope_cte
 from core.workflow_builtin_operands import scoped_runs
+from core.workflow_verdict_evaluator import reached_detail
 from core.workflow_verdict_read import price_snapshot, read_snapshot
-from core.workflow_verdict_types import Snapshot, WorkflowHistory
+from core.workflow_verdict_rules import compute
+from core.workflow_verdict_types import Snapshot, WorkflowHistory, subject_of
 from core.workflow_verdicts import Run, parse_ts
 from infra.auth import require_user
 from infra.database import get_db
@@ -108,23 +115,22 @@ def workflow_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope,
     parents = {str(row["id"]): row["parent_id"] for row in nodes}
     root_ids = frozenset(str(row["id"]) for row in roots)
     in_window = _started_in_window(db, root_ids, grain, window)
-    snapshot = _window_runs(db, {str(row["workflow_ref"]) for row in roots}, in_window, now=now)
+    full = read_snapshot(db, now=now or datetime.now(timezone.utc),
+                         workflow_refs=sorted({str(row["workflow_ref"]) for row in roots}))
     return {"window": {"from": window.first, "to": grain.period_end(window.last)},
             "coverage": _coverage(db, scope.params(user_id), grain, window, parents, root_ids),
-            "workflows": _entries(db, snapshot, grain)}
+            "workflows": _entries(db, _window_runs(db, full, in_window), full, grain)}
 
 
-def _window_runs(db: sqlite3.Connection, refs: Iterable[str], keep: frozenset[str],
-                 *, now: datetime | None) -> Snapshot:
-    """The judged runs of these workflows, narrowed to the scope's own runs in the window, then priced.
+def _window_runs(db: sqlite3.Connection, full: Snapshot, keep: frozenset[str]) -> Snapshot:
+    """The window's runs of this snapshot, priced.
 
     ``read_snapshot`` reads every run of the named workflows on this install, so the scope's run ids and
     the window decide what is kept; pricing only what is kept holds the chain walk to the window.
     """
-    snapshot = read_snapshot(db, now=now or datetime.now(timezone.utc), workflow_refs=sorted(refs))
-    kept = tuple(replace(history, runs=tuple(run for run in history.runs if run.run_id in keep))
-                 for history in snapshot.workflows)
-    narrowed = replace(snapshot, workflows=kept, plans={}, reached=frozenset())
+    narrowed = replace(full, workflows=tuple(
+        replace(history, runs=tuple(run for run in history.runs if run.run_id in keep))
+        for history in full.workflows), plans={}, reached=frozenset())
     return price_snapshot(db, narrowed) if keep else narrowed
 
 
@@ -157,9 +163,13 @@ def _started_in_window(db: sqlite3.Connection, run_ids: frozenset[str], grain: G
     return frozenset(str(row["id"]) for row in rows)
 
 
-def _entries(db: sqlite3.Connection, snapshot: Any, grain: Grain) -> list[dict[str, Any]]:
-    """One entry per workflow, biggest first, each with its runs in start order."""
-    runs = [run for history in snapshot.workflows for run in history.runs]
+def _entries(db: sqlite3.Connection, windowed: Snapshot, full: Snapshot, grain: Grain) -> list[dict[str, Any]]:
+    """One entry per workflow, biggest first, each with its runs in start order.
+
+    ``windowed`` carries the runs to list, ``full`` the history the excluded count and the verdict are read
+    from: a run outside the window is not listed, but it is still a run the engine has or has not compared.
+    """
+    runs = [run for history in windowed.workflows for run in history.runs]
     if not runs:
         return []
     ids = [run.run_id for run in runs]
@@ -167,26 +177,66 @@ def _entries(db: sqlite3.Connection, snapshot: Any, grain: Grain) -> list[dict[s
     titles = _step_titles(db, {node_id for record in records.values()
                                for step in record["steps"] for node_id in step["node_ids"]})
     agents = _agents(db, ids)
-    owners = {history.owner for history in snapshot.workflows if history.owner}
+    owners = {history.owner for history in full.workflows if history.owner}
     labels = _labels(db, {agent["id"] for agent in agents.values() if agent} | owners)
     working = _working_seconds(db, ids)
+    verdicts = _verdicts(db, full)
+    by_ref = {history.ref: history for history in full.workflows}
     rows = {run.run_id: _run_row(run, records.get(run.run_id), titles, agents.get(run.run_id),
                                  working.get(run.run_id), parse_zone(grain.zone))
             for run in runs}
-    entries = [_entry(history, rows, labels) for history in snapshot.workflows]
+    entries = [_entry(history, rows, labels, by_ref[history.ref], verdicts.get(history.ref))
+               for history in windowed.workflows]
     return sorted(entries, key=lambda entry: (-len(entry["runs"]), entry["ref"]))
 
 
-def _entry(history: WorkflowHistory, rows: Mapping[str, dict[str, Any]],
-           labels: Mapping[str, str | None]) -> dict[str, Any]:
-    """One workflow: its reference, its owner, and its runs from first started to last."""
+def _entry(history: WorkflowHistory, rows: Mapping[str, dict[str, Any]], labels: Mapping[str, str | None],
+           full_history: WorkflowHistory, verdict: dict[str, Any] | None) -> dict[str, Any]:
+    """One workflow: its reference, its owner, its runs from first started to last, and its comparison state.
+
+    ``excluded`` is the engine's own count of runs it never judged, and ``verdict`` where the current
+    version's comparison stands; both come from ``full_history``, the workflow's whole history.
+    """
     return {
         "ref": history.ref,
         # No source on dev for a human name: see this module's note; the reference is the identity.
         "name": None,
         "owner": None if history.owner is None else {"id": history.owner, "label": labels.get(history.owner)},
         "runs": [rows[run.run_id] for run in sorted(history.runs, key=lambda run: (parse_ts(run.started_at), run.run_id))],
+        "excluded": dict(full_history.excluded),
+        "verdict": verdict,
     }
+
+
+def _verdicts(db: sqlite3.Connection, full: Snapshot) -> dict[str, dict[str, Any] | None]:
+    """Where each workflow's current version stands with the engine, over its full history.
+
+    ``workflow_verdict_rules.compute`` is the evaluator's own assembly — the recorded plan where a version
+    has one, a frozen plan otherwise — so the floors, the next look and the reason words are the engine's,
+    never recomputed here. A version whose verdict was reached is read from its record instead, because the
+    engine never recomputes one. Null only where no run of the workflow carries an exact version: there is
+    nothing to compare, and no zero is standing in for it.
+    """
+    current = {history.ref: (versions[-1] if (versions := history.versions()) else None)
+               for history in full.workflows}
+    subjects = {subject_of("workflow", ref, version) for ref, version in current.items() if version}
+    stored = reached_detail(db, sorted(subjects & full.reached))
+    open_versions = {evaluation.subject: evaluation.verdict for evaluation in compute(full)}
+    verdicts: dict[str, dict[str, Any] | None] = {}
+    for ref, version in current.items():
+        subject = subject_of("workflow", ref, version) if version else ""
+        if subject in stored:
+            record = stored[subject]
+            verdicts[ref] = {"word": record["word"], "reason": record["reason"],
+                             "look": record.get("look"), "inputs": dict(record.get("inputs") or {})}
+        elif subject in open_versions:
+            verdict = open_versions[subject]
+            verdicts[ref] = {"word": verdict.word, "reason": verdict.reason, "look": verdict.look,
+                             "inputs": dict(verdict.inputs)}
+        else:
+            # No run of this workflow carries an exact version, so there is no version to compare.
+            verdicts[ref] = None
+    return verdicts
 
 
 def _run_row(run: Run, record: Mapping[str, Any] | None, titles: Mapping[str, str],
