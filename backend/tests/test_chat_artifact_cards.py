@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import time
 import uuid
 from collections.abc import Iterator
 from pathlib import Path
@@ -535,6 +536,17 @@ def test_more_than_forty_existing_files_make_cards(db, ws):
 def test_relative_candidates_exclude_url_and_fenced_text():
     assert targets("read notes/one.md and `notes/two.md` https://example.com/notes/no.md\n```\nnotes/hidden.md\n```") == ["notes/one.md", "notes/two.md"]
     assert targets("[notes/label.md](notes/actual.md) [site](https://example.com/file.md)") == ["notes/actual.md"]
+
+
+def test_a_long_unbroken_run_without_a_url_is_read_in_linear_time():
+    # The URL mask scan was quadratic over such a run: about 0.3 s for this 10 KB one.
+    text = "tool" * 2500 + " see notes/one.md"
+
+    started = time.perf_counter()
+    found = targets(text)
+
+    assert found == ["notes/one.md"]
+    assert time.perf_counter() - started < 0.1
 
 
 # Reference cards: the registered files a message names.
