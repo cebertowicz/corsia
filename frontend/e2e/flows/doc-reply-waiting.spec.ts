@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type Route } from '@playwright/test';
-import { chatComposer, createSession, loadPastFirstRunLanding, loginByUrl, sidebarThread, TEST_SESSION_TOKEN, TEST_TOKEN } from '../support/corsia';
+import { chatComposer, createSession, loadPastFirstRunLanding, loginByUrl, replacePreviousFixtureThread, sidebarThread, TEST_SESSION_TOKEN, TEST_TOKEN } from '../support/corsia';
 import { injectMessage } from '../support/mock';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -255,14 +255,6 @@ async function tabTo(page: Page, selector: string): Promise<void> {
 async function documentReady(page: Page): Promise<void> {
 	await expect(page.locator('.doc .cm-content')).toContainText('Q4 launch plan');
 	await expect(page.locator('.doc').getByRole('button', { name: /^\d+ threads?\b/ })).toBeVisible();
-}
-
-// Frames show one clean fixture: the other tests' sessions would otherwise crowd the sidebar.
-async function onlyThread(request: APIRequestContext, keepId: string): Promise<void> {
-	const listed = await (await request.get(`/api/threads?token=${TEST_TOKEN}`)).json();
-	for (const thread of (listed.threads ?? []) as Array<{ id: string }>) {
-		if (thread.id !== keepId) await request.delete(`/api/threads/${thread.id}?token=${TEST_TOKEN}`);
-	}
 }
 
 // The frames belong to the replier's thread, not the conductor landing the app opens on.
@@ -659,7 +651,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			await seedScenario(page, request, threadId, `stacked-needs-you-${theme}-${width}`, [0]);
 			seedDecision(threadId);
 			const queue = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
@@ -724,7 +716,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const first = await seedScenario(page, request, threadId, `two-documents-${theme}-${width}`, [0]);
 			// SQLite timestamps have second precision. The later document must have a strictly newer reply so
 			// this checks R4.2's cross-document destination rule rather than relying on a tie in server order.
@@ -756,7 +748,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const scenario = await seedScenario(page, request, threadId, `arrival-${theme}-${width}`, []);
 			await stageWorkspace(page, threadId, scenario.docPath, scenario.name, 'chat', false);
 			await loginByUrl(page);
@@ -802,7 +794,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const scenario = await seedScenario(page, request, threadId, `passive-${theme}-${width}`);
 			await serveReplyQueue(page, request, scenario, threadId);
 			await stageDocument(page, threadId, scenario.docPath, scenario.name, width);
@@ -857,7 +849,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const scenario = await seedScenario(page, request, threadId, `${theme}-${width}`, [0, 1, 2], {
 				readerFollowups: partialReadFollowups(width),
 			});
@@ -950,7 +942,7 @@ for (const width of [1440, 393]) {
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
 		const threadId = await createSession(request, threadTitle);
-		await onlyThread(request, threadId);
+		await replacePreviousFixtureThread(request, threadId);
 		const scenario = await seedScenario(page, request, threadId, `before-${width}`, []);
 		await serveReplyQueue(page, request, scenario, threadId);
 		await stageDocument(page, threadId, scenario.docPath, scenario.name, width);
@@ -974,7 +966,7 @@ for (const width of [1440, 393]) {
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const scenario = await seedScenario(page, request, threadId, `long-dock-${theme}-${width}`, [0, 1, 2], { name: LONG_DOCUMENT_NAME, replier: LONG_REPLIER });
 			await serveReplyQueue(page, request, scenario, threadId);
 			await loginByUrl(page);
@@ -1005,7 +997,7 @@ for (const width of [1440, 393]) {
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
 		const threadId = await createSession(request, threadTitle);
-		await onlyThread(request, threadId);
+		await replacePreviousFixtureThread(request, threadId);
 		const scenario = await seedScenario(page, request, threadId, `long-chip-${width}`, [0, 1, 2], { name: LONG_DOCUMENT_NAME, replier: LONG_REPLIER });
 		await serveReplyQueue(page, request, scenario, threadId);
 		await loadPastFirstRunLanding(page, () => page.goto(`/?token=${encodeURIComponent(TEST_SESSION_TOKEN)}`), { lands: true });
@@ -1022,7 +1014,7 @@ for (const width of [1440, 393]) {
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
 		const threadId = await createSession(request, threadTitle);
-		await onlyThread(request, threadId);
+		await replacePreviousFixtureThread(request, threadId);
 		const scenario = await seedScenario(page, request, threadId, `focus-${width}`);
 		await serveReplyQueue(page, request, scenario, threadId);
 		await loginByUrl(page);
@@ -1030,21 +1022,27 @@ for (const width of [1440, 393]) {
 		// Replies never become a dock stop: the keyboard reaches the chip, then the phone plan control and composer.
 		await expect(page.locator('[data-attention-dock]')).toHaveCount(0);
 		const chip = page.locator('.attention-dock .reply-chip-notice').getByRole('button');
+		const planChip = page.getByRole('button', { name: /^Open plan/ });
 		await tabTo(page, '.attention-dock .reply-chip-notice button');
 		await expect(chip).toBeFocused();
 		await expect(chip).toContainText('3 new replies · launch-plan.md');
 		await expect(chip).toHaveCSS('outline-style', 'solid');
 		await shot(page, `04b-reply-chip-focus-light-${width}`);
+		// The plan control mounts with the thread's plan snapshot, after the hand-off it sits beside, and Tab can
+		// only reach it once it is in the DOM. Wait on it before the keystroke instead of racing its mount;
+		// measured, a Tab sent before the mount lands on the composer and the assertion reports 'inactive'.
+		if (width === 393) await expect(planChip).toBeVisible();
 		await page.keyboard.press('Tab');
 		if (width === 393) {
-			await expect(page.getByRole('button', { name: /^Open plan/ })).toBeFocused();
+			await expect(planChip).toBeFocused();
 			await page.keyboard.press('Tab');
 		}
 		await expect(chatComposer(page)).toBeFocused();
 		await shot(page, `04c-composer-focus-after-chip-light-${width}`);
 		await page.keyboard.press('Shift+Tab');
 		if (width === 393) {
-			await expect(page.getByRole('button', { name: /^Open plan/ })).toBeFocused();
+			await expect(planChip).toBeVisible();
+			await expect(planChip).toBeFocused();
 			await page.keyboard.press('Shift+Tab');
 		}
 		await expect(chip).toBeFocused();
@@ -1062,7 +1060,7 @@ for (const width of [1440, 393]) {
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const scenario = await seedScenario(page, request, threadId, `failed-open-${theme}-${width}`);
 			await serveReplyQueue(page, request, scenario, threadId);
 			await page.route('**/api/files/content**', async (route) => {
@@ -1090,7 +1088,7 @@ test(`${TAG} light 393px: same reply count keeps the responsive document UI unch
 	await page.setViewportSize({ width: 393, height: 852 });
 	await page.emulateMedia({ colorScheme: 'light' });
 	const threadId = await createSession(request, threadTitle);
-	await onlyThread(request, threadId);
+	await replacePreviousFixtureThread(request, threadId);
 	// The main responsive journey keeps one shorter reader context so its one-unread,
 	// offscreen checkpoint remains stable. This separate fixture proves the same UI
 	// with the desktop thread's two reader follow-ups rather than changing that journey.
@@ -1118,7 +1116,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const scenario = await seedScenario(page, request, threadId, `removed-${theme}-${width}`);
 			let documentAvailable = true;
 			await serveReplyQueue(page, request, scenario, threadId, () => documentAvailable);
@@ -1168,7 +1166,7 @@ for (const theme of ['light', 'dark'] as const) {
 		await page.setViewportSize({ width: 1440, height: 900 });
 		await page.emulateMedia({ colorScheme: theme });
 		const threadId = await createSession(request, threadTitle);
-		await onlyThread(request, threadId);
+		await replacePreviousFixtureThread(request, threadId);
 		const childId = await createSession(request, 'Reviewer');
 		sqlite([["UPDATE threads SET spawned_by=? WHERE id=?", [threadId, childId]]]);
 		const scenario = await seedScenario(page, request, threadId, `hidden-worker-${theme}`, []);
@@ -1193,7 +1191,7 @@ test(`${TAG} real queue: open the chip and read its reply`, async ({ page, reque
 	skipMismatchedProject(1440, testInfo.project.name);
 	await page.setViewportSize({ width: 1440, height: 900 });
 	const threadId = await createSession(request, threadTitle);
-	await onlyThread(request, threadId);
+	await replacePreviousFixtureThread(request, threadId);
 	const scenario = await seedScenario(page, request, threadId, 'real-reply-queue', [0]);
 	const queue = await request.get('/api/attention/queue', { params: { token: TEST_TOKEN } });
 	expect(queue.ok()).toBeTruthy();
@@ -1224,7 +1222,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const scenario = await seedScenario(page, request, threadId, `read-${theme}-${width}`, [0, 1, 2], { readerFollowups: partialReadFollowups(width) });
 			await loginByUrl(page);
 			await openThread(page, threadTitle);
@@ -1280,7 +1278,7 @@ for (const theme of ['light', 'dark'] as const) {
 				await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 				await page.emulateMedia({ colorScheme: theme });
 				const threadId = await createSession(request, threadTitle);
-				await onlyThread(request, threadId);
+				await replacePreviousFixtureThread(request, threadId);
 				const scenario = await seedScenario(page, request, threadId, `backdrop-${theme}-${width}-${withDecision}`, [],
 					width === 393 && !withDecision ? { name: LONG_DOCUMENT_NAME } : {});
 				const longBubble = Array(80).fill('Please check the launch owners, the release schedule, and the support coverage before the announcement.').join(' ');

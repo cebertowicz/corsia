@@ -1,16 +1,13 @@
 import { test } from '../support/test';
-import { expect, type Page } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { agentComment, openLivePair, reviewerSession, suggest } from '../support/liveConcurrency';
-import { seedLiveDocument } from '../support/liveDocument';
+import { deleteRenderedLine, seedLiveDocument } from '../support/liveDocument';
 import { beginComment, insertPrefix } from '../support/liveCommentProof';
 import { TEST_TOKEN } from '../support/corsia';
+import { readMockCallCount, readUnmatchedThreads, seedMockResponses, waitForThreadReply } from '../support/mock';
 
-/** From the empty end of the line: a click on commented text would open its card instead. */
-async function caretAtLineEnd(page: Page, quote: string) {
- const line = page.locator('.cm-line').filter({ hasText: quote });
- const size = (await line.boundingBox())!;
- await line.click({ position: { x: size.width - 4, y: size.height / 2 } });
-}
+// Each case edits a document; its delayed owner wake must not enter the next case's mock seed.
+test.use({ seedPerTest: true });
 
 const actions = ['above', 'far', 'gone', 'inside', 'reply', 'decision', 'comment', 'resolve'] as const;
 const cases = actions.flatMap(action => [[action, 1440, 900] as const, ...(action === 'above' || action === 'far' || action === 'reply' ? [[action, 393, 852] as const] : [])]);
@@ -46,21 +43,37 @@ for (const box of ['draft', 'reply'] as const) for (const [action, width, height
     await expect(reader.locator('.cm-content')).toContainText('prefix 0');
    }
    if (action === 'gone') {
-    await caretAtLineEnd(writer, quote);
-    await writer.keyboard.press('Shift+Home'); await writer.keyboard.press('Backspace');
+    await deleteRenderedLine(writer, quote);
+    await expect(writer.locator('.cm-content')).not.toContainText(quote);
     await expect(reader.locator('.cm-content')).not.toContainText(quote);
    }
    if (action === 'above') { await insertPrefix(writer, 'remote prefix\n'); await expect(reader.locator('.cm-content')).toContainText('remote prefix'); }
    if (action === 'inside') {
-    await caretAtLineEnd(writer, quote); await writer.keyboard.press('Home'); await writer.keyboard.press('ArrowRight'); await writer.keyboard.insertText('Z');
-    await expect(reader.locator('.cm-content')).toContainText(box === 'draft' ? quote.slice(0, 1) + 'Z' + quote.slice(1) : 'Z' + quote);
+    await writer.getByText(quote, { exact: true }).first().click();
+    if (box === 'reply') {
+     await expect(writer.getByRole('dialog')).toBeVisible();
+     await writer.keyboard.press('Escape');
+     await expect(writer.getByRole('dialog')).toHaveCount(0);
+    } else {
+     await writer.keyboard.press('Home');
+     await writer.keyboard.press('ArrowRight');
+    }
+    await expect(writer.locator('.cm-content')).toBeFocused();
+    const offset = await writer.evaluate(() => window.getSelection()?.anchorOffset ?? -1);
+    expect(offset).toBeGreaterThan(0);
+    expect(offset).toBeLessThan(quote.length);
+    await writer.keyboard.insertText('Z');
+    await expect(reader.locator('.cm-content')).toContainText(quote.slice(0, offset) + 'Z' + quote.slice(offset));
    }
+   let queuedReplyAt: number | undefined;
    if (action === 'reply') {
     const prior = changes;
     const response = await request.post('/api/delegation/docs/comments', { params: { token: TEST_TOKEN }, data: { parent_id: root, body: 'Remote reply', as_session_id: agent.id } });
     expect(response.ok(), await response.text()).toBeTruthy();
-    await expect.poll(() => changes).toBeGreaterThan(prior);
-    if (box === 'reply') await expect(reader.getByText('Remote reply')).toBeVisible();
+    if (box === 'reply') {
+     expect((await response.json()).queued.position).toBe(1);
+     queuedReplyAt = prior;
+    } else await expect.poll(() => changes).toBeGreaterThan(prior);
    }
    if (action === 'decision') {
     const response = await request.post(`/api/comments/${suggestion}/decision`, { params: { token: TEST_TOKEN }, data: { decision: 'accept' } });
@@ -85,6 +98,31 @@ for (const box of ['draft', 'reply'] as const) for (const [action, width, height
    await reader.keyboard.insertText('\nmore'.repeat(40));
    await expect(input).toBeFocused();
    await expect(reader.locator('[aria-hidden="true"][data-popover]')).toHaveCount(0);
+   if (queuedReplyAt !== undefined) {
+    const draft = await input.inputValue();
+    // Leaving wakes the agent to choose what to do with its saved write; it is not posted automatically.
+    await seedMockResponses(request, [
+     { match_thread: agent.id, tool_calls: [{ id: `post-${root}`, name: 'doc_comment_update', arguments: JSON.stringify({ comment_id: root, post_as_is: true }) }], finish_reason: 'tool_calls' },
+     { match_thread: agent.id, content: 'Posted the reply.', finish_reason: 'stop' },
+     // Posting an agent reply also delivers feedback to the document owner.
+     { match_thread: doc.threadId, content: 'Saw the reply.', finish_reason: 'stop' },
+    ]);
+    if (width === 393) await reader.getByRole('button', { name: 'Close', exact: true }).click();
+    else await reader.keyboard.press('Escape');
+    await expect.poll(async () => {
+     const listed = await request.get(`/api/artifacts/${doc.artifactId}/comments`, { params: { token: TEST_TOKEN } });
+     expect(listed.ok()).toBeTruthy();
+     const comments = (await listed.json()).comments as Array<{ id: string; replies: Array<{ body: string }> }>;
+     return comments.find(comment => comment.id === root)?.replies.some(reply => reply.body === 'Remote reply') ?? false;
+    }, { message: 'the queued reply posts after the writer turn releases' }).toBe(true);
+    await expect.poll(() => readMockCallCount(request), { timeout: 30_000 }).toBe(3);
+    await waitForThreadReply(request, agent.id, 'Posted the reply.', { message: 'the queued reply turn finishes before reseeding' });
+    await waitForThreadReply(request, doc.threadId, 'Saw the reply.', { message: 'the document owner finishes receiving the reply' });
+    expect(await readUnmatchedThreads(request)).toEqual([]);
+    await reader.locator('.cm-comment-anchor').filter({ hasText: quote }).click();
+    await expect(reader.getByText('Remote reply')).toBeVisible();
+    await expect(reader.getByPlaceholder('Reply…')).toHaveValue(draft);
+   }
   } finally { await pair.close(); }
  });
 }

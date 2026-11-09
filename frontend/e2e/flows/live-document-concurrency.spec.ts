@@ -54,7 +54,7 @@ for (const [width, height, project] of layouts) {
 		test.skip(testInfo.project.name !== project, 'Run each layout in its matching browser mode.');
 		test.setTimeout(120_000);
 		const stamp = `${width}-${Date.now()}`;
-		const typed = ` typed while others work ${stamp} ${'and keeps going '.repeat(4)}`.trimEnd();
+		let typed = ` typed while others work ${stamp}`;
 		const remote = `remote ${stamp}`;
 		const quote = `late quote ${stamp}`;
 		const document = await seedLiveDocument(request, `typing-${stamp}`, `# Typing ${stamp}\n\nalpha line ${stamp}\n\n${quote}\n\nomega line ${stamp}\n`);
@@ -66,20 +66,44 @@ for (const [width, height, project] of layouts) {
 			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(0);
 			await editor.locator('.cm-line').filter({ hasText: `alpha line ${stamp}` }).click();
 			await reader.keyboard.press('End');
-			let typingDone = false;
-			const typing = reader.keyboard.type(typed, { delay: 40 }).then(() => { typingDone = true; });
-			await typeAtDocumentEnd(writer, remote);
-			// Create from the other reader's live selection, not offsets in the original seed text.
-			await writer.locator('.cm-line').filter({ hasText: quote }).click();
-			await writer.keyboard.press('Home');
-			await writer.keyboard.press('Shift+End');
-			await writer.locator('.sel-comment').click();
-			await writer.getByPlaceholder('Comment, or @ to tag an agent').fill(`Late ${stamp}`);
-			await writer.getByRole('button', { name: 'Comment', exact: true }).last().click();
-			await expect(editor).toContainText(remote);
-			await expect(reader.getByRole('button', { name: /^1 thread\b/ })).toBeVisible();
-			expect(typingDone, 'the remote edit and the comment load landed while the reader was still typing').toBe(false);
-			await typing;
+			const inputCount = await editor.evaluateHandle((element) => {
+				let count = 0;
+				// CodeMirror handles beforeinput itself on mobile, so observe it before the editor handles it.
+				document.addEventListener('beforeinput', (event) => {
+					if (event.target instanceof Node && element.contains(event.target)) count += 1;
+				}, true);
+				return () => count;
+			});
+			await reader.keyboard.type(typed);
+			async function typeWhile(label: string, remoteAction: () => Promise<void>) {
+				const before = await inputCount.evaluate((count) => count());
+				let finished = false;
+				await Promise.all([
+					remoteAction().finally(() => { finished = true; }),
+					(async () => {
+						for (let step = 0; !finished && step < 1000; step++) {
+							await reader.keyboard.type(' work');
+							typed += ' work';
+						}
+						expect(finished, `${label} arrived while typing`).toBe(true);
+					})(),
+				]);
+				expect(await inputCount.evaluate((count) => count()), `local input while ${label}`).toBeGreaterThan(before);
+			}
+			await typeWhile('the remote edit arrives', async () => {
+				await typeAtDocumentEnd(writer, remote);
+				await expect(editor).toContainText(remote);
+			});
+			await typeWhile('the comment loads', async () => {
+				// Create from the other reader's live selection, not offsets in the original seed text.
+				await writer.locator('.cm-line').filter({ hasText: quote }).click();
+				await writer.keyboard.press('Home');
+				await writer.keyboard.press('Shift+End');
+				await writer.locator('.sel-comment').click();
+				await writer.getByPlaceholder('Comment, or @ to tag an agent').fill(`Late ${stamp}`);
+				await writer.getByRole('button', { name: 'Comment', exact: true }).last().click();
+				await expect(reader.getByRole('button', { name: /^1 thread\b/ })).toBeVisible();
+			});
 
 			// The caret never moved: the next key lands right after the typed text, and focus stayed in the editor.
 			await reader.keyboard.type('!');
