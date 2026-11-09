@@ -44,23 +44,26 @@ let draining: Promise<void> | null = null;
 
 function load(ids: string[]): Promise<void> {
 	for (const id of ids) pending.add(id);
-	if (!draining && pending.size > 0) {
-		const run: Promise<void> = drain().finally(() => {
-			if (draining === run) draining = null;
-		});
-		draining = run;
-	}
+	if (!draining && pending.size > 0) draining = drain();
 	return draining ?? Promise.resolve();
 }
 
-/** Reads run one after another, so a newer reading always lands after an older one. */
+/**
+ * Reads run one after another, so a newer reading always lands after an older one.
+ * `draining` clears in the same step that finds `pending` empty, so a thread named
+ * at any later moment starts a new read rather than joining one that has ended.
+ */
 async function drain(): Promise<void> {
-	while (pending.size > 0) {
-		const ids = [...pending];
-		pending = new Set();
-		for (let start = 0; start < ids.length; start += CHUNK) {
-			await loadChunk(ids.slice(start, start + CHUNK));
+	try {
+		while (pending.size > 0) {
+			const ids = [...pending];
+			pending = new Set();
+			for (let start = 0; start < ids.length; start += CHUNK) {
+				await loadChunk(ids.slice(start, start + CHUNK));
+			}
 		}
+	} finally {
+		draining = null;
 	}
 }
 
