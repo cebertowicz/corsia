@@ -129,13 +129,17 @@ def _guided_write(
     """Blocking. Run a validated editor save of a guidance file or document through its history (issue #2272).
 
     ``expected_sha256`` is checked once, by the history lock's compare-and-swap; ``history_required``
-    writes nothing unless the version is recorded."""
+    writes nothing unless the version is recorded. The owner report's diff runs after the save, never
+    under the history lock."""
     payloads: list[dict] = []
+    reports: list[Callable[[], None]] = []
     saved = save_guidance(
         {path: text.encode()}, workspace=Path(config.WORKSPACE), target=target,
         author=author(), reason=reason, expected=None if expected_sha256 is None else {path: expected_sha256},
-        atomic=history_required, write=lambda _path, _data: payloads.append(write(path, None)),
+        atomic=history_required, write=lambda _path, _data: payloads.append(write(path, None, reports)),
     )
+    for report in reports:
+        report()
     if saved.outcome == "refused":
         assert saved.line is not None
         if saved.reason == "lesson-outside-placement":
@@ -239,39 +243,12 @@ def write_atomic_plain(path: Path, text: str, prior_sha256: str | None = None) -
         unlink_bound_file(stage, missing_ok=True)
 
 
-def write_live_text(path: Path, text: str, prior_sha256: str, actor=None, reason: str | None = None) -> None:
-    """Blocking. The live lane's write: a recorded document is saved as a version by its actor through the
-    history writer, any other file as before; a changed file is never replaced (``FileChangedOutside``)."""
-    target = history_target(path, Path(config.WORKSPACE))
-    if target is None or not target.document:
-        write_atomic_plain(path, text, prior_sha256)
-        return
-    saved = save_guidance(
-        {path: text.encode("utf-8")}, workspace=Path(config.WORKSPACE), target=target, author=_live_author(actor),
-        reason=reason, expected={path: prior_sha256},
-        write=lambda _path, data: write_atomic_plain(path, data.decode("utf-8"), prior_sha256),
-    )
-    if saved.outcome == "stale":
-        raise FileChangedOutside()
-    if saved.outcome == "refused":
-        raise DocumentSaveError("save_failed", saved.line or "Document was not saved")
-    if saved.line:
-        _log.warning("live document %s saved without its version: %s", path, saved.line)
-
-
-def _live_author(actor) -> str:
-    """The Git author of a live write: the person, the writing agent, or CORSIA for an unattributed one."""
-    if actor is None:
-        return saver_author()
-    if actor.direct_user or actor.thread_id == UI_THREAD:
-        return saver_author(user_id=actor.user_id) if actor.user_id else saver_author()
-    return saver_author(thread_id=actor.thread_id)
-
-
 def _write_document(
     body: DocumentSave, resolved: Path, direct_user: bool, expected_sha256: str | None = None,
+    reports: list[Callable[[], None]] | None = None,
 ) -> dict:
-    """Blocking. Write a validated document and resolve its artifact identity."""
+    """Blocking. Write a validated document and resolve its artifact identity; with ``reports``, the
+    owner report is left there for the caller to run once it holds no lock."""
     if expected_sha256 is not None:
         current_sha256 = hashlib.sha256(resolved.read_bytes()).hexdigest()
         if current_sha256 != expected_sha256:
@@ -319,11 +296,10 @@ def _write_document(
                     db, artifact, previous_sha256=prior_sha256,
                     new_sha256=new_sha256, actor_thread_id=UI_THREAD,
                 )
-        try:
-            # The bytes are saved and recorded: a report failure never fails the save.
-            report_plain_write(decision, resolved, before, thread_id=actor, db=db)
-        except Exception as exc:
-            _log.warning("owner report failed for saved artifact %s: %s", decision.artifact_id, type(exc).__name__)
+        if reports is None:
+            _report(decision, resolved, before, actor, db)
+        else:
+            reports.append(lambda: _report(decision, resolved, before, actor))
     finally:
         db.close()
     notification = artifact or {
@@ -332,6 +308,19 @@ def _write_document(
         "external_id": str(resolved),
     }
     return _saved_payload(resolved, actor, {"artifact": artifact, "_notification": notification})
+
+
+def _report(decision, resolved: Path, before: bytes | None, actor: str, db=None) -> None:
+    """Report a saved write to its owner; the bytes are saved, so a failure never fails the save."""
+    own = db is None
+    db = db or get_db()
+    try:
+        report_plain_write(decision, resolved, before, thread_id=actor, db=db)
+    except Exception as exc:
+        _log.warning("owner report failed for saved artifact %s: %s", decision.artifact_id, type(exc).__name__)
+    finally:
+        if own:
+            db.close()
 
 
 async def save_document_text(
@@ -375,8 +364,8 @@ async def _save_legacy_document(
         body.text,
         lambda: author or (saver_author(thread_id=thread_id) if thread_id else saver_author(user_id=user_id)),
         reason,
-        lambda path, expected: _write_document(
-            body, path, direct_user=not by_agent, expected_sha256=expected,
+        lambda path, expected, reports=None: _write_document(
+            body, path, direct_user=not by_agent, expected_sha256=expected, reports=reports,
         ),
         expected_sha256=expected_sha256, history_required=history_required,
     )

@@ -29,7 +29,7 @@ from infra.guidance_messages import (
 )
 from infra.guidance_states import HistoryOff, GitFault, NoRepository, _LockBusy, history_is_off
 from infra.guidance_save_after import after_save
-from infra.guidance_save_types import SaveResult, _Commit
+from infra.guidance_save_types import KnownHead, SaveResult, _Commit
 from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
 
@@ -91,9 +91,10 @@ def recorded_blob_reader(workspace: Path):
     return BatchBlobReader.for_repo(repo, _GIT_CONFIG, _GIT_TIMEOUT_SECONDS), None
 
 
-def _acquire(repo: Path) -> tuple[int, float]:
+def _acquire(repo: Path, git_dir: Path | None = None) -> tuple[int, float]:
     try:
-        handle = os.open(Path(_git(repo, "rev-parse", "--absolute-git-dir").strip()) / _LOCK_NAME, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+        git_dir = git_dir or Path(_git(repo, "rev-parse", "--absolute-git-dir").strip())
+        handle = os.open(git_dir / _LOCK_NAME, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
     except OSError as exc:
         raise GitFault(f"guidance lock: {exc}") from exc
     started = time.monotonic()
@@ -127,24 +128,28 @@ def _changed(repo: Path, specs: list[str]) -> list[str]:
     return [record[3:] for record in out.split("\0") if record]
 
 
-def _repair(repo: Path, shown: set[str] | None = None) -> tuple[list[str], list[str]]:
+def _repair(repo: Path, shown: set[str] | None = None, git_dir: Path | None = None) -> tuple[list[str], list[str]]:
     """Repair every recorded path; report only ``shown`` ones, so a caller never learns another scope's paths."""
     try:
-        return consume_records(_git, repo, shown)
+        return consume_records(_git, repo, shown, git_dir=git_dir)
     except Exception as exc:  # a repair fault must not fail a landed save
         logger.warning("Guidance index repair failed: {}.", exc)
         return [], ["Guidance index repair could not run; the server log has the error."]
 
 
-def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: str, *, repair_unchanged: bool = True) -> _Commit | None:
+def _commit(
+    repo: Path, files: dict[str, bytes | None], message: str, author: str, *, repair_unchanged: bool = True,
+    known: KnownHead | None = None,
+) -> _Commit | None:
     """Commit exactly ``files`` on HEAD, or return recovery results for an unchanged tree.
-    One retry is safe: every failure precedes the compare-and-swap ``update-ref``.
-    A real-index sync fault after it is returned, not raised.
+    One retry is safe: every failure precedes the compare-and-swap ``update-ref``, and the retry reads
+    HEAD again rather than trusting ``known``. A real-index sync fault after it is returned, not raised.
 
     The real-index sync is a second write HEAD does not need: a proven-stale ``index.lock`` is cleared
     first, so a stale lock can no longer fail every later save's sync."""
     for attempt in (1, 2):
-        head = _git(repo, "rev-parse", "--verify", "-q", "HEAD", ok=(0, 1)).strip() or None
+        trusted = known if attempt == 1 else None
+        head = trusted.head if trusted else (_git(repo, "rev-parse", "--verify", "-q", "HEAD", ok=(0, 1)).strip() or None)
         staged: list[tuple[str, tuple[str, ...]]] = []
         try:
             with tempfile.TemporaryDirectory(prefix="corsia-guidance-") as scratch:
@@ -155,24 +160,28 @@ def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: st
                         args: tuple[str, ...] = ("--force-remove", "--", rel)
                     else:
                         blob = _git(repo, "hash-object", "-w", "--stdin", data=data).strip()
-                        mode = (_git(repo, "ls-files", "-s", "--", rel, env=env).split() or ["100644"])[0]
+                        mode = (trusted.modes.get(rel, "100644") if trusted
+                                else (_git(repo, "ls-files", "-s", "--", rel, env=env).split() or ["100644"])[0])
                         args = ("--add", "--cacheinfo", f"{mode},{blob},{rel}")
                     _git(repo, "update-index", *args, env=env)
                     staged.append((rel, args))
                 tree = _git(repo, "write-tree", env=env).strip()
-            if head and tree == _git(repo, "rev-parse", f"{head}^{{tree}}").strip():
-                repaired, notes = _repair(repo, set(files)) if repair_unchanged else ([], [])
+            if head and tree == (trusted.tree if trusted and trusted.tree else _git(repo, "rev-parse", f"{head}^{{tree}}").strip()):
+                repaired, notes = _repair(repo, set(files), known and known.git_dir) if repair_unchanged else ([], [])
                 return _Commit(head, changed=False, repaired=tuple(repaired), notes=tuple(notes)) if repaired or notes else None
             name, _, email = author.rpartition(" <")
             identity = {"GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email.rstrip(">"), "GIT_COMMITTER_NAME": "CORSIA", "GIT_COMMITTER_EMAIL": CORSIA_COMMITTER}
             sha = _git(repo, "commit-tree", tree, *(("-p", head) if head else ()), "-F", "-", data=message.encode(), env=identity).strip()
             _git(repo, "update-ref", "HEAD", sha, head or "0" * 40)
+            if known is not None:
+                known.head, known.tree = sha, tree
             break
         except GitFault:
             if attempt == 2:
                 raise
     unsynced: list[str] = []
-    lock_fault = fault = index_lock_fault(_git, repo)
+    git_dir = known.git_dir if known is not None else None
+    lock_fault = fault = index_lock_fault(_git, repo, git_dir)
     for rel, args in staged:
         try:
             if lock_fault:
@@ -188,7 +197,7 @@ def _commit(repo: Path, files: dict[str, bytes | None], message: str, author: st
                 logger.warning("{}", fault)
     if unsynced:
         logger.warning("guidance commit {} landed; index sync failed for {}: {}", sha, unsynced, fault)
-    repaired, notes = _repair(repo, set(files))
+    repaired, notes = _repair(repo, set(files), git_dir)
     return _Commit(sha, tuple(unsynced), fault, repaired=tuple(repaired), notes=tuple(notes))
 
 
@@ -249,8 +258,9 @@ def save_guidance(
 
     Binary-safe reviewed bundles use raw SHA-256 and a 1 MB file ceiling; ordinary guidance is text-only.
     An agent's new or changed lesson is refused unless the caller passes ``lesson_gate=False``.
-    A document target is recorded the same way, without the lesson check, the carry-in record or the
-    sweep of other guidance, and reports a line only when its history could not be recorded.
+    A document target is written first and recorded after the save returns (:mod:`infra.document_recorder`),
+    without the lesson check, the carry-in record or the sweep of other guidance; it reports a line
+    only when its history could not be recorded.
     """
     lesson_gate = lesson_gate and not target.document
     lesson_changes = ()
@@ -274,10 +284,16 @@ def save_guidance(
     kind = "document" if target.document else "guidance"
     subject = f"{kind} save: {', '.join(os.path.relpath(path, workspace) for path in changes)}"
     commit = message or commit_message(subject, target.scope, reason, evidence)
-    result = _save(
-        changes, workspace, target, author, commit, done, expected, atomic,
-        binary_safe_history, write, timing,
-    )
+    if target.document and not deletes:
+        from infra.document_recorder import save_document
+
+        result = save_document(writes, workspace=workspace, target=target, author=author, message=commit,
+                               expected=expected, atomic=atomic, write=write)
+    else:
+        result = _save(
+            changes, workspace, target, author, commit, done, expected, atomic,
+            binary_safe_history, write, timing,
+        )
     return after_save(
         result, workspace=workspace, writes=writes, target=target, author=author, timing=timing,
         lesson_changes=lesson_changes, lesson_observation_thread_id=lesson_observation_thread_id,
@@ -347,8 +363,7 @@ def _save(
             timing["commit_ms"] = (time.monotonic() - started) * 1000
         if landed is not None:
             lines += ([done.format(sha=landed.sha[:7])] if done and landed.changed and not landed.unsynced else []) + landed.unsynced_line()
-        if not target.document:
-            lines += _sweep_others(repo, workspace, db, set(rels.values()))
+        lines += _sweep_others(repo, workspace, db, set(rels.values()))
         if landed is None or not landed.changed:
             return SaveResult("unchanged", line="\n".join(lines) or None)
         return SaveResult(

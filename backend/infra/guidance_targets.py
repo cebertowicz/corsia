@@ -16,11 +16,13 @@ class GuidanceTarget:
     """A history save's scope label, or the fault that hid it.
 
     ``document`` marks an ordinary document: recorded by the same writer, but none of the
-    instruction-only work (the lesson check, the carry-in record) follows its save."""
+    instruction-only work (the lesson check, the carry-in record) follows its save. ``registered``
+    marks a registered thread-folder document, recorded even where the workspace's Git ignores it."""
 
     scope: str
     fault: str | None = None
     document: bool = False
+    registered: bool = False
 
 
 def guidance_target(path: Path, workspace: Path | None = None) -> GuidanceTarget | None:
@@ -42,16 +44,18 @@ def history_target(path: Path, workspace: Path | None = None) -> GuidanceTarget 
     """The target whose saves the workspace history records: guidance first, else a recorded document.
 
     A document whose classification fails is not recorded: its save stays an ordinary write, as it was
-    before documents had history. One the workspace's Git ignores is a target, and the writer's own
-    ignore check saves it unrecorded, so a save asks Git that once."""
+    before documents had history. One the workspace's Git ignores is a target, and the recorder's own
+    ignore check leaves it unrecorded, so a save asks Git that once, after it returns."""
     target = guidance_target(path, workspace)
     if target is not None:
         return target
+    from core.document_history_paths import in_thread_folder
     from infra.config import WORKSPACE
 
-    if not document_candidate(path, Path(workspace or WORKSPACE)):
+    root = Path(workspace or WORKSPACE)
+    if not document_candidate(path, root):
         return None
-    return GuidanceTarget(DOCUMENT_SCOPE, document=True)
+    return GuidanceTarget(DOCUMENT_SCOPE, document=True, registered=in_thread_folder(path, root))
 
 
 def document_candidate(path: Path, workspace: Path) -> bool:

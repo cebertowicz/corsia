@@ -3,8 +3,8 @@
 A recorded document is a text file in the workspace that the person keeps: anything outside the
 thread trays, and a file in a tray only once it is registered as an artifact. Never recorded: a
 ``working`` folder (ephemeral), a file inside another repository (a project's source checkout), a
-path the workspace's Git ignores (the person's choice, and where secrets are kept out), and
-anything not text up to 1 MB. Guidance is classified first by :mod:`core.guidance_paths`.
+path the workspace's Git ignores (the person's choice, and where secrets are kept out) unless it is
+a registered tray file (registration is the mark), and anything not text up to 1 MB. Guidance is classified first by :mod:`core.guidance_paths`.
 """
 
 from __future__ import annotations
@@ -25,6 +25,14 @@ def _tray_parts(parts: tuple[str, ...]) -> tuple[str, ...] | None:
     if len(parts) >= 3 and parts[0] == _THREADS_DIR:
         return parts[2:]
     return None
+
+
+def in_thread_folder(path: str | Path, workspace: str | Path) -> bool:
+    """Whether ``path`` sits in a thread tray, so only its registration makes it a recorded document."""
+    absolute, root = _absolute(path), _absolute(workspace)
+    if absolute is None or root is None or not absolute.is_relative_to(root):
+        return False
+    return _tray_parts(absolute.relative_to(root).parts) is not None
 
 
 def _inside_other_repository(absolute: Path, root: Path) -> bool:

@@ -37,7 +37,7 @@ def history_off(workspace: Path) -> bool:
 
 def history_offered(workspace: Path, document: Path | None = None) -> bool:
     """Whether an open recorded file offers History: the workspace records history, and Git does not
-    ignore ``document`` when the file is one (a guidance file passes None)."""
+    ignore ``document`` (a guidance file or a registered thread-folder file passes None)."""
     from infra.guidance_targets import ignored_by_workspace
 
     if history_off(workspace):

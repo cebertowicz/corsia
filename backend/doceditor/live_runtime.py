@@ -13,7 +13,8 @@ from uuid import uuid4
 
 from doceditor.live_failure_record import SetupFailure
 
-from doceditor.document_save import validate_live_write, write_live_text
+from doceditor.document_save import validate_live_write
+from doceditor.live_text_write import write_live_text
 from doceditor import live_events
 from doceditor.live_damage import DamageSave
 from doceditor.live_document import LiveDocument, file_hash
