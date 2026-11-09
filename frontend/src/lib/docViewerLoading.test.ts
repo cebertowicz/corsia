@@ -71,15 +71,16 @@ describe('a live reopen that replayed a device copy', () => {
 	const fileText = '# Doc\nfirst';
 	const openWith = async (liveText: string, unwritten: boolean) => {
 		const flush = vi.fn().mockResolvedValue({});
+		const written = vi.fn();
 		const live = { text: { toString: () => liveText }, artifactId: 'artifact', writable: true, flush,
-			durability: { clean: true, unwritten }, connection: 'connected' };
+			durability: { clean: true, unwritten, written, snapshot: () => ({ localGeneration: 3, ackGeneration: 1 }) }, connection: 'connected' };
 		api.fetchContent.mockResolvedValue({ text: fileText, writable: true, freshness: null, revision: 'r1', artifact: { id: 'artifact' } });
 		vi.mocked(openLiveDocument).mockResolvedValue(live as never);
 		liveDocumentBindings.set({ [target.instanceId]: live } as never);
 		seedDraft(target, liveText);
 		await loadViewerContent({ target, isCurrent: () => true, onReady: vi.fn(), onSnapshot: vi.fn(), onUnavailable: vi.fn() });
 		await new Promise(resolve => setTimeout(resolve, 0));
-		return flush;
+		return Object.assign(flush, { written });
 	};
 	afterEach(() => { liveDocumentBindings.set({}); });
 
@@ -88,12 +89,16 @@ describe('a live reopen that replayed a device copy', () => {
 		expect(flush).toHaveBeenCalledOnce();
 	});
 
-	it('writes nothing when the replay added nothing to the file text', async () => {
-		expect(await openWith(fileText, true)).not.toHaveBeenCalled();
+	it('writes nothing when the replay added nothing to the file text, and owes no flush on close', async () => {
+		const flush = await openWith(fileText, true);
+		expect(flush).not.toHaveBeenCalled();
+		expect(flush.written).toHaveBeenCalledExactlyOnceWith(3);
 	});
 
 	it('writes nothing on a plain reopen with no local transactions to write', async () => {
-		expect(await openWith('# Doc\nfirst\nremote edit', false)).not.toHaveBeenCalled();
+		const flush = await openWith('# Doc\nfirst\nremote edit', false);
+		expect(flush).not.toHaveBeenCalled();
+		expect(flush.written).not.toHaveBeenCalled();
 	});
 });
 
