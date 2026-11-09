@@ -54,8 +54,8 @@ _EVENT_DIGESTS = {
     ),
 }
 
-#: A user's own pause is labeled as theirs wherever it appears, because no
-#: agent may act on it (matrix rule 6): not the worker, and not the parent.
+#: A user's own pause is labeled as theirs wherever it appears: it is lifted
+#: only on their word (matrix rule 6), by them or by a coordinator they ask.
 _BY_USER = " by user"
 
 

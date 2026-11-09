@@ -360,7 +360,7 @@ def _route(plan_id, operation, params, actor, common, db, workflow):
     if operation in boundary_edges.EDGE_OPERATIONS:
         return boundary_edges.dispatch(plan_id, operation, params, actor, common, db)
     if operation in {"pause", "resume", "pause_node"}:
-        pause_authority.require(operation, params, actor, service._plan_row(db, plan_id), db)
+        pause_authority.require(operation, params, actor, provenance=common["provenance"])
     if operation in {"pause", "resume"}:
         return lifecycle.transition(
             plan_id,

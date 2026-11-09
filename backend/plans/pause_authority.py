@@ -1,7 +1,9 @@
 """Who pauses and resumes a plan (pause contract rule 1, #1969).
 
-The user or a coordinator pauses or resumes a plan. An agent that wants to come back to a task
-later schedules it instead (``plans.scheduled_wait``), and a pause call tells
+The person pauses or resumes a plan, and so may the coordinator of another
+agent's plan (its project's conductor or the CORSIA agent); a pause the person
+set is lifted on their word. An agent that wants to come back to a task later
+schedules it instead (``plans.scheduled_wait``), and a pause call tells
 it so in one line.
 
 What may start a paused agent's Turn (rules 2 and 3, #1971) lives here too:
@@ -150,15 +152,19 @@ def _one_line(db, row) -> str:
     return (str(metadata.get("summary") or "").strip() or (lines or [""])[0])[:200]
 
 
-def require(operation: str, params, actor, plan, db) -> None:
-    """Permit a coordinator to pause or resume another thread's plan."""
+def require(operation: str, params, actor, *, provenance: str) -> None:
+    """Refuse an agent's pause or resume unless the boundary authorized its coordinator.
+
+    The boundary decides coordinator authority once (``thread_may_mutate``)
+    and stamps ``STEER_PROVENANCE``; this reads that stamp rather than
+    deciding again.
+    """
+    from plans.conductor_add import STEER_PROVENANCE
+
     if actor.kind != "thread":
         return
-    if operation in {"pause", "resume"} and plan["owner_id"] != actor.thread_id:
-        from plans.conductor_add import conductor_may_add
-
-        if conductor_may_add(db, plan, actor):
-            return
+    if operation in {"pause", "resume"} and provenance == STEER_PROVENANCE:
+        return
     if operation == "resume":
         raise PlanRefusal(RESUME_REFUSAL)
     raise PlanRefusal(pause_refusal(params.get("node_id")))

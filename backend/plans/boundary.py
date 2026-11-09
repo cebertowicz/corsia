@@ -14,7 +14,9 @@ import plans.boundary_dispatch as boundary_dispatch
 import plans.boundary_fields as fields
 import plans.boundary_guard as boundary_guard
 import plans.boundary_worker as boundary_worker
-from plans.conductor_add import conductor_may_add, thread_may_mutate
+from plans.conductor_add import (
+    ADD_PROVENANCE, STEER_PROVENANCE, coordinator_may_steer, thread_may_mutate,
+)
 import plans.errors as errors
 import plans.node_settlement as node_settlement
 import plans.notifications as notifications
@@ -177,12 +179,12 @@ def _authorize_and_dispatch(
     review_operation = operation in {"accept", "accept_with_follow_up", "reject"}
     # Naming the next task to start is not a review act, so a review that
     # names one also needs the authority to drive this plan's nodes.
-    foreign_conductor_add = _authorize_thread_mutation_owner(
+    foreign_coordinator = _authorize_thread_mutation_owner(
         db, plan, operation, params, actor,
         review_operation=review_operation and "next_node_id" not in params,
     )
-    if foreign_conductor_add:
-        provenance = "plan.conductor_add"
+    if foreign_coordinator:
+        provenance = ADD_PROVENANCE if operation in {"add", "insert"} else STEER_PROVENANCE
     if operation == "insert":
         _authorize_insert_target(db, plan_id, params)
     if operation in {"add", "insert"}:
@@ -296,7 +298,7 @@ def _authorize_thread_mutation_owner(
     # A foreign add has one useful refusal no matter who made it. A conductor's
     # other foreign mutations take the same route; ordinary review retains its
     # existing reviewer-specific refusal below.
-    if operation == "add" or conductor_may_add(db, plan, actor):
+    if operation == "add" or coordinator_may_steer(db, plan, actor):
         raise errors.PlanRefusal(FOREIGN_PLAN_MUTATION)
     if not review_operation:
         raise PermissionError("thread plan mutations require the owning thread")

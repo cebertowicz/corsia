@@ -119,7 +119,24 @@ def test_coordinator_pauses_and_resumes_lane_with_provenance(db, actor):
     _mutate(db, plan.id, "resume", {"expected_revision": paused["revision"]}, actor)
     assert service._plan_row(db, plan.id)["state"] == "active"
     events = db.execute("SELECT actor_id, provenance FROM plan_events WHERE plan_id=? AND event='state_transition' ORDER BY rowid", (plan.id,)).fetchall()
-    assert [(row["actor_id"], row["provenance"]) for row in events[-2:]] == [(actor.thread_id, "plan.conductor_add")] * 2
+    assert [(row["actor_id"], row["provenance"]) for row in events[-2:]] == [(actor.thread_id, "plan.coordinator_steer")] * 2
+
+
+def test_coordinator_resumes_a_pause_the_person_set_and_never_its_own_plan(db):
+    """The person may ask their conductor to lift their pause; the template
+    holds the conductor to their word. A coordinator still cannot pause or
+    resume its own plan."""
+    plan = service.ensure_plan("thread", "lane", db=db)
+    db.commit()
+    person = PlanActor(None, "user", None, kind="user")
+    _mutate(db, plan.id, "pause", {"expected_revision": plan.revision}, person)
+    paused = service._plan_row(db, plan.id)
+    _mutate(db, plan.id, "resume", {"expected_revision": paused["revision"]}, PROJECT_CONDUCTOR)
+    assert service._plan_row(db, plan.id)["state"] == "active"
+    own = service.ensure_plan("thread", PROJECT_CONDUCTOR.thread_id, db=db)
+    db.commit()
+    with pytest.raises(PlanRefusal):
+        _mutate(db, own.id, "pause", {"expected_revision": own.revision}, PROJECT_CONDUCTOR)
 
 
 def test_coordinator_inserts_and_reorders_only_top_level(db):
@@ -134,7 +151,7 @@ def test_coordinator_inserts_and_reorders_only_top_level(db):
     moved = _mutate(db, plan.id, "reorder", {"node_id": first.id, "order_key": 0, "expected_revision": first_row["revision"]}, PROJECT_CONDUCTOR)["node"]
     assert moved["order_key"] < service._node_row(db, inserted["id"])["order_key"]
     event = db.execute("SELECT actor_id, provenance FROM plan_node_events WHERE node_id=? AND event='node_reordered'", (first.id,)).fetchone()
-    assert tuple(event) == (PROJECT_CONDUCTOR.thread_id, "plan.conductor_add")
+    assert tuple(event) == (PROJECT_CONDUCTOR.thread_id, "plan.coordinator_steer")
     for operation, params in [("insert", {"before_node_id": child.id}), ("reorder", {"node_id": child.id, "order_key": 0, "expected_revision": child.revision}), ("pause_node", {"node_id": first.id, "expected_revision": moved["revision"]})]:
         with pytest.raises(PlanRefusal):
             if operation == "insert":
