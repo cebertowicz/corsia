@@ -168,56 +168,6 @@ class UnarchivedIds:
         ).fetchone() is not None
 
 
-class PlanTitles(Mapping):
-    """Titles of a plan's unarchived nodes: the listed rows', and any other asked by id.
-
-    Stands for the plan's whole title map where a reader names a few nodes (the target of
-    a dependency), so the question costs a lookup, not the plan.
-    """
-
-    def __init__(self, connection, plan_id: str, listed: Iterable[sqlite3.Row] = ()) -> None:
-        self._connection, self._plan_id = connection, plan_id
-        self._known = {str(row["id"]): row["title"] for row in listed}
-
-    def __getitem__(self, node_id: str) -> str:
-        if node_id not in self._known:
-            row = self._connection.execute(
-                f"SELECT title FROM plan_nodes WHERE id=? AND plan_id=? AND {_UNARCHIVED}",
-                (node_id, self._plan_id),
-            ).fetchone()
-            if row is None:
-                raise KeyError(node_id)
-            self._known[node_id] = row["title"]
-        return self._known[node_id]
-
-    def __iter__(self):
-        return iter(self._known)
-
-    def __len__(self) -> int:
-        return len(self._known)
-
-
-class PlansTitles(Mapping):
-    """The titles of several plans' nodes: each plan's own ``PlanTitles``, asked in turn."""
-
-    def __init__(self, connection, trees: Iterable["OpenTree"]) -> None:
-        self._by_plan = [PlanTitles(connection, str(tree.plan["id"]), tree.rows) for tree in trees]
-
-    def __getitem__(self, node_id: str) -> str:
-        for titles in self._by_plan:
-            try:
-                return titles[node_id]
-            except KeyError:
-                continue
-        raise KeyError(node_id)
-
-    def __iter__(self):
-        return (node_id for titles in self._by_plan for node_id in titles)
-
-    def __len__(self) -> int:
-        return sum(len(titles) for titles in self._by_plan)
-
-
 def _chunks(ids: list[str]) -> Iterable[list[str]]:
     for start in range(0, len(ids), _ID_CHUNK):
         yield ids[start:start + _ID_CHUNK]
