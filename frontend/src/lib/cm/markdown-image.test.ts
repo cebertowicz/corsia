@@ -417,7 +417,7 @@ describe('links in a rendered table', () => {
 		const showError = vi.fn();
 		const deps = {
 			activeThreadId: () => 't1', projectId: () => 'p1',
-			fetchTree: vi.fn().mockResolvedValue([{ id: 'ws', label: 'Workspace', kind: 'workspace' as const, path: '/ws', nodes: [], capped: false }]),
+			fetchRoots: vi.fn().mockResolvedValue([{ id: 'ws', label: 'Workspace', kind: 'workspace' as const, path: '/ws' }]),
 			fetchRevision, openArtifact, showError, openExternal: vi.fn(), isTauri: () => true, origin: () => 'http://corsia.test',
 			openSettings: vi.fn(), openThread: vi.fn(),
 		};
