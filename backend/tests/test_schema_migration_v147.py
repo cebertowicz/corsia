@@ -43,7 +43,7 @@ def _accepted(db, when: str) -> None:
 
 
 def test_v147_fresh_schema_has_no_install_history_rows() -> None:
-    assert SCHEMA_VERSION == 185
+    assert SCHEMA_VERSION == 186
     assert MIGRATIONS[146] is migrate_146_to_147
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row

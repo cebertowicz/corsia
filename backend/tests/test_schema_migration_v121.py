@@ -18,7 +18,7 @@ def _columns(db: sqlite3.Connection) -> list[str]:
 
 
 def test_fresh_schema_has_the_table_and_the_step_is_registered() -> None:
-    assert SCHEMA_VERSION == 185
+    assert SCHEMA_VERSION == 186
     assert MIGRATIONS[120] is migrate_120_to_121
     with closing(sqlite3.connect(":memory:")) as db:
         initialize_schema(db)

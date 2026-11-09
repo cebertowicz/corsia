@@ -29,7 +29,7 @@ def _columns(db: sqlite3.Connection) -> list[tuple[str, str]]:
 
 
 def test_v155_is_registered() -> None:
-    assert SCHEMA_VERSION == 185
+    assert SCHEMA_VERSION == 186
     assert MIGRATIONS[154] is migrate_154_to_155
 
 

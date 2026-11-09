@@ -25,7 +25,7 @@ def _dev_139() -> sqlite3.Connection:
 
 
 def test_v140_registers_the_requesting_node_step() -> None:
-    assert SCHEMA_VERSION == 185
+    assert SCHEMA_VERSION == 186
     assert MIGRATIONS[139] is migrate_139_to_140
 
 

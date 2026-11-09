@@ -211,32 +211,35 @@ def _model_switch_transcript_version(
     thread_id: str,
 ) -> tuple[int, int, int, int]:
     """Return a compact append/delete/retention token for final CAS."""
-    from core.thread_lifecycle import TOOL_TRIM_MARKER
+    from infra.tool_retention_marker import TOOL_TRIM_CONTENT_SQL
 
-    row = db.execute(
-        """
-        SELECT s.next_message_seq,
-               COUNT(m.id) AS message_count,
-               COALESCE(MAX(m.seq), 0) AS max_seq,
-               COALESCE(SUM(
-                   CASE WHEN m.role = 'tool'
-                         AND substr(m.content, 1, ?) = ?
-                        THEN 1 ELSE 0 END
-               ), 0) AS retention_stub_count
-        FROM threads AS s
-        LEFT JOIN messages AS m ON m.thread_id = s.id AND m.seq IS NOT NULL
-        WHERE s.id = ?
-        GROUP BY s.id
-        """,
-        (len(TOOL_TRIM_MARKER), TOOL_TRIM_MARKER, thread_id),
+    # Three index-only reads instead of one joined aggregate: the join has to
+    # visit every row of the thread to sum the CASE (84,506 rows on a long
+    # thread, for four numbers), while each read here is bounded by what it
+    # asks for — the counts are a range over ``idx_messages_session_seq`` and
+    # the stub count a range over ``idx_messages_retention_stub``.
+    # ``seq IS NOT NULL`` stays on both, because an unpositioned row is outside
+    # the token either way; the shipped join said the same in its ON clause.
+    owner = db.execute(
+        "SELECT next_message_seq FROM threads WHERE id = ?", (thread_id,)
     ).fetchone()
-    if row is None:
+    if owner is None:
         raise LookupError(f"thread does not exist: {thread_id}")
+    counts = db.execute(
+        "SELECT COUNT(*) AS message_count, COALESCE(MAX(seq), 0) AS max_seq "
+        "FROM messages WHERE thread_id = ? AND seq IS NOT NULL",
+        (thread_id,),
+    ).fetchone()
+    stubs = db.execute(
+        "SELECT COUNT(*) AS retention_stub_count FROM messages WHERE thread_id = ? "
+        f"AND seq IS NOT NULL AND role = 'tool' AND {TOOL_TRIM_CONTENT_SQL}",
+        (thread_id,),
+    ).fetchone()
     return (
-        int(row["next_message_seq"]),
-        int(row["message_count"]),
-        int(row["max_seq"]),
-        int(row["retention_stub_count"]),
+        int(owner["next_message_seq"]),
+        int(counts["message_count"]),
+        int(counts["max_seq"]),
+        int(stubs["retention_stub_count"]),
     )
 
 

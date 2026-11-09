@@ -73,7 +73,7 @@ def _rows(db) -> dict[str, tuple]:
 
 
 def test_fresh_schema_is_current_version():
-    assert SCHEMA_VERSION == 185
+    assert SCHEMA_VERSION == 186
 
 
 def test_closed_tasks_come_back_and_nothing_else_does(tmp_path):

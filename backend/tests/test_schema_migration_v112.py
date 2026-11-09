@@ -34,7 +34,7 @@ def _columns(db: sqlite3.Connection) -> list[str]:
 
 
 def test_registered_as_the_current_step():
-    assert SCHEMA_VERSION == 185
+    assert SCHEMA_VERSION == 186
     assert MIGRATIONS[111] is migrate_111_to_112
 
 

@@ -41,7 +41,7 @@ def _fact(db, event_name: str, subject: str, key: str) -> None:
 
 
 def test_v148_fresh_schema_has_both_indexes() -> None:
-    assert SCHEMA_VERSION == 185
+    assert SCHEMA_VERSION == 186
     assert MIGRATIONS[147] is migrate_147_to_148
     db = sqlite3.connect(":memory:")
     initialize_schema(db)

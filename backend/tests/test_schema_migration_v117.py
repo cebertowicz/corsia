@@ -39,7 +39,7 @@ def _indexes(db: sqlite3.Connection) -> set[str]:
 
 
 def test_v117_registers_and_widens_kind_keeping_rows(tmp_path) -> None:
-    assert SCHEMA_VERSION == 185 and MIGRATIONS[116] is migrate_116_to_117
+    assert SCHEMA_VERSION == 186 and MIGRATIONS[116] is migrate_116_to_117
     path = tmp_path / "old.db"
     with sqlite3.connect(path) as db:
         db.executescript(_V116_TABLE + """

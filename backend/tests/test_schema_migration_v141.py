@@ -113,7 +113,7 @@ def test_a_full_v140_install_takes_the_step_and_ends_where_a_fresh_install_start
     from infra.database_migrations import MIGRATIONS, migrate_to_current
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 185 and MIGRATIONS[140] is migrate_140_to_141
+    assert SCHEMA_VERSION == 186 and MIGRATIONS[140] is migrate_140_to_141
     db = sqlite3.connect(":memory:")
     initialize_schema(db)
     for table in ("event_route_decisions", "event_rules"):

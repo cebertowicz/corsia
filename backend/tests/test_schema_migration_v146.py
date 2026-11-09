@@ -58,7 +58,7 @@ def test_v146_migrates_a_v145_batch_table_to_the_fresh_lane_shape() -> None:
     from infra.database_migrations import MIGRATIONS, migrate_to_current
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 185 and MIGRATIONS[145] is migrate_145_to_146
+    assert SCHEMA_VERSION == 186 and MIGRATIONS[145] is migrate_145_to_146
     fresh = sqlite3.connect(":memory:")
     db = sqlite3.connect(":memory:")
     try:

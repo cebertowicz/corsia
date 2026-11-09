@@ -142,7 +142,7 @@ def test_a_v137_install_takes_both_steps_and_ends_where_a_fresh_install_starts()
     from infra.migration_137_to_138_plan_intent import migrate_137_to_138
     from infra.schema import SCHEMA_VERSION
 
-    assert SCHEMA_VERSION == 185
+    assert SCHEMA_VERSION == 186
     assert (MIGRATIONS[137], MIGRATIONS[138]) == (migrate_137_to_138, migrate_138_to_139)
     db = _v137()
     result = migrate_to_current(db, SCHEMA_VERSION)

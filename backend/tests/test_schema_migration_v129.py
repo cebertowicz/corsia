@@ -71,7 +71,7 @@ def _seed_legacy(db: sqlite3.Connection) -> None:
 
 
 def test_v128_registers_connected_accounts_step() -> None:
-    assert SCHEMA_VERSION == 185
+    assert SCHEMA_VERSION == 186
     assert MIGRATIONS[128] is migrate_128_to_129
     assert 129 in MIGRATIONS
 
