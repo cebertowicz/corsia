@@ -43,7 +43,9 @@ support, and the live token split in `app-tokens.css` + `app.css`.
 ## 0. The reference screen: the chat view
 
 **Status:** approved look, 2026-10-15. Every other screen is brought into line
-with it, one screen at a time. Where an older section below disagrees, it
+with it, one screen at a time. Until a screen is, anything added to it matches
+that screen's own current look, element by element, and moves to §0 only when
+the whole screen does. Where an older section below disagrees, it
 carries a **Superseded by §0** note at that point, and this section wins.
 
 **What this section is.** For each role on the screen, it gives the treatment the approved chat view
