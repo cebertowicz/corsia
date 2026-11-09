@@ -32,6 +32,38 @@ from infra.queries import (
 
 router = APIRouter(prefix="/api", tags=["threads"])
 
+#: Thread columns the chat list does not carry. `SELECT s.*` shipped every column on every
+#: row, and an unread column still costs its name once per thread: on the production-scale
+#: fixture (560 visible threads) these 19 columns are 306 KB of the 804 KB body, 38%. Each is
+#: turn, model-switch, compaction, confinement or local-only engine state that no caller of
+#: this route reads: the frontend keeps the row as its own `Thread`
+#: (frontend/src/lib/stores/threads.ts declares the four switch fields it does show and none of
+#: these), every backend test that names these columns reads them from a database row or from
+#: another table, and the one script that fetches this route (scripts/speed_gate) measures the
+#: message read. The value is still served by the route that owns it: thread detail, the
+#: model-switch and local-only routes, and the roster read.
+_LIST_INTERNAL_COLUMNS = (
+    "agent_roster_updated_at",
+    "confinement",
+    "confined_read_dirs",
+    "execution_epoch",
+    "history_epoch",
+    "last_auto_retry_at",
+    "last_context_change_seq",
+    "local_only_cut_seq",
+    "next_input_order",
+    "next_message_seq",
+    "pending_compaction_detail",
+    "pending_compaction_trigger",
+    "pending_execution_epoch",
+    "switch_actor_id",
+    "switch_actor_kind",
+    "switch_after_input_order",
+    "switch_checkpoint_choice",
+    "switch_reason",
+    "switch_requested_at",
+)
+
 
 @router.get("/threads")
 async def list_threads(token: str, archived: int = 0):
@@ -74,6 +106,8 @@ async def list_threads(token: str, archived: int = 0):
             coordination = []
             for row in rows:
                 item = project_thread(reader, row)
+                for column in _LIST_INTERNAL_COLUMNS:
+                    item.pop(column, None)
                 item['last_message'] = strip_answer_tags(item['last_message'])
                 item['archived'] = 1 if thread_is_explicitly_archived(row) else 0
                 if row['id'] in conductor_ids:
