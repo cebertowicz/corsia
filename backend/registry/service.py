@@ -43,14 +43,8 @@ def registrable_zone(p: Path, *, db=None) -> str | None:
 
     workspace = config.WORKSPACE.resolve()
     candidates = [(workspace, "workspace")]
-    candidates.extend(
-        (root, "repo")
-        for root in {
-            allowed.resolve()
-            for allowed in get_allowed_dirs_rw(db=db, containing=p)
-            if allowed.resolve() != workspace
-        }
-    )
+    resolved = {allowed.resolve() for allowed in get_allowed_dirs_rw(db=db, containing=p)}
+    candidates.extend((root, "repo") for root in resolved if root != workspace)
     matches = [
         (root, zone)
         for root, zone in candidates

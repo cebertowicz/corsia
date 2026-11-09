@@ -328,9 +328,10 @@ def _allowed_dirs_rw_containing(
         elif (
             policy.source_binding_valid and not policy.enforcement_error
             and not policy.protect_base_checkout
-            and _is_within(target, policy.path.resolve(strict=False))
         ):
-            roots.append(policy.path.resolve(strict=False))
+            writable_root = policy.path.resolve(strict=False)
+            if _is_within(target, writable_root):
+                roots.append(writable_root)
     return roots
 
 

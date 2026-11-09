@@ -1027,21 +1027,29 @@ def list_registered_repo_policies(
                 f"repository policy query failed: {exc}"
             ) from exc
         policies: list[RepoPolicy] = []
+        # A project's planning root is one fact for all its rows: read and resolve
+        # it once per listing, keeping the failure so an unresolvable project's
+        # rows still report the reason they did when the lookup ran per row.
+        planning: dict[str, Path | ValueError] = {}
         for row in rows:
             project_id = str(row["id"])
             policy = _policy_from_row(project_id, row)
             if policy is None:
                 continue
-            try:
-                _name, planning_root = resolve_project_paths(
-                    workspace,
-                    project_id,
-                    db=connection,
-                )
-            except ValueError as exc:
-                binding_error = f"project planning root is invalid: {exc}"
+            if project_id not in planning:
+                try:
+                    planning[project_id] = resolve_project_paths(
+                        workspace,
+                        project_id,
+                        db=connection,
+                    )[1]
+                except ValueError as exc:
+                    planning[project_id] = exc
+            prepared = planning[project_id]
+            if isinstance(prepared, ValueError):
+                binding_error = f"project planning root is invalid: {prepared}"
             else:
-                binding_error = _source_binding_error(planning_root, policy)
+                binding_error = _source_binding_error(prepared, policy)
             if binding_error is not None:
                 policy = replace(
                     policy, enforcement_error=binding_error, source_binding_valid=False,
