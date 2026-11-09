@@ -5,6 +5,7 @@ import { existingDraft, flushDraft } from '$lib/stores/docSaveQueue';
 import { contentWidth, widenForHistory } from '$lib/imageViewerPane';
 import { emitProductEvent } from '$lib/product_events';
 import { RequestRefused } from '$lib/api/docs';
+import { textSha256 } from '$lib/stores/documentWire';
 
 /** Whether History is offered and open for the viewer's tab, and the one call that asks the server to restore a version. */
 export function createViewerHistory(source: {
@@ -16,6 +17,8 @@ export function createViewerHistory(source: {
 	/** Brings the column back, when it fits and has comments to show. */
 	showColumn: () => void;
 	root: () => HTMLElement | undefined;
+	/** An open live document's current text, the base a restore is checked against; null for a saved-file tab. */
+	liveText?: () => string | null;
 }) {
 	let open = $state(false);
 	// The server says on open whether this file's versions are recorded; History is fetched only once opened.
@@ -62,7 +65,8 @@ export function createViewerHistory(source: {
 		if (!document) throw new RequestRefused('Document closed', 'not_loaded');
 		const flushed = await flushDraft(document).catch(() => false);
 		if (!flushed) throw new RequestRefused('Pending typing was not saved', 'unsaved_typing');
-		const base = existingDraft(document)?.savedRevision;
+		const live = source.liveText?.() ?? null;
+		const base = live !== null ? await textSha256(live) : existingDraft(document)?.savedRevision;
 		if (!base) throw new RequestRefused('Document revision unavailable', 'not_loaded');
 		await restoreVersion(document, version.id, base);
 	}

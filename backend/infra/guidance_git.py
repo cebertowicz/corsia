@@ -28,6 +28,7 @@ from infra.guidance_messages import (
     commit_message, is_person_author, recorded_reason,
 )
 from infra.guidance_states import HistoryOff, GitFault, NoRepository, _LockBusy, history_is_off
+from infra.guidance_save_after import after_save
 from infra.guidance_save_types import SaveResult, _Commit
 from infra.guidance_targets import GuidanceTarget
 from infra.skill_save_validation import refused_save
@@ -248,7 +249,10 @@ def save_guidance(
 
     Binary-safe reviewed bundles use raw SHA-256 and a 1 MB file ceiling; ordinary guidance is text-only.
     An agent's new or changed lesson is refused unless the caller passes ``lesson_gate=False``.
+    A document target is recorded the same way, without the lesson check, the carry-in record or the
+    sweep of other guidance, and reports a line only when its history could not be recorded.
     """
+    lesson_gate = lesson_gate and not target.document
     lesson_changes = ()
     if lesson_gate and not is_person_author(author):
         from infra.lesson_save_gate import lesson_changes as assess_lesson_changes
@@ -266,42 +270,18 @@ def save_guidance(
     changes: dict[Path, bytes | None] = {**writes, **{path: None for path in deletes}}
     expected = {**(expected or {}), **deletes}
     timing: dict[str, float] = {}
-    done = (SAVE_COMMITTED if recorded_reason(reason) else SAVE_UNRECORDED).replace("{scope}", target.scope)
-    subject = f"guidance save: {', '.join(os.path.relpath(path, workspace) for path in changes)}"
+    done = "" if target.document else (SAVE_COMMITTED if recorded_reason(reason) else SAVE_UNRECORDED).replace("{scope}", target.scope)
+    kind = "document" if target.document else "guidance"
+    subject = f"{kind} save: {', '.join(os.path.relpath(path, workspace) for path in changes)}"
     commit = message or commit_message(subject, target.scope, reason, evidence)
     result = _save(
         changes, workspace, target, author, commit, done, expected, atomic,
         binary_safe_history, write, timing,
     )
-    from infra.product_events import emit_product_event
-
-    properties = {
-        "outcome": result.outcome, "scope": target.scope, "history_off": result.outcome == "history-off",
-        "index_unsynced": list(result.unsynced), **timing,
-    }
-    logger.info("guidance save {}", properties)
-    emit_product_event("guidance_history", "save", properties=properties)
-    warnings: list[str | None] = []
-    if result.outcome == "written" and lesson_changes:
-        from infra.lesson_save_gate import observe_written_save
-
-        warnings.append(observe_written_save(
-            lesson_changes, author, stewardship_thread_id=lesson_observation_thread_id,
-        ))
-    if result.outcome == "written" and result.sha and writes:
-        # Only a landed commit creates C1 work; matching remains off this request path.
-        from core.carry_in_facts import record_committed_save
-        from infra.carry_in_drain import request_drain
-
-        record_committed_save(workspace, list(writes), result.sha)
-        request_drain(workspace)
-    if any(warnings):
-        result = SaveResult(
-            result.outcome, result.reason, result.sha,
-            line="\n".join(line for line in (result.line, *warnings) if line),
-            unsynced=result.unsynced, errors=result.errors,
-        )
-    return result
+    return after_save(
+        result, workspace=workspace, writes=writes, target=target, author=author, timing=timing,
+        lesson_changes=lesson_changes, lesson_observation_thread_id=lesson_observation_thread_id,
+    )
 
 
 def _save(
@@ -366,8 +346,9 @@ def _save(
         finally:
             timing["commit_ms"] = (time.monotonic() - started) * 1000
         if landed is not None:
-            lines += ([done.format(sha=landed.sha[:7])] if landed.changed and not landed.unsynced else []) + landed.unsynced_line()
-        lines += _sweep_others(repo, workspace, db, set(rels.values()))
+            lines += ([done.format(sha=landed.sha[:7])] if done and landed.changed and not landed.unsynced else []) + landed.unsynced_line()
+        if not target.document:
+            lines += _sweep_others(repo, workspace, db, set(rels.values()))
         if landed is None or not landed.changed:
             return SaveResult("unchanged", line="\n".join(lines) or None)
         return SaveResult(

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from infra.guidance_git import _git_bytes, workspace_repository
@@ -11,6 +11,8 @@ from infra.guidance_messages import parse_recorded_reason
 
 # The most versions one list returns; ``truncated`` says older ones exist.
 HISTORY_CAP = 500
+# Consecutive saves by one author this close together show as one version.
+GROUP_GAP = timedelta(minutes=10)
 _COMMIT = re.compile(r"[0-9a-f]{40}")
 
 
@@ -33,6 +35,16 @@ def history_off(workspace: Path) -> bool:
         return False
 
 
+def history_offered(workspace: Path, document: Path | None = None) -> bool:
+    """Whether an open recorded file offers History: the workspace records history, and Git does not
+    ignore ``document`` when the file is one (a guidance file passes None)."""
+    from infra.guidance_targets import ignored_by_workspace
+
+    if history_off(workspace):
+        return False
+    return document is None or not ignored_by_workspace(document, workspace)
+
+
 def list_versions(workspace: Path, relative: str) -> tuple[list[dict[str, str | None]], bool]:
     """The newest versions that hold this file's text, and whether older ones exist past the cap."""
     repo = repository(workspace)
@@ -47,7 +59,26 @@ def list_versions(workspace: Path, relative: str) -> tuple[list[dict[str, str | 
     for index in range(0, len(fields) - 3, 4):
         commit, author, saved_at, message = fields[index:index + 4]
         rows.append({"id": commit, "author": author, "savedAt": saved_at, "reason": parse_recorded_reason(message)})
-    return rows[:HISTORY_CAP], len(rows) > HISTORY_CAP
+    return grouped(rows[:HISTORY_CAP]), len(rows) > HISTORY_CAP
+
+
+def grouped(rows: list[dict[str, str | None]]) -> list[dict[str, str | None]]:
+    """Newest-first saves shown as versions: a save joins the version just before it when the same
+    author made both within ``GROUP_GAP`` and the later one states no reason. The shown version is the
+    group's newest save, under the reason that started it. Display only: every commit stays in history."""
+    shown: list[dict[str, str | None]] = []
+    for row in reversed(rows):
+        last = shown[-1] if shown else None
+        if (last is not None and row["reason"] is None and row["author"] == last["author"]
+                and _at(row) - _at(last) <= GROUP_GAP):
+            shown[-1] = {**row, "reason": last["reason"]}
+        else:
+            shown.append(row)
+    return shown[::-1]
+
+
+def _at(row: dict[str, str | None]) -> datetime:
+    return datetime.fromisoformat(str(row["savedAt"]))
 
 
 def version_bytes(repo: Path, relative: str, commit: str) -> bytes:

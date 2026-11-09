@@ -50,6 +50,8 @@ class Operation:
     single_suggestion: bool = False
     multi_edit: bool = False
     edit_path: str | None = None
+    #: Why this write was made, recorded with a document's version (a restore names the version).
+    reason: str | None = None
     op_id: str = field(default_factory=lambda: str(uuid4()))
 
 

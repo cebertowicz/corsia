@@ -79,7 +79,7 @@ class DamageSave:
         try:
             await self.entry.lane.validate_actor(text, actor)
             publication = await asyncio.to_thread(self._publication, actor, text, prior_text, prior_hash)
-            await self.entry.lane.write(text, prior_hash)
+            await self.entry.lane.write(text, prior_hash, actor)
         except FileChangedOutside:
             self._refused("file_changed_outside")
             return

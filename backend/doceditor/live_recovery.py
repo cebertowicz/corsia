@@ -107,7 +107,7 @@ async def _choose(lane, kind, actor):
         return WriteResult(text, True)
     await live_lane._checkpoint("choice_record")
     try:
-        await lane.write(text, current_hash)
+        await lane.write(text, current_hash, actor)
     except Exception:
         # A refused clear leaves the complete held evidence and choice intact.
         # A later lane retry or load clears it; no new write can overtake it.

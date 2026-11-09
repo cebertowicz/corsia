@@ -125,7 +125,7 @@ async def test_refused_rename_and_actual_refused_clear_block_new_choices(tmp_pat
     original = live.store.pending()
     db = None
 
-    async def refused(text, prior_hash):
+    async def refused(text, prior_hash, *_actor_and_reason):
         nonlocal db
         db = sqlite3.connect(live.store.path, isolation_level=None)
         db.execute("BEGIN IMMEDIATE")

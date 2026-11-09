@@ -22,7 +22,7 @@ async def open_lane(tmp_path, *, validate=None, write=None):
         if validate:
             validate(text)
 
-    async def writer(text, prior_hash):
+    async def writer(text, prior_hash, *_actor_and_reason):
         if write is not None:
             await asyncio.to_thread(write, path, text)
         else:

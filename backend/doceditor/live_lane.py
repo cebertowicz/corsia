@@ -54,7 +54,7 @@ class _Queued:
 class DocumentLane:
     def __init__(
         self, live: LiveDocument, *, validate_actor: Callable[[str, WriteActor | None], Awaitable],
-        write: Callable[[str, str], Awaitable],
+        write: Callable[..., Awaitable],
         policy: Callable[[Operation, str], Awaitable[Publication | None]] | None = None,
         published: Callable[[], None] | None = None, artifact_id: str = "",
         admission: PublicationGate | None = None,
@@ -269,7 +269,7 @@ class DocumentLane:
         record = await record_candidate(self.live, fork, prior_hash, publication, operation)
         await _checkpoint("record")
         try:
-            await self.write(text, prior_hash)
+            await self.write(text, prior_hash, operation.actor, operation.reason)
         except Exception:
             await asyncio.to_thread(self.live.store.discard, record.op_id)
             self.live.pending_changed()
@@ -331,6 +331,16 @@ class DocumentLane:
     async def recover(self) -> None:
         from doceditor.live_recovery import recover
         await self._submit(lambda: recover(self))
+
+    async def restore(self, operation: Operation, expected_sha256: str) -> WriteResult:
+        """Run a whole-text replace only while the live text still hashes to ``expected_sha256``, the
+        text the person restored from; checked in this lane's turn, so no write lands in between."""
+        async def run() -> WriteResult:
+            if file_hash(self.live.text.encode("utf-8")) != expected_sha256:
+                from doceditor.document_save import DocumentSaveError, STALE_MESSAGE
+                raise DocumentSaveError("stale", STALE_MESSAGE)
+            return await self._execute(operation)
+        return await self._submit(run)
 
     async def choose(self, kind: Literal["corsia", "file"], *, actor: WriteActor | None = None,
                      cancel_event=None) -> WriteResult:

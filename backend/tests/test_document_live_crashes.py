@@ -134,7 +134,7 @@ async def worker(root, cut, edit):
                 threading.Event().wait()
             live.store.clear_choice = clearing
 
-            async def refused(text, prior_hash):
+            async def refused(text, prior_hash, *_actor_and_reason):
                 stage = live.path.with_name(f".corsia-live-{live.path.name}.stage")
                 stage.write_text(text)
                 raise PermissionError("rename refused")

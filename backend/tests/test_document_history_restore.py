@@ -108,7 +108,9 @@ async def test_unknown_version_is_unavailable(skill):
 @pytest.mark.asyncio
 async def test_file_without_history_is_history_off(skill):
     workspace, thread_id, _path, _user = skill
-    plain = workspace / 'notes.md'
+    # An unregistered file in a thread's tray is never recorded.
+    plain = workspace / '.threads' / thread_id / 'scratch' / 'notes.md'
+    plain.parent.mkdir(parents=True)
     plain.write_text('notes')
     response = await files.restore_version('test', files.RestoreBody(
         path=str(plain), version='a' * 40, base_sha256=sha('notes'), thread_id=thread_id))
@@ -271,10 +273,12 @@ def test_document_open_says_whether_the_file_is_recorded(history_scope):
     path = workspace / '.threads' / thread_id / 'skills' / 'demo' / 'SKILL.md'
     path.parent.mkdir(parents=True)
     path.write_text(SKILL_BODY)
-    plain = workspace / 'notes.md'
+    plain = workspace / '.threads' / thread_id / 'scratch' / 'notes.md'
+    plain.parent.mkdir(parents=True)
     plain.write_text('notes')
     assert read_document(str(path), user_id, None, thread_id)['_recorded'] is True
-    assert read_document(str(plain), user_id, None, thread_id)['_recorded'] is False
+    # Opened with no thread, the tray file stays unregistered (a thread's open registers it, and records it).
+    assert read_document(str(plain), user_id, None, None)['_recorded'] is False
 
 
 @pytest.mark.asyncio
@@ -297,4 +301,4 @@ async def test_document_open_asks_git_only_off_the_database_pool(skill, monkeypa
 
     monkeypatch.setattr(files, 'run_off_db', counted)
     assert (await files.content('test', str(path), thread_id=thread_id))['history'] is True
-    assert len(asked) == 1 and off_db == [document_history.history_off]
+    assert len(asked) == 1 and off_db == [document_history.history_offered]

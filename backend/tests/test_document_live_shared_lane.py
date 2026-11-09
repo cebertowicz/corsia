@@ -25,7 +25,7 @@ async def opened(scope, tmp_path, actor):
     policy = SharedLivePolicy(live, owner=owner)
     async def valid(text, actor=None):
         pass
-    async def writer(text, prior_hash):
+    async def writer(text, prior_hash, *_actor_and_reason):
         await asyncio.to_thread(write_atomic_plain, path, text, prior_hash)
     lane = DocumentLane(live, validate_actor=valid, write=writer, policy=policy.decide)
     policy.schedule_setup = lane.schedule_setup

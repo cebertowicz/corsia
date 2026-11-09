@@ -106,13 +106,18 @@ def test_the_history_route_reports_history_off_not_unavailable(workspace_with_no
     assert missing.value.status_code == 404
 
 
+def reasoned(reason: str) -> str:
+    """A message whose stated reason keeps its save a version of its own in the grouped list."""
+    return f"{reason}\n\nReason: {reason}\nScope: workspace"
+
+
 def test_list_reports_truncation_past_the_cap(repo, monkeypatch):
     monkeypatch.setattr(document_history, "HISTORY_CAP", 2)
     path = repo / "sample.md"
-    first = commit(repo, path, "one", "first")
-    commit(repo, path, "two", "second")
+    first = commit(repo, path, "one", reasoned("first"))
+    commit(repo, path, "two", reasoned("second"))
     assert list_versions(repo, "sample.md")[1] is False
-    commit(repo, path, "three", "third")
+    commit(repo, path, "three", reasoned("third"))
     rows, truncated = list_versions(repo, "sample.md")
     assert len(rows) == 2 and truncated is True
     assert first not in [row["id"] for row in rows]
@@ -123,11 +128,11 @@ def test_list_reports_truncation_past_the_cap(repo, monkeypatch):
 
 def test_deleted_then_recreated_file_lists_only_versions_with_text(repo):
     path = repo / "sample.md"
-    first = commit(repo, path, "before delete", "first")
+    first = commit(repo, path, "before delete", reasoned("first"))
     git(repo, "rm", "-q", "--", "sample.md")
     git(repo, "commit", "-qm", "delete")
     deleted = git(repo, "rev-parse", "HEAD").strip()
-    recreated = commit(repo, path, "after delete", "recreate")
+    recreated = commit(repo, path, "after delete", reasoned("recreate"))
     rows, _ = list_versions(repo, "sample.md")
     assert [row["id"] for row in rows] == [recreated, first]
     assert version_text(repo, "sample.md", first) == "before delete"
