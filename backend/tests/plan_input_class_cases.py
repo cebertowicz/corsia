@@ -16,7 +16,8 @@ from __future__ import annotations
 from functools import partial
 
 from plans import (
-    boundary_dispatch, delegate_attach, holds, intent_creation, service, status_cursor, system_user_steps,
+    boundary_dispatch, delegate_attach, dependencies, holds, intent_creation, service, status_cursor,
+    system_user_steps,
 )
 from plans.boundary import PlanActor, mutate
 from plans.current import read_current_plan, read_current_status
@@ -104,6 +105,25 @@ def _regroup_a_run_step(db, scene):
     return partial(
         _mutate, db, scene.plan_id, "edit", {
             "node_id": step.id, "expected_revision": _revision(db, step.id),
+            "parent_id": branch.id,
+        }, _mid(),
+    )
+
+
+def _regroup_under_its_prerequisite(db, scene):
+    """Move a task under the branch it waits on: the branch would then wait on it."""
+    branch = service.add_node(
+        scene.plan_id, kind="phase", title="Release", acceptance_criteria="R",
+        intent="Hold the branch.", db=db,
+    )
+    task = service.add_node(
+        scene.plan_id, kind="task", title="Announce", acceptance_criteria="A", db=db,
+    )
+    dependencies.add_dependency(task.id, branch.id, db=db)
+    db.commit()
+    return partial(
+        _mutate, db, scene.plan_id, "edit", {
+            "node_id": task.id, "expected_revision": _revision(db, task.id),
             "parent_id": branch.id,
         }, _mid(),
     )
@@ -699,6 +719,8 @@ _CASES = {
     ("regroup.py", 'CYCLE.format(title=node["title"], parent=parent["title"])'):
         _regroup_into_own_branch(2),
     ("regroup.py", 'RUN_STEP.format(title=node["title"])'): _regroup_a_run_step,
+    ("regroup.py", 'WAIT_CYCLE.format(title=before["title"], parent=parent["title"])'):
+        _regroup_under_its_prerequisite,
     # --- plans/bulk_fields.py ---
     ("bulk_fields.py", "_alone(operation, extras)"): _operation(
         "edit", {"node_ids": [OWN], "node_id": NODE, "later": True},
