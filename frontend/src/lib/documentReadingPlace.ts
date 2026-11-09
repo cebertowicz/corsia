@@ -50,10 +50,15 @@ export function captureDocumentPlace(view: EditorView, scrollTop?: number): Text
 	const block = view.lineBlockAtHeight(edge - view.documentTop), table = drawnTableAt(view, block.from);
 	let row = table && tableRowAtHeight(view, table, edge);
 	// A row cut off at the edge is context above the reader; the place is the next row, the first one wholly started in view,
-	// so that the cut-off row growing or shrinking moves only itself.
-	if (row && row.rect.top < edge - 0.5 && row.rect.bottom < scroller.getBoundingClientRect().bottom - shift) row = tableRowAtHeight(view, table!, row.rect.bottom);
+	// or the line after the table when the cut-off row is its last, so that the cut-off row growing or shrinking moves only itself.
+	let line = block;
+	if (row && row.rect.top < edge - 0.5 && row.rect.bottom < scroller.getBoundingClientRect().bottom - shift) {
+		const next = tableRowAtHeight(view, table!, row.rect.bottom);
+		if (next && next.pos !== row.pos) row = next;
+		else if (block.to < view.state.doc.length) [row, line] = [null, view.lineBlockAt(block.to + 1)];
+	}
 	if (row) return { from: row.pos, top: row.rect.top + shift - frameTop(view), scrollTop: at };
-	return { from: block.from, top: view.documentTop + shift + block.top - frameTop(view), scrollTop: at };
+	return { from: line.from, top: view.documentTop + shift + line.top - frameTop(view), scrollTop: at };
 }
 
 /**

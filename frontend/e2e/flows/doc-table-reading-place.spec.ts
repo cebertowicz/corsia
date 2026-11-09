@@ -52,18 +52,18 @@ async function rowAt(page: Page, key: string): Promise<{ top: number; x: number 
 	}), key);
 }
 
-/** Scrolls as a reader would so the row holding `key` starts `margin` px below the scroller's top, then lets it settle. */
-async function readAtRow(page: Page, key: string, margin = 40): Promise<void> {
+/** Scrolls as a reader would so the row holding `key` starts (or with `edge` 'bottom', ends) `margin` px below the scroller's top, then lets it settle. */
+async function readAtRow(page: Page, key: string, margin = 40, edge: 'top' | 'bottom' = 'top'): Promise<void> {
 	for (let pass = 0; pass < 4; pass++) {
-		await page.evaluate(({ key, margin }) => {
+		await page.evaluate(({ key, margin, edge }) => {
 			const scroller = document.querySelector<HTMLElement>('.cm-scroller')!;
 			const tr = [...document.querySelectorAll<HTMLElement>('.cm-md-table tr')].find((el) => el.textContent?.includes(`${key} title:`));
-			if (tr) { scroller.scrollTop += tr.getBoundingClientRect().top - scroller.getBoundingClientRect().top - margin; return; }
+			if (tr) { scroller.scrollTop += tr.getBoundingClientRect()[edge] - scroller.getBoundingClientRect().top - margin; return; }
 			// Not drawn yet: bring its table in through the editor first.
 			const view = eval(`(() => { const content = document.querySelector('.cm-content'); return content && content.cmTile && content.cmTile.root.view; })()`);
 			const at = view.state.doc.toString().indexOf(`**${key} title:**`);
 			view.dispatch({ effects: view.constructor.scrollIntoView(at, { y: 'center' }) });
-		}, { key, margin });
+		}, { key, margin, edge });
 		await page.waitForTimeout(400);
 	}
 }
@@ -136,13 +136,17 @@ async function pair(browser: Browser, document: LiveDocument, width: number, hei
 }
 
 const READ = 'steer2-r3';
-const editCases: Array<{ name: string; find: string; insert: string; remove?: number }> = [
+/** `read`: the row scrolled to, how far below the edge it starts (or ends); `watch`: the row whose place is measured (default both READ). */
+const editCases: Array<{ name: string; find: string; insert: string; remove?: number; read?: [string, number, ('top' | 'bottom')?]; watch?: string }> = [
 	{ name: 'row above in the same table grows', find: 'steer2-r1 status: on track,', insert: LONGER },
 	{ name: 'row inserted above in the same table', find: `${row('steer2-r0')}\n`, insert: `${row('steer2-new')}\n` },
 	{ name: 'row above in the same table shrinks', find: 'steer2-r2 status: on track,', insert: ' done.', remove: ` ${CELL}`.length },
 	{ name: 'row in a table above grows', find: 'first2-r4 status: on track,', insert: LONGER },
 	{ name: 'row below in the same table grows', find: 'steer2-r5 status: on track,', insert: LONGER },
 	{ name: 'row in a table below grows', find: 'learn2-r2 status: on track,', insert: LONGER },
+	// The edge cuts a table's last row, which ends just inside the view: the reader has the text after the table, which stays
+	// put when that row grows. A table no case above edits, so the row is short enough to end in view at every width.
+	{ name: 'last row cut off at the edge grows', find: 'auto2-r5 status: on track,', insert: LONGER, read: ['auto2-r5', 60, 'bottom'], watch: 'trust2-r0' },
 ];
 
 for (const [width, height] of LAYOUTS) {
@@ -154,11 +158,11 @@ for (const [width, height] of LAYOUTS) {
 		const results: Drift[] = [];
 		try {
 			await installPaintedFrames(live.reader);
-			for (const { name, find, insert, remove } of editCases) {
-				await readAtRow(live.reader, READ);
-				const anchor = await rowAt(live.reader, READ);
+			for (const { name, find, insert, remove, read = [READ, 40], watch = READ } of editCases) {
+				await readAtRow(live.reader, ...read);
+				const anchor = await rowAt(live.reader, watch);
 				expect(anchor, `${name}: the row being read is drawn`).not.toBeNull();
-				await startSampling(live.reader, READ, 2_500);
+				await startSampling(live.reader, watch, 2_500);
 				await live.reader.screenshot({ path: testInfo.outputPath(`table-${width}-${name.replace(/ /g, '-')}-before.png`) });
 				await writerEdits(live.writer, find, insert, remove);
 				const result = await drift(live.reader, name, anchor!);
