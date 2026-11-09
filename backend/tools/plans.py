@@ -53,7 +53,7 @@ _DECISION_OPERATIONS = {
 }
 
 _OPERATIONS = [
-    "add", "insert", "edit", "split", "reorder", "activate", "start",
+    "add", "insert", "edit", "split", "reorder", "pause", "resume", "activate", "start",
     "resume_node", "block_node", "resolve_blocker",
     "request_review", "mark_done", "reject", "fail", "attach_spawned_thread",
     "replace_spawned_thread", "accept",
@@ -342,8 +342,7 @@ class PlanUpdateTool(_OperationTool):
             "'operation': 'arm_watch', 'params': {'node_id': 'node-id', "
             "'expected_revision': 0, 'condition': {'type': 'deadline', "
             "'value': '2030-01-01T00:00:00+00:00'}, 'expected_event': "
-            "'external.done'}}. Pause is the user's; to set a task aside, "
-            "arm_watch a deadline with reason instead. "
+            "'external.done'}}. To set your task aside, arm_watch a deadline with reason. "
             + CLOSE_NEXT_DESCRIPTION
             + " "
             + USER_TASKS_DESCRIPTION
@@ -354,8 +353,8 @@ class PlanUpdateTool(_OperationTool):
         return update_schema(_OPERATIONS)
 
     def validate_params(self, params: dict[str, Any]) -> list[str]:
-        """Answer a pause, which the schema no longer offers, with its replacement."""
-        if params.get("operation") in public.PAUSE_OPERATIONS:
+        """Answer a task pause, which agents cannot perform, with its replacement."""
+        if params.get("operation") == "pause_node":
             node_id = (params.get("params") or {}).get("node_id")
             return [public.pause_refusal(node_id if isinstance(node_id, str) else None)]
         return super().validate_params(params)

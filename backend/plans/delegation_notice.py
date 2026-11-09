@@ -54,8 +54,8 @@ _EVENT_DIGESTS = {
     ),
 }
 
-#: A user's own pause is labeled as theirs wherever it appears, because no
-#: agent may act on it (matrix rule 6): not the worker, and not the parent.
+#: A user's own pause is labeled as theirs wherever it appears: it is lifted
+#: only on their word (matrix rule 6), by them or by a coordinator they ask.
 _BY_USER = " by user"
 
 
@@ -283,7 +283,7 @@ def observe_plan_transition(
 
     A worker that paused its own plan stopped doing the work the parent is
     waiting for, so the parent is woken to tell the user if the step is needed
-    now (only the user resumes, pause contract rule 1). Only the worker's own
+    now (the person or their conductor resumes). Only the worker's own
     act says that: a pause the *user* set is never any agent's to undo (matrix
     rule 6), and one the parent or nobody set is not the worker's doing, so
     each reaches the parent as a digest and nudges nobody.

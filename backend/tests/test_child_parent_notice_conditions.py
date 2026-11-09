@@ -334,8 +334,8 @@ def test_b11_child_pausing_its_whole_plan_wakes_the_parent(db):
     appended = wakes(db)
     assert len(appended) == 1
     content = str(appended[0]["content"]).lower()
-    assert "paused on the user's word" in content
-    assert "only the user resumes" in content
+    assert "is paused" in content
+    assert "the person or their conductor resumes" in content
 
 
 def _set_plan_state(db, plan_id: str, state: str, actor: str | None) -> None:

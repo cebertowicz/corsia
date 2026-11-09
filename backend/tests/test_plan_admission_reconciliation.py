@@ -31,7 +31,7 @@ def _actor():
     return PlanActor("owner", "user", None)
 
 
-#: Only the user resumes, and an agent pauses only to relay them (#1969).
+#: Only the user or a coordinator resumes a plan (#1969).
 HUMAN = PlanActor(None, "user", None, kind="user")
 
 
