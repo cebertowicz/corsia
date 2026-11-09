@@ -286,7 +286,7 @@ def authorize_thread_owner(db, owner_id: str, actor: PlanActor) -> None:
 def _authorize_thread_mutation_owner(
     db, plan, operation: str, params: dict[str, Any], actor: PlanActor, *, review_operation: bool,
 ) -> bool:
-    """Require ownership, returning whether this is the one conductor foreign add."""
+    """Require ownership, returning whether this is coordinator foreign steering."""
     if actor.kind != "thread" or plan["owner_kind"] != "thread" or plan["owner_id"] == actor.thread_id:
         return False
     if thread_may_mutate(db, plan, operation, params, actor):

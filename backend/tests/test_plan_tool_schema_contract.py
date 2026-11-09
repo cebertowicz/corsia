@@ -11,6 +11,8 @@ _MUTATION_REQUIRED = {
     "edit": {"node_id", "expected_revision"},
     "split": {"node_id", "title", "acceptance_criteria", "size", "expected_revision"},
     "reorder": {"node_id", "order_key", "expected_revision"},
+    "pause": {"expected_revision"},
+    "resume": {"expected_revision"},
     "activate": {"node_id", "expected_revision"},
     "start": {"node_id", "expected_revision"},
     "resume_node": {"node_id", "hold_id", "expected_revision"},
@@ -117,10 +119,10 @@ def test_identical_mutation_shapes_share_one_conditional_contract():
         for rule in schema["allOf"]
     ]
 
-    # Only the user pauses or resumes (pause contract rule 1), so agents are
-    # never offered either.
-    for human in ("resume", "pause", "pause_node"):
-        assert not any(human in (operations or ()) for operations in grouped)
+    # Coordinators can pause or resume foreign plans; task pauses remain human-only.
+    assert any({"pause", "resume"} <= set(operations or ()) for operations in grouped)
+    assert not any("pause_node" in (operations or ()) for operations in grouped)
+    assert "conductor or CORSIA agent on another agent's plan" in schema["properties"]["operation"]["description"]
     shared = {frozenset(operations) for operations in grouped if operations}
     # `next_node_id` is accepted only by closing operations, so the node/revision
     # shape splits into the selection pair and the closing pair.
@@ -381,7 +383,7 @@ def test_add_defaults_kind_and_activate_advertises_its_requirement():
 # plan_update 9,372 -> 9,487 (+115, Later S1): `later` publishes at the field for add, insert,
 # edit, arm_watch and block_node, and `reason` names where it becomes required and what to
 # write there; an agent never told of the cut cannot park work, so the words are the feature.
-_PUBLISHED_BYTES = {"plan_update": 9_487, "plan_decision": 3_100}
+_PUBLISHED_BYTES = {"plan_update": 9_620, "plan_decision": 3_100}
 
 
 def test_the_operation_text_names_each_neighboring_settlement_choice():

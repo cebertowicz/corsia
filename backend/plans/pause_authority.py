@@ -1,6 +1,6 @@
 """Pause is the user's (pause contract rule 1, #1969).
 
-Only the user pauses or resumes. An agent that wants to come back to a task
+The user or a coordinator pauses or resumes a plan. An agent that wants to come back to a task
 later schedules it instead (``plans.scheduled_wait``), and a pause call tells
 it so in one line.
 
@@ -16,8 +16,7 @@ from plans.errors import PlanRefusal
 from plans.scheduled_wait import pause_refusal
 
 RESUME_REFUSAL = (
-    "only the user resumes a paused plan. Tell the user it is paused and ask "
-    "them to resume it."
+    "Only the person or their conductor resumes a paused plan. Tell them if it is needed now."
 )
 NODE_RESUME_REFUSAL = (
     "The user paused this task; only they resume it. Pick up your next task."
@@ -25,7 +24,7 @@ NODE_RESUME_REFUSAL = (
 
 
 def thread_paused_since(db, thread_id: str) -> str | None:
-    """Return when the user paused this thread's plan, or ``None`` if it runs.
+    """Return when this thread's plan was paused, or ``None`` if it runs.
 
     Rule 5 (#1973): a Turn claiming inputs stamps this on each of them, so the
     line opening a paused agent's input is stored with the input and replays
@@ -35,7 +34,7 @@ def thread_paused_since(db, thread_id: str) -> str | None:
 
 
 def _paused_plan(db, thread_id: str) -> tuple[str | None, str | None]:
-    """Return this thread's plan and when the user paused it, if they did."""
+    """Return this thread's plan and when it was paused, if it is."""
     from plans.wait_causes import paused_since
 
     plan = db.execute(
@@ -151,10 +150,15 @@ def _one_line(db, row) -> str:
     return (str(metadata.get("summary") or "").strip() or (lines or [""])[0])[:200]
 
 
-def require(operation: str, params, actor) -> None:
-    """Refuse an agent's pause or resume: both are the user's."""
+def require(operation: str, params, actor, plan, db) -> None:
+    """Permit a coordinator to pause or resume another thread's plan."""
     if actor.kind != "thread":
         return
+    if operation in {"pause", "resume"} and plan["owner_id"] != actor.thread_id:
+        from plans.conductor_add import conductor_may_add
+
+        if conductor_may_add(db, plan, actor):
+            return
     if operation == "resume":
         raise PlanRefusal(RESUME_REFUSAL)
     raise PlanRefusal(pause_refusal(params.get("node_id")))

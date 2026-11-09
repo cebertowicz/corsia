@@ -132,10 +132,10 @@ def test_a_paused_agents_input_opens_with_the_stored_pause_line(main_db) -> None
     resumed, plain_row = claim("resumed")
 
     line, rest = paused.content.split("\n\n", 1)
-    assert line.startswith("[Paused by the user since ")
+    assert line.startswith("[Paused since ")
     assert line.endswith(" UTC. In this Turn do only what the user's own message here "
                          "asks; otherwise read, reply and update your plan, and change "
-                         "nothing else. Only the user resumes.]")
+                         "nothing else. The person or their conductor resumes.]")
     assert rest == resumed.content == "hello"
     assert paused.agent_envelope.managed_prefix.startswith(line)
     meta = json.loads(stored["metadata"])

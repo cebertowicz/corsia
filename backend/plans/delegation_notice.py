@@ -283,7 +283,7 @@ def observe_plan_transition(
 
     A worker that paused its own plan stopped doing the work the parent is
     waiting for, so the parent is woken to tell the user if the step is needed
-    now (only the user resumes, pause contract rule 1). Only the worker's own
+    now (the person or their conductor resumes). Only the worker's own
     act says that: a pause the *user* set is never any agent's to undo (matrix
     rule 6), and one the parent or nobody set is not the worker's doing, so
     each reaches the parent as a digest and nudges nobody.

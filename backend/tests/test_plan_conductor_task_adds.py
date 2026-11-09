@@ -67,7 +67,7 @@ def db():
         connection.close()
 
 
-def _add(db, plan_id: str, actor: PlanActor, **params):
+def _add(db, plan_id: str, actor: PlanActor, operation="add", **params):
     intent = "Keep lane context current"
     plan_row = db.execute("SELECT owner_id FROM plans WHERE id=?", (plan_id,)).fetchone()
     if plan_row is None:
@@ -87,7 +87,7 @@ def _add(db, plan_id: str, actor: PlanActor, **params):
     )
     db.execute("UPDATE messages SET active_turn_id=? WHERE thread_id=? AND content=?", (turn_id, thread_id, intent))
     return mutate(
-        plan_id, "add", {"kind": "task", "title": "Refresh lane context",
+        plan_id, operation, {"kind": "task", "title": "Refresh lane context",
         "acceptance_criteria": "Current", "size": "unknown", "intent": intent,
         **params}, actor=replace(actor, turn_id=turn_id),
         provenance="test.conductor_add", mutation_id=uuid.uuid4().hex, db=db,
@@ -107,6 +107,49 @@ def _mutate(db, plan_id: str, operation: str, params: dict, actor=LANE):
         plan_id, operation, params, actor=actor, provenance="test.settle",
         mutation_id=uuid.uuid4().hex, db=db,
     ).result
+
+
+@pytest.mark.parametrize("actor", [PROJECT_CONDUCTOR, WORKSPACE_CONDUCTOR])
+def test_coordinator_pauses_and_resumes_lane_with_provenance(db, actor):
+    plan = service.ensure_plan("thread", "lane", db=db)
+    db.commit()
+    _mutate(db, plan.id, "pause", {"expected_revision": plan.revision}, actor)
+    paused = service._plan_row(db, plan.id)
+    assert paused["state"] == "paused"
+    _mutate(db, plan.id, "resume", {"expected_revision": paused["revision"]}, actor)
+    assert service._plan_row(db, plan.id)["state"] == "active"
+    events = db.execute("SELECT actor_id, provenance FROM plan_events WHERE plan_id=? AND event='state_transition' ORDER BY rowid", (plan.id,)).fetchall()
+    assert [(row["actor_id"], row["provenance"]) for row in events[-2:]] == [(actor.thread_id, "plan.conductor_add")] * 2
+
+
+def test_coordinator_inserts_and_reorders_only_top_level(db):
+    plan = service.ensure_plan("thread", "lane", db=db)
+    first = service.add_node(plan.id, kind="phase", title="First", acceptance_criteria="Done", db=db)
+    child = service.add_node(plan.id, kind="task", title="Child", acceptance_criteria="Done", parent_id=first.id, db=db)
+    db.commit()
+    inserted = _add(db, plan.id, PROJECT_CONDUCTOR, operation="insert", before_node_id=first.id)
+    first_row = service._node_row(db, first.id)
+    assert inserted["order_key"] < first_row["order_key"]
+    assert _node_created(db, inserted["id"]) == (PROJECT_CONDUCTOR.thread_id, "plan.conductor_add")
+    moved = _mutate(db, plan.id, "reorder", {"node_id": first.id, "order_key": 0, "expected_revision": first_row["revision"]}, PROJECT_CONDUCTOR)["node"]
+    assert moved["order_key"] < service._node_row(db, inserted["id"])["order_key"]
+    event = db.execute("SELECT actor_id, provenance FROM plan_node_events WHERE node_id=? AND event='node_reordered'", (first.id,)).fetchone()
+    assert tuple(event) == (PROJECT_CONDUCTOR.thread_id, "plan.conductor_add")
+    for operation, params in [("insert", {"before_node_id": child.id}), ("reorder", {"node_id": child.id, "order_key": 0, "expected_revision": child.revision}), ("pause_node", {"node_id": first.id, "expected_revision": moved["revision"]})]:
+        with pytest.raises(PlanRefusal):
+            if operation == "insert":
+                params = {"title": "Denied", "acceptance_criteria": "Never", "size": "S", **params}
+            _mutate(db, plan.id, operation, params, PROJECT_CONDUCTOR)
+
+
+def test_other_agent_and_own_plan_cannot_be_paused_or_resumed(db):
+    plan = service.ensure_plan("thread", "lane", db=db)
+    db.commit()
+    for operation in ("pause", "resume"):
+        with pytest.raises(PermissionError):
+            _mutate(db, plan.id, operation, {"expected_revision": plan.revision}, PLAIN_AGENT)
+        with pytest.raises(PlanRefusal):
+            _mutate(db, plan.id, operation, {"expected_revision": plan.revision}, LANE)
 
 
 def test_project_conductor_appends_a_pending_top_level_task_without_waking_lane(db):
@@ -132,7 +175,7 @@ _OUT_OF_SCOPE = PermissionError, "^plan is outside the current project scope$"
         (PLAIN_AGENT, "add", {}, _ROUTES),
         # Another project's conductor cannot even see the plan.
         (OTHER_CONDUCTOR, "add", {}, _OUT_OF_SCOPE),
-        (PROJECT_CONDUCTOR, "insert", {}, _ROUTES),
+        (PROJECT_CONDUCTOR, "insert", {"parent_id": "placeholder"}, _ROUTES),
         (PROJECT_CONDUCTOR, "add", {"parent_id": "placeholder"}, _ROUTES),
         (PROJECT_CONDUCTOR, "add", {"depends_on_node_id": "placeholder"}, _ROUTES),
     ],

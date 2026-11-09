@@ -117,7 +117,7 @@ def test_only_the_user_resumes():
     _change(db, "pause", HUMAN, "user-pause")
     _deliver(db, "m1", "user", {})
 
-    with pytest.raises(service.PlanRefusal, match="only the user resumes"):
+    with pytest.raises(service.PlanRefusal, match="Only the person or their conductor resumes"):
         _change(db, "resume", _agent(), "agent-resume")
 
     assert _change(db, "resume", HUMAN, "user-resume")["state"] == "active"

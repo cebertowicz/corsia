@@ -33,8 +33,8 @@ USER_TASKS_DESCRIPTION = (
 
 #: The next steps after a thread cannot mutate another agent's plan.
 FOREIGN_PLAN_MUTATION = (
-    "Only the CORSIA agent or a project conductor may append a top-level task to another agent's "
-    "plan. Instead, depend on the lane's node (plan_update add_dependency after "
+    "Only the CORSIA agent or a project conductor may add, insert or reorder top-level tasks "
+    "in another agent's plan, or pause or resume it. Otherwise, depend on the lane's node (plan_update add_dependency after "
     "plan_read(thread_id=...)), ask the lane for a review, or file it to the "
     "backlog under the lane's label."
 )

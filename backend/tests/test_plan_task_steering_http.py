@@ -462,4 +462,5 @@ def test_resume_and_close_stay_agent_operations_and_pause_is_the_users(db):
     from plans import boundary_fields
 
     assert not {"resume_node", "close_node"} & boundary_fields.HUMAN_OPERATIONS
-    assert {"pause_node", "pause"} <= boundary_fields.HUMAN_OPERATIONS
+    assert "pause_node" in boundary_fields.HUMAN_OPERATIONS
+    assert not {"pause", "resume"} & boundary_fields.HUMAN_OPERATIONS
