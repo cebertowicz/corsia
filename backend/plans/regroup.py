@@ -2,10 +2,8 @@
 
 A plan drifts out of shape as it grows: work added under one outcome belongs
 under another, and rows sit at top level because no branch existed when they
-were written. Before this there was no way to say so -- a node's position was
-fixed at creation, so tidying meant closing the row and adding it back, which
-costs its history, its dependencies, its holds and waits, its cost record and
-its identity. A regroup costs none of that: the node keeps its id, its events,
+were written. A regroup moves the row without closing and re-adding it: the
+node keeps its id, its events,
 its ``commitment_id`` (the immutable original obligation that anchors cost
 history), its dependencies, holds, waits and Later flag. It keeps the intent it
 serves too: ``intent_node_id`` names the node a row was made from (a follow-up's
@@ -13,9 +11,9 @@ source, a worker plan's step above), never the branch it hangs under, so where
 the row hangs has no bearing on it -- exactly as a row added at that position
 would not inherit the branch's intent either.
 
-Two things make the write non-trivial. Nothing had to guard a node's ancestors
-before, because nothing could re-hang one -- ``plans.hierarchy`` cycles are
-plan-level -- so the cycle check lives here. And a node's stored subtree figures
+Two things make the write non-trivial. This is the only writer of a node's
+``parent_id`` (``plans.hierarchy`` cycles are plan-level), so the node-cycle
+check lives here. And a node's stored subtree figures
 come with it, so the branch it left and the branch it joined each have to be
 re-derived; ``aggregates.apply`` measures a row's own change, which a move is
 not, so ``plans.aggregates_move`` does that part.
@@ -124,6 +122,9 @@ def _refuse(connection, node, parent_id: str) -> None:
     # exactly what an `add` under the same node would; the task check above is
     # this module's only because the hint to make a branch is a regroup's own.
     node_creation._validate_parent(connection, node["plan_id"], parent_id)
+    # The stored chain, archived rows included, not the live chain readers use
+    # (``node_states.live_chain`` stops at an archived row, so it would miss the
+    # node above a stranded one); the seen set ends the walk on any loop.
     current: str | None = parent_id
     seen = set()
     while current is not None:

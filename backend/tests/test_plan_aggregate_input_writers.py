@@ -291,9 +291,7 @@ def test_allowed_sites_are_all_still_present_and_typed() -> None:
 def test_no_runtime_delete_replace_or_parent_rewrite() -> None:
     """N3: nothing deletes or replaces a node row, and only the one writer re-hangs one.
 
-    A node's parent used to be immutable after creation, so this pin could simply
-    forbid the write. A regroup (design §4) made the move an operation, which moves
-    the invariant rather than weakening it: the parent may change only through
+    The parent may change only through
     ``touch_node``, the single UPDATE that also bumps the revision, and only from
     ``plans.regroup`` -- which re-derives the branch it left and the branch it
     joined in the same call (``plans.aggregates_move``). That half is proved by
