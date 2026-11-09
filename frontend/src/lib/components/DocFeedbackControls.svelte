@@ -1,6 +1,7 @@
 <script lang="ts">
 	// A document's undelivered status and, for one held lane, its Send control: the document's lane in its header and
 	// the image lane in the bar of an image viewer over it (DCOL-FR13.12). Each lane has this one sender.
+	import { tick } from 'svelte';
 	import { Button } from '$lib/components/ui';
 	import type { DocFeedback, HeldLane } from '$lib/docFeedback.svelte';
 	import { inlineSlot } from '$lib/slotMotion';
@@ -16,16 +17,19 @@
 	const undelivered = $derived(feedback.undeliveredCount(lane));
 	const summary = $derived(feedback.undeliveredSummary(lane));
 	const sentHere = $derived(lane !== null && feedback.sentLane === lane && feedback.sent > 0);
-	let sender = $state<HTMLSpanElement>();
+	let sender = $state<HTMLSpanElement>(), notSent = $state<HTMLSpanElement>();
 
 	async function send() {
 		if (!lane) return;
-		// The image Send disappears once its comments go. Keep keyboard focus on the viewer's durable Comment control.
-		// Decide by where focus is when the send settles, not by the Sent line, which can end before a slow settle does.
+		// The image Send disappears once its comments go, or Retry takes its place when they were not delivered. Keep keyboard
+		// focus on the next step: Retry when it stands there, else the viewer's durable Comment control. Decide by where focus
+		// is when the send settles, not by the Sent line, which can end before a slow settle does.
 		const viewer = compact && lane === 'image-held' && sender?.contains(document.activeElement) ? sender.closest('.image-comments') : null;
 		await feedback.sendLane(lane);
+		await tick();
 		if (viewer && (document.activeElement === null || document.activeElement === document.body)) {
-			viewer.querySelector<HTMLButtonElement>('[data-image-comment]')?.focus();
+			const retry = feedback.undeliveredCount(lane) > 0 ? notSent?.querySelector<HTMLButtonElement>('button') : null;
+			(retry ?? viewer.querySelector<HTMLButtonElement>('[data-image-comment]'))?.focus();
 		}
 	}
 </script>
@@ -45,7 +49,7 @@
 	</span>
 {/if}
 <!-- In a narrow bar the summary is read out, not laid out: Retry stands in Send's place and carries it as its name. -->
-<span class="undelivered" class:idle={undelivered === 0} class:compact>
+<span bind:this={notSent} class="undelivered" class:idle={undelivered === 0} class:compact>
 	<span role="status" class:sr-only={compact}>{undelivered > 0 ? summary : feedback.sent > 0 ? feedback.sentText : ''}</span>
 	{#if lane && undelivered > 0}
 		<Button size="sm" variant="secondary" onclick={() => void feedback.retry(lane)} loading={feedback.retryingLane === lane} disabled={feedback.retryingLane !== null}

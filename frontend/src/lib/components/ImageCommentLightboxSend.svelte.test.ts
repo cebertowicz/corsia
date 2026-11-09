@@ -237,6 +237,26 @@ describe('Send in the image viewer (DCOL-FR13.12)', () => {
 		expect(document.activeElement).toBe(shown.target.querySelector('[data-image-comment]'));
 	});
 
+	it('gives keyboard focus to Retry when the bar\'s Send ends not delivered', async () => {
+		const doc = documentStatus();
+		doc.component.sync('art-doc', pending(2, { image: 2 }));
+		mocks.fetchComments.mockResolvedValue({ comments: [onImage('here', 1)], feedback: pending(2, { image: 2 }) });
+		const batch = { id: 'b-1', item_count: 2, undelivered_reason: 'agent_unavailable', attempts: 1, delivery_policy: 'image-held' as const };
+		mocks.send.mockResolvedValue({ woken: [], ...pending(0), undelivered_batches: [batch], undelivered_count: 2, sent_count: 0 });
+		flushSync();
+		const shown = await viewer({
+			src: SRC, alt: 'Mock', artifactId: 'art-doc', docName: 'notes.md', onBack: vi.fn(),
+			inDocument: { occurrence: { from: 10, to: 24 }, post: vi.fn(async () => 'new') }, feedback: doc.component.controller(),
+		});
+		const send = sendIn(shown.target.querySelector('.bar')!)!;
+		send.focus();
+		send.click();
+		await settle();
+		const retry = [...shown.target.querySelectorAll<HTMLButtonElement>('.bar button')].find((button) => /Retry/.test(button.textContent ?? ''));
+		expect(retry).toBeTruthy();
+		expect(document.activeElement).toBe(retry);
+	});
+
 	it('keeps the comments pill beside a held Send, which takes its short wording in the bar on a phone', async () => {
 		const doc = documentStatus();
 		doc.component.sync('art-doc', pending(3, { doc: 1, image: 2 }));
