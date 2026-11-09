@@ -16,13 +16,14 @@ support, and the live token split in `app-tokens.css` + `app.css`.
 ## TL;DR
 
 - **The chat view is the reference screen (§0).** Each role (row, label,
-  status, action, card, accent) has one treatment taken from it; match it, and
-  never use a treatment §0.2 lists as out. A screen not yet converted keeps
-  its own look for anything added to it until its pass (§0).
+  status, action, card, accent) has one treatment taken from it. New and
+  converted screens match it and never use a treatment §0.2 lists as out. A
+  screen not yet converted keeps its own look for anything added to it until
+  its pass (§0).
 - **Use the live primitives** in `frontend/src/lib/components/ui/`: `Button`,
   `Field`, `IconButton`, `Message`, `Modal`, `Section`, `Toggle`.
-  Don't roll your own. (`StatePill` still exists, but status is a dot or
-  coloured text, never a pill: §0.2.)
+  Don't roll your own. (`StatePill` still exists; on new and converted
+  screens status is a dot or coloured text, never a pill: §0.2.)
 - **All design values are tokens** in `frontend/src/app-tokens.css` (imported
   by `app.css`). Never hardcode colors, spacing, type, blurs, radii, motion,
   press behavior, elevations, or scrim alphas.
