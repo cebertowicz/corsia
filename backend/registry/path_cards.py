@@ -82,7 +82,10 @@ def targets(text: str) -> list[str]:
     body = _FENCE.sub("", text or "")
     found: list[tuple[int, str]] = [(m.start(), m.group(1)) for m in _MARKDOWN_LINK.finditer(body)]
     bare_body = _MARKDOWN_LINK.sub(lambda m: " " * len(m.group()), body)
-    bare_body = _URL.sub(lambda m: " " * len(m.group()), bare_body)
+    # Every URL has "://". Without one, skip the scan: it retries from each character of an
+    # unbroken run of word characters, quadratic in the run's length, on every page read.
+    if "://" in bare_body:
+        bare_body = _URL.sub(lambda m: " " * len(m.group()), bare_body)
     found += [(m.start(), m.group(1)) for m in _BARE_PATH.finditer(bare_body)]
     ordered: list[str] = []
     seen: set[str] = set()
