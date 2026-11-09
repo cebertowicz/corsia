@@ -17,7 +17,8 @@ support, and the live token split in `app-tokens.css` + `app.css`.
 
 - **The chat view is the reference screen (§0).** Each role (row, label,
   status, action, card, accent) has one treatment taken from it; match it, and
-  never use a treatment §0.2 lists as out.
+  never use a treatment §0.2 lists as out. A screen not yet converted keeps
+  its own look for anything added to it until its pass (§0).
 - **Use the live primitives** in `frontend/src/lib/components/ui/`: `Button`,
   `Field`, `IconButton`, `Message`, `Modal`, `Section`, `Toggle`.
   Don't roll your own. (`StatePill` still exists, but status is a dot or
@@ -554,7 +555,8 @@ unchanged. Markdown content uses `--text-callout` and scales down inside
 
 **Superseded by §0:** a section label is sentence case, `--text-footnote`,
 `--fw-semibold`, `--text-tertiary` (§0.1). The uppercase caps below are the
-old treatment, kept until each screen's pass removes them; don't add new ones.
+old treatment, kept until each screen's pass removes them; don't use them on a
+new or converted screen.
 
 **Section caps** (PROJECTS, PINNED, CONVERSATIONS, etc. — used by
 `Section.svelte` and ad-hoc sidebar headers):
@@ -914,8 +916,8 @@ match the visual contract.
 ### 3.5 StatePill
 
 **Superseded by §0:** show a status as a dot or coloured text (§0.1 Status);
-a filled pill holding a status is out (§0.2 item 4). Don't add new StatePill
-uses; existing ones go in each screen's pass.
+a filled pill holding a status is out (§0.2 item 4). Don't add StatePill to a
+new or converted screen; existing ones go in each screen's pass.
 
 `ui/StatePill.svelte`. Small uppercase pill that visualizes a state.
 
@@ -956,7 +958,7 @@ interface Props {
 ```
 
 Title styling: 9.5px / 700 / 0.12em / uppercase / `--text-tertiary`.
-**Superseded by §0:** new and revised titles use the §0.1 Section label.
+**Superseded by §0:** titles on new and converted screens use the §0.1 Section label.
 Body uses `display: contents` (no wrapper div).
 
 Use this for a logical grouping inside a modal body or panel. **Not** for
@@ -966,7 +968,7 @@ different aesthetic; see §5.2.
 ### 3.7 Message
 
 **Superseded by §0:** a tinted banner is out (§0.2 items 1 and 2). New and
-revised screens state a result as coloured text in the §0.1 Status colours,
+converted screens state a result as coloured text in the §0.1 Status colours,
 with no fill or border. The banner below is the existing primitive, kept until
 each screen's pass replaces it.
 
