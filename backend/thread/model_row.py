@@ -210,47 +210,47 @@ def _model_switch_transcript_version(
     db,
     thread_id: str,
 ) -> tuple[int, int, int, int]:
-    """Return a compact append/delete/retention token for final CAS."""
-    from core.thread_lifecycle import TOOL_TRIM_MARKER
+    """Return a compact append/delete/retention token for final CAS.
 
-    row = db.execute(
-        """
-        SELECT s.next_message_seq,
-               COUNT(m.id) AS message_count,
-               COALESCE(MAX(m.seq), 0) AS max_seq,
-               COALESCE(SUM(
-                   CASE WHEN m.role = 'tool'
-                         AND substr(m.content, 1, ?) = ?
-                        THEN 1 ELSE 0 END
-               ), 0) AS retention_stub_count
-        FROM threads AS s
-        LEFT JOIN messages AS m ON m.thread_id = s.id AND m.seq IS NOT NULL
-        WHERE s.id = ?
-        GROUP BY s.id
-        """,
-        (len(TOOL_TRIM_MARKER), TOOL_TRIM_MARKER, thread_id),
+    The caller must hold a transaction: the four numbers arrive over three
+    statements, so without one a writer could land between them and the token
+    would describe history nobody proved. Both production callers hold one —
+    ``thread.model_source`` reads this inside the explicit ``BEGIN`` that opens
+    its preparation, and ``thread.model_commit`` inside the ``write_transaction``
+    that revalidates the commit — which is what makes comparing this against a
+    prepared token a real compare-and-set.
+
+    Each read is bounded by what it asks for: the counts are a range over
+    ``idx_messages_session_seq`` and the stub count a range over
+    ``idx_messages_retention_stub``, so the cost tracks the thread's rows rather
+    than the number of statements (3.08 ms and 540 k VM steps against 26.14 ms
+    and 1.88 M for a single whole-thread aggregate, on an 84,506-row thread).
+    ``seq IS NOT NULL`` is on both message reads because an unpositioned row is
+    outside the token.
+    """
+    from infra.tool_retention_marker import TOOL_TRIM_CONTENT_SQL
+
+    owner = db.execute(
+        "SELECT next_message_seq FROM threads WHERE id = ?", (thread_id,)
     ).fetchone()
-    if row is None:
+    if owner is None:
         raise LookupError(f"thread does not exist: {thread_id}")
+    counts = db.execute(
+        "SELECT COUNT(*) AS message_count, COALESCE(MAX(seq), 0) AS max_seq "
+        "FROM messages WHERE thread_id = ? AND seq IS NOT NULL",
+        (thread_id,),
+    ).fetchone()
+    stubs = db.execute(
+        "SELECT COUNT(*) AS retention_stub_count FROM messages WHERE thread_id = ? "
+        f"AND seq IS NOT NULL AND role = 'tool' AND {TOOL_TRIM_CONTENT_SQL}",
+        (thread_id,),
+    ).fetchone()
     return (
-        int(row["next_message_seq"]),
-        int(row["message_count"]),
-        int(row["max_seq"]),
-        int(row["retention_stub_count"]),
+        int(owner["next_message_seq"]),
+        int(counts["message_count"]),
+        int(counts["max_seq"]),
+        int(stubs["retention_stub_count"]),
     )
-
-
-def _read_model_switch_transcript_version_for_thread(
-    thread_id: str,
-) -> tuple[int, int, int, int]:
-    """Read a current transcript version through an isolated database handle."""
-    from infra.database import get_db
-
-    db = get_db()
-    try:
-        return _model_switch_transcript_version(db, thread_id)
-    finally:
-        db.close()
 
 
 def select_first_model(

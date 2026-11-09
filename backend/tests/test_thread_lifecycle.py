@@ -1434,7 +1434,7 @@ def test_tool_payload_coverage_check_seeks_checkpoints_before_boundary():
         for row in db.execute(
             "EXPLAIN QUERY PLAN SELECT 1 FROM messages AS m WHERE m.id = ? AND "
             f"{lifecycle_trims._TRIMMABLE_TOOL_PAYLOAD}",
-            ("t1", _iso(NOW), 1, "x"),
+            ("t1", _iso(NOW)),
         )
     ]
     checkpoint = next(i for i, step in enumerate(plan) if step.startswith("SEARCH p "))

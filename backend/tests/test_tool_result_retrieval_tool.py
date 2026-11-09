@@ -234,7 +234,7 @@ def test_scoped_page_rejects_offset_inside_utf8_code_point(isolated_db) -> None:
 
 @pytest.mark.parametrize("row_kind", ["assistant", "destructively_retained"])
 def test_scoped_page_rejects_noncanonical_rows(isolated_db, row_kind) -> None:
-    from core.thread_lifecycle import TOOL_TRIM_MARKER
+    from infra.tool_retention_marker import TOOL_TRIM_MARKER
     from core.tool_result_projection import (
         ToolResultReferenceError,
         resolve_tool_result_page,

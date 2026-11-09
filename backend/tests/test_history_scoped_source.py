@@ -14,7 +14,7 @@ import sqlite3
 
 import pytest
 
-from core.thread_lifecycle import TOOL_TRIM_MARKER
+from infra.tool_retention_marker import TOOL_TRIM_MARKER
 from history.types import HistoryBoundary
 
 THREAD = "thread-1"
