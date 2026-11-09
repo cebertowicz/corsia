@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { closeComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
@@ -424,7 +425,7 @@ journey('the review controls remain usable in the phone comments sheet', [['393 
 	await expect(approve).toBeVisible();
 	await approve.click();
 	await expect(drawer.locator('.rb-receipt')).toContainText('Approved');
-	await drawer.getByRole('button', { name: 'Close comments', exact: true }).click();
+	await closeComments(drawer);
 	await expect(page.locator('.review-bar .rb-receipt')).toBeVisible();
 });
 
@@ -460,7 +461,7 @@ journey('a review note survives moving into and out of the phone comments sheet'
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Keep this note');
 	await expect(page.getByRole('textbox', { name: /^Note for / })).toHaveCount(1);
-	await drawer.getByRole('button', { name: 'Close comments', exact: true }).click();
+	await closeComments(drawer);
 	await expect(page.getByRole('textbox', { name: /^Note for / })).toHaveValue('Keep this note');
 	await page.getByRole('button', { name: 'Cancel', exact: true }).click();
 	await expect(page.getByRole('button', { name: 'Reject', exact: true })).toBeFocused();
@@ -484,7 +485,7 @@ journey('a pending review send survives moving through the phone comments sheet'
 	const drawer = page.locator('[data-doc-comments-drawer]');
 	await expect(drawer.getByText('Sending your review…')).toBeVisible();
 	await expect(drawer.getByRole('textbox', { name: /^Note for / })).toHaveValue('Please revise');
-	await drawer.getByRole('button', { name: 'Close comments', exact: true }).click();
+	await closeComments(drawer);
 	await expect(page.getByText('Sending your review…')).toBeVisible();
 	release();
 	await expect(page.locator('.rb-receipt')).toContainText('Rejected');
@@ -553,7 +554,7 @@ journey('held comments have the header Send, whole at every size, and the drawer
 		expect(list!.x + list!.width, 'the margin column ends inside the document column').toBeLessThanOrEqual(column!.x + column!.width + 0.5);
 	}
 	await shot(page, 'drawer-without-footer', info);
-	await drawer.getByRole('button', { name: 'Close comments', exact: true }).click();
+	await closeComments(drawer);
 	await expect(drawer).toBeHidden();
 
 	if (mode === 'phone') {

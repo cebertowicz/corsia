@@ -6,7 +6,7 @@
 	import { isMobile, prefersReducedMotion } from '$lib/stores/viewport';
 	import { onDestroy, untrack } from 'svelte';
 	import { ensureEditorArtifactId, releaseDocEditor } from '$lib/stores/activeDocEditor';
-	import { docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements, hasUnread, arrivedDocComments } from '$lib/stores/docComments';
+	import { docComments, commentLoads, remapComments, markThreadViewed, hasUnread, arrivedDocComments } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
@@ -42,7 +42,6 @@
 		withDraftArtifactId, existingDraft,
 	} from '$lib/stores/docSaveQueue';
 	import { createDocSaveState } from '$lib/docViewerSaveState.svelte';
-	import { liveConnectionDescriptionId } from '$lib/liveConnectionDescription';
 	import { reload as reloadAttentionQueue } from '$lib/stores/attentionDock.svelte';
 	import DocCommentSurface from './DocCommentSurface.svelte';
 	import DocViewerEditorSurface from './DocViewerEditorSurface.svelte';
@@ -89,7 +88,7 @@
 	let feedbackStatus = $state<DocViewerStatus>();
 
 	const save = createDocSaveState(() => target);
-	const history = createViewerHistory({ key: () => targetKey, target: () => target, closeComments: () => commentUI.close(), columnShown: () => (commentUI.state?.kind === 'list' || commentUI.state?.kind === 'thread') && marginFits(docRoot, isPaneDrawer()), showColumn: () => { if (listedComments.length > 0 && marginFits(docRoot, isPaneDrawer())) commentUI.openOnLoad(); }, root: () => docRoot });
+	const history = createViewerHistory({ key: () => targetKey, target: () => target, closeComments: () => commentUI.closeAll(), columnShown: () => (commentUI.state?.kind === 'list' || commentUI.state?.kind === 'thread') && marginFits(docRoot, isPaneDrawer()), showColumn: () => { if (listedComments.length > 0 && marginFits(docRoot, isPaneDrawer())) commentUI.openOnLoad(); }, root: () => docRoot });
 	const liveSession = $derived(target ? $liveDocumentBindings[target.instanceId] : undefined);
 	let liveConnection = $state<LiveDocumentSession['connection'] | null>(null);
 	let liveGeneration = $state(0);
@@ -118,6 +117,8 @@
 	});
 	let docRoot = $state<HTMLElement>();
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
+	/** The resolved drawer beside the margin column: its count (zero without the column) and whether it is open, shared by the header's control and the surface. */
+	let resolvedCount = $state(0), resolvedOpen = $state(false);
 
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey, () => marginFits(docRoot, isPaneDrawer()));
 	const reviewBarState = createReviewBarState();
@@ -221,7 +222,7 @@
 			prevTarget = leavePreviousTarget(prevTarget, d);
 
 			draftController.select(null);
-			commentUI.close();
+			commentUI.closeAll();
 			focusedDocComment.set(null); discardCommentDraft(commentDraftScope(prevTarget));
 			// These fields describe the mounted target, not its predecessor; a reload of the same file keeps the server's known answer.
 			const nextId = withDraftArtifactId(d).artifactId; if (nextId !== loadedArtifactId) serverReadOnly = false; loadedArtifactId = nextId;
@@ -279,7 +280,7 @@
 		readonly={readonly && !confirming && !openRefusal}
 		commentCount={commentStatus.commentCount}
 		unreadCount={unreadThreads.length}
-		orphanedCount={commentStatus.orphanedCount}
+		{resolvedCount} {resolvedOpen} onOpenResolved={() => resolvedOpen = !resolvedOpen}
 		artifactId={loadedArtifactId}
 		viewingThreadId={target?.threadId ?? null}
 		reviewTargetKey={targetKey}
@@ -367,7 +368,6 @@
 		onFocus={focusFromCard}
 		load={loadedArtifactId ? $commentLoads[loadedArtifactId] : undefined}
 		onRetry={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
-		placementRecovery={{ onReload: loadedArtifactId && liveSession ? () => loadedArtifactId ? reloadPlacements(loadedArtifactId) : false : undefined, unplacedCount: commentStatus.orphanedCount, replaceableCount: commentStatus.replaceableCount, reloading: commentStatus.placementReloading, reloadError: commentStatus.placementReloadError, unavailable: liveConnection === 'disconnected' || liveConnection === 'reconnecting', connectionDescriptionId: liveConnectionDescriptionId(liveSession?.artifactId) }}
 		onSubmit={submitComment}
 		onReply={threadActions.reply}
 		onViewed={(id, replyId) => loadedArtifactId ? markThreadViewed(loadedArtifactId, id, replyId) : Promise.resolve()}
@@ -384,6 +384,8 @@
 		images={images.groups}
 		{covered}
 		{readStampSuppressed}
+		draftOverColumn={commentUI.draftOverColumn}
+		bind:resolvedCount bind:resolvedOpen
 	/>
 </div>
 {#snippet reviewControls(inSheet: boolean)}

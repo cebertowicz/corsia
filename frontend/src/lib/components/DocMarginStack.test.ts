@@ -36,4 +36,23 @@ describe('DocMarginStack', () => {
 		expect(clip.querySelectorAll('.margin-card.placed')).toHaveLength(2);
 		expect(observers).toBe(1);
 	});
+
+	it.each([
+		['inside the scroller (the document canvas): the cards ride the native scroll and nothing follows it', true, ''],
+		['beside the scroller (the chat column): the stack follows the scroll', false, 'translateY(-200px)'],
+	])('with its clip %s', (_where, inside, transform) => {
+		vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+		const bounds = document.createElement('div');
+		bounds.innerHTML = '<div class="cm-scroller"><div class="cm-content"></div></div>';
+		const scroller = bounds.querySelector<HTMLElement>('.cm-scroller')!;
+		const clip = document.createElement('div');
+		clip.className = 'drawer-comments';
+		document.body.append(bounds);
+		(inside ? scroller : document.body).append(clip);
+		component = mount(DocMarginStack, { target: clip, props: { bounds, pinned: [thread('a')], selectedId: null, behind: false, card } });
+		flushSync();
+		Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: 200 });
+		scroller.dispatchEvent(new Event('scroll'));
+		expect(clip.querySelector<HTMLElement>('.margin-stack')!.style.transform).toBe(transform);
+	});
 });

@@ -21,6 +21,47 @@ describe('comment surface state', () => {
 		expect(get(focusedDocComment)).toBeNull();
 	});
 
+	it('opens only the picked thread in place of the list when the canvas has no room for the column', () => {
+		const surface = createCommentSurfaceState(() => {}, undefined, () => false);
+		surface.openList(document.createElement('button'));
+		expect(surface.focusComment('c1', new DOMRect())).toBe(true);
+		expect(surface.state).toEqual({ kind: 'thread', id: 'c1' });
+		expect(get(focusedDocComment)).toBe('c1');
+	});
+
+	it('keeps the margin column under a new comment and goes back to it when the draft closes', () => {
+		const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+		surface.openOnLoad();
+		surface.openDraft(new DOMRect());
+		expect(surface.state).toEqual({ kind: 'draft' });
+		expect(surface.draftOverColumn).toBe(true);
+		// A second selection while drafting is still over the column.
+		surface.openDraft(new DOMRect());
+		expect(surface.draftOverColumn).toBe(true);
+		surface.close();
+		expect(surface.state).toEqual({ kind: 'list' });
+		expect(surface.draftOverColumn).toBe(false);
+		surface.close();
+		expect(surface.state).toBeNull();
+	});
+
+	it('closes a draft with nothing behind it, or everything when another document opens', () => {
+		const surface = createCommentSurfaceState(() => {}, undefined, () => true);
+		surface.openDraft(new DOMRect());
+		expect(surface.draftOverColumn).toBe(false);
+		surface.close();
+		expect(surface.state).toBeNull();
+		surface.openOnLoad();
+		surface.openDraft(new DOMRect());
+		surface.closeAll();
+		expect(surface.state).toBeNull();
+		// Without room for the column, a draft from the list is the popover's alone.
+		const narrow = createCommentSurfaceState(() => {}, undefined, () => false);
+		narrow.openList(document.createElement('button'));
+		narrow.openDraft(new DOMRect());
+		expect(narrow.draftOverColumn).toBe(false);
+	});
+
 	it('does not authorize a navigation target for an already focused caret', () => {
 		const surface = createCommentSurfaceState(() => {});
 		expect(surface.focusComment('c1', new DOMRect())).toBe(true);

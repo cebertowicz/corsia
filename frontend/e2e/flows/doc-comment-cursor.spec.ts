@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { closeComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
@@ -338,7 +339,7 @@ for (const motion of MOTIONS) {
 			await clickLine(page, viewport, { marker: 'qx-a-plain', note: 'comments list just opened, nothing scrolled', scroll: false });
 			for (const marker of ['qx-a-code', 'qx-a-own', 'qx-a-cmt']) await clickLine(page, viewport, { marker, note: 'comments list open' });
 		}
-		await list.getByRole('button', { name: 'Close comments', exact: true }).click();
+		await closeComments(list);
 		await expect(list).toHaveCount(0);
 
 		await clickCommentedText(page, viewport, 'qx-a-own');

@@ -24,7 +24,6 @@
 		readonly,
 		commentCount,
 		unreadCount = 0,
-		orphanedCount,
 		artifactId,
 		targetInstanceId,
 		viewingThreadId = null,
@@ -45,6 +44,9 @@
 		historyAvailable = false,
 		historyOpen = false,
 		onOpenHistory,
+		resolvedCount = 0,
+		resolvedOpen = false,
+		onOpenResolved,
 	}: {
 		title?: string;
 		presence?: import('svelte').Snippet;
@@ -58,7 +60,6 @@
 		readonly: boolean;
 		commentCount: number;
 		unreadCount?: number;
-		orphanedCount: number;
 		artifactId: string | null;
 		targetInstanceId: string | null;
 		viewingThreadId?: string | null;
@@ -81,6 +82,10 @@
 		historyAvailable?: boolean;
 		historyOpen?: boolean;
 		onOpenHistory?: () => void;
+		/** Resolved threads behind the text control that opens their drawer; zero hides it (the margin column is not up, or none is resolved). */
+		resolvedCount?: number;
+		resolvedOpen?: boolean;
+		onOpenResolved?: () => void;
 	} = $props();
 
 	let feedbackStatus = $state<DocFeedbackStatus>();
@@ -185,8 +190,9 @@
 			{/if}
 			{#if stale && ready}<button type="button" class="doc-tool warn stale-control" onclick={() => onReload?.()}>File changed · Reload</button>{/if}
 			{#if saveStatus !== 'idle'}<span class="save-ghost" class:saving={saveStatus === 'saving'}>{saveStatus === 'saving' ? 'Saving…' : '✓ Saved'}</span>{/if}
-			<CommentsPill class="doc-tool comment-status" count={commentCount} unread={unreadCount} {unsent} unplaced={orphanedCount}
+			<CommentsPill class="doc-tool comment-status" count={commentCount} unread={unreadCount} {unsent}
 				loading={commentsLoading} unknown={!ready} expanded={commentsOpen} disabled={!ready || commentsLoading} onOpen={onOpenComments} />
+			{#if resolvedCount && onOpenResolved}<button type="button" class="doc-tool resolved-tool" data-resolved-entry aria-haspopup="dialog" aria-expanded={resolvedOpen} onclick={onOpenResolved}>Resolved · {resolvedCount}</button>{/if}
 			{#if artifactId}
 				<span class="delivery-toggle" title="When off, comments send when you close the document or pause for two minutes.">
 					<span>Deliver immediately</span>

@@ -226,19 +226,10 @@ test('@surface:doc-canvas-polish @flow:doc-canvas-polish pinned header, real arr
 		await deleteRenderedLine(page, quote);
 	}
 	await expect(page.locator('.cm-content')).not.toContainText(quote);
-	await expect(page.locator('.comment-status:has(.unplaced-dot)')).toBeVisible();
-	if (mobile) {
-		// At phone width the control is 44px tall; the dot stays on the icon and the compact toolbar padding applies.
-		const fit = await page.locator('.comment-status').evaluate((button) => {
-			const icon = button.querySelector('.tool-icon')!.getBoundingClientRect();
-			const dot = button.querySelector('.unplaced-dot')!.getBoundingClientRect();
-			return { dx: Math.abs(dot.left + dot.width / 2 - (icon.right)), dy: Math.abs(dot.top + dot.height / 2 - icon.top), padding: getComputedStyle(button).paddingLeft };
-		});
-		expect(fit.dx).toBeLessThanOrEqual(8);
-		expect(fit.dy).toBeLessThanOrEqual(8);
-		expect(fit.padding).toBe('8px');
-	}
-	await page.locator('.comment-status:has(.unplaced-dot)').click();
+	// The comments control says nothing about the lost quote: the card itself carries that, in the list.
+	await expect(page.locator('.comment-status .unplaced-dot')).toHaveCount(0);
+	if (mobile) expect(await page.locator('.comment-status').evaluate((button) => getComputedStyle(button).paddingLeft)).toBe('8px');
+	await page.locator('.comment-status').click();
 	await expect(drawer).toBeVisible();
 	await drawer.getByRole('button', { name: 'Show comment: text unavailable', exact: true }).click();
 	await expect(drawer).toContainText('This comment has no text to jump to.');

@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { closeComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { chatComposer, createSession, loginByUrl, sendButton, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
@@ -644,7 +645,7 @@ for (const width of [1440, 393]) {
 			await expect(page.locator('[data-doc-comments-drawer]')).toBeVisible();
 			await expect.poll(() => page.locator('[data-doc-comments-drawer]').evaluate((drawer) => drawer.contains(document.activeElement) || !!drawer.closest('[role="dialog"]')?.contains(document.activeElement))).toBe(true);
 
-			await page.getByRole('button', { name: 'Close comments' }).click();
+			await closeComments(page);
 			await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 			// The drawer takes focus back to the document itself: the thread it jumped to is read and on screen, so the band
 			// has nothing left to point at. The reader going back up makes the last thread a target, and the notice is drawn again.
@@ -721,7 +722,7 @@ for (const width of [1440, 393]) {
 		await expect(controlBox(page)).toHaveCount(0);
 		const x = box.x + box.width / 2, y = box.y + box.height / 2;
 		expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-doc-jump]'), { x, y }), 'the control cannot be hit while the sheet is up').toBe(false);
-		await page.getByRole('button', { name: 'Close comments' }).click();
+		await closeComments(page);
 		await expect(sheet.first()).toBeVisible();
 		await expect(controlBox(page)).toHaveCount(0);
 		expect(await page.evaluate(({ x, y }) => !!document.elementFromPoint(x, y)?.closest('[data-doc-jump]'), { x, y }), 'the control cannot be hit while the sheet is up').toBe(false);
@@ -879,7 +880,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await holdDwell(page, false);
 			// The first reply is read after its dwell. Put the comments list away: the document's control is back, counting the other two.
 			await awaitFocusedRead(page);
-			await page.getByRole('button', { name: 'Close comments' }).click();
+			await closeComments(page);
 			await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 			await expectControl(page, '2 new');
 
@@ -925,7 +926,7 @@ for (const theme of ['light', 'dark'] as const) {
 				await controlButton(page).click();
 				// The comments list opens over the document and covers the control; stay until the arrival reads it, then put it away to tap again.
 				await awaitFocusedRead(page);
-				await page.getByRole('button', { name: 'Close comments' }).click();
+				await closeComments(page);
 				await expect(page.locator('[data-doc-comments-drawer]')).toHaveCount(0);
 			}
 			await expect(controlBox(page)).toHaveCount(0);
@@ -1095,7 +1096,7 @@ test.describe('jump control motion evidence', () => {
 				await saveMotionProbe(page);
 				await page.waitForTimeout(2000);
 				await startMotionProbe(page);
-				await page.getByRole('button', { name: 'Close comments' }).click();
+				await closeComments(page);
 				await expect(controlBox(page)).toHaveCount(0);
 				await saveMotionProbe(page);
 				// Stimulate a second arrival and a viewed event while the document is visible, so the recording includes the control's own exit.

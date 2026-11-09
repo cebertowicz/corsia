@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { inResolved, replyField, showAllThreads } from '../support/commentDrawer';
+import { inResolved, replyField, resolvedEntry, showAllThreads } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
@@ -56,7 +56,6 @@ test('@flow:document-suggestions an agent\'s suggestions are refused when stale,
 	// The refused accept reaches the live document, which takes the file's text in: the screen now shows
 	// it, and the refused card stays orphaned against it.
 	await expect(editor).toContainText('The third line has moved on.');
-	await expect(page.locator('.comment-status:has(.unplaced-dot)')).toBeVisible();
 	await expect(page.getByText('Updated elsewhere since you opened it.')).toHaveCount(0);
 	// The refused card's message is readable in both themes.
 	await row(stale).getByRole('alert').scrollIntoViewIfNeeded();
@@ -83,8 +82,8 @@ test('@flow:document-suggestions an agent\'s suggestions are refused when stale,
 
 	await accept(loose).click();
 	// A decided suggestion leaves the open cards for the Resolved list, which covers the margin while it is open.
-	const resolvedEntry = drawer.locator('[data-aside-kind="resolved"]');
-	await resolvedEntry.click();
+	const resolved = resolvedEntry(drawer);
+	await resolved.click();
 	const accepted = row(loose).getByRole('region', { name: /^accepted suggestion by / });
 	await expect(accepted).toBeVisible();
 	await expect(editor).toContainText('The first line is tight.');
@@ -93,9 +92,9 @@ test('@flow:document-suggestions an agent\'s suggestions are refused when stale,
 	await accepted.getByRole('button', { name: /Accepted by/ }).click();
 	await expect(accepted).toContainText('Why tighter?');
 
-	await resolvedEntry.click();
+	await resolved.click();
 	await reject(fine).click();
-	await resolvedEntry.click();
+	await resolved.click();
 	const rejected = row(fine).getByRole('region', { name: /^rejected suggestion by / });
 	await expect(rejected.getByRole('button', { name: /Rejected by/ })).toBeVisible();
 	await expect(rejected.locator('.ct-cross')).toHaveCount(1);

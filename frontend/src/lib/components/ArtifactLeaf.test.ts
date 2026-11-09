@@ -309,7 +309,7 @@ describe('ArtifactLeaf legacy discussion compatibility', () => {
 });
 
 describe('ArtifactLeaf in-canvas comments', () => {
-	it('shows an orphan marker and opens its list inside the canvas without changing the right pane', async () => {
+	it('keeps an orphan in its own card, with no unplaced mark on the pill, and opens its list inside the canvas without changing the right pane', async () => {
 		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
 		// jsdom lays nothing out, so give the document column the width a wide canvas has: wide enough for the inline drawer.
 		const measure = HTMLElement.prototype.getBoundingClientRect;
@@ -323,7 +323,10 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			mocks.setComments({ 'art-comments': [{ id: 'orphan', from: 0, to: 5, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
 			openArtifactTab(THREAD, { path: '/comments.md', title: 'comments.md' });
 			render();
-			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('title')).toBe("1 comment couldn't be placed"));
+			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('1 thread'));
+			const pill = host.querySelector<HTMLButtonElement>('.comment-status')!;
+			expect(pill.getAttribute('title')).toBeNull();
+			expect(pill.querySelector('.unplaced-dot')).toBeNull();
 			paneOpen.set(true);
 			host.querySelector<HTMLButtonElement>('.comment-status')!.click();
 			flushSync();
@@ -331,6 +334,38 @@ describe('ArtifactLeaf in-canvas comments', () => {
 			expect(document.body.querySelector('.popover')).toBeNull();
 			expect(host.querySelector('[data-adaptive-drawer]')).toBeNull();
 			expect(get(paneOpen)).toBe(true);
+			expect(host.querySelector('[data-doc-comments-drawer]')!.textContent).not.toContain("couldn't be placed");
+		} finally {
+			wide.mockRestore();
+		}
+	});
+
+	it('opens the resolved threads from the header control beside the margin column, and only from it', async () => {
+		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
+		const measure = HTMLElement.prototype.getBoundingClientRect;
+		const wide = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+			const rect = measure.call(this);
+			return this.classList.contains('doc') ? { ...rect, width: 1000, right: rect.left + 1000 } as DOMRect : rect;
+		});
+		giveRangesLayout();
+		try {
+			mocks.fetchContent.mockResolvedValue({ text: 'Document text', revision: 'r-1', writable: true, artifact: { id: 'art-resolved' } });
+			mocks.setComments({ 'art-resolved': [
+				{ id: 'open', from: 0, to: 8, anchor: 'Document', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] },
+				{ id: 'done', from: 9, to: 13, anchor: 'text', author: 'you', text: 'settled', at: 'now', resolved: true, replies: [] },
+			] });
+			openArtifactTab(THREAD, { path: '/resolved.md', title: 'resolved.md' });
+			render();
+			await vi.waitFor(() => expect(host.querySelector('.comment-status')?.getAttribute('aria-label')).toBe('1 thread'));
+			if (!host.querySelector('.doc [data-doc-comments-drawer]')) { host.querySelector<HTMLButtonElement>('.comment-status')!.click(); flushSync(); }
+			const entry = await vi.waitFor(() => { const found = host.querySelector<HTMLButtonElement>('[data-resolved-entry]'); expect(found).not.toBeNull(); return found!; });
+			expect(entry.textContent).toBe('Resolved · 1');
+			expect(entry.getAttribute('aria-expanded')).toBe('false');
+			expect(document.body.querySelector('.resolved-drawer')).toBeNull();
+			entry.click(); flushSync();
+			await vi.waitFor(() => expect(document.body.querySelector('.resolved-drawer [data-comment-id="done"]')).not.toBeNull());
+			expect(entry.getAttribute('aria-expanded')).toBe('true');
+			expect(host.querySelector('.doc [data-doc-comments-drawer] [data-comment-id="open"]')).not.toBeNull();
 		} finally {
 			wide.mockRestore();
 		}

@@ -16,11 +16,16 @@
 	let tops = $state<Record<string, number>>({});
 	/** The card picked last, so only a new pick (not a re-layout) is brought into view when it grows. */
 	let pickedBefore: string | null = null;
-	// One scroll: the cards sit in document coordinates inside a clip below the column header and move with the editor's scroller.
+	// One scroll. A clip inside the scroller's own content (the document's column, drawn on the canvas) scrolls with the text natively:
+	// the cards sit beside their lines and nothing follows. A clip beside the scroller (the chat's column) holds the cards in document
+	// coordinates below its header and moves them with the scroller.
 	$effect(() => {
 		if (!stackEl) return;
 		const scroller = source.scroller(), clip = source.clip(stackEl), room = source.room();
 		if (!scroller || !clip || !room) return;
+		// Read each time: the document's column is moved into the scroller once it has mounted, after this setup has run.
+		const onCanvas = () => scroller.contains(clip);
+		let followed = false;
 		const area = room.el;
 		restoring.get(area)?.();
 		restoring.delete(area);
@@ -37,6 +42,13 @@
 		let frame = 0, overhang = parseFloat(area.style.getPropertyValue(room.property)) || 0;
 		// A card shows for as long as its own placed box reaches into the clip, and goes once that box has scrolled fully above the clip top; where its anchor is does not matter, so a card stacked far below its text stays reachable. One that would start above the clip sits at the clip top, under the header, and the cards below it shift down, so none is ever cut off under the header.
 		const follow = () => {
+			if (onCanvas()) {
+				// Anything a follow laid out before the move is undone once.
+				if (followed) for (const el of [stackEl!, ...stackEl!.querySelectorAll<HTMLElement>('[data-margin-card]')]) { el.style.transform = ''; el.classList.remove('under'); }
+				followed = false;
+				return;
+			}
+			followed = true;
 			const scrolled = scroller.scrollTop;
 			stackEl!.style.transform = `translateY(${-scrolled}px)`;
 			const cards = [...stackEl!.querySelectorAll<HTMLElement>('[data-margin-card]')].map((el) => ({ el, top: el.offsetTop, h: el.offsetHeight, out: el.offsetTop + el.offsetHeight <= scrolled })).sort((a, b) => a.top - b.top);
@@ -56,7 +68,7 @@
 		};
 		const read = () => {
 			follow();
-			const clipTop = clip.getBoundingClientRect().top, scrolled = scroller.scrollTop;
+			const clipTop = clip.getBoundingClientRect().top, scrolled = onCanvas() ? 0 : scroller.scrollTop;
 			const items: MarginItem[] = [], loose: MarginItem[] = [];
 			for (const id of ids) {
 				const mark = source.anchor(id), card = stackEl!.querySelector<HTMLElement>(`[data-margin-card="${id}"]`);
@@ -71,11 +83,12 @@
 			const next = placeCards(items, selected);
 			if (Object.keys(next).length !== Object.keys(tops).length || Object.entries(next).some(([id, top]) => Math.abs((tops[id] ?? 1e9) - top) > 0.5)) tops = next;
 			// The text scrolls far enough that the last card sits whole in the clip, as follow() will lay the stack out at that scroll (cards above the clip top are gone, the rest shift down under the header). Nothing is added when the cards already fit.
+			// On the canvas the cards are part of the scrolling content, which already reaches as far as the last one.
 			const placed = items.map((item) => ({ top: next[item.id] ?? 0, h: item.h })).sort((a, b) => a.top - b.top);
 			const lastBottomAt = (at: number) => { let bottom = at, last = -Infinity; for (const card of placed) { if (card.top + card.h <= at) continue; const top = card.h > clip.clientHeight ? card.top : Math.max(card.top, bottom); last = top + card.h; bottom = last + GAP; } return last; };
 			let low = 0, high = placed.reduce((most, card) => Math.max(most, card.top + card.h), 0);
 			for (let i = 0; i < 24 && high - low > 0.5; i++) { const mid = (low + high) / 2; if (lastBottomAt(mid) <= mid + clip.clientHeight) high = mid; else low = mid; }
-			const wanted = Math.max(0, Math.ceil(high) + 1 + Math.round(scroller.clientHeight - (scroller.scrollHeight - overhang)));
+			const wanted = onCanvas() ? 0 : Math.max(0, Math.ceil(high) + 1 + Math.round(scroller.clientHeight - (scroller.scrollHeight - overhang)));
 			if (wanted !== overhang) { overhang = wanted; area.style.setProperty(room.property, `${overhang}px`); }
 			reveal();
 		};

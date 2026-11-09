@@ -1,4 +1,4 @@
-import { inResolved, replyField, showAllThreads } from '../support/commentDrawer';
+import { inResolved, replyField, resolvedEntry, showAllThreads } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { TEST_TOKEN } from '../support/corsia';
@@ -243,8 +243,8 @@ for (const [width, height, project] of layouts) {
 			expect(await replyState(), 'a remote edit never takes the reply draft or its focus').toEqual(draft);
 
 			held.release();
-			// The decided card moved to the Resolved list; read that from its entry, since opening the list would move focus off the draft.
-			await expect(drawer.locator('[data-aside-kind="resolved"]')).toContainText('Resolved · 1');
+			// The decided card moved to the Resolved list; read that from its control, since opening the list would move focus off the draft.
+			await expect(resolvedEntry(drawer)).toContainText('Resolved · 1');
 			await expect(drawerRow(reader, loose)).toHaveCount(0);
 			await expect(reader.locator('.cm-content')).toContainText(`The tight line ${stamp}.`);
 			await expect.poll(replyState, { message: 'the settled Accept and its comments load leave the draft alone' }).toEqual(draft);

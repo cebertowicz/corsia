@@ -2,7 +2,7 @@ import path from 'node:path';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import { expectQuietSave, observeSaveCue } from '../support/docSaveCue';
-import { openResolved, replyField, showAllThreads } from '../support/commentDrawer';
+import { closeComments, openResolved, replyField, showAllThreads } from '../support/commentDrawer';
 import { createSession, loginByUrl, saveEvidenceScreenshot, TEST_TOKEN } from '../support/corsia';
 
 async function seedCommentedDocument({ page, request }: { page: Page; request: APIRequestContext }) {
@@ -70,7 +70,7 @@ test('@flow:document-comment-writes replies, agrees, resolves, reopens and saves
 	await resolved.getByRole('button', { name: 'Re-open', exact: true }).click();
 	await expect(comment).toBeVisible();
 	// The adaptive comments drawer is modal, so close it before returning to the document to move the anchor.
-	await page.getByRole('region', { name: 'Document comments', exact: true }).getByRole('button', { name: 'Close comments', exact: true }).click();
+	await closeComments(page.getByRole('region', { name: 'Document comments', exact: true }));
 
 	const editor = page.locator('.cm-content');
 	await editor.click();

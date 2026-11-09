@@ -59,22 +59,9 @@ for (const [width, height, project] of [[1440, 960, 'chromium-desktop'], [393, 8
 			await expect(reader.locator('.cm-line').filter({ hasText: quote })).toHaveCount(2);
 			await expect(reader.locator('.cm-content')).toContainText(`reply anchor ${stamp}`);
 			await expect(reader.locator('.cm-content')).toContainText(`remote edit ${stamp}`);
-			const reload = comments.getByRole('button', { name: 'Reload comment placements', exact: true });
-			await expect(reload).toBeVisible();
-			const reloadBox = await reload.boundingBox();
-			expect(reloadBox).not.toBeNull();
-			// Desktop is the shared secondary sm Button's 28px (as the feedback row's Retry); narrow screens widen its hit area to 44.
-			expect(reloadBox!.height).toBeGreaterThanOrEqual(width <= 768 ? 44 : 28);
-			expect(reloadBox!.x).toBeGreaterThanOrEqual(0);
-			expect(reloadBox!.x + reloadBox!.width).toBeLessThanOrEqual(width);
-			await reader.screenshot({ path: testInfo.outputPath(`comment-reload-before-${width}.png`) });
-			await reload.click();
-			await expect(reader.locator('.cm-comment-anchor')).toHaveCount(3);
+			// The comments say nothing about placement; the lost threads keep their cards, and the next load places them again.
+			await expect(comments.getByRole('button', { name: 'Reload comment placements', exact: true })).toHaveCount(0);
 			await expect(reply).toHaveValue(`draft ${stamp}`);
-			await expect(comments.getByRole('heading', { name: /^Comments\b/ })).toBeFocused();
-			await expect(comments.getByRole('status').filter({ hasText: 'Comments placed' })).toBeVisible();
-			await expect(reload).toHaveCount(0);
-			await reader.screenshot({ path: testInfo.outputPath(`comment-reload-success-${width}.png`) });
 			await reader.reload();
 			if (width <= 768) await reader.getByRole('button', { name: 'Toggle sidebar' }).click();
 			await reader.getByText(document.title, { exact: true }).first().click();
