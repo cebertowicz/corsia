@@ -183,7 +183,7 @@ def test_viewing_one_answer_to_several_replies_clears_it_once(isolated_db):
         assert chat_reply_items(db, OWNER_USER, 'thread')[0]['detail']['unread_count'] == 1
     finally:
         db.close()
-    # The thread shows the shared answer once, under c2.1; viewing it there clears c2.2's row too.
+    # The thread shows the shared answer once, under c2.1; viewing it there clears it.
     response = TestClient(app).post('/api/threads/thread/messages/followup/comments/c2.1/viewed',
                                     headers={'Authorization': f'Bearer {OWNER_TOKEN}'},
                                     json={'assistant_message_id': 'shared-answer'})

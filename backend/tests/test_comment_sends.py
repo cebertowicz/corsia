@@ -146,8 +146,8 @@ def test_replies_are_admitted_and_answered_in_the_root_thread(thread_rows):
     assert detail['unread_count'] == 1
     assert detail['destination']['user_message_id'] == 'root-send'
     assert detail['destination']['cid'] == 'c1.1'
-    db.executemany("INSERT INTO chat_comment_views VALUES ('person','reply-send',?,?)",
-                   [(cid, answers[0]['created_at']) for cid in ('c2.1', 'c2.2')])
+    # Viewing the answer where the thread shows it (its first cid) clears it.
+    db.execute("INSERT INTO chat_comment_views VALUES ('person','reply-send','c2.1',?)", (answers[0]['created_at'],))
     assert chat_reply_items(db, 'person', THREAD) == []
 
 
