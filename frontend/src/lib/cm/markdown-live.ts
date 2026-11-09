@@ -141,6 +141,7 @@ function buildInlineDecorations(view: EditorView): DecorationSet {
 					case 'EmphasisMark':
 					case 'StrikethroughMark':
 					case 'CodeMark':
+					case 'CodeInfo': // a fence's language name ("ts") is syntax too
 						hide(node.from, node.to);
 						break;
 					case 'InlineCode':
