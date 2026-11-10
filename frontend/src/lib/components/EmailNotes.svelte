@@ -19,7 +19,7 @@
 <style>
 	.email-loud {
 		list-style: none; margin: 0;
-		padding: var(--space-2) var(--doc-phone-inset, var(--space-3)) var(--space-1) var(--doc-phone-inset, var(--doc-rail, 44px));
+		padding: var(--space-2) var(--doc-phone-inset, var(--space-3)) var(--space-1) var(--doc-inset, 24px);
 		font-size: var(--text-footnote); line-height: var(--lh-normal); font-weight: var(--fw-semibold); color: var(--amber-text);
 	}
 	.email-loud li { display: flex; align-items: baseline; gap: var(--space-2); padding: 0 calc(var(--space-1) / 2); overflow-wrap: anywhere; }

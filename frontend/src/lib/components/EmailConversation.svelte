@@ -115,7 +115,7 @@
 </section>
 
 <style>
-	.email-conversation { padding: var(--space-3) var(--doc-phone-inset, var(--space-3)) var(--space-7) var(--doc-phone-inset, var(--doc-rail, 44px)); }
+	.email-conversation { padding: var(--space-3) var(--doc-phone-inset, var(--space-3)) var(--space-7) var(--doc-inset, 24px); }
 	.email-conversation-label { margin: 0 0 var(--space-2); padding: 0 var(--space-2); font-size: var(--text-footnote); font-weight: var(--fw-semibold); color: var(--text-tertiary); }
 	.email-status { margin: 0 0 var(--space-2); padding: 0 var(--space-2); display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--space-3); font-size: var(--text-footnote); line-height: 1.5; color: var(--text-tertiary); overflow-wrap: anywhere; }
 	.email-status.failed { color: var(--red-text); }
