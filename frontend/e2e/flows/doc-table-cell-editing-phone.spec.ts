@@ -73,7 +73,9 @@ test.describe('@flow:doc-table-cell-editing-phone @surface:documents', () => {
 			table: (await page.locator('.cm-md-table table').first().boundingBox())!,
 		};
 		const target = cell(page, 1, 6);
-		await target.tap();
+		// Tapped to the right of the cell's word, on its line: the caret goes after the word, as a tap there does in prose.
+		const cellBox = (await target.boundingBox())!;
+		await target.tap({ position: { x: cellBox.width - 6, y: cellBox.height / 2 } });
 
 		const editor = page.locator('.cm-md-cell-editor .cm-editor');
 		await expect(editor).toBeVisible();

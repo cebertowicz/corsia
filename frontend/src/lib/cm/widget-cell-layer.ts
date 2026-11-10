@@ -18,7 +18,9 @@ export class CellLayer {
 	/** The element the cell's editor is placed in, reused from one cell to the next. */
 	readonly el = document.createElement('div');
 	private cell: HTMLTableCellElement | null = null;
-	private tracked: ResizeObserver | undefined;
+	private frame = 0;
+	/** What was last written to the layer, so a frame where nothing moved writes nothing. */
+	private written = '';
 
 	constructor() { this.el.className = 'cm-md-cell-layer'; }
 
@@ -30,13 +32,12 @@ export class CellLayer {
 		this.el.append(editor);
 		host.dom.append(this.el);
 		this.follow();
-		// The cell's box moves when its own text rewraps, when the table is redrawn under a remote edit, when the panel or
-		// sidebar changes the document's width, and when the document or the page scrolls or the window resizes.
-		this.tracked = typeof ResizeObserver === 'function' ? new ResizeObserver(this.follow) : undefined;
-		this.tracked?.observe(td);
-		this.tracked?.observe(host.dom);
-		window.addEventListener('scroll', this.follow, { capture: true, passive: true });
-		window.addEventListener('resize', this.follow);
+		// The cell's box moves when its own text rewraps, when the table is redrawn under a remote edit, when the document
+		// scrolls or the window resizes, and when something drawn above the editor (a notice, a bar) comes or goes and moves
+		// the whole editor down the page with no resize or scroll to announce it. So the layer reads the cell's box every
+		// frame while it is open, and writes only when that box has changed.
+		const tick = () => { this.follow(); this.frame = requestAnimationFrame(tick); };
+		this.frame = requestAnimationFrame(tick);
 	}
 
 	/** The click that closes the cell: anything outside the editor is elsewhere. */
@@ -50,32 +51,32 @@ export class CellLayer {
 		const cell = this.cell, el = this.el;
 		if (!cell?.isConnected) return;
 		const box = cell.getBoundingClientRect(), style = getComputedStyle(cell);
-		el.style.left = `${box.left}px`;
-		el.style.top = `${box.top}px`;
-		el.style.width = `${box.width}px`;
-		el.style.minHeight = `${box.height}px`;
-		el.style.padding = `${style.paddingTop} ${style.paddingRight} ${style.paddingBottom} ${style.paddingLeft}`;
-		// A row is as tall as its tallest cell, and a shorter cell's text sits where its vertical alignment puts it; the
-		// editor's text sits there too, so opening a cell in a tall row does not move its text to the top.
-		el.style.justifyContent = style.verticalAlign === 'middle' ? 'center' : style.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start';
 		// The cell's own type, not the editor's: a line that wraps at a different width, or at a different height, would put
 		// the reader's text out of step with the row they are editing. The renderer wraps a cell's text in an element of its
 		// own, and that element carries the type, so it is asked rather than the cell around it.
 		const face = cell.querySelector<HTMLElement>('p, div, li, span') ?? cell;
 		const type = face === cell ? style : getComputedStyle(face);
-		for (const property of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'overflowWrap', 'wordBreak'] as const) {
-			el.style[property] = type[property];
-		}
+		const next: Partial<Record<keyof CSSStyleDeclaration & string, string>> = {
+			left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, minHeight: `${box.height}px`,
+			padding: `${style.paddingTop} ${style.paddingRight} ${style.paddingBottom} ${style.paddingLeft}`,
+			// A row is as tall as its tallest cell, and a shorter cell's text sits where its vertical alignment puts it; the
+			// editor's text sits there too, so opening a cell in a tall row does not move its text to the top.
+			justifyContent: style.verticalAlign === 'middle' ? 'center' : style.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start',
+		};
+		for (const property of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'overflowWrap', 'wordBreak'] as const) next[property] = type[property];
+		const signature = JSON.stringify(next);
+		if (signature === this.written) return;
+		this.written = signature;
+		Object.assign(el.style, next);
 	};
 
 	/** Takes the layer out of the document and leaves the cell as a plain rendered cell again. */
 	close() {
 		this.cell?.classList.remove(CELL_EDITING);
 		this.cell = null;
-		this.tracked?.disconnect();
-		this.tracked = undefined;
+		cancelAnimationFrame(this.frame);
+		this.frame = 0;
+		this.written = '';
 		this.el.remove();
-		window.removeEventListener('scroll', this.follow, { capture: true });
-		window.removeEventListener('resize', this.follow);
 	}
 }

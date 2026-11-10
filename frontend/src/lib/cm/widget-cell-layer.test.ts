@@ -18,22 +18,6 @@ const track = <T extends Rig>(r: T) => { rigs.push(r); return r; };
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { while (rigs.length) rigs.pop()!.view.destroy(); cleanup(); document.body.innerHTML = ''; vi.useRealTimers(); });
 
-/** jsdom has no ResizeObserver; this one records what is watched and reports a resize on demand. */
-function stubResizeObserver() {
-	const observers: { callback: () => void; watched: Set<Element> }[] = [];
-	vi.stubGlobal('ResizeObserver', class {
-		private readonly entry: { callback: () => void; watched: Set<Element> };
-		constructor(callback: () => void) { this.entry = { callback, watched: new Set() }; observers.push(this.entry); }
-		observe(element: Element) { this.entry.watched.add(element); }
-		unobserve(element: Element) { this.entry.watched.delete(element); }
-		disconnect() { this.entry.watched.clear(); }
-	});
-	return {
-		watches: (element: Element) => observers.some((observer) => observer.watched.has(element)),
-		resize: (element: Element) => observers.filter((observer) => observer.watched.has(element)).forEach((observer) => observer.callback()),
-	};
-}
-
 /** The cell's box, since jsdom gives every element a zero one. */
 const boxOf = (element: Element, left: number, top: number, width: number, height: number) => {
 	element.getBoundingClientRect = () => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) } as DOMRect);
@@ -58,20 +42,21 @@ describe('the layer a cell editor lives in', () => {
 		expect(editingCell(r), 'the cell it covers is the one clicked').toBe(cell);
 	});
 
-	it('follows the cell when the layout moves it and lets go when the cell closes', () => {
+	it('follows the cell however the layout moves it and lets go when the cell closes', () => {
 		const r = track(open());
-		const cell = cellEl(r), observer = stubResizeObserver();
+		const cell = cellEl(r);
 		boxOf(cell, 320, 140, 210, 44);
 		clicked(r);
-		expect(observer.watches(cell), 'the cell is watched: its text rewrapping moves the box').toBe(true);
-		expect(observer.watches(r.view.dom), 'so is the editor: the panel and sidebar change its width').toBe(true);
+		// A resize, a scroll, and the whole editor moving down the page under a notice drawn above it all move the cell's box,
+		// and only the first two announce themselves; the layer is on the cell's box by the next frame either way.
 		boxOf(cell, 120, 300, 480, 66);
-		observer.resize(cell);
-		expect(layer(r)!.style.left, 'a resize moves the layer').toBe('120px');
+		vi.advanceTimersByTime(20);
+		expect(layer(r)!.style.left, 'the layer moves with the cell').toBe('120px');
 		expect(layer(r)!.style.width).toBe('480px');
-		boxOf(cell, 120, 90, 480, 66);
-		window.dispatchEvent(new Event('scroll'));
-		expect(layer(r)!.style.top, 'so does a scroll').toBe('90px');
+		boxOf(cell, 120, 408, 480, 66);
+		vi.advanceTimersByTime(20);
+		expect(layer(r)!.style.top, 'with nothing announcing the move').toBe('408px');
+		expect(layer(r)!.style.minHeight).toBe('66px');
 		press(r, 'Escape');
 		expect(layer(r), 'closing takes the layer out of the document').toBeNull();
 		expect(editingCell(r), 'and the cell is a plain rendered cell again').toBeNull();

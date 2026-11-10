@@ -122,6 +122,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		const cell = page.locator('.cm-md-table tr', { hasText: 'cut line' }).locator('td').nth(1);
 		await cell.scrollIntoViewIfNeeded();
 		await cell.click();
+		await expect(page.locator('.cm-md-cell-editor .cm-content')).toBeFocused();
 		await page.locator('.sel-comment').click();
 		await page.getByPlaceholder('Comment, or @ to tag an agent').fill('Empty-cell comment.');
 		await page.getByRole('button', { name: 'Comment', exact: true }).last().click();

@@ -156,38 +156,45 @@ export async function editorInCell(page: Page, target: Locator) {
 		expect(e.x + e.width, 'and ends inside it').toBeLessThanOrEqual(b.x + b.width + 1);
 		expect(e.y + e.height, 'and covers nothing of the row below').toBeLessThanOrEqual(b.y + b.height + 1);
 	}).toPass({ timeout: 5_000 });
-	const caret = await page.evaluate(() => {
+	// The rest is read in one frame, once the layer has had its frame to follow the cell: read across separate calls, a cell
+	// that moved in between (a notice drawn above the editor, a redraw) would be compared with an editor not yet moved.
+	const read = await page.evaluate(async ([content, td]) => {
+		await new Promise((done) => requestAnimationFrame(done));
 		const selection = document.getSelection();
-		if (!selection?.rangeCount) return null;
-		const rect = selection.getRangeAt(0).getClientRects()[0] ?? selection.getRangeAt(0).getBoundingClientRect();
-		return { x: rect.left, y: rect.top, height: rect.height };
-	});
+		const rect = selection?.rangeCount ? (selection.getRangeAt(0).getClientRects()[0] ?? selection.getRangeAt(0).getBoundingClientRect()) : null;
+		// The editor's text is drawn where the cell draws it: the same first character at the same place, on as many lines.
+		// The place is both ways: a cell in a row made tall by another is drawn at its vertical alignment, not at the top.
+		const drawn = (el: Element) => {
+			// Read off the text alone: the boxes of the elements holding it (the editor's line, a comment's mark) are not lines.
+			const range = document.createRange(), bottoms = new Set<number>();
+			let first: DOMRect | null = null;
+			const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+			for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+				const text = node.textContent!, at = text.search(/\S/);
+				if (at < 0) continue;
+				range.setStart(node, at);
+				range.setEnd(node, text.trimEnd().length);
+				for (const line of range.getClientRects()) if (line.width > 0) bottoms.add(Math.round(line.bottom));
+				// The first character that is not padding, measured on its own.
+				range.setEnd(node, at + 1);
+				first ??= range.getBoundingClientRect();
+			}
+			return { left: first?.left ?? 0, top: first?.top ?? 0, lines: bottoms.size };
+		};
+		const box = td!.getBoundingClientRect();
+		return {
+			cell: { x: box.left, y: box.top, width: box.width, height: box.height },
+			caret: rect && { x: rect.left, y: rect.top, height: rect.height },
+			text: drawn(content!), under: drawn(td!),
+		};
+	}, [await cellContent(page).elementHandle(), await target.elementHandle()] as const);
+	const { caret, text, under } = read;
+	b = read.cell;
 	expect(caret, 'the caret is placed').not.toBeNull();
 	expect(caret!.x, 'the caret is inside the cell').toBeGreaterThanOrEqual(b.x - 1);
 	expect(caret!.x).toBeLessThanOrEqual(b.x + b.width + 1);
 	expect(caret!.y).toBeGreaterThanOrEqual(b.y - 1);
 	expect(caret!.y + caret!.height).toBeLessThanOrEqual(b.y + b.height + 1);
-	// The editor's text is drawn where the cell draws it: the same first character at the same place, on as many lines.
-	// The place is both ways: a cell in a row made tall by another is drawn at its vertical alignment, not at the top.
-	const drawn = (el: Element) => {
-		// Read off the text alone: the boxes of the elements holding it (the editor's line, a comment's mark) are not lines.
-		const range = document.createRange(), bottoms = new Set<number>();
-		let first: DOMRect | null = null;
-		const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-		for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-			const text = node.textContent!, at = text.search(/\S/);
-			if (at < 0) continue;
-			range.setStart(node, at);
-			range.setEnd(node, text.trimEnd().length);
-			for (const rect of range.getClientRects()) if (rect.width > 0) bottoms.add(Math.round(rect.bottom));
-			// The first character that is not padding, measured on its own.
-			range.setEnd(node, at + 1);
-			first ??= range.getBoundingClientRect();
-		}
-		return { left: first?.left ?? 0, top: first?.top ?? 0, lines: bottoms.size };
-	};
-	const text = await cellContent(page).evaluate(drawn);
-	const under = await target.evaluate(drawn);
 	expect(Math.abs(text.left - under.left), 'the text starts where the cell draws it').toBeLessThanOrEqual(1);
 	expect(Math.abs(text.top - under.top), 'at the same height').toBeLessThanOrEqual(1);
 	expect(text.lines, 'and wraps onto as many lines').toBe(under.lines);

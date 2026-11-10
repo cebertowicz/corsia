@@ -6,8 +6,9 @@ import { pendingCommentMark } from './pending-comment-mark';
 import { drawnCellImage, markChangedOpenable, openWidgetImage, openWidgetOnKey } from './widget-open';
 import { blockRange, DIAGRAM, TABLE, widgetOf } from './widget-blocks';
 import { selectionIn } from './widget-selection';
-import { CELL_EDITOR } from './widget-cell-state';
+import { CELL_EDITOR, openCellState } from './widget-cell-state';
 import { cellClicked } from './widget-cell-click';
+import { emptyCellKey, emptyCellSelection } from './widget-cell-comment';
 import { addCommentId, commentIdsAt, keepingSelection, paintTable, unpaint, type Mark } from './widget-paint';
 import { caretToWidget } from './widget-caret';
 
@@ -160,6 +161,12 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 			if (update.docChanged || update.viewportChanged || update.geometryChanged || update.heightChanged
 				|| update.startState.field(commentRanges) !== update.state.field(commentRanges)
 				|| update.transactions.some((transaction) => transaction.effects.length > 0)) this.paint();
+			// An empty cell's editor opening, or its cell emptied, raises the whole-cell offer; the first character typed into it removes it.
+			const before = emptyCellKey(update.startState), after = emptyCellKey(update.state);
+			if (before !== after) {
+				if (after) this.listen();
+				else if (before && update.state.field(openCellState, false)) hooks.onSelect(null);
+			}
 		}
 
 		destroy() {
@@ -180,6 +187,8 @@ export function widgetComments(hooks: WidgetCommentHooks) {
 
 		private read() {
 			if (this.dragging) return;
+			const empty = emptyCellSelection(this.view);
+			if (empty) { this.raised = false; hooks.onSelect(empty); return; }
 			const selection = document.getSelection();
 			const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
 			const el = range && widgetOf(this.view, range.commonAncestorContainer);

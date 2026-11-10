@@ -25,6 +25,7 @@
 	import { imagePins } from '$lib/cm/image-pins';
 	import { commentNewSigns } from '$lib/cm/comment-new-signs';
 	import { widgetComments } from '$lib/cm/widget-comments';
+	import { emptyCellSelection } from '$lib/cm/widget-cell-comment';
 	import { cardQuoteLabel, widgetCommentLabel } from '$lib/cm/widget-cells';
 	import type { SelectionLabel } from '$lib/stores/commentDraft';
 	import { suggestionMarks } from '$lib/cm/suggestion-marks';
@@ -192,6 +193,9 @@
 	function handleSelection(v: EditorView, click?: MouseEvent, typed?: boolean) {
 		const r = v.state.selection.main;
 		if (r.empty) {
+			// A caret in an empty cell's editor has no text to select: the offer there is the whole cell's.
+			const wholeCell = emptyCellSelection(v);
+			if (wholeCell) { caretRule.range(); onSelect?.(wholeCell); return; }
 			const read = caretRule.read(!!click, !!typed, () => click ? highlightAtPress(v, click, curHighlights) : curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to));
 			if (!read) return;
 			onSelect?.(null);
