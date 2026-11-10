@@ -24,20 +24,13 @@ const caretOf = (field: HTMLElement): [number, number] | null => field instanceo
 	? [field.selectionStart ?? 0, field.selectionEnd ?? 0]
 	: null;
 
-/** The writing place in a comment surface — a thread's reply or the new-comment field — or null for anything else. */
+/** The writing place in a comment surface, in any form it takes (list, margin card, popover, sheet) — a thread's reply or the new-comment field — or null for anything else, or a form on its way out. */
 function placeOf(target: EventTarget | null): WritingPlace | null {
-	const field = target instanceof HTMLElement ? target : null;
-	if (!field?.matches('.ct-input, [data-drawer-autofocus]')) return null;
-	const card = field.closest<HTMLElement>('[data-comment-id]');
-	if (card) return { where: `[data-comment-id="${CSS.escape(card.getAttribute('data-comment-id') ?? '')}"] .ct-input`, caret: caretOf(field) };
-	return field.matches('[data-drawer-autofocus]') ? { where: '[data-drawer-autofocus]', caret: caretOf(field) } : null;
+	const field = target instanceof HTMLElement && !target.closest('.leaving') ? target : null;
+	const card = field?.matches('.ct-input') ? field.closest<HTMLElement>('[data-thread-id]') : null;
+	if (field && card) return { where: `[data-thread-id="${CSS.escape(card.getAttribute('data-thread-id') ?? '')}"] .ct-input`, caret: caretOf(field) };
+	return field?.matches('.composer [data-drawer-autofocus]') ? { where: '.composer [data-drawer-autofocus]', caret: caretOf(field) } : null;
 }
-
-/** Focus on one of the reader's own writing fields; a form on its way out does not count. */
-const inSurface = (target: EventTarget | null) => {
-	const surface = target instanceof Element ? target.closest<HTMLElement>('.canvas-comment-drawer') : null;
-	return !!placeOf(target) && !!surface && !surface.classList.contains('leaving');
-};
 
 /**
  * Hands the reply or comment field the reader was writing in back across one trip of the Workspace panel, with the
@@ -56,6 +49,7 @@ const inSurface = (target: EventTarget | null) => {
  */
 export function holdWritingPlace(live: () => string | null) {
 	let pending: WritingPlace | null = null, frame = 0;
+	const placed = new WeakSet<HTMLElement>();
 
 	const stopTrying = () => {
 		if (frame) cancelAnimationFrame(frame);
@@ -73,12 +67,12 @@ export function holdWritingPlace(live: () => string | null) {
 		if (!pending || !area?.isConnected) return;
 		const field = area.querySelector<HTMLElement>(pending.where);
 		if (!field) return;
-		if (field !== document.activeElement) {
-			field.focus({ preventScroll: true });
-			// A field in a form the surface has not drawn yet takes no focus.
-			if (document.activeElement !== field) return;
-			if (pending.caret && field instanceof HTMLTextAreaElement) field.setSelectionRange(...pending.caret);
-		}
+		if (field !== document.activeElement) field.focus({ preventScroll: true });
+		// A field in a form the surface has not drawn yet takes no focus.
+		if (document.activeElement !== field || placed.has(field)) return;
+		// Once per field: a form may have focused it already, with the caret at the end.
+		placed.add(field);
+		if (pending.caret && field instanceof HTMLTextAreaElement) field.setSelectionRange(...pending.caret);
 	}
 
 	// The list can still be on its way in when the panel closes: the width eases back over a few hundred
@@ -111,23 +105,25 @@ export function holdWritingPlace(live: () => string | null) {
 	// The surface's element changes with every form the list takes, and the one being replaced can clear the caller's
 	// reference to it on its way out, so focus is watched on the document and filtered to the surface's own fields.
 	$effect(() => {
+		// The place focus last left, to be carried if it goes on to the panel's own control: from a reply to the toggle by
+		// keyboard the way crosses the card's own buttons, which are not the reader moving on.
+		let left: WritingPlace | null = null;
 		const onFocusIn = (event: FocusEvent) => {
 			const place = placeOf(event.target);
-			if (!inSurface(event.target)) {
-				// Back on the panel's own control is the form being replaced handing focus back. Anywhere else they have
-				// moved on: nothing is carried and nothing is placed.
-				if (!toPanelControl(event.target)) { carried = null; pending = null; stopTrying(); }
+			const target = event.target instanceof Element ? event.target : null;
+			if (!place) {
+				if (toPanelControl(target)) { carried ??= left; return; }
+				// Another field, or the document's text, is the reader moving on: nothing is carried and nothing is placed.
+				if (target?.closest('input, textarea, select, [contenteditable="true"], .cm-content')) { left = null; carried = null; pending = null; stopTrying(); }
 				return;
 			}
+			left = null;
 			// They chose a place to write that is not the one being carried: that one is theirs.
-			if (pending && place?.where !== pending.where) { carried = null; pending = null; stopTrying(); }
+			if (pending && place.where !== pending.where) { carried = null; pending = null; stopTrying(); }
 		};
-		// Leaving for the panel's control is the panel opening: carry the place, caret and all, to whichever surface
-		// the panel leaves behind. Anywhere else the reader has moved on.
 		const onFocusOut = (event: FocusEvent) => {
-			if (!inSurface(event.target)) return;
 			const place = placeOf(event.target);
-			if (toPanelControl(event.relatedTarget) && place) carried = place;
+			if (place) left = place;
 		};
 		document.addEventListener('focusin', onFocusIn);
 		document.addEventListener('focusout', onFocusOut);

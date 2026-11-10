@@ -129,9 +129,11 @@
 	const resolvedDrawer = createResolvedDrawer({ enabled: () => !image, resolved: () => resolvedList, open: () => resolvedOpen, setOpen: (open) => resolvedOpen = open, setCount: (count) => resolvedCount = count, entry: () => bounds?.querySelector<HTMLElement>('[data-resolved-entry]') ?? null });
 	holdReadingLine({ margin: () => margin, bounds: () => bounds, selectedId: () => selectedId });
 	// Writing survives the panel's trip: where the reader was writing, and where the list is up to receive it back.
+	// A card or composer is up wherever it fits (margin card, popover, sheet), so its place is carried from any of them.
 	holdWritingPlace(() => surfaceState === null ? null
 		: margin ? '.canvas-comment-drawer.margin:not(.leaving)'
-			: sheetDrawer ? '.canvas-comment-drawer.sheet' : null);
+			: surfaceState.kind !== 'list' ? 'body'
+				: sheetDrawer ? '.canvas-comment-drawer.sheet' : null);
 	let detent = $state<'full' | 'half'>('full');
 	const draftTags = createMentionSelection();
 	const replyTags = new Map<string, ReturnType<typeof createMentionSelection>>();
@@ -323,7 +325,7 @@
 		</div>{/key}</div>
 	</div>
 {/snippet}
-{#snippet cardPopover()}<Popover fill={surfaceState?.kind === 'draft'} anchor={cardAnchor} placement={anchorAtClick ? 'pointer' : 'right'} {bounds} clearAnchor={surfaceState?.kind === 'thread' && !image} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} takeFocus={!(surfaceState?.kind === 'thread' && surfaceState.fromText)} sideKey={surfaceState?.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus} keepOpenOnPointer={(target) => !!image && surfaceState?.kind === 'draft' && target instanceof Element && !!bounds?.contains(target) && !!target.closest('[data-image-zoom]')}>{@render content()}</Popover>{/snippet}
+{#snippet cardPopover()}<Popover fill={surfaceState?.kind === 'draft'} anchor={cardAnchor} placement={anchorAtClick ? 'pointer' : 'right'} {bounds} clearAnchor={surfaceState?.kind === 'thread' && !image} avoidRect={image?.imageBounds} initialFocus={image && !readOnly ? '.ct-input' : undefined} takeFocus={!(surfaceState?.kind === 'thread' && surfaceState.fromText)} sideKey={surfaceState?.kind === 'thread' ? surfaceState.ids?.[0] ?? surfaceState.id : anchor} open={true} {onClose} {restoreFocus} keepOpenOnPointer={(target) => (target instanceof Element && !!target.closest('[aria-label="Toggle panel"]')) || (!!image && surfaceState?.kind === 'draft' && target instanceof Element && !!bounds?.contains(target) && !!target.closest('[data-image-zoom]'))}>{@render content()}</Popover>{/snippet}
 
 {#if surfaceState || sheet.closing}
 	{#if margin && surfaceState}
