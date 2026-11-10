@@ -213,7 +213,7 @@ describe('comment surface status', () => {
 		], 'x')).toEqual({ commentCount: 3, orphanedCount: 1, replaceableCount: 1, placementReloading: true, placementReloadError: true });
 	});
 
-	it('offers Place again only for orphaned comments whose quote remains in the text', () => {
+	it('counts as replaceable only orphaned comments whose quote remains in the text', () => {
 		const deleted = commentsInDocumentOrder([comment('deleted', 0, 'quote')], 'other');
 		const restored = commentsInDocumentOrder([comment('restored', 8, 'quote')], 'restored quote', { restored: 'Refused' });
 		const elsewhere = commentsInDocumentOrder([comment('elsewhere', 20, 'quote')], 'quote elsewhere');
