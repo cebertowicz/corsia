@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ChatPanel from './ChatPanel.svelte';
 import { withEmptyAttentionQueue } from '../__tests__/fixtures/attentionQueue';
 import { withOpenTime } from '../__tests__/fixtures/openTimeServer';
+import { MOUNT_WAIT_MS } from '../__tests__/fixtures/mountWait';
 import type { TurnSummary } from './transcriptRunLabel';
 import { token } from '$lib/stores/auth';
 import { activeThreadId, messages, reasoningEffort, threads } from '$lib/stores/threads';
@@ -208,10 +209,9 @@ describe('ChatPanel first-page failure', () => {
 		flushSync();
 
 		await (component as Record<string, any>).fetchThreadMessages('thread-b');
-		// The label renders after the fetched page settles through the message store, which can pass vi.waitFor's 1 s default under a full parallel run.
-		await vi.waitFor(() => expect(host.textContent).toContain('Worked · 1 step · 4 min'), { timeout: 5_000 });
+		await vi.waitFor(() => expect(host.textContent).toContain('Worked · 1 step · 4 min'), { timeout: MOUNT_WAIT_MS });
 		await (component as Record<string, any>).fetchThreadMessages('thread-b');
-		await vi.waitFor(() => expect(host.textContent).toContain('Worked · 2 steps · 8 min'), { timeout: 5_000 });
+		await vi.waitFor(() => expect(host.textContent).toContain('Worked · 2 steps · 8 min'), { timeout: MOUNT_WAIT_MS });
 	});
 
 	it('aborts the first page of the thread the user left, without an error state', async () => {

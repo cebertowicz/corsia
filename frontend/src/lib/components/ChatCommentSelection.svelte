@@ -328,7 +328,7 @@
 {/if}
 {#if viewing && viewedComment && threadId && !open}
 	{#if narrow}
-		<AdaptiveDrawer ariaLabel="Comment thread" heading="Comments" doneLabel="Close" followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+		<AdaptiveDrawer ariaLabel="Comment thread" doneLabel="Close" followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
 			<ChatCommentThreads messageId={viewing.messageId} {threadId} comments={[viewedComment]} onReply={replyInThread} keepReplyVisible />
 		</AdaptiveDrawer>
 	{:else}

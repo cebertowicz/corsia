@@ -97,8 +97,9 @@ export const docTheme = EditorView.theme({
 	'.cm-comment-block': { outline: 'medium solid color-mix(in srgb, var(--amber) 42%, transparent)', outlineOffset: 'calc(var(--space-1) * -1)', transition: 'outline-color var(--dur-tight)' },
 	'.cm-comment-block-pending': { outline: 'medium dashed var(--amber)', outlineOffset: 'calc(var(--space-1) * -1)' },
 	'.cm-comment-block-focused': { outlineColor: 'var(--amber)' },
-	// A mark on a whole table cell: the same underline, as a cell's own bottom edge.
-	'.cm-md-table td.cm-comment-anchor, .cm-md-table th.cm-comment-anchor': { borderBottomWidth: 'medium' },
+	// A mark on a whole table cell: the text highlight's amber underline, drawn inside the cell so its own border stays as it is.
+	'.cm-md-table td.cm-comment-anchor, .cm-md-table th.cm-comment-anchor': { boxShadow: 'inset 0 -2px 0 color-mix(in srgb, var(--amber) 42%, transparent)' },
+	'.cm-md-table td.cm-comment-focused, .cm-md-table th.cm-comment-focused, .cm-md-table td.cm-comment-pending, .cm-md-table th.cm-comment-pending': { boxShadow: 'inset 0 -2px 0 var(--amber)' },
 	// The rail is a positioned layer holding one empty element per commented line, which the margin cards read their line from;
 	// it draws nothing and takes no pointer or focus.
 	'.cm-comment-rail': { position: 'absolute', left: '0', top: '0', width: '0', height: '0', zIndex: '1', pointerEvents: 'none', visibility: 'hidden' },
@@ -119,6 +120,8 @@ export const docTheme = EditorView.theme({
 		boxShadow: 'inset 0 0 0 2.5px var(--region-color)', opacity: '0', transition: 'opacity var(--dur-tight) var(--ease-snap)',
 	},
 	'.cm-image-pin.selected .disc::after': { opacity: '1' },
+	// A deleted passage's sign (900 and 393, where no card shows): the dashed amber edge its margin card has, on the page colour.
+	'.cm-image-pin.removed .disc': { background: 'var(--bg-primary)', border: '1.5px dashed var(--amber)', boxShadow: 'none' },
 	'.cm-image-pin:focus-visible': { outline: 'none' },
 	'.cm-image-pin:focus-visible .disc': { outline: '2px solid var(--accent)', outlineOffset: '3px' },
 	// The app's reduced-motion reset gives every element a 0.01ms transition on

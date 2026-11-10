@@ -57,10 +57,6 @@ export interface DocComment {
 	replies: CommentReply[];
 	/** Live documents only (4.2); `drawn` once browser-made positions place it. */
 	placement?: Placement;
-	/** A live placement reload (placing lost comments again, `docCommentReload`) is queued or in flight. */
-	placementReloading?: boolean;
-	/** The latest live placement reload was refused. */
-	placementReloadError?: boolean;
 	drawn?: boolean;
 	/** A comment on part of an image (DCOL-FR13.3); null for a text comment. */
 	region?: ImageRegion | null;

@@ -8,7 +8,7 @@
 	import { leaveRow } from '$lib/actions/leaveRow';
 	import { commentTurn } from '$lib/ws/commentTurn';
 	type Comment = CommentThreadData & { review?: boolean };
-	/** A card whose text was deleted draws that text itself (quote and "Text removed"), so its header carries no quote line of its own. Mirrors the `hideOrphan` the card is given. */
+	/** A card whose text was deleted draws that text itself (quote and "Original text deleted"), so its header carries no quote line of its own. Mirrors the `hideOrphan` the card is given. */
 	const showsOwnQuote = (comment: Comment) => !!comment.orphaned && !!comment.detached && !!comment.anchor && !(documentOrder && !underTextChanged);
 	// A live row never drawn has no text to go to yet; its card line says why (4.2).
 	const unplaced = (comment: Comment) => !comment.drawn && (comment.placement === 'placing' || comment.placement === 'not_placed');
@@ -119,7 +119,8 @@
 <div class="list" bind:this={listElement} data-doc-path={docPath} role="region" aria-label="Comment threads" onfocusin={holdCardOrder} onfocusout={releaseCardOrder}>
 	{#if documentOrder}
 		{#each rows as row (row.key ?? row.comments[0].id)}
-			{#if row.key !== null}{@render groupHead?.(row.comments)}{/if}
+			<!-- In the margin an image's thumbnail and caption sit inside the top of its first card; in a list they head the image's cards. -->
+			{#if row.key !== null && !restCards}{@render groupHead?.(row.comments)}{/if}
 			{#each row.comments as comment (comment.id)}
 			{@const region = comment.regionNumber != null}
 			<!-- An image comment's card and its mark light up together; the card itself selects its tag, so it needs no link. -->
@@ -134,6 +135,7 @@
 				onfocusout={region && onHover ? leaveCard : undefined}
 			>
 				{#snippet header()}
+					{#if restCards && row.key !== null && comment === row.comments[0]}{@render groupHead?.(row.comments)}{/if}
 					{#if !region && !showsOwnQuote(comment)}
 						<button type="button" class="comment-jump" class:rest={restCards && focusedId !== comment.id} data-comment-jump disabled={unplaced(comment)} aria-describedby={unplaced(comment) ? `comment-placement-${comment.id}` : undefined} onclick={(event) => { event.stopPropagation(); onFocus?.(comment.id); }} aria-label={comment.orphaned || comment.review ? 'Show comment: text unavailable' : comment.anchor ? `Go to text: ${shownQuote(comment) ?? plainQuote(comment.anchor)}` : 'Go to text'}>
 							{#if comment.review || comment.orphaned}{@const lead = comment.review ? 'Review comment' : underTextChanged ? '' : 'Text changed'}{lead}{lead && comment.anchor ? ': ' : ''}{comment.anchor ? `“${plainQuote(comment.anchor)}”` : ''}{:else}{shownQuote(comment) ?? (comment.anchor ? `“${plainQuote(comment.anchor)}”` : 'Go to text')}{/if}

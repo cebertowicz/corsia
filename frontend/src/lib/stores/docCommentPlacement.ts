@@ -1,7 +1,6 @@
 import * as Y from 'yjs';
 import { get, type Writable } from 'svelte/store';
 import type { DocComment } from './docComments';
-import { clearReloadErrors, markReloading, refuseRequest, reloadFlags, reportReloadFailure, settleReload } from './docCommentReload';
 import { encodeUpdate, textDigest, type DocumentFrame } from './documentWire';
 import { liveDocumentBindings } from './liveDocuments';
 import type { LiveDocumentSession } from './liveDocumentSession';
@@ -15,6 +14,9 @@ type Range = NonNullable<DocumentFrame['ranges']>[number];
 /** The rows the server keeps a live range for: anchored, top level, not a review comment, not orphaned. */
 const placeable = (row: DocComment) => !row.review && !!row.anchor && !row.orphaned;
 const unplaced = (row: DocComment): DocComment => ({ ...row, placement: undefined, drawn: false });
+/** A reload places lost comments again: every anchored row goes back to Placing; a row never drawn keeps its orphan eligibility meanwhile. */
+const markReloading = (rows: DocComment[]): DocComment[] => rows.map(row => row.anchor && !row.review
+	? { ...row, placement: row.placement === undefined && !row.drawn ? undefined : 'placing' } : row);
 
 /**
  * One live document's placement. Composed only by the comments store, and writes only its rows:
@@ -27,6 +29,8 @@ class LivePlacement {
 	private seq = 0;
 	private inFlight: { seq: number; requestId: string; reload: boolean } | null = null;
 	private marked: { reload: boolean } | null = null;
+	/** A reload is queued or in flight. It runs on its own, once per live load, with nothing shown: a refusal leaves rows lost and is only logged. */
+	private reloading = false;
 	private positions = new Map<string, Positions>();
 	private server = new Map<string, string>();
 	private clean: boolean;
@@ -54,14 +58,13 @@ class LivePlacement {
 		let ask = false;
 		const rows = next.map(row => {
 			const old = previous.get(row.id);
-			const reload = reloadFlags(old);
-			if (!placeable(row)) return { ...row, ...reload };
+			if (!placeable(row)) return row;
 			const key = `${row.from}:${row.to}:${row.anchor}`, changed = this.server.get(row.id) !== key;
 			this.server.set(row.id, key);
 			const drawn = old?.drawn ? { drawn: true, from: old.from, to: old.to } : { drawn: false };
-			if (!changed && old?.placement === 'placed' && old.drawn) return { ...row, ...drawn, ...reload, placement: 'placed' as const };
+			if (!changed && old?.placement === 'placed' && old.drawn) return { ...row, ...drawn, placement: 'placed' as const };
 			ask = true;
-			return { ...row, ...drawn, ...reload, placement: 'placing' as const };
+			return { ...row, ...drawn, placement: 'placing' as const };
 		});
 		const ids = new Set(next.map(row => row.id));
 		for (const id of [...this.positions.keys()]) if (!ids.has(id)) this.positions.delete(id);
@@ -76,8 +79,9 @@ class LivePlacement {
 
 	/** Re-resolve the live document's orphaned quotes through this placement lifecycle. */
 	reload(): boolean {
-		if (this.destroyed || this.session.connection !== 'connected' || this.current().some(row => row.placementReloading)) return false;
-		this.markReloading();
+		if (this.destroyed || this.session.connection !== 'connected' || this.reloading) return false;
+		this.reloading = true;
+		this.write(markReloading);
 		this.ask(true);
 		return true;
 	}
@@ -97,8 +101,6 @@ class LivePlacement {
 		const id = this.session.artifactId;
 		this.rows.update(all => all[id] ? { ...all, [id]: change(all[id]) } : all);
 	}
-
-	private markReloading(): void { this.write(markReloading); }
 
 	private ask(reload = false): void {
 		if (this.inFlight) { this.marked = { reload: reload || !!this.marked?.reload }; return; }
@@ -135,16 +137,16 @@ class LivePlacement {
 			if (!this.inFlight || frame.request_id !== this.inFlight.requestId || frame.kind === 'store_mismatch') return;
 			const request = this.inFlight;
 			this.inFlight = null;
-			this.write(rows => refuseRequest(rows, request.reload));
+			this.write(rows => rows.map(row => row.placement === 'placing' ? { ...row, placement: 'not_placed' } : row));
 			if (request.reload) {
-				reportReloadFailure(this.session.artifactId, frame.kind);
+				console.error('Comment placement: placing lost comments again failed', { artifactId: this.session.artifactId, kind: frame.kind });
 				this.settleReload();
 			}
 			this.next();
 		} else if (frame.type === 'doc_opened') {
 			if (this.current().some(row => row.placement === 'placing' || row.placement === 'not_placed') || this.marked?.reload) {
 				this.write(rows => rows.map(row => row.placement === 'not_placed' ? { ...row, placement: 'placing' } : row));
-				if (this.marked?.reload) this.markReloading();
+				if (this.marked?.reload) this.write(markReloading);
 				this.next(true);
 			}
 		} else if (frame.type === 'doc_ack') {
@@ -194,10 +196,7 @@ class LivePlacement {
 			this.write(rows => rows.map(row => row.placement === 'placing' ? { ...row, placement: 'not_placed' } : row));
 		}
 		// Otherwise the tab holds local-only changes: rows stay Placing until it next becomes clean.
-		if (reload) {
-			this.write(clearReloadErrors);
-			this.settleReload();
-		}
+		if (reload) this.settleReload();
 		this.next();
 	}
 
@@ -225,7 +224,7 @@ class LivePlacement {
 		}));
 	}
 
-	private settleReload(): void { this.write(settleReload); }
+	private settleReload(): void { this.reloading = false; }
 
 	/** Drawn rows move only by their own relative positions, on every change to the text. */
 	private moved = (event: Y.YTextEvent): void => {

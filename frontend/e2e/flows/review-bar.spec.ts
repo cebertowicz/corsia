@@ -648,8 +648,8 @@ journey('keeps an orphan-heavy review ask compact and offers no Place again once
 	await comments.click();
 	const drawer = page.getByRole('region', { name: 'Document comments' });
 	// Every quote is gone from the document, so Place again has nothing to place: the cards say so and the footer stays away.
-	// A margin card says "Text removed"; a row in the list or sheet says "Text changed:".
-	await expect(drawer.getByText(/^(Text changed:|Text removed$)/)).toHaveCount(22);
+	// A margin card says "Original text deleted"; a row in the list or sheet says "Text changed:".
+	await expect(drawer.getByText(/^(Text changed:|Original text deleted$)/)).toHaveCount(22);
 	await expect(drawer.locator('[data-drawer-placement]')).toHaveCount(0);
 	await settled(page);
 	// Drawer geometry is covered by its focused recovery journey; this flow records the phone layout annotation below.

@@ -169,7 +169,7 @@ describe('DocCommentSurface suggestions', () => {
 		render({ state: { kind: 'list' }, comments: [deleted, secondSuggestion] });
 		const card = document.body.querySelector<HTMLElement>('[data-margin-card="comment-1"]');
 		expect(card).not.toBeNull();
-		expect(card!.querySelector('.ct-orphan')?.textContent).toBe('Text removed');
+		expect(card!.querySelector('.ct-orphan')?.textContent).toBe('Original text deleted');
 		expect(card!.querySelector('.ct.orphaned')).not.toBeNull();
 		expect(document.body.querySelector('.aside-button[data-aside-kind="lost"], .orphans-button')).toBeNull();
 		expect(document.body.querySelector('[data-margin-card="comment-2"]')).not.toBeNull();
@@ -187,18 +187,27 @@ describe('DocCommentSurface suggestions', () => {
 		expect(document.body.querySelector('[data-margin-card="comment-1"]')).not.toBeNull();
 	});
 
-	it('lists the open threads in the sheet that has no margin, with the resolved ones behind an entry, newest first', async () => {
+	it('lists only the open threads in the sheet that has no margin; the resolved ones, newest first, open in their own drawer from the header control', async () => {
 		const resolved = (id: string, updatedAt: string) => ({ ...suggestion, id, anchor: id, replacement: null, resolved: true, updatedAt });
-		render({ narrow: true, state: { kind: 'list' }, comments: [suggestion, resolved('old', '2026-11-01T10:00:00Z'), resolved('new', '2026-11-05T10:00:00Z')] });
-		const ids = () => [...document.body.querySelectorAll('[data-doc-comments-drawer] [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'));
-		expect(ids()).toEqual(['comment-1']);
+		const open = resolvedDrawerProps();
+		render(Object.defineProperties({ narrow: true, state: { kind: 'list' }, comments: [suggestion, resolved('old', '2026-11-01T10:00:00Z'), resolved('new', '2026-11-05T10:00:00Z')] }, open.props));
+		const ids = (selector: string) => [...document.body.querySelectorAll(`${selector} [data-comment-id]`)].map((card) => card.getAttribute('data-comment-id'));
+		expect(ids('[data-doc-comments-drawer]')).toEqual(['comment-1']);
 		expect(document.body.querySelector('[data-doc-comments-drawer] .drawer-heading')?.textContent).toContain('1 open');
-		const entry = document.body.querySelector<HTMLButtonElement>('[data-doc-comments-drawer] [data-aside-kind="resolved"]')!;
-		expect(entry.textContent).toContain('Resolved · 2');
-		entry.click();
-		await tick();
-		expect(ids()).toEqual(['comment-1', 'new', 'old']);
-		expect(document.body.querySelector('[data-drawer-filter]')).toBeNull();
+		expect(document.body.querySelector('[data-doc-comments-drawer] [data-aside-kind]')).toBeNull();
+		expect(open.count()).toBe(2);
+		open.set(true); flushSync(); await tick();
+		expect(ids('.resolved-drawer')).toEqual(['new', 'old']);
+		expect(document.body.querySelector('[data-doc-comments-drawer] .resolved-drawer')).toBeNull();
+	});
+
+	it('opens the resolved drawer with no comment surface up, so a narrow canvas reaches it from the header control alone', async () => {
+		const open = resolvedDrawerProps();
+		render(Object.defineProperties({ narrow: true, state: null, comments: [suggestion, { ...secondSuggestion, resolved: true }] }, open.props));
+		expect(document.body.querySelector('[data-doc-comments-drawer]')).toBeNull();
+		expect(open.count()).toBe(1);
+		open.set(true); flushSync(); await tick();
+		expect([...document.body.querySelectorAll('.resolved-drawer [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'))).toEqual(['comment-2']);
 	});
 
 	it('has no resolved entry and no empty-resolved text in the sheet while nothing is resolved', () => {
@@ -655,13 +664,14 @@ describe('DocCommentSurface comments on images inside a document', () => {
 	const images = () => ({ srcOf: vi.fn((comment: { id: string }) => `/img/${comment.id}`), colorOf: vi.fn(() => '#e5484d'), onOpen: vi.fn() });
 
 	// The margin column keeps the thumbnail: one heads each image card, in document order. Grouping every comment of an image together under one thumbnail, in number order, and the orphaned card, are the sheet's list (the next two tests).
-	it('in the margin column, a thumbnail heads each image card, in document order', () => {
+	it('in the margin column, a thumbnail and caption sit inside the top of each image card, in document order', () => {
 		render({ state: { kind: 'list' }, comments, images: images() });
 		expect(document.body.querySelector('.canvas-comment-drawer.margin')).not.toBeNull();
 		const ids = [...document.body.querySelectorAll('[data-doc-comments-drawer] [data-comment-id]')].map((card) => card.getAttribute('data-comment-id'));
 		expect(ids).toEqual(['before', 'b', 'between', 'a', 'c', 'gone']);
 		const thumbs = [...document.body.querySelectorAll<HTMLButtonElement>('[data-region-thumb]')];
-		expect(thumbs.map((thumb) => thumb.nextElementSibling?.getAttribute('data-comment-id'))).toEqual(['b', 'a', 'c', 'gone']);
+		expect(thumbs.map((thumb) => thumb.closest('[data-comment-id]')?.getAttribute('data-comment-id'))).toEqual(['b', 'a', 'c', 'gone']);
+		for (const thumb of thumbs) expect(thumb.closest('.ct')?.firstElementChild).toBe(thumb);
 		expect(thumbs.map((thumb) => thumb.getAttribute('aria-label'))).toEqual(['Mock: image with comment 2', 'Mock: image with comment 1', 'Mock: image with comment 1', 'Mock: image with comment 3']);
 	});
 

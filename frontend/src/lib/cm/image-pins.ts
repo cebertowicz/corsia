@@ -123,7 +123,7 @@ export function imagePins(hooks: { onFocus: (ids: string[], opener: HTMLElement,
 				pin.classList.toggle('selected', !!range.focused);
 				pin.setAttribute('aria-pressed', String(!!range.focused));
 				pin.classList.toggle('removed', !range.pin);
-				pin.setAttribute('aria-label', range.pin ? `Comment ${range.pin.number}` : 'Text removed');
+				pin.setAttribute('aria-label', range.pin ? `Comment ${range.pin.number}` : 'Original text deleted');
 				pin.style.left = `${x}px`;
 				pin.style.top = `${y}px`;
 				// A deleted passage's sign takes the amber its card is edged in.
