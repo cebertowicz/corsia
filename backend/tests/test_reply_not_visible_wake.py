@@ -479,20 +479,20 @@ async def test_answers_shown_in_the_messages_comment_threads_are_a_visible_reply
 
 @pytest.mark.asyncio
 async def test_an_answer_whose_comment_the_page_cannot_show_still_nudges(db, monkeypatch) -> None:
-    # The renderer shows an answer in its thread only while the comment row joins; else it is inline text.
+    # The renderer shows an answer in its thread only while the comment row joins; a deleted
+    # comment takes its answer with it, so chat shows nothing either.
     import infra.reply_not_visible_wake as wake
 
     monkeypatch.setattr(wake, "_clock", lambda created_at: "1:19")
     cid = _comment_on(db, "")
-    text = f"[{cid}] Moved. Tonight runs at 4 AM."
-    _say(db, text)
+    _say(db, f"[{cid}] Moved. Tonight runs at 4 AM.")
     db.execute("DELETE FROM chat_comments WHERE user_message_id='m1'")
     db.commit()
 
     await _end(db)
 
     (nudge,) = _nudges(db)
-    assert nudge["content"].endswith(nudge_text("1:19", text))
+    assert nudge["content"].endswith(nudge_text("1:19", None))
 
 
 @pytest.mark.asyncio

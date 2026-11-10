@@ -123,6 +123,18 @@ Source: `backend/infra/chat_comment_schema.py`.
 
 Indexes: `idx_chat_comments_target` (thread_id, target_message_id), `sqlite_autoindex_chat_comments_1` (user_message_id, cid, unique).
 
+### `chat_visible_content`
+
+Source: `backend/infra/chat_comment_schema.py`.
+
+| Column | Type | Primary key | NOT NULL | Default | References |
+|---|---|---|---|---|---|
+| `message_id` | TEXT | Yes | No | — | — |
+| `thread_id` | TEXT | No | Yes | — | — |
+| `content` | TEXT | No | Yes | — | — |
+
+Indexes: `idx_chat_visible_content_thread` (thread_id), `sqlite_autoindex_chat_visible_content_1` (message_id, unique).
+
 ### `continuation_triggers`
 
 Source: `backend/infra/continuation_schema.py`.

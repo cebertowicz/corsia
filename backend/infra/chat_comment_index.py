@@ -5,9 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from infra.chat_comment_answers import (
-    SHOWN_ANSWERS_FROM, UNREAD_FROM, UNREAD_WHERE, parse_answers, visible_answer_content,
-)
+from infra.chat_comment_answers import UNREAD_FROM, UNREAD_WHERE, parse_answers, saved_answer_fields
 
 
 def place_comments(db: sqlite3.Connection, thread_id: str, user_message_id: str,
@@ -73,19 +71,8 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
         "ORDER BY c.created_at,c.user_message_id,c.cid,answer.answered_at",
         (user_id, user_id, thread_id, json.dumps(list(by_id))),
     ).fetchall()
-    answer_rows = db.execute(
-        f"SELECT a.assistant_message_id,a.cid,answer.content {SHOWN_ANSWERS_FROM} "
-        "JOIN messages answer ON answer.id=a.assistant_message_id AND answer.thread_id=a.thread_id "
-        "WHERE a.thread_id=? AND a.assistant_message_id IN (SELECT value FROM json_each(?))",
-        (thread_id, json.dumps(list(by_id))),
-    ).fetchall()
-    answer_content = {}
-    for answer_id, cid, content in answer_rows:
-        by_id[answer_id].setdefault('chat_answer_cids', []).append(cid)
-        answer_content[answer_id] = content
-    for answer_id, content in answer_content.items():
-        message = by_id[answer_id]
-        message['chat_visible_content'] = visible_answer_content(content, message['chat_answer_cids'])
+    for message_id, fields in saved_answer_fields(db, thread_id, list(by_id)).items():
+        by_id[message_id].update(fields)
     sender_ids = list({row[1] for row in rows})
     if not sender_ids:
         return

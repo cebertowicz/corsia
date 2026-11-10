@@ -160,7 +160,8 @@ class TestSessionList:
             db.close()
         assert [list(item.items()) for item in listed] == [list(item.items()) for item in expected]
         by_id = {item["id"]: item for item in listed}
-        assert by_id[sids[0]]["last_message"] == ("latest " + "x" * 120)[:100]
+        # System messages are not chat text, so they never preview.
+        assert by_id[sids[0]]["last_message"] is None
         assert by_id[sids[1]]["title"] == 'Packed "two" é 😀'
 
     def test_list_sessions_requires_auth(self, integration_client):

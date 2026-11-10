@@ -166,6 +166,7 @@ def _result_outcome(is_error: bool, metadata: dict) -> str:
 
 def _clear_terminal_live_state(ctx: CCEventContext) -> None:
     ctx.live.input_delivery_unproven = False
+    ctx.live.answer_stream.reset()
     ctx.live.turn_has_assistant_row = False
     ctx.live.dropped_line_this_turn = False
     ctx.live.turn_active = False

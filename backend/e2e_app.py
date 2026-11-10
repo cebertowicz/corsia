@@ -14,7 +14,8 @@ import e2e_reset
 e2e_reset.restore_if_requested()
 
 from e2e_live_faults import FaultConfiguration, FaultConfigurationError, FaultController, build_router  # noqa: E402
-from e2e_mock import mock_engine, router as mock_router, seed_mock_catalog  # noqa: E402
+from e2e_mock import mock_engine, router as mock_router  # noqa: E402
+from e2e_mock_catalog import seed_mock_catalog  # noqa: E402
 from infra.config import DB_PATH, STATE_ROOT  # noqa: E402
 from main import app as production_app  # noqa: E402
 

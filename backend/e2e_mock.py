@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 from contextlib import contextmanager
 from typing import Any
 from unittest.mock import patch
@@ -13,7 +11,6 @@ from fastapi import APIRouter, HTTPException
 from loguru import logger
 
 import e2e_mock_calls as mock_calls
-from e2e_mock_harnesses import connect_fixture_harnesses
 import e2e_pressure_fixture as pressure_fixture
 from e2e_mock_responses import _make_chunk, _make_non_streaming, _stream_tool_calls
 
@@ -32,7 +29,7 @@ _DEFAULT_REPLY: dict = {
 
 
 def _reset_mock_state(replies: list[dict] | None = None) -> None:
-    """Replace the mock response queue and its response and completion gates."""
+    """Replace the mock response queue and its response, content and completion gates."""
     global _mock_replies, _mock_gates, _call_count
     global _consumed_targeted_replies, _last_targeted_replies, _last_thread_replies
     for event in _mock_gates.values():
@@ -40,7 +37,7 @@ def _reset_mock_state(replies: list[dict] | None = None) -> None:
     _mock_replies = replies or []
     _mock_gates = {
         gate_name: asyncio.Event()
-        for reply in _mock_replies for key in ("response_gate", "completion_gate")
+        for reply in _mock_replies for key in ("response_gate", "content_gate", "completion_gate")
         if isinstance((gate_name := reply.get(key)), str) and gate_name
     }
     _call_count = 0
@@ -150,6 +147,8 @@ async def _streaming_iter(reply: dict):
     if content:
         mid = len(content) // 2
         yield _make_chunk(content=content[:mid] or content)
+        # A content gate holds the reply half-written, as a slow model leaves it mid-stream.
+        await _wait_for_gate(reply, "content_gate")
         if mid > 0:
             yield _make_chunk(content=content[mid:])
 
@@ -201,94 +200,6 @@ def mock_engine():
             "╚══════════════════════════════════════════════════════════════╝"
         )
         yield
-
-
-def seed_mock_catalog() -> None:
-    """Insert a synthetic model row for mock-mode UI tests."""
-    from infra.database import get_db
-    from infra import state as _state
-
-    db = get_db()
-    now = "2026-01-01T00:00:00Z"
-    db.execute(
-        """INSERT OR REPLACE INTO models
-           (id, provider, provider_model_id, litellm_model, display_name,
-            backend, source, enabled, available, context_window,
-            supports_vision, supports_tools, supports_reasoning,
-            default_temperature, default_max_tokens,
-            discovered_at, last_seen_at, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,1,1,128000,1,1,1,NULL,8192,?,?,?,?)""",
-        ("mock-test-model", "mock", "test-model", "mock/test-model",
-         "Mock Test Model", "api", "mock", now, now, now, now),
-    )
-    db.execute(
-        """INSERT OR REPLACE INTO models
-           (id, provider, provider_model_id, litellm_model, display_name,
-            backend, source, enabled, available, context_window,
-            supports_vision, supports_tools, supports_reasoning,
-            default_temperature, default_max_tokens,
-            discovered_at, last_seen_at, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,1,1,?,1,1,1,NULL,8192,?,?,?,?)""",
-        (pressure_fixture.PRESSURE_MODEL_BY_HARNESS["native"], "mock", "pressure-model", "mock/pressure-model",
-         "Mock Pressure Model", "api", "mock", pressure_fixture.PRESSURE_CONTEXT_WINDOW,
-        now, now, now, now),
-    )
-    fixture_binaries = {
-        harness: os.environ.get(env_name)
-        for harness, env_name in (
-            ("claude-code", "CORSIA_E2E_CC_BINARY"),
-            ("codex", "CORSIA_E2E_CODEX_BINARY"),
-        )
-    }
-    if any(fixture_binaries.values()) and not all(fixture_binaries.values()):
-        raise RuntimeError("matrix fixture binaries must be configured together")
-    harness_rows = (
-        (
-            "claude-code/fixture-cc", "claude-code", "fixture-cc",
-            "claude-code/fixture-cc", "Mock Claude Code", "cc", 393_216,
-        ),
-        (
-            pressure_fixture.PRESSURE_MODEL_BY_HARNESS["claude-code"], "claude-code",
-            "fixture-cc-pressure", pressure_fixture.PRESSURE_MODEL_BY_HARNESS["claude-code"],
-            "Mock Claude Code Pressure", "cc", pressure_fixture.PRESSURE_CONTEXT_WINDOW,
-        ),
-        (
-            "codex/fixture-codex", "codex", "fixture-codex",
-            "codex/fixture-codex", "Mock Codex", "codex", 393_216,
-        ),
-        (
-            pressure_fixture.PRESSURE_MODEL_BY_HARNESS["codex"], "codex",
-            "fixture-codex-pressure", pressure_fixture.PRESSURE_MODEL_BY_HARNESS["codex"],
-            "Mock Codex Pressure", "codex", pressure_fixture.PRESSURE_CONTEXT_WINDOW,
-        ),
-    )
-    if all(fixture_binaries.values()):
-        db.executemany(
-            """INSERT OR REPLACE INTO models
-               (id,harness,provider,provider_model_id,litellm_model,display_name,
-                backend,source,enabled,available,context_window,supports_vision,
-                supports_tools,supports_reasoning,default_temperature,
-                default_max_tokens,metadata_json,discovered_at,last_seen_at,
-                created_at,updated_at)
-               VALUES (?,?,?,?,?,?,?,'mock',1,1,?,1,1,1,NULL,8192,?,?,?,?,?)""",
-            (
-                (
-                    model_id, harness, harness, provider_model_id, litellm_model,
-                    display_name, backend, context_window,
-                    json.dumps({"resolved_identity": provider_model_id}),
-                    now, now, now, now,
-                )
-                for (
-                    model_id, harness, provider_model_id, litellm_model,
-                    display_name, backend, context_window,
-                ) in harness_rows
-            ),
-        )
-    connect_fixture_harnesses(db, fixture_binaries, harness_rows, now)
-    db.commit()
-    db.close()
-
-    logger.info("Mock catalog seeded: mock/test-model")
 
 
 router = APIRouter(prefix="/api/test", tags=["test"])

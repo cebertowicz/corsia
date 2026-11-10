@@ -187,7 +187,7 @@ async def on_assistant_step(ctx: CCEventContext, ev: dict) -> None:
             )
     ctx.live.last_text = text or ctx.live.last_text
     ctx.live.last_assistant_message_id = message_id
-    ctx.live.thinking_buf = ""
+    ctx.live.reset_step_text()
     ctx.live.reasoning_provenance = None
     ctx.live.reasoning_provider_message_id = None
     ctx.live.turn_has_assistant_row = True

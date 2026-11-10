@@ -266,6 +266,27 @@ async def test_completion_gate_blocks_until_released():
 
 
 @pytest.mark.asyncio
+async def test_content_gate_holds_the_reply_half_written():
+    from e2e_mock import (
+        _next_reply,
+        _release_mock_gate,
+        _reset_mock_state,
+        _streaming_iter,
+    )
+
+    _reset_mock_state([{"role": "assistant", "content": "gone", "content_gate": "mid"}])
+    stream = _streaming_iter(_next_reply())
+
+    assert (await anext(stream)).choices[0].delta.content == "go"
+    second_half = asyncio.create_task(anext(stream))
+    await asyncio.sleep(0)
+    assert not second_half.done()
+
+    assert _release_mock_gate("mid")
+    assert (await second_half).choices[0].delta.content == "ne"
+
+
+@pytest.mark.asyncio
 async def test_response_gate_holds_the_stream_until_released():
     """The call is counted (the write was sent) but no stream opens, so the
     caller cannot reach response-started acceptance before the release."""

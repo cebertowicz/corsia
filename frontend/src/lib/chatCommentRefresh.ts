@@ -71,6 +71,8 @@ export function watchChatCommentThreads(pageSize: number, announce: (quote: stri
 	const stops = [on('turn_complete', frame => refresh(frame)), on('message_added', frame => {
 		const comments = frame?.message?.metadata?.reply_context?.comments;
 		if (Array.isArray(comments) && comments.length) void refresh(frame, comments);
+		// An update can answer comments while its turn keeps running; show them in their threads now.
+		else if (frame?.message?.chat_answer_cids?.length) void refresh({ thread_id: frame.thread_id, step_ids: [frame.message.id] });
 	})];
 	return () => { generation++; stops.forEach(stop => stop()); };
 }

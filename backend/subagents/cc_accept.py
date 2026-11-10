@@ -87,6 +87,7 @@ def _bind_turn(live: _Live, frame, identity: TurnIdentity) -> None:
         live.turn_terminal = None
         live.interrupt_requested = False
         live.apply_now_interrupt_turn = None
+    live.reset_step_text()
     live.last_assistant_message_id = None
     live.last_call_usage = None
     live.turn_usage = None

@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Generic, Literal, TypeVar
 
 from core.turn_core import TurnIdentity
+from infra.chat_comment_answers import VisibleAnswerStream
 
 
 log = logging.getLogger(__name__)
@@ -100,6 +101,7 @@ class LiveBase:
     parent_thread_id: str | None
     name: str
     thinking_buf: str = ""
+    answer_stream: VisibleAnswerStream = field(default_factory=VisibleAnswerStream)
     tool_names: dict = field(default_factory=dict)
     # Provider tool-call id -> durable Assistant-Step row id. Entries live only
     # until the canonical role=tool result commits.
@@ -116,6 +118,10 @@ class LiveBase:
         default_factory=_new_checkpoint_wait_scope,
         repr=False,
     )
+
+    def reset_step_text(self) -> None:
+        self.thinking_buf = ""
+        self.answer_stream.reset()
 
 
 H = TypeVar("H", bound=LiveBase)

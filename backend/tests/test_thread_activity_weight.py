@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import sqlite3
 
+from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
 from subagents.assistant_step_display import load_assistant_step_display
 
 
@@ -42,6 +43,7 @@ def _db() -> sqlite3.Connection:
     conn.execute(
         "CREATE TABLE active_turns (id TEXT, thread_id TEXT, status TEXT, started_at TEXT, ended_at TEXT, error TEXT)"
     )
+    conn.executescript(CHAT_VISIBLE_CONTENT_SQL)
     return conn
 
 
