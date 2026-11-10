@@ -86,7 +86,8 @@ export function chartGeometry(spec: ChartSpec, W: number, ML: number, MR: number
 	const bw = slot * 0.62;
 	const y0 = MT + PH;
 	const items: ChartItem[] = [{ kind: 'text', cls: 'at', x: 0, y: Number(f1(fs + 1)), anchor: 'start', text: spec.axisTitle }];
-	const decimals = Math.abs(step - Math.round(step)) < 1e-9 ? 0 : Math.abs(step * 10 - Math.round(step * 10)) < 1e-6 ? 1 : 2;
+	let decimals = 0;
+	while (decimals < 12 && (step * 10 ** decimals < 1e-6 || Math.abs(step * 10 ** decimals - Math.round(step * 10 ** decimals)) > 1e-6)) decimals++;
 	for (let i = 0; i <= nt; i++) {
 		const v = i * step;
 		items.push({ kind: 'line', cls: i === 0 ? 'zero' : 'grid', x1: ML, x2: W - MR, y: Number(f1(y(v))) });

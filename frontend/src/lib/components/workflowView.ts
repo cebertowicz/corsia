@@ -3,6 +3,7 @@ import type { BarPoint } from './measurementBarChart';
 export interface WorkflowRun {
   run_id: string;
   focus_node_id: string;
+  plan_target: { thread_id: string; step_id: string | null } | null;
   started: string;
   version: string;
   version_id: string;
@@ -23,13 +24,10 @@ export interface WeeklyWorkflow {
   version_id: string;
   runs: number;
   failed: number;
-  first_try: number | null;
-  corrections: number | null;
-  gate_rounds: number | null;
-  cost: number | null;
-  minutes: number | null;
-  owner_measure: number | null;
+  measures: Record<Measure, MeasureValue>;
 }
+export interface MeasureValue { numerator: number | null; n: number; value: number | null }
+export interface WorkflowVersion { id: string; label: string; started: string; runs: number; measures: Record<Measure, MeasureValue> }
 export interface WorkflowEntry {
   ref: string;
   name: string | null;
@@ -37,9 +35,13 @@ export interface WorkflowEntry {
   runs: WorkflowRun[];
   history: WorkflowRun[];
   weekly: WeeklyWorkflow[];
+  versions: WorkflowVersion[];
+  measures: Record<Measure, MeasureValue>;
+  agent_measures: Record<string, Record<Measure, MeasureValue>>;
+  summary: string[];
   steps: string[];
   verdict: { word: string; reason: string; look: number; inputs: Record<string, unknown> } | null;
-  runs_needed: number | null;
+  test_start: string | null;
 }
 export interface WorkflowResponse {
   window: { from: string; to: string };
@@ -61,13 +63,9 @@ export const caughtText: Record<NonNullable<WorkflowRun['caught']>, string> = {
 export const dayName = (value: string) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`));
 export const agentName = (run: WorkflowRun) => run.agent?.label ?? '—';
 export const workflowName = (entry: WorkflowEntry) => entry.name ?? entry.ref;
-export function value(runs: WorkflowRun[], measure: Measure): number | null {
-  if (measure === 'first_try') {
-    const ended = runs.filter((run) => run.first_try !== null);
-    return ended.length ? 100 * ended.filter((run) => run.first_try).length / ended.length : null;
-  }
-  const values = runs.map((run) => run[measure]).filter((item): item is number => item !== null);
-  return values.length ? values.reduce((sum, item) => sum + item, 0) / values.length : null;
+export function value(measures: Record<Measure, MeasureValue>, measure: Measure): number | null {
+  const result = measures[measure].value;
+  return result === null ? null : measure === 'first_try' ? result * 100 : result;
 }
 export function format(value: number | null, measure: Measure): string {
   if (value === null) return '—';
@@ -76,7 +74,7 @@ export function format(value: number | null, measure: Measure): string {
   return measure === 'minutes' ? `${value.toFixed(1)} min` : value.toFixed(1);
 }
 export function versions(entry: WorkflowEntry): string[] {
-  return [...new Set(entry.history.map((run) => run.version_id))];
+  return entry.versions.map((version) => version.id);
 }
 /** A shared weekly axis; values themselves are served by Measurement. */
 export function chartPoints(entry: WorkflowEntry, version: string, measure: Measure): BarPoint[] {
@@ -91,7 +89,8 @@ export function chartPoints(entry: WorkflowEntry, version: string, measure: Meas
   }
   return days.map((start) => {
     const point = entry.weekly.find((item) => item.start === start && item.version_id === version);
-    const raw = point?.[measure] ?? null;
-    return { start, n: point?.runs ?? 0, value: raw === null ? null : measure === 'first_try' ? raw * 100 : raw, ma: null };
+    const observation = point?.measures[measure];
+    const raw = observation?.value ?? null;
+    return { start, n: observation?.n ?? 0, value: raw === null ? null : measure === 'first_try' ? raw * 100 : raw, ma: null };
   });
 }

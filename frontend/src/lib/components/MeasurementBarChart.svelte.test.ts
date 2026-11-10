@@ -28,6 +28,37 @@ function render(points: BarPoint[]): HTMLElement {
 const texts = (root: Element, cls: string) => [...root.querySelectorAll(`text.${cls}`)].map((n) => n.textContent);
 
 describe('MeasurementBarChart', () => {
+	it('aligns a version mark with its weekly bar on both layouts', () => {
+		host = document.createElement('div');
+		document.body.appendChild(host);
+		component = mount(MeasurementBarChart, { target: host, props: { ...props([point(0, 8), point(1, 12)]), marks: [{ index: 1, label: 'Version starts' }] } });
+		for (const layout of ['.mob', '.dsk']) {
+			const svg = host.querySelector(`${layout} svg`)!;
+			const bar = svg.querySelectorAll('rect.bar')[1];
+			const mark = svg.querySelector('line.version-mark')!;
+			const center = Number(bar.getAttribute('x')) + Number(bar.getAttribute('width')) / 2;
+			// Geometry rounds the bar's x and width independently to a tenth of a pixel.
+			expect(Math.abs(Number(mark.getAttribute('x1')) - center)).toBeLessThanOrEqual(0.15);
+			// Value labels and their halos paint over the mark, keeping text readable.
+			expect(mark.compareDocumentPosition(svg.querySelector('text.vl')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		}
+	});
+
+	it('keeps small axis ticks distinct', () => {
+		const chart = render([point(0, 0.02)]);
+		const ticks = texts(chart.querySelector('.dsk svg')!, 'tk');
+		expect(new Set(ticks).size).toBe(ticks.length);
+	});
+
+	it('labels a weekly calendar date without shifting to the previous day', () => {
+		const chart = render([{ start: '2026-11-02', value: 8, n: 20, ma: null }]);
+		for (const layout of ['.mob', '.dsk']) {
+			const svg = chart.querySelector(`${layout} svg`)!;
+			expect(texts(svg, 'xl')).toEqual(['2']);
+			expect(texts(svg, 'xm')).toEqual(['Nov']);
+		}
+	});
+
 	it('keeps a single digit upright on the phone chart', () => {
 		const chart = render([point(0, 8, 50), point(1, 12, 50)]);
 		const labels = chart.querySelectorAll('.mob svg text.vl');
@@ -39,7 +70,7 @@ describe('MeasurementBarChart', () => {
 	it('draws axis title, ticks, a zero baseline, a value on every bar, the n row and a caption', () => {
 		const chart = render([point(0, 30, 50), point(1, 45, 80), point(2, 92, 1349)]);
 		const phone = chart.querySelector('.mob svg')!;
-		expect(texts(phone, 'at')).toEqual(['Hours of work per hour you spend']);
+		expect(chart.querySelector('.axis-title')?.textContent).toBe('Hours of work per hour you spend');
 		expect(texts(phone, 'tk')).toEqual(['0', '25', '50', '75', '100']);
 		expect(phone.querySelectorAll('line.zero')).toHaveLength(1);
 		expect(texts(phone, 'vl')).toEqual(['30', '45', '92']);

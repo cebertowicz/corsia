@@ -37,6 +37,8 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, Query
 
 from api.measurement_queries import outcome_ctes
+from api.measurement_workflow_copy import summary as _summary
+from api.measurement_workflow_threads import agents as _agents, labels as _labels, plan_targets as _plan_targets
 from api.measurement_scope import resolve_grain, validate_scope
 from core.correction_attribution import NOT_IN_WORKFLOW, UNATTRIBUTED, workflow_run_of
 from core.corrections_recording import (
@@ -45,8 +47,6 @@ from core.corrections_recording import (
 )
 from core.measurement_scope import Grain, MeasurementScope, Window, parse_zone, query_params, scope_cte
 from core.workflow_builtin_operands import scoped_runs
-from core.workflow_verdict_evaluator import reached_detail
-from core.workflow_verdict_read import price_snapshot, read_snapshot
 from core.workflow_verdict_rules import compute
 from core.workflow_verdict_types import Snapshot, WorkflowHistory, subject_of
 from core.workflow_verdicts import Run, parse_ts
@@ -55,7 +55,7 @@ from infra.database import get_db
 from infra.db_async import run_bulk
 from plans import node_cost_scoped, run_end
 from tools.workflow_task_fields import version_short_hash
-from api.measurement_workflow_history import weekly as _weekly
+from api.measurement_workflow_history import measures as _measures, version_summaries as _version_summaries, weekly as _weekly
 
 router = APIRouter()
 
@@ -111,10 +111,16 @@ async def workflows_read(project: str, agent: str, page_grain: Grain, user: dict
 def workflow_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope,
                   grain: Grain, *, now: datetime | None = None) -> dict[str, Any]:
     """Coverage and the window's runs, for one already validated scope and grain."""
+    from core.workflow_verdict_read import read_snapshot
+
     window = grain.latest
     nodes, roots = scoped_runs(db, user_id, scope)
     parents = {str(row["id"]): row["parent_id"] for row in nodes}
     root_ids = frozenset(str(row["id"]) for row in roots)
+    coverage = _coverage(db, scope.params(user_id), grain, window, parents, root_ids)
+    if not root_ids:
+        return {"window": {"from": window.first, "to": grain.period_end(window.last)},
+                "coverage": coverage, "workflows": []}
     in_window = _started_in_window(db, root_ids, grain, window)
     full = read_snapshot(db, now=now or datetime.now(timezone.utc),
                          workflow_refs=sorted({str(row["workflow_ref"]) for row in roots}))
@@ -123,7 +129,7 @@ def workflow_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope,
         replace(history, runs=tuple(run for run in history.runs if run.run_id in in_window))
         for history in scoped.workflows))
     return {"window": {"from": window.first, "to": grain.period_end(window.last)},
-            "coverage": _coverage(db, scope.params(user_id), grain, window, parents, root_ids),
+            "coverage": coverage,
             "workflows": _entries(db, windowed, full, grain, scoped)}
 
 
@@ -133,6 +139,8 @@ def _window_runs(db: sqlite3.Connection, full: Snapshot, keep: frozenset[str]) -
     ``read_snapshot`` reads every run of the named workflows on this install, so the scope's run ids and
     the window decide what is kept; pricing only what is kept holds the chain walk to the window.
     """
+    from core.workflow_verdict_read import price_snapshot
+
     narrowed = replace(full, workflows=tuple(
         replace(history, runs=tuple(run for run in history.runs if run.run_id in keep))
         for history in full.workflows), plans={}, reached=frozenset())
@@ -183,14 +191,17 @@ def _entries(db: sqlite3.Connection, windowed: Snapshot, full: Snapshot, grain: 
     titles = _step_titles(db, {node_id for record in records.values()
                                for step in record["steps"] for node_id in step["node_ids"]})
     agents = _agents(db, ids)
+    targets = _plan_targets(db, ids)
     owners = {history.owner for history in full.workflows if history.owner}
     labels = _labels(db, {agent["id"] for agent in agents.values() if agent} | owners)
     working = _working_seconds(db, ids)
-    verdicts = _verdicts(db, full)
+    verdicts, calls = _verdicts(db, full)
     by_ref = {history.ref: history for history in full.workflows}
     rows = {run.run_id: _run_row(run, records.get(run.run_id), titles, agents.get(run.run_id),
                                  working.get(run.run_id), parse_zone(grain.zone))
             for run in history_runs}
+    for run_id, row in rows.items():
+        row["plan_target"] = targets.get(run_id)
     history_by_ref = {history.ref: history for history in scoped.workflows}
     entries = []
     for history in windowed.workflows:
@@ -199,7 +210,17 @@ def _entries(db: sqlite3.Connection, windowed: Snapshot, full: Snapshot, grain: 
             continue
         entry = _entry(history, rows, labels, by_ref[history.ref], verdicts.get(history.ref))
         entry["history"] = [rows[run.run_id] for run in sorted(all_runs, key=lambda run: (parse_ts(run.started_at), run.run_id))]
-        entry["weekly"] = _weekly(entry["history"])
+        entry["weekly"] = _weekly(entry["history"], resolve_grain("weeks", grain.zone))
+        entry["measures"] = _measures(entry["runs"])
+        entry["versions"] = _version_summaries(entry["history"], by_ref[history.ref], parse_zone(grain.zone))
+        versions = by_ref[history.ref].versions()
+        current = versions[-1] if versions else None
+        entry["test_start"] = (parse_ts(by_ref[history.ref].first_use(current)).astimezone(parse_zone(grain.zone)).date().isoformat()
+                               if current and len(versions) > 1 else None)
+        entry["summary"] = _summary(entry["verdict"], entry["excluded"], entry["owner"] is not None,
+                                    calls.get(history.ref, []))
+        entry["agent_measures"] = {agent_id: _measures([row for row in entry["runs"] if (row["agent"] or {}).get("id", "") == agent_id])
+                                   for agent_id in {(row["agent"] or {}).get("id", "") for row in entry["runs"]}}
         entry["steps"] = sorted({titles[node_id] for run in all_runs if (record := records.get(run.run_id))
                                  for step in record["steps"] for node_id in step["node_ids"] if node_id in titles})
         entries.append(entry)
@@ -221,24 +242,10 @@ def _entry(history: WorkflowHistory, rows: Mapping[str, dict[str, Any]], labels:
         "runs": [rows[run.run_id] for run in sorted(history.runs, key=lambda run: (parse_ts(run.started_at), run.run_id))],
         "excluded": dict(full_history.excluded),
         "verdict": verdict,
-        "runs_needed": _runs_needed(verdict),
     }
 
 
-def _runs_needed(verdict: Mapping[str, Any] | None) -> int | None:
-    """Distance to the engine's next minimum only when it exposes both inputs."""
-    if not verdict or verdict.get("word") != "collecting":
-        return None
-    inputs = verdict.get("inputs") or {}
-    if not isinstance(inputs, Mapping):
-        return None
-    minimum, count = inputs.get("minimum"), inputs.get("n")
-    if type(minimum) is not int or type(count) is not int:
-        return None
-    return max(0, minimum - count)
-
-
-def _verdicts(db: sqlite3.Connection, full: Snapshot) -> dict[str, dict[str, Any] | None]:
+def _verdicts(db: sqlite3.Connection, full: Snapshot) -> tuple[dict[str, dict[str, Any] | None], dict[str, list[dict[str, Any]]]]:
     """Where each workflow's current version stands with the engine, over its full history.
 
     ``workflow_verdict_rules.compute`` is the evaluator's own assembly — the recorded plan where a version
@@ -247,26 +254,32 @@ def _verdicts(db: sqlite3.Connection, full: Snapshot) -> dict[str, dict[str, Any
     engine never recomputes one. Null only where no run of the workflow carries an exact version: there is
     nothing to compare, and no zero is standing in for it.
     """
+    from core.workflow_verdict_evaluator import reached_detail
+
     current = {history.ref: (versions[-1] if (versions := history.versions()) else None)
                for history in full.workflows}
     subjects = {subject_of("workflow", ref, version) for ref, version in current.items() if version}
     stored = reached_detail(db, sorted(subjects & full.reached))
     open_versions = {evaluation.subject: evaluation.verdict for evaluation in compute(full)}
     verdicts: dict[str, dict[str, Any] | None] = {}
+    calls: dict[str, list[dict[str, Any]]] = {}
     for ref, version in current.items():
         subject = subject_of("workflow", ref, version) if version else ""
         if subject in stored:
             record = stored[subject]
             verdicts[ref] = {"word": record["word"], "reason": record["reason"],
                              "look": record.get("look"), "inputs": dict(record.get("inputs") or {})}
+            calls[ref] = [{"name": call[0], "call": call[1], "reason": call[2]}
+                          for call in record.get("calls", []) if len(call) >= 3]
         elif subject in open_versions:
             verdict = open_versions[subject]
             verdicts[ref] = {"word": verdict.word, "reason": verdict.reason, "look": verdict.look,
                              "inputs": dict(verdict.inputs)}
+            calls[ref] = [{"name": call.name, "call": call.call, "reason": call.reason} for call in verdict.calls]
         else:
             # No run of this workflow carries an exact version, so there is no version to compare.
             verdicts[ref] = None
-    return verdicts
+    return verdicts, calls
 
 
 def _run_row(run: Run, record: Mapping[str, Any] | None, titles: Mapping[str, str],
@@ -356,29 +369,6 @@ def _step_titles(db: sqlite3.Connection, node_ids: Iterable[str]) -> dict[str, s
         {"ids": json.dumps(ids)},
     ).fetchall()}
 
-
-def _agents(db: sqlite3.Connection, run_ids: Iterable[str]) -> dict[str, dict[str, Any] | None]:
-    """The thread that ran each run: the owner of its plan, as ``/agents`` names a thread."""
-    found: dict[str, dict[str, Any] | None] = {run_id: None for run_id in run_ids}
-    rows = db.execute("""
-        SELECT n.id AS run_id,p.owner_id AS id,t.title AS label FROM plan_nodes n
-        JOIN plans p ON p.id=n.plan_id AND p.owner_kind='thread'
-        LEFT JOIN threads t ON t.id=p.owner_id
-        WHERE n.id IN (SELECT value FROM json_each(:ids))
-    """, {"ids": json.dumps(sorted(run_ids))}).fetchall()
-    found.update({str(row["run_id"]): {"id": str(row["id"]), "label": row["label"]} for row in rows})
-    return found
-
-
-def _labels(db: sqlite3.Connection, thread_ids: Iterable[str]) -> dict[str, str | None]:
-    """Each thread's own title, which is what the page shows for an agent."""
-    ids = sorted(thread_ids)
-    if not ids:
-        return {}
-    return {str(row["id"]): row["title"] for row in db.execute(
-        "SELECT id,title FROM threads WHERE id IN (SELECT value FROM json_each(:ids))",
-        {"ids": json.dumps(ids)},
-    ).fetchall()}
 
 
 def _working_seconds(db: sqlite3.Connection, run_ids: list[str]) -> dict[str, float]:

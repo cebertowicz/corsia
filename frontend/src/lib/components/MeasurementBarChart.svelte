@@ -43,7 +43,7 @@
 	const hasAverage = $derived(points.some((p) => p.ma !== null));
 	const visibleMarks = $derived(marks.filter((mark) => Number.isInteger(mark.index) && mark.index >= 0 && mark.index < points.length));
 	const chartLabel = $derived(visibleMarks.length
-		? `${ariaLabel}. Version changes: ${visibleMarks.map((mark) => `${mark.label}, week starting ${points[mark.index].start}`).join('; ')}.`
+		? `${ariaLabel}. Chart marks: ${visibleMarks.map((mark) => `${mark.label}, week starting ${points[mark.index].start}`).join('; ')}.`
 		: ariaLabel);
 </script>
 
@@ -51,12 +51,11 @@
 	{@const axisLabels = g.items.filter((item): item is Extract<ChartItem, { kind: 'text' }> => item.kind === 'text' && (item.cls === 'xl' || item.cls === 'xl cur'))}
 	{@const zero = g.items.find((item): item is Extract<ChartItem, { kind: 'line' }> => item.kind === 'line' && item.cls === 'zero')!}
 	{@const plotTop = g.width === 335 ? 52 : 28}
-	{@const slot = (zero.x2 - zero.x1) / points.length}
 	{@const band = visibleMarks.length ? 60 : 0}
 	<svg viewBox={`0 0 ${g.width} ${Math.trunc(g.height) + band}`} role="img" aria-label={chartLabel}>
 		{#each g.items as item}
 			{#if item.kind === 'text'}
-				<text class={item.cls} x={item.x} y={item.y} text-anchor={item.anchor} transform={[band && item.cls !== 'at' ? `translate(0 ${band})` : '', item.rotate ? `rotate(${item.rotate.deg ?? -90} ${item.rotate.x} ${item.rotate.y})` : ''].filter(Boolean).join(' ') || undefined} style={item.size ? `font-size: ${item.size}px` : undefined}>{item.text}</text>
+				{#if item.cls !== 'at' && (!visibleMarks.length || item.cls !== 'vl')}<text class={item.cls} x={item.x} y={item.y} text-anchor={item.anchor} transform={[band && item.cls !== 'at' ? `translate(0 ${band})` : '', item.rotate ? `rotate(${item.rotate.deg ?? -90} ${item.rotate.x} ${item.rotate.y})` : ''].filter(Boolean).join(' ') || undefined} style={item.size ? `font-size: ${item.size}px` : undefined}>{item.text}</text>{/if}
 			{:else if item.kind === 'line'}
 				<line class={item.cls} x1={item.x1} x2={item.x2} y1={item.y} y2={item.y} transform={`translate(0 ${band})`} />
 			{:else if item.kind === 'rect'}
@@ -70,9 +69,14 @@
 			{/if}
 		{/each}
 		{#each visibleMarks as mark, i}
-			<line class="version-mark" x1={axisLabels[mark.index].x - slot * 0.31} x2={axisLabels[mark.index].x - slot * 0.31} y1={plotTop + band} y2={zero.y + band} />
-			<text class="version-label" x={axisLabels[mark.index].x - slot * 0.31} y="32" text-anchor={i === 0 && visibleMarks.length > 1 ? 'end' : 'start'}>{mark.label}</text>
+			<line class="version-mark" x1={axisLabels[mark.index].x} x2={axisLabels[mark.index].x} y1={plotTop + band} y2={zero.y + band} />
+			<text class="version-label" x={axisLabels[mark.index].x} y={32 + i * 12} text-anchor={axisLabels[mark.index].x < g.width / 2 ? 'start' : 'end'}>{mark.label}</text>
 		{/each}
+		{#if visibleMarks.length}
+			{#each g.items as item}
+				{#if item.kind === 'text' && item.cls === 'vl'}<text class={item.cls} x={item.x} y={item.y} text-anchor={item.anchor} transform={[`translate(0 ${band})`, item.rotate ? `rotate(${item.rotate.deg ?? -90} ${item.rotate.x} ${item.rotate.y})` : ''].filter(Boolean).join(' ')} style={item.size ? `font-size: ${item.size}px` : undefined}>{item.text}</text>{/if}
+			{/each}
+		{/if}
 	</svg>
 {/snippet}
 
@@ -84,6 +88,7 @@
 		{#if anyWithheld}<span>No bar, "{missingText}": {missingText === 'too few' ? `too little behind that ${unit} to show a value` : `no value for that ${unit}`}</span>{/if}
 		{#if hasAverage}<span><i class="l"></i>{averageName}</span>{/if}
 	</div>
+	<div class="axis-title">{axisTitle}</div>
 	<div class="mob">{@render svg(phone)}</div>
 	<div class="dsk" use:watchWidth>{@render svg(desktop)}</div>
 	<table class="sr-only">
@@ -111,6 +116,7 @@
 	}
 	.chart figcaption { font-size: 12px; color: var(--mbc-muted); margin-top: 6px; overflow-wrap: anywhere; }
 	.chart svg { display: block; width: 100%; height: auto; }
+	.axis-title { font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--mbc-ink); overflow-wrap: anywhere; }
 	.dsk { display: none; }
 	.lg { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--mbc-muted); margin: 0 0 4px; }
 	.lg i { display: inline-block; vertical-align: -1px; margin-right: 5px; }

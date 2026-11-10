@@ -277,12 +277,24 @@ def entry_by_ref(body: dict[str, Any], ref: str) -> dict[str, Any]:
     return next(entry for entry in body["workflows"] if entry["ref"] == ref)
 
 
-def test_runs_needed_uses_only_the_engine_inputs() -> None:
-    from api.measurement_workflows import _runs_needed
+def test_collecting_copy_reports_engine_counts_without_predicting_runs() -> None:
+    from api.measurement_workflow_copy import summary
 
-    assert _runs_needed({"word": "collecting", "inputs": {"minimum": 20, "n": 7}}) == 13
-    assert _runs_needed({"word": "not_enough_data", "inputs": {"minimum": 20}}) is None
-    assert _runs_needed({"word": "collecting", "inputs": {"minimum": 20}}) is None
+    lines = summary({"word": "collecting", "inputs": {"minimum": 20, "n": 7}}, {}, False)
+    assert "7 of 20 comparable results; next check at 20." in lines
+    assert not any("more runs" in line for line in lines)
+    assert "Cost per outcome got worse." in summary(
+        {"word": "revert", "reason": "cost_worse_no_gain"}, {}, False,
+        [{"name": "cost_per_outcome", "call": "worse", "reason": None}])
+
+
+@pytest.mark.parametrize("reason", ["no_shared_groups", "coverage_under_half", "kpi_unconfirmed",
+                                    "cost_unknown", "no_baseline", "no_independent_quality_measure",
+                                    "kpi_engine_missing"])
+def test_verdict_reason_has_specific_copy(reason: str) -> None:
+    from api.measurement_workflow_copy import REASON_COPY, summary
+
+    assert summary({"word": "not_enough_data", "reason": reason}, {}, False) == [REASON_COPY[reason]]
 
 
 def test_workflow_with_only_older_runs_remains_visible(db) -> None:
@@ -305,8 +317,9 @@ def test_history_and_weekly_values_use_scoped_run_records(section) -> None:
                 and point["version"] == history["close-v4-b"]["version"])
     assert week["runs"] == 2
     assert week["failed"] == 1
-    assert week["gate_rounds"] == pytest.approx(1.5)
-    assert week["minutes"] == pytest.approx(12.5)
+    assert week["measures"]["gate_rounds"]["value"] == pytest.approx(1.5)
+    assert week["measures"]["minutes"]["value"] == pytest.approx(12.5)
+    assert week["measures"]["minutes"]["n"] == 2
 
 
 def test_history_does_not_cross_selected_agent_scope(section) -> None:
@@ -415,9 +428,26 @@ def test_weekly_groups_versions_by_full_identity_even_when_display_hash_collides
               "failed_step": None, "first_try": True, "corrections": 0, "gate_rounds": 1,
               "cost": None, "minutes": None, "owner_measure": None}
     rows = [dict(common, version_id="abc1234+first"), dict(common, version_id="abc1234+second")]
-    result = _weekly(rows)
+    result = _weekly(rows, resolve_grain("weeks", "America/Los_Angeles", now=NOW))
     assert {point["version_id"] for point in result} == {"abc1234+first", "abc1234+second"}
     assert [point["runs"] for point in result] == [1, 1]
+
+
+def test_version_measures_include_recorded_numerators_and_week_uses_measurement_grain(section) -> None:
+    from tools.workflow_task_fields import version_short_hash
+
+    close = entry_by_ref(section, CLOSE)
+    assert close["test_start"] == next(version["started"] for version in close["versions"] if version["id"] == V4)
+    for version in close["versions"]:
+        assert version["label"] == version_short_hash(version["id"])
+        runs = [row for row in close["history"] if row["version_id"] == version["id"]]
+        known = [row["gate_rounds"] for row in runs if row["gate_rounds"] is not None]
+        assert version["measures"]["gate_rounds"]["numerator"] == sum(known)
+        assert version["measures"]["gate_rounds"]["n"] == len(known)
+        assert len(version["label"]) == 7
+    weekly_grain = resolve_grain("weeks", "America/Los_Angeles", now=NOW)
+    for point in close["weekly"]:
+        assert point["start"] == weekly_grain.period_of(point["start"])
 
 
 def test_a_run_the_agent_failed_names_the_step_and_says_the_agent_caught_it(section) -> None:
@@ -477,6 +507,67 @@ def test_a_selected_agent_sees_only_its_own_runs(db) -> None:
     assert "root" not in json.dumps(only_billing)
     # The other agent's plan is out of this scope: its two untagged tasks leave the denominator too.
     assert read(MeasurementScope("alpha", "root"))["coverage"] == {"under_workflow": 7, "all_tasks": 9}
+
+
+def test_empty_scope_keeps_coverage_without_reading_workflow_history(db, monkeypatch) -> None:
+    from core import workflow_verdict_read
+
+    task(db, 'plain-only', 'plan-root', created='2026-10-01T09:00:00Z')
+    monkeypatch.setattr(workflow_verdict_read, 'read_snapshot', lambda *args, **kwargs: pytest.fail('no runs to read'))
+    result = read()
+    assert result['coverage'] == {'under_workflow': 0, 'all_tasks': 1}
+    assert result['workflows'] == []
+
+
+def test_route_returns_visible_plan_target_for_worker_run(db) -> None:
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from api import measurement
+    from plans import service
+    from plans.delegation import attach_spawned_thread
+
+    db.execute("INSERT INTO threads (id,user_id,title,project_id,spawned_by,created_at,updated_at) "
+               "VALUES ('worker','steve','Worker','alpha','root','t','t')")
+    node = service.add_node('plan-root', kind='task', title='Delegated work',
+                            acceptance_criteria='Done', db=db)
+    service.transition_node(node.id, 'active', db=db)
+    child = service.ensure_plan('thread', 'worker', db=db)
+    attach_spawned_thread(node.id, 'worker', actor_id='root', db=db)
+    live = resolve_grain('weeks', 'UTC')
+    inside = (date.fromisoformat(live.latest.first) + timedelta(days=1)).isoformat()
+    phase(db, 'worker-run', child.id, created=f'{inside}T09:00:00Z', ended=f'{inside}T10:00:00Z')
+    step(db, 'worker-step', child.id, 'worker-run', 'gather', title='Gather statements',
+         created=f'{inside}T09:10:00Z', ended=f'{inside}T10:00:00Z')
+    end_run(db, 'worker-step', 'accepted')
+    db.execute("INSERT INTO threads (id,user_id,title,project_id,spawned_by,created_at,updated_at) "
+               "VALUES ('grandchild','steve','Nested worker','alpha','worker','t','t')")
+    nested = service.add_node(child.id, kind='task', title='Nested work', acceptance_criteria='Done', db=db)
+    service.transition_node(nested.id, 'active', db=db)
+    grandchild = service.ensure_plan('thread', 'grandchild', db=db)
+    attach_spawned_thread(nested.id, 'grandchild', actor_id='worker', db=db)
+    phase(db, 'nested-run', grandchild.id, created=f'{inside}T09:00:00Z', ended=f'{inside}T10:00:00Z')
+    step(db, 'nested-step', grandchild.id, 'nested-run', 'gather', title='Gather statements',
+         created=f'{inside}T09:10:00Z', ended=f'{inside}T10:00:00Z')
+    end_run(db, 'nested-step', 'accepted')
+    db.commit()
+    app = FastAPI()
+    app.include_router(measurement.router)
+    app.dependency_overrides[measurement.require_user] = lambda: {'id': 'steve'}
+    response = TestClient(app).get('/api/measurement/workflows?project=all&agent=none&grain=weeks&timezone=UTC')
+    assert response.status_code == 200
+    runs = {run['run_id']: run for run in response.json()['workflows'][0]['runs']}
+    assert runs['worker-run']['agent'] == {'id': 'worker', 'label': 'Worker'}
+    assert runs['worker-run']['plan_target'] == {'thread_id': 'root', 'step_id': node.id}
+    assert runs['nested-run']['agent'] == {'id': 'grandchild', 'label': 'Nested worker'}
+    assert runs['nested-run']['plan_target'] == {'thread_id': 'root', 'step_id': node.id}
+    # A worker without its live attachment must not navigate to a different plan.
+    from plans import commitments
+    assert commitments.attached_parent_node(child.id, db=db) is not None
+    with raw_plan_seed(db):
+        db.execute("UPDATE plan_nodes SET state='closed' WHERE id=?", (node.id,))
+    db.commit()
+    response = TestClient(app).get('/api/measurement/workflows?project=all&agent=none&grain=weeks&timezone=UTC')
+    assert all(run['plan_target'] is None for run in response.json()['workflows'][0]['runs'])
 
 
 def test_the_route_answers_for_the_page_parameters_and_the_live_window(db) -> None:
