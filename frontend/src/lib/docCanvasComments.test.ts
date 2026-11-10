@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { awaitsFirstMark, canvasCommentHighlights, canvasCommentRange, canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, commentSurfaceStatus, commentsInDocumentOrder } from './docCanvasComments';
+import { awaitsFirstMark, canvasCommentHighlights, canvasCommentRange, canvasCommentScrollTarget, canvasFocusedCommentScrollTarget, commentSurfaceStatus, commentsInDocumentOrder, placeLostOnLoad } from './docCanvasComments';
 import { agentColor } from './docPresence';
 import type { DocComment } from './stores/docComments';
 
@@ -437,5 +437,39 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 			const [row] = commentsInDocumentOrder([insertion(16, { decision: undefined, replies: [] })], inserted, {}, 's2');
 			expect(row).toMatchObject({ orphaned: false, decision: 'accepted', from: 19, to: 25 });
 		});
+	});
+});
+
+describe('placeLostOnLoad: lost comments are placed again once per live load', () => {
+	const setup = () => { const asks: string[] = []; return { asks, place: placeLostOnLoad((id) => { asks.push(id); return true; }) }; };
+	it('asks nothing when no lost comment has its quote in the text', () => {
+		const { asks, place } = setup(), load = {};
+		place(load, 'doc', commentSurfaceStatus([comment('a', 0, 'x')], 'x').replaceableCount);
+		place(load, 'doc', commentSurfaceStatus([comment('a', 0, 'gone', { orphaned: true })], 'x').replaceableCount);
+		expect(asks).toEqual([]);
+	});
+	it('asks once when one is, and not again while it stays lost in the same load', () => {
+		const { asks, place } = setup(), load = {};
+		const lost = commentSurfaceStatus([comment('a', 0, 'x', { orphaned: true })], 'x').replaceableCount;
+		place(load, 'doc', lost);
+		place(load, 'doc', lost);
+		expect(asks).toEqual(['doc']);
+		place({}, 'doc', lost);
+		expect(asks).toEqual(['doc', 'doc']);
+	});
+	it('asks again in the same load only when the session could not take the ask', () => {
+		let taken = false;
+		const asks: string[] = [], place = placeLostOnLoad((id) => { asks.push(id); return taken; }), load = {};
+		place(load, 'doc', 1);
+		taken = true;
+		place(load, 'doc', 1);
+		place(load, 'doc', 1);
+		expect(asks).toEqual(['doc', 'doc']);
+	});
+	it('waits for a live session and a loaded document', () => {
+		const { asks, place } = setup();
+		place(undefined, 'doc', 1);
+		place({}, null, 1);
+		expect(asks).toEqual([]);
 	});
 });

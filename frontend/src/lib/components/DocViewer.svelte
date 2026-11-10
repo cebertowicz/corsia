@@ -6,7 +6,7 @@
 	import { isMobile, prefersReducedMotion } from '$lib/stores/viewport';
 	import { onDestroy, untrack } from 'svelte';
 	import { ensureEditorArtifactId, releaseDocEditor } from '$lib/stores/activeDocEditor';
-	import { docComments, commentLoads, remapComments, markThreadViewed, hasUnread, arrivedDocComments } from '$lib/stores/docComments';
+	import { docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements, hasUnread, arrivedDocComments } from '$lib/stores/docComments';
 	import { suggestionRefusals } from '$lib/stores/suggestionRefusals';
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { commentDraft, commentDraftScope, discardCommentDraft, setCommentBody } from '$lib/stores/commentDraft';
@@ -29,7 +29,7 @@
 	import { handleDocumentKey } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { createCommentSurfaceState, focusDocumentEditor, marginFits, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';
-	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
+	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, commentsInDocumentOrder, placeLostOnLoad } from '$lib/docCanvasComments';
 	import { leavePreviousTarget, loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
 	import { connectionState } from '$lib/stores/connection';
@@ -111,6 +111,8 @@
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined, suggestionBusyId));
 	const commentStatus = $derived(commentSurfaceStatus(listedComments, editText));
+	const placeLost = placeLostOnLoad(reloadPlacements);
+	$effect(() => placeLost(liveConnection === 'connected' ? liveSession : undefined, loadedArtifactId, commentStatus.replaceableCount));
 	const unreadThreads = $derived(listedComments.filter(hasUnread));
 	const scroll = createCommentScrollTarget({
 		focused: () => focusedComment, comments: () => listedComments, text: () => editText, listOpen: () => commentUI.state?.kind === 'list',

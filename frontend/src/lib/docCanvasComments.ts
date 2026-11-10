@@ -106,6 +106,19 @@ export function commentSurfaceStatus(comments: DocComment[], text: string) {
 }
 
 /**
+ * Places lost comments again, once per live load: when the status reports any whose quote is still in the text
+ * (`replaceableCount`), the live session is asked to re-resolve them (`reload`, which says whether it asked). Any it
+ * can't place stay lost until the next load.
+ */
+export function placeLostOnLoad(reload: (artifactId: string) => boolean) {
+	let asked: object | null = null;
+	return (load: object | undefined, artifactId: string | null, replaceableCount: number): void => {
+		if (!load || !artifactId || !replaceableCount || asked === load) return;
+		if (reload(artifactId)) asked = load;
+	};
+}
+
+/**
  * A live-tracked comment keeps its two ends where the text moves them: an edit inside its range keeps the thread on the words now inside
  * (the server does the same, so a reload agrees), and text typed just outside is not part of it. An open suggestion is left out: its quote is
  * the text it replaces, so rewriting it would change what it proposes. A decided suggestion behaves as it always has.
