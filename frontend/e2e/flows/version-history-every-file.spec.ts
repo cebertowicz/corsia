@@ -201,7 +201,8 @@ test('@flow:version-history-every-file a chat\'s document the person edits shows
 	await expect(page.getByRole('button', { name: 'Restoring…', exact: true })).toBeDisabled();
 	await expect.poll(() => commits(root, file)).toBe(7);
 	await expect.soft(page.getByText('Saving…', { exact: true })).toBeVisible();
-	await expect(rows).toHaveCount(4);
+	// A phone keeps the version open while it restores; a wide screen's list keeps its rows.
+	if (!phone) await expect(rows).toHaveCount(4);
 	await shot(page, 'history-doc-restoring');
 	release();
 	await expect(page.getByRole('button', { name: 'Restoring…', exact: true })).toHaveCount(0, { timeout: 30_000 });
