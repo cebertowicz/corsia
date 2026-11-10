@@ -148,6 +148,8 @@ def test_attaches_answer_and_unread_state_to_loaded_target(isolated_db):
         db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES ('answer','thread','assistant','[c1.1] because','u',3)")
         place_comments(db, 'thread', 'user', metadata, 't')
         db.execute("INSERT INTO chat_comment_answers VALUES ('thread','user','c1.1','answer','u')")
+        # Placing the answer saves its message's chat text in the same write.
+        db.execute("INSERT INTO chat_visible_content VALUES ('answer','thread','')")
         page = [{'id': 'target', 'role': 'assistant'}]
         attach_comments(db, 'thread', 'person', page)
         thread = page[0]['chat_comments'][0]

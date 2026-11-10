@@ -6,6 +6,7 @@ import json
 import sqlite3
 
 from subagents import assistant_step_display
+from infra.chat_comment_schema import CHAT_VISIBLE_CONTENT_SQL
 from subagents.assistant_step_display import load_assistant_step_display
 
 
@@ -28,6 +29,7 @@ def _db() -> sqlite3.Connection:
         "json_extract(metadata, '$.tool_call_id')) "
         "WHERE role='tool' AND json_valid(metadata)"
     )
+    conn.executescript(CHAT_VISIBLE_CONTENT_SQL)
     return conn
 
 

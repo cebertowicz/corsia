@@ -8,7 +8,7 @@
    room opens over the spring duration and closes the same way as the column leaves, so the text narrows and widens in one smooth step.
    A Workspace panel shown over the canvas covers its inline end (`--pane-overlay-inset`), so the room starts left of it. */
 .doc .cm-scroller { transition: padding-right var(--dur-spring) var(--ease-material); }
-.doc:has(.canvas-comment-drawer.margin:not(.leaving)) .cm-scroller { padding-right: calc(var(--margin-column) + var(--space-2) + var(--pane-overlay-inset, 0px)); }
+.doc.margin-room .cm-scroller { padding-right: calc(var(--margin-column) + var(--space-2) + var(--pane-overlay-inset, 0px)); }
 /* The bottom band has its own track, so notices do not cover the editor, its activity control or a drawer. */
 .doc:has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom'; grid-template-rows: auto minmax(0, 1fr) auto; }
 .doc:has(.canvas-comment-drawer:not(.margin)):has(.doc-bottom-band) { grid-template-areas: 'header' 'editor' 'bottom' 'drawer'; grid-template-rows: auto minmax(0, 1fr) auto minmax(0, var(--doc-drawer-height)); }

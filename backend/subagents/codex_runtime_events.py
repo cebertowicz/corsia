@@ -313,7 +313,7 @@ async def _on_thread_started(ctx, ev: dict) -> None:
 async def _on_text_delta(ctx, ev: dict) -> None:
     ctx.bcast(ctx.thread_id, _frame(ctx, ev, {
         "type": "text_delta", "thread_id": ctx.thread_id,
-        "content": ev.get("text", ""),
+        "content": ctx.live.answer_stream.feed(ev.get("text", "")),
     }))
 
 
@@ -341,7 +341,7 @@ async def _on_assistant_text(ctx, ev: dict) -> None:
     ctx.live.last_text = text
     ctx.live.last_assistant_message_id = mid
     ctx.live.open_tool_step_id = mid
-    ctx.live.thinking_buf = ""
+    ctx.live.reset_step_text()
     ctx.live.thinking_provenance = None
     ctx.live.turn_has_assistant_row = True
 
@@ -393,7 +393,7 @@ async def _on_tool_use(ctx, ev: dict) -> None:
         expected_model=getattr(ctx.live, "expected_reported_model", None),
         assistant_step_id=append_step_id,
     )
-    ctx.live.thinking_buf = ""
+    ctx.live.reset_step_text()
     ctx.live.thinking_provenance = None
     ctx.live.open_tool_step_id = step_id
     ctx.live.tool_names[tool_id] = name

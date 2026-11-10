@@ -139,3 +139,18 @@ it('refreshes only a newly commented target on input', async () => {
   await vi.waitFor(() => expect(batches).toEqual([['target']]));
   stop();
 });
+
+it('shows a mid-turn update\'s answers in their threads without waiting for the turn to end', async () => {
+  const comment = { id: 'comment', cid: 'c1.1', user_message_id: 'user', quote: 'text', note: '', from_off: 0, to_off: 4, created_at: 't', answers: [] };
+  messages.set([row('target', 1, { chat_comments: [comment] }), row('update', 3, { chat_answer_cids: ['c1.1'], chat_visible_content: '' })]);
+  const batches: string[][] = [];
+  vi.stubGlobal('fetch', vi.fn(async (_url: string, options: RequestInit) => {
+    const ids = JSON.parse(String(options.body)).message_ids as string[];
+    batches.push(ids);
+    return { ok: true, json: async () => ({ messages: ids.map(id => id === 'update' ? { id, chat_answer_cids: ['c1.1'], chat_visible_content: '' } : { id, chat_comments: [comment] }) }) };
+  }));
+  const stop = watchChatCommentThreads(50);
+  state.handlers.get('message_added')!({ thread_id: 'thread', message: { id: 'update', chat_answer_cids: ['c1.1'], metadata: { for_user: true } } });
+  await vi.waitFor(() => expect(batches).toEqual([['update'], ['target']]));
+  stop();
+});

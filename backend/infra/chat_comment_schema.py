@@ -1,6 +1,16 @@
 """Read stamps and the write-time index of chat-comment answers."""
 
-CHAT_COMMENT_SCHEMA_SQL = """
+# The chat text of a message that answered comments, decided when the message was saved.
+CHAT_VISIBLE_CONTENT_SQL = """CREATE TABLE IF NOT EXISTS chat_visible_content (
+    message_id TEXT PRIMARY KEY,
+    thread_id TEXT NOT NULL,
+    content TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_visible_content_thread
+    ON chat_visible_content(thread_id);
+"""
+
+CHAT_COMMENT_SCHEMA_SQL = CHAT_VISIBLE_CONTENT_SQL + """
 CREATE TABLE IF NOT EXISTS chat_comments (
     thread_id TEXT NOT NULL,
     target_message_id TEXT NOT NULL,

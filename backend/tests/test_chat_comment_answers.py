@@ -8,12 +8,14 @@ from fastapi.testclient import TestClient
 
 from auth_fixtures import OTHER_TOKEN, OWNER_TOKEN, OWNER_USER
 from doc_feedback_helpers import seed_thread
-from infra.chat_comment_answers import parse_answers, strip_answer_tags, visible_answer_content
+from infra.chat_comment_answers import VisibleAnswerStream, parse_answers, strip_answer_tags, visible_answer_content
+from chat_answer_tag_cases import TAG_CASES
 from infra.database import get_db, initialize_schema
 from infra.database_migrations import migrate_to_current
 from infra.queries import insert_message
 from infra.reply_context import RejectedComments, require_every_comment
 from infra.schema import SCHEMA_VERSION
+from infra.sidebar_preview import sidebar_update
 
 
 def _seed(db):
@@ -72,7 +74,39 @@ def test_thread_list_preview_hides_answer_tags(isolated_db):
     finally:
         db.close()
     listed = TestClient(app).get(f"/api/threads?token={OWNER_TOKEN}").json()["threads"]
-    assert [t["last_message"] for t in listed if t["id"] == "thread"] == ["Moved. Tonight runs at 4 AM."]
+    # The answer is answer-only, so chat's last visible message (and the preview) is the one before it.
+    assert [t["last_message"] for t in listed if t["id"] == "thread"] == ["text"]
+    assert sidebar_update("thread")["last_message"] == "text"
+
+
+@pytest.mark.parametrize(('text', 'before', 'visible'), TAG_CASES)
+def test_tag_cases_find_the_first_section(text, before, visible):
+    assert bool(parse_answers(text, 'answer')) == (before is not None)
+    if before is not None:
+        assert VisibleAnswerStream().feed(text) == before
+    stream = VisibleAnswerStream()
+    assert ''.join(stream.feed(char) for char in text) == visible
+
+
+def test_live_update_carries_its_placed_answers(isolated_db):
+    """An update sent mid-turn reaches the page with its placed answers already out of its chat text."""
+    from infra.send_broadcast import project_input_message, read_input_broadcast_row
+    db = get_db()
+    try:
+        _seed(db)
+        insert_message("thread", "assistant", "Intro\n\n[c1.1] placed\n\n[c1.9] unknown",
+                       {"for_user": True, "turn_unbound_reason": "legacy_import"},
+                       msg_id="update", db=db, created_at="2026-01-02")
+        insert_message("thread", "assistant", "No answers here", {"for_user": True, "turn_unbound_reason": "legacy_import"},
+                       msg_id="plain", db=db, created_at="2026-01-03")
+        db.commit()
+        pushed = project_input_message(read_input_broadcast_row("update", db=db))
+        plain = project_input_message(read_input_broadcast_row("plain", db=db))
+    finally:
+        db.close()
+    assert pushed["chat_answer_cids"] == ["c1.1"]
+    assert pushed["chat_visible_content"] == "Intro\n\n[c1.9] unknown"
+    assert "chat_answer_cids" not in plain and "chat_visible_content" not in plain
 
 
 def test_malformed_cid_is_rejected():
@@ -105,6 +139,63 @@ def test_write_places_known_answers(isolated_db):
         db.rollback()
     finally:
         db.close()
+
+
+def test_write_saves_the_chat_text_once_and_keeps_the_message_as_written(isolated_db):
+    text = "Intro\n\n[c1.1][c1.2] shared\n\n[c1.9] unknown"
+    db = get_db()
+    try:
+        _seed(db)
+        _answer(db, text)
+        insert_message("thread", "assistant", "Plain\n\n[c1.9] unknown", {"turn_unbound_reason": "legacy_import"},
+                       msg_id="unplaced", db=db, created_at="2026-01-03")
+        db.commit()
+        assert db.execute("SELECT content FROM messages WHERE id='answer'").fetchone()[0] == text
+        assert [tuple(row) for row in db.execute("SELECT message_id,thread_id,content FROM chat_visible_content")] == [
+            ("answer", "thread", "Intro\n\n[c1.9] unknown"),
+        ]
+    finally:
+        db.close()
+
+
+def test_deleting_a_comment_keeps_its_answer_out_of_chat(isolated_db):
+    from infra.chat_comment_index import attach_comments
+    db = get_db()
+    try:
+        _seed(db)
+        _answer(db, "Intro\n\n[c1.1] answer")
+        db.execute("DELETE FROM chat_comments WHERE cid='c1.1'")
+        db.commit()
+        page = [{"id": "answer", "role": "assistant", "content": "Intro\n\n[c1.1] answer"}]
+        attach_comments(db, "thread", OWNER_USER, page)
+    finally:
+        db.close()
+    assert page[0]["chat_visible_content"] == "Intro"
+    assert page[0]["chat_answer_cids"] == []
+
+
+def test_migration_saves_chat_text_for_messages_answered_before_it(tmp_path):
+    """A database at 186 holding answered messages gets their chat text, once."""
+    db = sqlite3.connect(tmp_path / "answered.db")
+    initialize_schema(db)
+    db.row_factory = None
+    _seed(db)
+    db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) VALUES "
+               "('old-answer','thread','assistant','Intro\n\n[c1.1] old\n\n[c1.9] unplaced','2026-01-02',2),"
+               "('old-plain','thread','assistant','Plain [c1.1] words','2026-01-03',3)")
+    db.executemany("INSERT INTO chat_comment_answers VALUES ('thread','question',?,'old-answer','2026-01-02')",
+                   [("c1.1",), ("c1.2",)])
+    db.execute("DROP TABLE chat_visible_content")
+    db.execute("PRAGMA user_version=186")
+    db.commit()
+    result = migrate_to_current(db, SCHEMA_VERSION)
+    assert (result.from_version, result.to_version) == (186, SCHEMA_VERSION)
+    assert db.execute("SELECT message_id,content FROM chat_visible_content").fetchall() == [
+        ("old-answer", "Intro\n\n[c1.9] unplaced"),
+    ]
+    assert db.execute("SELECT content FROM messages WHERE id='old-answer'").fetchone()[0].endswith("[c1.9] unplaced")
+    assert migrate_to_current(db, SCHEMA_VERSION).migrated is False
+    db.close()
 
 
 def test_route_stamps_the_newest_seen_answer_and_checks_ownership(isolated_db):
@@ -212,6 +303,7 @@ def test_thread_teardown_removes_only_its_chat_comment_rows(isolated_db, operati
         db.execute("INSERT INTO chat_comment_answers VALUES ('thread','followup','c2.1','answer','t')")
         db.execute("INSERT INTO chat_comment_views VALUES (?,?,?,?)", (OWNER_USER, 'followup', 'c2.1', 't'))
         seed_thread(db, "other")
+        db.execute("INSERT INTO chat_visible_content VALUES ('other-answer','other','')")
         db.execute("INSERT INTO messages(id,thread_id,role,content,created_at,seq) "
                    "VALUES ('other-question','other','user','x','t',1)")
         db.execute("INSERT INTO chat_comment_answers VALUES ('other','other-question','c1.1','other-answer','t')")
@@ -228,6 +320,7 @@ def test_thread_teardown_removes_only_its_chat_comment_rows(isolated_db, operati
         assert [row[0] for row in db.execute("SELECT thread_id FROM chat_comment_answers")] == ["other"]
         assert [row[0] for row in db.execute("SELECT thread_id FROM chat_comments")] == ["other"]
         assert [row[0] for row in db.execute("SELECT user_message_id FROM chat_comment_views")] == ["other-question"]
+        assert [row[0] for row in db.execute("SELECT message_id FROM chat_visible_content")] == ["other-answer"]
     finally:
         db.rollback()
         db.close()

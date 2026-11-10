@@ -18,6 +18,7 @@ from infra.chat_comment_answers import strip_answer_tags
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_read
 from infra.packed_rows import fetch_all
+from infra.sidebar_preview import LAST_MESSAGE_PREVIEW
 from infra.product_events import emit_product_event
 from infra.conductor import get_all_coordination_ids
 from infra.corsia_agent import get_corsia_agent
@@ -83,9 +84,7 @@ async def list_threads(token: str, archived: int = 0):
         reader = Reader.from_user(user)
         visible, identity = hidden_clause(reader, "s")
         sql = f"""SELECT s.*,
-               CASE WHEN {visible} THEN
-                 (SELECT substr(m.content, 1, 100) FROM messages m WHERE m.thread_id = s.id ORDER BY m.created_at DESC LIMIT 1)
-               END as last_message
+               CASE WHEN {visible} THEN {LAST_MESSAGE_PREVIEW} END as last_message
                FROM threads s WHERE s.user_id = ?
                AND {thread_available_sql('s', include_user_archived=bool(archived))}
                AND s.spawned_by IS NULL"""

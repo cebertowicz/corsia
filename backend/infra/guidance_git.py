@@ -249,6 +249,10 @@ def _sweep_others(repo: Path, workspace: Path, db, exclude: set[str]) -> list[st
                 left += 1
             elif rel not in exclude and classify_guidance_path(repo / rel, workspace=workspace, db=db) and is_history_text(read_regular(repo / rel)):
                 found.append(rel)
+        # The sweep passes the same gate as a save: a credential-shaped file in a skill's evals is never recorded.
+        if found:
+            skip = ignored(repo, found)
+            found = [rel for rel in found if rel not in skip]
         lines = sweep(repo, found, "guidance") if found else []
         return lines + ([f"{left} more changed guidance candidates wait for the next save."] if left else [])
     except Exception as exc:  # the save stands; the sweep failure must still be visible

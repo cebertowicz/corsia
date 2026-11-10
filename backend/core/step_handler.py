@@ -6,8 +6,9 @@ import logging
 import uuid
 from typing import Any, Awaitable, Callable
 
-from infra.chat_comment_answers import strip_answer_tags
-from infra.database import get_db, write_transaction
+from infra.chat_comment_answers import VisibleAnswerStream, message_answer_fields
+from infra.database import write_transaction
+from infra.sidebar_preview import sidebar_update
 from infra.time import utc_now_iso
 from infra.db_async import run_in_db
 from infra.context_receipts import attach_delivered_context_to_latest_assistant as _attach_delivered_context_to_latest_assistant
@@ -63,6 +64,7 @@ class StepHandler:
         self.tool_step_reasoning: str | None = None
         self.tool_step_reasoning_provenance: dict[str, Any] | None = None
         self.tool_step_browser_chip: dict = {}
+        self.answer_stream = VisibleAnswerStream()
         self.reasoning_parts: list[str] = []
         self.reasoning_provenance: dict[str, Any] | None = None
 
@@ -146,6 +148,7 @@ class StepHandler:
                                msg_id=step_id, db=db, created_at=step_now)
 
         await run_in_db(_persist)
+        self.answer_stream.reset()
 
         self.step_ids.append(step_id)
         pending_hints = self.tool_hints[:]
@@ -169,6 +172,7 @@ class StepHandler:
             "metadata": ws_meta,
             "created_at": step_now,
             "seq": await _step_seq(self.thread_id, step_id),
+            **await run_in_db(message_answer_fields, self.thread_id, step_id),
             "finalized_tool_ids": [],
         })
 
@@ -177,7 +181,7 @@ class StepHandler:
         await self._emit({
             "type": "text_delta",
             "thread_id": self.thread_id,
-            "content": payload["content"],
+            "content": self.answer_stream.feed(payload["content"]),
         })
 
     async def _handle_reasoning(self, payload: dict):
@@ -251,6 +255,7 @@ class StepHandler:
                                msg_id=tc_step_id, db=db, created_at=tc_step_now)
 
         await run_in_db(_persist)
+        self.answer_stream.reset()
         self.step_ids.append(tc_step_id)
         self.tool_step_id = tc_step_id
         self.tool_step_created_at = tc_step_now
@@ -297,6 +302,7 @@ class StepHandler:
             "metadata": metadata,
             "created_at": self.tool_step_created_at,
             "seq": await _step_seq(self.thread_id, self.tool_step_id),
+            **await run_in_db(message_answer_fields, self.thread_id, self.tool_step_id),
             "finalized_tool_ids": finalized_ids,
         })
 
@@ -353,26 +359,13 @@ class StepHandler:
         await self._emit(ws_payload)
 
         try:
-            def _query():
-                db = get_db()
-                row = db.execute(
-                    """SELECT s.title, s.updated_at,
-                       (SELECT substr(m.content, 1, 100) FROM messages m
-                        WHERE m.thread_id = s.id AND m.role IN ('user', 'assistant')
-                        ORDER BY m.created_at DESC LIMIT 1) as last_message
-                       FROM threads s WHERE s.id = ?""",
-                    (self.thread_id,)
-                ).fetchone()
-                db.close()
-                return dict(row) if row else None
-
-            row = await run_in_db(_query)
+            row = await run_in_db(sidebar_update, self.thread_id)
             if row:
                 await self._emit({
                     "type": "session_updated",
                     "thread_id": self.thread_id,
                     "title": row["title"],
-                    "last_message": strip_answer_tags(row["last_message"]),
+                    "last_message": row["last_message"],
                     "updated_at": row["updated_at"],
                 })
         except Exception as e:
