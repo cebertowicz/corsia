@@ -42,6 +42,7 @@ _OUTSIDE = "Unknown editor <outside-edit@corsia.local>"
 _SWEEP_LIMIT = 100
 # A workspace's own repository and Git directory, by the ``.git`` entry they were read through: neither
 # changes per save or open, so each is read from Git once, and again only when ``.git`` is replaced.
+# A state history is off for is not kept: an enclosing repository can come or go with ``.git`` unchanged.
 _REPOSITORIES: dict[tuple[Path, bool, tuple[int, int] | None], tuple[Path | None, str | None]] = {}
 _GIT_DIRS: dict[tuple[Path, tuple[int, int] | None], Path] = {}
 
@@ -84,7 +85,7 @@ def workspace_repository(workspace: Path, *, create: bool = False) -> tuple[Path
     if (known := _REPOSITORIES.get(key)) is not None:
         return known
     found = _workspace_repository(workspace, create)
-    if found[0] is not None or history_is_off(found[1]):  # a Git fault is asked again next time
+    if found[0] is not None:
         _REPOSITORIES[(workspace, create, _git_entry(workspace))] = found
     return found
 
