@@ -6,9 +6,14 @@
 	import AgentOptions from '../reviews/AgentOptions.svelte';
 	import { agentOptionIndex } from '../reviews/agentOptionKeys';
 	import { hasMentionRoster, useMentionRoster } from './mentionContext';
-	import { createMentionSelection } from './mentionSelection';
-	export function taggedAgentIds(text: string) { return selectedTags.ids(text); }
-	export function occurrences(text: string) { return selectedTags.occurrences(text); }
+	import { createMentionSelection, typedMentions } from './mentionSelection';
+	export function taggedAgentIds(text: string) { return [...new Set(occurrences(text).map(item => item.agent_id))]; }
+	export function occurrences(text: string) {
+		const picked = selectedTags.occurrences(text);
+		// Tags need the chat the document was opened from, so typed names resolve only where picking could.
+		const typed = roster.noViewingThread ? [] : typedMentions(text, roster.taggableAgents, picked);
+		return [...picked, ...typed].sort((a, b) => a.start - b.start);
+	}
 	import type { TaggableAgent } from '$lib/api/docReviews';
 	let { input, selectedTags = createMentionSelection() }: { input: HTMLTextAreaElement | undefined; selectedTags?: ReturnType<typeof createMentionSelection> } = $props();
 	const available = hasMentionRoster();

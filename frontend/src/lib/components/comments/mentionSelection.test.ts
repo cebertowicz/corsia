@@ -1,5 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { createMentionSelection } from './mentionSelection';
+import { createMentionSelection, typedMentions } from './mentionSelection';
+
+describe('typed names', () => {
+	const roster = [{ id: 'int', name: 'Integration' }, { id: 'sub', name: 'Agent Substrate' }, { id: 'eco', name: 'Ecosystem' }, { id: 'agent', name: 'Agent' }];
+	it('tags every typed @name that names one agent, longest name first', () => {
+		const text = 'Please look. @Integration @Agent Substrate @Ecosystem';
+		expect(typedMentions(text, roster, [])).toEqual([
+			{ agent_id: 'int', start: 13, end: 25 }, { agent_id: 'sub', start: 26, end: 42 }, { agent_id: 'eco', start: 43, end: 53 },
+		]);
+	});
+	it('matches case-insensitively and stops at punctuation, but not inside a longer word or an address', () => {
+		expect(typedMentions('@integration, thanks', roster, [])).toEqual([{ agent_id: 'int', start: 0, end: 12 }]);
+		expect(typedMentions('@Integrations', roster, [])).toEqual([]);
+		expect(typedMentions('mail me@Integration', roster, [])).toEqual([]);
+	});
+	it('leaves picked occurrences alone and skips a name two agents share', () => {
+		const picked = [{ agent_id: 'sub', start: 0, end: 16 }];
+		expect(typedMentions('@Agent Substrate', roster, picked)).toEqual([]);
+		expect(typedMentions('@Twin', [{ id: 'a', name: 'Twin' }, { id: 'b', name: 'Twin' }], [])).toEqual([]);
+	});
+});
 
 describe('picker selections', () => {
 	it('tracks the selected occurrence when identical text is independently typed and edited', () => {

@@ -3,6 +3,24 @@ import { hashSeed } from '$lib/typingPace';
 export type MentionOccurrence = { agent_id: string; start: number; end: number };
 type Selection = { id: string; start: number; text: string };
 
+/** At send, a typed `@Name` naming exactly one taggable agent tags it, as if picked; the stored occurrence carries the id.
+ *  Longest names win, and text already covered by a picked occurrence is left alone. */
+export function typedMentions(text: string, agents: { id: string; name: string }[], picked: MentionOccurrence[]): MentionOccurrence[] {
+	const byName = new Map<string, string[]>();
+	for (const agent of agents) { const key = agent.name.toLowerCase(); byName.set(key, [...(byName.get(key) ?? []), agent.id]); }
+	const names = [...byName].filter(([, ids]) => new Set(ids).size === 1).map(([name]) => name).sort((a, b) => b.length - a.length);
+	const taken = [...picked], found: MentionOccurrence[] = [], lower = text.toLowerCase();
+	for (let at = lower.indexOf('@'); at >= 0; at = lower.indexOf('@', at + 1)) {
+		if (at > 0 && !/\s/.test(text[at - 1])) continue;
+		const name = names.find(candidate => lower.startsWith(candidate, at + 1) && !/[\p{L}\p{N}_]/u.test(text[at + 1 + candidate.length] ?? ''));
+		const end = name ? at + 1 + name.length : 0;
+		if (!name || taken.some(item => item.start < end && at < item.end)) continue;
+		const occurrence = { agent_id: byName.get(name)![0], start: at, end };
+		taken.push(occurrence); found.push(occurrence);
+	}
+	return found;
+}
+
 /** Identifies a draft's text by its length and hash, so a snapshot stays the same size however long the draft grows. */
 const textKey = (text: string) => `${text.length}:${hashSeed(text)}`;
 
