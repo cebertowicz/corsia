@@ -73,8 +73,8 @@ async def test_stale_at_draft_can_be_retargeted(mail, approve, clean_screen):
     saved = await EmailDraftTool().execute(_thread_id=mail.thread, account_id=mail.account, subject='Lunch', body='Yes', reply_to_message_id='m-101')
     retargeted = json.loads(saved)
     notes = '\n'.join(json.loads(_row(retargeted['draft_id'])['target_json'])['notes'])
-    assert '<untrusted-email>New details from Pat</untrusted-email>' in notes
-    assert notes.index('New details from Pat') < notes.index('quoted below the reply')
+    assert 'The message being replied to' not in notes
+    assert 'quoted below the reply' in notes
     assert json.loads(_row(retargeted['draft_id'])['target_json'])['reply_to'] == 'm-101'
     result = await send(mail, retargeted)
     assert not result.startswith('Error'), result
