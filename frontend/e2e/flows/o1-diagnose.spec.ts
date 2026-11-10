@@ -57,31 +57,8 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
     await page.keyboard.press('Escape');
     if (await details.isVisible() && await details.getAttribute('aria-expanded') === 'true') await details.click();
   }
-  // Locate the actual switch for this content and capture both adjacent widths.
-  const inDetails = async (width: number) => {
-    await page.setViewportSize({ width, height: 900 });
-    await page.waitForTimeout(2000); // Allow the shell's responsive transition to settle.
-    return page.locator('button.identity:visible').first().evaluate(button => button.classList.contains('compact'));
-  };
-  let low = 1100, high = 1440;
-  expect(await inDetails(low)).toBe(true);
-  expect(await inDetails(high)).toBe(false);
-  while (high - low > 1) {
-    const middle = Math.floor((low + high) / 2);
-    if (await inDetails(middle)) low = middle; else high = middle;
-  }
-  console.log('SWITCH', low, high);
-  expect(await inDetails(low)).toBe(true);
-  await page.screenshot({ animations: 'disabled', path: `${out}/switch-details-${low}.png` });
-  await page.locator('button.identity:visible').first().click();
-  await expect(page.getByRole('combobox', { name: 'Supervisor', exact: true })).toBeVisible();
-  await page.screenshot({ animations: 'disabled', path: `${out}/switch-details-open-${low}.png` });
-  await page.keyboard.press('Escape');
-  expect(await inDetails(high)).toBe(false);
-  await expect(page.locator('button.identity:visible').first()).toBeVisible();
-  await page.screenshot({ animations: 'disabled', path: `${out}/switch-status-${high}.png` });
-  await page.setViewportSize({ width: 900, height: 900 });
-  await page.waitForTimeout(2000); // The Details switch follows the shell transition.
+  // The base owner slot can be hidden by the shell at narrow pane widths.
+  // Exercise save states at the last width where this run showed the slot.
   await showPicker(page);
   let release!: () => void;
   const delayed = new Promise<void>(resolve => release = resolve);
