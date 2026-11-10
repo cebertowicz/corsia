@@ -14,7 +14,7 @@ from typing import Any
 
 import httpx
 
-from connections.account_errors import AccountError, AccountUnavailable
+from connections.account_errors import AccountError
 from infra import key_store
 from infra.db_async import run_in_db
 
@@ -55,22 +55,14 @@ class GoogleError(AccountError):
     """Base of every Google-only error this package raises; its text is safe to show."""
 
 
-class GoogleUnavailable(GoogleError, AccountUnavailable):
-    """A Google account that isn't usable right now for a reason that clears on its own."""
-
-
 class GoogleNotConnected(GoogleError):
-    person_fixes = True
-
     def __init__(self) -> None:
-        super().__init__(NOT_CONNECTED)
+        super().__init__(NOT_CONNECTED, person_fixes=True)
 
 
 class GoogleSignInRejected(GoogleError):
-    person_fixes = True
-
     def __init__(self, *, published: bool = False) -> None:
-        super().__init__(PUBLISHED_SIGN_IN_RECOVERY if published else NEEDS_SIGN_IN)
+        super().__init__(PUBLISHED_SIGN_IN_RECOVERY if published else NEEDS_SIGN_IN, person_fixes=True)
 
 
 class GoogleSignInError(GoogleError):

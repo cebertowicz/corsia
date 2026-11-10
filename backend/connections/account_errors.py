@@ -2,17 +2,12 @@
 
 
 class AccountError(Exception):
-    """A fixed, safe-to-show refusal from a connected email or calendar account."""
+    """A fixed, safe-to-show refusal from a connected email or calendar account.
 
-    #: Only the person can clear it (sign in again, a password, a host setting); trying again can't.
-    person_fixes = False
+    ``person_fixes`` is the one answer to "can only the person clear this?" (sign in again, a password, a host
+    setting): the raiser sets it, and every reader trusts it. Unset, trying again later can work.
+    """
 
-
-class AccountUnavailable(AccountError):
-    """A refusal that clears on its own: trying again later can work, and reconnecting doesn't help."""
-
-
-class AccountNeedsPerson(AccountError):
-    """A refusal only the person can clear: sign in again, set a password, or change a host setting."""
-
-    person_fixes = True
+    def __init__(self, *args: object, person_fixes: bool = False) -> None:
+        super().__init__(*args)
+        self.person_fixes = person_fixes

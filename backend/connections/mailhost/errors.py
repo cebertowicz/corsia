@@ -47,5 +47,5 @@ class MailHostError(AccountError):
         self.cause = cause
         self.host = host
         # A refused password or IMAP turned off is a setting only the person can change.
-        self.person_fixes = cause in (PASSWORD_REFUSED, IMAP_OFF)
-        super().__init__(_MESSAGES[cause].format(host=host or "the server", name=name or "The host"))
+        super().__init__(_MESSAGES[cause].format(host=host or "the server", name=name or "The host"),
+                         person_fixes=cause in (PASSWORD_REFUSED, IMAP_OFF))

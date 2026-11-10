@@ -3,8 +3,10 @@
 Only header lines move; body bytes stay as written. Notes are stored before the
 validated writer removes them, so an interrupted conversion cannot lose them.
 A converted file has no legacy lines and is never rewritten on later starts.
-Once a start converts every open draft without a failure, the ``email_draft_format``
-setting records it and later starts skip the pass; until then each start retries.
+A draft that can never convert (its file gone, outside the workspace, or not a draft
+document) is logged once and left as it is. Once a start passes every open draft without
+any other failure, the ``email_draft_format`` setting records it and later starts skip
+the pass; until then each start retries.
 """
 from __future__ import annotations
 
@@ -36,10 +38,22 @@ def _open_drafts() -> list[dict]:
         db.close()
 
 
+# The old writer put every note on its own ``Note:`` lines, one per line of the note, so where one note ends is lost.
+# Lines the view now shows elsewhere are dropped: attachment lines (the chips) and the replied-to email's evidence (the
+# conversation), which always ran up to the line saying the earlier email is quoted.
+_ATTACHMENT = "Attachment: "
+_EVIDENCE = "The message being replied to:"
+_AFTER_EVIDENCE = "The earlier message from "
+
+
 def _converted(text: str) -> tuple[str, list[str]]:
-    """Remove the two old header-only fields, preserving line endings and the entire body."""
-    kept, notes = [], []
-    in_header = True
+    """Remove the two old header-only fields, preserving line endings and the entire body.
+
+    The old note lines become one note, since their boundaries can't be recovered; the next save of the draft
+    replaces it with notes made the current way.
+    """
+    kept, lines = [], []
+    in_header, in_evidence = True, False
     for line in text.split("\n"):
         raw = line.removesuffix("\r")
         if not raw:
@@ -47,17 +61,20 @@ def _converted(text: str) -> tuple[str, list[str]]:
         key, colon, value = raw.partition(":")
         if in_header and colon and key.strip().lower() in {"note", "in reply to"}:
             if key.strip().lower() == "note":
-                notes.append(value.removeprefix(" "))
+                note = value.removeprefix(" ")
+                in_evidence = (in_evidence or note.startswith(_EVIDENCE)) and not note.startswith(_AFTER_EVIDENCE)
+                if not in_evidence and not note.startswith(_ATTACHMENT):
+                    lines.append(note)
         else:
             kept.append(line)
-    return "\n".join(kept), notes
+    return "\n".join(kept), ["\n".join(lines)] if lines else []
 
 
 def _store_notes(row: dict, notes: list[str]) -> dict:
-    """Append every converted line in order, repeats included: one old note spans several lines.
+    """Append the converted note.
 
-    A start interrupted after this write converts the same file again; its lines are already the tail, so they
-    aren't added twice.
+    A start interrupted after this write converts the same file again; its note is already the tail, so it isn't
+    added twice.
     """
     target = draft_target(row)
     stored = list(target.get("notes") or [])
@@ -78,16 +95,21 @@ async def convert_open_drafts() -> None:
     failed = False
     for row in await run_in_db(_open_drafts):
         try:
+            # These never clear on a later start, so they are logged and left; they don't hold the pass open.
             path = (root / row["path"]).resolve()
             if not path.is_relative_to(root):
-                raise ValueError("draft path is outside the workspace")
-            before = await run_off_db(path.read_bytes)
+                log.warning("Open email draft %s is outside the workspace; left as it is", row["id"])
+                continue
+            try:
+                before = await run_off_db(path.read_bytes)
+            except FileNotFoundError:
+                log.warning("Open email draft %s has no file; nothing to convert", row["id"])
+                continue
             text, notes = _converted(before.decode("utf-8"))
             if text.encode("utf-8") == before:
                 continue
             if parse_document(text) is None:
                 log.warning("Open email draft %s could not be parsed; file left untouched", row["id"])
-                failed = True
                 continue
             target = await run_in_db(_store_notes, row, notes)
             await save_document_text(

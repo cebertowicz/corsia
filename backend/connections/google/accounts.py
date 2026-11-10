@@ -17,7 +17,7 @@ import sqlite3
 from connections.account_resolver import Refusals, resolve
 from connections.connected_accounts import GOOGLE_PROVIDER
 from connections.google.client import (
-    NOT_CONNECTED, STATUS_CONNECTED, STATUS_NEEDS_SIGN_IN, GoogleError, GoogleUnavailable, sign_in_recovery,
+    NOT_CONNECTED, STATUS_CONNECTED, STATUS_NEEDS_SIGN_IN, GoogleError, sign_in_recovery,
 )
 
 NONE_AVAILABLE = (
@@ -61,10 +61,10 @@ def usable(account: dict, db: sqlite3.Connection) -> dict:
     if state == STATUS_CONNECTED:
         return account
     if state == STATUS_NEEDS_SIGN_IN:
-        raise GoogleError(f"{account['address']}: {sign_in_recovery(str(account['id']), db=db)}")
+        raise GoogleError(f"{account['address']}: {sign_in_recovery(str(account['id']), db=db)}", person_fixes=True)
     if state == "signed_out":
-        raise GoogleError(SIGNED_OUT.format(address=account["address"]))
-    raise GoogleUnavailable(UNAVAILABLE.format(address=account["address"]))
+        raise GoogleError(SIGNED_OUT.format(address=account["address"]), person_fixes=True)
+    raise GoogleError(UNAVAILABLE.format(address=account["address"]))
 
 
 

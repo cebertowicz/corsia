@@ -19,7 +19,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
-from connections.account_errors import AccountError, AccountUnavailable
+from connections.account_errors import AccountError
 from connections.mail.email_document import DraftRefused
 from connections.mail_accounts import resolve_for_thread
 from infra.auth import owns_thread, require_human_user
@@ -95,17 +95,16 @@ async def draft_context(artifact_id: str, user: dict = Depends(require_human_use
     try:
         account = await run_in_db(resolve_for_thread, target["account_id"], draft["thread_id"])
         backend = backend_for(account)
-    except AccountUnavailable as exc:
+    except AccountError as exc:
+        # The refusal itself says whether only the person can fix it; anything else may clear on a retry.
+        if exc.person_fixes:
+            return {**failed, "reason": ACCOUNT}
         logger.warning("A draft's account isn't usable right now (reference {}): {}", reference, type(exc).__name__)
         return {**failed, "reason": UNREADABLE, "reference": reference}
-    except AccountError:
-        # Finding the account refuses only for an account problem (gone, not email, a setting to fix), except
-        # what clears on its own above.
-        return {**failed, "reason": ACCOUNT}
     try:
         return {**base, **await _conversation(backend, str(account["id"]), {**target, "reply_to": str(reply_to)})}
     except (AccountError, DraftRefused) as exc:
-        # A read refuses for many reasons; only one the refusal itself marks as the person's to fix is ACCOUNT.
+        # The same rule as finding the account: only a refusal marked as the person's to fix is ACCOUNT.
         if isinstance(exc, AccountError) and exc.person_fixes:
             logger.warning("A draft's conversation could not be read: the account needs the person ({})", type(exc).__name__)
             return {**failed, "reason": ACCOUNT}

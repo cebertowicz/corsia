@@ -173,7 +173,7 @@ async def test_a_signed_out_account_is_the_account_state_not_a_retry(mail):
 @pytest.mark.asyncio
 async def test_a_mail_host_refusal_only_the_person_can_fix_is_the_account_state(mail, monkeypatch):
     import api.email_drafts as route
-    from connections.account_errors import AccountError, AccountNeedsPerson
+    from connections.account_errors import AccountError
     from connections.mailhost.errors import IMAP_OFF, PASSWORD_REFUSED, SERVER_UNREACHABLE, MailHostError
     from connections.mailhost.read import NEEDS_PASSWORD
 
@@ -185,7 +185,7 @@ async def test_a_mail_host_refusal_only_the_person_can_fix_is_the_account_state(
             raise self.exc
 
     saved = await _draft(mail, reply_to_message_id="m-100")
-    for exc, reason in ((AccountNeedsPerson(NEEDS_PASSWORD), "account"), (MailHostError(PASSWORD_REFUSED), "account"),
+    for exc, reason in ((AccountError(NEEDS_PASSWORD, person_fixes=True), "account"), (MailHostError(PASSWORD_REFUSED), "account"),
                         (MailHostError(IMAP_OFF), "account"),
                         # Any other fixed refusal from the account stays the retryable state.
                         (MailHostError(SERVER_UNREACHABLE), "unreadable"),
@@ -198,12 +198,12 @@ async def test_a_mail_host_refusal_only_the_person_can_fix_is_the_account_state(
 @pytest.mark.asyncio
 async def test_an_account_that_is_only_briefly_unusable_offers_retry_not_reconnecting(mail, monkeypatch):
     import api.email_drafts as route
-    from connections.account_errors import AccountError, AccountUnavailable
+    from connections.account_errors import AccountError
     from connections.mail_accounts import NONE_AVAILABLE
 
     saved = await _draft(mail, reply_to_message_id="m-100")
-    for refusal, reason in ((AccountUnavailable("x is still being checked."), "unreadable"),
-                            (AccountError(NONE_AVAILABLE), "account")):
+    for refusal, reason in ((AccountError("x is still being checked."), "unreadable"),
+                            (AccountError(NONE_AVAILABLE, person_fixes=True), "account")):
         def refuse(*_args, refusal=refusal):
             raise refusal
         monkeypatch.setattr(route, "resolve_for_thread", refuse)
@@ -216,27 +216,68 @@ async def test_an_account_that_is_only_briefly_unusable_offers_retry_not_reconne
     ("checking", True), ("some_new_state", True), ("waiting", False), ("refused", False), ("revoked", False),
     ("imap_off", False), ("unreachable", False),
 ])
-def test_only_mail_host_states_that_clear_on_their_own_are_unavailable(monkeypatch, status, passing):
+def test_only_mail_host_states_that_clear_on_their_own_leave_the_person_out(monkeypatch, status, passing):
     from connections import mail_accounts
-    from connections.account_errors import AccountError, AccountUnavailable
+    from connections.account_errors import AccountError
 
     monkeypatch.setattr(mail_accounts.store, "read", lambda _id, db=None: (None, {"status": status}))
     with pytest.raises(AccountError) as refused:
         mail_accounts._mail_host_usable({"id": "a", "address": "me@host.example", "state": "pending"}, None)
-    assert isinstance(refused.value, AccountUnavailable) is passing
+    assert refused.value.person_fixes is not passing
 
 
-def test_a_google_account_in_no_named_state_is_unavailable_and_a_signed_out_one_is_not(monkeypatch):
-    from connections.account_errors import AccountUnavailable
+def test_a_signed_out_google_account_is_the_persons_to_fix_and_one_in_no_named_state_is_not(monkeypatch):
     from connections.google import accounts
     from connections.google.client import GoogleError
 
     with pytest.raises(GoogleError) as unknown:
         accounts.usable({"id": "g", "address": "me@gmail.example", "state": "paused"}, None)
-    assert isinstance(unknown.value, AccountUnavailable)
+    assert unknown.value.person_fixes is False
     with pytest.raises(GoogleError) as signed_out:
         accounts.usable({"id": "g", "address": "me@gmail.example", "state": "signed_out"}, None)
-    assert not isinstance(signed_out.value, AccountUnavailable)
+    assert signed_out.value.person_fixes is True
+
+
+@pytest.mark.asyncio
+async def test_one_refusal_gives_the_same_state_whether_finding_the_account_or_reading_raises_it(mail, monkeypatch):
+    import api.email_drafts as route
+    from connections import mail_accounts
+    from connections.account_errors import AccountError
+    from connections.google import accounts
+
+    def raised(make):
+        try:
+            make()
+        except AccountError as exc:
+            return exc
+        raise AssertionError("no refusal")
+
+    monkeypatch.setattr(mail_accounts.store, "read", lambda _id, db=None: (None, {"status": "checking"}))
+    refusals = {
+        "account": [raised(lambda: accounts.usable({"id": "g", "address": "g@x.example", "state": "signed_out"}, None))],
+        "unreadable": [raised(lambda: accounts.usable({"id": "g", "address": "g@x.example", "state": "paused"}, None)),
+                       raised(lambda: mail_accounts._mail_host_usable({"id": "a", "address": "a@x.example", "state": "pending"}, None))],
+    }
+
+    class Refusing:
+        def __init__(self, exc: Exception):
+            self.exc = exc
+
+        async def conversation(self, account_id, target):
+            raise self.exc
+
+    saved = await _draft(mail, reply_to_message_id="m-100")
+    for reason, excs in refusals.items():
+        for exc in excs:
+            def refuse(*_args, exc=exc):
+                raise exc
+            with monkeypatch.context() as stage:
+                stage.setattr(route, "resolve_for_thread", refuse)
+                found = await draft_context(_artifact(saved), _owner(mail.thread))
+            with monkeypatch.context() as stage:
+                stage.setattr(route, "backend_for", lambda account, exc=exc: Refusing(exc))
+                read = await draft_context(_artifact(saved), _owner(mail.thread))
+            assert found["reason"] == read["reason"] == reason, exc
 
 
 @pytest.mark.asyncio

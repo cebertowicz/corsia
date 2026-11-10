@@ -35,7 +35,7 @@ async def test_open_draft_converts_once_preserving_body_and_old_guard_notes(owne
     assert after.partition(b"\r\n\r\n")[2] == before.partition(b"\r\n\r\n")[2]
     assert parse_document(after.decode()) is not None
     row = scope["db"].execute("SELECT * FROM action_drafts WHERE id=?", (draft_id,)).fetchone()
-    assert json.loads(row["target_json"])["notes"] == ["Existing", "same subject in another conversation", " indented note  "]
+    assert json.loads(row["target_json"])["notes"] == ["Existing", "same subject in another conversation\n indented note  "]
     first = dict(row)
     await convert_open_drafts()
     assert path.read_bytes() == after
@@ -43,17 +43,22 @@ async def test_open_draft_converts_once_preserving_body_and_old_guard_notes(owne
 
 
 @pytest.mark.asyncio
-async def test_repeated_lines_of_multi_line_notes_all_move(ownership_scope):
+async def test_old_note_lines_become_one_note_without_what_the_view_shows_elsewhere(ownership_scope):
     from connections.mail.draft_format_conversion import convert_open_drafts
     scope = ownership_scope
     lines = ["Another person wrote in this thread:", "Pat wrote on Nov 2 (read).", "The text isn't shown here.",
              "The sender wrote again in this thread:", "Sam wrote on Nov 3 (unread).", "The text isn't shown here."]
-    text = HEADER + "".join(f"Note: {line}\r\n" for line in lines) + BODY
+    # The replied-to email's evidence (the conversation shows it) and attachment lines (the chips show them) go.
+    shown = ["The message being replied to:", "Sam wrote on Nov 1, 2026, 9:00 AM UTC (read).",
+             "<untrusted-email>Lunch?</untrusted-email>"]
+    quoted = "The earlier message from Sam will be quoted below the reply."
+    old = [*lines, *shown, quoted, "Attachment: menu.pdf (12 KB)"]
+    text = HEADER + "".join(f"Note: {line}\r\n" for line in old) + BODY
     path, draft_id = _draft(scope, "multi.md", text=text)
     await convert_open_drafts()
     assert path.read_bytes() == (HEADER + BODY).encode()
     row = scope["db"].execute("SELECT target_json FROM action_drafts WHERE id=?", (draft_id,)).fetchone()
-    assert json.loads(row[0])["notes"] == ["Existing", *lines]
+    assert json.loads(row[0])["notes"] == ["Existing", "\n".join([*lines, quoted])]
 
 
 @pytest.mark.asyncio
@@ -79,9 +84,21 @@ async def test_parse_failure_leaves_file_and_record_untouched(ownership_scope, c
     assert path.read_bytes() == broken.encode()
     assert dict(scope["db"].execute("SELECT * FROM action_drafts WHERE id=?", (draft_id,)).fetchone()) == before
     assert "could not be parsed" in caplog.text
-    # A file left unconverted keeps the pass running at each start.
+    # It can never convert, so it doesn't make every later start read the drafts again.
     from infra.settings import get_setting
-    assert get_setting("email_draft_format") is None
+    assert get_setting("email_draft_format") == {"converted": True}
+
+
+@pytest.mark.asyncio
+async def test_a_draft_whose_file_is_gone_does_not_hold_the_pass_open(ownership_scope, caplog):
+    from connections.mail.draft_format_conversion import convert_open_drafts
+    from infra.settings import get_setting
+    scope = ownership_scope
+    path, _ = _draft(scope, "gone.md")
+    path.unlink()
+    await convert_open_drafts()
+    assert "has no file" in caplog.text
+    assert get_setting("email_draft_format") == {"converted": True}
 
 
 @pytest.mark.asyncio
@@ -120,7 +137,7 @@ async def test_writer_failure_keeps_notes_for_the_next_start(ownership_scope, mo
         await conversion.convert_open_drafts()
     assert path.read_bytes() == OLD.encode()
     notes = json.loads(scope["db"].execute("SELECT target_json FROM action_drafts WHERE id=?", (draft_id,)).fetchone()[0])["notes"]
-    assert "same subject in another conversation" in notes
+    assert any("same subject in another conversation" in note for note in notes)
     from infra.settings import get_setting
     assert get_setting("email_draft_format") is None
     await conversion.convert_open_drafts()
