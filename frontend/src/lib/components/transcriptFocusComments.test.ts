@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { placedCommentEnvelopes } from '$lib/chatCommentDelivery';
+import { suppressibleCommentEnvelopes } from '$lib/chatCommentDelivery';
 import { buildTranscriptPresentation, isRunExpanded, runTokens, toggleRun } from './transcriptFocusModel';
 
 const base = { thread_id: 'thread', created_at: '2026-11-09T17:00:00Z' };
@@ -21,7 +21,7 @@ function presentation(sends: any[]) {
   const rows: any[] = [target];
   sends.forEach((row, i) => rows.push(work(i + 1), row));
   rows.push(work(4), last);
-  const placed = placedCommentEnvelopes(rows, 'thread');
+  const placed = suppressibleCommentEnvelopes(rows, 'thread');
   return { placed, entries: buildTranscriptPresentation(rows, true, null, undefined, [], placed) };
 }
 
@@ -37,10 +37,10 @@ describe('Focus comment sends', () => {
     expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message', 'fold', 'message']);
     expect(entries[2]).toMatchObject({ message: { id: 'send-2' } });
   });
-  it('joins across an optimistic send with a shown target', () => {
+  it('keeps an optimistic send visible between work blocks', () => {
     const { entries, placed } = presentation([send(1, { _optimistic: true })]);
-    expect(placed.has('send-1')).toBe(true);
-    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message']);
+    expect(placed.has('send-1')).toBe(false);
+    expect(entries.map(e => e.kind)).toEqual(['message', 'fold', 'message', 'fold', 'message']);
   });
   it('keeps a previously expanded inner stub open after merging', () => {
     const stub = (firstId: string, lastId: string, firstSeq: number, lastSeq: number) => ({
@@ -48,7 +48,7 @@ describe('Focus comment sends', () => {
     });
     const stubs = [stub('a', 'b', 2, 3), stub('c', 'd', 5, 6), stub('e', 'f', 8, 9)];
     const rows: any[] = [{ ...target, seq: 1 }, { ...send(1), seq: 4 }, { ...send(2), seq: 7 }, { ...last, seq: 10 }];
-    const placed = placedCommentEnvelopes(rows, 'thread');
+    const placed = suppressibleCommentEnvelopes(rows, 'thread');
     const before = buildTranscriptPresentation(rows, true, null, undefined, stubs);
     const expanded = new Set(runTokens(before, 3, true));
     const after = buildTranscriptPresentation(rows, true, null, undefined, stubs, placed);

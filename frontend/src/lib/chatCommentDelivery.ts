@@ -4,8 +4,9 @@ import type { ChatComment, Message } from '$lib/stores/threads';
 const replyKey = (userMessageId?: string, cid?: string) => (userMessageId && cid ? `${userMessageId}:${cid}` : '');
 
 /**
- * The empty comment envelopes in one thread that need no row of their own, because every comment they carry
- * is already attached to a loaded target. One pass builds the keys; each envelope then
+ * Empty comment envelopes whose comments are attached to a loaded target. Placement alone does not
+ * decide visibility: suppressibleCommentEnvelopes also preserves delivery and recovery controls.
+ * One pass builds the keys; each envelope then
  * checks its comments against them, so the transcript asks once per change instead of rescanning per row.
  */
 export function placedCommentEnvelopes(rows: Message[], threadId: string | null | undefined): Set<string> {
