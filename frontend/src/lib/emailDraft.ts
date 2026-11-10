@@ -68,6 +68,8 @@ export interface EmailDraftContext {
 	status: ConversationStatus;
 	/** With `error`: why the read failed. */
 	reason?: ConversationFailure;
+	/** With `unreadable`: the reference a system failure was logged under, for the person to quote. */
+	reference?: string;
 }
 
 /** The labels the header view knows; any other line is still a header line, drawn as one being typed. */

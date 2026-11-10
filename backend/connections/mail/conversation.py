@@ -15,7 +15,8 @@ class ConversationEmail:
     sender: str
     date: datetime
     body: str
-    #: From, To and Cc, lowercase: the view marks a recipient the answered email didn't have.
+    #: From, To, Cc and Reply-To, lowercase: the view marks a recipient the answered email didn't have. Reply-To
+    #: counts because it is where the reply guard (``tools.mail_guard.check_reply``) sends a reply by default.
     addresses: tuple[str, ...]
 
 

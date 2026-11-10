@@ -3,9 +3,10 @@
 	import { cubicOut } from 'svelte/easing';
 	import { prefersReducedMotion } from '$lib/stores/viewport';
 	import { formatMoment, parseUTC } from '$lib/time';
+	import ErrorReference from '$lib/components/ui/ErrorReference.svelte';
 	import { previewLine, senderAddress, senderName, type ConversationFailure, type ConversationStatus, type EmailMessage } from '$lib/emailDraft';
 
-	let { messages, repliedTo = null, status = 'ready', reason = 'unreadable', onretry }: {
+	let { messages, repliedTo = null, status = 'ready', reason = 'unreadable', reference, onretry }: {
 		/** Newest first: the emails that came after the one the draft answers, that one, then the older ones. */
 		messages: EmailMessage[];
 		/** The id of the email the draft answers; its row says so. */
@@ -13,6 +14,8 @@
 		status?: ConversationStatus;
 		/** With `error`: why the read failed. Only a failed read can be retried from here; the others need the person elsewhere. */
 		reason?: ConversationFailure;
+		/** With `unreadable`: the reference the failure was logged under (copy C10). */
+		reference?: string;
 		onretry?: () => void;
 	} = $props();
 
@@ -50,6 +53,7 @@
 			<span>{FAILURE[reason]}</span>
 			{#if reason === 'unreadable'}<button type="button" class="email-retry" onclick={onretry}>Retry</button>{/if}
 		</p>
+		{#if reason === 'unreadable' && reference}<ErrorReference {reference} />{/if}
 	{/if}
 	{#if messages.length}
 		<ul class="email-list">

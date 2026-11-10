@@ -28,6 +28,7 @@ from connections.mailhost.read import NEEDS_PASSWORD
 from infra.auth import owns_thread, require_human_user
 from infra.database import get_db
 from infra.db_async import run_in_db
+from infra.failure_reference import new_error_reference
 from registry import artifact_record
 from tools.mail_backends import MailBackend, backend_for
 from tools.reviewed_drafts import draft_at, draft_target, working_root
@@ -107,12 +108,15 @@ async def draft_context(artifact_id: str, user: dict = Depends(require_human_use
         backend = backend_for(account)
     except AccountError:
         return {**failed, "reason": ACCOUNT}
+    # A failed read shows a reference the person can quote, and the log line carries it (copy C10).
+    reference = new_error_reference()
     try:
         return {**base, **await _conversation(backend, str(account["id"]), {**target, "reply_to": str(reply_to)})}
     except (AccountError, DraftRefused) as exc:
-        logger.warning("A draft's conversation could not be read: {}", type(exc).__name__)
         if _signed_out(exc):
+            logger.warning("A draft's conversation could not be read: the account is signed out ({})", type(exc).__name__)
             return {**failed, "reason": ACCOUNT}
+        logger.warning("A draft's conversation could not be read (reference {}): {}: {}", reference, type(exc).__name__, exc)
     except Exception:  # noqa: BLE001 - any other read failure is the same named state, logged with its cause
-        logger.exception("A draft's conversation could not be read")
-    return {**failed, "reason": UNREADABLE}
+        logger.exception("A draft's conversation could not be read (reference {})", reference)
+    return {**failed, "reason": UNREADABLE, "reference": reference}

@@ -175,7 +175,7 @@
 			{#if email}<EmailNotes lines={loudLines} />{/if}
 			{@render editorBlock()}
 			{#if email && (email.conversation.length || email.status !== 'ready')}
-				<EmailConversation messages={email.conversation} repliedTo={repliedToId(email)} status={email.status} reason={email.reason} onretry={() => readAttempt += 1} />
+				<EmailConversation messages={email.conversation} repliedTo={repliedToId(email)} status={email.status} reason={email.reason} reference={email.reference} onretry={() => readAttempt += 1} />
 			{/if}
 		</div>
 	{/if}

@@ -6,6 +6,8 @@ import type { ConversationFailure, EmailDraftContext } from '$lib/emailDraft';
 interface ContextResponse {
 	status: 'ready' | 'error';
 	reason: 'account' | 'unreadable' | null;
+	/** With `unreadable`: the reference the server logged the failure under. */
+	reference?: string;
 	replied_to: string | null;
 	answered: string[] | null;
 	conversation: EmailDraftContext['conversation'];
@@ -21,19 +23,20 @@ const REFUSED: Record<number, ConversationFailure> = { 401: 'signin', 404: 'miss
  * request that fails before the server answers is the same named state as a failed read, so the view offers its retry.
  */
 export async function fetchEmailDraftContext(artifactId: string): Promise<EmailDraftContext> {
-	const failed = (reason: ConversationFailure): EmailDraftContext => ({ status: 'error', reason, conversation: [], notes: [], attachments: [] });
+	const failed = (reason: ConversationFailure, reference?: string): EmailDraftContext => ({ status: 'error', reason, reference, conversation: [], notes: [], attachments: [] });
 	let body: ContextResponse;
 	try {
 		const res = await fetch(`/api/email-drafts/${encodeURIComponent(artifactId)}/context`, {
 			headers: { Authorization: `Bearer ${get(token) ?? ''}` },
 		});
-		if (!res.ok) return failed(REFUSED[res.status] ?? 'unreadable');
+		// A server error answers with the reference it logged (backend/main.py).
+		if (!res.ok) return failed(REFUSED[res.status] ?? 'unreadable', (await res.json().catch(() => null))?.reference ?? undefined);
 		body = (await res.json()) as ContextResponse;
 	} catch {
 		return failed('unreadable');
 	}
 	return {
-		status: body.status, reason: body.reason ?? undefined, repliedTo: body.replied_to ?? undefined,
+		status: body.status, reason: body.reason ?? undefined, reference: body.reference, repliedTo: body.replied_to ?? undefined,
 		answered: body.answered ?? undefined, conversation: body.conversation ?? [],
 		attachments: body.attachments ?? [], notes: body.notes ?? [],
 	};

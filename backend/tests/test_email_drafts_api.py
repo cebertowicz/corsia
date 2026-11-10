@@ -12,10 +12,12 @@ import json
 import httpx
 import pytest
 from fastapi import HTTPException
+from loguru import logger
 
 import infra.config as config
 from api.email_drafts import draft_context
 from infra.database import get_db
+from infra.failure_reference import REFERENCE
 from registry.service import register_write
 from tests.test_google_email import (  # noqa: F401  (fixtures)
     GMAIL,
@@ -44,6 +46,10 @@ def _email(mid: str, sender: str, when_ms: int, body: str, *, labels=(), to: str
 ANSWERED = {**THREADED, "payload": {**_text("Noon or one?"), "headers": [
     *THREADED["payload"]["headers"],
     {"name": "To", "value": "Sam Lee <sam@example.com>"}, {"name": "Cc", "value": "Ana Ruiz <ana@mail.example>"},
+]}}
+# A list's email: the reply guard sends a reply to its Reply-To by default, so that address is on the email too.
+LIST_ANSWERED = {**ANSWERED, "payload": {**ANSWERED["payload"], "headers": [
+    *ANSWERED["payload"]["headers"], {"name": "Reply-To", "value": "Lunch club <lunch@lists.example>"},
 ]}}
 OLDER = _email("m-090", "Sam Lee <sam@example.com>", 1793000000000, "Lunch this week?", labels=("SENT",))
 NEWER = _email("m-110", "Lee Park <lee@mail.example>", 1793100000000, "I can come too.")
@@ -108,6 +114,40 @@ async def test_a_failed_thread_read_is_the_named_unreadable_state(mail):
     context = await draft_context(_artifact(saved), _owner(mail.thread))
     assert (context["status"], context["reason"], context["conversation"]) == ("error", "unreadable", [])
     assert context["replied_to"] == "m-100"
+    assert REFERENCE.match(context["reference"])
+
+
+@pytest.mark.asyncio
+async def test_the_failed_read_is_logged_under_the_reference_the_person_sees(mail, monkeypatch):
+    import api.email_drafts as route
+    from connections.account_errors import AccountError
+
+    class Failing:
+        def __init__(self, exc: Exception):
+            self.exc = exc
+
+        async def conversation(self, account_id, target):
+            raise self.exc
+
+    saved = await _draft(mail, reply_to_message_id="m-100")
+    logged: list[str] = []
+    sink = logger.add(lambda message: logged.append(str(message)), level="WARNING")
+    try:
+        for exc in (RuntimeError("socket closed"), AccountError("That message can't be found.")):
+            monkeypatch.setattr(route, "backend_for", lambda account, exc=exc: Failing(exc))
+            context = await draft_context(_artifact(saved), _owner(mail.thread))
+            assert context["reason"] == "unreadable"
+            assert any(context["reference"] in line and type(exc).__name__ in line for line in logged)
+    finally:
+        logger.remove(sink)
+
+
+@pytest.mark.asyncio
+async def test_a_reply_to_address_counts_as_on_the_answered_email(mail):
+    saved = await _draft(mail, reply_to_message_id="m-100")
+    _serve(mail, [OLDER, LIST_ANSWERED, NEWER])
+    context = await draft_context(_artifact(saved), _owner(mail.thread))
+    assert context["answered"] == ["pat@mail.example", "sam@example.com", "ana@mail.example", "lunch@lists.example"]
 
 
 @pytest.mark.asyncio

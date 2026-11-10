@@ -117,6 +117,15 @@ describe('reading a draft’s context', () => {
 		expect(await fetchEmailDraftContext('a')).toMatchObject({ status: 'error', reason: 'account', conversation: [] });
 	});
 
+	it('carries the reference a failed read was logged under, from the route or from a server error', async () => {
+		vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+			status: 'error', reason: 'unreadable', reference: 'K7Q2MX', replied_to: 'r-1', answered: null, conversation: [], attachments: [], notes: [],
+		}), { status: 200 })));
+		expect(await fetchEmailDraftContext('a')).toMatchObject({ status: 'error', reason: 'unreadable', reference: 'K7Q2MX' });
+		vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ detail: 'Something went wrong in CORSIA. Try again.', reference: 'P3WD9A' }), { status: 500 })));
+		expect(await fetchEmailDraftContext('a')).toMatchObject({ status: 'error', reason: 'unreadable', reference: 'P3WD9A' });
+	});
+
 	it('names an ended sign-in and a draft that isn’t found, and turns any other failure into a failed read the view can retry', async () => {
 		vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })));
 		expect(await fetchEmailDraftContext('a')).toEqual({ status: 'error', reason: 'signin', conversation: [], notes: [], attachments: [] });
@@ -124,6 +133,8 @@ describe('reading a draft’s context', () => {
 		expect(await fetchEmailDraftContext('a')).toMatchObject({ status: 'error', reason: 'missing' });
 		vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 500 })));
 		expect(await fetchEmailDraftContext('a')).toMatchObject({ status: 'error', reason: 'unreadable' });
+		vi.stubGlobal('fetch', vi.fn(async () => new Response('not json', { status: 502 })));
+		expect(await fetchEmailDraftContext('a')).toMatchObject({ status: 'error', reason: 'unreadable', reference: undefined });
 		vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('offline'); }));
 		expect(await fetchEmailDraftContext('a')).toMatchObject({ status: 'error', reason: 'unreadable' });
 	});

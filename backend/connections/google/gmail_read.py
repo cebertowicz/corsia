@@ -191,9 +191,12 @@ async def conversation(account_id: str, thread_id: str) -> list[ConversationEmai
             continue
         payload = raw.get("payload") or {}
         headers = headers_from_payload(payload)
+        # Reply-To isn't one of the tool-shape headers; the view needs it only as an address.
+        reply_to = next((str(h.get("value", "")) for h in payload.get("headers") or []
+                         if isinstance(h, dict) and str(h.get("name", "")).lower() == "reply-to"), "")
         emails.append(ConversationEmail(
             message_id=str(raw["id"]), sender=headers.get("from", ""),
             date=datetime.fromtimestamp(int(raw["internalDate"]) / 1000, timezone.utc), body=body_text(payload),
-            addresses=header_addresses(headers.get("from", ""), headers.get("to", ""), headers.get("cc", "")),
+            addresses=header_addresses(headers.get("from", ""), headers.get("to", ""), headers.get("cc", ""), reply_to),
         ))
     return emails

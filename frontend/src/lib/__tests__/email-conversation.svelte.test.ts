@@ -111,6 +111,14 @@ describe('EmailConversation read states', () => {
 		expect(tries).toBe(1);
 	});
 
+	it('shows the reference a failed read was logged under, and none without one', () => {
+		component = mount(EmailConversation, { target: host, props: { messages: [], status: 'error', reference: 'K7Q2MX' } });
+		expect(host.querySelector('.reference')?.textContent).toBe('Reference: K7Q2MX');
+		unmount(component);
+		component = mount(EmailConversation, { target: host, props: { messages: [], status: 'error', reason: 'account', reference: 'K7Q2MX' } });
+		expect(host.querySelector('.reference')).toBeNull();
+	});
+
 	it.each([
 		['account', 'This draft’s email account is signed out or removed. Reconnect it in Settings › Connected apps.'],
 		['signin', 'You’re signed out of CORSIA. Sign in again to see the earlier emails.'],

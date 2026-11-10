@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import email
+import email.parser
 import email.policy
 import re
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ _FLAGS = re.compile(rb"\bFLAGS\s*\(([^)]*)\)", re.I)
 _INTERNAL_DATE = re.compile(rb'\bINTERNALDATE\s+"([^"]+)"', re.I)
 _SENT_ID = re.compile(r"^sent:([0-9a-f]{8}):(\d{1,12}):(\d{1,12})$")
 _FIELDS = "FROM DATE SUBJECT REPLY-TO MESSAGE-ID IN-REPLY-TO REFERENCES"
+_HEADERS_ONLY = email.parser.BytesHeaderParser(policy=email.policy.default)
 
 
 @dataclass
@@ -249,6 +251,8 @@ def _conversation(ep, username: str, password: str, account_id: str, ids: set[st
             found = _batch(conn, ep, uids, f"(UID FLAGS INTERNALDATE BODY.PEEK[]<0.{read.MAX_FETCH_BYTES}>)", flags=True)
             for uid, (raw, _, arrival) in found.items():
                 headers, body = read.parse(raw, with_body=True)
+                # Reply-To isn't one of the tool-shape headers; the view needs it only as an address.
+                reply_to = str(_HEADERS_ONLY.parsebytes(raw).get("Reply-To", ""))
                 try:
                     date = datetime.strptime(arrival.decode("ascii"), "%d-%b-%Y %H:%M:%S %z").astimezone(timezone.utc)
                 except (ValueError, UnicodeError):
@@ -256,7 +260,7 @@ def _conversation(ep, username: str, password: str, account_id: str, ids: set[st
                 emails.append(ConversationEmail(
                     message_id=_message_id(account_id, folder, validity, uid),
                     sender=headers.get("from", ""), date=date, body=body,
-                    addresses=header_addresses(headers.get("from", ""), headers.get("to", ""), headers.get("cc", "")),
+                    addresses=header_addresses(headers.get("from", ""), headers.get("to", ""), headers.get("cc", ""), reply_to),
                 ))
     return emails
 

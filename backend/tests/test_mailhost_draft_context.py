@@ -34,7 +34,8 @@ async def test_the_conversation_is_read_in_one_session_with_one_search_and_one_f
     context = await draft_context(_artifact(saved), _owner(host.thread))
     assert context["status"] == "ready" and context["replied_to"] == _id(host)
     assert [m["body"].strip() for m in context["conversation"]] == ["Noon on Friday?", "Friday works."]
-    assert context["answered"] == ["sam@example.com", "you@example.com"]
+    # The draft goes to the Reply-To by default, so that address is on the answered email, not an added one.
+    assert context["answered"] == ["sam@example.com", "you@example.com", "team@example.com"]
     verbs = [verb for _, verb in imap.commands[commands:]]
     assert verbs.count("LOGIN") == 1
     # Inbox: one SEARCH for the draft's thread Message-IDs and one FETCH; Sent: one SEARCH that found nothing to fetch.
