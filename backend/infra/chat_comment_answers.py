@@ -103,4 +103,12 @@ JOIN messages target ON target.id=c.target_message_id AND target.thread_id=a.thr
 JOIN messages u ON u.id=a.user_message_id AND u.thread_id=a.thread_id
 JOIN messages m ON m.id=a.assistant_message_id AND m.thread_id=a.thread_id
 LEFT JOIN chat_comment_views v ON v.user_id=? AND v.user_message_id=a.user_message_id AND v.cid=a.cid"""
-UNREAD_WHERE = "(v.user_id IS NULL OR v.seen_at < a.answered_at)"
+# One agent message is one answer in a comment thread, however many of the thread's cids it tags.
+# That answer is read and stamped through its first row: the thread's earliest tagged comment.
+UNREAD_WHERE = """(v.user_id IS NULL OR v.seen_at < a.answered_at) AND NOT EXISTS (
+SELECT 1 FROM chat_comment_answers o
+JOIN chat_comments oc ON oc.thread_id=o.thread_id AND oc.user_message_id=o.user_message_id AND oc.cid=o.cid
+WHERE o.assistant_message_id=a.assistant_message_id AND +o.thread_id=a.thread_id
+AND COALESCE(oc.root_user_message_id,oc.user_message_id)=COALESCE(c.root_user_message_id,c.user_message_id)
+AND COALESCE(oc.root_cid,oc.cid)=COALESCE(c.root_cid,c.cid)
+AND (oc.created_at,oc.user_message_id,oc.cid) < (c.created_at,c.user_message_id,c.cid))"""

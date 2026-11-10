@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { closeComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page, type Route } from '@playwright/test';
 import { chatComposer, createSession, loadPastFirstRunLanding, loginByUrl, replacePreviousFixtureThread, sidebarThread, TEST_SESSION_TOKEN, TEST_TOKEN } from '../support/corsia';
@@ -800,7 +801,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await stageDocument(page, threadId, scenario.docPath, scenario.name, width);
 			await expect(page.getByText(PASSAGES[0].reply, { exact: true })).toBeVisible();
 			await documentReady(page);
-			await page.getByRole('button', { name: 'Close comments' }).click();
+			await closeComments(page);
 
 			// A reply to each thread lands while the reader is in the document: they count, and nothing interrupts.
 			await page.waitForTimeout(1100);

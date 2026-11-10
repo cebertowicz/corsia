@@ -1,24 +1,31 @@
 import * as Y from 'yjs';
 import { get, type Writable } from 'svelte/store';
 import type { DocComment } from './docComments';
+import { anchoredQuote } from './docCommentProjection';
 import { encodeUpdate, textDigest, type DocumentFrame } from './documentWire';
 import { liveDocumentBindings } from './liveDocuments';
 import type { LiveDocumentSession } from './liveDocumentSession';
+import { edges, placeNow, type Positions } from './docCommentPositions';
 
 /** A live row's placement (4.2). Rows without one are not live, or have no place the server tracks. */
 export type Placement = 'placed' | 'placing' | 'not_placed';
 type Rows = Writable<Record<string, DocComment[]>>;
-type Positions = { from: Y.RelativePosition; to: Y.RelativePosition };
 type Range = NonNullable<DocumentFrame['ranges']>[number];
 
 /** The rows the server keeps a live range for: anchored, top level, not a review comment, not orphaned. */
 const placeable = (row: DocComment) => !row.review && !!row.anchor && !row.orphaned;
 const unplaced = (row: DocComment): DocComment => ({ ...row, placement: undefined, drawn: false });
+/** A reload places lost comments again: every anchored row goes back to Placing; a row never drawn keeps its orphan eligibility meanwhile. */
+const markReloading = (rows: DocComment[]): DocComment[] => rows.map(row => row.anchor && !row.review
+	? { ...row, placement: row.placement === undefined && !row.drawn ? undefined : 'placing' } : row);
+/** A lost comment: the server's range for it is gone, and it is not resolved. */
+const lost = (row: DocComment) => row.orphaned && !row.resolved;
 
 /**
  * One live document's placement. Composed only by the comments store, and writes only its rows:
  * there is no second collection, timer or retry registry. Cleanliness is read from the session's
- * durability bookkeeping (4.1), never kept here.
+ * durability bookkeeping (4.1), never kept here. Lost quotes are re-placed when comments are shown again
+ * (a load, or a held comment arriving, shown or released).
  */
 class LivePlacement {
 	readonly session: LiveDocumentSession;
@@ -26,6 +33,8 @@ class LivePlacement {
 	private seq = 0;
 	private inFlight: { seq: number; requestId: string; reload: boolean } | null = null;
 	private marked: { reload: boolean } | null = null;
+	/** A reload is queued or in flight. A refusal is logged; the next time comments are shown can ask again. */
+	private reloading = false;
 	private positions = new Map<string, Positions>();
 	private server = new Map<string, string>();
 	private clean: boolean;
@@ -47,27 +56,26 @@ class LivePlacement {
 
 	holds(id: string): boolean { return this.current().some(row => row.id === id); }
 
-	/** A comments load: rows whose server range is new or changed, or that are not placed, are asked for. */
+	/** Comments are shown again: rows whose server range is new or changed, or that are not placed, are asked for. */
 	show(next: DocComment[]): void {
 		const previous = new Map(this.current().map(row => [row.id, row]));
 		let ask = false;
 		const rows = next.map(row => {
 			const old = previous.get(row.id);
-			if (!placeable(row)) return old?.placementReloading || old?.placementReloadError
-				? { ...row, placementReloading: old.placementReloading, placementReloadError: old.placementReloadError } : row;
+			if (!placeable(row)) return row;
 			const key = `${row.from}:${row.to}:${row.anchor}`, changed = this.server.get(row.id) !== key;
 			this.server.set(row.id, key);
 			const drawn = old?.drawn ? { drawn: true, from: old.from, to: old.to } : { drawn: false };
-			const reload = old?.placementReloading || old?.placementReloadError
-				? { placementReloading: old.placementReloading, placementReloadError: old.placementReloadError } : {};
-			if (!changed && old?.placement === 'placed' && old.drawn) return { ...row, ...drawn, ...reload, placement: 'placed' as const };
+			if (!changed && old?.placement === 'placed' && old.drawn) return { ...row, ...drawn, placement: 'placed' as const };
 			ask = true;
-			return { ...row, ...drawn, ...reload, placement: 'placing' as const };
+			return { ...row, ...drawn, placement: 'placing' as const };
 		});
 		const ids = new Set(next.map(row => row.id));
 		for (const id of [...this.positions.keys()]) if (!ids.has(id)) this.positions.delete(id);
 		this.rows.update(all => ({ ...all, [this.session.artifactId]: rows }));
-		if (ask) this.ask();
+		const text = this.session.text.toString();
+		const hasLostWords = rows.some(row => { const quote = anchoredQuote(row); return lost(row) && !!quote && text.includes(quote); });
+		if (!(hasLostWords && this.reload()) && ask) this.ask();
 	}
 
 	retry(): void {
@@ -75,10 +83,11 @@ class LivePlacement {
 		this.ask(true);
 	}
 
-	/** Re-resolve the live document's orphaned quotes through this placement lifecycle. */
-	reload(): boolean {
-		if (this.destroyed || this.session.connection !== 'connected' || this.current().some(row => row.placementReloading)) return false;
-		this.markReloading();
+	/** Re-resolve lost quotes when comments are shown again through this placement lifecycle. */
+	private reload(): boolean {
+		if (this.destroyed || this.session.connection !== 'connected' || this.reloading) return false;
+		this.reloading = true;
+		this.write(markReloading);
 		this.ask(true);
 		return true;
 	}
@@ -97,18 +106,6 @@ class LivePlacement {
 	private write(change: (rows: DocComment[]) => DocComment[]): void {
 		const id = this.session.artifactId;
 		this.rows.update(all => all[id] ? { ...all, [id]: change(all[id]) } : all);
-	}
-
-	private markReloading(): void {
-		this.write(rows => rows.map(row => row.anchor && !row.review
-			// A row with no placement has never been drawn; keep its orphan eligibility while Reload is in flight.
-			? {
-				...row,
-				placement: row.placement === undefined && !row.drawn ? undefined : 'placing',
-				placementReloading: true,
-				placementReloadError: false,
-			}
-			: row));
 	}
 
 	private ask(reload = false): void {
@@ -146,15 +143,16 @@ class LivePlacement {
 			if (!this.inFlight || frame.request_id !== this.inFlight.requestId || frame.kind === 'store_mismatch') return;
 			const request = this.inFlight;
 			this.inFlight = null;
-			this.write(rows => rows.map(row => row.placement === 'placing'
-				? { ...row, placement: 'not_placed', placementReloadError: request.reload ? row.placementReloading : row.placementReloadError }
-				: request.reload && row.placementReloading ? { ...row, placementReloadError: true } : row));
-			if (request.reload) this.settleReload();
+			this.write(rows => rows.map(row => row.placement === 'placing' ? { ...row, placement: 'not_placed' } : row));
+			if (request.reload) {
+				console.error('Comment placement: placing lost comments again failed', { artifactId: this.session.artifactId, kind: frame.kind });
+				this.settleReload();
+			}
 			this.next();
 		} else if (frame.type === 'doc_opened') {
 			if (this.current().some(row => row.placement === 'placing' || row.placement === 'not_placed') || this.marked?.reload) {
 				this.write(rows => rows.map(row => row.placement === 'not_placed' ? { ...row, placement: 'placing' } : row));
-				if (this.marked?.reload) this.markReloading();
+				if (this.marked?.reload) this.write(markReloading);
 				this.next(true);
 			}
 		} else if (frame.type === 'doc_ack') {
@@ -204,10 +202,7 @@ class LivePlacement {
 			this.write(rows => rows.map(row => row.placement === 'placing' ? { ...row, placement: 'not_placed' } : row));
 		}
 		// Otherwise the tab holds local-only changes: rows stay Placing until it next becomes clean.
-		if (reload) {
-			this.clearReloadErrors();
-			this.settleReload();
-		}
+		if (reload) this.settleReload();
 		this.next();
 	}
 
@@ -217,11 +212,9 @@ class LivePlacement {
 			.map(range => [range.id, range]));
 		const keep = this.marked !== null; // a newer answer decides rows this one does not name
 		const { text } = this.session;
-		for (const [id, range] of found) {
-			// Exclusive boundaries: text typed exactly at either edge lands outside the range.
-			this.positions.set(id, { from: Y.createRelativePositionFromTypeIndex(text, range.from_off, 0),
-				to: Y.createRelativePositionFromTypeIndex(text, range.to_off, -1) });
-		}
+		// An open end (`docCommentPositions.ts`) survives an answer that agrees with the row: the server holds it open too.
+		const open = (id: string, range: Range) => !!this.positions.get(id)?.open && this.current().some(row => row.id === id && row.from === range.from_off && row.to === range.to_off);
+		for (const [id, range] of found) this.positions.set(id, edges(text, range.from_off, range.to_off, open(id, range)));
 		this.write(rows => rows.map(original => {
 			const state = flags.get(original.id);
 			const row = state ? { ...original, orphaned: state.orphaned, textChanged: state.text_changed, statusText: snapshotText } : original;
@@ -235,28 +228,17 @@ class LivePlacement {
 		}));
 	}
 
-	private clearReloadErrors(): void {
-		this.write(rows => rows.some(row => row.placementReloading && row.placementReloadError)
-			? rows.map(row => row.placementReloading ? { ...row, placementReloadError: false } : row)
-			: rows);
-	}
-
-	private settleReload(): void {
-		this.write(rows => rows.some(row => row.placementReloading)
-			? rows.map(row => row.placementReloading ? { ...row, placementReloading: false } : row)
-			: rows);
-	}
+	private settleReload(): void { this.reloading = false; }
 
 	/** Drawn rows move only by their own relative positions, on every change to the text. */
 	private moved = (event: Y.YTextEvent): void => {
 		if (!this.needsStates) this.needsStates = this.editsInside(event.delta);
 		if (!this.positions.size) return;
-		const { doc } = this.session;
 		this.write(rows => rows.map(row => {
 			const at = row.drawn ? this.positions.get(row.id) : undefined;
 			if (!at) return row;
-			const from = Y.createAbsolutePositionFromRelativePosition(at.from, doc)?.index;
-			const to = Y.createAbsolutePositionFromRelativePosition(at.to, doc)?.index;
+			const { from, to, moved } = placeNow(at, this.session.text, row, event.delta);
+			if (moved) this.positions.set(row.id, moved);
 			return from === undefined || to === undefined || (from === row.from && to === row.to) ? row : { ...row, from, to };
 		}));
 	};
@@ -292,9 +274,6 @@ export function trackPlacements(rows: Rows) {
 		},
 		retry(commentId: string): void {
 			for (const placement of live.values()) if (placement.holds(commentId)) placement.retry();
-		},
-		reload(artifactId: string): boolean {
-			return live.get(artifactId)?.reload() ?? false;
 		},
 	};
 }

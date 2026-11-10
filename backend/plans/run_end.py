@@ -9,7 +9,7 @@ as a ``workflow_run_ended`` event on the phase.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Iterable
 
 import plans.service as service
 from plans import node_states
@@ -123,12 +123,27 @@ def record_if_ended(db, node_id: str, new_state: str) -> None:
         parent_id = parent["parent_id"]
 
 
+def records(db, phase_ids: Iterable[str]) -> dict[str, dict[str, Any]]:
+    """Each listed run phase's recorded end, by phase id; a phase that has not ended is absent.
+
+    The one reader of ``workflow_run_ended``: a run writes it once, so its first row is its record.
+    ``_recorded_at`` is the event timestamp, not a field in the stored payload.
+    """
+    ids = list(dict.fromkeys(str(value) for value in phase_ids))
+    if not ids:
+        return {}
+    found: dict[str, dict[str, Any]] = {}
+    for row in db.execute(
+        "SELECT node_id,payload_json,created_at FROM plan_node_events WHERE event=?"
+        " AND node_id IN (SELECT value FROM json_each(?)) ORDER BY created_at,rowid",
+        (EVENT, json.dumps(ids)),
+    ):
+        found.setdefault(str(row["node_id"]), {**json.loads(row["payload_json"]), "_recorded_at": row["created_at"]})
+    return found
+
+
 def _ended(db, phase_id: str) -> dict[str, Any] | None:
-    row = db.execute(
-        "SELECT payload_json FROM plan_node_events WHERE node_id=? AND event=? ORDER BY created_at,rowid LIMIT 1",
-        (phase_id, EVENT),
-    ).fetchone()
-    return None if row is None else json.loads(row["payload_json"])
+    return records(db, [phase_id]).get(phase_id)
 
 
 def _record(db, phase) -> None:

@@ -29,7 +29,7 @@
 	import { MessageListScrollControl } from './messageListScrollControl';
 	import { createFocusWorkBlock } from './focusWorkBlock.svelte';
 	import { visibleChatAnswerRows } from '$lib/chatAnswerText';
-
+	import { suppressibleCommentEnvelopes } from '$lib/chatCommentDelivery';
 	let { messagesEl = $bindable(), layoutRoot = undefined, userIsNearBottom = $bindable(true), ignoreScrollEvents = $bindable(false), hideScrollFab = false, onOpenLightbox, hasMoreMessages = false, loadingOlderMessages = false, olderLoadFailed = false, onLoadOlder, firstLoadPending = false, firstLoadFailed = false, onRetryFirstLoad, threadId = undefined, turnSummaries = {}, historyComplete = undefined, focusRuns = [], runLoads = {}, onLoadRun }: {
 		messagesEl: HTMLDivElement | undefined;
 		/** The panel holding this transcript's composer, when the transcript is not its direct child (it sits beside the comment margin). */
@@ -143,19 +143,18 @@
 			? { turnId: renderedThreadId ? $turnStates.get(renderedThreadId)?.turnId ?? null : null }
 			: null,
 	);
+	const placedEnvelopes = $derived(suppressibleCommentEnvelopes($messages, renderedThreadId));
 	const transcriptEntries = $derived(mergeTranscriptUpdates(
-		buildTranscriptPresentation(transcriptMessages, focusMode, liveTurn, undefined,
-			focusMode ? focusRuns.filter((run) => runHasMore(run, runLoads[run.lastId])) : []),
-		(revealingOpening ? [] : renderedThreadId ? $threadUpdateCards[renderedThreadId]?.cards ?? [] : []).filter((card) => card.after_seq >= windowFloor),
-		{
-			focusMode, divider: renderedThreadId ? $visitDividers[renderedThreadId]?.divider ?? null : null,
-			pauses: pauseDescriptors, turnSummaries,
-			sourceContext: renderedThreadId ? {
-				threadId: renderedThreadId, phase: $turnStates.get(renderedThreadId)?.phase ?? 'idle',
-				turnId: $turnStates.get(renderedThreadId)?.turnId ?? null,
-			} : undefined,
-		},
-	));
+			buildTranscriptPresentation(transcriptMessages, focusMode, liveTurn, undefined,
+				focusMode ? focusRuns.filter((run) => runHasMore(run, runLoads[run.lastId])) : [], placedEnvelopes),
+			(revealingOpening ? [] : renderedThreadId ? $threadUpdateCards[renderedThreadId]?.cards ?? [] : []).filter((card) => card.after_seq >= windowFloor),
+			{
+				focusMode, divider: renderedThreadId ? $visitDividers[renderedThreadId]?.divider ?? null : null,
+				pauses: pauseDescriptors, turnSummaries,
+				sourceContext: renderedThreadId ? { threadId: renderedThreadId,
+					phase: $turnStates.get(renderedThreadId)?.phase ?? 'idle', turnId: $turnStates.get(renderedThreadId)?.turnId ?? null } : undefined,
+			},
+		));
 	const initialLanding = new InitialLandingIntent((landing) => {
 		if (landing.target === 'divider') {
 			landedVisit = landing.threadId;
@@ -311,6 +310,7 @@
 	<!-- Every transcript row, live work included, renders through the body's Focus classification. -->
 		<MessageListBody
 			{transcriptEntries}
+			{placedEnvelopes}
 			{pendingEntries}
 			retryRows={focusMode ? messageRows.filter(needsWakeRetry) : []}
 			{expandedTools}
@@ -355,12 +355,12 @@
 		border-radius: 8px;
 	}
 	/* Padding-top would be added to a sticky child's `top`, so the lead-in under the header is a spacer; sticky chrome
-	   pins at `--sticky-top`, 8px under it. Bottom padding also carries `--margin-overhang`: the comment margin's room. */
+	   pins at `--sticky-top`, 8px under it. */
 	.messages {
 		flex: 1; overflow-y: auto; min-width: 0;
 		--sticky-top: calc(var(--header-bottom) + 8px);
 		--messages-lead: calc(var(--header-bottom) + 24px);
-		padding: 0 16px calc(var(--input-bar-height, 100px) + 16px + var(--margin-overhang, 0px));
+		padding: 0 16px calc(var(--input-bar-height, 100px) + 16px);
 	}
 	.messages::before { content: ''; display: block; flex: none; height: var(--messages-lead); }
 	@media (max-width: 768px) {

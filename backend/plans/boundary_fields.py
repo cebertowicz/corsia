@@ -53,10 +53,8 @@ PARK_OPERATIONS = frozenset({"pause_node", "block_node", "arm_watch"})
 #: to start next, and only their results carry ``next``: what now holds that
 #: executor's slot and its other open tasks.
 NEXT_OPERATIONS = CLOSING_OPERATIONS | PARK_OPERATIONS
-#: Operations only the authenticated user applies, over HTTP. The agent tool
-#: schema never lists them: only the user pauses or resumes (pause contract
-#: rule 1). An agent schedules a task instead (``plans.scheduled_wait``).
-HUMAN_OPERATIONS = frozenset({"resume", "pause", "pause_node"})
+#: Only the person pauses individual tasks. Coordinators may pause another plan.
+HUMAN_OPERATIONS = frozenset({"pause_node"})
 _NEXT = {"next_node_id"}
 
 OPERATION_FIELDS = {

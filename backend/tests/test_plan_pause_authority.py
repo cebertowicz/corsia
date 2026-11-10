@@ -1,6 +1,7 @@
-"""Pause is the user's (pause contract rule 1, #1969; W1 of the work-never-stops design).
+"""Pause is the person's (pause contract rule 1, #1969; W1 of the work-never-stops design).
 
-Only the user pauses or resumes. An agent's pause is refused in one line that
+The person pauses or resumes; so does a coordinator on another agent's plan
+(``test_plan_conductor_task_adds``). An agent's pause of its own plan is refused in one line that
 says how to schedule the task instead, even in a Turn carrying the user's word:
 the agent relays the user by scheduling, and the user pauses from the pane.
 """
@@ -54,7 +55,7 @@ def _change(db, operation: str, actor: PlanActor, key: str):
 
 
 SCHEDULE_INSTEAD = (
-    "Pause is the user's. To come back to this later, schedule it: "
+    "Only the person or their conductor pauses. To come back to this later, schedule it: "
     "arm_watch(node_id={node}, condition={{type: deadline, value: <ISO time>}}, reason=<why>)."
 )
 
@@ -117,7 +118,7 @@ def test_only_the_user_resumes():
     _change(db, "pause", HUMAN, "user-pause")
     _deliver(db, "m1", "user", {})
 
-    with pytest.raises(service.PlanRefusal, match="only the user resumes"):
+    with pytest.raises(service.PlanRefusal, match="Only the person or their conductor resumes"):
         _change(db, "resume", _agent(), "agent-resume")
 
     assert _change(db, "resume", HUMAN, "user-resume")["state"] == "active"

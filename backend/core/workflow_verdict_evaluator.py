@@ -10,11 +10,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import datetime, timezone
-from typing import Iterable
+from typing import Any, Iterable
 
 from loguru import logger
 
-from core.workflow_verdict_read import PLANNED_EVENT, REACHED_EVENT
+from core.workflow_verdict_read import PLANNED_EVENT, REACHED_EVENT, json_ids
 from core.workflow_verdict_rules import Evaluation, Verdict
 from core.workflow_verdict_types import split_subject
 from infra.outcome_events import record_outcome_event
@@ -51,6 +51,35 @@ def detail_text(verdict: Verdict) -> str:
         if len(text) <= DETAIL_LIMIT:
             return text
     raise AssertionError("unreachable: a look alone fits")
+
+
+def reached_detail(db: sqlite3.Connection, subjects: Iterable[str]) -> dict[str, dict[str, Any]]:
+    """Each reached verdict's own record: its word, its reason, and the look and inputs it decided on.
+
+    :func:`core.workflow_verdict_rules.compute` never recomputes a subject that has a reached verdict
+    (VR-3), so a read that shows where a comparison stands reads the record instead of deciding again.
+    The detail is :func:`detail_text`'s JSON: a look always, the deciding inputs and per-measure calls
+    while they fit the record's size limit, so a thin record yields a thin detail. An empty subject list
+    reads nothing, as :func:`core.workflow_verdict_read.recorded_verdicts` does: a caller with no subjects
+    of interest never gets the install's whole reached history.
+    """
+    encoded = json_ids(subjects)
+    if encoded == "[]":
+        return {}
+    where = " AND subject_key IN (SELECT value FROM json_each(:subjects))"
+    params = {"reached": REACHED_EVENT, "subjects": encoded}
+    found: dict[str, dict[str, Any]] = {}
+    for row in db.execute(f"""
+        SELECT subject_key, attributes FROM outcome_events
+        WHERE event_name=:reached AND retracted_at IS NULL AND subject_key IS NOT NULL{where}
+    """, params).fetchall():
+        recorded = json.loads(row["attributes"])
+        detail = recorded.get("detail")
+        found[row["subject_key"]] = {
+            "word": recorded["verdict"], "reason": recorded["reason"],
+            **(json.loads(detail) if isinstance(detail, str) else dict(detail or {})),
+        }
+    return found
 
 
 def write_verdicts(connection: sqlite3.Connection, evaluations: Iterable[Evaluation]) -> int:

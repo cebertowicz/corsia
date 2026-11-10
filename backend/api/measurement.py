@@ -17,6 +17,7 @@ from api.measurement_findings import derive_findings_state
 from api.measurement_join import joined_read
 from api.measurement_limits import first_recorded_period, limits_by_period, router as limits_router
 from api.measurement_recent import router as recent_router
+from api.measurement_workflows import router as workflows_router
 from api.measurement_presence import PresenceCoverage, presence_coverage
 from api.measurement_corrections import COVERAGE_METRICS, corrections_family, coverage_value
 from api.measurement_breaks import (
@@ -42,6 +43,7 @@ from core.measurement_scope import Grain, ScopeError
 router = APIRouter(prefix="/api/measurement", tags=["measurement"])
 router.include_router(limits_router)
 router.include_router(recent_router)
+router.include_router(workflows_router)
 router.include_router(agent_kpis_router)
 
 

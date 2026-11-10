@@ -1,4 +1,4 @@
-import { inResolved, showAllThreads } from '../support/commentDrawer';
+import { closeComments, inResolved, showAllThreads } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { saveEvidenceScreenshot } from '../support/corsia';
@@ -112,7 +112,7 @@ for (const [width, height, project] of layouts) {
 				return !!document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.closest('[data-adaptive-drawer]');
 			});
 			expect(covered, 'the insert is under the list sheet and its scrim').toBe(true);
-			await page.getByRole('button', { name: 'Close comments', exact: true }).click();
+			await closeComments(page);
 			await expect(drawer).toHaveCount(0);
 			if (project === 'chromium-mobile') await insert(page, fine).tap(); else await insert(page, fine).click();
 			await expect(card('Loosen the second line.')).toBeVisible();
@@ -202,7 +202,7 @@ for (const [width, height, project] of layouts) {
 			// closed before the document is touched, and the card is still listed when it opens again.
 			await openComments(page, drawer);
 			await expect(strike(page, loose)).toHaveText('is loose');
-			await page.getByRole('button', { name: 'Close comments', exact: true }).click();
+			await closeComments(page);
 			await expect(drawer).toHaveCount(0);
 			// The click lands at the line's end, clear of the margin markers on its left, and Home returns the caret to the line's start.
 			const line = editor.locator('.cm-line', { hasText: 'The first line is loose.' });

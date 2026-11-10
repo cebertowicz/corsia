@@ -18,10 +18,8 @@
 		createdAt?: string;
 	};
 
-	let { replies, newReplyIds = new Set<string>(), collapseReplyIds = newReplyIds, onNewestReplyRendered, fullNames = false }: {
+	let { replies, newReplyIds = new Set<string>(), collapseReplyIds = newReplyIds, onNewestReplyRendered }: {
 		replies: CommentReplyData[];
-		/** The thread is open: each author's whole name shows, wrapping. */
-		fullNames?: boolean;
 		newReplyIds?: ReadonlySet<string>;
 		collapseReplyIds?: ReadonlySet<string>;
 		onNewestReplyRendered?: (element: HTMLElement | undefined) => void;
@@ -68,7 +66,7 @@
 		<div class="ct-reply" class:new={isNew} data-reply-id={reply.id} use:newestElement={index === replies.length - 1}>
 			<div class="ct-msg-meta">
 				<!-- The reply rail supplies grouping; an author dot would repeat it. -->
-				<span class="ct-msg-author" title={author.name}><MiddleName name={author.name} full={fullNames} /></span>
+				<span class="ct-msg-author" title={author.name}><MiddleName name={author.name} /></span>
 				<span class="ct-at">{reply.at}</span>
 				{#if isNew}<NewMarker />{/if}
 			</div>

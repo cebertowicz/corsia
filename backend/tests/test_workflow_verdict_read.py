@@ -73,15 +73,20 @@ def node(db, node_id: str, *, workflow: str | None = "sdlc-process", version: st
         if state in {"accepted", "accepted_with_followup", "failed", "closed"}:
             db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,prior_state,new_state,created_at) "
                        "VALUES (?,?,'test',?,'active',?,?)", (f"end-{node_id}", node_id, state, state, ended))
+            if kind == "phase":
+                outcome = "completed" if state in {"accepted", "accepted_with_followup"} else "failed"
+                db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,payload_json,created_at) "
+                           "VALUES (?,?,'test','workflow_run_ended',?,?)",
+                           (f"run-end-{node_id}", node_id, json.dumps({"outcome": outcome}), ended))
 
 
 def usage(db, usage_id: str, node_id: str, model: str = "claude-code/opus", *, prompt: int = 1_000_000,
-          manifest: str | None = "m") -> None:
+          manifest: str | None = "m", role: str = "execution", thread: str = "root") -> None:
     db.execute("INSERT INTO llm_usage (id,thread_id,model,prompt_tokens,completion_tokens,cache_creation_tokens,"
                "cache_read_tokens,total_tokens,source,created_at,plan_id,plan_node_id,plan_attempt_id,"
-               "plan_commitment_id,plan_usage_role,context_manifest_id) VALUES (?,'root',?,?,0,0,0,?,"
-               "'external_harness:claude-code','2026-10-02T00:00:00Z','plan',?,'attempt',?,'execution',?)",
-               (usage_id, model, prompt, prompt, node_id, node_id, manifest))
+               "plan_commitment_id,plan_usage_role,context_manifest_id) VALUES (?,?,?, ?,0,0,0,?,"
+               "'external_harness:claude-code','2026-10-02T00:00:00Z','plan',?,'attempt',?,?,?)",
+               (usage_id, thread, model, prompt, prompt, node_id, node_id, role, manifest))
 
 
 def correction(db, message_id: str, node_id: str, *, at: str = "2026-10-06T00:00:00Z", label: str = "correction",
@@ -134,12 +139,32 @@ def test_settled_means_terminal_and_past_the_window_and_failed_runs_are_not_outc
     assert runs["open"].terminal_at is None and not runs["open"].settled(0, NOW)
 
 
+def test_phase_run_uses_recorded_end_even_when_phase_is_pending(db) -> None:
+    from plans import run_end
+
+    for name, outcome, child_state in (("done-phase", "completed", "accepted"),
+                                        ("failed-phase", "failed", "failed")):
+        node(db, name, kind="phase", state="pending")
+        node(db, f"{name}-step", parent=name, state=child_state)
+        with raw_plan_seed(db):
+            db.execute("INSERT INTO plan_node_events (id,node_id,provenance,event,payload_json,created_at) "
+                       "VALUES (?,?,'test',?,?,?)", (f"record-{name}", name, run_end.EVENT,
+                       json.dumps({"outcome": outcome}), "2026-10-07T00:00:00Z"))
+    node(db, "open-phase", kind="phase", state="pending")
+    runs, _ = runs_of(read_snapshot(db, now=NOW))
+    assert runs["done-phase"].terminal_at == "2026-10-07T00:00:00Z"
+    assert runs["done-phase"].outcome
+    assert runs["failed-phase"].terminal_at == "2026-10-07T00:00:00Z"
+    assert not runs["failed-phase"].outcome
+    assert runs["open-phase"].terminal_at is None
+
+
 def test_the_group_is_the_runs_own_model_difficulty_and_size_band(db) -> None:
     node(db, "opus", difficulty="hard", size="XL")
     usage(db, "u1", "opus", prompt=900)
     usage(db, "u2", "opus", "codex/gpt-5.6-terra", prompt=100, manifest=None)
     node(db, "worker", parent="opus", workflow=None)
-    usage(db, "u3", "worker", "codex/gpt-5.6-terra", prompt=100_000, manifest=None)  # a worker's tokens are not own
+    usage(db, "u3", "worker", "codex/gpt-5.6-terra", prompt=100_000, manifest=None, role="execution", thread="worker-thread")
     node(db, "split", size="S")
     usage(db, "u4", "split", prompt=500)
     usage(db, "u5", "split", "codex/gpt-5.6-terra", prompt=500, manifest=None)
@@ -148,6 +173,20 @@ def test_the_group_is_the_runs_own_model_difficulty_and_size_band(db) -> None:
     assert runs["opus"].group == (OPUS, "hard", "L+")
     assert runs["split"].group == (MIXED, "standard", "XS-S")
     assert runs["silent"].group == (MIXED, "unrated", "unsized")
+
+
+def test_phase_run_model_counts_step_usage_and_requires_eighty_percent(db) -> None:
+    node(db, "phase", kind="phase")
+    node(db, "step", parent="phase")
+    usage(db, "step-opus", "step", prompt=800, role="delegation")
+    usage(db, "step-terra", "step", "codex/gpt-5.6-terra", prompt=200, manifest=None)
+    node(db, "split-phase", kind="phase")
+    node(db, "split-step", parent="split-phase")
+    usage(db, "split-opus", "split-step", prompt=799)
+    usage(db, "split-terra", "split-step", "codex/gpt-5.6-terra", prompt=201, manifest=None)
+    runs, _ = runs_of(read_snapshot(db, now=NOW))
+    assert runs["phase"].group[0] == OPUS
+    assert runs["split-phase"].group[0] == MIXED
 
 
 def test_corrections_reach_their_run_through_the_correction_attribution(db) -> None:

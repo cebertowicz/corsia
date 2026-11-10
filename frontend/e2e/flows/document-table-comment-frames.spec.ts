@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { closeComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
@@ -116,7 +117,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 		await page.getByRole('button', { name: /^2 threads\b/ }).click();
 		const comments = page.locator('[data-doc-comments-drawer]');
 		await comments.locator(`[data-comment-id="${ids.table}"]`).locator('[data-comment-jump]').click();
-		await comments.getByRole('button', { name: 'Close comments' }).click();
+		await closeComments(comments);
 		await expect(comments).toHaveCount(0);
 		const cell = page.locator('.cm-md-table tr', { hasText: 'cut line' }).locator('td').nth(1);
 		await cell.scrollIntoViewIfNeeded();
@@ -178,7 +179,7 @@ test.describe('@flow:document-table-comment-frames @surface:documents desktop wi
 
 		// A save on text that is already in view leaves the reader where they are. The list closes first: closing it widens the editor and
 		// rewraps the text, so that reflow, which is not a scroll, would otherwise sit between the two measurements.
-		await side.getByRole('button', { name: 'Close comments' }).click();
+		await closeComments(side);
 		await expect(side).toHaveCount(0);
 		await settle(page);
 		const target = page.locator('.cm-line', { hasText: 'Visible save target line.' });

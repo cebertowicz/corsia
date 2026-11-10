@@ -6,6 +6,8 @@ import { trackPlacements } from './docCommentPlacement';
 import { anchoredQuote, fromServer, type CommentAuthor, type DocComment } from './docCommentProjection';
 import { heldIds, withhold } from './docCommentHolds';
 import { newClientId } from './documentWire';
+import type { ChangeDesc } from '@codemirror/state';
+import { mapCommentRange } from '$lib/cm/comment-range';
 
 export { fromServer, hasUnread, regionFromServer } from './docCommentProjection';
 export type { CommentAuthor, CommentReply, DocComment } from './docCommentProjection';
@@ -44,8 +46,6 @@ export const commentLoads = writable<Record<string, CommentLoad>>({});
 const placements = trackPlacements(docComments);
 /** Retry a live row's placement: one new positions request for its document. */
 export const retryPlacement = (commentId: string) => placements.retry(commentId);
-/** Re-resolve orphaned live placements without reloading or changing document text. */
-export const reloadPlacements = (artifactId: string) => placements.reload(artifactId);
 
 /**
  * The one way a lane hold changes what is shown. The document's current rows, edited, go through the placement
@@ -201,12 +201,15 @@ export function ackComment(artifactId: string, commentId: string, acked = true) 
 
 const dirty = new Map<string, Set<string>>();
 
-export function remapComments(artifactId: string, mapPos: (pos: number) => number) {
+/** `open`: the comments whose highlight had an open end before the edit (`cm/comment-marks.ts` `openCommentIds`). */
+export function remapComments(artifactId: string, changes: ChangeDesc, open: ReadonlySet<string> = new Set()) {
 	docComments.update((all) => {
 		const list = (all[artifactId] ?? []).map((c) => {
 			// A live row moves only by its own positions, and the server alone persists its offsets.
 			if (c.drawn || c.placement || c.from == null || c.to == null) return c;
-			const next = { ...c, from: mapPos(c.from), to: mapPos(c.to) };
+			// The highlight's rule and its open ends (`cm/comment-marks.ts`), so the card and its highlight never disagree.
+			const { from, to } = mapCommentRange({ from: c.from, to: c.to, open: open.has(c.id) }, changes);
+			const next = { ...c, from, to };
 			if (next.from !== c.from || next.to !== c.to) {
 				if (!dirty.has(artifactId)) dirty.set(artifactId, new Set());
 				dirty.get(artifactId)!.add(c.id);

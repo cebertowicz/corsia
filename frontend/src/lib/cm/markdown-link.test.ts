@@ -302,14 +302,14 @@ describe('documentLinkTarget', () => {
 });
 
 describe('following a document link through the app router', () => {
-	const ROOTS = [{ id: 'w', label: 'Workspace', kind: 'workspace' as const, path: '/workspace', nodes: [], capped: false }];
+	const ROOTS = [{ id: 'w', label: 'Workspace', kind: 'workspace' as const, path: '/workspace' }];
 	const THREAD = 'thread-links';
 
 	function deps(overrides: Partial<LinkResolverDeps> = {}): LinkResolverDeps {
 		return {
 			activeThreadId: () => THREAD,
 			projectId: () => 'project-1',
-			fetchTree: vi.fn().mockResolvedValue(ROOTS),
+			fetchRoots: vi.fn().mockResolvedValue(ROOTS),
 			fetchRevision: vi.fn().mockImplementation(async (path: string) => ({ exists: !path.endsWith('missing.md'), path, revision: 'r', size: 1, writable: true, artifact_id: null })),
 			openArtifact: vi.fn(),
 			showError: vi.fn(),

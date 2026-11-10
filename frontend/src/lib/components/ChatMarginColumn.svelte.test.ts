@@ -10,7 +10,6 @@ import { chatReplyDrafts } from './chatReplyDrafts.svelte';
 vi.mock('$lib/stores/attentionDock.svelte', () => ({ reload: vi.fn().mockResolvedValue(undefined) }));
 
 let host: HTMLElement;
-let clip: HTMLElement;
 let scroller: HTMLElement;
 let component: ReturnType<typeof mount> | null = null;
 
@@ -19,15 +18,13 @@ function transcript() {
 	host = document.createElement('div');
 	scroller = document.createElement('div');
 	scroller.className = 'messages';
-	clip = document.createElement('div');
-	clip.className = 'chat-margin-clip';
 	scroller.innerHTML = `<div class="message" data-message-id="m1"><div class="long-message-body"><span data-comment-ids="kept" role="button">runs at 2 AM</span> and copies the workspace.</div></div>`;
-	host.append(scroller, clip);
+	host.append(scroller);
 	document.body.append(host);
 	const at = (el: HTMLElement, top: number) => { el.getBoundingClientRect = () => ({ top, bottom: top + 20, left: 0, right: 100, width: 100, height: 20, x: 0, y: top, toJSON: () => ({}) }) as DOMRect; };
 	at(scroller.querySelector<HTMLElement>('[data-comment-ids]')!, 120);
 	at(scroller.querySelector<HTMLElement>('.long-message-body')!, 300);
-	at(clip, 0);
+	at(scroller, 0);
 }
 
 function thread() {
@@ -53,17 +50,22 @@ it('puts one card per comment of the thread in the column, each beside where its
 	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 	transcript(); thread();
 	const picks: string[] = [];
-	component = mount(ChatMarginColumn, { target: clip, props: { threadId: 'thread', scroller, selectedId: null, onSelect: (id: string) => picks.push(id), onSendReply: vi.fn() } });
+	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: null, onSelect: (id: string) => picks.push(id), onSendReply: vi.fn() } });
 	flushSync();
 
-	const cards = clip.querySelectorAll<HTMLElement>('[data-margin-card]');
+	// The column is drawn on the canvas: inside the transcript's scroller, so its cards scroll with their messages.
+	expect(scroller.querySelector('.chat-margin')?.classList.contains('on-canvas')).toBe(true);
+	const cards = scroller.querySelectorAll<HTMLElement>('[data-margin-card]');
 	expect([...cards].map(card => card.dataset.marginCard)).toEqual(['kept', 'lost']);
 	// The painted highlight holds its card; the comment whose text is gone is placed at the message body its text left.
 	expect(cards[0].style.top).toBe('120px');
 	expect(cards[1].style.top).toBe('300px');
 	expect(cards[0].textContent).toContain('Why 2 AM?');
 	expect(cards[1].textContent).toContain('Which drive?');
-	expect(clip.querySelectorAll('.chat-comment-threads.margin')).toHaveLength(2);
+	expect(host.querySelectorAll('.chat-comment-threads.margin')).toHaveLength(2);
+	// A resting card is the thread alone: no quote, since it sits level with its text, and no Reply field until it is picked.
+	expect(cards[0].textContent).not.toContain('“runs at 2 AM”');
+	expect(cards[0].querySelector('textarea')).toBeNull();
 
 	cards[1].querySelector<HTMLElement>('.chat-margin-card')!.click();
 	expect(picks).toEqual(['lost']);
@@ -74,38 +76,41 @@ it('lists only this thread\'s comments and rides the transcript it is given', ()
 	transcript(); thread();
 	messages.update(current => [...current, { id: 'm2', thread_id: 'other', role: 'assistant', content: 'elsewhere', seq: 2, created_at: '2026-11-08T00:00:00Z', chat_comments: [{ id: 'else', cid: 'c9', user_message_id: 's9', quote: 'elsewhere', note: 'No', from_off: 0, to_off: 9, anchor_prefix: '', anchor_suffix: '', created_at: '2026-11-08T00:00:00Z', answers: [] }] } as never]);
 	const sent: unknown[] = [];
-	component = mount(ChatMarginColumn, { target: clip, props: { threadId: 'thread', scroller, selectedId: null, onSelect: () => {}, onSendReply: (reply: unknown) => sent.push(reply) } });
+	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: 'kept', onSelect: () => {}, onSendReply: (reply: unknown) => sent.push(reply) } });
 	flushSync();
 
-	expect(clip.querySelectorAll('[data-margin-card]')).toHaveLength(2);
+	expect(host.querySelectorAll('[data-margin-card]')).toHaveLength(2);
 	// The reply carries the comment's own anchor, so it answers the same text the card quotes.
-	clip.querySelectorAll<HTMLElement>('[data-margin-card]')[0].querySelector<HTMLTextAreaElement>('textarea')!.value = 'Please change it';
-	clip.querySelectorAll<HTMLElement>('[data-margin-card]')[0].querySelector<HTMLTextAreaElement>('textarea')!.dispatchEvent(new Event('input', { bubbles: true }));
+	host.querySelectorAll<HTMLElement>('[data-margin-card]')[0].querySelector<HTMLTextAreaElement>('textarea')!.value = 'Please change it';
+	host.querySelectorAll<HTMLElement>('[data-margin-card]')[0].querySelector<HTMLTextAreaElement>('textarea')!.dispatchEvent(new Event('input', { bubbles: true }));
 	flushSync();
-	clip.querySelectorAll<HTMLElement>('[data-margin-card]')[0].querySelector<HTMLElement>('[data-send-reply]')!.click();
+	host.querySelectorAll<HTMLElement>('[data-margin-card]')[0].querySelector<HTMLElement>('[data-send-reply]')!.click();
 	flushSync();
 	expect(sent).toHaveLength(1);
 	expect(sent[0]).toMatchObject({ messageId: 'm1', quote: 'runs at 2 AM', note: 'Please change it', root_user_message_id: 's1', root_cid: 'c1' });
 });
 
-it('picks a card when the reader moves into its Reply field, so the column keeps its Send button in view', () => {
+it('picks a card when the reader moves into it, and shows its Reply field once it is picked', () => {
 	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 	transcript(); thread();
 	const picks: string[] = [];
-	component = mount(ChatMarginColumn, { target: clip, props: { threadId: 'thread', scroller, selectedId: null, onSelect: (id: string) => picks.push(id), onSendReply: vi.fn() } });
+	const props = $state({ threadId: 'thread', scroller, selectedId: null as string | null, onSelect: (id: string) => { picks.push(id); props.selectedId = id; }, onSendReply: vi.fn() });
+	component = mount(ChatMarginColumn, { target: host, props });
 	flushSync();
-	// The field stops its click from reaching the card, so the pick comes from focus, the way a keyboard reader arrives too.
-	const field = clip.querySelectorAll<HTMLElement>('[data-margin-card]')[1].querySelector<HTMLTextAreaElement>('textarea')!;
-	field.click();
-	field.focus();
+	// Focus picks it, the way a keyboard reader arrives.
+	const card = host.querySelectorAll<HTMLElement>('[data-margin-card]')[1];
+	card.querySelector<HTMLElement>('.chat-comment-thread')!.focus();
+	flushSync();
 	expect(picks).toEqual(['lost']);
+	expect(card.querySelector('textarea')).not.toBeNull();
+	expect(host.querySelectorAll<HTMLElement>('[data-margin-card]')[0].querySelector('textarea')).toBeNull();
 });
 
 it('re-places the cards when a transcript row grows with no change to its markup, as an image loading does', async () => {
 	const watched: Element[] = [];
 	vi.stubGlobal('ResizeObserver', class { observe(el: Element) { watched.push(el); } unobserve() {} disconnect() {} });
 	transcript(); thread();
-	component = mount(ChatMarginColumn, { target: clip, props: { threadId: 'thread', scroller, selectedId: null, onSelect: () => {}, onSendReply: vi.fn() } });
+	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: null, onSelect: () => {}, onSendReply: vi.fn() } });
 	flushSync();
 	expect(watched).toContain(scroller.querySelector('[data-message-id="m1"]'));
 	// A row that arrives after the column is up (a page of older rows above it) is watched too, so it growing later moves the cards.
@@ -120,18 +125,18 @@ it('keeps the cards in place while a reply streams in, rather than rebuilding th
 	const watched: Element[] = [];
 	vi.stubGlobal('ResizeObserver', class { observe(el: Element) { watched.push(el); } unobserve() {} disconnect() {} });
 	transcript(); thread();
-	component = mount(ChatMarginColumn, { target: clip, props: { threadId: 'thread', scroller, selectedId: null, onSelect: () => {}, onSendReply: vi.fn() } });
+	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: null, onSelect: () => {}, onSendReply: vi.fn() } });
 	flushSync();
-	const card = clip.querySelector('[data-margin-card="kept"]');
+	const card = host.querySelector('[data-margin-card="kept"]');
 	const observed = watched.length;
 	// The typewriter's tick: a new message object, the same comments. The column's setup is not run again, so nothing is observed afresh.
 	for (const pos of [1, 2, 3]) { messages.update(current => current.map(message => ({ ...message, typewriterPos: pos }))); flushSync(); }
 	expect(watched).toHaveLength(observed);
-	expect(clip.querySelector('[data-margin-card="kept"]')).toBe(card);
+	expect(host.querySelector('[data-margin-card="kept"]')).toBe(card);
 	// A new comment is a change: it gets its card.
 	messages.update(current => current.map(message => ({ ...message, chat_comments: [...message.chat_comments!, { ...message.chat_comments![0], id: 'added', cid: 'c3' }] })));
 	flushSync();
-	expect([...clip.querySelectorAll<HTMLElement>('[data-margin-card]')].map(item => item.dataset.marginCard)).toEqual(['kept', 'lost', 'added']);
+	expect([...host.querySelectorAll<HTMLElement>('[data-margin-card]')].map(item => item.dataset.marginCard)).toEqual(['kept', 'lost', 'added']);
 });
 
 it('says why a card\'s reply is refused when its message has no place in history, and keeps the reply', async () => {
@@ -139,9 +144,9 @@ it('says why a card\'s reply is refused when its message has no place in history
 	transcript(); thread();
 	messages.update(current => current.map(message => ({ ...message, seq: undefined })));
 	const sent: unknown[] = [];
-	component = mount(ChatMarginColumn, { target: clip, props: { threadId: 'thread', scroller, selectedId: null, onSelect: () => {}, onSendReply: (reply: unknown) => sent.push(reply) } });
+	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: 'kept', onSelect: () => {}, onSendReply: (reply: unknown) => sent.push(reply) } });
 	flushSync();
-	const card = clip.querySelectorAll<HTMLElement>('[data-margin-card]')[0];
+	const card = host.querySelectorAll<HTMLElement>('[data-margin-card]')[0];
 	card.querySelector<HTMLTextAreaElement>('textarea')!.value = 'Please change it';
 	card.querySelector<HTMLTextAreaElement>('textarea')!.dispatchEvent(new Event('input', { bubbles: true }));
 	flushSync();
@@ -158,9 +163,9 @@ it('says why a card\'s reply is refused when its message has no place in history
 it('keeps an unsent reply when the canvas narrows and the same thread opens in its popover', () => {
 	vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
 	transcript(); thread();
-	component = mount(ChatMarginColumn, { target: clip, props: { threadId: 'thread', scroller, selectedId: null, onSelect: () => {}, onSendReply: vi.fn() } });
+	component = mount(ChatMarginColumn, { target: host, props: { threadId: 'thread', scroller, selectedId: 'lost', onSelect: () => {}, onSendReply: vi.fn() } });
 	flushSync();
-	const field = clip.querySelectorAll<HTMLElement>('[data-margin-card]')[1].querySelector<HTMLTextAreaElement>('textarea')!;
+	const field = host.querySelectorAll<HTMLElement>('[data-margin-card]')[1].querySelector<HTMLTextAreaElement>('textarea')!;
 	field.value = 'The one in the closet';
 	field.dispatchEvent(new Event('input', { bubbles: true }));
 	flushSync();

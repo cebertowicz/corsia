@@ -26,6 +26,7 @@ from api.measurement_scope import query_params, scope_cte
 from core.correction_attribution import attributed_facts, workflow_run_of
 from core.measurement_scope import Grain
 from infra.measure_registry import workflow_for_file
+from plans.public import run_end_records
 from core.workflow_verdict_rules import Definition, FrozenPlan, Snapshot, WorkflowHistory
 from core.workflow_verdict_types import split_subject, subject_of
 from core.workflow_verdicts import MIXED, OUTCOME_STATES, TERMINAL_STATES, CorrectionFact, KpiRow, Run, parse_ts
@@ -68,20 +69,22 @@ def model_key(identity_key: str) -> str:
     return identity_key.rpartition("/")[2] or identity_key
 
 
-def _model_groups(db: sqlite3.Connection, run_ids: Sequence[str]) -> dict[str, str]:
-    """Each run's model: the identity behind at least 80% of its own node's fresh tokens, else mixed."""
+def _model_groups(db: sqlite3.Connection, trees: Mapping[str, Sequence[Mapping[str, Any]]]) -> dict[str, str]:
+    """Each run's model from its plan owner's fresh tokens on the run's tasks."""
+    run_of = {node["id"]: run_id for run_id, nodes in trees.items() for node in nodes}
     rows = db.execute(f"""
         SELECT node_id,{IDENTITY_GROUP},SUM(fresh) AS fresh FROM (
           SELECT u.plan_node_id AS node_id,{identity_columns("u")},
             COALESCE(u.prompt_tokens,0)+COALESCE(u.completion_tokens,0)+COALESCE(u.cache_creation_tokens,0) AS fresh
           FROM llm_usage u {identity_join("u")}
+          JOIN plans p ON p.id=u.plan_id AND p.owner_kind='thread' AND p.owner_id=u.thread_id
           WHERE u.plan_node_id IN (SELECT value FROM json_each(:ids))
         ) GROUP BY node_id,{IDENTITY_GROUP}
-    """, {"ids": json_ids(run_ids)}).fetchall()
+    """, {"ids": json_ids(run_of)}).fetchall()
     resolve = IdentityResolver(db)
     totals: defaultdict[str, defaultdict[str, float]] = defaultdict(lambda: defaultdict(float))
     for row in rows:
-        totals[row["node_id"]][model_key(resolve(dict(row)).key)] += float(row["fresh"] or 0)
+        totals[run_of[row["node_id"]]][model_key(resolve(dict(row)).key)] += float(row["fresh"] or 0)
     groups = {}
     for node_id, by_model in totals.items():
         model, tokens = max(by_model.items(), key=lambda item: item[1])
@@ -262,8 +265,10 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
         ))
     judged = [node for node in roots if judged_version(node["workflow_version"])]
     judged_ids = {node["id"] for node in judged}
-    models = _model_groups(db, [node["id"] for node in judged])
-    times = terminal_times(db, [node["id"] for node in judged])
+    trees = _subtrees(nodes, root_ids)
+    models = _model_groups(db, {node["id"]: trees[node["id"]] for node in judged})
+    times = terminal_times(db, [node["id"] for node in judged if node["kind"] != "phase"])
+    ends = run_end_records(db, (node["id"] for node in judged if node["kind"] == "phase"))
     by_workflow: dict[str, list[Run]] = defaultdict(list)
     excluded: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for node in roots:
@@ -272,8 +277,14 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
             excluded[node["workflow_ref"]][reason] += 1
             continue
         group = (models.get(node["id"], MIXED), node["difficulty"] or "unrated", size_band(node["size"]))
+        if node["kind"] == "phase":
+            end = ends.get(node["id"])
+            terminal = end["_recorded_at"] if end else None
+            state = {"completed": "accepted", "failed": "failed"}[end["outcome"]] if end else "pending"
+        else:
+            terminal, state = node_terminal_at(node, times), node["state"]
         by_workflow[node["workflow_ref"]].append(Run(
-            node["id"], node["workflow_version"], group, node["created_at"], node_terminal_at(node, times), node["state"],
+            node["id"], node["workflow_version"], group, node["created_at"], terminal, state,
             tuple(sorted(facts.get(node["id"], ()), key=lambda f: (parse_ts(f.source_at), f.source_id)))))
     histories = []
     for ref in sorted(set(by_workflow) | set(excluded)):

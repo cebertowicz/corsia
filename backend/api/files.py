@@ -11,9 +11,9 @@ from pydantic import BaseModel
 from api.files_roots import (
     annotate,
     artifact_index,
-    resolve_project,
     scope_bases,
     shared_projector,
+    tree_roots,
     walk,
 )
 from doceditor.document_save import DocumentSave, DocumentSaveError, save_document_text
@@ -29,29 +29,29 @@ router = APIRouter(prefix="/api/files", tags=["files"])
 
 
 @router.get("/tree")
-async def tree(token: str, project_id: str | None = None):
-    """The scope's doc roots, each a flat (pruned, capped) node list."""
+async def tree(token: str, project_id: str | None = None, nodes: bool = True):
+    """The scope's doc roots, each a flat (pruned, capped) node list.
+
+    With ``nodes=false`` the answer is the roots alone — id, label, kind, path.
+    A chat link only resolves its target against the root paths, so it asks for
+    these and the walk, the artifact index and the annotation never run.
+    """
     if not authenticate(token):
         raise HTTPException(401)
 
     def _tree():
         db = get_db()
         try:
-            roots: list[dict] = []
+            roots = tree_roots(project_id, db)
+            if not nodes:
+                return {"roots": roots}
             by_path = artifact_index(db)
             project = shared_projector(db)
-            if project_id:
-                planning, repos = resolve_project(project_id, db)
-                if planning:
-                    roots.append({"id": "planning", "label": "Project", "kind": "workspace", "path": str(planning)})
-                for name, p in repos:
-                    roots.append({"id": f"repo:{name}", "label": name, "kind": "repo", "path": str(p)})
-            else:
-                roots.append({"id": "ws", "label": "Workspace", "kind": "workspace", "path": str(config.WORKSPACE.resolve())})
             for r in roots:
-                nodes, capped = walk(Path(r["path"]))
-                annotate(nodes, Path(r["path"]), by_path, project)
-                r["nodes"] = nodes
+                path = Path(r["path"])
+                walked, capped = walk(path)
+                annotate(walked, path, by_path, project)
+                r["nodes"] = walked
                 r["capped"] = capped
             return {"roots": roots}
         finally:

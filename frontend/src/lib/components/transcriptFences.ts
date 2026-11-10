@@ -67,5 +67,5 @@ function splitStubFence(entry: TranscriptFoldEntry, turns: string[]): Transcript
 function fragment(entry: TranscriptFoldEntry, from: number, to: number, live: boolean): TranscriptFoldEntry {
 	const run = runEntry(entry.items.slice(from, to), from === 0 && to === entry.items.length ? entry.id : `${entry.id}:pause:${from}`, live);
 	// A stub is indivisible and belongs to the prefix, never copied into both fragments.
-	return from === 0 && entry.stub ? { ...run, stub: entry.stub, turnIds: [...new Set([...entry.stub.turnIds, ...run.turnIds])] } : run;
+	return from === 0 && entry.stub ? { ...run, stub: entry.stub, stubParts: entry.stubParts, turnIds: [...new Set([...entry.stub.turnIds, ...run.turnIds])] } : run;
 }

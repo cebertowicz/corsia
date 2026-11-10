@@ -110,7 +110,7 @@ async def test_repeated_cancel_joins_commit_or_proven_rollback(ownership_scope, 
     task = asyncio.create_task(invoke(kind, ownership_scope, entry, 'cancelled'))
     try:
         assert await asyncio.to_thread(entered.wait, 5)
-        typing(entry, 2, delete=1, insert='b')
+        typing(entry, 2, delete=1, insert='')
         assert entry.live.ranges['cancelled'][0] == entry.live.ranges['cancelled'][1]
         task.cancel()
         await asyncio.sleep(0)

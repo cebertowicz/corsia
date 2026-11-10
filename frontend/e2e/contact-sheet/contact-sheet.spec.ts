@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { type Page, type APIRequestContext } from '@playwright/test';
 import { test, expect } from '../support/test';
+import { isolatedDb, setDebugVersionOverlay } from '../support/heldComments';
 import { scanBreakpoints, captureWidths } from './breakpoints.mjs';
 async function scrollScreen(page: Page, selector: string, scroll: 'top' | 'bottom') {
   await page.evaluate(({ selector, scroll }) => {
@@ -19,26 +20,62 @@ async function scrollScreen(page: Page, selector: string, scroll: 'top' | 'botto
   await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 }
 
-async function capture(page: Page, request: APIRequestContext, name: string, output: string) {
+// A passing notice (such as a sent confirmation) can arrive after the screen settles, so each shot dismisses it first.
+// Pinned notices are part of the screen's state and stay.
+async function dismissToasts(page: Page) {
+  const close = page.locator('.toast:not(.toast--pinned) .toast-close');
+  for (let left = await close.count(); left > 0; left = await close.count()) {
+    await close.first().click();
+    await expect(close).toHaveCount(left - 1);
+  }
+}
+
+async function capture(page: Page, request: APIRequestContext, name: string, output: string, selectedWidths?: number[]) {
   if (!/^[a-z0-9-]+$/.test(name) || !path.isAbsolute(output)) throw new Error('Invalid scenario or non-absolute output path');
   const scenario = await import(`./${name}.ts`);
   if (typeof scenario.seed !== 'function' || typeof scenario.scrollAnchor !== 'string') throw new Error('Scenario must export seed and scrollAnchor');
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await scenario.seed(page, request);
+  await setDebugVersionOverlay(request, false);
+  isolatedDb(['cursor = connection.execute("UPDATE models SET display_name=? WHERE id=?", ("Claude Sonnet 5.5", "mock-test-model"))', 'assert cursor.rowcount == 1']);
+  const context = page.context();
+  // Keep the disposable account ID intact while giving its greeting a review identity.
+  await context.routeWebSocket('**/ws', socket => {
+    const server = socket.connectToServer();
+    server.onMessage(message => {
+      if (typeof message !== 'string') return socket.send(message);
+      const payload = JSON.parse(message);
+      if (payload.type === 'auth_ok' && payload.user) payload.user.name = 'Jordan';
+      socket.send(JSON.stringify(payload));
+    });
+  });
+  let captured = page;
+  let open: ((page: Page) => Promise<void>) | undefined;
   const breakpoints = scanBreakpoints(path.resolve('src'));
-  const widths = captureWidths(breakpoints);
+  const widths = selectedWidths ?? captureWidths(breakpoints);
   const groups: string[] = [];
   fs.mkdirSync(output, { recursive: true });
-  for (const width of widths) {
+  for (const [index, width] of widths.entries()) {
     const figures: string[] = [];
-    await page.setViewportSize({ width, height: 900 });
+    if (index > 0) {
+      await captured.close();
+      captured = await context.newPage();
+    }
+    await captured.setViewportSize({ width, height: 900 });
+    if (open) await open(captured);
+    else {
+      open = await scenario.seed(captured, request);
+      if (typeof open !== 'function') throw new Error('Scenario seed must return an open function');
+    }
+    await expect(captured.locator('.version-overlay')).toHaveCount(0);
+    await expect(captured.getByText('Mock Test Model', { exact: true })).toHaveCount(0);
+    await expect(captured.locator('body')).not.toContainText(/\be2e\b/i);
     for (const theme of ['light', 'dark'] as const) {
-      await page.emulateMedia({ colorScheme: theme });
-      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      await captured.emulateMedia({ colorScheme: theme });
+      await expect(captured.locator('html')).toHaveAttribute('data-theme', theme);
       for (const scroll of ['top', 'bottom'] as const) {
-        await scrollScreen(page, scenario.scrollAnchor, scroll);
+        await scrollScreen(captured, scenario.scrollAnchor, scroll);
+        await dismissToasts(captured);
         const file = `${width}-${theme}-${scroll}.png`;
-        await page.screenshot({ path: path.join(output, file), animations: 'disabled' });
+        await captured.screenshot({ path: path.join(output, file), animations: 'disabled' });
         figures.push(`<figure><figcaption>${width}px · ${theme} · ${scroll}</figcaption><img loading="lazy" src="${file}" alt="${width} pixels, ${theme}, ${scroll}"></figure>`);
       }
     }
@@ -47,10 +84,24 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
   const html = `<!doctype html><html lang="en"><meta charset="utf-8"><title>${name} contact sheet</title><style>body{font:16px system-ui;margin:24px;background:#eee;color:#111}section>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px}figure{margin:0;background:white;padding:8px}img{width:100%;height:auto}figcaption{padding:8px}</style><h1>${name}</h1><p>Viewport widths: ${widths.join(', ')} px. Widths cover both sides of media-query boundaries.</p><p>Container coverage depends on the scenario content and panes it opens.</p>${groups.join('\n')}</html>`;
   fs.writeFileSync(path.join(output, 'index.html'), html);
   console.log(`Contact sheet: ${path.join(output, 'index.html')}`);
+  return captured;
 }
 
+test.use({ seedPerTest: true });
 test.skip(!process.env.CONTACT_SHEET_SCENARIO, 'Run through scripts/contact-sheet');
 test('capture contact sheet', async ({ page, request }) => {
+  test.skip(process.env.CONTACT_SHEET_REGRESSION === '1', 'Regression test only');
   test.setTimeout(1_800_000);
   await capture(page, request, process.env.CONTACT_SHEET_SCENARIO ?? '', process.env.CONTACT_SHEET_OUT ?? '');
+});
+
+test('chat composer initializes at the captured width', async ({ page, request }) => {
+  test.skip(process.env.CONTACT_SHEET_SCENARIO !== 'chat', 'Chat regression only');
+  test.setTimeout(120_000);
+  const output = path.join(process.env.CONTACT_SHEET_OUT ?? '', 'regression');
+  const captured = await capture(page, request, 'chat', output, [1440, 1440, 393]);
+  await expect(captured.locator('aside.sidebar').getByText(/^Review conversation \d+$/, { exact: true })).toHaveCount(1);
+  await captured.getByRole('button', { name: 'Attach', exact: true }).click();
+  await expect(captured.locator('.mobile-attach-row')).toBeVisible();
+  await captured.screenshot({ path: path.join(output, 'composer-393.png') });
 });

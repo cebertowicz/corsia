@@ -3,13 +3,15 @@
 	export type Anchor = DOMRect | HTMLElement | (() => DOMRect | null) | null;
 	/** Fired on `window` when an anchor's text may have moved without a scroll or resize (an edit, or lines drawn after a scroll). */
 	export const ANCHOR_MOVED = 'popover-anchor-moved';
+	/** Where an anchor is drawn now. */
+	export const anchorRect = (value: Anchor) => typeof value === 'function' ? value() : value instanceof HTMLElement ? value.getBoundingClientRect() : value;
 </script>
 
 <script lang="ts">
 	import { tick } from 'svelte';
 	import { portal } from '$lib/actions/portal';
 	import { menuPop } from '$lib/popoverMotion';
-	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, surfaceRole = 'dialog', sideKey, keepOpenOnPointer, children }: {
+	let { anchor, open, onClose, onClosed = () => {}, restoreFocus, placement = 'right', fill = false, width: cardWidth, onPlace, bounds = null, avoidRect, initialFocus, takeFocus = true, surfaceRole = 'dialog', sideKey, keepOpenOnPointer, children }: {
 		anchor: Anchor;
 		open: boolean;
 		onClose: () => void;
@@ -28,6 +30,8 @@
 		avoidRect?: () => DOMRect | null;
 		/** A selector for what takes focus on open, when present; otherwise the first focusable element does. */
 		initialFocus?: string;
+		/** False leaves the focus where it is on open, for a card that opens beside text the person is editing. */
+		takeFocus?: boolean;
 		/** Omit the wrapper role when a child supplies the popup's semantic role, such as a listbox. */
 		surfaceRole?: 'dialog' | null;
 		/** What the surface is about, when that outlives the `anchor` value. A surface keeps its side until it closes, a scroll or resize moves the anchor, or this changes. */
@@ -47,7 +51,6 @@
 	let rememberedKey: unknown;
 	let anchorSeen: DOMRect | null | undefined;
 	let lastScrollInput = 0;
-	function rectFor(value: Anchor) { return typeof value === 'function' ? value() : value instanceof HTMLElement ? value.getBoundingClientRect() : value; }
 	/** The area the surface may occupy: the viewport, or the part of `bounds` inside it. */
 	function region() {
 		const edge = bounds?.getBoundingClientRect();
@@ -57,7 +60,7 @@
 		};
 	}
 	function position(event?: Event) {
-		const rect = rectFor(anchor);
+		const rect = anchorRect(anchor);
 		const live = typeof anchor === 'function';
 		if (!surface) return;
 		// A scroll inside the card or in another pane left the anchor where it was, so there is nothing to answer.
@@ -152,11 +155,18 @@
 			if (cancelled) return;
 			position();
 			await tick(); // Apply placement and visibility before moving focus into the card.
-			if (cancelled || !open || hidden) return;
+			if (cancelled || !open || hidden || !takeFocus) return;
 			const preferred = initialFocus ? surface?.querySelector<HTMLElement>(initialFocus) : null;
 			(preferred ?? surface?.querySelector<HTMLElement>('button, input, textarea, select, [tabindex]:not([tabindex="-1"])'))?.focus();
 		});
 		return () => { cancelled = true; };
+	});
+	// Content growing inside the card (a reply being typed) clamps it again, so its foot and Send stay on screen.
+	$effect(() => {
+		if (!open || !surface) return;
+		const observer = new ResizeObserver(() => position());
+		observer.observe(surface);
+		return () => observer.disconnect();
 	});
 	// A new anchor (a card that stops following its text) is placed at once, not at the next scroll or edit.
 	$effect(() => {
