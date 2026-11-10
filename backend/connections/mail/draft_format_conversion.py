@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 
 from connections.mail.email_document import parse_document
 from doceditor.document_save import DocumentSave, save_document_text
@@ -39,11 +40,16 @@ def _open_drafts() -> list[dict]:
 
 
 # The old writer put every note on its own ``Note:`` lines, one per line of the note, so where one note ends is lost.
-# Lines the view now shows elsewhere are dropped: attachment lines (the chips) and the replied-to email's evidence (the
-# conversation), which always ran up to the line saying the earlier email is quoted.
-_ATTACHMENT = "Attachment: "
-_EVIDENCE = "The message being replied to:"
-_AFTER_EVIDENCE = "The earlier message from "
+# Only the one-line notes the person still gets are kept: the sender's email count, a reply sent to another address,
+# the quoted-email line and the font line. Everything else is the guard's evidence, which now goes only to the agent,
+# or what the view shows elsewhere (attachment chips, the conversation). Text inside an email's untrusted-email
+# wrapper is never a note's start, since an email can contain any line.
+_KEPT = re.compile(
+    r"\d+ emails from .* in the last 30 days\.$"
+    r"|The requested recipient differs from the original reply address "
+    r"|The earlier message from .* will be quoted below the reply\.$"
+    r"|Couldn’t read your usual font, ")
+_OPEN, _CLOSE = "<untrusted-email", "</untrusted-email>"
 
 
 def _converted(text: str) -> tuple[str, list[str]]:
@@ -53,7 +59,7 @@ def _converted(text: str) -> tuple[str, list[str]]:
     replaces it with notes made the current way.
     """
     kept, lines = [], []
-    in_header, in_evidence = True, False
+    in_header, in_email = True, False
     for line in text.split("\n"):
         raw = line.removesuffix("\r")
         if not raw:
@@ -62,9 +68,12 @@ def _converted(text: str) -> tuple[str, list[str]]:
         if in_header and colon and key.strip().lower() in {"note", "in reply to"}:
             if key.strip().lower() == "note":
                 note = value.removeprefix(" ")
-                in_evidence = (in_evidence or note.startswith(_EVIDENCE)) and not note.startswith(_AFTER_EVIDENCE)
-                if not in_evidence and not note.startswith(_ATTACHMENT):
+                if not in_email and _KEPT.match(note):
                     lines.append(note)
+                if _OPEN in note:
+                    in_email = True
+                if _CLOSE in note.rpartition(_OPEN)[2]:
+                    in_email = False
         else:
             kept.append(line)
     return "\n".join(kept), ["\n".join(lines)] if lines else []

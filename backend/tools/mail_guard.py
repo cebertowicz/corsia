@@ -44,8 +44,9 @@ class Verdict:
     warnings: list[str] = field(default_factory=list)
     info: list[str] = field(default_factory=list)
     evidence_ids: list[dict[str, str]] = field(default_factory=list)
-    #: Context the person sees under the draft's header, worded for them. Who the email goes to and newer emails in
-    #: its thread are not here: the draft view works those out from the draft and the conversation it reads.
+    #: Context the person sees under the draft's header, worded for them. Added recipients and newer emails in its
+    #: thread are not here: the draft view works those out from the draft and the conversation it reads. A reply sent
+    #: away from the address the earlier email asked for is, since the view can't mark it.
     quiet: list[str] = field(default_factory=list)
 
 
