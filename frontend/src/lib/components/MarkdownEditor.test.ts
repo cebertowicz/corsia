@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import { fromStore, get, writable } from 'svelte/store';
 import { EditorView } from '@codemirror/view';
+import type { ChangeDesc } from '@codemirror/state';
 import { commentRanges } from '$lib/cm/comment-marks';
 
 vi.mock('$lib/api/docs', () => ({ fetchComments: vi.fn(), postComment: vi.fn(), patchComment: vi.fn(), persistPositions: vi.fn() }));
@@ -27,7 +28,7 @@ describe('MarkdownEditor edits', () => {
 		const text = writable('The quick brown fox.');
 		const live = fromStore(text);
 		// As DocViewer wires it: an edit's position map goes to the comment store.
-		const onEdit = vi.fn((mapPos: (position: number) => number) => remapComments('artifact', mapPos));
+		const onEdit = vi.fn((changes: ChangeDesc) => remapComments('artifact', changes));
 		host = document.createElement('div'); document.body.appendChild(host);
 		component = mount(MarkdownEditor, {
 			target: host,

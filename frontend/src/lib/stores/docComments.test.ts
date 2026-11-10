@@ -1,5 +1,9 @@
 import { get } from 'svelte/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ChangeSet, EditorState, type ChangeSpec } from '@codemirror/state';
+import { commentRanges, openCommentIds, setCommentRanges } from '$lib/cm/comment-marks';
+
+vi.mock('$lib/documentReadingPlace', () => ({ releasePlace: vi.fn() }));
 
 const mocks = vi.hoisted(() => ({ fetchComments: vi.fn(), persistPositions: vi.fn(), postComment: vi.fn(), patchComment: vi.fn(), markCommentThreadViewed: vi.fn() }));
 vi.mock('$lib/api/docs', () => ({
@@ -114,12 +118,49 @@ describe('comment loading presentation', () => {
 	});
 });
 
+describe('remapComments', () => {
+	it('moves a comment onto text typed over all of it, like its highlight, and empties it when the text is deleted', () => {
+		const comment = (id: string, from: number, to: number) => ({ id, from, to, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] });
+		// The editor's own mapping of an edit to "one quote two", whose comment is on "quote" (4..9): the text deleted, then typed.
+		const edit = (insert: string) => ChangeSet.of({ from: 4, to: 9 }, 13).compose(ChangeSet.of({ from: 4, insert }, 8));
+		docComments.set({ remap: [comment('typed', 4, 9)] });
+		remapComments('remap', edit('words!'));
+		expect(get(docComments).remap[0]).toMatchObject({ from: 4, to: 10 });
+		docComments.set({ remap: [comment('deleted', 4, 9)] });
+		remapComments('remap', edit(''));
+		expect(get(docComments).remap[0]).toMatchObject({ from: 4, to: 4 });
+	});
+
+	it('follows the open end of the editor it is told of, so a reopened document starts it closed for the card and its highlight', () => {
+		docComments.set({ remap: [{ id: 'c1', from: 4, to: 9, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [] }] });
+		// One editor of "one quote two" whose rows set its highlights, as the document viewer does; each edit remaps the rows.
+		const editor = (doc: string) => {
+			let state = EditorState.create({ doc, extensions: [commentRanges] });
+			const set = () => { state = state.update({ effects: setCommentRanges.of(get(docComments).remap.map(({ id, from, to }) => ({ id, from: from!, to: to! }))) }).state; };
+			set();
+			return (spec: ChangeSpec) => {
+				const next = state.update({ changes: spec });
+				remapComments('remap', next.changes, openCommentIds(state));
+				state = next.state;
+				set();
+				return { card: get(docComments).remap[0], highlight: state.field(commentRanges)[0] };
+			};
+		};
+		const first = editor('one quote two');
+		first({ from: 4, to: 9, insert: 'H' });
+		expect(first({ from: 5, insert: 'a' })).toMatchObject({ card: { from: 4, to: 6 }, highlight: { from: 4, to: 6 } });
+		// The document closed and opened again: a new editor, whose highlight's end is closed, and so is the card's.
+		const reopened = editor('one Ha two');
+		expect(reopened({ from: 6, insert: 'n' })).toMatchObject({ card: { from: 4, to: 6 }, highlight: { from: 4, to: 6 } });
+	});
+});
+
 describe('flushPositions', () => {
 	it('does not persist a mapped unresolved comment when its anchor no longer matches restored draft text', async () => {
 		docComments.set({ artifact: [{
 			id: 'comment', from: 0, to: 5, anchor: 'quote', author: 'you', text: 'note', at: 'now', resolved: false, replies: [],
 		}] });
-		remapComments('artifact', (position) => position + 1);
+		remapComments('artifact', ChangeSet.of({ from: 0, insert: 'i' }, 5));
 		await flushPositions('artifact', 'inserted quote');
 		expect(mocks.persistPositions).not.toHaveBeenCalled();
 	});

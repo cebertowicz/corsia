@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type * as Y from 'yjs';
+	import type { ChangeDesc } from '@codemirror/state';
 	import type { CommentRange, ScrollOrigin } from '$lib/cm/comment-marks';
 	import type { CommentSelection } from '$lib/stores/commentSelection';
 	import type { PresenceRange } from '$lib/cm/presence-marks';
@@ -62,7 +63,7 @@
 		onAnchorFocus: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) => void;
 		onCaretAway?: () => void;
 		onSuggestionHover?: (id: string | null) => void;
-		onEdit: (mapPos: (position: number) => number) => void;
+		onEdit: (changes: ChangeDesc, open: ReadonlySet<string>) => void;
 		onLayout: (mapPos?: (position: number) => number) => void;
 		readOnly: boolean;
 		imageBase?: { path: string; projectId: string | null; imageCacheKey?: string } | null;

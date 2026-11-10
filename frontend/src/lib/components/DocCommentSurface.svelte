@@ -116,9 +116,9 @@
 	const roomForMargin = $derived(hasRoomForMargin(canvasWidth));
 	const sheetDrawer = $derived(narrow || (!image && !roomForMargin));
 	/** How a card opened from the text shows: the phone sheet; else the margin column on any desktop canvas with room, cards beside their anchors; else a popover over the text. The editor reads it, so only a press opens a card over the text. */
-	export function cardMode(): CardMode { return (phone ?? narrow) ? 'sheet' : !narrow && !image && roomForMargin ? 'margin' : 'popover'; }
-	const wantsRoom = $derived(!narrow && !image && (surfaceState?.kind === 'list' || surfaceState?.kind === 'thread'));
-	const margin = $derived(wantsRoom && roomForMargin);
+	const columnFits = $derived(!narrow && !image && roomForMargin); // the one margin rule: the card mode and the column both read it
+	export function cardMode(): CardMode { return (phone ?? narrow) ? 'sheet' : columnFits ? 'margin' : 'popover'; }
+	const margin = $derived(columnFits && (surfaceState?.kind === 'list' || surfaceState?.kind === 'thread'));
 	const selectedId = $derived(surfaceState?.kind === 'thread' ? surfaceState.id : focusedId);
 	// A thread whose text is gone keeps its card in the column at the nearest line, labelled "This text is no longer in the document" (CommentThread). A review conversation never had text: it keeps its own entry and list, labelled "Review comment".
 	const aside = createMarginAside({ margin: () => margin, selectedId: () => selectedId, resolved: () => resolvedList, reviews: () => reviews });

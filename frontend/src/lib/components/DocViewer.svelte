@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
+	import type { ChangeDesc } from '@codemirror/state';
 	import { cubicOut } from 'svelte/easing';
 	import './DocViewer.css';
 	import { docCanvasBounds } from '$lib/actions/docCanvasBounds';
@@ -120,7 +121,8 @@
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
 	let commentSurface = $state<ReturnType<typeof DocCommentSurface>>();
 
-	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey, () => marginFits(docRoot, isPaneDrawer()));
+	// Whether the margin column is up is the surface's own answer, the one its cards and column follow.
+	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey, () => commentSurface?.cardMode() === 'margin');
 	const reviewBarState = createReviewBarState();
 	// Below the margin width a card opened from the text is a popover over it: the caret leaving or a key typed in the text closes it, so it never covers what is being written.
 	const closeTextCard = () => { if (commentSurface?.cardMode() === 'popover' && commentUI.state?.kind === 'thread' && commentUI.state.fromText) commentUI.close(); };
@@ -132,7 +134,7 @@
 	const openCards = createCommentOpeners(commentUI, scroll);
 	// A marker over comments on parts of one image opens the image, at the comment when it is the only one (DCOL-FR13.5).
 	function focusMarker(ids: string[], opener: HTMLElement, reading?: () => DOMRect | null, click?: MouseEvent) { arrivedDocComments.set(new Set(ids)); images.openOr(ids, ids.length === 1 ? { id: ids[0] } : undefined, () => openCards.markers(ids, opener, reading, click)); }
-	function onDocEdit(mapPos: (p: number) => number) { if (loadedArtifactId) remapComments(loadedArtifactId, mapPos); images.remap(mapPos); }
+	function onDocEdit(changes: ChangeDesc, open: ReadonlySet<string>) { if (loadedArtifactId) remapComments(loadedArtifactId, changes, open); images.remap((p) => changes.mapPos(p)); }
 
 	const accent = $derived($projects.find((project) => project.id === target?.projectId)?.accent_color ?? null);
 	const images = createDocViewerImages({

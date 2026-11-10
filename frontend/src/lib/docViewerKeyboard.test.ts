@@ -75,3 +75,36 @@ describe('handleDocumentKey Escape', () => {
 		expect(state.close).toHaveBeenCalledOnce();
 	});
 });
+
+describe('handleDocumentKey typing with a phone sheet up', () => {
+	const key = (from: HTMLElement, init: KeyboardEventInit) => {
+		const event = new KeyboardEvent('keydown', { cancelable: true, bubbles: true, ...init });
+		from.dispatchEvent(event);
+		return event;
+	};
+	const sheetFrom = (fromText: boolean) => setup({ commentUI: { state: { kind: 'thread', fromText }, anchor: null, sheetUp: true,
+		close: vi.fn(), restoreFocus: vi.fn(), release: vi.fn(() => false) } });
+
+	it('closes a sheet a tap in the text opened and gives the caret the key, without taking the key', () => {
+		const { state, commentUI } = sheetFrom(true);
+		const event = key(document.body, { key: 'Z' });
+		handleDocumentKey(event, state);
+		expect(commentUI.close).toHaveBeenCalledOnce();
+		expect(commentUI.restoreFocus).toHaveBeenCalledOnce();
+		expect(event.defaultPrevented).toBe(false);
+	});
+
+	it('leaves the sheet up for its own fields, shortcuts, keys that type nothing, and a sheet opened another way', () => {
+		const field = document.createElement('textarea');
+		document.body.appendChild(field);
+		for (const [fromText, from, init] of [
+			[true, field, { key: 'Z' }], [true, document.body, { key: 'z', metaKey: true }], [true, document.body, { key: 'Tab' }],
+			[false, document.body, { key: 'Z' }],
+		] as const) {
+			const { state, commentUI } = sheetFrom(fromText);
+			handleDocumentKey(key(from, init), state);
+			expect(commentUI.close).not.toHaveBeenCalled();
+		}
+		field.remove();
+	});
+});

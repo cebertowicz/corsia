@@ -14,6 +14,8 @@ import { _resetLiveStepForTests } from './plans/planLiveStep';
 import { handleMessage } from '$lib/ws/handlers';
 import { awaitFirstRunOpening, _resetFirstRunOpeningRevealForTests } from '$lib/ws/firstRunOpeningReveal';
 import { _resetTypewritersForTests } from '$lib/ws/typewriter';
+import { clipChatSelection } from '$lib/chatCommentAnchors';
+import { messageBody } from './chatUnreadTargets';
 
 vi.mock('$lib/product_events', () => ({ emitProductEvent: vi.fn(), identifyUser: vi.fn() }));
 vi.mock('$lib/ws', () => ({ on: () => () => {}, connect: vi.fn(), disconnect: vi.fn(), isConnected: () => false, reconnectNow: vi.fn(), sendMessage: vi.fn(), stopTurn: vi.fn(), hasActiveTurn: () => false, subscribeThread: vi.fn(), unsubscribeThread: vi.fn(), watchThread: vi.fn(), cancelThreadTypewriters: vi.fn() }));
@@ -116,6 +118,32 @@ describe('first-run transcript composition', () => {
 		runFrames();
 
 		expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' });
+	});
+
+	// A comment made on the opening must point at the same text whether it was picked during the reveal's session or after a reload.
+	it('anchors a comment on the revealed opening at the offsets a reloaded opening gives', async () => {
+		const phrase = 'My plan for finishing your setup';
+		const anchorOf = () => {
+			const body = messageBody(host.querySelector('.message.assistant[data-message-id]'))!;
+			const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+			let node = walker.nextNode() as Text | null;
+			while (node && (!node.data.includes(phrase) || node.parentElement?.closest('.sr-only'))) node = walker.nextNode() as Text | null;
+			const range = document.createRange();
+			range.setStart(node!, node!.data.indexOf(phrase)); range.setEnd(node!, node!.data.indexOf(phrase) + phrase.length);
+			const selection = document.getSelection()!; selection.removeAllRanges(); selection.addRange(range);
+			return clipChatSelection(selection, body)!.anchor;
+		};
+		await show(); awaitFirstRunOpening(thread); receive(); await settle();
+		vi.advanceTimersByTime(2_000); await settle();
+		expect(host.querySelector('.typewriter-text')).toBeNull();
+		const revealed = anchorOf();
+		await unmount(component!); component = undefined;
+		_resetFirstRunOpeningRevealForTests(); _resetTypewritersForTests();
+		messages.set([{ ...opening, thread_id: thread }] as never);
+		await show();
+		const reloaded = anchorOf();
+		expect(revealed).toEqual(reloaded);
+		expect(reloaded.quote).toBe(phrase);
 	});
 
 	it('lands the opening after a requested divider resolves without a target', async () => {
