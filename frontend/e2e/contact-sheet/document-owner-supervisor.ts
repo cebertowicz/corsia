@@ -27,9 +27,10 @@ export async function seed(page: Page, request: APIRequestContext) {
 	const roots = (await (await request.get('/api/files/tree', { params })).json()).roots;
 	const workspace = roots.find((root: { kind: string }) => root.kind === 'workspace').path;
 	mkdirSync(path.join(workspace, 'shared'), { recursive: true });
-	const index = await request.put('/api/files/content', { params, data: { path: path.join(workspace, 'shared', 'planning', 'INDEX.md'), text: '# Planning\n', thread_id: owner, create: true } });
+	const fixtureDir = path.join(workspace, 'shared', `planning-${owner}`);
+	const index = await request.put('/api/files/content', { params, data: { path: path.join(fixtureDir, 'INDEX.md'), text: '# Planning\n', thread_id: owner, create: true } });
 	expect(index.ok(), await index.text()).toBeTruthy();
-	const docPath = path.join(workspace, 'shared', 'planning', 'Project planning.md');
+	const docPath = path.join(fixtureDir, 'Project planning.md');
 	const paragraphs = [
 		['Purpose', 'Plan a community garden that neighbours can reach and enjoy throughout the year.'],
 		['Outcomes', 'Prepare the site for a first planting day and make room for future workshops.'],

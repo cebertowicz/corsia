@@ -21,7 +21,13 @@ test('owner slots in the base comparison fixture', async ({ page, request }) => 
     await target.screenshot({ path: `${out}/o1-details-${width}.png`, animations: 'disabled' });
     const measurements = await target.locator('.document-header').evaluate(header => {
       const box = (el: Element | null) => el?.getBoundingClientRect().toJSON();
-      return { header: box(header), identity: box(header.querySelector('.document-identity')), details: box(header.querySelector('.identity-details')), tools: box(header.querySelector('.document-tools')), metadata: box(header.querySelector('.document-metadata')) };
+      const describe = (selector: string) => {
+        const el = header.querySelector<HTMLElement>(selector);
+        if (!el) return null;
+        const style = getComputedStyle(el);
+        return { box: box(el), font: style.font, padding: style.padding, gap: style.gap, scrollWidth: el.scrollWidth, clientWidth: el.clientWidth };
+      };
+      return { header: box(header), identity: box(header.querySelector('.document-identity')), details: box(header.querySelector('.identity-details')), tools: box(header.querySelector('.document-tools')), metadata: box(header.querySelector('.document-metadata')), age: describe('.identity-age'), owner: describe('.identity-owner'), verified: describe('.identity-verified') };
     });
     console.log('O1', width, JSON.stringify(measurements));
   }
