@@ -270,7 +270,8 @@
 <style>
 	.document-header { grid-area: header; min-width: 0; flex: none; display: flex; flex-direction: column; gap: 6px; padding-left: var(--doc-inset, 24px); background: var(--bg-primary); }
 	.document-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
-	.identity-details { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; border: 0; padding: 2px 0; background: none; color: var(--text-primary); cursor: pointer; text-align: left; }
+	/* Match the original button's font after splitting its two actions. */
+	.identity-details { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; border: 0; padding: 2px 0; background: none; color: var(--text-primary); font: 13.3333px Arial; cursor: pointer; text-align: left; }
 	.document-title { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-subhead); font-weight: var(--fw-semibold); }
 	.identity-age { display: none; }
 	.feedback-controls { display: contents; }
