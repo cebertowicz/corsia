@@ -215,10 +215,13 @@ test('@flow:version-history-every-file a workspace document shows every History 
 	await expect.soft(page.getByText('Couldn’t restore this version. The document is unchanged.')).toBeVisible({ timeout: 15_000 });
 	await expect.soft(page.locator('.cm-content')).toContainText('Outside edit after opening history.');
 	await expect.soft(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+	// The reloaded list holds the outside edit as the current version. A phone keeps the version open, so it
+	// goes back to the list after the frame.
+	if (!phone) await expect(rows).toHaveCount(shown + 1);
 	await shot(page, 'history-doc-changed-since');
-	// Reported, not asserted: whether the reloaded list holds the outside edit as a version. A phone keeps
-	// the version open, so it goes back to the list first.
 	if (phone) await drawer.getByRole('button', { name: 'Back', exact: true }).click();
+	await expect(rows).toHaveCount(shown + 1);
+	await expect(rows.first()).toContainText('Current');
 	const changed = `${width}: ${shown} before, ${await rows.count()} after; first: ${(await rows.first().innerText()).replace(/\s+/g, ' ')}`;
 	info.annotations.push({ type: 'changed-since rows', description: changed });
 	if (process.env.VH_OUT) fs.appendFileSync(path.join(process.env.VH_OUT, 'changed-since-rows.txt'), `${changed}\n`);
