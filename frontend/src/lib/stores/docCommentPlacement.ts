@@ -74,8 +74,8 @@ class LivePlacement {
 		for (const id of [...this.positions.keys()]) if (!ids.has(id)) this.positions.delete(id);
 		this.rows.update(all => ({ ...all, [this.session.artifactId]: rows }));
 		const text = this.session.text.toString();
-		if (rows.some(row => { const quote = anchoredQuote(row); return lost(row) && !!quote && text.includes(quote); })) this.reload();
-		else if (ask) this.ask();
+		const hasLostWords = rows.some(row => { const quote = anchoredQuote(row); return lost(row) && !!quote && text.includes(quote); });
+		if (!(hasLostWords && this.reload()) && ask) this.ask();
 	}
 
 	retry(): void {

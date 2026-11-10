@@ -449,10 +449,11 @@ describe('comment placement in a live document (4.2)', () => {
 		await loadLost();
 		expect(doc.asks()).toHaveLength(2);
 		doc.answer(doc.asks()[1]);
+		await vi.waitFor(() => expect(doc.asks()).toHaveLength(3));
+		doc.answer(doc.asks()[2]);
 		await vi.waitFor(() => expect(row()).toMatchObject({ placement: 'placed' }));
-		expect(doc.asks()).toHaveLength(2);
 		await loadLost();
-		expect(doc.asks()).toHaveLength(3);
+		expect(doc.asks()).toHaveLength(4);
 	});
 
 	it('settles a refused Reload without leaving its control busy, and records the failure once', async () => {
@@ -666,6 +667,19 @@ describe('lost comments are placed again on comments load', () => {
 		doc.answer(reloads(doc)[0], { ranges: [{ id: 'c2', from_off: 11, to_off: 16 }],
 			states: [{ id: 'c2', orphaned: false, text_changed: false }] });
 		await vi.waitFor(() => expect(row('c2')).toMatchObject({ orphaned: false, placement: 'placed', drawn: true, from: 11, to: 16 }));
+	});
+
+	it('asks for a new anchored row shown while a reload is in flight', async () => {
+		const doc = await opened('alpha beta gamma', [lostRow('c2', 'gamma')]);
+		const reload = doc.asks()[0];
+		mocks.fetchComments.mockResolvedValue({ comments: [lostRow('c2', 'gamma'), serverRow('c1', 'beta', 6)], feedback: {} });
+		await loadComments('artifact');
+		expect(doc.asks()).toHaveLength(1);
+		doc.answer(reload, { ranges: [{ id: 'c2', from_off: 11, to_off: 16 }],
+			states: [{ id: 'c2', orphaned: false, text_changed: false }] });
+		await vi.waitFor(() => expect(doc.asks()).toHaveLength(2));
+		doc.answer(doc.asks()[1]);
+		await vi.waitFor(() => expect(row('c1')).toMatchObject({ placement: 'placed', from: 6, to: 10 }));
 	});
 
 	it('does not reload on a load when lost words are absent', async () => {
