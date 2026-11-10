@@ -28,10 +28,13 @@ describe('comment mentions', () => {
   field.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));flushSync();expect(host.querySelector<HTMLElement>('.mention-region')?.inert).toBe(true); await vi.waitFor(() => expect(host.querySelector('[role=listbox]')).toBeNull()); expect(field.hasAttribute('aria-autocomplete')).toBe(false); expect(field.hasAttribute('aria-controls')).toBe(false); expect(field.hasAttribute('aria-activedescendant')).toBe(false);
  });
  it.each([
-  { noViewingThread:false, tagged:['b','a'] },
-  { noViewingThread:true, tagged:[] },
- ])('tags agents whose names were typed, not picked, unless no chat can carry the tag ($noViewingThread)', ({noViewingThread, tagged}) => {
-  host=document.createElement('div');document.body.append(host);component=mount(MentionPickerHarness,{target:host,props:{agents,noViewingThread,body:'Over to @Beta Agent and @alpha agent.'}});flushSync();
+  { case:'ready', tagged:['b','a'] },
+  { case:'no chat', noViewingThread:true, tagged:[] },
+  { case:'loading', status:'loading' as const, tagged:[] },
+  { case:'load error', status:'error' as const, tagged:[] },
+  { case:'roster error', rosterError:true, tagged:[] },
+ ])('tags agents whose names were typed, not picked, only where picking could ($case)', ({noViewingThread, status, rosterError, tagged}) => {
+  host=document.createElement('div');document.body.append(host);component=mount(MentionPickerHarness,{target:host,props:{agents,noViewingThread,status,rosterError,body:'Over to @Beta Agent and @alpha agent.'}});flushSync();
   expect((component as { taggedAgentIds: () => string[] }).taggedAgentIds()).toEqual(tagged);
  });
  it.each([

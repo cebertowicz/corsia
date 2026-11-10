@@ -7,22 +7,21 @@
 	import { agentOptionIndex } from '../reviews/agentOptionKeys';
 	import { hasMentionRoster, useMentionRoster } from './mentionContext';
 	import { createMentionSelection, withTypedMentions } from './mentionSelection';
-	export function taggedAgentIds(text: string) { return [...new Set(occurrences(text).map(item => item.agent_id))]; }
 	export function occurrences(text: string) {
-		const picked = selectedTags.occurrences(text);
-		// Tags need the chat the document was opened from, so typed names resolve only where picking could.
-		return withTypedMentions(text, roster.noViewingThread ? [] : roster.taggableAgents, picked);
+		// Typed names resolve only where picking could: a chat to carry the tag and a roster that loaded.
+		return withTypedMentions(text, canTag ? roster.taggableAgents : [], selectedTags.occurrences(text));
 	}
 	import type { TaggableAgent } from '$lib/api/docReviews';
 	let { input, selectedTags = createMentionSelection() }: { input: HTMLTextAreaElement | undefined; selectedTags?: ReturnType<typeof createMentionSelection> } = $props();
 	const available = hasMentionRoster();
 	const roster = useMentionRoster();
+	const canTag = $derived(!roster.noViewingThread && roster.loadState === 'ready' && !roster.rosterError);
 	const uniqueId = $props.id();
 	const id = `mention-${uniqueId}`;
 	let query = $state<string | null>(null), start = 0, active = $state(0);
 	let lastQuery = '';
 	let chosen: { start: number; text: string } | null = null;
-	const matches = $derived(roster.noViewingThread || roster.loadState !== 'ready' || roster.rosterError ? [] : roster.taggableAgents.filter((agent) => agent.name.toLowerCase().includes((query ?? lastQuery).toLowerCase())));
+	const matches = $derived(!canTag ? [] : roster.taggableAgents.filter((agent) => agent.name.toLowerCase().includes((query ?? lastQuery).toLowerCase())));
 	const status = $derived(roster.noViewingThread ? 'no_thread' : roster.loadState === 'loading' ? 'loading' : roster.loadState === 'error' || roster.rosterError ? 'error' : !roster.taggableAgents.length ? 'empty' : 'ready');
 	// What the picker shows: a change to it crossfades the panel around it under reduced motion.
 	const shownKey = $derived(query === null ? 'closed' : `${status}:${matches.map((agent) => `${agent.id}:${agent.name}:${agent.responsibility}`).join('|')}`);
