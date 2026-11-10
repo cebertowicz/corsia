@@ -69,7 +69,8 @@ export async function showPicker(target: Page) {
 	const details = target.getByRole('button', { name: 'Document details' });
 	const identity = target.locator('button.identity:visible').first();
 	if (!(await identity.isVisible()) && await details.isVisible()) await details.click();
-	await identity.click();
-	await target.getByRole('combobox', { name: 'Supervisor', exact: true }).click();
+	const supervisor = target.getByRole('combobox', { name: 'Supervisor', exact: true });
+	if (!(await supervisor.isVisible())) await identity.click();
+	await supervisor.click();
 	await expect(target.getByRole('option', { name: /A very long agent name.*Paused/ })).toBeVisible();
 }
