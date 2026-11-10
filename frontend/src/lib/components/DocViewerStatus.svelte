@@ -359,7 +359,11 @@
 		.document-metadata:not(.expanded) { display: none; }
 		.identity-details:has(.identity-age) { display: flex; }
 		.identity-age { display: flex; width: 100%; gap: 6px; color: var(--text-secondary); font-size: var(--text-caption); container: identity-age / inline-size; }
-		.identity-owner { flex: 1; min-width: 13ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.identity-owner { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+		.identity-details:has(.identity-owner:not(.has-freshness)) { flex: 1 1 0; min-width: 6ch; }
+		.document-identity:has(.identity-owner:not(.has-freshness)) .document-tools { flex: 0 1 auto; min-width: 0; }
+		.document-identity:has(.identity-owner:not(.has-freshness)) .delivery-toggle { min-width: 0; flex: 0 1 auto; }
+		.document-identity:has(.identity-owner:not(.has-freshness)) .delivery-toggle > span { min-width: 8ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		/* The verified phrase carries the picker when the owner cannot fit. */
 		.identity-verified { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 		@container identity-age (width < 7.5rem) { .identity-owner.has-freshness { display: none; } }

@@ -66,7 +66,7 @@
 
 <svelte:window onresize={measurePane} />
 <button bind:this={ownAnchor} type="button" class="identity" class:compact aria-label={`Owner and supervisor: ${ownerLabel}, ${supervisorLabel}`} aria-haspopup="dialog" aria-expanded={open} title={`Owner: ${ownerLabel} · Supervisor: ${supervisorLabel}`} onclick={() => { open = !open; if (open) measurePane(); }}>
-	<span class="compact-owner">Owner: {ownerLabel}</span>
+	<span class="compact-owner"><span class="owner-name">Owner: {ownerLabel}</span><span class="owner-only">Owner</span></span>
 	<span class="full-owner">{#if sameAgent}<span class="identity-part">Owner and supervisor: <span class="identity-name" class:pending={!!pending}>{ownerLabel}</span></span>{:else}<span class="identity-part">Owner: <span class="identity-name" class:pending={pending?.kind === 'owner'}>{ownerLabel}</span></span><span aria-hidden="true">&nbsp;·&nbsp;</span>{#if ownership.can_act}<span class="identity-part">Supervisor: <span class="identity-name" class:pending={pending?.kind === 'supervisor'}>{supervisorLabel}</span></span>{:else}<span class="identity-part">{supervisorLabel}</span>{/if}{/if}</span>
 	{#if saving}<span class="pending">Saving…</span>{:else if error && !open}<span class="failure">Change failed</span>{/if}
 </button>
@@ -92,6 +92,11 @@
 	.identity-part { display: flex; min-width: 0; white-space: pre; }
 	.identity-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 	.compact-owner { display: none; overflow: hidden; text-overflow: ellipsis; }
+	.owner-only { display: none; }
+	@container identity-age (width < 13ch) {
+		.owner-name { display: none; }
+		.owner-only { display: inline; }
+	}
 	.full-owner { display: contents; }
 	.identity.compact .compact-owner { display: block; }
 	.identity.compact .full-owner { display: none; }
