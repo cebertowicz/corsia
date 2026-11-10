@@ -7,18 +7,20 @@ import { renderedFragment } from './rendered-images';
 import { blockSource, tableAt } from './widget-blocks';
 import { BlockWidget, priorWidget } from './block-widget';
 import { tableCells } from './widget-cells';
-import { openCellIn, type OpenCell } from './widget-cell-state';
+import { CELL_EDITING } from './widget-cell-layer';
+import { type OpenCell } from './widget-cell-state';
 
 /**
  * The rendered table, and the one way its DOM is built and kept current.
  *
  * A table is one block widget over its source lines, so a keystroke in a cell would otherwise recreate the whole table —
  * which is why an editor cannot live inside a cell while the widget is thrown away on every change. So the widget answers
- * CodeMirror's `updateDOM` and moves in only the cells whose text actually changed, leaving every other node — the cell
- * being edited above all, since its own editor holds that text live — where it is. CodeMirror calls `updateDOM` only when
- * `eq` says the two widgets differ, and hands it the widget that drew the node, so `eq` stays the strict question "does
- * this render the same" and `updateDOM` patches the difference. A change of *shape* — a row added, a column gained — and a
- * change of the image context, whose URLs are baked into the rendered cells, both refuse the patch and rebuild instead.
+ * CodeMirror's `updateDOM` and moves in only the cells whose text actually changed, leaving every other node where it is —
+ * including the cell being edited, whose hidden text has to keep pace with the editor lying over it so the row grows as that
+ * text wraps. CodeMirror calls `updateDOM` only when `eq` says the two widgets differ, and hands it the widget that drew the
+ * node, so `eq` stays the strict question "does this render the same" and `updateDOM` patches the difference. A change of
+ * *shape* — a row added, a column gained — and a change of the image context, whose URLs are baked into the rendered cells,
+ * both refuse the patch and rebuild instead.
  */
 
 class TableWidget extends BlockWidget {
@@ -36,9 +38,9 @@ class TableWidget extends BlockWidget {
 		el.dataset.srcLength = String(this.src.length); // the source range this DOM stands for, for `blockRange`
 		return this.drew(el);
 	}
-	updateDOM(dom: HTMLElement, view: EditorView, from: TableWidget) {
+	updateDOM(dom: HTMLElement, _view: EditorView, from: TableWidget) {
 		if (!sameImages(this.images, from.images) || shape(this.src) !== shape(from.src)) return false;
-		if (!transplant(dom, this.src, this.images, from.src, openCellIn(view.state))) return false;
+		if (!transplant(dom, this.src, this.images, from.src)) return false;
 		dom.dataset.srcLength = String(this.src.length);
 		this.drew(dom); // this node is what the next render measures its height against
 		return true;
@@ -68,9 +70,9 @@ const shape = (src: string) => {
 
 /**
  * Re-renders `src` and moves into the drawn table only the cells whose source text differs from `was`, the source the node
- * holds — and never the open cell, whose own editor shows that text as it changes.
+ * holds — the cell being edited included, since its hidden text is what keeps the row the right height.
  */
-function transplant(el: HTMLElement, src: string, images: ImageContext | null, was: string, open: OpenCell | null, force?: { row: number; col: number }): boolean {
+function transplant(el: HTMLElement, src: string, images: ImageContext | null, was: string, force?: { row: number; col: number }): boolean {
 	const fresh = renderTable(src, images).querySelector('table');
 	const drawn = el.querySelector('table');
 	if (!fresh || !drawn) return false;
@@ -80,23 +82,36 @@ function transplant(el: HTMLElement, src: string, images: ImageContext | null, w
 		const unchanged = before && was.slice(before.rawFrom, before.rawTo) === src.slice(span.rawFrom, span.rawTo);
 		const forced = force && span.row === force.row && span.col === force.col;
 		if (unchanged && !forced) continue;
-		if (open && span.row === open.row && span.col === open.col) continue;
 		const next = fresh.rows[span.row]?.cells[span.col];
 		const now = drawn.rows[span.row]?.cells[span.col];
-		if (next && now) now.replaceWith(next);
+		if (next && now) copyCell(now, next);
 	}
 	return true;
 }
 
 /**
- * Puts a cell's rendered content back from the document's source: what a closed cell needs, since its editor replaced the
- * rendered text while it was open and the source may have moved on underneath it.
+ * Moves a re-rendered cell into the drawn one and keeps the drawn element. A cell's own node has to survive the keystroke
+ * that changed it: the reader's editor lies over it and follows its box, and a comment anchor inside it is a live node.
+ * Only its attributes and its inside are replaced, which is also the smaller mutation for the browser to lay out.
+ */
+function copyCell(into: HTMLTableCellElement, from: HTMLTableCellElement) {
+	// The marker that an editor lies over this cell belongs to the reader's place, not to the source, so it rides through
+	// the patch untouched; the layer takes it off when the cell closes or the editor moves on.
+	if (into.classList.contains(CELL_EDITING)) from.classList.add(CELL_EDITING);
+	for (const attribute of Array.from(from.attributes)) if (into.getAttribute(attribute.name) !== attribute.value) into.setAttribute(attribute.name, attribute.value);
+	for (const { name } of Array.from(into.attributes)) if (!from.hasAttribute(name)) into.removeAttribute(name);
+	into.replaceChildren(...from.childNodes);
+}
+
+/**
+ * Puts a cell's rendered content back from the document's source: what a closed cell needs, since its editor lay over its
+ * text while it was open and the source may have moved on underneath it.
  */
 export function repaintTableCell(el: HTMLElement, state: EditorState, cell: OpenCell) {
 	const block = tableAt(state, cell.from, cell.from + 1);
 	if (!block || block.from !== cell.tableFrom || !el.querySelector('table')) return;
 	const src = state.sliceDoc(block.from, block.to);
-	transplant(el, src, state.facet(imageContext)(), src, null, cell);
+	transplant(el, src, state.facet(imageContext)(), src, cell);
 }
 
 /**

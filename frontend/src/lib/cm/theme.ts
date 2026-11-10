@@ -83,11 +83,25 @@ export const docTheme = EditorView.theme({
 	'.cm-md-table': { margin: '0', padding: '0.6em 0' },
 	// Without this, a drag that starts inside a widget is turned into a caret on the editor, so no text in a table or diagram can be selected.
 	'.cm-md-table, .cm-md-table *, .cm-md-mermaid, .cm-md-mermaid *': { userSelect: 'text', WebkitUserModify: 'read-only' },
-	// A cell's own editor is the one thing inside a table that is written to, so it takes back what the rule above takes
-	// away. `user-modify: read-only` propagates down and a descendant cannot raise it back, so while a cell of this table is
-	// open the whole table has to ask for editing — the cell's editor, and nothing else, is where the caret can then go.
-	'.cm-md-table:has(.cm-md-cell-editor), .cm-md-table:has(.cm-md-cell-editor) *': { userSelect: 'text', WebkitUserModify: 'read-write' },
-	'.cm-md-cell-editor, .cm-md-cell-editor *': { userSelect: 'text', WebkitUserModify: 'read-write' },
+	// A cell's editor cannot sit in the cell it edits: Chromium places no caret in a contenteditable element inside
+	// CodeMirror's editing host, and a drawn cell is inside it. So the editor is held in a layer that shares the document's
+	// fonts and theme but sits outside that host, pinned over the cell (`widget-cell-layer.ts`), and the cell keeps its own
+	// text underneath, unseen, so the row keeps the height that text gives it.
+	'.cm-md-cell-layer': {
+		position: 'fixed',
+		zIndex: 40,
+		boxSizing: 'border-box',
+		background: 'color-mix(in srgb, var(--accent) 5%, transparent)',
+		outline: '2px solid var(--accent)',
+		outlineOffset: '-2px',
+		borderRadius: 'var(--radius-sm)',
+		cursor: 'text',
+		overflow: 'hidden'
+	},
+	'.cm-md-cell-layer .cm-editor': { height: 'auto', backgroundColor: 'transparent' },
+	// The edited cell's own box stays drawn; only its ink and any image step aside under the editor.
+	'.cm-md-cell-editing': { color: 'transparent', textDecorationColor: 'transparent' },
+	'.cm-md-cell-editing img, .cm-md-cell-editing .cm-md-image, .cm-md-cell-editing .cm-md-image-note': { visibility: 'hidden' },
 	// While a cell is open its editor holds the reader's place. The document's own caret, mirrored to the same source range
 	// for the comment flows, would otherwise be a second caret on the same text.
 	'&.cm-md-cell-open .cm-cursorLayer': { display: 'none' },

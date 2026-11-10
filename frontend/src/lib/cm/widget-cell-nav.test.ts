@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Rig } from './typed-reveal-rig';
-import { build, cellEditor, cellEl, cellText, cleanup, clicked, mountedEditor, press, THREEROW, typed } from './widget-cell-rig';
+import { build, caretAt, cellCaret, cellEditor, cellEl, cellText, cleanup, clicked, editingCell, mountedEditor, press, THREEROW, typed } from './widget-cell-rig';
 
 /**
  * Moving around a table from inside a cell: Tab and Shift-Tab walk the cells and wrap at the row ends, Enter goes down a
@@ -19,15 +19,16 @@ const openTable = () => {
 	clicked(r, cellEl(r, 1, 0));
 	return r;
 };
-const openIn = (r: Rig, row: number, col: number) => !!cellEl(r, row, col).querySelector('.cm-md-cell-editor');
+const openIn = (r: Rig, row: number, col: number) => !!mountedEditor(r) && editingCell(r) === cellEl(r, row, col);
 
 describe('Tab and Enter move through the table', () => {
 	it('Tab opens the next cell, and what is typed there lands there', () => {
 		const r = openTable();
 		expect(openIn(r, 1, 0)).toBe(true);
+		const editor = mountedEditor(r);
 		press(r, 'Tab');
 		expect(openIn(r, 1, 1), 'the cell to the right is open now').toBe(true);
-		expect(mountedEditor(r) === cellEl(r, 1, 1).querySelector('.cm-md-cell-editor')).toBe(true);
+		expect(mountedEditor(r), 'the same editor travelled with the reader, over the new cell').toBe(editor);
 		typed(r, 5, '!');
 		expect(cellText(r)).toBe(' Done! ');
 		expect(r.view.state.doc.toString()).toContain('| Login | Done! | first |');
@@ -77,8 +78,8 @@ describe('Tab and Enter move through the table', () => {
 		const r = openTable();
 		typed(r, 6, '!');
 		press(r, 'Tab');
-		expect(mountedEditor(r) === cellEl(r, 1, 1).querySelector('.cm-md-cell-editor')).toBe(true);
-		expect(cellEl(r, 1, 0).textContent, 'the cell behind shows what was typed, without the editor').toBe('Login!');
+		expect(editingCell(r), 'the editor moved on to the next cell').toBe(cellEl(r, 1, 1));
+		expect(cellEl(r, 1, 0).textContent, 'the cell behind shows what was typed, unseen under nothing').toBe('Login!');
 		expect(r.view.state.doc.toString()).toContain('| Login! | Done | first |');
 	});
 });
@@ -92,5 +93,19 @@ describe('Escape leaves the table', () => {
 		expect(cellEl(r, 1, 0).textContent, 'the cell is rendered text again').toBe('Login!');
 		expect(r.view.state.selection.main.head).toBe(r.view.state.doc.length);
 		expect(cellEditor(r)).toBeNull();
+	});
+});
+
+describe('the ordinary caret keys work in a cell', () => {
+	it('arrows move and select as they do in prose', () => {
+		const r = openTable();
+		caretAt(r, 0);
+		press(r, 'ArrowRight');
+		press(r, 'ArrowRight');
+		expect(cellCaret(r), 'the arrows moved it two characters').toBe(2);
+		press(r, 'ArrowRight', true);
+		const { from, to } = cellEditor(r)!.state.selection.main;
+		expect([from, to], 'and a shifted arrow selects from the caret, which is how a word gets commented').toEqual([2, 3]);
+		// Home and End need a laid-out line, which jsdom does not provide; the browser spec presses them in a real cell.
 	});
 });

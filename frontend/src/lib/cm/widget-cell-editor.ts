@@ -2,6 +2,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { EditorState, Facet, Transaction, type Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin, keymap, type ViewUpdate } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
+import { defaultKeymap } from '@codemirror/commands';
 import { yUndoManagerKeymap } from 'y-codemirror.next';
 import { blockRange, cellElement, drawnTableAt, TABLE } from './widget-blocks';
 import { CELL_IMAGE } from './widget-open';
@@ -10,20 +11,23 @@ import {
 } from './widget-cell-state';
 import { cellDifference, cellShapeOnly } from './widget-cell-text';
 import { adjacentCell, caretAfterTable, cellBelow, tableOfCell } from './widget-cell-nav';
+import { CellLayer } from './widget-cell-layer';
 import { repaintTableCell } from './widget-table';
 
 /**
  * Editing the text of a rendered table cell where it is read.
  *
- * Clicking a drawn cell opens a small editor inside that cell's own `<td>`, holding exactly that cell's source slice
+ * Clicking a drawn cell opens a small editor over that cell's own `<td>`, holding exactly that cell's source slice
  * between its pipes. So one keystroke is one transaction against the cell's own range, and the document keeps its single
  * Yjs binding, its single undo manager and its single markdown parse: the nested editor holds no document state of its
  * own and is rewritten from the document whenever the two disagree, which is also how a live edit from another client
  * reaches the cell. Formatting renders while you type because the cell runs the document's own hide-syntax pass, handed
  * to it through `cellEditorExtensions`.
  *
- * The editor replaces the cell's rendered content while it is open, and the cell is repainted from the source when it
- * closes — which only works because `widget-table.ts` keeps the table's DOM, and this `<td>`, alive across edits.
+ * The editor sits in `widget-cell-layer.ts`'s layer rather than in the `<td>` itself, because a caret cannot be placed
+ * inside the document's own editing host; the cell keeps its live rendered text underneath, unseen, so the row keeps
+ * growing as the text wraps. The cell is repainted from the source when the editor closes, and the table's DOM survives
+ * the whole edit because `widget-table.ts` keeps it, and this `<td>`, alive across edits.
  */
 
 /** The extensions a cell's own editor runs over its source. `markdown-live.ts` supplies the document's hide-syntax pass. */
@@ -40,7 +44,7 @@ const CELL_THEME = EditorView.theme({
 
 type Change = { from: number; to: number; insert: string };
 
-/** The cell's editor and the `<td>` holding it, for as long as one cell is open. */
+/** The cell's editor, and the cell it is held over, for as long as one cell is open. */
 class CellEditors {
 	private cell: OpenCell | null = null;
 	private left: OpenCell | null = null;
@@ -48,6 +52,9 @@ class CellEditors {
 	private editor: EditorView | null = null;
 	private wrap: HTMLElement | null = null;
 	private mounted: HTMLTableCellElement | null = null;
+	private readonly layer = new CellLayer();
+	// Where the click that opened a cell landed, so the caret goes there and not to the start of the cell's text.
+	private clickedAt: { x: number; y: number } | null = null;
 
 	constructor(private readonly host: EditorView) {
 		host.dom.addEventListener('click', this.openPressed);
@@ -70,11 +77,14 @@ class CellEditors {
 		const block = blockRange(host, widget);
 		if (!block) return;
 		const open = cellToOpen(host.state, block.from, row.rowIndex, cell.cellIndex);
-		if (open) host.dispatch({ effects: openCellAt.of(open) });
+		if (open) {
+			this.clickedAt = { x: event.clientX, y: event.clientY };
+			host.dispatch({ effects: openCellAt.of(open) });
+		}
 	};
 
 	private readonly pressedElsewhere = (press: Event) => {
-		if (this.cell && !this.mounted?.contains(press.target as Node)) this.close();
+		if (this.cell && !this.layer.contains(press.target as Node)) this.close();
 	};
 
 	/**
@@ -108,7 +118,7 @@ class CellEditors {
 		if (moved) this.mirrorToDocument(cell, editor);
 	}
 
-	/** Puts the editor in the cell it edits, or out of the document while that cell is not drawn. */
+	/** Puts the editor over the cell it edits, or out of the document while that cell is not drawn. */
 	private mount(cell: OpenCell) {
 		const wrap = this.wrap;
 		if (!wrap) return;
@@ -117,27 +127,35 @@ class CellEditors {
 		const widget = drawnTableAt(this.host, cell.tableFrom);
 		const td = widget ? cellElement(widget, cell) : null;
 		if (!td) { this.unmount(); return; }
-		if (td === this.mounted && wrap.parentElement === td) return;
+		if (td === this.mounted && this.layer.contains(wrap)) { this.clickedAt = null; return; }
 		const hadFocus = wrap.contains(document.activeElement);
-		// CodeMirror draws a block widget's DOM as `contenteditable="false"`, and no caret can be placed in such a subtree.
-		// While this table's cell is being edited its own DOM has to be able to hold one, so the flag comes off here and goes
-		// back on when the cell closes: the reader is typing in this table, and only in the nested editor, for exactly as long.
-		widget!.setAttribute('contenteditable', 'true');
-		td.textContent = ''; // the rendered text steps aside; the editor shows the same text, live
-		td.append(wrap);
+		this.layer.open(td, wrap, this.host);
 		this.mounted = td;
 		// Focus is taken only once the editor is in the document — before that, focusing it does nothing — and the click
-		// that opened the cell counts as the reader asking for the caret there.
-		if (hadFocus || this.fresh) { this.editor?.focus(); this.fresh = false; }
+		// that opened the cell counts as the reader asking for the caret there, at the word they clicked rather than at the
+		// start of the cell. The layer is over the cell by now, so the editor reads the click's point off its own layout.
+		if (hadFocus || this.fresh) {
+			this.editor?.focus();
+			this.fresh = false;
+			this.placeAtClick();
+		}
 		this.editor?.requestMeasure();
 	}
 
-	/** Takes the editor out of the document and puts the table back as an uneditable rendered block. */
+	/** The caret where the click landed, as a click in prose puts it. */
+	private placeAtClick() {
+		const clicked = this.clickedAt, editor = this.editor;
+		this.clickedAt = null;
+		if (!clicked || !editor) return;
+		const at = editor.posAtCoords(clicked);
+		if (at === null) return;
+		editor.dispatch({ selection: { anchor: at, head: at } });
+	}
+
+	/** Takes the editor off the cell, leaving the cell as a plain rendered cell. */
 	private unmount() {
-		const mounted = this.mounted;
-		this.wrap?.remove();
+		this.layer.close();
 		this.mounted = null;
-		mounted?.closest<HTMLElement>(TABLE)?.setAttribute('contenteditable', 'false');
 	}
 
 	/**
@@ -152,6 +170,7 @@ class CellEditors {
 	}
 
 	private close() {
+		this.clickedAt = null;
 		this.left = this.cell;
 		this.cell = null;
 		if (this.host.state.field(openCellState)) this.host.dispatch({ effects: closeCell.of(null) });
@@ -202,7 +221,10 @@ class CellEditors {
 						{ key: 'Enter', preventDefault: true, run: () => (this.moveTo(cellBelow(host.state, this.cell!)), true) },
 						// Undo and redo are the document's own: the same commands the document's keymap runs, against the
 						// document's view, so the one Yjs undo manager holds the cell's edits in the document's history.
-						...yUndoManagerKeymap.map((binding) => ({ ...binding, run: () => binding.run?.(host) ?? false }))
+						...yUndoManagerKeymap.map((binding) => ({ ...binding, run: () => binding.run?.(host) ?? false })),
+						// The ordinary caret keys — arrows, Home, End, deleting forward — are the platform's own bindings. Only
+						// the ones above are given a different meaning inside a cell.
+						...defaultKeymap
 					]),
 					CELL_THEME
 				]
@@ -214,15 +236,18 @@ class CellEditors {
 	private readonly fromCell = (update: ViewUpdate) => {
 		const cell = this.cell, editor = this.editor;
 		if (!cell || !editor) return;
+		if (update.docChanged && !update.transactions.every((tr) => tr.isUserEvent(CELL_SYNC))) {
+			const changes: Change[] = [];
+			update.changes.iterChanges((fromA, toA, _fromB, _toB, insert) => {
+				changes.push({ from: cell.from + fromA, to: cell.from + toA, insert: insert.sliceString(0, insert.length) });
+			});
+			if (cell.padded) this.openCellInSource(changes, cell);
+			const event = update.transactions[update.transactions.length - 1]?.annotation(Transaction.userEvent);
+			this.host.dispatch(event ? { changes, userEvent: event } : { changes });
+		}
+		// The reader's place is mirrored after the change, never before it: a caret at the end of a long insertion sits past
+		// the end of the document until the document holds what was typed, and the document refuses a selection there.
 		if (update.selectionSet || update.docChanged) this.mirrorToDocument(cell, editor);
-		if (!update.docChanged || update.transactions.every((tr) => tr.isUserEvent(CELL_SYNC))) return;
-		const changes: Change[] = [];
-		update.changes.iterChanges((fromA, toA, _fromB, _toB, insert) => {
-			changes.push({ from: cell.from + fromA, to: cell.from + toA, insert: insert.sliceString(0, insert.length) });
-		});
-		if (cell.padded) this.openCellInSource(changes, cell);
-		const event = update.transactions[update.transactions.length - 1]?.annotation(Transaction.userEvent);
-		this.host.dispatch(event ? { changes, userEvent: event } : { changes });
 	};
 
 	/**
@@ -241,15 +266,14 @@ class CellEditors {
 	private detach() {
 		const editor = this.editor;
 		if (!editor) return;
-		const cell = this.cell ?? this.left, mounted = this.mounted, wrap = this.wrap;
+		const cell = this.cell ?? this.left, mounted = this.mounted;
 		this.editor = null;
 		this.cell = null;
 		this.left = null;
 		this.wrap = null;
 		this.mounted = null;
 		editor.destroy();
-		wrap?.remove();
-		mounted?.closest<HTMLElement>(TABLE)?.setAttribute('contenteditable', 'false');
+		this.layer.close();
 		// The cell goes back to being rendered text — from the source as it stands now, not as it was when the cell opened.
 		const table = mounted?.closest<HTMLElement>(TABLE);
 		if (cell && table?.isConnected) repaintTableCell(table, this.host.state, cell);

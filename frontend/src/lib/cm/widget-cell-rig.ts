@@ -31,8 +31,10 @@ export const open = (extensions: Extension[] = []) => build(DOC, extensions);
 
 export const table = (r: Rig) => r.view.dom.querySelector('table');
 export const cellEl = (r: Rig, row = 1, col = 0) => table(r)!.rows[row].cells[col];
-// One cell is open at a time, wherever it is in the table.
+// One cell is open at a time, wherever it is in the table: the editor is in the layer, the layer is over the cell.
 export const mountedEditor = (r: Rig) => r.view.dom.querySelector<HTMLElement>('.cm-md-cell-editor');
+export const layer = (r: Rig) => r.view.dom.querySelector<HTMLElement>('.cm-md-cell-layer');
+export const editingCell = (r: Rig) => r.view.dom.querySelector<HTMLTableCellElement>('.cm-md-cell-editing');
 export const cellEditor = (r: Rig) => {
 	const el = mountedEditor(r)?.querySelector<HTMLElement>('.cm-editor');
 	return el ? EditorView.findFromDOM(el) : null;

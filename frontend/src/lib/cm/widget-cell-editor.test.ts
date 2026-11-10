@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorState } from '@codemirror/state';
 import { A as AUTHOR, type Rig } from './typed-reveal-rig';
 import {
-	cellCaret, cellEditor, cellEl, cellText, caretAt, cellFrom, cleanup, clicked, deleted, DOC, key,
-	mountedEditor, open, pasted, press, table, typed
+	cellCaret, cellEditor, cellEl, cellText, caretAt, cellFrom, cleanup, clicked, deleted, DOC, editingCell, key,
+	layer, mountedEditor, open, pasted, press, table, typed
 } from './widget-cell-rig';
 
 /**
- * Editing a rendered table cell: the click opens an editor inside the cell's own `<td>` whose document is that cell's
+ * Editing a rendered table cell: the click opens an editor over the cell's own `<td>` whose document is that cell's
  * source slice, so typing, deleting, pasting, undoing and a live edit from another client all land in the main document,
  * in the cell's range, and the table stays a table while it happens.
  */
@@ -22,14 +22,15 @@ afterEach(() => { while (rigs.length) rigs.pop()!.view.destroy(); cleanup(); doc
 const at = (offset: number) => cellFrom() + offset;
 
 describe('clicking a cell edits it where it is read', () => {
-	it('opens an editor inside the cell holding that cell\'s own source, and leaves the table rendered', () => {
+	it('opens an editor over the cell holding that cell\'s own source, and leaves the table rendered', () => {
 		const r = track(open());
 		expect(table(r), 'setup: the table is rendered').not.toBeNull();
 		clicked(r);
 		expect(cellEditor(r), 'the cell editor opened').not.toBeNull();
 		expect(cellText(r)).toBe(' Login ');
-		expect(cellEl(r).contains(cellEditor(r)!.dom), 'it is the cell that holds the editor').toBe(true);
-		expect(cellEl(r).contains(document.activeElement), 'the click put the caret in the cell').toBe(true);
+		expect(editingCell(r), 'the cell it lies over is the one clicked').toBe(cellEl(r));
+		expect(cellEl(r).contains(cellEditor(r)!.dom), 'and not inside that cell').toBe(false);
+		expect(cellEditor(r)!.dom.contains(document.activeElement), 'the click put the caret in the cell').toBe(true);
 		expect(table(r), 'the table is still a table').not.toBeNull();
 		expect(r.view.state.doc.toString(), 'nothing is written by opening').toBe(DOC);
 	});
@@ -41,6 +42,7 @@ describe('clicking a cell edits it where it is read', () => {
 		expect(cellText(r), 'while it is open the editor is the cell\'s content').toBe(' LoginXY ');
 		press(r, 'Escape');
 		expect(mountedEditor(r), 'the editor is gone').toBeNull();
+		expect(layer(r), 'and so is the layer that held it').toBeNull();
 		expect(cellEl(r)!.textContent, 'the cell is rendered text again, with what was typed').toBe('LoginXY');
 	});
 
@@ -62,11 +64,11 @@ describe('clicking a cell edits it where it is read', () => {
 	it('keeps the table\'s DOM across a keystroke, so the editor and the reader\'s place survive', () => {
 		const r = track(open());
 		clicked(r);
-		const drawn = table(r), cell = cellEl(r);
+		const drawn = table(r), cell = cellEl(r), editor = mountedEditor(r);
 		typed(r, 6, 'XY');
 		expect(table(r), 'the table widget was not thrown away').toBe(drawn);
-		expect(cellEl(r), 'the cell is the same node, holding the same editor').toBe(cell);
-		expect(mountedEditor(r), 'and the editor is still mounted in it').toBe(cell.querySelector('.cm-md-cell-editor'));
+		expect(cellEl(r), 'the cell is the same node, still the one being edited').toBe(cell);
+		expect(mountedEditor(r), 'and the same editor still lies over it').toBe(editor);
 		expect(cellEl(r, 1, 1).textContent, 'the cell beside it shows the document as it stands').toBe('Done');
 	});
 });
@@ -282,5 +284,12 @@ describe('a selection in the cell is a selection in the document', () => {
 		clicked(r);
 		typed(r, 6, 'XY');
 		expect(r.view.state.selection.main.head, 'the caret in the document is where it is in the cell').toBe(at(8));
+		// A caret at the end of a long insertion is past the end of the document until the change lands there, so the
+		// document has to take the text before it can take the selection — and a mirrored selection is what a comment needs.
+		const long = ' and a great many words after them';
+		typed(r, 8, long);
+		expect(r.view.state.doc.toString(), 'the whole insertion is in the cell, and the row keeps its columns')
+			.toContain(`| LoginXY${long} | Done |`);
+		expect(r.view.state.selection.main.head, 'and the document mirrors the caret after it').toBe(at(8 + long.length));
 	});
 });
