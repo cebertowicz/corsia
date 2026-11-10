@@ -37,8 +37,8 @@ def weekly(rows: list[dict[str, Any]], grain: Grain) -> list[dict[str, Any]]:
     result = []
     for (start, version), items in sorted(groups.items()):
         values = measures(items)
-        ended = [item for item in items if item["ended"]]
+        finished = [item for item in items if item["finished"]]
         result.append({"start": start, "version": items[0]["version"], "version_id": version, "runs": len(items),
-                       "failed": sum(item["failed_step"] is not None for item in ended),
+                       "failed": sum(item["failed_step"] is not None for item in finished),
                        "measures": values})
     return result

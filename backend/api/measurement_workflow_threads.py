@@ -19,7 +19,7 @@ def agents(db: sqlite3.Connection, run_ids: Iterable[str]) -> dict[str, dict[str
 
 def plan_targets(db: sqlite3.Connection, run_ids: Iterable[str]) -> dict[str, dict[str, str | None] | None]:
     """Find the visible plan and its nesting step using the plan attachment owner."""
-    from plans.commitments import attached_parent_node
+    from plans.public import attached_parent_node
 
     rows = db.execute("""
         SELECT n.id AS run_id, p.id AS plan_id, p.owner_id, t.spawned_by

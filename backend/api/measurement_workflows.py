@@ -53,7 +53,7 @@ from core.workflow_verdicts import Run, parse_ts
 from infra.auth import require_user
 from infra.database import get_db
 from infra.db_async import run_bulk
-from plans import node_cost_scoped, run_end
+from plans.public import node_cost_project, run_end_records
 from tools.workflow_task_fields import version_short_hash
 from api.measurement_workflow_history import measures as _measures, version_summaries as _version_summaries, weekly as _weekly
 
@@ -187,7 +187,7 @@ def _entries(db: sqlite3.Connection, windowed: Snapshot, full: Snapshot, grain: 
     if not history_runs:
         return []
     ids = [run.run_id for run in history_runs]
-    records = run_end.records(db, ids)
+    records = run_end_records(db, ids)
     titles = _step_titles(db, {node_id for record in records.values()
                                for step in record["steps"] for node_id in step["node_ids"]})
     agents = _agents(db, ids)
@@ -300,7 +300,7 @@ def _run_row(run: Run, record: Mapping[str, Any] | None, titles: Mapping[str, st
         "corrections": None if run.terminal_at is None else len({
             (fact.source_kind, fact.source_id) for fact in run.corrections if fact.is_correction and
             fact.source_kind in _PERSON_SOURCES | {SOURCE_KIND_SENT_BACK}}),
-        "ended": record is not None,
+        "finished": record is not None,
         "first_try": None if record is None else all(
             step["state"] == STEP_DONE and int(step["rounds"]) == 0 and
             step.get("gate_answer") != "changes_requested"
@@ -373,7 +373,7 @@ def _step_titles(db: sqlite3.Connection, node_ids: Iterable[str]) -> dict[str, s
 
 def _working_seconds(db: sqlite3.Connection, run_ids: list[str]) -> dict[str, float]:
     """Each run's own working time, from the cost rollup that records it (subtree and carried plans)."""
-    _own, rolled, _initiatives, _ledger = node_cost_scoped.project([], run_ids, (), db=db)
+    _own, rolled, _initiatives, _ledger = node_cost_project([], run_ids, (), db=db)
     found = {}
     for run_id, figures in rolled.items():
         execution = figures.get("execution") or {}

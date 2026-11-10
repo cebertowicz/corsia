@@ -14,7 +14,7 @@ export interface WorkflowRun {
   caught: 'agent_closed' | 'sent_back' | 'corrected_later' | null;
   gate_rounds: number | null;
   corrections: number | null;
-  ended: boolean;
+  finished: boolean;
   first_try: boolean | null;
   owner_measure: number | null;
 }

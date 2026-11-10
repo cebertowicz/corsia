@@ -424,7 +424,7 @@ def test_a_clean_run_carries_its_date_version_agent_cost_minutes_and_one_gate_ro
 def test_weekly_groups_versions_by_full_identity_even_when_display_hash_collides() -> None:
     from api.measurement_workflows import _weekly
 
-    common = {"started": "2026-10-07", "version": "abc1234", "ended": True,
+    common = {"started": "2026-10-07", "version": "abc1234", "finished": True,
               "failed_step": None, "first_try": True, "corrections": 0, "gate_rounds": 1,
               "cost": None, "minutes": None, "owner_measure": None}
     rows = [dict(common, version_id="abc1234+first"), dict(common, version_id="abc1234+second")]

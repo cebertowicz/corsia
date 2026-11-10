@@ -26,7 +26,7 @@ from api.measurement_scope import query_params, scope_cte
 from core.correction_attribution import attributed_facts, workflow_run_of
 from core.measurement_scope import Grain
 from infra.measure_registry import workflow_for_file
-from plans import run_end
+from plans.public import run_end_records
 from core.workflow_verdict_rules import Definition, FrozenPlan, Snapshot, WorkflowHistory
 from core.workflow_verdict_types import split_subject, subject_of
 from core.workflow_verdicts import MIXED, OUTCOME_STATES, TERMINAL_STATES, CorrectionFact, KpiRow, Run, parse_ts
@@ -268,7 +268,7 @@ def read_snapshot(db: sqlite3.Connection, *, now: datetime | None = None,
     trees = _subtrees(nodes, root_ids)
     models = _model_groups(db, {node["id"]: trees[node["id"]] for node in judged})
     times = terminal_times(db, [node["id"] for node in judged if node["kind"] != "phase"])
-    ends = run_end.records(db, (node["id"] for node in judged if node["kind"] == "phase"))
+    ends = run_end_records(db, (node["id"] for node in judged if node["kind"] == "phase"))
     by_workflow: dict[str, list[Run]] = defaultdict(list)
     excluded: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for node in roots:
