@@ -180,6 +180,43 @@ async def test_history_is_offered_only_once_a_version_is_recorded(history_scope)
 
 
 @pytest.mark.asyncio
+async def test_a_fault_offers_history_so_its_panel_shows_it(history_scope, monkeypatch):
+    from fastapi import HTTPException
+
+    from api import files, files_history
+    from core import document_history_paths
+    from infra import document_history
+    from infra.guidance_states import GitFault
+
+    workspace, thread_id = history_scope
+    user_id = owner(thread_id)
+    monkeypatch.setattr(files, 'authenticate', lambda _token: {'id': user_id})
+    path = placed(workspace / 'notes' / 'plan.md')
+    real = document_history._git_bytes
+
+    def unreadable_head(repo, *args, **kwargs):
+        if args[0] == 'rev-parse' and args[-1].startswith('HEAD:'):
+            raise GitFault('fatal: unable to read tree')
+        return real(repo, *args, **kwargs)
+    # Git failing the open's one lookup offers History rather than hiding it.
+    monkeypatch.setattr(document_history, '_git_bytes', unreadable_head)
+    assert (await files.content('test', str(path), thread_id=thread_id))['history'] is True
+    monkeypatch.setattr(document_history, '_git_bytes', real)
+    # A document whose classification fails carries the fault, as a guidance file's does.
+    monkeypatch.setattr(document_history_paths, 'is_history_document', lambda *_a, **_k: (_ for _ in ()).throw(OSError('database is locked')))
+    target = history_target(path, workspace)
+    assert target.document and 'database is locked' in target.fault
+    assert (await files.content('test', str(path), thread_id=thread_id))['history'] is True
+    with pytest.raises(HTTPException) as failure:
+        files_history.history(str(path), user_id, None, thread_id)
+    assert failure.value.status_code == 503
+    # Its save still lands and says history may be missing.
+    saved = await save_document_text(DocumentSave(path=str(path), text='Saved.\n', thread_id=thread_id), user_id)
+    assert path.read_text() == 'Saved.\n'
+    assert saved['document_history'].startswith('Saved. History may be missing: could not check')
+
+
+@pytest.mark.asyncio
 async def test_a_save_answers_once_its_version_is_recorded_in_turn(history_scope, monkeypatch):
     from doceditor.document_save import DocumentSaveError
     from infra import guidance_git

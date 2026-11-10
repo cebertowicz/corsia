@@ -49,9 +49,9 @@ def guidance_target(path: Path, workspace: Path | None = None) -> HistoryTarget 
 def history_target(path: Path, workspace: Path | None = None) -> HistoryTarget | None:
     """The target whose saves the workspace history records: guidance first, else a recorded document.
 
-    A document whose classification fails is not recorded: its save stays an ordinary write, as it was
-    before documents had history. One the workspace's Git ignores is a target, and the writer's one
-    ignore gate leaves it unrecorded."""
+    A classification that fails is a target carrying its fault, as guidance's is, so the save and the
+    History control both say history may be missing. One the workspace's Git ignores is a target, and
+    the writer's one ignore gate leaves it unrecorded."""
     target = guidance_target(path, workspace)
     if target is not None:
         return target
@@ -62,7 +62,7 @@ def history_target(path: Path, workspace: Path | None = None) -> HistoryTarget |
 
 
 def document_target(path: Path, workspace: Path) -> HistoryTarget | None:
-    """The document half of the decision (no Git); a failed check records nothing."""
+    """The document half of the decision (no Git); a failed check is a document target with its fault."""
     from core.document_history_paths import in_thread_folder, is_history_document
     from infra.database import get_db
 
@@ -72,5 +72,5 @@ def document_target(path: Path, workspace: Path) -> HistoryTarget | None:
                 return None
     except Exception as exc:
         logger.warning("document history classification failed for {}: {}", path, exc)
-        return None
+        return HistoryTarget(DOCUMENT_SCOPE, f"could not check whether this file has history ({exc})", document=True)
     return HistoryTarget(DOCUMENT_SCOPE, document=True, registered=in_thread_folder(path, workspace))

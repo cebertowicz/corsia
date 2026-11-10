@@ -39,19 +39,21 @@ def history_off(workspace: Path) -> bool:
 
 def history_offered(workspace: Path, document=None) -> bool:
     """Whether an open recorded file offers History: the workspace records history, and ``document`` (its
-    path and target; a guidance file passes None) has a version to list, so a file with none recorded has
-    no History control (VH7). One ``git log`` (an unborn HEAD exits 128: none recorded); a Git fault
-    offers none."""
+    path and target; a guidance file passes None) is in the latest version, so a file with none recorded
+    has no History control (VH7). One lookup in HEAD, whatever the history's length (an unborn HEAD or
+    a path not in it exits 1). A fault, the target's own or Git's, offers History, so the panel's load
+    shows it."""
     try:
         repo = repository(workspace)
-        if repo is None or document is None:
+        if repo is None or document is None or document[1].fault:
             return repo is not None
         relative = document[0].resolve(strict=False).relative_to(repo).as_posix()
-        return bool(_git_bytes(repo, "log", "-1", "--format=%H", "--diff-filter=d", "--",
-                               f":(literal){relative}", ok=(0, 128)).strip())
-    except (GitFault, ValueError) as exc:
+        return _git_bytes(repo, "rev-parse", "--verify", "--quiet", f"HEAD:{relative}", ok=(0, 1)).strip() != b""
+    except GitFault as exc:
         logger.warning("history check failed for {}: {}", document, exc)
-        return document is None
+        return True
+    except ValueError:  # outside this history: nothing to list
+        return False
 
 
 def list_versions(workspace: Path, relative: str) -> tuple[list[dict[str, str | None]], bool]:
