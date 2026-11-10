@@ -37,9 +37,9 @@ function seqRange(entry: TranscriptEntry): SeqRange | null {
 }
 
 /** `run` carrying `stub`, its Turns first. */
-function withStub(run: TranscriptFoldEntry, stub: RunStub | undefined): TranscriptFoldEntry {
+function withStub(run: TranscriptFoldEntry, stub: RunStub | undefined, stubParts?: string[]): TranscriptFoldEntry {
 	if (!stub) return run;
-	return { ...run, stub, turnIds: [...new Set([...stub.turnIds, ...run.turnIds])] };
+	return { ...run, stub, stubParts, turnIds: [...new Set([...stub.turnIds, ...run.turnIds])] };
 }
 
 function updateEntry(card: UpdateCard, earlier = 0): TranscriptUpdateEntry {
@@ -103,9 +103,9 @@ function closeRunsInGap(
 	const shown = groupRun(group);
 	const placed: TranscriptEntry[] = [];
 	let next = 0;
-	const draw = (part: TranscriptMessageEntry[], stub?: RunStub) => {
+	const draw = (part: TranscriptMessageEntry[], stub?: RunStub, stubParts?: string[]) => {
 		const card = shown[next];
-		if (part.length || stub) placed.push(withStub(runEntry(part, `run:${card.id}`), stub));
+		if (part.length || stub) placed.push(withStub(runEntry(part, `run:${card.id}`), stub, stubParts));
 		placed.push(card);
 		next += 1;
 	};
@@ -124,14 +124,14 @@ function closeRunsInGap(
 			});
 			// The card follows this run's rows: a later run of the gap may hold its place.
 			if (cut === -1 && index < runs.length - 1) break;
-			draw(cut === -1 ? rest : rest.slice(0, cut), beforeStub ? undefined : stub);
+			draw(cut === -1 ? rest : rest.slice(0, cut), beforeStub ? undefined : stub, run.stubParts);
 			if (!beforeStub) {
 				stub = undefined;
 				rest = cut === -1 ? [] : rest.slice(cut);
 			}
 		}
 		if (rest === items && stub === run.stub) placed.push({ ...run, items });
-		else if (rest.length || run.live || stub) placed.push(withStub(runEntry(rest, run.id, run.live), stub));
+		else if (rest.length || run.live || stub) placed.push(withStub(runEntry(rest, run.id, run.live), stub, run.stubParts));
 	});
 	while (next < shown.length) draw([]);
 	return placed;

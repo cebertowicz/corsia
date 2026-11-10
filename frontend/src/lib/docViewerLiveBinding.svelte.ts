@@ -1,4 +1,11 @@
 import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
+import { placeLostOnLoad } from '$lib/docCanvasComments';
+
+/** Lost comments whose quote is still in the text are placed again once per connected live load (`placeLostOnLoad`). */
+export function placeLostWhenLive(reload: (artifactId: string) => boolean, load: () => object | undefined, artifactId: () => string | null, replaceableCount: () => number): void {
+	const placeLost = placeLostOnLoad(reload);
+	$effect(() => placeLost(load(), artifactId(), replaceableCount()));
+}
 
 export function reopenOnReconnect(connected: () => boolean, refused: () => boolean, reopen: () => void): void {
 	let wasConnected = false;

@@ -3,7 +3,7 @@
 	import type * as Y from 'yjs';
 	import { liveDocumentBinding } from '$lib/cm/live-document-binding';
 	import { EditorView, keymap } from '@codemirror/view';
-	import { EditorState, Compartment, Transaction } from '@codemirror/state';
+	import { EditorState, Compartment } from '@codemirror/state';
 	import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirror/commands';
 	import { markdown } from '@codemirror/lang-markdown';
 	import { GFM } from '@lezer/markdown';
@@ -15,9 +15,10 @@
 	import { focusedDocComment } from '$lib/stores/docCommentFocus';
 	import { get } from 'svelte/store';
 	import { markdownTasks } from '$lib/cm/markdown-tasks';
-	import { commentMarks, coveredByMove, setCommentRanges, scrollToRange, type CommentRange, type ScrollOrigin } from '$lib/cm/comment-marks';
+	import { commentMarks, coveredByMove, setCommentRanges, type CommentRange } from '$lib/cm/comment-marks';
 	import { pendingCommentMark, setPendingComment } from '$lib/cm/pending-comment-mark';
 	import { selectionRange, type CommentSelection } from '$lib/stores/commentSelection';
+	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
 	import { ANCHOR_MOVED } from '$lib/components/ui/Popover.svelte';
 	import { commentRail } from '$lib/cm/comment-rail';
 	import { imagePins } from '$lib/cm/image-pins';
@@ -28,6 +29,7 @@
 	import { suggestionMarks } from '$lib/cm/suggestion-marks';
 	import { presenceMarks, setPresenceRanges, type PresenceRange } from '$lib/cm/presence-marks';
 	import { createTypedReveal, revealTypedUnder, settleTypedReveals } from '$lib/cm/typed-reveal';
+	import { jumpToComment, type JumpTarget } from '$lib/cm/comment-jump';
 	import { attachPreviewFeed, type PreviewFrameSource } from '$lib/stores/livePreviewFeed';
 	import { captureDocumentPlace, dispatchKeepingPlace, holdPlace, keepPlaceWhenEditorMoves, reportDocumentPlaceOnScroll, type TextDocumentPlace } from '$lib/documentReadingPlace';
 
@@ -44,7 +46,8 @@
 		onSelect,
 		onAnchorFocus,
 		onCaretAway,
-		commentsAsSheet = false,
+		cardMode = 'margin',
+		onTyping,
 		onSuggestionHover,
 		onEdit,
 		onLayout,
@@ -73,15 +76,17 @@
 		onAnchorFocus?: (id: string, anchor: () => DOMRect | null, viaSuggestion?: boolean, click?: MouseEvent) => void;
 		/** A caret came to rest in text no comment covers: whatever card was picked lets go. */
 		onCaretAway?: () => void;
-		/** Cards open as the phone sheet here, so a caret in a suggestion opens none and the editor keeps the focus to edit. */
-		commentsAsSheet?: boolean;
+		/** How a card opened from the text shows now. Over the text (a popover or the phone sheet) only a click on a highlight opens one, never the caret arriving by keys. */
+		cardMode?: CardMode;
+		/** The person typed or deleted in the text. */
+		onTyping?: () => void;
 		onSuggestionHover?: (id: string | null) => void;
 		onEdit?: (mapPos: (pos: number) => number) => void;
 		onLayout?: (mapPos?: (pos: number) => number) => void;
 		highlights?: CommentRange[];
 		presence?: PresenceRange[];
 		pendingComment?: CommentSelection | null;
-		scrollTo?: { from: number; to: number; focus?: boolean; origin: ScrollOrigin } | null;
+		scrollTo?: JumpTarget | null;
 		/** The mounted tab identity keeps a delayed scroll sample from landing on the next tab. */
 		tabInstanceId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: TextDocumentPlace) => void;
@@ -177,16 +182,26 @@
 		if (open) open(ids, opener, undefined, click); else onAnchorFocus?.(ids[0], liveAnchor(ids[0]), opener.dataset.suggestionId !== undefined || undefined, click);
 	}
 
+	/** The highlight the caret last came to rest in: a caret moving inside it (typing, Backspace, the arrow keys) is editing there, and does not pick its card again. */
+	let caretIn: string | null = null;
+	/** A press waiting for its frame; a key pressed before then supersedes it. Until then the press, not the caret's report, picks the card. */
+	let pendingPress: MouseEvent | null = null;
+
 	function handleSelection(v: EditorView, click?: MouseEvent) {
 		const r = v.state.selection.main;
 		if (r.empty) {
 			onSelect?.(null);
 			const hit = curHighlights.find((h) => !h.point && r.from >= h.from && r.from <= h.to);
-			// Where cards open as the phone sheet, a caret in a suggestion is editing: only a press on its insert (suggestionMarks) opens the card.
-			if (hit && !(hit.suggestion && commentsAsSheet) && v.coordsAtPos(r.from)) {
+			const arrived = !!hit && hit.id !== caretIn;
+			caretIn = hit?.id ?? null;
+			// Where a card would cover the text (the phone sheet, the popover), only a tap or click opens it; typing and the arrow keys
+			// are editing. On the phone a caret in a suggestion opens none; a press on its insert does (suggestionMarks).
+			const opens = cardMode === 'sheet' ? !!click && !hit?.suggestion : cardMode === 'popover' ? !!click : arrived || !!click;
+			if (hit && opens && v.coordsAtPos(r.from)) {
 				onAnchorFocus?.(hit.id, liveAnchor(hit.id), hit.suggestion ? true : undefined, click);
 			} else if (!hit) onCaretAway?.();
 		} else {
+			caretIn = null;
 			emitSelection(v);
 		}
 	}
@@ -229,19 +244,23 @@
 					mousedown(press, v) {
 						dragging = true;
 						onSelect?.(null);
-						const up = () => { dragging = false; requestAnimationFrame(() => handleSelection(v, press)); };
+						// The press is read a frame after mouseup, once the editor has placed the caret; a key that moves it first supersedes the press.
+						const up = () => { dragging = false; pendingPress = press; requestAnimationFrame(() => { if (pendingPress !== press) return; pendingPress = null; handleSelection(v, press); }); };
 						window.addEventListener('mouseup', up, { once: true });
 						return false;
 					}
 				}),
+				// The caret a press placed can be reported after mouseup as a plain 'select' (CodeMirror labels any report 50 ms past the pointer so, as a phone tap's can be): only a key pressed since drops the press.
+				EditorView.domEventObservers({ keydown() { pendingPress = null; } }),
 				EditorView.updateListener.of((u) => {
 					if (u.docChanged) {
 						value = u.state.doc.toString();
 						if (!syncing) onEdit?.((p) => u.changes.mapPos(p));
+						if (u.transactions.some((t) => t.isUserEvent('input') || t.isUserEvent('delete'))) onTyping?.();
 					}
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) announceMoved();
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) onLayout?.(u.docChanged ? (p) => u.changes.mapPos(p) : undefined);
-					if (u.selectionSet && !dragging && !u.transactions.some((t) => t.isUserEvent('select.pointer') || t.isUserEvent('select.doc-comment'))) {
+					if (u.selectionSet && !dragging && !pendingPress && !u.transactions.some((t) => t.isUserEvent('select.pointer') || t.isUserEvent('select.doc-comment'))) {
 						handleSelection(u.view);
 					}
 				})
@@ -365,14 +384,7 @@
 		if (!editor || !target) return;
 		// Only a new target moves the reader. The jump reads other state (the visible band asks whether a sheet is over the
 		// text); tracked, a sheet closing would replay the jump and pull focus back to the text from the sheet's opener.
-		untrack(() => {
-			revealTypedUnder(editor, [target]);
-			scrollToRange(editor, target.from, target.to, target.origin);
-			if (!target.focus) return;
-			editor.dispatch({ selection: { anchor: Math.min(target.from, editor.state.doc.length) }, annotations: Transaction.userEvent.of('select.doc-comment') });
-			if (window.matchMedia?.('(pointer: coarse)').matches) host?.focus({ preventScroll: true });
-			else editor.focus();
-		});
+		untrack(() => jumpToComment(editor, target, host));
 	});
 </script>
 

@@ -39,6 +39,7 @@ export type TranscriptFoldEntry = {
 	live: boolean;
 	/** Rows a Focus page left unloaded; the run's rows read from its range when it is expanded. */
 	stub?: RunStub;
+	stubParts?: string[]; // Original stub endpoints retain expansion when adjacent pieces join.
 	/** Source slots, never work items, weights, expansion identities or Turn boundaries. */
 	pauses?: (PauseAnnotation & { afterItem: number })[];
 	/**
@@ -139,7 +140,7 @@ export function runTokens(
 ): string[] {
 	const run = entries[index];
 	if (run?.kind !== 'fold') return [];
-	const tokens = [...(run.stub ? stubTokens(run.stub) : []), ...run.items.flatMap(({ message }) => (
+	const tokens = [...(run.stub ? stubTokens(run.stub) : []), ...(run.stubParts ?? []), ...run.items.flatMap(({ message }) => (
 		message._optimistic === true
 			? []
 			: ((message.mergedIds ?? [message.id]) as string[]).map((id) => `row:${id}`)
@@ -229,6 +230,7 @@ export function buildTranscriptPresentation(
 	live: { turnId: string | null } | null = null,
 	openKey = OPEN_RUN_KEY,
 	stubs: readonly RunStub[] = [],
+	placedEnvelopes: ReadonlySet<string> = new Set(),
 ): TranscriptEntry[] {
 	if (!focusMode) {
 		return visibleMessages.map((message) => messageEntry(
@@ -252,6 +254,7 @@ export function buildTranscriptPresentation(
 		const browserChip = newestChip(held, run.items);
 		if (browserChip) run.browserChip = browserChip;
 		if (held.length) {
+			run.stubParts = held.flatMap(stubTokens);
 			const stub = combineStubs(held.splice(0));
 			run.stub = stub;
 			run.turnIds = [...new Set([...stub.turnIds, ...run.turnIds])];
@@ -260,7 +263,7 @@ export function buildTranscriptPresentation(
 	};
 
 	for (const message of visibleMessages) {
-		if (isAgentOnlyReceipt(message)) continue;
+		if (isAgentOnlyReceipt(message) || placedEnvelopes.has(message.id)) continue;
 		const at = sourceRange(message)?.min ?? message.seq;
 		if (typeof at === 'number' && at > 0) holdThrough(at);
 		if (isHumanMessage(message) || isSystemNotice(message)) {

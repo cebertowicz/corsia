@@ -22,14 +22,14 @@
 	import type { DocOpenRefusal } from '$lib/docOpenRefusal';
 	import { handleViewerFailure } from '$lib/docViewerFailure';
 	import { applyDocumentContent } from '$lib/docViewerApplyContent';
-	import { bindViewerSession, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
+	import { bindViewerSession, placeLostWhenLive, reopenOnReconnect } from '$lib/docViewerLiveBinding.svelte';
 	import { bindViewerDraft } from '$lib/docViewerDraftBinding.svelte';
 	import type { DocumentFreshness } from '$lib/docFreshness';
 	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
 	import { handleDocumentKey } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { createCommentSurfaceState, focusDocumentEditor, marginFits, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';
-	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, commentsInDocumentOrder, placeLostOnLoad } from '$lib/docCanvasComments';
+	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
 	import { leavePreviousTarget, loadViewerContent, openFromDraft, type ViewerContent } from '$lib/docViewerLoading';
 	import { liveDocumentBindings } from '$lib/stores/liveDocuments';
 	import { connectionState } from '$lib/stores/connection';
@@ -111,8 +111,7 @@
 
 	const listedComments = $derived(commentsInDocumentOrder(loadedArtifactId ? ($docComments[loadedArtifactId] ?? []) : [], editText, loadedArtifactId ? $suggestionRefusals[loadedArtifactId] : undefined, suggestionBusyId));
 	const commentStatus = $derived(commentSurfaceStatus(listedComments, editText));
-	const placeLost = placeLostOnLoad(reloadPlacements);
-	$effect(() => placeLost(liveConnection === 'connected' ? liveSession : undefined, loadedArtifactId, commentStatus.replaceableCount));
+	placeLostWhenLive(reloadPlacements, () => liveConnection === 'connected' ? liveSession : undefined, () => loadedArtifactId, () => commentStatus.replaceableCount);
 	const unreadThreads = $derived(listedComments.filter(hasUnread));
 	const scroll = createCommentScrollTarget({
 		focused: () => focusedComment, comments: () => listedComments, text: () => editText, listOpen: () => commentUI.state?.kind === 'list',
@@ -121,9 +120,12 @@
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
 	/** The resolved drawer beside the margin column: its count (zero without the column) and whether it is open, shared by the header's control and the surface. */
 	let resolvedCount = $state(0), resolvedOpen = $state(false);
+	let commentSurface = $state<ReturnType<typeof DocCommentSurface>>();
 
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey, () => marginFits(docRoot, isPaneDrawer()));
 	const reviewBarState = createReviewBarState();
+	// Below the margin width a card opened from the text is a popover over it: the caret leaving or a key typed in the text closes it, so it never covers what is being written.
+	const closeTextCard = () => { if (commentSurface?.cardMode() === 'popover' && commentUI.state?.kind === 'thread' && commentUI.state.fromText) commentUI.close(); };
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	openColumnOnLoad({ artifactId: () => loadedArtifactId, ready: () => docState === 'ready' && !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready', root: () => docRoot, paneDrawer: isPaneDrawer, hasComments: () => listedComments.length > 0, shown: () => !!commentUI.state, open: commentUI.openOnLoad });
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId, (comment) => images.groups.colorOf(comment)));
@@ -330,7 +332,9 @@
 		onSave={flushNow}
 		onSelect={draftController.select}
 		onAnchorFocus={openCards.comment}
-		onCaretAway={() => void commentUI.release()}
+		onCaretAway={() => { if (!commentUI.release()) closeTextCard(); }}
+		onTyping={closeTextCard}
+		cardMode={commentSurface?.cardMode()}
 		onSuggestionHover={commentUI.hover}
 		onEdit={onDocEdit}
 		onLayout={(mapPos) => activity?.editorChanged(mapPos)}
@@ -342,11 +346,11 @@
 		saveError={save.error}
 		pendingSel={draftController.pending}
 		commentSheetOpen={commentUI.sheetUp}
-		commentsAsSheet={$isMobile}
 		onStartComment={draftController.start}
 	/>
 	{#if history.open && history.available && target}<DocHistorySurface {target} readOnly={serverReadOnly} applyRestore={history.restore} onRestored={async () => { (await onPrepareCleanReload())?.(); }} bind:restoring={() => history.restoring, history.setRestoring} narrow={isPaneDrawer()} within={docRoot?.closest<HTMLElement>('.leaf-body') ?? docRoot} {covered} onClose={history.close} />{/if}
 	<DocCommentSurface
+		bind:this={commentSurface}
 		reviewBar={reviewControls}
 		reviewVisible={commentUI.sheetUp}
 		state={commentUI.state}

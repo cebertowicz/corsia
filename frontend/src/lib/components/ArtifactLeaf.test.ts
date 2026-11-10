@@ -985,12 +985,19 @@ describe('ArtifactLeaf load-status ownership', () => {
 });
 
 // Opening a thread from inside the text must leave the user's caret and focus where they are.
+// The caret arriving by itself opens a card only where the margin fits; below it only a click does (MarkdownEditor.test.ts).
 describe('ArtifactLeaf comment focus from the text', () => {
 	const QUOTE = { from: 4, to: 9 };
 	// jsdom has no text layout; give the editor one line box so it can measure the caret.
 	const rangeLayout = Range.prototype as Partial<Pick<Range, 'getClientRects' | 'getBoundingClientRect'>>;
 	beforeEach(() => {
 		Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1200 });
+		// Give the document column a wide canvas's width, so cards open in the margin.
+		const measure = HTMLElement.prototype.getBoundingClientRect;
+		vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+			const rect = measure.call(this);
+			return this.classList.contains('doc') ? { ...rect, width: 1000, right: rect.left + 1000 } as DOMRect : rect;
+		});
 		rangeLayout.getClientRects = () => [new DOMRect(10, 20, 8, 16)] as unknown as DOMRectList;
 		rangeLayout.getBoundingClientRect = () => new DOMRect(10, 20, 8, 16);
 		Element.prototype.scrollIntoView = () => {};
@@ -1020,7 +1027,7 @@ describe('ArtifactLeaf comment focus from the text', () => {
 		flushSync();
 		// The editor's anchor-focus callback reached the viewer and opened this thread.
 		expect(get(focusedDocComment)).toBe('comment');
-		expect(document.body.querySelector('.popover')).not.toBeNull();
+		expect(host.querySelector('[data-margin-card="comment"]')).not.toBeNull();
 		expect(view.state.selection.main).toMatchObject({ anchor: QUOTE.from + 2, head: QUOTE.from + 2 });
 	});
 

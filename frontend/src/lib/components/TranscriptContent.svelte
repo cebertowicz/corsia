@@ -15,7 +15,6 @@
 	import { coreSettings } from '$lib/stores/settings';
 	import { chatReplyJump } from '$lib/stores/chatReplyJump';
 	import { activeToolsByThread, messages } from '$lib/stores/threads';
-	import { placedCommentEnvelopes } from '$lib/chatCommentDelivery';
 	import { INITIAL_TURN_STATE, turnStates } from '$lib/ws/turnState';
 	import { threadLiveStep, UNKNOWN_STEP } from './plans/planLiveStep';
 	import { createLiveLine } from './plans/liveLine.svelte';
@@ -39,6 +38,7 @@
 
 	let {
 		entries,
+		placedEnvelopes = new Set<string>(),
 		expandedTools,
 		expandedReasoning,
 		onToggleToolBlock,
@@ -56,6 +56,7 @@
 		showWait = true,
 	}: {
 		entries: TranscriptEntry[];
+		placedEnvelopes?: ReadonlySet<string>;
 		expandedTools: Set<string>;
 		expandedReasoning: Set<string>;
 		onToggleToolBlock: (id: string) => void;
@@ -84,6 +85,17 @@
 	const pausePresentation = $derived(attachPlanLimitPauses(entries, pauses, boundThreadId && boundTurn
 		? { threadId: boundThreadId, phase: boundTurn.phase, turnId: boundTurn.turnId } : undefined));
 	const renderedEntries = $derived(pausePresentation.entries);
+	// Open runs (their `row:` and `after:` tokens); written only by clicks.
+	let expandedFolds = $state(new Set<string>());
+	const visibleSources = $derived.by(() => {
+		const ids = new Set<string>();
+		renderedEntries.forEach((entry, index) => {
+			const items = entry.kind === 'message' ? [entry] : entry.kind === 'fold'
+				&& isRunExpanded(runTokens(renderedEntries, index, historyComplete), expandedFolds) ? entry.items : [];
+			for (const item of items) for (const row of sourceMembers(item.message)) ids.add(row.id);
+		});
+		return ids;
+	});
 	const stubPauses = $derived(stubPauseTurns(renderedEntries, pauses, turnSummaries));
 	// A hold's ask card has one home: its blocked update row while that row is on screen, else its message.
 	const homedHolds = $derived(new Set(renderedEntries.flatMap((entry) =>
@@ -99,19 +111,6 @@
 		});
 		return holds;
 	});
-	const visibleSources = $derived.by(() => {
-		const ids = new Set<string>();
-		renderedEntries.forEach((entry, index) => {
-			const items = entry.kind === 'message' ? [entry] : entry.kind === 'fold'
-				&& isRunExpanded(runTokens(renderedEntries, index, historyComplete), expandedFolds) ? entry.items : [];
-			for (const item of items) for (const row of sourceMembers(item.message)) ids.add(row.id);
-		});
-		return ids;
-	});
-	// Comment-only sends already shown on the thread they answer get no row of their own; one pass per change answers every row.
-	const placedEnvelopes = $derived(placedCommentEnvelopes($messages, boundThreadId, visibleSources));
-	// Open runs (their `row:` and `after:` tokens); written only by clicks.
-	let expandedFolds = $state(new Set<string>());
 	// One instance serves every thread, and `after:start` names no thread: a thread change resets.
 	let expandedForThread: string | null | undefined;
 	$effect.pre(() => {

@@ -560,6 +560,16 @@ class TestRangeRead:
         assert page["has_more"] is False
         assert page["oldest_id"] == "w002"
 
+    def test_range_includes_visible_send_between_work_stubs(self):
+        conn = _db()
+        t = _Thread(conn)
+        first = t.add("w", "T1")
+        send = t.add("u", content="", meta={"reply_context": {"comments": [{"cid": "reply"}]}})
+        last = t.add("w", "T1")
+        conn.commit()
+        page = page_run_range(conn, _SID, 10, first, last, None)
+        assert [m["id"] for m in page["messages"]] == [first, send, last]
+
     def test_a_large_run_pages_newest_first_within_its_range(self):
         conn = self._run()
         first = page_run_range(conn, _SID, 2, "w002", "w006", None)
