@@ -28,6 +28,20 @@ describe('failed outcomes fence only when the user owns the item', () => {
 });
 
 describe('passive outcomes respect real composition fences', () => {
+ it.each(['card', 'pause'] as const)('keeps original combined stub expansion tokens through a %s fence', (fence) => {
+  const part = (id: string, seq: number) => ({ firstId: id, lastId: id, firstSeq: seq, lastSeq: seq, count: 1, weight: 1, kinds: ['step'], continuesOlder: false, turnIds: ['p'] });
+  const rows = [work('p4', 4, 'p'), work('n5', 5, 'n')];
+  const raw = buildTranscriptPresentation(rows, true, null, undefined, [part('s1', 1), part('s2', 2), part('s3', 3)]);
+  const original = ['row:s2'];
+  expect(runTokens(raw, 0, false)).toEqual(expect.arrayContaining(original));
+  const cards = fence === 'card' ? [{ ...outcome(1, 3), kind: 'failed' as const }] : [outcome(1, 4)];
+  const pauses = fence === 'pause' ? planLimitPauseDescriptors(rows, { p: summary('cancelled', 1, CAUSE) }) : [];
+  const entries = mergeTranscriptUpdates(raw, cards, { focusMode: true, divider: null, pauses });
+  expect(entries.some(e => e.kind === (fence === 'card' ? 'update' : 'pause'))).toBe(true);
+  const host = entries.findIndex(e => e.kind === 'fold' && e.stub);
+  expect(host).toBeGreaterThanOrEqual(0);
+  expect(runTokens(entries, host, false)).toEqual(expect.arrayContaining(original));
+ });
  it('keeps old/new cards on opposite sides even at the same after_seq', () => {
   const entries = mergeTranscriptUpdates(buildTranscriptPresentation([work('w1', 1, 'p')], true),
    [outcome(1, 1), outcome(2, 1, true)], { focusMode: true, divider: { since, first_seq: null } });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatComment, Message } from '$lib/stores/threads';
-import { chatReplyIndex, placedCommentEnvelopes } from './chatCommentDelivery';
+import { chatReplyIndex, placedCommentEnvelopes, suppressibleCommentEnvelopes } from './chatCommentDelivery';
 
 const root = { id: 'root', user_message_id: 'author', cid: 'c1' } as ChatComment;
 const row = (id: string, state: string, sender = 'author', cid = 'c1', thread = 'thread') => ({
@@ -44,6 +44,19 @@ describe('pending comment replies', () => {
 });
 
 describe('comment-only envelopes', () => {
+	it.each(['ambiguous', 'cancelled'] as const)('keeps a %s send visible even when an answer is loaded', state => {
+		const send = row('send', state);
+		const target = { id: 'target', thread_id: 'thread', role: 'assistant', content: 'quote', chat_comments: [{ ...root, answers: [{ author_kind: 'user', user_message_id: 'send', cid: 'reply-cid' }] }] } as unknown as Message;
+		expect(suppressibleCommentEnvelopes([target, send], 'thread').has('send')).toBe(false);
+	});
+	it('retains recovery controls until a later retry replaces a failed reply', () => {
+		const target = { id: 'target', thread_id: 'thread', role: 'assistant', content: 'quote', chat_comments: [{ ...root, answers: [] }] } as unknown as Message;
+		const failed = row('failed', 'failed');
+		const queued = { ...row('queued', 'queued'), metadata: { ...row('queued', 'queued').metadata, retried_from_message_id: 'failed' } } as Message;
+		expect([...suppressibleCommentEnvelopes([target, failed, queued], 'thread')]).toEqual([]);
+		const retry = { ...queued, delivery_state: 'failed' } as Message;
+		expect([...suppressibleCommentEnvelopes([target, failed, retry], 'thread')]).toEqual(['failed']);
+	});
 	// Whether this envelope is placed when the transcript holds it alongside these rows.
 	const placed = (envelope: Message, rows: Message[]) =>
 		placedCommentEnvelopes([envelope, ...rows.filter(other => other.id !== envelope.id)], envelope.thread_id).has(envelope.id);

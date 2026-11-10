@@ -47,6 +47,26 @@ export function placedCommentEnvelopes(rows: Message[], threadId: string | null 
 	return placed;
 }
 
+function supersededReplies(rows: Message[], threadId: string | null | undefined): Set<string> {
+	const superseded = new Set<string>();
+	for (const row of rows) {
+		if (row.thread_id !== threadId || !row.metadata?.retried_from_message_id) continue;
+		if (row.delivery_state === 'delivered' || row.delivery_state === 'failed') superseded.add(row.metadata.retried_from_message_id);
+	}
+	return superseded;
+}
+
+/** Placed replies still needing delivery or recovery retain their transcript controls. */
+export function suppressibleCommentEnvelopes(rows: Message[], threadId: string | null | undefined): Set<string> {
+	const placed = placedCommentEnvelopes(rows, threadId);
+	const superseded = supersededReplies(rows, threadId);
+	for (const row of rows) {
+		if (row.thread_id === threadId && (row._optimistic || row.delivery_state === 'queued'
+			|| (row.delivery_state && row.delivery_state !== 'delivered' && !superseded.has(row.id)))) placed.delete(row.id);
+	}
+	return placed;
+}
+
 const addTo = (index: Map<string, Message[]>, key: string, seen: Set<string>, row: Message) => {
 	if (seen.has(`${key}|${row.id}`)) return;
 	seen.add(`${key}|${row.id}`);
@@ -67,11 +87,7 @@ export type ChatReplyIndex = {
  */
 export function chatReplyIndex(rows: Message[], threadId: string): ChatReplyIndex {
 	// A failed send is hidden once a retry of it reaches the server, whether that retry landed or failed in turn.
-	const superseded = new Set<string>();
-	for (const row of rows) {
-		if (row.thread_id !== threadId || !row.metadata?.retried_from_message_id) continue;
-		if (row.delivery_state === 'delivered' || row.delivery_state === 'failed') superseded.add(row.metadata.retried_from_message_id);
-	}
+	const superseded = supersededReplies(rows, threadId);
 	const pendingByKey = new Map<string, Message[]>();
 	const failedByKey = new Map<string, Message[]>();
 	const pendingSeen = new Set<string>();

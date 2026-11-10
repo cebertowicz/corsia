@@ -76,7 +76,6 @@
 	<section class="pending-input-region" aria-label="Messages not delivered yet">
 		<TranscriptContent
 			entries={pendingEntries}
-			{placedEnvelopes}
 			{expandedTools}
 			{expandedReasoning}
 			{onToggleToolBlock}

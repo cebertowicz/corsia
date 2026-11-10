@@ -32,7 +32,7 @@ _Changes merged since the last release. Each PR that changes what you see or do 
 - Email and web addresses written as plain text in a document, such as an email draft's From and To lines, no longer disappear when you view it.
 - GitHub rules for completed checks now work by default when a repository webhook is connected, and temporary failures get another chance to deliver the event.
 - If the first setup chat ends without a visible reply, CORSIA now gives the agent one more chance to send it.
-- In Focus, work separated only by comment replies shown in the margin now appears in one Worked row.
+- In Focus, work separated only by delivered comment replies attached to loaded messages now appears in one Worked row.
 - In the desktop app, Sign in and Open the page again on a connected app or account now open the sign-in page in your default browser; before, a connected app's page didn't open and you had to copy its link.
 - Jumping to a comment in a wide table now brings its cell into view sideways as well as its row.
 - Local models now follow each model's own defaults: a chat with no thinking level chosen runs at the model's default level (the picker reads Auto), and setup and model downloads no longer set a reply-length limit. Existing reply-length limits, including those earlier setup runs set, remain until changed in oMLX.
