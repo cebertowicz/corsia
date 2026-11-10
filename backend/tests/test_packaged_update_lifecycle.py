@@ -269,13 +269,13 @@ async def test_failed_update_child_releases_when_cleanup_cannot_connect(isolated
 
 
 async def test_child_refusal_preserves_already_recorded_reason(isolated_db):
-    from api.system_admin import _settle_update_child_refusal
+    from api.update_child_exit import settle_update_child_refusal
 
     operation_id = await run_in_db(operation_in, "ready")
     assert await restart.abort_restart_control(
         operation_id, error="specific refusal", failure_code="update_refused"
     )
-    await _settle_update_child_refusal(operation_id)
+    await settle_update_child_refusal(operation_id)
     row = await run_in_db(self_restart.operation_by_id, operation_id)
     assert row["status"] == "failed"
     assert row["error"] == "specific refusal" and row["failure_code"] == "update_refused"
@@ -283,11 +283,11 @@ async def test_child_refusal_preserves_already_recorded_reason(isolated_db):
 
 @pytest.mark.parametrize("phase", ["restarting", "resuming", "verifying"])
 async def test_child_refusal_does_not_release_advanced_update(isolated_db, phase):
-    from api.system_admin import _settle_update_child_refusal
+    from api.update_child_exit import settle_update_child_refusal
 
     operation_id = await run_in_db(operation_in, phase)
     held_before = self_restart.restart_holds_new_work()
-    await _settle_update_child_refusal(operation_id)
+    await settle_update_child_refusal(operation_id)
     row = await run_in_db(self_restart.operation_by_id, operation_id)
     assert row["status"] == "in_flight" and row["phase"] == phase
     assert self_restart.restart_holds_new_work() == held_before
