@@ -162,13 +162,23 @@ const expectHintBelow = (name: string, flagged: string) => async (page: Page) =>
 		const tipBox = node.querySelector('.cm-email-added-tip')!.getBoundingClientRect();
 		const line = node.closest('.cm-line')!;
 		const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT);
-		const rects: DOMRect[] = [];
+		// The tail keeps the address ending with its "!", so the address can span several text nodes.
+		const pieces: { node: Node; start: number; end: number }[] = [];
+		let joined = '';
 		for (let text = walker.nextNode(); text; text = walker.nextNode()) {
-			const at = text.textContent?.indexOf(flagged) ?? -1;
-			if (at < 0) continue;
+			if (text.parentElement?.closest('.cm-email-added-mark')) continue;
+			const start = joined.length;
+			joined += text.textContent ?? '';
+			pieces.push({ node: text, start, end: joined.length });
+		}
+		const at = joined.indexOf(flagged);
+		const first = pieces.find((piece) => piece.start <= at && piece.end > at);
+		const last = pieces.find((piece) => piece.start < at + flagged.length && piece.end >= at + flagged.length);
+		const rects: DOMRect[] = [];
+		if (at >= 0 && first && last) {
 			const range = document.createRange();
-			range.setStart(text, at);
-			range.setEnd(text, at + flagged.length);
+			range.setStart(first.node, at - first.start);
+			range.setEnd(last.node, at + flagged.length - last.start);
 			rects.push(...range.getClientRects());
 		}
 		const scroller = node.closest('.cm-scroller')!.getBoundingClientRect();
