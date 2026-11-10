@@ -52,7 +52,8 @@ def summary(verdict: Mapping[str, Any] | None, excluded: Mapping[str, Any], owne
                 lines.append("No earlier version has enough settled runs to compare yet.")
             elif reason == "kpi_unconfirmed" and type(inputs.get("k")) is int and inputs.get("kpi"):
                 count = inputs["k"]
-                lines.append(f"{count} {'value' if count == 1 else 'values'} for {inputs['kpi']} {'isn’t' if count == 1 else 'aren’t'} confirmed yet.")
+                verb = "isn't" if count == 1 else "aren't"
+                lines.append(f"{count} {'value' if count == 1 else 'values'} for {inputs['kpi']} {verb} confirmed yet.")
             else:
                 lines.append(REASON_COPY.get(reason, "There isn't enough data to compare these versions."))
         elif word == "changed_early":

@@ -166,6 +166,12 @@ class Seed:
         db = get_db()
         try:
             finish_turn(db, helper_id)
+        finally:
+            db.close()
+        # A new agent's own first turn, or the server's turn for these plan writes, may still be running.
+        await self.wait_idle()
+        db = get_db()
+        try:
             accept_thread_input(self.thread_id, role='user', content='Run the workflow step.',
                                 intent='apply_now', message_id=f'{phase}-input', created_at=stamp, db=db)
             turn_id = f'{phase}-turn'

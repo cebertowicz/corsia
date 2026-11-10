@@ -24,6 +24,11 @@ because no version comparison can use them, and the list is the same set the ver
 The run list is windowed; the excluded count and the verdict are not. They are read from the workflow's full
 history, because a run outside the window is still a run the engine has or has not compared, and the next
 look belongs to the whole version, not to the week being viewed.
+
+They ignore the scope for the same reason: the engine pools a workflow version's runs by workflow reference
+across the install, and the nightly job settles that one call. A scoped page that recomputed it from the
+scope's runs would show a second, different call for the same version. The runs, steps, agents and measures
+are the scope's.
 """
 from __future__ import annotations
 
@@ -124,7 +129,7 @@ def workflow_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope,
     in_window = _started_in_window(db, root_ids, grain, window)
     full = read_snapshot(db, now=now or datetime.now(timezone.utc),
                          workflow_refs=sorted({str(row["workflow_ref"]) for row in roots}))
-    scoped = _window_runs(db, full, root_ids)
+    scoped = _priced_scope_runs(db, full, root_ids)
     windowed = replace(scoped, workflows=tuple(
         replace(history, runs=tuple(run for run in history.runs if run.run_id in in_window))
         for history in scoped.workflows))
@@ -133,11 +138,11 @@ def workflow_runs(db: sqlite3.Connection, user_id: str, scope: MeasurementScope,
             "workflows": _entries(db, windowed, full, grain, scoped)}
 
 
-def _window_runs(db: sqlite3.Connection, full: Snapshot, keep: frozenset[str]) -> Snapshot:
-    """The window's runs of this snapshot, priced.
+def _priced_scope_runs(db: sqlite3.Connection, full: Snapshot, keep: frozenset[str]) -> Snapshot:
+    """The scope's runs of this snapshot, from its first run to its latest, priced.
 
-    ``read_snapshot`` reads every run of the named workflows on this install, so the scope's run ids and
-    the window decide what is kept; pricing only what is kept holds the chain walk to the window.
+    ``read_snapshot`` reads every run of the named workflows on this install, so the scope's run ids decide
+    what is kept; the weekly trends and version summaries need every one of them, not only the window's.
     """
     from core.workflow_verdict_read import price_snapshot
 

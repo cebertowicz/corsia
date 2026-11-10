@@ -6,6 +6,7 @@
  import { grainScopeParams, measurementGrain } from '$lib/stores/measurementGrain';
  import { periodName } from '$lib/stores/measurementPeriod';
  import { focusPlanNode } from '$lib/planNodeFocus';
+ import { emitProductEvent } from '$lib/product_events';
  import MeasurementBarChart from './MeasurementBarChart.svelte';
  import Popover from './ui/Popover.svelte';
  import Button from './ui/Button.svelte';
@@ -23,6 +24,9 @@
  const active = $derived(response?.workflows.find((row) => row.ref === open));
  const windowLabel = $derived(response ? periodName(response.window) : 'this window');
  const activeVersions = $derived(active ? versions(active).slice(-2) : []);
+ // The owner's measure shows only once a run of this workflow records one; until then its row could only read "—".
+ const shownMeasures = $derived(active?.history.some((run) => run.owner_measure !== null) ? measures : measures.filter((measure) => measure.key !== 'owner_measure'));
+ const runCount = (count: number) => `${count} ${count === 1 ? 'run' : 'runs'}`;
  let returnFocus = $state<number | null>(null);
  let returnScroll = $state<number | null>(null);
 
@@ -51,9 +55,10 @@
  function showRuns(event: MouseEvent, title: string, runs: WorkflowRun[]) {
   navigationError = false;
   runList = { title, runs, anchor: event.currentTarget as HTMLElement };
+  emitProductEvent('measurement', 'workflow_runs_listed', { runs: runs.length });
  }
  async function openRun(run: WorkflowRun) {
-  if (!run.agent) return;
+  if (!run.agent || !run.plan_target) return;
   navigating = true;
   const scroller = document.querySelector<HTMLElement>('.measurement-scroller');
   const section = document.querySelector<HTMLElement>('[data-testid="workflow-overview"]');
@@ -65,7 +70,9 @@
    await new Promise<void>((resolve, reject) => openSubagentRequest.set({ threadId: thread, onOpened: resolve, onError: reject }));
    await tick();
    await focusPlanNode(thread, run.focus_node_id, step);
+   emitProductEvent('measurement', 'workflow_run_opened', { outcome: 'succeeded' });
   } catch (failure) {
+   emitProductEvent('measurement', 'workflow_run_opened', { outcome: 'failed' });
    console.warn('[workflows] plan navigation failed', failure);
    sessionStorage.removeItem('workflows-return');
    navigating = false; navigationError = true;
@@ -93,9 +100,9 @@
  }
  function status(entry: WorkflowEntry) {
   const count = versions(entry).length;
-  if (count < 2 || entry.verdict?.reason === 'no_baseline') return `${entry.history.length} ${entry.history.length === 1 ? 'run' : 'runs'} so far. Nothing to compare yet.`;
-  if (entry.verdict?.word === 'collecting') return `Comparing ${labelVersion(versions(entry).at(-1)!)}: ${entry.runs.length} runs in ${windowLabel}.`;
-  return `${entry.runs.length} runs in ${windowLabel}.`;
+  if (count < 2 || entry.verdict?.reason === 'no_baseline') return `${runCount(entry.history.length)} so far. Nothing to compare yet.`;
+  if (entry.verdict?.word === 'collecting') return `Comparing ${labelVersion(versions(entry).at(-1)!)}: ${runCount(entry.runs.length)} in ${windowLabel}.`;
+  return `${runCount(entry.runs.length)} in ${windowLabel}.`;
  }
  function chartMarks(entry: WorkflowEntry, version: string, measure: Measure) {
   const points = chartPoints(entry, version, measure);
@@ -137,7 +144,7 @@
     <div class="table-wrap" role="region" aria-label="Workflows table, scrolls sideways when it is wider than the screen" tabindex="0"><table class="list">
      <thead><tr><th>Workflow</th><th>Owner</th><th>Runs</th><th>What's happening</th><th>First-try success</th><th>Your corrections per run</th><th>Cost per run</th></tr></thead>
      <tbody>{#each response.workflows as row (row.ref)}<tr class:selected={open === row.ref}>
-      <th scope="row"><button class="row-action" aria-expanded={open === row.ref} onclick={() => open = open === row.ref ? null : row.ref}>{workflowName(row)}</button></th>
+      <th scope="row"><button class="row-action" aria-expanded={open === row.ref} onclick={() => { open = open === row.ref ? null : row.ref; if (open) emitProductEvent('measurement', 'workflow_opened'); }}>{workflowName(row)}</button></th>
       <td data-label="Owner">{row.owner?.label ?? '—'}</td><td data-label="Runs">{row.runs.length}</td><td data-label="What's happening">{status(row)}</td>
       <td data-label="First-try success">{format(value(row.measures, 'first_try'), 'first_try')}</td><td data-label="Your corrections per run">{format(value(row.measures, 'corrections'), 'corrections')}</td><td data-label="Cost per run">{format(value(row.measures, 'cost'), 'cost')}{row.runs.some((run) => run.cost === null) && row.runs.some((run) => run.cost !== null) ? '*' : ''}</td>
      </tr>{/each}</tbody>
@@ -153,20 +160,20 @@
    <p>{labelVersion(activeVersions[1])} against {labelVersion(activeVersions[0])}.</p>
    <div class="table-wrap"><table><thead><tr><th>Measure</th>{#each activeVersions as version}<th>{labelVersion(version)}</th>{/each}</tr></thead><tbody>
     <tr><th scope="row">Runs</th>{#each activeVersions as version}<td>{active.versions.find((item) => item.id === version)?.runs}</td>{/each}</tr>
-    {#each measures as measure}<tr><th scope="row">{measure.label}</th>{#each activeVersions as version}{@const versionData = active.versions.find((item) => item.id === version)!}<td>{format(value(versionData.measures, measure.key), measure.key)}{#if versionData.measures[measure.key].n && ['first_try', 'corrections', 'gate_rounds'].includes(measure.key)}<span class="sub">{versionData.measures[measure.key].numerator} in {versionData.measures[measure.key].n} runs</span>{/if}</td>{/each}</tr>{/each}
+    {#each shownMeasures as measure}<tr><th scope="row">{measure.label}</th>{#each activeVersions as version}{@const versionData = active.versions.find((item) => item.id === version)!}<td>{format(value(versionData.measures, measure.key), measure.key)}{#if versionData.measures[measure.key].n && ['first_try', 'corrections', 'gate_rounds'].includes(measure.key)}<span class="sub">{versionData.measures[measure.key].numerator} in {versionData.measures[measure.key].n} runs</span>{/if}</td>{/each}</tr>{/each}
    </tbody></table></div>
    {#if active.summary.length}<ul class="result">{#each active.summary as line}<li>{line}</li>{/each}</ul>{/if}
   {:else}<p>{status(active)}</p>{/if}
-  <div class="trends">{#each measures as measure}{#each activeVersions as version}{@render chart(active, measure.key, measure.label, version)}{/each}{/each}</div>
+  <div class="trends">{#each shownMeasures as measure}{#each activeVersions as version}{@render chart(active, measure.key, measure.label, version)}{/each}{/each}</div>
   <h4>Which step fails, {windowLabel}</h4>
   <div class="table-wrap"><table class="run-counts"><thead><tr><th>Step</th>{#each activeVersions as version}<th>{labelVersion(version)}</th>{/each}</tr></thead><tbody>{#each active.steps as step}<tr><th scope="row">{step}</th>{#each activeVersions as version}{@const runs = active.runs.filter((run) => run.version_id === version)}<td>{@render count(runs.filter((run) => run.failed_step === step), runs.length, `${step} failed, ${labelVersion(version)}`)}</td>{/each}</tr>{/each}</tbody></table></div>
   <h4>Who ran it, {windowLabel}</h4>
   <div class="table-wrap"><table class="run-counts"><thead><tr><th>Agent</th><th>Runs</th><th>Runs with a failed step</th><th>Cost per run</th></tr></thead><tbody>{#each [...new Set(active.runs.map((run) => run.agent?.id ?? ''))] as agent}{@const runs = active.runs.filter((run) => (run.agent?.id ?? '') === agent)}<tr><th scope="row">{agentName(runs[0])}</th><td><button class="count" onclick={(event) => showRuns(event, `${agentName(runs[0])}, all runs`, runs)}>{runs.length}</button></td><td>{@render count(runs.filter((run) => run.failed_step !== null), runs.length, `${agentName(runs[0])}, runs with a failed step`)}</td><td>{format(value(active.agent_measures[agent], 'cost'), 'cost')}</td></tr>{/each}</tbody></table></div>
-  <p><button class="count" onclick={(event) => showRuns(event, `${workflowName(active!)}, all runs`, active!.runs)}>Show all {active.runs.length} runs</button></p>
+  <p><button class="count" onclick={(event) => showRuns(event, `${workflowName(active!)}, all runs`, active!.runs)}>Show all {runCount(active.runs.length)}</button></p>
  </section>{/if}
  {#if runList}<Popover anchor={runList.anchor} open onClose={() => runList = null} placement="bottom-end" surfaceRole={null}>
   {#snippet children()}<div class="picker-panel" data-testid="workflow-runs"><p class="list-title">{runList!.title}: {runList!.runs.length} {runList!.runs.length === 1 ? 'run' : 'runs'}</p>
-   <div class="picker-list">{#each runList!.runs as run}<button class="picker-option" onclick={() => void openRun(run)} disabled={navigating || !run.agent}><span>{dayName(run.started)} · {agentName(run)} · {labelVersion(run.version_id)}</span><span class="sub">{run.failed_step ? `${run.failed_step} failed${run.caught ? `: ${caughtText[run.caught]}` : ''}` : 'No failed step'}</span></button>{/each}</div>
+   <div class="picker-list">{#each runList!.runs as run}<button class="picker-option" onclick={() => void openRun(run)} disabled={navigating || !run.agent || !run.plan_target}><span>{dayName(run.started)} · {agentName(run)} · {labelVersion(run.version_id)}</span><span class="sub">{run.failed_step ? `${run.failed_step} failed${run.caught ? `: ${caughtText[run.caught]}` : ''}` : 'No failed step'}</span></button>{/each}</div>
    {#if navigating}<p role="status">Opening plan…</p>{:else if navigationError}<p role="alert">Couldn't open the plan. Try again.</p>{:else}<p class="sub">Each run opens in its plan, at the run.</p>{/if}
   </div>{/snippet}
  </Popover>{/if}
