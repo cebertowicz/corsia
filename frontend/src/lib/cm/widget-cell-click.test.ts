@@ -35,6 +35,15 @@ describe('cellClicked', () => {
 		expect(cellClicked(r.view, marked)).toBeNull();
 	});
 
+	it('still opens a cell that a comment covers whole, on the cell or on the whole table', () => {
+		for (const [name, mark] of [['the cell', (r: Rig) => cellEl(r)], ['the table widget', (r: Rig) => cellEl(r).closest('.cm-md-table') as HTMLElement]] as const) {
+			const r = track(open());
+			mark(r).dataset.commentIds = 'c1';
+			const clicked = cellClicked(r.view, cellEl(r));
+			expect(clicked?.cell, `a comment on ${name} does not stop its cell opening`).toBe(cellEl(r));
+		}
+	});
+
 	it('leaves a selection already dragged inside the table to the comment flows', () => {
 		const r = track(open());
 		const range = document.createRange();

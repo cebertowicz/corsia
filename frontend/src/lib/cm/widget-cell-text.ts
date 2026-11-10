@@ -69,6 +69,11 @@ export function cellShapeOnly(transaction: Transaction) {
 		let from = fromA, to = toA;
 		const before = insert.sliceString(0, insert.length);
 		let text = before;
+		// Backspace with the caret between an escape's hidden backslash and its pipe, where a click or an arrow can leave it.
+		// The caret is drawn before the pipe, so what it deletes is the character drawn before the pipe, not the hidden
+		// backslash: the range moves one character back, to where the same key from the other side of the marker lands.
+		const caret = (head: number) => transaction.startState.selection.ranges.some((range) => range.empty && range.head === head);
+		if (to - from === 1 && from > 0 && insideEscape(doc, to) && caret(to)) { from--; to--; }
 		if (from !== to) {
 			if (insideEscape(doc, to)) to++;
 			if (insideEscape(doc, from)) from--;

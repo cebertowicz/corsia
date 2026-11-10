@@ -4,7 +4,7 @@ import type { Rig } from './typed-reveal-rig';
 import { tableCells } from './widget-cells';
 import { cellShapeOnly } from './widget-cell-text';
 import {
-	build, cellCaret, cellText, cleanup, clicked, deleted, DOC, open, pasted, table, typed
+	build, caretAt, cellCaret, cellText, cleanup, clicked, deleted, DOC, open, pasted, press, table, typed
 } from './widget-cell-rig';
 
 /**
@@ -150,6 +150,37 @@ describe('an escaped pipe the cell already holds stays escaped', () => {
 			expect(cellCaret(r), `${name}: the caret is where the backslash was`).toBe(2);
 			expect(savedRow(r)).toEqual(['a\\|b', 'Done']);
 		}
+	});
+
+	it('removes the drawn backslash with Backspace whichever way the caret got right after it', () => {
+		// Drawn `a\|b`: source ` a`, a literal backslash (two), the pipe's hidden escape, the pipe. The caret right after the
+		// drawn backslash is either before the hidden escape (4) or between it and the pipe (5): the same place on screen.
+		const literal = PIPED.replace('a\\|b', 'a\\\\\\|b');
+		const routes: [string, (r: Rig) => void][] = [
+			['a click between the hidden escape and the pipe', (r) => caretAt(r, 5)],
+			['End then ArrowLeft', (r) => { press(r, 'End'); press(r, 'ArrowLeft'); press(r, 'ArrowLeft'); }],
+			['ArrowRight from the start', (r) => { press(r, 'Home'); for (let i = 0; i < 3; i++) press(r, 'ArrowRight'); }]
+		];
+		for (const [name, place] of routes) {
+			const r = track(build(literal));
+			clicked(r);
+			expect(cellText(r), 'setup: a literal backslash, then an escaped pipe').toBe(' a\\\\\\|b ');
+			place(r);
+			expect([4, 5], `${name}: the caret is right after the drawn backslash`).toContain(cellCaret(r));
+			press(r, 'Backspace');
+			expect(cellText(r), `${name}: the drawn backslash is gone and the pipe is still escaped`).toBe(' a\\|b ');
+			expect(savedRow(r), `${name}: the saved row`).toEqual(['a\\|b', 'Done']);
+			expect(table(r)!.rows[1].cells).toHaveLength(2);
+		}
+	});
+
+	it('still removes an escaped pipe whole with Delete in front of it', () => {
+		const r = track(build(PIPED));
+		clicked(r);
+		caretAt(r, 2);
+		press(r, 'Delete');
+		expect(cellText(r)).toBe(' ab ');
+		expect(savedRow(r)).toEqual(['ab', 'Done']);
 	});
 
 	it('keeps every pipe escaped whatever is typed at any place in the cell', () => {

@@ -5,7 +5,7 @@ import { GFM } from '@lezer/markdown';
 import type { Rig } from './typed-reveal-rig';
 import { emptyCellSelection } from './widget-cell-comment';
 import { openCellState } from './widget-cell-state';
-import { intersectsCell, tableCells, widgetCommentLabel } from './widget-cells';
+import { intersectsCell, tableCells, tableGrid, widgetCommentLabel } from './widget-cells';
 import { build, cellText, cleanup, clicked, table, typed } from './widget-cell-rig';
 
 /**
@@ -47,7 +47,8 @@ describe('the padded cells of a short row', () => {
 
 		it(`have no source for a comment to anchor on, in a row missing ${missing} cells`, () => {
 			const src = `${HEAD}\n${row}`, end = src.length;
-			const padded = tableCells(src).filter((span) => span.row === 1 && span.col >= 4 - missing);
+			const padded = tableGrid(src).filter((span) => span.row === 1 && span.col >= 4 - missing);
+			expect(tableCells(src).filter((span) => span.row === 1), 'tableCells has none of them').toHaveLength(4 - missing);
 			expect(padded.map((span) => [span.col, span.padded]), 'one span per drawn padded cell').toEqual(
 				Array.from({ length: missing }, (_, at) => [4 - missing + at, true]));
 			expect(padded.some((span) => intersectsCell(span, end - 1, end) || intersectsCell(span, end, end) || intersectsCell(span, 0, end)),

@@ -11,16 +11,12 @@ export interface CellSpan { row: number; col: number; from: number; to: number; 
  * cells; the delimiter row is skipped. `rawFrom`/`rawTo` are the same cell between its two pipes, padding included — the
  * only span that can hold a space the reader types at either edge of the cell.
  *
- * GFM renders every row to the header's column count, padding a short row with empty cells that have no source of their
- * own. They still draw a `<td>` a person can open and type into, so they get a `padded` span, zero-width at the row's end,
- * where the source would gain them. Every padded cell of a row sits at that same offset, so no source range tells one from
- * another: they have no anchor (`intersectsCell` never matches them), and so no comment, until typing gives them source.
- * A row with more cells than the header keeps its extra spans, and the render has no cell for them, so callers that look
- * cells up in the DOM skip them.
+ * Only cells the source has: GFM draws a short row padded with empty cells to the header's width (`tableGrid`), and those
+ * have no span here, so none takes a comment until typing gives it source. A row with more cells than the header keeps its
+ * extra spans, and the render has no cell for them, so callers that look cells up in the DOM skip them.
  */
 export function tableCells(src: string): CellSpan[] {
 	const cells: CellSpan[] = [];
-	const rows: { row: number; spans: CellSpan[]; end: number }[] = [];
 	let lineStart = 0;
 	src.split('\n').forEach((line, index) => {
 		const start = lineStart;
@@ -35,7 +31,6 @@ export function tableCells(src: string): CellSpan[] {
 		const edges = [-1, ...bars, line.length];
 		const lead = line.slice(0, bars[0] ?? 0).trim() === '' && bars.length > 0;
 		const tail = bars.length > 0 && line.slice(bars[bars.length - 1] + 1).trim() === '';
-		const spans: CellSpan[] = [];
 		let col = 0;
 		for (let i = 0; i < edges.length - 1; i++) {
 			if ((i === 0 && lead) || (i === edges.length - 2 && tail)) continue;
@@ -45,26 +40,42 @@ export function tableCells(src: string): CellSpan[] {
 			// its left delimiter is the smallest non-empty source span that still belongs uniquely to this cell.
 			const anchorFrom = from === to ? (rawStart < rawEnd ? rawStart : Math.max(0, rawStart - 1)) : from;
 			const anchorTo = from === to ? (rawStart < rawEnd ? rawEnd : rawStart) : to;
-			spans.push({ row, col: col++, from: start + from, to: start + to, anchorFrom: start + anchorFrom, anchorTo: start + anchorTo, rawFrom: start + rawStart, rawTo: start + rawEnd });
+			cells.push({ row, col: col++, from: start + from, to: start + to, anchorFrom: start + anchorFrom, anchorTo: start + anchorTo, rawFrom: start + rawStart, rawTo: start + rawEnd });
 		}
-		rows.push({ row, spans, end: start + line.length });
 	});
-	const columns = rows[0]?.spans.length ?? 0;
-	for (const { row, spans, end } of rows) {
-		cells.push(...spans);
-		for (let col = spans.length; col < columns; col++) {
-			cells.push({ row, col, from: end, to: end, anchorFrom: end, anchorTo: end, rawFrom: end, rawTo: end, padded: true });
-		}
-	}
 	return cells;
+}
+
+/**
+ * Every cell the table is drawn with, in drawn order: the source cells (`tableCells`) plus, for a row shorter than the
+ * header, the empty cells the renderer pads it with. A padded cell has no source of its own, so its span is zero-width at
+ * the row's end, where the source would gain it; every padded cell of a row sits at that offset. Only the paths that open
+ * or walk drawn cells read this; anything that anchors on source reads `tableCells`.
+ */
+export function tableGrid(src: string): CellSpan[] {
+	const real = tableCells(src), ends: number[] = [];
+	let lineStart = 0;
+	src.split('\n').forEach((line, index) => {
+		if (index !== 1) ends.push(lineStart + line.length);
+		lineStart += line.length + 1;
+	});
+	const columns = real.filter((span) => span.row === 0).length, grid: CellSpan[] = [];
+	ends.forEach((end, row) => {
+		const spans = real.filter((span) => span.row === row);
+		grid.push(...spans);
+		for (let col = spans.length; col < columns; col++) {
+			grid.push({ row, col, from: end, to: end, anchorFrom: end, anchorTo: end, rawFrom: end, rawTo: end, padded: true });
+		}
+	});
+	return grid;
 }
 
 export const snippet = (value: string) => value.length > SNIPPET ? `${value.slice(0, SNIPPET)}…` : value;
 export const clean = (value: string) => value.replace(/\s+/g, ' ').trim();
 
-/** Whether a source range touches the visible cell, including an empty cell's structural source anchor; never a padded cell, which has no source. */
+/** Whether a source range touches the visible cell, including an empty cell's structural source anchor. */
 export const intersectsCell = (span: CellSpan, from: number, to: number) =>
-	!span.padded && span.anchorFrom < to && span.anchorTo > from;
+	span.anchorFrom < to && span.anchorTo > from;
 const cellName = (value: string) => {
 	const text = plainQuote(clean(value));
 	return text.length > 24 ? `${text.slice(0, 23)}…` : text;
@@ -97,7 +108,7 @@ export function widgetCommentLabel(state: EditorState, from: number | undefined,
 	const src = state.sliceDoc(table.from, table.to), cells = tableCells(src);
 	const hit = cells.filter((span) => intersectsCell(span, from - table.from, to - table.from));
 	if (hit.length === 0) return null;
-	if (hit.length === cells.filter((span) => !span.padded).length) return 'The whole table';
+	if (hit.length === cells.length) return 'The whole table';
 	const rows = new Set(hit.map((span) => span.row)).size;
 	const named = (span: CellSpan) => snippet(clean(plainQuote(src.slice(span.from, span.to))));
 	if (rows > 1) return `${rows} rows, from “${named(cells.find((span) => span.row === hit[0].row && span.col === 0) ?? hit[0])}”`;

@@ -1,6 +1,6 @@
 import { StateEffect, StateField, type EditorState } from '@codemirror/state';
 import { tableAt } from './widget-blocks';
-import { intersectsCell, tableCells, type CellSpan } from './widget-cells';
+import { intersectsCell, tableCells, tableGrid, type CellSpan } from './widget-cells';
 
 /**
  * Which table cell is being edited, and where its text lives in the document.
@@ -51,7 +51,7 @@ export const cellAtSpan = (state: EditorState, block: number, span: CellSpan): O
 export function resolveCell(state: EditorState, cell: OpenCell): OpenCell | null {
 	const block = tableAt(state, cell.from, Math.max(cell.from, cell.to));
 	if (!block) return null;
-	const spans = tableCells(state.sliceDoc(block.from, block.to));
+	const text = state.sliceDoc(block.from, block.to), spans = tableCells(text), grid = tableGrid(text);
 	const from = cell.from - block.from, to = Math.max(from, cell.to - block.from);
 	let best: { span: CellSpan; over: number } | null = null;
 	for (const span of spans) {
@@ -62,18 +62,19 @@ export function resolveCell(state: EditorState, cell: OpenCell): OpenCell | null
 		?? spans.find((item) => intersectsCell(item, from, to))
 		// A zero-width range inside the cell's own span: an empty cell the reader has just opened. The padded cells of a short
 		// row all sit at its end, so the one in the cell's own column is the one opened.
-		?? spans.find((item) => item.row === cell.row && item.col === cell.col && item.rawFrom <= from && to <= item.rawTo)
-		?? spans.find((item) => item.rawFrom <= from && to <= item.rawTo);
+		?? grid.find((item) => item.row === cell.row && item.col === cell.col && item.rawFrom <= from && to <= item.rawTo)
+		?? grid.find((item) => item.rawFrom <= from && to <= item.rawTo);
 	if (!span) return null;
 	return cellAtSpan(state, block.from, span);
 }
 
 /** The cell to open from a click on the drawn cell at `row`/`col` of the table that starts at `tableFrom`. */
 export function cellToOpen(state: EditorState, tableFrom: number, row: number, col: number): OpenCell | null {
-	const src = state.sliceDoc(tableFrom, state.doc.length);
-	const span = tableCells(src).find((item) => item.row === row && item.col === col);
+	const block = tableAt(state, tableFrom, tableFrom);
+	if (!block) return null;
+	const span = tableGrid(state.sliceDoc(block.from, block.to)).find((item) => item.row === row && item.col === col);
 	if (!span) return null;
-	return resolveCell(state, cellAtSpan(state, tableFrom, span));
+	return resolveCell(state, cellAtSpan(state, block.from, span));
 }
 
 export const openCellState = StateField.define<OpenCell | null>({
@@ -105,7 +106,7 @@ export function openCellInSource(state: EditorState, changes: { from: number; in
 	const first = changes.find((change) => change.insert && change.from === cell.from);
 	const block = tableAt(state, cell.from, cell.from);
 	if (!first || !block) return;
-	const real = tableCells(state.sliceDoc(block.from, block.to)).filter((span) => span.row === cell.row && !span.padded).length;
+	const real = tableCells(state.sliceDoc(block.from, block.to)).filter((span) => span.row === cell.row).length;
 	const closed = state.sliceDoc(cell.from - 1, cell.from) === '|' ? '' : ' |';
 	first.insert = `${closed}${' |'.repeat(Math.max(0, cell.col - real))} ${first.insert} |`;
 }

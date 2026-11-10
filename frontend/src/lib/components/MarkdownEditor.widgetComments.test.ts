@@ -19,6 +19,8 @@ function mountEditor(highlights: CommentRange[], onAnchorFocus = vi.fn(), props:
 	return onAnchorFocus;
 }
 const comment = (id: string, onMarkerFocus?: CommentRange['onMarkerFocus']): CommentRange => ({ id, from: DANA, to: DANA + 4, onMarkerFocus });
+/** A comment on some of the cell's words, drawn as a mark inside the cell. One on all of them is drawn on the cell itself, and a click there also opens the cell. */
+const onWords = (id: string, onMarkerFocus?: CommentRange['onMarkerFocus']): CommentRange => ({ ...comment(id, onMarkerFocus), from: DANA + 1, to: DANA + 3 });
 /** The innermost mark drawn on the text, once the editor has painted it: with several comments they nest. */
 const painted = () => vi.waitFor(() => {
 	const marks = host.querySelectorAll<HTMLElement>('.cm-md-table [data-comment-ids]');
@@ -53,10 +55,12 @@ describe('a click on comments drawn inside a table', () => {
 
 	it('opens several comments on the same text as their margin marker does', async () => {
 		const onMarkerFocus = vi.fn();
-		const onAnchorFocus = mountEditor([comment('a', onMarkerFocus), comment('b', onMarkerFocus)]);
+		const onAnchorFocus = mountEditor([onWords('a', onMarkerFocus), onWords('b', onMarkerFocus)]);
 		(await painted()).click();
 		// The click goes on with them, so the cards open at it, as a click on one comment's text does.
-		expect(onMarkerFocus).toHaveBeenCalledWith(['a', 'b'], expect.any(HTMLElement), expect.any(Function), expect.any(MouseEvent));
+		// Marks on the same words nest, so the ids come innermost first.
+		expect(onMarkerFocus).toHaveBeenCalledWith(expect.arrayContaining(['a', 'b']), expect.any(HTMLElement), expect.any(Function), expect.any(MouseEvent));
+		expect(onMarkerFocus.mock.calls[0][0]).toHaveLength(2);
 		expect(onAnchorFocus).not.toHaveBeenCalled();
 	});
 
@@ -76,7 +80,7 @@ describe('a click on comments drawn inside a table', () => {
 
 	it('keeps the comment open and the caret in place when the table redraws before the browser reports where the press landed', async () => {
 		const onCaretAway = vi.fn();
-		const onAnchorFocus = mountEditor([comment('a')], vi.fn(), { onCaretAway });
+		const onAnchorFocus = mountEditor([onWords('a')], vi.fn(), { onCaretAway });
 		const mark = await painted();
 		const view = EditorView.findFromDOM(host.querySelector<HTMLElement>('.cm-editor')!)!;
 		// The reader's caret rests in the text above the table.

@@ -6,7 +6,7 @@ import { imageContext, refreshMarkdownImages, type ImageContext } from './markdo
 import { renderedFragment } from './rendered-images';
 import { blockSource, tableAt } from './widget-blocks';
 import { BlockWidget, priorWidget, syntaxDecorationField } from './block-widget';
-import { tableCells } from './widget-cells';
+import { tableCells, tableGrid } from './widget-cells';
 import { CELL_EDITING } from './widget-cell-layer';
 import { type OpenCell } from './widget-cell-state';
 
@@ -64,7 +64,7 @@ function renderTable(src: string, images: ImageContext | null): HTMLElement {
 /** The row count and the number of source cells in each: what a cell-by-cell patch can follow, and what a real edit breaks. */
 const shape = (src: string) => {
 	const perRow: number[] = [];
-	for (const span of tableCells(src)) perRow[span.row] = (perRow[span.row] ?? 0) + 1;
+	for (const span of tableGrid(src)) perRow[span.row] = (perRow[span.row] ?? 0) + 1;
 	return `${src.split('\n').length}|${perRow.join(',')}`;
 }
 

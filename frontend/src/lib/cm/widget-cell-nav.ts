@@ -1,6 +1,6 @@
 import type { EditorState } from '@codemirror/state';
 import { tableAt } from './widget-blocks';
-import { tableCells, type CellSpan } from './widget-cells';
+import { tableGrid, type CellSpan } from './widget-cells';
 import { cellAtSpan, type OpenCell } from './widget-cell-state';
 
 /**
@@ -11,7 +11,7 @@ import { cellAtSpan, type OpenCell } from './widget-cell-state';
 function tableOf(state: EditorState, cell: OpenCell): { from: number; to: number; cells: CellSpan[] } | null {
 	const block = tableAt(state, cell.from, cell.from + 1);
 	if (!block) return null;
-	return { ...block, cells: tableCells(state.sliceDoc(block.from, block.to)) };
+	return { ...block, cells: tableGrid(state.sliceDoc(block.from, block.to)) };
 }
 
 const stepTo = (block: { from: number }, state: EditorState, cells: CellSpan[], index: number): OpenCell | null =>
