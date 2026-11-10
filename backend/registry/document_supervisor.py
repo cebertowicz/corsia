@@ -59,6 +59,16 @@ def _conductor(db, artifact: dict[str, Any], workspace: Path) -> str | None:
         return None
 
 
+def is_multi_person(db) -> bool:
+    """More than one person account uses this CORSIA.
+
+    The one home for this check: the ownership PUT refuses a person taking a
+    document over on exactly this condition, and the ownership payload reports
+    it so the control never offers "You" an action that would be refused.
+    """
+    return person_accounts(db) > 1
+
+
 def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path) -> dict[str, Any]:
     """The owner, the effective supervisor and the picker's choices for one document."""
     metadata = parse_metadata(artifact.get("metadata"))
@@ -95,6 +105,7 @@ def ownership(db, artifact: dict[str, Any], *, user_id: str, workspace: Path) ->
                   "name": str(owner_row["title"] or owner) if owner_row is not None else None},
         "supervisor": supervisor,
         "can_act": status == "ready",
+        "multi_person": is_multi_person(db),
         "choices": choices,
     }
 

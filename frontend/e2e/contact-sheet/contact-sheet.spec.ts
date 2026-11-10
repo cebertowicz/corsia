@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { type Page, type APIRequestContext } from '@playwright/test';
 import { test, expect } from '../support/test';
-import { isolatedDb, setDebugVersionOverlay } from '../support/heldComments';
+import { setDebugVersionOverlay } from '../support/heldComments';
 import { scanBreakpoints, captureWidths } from './breakpoints.mjs';
 async function scrollScreen(page: Page, selector: string, scroll: 'top' | 'bottom') {
   await page.evaluate(({ selector, scroll }) => {
@@ -36,7 +36,6 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
   const scenario = await import(`./${name}.ts`);
   if (typeof scenario.seed !== 'function' || typeof scenario.scrollAnchor !== 'string') throw new Error('Scenario must export seed and scrollAnchor');
   await setDebugVersionOverlay(request, false);
-  isolatedDb(['cursor = connection.execute("UPDATE models SET display_name=? WHERE id=?", ("Claude Sonnet 5.5", "mock-test-model"))', 'assert cursor.rowcount == 1']);
   const context = page.context();
   // Keep the disposable account ID intact while giving its greeting a review identity.
   await context.routeWebSocket('**/ws', socket => {
@@ -69,6 +68,12 @@ async function capture(page: Page, request: APIRequestContext, name: string, out
     await expect(captured.locator('.version-overlay')).toHaveCount(0);
     await expect(captured.getByText('Mock Test Model', { exact: true })).toHaveCount(0);
     await expect(captured.locator('body')).not.toContainText(/\be2e\b/i);
+    if (typeof scenario.showPicker === 'function') {
+      const file = `${width}-rest.png`;
+      await captured.screenshot({ path: path.join(output, file), animations: 'disabled' });
+      figures.push(`<figure><figcaption>${width}px · at rest</figcaption><img loading="lazy" src="${file}" alt="${width} pixels, at rest"></figure>`);
+      await scenario.showPicker(captured);
+    }
     for (const theme of ['light', 'dark'] as const) {
       await captured.emulateMedia({ colorScheme: theme });
       await expect(captured.locator('html')).toHaveAttribute('data-theme', theme);

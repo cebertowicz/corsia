@@ -205,7 +205,12 @@ MULTI_PERSON_REFUSAL = "Taking over a document isn't available yet when more tha
 async def change_document_ownership(artifact_id: str, body: OwnershipBody, user: dict = Depends(require_human_user)):
     """The signed-in person changes a document's owner or supervisor (O1 prototype)."""
     from infra import config
-    from registry.document_supervisor import SUPERVISOR_KEY, TAKEN_OVER_KEY, ownership, person_accounts
+    from registry.document_supervisor import (
+        SUPERVISOR_KEY,
+        TAKEN_OVER_KEY,
+        is_multi_person,
+        ownership,
+    )
     from registry.identity_metadata import merge_identity_metadata, parse_metadata
     from registry.shared_principals import UI_PRINCIPAL, artifact_owner
 
@@ -222,7 +227,7 @@ async def change_document_ownership(artifact_id: str, body: OwnershipBody, user:
                 return "bad_choice", None
             if body.supervisor_thread_id and body.supervisor_thread_id not in agents:
                 return "bad_choice", None
-            if UI_PRINCIPAL in {current, new_owner} and person_accounts(db) > 1:
+            if UI_PRINCIPAL in {current, new_owner} and is_multi_person(db):
                 return "multi_person", None
             supervisor = body.supervisor_thread_id
             if new_owner == UI_PRINCIPAL and supervisor is None and current and current != UI_PRINCIPAL:

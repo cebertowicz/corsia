@@ -33,7 +33,7 @@ c.commit()
 test('capture document ownership states', async ({ page }) => {
 	test.setTimeout(300_000);
 	await setDebugVersionOverlay(page.request, false);
-	isolatedDb(['cursor = connection.execute("UPDATE models SET display_name=? WHERE id=?", ("Claude Sonnet 5.5", "mock-test-model"))', 'assert cursor.rowcount == 1']);
+	// Use an unconfigured composer for these review frames.
 	await page.context().routeWebSocket('**/ws', socket => {
 		const server = socket.connectToServer();
 		server.onMessage(message => {
@@ -43,7 +43,8 @@ test('capture document ownership states', async ({ page }) => {
 			socket.send(JSON.stringify(payload));
 		});
 	});
-	const owner = await createSession(page.request, 'Documents and Artifacts');
+	const owner = await createSession(page.request, 'Garden planning');
+	isolatedDb(['connection.execute("UPDATE threads SET model=NULL WHERE id=?", (sys.argv[2],))'], owner);
 	await injectMessage(page.request, owner, { role: 'user', content: 'Please put the project plan together so we can review the next steps.' }, TEST_TOKEN);
 	await injectMessage(page.request, owner, { role: 'assistant', content: 'I created the planning document. You can review it alongside our conversation.', metadata: { for_user: true } }, TEST_TOKEN);
 	const paused = await createSession(page.request, 'A very long agent name for planning and coordinating document changes');
@@ -68,8 +69,9 @@ test('capture document ownership states', async ({ page }) => {
 	await page.emulateMedia({ colorScheme: 'light' });
 	fixture('agent', docs[0].artifact, owner, paused);
 	await loginByUrl(page, { waitForComposer: false });
-	await page.getByText('Documents and Artifacts', { exact: true }).first().click();
+	await page.getByText('Garden planning', { exact: true }).first().click();
 	await expect(page.locator('.cm-content')).toBeVisible();
+	await page.getByRole('button', { name: 'Toggle panel', exact: true }).click();
 	const out = process.env.O1_FRAME_DIR;
 	if (!out) throw new Error('O1_FRAME_DIR is required');
 	const setTab = async (index: number) => page.evaluate(({ owner, doc }) => {
@@ -82,17 +84,24 @@ test('capture document ownership states', async ({ page }) => {
 			if (process.env.O1_ONLY && !process.env.O1_ONLY.split(',').includes(`${state}-${width}`)) continue;
 			const doc = docs[state === 'nonshared' ? 1 : 0];
 			fixture(state, doc.artifact, owner, paused);
+			if (state === 'refused') {
+				const loaded = await page.request.get('/api/files/content', { params: { ...params, path: doc.path } });
+				expect(loaded.ok()).toBeTruthy();
+				expect((await loaded.json()).ownership.multi_person).toBe(true);
+			}
 			await setTab(state === 'nonshared' ? 1 : 0);
 			await page.reload();
 			if (width <= 768) await page.getByRole('button', { name: 'Toggle sidebar' }).click();
-			await page.getByText('Documents and Artifacts', { exact: true }).first().click();
+			await page.getByText('Garden planning', { exact: true }).first().click();
 			await expect(page.locator('.cm-content')).toBeVisible();
 			await expect(page.locator('.doc')).toHaveCSS('opacity', '1');
-			const control = page.getByRole('button', { name: /^Owner:/ });
+			const details = page.getByRole('button', { name: 'Document details' });
+			const control = page.getByRole('button', { name: /^Owner/ });
+			if (!(await control.isVisible()) && await details.isVisible()) await details.click();
 			await expect(control).toBeVisible();
 			if (state === 'person') await expect(control).toContainText('Owner: You');
 			if (state === 'fallback') await expect(control).toContainText('Owner: none');
-			if (state === 'unavailable') await expect(control).toContainText('No one gets these comments');
+			if (state === 'unavailable') await expect(control).toContainText('No one gets comments on this document.');
 			if (['picker', 'refused', 'empty', 'nomatch'].includes(state)) {
 				await control.click();
 				await expect(page.getByRole('combobox', { name: 'Supervisor', exact: true })).toBeVisible();
@@ -108,18 +117,16 @@ test('capture document ownership states', async ({ page }) => {
 			}
 			if (state === 'refused') {
 				await page.getByRole('combobox', { name: 'Owner', exact: true }).click();
-				await page.getByRole('option', { name: 'You', exact: true }).click();
-				await expect(page.getByText("Taking over a document isn't available yet when more than one person uses this CORSIA.")).toBeVisible();
-				await expect(page.getByRole('combobox', { name: 'Owner', exact: true })).toHaveValue('Documents and Artifacts');
-				await expect(page.getByRole('combobox', { name: 'Owner', exact: true })).toHaveAttribute('aria-describedby', 'owner-error');
+				await expect(page.getByRole('option', { name: 'You', exact: true })).toHaveCount(0);
+				await expect(page.getByRole('combobox', { name: 'Owner', exact: true })).toHaveValue('Garden planning');
 			}
 			const box = await page.locator('.doc').boundingBox();
 			if (!box) throw new Error('Document canvas is not visible');
 			if (state === 'picker' || state === 'refused') {
-				const card = await page.locator('[data-popover]').boundingBox();
-				if (!card) throw new Error('Ownership popover is not visible');
-				expect(card.x).toBeGreaterThanOrEqual(box.x - 1);
-				expect(card.x + card.width).toBeLessThanOrEqual(box.x + box.width + 1);
+				const card = await page.getByRole('dialog').boundingBox();
+				if (!card) throw new Error('Ownership dialog is not visible');
+				expect(card.x).toBeGreaterThanOrEqual(0);
+				expect(card.x + card.width).toBeLessThanOrEqual(width);
 			}
 			await expect(page.locator('.version-overlay')).toHaveCount(0);
 			await expect(page.getByText('Mock Test Model', { exact: true })).toHaveCount(0);
