@@ -1,4 +1,5 @@
 import { onDestroy } from 'svelte';
+import { writable } from 'svelte/store';
 import { paneCollapsed } from '$lib/stores/paneCollapsed';
 
 /** The reader's place in a comment field: where to find that field again in whichever form the surface takes, and the caret they left. */
@@ -9,6 +10,21 @@ type WritingPlace = { where: string; caret: [number, number] | null };
  * form the list lands in is still settling.
  */
 const PLACE_WINDOW_MS = 1500;
+
+/**
+ * How long the surface holds the form its writing is in once the panel starts back: short enough that the place is
+ * still being re-placed when the form is finally allowed to change, so a card that genuinely changes form is drawn
+ * and takes the writing back rather than dropping it.
+ */
+const FORM_HOLD_MS = 900;
+
+/**
+ * True while the panel is easing back and a place is being carried to it. The canvas width passes through values the
+ * layout never settles at on its way, and the form the card is in is decided from that width: a card rebuilt in
+ * another form mid-move loses the writing, because the field the place is restored to no longer exists.
+ */
+const held = writable(false);
+export const writingHeld = { subscribe: held.subscribe };
 
 /**
  * The place being carried back. One document's comment surface is up at a time, and the panel's move can rebuild it,
@@ -99,6 +115,8 @@ export function holdWritingPlace(live: () => string | null) {
 		if (!carried) return;
 		pending = carried;
 		carried = null;
+		held.set(true);
+		setTimeout(() => held.set(false), FORM_HOLD_MS);
 		keepPlacedWhileShellMoves();
 	}
 

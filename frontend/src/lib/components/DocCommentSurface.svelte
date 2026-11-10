@@ -18,7 +18,7 @@
 	import DocMarginStack from './DocMarginStack.svelte';
 	import DocCommentDrawerHeading from './DocCommentDrawerHeading.svelte';
 	import { holdReadingLine } from '$lib/docMarginHold.svelte';
-	import { holdWritingPlace } from '$lib/docWritingHold.svelte';
+	import { holdWritingPlace, writingHeld } from '$lib/docWritingHold.svelte';
 	import { createResolvedDrawer } from '$lib/docResolvedDrawer.svelte';
 	import { createSuggestionDecisions } from '$lib/docSuggestionDecisions.svelte';
 	import type { DocComment } from '$lib/stores/docComments';
@@ -114,7 +114,16 @@
 	let filterOpen = $state(false);
 	let drawer = $state<HTMLElement>();
 	let canvasWidth = $state(Number.POSITIVE_INFINITY);
-	$effect(() => observeCanvasWidth(bounds, (width) => canvasWidth = width));
+	// The width the surface's form is decided from. While the panel eases back and a place is being carried to it, the
+	// canvas passes through widths the layout never settles at; taking one of those rebuilds the card in another form
+	// under the writing, whose field the place is then restored to. So the width is kept at the trip's starting value
+	// and re-read when the hold lifts, which is while the place is still being re-placed.
+	let heldWidth: number | null = null;
+	$effect(() => observeCanvasWidth(bounds, (width) => { if (heldWidth === null) canvasWidth = width; }));
+	$effect(() => writingHeld.subscribe((holding) => {
+		if (holding) heldWidth = canvasWidth;
+		else if (heldWidth !== null) { heldWidth = null; if (bounds) canvasWidth = bounds.getBoundingClientRect().width; }
+	}));
 	// The margin column shows only when the text beside it keeps at least 45 characters per line. `hasRoomForMargin` is the canvas-width rule where that holds (the 308 px column and the canvas's padding leave 314 px of text, 45 characters of the editor font); below it, today's sheet. Image viewers already decide whether their canvas is a sheet.
 	const roomForMargin = $derived(hasRoomForMargin(canvasWidth));
 	const sheetDrawer = $derived(narrow || (!image && !roomForMargin));
