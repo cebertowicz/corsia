@@ -14,7 +14,7 @@ vi.mock('$lib/api/docs', () => ({
 	markCommentThreadViewed: mocks.markCommentThreadViewed,
 }));
 
-import { prepareCommentArrival, revealCommentArrival } from './docCommentArrivals';
+import { holdCommentArrival, prepareCommentArrival, revealCommentArrival } from './docCommentArrivals';
 import {
 	docComments, commentLoads, fromServer, hasUnread, loadComments, flushPositions, markThreadViewed, remapComments, addComment, addReply, resolveComment,
 } from './docComments';
@@ -288,6 +288,22 @@ describe('prepared comment arrivals', () => {
 		expect(get(docComments).artifact).toBeUndefined();
 		revealCommentArrival('artifact', arrival);
 		expect(get(docComments).artifact.map((comment) => comment.id)).toEqual(['first']);
+	});
+
+	it('reveals the copy a load kept aside while it was held, not the older prepared one', async () => {
+		const note = (resolved: boolean) => ({ comments: [
+			{ id: 'note', author: 'Agent', author_kind: 'agent', body: 'A note', anchor_text: 'one', from_off: 0, to_off: 3, resolved, replies: [], created_at: '2026-09-30T05:00:00Z' },
+		], feedback: { open_count: resolved ? 0 : 1, owner_label: null, undelivered_batches: [] } });
+		// Its own document: earlier tests can leave a load for 'artifact' still running.
+		holdCommentArrival('held-doc', 'note');
+		mocks.fetchComments.mockResolvedValueOnce(note(false));
+		const arrival = await prepareCommentArrival('held-doc', 'note');
+		// Resolved while its arrival was still being shown: the load keeps that copy aside.
+		mocks.fetchComments.mockResolvedValueOnce(note(true));
+		await loadComments('held-doc');
+		expect(get(docComments)['held-doc']).toEqual([]);
+		revealCommentArrival('held-doc', arrival);
+		expect(get(docComments)['held-doc'].map((comment) => [comment.id, comment.resolved])).toEqual([['note', true]]);
 	});
 });
 

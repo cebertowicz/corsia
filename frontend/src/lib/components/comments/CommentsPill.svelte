@@ -34,7 +34,7 @@
 	aria-label={loading ? 'Loading comments' : label}
 	title={loading ? 'Comments are loading' : unknown ? 'Comments unavailable until the document opens' : undefined} onclick={(event) => onOpen(event.currentTarget)}>
 	<span class="icon-anchor"><svg class="tool-icon" aria-hidden="true" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>{#if imageBadge && !unknown}<span class="badge-count" aria-hidden="true">{loading ? '…' : count}</span>{/if}</span>
-	{#if !unknown}<span class="count">{loading ? '…' : count}</span>{#if !loading}{' '}<span class="count-unit">{noun}</span>{/if}{#if unread}{' '}<span class="unread">· {unreadPhrase}</span>{/if}{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}{/if}
+	{#if !unknown}<span class="count">{loading ? '…' : count}</span>{#if !loading}{' '}<span class="count-unit" class:keep={unread > 0}>{noun}</span>{/if}{#if unread}{' '}<span class="unread">· {unreadPhrase}</span>{/if}{#if unsent}<span class="unsent-dot" aria-hidden="true"></span>{/if}{/if}
 </button>
 
 <style>
@@ -51,5 +51,11 @@
 		.image-badge .badge-count { display: block; position: absolute; top: calc(var(--touch-target) / 2 - var(--space-1)); right: calc(1px - var(--space-2)); padding: 1px calc(var(--space-1) - 1px); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-primary); color: var(--text-primary); font-size: var(--text-caption); line-height: 1; font-weight: var(--fw-medium); font-variant-numeric: tabular-nums; }
 		.image-badge .count, .image-badge .count-unit, .image-badge .unread { display: none; }
 		.image-badge .unsent-dot { position: absolute; top: calc(var(--space-1) + 1px); right: var(--space-1); }
+	}
+	/* The header's one tool row with the noun is 250px ("0 comments" 108, Deliver 82, Request review 30, History 30); below that
+	   (196px when the Workspace panel overlays a 1280 window) the comment icon and count carry it. A phone header (345px) keeps the noun.
+	   An unread count keeps its noun: "3 · 3 unread" does not say what is counted. */
+	@container doc-header (width < 264px) {
+		.count-unit:not(.keep) { display: none; }
 	}
 </style>

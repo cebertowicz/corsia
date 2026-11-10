@@ -293,19 +293,15 @@
 		/* A reason and its Retry take their own line, so the reason is whole and reachable instead of running off the left edge. */
 		.document-tools:has(:global(.undelivered:not(.idle))) { flex-wrap: wrap; max-inline-size: 100%; justify-content: flex-end; }
 	}
-	@media (max-width: 768px) {
-		@container doc-header (width < 408px) {
-			/* A phone's 99 and 100+ counts, and a reviewer group that overflows into "+N", need the shorter visible preference label so Send stays whole in one row; the accessible name and 44px target stay unchanged. */
-			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle,
-			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle { gap: 0; }
-			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle > span,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span,
-			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle > span { font-size: 0; }
-			:global(.document-tools:has(.sending-now [data-short='Send 99'])) .delivery-toggle > span::after,
-			:global(.document-tools:has(.sending-now [data-short='Send 99+'])) .delivery-toggle > span::after,
-			:global(.document-tools:has(.reviewer-group .more)) .delivery-toggle > span::after { content: 'Deliver'; font-size: var(--text-footnote); }
-		}
+	@container doc-header (width < 408px) {
+		/* A compact row shows the shorter preference label at all times, so Send, the count with its noun and the review
+		   controls share one row, and nothing in it changes when Send arrives or leaves; the accessible name and target stay. */
+		.delivery-toggle { gap: 0; }
+		.delivery-toggle > span { font-size: 0; }
+		.delivery-toggle > span::after { content: 'Deliver'; font-size: var(--text-footnote); }
+		/* Send takes the room the count's noun had (the row is 250px with the noun, a phone header 345px, "Send 99" about 88px), so
+		   while it shows the icon and count carry the count, as they do in a narrower header; an unread count keeps its noun. */
+		:global(.document-tools:has(.sending-now) .comment-status .count-unit:not(.keep)) { display: none; }
 	}
 	@container doc-canvas (max-width: 37.5rem) {
 		.identity-details:has(.identity-age) { display: flex; }

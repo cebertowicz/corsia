@@ -364,7 +364,8 @@
 	/* Press-down tints at once, in place of the app's press scale. */
 	.lightbox :global(.control:not(:disabled):active) { scale: none; background: var(--press-bg); transition-duration: 0s; }
 	.lightbox :global(.control:focus-visible), .viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-	.back { padding-left: 4px; max-width: 60%; }
+	/* The document's name is the one label that yields: it truncates before any bar control is pushed past the edge. */
+	.back { padding-left: 4px; max-width: 60%; min-width: 0; }
 	.back-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 	/* A neutral backdrop, so a screenshot of a UI never reads as the app around it. */

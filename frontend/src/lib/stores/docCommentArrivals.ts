@@ -27,8 +27,9 @@ const merged = (comment: DocComment, replace: boolean) => (rows: DocComment[]): 
 export function revealCommentArrival(artifactId: string, arrival: PreparedCommentArrival): void {
 	const comment = arrival.comment;
 	if (!comment) return;
-	endHold(artifactId, comment.id);
-	reshow(artifactId, merged(comment, true));
+	// A load while it was held kept a newer copy aside (resolved or replied to since); the prepared copy is only as new as its own fetch.
+	const kept = endHold(artifactId, comment.id);
+	reshow(artifactId, merged(kept ?? comment, true));
 }
 
 /** Keep this comment out of the document's comments until it is released; a copy already shown is set aside. */

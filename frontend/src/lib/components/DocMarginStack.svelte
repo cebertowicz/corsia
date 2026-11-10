@@ -16,6 +16,9 @@
 	let stackEl = $state<HTMLElement>();
 	let headEl = $state<HTMLElement>();
 	let tops = $state<Record<string, number>>({});
+	/** How far down the column its cards reach. The cards are placed out of flow, so a spacer that tall gives the column's own box (a named
+	    region) their extent rather than none; it changes no placement, and the scroller's content already reaches the last card. */
+	let reach = $state(0);
 	/** The card picked last, so only a new pick (not a re-layout) is brought into view when it grows. */
 	let pickedBefore: string | null = null;
 	// One scroll. The column is drawn inside the scroller's own content (marginOnCanvas, the document's and the chat's), so the
@@ -52,6 +55,8 @@
 			items.sort((a, b) => a.y - b.y);
 			const next = placeCards(items, selected, heading ? heading.offsetHeight + GAP : 0);
 			if (Object.keys(next).length !== Object.keys(tops).length || Object.entries(next).some(([id, top]) => Math.abs((tops[id] ?? 1e9) - top) > 0.5)) tops = next;
+			const bottom = items.reduce((most, item) => Math.max(most, (next[item.id] ?? item.y) + item.h), heading?.offsetHeight ?? 0);
+			if (Math.abs(bottom - reach) > 0.5) reach = bottom;
 			reveal();
 		};
 		// Placement is read once per frame only after something that moves a line or a card: the text or its commented lines change, or the
@@ -77,11 +82,12 @@
 	});
 </script>
 
-<div class="margin-stack" bind:this={stackEl}>{#if head}<div class="margin-card margin-head placed" data-margin-head bind:this={headEl}>{@render head()}</div>{/if}{#each pinned as comment (comment.id)}<div class="margin-card" class:placed={tops[comment.id] !== undefined} data-margin-card={comment.id} style:top="{tops[comment.id] ?? 0}px">{@render card(comment)}</div>{/each}{#if composer}<div class="margin-card margin-composer" class:placed={tops[composer.id] !== undefined} data-margin-card={composer.id} style:top="{tops[composer.id] ?? 0}px" use:takeFocus>{@render composer.body()}</div>{/if}</div>
+<div class="margin-stack" bind:this={stackEl}>{#if head}<div class="margin-card margin-head placed" data-margin-head bind:this={headEl}>{@render head()}</div>{/if}{#each pinned as comment (comment.id)}<div class="margin-card" class:placed={tops[comment.id] !== undefined} data-margin-card={comment.id} style:top="{tops[comment.id] ?? 0}px">{@render card(comment)}</div>{/each}{#if composer}<div class="margin-card margin-composer" class:placed={tops[composer.id] !== undefined} data-margin-card={composer.id} style:top="{tops[composer.id] ?? 0}px" use:takeFocus>{@render composer.body()}</div>{/if}</div><div class="margin-reach" aria-hidden="true" style:height="{reach}px"></div>
 
 <style>
 	/* The cards take the Frosted card role through these tokens, which the thread card reads; their corners are the comment popover's. A negative spread keeps each card's lift below it, not spread sideways over its neighbour or the text. */
 	.margin-stack { --ct-bg: var(--glass-thin); --ct-border: var(--border); --ct-radius: var(--radius); --ct-shadow: var(--glass-rim), 0 10px 14px -10px color-mix(in srgb, black 22%, transparent); position: absolute; top: 0; left: 0; right: 0; }
+	.margin-reach { pointer-events: none; }
 	/* A composer, and the head's Accept all, are drawn as cards, in the same frame. */
 	.margin-composer, .margin-head { background: var(--ct-bg); border: 1px solid var(--ct-border); border-radius: var(--ct-radius); box-shadow: var(--ct-shadow); padding: var(--space-2) calc(var(--space-2) + var(--space-1) / 2); }
 	.margin-card { position: absolute; left: 0; right: 0; visibility: hidden; }
