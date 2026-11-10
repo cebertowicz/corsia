@@ -32,8 +32,8 @@ export interface CommentRange {
 	region?: boolean;
 	/** What that pin draws (`image-pins.ts`): its box or point on the image, its number and its author's colour. */
 	pin?: { region: ImageRegion; number: number; color: string };
-	/** The thread has a reply the reader has not opened: its highlight carries the new-reply sign (`comment-new-signs.ts`). */
-	unread?: boolean;
+	/** The thread has something the reader has not opened, the comment itself or a reply: its highlight carries the new sign, named for it (`comment-new-signs.ts`). */
+	unread?: 'comment' | 'reply';
 	/** Its text was just typed over: the rest of the word typed at its end joins it (`mapCommentRange`). */
 	open?: boolean;
 }

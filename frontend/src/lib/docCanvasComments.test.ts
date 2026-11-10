@@ -40,12 +40,13 @@ describe('canvas comment order and navigation', () => {
 		expect(canvasCommentHighlights(rows, text, null, undefined)).toMatchObject([{ id: 'legacy', from: start, to: start + 'quoted source'.length }]);
 	});
 
-	it('marks the highlight of a thread with a reply or comment the reader has not opened', () => {
-		const text = 'one two three';
+	it('marks the highlight of a thread with a reply or comment the reader has not opened, naming which is new', () => {
+		const text = 'one two three four';
 		const rows = commentsInDocumentOrder([
 			comment('replied', 0, 'one', { newReplyIds: ['r1'] }), comment('started', 4, 'two', { newComment: true }), comment('read', 8, 'three', { newReplyIds: [] }),
+			comment('both', 14, 'four', { newComment: true, newReplyIds: ['r2'] }),
 		], text);
-		expect(canvasCommentHighlights(rows, text, null, undefined).map((range) => [range.id, range.unread ?? false])).toEqual([['replied', true], ['started', true], ['read', false]]);
+		expect(canvasCommentHighlights(rows, text, null, undefined).map((range) => [range.id, range.unread ?? false])).toEqual([['replied', 'reply'], ['started', 'comment'], ['read', false], ['both', 'reply']]);
 	});
 
 	it('preserves an explicit scroll origin with the canonical comment range', () => {
@@ -440,7 +441,7 @@ describe('a decided suggestion that has replies stays an open conversation', () 
 	});
 });
 
-describe('placeLostOnLoad: lost comments are placed again once per live load', () => {
+describe('placeLostOnLoad: lost comments are placed again in the same live load', () => {
 	const setup = () => { const asks: string[] = []; return { asks, place: placeLostOnLoad((id) => { asks.push(id); return true; }) }; };
 	it('asks nothing when no lost comment has its quote in the text', () => {
 		const { asks, place } = setup(), load = {};
@@ -455,6 +456,32 @@ describe('placeLostOnLoad: lost comments are placed again once per live load', (
 		place(load, 'doc', lost);
 		expect(asks).toEqual(['doc']);
 		place({}, 'doc', lost);
+		expect(asks).toEqual(['doc', 'doc']);
+	});
+	it('places a comment that loses its text after load in the same load, without a reload', () => {
+		const { asks, place } = setup(), load = {}, text = 'Intro\nConfirm the page\nEnd';
+		const status = (comments: DocComment[], body: string) => commentSurfaceStatus(comments, body);
+		place(load, 'doc', status([comment('a', 6, 'Confirm the page')], text).replaceableCount);
+		expect(asks).toEqual([]);
+		// Its text is deleted: the session marks it lost. Nothing to place while the quote is gone; its card shows it at the nearest line.
+		const deleted = status([comment('a', 6, 'Confirm the page', { orphaned: true })], 'Intro\n\nEnd');
+		expect(deleted).toMatchObject({ orphanedCount: 1, replaceableCount: 0 });
+		place(load, 'doc', deleted.replaceableCount);
+		expect(asks).toEqual([]);
+		// The text comes back while it is still lost: the same load asks the session to place it.
+		place(load, 'doc', status([comment('a', 6, 'Confirm the page', { orphaned: true })], text).replaceableCount);
+		expect(asks).toEqual(['doc']);
+		// Placed, then another comment is lost later in the same load: one more pass, for it.
+		place(load, 'doc', 0);
+		place(load, 'doc', status([comment('b', 0, 'Intro', { orphaned: true })], text).replaceableCount);
+		expect(asks).toEqual(['doc', 'doc']);
+	});
+	it('asks again in the same load only when more are lost than it last asked about', () => {
+		const { asks, place } = setup(), load = {};
+		place(load, 'doc', 1);
+		place(load, 'doc', 1);
+		place(load, 'doc', 2);
+		place(load, 'doc', 2);
 		expect(asks).toEqual(['doc', 'doc']);
 	});
 	it('asks again in the same load only when the session could not take the ask', () => {

@@ -82,7 +82,7 @@
 		historyAvailable?: boolean;
 		historyOpen?: boolean;
 		onOpenHistory?: () => void;
-		/** Resolved threads behind the text control that opens their drawer; zero hides it (the margin column is not up, or none is resolved). */
+		/** Resolved threads behind the text control that opens their drawer, at every width; zero (none resolved, or an image viewer) hides it. */
 		resolvedCount?: number;
 		resolvedOpen?: boolean;
 		onOpenResolved?: () => void;

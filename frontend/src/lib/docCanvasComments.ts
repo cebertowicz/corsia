@@ -66,7 +66,7 @@ export function canvasCommentHighlights(comments: DocComment[], text: string, fo
 	let inlineEnd = -1;
 	return comments.filter((comment) => !comment.resolved || (comment.id === focusedId && !comment.decision)).flatMap((comment): CommentRange[] => {
 		const anchorRange = canvasCommentRange(comment, text);
-		const unread = !!comment.newComment || !!comment.newReplyIds?.length;
+		const unread = comment.newReplyIds?.length ? 'reply' : comment.newComment ? 'comment' : undefined;
 		// A comment whose original text is gone keeps a point at the line its text last was, where its margin card sits.
 		if (!anchorRange && (comment.detached || decidedOpen(comment)) && !comment.resolved && comment.regionNumber == null && comment.from != null) {
 			const at = Math.min(Math.max(comment.from, 0), text.length);
@@ -103,15 +103,17 @@ export function commentSurfaceStatus(comments: DocComment[], text: string) {
 }
 
 /**
- * Places lost comments again, once per live load: when the status reports any whose quote is still in the text
- * (`replaceableCount`), the live session is asked to re-resolve them (`reload`, which says whether it asked). Any it
- * can't place stay lost until the next load.
+ * Places lost comments again: when the status reports any whose quote is still in the text (`replaceableCount`), the
+ * live session is asked to re-resolve them (`reload`, which says whether it asked). In one live load it asks again only
+ * when that count rises, so a comment lost mid-session gets its own pass, and one the pass can't place is not asked
+ * about again until the next load.
  */
 export function placeLostOnLoad(reload: (artifactId: string) => boolean) {
-	let asked: object | null = null;
+	let asked: object | null = null, askedCount = 0;
 	return (load: object | undefined, artifactId: string | null, replaceableCount: number): void => {
-		if (!load || !artifactId || !replaceableCount || asked === load) return;
-		if (reload(artifactId)) asked = load;
+		if (asked === load) askedCount = Math.min(askedCount, replaceableCount);
+		if (!load || !artifactId || !replaceableCount || (asked === load && replaceableCount <= askedCount)) return;
+		if (reload(artifactId)) { asked = load; askedCount = replaceableCount; }
 	};
 }
 

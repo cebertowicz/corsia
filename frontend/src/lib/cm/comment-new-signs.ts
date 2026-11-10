@@ -1,14 +1,14 @@
 import { ViewPlugin, type EditorView, type ViewUpdate } from '@codemirror/view';
 import { commentRanges } from './comment-marks';
-import { placeHighlightDot } from '$lib/components/comments/highlightDot';
+import { placeHighlightDot, type NewSignName } from '$lib/components/comments/highlightDot';
 
 /**
- * The new-reply sign on each unread thread's highlight, as the chat draws it: pinned over the end of the highlight, out of
- * the text's flow. A highlight is found where it is drawn: the editor's own mark, the painted text of a table cell or
+ * The new sign on each unread thread's highlight, as the chat draws it: pinned over the end of the highlight, out of
+ * the text's flow, and named 'New reply' when a reply is unread, else 'New comment'. A highlight is found where it is drawn: the editor's own mark, the painted text of a table cell or
  * diagram, or the sign of an image comment or of a thread whose text was deleted (`image-pins.ts`). Signs are placed again whenever the editor redraws its lines.
  */
 class NewSigns {
-	private placed: { anchor: Element; cleanup: () => void }[] = [];
+	private placed: { anchor: Element; name: NewSignName; cleanup: () => void }[] = [];
 	/** An image comment's sign is drawn in the same measure as this one is read, so a highlight not found yet is looked for once more. */
 	private retried = false;
 
@@ -25,24 +25,25 @@ class NewSigns {
 		this.view.requestMeasure({ key: this, read: (view) => this.anchors(view), write: (anchors) => this.place(anchors) });
 	}
 
-	private anchors(view: EditorView): { anchors: HTMLElement[]; missing: boolean } {
+	private anchors(view: EditorView): { anchors: { anchor: HTMLElement; name: NewSignName }[]; missing: boolean } {
 		let missing = false;
-		const anchors = view.state.field(commentRanges).filter((range) => range.unread).flatMap((range) => {
+		const anchors = view.state.field(commentRanges).flatMap((range) => {
+			if (!range.unread) return [];
 			const id = CSS.escape(range.id);
 			const mark = [...view.contentDOM.querySelectorAll<HTMLElement>(`[data-comment-new="${id}"]`)].at(-1)
 				?? [...view.contentDOM.querySelectorAll<HTMLElement>('[data-comment-ids]')].filter((el) => el.dataset.commentIds?.split(',').includes(range.id)).at(-1)
 				?? view.scrollDOM.querySelector<HTMLElement>(`.cm-image-pin[data-comment-id="${id}"]`);
 			if (!mark) missing = true;
-			return mark ? [mark] : [];
+			return mark ? [{ anchor: mark, name: range.unread === 'reply' ? 'New reply' as const : 'New comment' as const }] : [];
 		});
 		return { anchors, missing };
 	}
 
-	private place({ anchors, missing }: { anchors: HTMLElement[]; missing: boolean }) {
+	private place({ anchors, missing }: { anchors: { anchor: HTMLElement; name: NewSignName }[]; missing: boolean }) {
 		if (missing && !this.retried) { this.retried = true; requestAnimationFrame(() => this.schedule()); }
-		if (anchors.length === this.placed.length && anchors.every((anchor, index) => anchor === this.placed[index].anchor)) return;
+		if (anchors.length === this.placed.length && anchors.every(({ anchor, name }, index) => anchor === this.placed[index].anchor && name === this.placed[index].name)) return;
 		this.clear();
-		this.placed = anchors.map((anchor) => ({ anchor, cleanup: placeHighlightDot(this.view.contentDOM, anchor) }));
+		this.placed = anchors.map(({ anchor, name }) => ({ anchor, name, cleanup: placeHighlightDot(this.view.contentDOM, anchor, null, undefined, name) }));
 	}
 
 	private clear() {

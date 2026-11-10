@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
+import { closeCardPopover, handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
+import { focusTrap } from '$lib/actions/focusTrap';
 
 function setup(overrides: Partial<DocumentKeyState> = {}) {
 	const anchor = document.createElement('button');
@@ -106,5 +107,56 @@ describe('handleDocumentKey typing with a phone sheet up', () => {
 			expect(commentUI.close).not.toHaveBeenCalled();
 		}
 		field.remove();
+	});
+});
+
+describe('closeCardPopover: Escape with a comment popover open over the text', () => {
+	// The page as at 900 px: the document sits in the overlaid Workspace panel, whose focus trap closes it on Escape.
+	function page(kind: 'thread' | 'draft', cardMode: DocumentKeyState['cardMode'] = 'popover') {
+		const panel = document.body.appendChild(document.createElement('div'));
+		const text = panel.appendChild(Object.assign(document.createElement('div'), { contentEditable: 'true', tabIndex: 0 }));
+		const card = document.body.appendChild(document.createElement('div'));
+		card.dataset.popover = '';
+		const reply = card.appendChild(document.createElement('textarea'));
+		const closePanel = vi.fn();
+		const trap = focusTrap(panel, { onEscape: closePanel, autoFocus: false });
+		const { state, commentUI } = setup({ cardMode, commentUI: { state: { kind, fromText: true }, anchor: null, sheetUp: false, close: vi.fn(), restoreFocus: vi.fn(), release: vi.fn(() => false) } });
+		const capture = (event: KeyboardEvent) => closeCardPopover(event, state);
+		window.addEventListener('keydown', capture, true);
+		const escape = (from: HTMLElement) => { from.focus(); from.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); };
+		const cleanup = () => { window.removeEventListener('keydown', capture, true); trap?.destroy?.(); panel.remove(); card.remove(); };
+		return { state, commentUI, text, reply, closePanel, escape, cleanup };
+	}
+
+	it('closes a popover opened from the text and puts focus back in the text, and the panel holding the document stays', () => {
+		const { commentUI, text, closePanel, escape, cleanup } = page('thread');
+		escape(text);
+		expect(commentUI.close).toHaveBeenCalledOnce();
+		expect(commentUI.restoreFocus).toHaveBeenCalledOnce();
+		expect(closePanel).not.toHaveBeenCalled();
+		cleanup();
+	});
+
+	it('cancels a new comment in a popover the same way, without closing the panel', () => {
+		const { state, text, closePanel, escape, cleanup } = page('draft');
+		escape(text);
+		expect(state.draftController.cancel).toHaveBeenCalledOnce();
+		expect(closePanel).not.toHaveBeenCalled();
+		cleanup();
+	});
+
+	it('leaves Escape inside the card to the card, and Escape with no popover to the layers below', () => {
+		const inside = page('thread');
+		inside.escape(inside.reply);
+		expect(inside.commentUI.close).not.toHaveBeenCalled();
+		inside.cleanup();
+		for (const mode of ['margin', 'sheet', 'unknown'] as const) {
+			const other = page('thread', mode === 'unknown' ? 'popover' : mode);
+			if (mode === 'unknown') other.state.cardMode = undefined;
+			other.escape(other.text);
+			expect(other.commentUI.close, mode).not.toHaveBeenCalled();
+			expect(other.closePanel).toHaveBeenCalledOnce();
+			other.cleanup();
+		}
 	});
 });

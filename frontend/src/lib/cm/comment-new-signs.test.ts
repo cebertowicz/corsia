@@ -19,7 +19,7 @@ const flush = (editor: EditorView) => (editor as unknown as { measure: () => voi
 
 it('pins the new-reply sign on an unread thread\'s highlight, and takes it away once the thread is read', () => {
 	view = new EditorView({ state: EditorState.create({ doc: 'The backup runs at 2 AM nightly.', extensions: [commentMarks, commentNewSigns] }), parent: document.body.appendChild(document.createElement('div')) });
-	view.dispatch({ effects: setCommentRanges.of([{ from: 11, to: 23, id: 'asked', unread: true }, { from: 0, to: 3, id: 'quiet' }]) });
+	view.dispatch({ effects: setCommentRanges.of([{ from: 11, to: 23, id: 'asked', unread: 'reply' }, { from: 0, to: 3, id: 'quiet' }]) });
 	flush(view);
 
 	// Only the unread thread's highlight names it, and only it carries the sign; the sign sits outside the text.
@@ -37,7 +37,18 @@ it('finds an image comment\'s sign when the highlight is a pin', () => {
 	view = new EditorView({ state: EditorState.create({ doc: 'Diagram below.', extensions: [commentMarks, commentNewSigns] }), parent: document.body.appendChild(document.createElement('div')) });
 	const pin = view.scrollDOM.appendChild(Object.assign(document.createElement('button'), { className: 'cm-image-pin' }));
 	pin.dataset.commentId = 'region';
-	view.dispatch({ effects: setCommentRanges.of([{ from: 0, to: 7, id: 'region', region: true, unread: true }]) });
+	view.dispatch({ effects: setCommentRanges.of([{ from: 0, to: 7, id: 'region', region: true, unread: 'reply' }]) });
 	flush(view);
 	expect(signs()).toHaveLength(1);
+});
+
+it('names the sign for what is new: a new comment with no new reply is a New comment, then a New reply once one arrives', () => {
+	view = new EditorView({ state: EditorState.create({ doc: 'The backup runs at 2 AM nightly.', extensions: [commentMarks, commentNewSigns] }), parent: document.body.appendChild(document.createElement('div')) });
+	const named = () => [...document.querySelectorAll('[data-highlight-dot] [role="img"]')].map((sign) => sign.getAttribute('aria-label'));
+	view.dispatch({ effects: setCommentRanges.of([{ from: 11, to: 23, id: 'fresh', unread: 'comment' }]) });
+	flush(view);
+	expect(named()).toEqual(['New comment']);
+	view.dispatch({ effects: setCommentRanges.of([{ from: 11, to: 23, id: 'fresh', unread: 'reply' }]) });
+	flush(view);
+	expect(named()).toEqual(['New reply']);
 });

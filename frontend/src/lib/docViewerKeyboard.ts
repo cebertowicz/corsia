@@ -27,6 +27,8 @@ export interface DocumentKeyState {
 	covered: boolean;
 	commentUI: { state: { kind: string; fromText?: boolean } | null; anchor: unknown; sheetUp: boolean; close: () => void; restoreFocus: () => void; release: () => boolean };
 	draftController: { draft: unknown; cancel: () => void; pending: unknown; select: (selection: null) => void };
+	/** How a card opened from the text shows now (`DocCommentSurface.cardMode`). */
+	cardMode?: 'margin' | 'popover' | 'sheet';
 	paneOpen: boolean;
 	isPaneDrawer: boolean;
 	escapeCloses: boolean;
@@ -77,4 +79,21 @@ export function handleDocumentKey(event: KeyboardEvent, state: DocumentKeyState)
 		flush: state.flush,
 		close: state.close,
 	});
+}
+
+/**
+ * Escape with a comment card open over the text (the popover below the margin width) and focus outside it, such as the
+ * caret in the text, closes the card and puts focus back in the text. It is read in the capture phase, before any layer
+ * holding the document hears it, so an overlaid Workspace panel never closes for it. Inside the card, the card's own Escape answers.
+ */
+export function closeCardPopover(event: KeyboardEvent, state: DocumentKeyState): void {
+	const { commentUI, draftController } = state;
+	const kind = commentUI.state?.kind;
+	if (event.key !== 'Escape' || event.defaultPrevented || state.covered || state.cardMode !== 'popover' || (kind !== 'thread' && kind !== 'draft')) return;
+	if (event.target instanceof Element && event.target.closest('[data-popover]')) return;
+	event.preventDefault();
+	event.stopPropagation();
+	if (kind === 'draft') return draftController.cancel();
+	commentUI.close();
+	commentUI.restoreFocus();
 }

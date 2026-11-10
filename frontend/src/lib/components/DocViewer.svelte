@@ -27,7 +27,7 @@
 	import { bindViewerDraft } from '$lib/docViewerDraftBinding.svelte';
 	import type { DocumentFreshness } from '$lib/docFreshness';
 	import { createCommentRetryToast, createThreadActions, prepareDocumentReload, reloadDocumentFeedback, teardownDocumentViewer, verifyAndApplyDocumentFreshness } from '$lib/docViewerOperations';
-	import { handleDocumentKey } from '$lib/docViewerKeyboard';
+	import { closeCardPopover, handleDocumentKey, type DocumentKeyState } from '$lib/docViewerKeyboard';
 	import { acceptAllOpen, openSuggestionCount } from '$lib/docAcceptAll';
 	import { createCommentSurfaceState, focusDocumentEditor, marginFits, openColumnOnLoad } from '$lib/docCommentSurfaceState.svelte';
 	import { awaitsFirstMark, canvasCommentHighlights, commentSurfaceStatus, commentsInDocumentOrder } from '$lib/docCanvasComments';
@@ -119,7 +119,7 @@
 	});
 	let docRoot = $state<HTMLElement>();
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
-	/** The resolved drawer beside the margin column: its count (zero without the column) and whether it is open, shared by the header's control and the surface. */
+	/** The resolved drawer over the document at every width: its count and whether it is open, shared by the header's control and the surface. */
 	let resolvedCount = $state(0), resolvedOpen = $state(false);
 	let commentSurface = $state<ReturnType<typeof DocCommentSurface>>();
 
@@ -262,16 +262,10 @@
 
 	onDestroy(() => { teardownDocumentViewer(target, flushNow, releaseDocEditor); });
 
-	function onKey(event: KeyboardEvent): void {
-		handleDocumentKey(event, {
-			covered, commentUI, draftController,
-			paneOpen: $paneOpen, isPaneDrawer: isPaneDrawer(),
-			escapeCloses, flush: flushNow, close: onClose,
-		});
-	}
+	const keyState = (): DocumentKeyState => ({ covered, commentUI, draftController, cardMode: commentSurface?.cardMode(), paneOpen: $paneOpen, isPaneDrawer: isPaneDrawer(), escapeCloses, flush: flushNow, close: onClose });
 </script>
 
-<svelte:window onkeydown={onKey} />
+<svelte:window onkeydown={(event) => handleDocumentKey(event, keyState())} onkeydowncapture={(event) => closeCardPopover(event, keyState())} />
 <DocumentViewport instanceId={target?.instanceId} ready={docState === 'ready'} root={docRoot} />
 
 <div class="doc" use:docCanvasBounds bind:this={docRoot} in:fade={{ duration: $prefersReducedMotion ? 0 : 160, easing: cubicOut }}>

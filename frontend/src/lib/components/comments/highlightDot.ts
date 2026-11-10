@@ -1,14 +1,17 @@
 import { mount, unmount } from 'svelte';
 import NewMarker from './NewMarker.svelte';
 
-/** Pin the new-reply sign over the end of a highlight, out of text flow so no line moves for it, kept visible within the scroller. */
-export function placeHighlightDot(body: HTMLElement, anchor: HTMLElement, failedQuote: string | null = null, onVisibility?: (visible: boolean) => void): () => void {
+/** What the pinned sign says is new, as its accessible name. */
+export type NewSignName = 'New comment' | 'New reply';
+
+/** Pin the new sign over the end of a highlight, out of text flow so no line moves for it, kept visible within the scroller. */
+export function placeHighlightDot(body: HTMLElement, anchor: HTMLElement, failedQuote: string | null = null, onVisibility?: (visible: boolean) => void, name: NewSignName = 'New reply'): () => void {
 	const host = document.createElement('span');
 	const layer = body.parentElement?.classList.contains('comment-mark-layer') ? body.parentElement : null;
 	host.dataset.highlightDot = '';
 	host.style.cssText = `position:${layer ? 'absolute' : 'fixed'};z-index:5;pointer-events:none;display:none;line-height:0`;
 	(layer ?? document.body).append(host);
-	const marker = mount(NewMarker, { target: host, props: { pinned: true, failedQuote } });
+	const marker = mount(NewMarker, { target: host, props: { pinned: true, failedQuote, name } });
 	let frame = 0;
 	function update() {
 		frame = 0;
