@@ -13,7 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from tools.mcp import _mcp_denial_guidance, _mcp_oserror_detail, connect_mcp_servers
+from tools.mcp import _mcp_denial_guidance, connect_mcp_servers
+from tools.mcp_local_transport import mcp_oserror_detail as _mcp_oserror_detail
 from tools.registry import ToolRegistry
 
 
