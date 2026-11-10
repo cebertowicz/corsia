@@ -81,7 +81,9 @@ async def draft_context(artifact_id: str, user: dict = Depends(require_human_use
     if draft is None:
         raise HTTPException(404, "Email draft not found")
     target = draft_target(draft)
-    base = {"attachments": await asyncio.to_thread(_attachments, draft["thread_id"], target.get("attachments") or []),
+    # The draft's own chat opens its attachments, whichever chat is on screen.
+    base = {"thread_id": draft["thread_id"],
+            "attachments": await asyncio.to_thread(_attachments, draft["thread_id"], target.get("attachments") or []),
             "notes": [str(note) for note in target.get("notes") or [] if isinstance(note, str)]}
     reply_to = target.get("reply_to")
     if not reply_to:
@@ -96,9 +98,10 @@ async def draft_context(artifact_id: str, user: dict = Depends(require_human_use
         account = await run_in_db(resolve_for_thread, target["account_id"], draft["thread_id"])
         backend = backend_for(account)
     except AccountError as exc:
-        # The refusal itself says whether only the person can fix it; anything else may clear on a retry.
+        # The refusal itself says whether only the person can fix it, and its fixed text names the cause; anything
+        # else may clear on a retry.
         if exc.person_fixes:
-            return {**failed, "reason": ACCOUNT}
+            return {**failed, "reason": ACCOUNT, "detail": str(exc)}
         logger.warning("A draft's account isn't usable right now (reference {}): {}", reference, type(exc).__name__)
         return {**failed, "reason": UNREADABLE, "reference": reference}
     try:
@@ -107,7 +110,7 @@ async def draft_context(artifact_id: str, user: dict = Depends(require_human_use
         # The same rule as finding the account: only a refusal marked as the person's to fix is ACCOUNT.
         if isinstance(exc, AccountError) and exc.person_fixes:
             logger.warning("A draft's conversation could not be read: the account needs the person ({})", type(exc).__name__)
-            return {**failed, "reason": ACCOUNT}
+            return {**failed, "reason": ACCOUNT, "detail": str(exc)}
         logger.warning("A draft's conversation could not be read (reference {}): {}: {}", reference, type(exc).__name__, exc)
     except Exception:  # noqa: BLE001 - any other read failure is the same named state, logged with its cause
         logger.exception("A draft's conversation could not be read (reference {})", reference)

@@ -25,7 +25,7 @@
 
 {#if attachments.length}
 	<ul class="email-attachments" aria-label="Attachments">
-		{#each attachments as item (item.path)}
+		{#each attachments as item, i (item.path || i)}
 			<li class="attachment">
 				<AttachmentRow card={card(item)} {threadId} variant="chip" middleEllipsis chipAside={item.unavailable ? CARD_STATE_LABELS.unavailable : size(item.size)} />
 			</li>

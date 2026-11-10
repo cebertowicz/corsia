@@ -100,6 +100,9 @@ def check_reply(
         result.recipients = recipients
         if requested_to and [x.casefold() for x in requested_to] != [x.casefold() for x in recipients]:
             result.warnings.append(f"The requested recipient differs from the original reply address {', '.join(recipients)}; the reply will go to {', '.join(requested_to)}.")
+            # The view marks only addresses the answered email never carried, so a reply sent to its sender instead of
+            # the address it asked for would go unmarked: the person reads this one here.
+            result.quiet.append(f"The earlier email asked for replies to {', '.join(recipients)}; this reply goes to {', '.join(requested_to)}.")
     for message in thread:
         if message.date <= target.date or message.message_id == target.message_id:
             continue

@@ -126,9 +126,9 @@
 		answered: email.answered ?? null,
 		header: draft?.header ?? null,
 		rereads,
-		attachmentsKey: JSON.stringify(attachments),
+		attachmentsKey: JSON.stringify([attachments, email.threadId ?? $activeThreadId]),
 		mountAttachments: attachments.length ? (host) => {
-			const chips = mount(EmailAttachments, { target: host, props: { attachments, threadId: $activeThreadId } });
+			const chips = mount(EmailAttachments, { target: host, props: { attachments, threadId: email.threadId ?? $activeThreadId } });
 			return () => void unmount(chips);
 		} : null,
 	} : null);
@@ -175,7 +175,7 @@
 			{#if email}<EmailNotes lines={loudLines} />{/if}
 			{@render editorBlock()}
 			{#if email && (email.conversation.length || email.status !== 'ready')}
-				<EmailConversation messages={email.conversation} repliedTo={repliedToId(email)} status={email.status} reason={email.reason} reference={email.reference} onretry={() => readAttempt += 1} />
+				<EmailConversation messages={email.conversation} repliedTo={repliedToId(email)} status={email.status} reason={email.reason} reference={email.reference} detail={email.detail} onretry={() => readAttempt += 1} />
 			{/if}
 		</div>
 	{/if}

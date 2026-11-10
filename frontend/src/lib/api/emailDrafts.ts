@@ -8,6 +8,10 @@ interface ContextResponse {
 	reason: 'account' | 'unreadable' | null;
 	/** With `unreadable`: the reference the server logged the failure under. */
 	reference?: string;
+	/** With `account`: the account's own fixed refusal, naming the cause. */
+	detail?: string;
+	/** The chat the draft belongs to. */
+	thread_id?: string;
 	replied_to: string | null;
 	answered: string[] | null;
 	conversation: EmailDraftContext['conversation'];
@@ -36,7 +40,7 @@ export async function fetchEmailDraftContext(artifactId: string): Promise<EmailD
 		return failed('unreadable');
 	}
 	return {
-		status: body.status, reason: body.reason ?? undefined, reference: body.reference, repliedTo: body.replied_to ?? undefined,
+		status: body.status, reason: body.reason ?? undefined, reference: body.reference, detail: body.detail, threadId: body.thread_id, repliedTo: body.replied_to ?? undefined,
 		answered: body.answered ?? undefined, conversation: body.conversation ?? [],
 		attachments: body.attachments ?? [], notes: body.notes ?? [],
 	};

@@ -25,4 +25,15 @@ describe('EmailAttachments', () => {
 		expect(chips).toHaveLength(2);
 		expect(chips.map((chip) => chip.textContent)).toEqual([expect.stringContaining('2 KB'), expect.stringContaining('4 KB')]);
 	});
+
+	it('still shows every chip when the server could not place the files (no paths)', () => {
+		const attachments: EmailAttachment[] = [
+			{ name: 'map.png', path: '', size: 2048, type: 'image', unavailable: true },
+			{ name: 'waiver.pdf', path: '', size: 4096, type: 'document', unavailable: true },
+		];
+		host = document.body.appendChild(document.createElement('div'));
+		component = mount(EmailAttachments, { target: host, props: { attachments, threadId: 'thread-1' } });
+		flushSync();
+		expect(host.querySelectorAll('li.attachment')).toHaveLength(2);
+	});
 });

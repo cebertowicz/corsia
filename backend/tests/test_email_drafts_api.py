@@ -168,6 +168,8 @@ async def test_a_signed_out_account_is_the_account_state_not_a_retry(mail):
     mail.fake.refresh_status = 400
     context = await draft_context(_artifact(saved), _owner(mail.thread))
     assert (context["status"], context["reason"]) == ("error", "account")
+    # The account's own fixed refusal names which cause it is.
+    assert context["detail"]
 
 
 @pytest.mark.asyncio
@@ -303,6 +305,8 @@ async def test_attachments_come_from_the_record_and_a_moved_file_is_unavailable(
     assert [(a["name"], a["type"], a["unavailable"]) for a in context["attachments"]] == [
         ("map.png", "image", False), ("waiver.pdf", "document", True)]
     assert context["attachments"][0]["path"] == str((root / "map.png").resolve())
+    # The draft's own chat opens its attachments, whichever chat is on screen.
+    assert context["thread_id"] == mail.thread
 
 
 @pytest.mark.asyncio

@@ -70,6 +70,10 @@ export interface EmailDraftContext {
 	reason?: ConversationFailure;
 	/** With `unreadable`: the reference a system failure was logged under, for the person to quote. */
 	reference?: string;
+	/** With `account`: which known cause the account reported, in its own fixed words. */
+	detail?: string;
+	/** The chat the draft belongs to, which opens its attachments. */
+	threadId?: string;
 }
 
 /** The labels the header view knows; any other line is still a header line, drawn as one being typed. */

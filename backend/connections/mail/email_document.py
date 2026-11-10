@@ -150,7 +150,7 @@ def _utf16(text: str, index: int) -> int:
 def read_header(text: str) -> dict:
     """The header block as the send reads it: each To and Cc entry's range and whether the send takes it as an address.
 
-    ``text`` is the header (every line up to the first blank line) and ranges are UTF-16 offsets into the document,
+    ``text`` is the whole document (the header is every line up to the first blank line) and ranges are UTF-16 offsets into it,
     as the editor counts them, so the view can mark them while its header still reads the same.
     """
     head = text.replace("\r\n", "\n").partition("\n\n")[0]

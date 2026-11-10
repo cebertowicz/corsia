@@ -4,6 +4,7 @@ from __future__ import annotations
 import email
 import email.parser
 import email.policy
+import email.utils
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -237,6 +238,20 @@ async def fetch_body(account_id: str, message_id: str) -> str:
     return await read.guarded(account_id, check, lambda: _read_body(ep, username, password, account_id, folder_kind, validity, uid))
 
 
+def _arrival_date(arrival: bytes, header: str) -> datetime:
+    """When the server received the email, else the date its sender wrote on it: a malformed date is the data's
+    problem, not the connection's, so it never reads as the server being unreachable."""
+    try:
+        return datetime.strptime(arrival.decode("ascii"), "%d-%b-%Y %H:%M:%S %z").astimezone(timezone.utc)
+    except (ValueError, UnicodeError):
+        pass
+    try:
+        written = email.utils.parsedate_to_datetime(header)
+    except (TypeError, ValueError, IndexError):
+        raise DraftRefused("An email in this conversation has no date the server or its sender gave in a readable form.") from None
+    return (written if written.tzinfo else written.replace(tzinfo=timezone.utc)).astimezone(timezone.utc)
+
+
 def _conversation(ep, username: str, password: str, account_id: str, ids: set[str]) -> list[ConversationEmail]:
     # One session: in Inbox and then Sent, one SEARCH for the thread's Message-IDs and one FETCH of what it finds.
     with imap.account_lock(account_id), imap.session(ep, username, password) as conn:
@@ -252,11 +267,9 @@ def _conversation(ep, username: str, password: str, account_id: str, ids: set[st
             for uid, (raw, _, arrival) in found.items():
                 headers, body = read.parse(raw, with_body=True)
                 # Reply-To isn't one of the tool-shape headers; the view needs it only as an address.
-                reply_to = str(_HEADERS_ONLY.parsebytes(raw).get("Reply-To", ""))
-                try:
-                    date = datetime.strptime(arrival.decode("ascii"), "%d-%b-%Y %H:%M:%S %z").astimezone(timezone.utc)
-                except (ValueError, UnicodeError):
-                    raise imap.unreachable(ep) from None
+                envelope = _HEADERS_ONLY.parsebytes(raw)
+                reply_to = str(envelope.get("Reply-To", ""))
+                date = _arrival_date(arrival, str(envelope.get("Date", "")))
                 emails.append(ConversationEmail(
                     message_id=_message_id(account_id, folder, validity, uid),
                     sender=headers.get("from", ""), date=date, body=body,

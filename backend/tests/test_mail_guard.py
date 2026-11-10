@@ -29,6 +29,8 @@ def test_reply_to_wins_and_different_requested_address_warns():
     result = check(target=target, to=["other@example.test"])
     assert result.recipients == ["reply@example.test"]
     assert result.warnings
+    # The view's added-recipient mark can't see a reply sent to the sender instead of the address they asked for.
+    assert result.quiet == ["The earlier email asked for replies to reply@example.test; this reply goes to other@example.test."]
     multiple = check(target=replace(TARGET, reply_to="One <one@example.test>, Two <two@example.test>"))
     assert multiple.recipients == ["one@example.test", "two@example.test"]
 
@@ -62,11 +64,13 @@ def test_cross_thread_same_conversation_unread_recent_stops_otherwise_warns():
     assert not check(sender=[replace(other, subject="Other")]).stale
 
 
-def test_the_person_sees_only_the_same_subject_note_as_quiet_context():
+def test_the_person_sees_the_recipient_change_and_same_subject_note_but_not_what_the_view_shows():
     other = replace(TARGET, message_id="b", thread_id="thread-b", date=NOW, subject="Re: Budget")
     newer = replace(TARGET, message_id="c", date=NOW, sender="Another <another@example.test>")
     result = check(thread=[newer], sender=[other], to=["other@example.test"])
-    assert result.quiet == ["Taylor wrote about the same subject in another conversation."]
+    # Newer emails in the conversation show in the view itself, so they are not notes.
+    assert result.quiet == ["The earlier email asked for replies to taylor@example.test; this reply goes to other@example.test.",
+                            "Taylor wrote about the same subject in another conversation."]
 
 
 def test_same_display_name_at_different_address_is_not_same_sender():
