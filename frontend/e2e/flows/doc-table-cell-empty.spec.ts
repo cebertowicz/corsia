@@ -4,29 +4,36 @@ import { cell, cellContent, DOC, editorIn, frame, LAYOUTS, onlyIn, openTableDocu
 
 /**
  * An empty cell has no text to select for a comment, so while its editor is open and still empty the Comment offer is the
- * whole cell's, in the place a tap on an empty cell puts it. The first character typed takes the offer away; deleting it
- * brings the offer back. At 393 the offer sits clear of the cell editor's line and inside the visible page.
+ * whole cell's, placed on that cell. The first character typed takes the offer away; deleting it brings the offer back. At
+ * 393 the offer sits clear of the cell editor's line and inside the visible page.
  */
 
 const FILLED = '| Signs | Plain words in a cell. | open |';
 const EMPTY_DOC = DOC.replace(FILLED, '| Signs | Plain words in a cell. |  |');
 
-/** The offer's box against the editor's line and the visible page: what keeps it off the text and above a phone's keyboard. */
+/**
+ * The offer's box against the open cell, the editor's line and the visible page: what keeps it on its cell, off the text and
+ * above a phone's keyboard.
+ */
 async function offerClear(page: Page) {
-	const [offer, line, viewport] = await Promise.all([
+	const [offer, open, line, viewport] = await Promise.all([
 		page.locator('.sel-comment').boundingBox(),
+		cell(page, 2, 2).boundingBox(),
 		page.locator('.cm-md-cell-editor .cm-line').first().boundingBox(),
 		page.evaluate(() => ({ top: visualViewport?.offsetTop ?? 0, height: visualViewport?.height ?? innerHeight, width: innerWidth })),
 	]);
 	expect(offer, 'the offer is drawn').not.toBeNull();
 	expect(line, 'the cell editor\'s line is drawn').not.toBeNull();
+	expect(open, 'the open cell is drawn').not.toBeNull();
+	const gap = Math.max(open!.x - (offer!.x + offer!.width), offer!.x - (open!.x + open!.width));
+	expect(gap, `the offer ${JSON.stringify(offer)} overlaps the open cell ${JSON.stringify(open)} across, or sits within 8px of it`).toBeLessThanOrEqual(8);
 	const apart = offer!.y + offer!.height <= line!.y + 0.5 || offer!.y >= line!.y + line!.height - 0.5;
 	const across = offer!.x + offer!.width <= line!.x + 0.5 || offer!.x >= line!.x + line!.width - 0.5;
 	expect(apart || across, `the offer ${JSON.stringify(offer)} covers nothing of the editor's line ${JSON.stringify(line)}`).toBe(true);
 	expect(offer!.y, 'the offer starts inside the visible page').toBeGreaterThanOrEqual(viewport.top);
 	expect(offer!.y + offer!.height, 'and ends inside it').toBeLessThanOrEqual(viewport.top + viewport.height);
 	expect(offer!.x + offer!.width, 'and is not cut off at the side').toBeLessThanOrEqual(viewport.width);
-	return { offer: offer!, line: line!, viewport };
+	return { offer: offer!, cell: open!, line: line!, viewport };
 }
 
 for (const layout of LAYOUTS) {

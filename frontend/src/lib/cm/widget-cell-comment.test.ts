@@ -41,6 +41,12 @@ describe('the Comment offer on an empty cell being edited', () => {
 		expect(emptyCellSelection(r.view), 'the one answer the editor and the widget flows both read').toMatchObject({ from: offer.from, to: offer.to });
 	});
 
+	it('is placed on the open cell\'s own box, not on its empty caret', () => {
+		const r = openCell(1);
+		vi.spyOn(cellEl(r, 1, 1), 'getBoundingClientRect').mockReturnValue(new DOMRect(312, 140, 120, 36));
+		expect(emptyCellSelection(r.view), 'above the cell\'s top edge, from its left').toMatchObject({ top: 140, left: 312, above: true });
+	});
+
 	it('goes when the first character is typed', () => {
 		const r = openCell(1);
 		typed(r, 1, 'x');

@@ -24,8 +24,8 @@ export const emptyCellKey = (state: EditorState) => {
 };
 
 /**
- * The whole-cell selection the Comment offer is raised for while the open cell is empty, placed as a tap on that cell places
- * it; null otherwise. A caret raises this rather than nothing, in the editor's own selection flow and in the widget comment
+ * The whole-cell selection the Comment offer is raised for while the open cell is empty, placed on that cell: above its top
+ * edge, from its left. Null otherwise. A caret raises this rather than nothing, in the editor's own selection flow and in the widget comment
  * flow alike, so whichever reports last the answer is the same.
  */
 export function emptyCellSelection(view: EditorView): WidgetSelection | null {
@@ -38,5 +38,8 @@ export function emptyCellSelection(view: EditorView): WidgetSelection | null {
 	range.selectNodeContents(td);
 	if (!range.collapsed) range.collapse(true);
 	const raised = selectionIn(view, widget, range);
-	return raised && { ...raised, top: raised.anchor()?.top ?? raised.top };
+	if (!raised) return null;
+	// That caret's own box has no size, so the offer is placed on the cell's box, the one its open editor is laid over.
+	const box = td.getBoundingClientRect();
+	return { ...raised, top: box.top, left: box.left };
 }
