@@ -1,17 +1,15 @@
 """Reply threading for a mail-host draft: one message's headers, read from the same account over IMAP.
 
 Only headers are requested, never a body.  The result feeds the draft's target the way Gmail's does:
-``in_reply_to`` and ``references`` thread the send, the label is the line the person sees, and the
-reply addresses and subject prefix are defaults the draft tool applies.
+``in_reply_to`` and ``references`` thread the send, and the reply addresses and subject prefix are
+defaults the draft tool applies.
 """
 
 from __future__ import annotations
 
 import email
 import email.policy
-import json
 
-from connections.account_errors import AccountError
 from connections.mail.email_document import DraftRefused, reply_addresses
 from connections.mailhost import imap, read
 from infra.db_async import run_in_db

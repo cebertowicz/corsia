@@ -49,8 +49,16 @@ def _converted(text: str) -> tuple[str, list[str]]:
 
 
 def _store_notes(row: dict, notes: list[str]) -> dict:
+    """Append every converted line in order, repeats included: one old note spans several lines.
+
+    A start interrupted after this write converts the same file again; its lines are already the tail, so they
+    aren't added twice.
+    """
     target = draft_target(row)
-    target["notes"] = list(dict.fromkeys([*(target.get("notes") or []), *notes]))
+    stored = list(target.get("notes") or [])
+    if notes and stored[-len(notes):] != notes:
+        stored.extend(notes)
+    target["notes"] = stored
     with write_transaction(None, scope="email_draft_format_notes") as db:
         db.execute("UPDATE action_drafts SET target_json=? WHERE id=? AND state='open'",
                    (json.dumps(target), row["id"]))

@@ -43,6 +43,20 @@ async def test_open_draft_converts_once_preserving_body_and_old_guard_notes(owne
 
 
 @pytest.mark.asyncio
+async def test_repeated_lines_of_multi_line_notes_all_move(ownership_scope):
+    from connections.mail.draft_format_conversion import convert_open_drafts
+    scope = ownership_scope
+    lines = ["Another person wrote in this thread:", "Pat wrote on Nov 2 (read).", "The text isn't shown here.",
+             "The sender wrote again in this thread:", "Sam wrote on Nov 3 (unread).", "The text isn't shown here."]
+    text = HEADER + "".join(f"Note: {line}\r\n" for line in lines) + BODY
+    path, draft_id = _draft(scope, "multi.md", text=text)
+    await convert_open_drafts()
+    assert path.read_bytes() == (HEADER + BODY).encode()
+    row = scope["db"].execute("SELECT target_json FROM action_drafts WHERE id=?", (draft_id,)).fetchone()
+    assert json.loads(row[0])["notes"] == ["Existing", *lines]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("state", ["sent", "discarded", "sending"])
 async def test_non_open_draft_is_untouched(ownership_scope, state):
     from connections.mail.draft_format_conversion import convert_open_drafts

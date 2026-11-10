@@ -32,7 +32,8 @@ async def test_gmail_warning_is_in_saved_draft(mail):
     saved = await gmail_draft(mail, to=['alternate@example.com'], reply_to_message_id='m-100')
     document = (mail.workspace / saved['path']).read_text()
     assert 'alternate@example.com' in document
-    assert any('differs' in note for note in json.loads(_row(saved['draft_id'])['target_json'])['notes'])
+    assert any('differs' in note for note in saved['guard_notes'])
+    assert not any('differs' in note for note in json.loads(_row(saved['draft_id'])['target_json'])['notes'])
     assert not mail.sends
 
 
@@ -58,7 +59,8 @@ async def test_host_warning_is_in_saved_draft(make_host):
     saved = await host_draft(host, to=['alternate@example.com'], cc=[], reply_to_message_id=_id(host))
     document = (host.workspace / saved['path']).read_text()
     assert 'alternate@example.com' in document
-    assert any('differs' in note for note in json.loads(host_row(saved['draft_id'])['target_json'])['notes'])
+    assert any('differs' in note for note in saved['guard_notes'])
+    assert not any('differs' in note for note in json.loads(host_row(saved['draft_id'])['target_json'])['notes'])
     assert not host.built.smtp.sent
 
 

@@ -421,7 +421,9 @@ async def test_send_builds_the_message_from_the_approved_bytes_and_marks_it_sent
     assert message.get_content_type() == "multipart/alternative"
     assert message.get_body(preferencelist=("html",)).get_content().startswith('<div dir="ltr"><font')
     document = (mail.workspace / saved["path"]).read_text()
-    assert any("requested recipient differs" in note for note in json.loads(_row(saved["draft_id"])["target_json"])["notes"])
+    # The view marks the added recipient in place, so only the agent gets the sentence.
+    assert any("requested recipient differs" in note for note in saved["guard_notes"])
+    assert not any("differs" in note for note in json.loads(_row(saved["draft_id"])["target_json"])["notes"])
     assert not any(line.startswith(("Note:", "In reply to:")) for line in document.partition("\n\n")[0].splitlines())
     expected = document.partition("\n\n")[2]
     assert message.get_body(preferencelist=("plain",)).get_content().replace("\r\n", "\n").rstrip("\n") == expected.rstrip("\n")

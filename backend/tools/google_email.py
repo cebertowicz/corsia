@@ -207,7 +207,9 @@ class EmailDraftTool(Tool):
             if verdict.stops:
                 raise DraftRefused(_stop("Draft not saved", verdict.stops))
             to = to or verdict.recipients
-            notes.extend(verdict.warnings + verdict.info + verdict.stale)
+            # The view shows added recipients and newer emails in the conversation itself (E5), so the guard's
+            # evidence goes to the agent and the person's notes hold only what has no other home.
+            notes.extend(verdict.info)
             quiet.extend(verdict.quiet)
             if not original.own:
                 notes.append(f"The earlier message from {original.sender} will be quoted below the reply.")
@@ -225,8 +227,7 @@ class EmailDraftTool(Tool):
             if str(exc).startswith("Not sent: "):
                 raise DraftRefused("Draft not saved: " + str(exc).removeprefix("Not sent: ")) from None
             raise
-        # Chips show attachment names and sizes. Guard evidence includes read state and outside-conversation
-        # details the conversation list does not carry, so those notes remain available in the quiet row.
+        # Chips show attachment names and sizes, so the notes carry no attachment lines.
         target = {**target, "account_id": account_id, "account": address, "attachments": attached,
                   "notes": list(dict.fromkeys([*quiet, *notes]))}
         text = compose_document(address, to, cc, subject, body, signature)
@@ -249,6 +250,7 @@ class EmailDraftTool(Tool):
         }
         if original:
             result["guard_evidence"] = verdict.evidence_ids
+            result.update({"guard_notes": evidence_notes} if (evidence_notes := verdict.warnings + verdict.stale) else {})
             result["guard_guidance"] = GUARD_GUIDANCE + f"Reply target: {original.message_id}; thread: {original.thread_id}."
         result.update({"font_note": font_note} if font_note else {})
         if copy_note is not None:

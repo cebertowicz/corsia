@@ -67,7 +67,9 @@ async def test_stale_at_draft_can_be_retargeted(mail, approve, clean_screen):
     draft = json.loads(saved)
     document = (mail.workspace / draft['path']).read_text()
     notes = '\n'.join(json.loads(_row(draft['draft_id'])['target_json'])['notes'])
-    assert 'New details from Pat' in notes and '<untrusted-email>' in notes
+    # The newer email is the agent's evidence; the view shows it live from the conversation (E5).
+    assert 'New details from Pat' in '\n'.join(draft['guard_notes'])
+    assert 'New details from Pat' not in notes and '<untrusted-email>' not in notes
     assert 'quoted below the reply' in notes
     assert 'Note:' not in document and 'In reply to:' not in document
     saved = await EmailDraftTool().execute(_thread_id=mail.thread, account_id=mail.account, subject='Lunch', body='Yes', reply_to_message_id='m-101')
@@ -378,7 +380,8 @@ async def test_reply_to_own_sent_mail_is_a_clean_draft(mail, screen_calls):
 async def test_own_target_still_warns_when_someone_else_wrote_later(mail, screen_calls, clean_screen):
     provider_state(mail, [_own(), _from(_arrival(newer(), datetime.now(timezone.utc) + timedelta(days=1)), 'Friend <f@mail.example>')])
     saved = (await _document(mail))[0]
-    assert any('Another person wrote' in note for note in json.loads(_row(saved['draft_id'])['target_json'])['notes'])
+    assert any('Another person wrote' in note for note in saved['guard_notes'])
+    assert not any('Another person wrote' in note for note in json.loads(_row(saved['draft_id'])['target_json'])['notes'])
 
 
 async def test_own_target_send_is_not_refused_by_unrelated_own_mail(mail, approve, screen_calls):
