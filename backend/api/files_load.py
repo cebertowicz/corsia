@@ -14,6 +14,7 @@ from registry import service as registry_service
 from registry.file_types import image_media_type
 from registry.path_access import ReadRefused, checked_read, shared_context_path
 from registry.doc_freshness import artifact_freshness
+from registry.document_supervisor import ownership as document_ownership
 from registry.identity_bridge import written_row
 
 #: Typed ``detail.code`` of the 415 a text open answers for an image file.
@@ -117,6 +118,7 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
         else:
             art = registry_service.resolve_file_identity(str(p), db=db)
         freshness = artifact_freshness(art, p, db=db)
+        ownership = document_ownership(db, art, user_id=user_id, workspace=config.WORKSPACE) if art else None
     finally:
         db.close()
     notification = art or {"integration": "workspace", "type": artifact_type, "external_id": str(p)}
@@ -129,7 +131,7 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     recorded = target is not None and not target.fault
     return {"text": text, "size": st.st_size, "mtime": st.st_mtime,
             "revision": revision(raw), "writable": writable, "artifact": art,
-            "freshness": freshness, "_recorded": recorded,
+            "freshness": freshness, "ownership": ownership, "_recorded": recorded,
             "_notification": notification}
 
 
