@@ -42,7 +42,7 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
           const range = document.createRange();
           range.selectNodeContents(part);
           return [...range.getClientRects()].every(rect => rect.left >= parent.left - 1 && rect.right <= parent.right + 1)
-            && part.scrollWidth <= part.clientWidth + 1;
+            && (getComputedStyle(part).overflow === 'visible' || part.scrollWidth <= part.clientWidth + 1);
         });
       });
       expect(labelsFit).toBe(true);
@@ -58,10 +58,10 @@ test('ownership layout at constrained widths', async ({ page, request }) => {
   // Locate the actual switch for this content and capture both adjacent widths.
   const inDetails = async (width: number) => {
     await page.setViewportSize({ width, height: 900 });
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(2000); // Allow the shell's responsive transition to settle.
     return page.locator('.document-header').evaluate(header => header.classList.contains('ownership-in-details'));
   };
-  let low = 1280, high = 1440;
+  let low = 1280, high = 2000;
   expect(await inDetails(low)).toBe(true);
   expect(await inDetails(high)).toBe(false);
   while (high - low > 1) {

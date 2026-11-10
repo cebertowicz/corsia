@@ -100,8 +100,8 @@
 	.identity { display: flex; gap: var(--space-1); text-decoration: underline; text-underline-offset: 2px; min-width: 0; max-width: 100%; white-space: nowrap; text-align: left; border: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
 	.identity-part { display: flex; min-width: 0; white-space: pre; }
 	.identity-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-	.identity.expanded { flex-wrap: wrap; white-space: normal; }
-	.identity.expanded .identity-part { max-width: 100%; white-space: normal; }
+	.identity.expanded { display: block; white-space: normal; }
+	.identity.expanded .identity-part { display: inline; white-space: normal; }
 	.identity.expanded .identity-name { overflow: visible; overflow-wrap: anywhere; }
 	.identity:hover { color: var(--text-primary); }
 	.pending { opacity: 0.65; }
