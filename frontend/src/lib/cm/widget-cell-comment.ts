@@ -26,8 +26,8 @@ export const emptyCellKey = (state: EditorState) => {
 
 /**
  * The whole-cell selection the Comment offer is raised for while the open cell is empty, placed on that cell: above its top
- * edge, from its left. Null otherwise. A caret raises this rather than nothing, in the editor's own selection flow and in the widget comment
- * flow alike, so whichever reports last the answer is the same.
+ * edge, from its left. Null otherwise. Its one writer is the editor's own selection flow (`selectionOffer`), which raises it for a
+ * caret there and clears it once the cell has text; the widget comment flow reads only selections drawn inside a widget.
  */
 export function emptyCellSelection(view: EditorView): WidgetSelection | null {
 	const cell = emptyOpenCell(view.state);

@@ -49,8 +49,9 @@ class CellEditors {
 	private cell: OpenCell | null = null;
 	private left: OpenCell | null = null;
 	private fresh = false;
-	// Whether the reader has changed the open cell's text, so leaving it commits an edit.
+	// Whether the reader has typed in the open cell, and the text it held when it opened: leaving it with other text is an edit.
 	private edited = false;
+	private opened = '';
 	private editor: EditorView | null = null;
 	private wrap: HTMLElement | null = null;
 	private mounted: HTMLTableCellElement | null = null;
@@ -95,10 +96,10 @@ class CellEditors {
 		// what was already typed, since every keystroke before this one is in the document.
 		if (update.state.readOnly) { this.close(); return; }
 		const was = this.cell;
-		const moved = !was || was.from !== cell.from || was.to !== cell.to
-			|| was.row !== cell.row || was.col !== cell.col || was.tableFrom !== cell.tableFrom;
+		const another = !was || was.row !== cell.row || was.col !== cell.col;
+		const moved = another || was.from !== cell.from || was.to !== cell.to || was.tableFrom !== cell.tableFrom;
 		this.cell = cell;
-		if (moved && was && this.editor && (was.row !== cell.row || was.col !== cell.col)) {
+		if (another && was && this.editor) {
 			// The cell the editor is leaving goes back to being rendered text before the editor moves on to the next one.
 			const previous = drawnTableAt(this.host, was.tableFrom);
 			if (previous) repaintTableCell(previous, update.state, was);
@@ -114,6 +115,7 @@ class CellEditors {
 			const text = cellSource(update.state, cell), current = editor.state.doc.toString();
 			if (current !== text) editor.dispatch({ changes: [cellDifference(current, text)], userEvent: CELL_SYNC });
 		}
+		if (another) this.opened = editor.state.doc.toString().trim();
 		if (moved) this.mirrorToDocument(cell, editor);
 	}
 
@@ -251,9 +253,12 @@ class CellEditors {
 		if (update.selectionSet || update.docChanged) this.mirrorToDocument(cell, editor);
 	};
 
-	/** One product event for each cell the reader leaves with its text changed: no cell content or position goes with it. */
+	/**
+	 * One product event for each cell the reader typed in and leaves with text other than it opened with, its padding aside:
+	 * typing and deleting back, or undoing, is no edit. No cell content or position goes with it.
+	 */
 	private committed() {
-		if (this.edited) emitProductEvent('document', 'table_cell_edited');
+		if (this.edited && this.editor?.state.doc.toString().trim() !== this.opened) emitProductEvent('document', 'table_cell_edited');
 		this.edited = false;
 	}
 

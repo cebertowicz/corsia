@@ -10,7 +10,8 @@ afterEach(() => { vi.restoreAllMocks(); });
 
 /**
  * An empty cell has no text to select for a comment, so while its editor is open and still empty the Comment offer is
- * the whole cell's. The first character typed takes the offer away, and emptying the cell again brings it back.
+ * the whole cell's. The editor's own selection flow raises and clears it (`MarkdownEditor.emptyCell.test.ts`); these specs
+ * place it, and check the widget comment flow leaves it alone.
  */
 
 const ROW = '| Login |  |';
@@ -35,12 +36,16 @@ function openCell(col: number) {
 const wholeEmptyCell = () => expect.objectContaining({ inWidget: true, from: expect.any(Number), to: expect.any(Number) });
 
 describe('the Comment offer on an empty cell being edited', () => {
-	it('is raised for the whole cell when the editor opens empty', () => {
+	it('is the whole cell, anchored in its own row, and the widget comment flow raises and clears none of it', () => {
 		const r = openCell(1);
-		expect(raised.at(-1), 'the offer is up as soon as the empty cell opens').toEqual(wholeEmptyCell());
-		const offer = raised.at(-1)!;
-		expect(offer.from >= rowFrom && offer.to <= rowTo, 'anchored on that cell, in its own row').toBe(true);
-		expect(emptyCellSelection(r.view), 'the one answer the editor and the widget flows both read').toMatchObject({ from: offer.from, to: offer.to });
+		const offer = emptyCellSelection(r.view);
+		expect(offer, 'the whole cell is offered').toEqual(wholeEmptyCell());
+		expect(offer!.from >= rowFrom && offer!.to <= rowTo, 'anchored on that cell, in its own row').toBe(true);
+		typed(r, 1, 'x');
+		vi.advanceTimersByTime(50);
+		deleted(r, 1, 2);
+		vi.advanceTimersByTime(50);
+		expect(raised, 'the editor\'s own selection flow is the one writer').toEqual([]);
 	});
 
 	it('is placed on the open cell\'s own box, not on its empty caret', () => {
@@ -49,28 +54,13 @@ describe('the Comment offer on an empty cell being edited', () => {
 		expect(emptyCellSelection(r.view), 'above the cell\'s top edge, from its left').toMatchObject({ top: 140, left: 312, above: true });
 	});
 
-	it('goes when the first character is typed', () => {
+	it('is none once the cell has text, and none for a cell opened with text', () => {
 		const r = openCell(1);
 		typed(r, 1, 'x');
-		vi.advanceTimersByTime(50);
-		expect(raised.at(-1), 'typing takes the offer away').toBeNull();
 		expect(emptyCellSelection(r.view), 'a cell with text has no whole-cell offer').toBeNull();
-	});
-
-	it('comes back when everything in the cell is deleted', () => {
-		const r = openCell(1);
-		typed(r, 1, 'x');
-		vi.advanceTimersByTime(50);
-		expect(raised.at(-1)).toBeNull();
 		deleted(r, 1, 2);
-		vi.advanceTimersByTime(50);
-		expect(raised.at(-1), 'the cell is empty again, so the offer is back').toEqual(wholeEmptyCell());
-	});
-
-	it('is not raised when the cell opened has text', () => {
-		const r = openCell(0);
-		expect(raised.filter(Boolean), 'a caret in text raises nothing').toEqual([]);
-		expect(emptyCellSelection(r.view)).toBeNull();
+		expect(emptyCellSelection(r.view), 'emptied, it has one again').toEqual(wholeEmptyCell());
+		expect(emptyCellSelection(openCell(0).view)).toBeNull();
 	});
 });
 

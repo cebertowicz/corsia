@@ -15,6 +15,34 @@ export function cellLabel(td: HTMLTableCellElement): string {
 	return `${header || `Column ${col}`}, row ${row}`;
 }
 
+/** Every element around `cell` that cuts off what overflows it: the table's sideways scroll, the document's scroll area, the pane. */
+function clippersOf(cell: Element): Element[] {
+	const found: Element[] = [];
+	for (let el = cell.parentElement; el && el !== document.body; el = el.parentElement) {
+		const style = getComputedStyle(el);
+		if (style.overflowX !== 'visible' || style.overflowY !== 'visible') found.push(el);
+	}
+	return found;
+}
+
+/**
+ * The part of a layer at `box`, `height` tall, that shows inside every one of `clippers`, as the clip-path that cuts the rest
+ * away; '' when all of it shows. The layer is fixed to the window, outside them all, so nothing else cuts it off as it
+ * does the cell under it.
+ */
+export function clipTo(box: DOMRect, height: number, clippers: Element[]): string {
+	let top = box.top, left = box.left, right = box.right, bottom = box.top + height;
+	for (const el of clippers) {
+		const outer = el.getBoundingClientRect(), x = outer.left + el.clientLeft, y = outer.top + el.clientTop;
+		top = Math.max(top, y);
+		left = Math.max(left, x);
+		right = Math.min(right, x + el.clientWidth);
+		bottom = Math.min(bottom, y + el.clientHeight);
+	}
+	const cut = [top - box.top, box.right - right, box.top + height - bottom, left - box.left].map((side) => Math.max(0, side));
+	return cut.some((side) => side > 0) ? `inset(${cut.map((side) => `${side}px`).join(' ')})` : '';
+}
+
 /**
  * Where a cell's editor is allowed to live.
  *
@@ -30,6 +58,7 @@ export class CellLayer {
 	/** The element the cell's editor is placed in, reused from one cell to the next. */
 	readonly el = document.createElement('div');
 	private cell: HTMLTableCellElement | null = null;
+	private clippers: Element[] = [];
 	private frame = 0;
 	/** What was last written to the layer, so a frame where nothing moved writes nothing. */
 	private written = '';
@@ -40,6 +69,7 @@ export class CellLayer {
 	open(td: HTMLTableCellElement, editor: HTMLElement, host: EditorView) {
 		this.close();
 		this.cell = td;
+		this.clippers = clippersOf(td);
 		td.classList.add(CELL_EDITING);
 		this.el.append(editor);
 		host.dom.append(this.el);
@@ -74,6 +104,8 @@ export class CellLayer {
 			// A row is as tall as its tallest cell, and a shorter cell's text sits where its vertical alignment puts it; the
 			// editor's text sits there too, so opening a cell in a tall row does not move its text to the top.
 			justifyContent: style.verticalAlign === 'middle' ? 'center' : style.verticalAlign === 'bottom' ? 'flex-end' : 'flex-start',
+			// A cell scrolled partly out of the table's sideways scroll or the document's scroll area is cut off there; so is its editor.
+			clipPath: clipTo(box, Math.max(box.height, el.offsetHeight), this.clippers),
 		};
 		for (const property of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'overflowWrap', 'wordBreak'] as const) next[property] = type[property];
 		const signature = JSON.stringify(next);
@@ -86,6 +118,7 @@ export class CellLayer {
 	close() {
 		this.cell?.classList.remove(CELL_EDITING);
 		this.cell = null;
+		this.clippers = [];
 		cancelAnimationFrame(this.frame);
 		this.frame = 0;
 		this.written = '';

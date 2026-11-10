@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
-import { savedContaining } from '../support/tableCells';
+import { savedContaining, settled } from '../support/tableCells';
 import { test } from '../support/test';
 
 /**
@@ -49,6 +49,8 @@ async function openDocument(page: Page, size: { width: number; height: number })
 	await page.getByRole('button', { name: 'Toggle sidebar' }).click();
 	await page.getByText(title, { exact: true }).first().click();
 	await expect(page.locator('.cm-md-table table').first()).toBeVisible({ timeout: 20_000 });
+	// Choosing the document closes the sidebar, and the page slides back into place after the table is drawn.
+	await settled(page);
 	return { docPath, params };
 }
 
@@ -93,5 +95,45 @@ test.describe('@flow:doc-table-cell-editing-phone @surface:documents', () => {
 		await expect(page.locator('.cm-md-cell-editor')).toHaveCount(0);
 		await savedContaining(page, seeded, '| Samantha ok |');
 		await frame(page, '06-phone-393-after');
+	});
+
+	test('an open cell scrolled partly out of view is cut off where the table and the document cut the cell off', async ({ page }) => {
+		test.setTimeout(120_000);
+		await openDocument(page, { width: 393, height: 851 });
+		const target = cell(page, 1, 1);
+		const cellBox = (await target.boundingBox())!;
+		await target.tap({ position: { x: 12, y: cellBox.height / 2 } });
+		await expect(page.locator('.cm-md-cell-editor .cm-content')).toBeFocused();
+		// Whether the open cell's editor is what shows at a point on the screen.
+		// Read once the layer has followed the cell, which it does on the next frame after the scroll.
+		const editorAt = (x: number, y: number) => page.evaluate(async ([x, y]) => {
+			for (let frame = 0; frame < 2; frame++) await new Promise(requestAnimationFrame);
+			return !!document.elementFromPoint(x, y)?.closest('.cm-md-cell-layer');
+		}, [x, y]);
+
+		// A swipe or trackpad scroll moves the table sideways with no press, so the cell stays open while 30px of it goes past the box's left edge.
+		const sideways = await target.evaluate((td) => {
+			const box = td.closest<HTMLElement>('.table-wrap')!;
+			box.scrollLeft += td.getBoundingClientRect().left - box.getBoundingClientRect().left + 30;
+			return { edge: box.getBoundingClientRect().left, cellLeft: td.getBoundingClientRect().left, y: td.getBoundingClientRect().top + 12 };
+		});
+		expect(sideways.cellLeft, 'setup: the cell runs past the table box\'s left edge').toBeLessThan(sideways.edge - 20);
+		expect(sideways.edge, 'setup: there is page to the left of the table box to probe').toBeGreaterThan(6);
+		expect(await editorAt(sideways.edge - 3, sideways.y), 'the editor does not draw left of the table box').toBe(false);
+		expect(await editorAt(sideways.edge + 3, sideways.y), 'and still draws inside it').toBe(true);
+
+		// The document scrolls under its top edge the same way, with the cell still open.
+		const down = await target.evaluate((td) => {
+			const area = td.closest<HTMLElement>('.cm-scroller')!;
+			area.scrollTop += td.getBoundingClientRect().top - area.getBoundingClientRect().top + 12;
+			const box = td.closest<HTMLElement>('.table-wrap')!.getBoundingClientRect();
+			return { edge: area.getBoundingClientRect().top, cellTop: td.getBoundingClientRect().top, x: box.left + 20 };
+		});
+		expect(down.cellTop, 'setup: the cell runs past the scroll area\'s top edge').toBeLessThan(down.edge - 6);
+		expect(down.edge, 'setup: there is something above the scroll area to probe').toBeGreaterThan(6);
+		expect(await editorAt(down.x, down.edge - 3), 'the editor does not draw above the document\'s scroll area').toBe(false);
+		expect(await editorAt(down.x, down.edge + 3), 'and still draws inside it').toBe(true);
+		await expect(page.locator('.cm-md-cell-editor'), 'the cell stayed open throughout').toHaveCount(1);
+		await frame(page, '06-phone-393-cut-off');
 	});
 });

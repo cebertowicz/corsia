@@ -62,6 +62,33 @@ describe('the layer a cell editor lives in', () => {
 		expect(editingCell(r), 'and the cell is a plain rendered cell again').toBeNull();
 	});
 
+	it('is cut off where the cell is, when the cell scrolls partly out of the table\'s sideways scroll or the document\'s scroll area', () => {
+		const r = track(open());
+		const cell = cellEl(r);
+		// An element's inside, as the browser clips to it (jsdom gives every one a zero box).
+		const inside = (el: Element, left: number, top: number, width: number, height: number) => {
+			boxOf(el, left, top, width, height);
+			for (const [name, value] of [['clientLeft', 0], ['clientTop', 0], ['clientWidth', width], ['clientHeight', height]] as const) {
+				Object.defineProperty(el, name, { value, configurable: true });
+			}
+		};
+		for (let el = cell.parentElement; el && el !== document.body; el = el.parentElement) inside(el, -5000, -5000, 10000, 10000);
+		const sideways = cell.closest('table')!.parentElement!, scrollArea = r.view.scrollDOM;
+		sideways.style.overflowX = 'auto';
+		scrollArea.style.overflow = 'auto';
+		inside(sideways, 40, 0, 400, 2000);
+		inside(scrollArea, 0, 100, 800, 500);
+		boxOf(cell, 100, 200, 120, 40);
+		clicked(r);
+		expect(layer(r)!.style.clipPath, 'a cell in full view is not cut').toBe('');
+		boxOf(cell, 380, 80, 120, 40);
+		vi.advanceTimersByTime(20);
+		expect(layer(r)!.style.clipPath, 'cut at the scroll area\'s top edge and the table\'s right edge').toBe('inset(20px 60px 0px 0px)');
+		boxOf(cell, 100, 200, 120, 40);
+		vi.advanceTimersByTime(20);
+		expect(layer(r)!.style.clipPath, 'and whole again once it scrolls back').toBe('');
+	});
+
 	it('leaves the cell\'s own live text under the editor, so the row grows with what is typed', () => {
 		const r = track(open());
 		clicked(r);

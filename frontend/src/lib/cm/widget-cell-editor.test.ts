@@ -68,13 +68,20 @@ describe('clicking a cell edits it where it is read', () => {
 		clicked(r);
 		typed(r, 6, 'XY');
 		const stale = cellEditor(r)!;
+		// Only the read-only setting changes, with no change to the text, as the viewer does while a suggestion is applied.
 		r.view.dispatch({ effects: readOnly.reconfigure(EditorState.readOnly.of(true)) });
 		const kept = DOC.replace('Login', 'LoginXY');
 		expect(mountedEditor(r), 'the cell closed').toBeNull();
 		expect(r.view.state.doc.toString(), 'what was typed before is kept').toBe(kept);
 		expect(cellEl(r).textContent).toBe('LoginXY');
+		const sent = vi.spyOn(r.view, 'dispatch'), thrown = vi.fn();
+		window.addEventListener('error', thrown);
 		stale.dispatch({ changes: { from: 8, insert: 'Z' }, userEvent: 'input.type' });
-		expect(r.view.state.doc.toString(), 'a keystroke still in flight does not reach the document').toBe(kept);
+		for (const key of ['Tab', 'Enter', 'Escape']) stale.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }));
+		window.removeEventListener('error', thrown);
+		expect(sent, 'no keystroke after the switch is sent to the document').not.toHaveBeenCalled();
+		expect(thrown, 'and none of them fails on the closed cell').not.toHaveBeenCalled();
+		expect(r.view.state.doc.toString()).toBe(kept);
 	});
 
 	it('reports one committed edit per cell left changed, and none for a cell only looked at', () => {
@@ -91,6 +98,23 @@ describe('clicking a cell edits it where it is read', () => {
 		expect(emit.mock.calls, 'moving on to the next cell commits the one left').toEqual([['document', 'table_cell_edited']]);
 		press(r, 'Escape');
 		expect(emit, 'the next cell was not changed').toHaveBeenCalledTimes(1);
+		emit.mockRestore();
+	});
+
+	it('reports no edit for a cell left with the text it opened with, after typing and deleting back or undoing', () => {
+		const emit = vi.spyOn(productEvents, 'emitProductEvent');
+		const r = track(open());
+		clicked(r);
+		typed(r, 6, 'X');
+		deleted(r, 6, 7);
+		press(r, 'Escape');
+		expect(emit, 'typed, then deleted back').not.toHaveBeenCalled();
+		clicked(r);
+		typed(r, 6, 'XY');
+		key(r, 'z');
+		expect(cellText(r), 'setup: the undo took the typing out').toBe(' Login ');
+		press(r, 'Tab');
+		expect(emit, 'typed, then undone').not.toHaveBeenCalled();
 		emit.mockRestore();
 	});
 

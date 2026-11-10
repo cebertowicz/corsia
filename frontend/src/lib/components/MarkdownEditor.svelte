@@ -144,7 +144,8 @@
 	}
 
 	import { rowsOf } from '$lib/cm/comment-anchor-geometry';
-	import { cellRowsAt } from '$lib/cm/widget-cell-comment';
+	import { cellRowsAt, emptyCellKey } from '$lib/cm/widget-cell-comment';
+	import { openCellState } from '$lib/cm/widget-cell-state';
 
 	/** A card's label for a comment on a table's text or its quote from code, read from this editor's own syntax tree; undefined while the editor is not up. */
 	export function widgetLabel(from: number | undefined, to: number | undefined, quote: string): string | null | undefined {
@@ -252,7 +253,10 @@
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) announceMoved();
 					if (u.docChanged || u.geometryChanged || u.viewportChanged) onLayout?.(u.docChanged ? (p) => u.changes.mapPos(p) : undefined);
 					if (u.transactions.some(releasesPress)) caretRule.released();
-					if (u.selectionSet && !caretRule.holding() && !u.transactions.some((t) => t.isUserEvent('select.pointer') || t.isUserEvent('select.doc-comment'))) {
+					// The editor's selection is the one writer of its Comment offer, an open empty cell's whole-cell offer included: an empty cell opening or emptied raises it, its first character takes it away.
+					// The cell closing leaves the offer up, so a press on it (which closes the cell) still lands on it.
+					const offerMoved = u.selectionSet || (!!u.state.field(openCellState, false) && emptyCellKey(u.startState) !== emptyCellKey(u.state));
+					if (offerMoved && !caretRule.holding() && !u.transactions.some((t) => t.isUserEvent('select.pointer') || t.isUserEvent('select.doc-comment'))) {
 						handleSelection(u.view, undefined, u.docChanged);
 					}
 				})
