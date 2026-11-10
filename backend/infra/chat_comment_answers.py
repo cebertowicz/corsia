@@ -128,7 +128,7 @@ def project_saved_answers(db: sqlite3.Connection, rows: list[tuple[str, str | No
             answers.setdefault((thread, message), []).append(cid)
     result = []
     for thread, message, text in rows:
-        cids = answers.get((thread, message), []) if text and '[c' in text else []
+        cids = answers.get((thread, message), []) if message and text and '[c' in text else []
         result.append({'chat_answer_cids': cids, 'chat_visible_content': visible_answer_content(text, cids)}
                       if cids and text is not None else {})
     return result
