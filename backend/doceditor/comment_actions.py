@@ -74,10 +74,10 @@ def suggestion_edit_span(comment: dict[str, Any], span: tuple[int, int]) -> tupl
 
 
 def insertion_position(comment: dict[str, Any], document_text: str, point: int) -> int:
-    """Skip accepted older insertions still contiguous after the same quote."""
+    """Skip older sibling insertions whose text already follows the same quote, contiguous; one not in the text is passed over."""
     key = (comment.get("created_at", ""), comment["id"])
     anchor_end = point
-    for sibling in sorted(comment["_accepted_insertions"], key=lambda row: (row.get("created_at", ""), row["id"])):
+    for sibling in sorted(comment["_insertion_siblings"], key=lambda row: (row.get("created_at", ""), row["id"])):
         if (sibling.get("created_at", ""), sibling["id"]) >= key:
             break
         if sibling.get("anchor_text") != comment.get("anchor_text"):
@@ -89,9 +89,8 @@ def insertion_position(comment: dict[str, Any], document_text: str, point: int) 
         if sibling_span[1] != anchor_end:
             continue
         replacement = sibling["replacement"]
-        if not document_text.startswith(replacement, point):
-            break
-        point += len(replacement)
+        if document_text.startswith(replacement, point):
+            point += len(replacement)
     return point
 
 
@@ -236,7 +235,7 @@ async def decide_suggestion(
             owner = owner_row(db, artifact["parent_thread_id"])
             check_decider(user_id=user_id, actor_thread_id=actor_thread_id, artifact=artifact, db=db)
             if decision == "accept" and comment.get("insert_after"):
-                comment["_accepted_insertions"] = store.accepted_insertions(
+                comment["_insertion_siblings"] = store.insertion_siblings(
                     comment["artifact_id"], comment["anchor_text"], db=db)
             return comment, artifact, owner[1] if owner else None
         finally:

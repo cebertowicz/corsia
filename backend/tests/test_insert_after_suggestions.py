@@ -15,7 +15,7 @@ def row(identifier, text, created):
     return {"id": identifier, "anchor_text": "Heading", "from_off": 0, "to_off": 7,
             "anchor_prefix": "", "anchor_suffix": "\n", "replacement": text,
             "insert_after": True, "created_at": created, "author_thread_id": "agent",
-            "_accepted_insertions": []}
+            "_insertion_siblings": []}
 
 
 def test_insert_validation_and_staleness():
@@ -53,15 +53,31 @@ def test_batch_skips_insertion_whose_anchor_overlaps_replacement():
 def test_single_insert_skips_accepted_older_sibling():
     first = row("a", " one", "1")
     second = row("b", " two", "2")
-    second["_accepted_insertions"] = [first]
+    second["_insertion_siblings"] = [first]
     assert applied_text(first, "Heading\n") == "Heading one\n"
     assert applied_text(second, "Heading one\n") == "Heading one two\n"
     assert applied_text(first, "Heading two\n") == "Heading one two\n"
 
 
+def test_single_insert_follows_an_older_sibling_whose_accept_is_not_recorded_yet():
+    # Two Accepts at once: the older one's text is in the document before its decision is saved.
+    first = {**row("a", " one", "1"), "decision": None}
+    second = row("b", " two", "2")
+    second["_insertion_siblings"] = [first]
+    assert applied_text(second, "Heading one\n") == "Heading one two\n"
+    assert applied_text(second, "Heading\n") == "Heading two\n"
+
+
+def test_single_insert_passes_over_an_older_sibling_not_in_the_text():
+    absent, accepted = row("a", " one", "1"), row("b", " two", "2")
+    third = row("c", " three", "3")
+    third["_insertion_siblings"] = [absent, accepted]
+    assert applied_text(third, "Heading two\n") == "Heading two three\n"
+
+
 def test_applied_text_requires_the_sibling_list():
     unloaded = row("a", " one", "1")
-    del unloaded["_accepted_insertions"]
+    del unloaded["_insertion_siblings"]
     with pytest.raises(KeyError):
         applied_text(unloaded, "Heading\n")
 

@@ -51,7 +51,7 @@ async def test_reject_does_not_read_accepted_siblings(integration_client, doc, _
     comment = json.loads(result)["comment"]
     def unexpected_read(*args, **kwargs):
         raise AssertionError("reject read accepted siblings")
-    monkeypatch.setattr(comments, "accepted_insertions", unexpected_read)
+    monkeypatch.setattr(comments, "insertion_siblings", unexpected_read)
     result = await DocCommentUpdateTool().execute(comment_id=comment["id"], decision="reject", _thread_id=owner)
     assert not result.startswith("Error"), result
     assert moved.read_text(encoding="utf-8") == "Heading\n"
