@@ -1,16 +1,15 @@
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorState, Facet, Transaction, type Extension } from '@codemirror/state';
-import { EditorView, ViewPlugin, keymap, type ViewUpdate } from '@codemirror/view';
+import { EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view';
 import { GFM } from '@lezer/markdown';
-import { defaultKeymap } from '@codemirror/commands';
-import { yUndoManagerKeymap } from 'y-codemirror.next';
 import { blockRange, cellElement, drawnTableAt, TABLE } from './widget-blocks';
 import { CELL_IMAGE } from './widget-open';
 import {
 	CELL_EDITOR, CELL_SYNC, cellSource, cellToOpen, closeCell, openCellAt, openCellState, type OpenCell
 } from './widget-cell-state';
-import { cellDifference, cellShapeOnly } from './widget-cell-text';
+import { caretOnCellText, cellDifference, cellPaddingFlush, cellShapeOnly } from './widget-cell-text';
 import { adjacentCell, caretAfterTable, cellBelow, tableOfCell } from './widget-cell-nav';
+import { cellKeys } from './widget-cell-keys';
 import { CellLayer } from './widget-cell-layer';
 import { repaintTableCell } from './widget-table';
 
@@ -127,7 +126,7 @@ class CellEditors {
 		const widget = drawnTableAt(this.host, cell.tableFrom);
 		const td = widget ? cellElement(widget, cell) : null;
 		if (!td) { this.unmount(); return; }
-		if (td === this.mounted && this.layer.contains(wrap)) { this.clickedAt = null; return; }
+		if (td === this.mounted && this.layer.contains(wrap)) { this.clickedAt = null; this.layer.follow(); return; }
 		const hadFocus = wrap.contains(document.activeElement);
 		this.layer.open(td, wrap, this.host);
 		this.mounted = td;
@@ -183,12 +182,16 @@ class CellEditors {
 		this.left = this.cell;
 		this.cell = null;
 		this.host.dispatch({ effects: closeCell.of(null), selection: { anchor: at, head: at }, scrollIntoView: true });
+		// The cell's editor held the focus and is gone now, so the document takes it back for the caret placed below the table.
+		this.host.focus();
 	}
 
 	private moveTo(next: OpenCell | null) {
 		if (!next) { this.leave(); return; }
 		this.left = this.cell;
 		this.host.dispatch({ effects: openCellAt.of(next) });
+		// The caret goes to the end of the next cell's text: the end of its slice, which the caret filter keeps on the text.
+		this.editor?.dispatch({ selection: { anchor: this.editor.state.doc.length } });
 		this.editor?.focus();
 	}
 
@@ -212,20 +215,15 @@ class CellEditors {
 					markdown({ extensions: GFM }),
 					...host.state.facet(cellEditorExtensions),
 					EditorView.lineWrapping,
-					EditorState.transactionFilter.of((tr) => (tr.docChanged && !tr.isUserEvent(CELL_SYNC) ? cellShapeOnly(tr) : tr)),
+					cellPaddingFlush,
+					EditorState.transactionFilter.of((tr) => (tr.isUserEvent(CELL_SYNC) ? tr : tr.docChanged ? cellShapeOnly(tr) : caretOnCellText(tr))),
 					EditorView.updateListener.of(this.fromCell),
-					keymap.of([
-						{ key: 'Escape', preventDefault: true, run: () => (this.leave(), true) },
-						{ key: 'Tab', preventDefault: true, run: () => (this.moveTo(adjacentCell(host.state, this.cell!, 1)), true) },
-						{ key: 'Shift-Tab', preventDefault: true, run: () => (this.moveTo(adjacentCell(host.state, this.cell!, -1)), true) },
-						{ key: 'Enter', preventDefault: true, run: () => (this.moveTo(cellBelow(host.state, this.cell!)), true) },
-						// Undo and redo are the document's own: the same commands the document's keymap runs, against the
-						// document's view, so the one Yjs undo manager holds the cell's edits in the document's history.
-						...yUndoManagerKeymap.map((binding) => ({ ...binding, run: () => binding.run?.(host) ?? false })),
-						// The ordinary caret keys — arrows, Home, End, deleting forward — are the platform's own bindings. Only
-						// the ones above are given a different meaning inside a cell.
-						...defaultKeymap
-					]),
+					cellKeys(host, {
+						leave: () => this.leave(),
+						next: () => this.moveTo(adjacentCell(host.state, this.cell!, 1)),
+						previous: () => this.moveTo(adjacentCell(host.state, this.cell!, -1)),
+						below: () => this.moveTo(cellBelow(host.state, this.cell!))
+					}),
 					CELL_THEME
 				]
 			})

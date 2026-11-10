@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { createSession, loginByUrl, TEST_TOKEN } from '../support/corsia';
+import { savedContaining } from '../support/tableCells';
 import { test } from '../support/test';
 
 /**
@@ -12,9 +13,10 @@ import { test } from '../support/test';
 const LONG = 'A long note that keeps going so the table needs more room than a phone has, with more words after it and a few more after those.';
 const DOC = [
 	'# Editing table cells on a phone', '',
-	'| Area | Review note | Preview |', '| --- | --- | --- |',
-	`| Wide | ${LONG} | open |`,
-	'| Signs | Plain words in a cell. | open |', '',
+	// Seven columns: more words side by side than a phone has room for, however the long note wraps.
+	'| Area | Review note | Preview | Owner | Priority | Deadline | Reviewer |', '| --- | --- | --- | --- | --- | --- | --- |',
+	`| Wide | ${LONG} | open | Dana | High | Friday | Samantha |`,
+	'| Signs | Plain words in a cell. | open | Lee | Low | Monday | Ari |', '',
 	'Paragraph below the table.', '',
 ].join('\n');
 
@@ -70,7 +72,7 @@ test.describe('@flow:doc-table-cell-editing-phone @surface:documents', () => {
 			page: await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY })),
 			table: (await page.locator('.cm-md-table table').first().boundingBox())!,
 		};
-		const target = cell(page, 1, 2);
+		const target = cell(page, 1, 6);
 		await target.tap();
 
 		const editor = page.locator('.cm-md-cell-editor .cm-editor');
@@ -87,8 +89,7 @@ test.describe('@flow:doc-table-cell-editing-phone @surface:documents', () => {
 		await expect(target).toContainText('ok');
 		await page.keyboard.press('Escape');
 		await expect(page.locator('.cm-md-cell-editor')).toHaveCount(0);
-		const stored = await page.request.get('/api/files/content', { params: { ...seeded.params, path: seeded.docPath } });
-		expect((await stored.json()).text as string, 'the tap and typing reached the file').toContain('| open ok |');
+		await savedContaining(page, seeded, '| Samantha ok |');
 		await frame(page, '06-phone-393-after');
 	});
 });

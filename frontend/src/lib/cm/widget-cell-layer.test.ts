@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type Rig } from './typed-reveal-rig';
-import { cellEl, cellText, cleanup, clicked, editingCell, layer, mountedEditor, open, press, typed } from './widget-cell-rig';
+import { commentRanges, setCommentRanges } from './comment-marks';
+import { pendingCommentMark } from './pending-comment-mark';
+import { widgetComments } from './widget-comments';
+import { cellEl, cellText, cleanup, clicked, DOC, editingCell, layer, mountedEditor, open, press, typed } from './widget-cell-rig';
 
 /**
  * Where a cell's editor is allowed to live. Chromium places no caret in a contenteditable element inside CodeMirror's
@@ -80,5 +83,21 @@ describe('the layer a cell editor lives in', () => {
 		typed(r, 6, ' and a great many words after them');
 		expect(cellText(r), 'the editor holds the cell\'s source').toBe(' Login and a great many words after them ');
 		expect(editingCell(r)!.textContent, 'the cell underneath shows the same text, unseen').toBe('Login and a great many words after them');
+	});
+
+	it('gives a closed cell its comment back, drawn on the same words', async () => {
+		const r = track(open([commentRanges, pendingCommentMark, widgetComments({ onSelect: vi.fn(), onFocus: vi.fn() })]));
+		const from = DOC.indexOf('Login');
+		r.view.dispatch({ effects: setCommentRanges.of([{ id: 'c1', from, to: from + 3 }]) });
+		// The paint pass runs in CodeMirror's measure frame, and again when the table's nodes change.
+		const settled = async () => { for (let pass = 0; pass < 3; pass++) { await Promise.resolve(); vi.advanceTimersByTime(50); } };
+		await settled();
+		const anchor = () => cellEl(r).querySelector('[data-comment-ids="c1"]')?.textContent;
+		expect(anchor(), 'setup: the comment is drawn on its words').toBe('Log');
+		clicked(r);
+		press(r, 'Escape');
+		expect(editingCell(r), 'the cell closed').toBeNull();
+		await settled();
+		expect(anchor(), 'and its comment is drawn on the same words again').toBe('Log');
 	});
 });

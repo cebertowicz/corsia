@@ -99,13 +99,29 @@ describe('Escape leaves the table', () => {
 describe('the ordinary caret keys work in a cell', () => {
 	it('arrows move and select as they do in prose', () => {
 		const r = openTable();
-		caretAt(r, 0);
+		caretAt(r, 1);
 		press(r, 'ArrowRight');
 		press(r, 'ArrowRight');
-		expect(cellCaret(r), 'the arrows moved it two characters').toBe(2);
+		expect(cellCaret(r), 'the arrows moved it two characters').toBe(3);
 		press(r, 'ArrowRight', true);
 		const { from, to } = cellEditor(r)!.state.selection.main;
-		expect([from, to], 'and a shifted arrow selects from the caret, which is how a word gets commented').toEqual([2, 3]);
+		expect([from, to], 'and a shifted arrow selects from the caret, which is how a word gets commented').toEqual([3, 4]);
 		// Home and End need a laid-out line, which jsdom does not provide; the browser spec presses them in a real cell.
+	});
+
+	it('keeps the caret on the drawn text, never in the spaces padding it from its pipes', () => {
+		const r = openTable();
+		const text = cellText(r);
+		const first = text.length - text.trimStart().length, last = text.trimEnd().length;
+		expect(first, 'the cell is padded on both sides').toBeGreaterThan(0);
+		caretAt(r, 0);
+		expect(cellCaret(r), 'a caret before the text goes to its first character').toBe(first);
+		caretAt(r, text.length);
+		expect(cellCaret(r), 'a caret after the text goes to its last').toBe(last);
+		press(r, 'ArrowRight');
+		expect(cellCaret(r), 'and an arrow does not take it into the padding').toBe(last);
+		press(r, 'ArrowLeft', true);
+		const { anchor, head } = cellEditor(r)!.state.selection.main;
+		expect([anchor, head], 'a selection is kept to the text the same way').toEqual([last, last - 1]);
 	});
 });

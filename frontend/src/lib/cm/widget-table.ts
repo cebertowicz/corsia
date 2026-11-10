@@ -77,6 +77,7 @@ function transplant(el: HTMLElement, src: string, images: ImageContext | null, w
 	const drawn = el.querySelector('table');
 	if (!fresh || !drawn) return false;
 	const held = tableCells(was);
+	let copied = false;
 	for (const span of tableCells(src)) {
 		const before = held.find((item) => item.row === span.row && item.col === span.col);
 		const unchanged = before && was.slice(before.rawFrom, before.rawTo) === src.slice(span.rawFrom, span.rawTo);
@@ -84,8 +85,11 @@ function transplant(el: HTMLElement, src: string, images: ImageContext | null, w
 		if (unchanged && !forced) continue;
 		const next = fresh.rows[span.row]?.cells[span.col];
 		const now = drawn.rows[span.row]?.cells[span.col];
-		if (next && now) copyCell(now, next);
+		if (next && now) { copyCell(now, next); copied = true; }
 	}
+	// A copied cell arrives unpainted, so the comment paint pass must not take the table for already drawn: the same
+	// marks over the same source (a closed cell, an edit that keeps the length) would otherwise leave its comments off.
+	if (copied) delete el.dataset.paintSignature;
 	return true;
 }
 

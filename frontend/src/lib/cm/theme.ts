@@ -99,6 +99,18 @@ export const docTheme = EditorView.theme({
 		overflow: 'hidden'
 	},
 	'.cm-md-cell-layer .cm-editor': { height: 'auto', backgroundColor: 'transparent' },
+	// The document's own theme gives a content area 40vh of bottom padding, and that rule reaches this editor too: without
+	// these, the layer is a screenful tall and covers the rows under the cell it sits on.
+	// The rest of the document's rules that reach it are undone too, so its text takes the cell's type from the layer
+	// (`widget-cell-layer.ts` copies it): the prose line height, the prose line's side padding and the prose wrapping would
+	// each wrap the editor's lines at other words than the cell's and make it taller than the row it sits in.
+	'.cm-md-cell-layer .cm-scroller': { height: 'auto', overflow: 'hidden', lineHeight: 'inherit' },
+	// `pre-wrap` lets the spaces padding the text from the trailing pipe hang past the line end, as the cell, which does not
+	// draw them, never wraps on them (`widget-cell-text.ts` pulls back the leading ones).
+	'.cm-md-cell-layer .cm-content': {
+		padding: '0', minHeight: '0', lineHeight: 'inherit', whiteSpace: 'pre-wrap', overflowWrap: 'inherit', wordBreak: 'inherit'
+	},
+	'.cm-md-cell-layer .cm-line': { padding: '0' },
 	// The edited cell's own box stays drawn; only its ink and any image step aside under the editor.
 	'.cm-md-cell-editing': { color: 'transparent', textDecorationColor: 'transparent' },
 	'.cm-md-cell-editing img, .cm-md-cell-editing .cm-md-image, .cm-md-cell-editing .cm-md-image-note': { visibility: 'hidden' },

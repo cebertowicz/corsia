@@ -42,8 +42,11 @@ export class CellLayer {
 	/** The click that closes the cell: anything outside the editor is elsewhere. */
 	contains = (node: Node | null) => this.el.contains(node);
 
-	/** Copies the cell's box and padding, so the text in the editor wraps exactly as it does in the cell. */
-	private readonly follow = () => {
+	/**
+	 * Copies the cell's box and padding, so the text in the editor wraps exactly as it does in the cell. Also called after
+	 * each document change, since an edit above the table moves the cell without resizing anything the layer observes.
+	 */
+	readonly follow = () => {
 		const cell = this.cell, el = this.el;
 		if (!cell?.isConnected) return;
 		const box = cell.getBoundingClientRect(), style = getComputedStyle(cell);
@@ -52,6 +55,14 @@ export class CellLayer {
 		el.style.width = `${box.width}px`;
 		el.style.minHeight = `${box.height}px`;
 		el.style.padding = `${style.paddingTop} ${style.paddingRight} ${style.paddingBottom} ${style.paddingLeft}`;
+		// The cell's own type, not the editor's: a line that wraps at a different width, or at a different height, would put
+		// the reader's text out of step with the row they are editing. The renderer wraps a cell's text in an element of its
+		// own, and that element carries the type, so it is asked rather than the cell around it.
+		const face = cell.querySelector<HTMLElement>('p, div, li, span') ?? cell;
+		const type = face === cell ? style : getComputedStyle(face);
+		for (const property of ['fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing', 'overflowWrap', 'wordBreak'] as const) {
+			el.style[property] = type[property];
+		}
 	};
 
 	/** Takes the layer out of the document and leaves the cell as a plain rendered cell again. */
