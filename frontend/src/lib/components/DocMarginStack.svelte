@@ -135,7 +135,7 @@
 	/* The cards take the Frosted card role through these tokens, which the thread card reads; their corners are the comment popover's. A negative spread keeps each card's lift below it, not spread sideways over its neighbour or the text. */
 	.margin-stack { --ct-bg: var(--glass-thin); --ct-border: var(--border); --ct-radius: var(--radius); --ct-shadow: var(--glass-rim), 0 10px 14px -10px color-mix(in srgb, black 22%, transparent); position: absolute; top: 0; left: 0; right: 0; will-change: transform; }
 	/* A composer is drawn as a card, in the same frame. */
-	.margin-composer { background: var(--ct-bg); border: 1px solid var(--ct-border); border-radius: var(--ct-radius); box-shadow: var(--ct-shadow); padding: 8px 10px; }
+	.margin-composer { background: var(--ct-bg); border: 1px solid var(--ct-border); border-radius: var(--ct-radius); box-shadow: var(--ct-shadow); padding: var(--space-2) calc(var(--space-2) + var(--space-1) / 2); }
 	/* The open list covers the whole column, so the cards under it are not drawn: none can show a corner below its edge. */
 	.margin-stack.behind, .margin-stack.behind .margin-card.placed { visibility: hidden; }
 	/* The cards go and come back with the box: they fade as it pops, and are hidden (not drawn) only once it has finished. */

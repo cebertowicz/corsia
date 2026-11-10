@@ -20,7 +20,7 @@
 </div>{/if}<IconButton ariaLabel="Close comments" variant="ghost" size="sm" onclick={onClose}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg></IconButton></div></div>
 
 <style>
-	.drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 0 var(--space-1) 4px; }
+	.drawer-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: 0 0 var(--space-1) var(--space-1); }
 	.drawer-heading h2 { margin: 0; font-size: var(--text-subhead); font-weight: var(--fw-semibold); color: var(--text-secondary); }
 	/* Where focus rests when a pinned footer takes it away: not a control, so Enter there does nothing. */
 	.drawer-heading h2:focus { outline: none; }
@@ -30,10 +30,10 @@
 	.drawer-tools { display: inline-flex; align-items: center; gap: var(--space-1); }
 	.filter-menu { position: relative; }
 	.filter-button, .filter-popup button { min-height: var(--space-6); border: 0; border-radius: var(--radius-xs); background: none; color: var(--text-secondary); font: inherit; font-size: var(--text-footnote); cursor: pointer; }
-	.filter-button { display: inline-flex; align-items: center; gap: 4px; padding: 0 var(--space-2); }
+	.filter-button { display: inline-flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); }
 	.filter-popup { position: absolute; z-index: 2; right: 0; top: calc(100% + var(--space-1)); display: grid; min-width: 9rem; padding: var(--space-1); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); background: var(--bg-elevated); box-shadow: var(--shadow-chip); }
 	.filter-popup button { display: flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-2); text-align: left; }
-	.filter-check { display: inline-flex; flex: none; width: 12px; height: 12px; }
+	.filter-check { display: inline-flex; flex: none; width: var(--space-3); height: var(--space-3); }
 	.filter-popup button[aria-checked="true"] { color: var(--accent-text); font-weight: var(--fw-semibold); }
-	@media (pointer: coarse) { .drawer-heading :global(button), .filter-button, .filter-popup button { min-height: 44px; } .drawer-heading :global(.ico-btn) { min-width: 44px; } }
+	@media (pointer: coarse) { .drawer-heading :global(button), .filter-button, .filter-popup button { min-height: var(--touch-target); } .drawer-heading :global(.ico-btn) { min-width: var(--touch-target); } }
 </style>
