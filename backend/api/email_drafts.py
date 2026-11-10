@@ -20,11 +20,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
 
 from connections.account_errors import AccountError, AccountUnavailable
-from connections.google.client import GoogleNotConnected, GoogleSignInRejected
 from connections.mail.email_document import DraftRefused
 from connections.mail_accounts import resolve_for_thread
-from connections.mailhost.errors import PASSWORD_REFUSED, MailHostError
-from connections.mailhost.read import NEEDS_PASSWORD
 from infra.auth import owns_thread, require_human_user
 from infra.database import get_db
 from infra.db_async import run_in_db
@@ -78,16 +75,6 @@ async def _conversation(backend: MailBackend, account_id: str, target: dict[str,
                               "body": email.body} for email in emails]}
 
 
-def _signed_out(exc: Exception) -> bool:
-    """Whether the account refused the read because its sign-in is gone: reconnecting fixes that, retrying doesn't.
-
-    A mail-host account with no saved password is the same case: ``read.credentials`` refuses it before any
-    connection, with its own fixed refusal."""
-    return isinstance(exc, (GoogleNotConnected, GoogleSignInRejected)) or (
-        isinstance(exc, MailHostError) and exc.cause == PASSWORD_REFUSED) or (
-        type(exc) is AccountError and exc.args == (NEEDS_PASSWORD,))
-
-
 @router.get("/{artifact_id}/context")
 async def draft_context(artifact_id: str, user: dict = Depends(require_human_user)) -> dict[str, Any]:
     draft = await run_in_db(_draft_for, artifact_id, user["id"])
@@ -112,12 +99,15 @@ async def draft_context(artifact_id: str, user: dict = Depends(require_human_use
         logger.warning("A draft's account isn't usable right now (reference {}): {}", reference, type(exc).__name__)
         return {**failed, "reason": UNREADABLE, "reference": reference}
     except AccountError:
+        # Finding the account refuses only for an account problem (gone, not email, a setting to fix), except
+        # what clears on its own above.
         return {**failed, "reason": ACCOUNT}
     try:
         return {**base, **await _conversation(backend, str(account["id"]), {**target, "reply_to": str(reply_to)})}
     except (AccountError, DraftRefused) as exc:
-        if _signed_out(exc):
-            logger.warning("A draft's conversation could not be read: the account is signed out ({})", type(exc).__name__)
+        # A read refuses for many reasons; only one the refusal itself marks as the person's to fix is ACCOUNT.
+        if isinstance(exc, AccountError) and exc.person_fixes:
+            logger.warning("A draft's conversation could not be read: the account needs the person ({})", type(exc).__name__)
             return {**failed, "reason": ACCOUNT}
         logger.warning("A draft's conversation could not be read (reference {}): {}: {}", reference, type(exc).__name__, exc)
     except Exception:  # noqa: BLE001 - any other read failure is the same named state, logged with its cause

@@ -20,7 +20,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import date
 
-from connections.account_errors import AccountError
+from connections.account_errors import AccountError, AccountNeedsPerson
 from connections.connected_accounts import resolve_credentials
 from connections.mail.received_attachments import Attachment
 from connections.mailhost import attachment_parts, imap, store
@@ -123,7 +123,7 @@ def credentials(account_id: str) -> tuple[Endpoints, str, str, dict[str, object]
     finally:
         db.close()
     if endpoints is None or not bundle:
-        raise AccountError(NEEDS_PASSWORD)
+        raise AccountNeedsPerson(NEEDS_PASSWORD)
     return endpoints, endpoints.imap_username or endpoints.username, str(bundle[PASSWORD]), check
 
 

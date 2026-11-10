@@ -60,11 +60,15 @@ class GoogleUnavailable(GoogleError, AccountUnavailable):
 
 
 class GoogleNotConnected(GoogleError):
+    person_fixes = True
+
     def __init__(self) -> None:
         super().__init__(NOT_CONNECTED)
 
 
 class GoogleSignInRejected(GoogleError):
+    person_fixes = True
+
     def __init__(self, *, published: bool = False) -> None:
         super().__init__(PUBLISHED_SIGN_IN_RECOVERY if published else NEEDS_SIGN_IN)
 
