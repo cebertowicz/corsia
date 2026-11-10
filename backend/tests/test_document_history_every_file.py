@@ -408,12 +408,34 @@ def test_grouping_joins_one_authors_quick_saves_only():
         ('Ana-40', 'Tighten intro'), ('Ana-25', None), ('Bo-12', None), ('Ana-0', 'Start')]
 
 
-def test_grouping_measures_each_gap_from_the_previous_save():
+def test_grouping_measures_from_each_versions_first_save_so_a_long_session_keeps_versions():
     gap = GROUP_GAP.total_seconds() / 60
-    rows = [row('Ana', 2 * gap - 1), row('Ana', gap - 0.5), row('Ana', 0)]
-    assert [r['id'] for r in grouped(rows)] == [rows[0]['id']]
+    # Saves every few minutes for twice the gap: the window never slides, so the session shows two.
+    rows = [row('Ana', 2 * gap - 1), row('Ana', gap + 0.5), row('Ana', gap - 0.5), row('Ana', 0)]
+    assert [r['id'] for r in grouped(rows)] == [rows[0]['id'], rows[2]['id']]
     rows = [row('Ana', gap + 1), row('Ana', 0)]
     assert [r['id'] for r in grouped(rows)] == [rows[0]['id'], rows[1]['id']]
+
+
+@pytest.mark.asyncio
+async def test_a_credential_named_file_is_never_recorded_whatever_the_ignore_rules(history_scope):
+    from infra.document_history import history_offered
+    from infra.guidance_targets import history_target as target_of
+
+    workspace, thread_id = history_scope
+    # A workspace made before the scaffold's credential lines: only the tray line, which a registered
+    # file in a tray's sub-folder passes.
+    (workspace / '.gitignore').write_text('/.threads/*/*\n')
+    tray = workspace / '.threads' / thread_id
+    secrets = [placed(workspace / '.env', 'TOKEN=x\n'), placed(workspace / 'config' / 'id_rsa', 'key\n'),
+               placed(tray / 'reports' / 'deploy.key', 'key\n')]
+    register(thread_id, secrets[-1])
+    before = head(workspace)
+    for path in secrets:
+        await save_document_text(DocumentSave(path=str(path), text='Changed.\n', thread_id=thread_id), owner(thread_id))
+        assert path.read_text() == 'Changed.\n'
+        assert not history_offered(workspace, (path, target_of(path, workspace)))
+    assert head(workspace) == before
 
 
 def test_grouped_list_of_the_capped_history_stays_under_a_second(tmp_path):

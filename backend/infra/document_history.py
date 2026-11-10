@@ -75,16 +75,20 @@ def list_versions(workspace: Path, relative: str) -> tuple[list[dict[str, str | 
 
 def grouped(rows: list[dict[str, str | None]]) -> list[dict[str, str | None]]:
     """Newest-first saves shown as versions: a save joins the version just before it when the same
-    author made both within ``GROUP_GAP`` and the later one states no reason. The shown version is the
-    group's newest save, under the reason that started it. Display only: every commit stays in history."""
+    author made both, within ``GROUP_GAP`` of that version's first save, and the later one states no
+    reason. The window never slides, so a long session still shows a version at least every
+    ``GROUP_GAP``. The shown version is the group's newest save, under the reason that started it.
+    Display only: every commit stays in history."""
     shown: list[dict[str, str | None]] = []
+    started = None
     for row in reversed(rows):
         last = shown[-1] if shown else None
-        if (last is not None and row["reason"] is None and row["author"] == last["author"]
-                and _at(row) - _at(last) <= GROUP_GAP):
+        if (last is not None and started is not None and row["reason"] is None
+                and row["author"] == last["author"] and _at(row) - started <= GROUP_GAP):
             shown[-1] = {**row, "reason": last["reason"]}
         else:
             shown.append(row)
+            started = _at(row)
     return shown[::-1]
 
 
