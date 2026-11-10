@@ -84,7 +84,9 @@ export const docTheme = EditorView.theme({
 	// Without this, a drag that starts inside a widget is turned into a caret on the editor, so no text in a table or diagram can be selected.
 	'.cm-md-table, .cm-md-table *, .cm-md-mermaid, .cm-md-mermaid *': { userSelect: 'text', WebkitUserModify: 'read-only' },
 	// A cell's own editor is the one thing inside a table that is written to, so it takes back what the rule above takes
-	// away; WebKit honours `contenteditable` only where user-modify allows it.
+	// away. `user-modify: read-only` propagates down and a descendant cannot raise it back, so while a cell of this table is
+	// open the whole table has to ask for editing — the cell's editor, and nothing else, is where the caret can then go.
+	'.cm-md-table:has(.cm-md-cell-editor), .cm-md-table:has(.cm-md-cell-editor) *': { userSelect: 'text', WebkitUserModify: 'read-write' },
 	'.cm-md-cell-editor, .cm-md-cell-editor *': { userSelect: 'text', WebkitUserModify: 'read-write' },
 	// While a cell is open its editor holds the reader's place. The document's own caret, mirrored to the same source range
 	// for the comment flows, would otherwise be a second caret on the same text.

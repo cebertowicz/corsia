@@ -44,6 +44,7 @@ type Change = { from: number; to: number; insert: string };
 class CellEditors {
 	private cell: OpenCell | null = null;
 	private left: OpenCell | null = null;
+	private fresh = false;
 	private editor: EditorView | null = null;
 	private wrap: HTMLElement | null = null;
 	private mounted: HTMLTableCellElement | null = null;
@@ -115,14 +116,28 @@ class CellEditors {
 		// does not draw, so its own position can resolve to the node after the table.
 		const widget = drawnTableAt(this.host, cell.tableFrom);
 		const td = widget ? cellElement(widget, cell) : null;
-		if (!td) { wrap.remove(); this.mounted = null; return; }
+		if (!td) { this.unmount(); return; }
 		if (td === this.mounted && wrap.parentElement === td) return;
 		const hadFocus = wrap.contains(document.activeElement);
+		// CodeMirror draws a block widget's DOM as `contenteditable="false"`, and no caret can be placed in such a subtree.
+		// While this table's cell is being edited its own DOM has to be able to hold one, so the flag comes off here and goes
+		// back on when the cell closes: the reader is typing in this table, and only in the nested editor, for exactly as long.
+		widget!.setAttribute('contenteditable', 'true');
 		td.textContent = ''; // the rendered text steps aside; the editor shows the same text, live
 		td.append(wrap);
 		this.mounted = td;
-		if (hadFocus) this.editor?.focus();
+		// Focus is taken only once the editor is in the document — before that, focusing it does nothing — and the click
+		// that opened the cell counts as the reader asking for the caret there.
+		if (hadFocus || this.fresh) { this.editor?.focus(); this.fresh = false; }
 		this.editor?.requestMeasure();
+	}
+
+	/** Takes the editor out of the document and puts the table back as an uneditable rendered block. */
+	private unmount() {
+		const mounted = this.mounted;
+		this.wrap?.remove();
+		this.mounted = null;
+		mounted?.closest<HTMLElement>(TABLE)?.setAttribute('contenteditable', 'false');
 	}
 
 	/**
@@ -168,6 +183,7 @@ class CellEditors {
 		const wrap = document.createElement('div');
 		wrap.className = 'cm-md-cell-editor';
 		this.wrap = wrap;
+		this.fresh = true;
 		this.editor = new EditorView({
 			parent: wrap,
 			state: EditorState.create({
@@ -192,7 +208,6 @@ class CellEditors {
 				]
 			})
 		});
-		this.editor.focus();
 	}
 
 	/** What the cell's editor did: send its change to the document on the cell's own range, and its selection as a document range. */
@@ -234,6 +249,7 @@ class CellEditors {
 		this.mounted = null;
 		editor.destroy();
 		wrap?.remove();
+		mounted?.closest<HTMLElement>(TABLE)?.setAttribute('contenteditable', 'false');
 		// The cell goes back to being rendered text — from the source as it stands now, not as it was when the cell opened.
 		const table = mounted?.closest<HTMLElement>(TABLE);
 		if (cell && table?.isConnected) repaintTableCell(table, this.host.state, cell);

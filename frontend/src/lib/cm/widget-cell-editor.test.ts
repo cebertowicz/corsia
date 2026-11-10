@@ -29,6 +29,7 @@ describe('clicking a cell edits it where it is read', () => {
 		expect(cellEditor(r), 'the cell editor opened').not.toBeNull();
 		expect(cellText(r)).toBe(' Login ');
 		expect(cellEl(r).contains(cellEditor(r)!.dom), 'it is the cell that holds the editor').toBe(true);
+		expect(cellEl(r).contains(document.activeElement), 'the click put the caret in the cell').toBe(true);
 		expect(table(r), 'the table is still a table').not.toBeNull();
 		expect(r.view.state.doc.toString(), 'nothing is written by opening').toBe(DOC);
 	});
@@ -188,6 +189,19 @@ describe('a live edit from another client reaches the open cell', () => {
 		expect(text.match(/XY/g), 'nothing duplicated').toHaveLength(1);
 		expect(text.match(/Z/g), 'nothing duplicated').toHaveLength(1);
 		expect(r.text.toString(), 'the document and the Yjs type agree').toBe(text);
+	});
+
+	it('an edit to another row arrives while the reader is typing, and the row holds', () => {
+		const r = track(open());
+		clicked(r);
+		typed(r, 6, 'XY');
+		r.edit(AUTHOR, (text) => text.insert(text.toString().indexOf('Status') + 6, '!'));
+		typed(r, 8, '!');
+		const text = r.view.state.doc.toString();
+		expect(text).toContain('LoginXY!');
+		expect(text).toContain('Status!');
+		expect(table(r)!.rows[1].cells, 'the row is still two columns').toHaveLength(2);
+		expect(r.text.toString()).toBe(text);
 	});
 
 	it('typing in the cell after a remote edit lands in that cell', () => {
