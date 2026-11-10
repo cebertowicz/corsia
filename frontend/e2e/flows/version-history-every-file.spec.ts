@@ -213,17 +213,21 @@ test('@flow:version-history-every-file a chat\'s document the person edits shows
 	expect(fs.readFileSync(file, 'utf8')).toBe(FIRST);
 	await shot(page, 'history-doc-restored');
 	// An edit made outside CORSIA after a version was opened: the restore is refused and the document is unchanged.
+	const shown = await rows.count();
 	if (phone && await older.isVisible()) await older.click(); else await rows.nth(2).click();
 	await expect(page.getByRole('button', { name: 'Restore', exact: true })).toBeEnabled();
-	const shown = await rows.count();
 	fs.writeFileSync(file, `${FIRST}Outside edit after opening history.\n`);
 	await page.getByRole('button', { name: 'Restore', exact: true }).click();
 	await expect.soft(page.getByText('Couldn’t restore this version. The document is unchanged.')).toBeVisible({ timeout: 15_000 });
 	await expect.soft(page.locator('.cm-content')).toContainText('Outside edit after opening history.');
 	await expect.soft(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
-	// Reported, not asserted: whether the reloaded list holds the outside edit as a version.
-	info.annotations.push({ type: 'changed-since rows', description: `${shown} before, ${await rows.count()} after; first: ${(await rows.first().innerText()).replace(/\s+/g, ' ')}` });
 	await shot(page, 'history-doc-changed-since');
+	// Reported, not asserted: whether the reloaded list holds the outside edit as a version. A phone keeps
+	// the version open, so it goes back to the list first.
+	if (phone) await drawer.getByRole('button', { name: 'Back', exact: true }).click();
+	const changed = `${width}: ${shown} before, ${await rows.count()} after; first: ${(await rows.first().innerText()).replace(/\s+/g, ' ')}`;
+	info.annotations.push({ type: 'changed-since rows', description: changed });
+	if (process.env.VH_OUT) fs.appendFileSync(path.join(process.env.VH_OUT, 'changed-since-rows.txt'), `${changed}\n`);
 	expect(fs.readFileSync(file, 'utf8')).toContain('Outside edit after opening history.');
 });
 
