@@ -304,7 +304,7 @@
 			ariaLabel={`${drawerItem.renderer === 'held-reply' ? 'Held reply' : 'Decision'} — ${label(drawerItem)}`}
 			contextLabel={drawerItem.renderer === 'held-reply' ? heldMeta(drawerItem.detail as HeldReplyDetail, closingHeld?.position ?? position, closingHeld?.count ?? dockQueue.count) : decisionMeta(drawerItem.detail as DecisionDetail)}
 			opaque
-			flushBottom
+			flushBottom aboveDrawers
 			open={!!$goneReply || (!closingHeld && showChip)}
 			onClose={() => void close()}
 			onClosed={() => { closingHeld = null; }}

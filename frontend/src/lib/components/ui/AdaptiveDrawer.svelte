@@ -34,6 +34,7 @@
 		open = true,
 		onClosed = () => {},
 		covered = false,
+		aboveDrawers = false,
 		panel = $bindable(null),
 	}: {
 		ariaLabel: string;
@@ -84,6 +85,8 @@
 		 * underneath, its place kept, but out of sight and reach, with no scrim over what covers it, until uncovered.
 		 */
 		covered?: boolean;
+		/** Outranks every other drawer, whichever mounted last: for the surface the person is asked to answer. */
+		aboveDrawers?: boolean;
 		/** The sheet's own element, for a caller that has to measure where it rests. */
 		panel?: HTMLElement | null;
 	} = $props();
@@ -156,6 +159,7 @@
 	class:half={detent === 'half'}
 	class:nonmodal={!modal || detent === 'half'}
 	class:covered
+	class:above-drawers={aboveDrawers}
 	inert={covered}
 	style:--drawer-top="{box?.top ?? 0}px"
 	style:--drawer-right="{box?.right ?? 0}px"
@@ -226,6 +230,9 @@
 		pointer-events: auto;
 		transition: background-color var(--dur-standard) var(--ease-entrance);
 	}
+	/* Top of the drawer band (§2.8). Drawers share 28, so a later mount (a comment list the canvas narrowing opens on
+	   its own) would otherwise cover the asking drawer. Modal, the command palette and toasts still outrank it. */
+	.drawer-backdrop.above-drawers { z-index: 30; }
 	.drawer-backdrop.within { inset: var(--drawer-top) var(--drawer-right) var(--drawer-bottom) var(--drawer-left); background: color-mix(in srgb, var(--glass-scrim) 88%, transparent); }
 	.drawer-backdrop.half { background-color: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
 	.drawer-backdrop.nonmodal { background: none; backdrop-filter: none; -webkit-backdrop-filter: none; pointer-events: none; }
