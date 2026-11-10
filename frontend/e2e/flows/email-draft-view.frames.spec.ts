@@ -117,8 +117,29 @@ const expectNewer = (line: string, newer: number) => async (page: Page) => {
 	await expect(page.locator('.email-conversation a')).toHaveCount(0);
 };
 /** A bad address is amber where it sits in To or Cc, with no "!", and one amber line names it as typed. */
+/** Every character of a flagged entry (added or not a full address) is drawn in amber, a bare address's URL colour included. */
+const expectAmber = async (page: Page) => {
+	const off = await page.locator('.cm-content').evaluate((content) => {
+		const probe = content.appendChild(document.createElement('span'));
+		probe.style.color = 'var(--amber-text)';
+		const amber = getComputedStyle(probe).color;
+		probe.remove();
+		const wrong: string[] = [];
+		for (const entry of content.querySelectorAll('.cm-email-added, .cm-email-added-tail, .cm-email-bad')) {
+			const walker = document.createTreeWalker(entry, NodeFilter.SHOW_TEXT);
+			for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+				if (text.parentElement!.closest('.cm-email-added-mark')) continue;
+				if (getComputedStyle(text.parentElement!).color !== amber) wrong.push(text.textContent ?? '');
+			}
+		}
+		return wrong;
+	});
+	expect(off, 'flagged entry text that is not amber').toEqual([]);
+	await expect(page.locator('.cm-email-added, .cm-email-bad').first()).toBeVisible();
+};
 const expectBad = (entries: string[], line: string) => async (page: Page) => {
 	await expect(page.locator('.cm-email-bad')).toHaveText(entries);
+	await expectAmber(page);
 	await expect(page.locator('.cm-email-added-mark')).toHaveCount(0);
 	await expect(page.locator('.email-loud li')).toHaveText([line]);
 };
@@ -129,6 +150,7 @@ const expectBad = (entries: string[], line: string) => async (page: Page) => {
 const expectHintBelow = (name: string, flagged: string) => async (page: Page) => {
 	const mark = page.locator('.cm-email-added-mark').first();
 	await expect(mark).toBeVisible();
+	await expectAmber(page);
 	if (isPhone(page)) await mark.click(); else await mark.hover();
 	const tip = page.locator('.cm-email-added-tip').first();
 	await expect(tip).toBeVisible();
@@ -173,7 +195,7 @@ const SCENARIOS: Scenario[] = [
 	{ name: '2b-rest-scrolled', doc: 'reply', context: reply(), act: scroll('end') },
 	{ name: '3-expanded', doc: 'reply', context: reply(), act: async (page) => { await openRow(1)(page); await scroll('end')(page); } },
 	// Journey 2: what the person should check before sending.
-	{ name: '4-warning', doc: 'ccadded', context: reply({ conversation: [...NEWER[1], ...FOUR], ...WITH_NOTES }) },
+	{ name: '4-warning', doc: 'ccadded', context: reply({ conversation: [...NEWER[1], ...FOUR], ...WITH_NOTES }), act: expectAmber },
 	{ name: '4b-quiet-open', doc: 'reply', context: reply(WITH_NOTES), act: async (page) => { await page.locator('.cm-email-notes-toggle').click(); await page.waitForTimeout(300); } },
 	{ name: '4c-loud-many', doc: 'bothadded', context: reply({ conversation: [...NEWER[2], ...FOUR] }) },
 	{ name: '4d-quiet-only', doc: 'reply', context: reply(WITH_NOTES), act: async (page) => { await expect(page.locator('.email-loud li')).toHaveCount(0); } },
@@ -195,7 +217,7 @@ const SCENARIOS: Scenario[] = [
 	} },
 	{ name: '4g-added-hint', doc: 'ccadded', context: reply(), keepPointer: true, act: expectHintBelow('4g-added-hint', 'priya.raman@example.com') },
 	{ name: '4g2-added-hint-short', doc: 'shortadded', context: reply(), keepPointer: true, act: expectHintBelow('4g2-added-hint-short', 'a@b.co') },
-	{ name: '4h-added-cc', doc: 'ccadded', context: reply() },
+	{ name: '4h-added-cc', doc: 'ccadded', context: reply(), act: expectAmber },
 	{ name: '4i-two-newer', doc: 'reply', context: reply({ conversation: [...NEWER[2], ...FOUR] }), act: async (page) => {
 		await expectNewer('2 emails came after the one you’re replying to: Dana Whitfield, Marcus Obi.', 2)(page);
 		await toList(page);

@@ -15,9 +15,10 @@ export const emailHeaderTheme = EditorView.theme({
 	},
 	'.cm-line.cm-email-head-empty': { borderRadius: 'var(--radius-sm)', boxShadow: 'inset 0 0 0 1px var(--border-subtle)' },
 	// An address that was not on the email being answered: amber, with a "!" that says so.
-	'.cm-email-added, .cm-email-added-tail': { color: 'var(--amber-text)' },
+	// A bare address is a markdown URL, whose syntax colour is a span inside the entry: the amber reaches into it.
+	'.cm-email-added, .cm-email-added-tail, .cm-email-added span, .cm-email-added-tail > span': { color: 'var(--amber-text)' },
 	// An entry that is not a full email address: amber where it sits, with no "!" (the line above the draft says why).
-	'.cm-email-bad': { color: 'var(--amber-text)' },
+	'.cm-email-bad, .cm-email-bad span': { color: 'var(--amber-text)' },
 	'.cm-email-added-tail': { whiteSpace: 'nowrap' },
 	'.cm-email-added-mark': {
 		all: 'unset', boxSizing: 'border-box', cursor: 'help', position: 'relative', display: 'inline-block', textIndent: '0', margin: '0 0 0 var(--space-1)',
