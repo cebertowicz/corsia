@@ -22,7 +22,7 @@ if action == 'refused':
 if action == 'empty':
  c.execute("UPDATE threads SET agent_enabled=0 WHERE user_id='e2e'")
 kind = 'ui' if action in ('person','fallback','unavailable','empty') else owner
-metadata = {'owner_user_id':'e2e','supervisor_thread_id':owner} if action == 'person' else {'supervisor_thread_id':owner} if action == 'fallback' else {'supervisor_thread_id':paused} if action == 'unavailable' else {}
+metadata = {'owner_user_id':'e2e','supervisor_thread_id':owner} if action == 'person' else {'supervisor_thread_id':owner} if action == 'fallback' else {'supervisor_thread_id':paused} if action == 'unavailable' else {'supervisor_thread_id':'missing-o1-supervisor'} if action == 'empty' else {}
 c.execute("DELETE FROM artifact_registrations WHERE artifact_id=? AND parent_thread_id=? AND relationship_state!='owner-active'", (artifact, kind))
 c.execute("UPDATE artifact_registrations SET parent_thread_id=? WHERE artifact_id=? AND relationship_state='owner-active'", (kind, artifact))
 c.execute("UPDATE artifact_identities SET metadata=? WHERE id=?", (json.dumps(metadata), artifact))
