@@ -101,7 +101,7 @@ async def test_refused_clear_retries_as_priority_lane_item(ownership_scope, tmp_
         if len(attempts) == 1:
             raise StoreRefused("clear refused")
         return discard(op_id, *args)
-    async def no_write(text, prior_hash, *_actor_and_reason):
+    async def no_write(text, prior_hash, *_operation):
         raise OSError("write refused")
     monkeypatch.setattr(entry.live.store, "discard", refused_once)
     entry.lane.write = no_write

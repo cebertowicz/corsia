@@ -89,8 +89,8 @@ async def content(token: str, path: str, project_id: str | None = None, thread_i
     if result.pop("_recorded"):
         from infra.document_history import history_offered
 
-        # One `git rev-parse` per recorded-file open, about 9 ms measured, and one `git check-ignore`
-        # for a document; any other file asks none.
+        # The repository is read from Git once per workspace; a document's open asks the writer's ignore
+        # gate (one `git check-ignore`), any other file asks Git nothing.
         result["history"] = await run_off_db(history_offered, Path(config.WORKSPACE), document)
     else:
         result["history"] = False

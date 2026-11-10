@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from infra import document_history
 from infra.document_history import list_versions, version_text
 from infra.guidance_git import GitFault
-from infra.guidance_targets import GuidanceTarget
+from infra.guidance_targets import HistoryTarget
 
 
 def git(repo: Path, *args: str) -> str:
@@ -88,7 +88,7 @@ def test_a_workspace_with_no_repository_of_its_own_reads_history_off(workspace_w
 
 def test_the_history_route_reports_history_off_not_unavailable(workspace_with_no_repository_of_its_own, monkeypatch):
     from api import files_history
-    from infra.guidance_targets import GuidanceTarget
+    from infra.guidance_targets import HistoryTarget
 
     class DB:
         def close(self):
@@ -99,7 +99,7 @@ def test_the_history_route_reports_history_off_not_unavailable(workspace_with_no
     monkeypatch.setattr(files_history, "get_db", DB)
     monkeypatch.setattr(files_history.config, "WORKSPACE", workspace)
     monkeypatch.setattr(files_history, "checked_read_path", lambda *_: (path, []))
-    monkeypatch.setattr("infra.guidance_targets.guidance_target", lambda *_: GuidanceTarget("context, workspace scope"))
+    monkeypatch.setattr("infra.guidance_targets.guidance_target", lambda *_: HistoryTarget("context, workspace scope"))
     assert files_history.history(str(path), "person", None, None) == {"versions": [], "truncated": False}
     with pytest.raises(HTTPException) as missing:
         files_history.history(str(path), "person", None, None, "a" * 40)
@@ -184,7 +184,7 @@ def test_git_fault_is_unavailable_not_unknown(repo, monkeypatch):
     monkeypatch.setattr(files_history, "get_db", DB)
     monkeypatch.setattr(files_history.config, "WORKSPACE", repo)
     monkeypatch.setattr(files_history, "checked_read_path", lambda *_: (path, []))
-    monkeypatch.setattr("infra.guidance_targets.guidance_target", lambda *_: GuidanceTarget("skill"))
+    monkeypatch.setattr("infra.guidance_targets.guidance_target", lambda *_: HistoryTarget("skill"))
 
     def fault(*_args, **_kwargs):
         raise GitFault("fatal: unable to read tree")

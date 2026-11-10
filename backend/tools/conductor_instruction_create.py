@@ -102,12 +102,12 @@ def _install_paths(target, kind: str, name: str | None, content: str, supporting
 
 def _save_bundle(writes: dict[Path, bytes], before: dict[Path, bytes | None], actor: str, kwargs: dict) -> dict:
     from infra.guidance_git import digest, save_guidance
-    from infra.guidance_targets import GuidanceTarget
+    from infra.guidance_targets import HistoryTarget
     from infra.guidance_messages import saver_author
     from infra.skill_save_validation import REFUSED
 
     saved = save_guidance(
-        writes, workspace=Path(config.WORKSPACE), target=GuidanceTarget("thread"),
+        writes, workspace=Path(config.WORKSPACE), target=HistoryTarget("thread"),
         author=saver_author(thread_id=actor), reason=kwargs.get("reason"), evidence=kwargs.get("evidence"),
         expected={path: digest(raw) for path, raw in before.items()},
     )

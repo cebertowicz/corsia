@@ -269,7 +269,7 @@ class DocumentLane:
         record = await record_candidate(self.live, fork, prior_hash, publication, operation)
         await _checkpoint("record")
         try:
-            await self.write(text, prior_hash, operation.actor, operation.reason)
+            await self.write(text, prior_hash, operation)
         except Exception:
             await asyncio.to_thread(self.live.store.discard, record.op_id)
             self.live.pending_changed()

@@ -5,6 +5,8 @@ import re
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from loguru import logger
+
 from infra.guidance_git import _git_bytes, workspace_repository
 from infra.guidance_states import GitFault, history_is_off
 from infra.guidance_messages import parse_recorded_reason
@@ -35,14 +37,22 @@ def history_off(workspace: Path) -> bool:
         return False
 
 
-def history_offered(workspace: Path, document: Path | None = None) -> bool:
-    """Whether an open recorded file offers History: the workspace records history, and Git does not
-    ignore ``document`` (a guidance file or a registered thread-folder file passes None)."""
-    from infra.guidance_targets import ignored_by_workspace
+def history_offered(workspace: Path, document=None) -> bool:
+    """Whether an open recorded file offers History: the workspace records history, and the writer's
+    ignore gate lets ``document`` (its path and target; a guidance file passes None) in. A Git fault in
+    that check offers none, as for an ignored file."""
+    from infra.history_ignore import ignored
 
-    if history_off(workspace):
-        return False
-    return document is None or not ignored_by_workspace(document, workspace)
+    try:
+        repo = repository(workspace)
+        if repo is None or document is None:
+            return repo is not None
+        path, target = document
+        relative = path.resolve(strict=False).relative_to(repo).as_posix()
+        return not ignored(repo, [relative], tray=target.registered)
+    except (GitFault, ValueError) as exc:
+        logger.warning("history check failed for {}: {}", document, exc)
+        return document is None
 
 
 def list_versions(workspace: Path, relative: str) -> tuple[list[dict[str, str | None]], bool]:

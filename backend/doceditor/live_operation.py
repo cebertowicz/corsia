@@ -52,6 +52,8 @@ class Operation:
     edit_path: str | None = None
     #: Why this write was made, recorded with a document's version (a restore names the version).
     reason: str | None = None
+    #: Write only if the version is recorded (a restore); the write fails, and is undone, otherwise.
+    history_required: bool = False
     op_id: str = field(default_factory=lambda: str(uuid4()))
 
 

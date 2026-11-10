@@ -94,13 +94,13 @@ def _save(
     from core.placement_proposal import marker
     from infra.config import WORKSPACE
     from infra.guidance_git import save_guidance
-    from infra.guidance_targets import GuidanceTarget
+    from infra.guidance_targets import HistoryTarget
     from infra.skill_save_validation import REFUSED
 
     trailer = marker(entry["thread_id"], entry["entry_id"], entry["revision"])
     result = save_guidance(
         {path: text.encode() for path, text in writes.items()},
-        workspace=Path(WORKSPACE), target=GuidanceTarget("placement"),
+        workspace=Path(WORKSPACE), target=HistoryTarget("placement"),
         expected=expected, atomic=True, author=outcomes._author(place),
         message=outcomes._message(entry, decision, relative, trailer, verb=verb),
         lesson_gate=False,  # the step's own retire and promote path

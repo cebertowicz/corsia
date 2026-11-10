@@ -8,17 +8,18 @@ from pathlib import Path
 from loguru import logger
 
 from infra.guidance_save_types import SaveResult
-from infra.guidance_targets import GuidanceTarget
+from infra.guidance_targets import HistoryTarget
 
 
 def after_save(
-    result: SaveResult, *, workspace: Path, writes: dict[Path, bytes], target: GuidanceTarget, author: str,
+    result: SaveResult, *, workspace: Path, writes: dict[Path, bytes], target: HistoryTarget, author: str,
     timing: dict[str, float], lesson_changes, lesson_observation_thread_id: str | None,
 ) -> SaveResult:
     """Report the save, then do the instruction-only follow-up a landed guidance commit owes (the lesson
-    observation, the carry-in record). A document gets neither, and keeps a line only when its version
-    could not be recorded."""
-    if target.document and result.outcome not in ("failed", "deferred", "stale") and not result.unsynced:
+    observation, the carry-in record). A document gets neither, and keeps a line only when a version
+    could not be recorded (this save's, or an earlier queued one's) or it was not written. The log line
+    and product event name the kind, so guidance and document saves stay apart in the metrics."""
+    if target.document and result.outcome in ("written", "unchanged", "history-off", "ordinary") and not result.unsynced:
         # A document's writer has nothing to act on when its version was recorded, or never would be.
         result = replace(result, line=None)
     from infra.product_events import emit_product_event
@@ -27,8 +28,8 @@ def after_save(
         "outcome": result.outcome, "scope": target.scope, "history_off": result.outcome == "history-off",
         "index_unsynced": list(result.unsynced), **timing,
     }
-    logger.info("guidance save {}", properties)
-    emit_product_event("guidance_history", "save", properties=properties)
+    logger.info("{} save {}", target.kind, properties)
+    emit_product_event(f"{target.kind}_history", "save", properties=properties)
     warnings: list[str | None] = []
     if result.outcome == "written" and lesson_changes:
         from infra.lesson_save_gate import observe_written_save

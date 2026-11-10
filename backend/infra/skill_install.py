@@ -23,7 +23,7 @@ from core.skill_validation import parse_frontmatter
 from core.skill_workflow_validation import WORKFLOW_KEYS, validate_workflow
 from infra.guidance_git import SaveResult, save_guidance
 from infra.guidance_messages import saver_author
-from infra.guidance_targets import GuidanceTarget
+from infra.guidance_targets import HistoryTarget
 from library.installed import local_bundle
 
 ALREADY_HERE = "already_here"
@@ -228,7 +228,7 @@ def install_skill_bundle(
     if target.exists() or target.is_symlink():
         return {"outcome": ALREADY_HERE, "reason": "destination_exists"}
     writes = {target / relative: data for relative, data in files.items()}
-    target_info = GuidanceTarget(f"skill, {'agent' if scope == 'thread' else scope} scope")
+    target_info = HistoryTarget(f"skill, {'agent' if scope == 'thread' else scope} scope")
     try:
         saved = save_guidance(
             writes,
@@ -302,7 +302,7 @@ def update_skill_bundle(
         saved = save_guidance(
             writes,
             workspace=workspace,
-            target=GuidanceTarget(f"skill, {'agent' if scope == 'thread' else scope} scope"),
+            target=HistoryTarget(f"skill, {'agent' if scope == 'thread' else scope} scope"),
             author=saver_author(thread_id=author_thread_id),
             reason=reason,
             expected=expected,
@@ -347,7 +347,7 @@ def remove_skill_bundle(
         saved = save_guidance(
             {},
             workspace=workspace,
-            target=GuidanceTarget(f"skill, {'agent' if scope == 'thread' else scope} scope"),
+            target=HistoryTarget(f"skill, {'agent' if scope == 'thread' else scope} scope"),
             author=saver_author(thread_id=author_thread_id),
             reason=reason,
             deletes=deletes,

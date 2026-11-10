@@ -656,10 +656,10 @@ def _log(repo: Path) -> list[str]:
 
 def _placement_save(workspace: Path, target: Path, text: str, expected: str | None):
     from infra.guidance_git import digest, save_guidance
-    from infra.guidance_targets import GuidanceTarget
+    from infra.guidance_targets import HistoryTarget
 
     return save_guidance(
-        {target: text.encode()}, workspace=workspace, target=GuidanceTarget("placement"),
+        {target: text.encode()}, workspace=workspace, target=HistoryTarget("placement"),
         expected={target: digest(expected)}, atomic=True, author="Lane <t@a>",
         message="placement: written\n\nPlacement: t/1@2\n",
     )

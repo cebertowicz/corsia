@@ -25,7 +25,7 @@ from infra.auth import owns_thread
 from infra.database import get_db
 from infra.db_async import run_in_db, run_off_db
 from infra.guidance_git import save_guidance
-from infra.guidance_targets import GuidanceTarget, guidance_target, history_target
+from infra.guidance_targets import HistoryTarget, guidance_target, history_target
 from infra.guidance_messages import saver_author
 from registry import service as registry_service
 from registry.durable_writes import write_text
@@ -123,7 +123,7 @@ async def _save_validated(
 
 
 def _guided_write(
-    path: Path, target: GuidanceTarget, text: str, author: Callable[[], str], reason: str | None, write,
+    path: Path, target: HistoryTarget, text: str, author: Callable[[], str], reason: str | None, write,
     expected_sha256: str | None = None, history_required: bool = False,
 ) -> dict:
     """Blocking. Run a validated editor save of a guidance file or document through its history (issue #2272).
@@ -153,7 +153,7 @@ def _guided_write(
     if not payloads:
         raise DocumentSaveError("save_failed", saved.line or "Document was not saved")
     if saved.line is not None:
-        payloads[0]["guidance_history"] = saved.line
+        payloads[0][f"{target.kind}_history"] = saved.line
     payloads[0]["version"] = saved.sha
     return payloads[0]
 

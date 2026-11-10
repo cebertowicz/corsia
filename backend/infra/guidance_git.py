@@ -1,9 +1,11 @@
-"""The single owner of CORSIA guidance history (issue #2272).
+"""The single writer of the workspace history: guidance (issue #2272) and documents (C11).
 
-Under one lock under ``.git/`` (every server process), :func:`save_guidance` commits
-outside edits at its paths as ``Reason: unrecorded``, writes the caller's bytes and
-commits those in-memory bytes, then sweeps other dirty guidance. A fault never fails a save,
-and no path writes over a file that changed since the caller read it.
+:func:`save_guidance` checks a save once (text, the person's ignore rules, the file unchanged since the
+caller read it), writes the caller's bytes and records them through :func:`infra.history_record.record`
+under one lock under ``.git/`` (every server process): outside edits at its paths first, as
+``Reason: unrecorded``, then the save. Guidance records before it answers and then sweeps other dirty
+guidance; a document is recorded after it answers. A fault never fails a save, and no path writes over
+a file that changed since the caller read it.
 """
 
 from __future__ import annotations
@@ -19,26 +21,29 @@ from typing import Any, Callable, Iterator
 
 from loguru import logger
 
+from core.document_history_paths import MAX_HISTORY_BYTES, is_history_text
 from infra.backend_git import GIT_CONFIG_ARGS
-from infra.guidance_cas import stale_result
 from infra.guidance_history_paths import digest, file_version, find_commit, is_empty_git_dir, read_regular, write_bytes as _write_bytes
 from infra.guidance_index_sync import CORSIA_COMMITTER, consume_records, index_lock_fault, record_failure, seed_legacy_records
 from infra.guidance_messages import (
-    REASON_PREFIX, SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_UNRECORDED, UNRECORDED_REASON,
-    commit_message, is_person_author, recorded_reason,
+    SAVE_COMMITTED, SAVE_FAILED, SAVE_HISTORY_OFF, SAVE_UNRECORDED, commit_message, is_person_author, recorded_reason,
 )
 from infra.guidance_states import HistoryOff, GitFault, NoRepository, _LockBusy, history_is_off
 from infra.guidance_save_after import after_save
 from infra.guidance_save_types import KnownHead, SaveResult, _Commit
-from infra.guidance_targets import GuidanceTarget
+from infra.guidance_targets import HistoryTarget
+from infra.history_ignore import ignored
 from infra.skill_save_validation import refused_save
 
 _LOCK_NAME, _LOCK_WAIT_SECONDS = "corsia-guidance.lock", 30.0
 _GIT_TIMEOUT_SECONDS = 30
 _GIT_CONFIG = (*GIT_CONFIG_ARGS, "-c", "commit.gpgsign=false", "-c", "safe.bareRepository=explicit")
 _OUTSIDE = "Unknown editor <outside-edit@corsia.local>"
-MAX_GUIDANCE_BYTES = 1024 * 1024
 _SWEEP_LIMIT = 100
+# A workspace's own repository and Git directory, by the ``.git`` entry they were read through: neither
+# changes per save or open, so each is read from Git once, and again only when ``.git`` is replaced.
+_REPOSITORIES: dict[tuple[Path, bool, tuple[int, int] | None], tuple[Path | None, str | None]] = {}
+_GIT_DIRS: dict[tuple[Path, tuple[int, int] | None], Path] = {}
 
 
 def _git_bytes(repo: Path, *args: str, env: dict[str, str] | None = None,
@@ -64,9 +69,27 @@ def _git(repo: Path, *args: str, env: dict[str, str] | None = None,
 
 # Public digest and path helpers remain re-exported from guidance_history_paths.
 
+def _git_entry(workspace: Path) -> tuple[int, int] | None:
+    try:
+        found = os.stat(workspace / ".git")
+    except OSError:
+        return None
+    return found.st_dev, found.st_ino
+
+
 def workspace_repository(workspace: Path, *, create: bool = False) -> tuple[Path | None, str | None]:
     """The workspace's own repository, never an enclosing one; a guidance save or Linux shell launch passes ``create``, where an empty ``.git`` counts as absent."""
     workspace = workspace.resolve(strict=False)
+    key = (workspace, create, _git_entry(workspace))
+    if (known := _REPOSITORIES.get(key)) is not None:
+        return known
+    found = _workspace_repository(workspace, create)
+    if found[0] is not None or history_is_off(found[1]):  # a Git fault is asked again next time
+        _REPOSITORIES[(workspace, create, _git_entry(workspace))] = found
+    return found
+
+
+def _workspace_repository(workspace: Path, create: bool) -> tuple[Path | None, str | None]:
     try:
         if (workspace / ".git").exists() and not (create and is_empty_git_dir(workspace / ".git")):
             top = Path(_git(workspace, "rev-parse", "--show-toplevel").strip()).resolve(strict=False)
@@ -91,10 +114,17 @@ def recorded_blob_reader(workspace: Path):
     return BatchBlobReader.for_repo(repo, _GIT_CONFIG, _GIT_TIMEOUT_SECONDS), None
 
 
-def _acquire(repo: Path, git_dir: Path | None = None) -> tuple[int, float]:
+def git_dir(repo: Path) -> Path:
+    """The repository's Git directory, read from Git once per ``.git`` entry."""
+    key = (repo, _git_entry(repo))
+    if (known := _GIT_DIRS.get(key)) is None:
+        known = _GIT_DIRS[key] = Path(_git(repo, "rev-parse", "--absolute-git-dir").strip())
+    return known
+
+
+def _acquire(repo: Path, directory: Path | None = None) -> tuple[int, float]:
     try:
-        git_dir = git_dir or Path(_git(repo, "rev-parse", "--absolute-git-dir").strip())
-        handle = os.open(git_dir / _LOCK_NAME, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+        handle = os.open((directory or git_dir(repo)) / _LOCK_NAME, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
     except OSError as exc:
         raise GitFault(f"guidance lock: {exc}") from exc
     started = time.monotonic()
@@ -109,6 +139,11 @@ def _acquire(repo: Path, git_dir: Path | None = None) -> tuple[int, float]:
             time.sleep(0.02)
 
 
+def _release(handle: int) -> None:
+    fcntl.flock(handle, fcntl.LOCK_UN)
+    os.close(handle)
+
+
 @contextmanager
 def _locked(handle: int) -> Iterator[Any]:
     """Hold the acquired lock with one database connection; release both."""
@@ -118,8 +153,7 @@ def _locked(handle: int) -> Iterator[Any]:
         with closing(get_db()) as db:
             yield db
     finally:
-        fcntl.flock(handle, fcntl.LOCK_UN)
-        os.close(handle)
+        _release(handle)
 
 
 def _changed(repo: Path, specs: list[str]) -> list[str]:
@@ -201,25 +235,10 @@ def _commit(
     return _Commit(sha, tuple(unsynced), fault, repaired=tuple(repaired), notes=tuple(notes))
 
 
-def _is_text(data: bytes | None) -> bool:
-    return data is None or (len(data) <= MAX_GUIDANCE_BYTES and b"\0" not in data[:8192])
-
-
-def _sweep(repo: Path, rels: list[str]) -> list[str]:
-    """Commit outside edits at ``rels`` from disk in one commit by an unknown editor: nothing
-    records who made them, and the last CORSIA writer did not write these bytes."""
-    names = sorted(rels)
-    shown = ", ".join(names[:12]) + (f" and {len(names) - 12} more" if len(names) > 12 else "")
-    files = {rel: read_regular(repo / rel) for rel in names}
-    done = _commit(repo, files, f"guidance sweep: {shown}\n\n{REASON_PREFIX}{UNRECORDED_REASON}\nScope: sweep", _OUTSIDE, repair_unchanged=False)
-    if done is None:
-        return []
-    return ([f"Swept and committed {shown} as {done.sha[:7]} with Reason: unrecorded."] if done.changed else []) + done.unsynced_line()
-
-
 def _sweep_others(repo: Path, workspace: Path, db, exclude: set[str]) -> list[str]:
     """Sweep up to ``_SWEEP_LIMIT`` other dirty guidance files; a fault becomes a line."""
     from core.guidance_paths import classify_guidance_path, sweep_pathspecs
+    from infra.history_record import sweep
 
     try:
         found: list[str] = []
@@ -227,21 +246,20 @@ def _sweep_others(repo: Path, workspace: Path, db, exclude: set[str]) -> list[st
         for rel in _changed(repo, sweep_pathspecs(workspace, db)):
             if len(found) == _SWEEP_LIMIT:
                 left += 1
-            elif rel not in exclude and classify_guidance_path(repo / rel, workspace=workspace, db=db) and _is_text(read_regular(repo / rel)):
+            elif rel not in exclude and classify_guidance_path(repo / rel, workspace=workspace, db=db) and is_history_text(read_regular(repo / rel)):
                 found.append(rel)
-        lines = _sweep(repo, found) if found else []
+        lines = sweep(repo, found, "guidance") if found else []
         return lines + ([f"{left} more changed guidance candidates wait for the next save."] if left else [])
     except Exception as exc:  # the save stands; the sweep failure must still be visible
         logger.opt(exception=True).warning("guidance sweep failed")
         return [f"Guidance sweep failed: {exc}. Outside edits remain on disk and not in history. Report this."]
 
 
-
 def save_guidance(
     writes: dict[Path, bytes],
     *,
     workspace: Path,
-    target: GuidanceTarget,
+    target: HistoryTarget,
     author: str,
     reason: str | None = None,
     evidence: str | None = None,
@@ -254,13 +272,14 @@ def save_guidance(
     lesson_gate: bool = True,
     lesson_observation_thread_id: str | None = None,
 ) -> SaveResult:
-    """Save writes and compare-and-swap deletes in one guidance-history commit.
+    """Save writes and compare-and-swap deletes in one history commit.
 
     Binary-safe reviewed bundles use raw SHA-256 and a 1 MB file ceiling; ordinary guidance is text-only.
     An agent's new or changed lesson is refused unless the caller passes ``lesson_gate=False``.
-    A document target is written first and recorded after the save returns (:mod:`infra.document_recorder`),
-    without the lesson check, the carry-in record or the sweep of other guidance; it reports a line
-    only when its history could not be recorded.
+    A document target (no lesson check, carry-in record or sweep of other guidance) is written, and its
+    version recorded after the save answers (``queued``); its line names only a save history could not
+    record: this one when ``atomic`` or the history lock is busy, else an earlier queued save of it,
+    which the record retries.
     """
     lesson_gate = lesson_gate and not target.document
     lesson_changes = ()
@@ -281,19 +300,9 @@ def save_guidance(
     expected = {**(expected or {}), **deletes}
     timing: dict[str, float] = {}
     done = "" if target.document else (SAVE_COMMITTED if recorded_reason(reason) else SAVE_UNRECORDED).replace("{scope}", target.scope)
-    kind = "document" if target.document else "guidance"
-    subject = f"{kind} save: {', '.join(os.path.relpath(path, workspace) for path in changes)}"
+    subject = f"{target.kind} save: {', '.join(os.path.relpath(path, workspace) for path in changes)}"
     commit = message or commit_message(subject, target.scope, reason, evidence)
-    if target.document and not deletes:
-        from infra.document_recorder import save_document
-
-        result = save_document(writes, workspace=workspace, target=target, author=author, message=commit,
-                               expected=expected, atomic=atomic, write=write)
-    else:
-        result = _save(
-            changes, workspace, target, author, commit, done, expected, atomic,
-            binary_safe_history, write, timing,
-        )
+    result = _save(changes, workspace, target, author, commit, done, expected, atomic, binary_safe_history, write, timing)
     return after_save(
         result, workspace=workspace, writes=writes, target=target, author=author, timing=timing,
         lesson_changes=lesson_changes, lesson_observation_thread_id=lesson_observation_thread_id,
@@ -301,27 +310,24 @@ def save_guidance(
 
 
 def _save(
-    writes: dict[Path, bytes | None], workspace: Path, target: GuidanceTarget, author: str, message: str, done: str,
+    writes: dict[Path, bytes | None], workspace: Path, target: HistoryTarget, author: str, message: str, done: str,
     expected: dict[Path, str | None] | None, atomic: bool, binary_safe_history: bool,
     write: Callable[[Path, bytes], object], timing: dict[str, float],
 ) -> SaveResult:
+    from infra.history_record import Version, put_back, record, save_queued, write_checked
+
     def unrecorded(outcome: str, why: str, line: str | None) -> SaveResult:
         if not atomic:
-            if (stale := stale_result(expected, read_bytes=read_regular)) is not None:
+            if isinstance(stale := write_checked(writes, expected, write), SaveResult):
                 return stale
-            for path, data in writes.items():
-                if data is None:
-                    path.unlink(missing_ok=True)
-                else:
-                    write(path, data)
         return SaveResult(outcome, why, line=line)
 
-    if binary_safe_history and any(data is not None and len(data) > MAX_GUIDANCE_BYTES for data in writes.values()):
+    if binary_safe_history and any(data is not None and len(data) > MAX_HISTORY_BYTES for data in writes.values()):
         return SaveResult("refused", "binary-too-large", line="Not saved: reviewed bundle files must be at most 1 MB.")
     if target.fault:
         line = f"Not saved: {target.fault}." if atomic else f"Saved. History may be missing: {target.fault}."
         return unrecorded("failed", target.fault, line)
-    if not binary_safe_history and not all(_is_text(data) for data in writes.values()):
+    if not binary_safe_history and not all(is_history_text(data) for data in writes.values()):
         return unrecorded("ordinary", "not text up to 1 MB", None)
     repo, why = workspace_repository(workspace, create=True)
     if repo is None and not history_is_off(why):
@@ -330,37 +336,28 @@ def _save(
         return unrecorded("history-off", why or "", SAVE_HISTORY_OFF.format(why=why))
     try:
         rels = {path: path.resolve(strict=False).relative_to(repo).as_posix() for path in writes}
-        if _git(repo, "check-ignore", "--", *rels.values(), ok=(0, 1)).strip():
+        if ignored(repo, list(rels.values()), tray=target.registered):
             return unrecorded("history-off", "ignored", SAVE_HISTORY_OFF.format(why="the path is ignored by Git"))
-        handle, timing["lock_wait_ms"] = _acquire(repo)
+        if target.document:  # recorded after the save answers, so never under the lock here
+            return save_queued(repo, writes, rels, author=author, message=message, expected=expected, atomic=atomic, write=write)
+        directory = git_dir(repo)
+        handle, timing["lock_wait_ms"] = _acquire(repo, directory)
     except _LockBusy as exc:
         return unrecorded("deferred", "deferred-guidance-lock", SAVE_FAILED.format(error=exc))
     except (GitFault, ValueError) as exc:
         return unrecorded("failed", str(exc), SAVE_FAILED.format(error=exc))
     with _locked(handle) as db:
-        try:
-            outside = _changed(repo, [f":(literal){rel}" for rel in rels.values()])
-            lines = _sweep(repo, outside) if outside else []
-        except Exception as exc:  # an unrecorded outside edit must never join the saver's commit
-            return unrecorded("failed", str(exc), SAVE_FAILED.format(error=f"outside edits could not be recorded first ({exc})"))
-        if (stale := stale_result(expected, read_bytes=read_regular)) is not None:
-            return stale
-        prior = {path: read_regular(path) for path in writes} if atomic else {}
-        for path, data in writes.items():
-            if data is None:
-                path.unlink(missing_ok=True)
-            else:
-                write(path, data)
+        if isinstance(prior := write_checked(writes, expected, write), SaveResult):
+            return prior
         started = time.monotonic()
-        try:
-            landed = _commit(repo, {rels[path]: data for path, data in writes.items()}, message, author)
-        except GitFault as exc:
-            for path, old in prior.items():  # HEAD never moved, so restoring prior bytes is safe
-                if read_regular(path) == writes[path]:
-                    _write_bytes(path, old) if old is not None else path.unlink(missing_ok=True)
-            return SaveResult("failed", str(exc), line="\n".join([*lines, SAVE_FAILED.format(error=exc)]))
-        finally:
-            timing["commit_ms"] = (time.monotonic() - started) * 1000
+        version = Version({rels[path]: (prior[path], data) for path, data in writes.items()}, author, message, target.kind)
+        landed_all, lines, fault = record(repo, [version], directory)
+        timing["commit_ms"] = (time.monotonic() - started) * 1000
+        if fault is not None or not landed_all:
+            if atomic:
+                put_back(prior, writes)
+            return SaveResult("failed", str(fault), line="\n".join([*lines, SAVE_FAILED.format(error=fault)]))
+        landed = landed_all[0]
         if landed is not None:
             lines += ([done.format(sha=landed.sha[:7])] if done and landed.changed and not landed.unsynced else []) + landed.unsynced_line()
         lines += _sweep_others(repo, workspace, db, set(rels.values()))

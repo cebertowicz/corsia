@@ -14,9 +14,9 @@ import pytest
 from doceditor.document_save import DocumentSave, save_document_text
 from infra.database import get_db
 from infra.document_history import GROUP_GAP, grouped, list_versions
-from infra.document_recorder import wait_recorded
+from infra.history_record import wait_recorded
 from infra.guidance_targets import history_target
-from tests.test_guidance_history import history_scope as history_scope, SKILL_BODY, _git
+from tests.test_guidance_history import history_scope as history_scope, SKILL_BODY, _IDENTITY, _git
 
 
 def sha(text: str) -> str:
@@ -70,7 +70,14 @@ def test_which_saves_are_recorded_as_documents(history_scope):
     finally:
         db.close()
     unregistered = placed(tray / 'scratch' / 'notes.md')
-    working = placed(workspace / 'projects' / 'demo' / 'working' / 'draft.md')
+    tray_working = placed(tray / 'working' / 'draft.md')
+    db = get_db()
+    try:
+        registry_service.register_write_strict(thread_id, str(tray_working), db=db)
+    finally:
+        db.close()
+    top_working = placed(workspace / 'working' / 'draft.md')
+    own_working = placed(workspace / 'notes' / 'working' / 'plan.md')
     instruction = placed(tray / 'skills' / 'demo' / 'SKILL.md', SKILL_BODY)
     ignored = placed(workspace / 'private' / 'secret.md')
     (workspace / '.gitignore').write_text('/private/\n')
@@ -79,7 +86,10 @@ def test_which_saves_are_recorded_as_documents(history_scope):
 
     assert (history_target(document, workspace).document, history_target(document, workspace).registered) == (True, False)
     assert (history_target(registered, workspace).document, history_target(registered, workspace).registered) == (True, True)
-    assert history_target(working, workspace) is None
+    # Only the ephemeral working folders are left out: a tray's own and the workspace's top-level one.
+    assert history_target(tray_working, workspace) is None
+    assert history_target(top_working, workspace) is None
+    assert history_target(own_working, workspace).document is True
     assert history_target(unregistered, workspace) is None
     skill = history_target(instruction, workspace)
     assert skill is not None and skill.document is False
@@ -96,7 +106,7 @@ async def test_a_document_git_ignores_saves_unrecorded(history_scope):
     before = head(workspace)
     saved = await save_document_text(DocumentSave(path=str(path), text='Kept out.\n', thread_id=thread_id), owner(thread_id))
     assert path.read_text() == 'Kept out.\n'
-    assert saved['version'] is None and 'guidance_history' not in saved
+    assert saved['version'] is None and 'document_history' not in saved
     assert head(workspace) == before
 
 
@@ -116,12 +126,94 @@ async def test_a_registered_thread_file_git_ignores_is_recorded_and_an_unregiste
     await save_document_text(DocumentSave(path=str(loose), text='More scratch.\n'), user_id)
     assert loose.read_text() == 'More scratch.\n'
     rel = f'.threads/{thread_id}/reports/summary.md'
-    assert subjects(workspace, kept) == [f'document save: {rel}', f'guidance sweep: {rel}']
+    assert subjects(workspace, kept) == [f'document save: {rel}', f'document sweep: {rel}']
     assert _git(['show', f'HEAD:{rel}'], cwd=workspace) == 'Final.\n'
     assert subjects(workspace, loose) == []
     assert _git(['rev-list', '--count', f'{before}..HEAD'], cwd=workspace).strip() == '2'
     rows, _truncated = list_versions(workspace, rel)
     assert len(rows) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_registered_thread_file_still_honours_every_other_ignore_rule(history_scope):
+    from infra.document_history import history_offered
+    from infra.guidance_targets import history_target as target_of
+
+    workspace, thread_id = history_scope
+    # The tray-wide line is the one rule registration overrides; the person's other rules still hold.
+    (workspace / '.gitignore').write_text('/.threads/*/*\n!/.threads/*/skills/\n*.secret.md\n')
+    (workspace / '.git' / 'info').mkdir(exist_ok=True)
+    (workspace / '.git' / 'info' / 'exclude').write_text('private-notes/\n')
+    tray = workspace / '.threads' / thread_id
+    kept = placed(tray / 'reports' / 'summary.md', 'Draft.\n')
+    by_root = placed(tray / 'reports' / 'keys.secret.md', 'token\n')
+    by_exclude = placed(tray / 'private-notes' / 'plan.md', 'Private.\n')
+    by_nested = placed(tray / 'local' / 'notes.md', 'Local.\n')
+    (tray / 'local' / '.gitignore').write_text('notes.md\n')
+    for path in (kept, by_root, by_exclude, by_nested):
+        register(thread_id, path)
+    user_id = owner(thread_id)
+    before = head(workspace)
+    for path in (kept, by_root, by_exclude, by_nested):
+        await save_document_text(DocumentSave(path=str(path), text='Changed.\n', thread_id=thread_id), user_id)
+        assert path.read_text() == 'Changed.\n'
+    assert head(workspace) != before
+    changed = set(_git(['diff', '--name-only', before, 'HEAD'], cwd=workspace).split())
+    assert changed == {f'.threads/{thread_id}/reports/summary.md'}
+    offered = {path.name: history_offered(workspace, (path, target_of(path, workspace))) for path in (kept, by_root, by_exclude, by_nested)}
+    assert offered == {'summary.md': True, 'keys.secret.md': False, 'plan.md': False, 'notes.md': False}
+
+
+@pytest.mark.asyncio
+async def test_a_restore_lands_after_every_earlier_save_or_not_at_all(history_scope, monkeypatch):
+    from doceditor.document_save import DocumentSaveError
+    from infra import guidance_git
+
+    workspace, thread_id = history_scope
+    user_id = owner(thread_id)
+    path = placed(workspace / 'notes' / 'plan.md', 'Start.\n')
+    await save_document_text(DocumentSave(path=str(path), text='One.\n', thread_id=thread_id), user_id)
+    assert wait_recorded()
+    real, release, started = guidance_git._commit, threading.Event(), threading.Event()
+
+    def held(*args, **kwargs):
+        started.set()
+        assert release.wait(10)
+        return real(*args, **kwargs)
+    monkeypatch.setattr(guidance_git, '_commit', held)
+    await save_document_text(DocumentSave(path=str(path), text='Two.\n', thread_id=thread_id), user_id)
+    assert await asyncio.to_thread(started.wait, 10)
+    restore = asyncio.create_task(save_document_text(
+        DocumentSave(path=str(path), text='One.\n', thread_id=thread_id), user_id, reason='Restored', history_required=True))
+    await asyncio.sleep(0.3)
+    # The restore waits for its own version, which queues behind the save still recording.
+    assert not restore.done()
+    release.set()
+    await restore
+    assert _git(['log', '-2', '--format=%s %B'], cwd=workspace).count('Reason: Restored') == 1
+    assert _git(['show', 'HEAD:notes/plan.md'], cwd=workspace) == 'One.\n'
+    assert _git(['show', 'HEAD~1:notes/plan.md'], cwd=workspace) == 'Two.\n'
+    # A restore history cannot record is refused, and the file is put back.
+    monkeypatch.setattr(guidance_git, '_commit', lambda *_a, **_k: (_ for _ in ()).throw(guidance_git.GitFault('disk full')))
+    with pytest.raises(DocumentSaveError):
+        await save_document_text(DocumentSave(path=str(path), text='Two.\n', thread_id=thread_id), user_id,
+                                 reason='Restored', history_required=True)
+    assert path.read_text() == 'One.\n'
+
+
+def test_a_document_delete_goes_through_the_same_writer(history_scope):
+    from infra.guidance_git import save_guidance
+    from infra.guidance_history_paths import digest
+    from infra.guidance_messages import saver_author
+
+    workspace, thread_id = history_scope
+    path = placed(workspace / 'notes' / 'gone.md', 'Bye.\n')
+    target = history_target(path, workspace)
+    saved = save_guidance({}, workspace=workspace, target=target, author=saver_author(thread_id=thread_id),
+                          deletes={path: digest(b'Bye.\n')})
+    assert saved.outcome == 'written' and not path.exists()
+    # The text it held (never recorded) is kept first, then the delete.
+    assert subjects(workspace, path) == ['document save: notes/gone.md', 'document sweep: notes/gone.md']
 
 
 @pytest.mark.asyncio
@@ -141,33 +233,46 @@ async def test_document_save_skips_the_lesson_check_and_carry_in(history_scope, 
         DocumentSave(path=str(path), text='Agent text.\n', thread_id=thread_id), owner(thread_id), by_agent=True)
     assert path.read_text() == 'Agent text.\n'
     # The version is recorded after the save returns, so the save names none.
-    assert saved['version'] is None and 'guidance_history' not in saved
+    assert saved['version'] is None and 'document_history' not in saved
     # The text it held before (never recorded) is kept first as its own version, then the save.
     assert subjects(workspace, path) == [
-        f'document save: .threads/{thread_id}/reports/plan.md', f'guidance sweep: .threads/{thread_id}/reports/plan.md']
+        f'document save: .threads/{thread_id}/reports/plan.md', f'document sweep: .threads/{thread_id}/reports/plan.md']
     assert asked == []
     author = _git(['log', '-1', '--format=%ae'], cwd=workspace).strip()
     assert author == f'{thread_id}@agents.corsia.local'
 
 
 @pytest.mark.asyncio
-async def test_a_history_fault_never_fails_a_document_save(history_scope, monkeypatch):
+async def test_a_save_history_could_not_record_is_reported_and_retried_by_the_next(history_scope, monkeypatch):
     from infra import guidance_git
 
     workspace, thread_id = history_scope
+    user_id = owner(thread_id)
     path = placed(workspace / 'notes' / 'plan.md')
+    await save_document_text(DocumentSave(path=str(path), text='Start.\n', thread_id=thread_id), user_id)
+    assert wait_recorded()
     before = head(workspace)
     real = guidance_git._commit
     monkeypatch.setattr(guidance_git, '_commit', lambda *_a, **_k: (_ for _ in ()).throw(guidance_git.GitFault('disk full')))
-    saved = await save_document_text(DocumentSave(path=str(path), text='Kept.\n', thread_id=thread_id), owner(thread_id))
+    saved = await save_document_text(DocumentSave(path=str(path), text='Kept.\n', thread_id=thread_id), user_id)
+    # The save never fails on history: its bytes are on disk, and its version is recorded after it answers.
     assert path.read_text() == 'Kept.\n'
-    assert saved['version'] is None and 'guidance_history' not in saved
+    assert saved['version'] is None and 'document_history' not in saved
     assert head(workspace) == before
-    # Once Git works again, the next save keeps the unrecorded text as an outside version first.
     monkeypatch.setattr(guidance_git, '_commit', real)
-    await save_document_text(DocumentSave(path=str(path), text='Next.\n', thread_id=thread_id), owner(thread_id))
-    assert subjects(workspace, path) == ['document save: notes/plan.md', 'guidance sweep: notes/plan.md']
-    assert _git(['show', 'HEAD~1:notes/plan.md'], cwd=workspace) == 'Kept.\n'
+    saved = await save_document_text(DocumentSave(path=str(path), text='Next.\n', thread_id=thread_id), user_id)
+    # The next save of that document says the earlier one was not recorded, and records it with this
+    # one: written straight over it by the same author, the two join into one version under that
+    # author, never an outside edit.
+    assert saved['document_history'] == (
+        "History couldn't record an earlier save of notes/plan.md (disk full); it is retried with this save.")
+    assert wait_recorded()
+    assert _git(['log', '--format=%s', f'{before}..HEAD'], cwd=workspace).splitlines() == ['document save: notes/plan.md']
+    assert _git(['show', 'HEAD:notes/plan.md'], cwd=workspace) == 'Next.\n'
+    assert _git(['rev-parse', 'HEAD~1'], cwd=workspace).strip() == before
+    assert _git(['log', '-1', '--format=%ae'], cwd=workspace).strip() == f'{user_id}@users.corsia.local'
+    saved = await save_document_text(DocumentSave(path=str(path), text='Last.\n', thread_id=thread_id), user_id)
+    assert 'document_history' not in saved  # reported once
 
 
 @pytest.mark.asyncio
@@ -196,7 +301,7 @@ async def test_saves_queued_behind_a_running_record_are_coalesced_in_order(histo
     assert path.read_text() == 'Five.\n' and max(took) < 2
     release.set()
     # 'Two' recorded alone; 'Three' to 'Five' queued behind it and land as one version, the newest text.
-    assert subjects(workspace, path) == ['document save: notes/plan.md'] * 3 + ['guidance sweep: notes/plan.md']
+    assert subjects(workspace, path) == ['document save: notes/plan.md'] * 3 + ['document sweep: notes/plan.md']
     assert _git(['show', 'HEAD:notes/plan.md'], cwd=workspace) == 'Five.\n'
     assert _git(['show', 'HEAD~1:notes/plan.md'], cwd=workspace) == 'Two.\n'
 
@@ -223,7 +328,7 @@ async def test_a_save_held_in_its_owner_report_never_holds_another_documents_rec
     assert await asyncio.to_thread(reporting.wait, 10)
     begun = time.monotonic()
     await save_document_text(DocumentSave(path=str(other), text='Other, edited.\n', thread_id=thread_id), user_id)
-    assert await asyncio.to_thread(wait_recorded, {other}, 10)
+    assert await asyncio.to_thread(wait_recorded, 10)
     recorded_in = time.monotonic() - begun
     try:
         assert not big.done()
@@ -296,8 +401,8 @@ async def live_lane(path: Path, tmp_path: Path):
     async def valid(_text, _actor):
         return None
 
-    async def writer(text, prior_hash, actor=None, reason=None):
-        await asyncio.to_thread(write_live_text, path, text, prior_hash, actor, reason)
+    async def writer(text, prior_hash, operation=None):
+        await asyncio.to_thread(write_live_text, path, text, prior_hash, operation)
 
     return live, DocumentLane(live, validate_actor=valid, write=writer)
 
@@ -319,6 +424,58 @@ async def test_live_lane_writes_are_recorded_by_their_actor(history_scope, tmp_p
     assert wait_recorded()
     assert _git(['log', '-1', '--format=%ae'], cwd=workspace).strip() == f'{thread_id}@agents.corsia.local'
     assert 'Reason: Live reason' in _git(['log', '-1', '--format=%B'], cwd=workspace)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('open_live', [False, True], ids=['closed', 'open'])
+async def test_agent_file_tool_saves_are_recorded_under_the_agents_name(history_scope, tmp_path, monkeypatch, open_live):
+    from doceditor import live_runtime
+    from doceditor.live_runtime import LiveDocuments
+    from tools.filesystem_edit import EditFileTool, MultiEditTool
+    from tools.filesystem_rw import ReadFileTool, WriteFileTool
+
+    workspace, thread_id = history_scope
+    # Agents write only in their own tray (or approved shared folders); registered, the file is a document.
+    path = placed(workspace / '.threads' / thread_id / 'reports' / 'plan.md', 'One.\n')
+    _git(['add', str(path.relative_to(workspace))], cwd=workspace)
+    _git([*_IDENTITY, 'commit', '-qm', 'seed'], cwd=workspace)
+    register(thread_id, path)
+    context = {'_thread_id': thread_id}
+    manager = None
+    lane_writes: list[str] = []
+    if open_live:
+        db = get_db()
+        try:
+            artifact_id = db.execute('SELECT id FROM artifact_identities WHERE path=?', (str(path),)).fetchone()[0]
+            db_path = Path(db.execute('PRAGMA database_list').fetchone()[2])
+        finally:
+            db.close()
+        manager = LiveDocuments(tmp_path / 'live', workspace=workspace, db_path=db_path)
+        monkeypatch.setattr(live_runtime, '_manager', manager)
+        real = live_runtime.write_live_text
+        monkeypatch.setattr(live_runtime, 'write_live_text', lambda *a: lane_writes.append(a[1]) or real(*a))
+        assert await manager.open(artifact_id, path) is not None
+    try:
+        await ReadFileTool(workspace=workspace).execute(str(path), **context)
+        calls = [
+            (WriteFileTool, {'content': 'Two.\n'}),
+            (EditFileTool, {'old_string': 'Two.', 'new_string': 'Three.'}),
+            (MultiEditTool, {'edits': [{'old_string': 'Three.', 'new_string': 'Four.'}]}),
+        ]
+        for tool, args in calls:
+            before = head(workspace)
+            result = await tool(workspace=workspace).execute(path=str(path), **args, **context)
+            assert not result.startswith('Error'), result
+            assert wait_recorded()
+            # Each save is its own version, authored by the agent that made it, never "Unknown editor".
+            assert _git(['log', '--format=%an <%ae>', f'{before}..HEAD'], cwd=workspace).split('\n')[:-1] == [
+                f'History Tester <{thread_id}@agents.corsia.local>'], tool.__name__
+    finally:
+        if manager is not None:
+            await manager.close()
+    assert path.read_text() == 'Four.\n'
+    # An open document's saves went through its live lane, not the closed-file path.
+    assert lane_writes == (['Two.\n', 'Three.\n', 'Four.\n'] if open_live else [])
 
 
 @pytest.mark.asyncio
@@ -373,3 +530,4 @@ async def test_restore_of_an_open_document_goes_through_its_lane(history_scope, 
     assert int(_git(['rev-list', '--count', 'HEAD'], cwd=workspace)) == before + 1
     assert _git(['log', '-1', '--format=%ae'], cwd=workspace).strip() == f'{user_id}@users.corsia.local'
     assert 'Reason: Restored ' in _git(['log', '-1', '--format=%B'], cwd=workspace)
+

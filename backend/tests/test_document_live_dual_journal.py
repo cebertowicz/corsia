@@ -52,7 +52,7 @@ async def test_killed_writer_recovers_intent_before_lane(durable_scope, cut, tmp
     async def valid(text, actor=None):
         pass
 
-    async def writer(text, prior_hash, *_actor_and_reason):
+    async def writer(text, prior_hash, *_operation):
         await asyncio.to_thread(
             durable_writes.write_text, target, text, thread_id=thread,
             project_id="project-alpha", workspace=workspace, notify=False,
@@ -101,7 +101,7 @@ async def worker(workspace, db_path, target, state, thread, cut):
     async def valid(text, actor=None):
         pass
 
-    async def writer(text, prior_hash, *_actor_and_reason):
+    async def writer(text, prior_hash, *_operation):
         await asyncio.to_thread(
             durable_writes.write_text, target, text, thread_id=thread,
             project_id="project-alpha", workspace=workspace, notify=False,

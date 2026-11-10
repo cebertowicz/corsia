@@ -197,7 +197,7 @@ def save_guided_write(
     )
     receipt = results[0] if results else None
     result = (
-        _with_line(receipt, "guidance_history", saved.line)
+        _with_line(receipt, f"{target.kind}_history", saved.line)
         if receipt is not None and saved.line
         else receipt or saved.line or ""
     )

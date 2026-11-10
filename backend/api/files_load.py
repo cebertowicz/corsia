@@ -120,19 +120,17 @@ def read_document(path: str, user_id: str, project_id: str | None, thread_id: st
     finally:
         db.close()
     notification = art or {"integration": "workspace", "type": artifact_type, "external_id": str(p)}
-    from core.document_history_paths import in_thread_folder
-    from infra.guidance_targets import document_candidate, guidance_target
+    from infra.guidance_targets import document_target, guidance_target
 
     # Guidance files and documents are recorded. Whether this file has history is decided by its one
     # owner, api/files.py content, which also asks Git whether history is off for the whole workspace
-    # (and whether it ignores a document outside the thread folders, where registration is the mark),
-    # off the database pool.
+    # (and, for a document, whether the writer's ignore gate keeps it out), off the database pool.
     target = guidance_target(p, config.WORKSPACE)
-    document = target is None and document_candidate(p, config.WORKSPACE)
-    recorded = (target is not None and not target.fault) or document
+    document = document_target(p, config.WORKSPACE) if target is None else None
+    recorded = (target is not None and not target.fault) or document is not None
     return {"text": text, "size": st.st_size, "mtime": st.st_mtime,
             "revision": revision(raw), "writable": writable, "artifact": art,
-            "freshness": freshness, "_recorded": recorded, "_document": p if document and not in_thread_folder(p, config.WORKSPACE) else None,
+            "freshness": freshness, "_recorded": recorded, "_document": (p, document) if document else None,
             "_notification": notification}
 
 

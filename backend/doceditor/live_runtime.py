@@ -231,11 +231,11 @@ class LiveDocuments:
                 self._release_opening(state_path)
                 raise
             policy = SharedLivePolicy(live, owner=self)
-            def replace_file(text, prior_hash, actor, reason):
-                write_live_text(path, text, prior_hash, actor, reason)
+            def replace_file(text, prior_hash, operation):
+                write_live_text(path, text, prior_hash, operation)
                 return file_hash(text.encode("utf-8"))
-            async def writer(text, prior_hash, actor=None, reason=None):
-                live.on_disk = (await asyncio.to_thread(replace_file, text, prior_hash, actor, reason), text)
+            async def writer(text, prior_hash, operation=None):
+                live.on_disk = (await asyncio.to_thread(replace_file, text, prior_hash, operation), text)
             async def validate_actor(text, caller):
                 await asyncio.to_thread(validate_live_write, path, text, caller)
             lane = DocumentLane(live, validate_actor=validate_actor, write=writer,

@@ -274,10 +274,10 @@ def _save(
     """Blocking. Save through the one guidance-history owner, which rechecks the read
     revision under its lock, so a concurrent guidance save is never overwritten."""
     from infra.guidance_git import save_guidance
-    from infra.guidance_targets import GuidanceTarget, guidance_target
+    from infra.guidance_targets import HistoryTarget, guidance_target
     from infra.guidance_messages import saver_author
 
-    target = guidance_target(path) or GuidanceTarget(
+    target = guidance_target(path) or HistoryTarget(
         "unknown", "this attached instruction file is not classified as guidance",
     )
     saved = save_guidance(

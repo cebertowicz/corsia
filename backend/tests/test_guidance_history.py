@@ -254,14 +254,14 @@ async def test_write_file_commits_the_saved_bytes_as_the_saver(history_scope):
 
 def test_save_guidance_delete_requires_the_expected_prior_hash(history_scope):
     from infra.guidance_git import digest, save_guidance
-    from infra.guidance_targets import GuidanceTarget
+    from infra.guidance_targets import HistoryTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "demo.md"
     path.parent.mkdir()
     path.write_text("before\n")
     result = save_guidance(
-        {}, workspace=workspace, target=GuidanceTarget("context, workspace scope"),
+        {}, workspace=workspace, target=HistoryTarget("context, workspace scope"),
         author="Tester <t@agents.corsia.local>", reason="Remove obsolete guidance",
         deletes={path: digest("before\n")}, atomic=True,
     )
@@ -273,14 +273,14 @@ def test_save_guidance_delete_requires_the_expected_prior_hash(history_scope):
 
 def test_save_guidance_delete_refuses_a_changed_destination(history_scope):
     from infra.guidance_git import digest, save_guidance
-    from infra.guidance_targets import GuidanceTarget
+    from infra.guidance_targets import HistoryTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "demo.md"
     path.parent.mkdir()
     path.write_text("newer\n")
     result = save_guidance(
-        {}, workspace=workspace, target=GuidanceTarget("context, workspace scope"),
+        {}, workspace=workspace, target=HistoryTarget("context, workspace scope"),
         author="Tester <t@agents.corsia.local>", reason="Remove obsolete guidance",
         deletes={path: digest("before\n")}, atomic=True,
     )
@@ -292,7 +292,7 @@ def test_save_guidance_delete_refuses_a_changed_destination(history_scope):
 def test_atomic_delete_without_history_writes_nothing(history_scope, monkeypatch):
     from infra import guidance_git
     from infra.guidance_git import digest, save_guidance
-    from infra.guidance_targets import GuidanceTarget
+    from infra.guidance_targets import HistoryTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "demo.md"
@@ -301,7 +301,7 @@ def test_atomic_delete_without_history_writes_nothing(history_scope, monkeypatch
     monkeypatch.setattr(guidance_git, "workspace_repository", lambda *_args, **_kwargs: (None, guidance_git.HistoryOff("off")))
 
     result = save_guidance(
-        {}, workspace=workspace, target=GuidanceTarget("context, workspace scope"),
+        {}, workspace=workspace, target=HistoryTarget("context, workspace scope"),
         author="Tester <t@agents.corsia.local>", deletes={path: digest("keep\n")}, atomic=True,
     )
 
@@ -311,14 +311,14 @@ def test_atomic_delete_without_history_writes_nothing(history_scope, monkeypatch
 
 def test_atomic_delete_with_a_target_fault_says_nothing_changed(history_scope):
     from infra.guidance_git import digest, save_guidance
-    from infra.guidance_targets import GuidanceTarget
+    from infra.guidance_targets import HistoryTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "demo.md"
     path.parent.mkdir()
     path.write_text("keep\n")
     result = save_guidance(
-        {}, workspace=workspace, target=GuidanceTarget("unknown", "classifier fault"),
+        {}, workspace=workspace, target=HistoryTarget("unknown", "classifier fault"),
         author="Tester <t@agents.corsia.local>", deletes={path: digest("keep\n")}, atomic=True,
     )
 
@@ -328,13 +328,13 @@ def test_atomic_delete_with_a_target_fault_says_nothing_changed(history_scope):
 
 def test_binary_safe_history_refuses_an_oversized_file_without_writing(history_scope):
     from infra.guidance_git import save_guidance
-    from infra.guidance_targets import GuidanceTarget
+    from infra.guidance_targets import HistoryTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "large.bin"
     result = save_guidance(
         {path: b"\0" * (1024 * 1024 + 1)}, workspace=workspace,
-        target=GuidanceTarget("context, workspace scope"), author="Tester <t@agents.corsia.local>",
+        target=HistoryTarget("context, workspace scope"), author="Tester <t@agents.corsia.local>",
         binary_safe_history=True,
     )
 
@@ -344,13 +344,13 @@ def test_binary_safe_history_refuses_an_oversized_file_without_writing(history_s
 
 def test_binary_safe_history_refuses_an_oversized_file_before_a_non_atomic_target_fault(history_scope):
     from infra.guidance_git import save_guidance
-    from infra.guidance_targets import GuidanceTarget
+    from infra.guidance_targets import HistoryTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "large.bin"
     result = save_guidance(
         {path: b"\0" * (1024 * 1024 + 1)}, workspace=workspace,
-        target=GuidanceTarget("unknown", "classifier fault"), author="Tester <t@agents.corsia.local>",
+        target=HistoryTarget("unknown", "classifier fault"), author="Tester <t@agents.corsia.local>",
         binary_safe_history=True,
     )
 
@@ -571,7 +571,7 @@ def test_a_commit_fault_retries_once_then_saves_with_the_failure(history_scope, 
 def test_commit_fault_restores_a_deleted_file(history_scope, monkeypatch):
     from infra import guidance_git
     from infra.guidance_git import digest, save_guidance
-    from infra.guidance_targets import GuidanceTarget
+    from infra.guidance_targets import HistoryTarget
 
     workspace, _thread_id = history_scope
     path = workspace / "context" / "demo.md"
@@ -582,7 +582,7 @@ def test_commit_fault_restores_a_deleted_file(history_scope, monkeypatch):
     )
 
     result = save_guidance(
-        {}, workspace=workspace, target=GuidanceTarget("context, workspace scope"),
+        {}, workspace=workspace, target=HistoryTarget("context, workspace scope"),
         author="Tester <t@agents.corsia.local>", deletes={path: digest("restore me\n")}, atomic=True,
     )
 
@@ -603,7 +603,10 @@ def test_a_status_fault_is_visible_never_clean(history_scope, monkeypatch):
 
     monkeypatch.setattr(guidance_git, "_git", failing)
     result = _save(workspace, _history(workspace), "text\n")
-    assert result.outcome == "failed" and "corrupt index" in result.line
+    # The save reads what history holds from HEAD, not from status, so it is recorded; the sweep of
+    # other guidance, which needs status, says it failed.
+    assert result.outcome == "written"
+    assert "Guidance sweep failed: git status failed: corrupt index" in result.line
     assert _history(workspace).read_text() == "text\n"
 
 

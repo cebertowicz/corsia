@@ -1,4 +1,4 @@
-"""Guidance path classification and its stable target value."""
+"""History path classification and its stable target value: guidance first, then documents."""
 
 from __future__ import annotations
 
@@ -12,20 +12,26 @@ DOCUMENT_SCOPE = "document"
 
 
 @dataclass(frozen=True)
-class GuidanceTarget:
+class HistoryTarget:
     """A history save's scope label, or the fault that hid it.
 
     ``document`` marks an ordinary document: recorded by the same writer, but none of the
-    instruction-only work (the lesson check, the carry-in record) follows its save. ``registered``
-    marks a registered thread-folder document, recorded even where the workspace's Git ignores it."""
+    guidance-only work (the lesson check, the carry-in record) follows its save. ``registered``
+    marks a registered thread-folder document, which a line ignoring whole thread trays does not
+    keep out of history (:mod:`infra.history_ignore`)."""
 
     scope: str
     fault: str | None = None
     document: bool = False
     registered: bool = False
 
+    @property
+    def kind(self) -> str:
+        """What its log line, product event and commit subjects call it: ``document`` or ``guidance``."""
+        return "document" if self.document else "guidance"
 
-def guidance_target(path: Path, workspace: Path | None = None) -> GuidanceTarget | None:
+
+def guidance_target(path: Path, workspace: Path | None = None) -> HistoryTarget | None:
     """Return a guidance target, preserving classification faults for the caller."""
     from core.guidance_paths import classify_guidance_path
     from infra.config import WORKSPACE
@@ -36,52 +42,35 @@ def guidance_target(path: Path, workspace: Path | None = None) -> GuidanceTarget
             scope = classify_guidance_path(path, workspace=workspace or Path(WORKSPACE), db=db)
     except Exception as exc:
         logger.warning("guidance classification failed for {}: {}", path, exc)
-        return GuidanceTarget("unknown", f"could not check whether this file is guidance ({exc})")
-    return GuidanceTarget(scope) if scope else None
+        return HistoryTarget("unknown", f"could not check whether this file is guidance ({exc})")
+    return HistoryTarget(scope) if scope else None
 
 
-def history_target(path: Path, workspace: Path | None = None) -> GuidanceTarget | None:
+def history_target(path: Path, workspace: Path | None = None) -> HistoryTarget | None:
     """The target whose saves the workspace history records: guidance first, else a recorded document.
 
     A document whose classification fails is not recorded: its save stays an ordinary write, as it was
-    before documents had history. One the workspace's Git ignores is a target, and the recorder's own
-    ignore check leaves it unrecorded, so a save asks Git that once, after it returns."""
+    before documents had history. One the workspace's Git ignores is a target, and the writer's one
+    ignore gate leaves it unrecorded."""
     target = guidance_target(path, workspace)
     if target is not None:
         return target
-    from core.document_history_paths import in_thread_folder
     from infra.config import WORKSPACE
 
     root = Path(workspace or WORKSPACE)
-    if not document_candidate(path, root):
-        return None
-    return GuidanceTarget(DOCUMENT_SCOPE, document=True, registered=in_thread_folder(path, root))
+    return document_target(path, root)
 
 
-def document_candidate(path: Path, workspace: Path) -> bool:
-    """The database half of the document decision (no Git); a failed check records nothing."""
-    from core.document_history_paths import is_history_document
+def document_target(path: Path, workspace: Path) -> HistoryTarget | None:
+    """The document half of the decision (no Git); a failed check records nothing."""
+    from core.document_history_paths import in_thread_folder, is_history_document
     from infra.database import get_db
 
     try:
         with closing(get_db()) as db:
-            return is_history_document(path, workspace=workspace, db=db)
+            if not is_history_document(path, workspace=workspace, db=db):
+                return None
     except Exception as exc:
         logger.warning("document history classification failed for {}: {}", path, exc)
-        return False
-
-
-def ignored_by_workspace(path: Path, workspace: Path) -> bool:
-    """Whether the workspace's own repository ignores ``path``; a Git fault counts as ignored."""
-    from infra.guidance_git import _git, workspace_repository
-    from infra.guidance_states import GitFault
-
-    try:
-        repo, _why = workspace_repository(workspace)
-        if repo is None:
-            return False
-        relative = path.resolve(strict=False).relative_to(repo).as_posix()
-        return bool(_git(repo, "check-ignore", "--", relative, ok=(0, 1)).strip())
-    except (GitFault, ValueError) as exc:
-        logger.warning("document ignore check failed for {}: {}", path, exc)
-        return True
+        return None
+    return HistoryTarget(DOCUMENT_SCOPE, document=True, registered=in_thread_folder(path, workspace))

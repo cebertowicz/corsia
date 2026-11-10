@@ -289,7 +289,7 @@ async def test_document_open_asks_git_only_off_the_database_pool(skill, monkeypa
 
     _workspace, thread_id, path, user_id = skill
     asked = []
-    monkeypatch.setattr(document_history, 'history_off', lambda workspace: asked.append(workspace) or False)
+    monkeypatch.setattr(document_history, 'repository', lambda workspace: asked.append(workspace) or workspace)
     files_load.read_document(str(path), user_id, None, thread_id)
     assert asked == []
     off_db = []

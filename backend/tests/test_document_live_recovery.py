@@ -48,7 +48,8 @@ async def test_choice_commits_received_closure_and_retires_held(tmp_path, kind, 
     acks = []
     live.acknowledge = acks.append
     insert(live, "during", "LATE ")
-    result = await lane.choose(kind)
+    from doceditor.live_publication_record import WriteActor
+    result = await lane.choose(kind, actor=WriteActor("thread-a", None))
     expected = "LATE " + expected if kind == "corsia" else expected
     assert result.server_saved
     assert live.text == live.path.read_text() == expected
@@ -125,7 +126,7 @@ async def test_refused_rename_and_actual_refused_clear_block_new_choices(tmp_pat
     original = live.store.pending()
     db = None
 
-    async def refused(text, prior_hash, *_actor_and_reason):
+    async def refused(text, prior_hash, *_operation):
         nonlocal db
         db = sqlite3.connect(live.store.path, isolation_level=None)
         db.execute("BEGIN IMMEDIATE")
