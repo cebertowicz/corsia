@@ -212,7 +212,7 @@ test('@flow:version-history-every-file a workspace document shows every History 
 	await expect(page.getByRole('button', { name: 'Restore', exact: true })).toBeEnabled();
 	fs.writeFileSync(file, `${FIRST}Outside edit after opening history.\n`);
 	await page.getByRole('button', { name: 'Restore', exact: true }).click();
-	await expect.soft(page.getByText('Couldn’t restore this version. The document is unchanged.')).toBeVisible({ timeout: 15_000 });
+	await expect.soft(page.getByText('Couldn’t restore this version because the document has newer changes. Check the current document, then try again.')).toBeVisible({ timeout: 15_000 });
 	await expect.soft(page.locator('.cm-content')).toContainText('Outside edit after opening history.');
 	await expect.soft(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
 	// The refusal records nothing, so the reloaded list is unchanged; the next save keeps the outside edit. A

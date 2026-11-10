@@ -165,7 +165,7 @@ describe('document history', () => {
 		vi.mocked(fetchHistory).mockClear();
 		versions = [{ ...versions[0], id: 'outside', author: 'Unknown editor', reason: null }, ...versions];
 		await press();
-		expect(host.textContent).toContain('Couldn’t restore this version. The document is unchanged.');
+		expect(host.textContent).toContain('Couldn’t restore this version because the document has newer changes. Check the current document, then try again.');
 		// The document and the list are still reloading: Retry would send a restore against the old text.
 		expect(buttons('Retry')).toHaveLength(0);
 		reloaded(); await flush();

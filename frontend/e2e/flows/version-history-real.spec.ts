@@ -85,7 +85,7 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	// An edit made outside CORSIA after History opened: the restore is refused, and the document and list reload first.
 	fs.writeFileSync(file, skill('Outside edit after opening history.'));
 	await page.getByRole('button', { name: 'Restore', exact: true }).click();
-	await expect(page.getByText('Couldn’t restore this version. The document is unchanged.')).toBeVisible();
+	await expect(page.getByText('Couldn’t restore this version because the document has newer changes. Check the current document, then try again.')).toBeVisible();
 	await expect(page.locator('.cm-content')).toContainText('Outside edit after opening history.');
 	await expect(page.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
 	if (out) await page.screenshot({ path: path.join(out, `history-changed-since-${width}.png`), animations: 'disabled' });

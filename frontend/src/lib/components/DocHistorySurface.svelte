@@ -31,7 +31,7 @@
 	// Each refusal kind's line and the one action that can help: sending the restore again, reloading the list, or none.
 	const REFUSALS: Record<string, { line: string; action: 'restore' | 'reload' | null }> = {
 		failed: { line: 'Couldn’t restore this version. The document is unchanged.', action: 'restore' },
-		stale: { line: 'Couldn’t restore this version. The document is unchanged.', action: 'restore' },
+		stale: { line: 'Couldn’t restore this version because the document has newer changes. Check the current document, then try again.', action: 'restore' },
 		unsaved_typing: { line: 'Couldn’t restore this version. Your latest typing isn’t saved yet, so nothing was restored.', action: 'restore' },
 		not_loaded: { line: 'Couldn’t restore this version. The document is still loading.', action: 'restore' },
 		unconfirmed: { line: 'Couldn’t confirm the restore. The newest version doesn’t hold this version’s text.', action: 'restore' },

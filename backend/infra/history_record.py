@@ -62,10 +62,9 @@ def record(repo: Path, versions: list[Version], git_dir: Path) -> tuple[list[_Co
             if not version.files:  # every file it saved is one history keeps out
                 landed.append(None)
                 continue
-            # Bytes history already holds were recorded by an earlier try; anything else it replaced
-            # that history lacks came from outside CORSIA and is kept first, under no one's name.
-            outside = {rel: prior for rel, (prior, data) in version.files.items()
-                       if blob_id(prior) != blobs.get(rel) and (data is None or blob_id(data) != blobs.get(rel))}
+            # Bytes it replaced that history lacks came from outside CORSIA and are kept first, under no
+            # one's name, whatever the save writes over them.
+            outside = {rel: prior for rel, (prior, _data) in version.files.items() if blob_id(prior) != blobs.get(rel)}
             if outside:
                 lines += _sweep(repo, outside, version.kind, known)
                 blobs.update({rel: blob_id(prior) for rel, prior in outside.items()})

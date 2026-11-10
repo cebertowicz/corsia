@@ -566,6 +566,45 @@ async def test_an_outside_edit_behind_a_refused_restore_is_kept_by_the_next_save
 
 
 @pytest.mark.asyncio
+async def test_a_save_of_the_recorded_text_over_an_outside_edit_keeps_the_edit_first(history_scope):
+    workspace, thread_id = history_scope
+    user_id = owner(thread_id)
+    path = placed(workspace / 'notes' / 'plan.md')
+    await save_document_text(DocumentSave(path=str(path), text='Recorded.\n', thread_id=thread_id), user_id)
+    before = head(workspace)
+    path.write_text('Outside edit.\n')
+    # Typed back to exactly what history holds: the outside text is still kept as its own version.
+    saved = await save_document_text(DocumentSave(path=str(path), text='Recorded.\n', thread_id=thread_id), user_id)
+    assert path.read_text() == 'Recorded.\n'
+    assert _git(['log', '--format=%s', f'{before}..HEAD'], cwd=workspace).splitlines() == [
+        'document save: notes/plan.md', 'document sweep: notes/plan.md']
+    assert _git(['show', 'HEAD~1:notes/plan.md'], cwd=workspace) == 'Outside edit.\n'
+    assert 'Reason: unrecorded' in _git(['log', '-1', '--format=%B', 'HEAD~1'], cwd=workspace)
+    assert saved['version'] == head(workspace) and _git(['show', 'HEAD:notes/plan.md'], cwd=workspace) == 'Recorded.\n'
+
+
+@pytest.mark.asyncio
+async def test_restoring_the_newest_version_over_an_outside_edit_keeps_the_edit(history_scope, monkeypatch):
+    from api import files
+
+    workspace, thread_id = history_scope
+    user_id = owner(thread_id)
+    monkeypatch.setattr(files, 'authenticate', lambda _token: {'id': user_id})
+    path = placed(workspace / 'notes' / 'plan.md')
+    await save_document_text(DocumentSave(path=str(path), text='Newest version.\n', thread_id=thread_id), user_id)
+    newest = head(workspace)
+    path.write_text('Outside edit.\n')
+    result = await files.restore_version('test', files.RestoreBody(
+        path=str(path), version=newest, base_sha256=sha('Outside edit.\n'), thread_id=thread_id))
+    assert result['sha256'] == sha('Newest version.\n') and path.read_text() == 'Newest version.\n'
+    # The restore writes history's own newest text, and the outside text it replaced stays recoverable.
+    assert _git(['show', 'HEAD~1:notes/plan.md'], cwd=workspace) == 'Outside edit.\n'
+    assert 'Reason: unrecorded' in _git(['log', '-1', '--format=%B', 'HEAD~1'], cwd=workspace)
+    assert 'Reason: Restored ' in _git(['log', '-1', '--format=%B'], cwd=workspace)
+    assert _git(['show', 'HEAD:notes/plan.md'], cwd=workspace) == 'Newest version.\n'
+
+
+@pytest.mark.asyncio
 async def test_restore_of_an_open_document_goes_through_its_lane(history_scope, tmp_path, monkeypatch):
     from api import files
     from doceditor import live_tools
