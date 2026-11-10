@@ -4,7 +4,6 @@
 	import './DocViewer.css';
 	import { docCanvasBounds } from '$lib/actions/docCanvasBounds';
 	import { isMobile, prefersReducedMotion } from '$lib/stores/viewport';
-	import { emailDraftContext } from '$lib/emailDraft';
 	import { onDestroy, untrack } from 'svelte';
 	import { ensureEditorArtifactId, releaseDocEditor } from '$lib/stores/activeDocEditor';
 	import { docComments, commentLoads, remapComments, markThreadViewed, reloadPlacements, hasUnread, arrivedDocComments } from '$lib/stores/docComments';
@@ -119,11 +118,12 @@
 	});
 	let docRoot = $state<HTMLElement>();
 	let editorSurface = $state<ReturnType<typeof DocViewerEditorSurface>>();
-	// The email draft's send is over and its send bar holds no answer; the review bar then answers a send request like any other.
-	let emailReviewReleased = $state(false);
+	let commentSurface = $state<ReturnType<typeof DocCommentSurface>>();
 
 	const commentUI = createCommentSurfaceState(() => focusDocumentEditor(docRoot), () => targetKey, () => marginFits(docRoot, isPaneDrawer()));
 	const reviewBarState = createReviewBarState();
+	// Below the margin width a card opened from the text is a popover over it: the caret leaving or a key typed in the text closes it, so it never covers what is being written.
+	const closeTextCard = () => { if (commentSurface?.cardMode() === 'popover' && commentUI.state?.kind === 'thread' && commentUI.state.fromText) commentUI.close(); };
 	const shownFocus = $derived(commentUI.hovered ?? focusedComment);
 	openColumnOnLoad({ artifactId: () => loadedArtifactId, ready: () => docState === 'ready' && !!loadedArtifactId && $commentLoads[loadedArtifactId]?.state === 'ready', root: () => docRoot, paneDrawer: isPaneDrawer, hasComments: () => listedComments.length > 0, shown: () => !!commentUI.state, open: commentUI.openOnLoad });
 	const highlights = $derived(canvasCommentHighlights(listedComments, editText, shownFocus, focusMarker, suggestionBusyId));
@@ -273,7 +273,7 @@
 <div class="doc" use:docCanvasBounds bind:this={docRoot} in:fade={{ duration: $prefersReducedMotion ? 0 : 160, easing: cubicOut }}>
 	<DocViewerStatus
 		title={target?.name ?? 'Document'}
-		emailDraft={docState === 'ready' && !!emailDraftContext(editText)}
+		emailDraft={reviewBarState.emailDraft}
 		commentsOpen={commentUI.state?.kind === 'list'}
 		commentsLoading={docState === 'loading' || (loadedArtifactId ? $commentLoads[loadedArtifactId]?.state === 'loading' : false)}
 		saveStatus={history.restoring ? 'saving' : save.status}
@@ -319,8 +319,7 @@
 	<DocCanvasActivity bind:this={activity} root={docRoot} artifactId={loadedArtifactId} threadId={target?.threadId ?? null} onJump={(span) => scroll.value = { ...span, origin: 'navigation' }} />
 	<DocViewerEditorSurface
 		bind:this={editorSurface}
-		bind:reviewReleased={emailReviewReleased}
-		reviewAnswersShown={reviewBarState.answersOpen}
+		reviewBar={reviewBarState}
 		{docState}
 		documentName={target?.name ?? 'this document'}
 		onRetry={() => reloadNonce += 1}
@@ -333,7 +332,9 @@
 		onSave={flushNow}
 		onSelect={draftController.select}
 		onAnchorFocus={openCards.comment}
-		onCaretAway={() => void commentUI.release()}
+		onCaretAway={() => { if (!commentUI.release()) closeTextCard(); }}
+		onTyping={closeTextCard}
+		cardMode={commentSurface?.cardMode()}
 		onSuggestionHover={commentUI.hover}
 		onEdit={onDocEdit}
 		onLayout={(mapPos) => activity?.editorChanged(mapPos)}
@@ -346,11 +347,11 @@
 		saveError={save.error}
 		pendingSel={draftController.pending}
 		commentSheetOpen={commentUI.sheetUp}
-		commentsAsSheet={$isMobile}
 		onStartComment={draftController.start}
 	/>
 	{#if history.open && history.available && target}<DocHistorySurface {target} readOnly={serverReadOnly} applyRestore={history.restore} onRestored={async () => { (await onPrepareCleanReload())?.(); }} bind:restoring={() => history.restoring, history.setRestoring} narrow={isPaneDrawer()} within={docRoot?.closest<HTMLElement>('.leaf-body') ?? docRoot} {covered} onClose={history.close} />{/if}
 	<DocCommentSurface
+		bind:this={commentSurface}
 		reviewBar={reviewControls}
 		reviewVisible={commentUI.sheetUp}
 		state={commentUI.state}
@@ -394,6 +395,6 @@
 	/>
 </div>
 {#snippet reviewControls(inSheet: boolean)}
-	<ReviewBar artifactId={loadedArtifactId} bar={reviewBarState} emailEnded={emailReviewReleased} draftOpen={composerHasText} suppressed={commentUI.state !== null && commentUI.state !== undefined && !inSheet} {inSheet} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
+	<ReviewBar artifactId={loadedArtifactId} bar={reviewBarState} emailEnded={reviewBarState.emailEnded} draftOpen={composerHasText} suppressed={commentUI.state !== null && commentUI.state !== undefined && !inSheet} {inSheet} pendingSuggestions={readonly || confirming ? 0 : openSuggestionCount(listedComments)} onAcceptAll={async () => { suggestionBusyId = ''; try { await acceptAllOpen(target, loadedArtifactId ?? '', { onText: (text) => { if (!liveSession) editText = text; }, onDocumentChanged: reload }); } finally { suggestionBusyId = null; } }} onAnswered={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)} />
 {/snippet}
 <!-- Styles are in DocViewer.css. -->

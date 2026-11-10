@@ -35,6 +35,8 @@ export function createReviewBarState() {
 	let receipt = $state<ReviewReceipt | null>(null);
 	/** An email draft's send is over (Sent or Not sent): its send request, if one is open, is answered here like any other. */
 	let emailEnded = $state(false);
+	/** The document is an email draft: the canvas toolbar words itself for one. */
+	let emailDraft = $state(false);
 	/** The last read failed and none has succeeded since: the bar does not know the artifact's requests. */
 	let readFailed = $state(false);
 	let retrying = $state(false);
@@ -123,6 +125,7 @@ export function createReviewBarState() {
 		get note() { return note; }, set note(value: string) { note = value; },
 		get noteFor() { return noteFor; }, set noteFor(value: typeof noteFor) { noteFor = value; },
 		get emailEnded() { return emailEnded; }, set emailEnded(value: boolean) { emailEnded = value; },
+		get emailDraft() { return emailDraft; }, set emailDraft(value: boolean) { emailDraft = value; },
 		get accepting() { return accepting; }, set accepting(value: boolean) { accepting = value; },
 		get failure() { return failure; }, set failure(value: string) { failure = value; },
 		get visible() { return visible(); },

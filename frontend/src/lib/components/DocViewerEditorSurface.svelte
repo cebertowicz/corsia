@@ -9,6 +9,7 @@
 	import { openDocumentLink } from '$lib/linkTargetResolver';
 	import { menuPop } from '$lib/popoverMotion';
 	import type { SelectionLabel } from '$lib/stores/commentDraft';
+	import type { CardMode } from '$lib/docCommentSurfaceState.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import MarkdownEditor from './MarkdownEditor.svelte';
 	import EmailConversation from './EmailConversation.svelte';
@@ -18,6 +19,7 @@
 	import { addressesOnAnsweredEmail, badEntriesIn, emailDraftContext, newerEmails, newerEmailsLine, notFullAddressLine, repliedToId, type EmailAttachment, type EmailDraftContext } from '$lib/emailDraft';
 	import type { EmailHeaderOptions } from '$lib/cm/email-header';
 	import { activeThreadId } from '$lib/stores/activeThreadId';
+	import type { ReviewBarState } from '$lib/reviewBarState.svelte';
 
 	type DocState = 'loading' | 'ready' | 'error';
 	type PendingSelection = { from: number; to: number; text: string; top: number; left: number; anchor?: () => DOMRect | null; above?: boolean; label?: SelectionLabel; inWidget?: boolean };
@@ -47,13 +49,13 @@
 		saveError,
 		pendingSel,
 		commentSheetOpen = false,
-		commentsAsSheet = false,
+		cardMode,
+		onTyping,
 		onStartComment,
 		tabInstanceId = null,
 		artifactId = null,
 		onDocumentPlace,
-		reviewReleased = $bindable(false),
-		reviewAnswersShown = false,
+		reviewBar,
 	}: {
 		docState: DocState;
 		documentName?: string;
@@ -80,16 +82,15 @@
 		pendingSel: PendingSelection | null;
 		/** Routed from createCommentSheet; its closing scrim remains modal until the outro ends. */
 		commentSheetOpen?: boolean;
-		/** Cards open as the phone sheet (the pane-drawer width): a caret in a suggestion is editing and opens none. */
-		commentsAsSheet?: boolean;
+		/** How a card opened from the text shows now (DocCommentSurface): over the text, as a popover or the sheet, only a click opens one. */
+		cardMode?: CardMode;
+		onTyping?: () => void;
 		onStartComment: () => void;
 		tabInstanceId?: string | null;
 		artifactId?: string | null;
 		onDocumentPlace?: (instanceId: string, place: { from: number; top: number; scrollTop: number }) => void;
-		/** Out: the email draft's send is over and its send bar holds no answer (none on its way, none to retry); the review bar answers a send request then. */
-		reviewReleased?: boolean;
-		/** In: the canvas's review bar is showing the draft's open request with its answers (the send bar's unanswered sentence points at it only then). */
-		reviewAnswersShown?: boolean;
+		/** The canvas's review bar state. Out: `emailEnded` once the draft's send is over and its send bar holds no answer (none on its way, none to retry), so the review bar answers a send request then, and `emailDraft`. In: `answersOpen`, the bar showing the draft's open request with its answers (the send bar's unanswered sentence points at it only then). */
+		reviewBar: ReviewBarState;
 	} = $props();
 
 	let sendEnded = $state(false);
@@ -104,6 +105,7 @@
 	// (prototype: only the list changes). The prototype's files live in the folder `corsia:emailDraftFiles` names.
 	let removedFiles = $state<Set<string>>(new Set());
 	// A sent or not-to-send email, or a draft the tab can't edit, is read-only: no typing, no Cc control, no chip remove marks.
+	$effect(() => { reviewBar.emailDraft = !!email; return () => { reviewBar.emailDraft = false; }; });
 	const emailLocked = $derived(!!email && (readOnly || email.readOnly === true || sendEnded));
 	const attachments = $derived<EmailAttachment[]>((email?.attachments ?? []).filter((item) => !removedFiles.has(item.name)).map((item) => ({ ...item, path: prototypeFilePath(item.path) })));
 	function prototypeFilePath(name: string): string {
@@ -145,7 +147,7 @@
 
 {#snippet editorBlock()}
 	<div class="ed-wrap">
-		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {commentsAsSheet} {onSuggestionHover} {onEdit} {onLayout} {onCaretAway} readOnly={readOnly || emailLocked} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} {emailHeader} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
+		<MarkdownEditor bind:this={editor} bind:value liveText={liveText} {typingAllowed} {previews} {highlights} {presence} {pendingComment} {scrollTo} {onSave} {onSelect} {onAnchorFocus} {onCaretAway} {cardMode} {onTyping} {onSuggestionHover} {onEdit} {onLayout} readOnly={readOnly || emailLocked} {imageBase} {onOpenImage} {tabInstanceId} {onDocumentPlace} {emailHeader} onOpenLink={imageBase ? (href) => void openDocumentLink(href, imageBase.path) : undefined} />
 		{#if saveError}
 			<div class="save-error" role="alert">{saveError}</div>
 		{/if}
@@ -153,7 +155,7 @@
 {/snippet}
 
 <div class="doc-main" class:email-mode={email} bind:this={column}>
-	{#if email && docState === 'ready'}<EmailSendBar readOnly={readOnly || !!email.readOnly} connected={typingAllowed && !email.offline} blocker={attachments.find((item) => item.unavailable)?.name ?? null} sendEnds={email.sendEnds} reviewArtifactId={email.review ? artifactId : null} bind:ended={sendEnded} bind:answersFree={reviewReleased} answersShown={reviewAnswersShown} />{/if}
+	{#if email && docState === 'ready'}<EmailSendBar readOnly={readOnly || !!email.readOnly} connected={typingAllowed && !email.offline} blocker={attachments.find((item) => item.unavailable)?.name ?? null} sendEnds={email.sendEnds} reviewArtifactId={email.review ? artifactId : null} bind:ended={sendEnded} bind:answersFree={reviewBar.emailEnded} answersShown={reviewBar.answersOpen} />{/if}
 	{#if docState === 'loading'}
 		<div class="loadbar"><span></span></div>
 		<div class="md-skel">{#each Array(6) as _, i (i)}<span class="ms-line" style="width:{[90, 70, 80, 55, 75, 45][i]}%"></span>{/each}</div>
