@@ -12,6 +12,7 @@ from infra.auth import owns_thread
 from infra.database import get_db
 from infra.db_async import run_off_db
 from infra.document_history import list_versions, repository, restore_reason, version_bytes, version_text
+from infra.document_recorder import wait_recorded
 from infra.guidance_git import GitFault
 
 # Each restore refusal's status and detail; the client words its line from ``kind``. Every refusal that
@@ -103,7 +104,7 @@ async def restore(path: str, version: str, base_sha256: str, user_id: str, proje
 
     if (entry := find_live(resolved)) is not None:
         # An open document changes only through its live lane, which records the version.
-        return await _restore_live(entry, text, reason, base_sha256, user_id, project_id, thread_id)
+        return await _restore_live(entry, resolved, text, reason, base_sha256, user_id, project_id, thread_id)
     try:
         saved = await save_document_text(
             DocumentSave(path=path, text=text, project_id=project_id, thread_id=thread_id), user_id,
@@ -120,10 +121,11 @@ async def restore(path: str, version: str, base_sha256: str, user_id: str, proje
     return {"version": saved.get("version"), "sha256": saved["revision"]}
 
 
-async def _restore_live(entry, text: str, reason: str, base_sha256: str, user_id: str,
+async def _restore_live(entry, resolved: Path, text: str, reason: str, base_sha256: str, user_id: str,
                         project_id: str | None, thread_id: str | None):
     """Replace an open document's text with the version's, as the person, only while it still holds the
-    text they restored from. The lane writes and records it; its version id is not known here."""
+    text they restored from. The lane writes it and queues its version, which is recorded before this
+    answers, so the history the person reloads holds the restore; its version id is not known here."""
     import hashlib
 
     from doceditor.document_scope import UI_THREAD
@@ -141,4 +143,5 @@ async def _restore_live(entry, text: str, reason: str, base_sha256: str, user_id
         return _refused("failed")
     if not result.server_saved:
         return _refused("failed")
+    await run_off_db(wait_recorded, {resolved})
     return {"version": None, "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}

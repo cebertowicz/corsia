@@ -369,7 +369,7 @@ async def test_restore_of_an_open_document_goes_through_its_lane(history_scope, 
         live.close()
     assert result == {'version': None, 'sha256': sha('First version.\n')}
     assert path.read_text() == 'First version.\n'
-    assert wait_recorded()
+    # The answer comes only once the version is recorded, so a history reloaded on it shows the restore.
     assert int(_git(['rev-list', '--count', 'HEAD'], cwd=workspace)) == before + 1
     assert _git(['log', '-1', '--format=%ae'], cwd=workspace).strip() == f'{user_id}@users.corsia.local'
     assert 'Reason: Restored ' in _git(['log', '-1', '--format=%B'], cwd=workspace)

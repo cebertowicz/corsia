@@ -56,13 +56,14 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	await page.getByRole('button', { name: 'Retry', exact: true }).click();
 	const drawer = page.locator('[data-doc-history-drawer]');
 	const rows = drawer.locator('.vrow');
-	await expect(rows).toHaveCount(3);
+	// The first version, then the two saves, which one author made minutes apart, shown as one version.
+	await expect(rows).toHaveCount(2);
 	if (out) await page.screenshot({ path: path.join(out, `history-list-${width}.png`), animations: 'disabled' });
-	await rows.nth(1).click();
-	await expect(page.getByText('Second version.', { exact: false }).first()).toBeVisible();
+	await rows.first().click();
+	await expect(page.locator('.diff-line', { hasText: 'Third version.' }).first()).toBeVisible();
 	if (out) await page.screenshot({ path: path.join(out, `history-version-${width}.png`), animations: 'disabled' });
 	const older = page.getByRole('button', { name: 'Older', exact: true });
-	if (await older.isVisible()) await older.click(); else await rows.nth(2).click();
+	if (await older.isVisible()) await older.click(); else await rows.nth(1).click();
 	await expect(page.getByText('First version.', { exact: false }).first()).toBeVisible();
 	fs.writeFileSync(file, skill('Agent edit after opening history.'));
 	await page.getByRole('button', { name: 'Restore', exact: true }).click();
@@ -94,9 +95,10 @@ test('@flow:version-history-real steps through Git versions and restores one', a
 	await expect.poll(count, { timeout: 15_000 }).toBe(before + 2);
 	release();
 	await expect(page.getByRole('button', { name: 'Restoring…', exact: true })).toHaveCount(0, { timeout: 30_000 });
-	await expect(rows).toHaveCount(before + 2);
+	// Typing just after a restore may show within the restore's version, so look for it in either of the newest two.
 	await expect(rows.first()).toContainText('Current');
-	await expect(rows.nth(1)).toContainText('Restored');
+	await expect(drawer.locator('.vrow', { hasText: 'Restored' })).toHaveCount(1);
+	await expect(rows.nth(1)).toBeVisible();
 	if (out) await page.screenshot({ path: path.join(out, `history-restored-${width}.png`), animations: 'disabled' });
 	// Both writes are versions: the restore, then the typing that landed after it.
 	const log = execFileSync('git', ['-C', root, 'log', '--format=%B%x00', '-n', '2', '--', path.relative(root, file)], { encoding: 'utf8' }).split('\0');
