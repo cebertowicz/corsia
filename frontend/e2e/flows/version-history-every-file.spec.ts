@@ -123,7 +123,7 @@ function oldestCommit(root: string, file: string): string {
 	return execFileSync('git', ['-C', root, 'log', '--reverse', '--format=%H', '--', path.relative(root, file)], { encoding: 'utf8' }).split('\n')[0];
 }
 
-test('@flow:version-history-every-file a chat\'s document the person edits shows every History state, groups saves and restores', async ({ page, request, browser }, info) => {
+test('@flow:version-history-every-file a workspace document shows every History state, groups saves and restores', async ({ page, request }, info) => {
 	const phone = info.project.name === 'chromium-mobile';
 	const width = phone ? 393 : 1440;
 	await page.setViewportSize({ width, height: phone ? 852 : 900 });
@@ -131,12 +131,9 @@ test('@flow:version-history-every-file a chat\'s document the person edits shows
 	const title = `history-doc-${width}-${Date.now()}`;
 	const threadId = await createSession(request, title);
 	const root = await workspaceRoot(request);
-	// In the chat's own folder, so the chat owns it and its agent edits it directly: an agent may not write
-	// the scope's top-level folders, and edits a shared document it does not own only by suggestion.
-	const file = path.join(root, '.threads', threadId, 'reports', `plan-${width}-${Date.now()}.md`);
+	const file = path.join(root, 'docs', `plan-${width}-${Date.now()}.md`);
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	fs.writeFileSync(file, FIRST);
-	// Registered, as opening it in the chat's canvas does, so the ignored chat folder does not keep it out.
 	const artifactId = await register(request, file, threadId);
 	// An ordinary document is recorded from its first save: the text it had, then each save. Saves that
 	// queue together are recorded as one, so each is let land before the next.
@@ -144,10 +141,9 @@ test('@flow:version-history-every-file a chat\'s document the person edits shows
 		await save(request, file, text, threadId);
 		await expect.poll(() => commits(root, file), { timeout: 15_000 }).toBe(index + 2);
 	}
-	// The person restores the first text (a save with a reason), then the chat's agent edits it.
+	// The person restores the first text: a save with a reason, so it starts a version of its own.
 	await restoreThroughApi(request, file, oldestCommit(root, file), threadId);
-	await agentEdit(browser, request, info, title, threadId, file, 'Delete this line.', 'Agent line.');
-	await expect.poll(() => commits(root, file)).toBe(6);
+	await expect.poll(() => commits(root, file)).toBe(5);
 	// History is read only once it is opened, so the first read is the one that fails.
 	await page.route('**/api/files/history?*', async (route) => route.abort('internetdisconnected'), { times: 1 });
 	const drawer = await openHistory(page, info, title, artifactId, file, threadId);
@@ -155,39 +151,37 @@ test('@flow:version-history-every-file a chat\'s document the person edits shows
 	await shot(page, 'history-doc-load-failure');
 	await page.getByRole('button', { name: 'Retry', exact: true }).click();
 	const rows = drawer.locator('.vrow');
-	// Newest first: the agent's edit under the chat's name; the restore, whose reason keeps it out of the
-	// person's group; the person's three saves as one version; the text the file had.
-	await expect(rows).toHaveCount(4);
-	await expect(rows.first()).toContainText(title);
+	// Newest first: the restore, whose reason keeps it out of the person's group; the person's three saves
+	// as one version; the text the file had. (A group broken by another author: the chat-file test.)
+	await expect(rows).toHaveCount(3);
 	await expect(rows.first()).toContainText('Current');
-	await expect(rows.first()).not.toContainText('Unknown editor');
-	await expect(rows.nth(1)).toContainText('Restored');
-	await expect(rows.nth(2)).toContainText('e2e');
-	await expect(rows.nth(2)).toContainText('No reason given');
-	await expect(rows.nth(3)).toContainText('Unknown editor');
+	await expect(rows.first()).toContainText('Restored');
+	await expect(rows.nth(1)).toContainText('e2e');
+	await expect(rows.nth(1)).toContainText('No reason given');
+	await expect(rows.nth(2)).toContainText('Unknown editor');
 	await shot(page, 'history-doc-list');
 	// A phone shows one version at a time, so it steps with Older; a wide screen picks the row.
 	const older = page.getByRole('button', { name: 'Older', exact: true });
+	const newer = page.getByRole('button', { name: 'Newer', exact: true });
 	const goTo = async (from: number, to: number) => {
-		if (phone) for (let at = from; at < to; at++) await older.click();
-		else await rows.nth(to).click();
+		if (!phone) await rows.nth(to).click();
+		else for (let at = from; at !== to; at += to > from ? 1 : -1) await (to > from ? older : newer).click();
 	};
 	await rows.first().click();
-	await expect(page.locator('.diff-line.del')).toHaveCount(1);
-	await expect(page.locator('.diff-line.del')).toContainText('Delete this line.');
-	await expect(page.locator('.diff-line.add')).toContainText('Agent line.');
+	await expect(page.locator('.diff-line.del')).toHaveCount(2);
+	await expect(page.locator('.diff-line.add')).toContainText('Delete this line.');
 	await shot(page, 'history-doc-version');
-	// The group's one version shows every change its three saves made, the deleted text in red.
 	await goTo(0, 2);
+	await expect(page.locator('.diff-line.del')).toHaveCount(0);
+	await expect(page.locator('.diff-line.add', { hasText: 'Delete this line.' })).toBeVisible();
+	await shot(page, 'history-doc-older-version');
+	// The group's one version shows every change its three saves made, the deleted text in red.
+	await goTo(2, 1);
 	await expect(page.locator('.diff-line.del')).toHaveCount(1);
 	await expect(page.locator('.diff-line.del')).toContainText('Delete this line.');
 	await expect(page.locator('.diff-line.add', { hasText: 'Added line.' })).toBeVisible();
 	await expect(page.locator('.diff-line.add', { hasText: 'Another line.' })).toBeVisible();
 	await shot(page, 'history-doc-deleted-text');
-	await goTo(2, 3);
-	await expect(page.locator('.diff-line.del')).toHaveCount(0);
-	await expect(page.locator('.diff-line.add', { hasText: 'Delete this line.' })).toBeVisible();
-	await shot(page, 'history-doc-older-version');
 	// Hold the restore's answer after the server has applied it: Restore reads "Restoring…", the save
 	// line "Saving…", and the list waits for the answer.
 	let release!: () => void;
@@ -199,22 +193,22 @@ test('@flow:version-history-every-file a chat\'s document the person edits shows
 	}, { times: 1 });
 	await page.getByRole('button', { name: 'Restore', exact: true }).click();
 	await expect(page.getByRole('button', { name: 'Restoring…', exact: true })).toBeDisabled();
-	await expect.poll(() => commits(root, file)).toBe(7);
+	await expect.poll(() => commits(root, file)).toBe(6);
 	await expect.soft(page.getByText('Saving…', { exact: true })).toBeVisible();
 	// A phone keeps the version open while it restores; a wide screen's list keeps its rows.
-	if (!phone) await expect(rows).toHaveCount(4);
+	if (!phone) await expect(rows).toHaveCount(3);
 	await shot(page, 'history-doc-restoring');
 	release();
 	await expect(page.getByRole('button', { name: 'Restoring…', exact: true })).toHaveCount(0, { timeout: 30_000 });
-	await expect(rows).toHaveCount(5);
+	await expect(rows).toHaveCount(4);
 	await expect(rows.first()).toContainText('Current');
 	await expect(rows.first()).toContainText('Restored');
-	await expect(page.locator('.cm-content')).toContainText('Delete this line.');
-	expect(fs.readFileSync(file, 'utf8')).toBe(FIRST);
+	await expect(page.locator('.cm-content')).toContainText('Another line.');
+	expect(fs.readFileSync(file, 'utf8')).toBe(THIRD);
 	await shot(page, 'history-doc-restored');
 	// An edit made outside CORSIA after a version was opened: the restore is refused and the document is unchanged.
 	const shown = await rows.count();
-	if (phone && await older.isVisible()) await older.click(); else await rows.nth(2).click();
+	if (phone && await older.isVisible()) await older.click(); else await rows.nth(1).click();
 	await expect(page.getByRole('button', { name: 'Restore', exact: true })).toBeEnabled();
 	fs.writeFileSync(file, `${FIRST}Outside edit after opening history.\n`);
 	await page.getByRole('button', { name: 'Restore', exact: true }).click();
@@ -231,7 +225,7 @@ test('@flow:version-history-every-file a chat\'s document the person edits shows
 	expect(fs.readFileSync(file, 'utf8')).toContain('Outside edit after opening history.');
 });
 
-test('@flow:version-history-every-file a registered chat file has History from the tray; working/ and unregistered files show none', async ({ page, request }, info) => {
+test('@flow:version-history-every-file a registered chat file has History from the tray; working/ and unregistered files show none', async ({ page, request, browser }, info) => {
 	const phone = info.project.name === 'chromium-mobile';
 	const width = phone ? 393 : 1440;
 	await page.setViewportSize({ width, height: phone ? 852 : 900 });
@@ -250,6 +244,9 @@ test('@flow:version-history-every-file a registered chat file has History from t
 		await save(request, kept, text, threadId);
 		await expect.poll(() => commits(root, kept), { timeout: 15_000 }).toBe(index + 2);
 	}
+	// The chat's agent edits its own file with the file tools: a new author, so a version of its own.
+	await agentEdit(browser, request, info, title, threadId, kept, 'Added line.', 'Agent line.');
+	await expect.poll(() => commits(root, kept)).toBe(4);
 	await save(request, loose, EDITS[0], null);
 	// A chat's working/ file stays out of history even when a save with the chat registers it.
 	const workingSave = await request.put(`/api/files/content${authQuery}`, { data: { path: working, text: EDITS[0], thread_id: threadId } });
@@ -267,17 +264,23 @@ test('@flow:version-history-every-file a registered chat file has History from t
 	await expect(trayRow).toBeVisible();
 	await shot(page, 'history-tray');
 	await trayRow.click();
-	await expect(page.locator('.cm-content')).toContainText('Added line.');
+	await expect(page.locator('.cm-content')).toContainText('Agent line.');
 	const history = page.getByRole('button', { name: 'History', exact: true });
 	await expect(history).toBeVisible();
 	await shot(page, 'history-tray-file-open');
 	await history.click();
 	const rows = page.locator('[data-doc-history-drawer] .vrow');
-	await expect(rows).toHaveCount(2);
+	// Newest first: the agent's edit under the chat's name; the person's two saves as one version; the text
+	// the file had.
+	await expect(rows).toHaveCount(3);
 	await expect(rows.first()).toContainText('Current');
+	await expect(rows.first()).toContainText(title);
+	await expect(rows.first()).not.toContainText('Unknown editor');
+	await expect(rows.nth(1)).toContainText('e2e');
 	await shot(page, 'history-thread-file-list');
 	await rows.first().click();
-	await expect(page.locator('.diff-line.del')).toContainText('Delete this line.');
+	await expect(page.locator('.diff-line.del')).toContainText('Added line.');
+	await expect(page.locator('.diff-line.add')).toContainText('Agent line.');
 	await shot(page, 'history-thread-file-version');
 	// No version recorded, no control: the header offers no History and no empty panel. Opening the
 	// unregistered file in the chat registers it, but it has nothing to list until it is saved.
