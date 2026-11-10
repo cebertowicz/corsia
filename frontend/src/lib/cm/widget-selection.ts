@@ -39,7 +39,8 @@ export function selectionIn(view: EditorView, el: HTMLElement, range: Range): Wi
 	const origin = range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
 	const collapsedCell = range.collapsed ? origin?.closest<HTMLTableCellElement>('td, th') ?? null : null;
 	const covered = tableCells(src).map((span) => ({ span, cell: cellElement(el, span) }))
-		.filter((hit): hit is { span: CellSpan; cell: HTMLTableCellElement } => !!hit.cell && (range.intersectsNode(hit.cell) || hit.cell === collapsedCell))
+		// A padded cell has no source for a comment to anchor on (`tableCells`).
+		.filter((hit): hit is { span: CellSpan; cell: HTMLTableCellElement } => !hit.span.padded && !!hit.cell && (range.intersectsNode(hit.cell) || hit.cell === collapsedCell))
 		.map(({ span, cell }) => {
 			// The selection's share of this cell: it starts and ends inside the cell, or at the cell's own edges. A collapsed
 		// range at an empty cell's edge does not intersect that element in Chromium, so `collapsedCell` above includes it.

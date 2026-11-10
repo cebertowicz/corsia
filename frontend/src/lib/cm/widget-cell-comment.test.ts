@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { commentRanges } from './comment-marks';
 import { pendingCommentMark } from './pending-comment-mark';
 import { widgetComments, type WidgetSelection } from './widget-comments';
-import { cellRowsAt, emptyCellSelection, openCellPlace } from './widget-cell-comment';
+import { cellTextRows, emptyCellSelection, openCellText } from './widget-cell-comment';
+import { selectionOffer } from './selection-offer';
 import { type Rig } from './typed-reveal-rig';
 import { build, cellEditor, cellEl, cleanup, clicked, deleted, typed } from './widget-cell-rig';
 
@@ -68,33 +69,57 @@ describe('the Comment offer on an empty cell being edited', () => {
 const logFrom = rowFrom + 2, logTo = logFrom + 3;
 
 describe('text selected in an open cell', () => {
-	it('places the offer off the selected text in the cell editor, as a drawn cell\'s selection is', () => {
+	it('is measured in the cell\'s own editor, from where the cell starts in the document', () => {
 		const r = openCell(0);
-		// Two drawn lines: the offer sits above the first and from where the last ends.
-		vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(function (this: Range) {
-			return (this.toString() === 'Log' ? [new DOMRect(300, 120, 20, 16), new DOMRect(290, 138, 12, 16)] : []) as unknown as DOMRectList;
-		});
-		expect(openCellPlace(r.view, logFrom, logTo), 'measured off the selected words').toEqual({ top: 120, left: 302 });
+		const open = openCellText(r.view, logFrom, logTo);
+		expect(open?.inner.dom.closest('.cm-md-cell-editor'), 'the open cell\'s editor').not.toBeNull();
+		expect(open!.inner.state.sliceDoc(logFrom - open!.base, logTo - open!.base), 'the same words').toBe('Log');
 	});
 
-	it('places nothing for a range outside the open cell, or with no cell open', () => {
+	it('is not measured there for a range outside the open cell, or with no cell open', () => {
 		const r = openCell(0);
-		expect(openCellPlace(r.view, 0, 3), 'prose is placed by the editor').toBeNull();
+		expect(openCellText(r.view, 0, 3), 'prose is measured by the document\'s editor').toBeNull();
 		const closed = build(DOC);
 		rigs.push(closed);
-		expect(openCellPlace(closed.view, logFrom, logTo)).toBeNull();
+		expect(openCellText(closed.view, logFrom, logTo)).toBeNull();
 	});
 
-	it('anchors the composer to the cell\'s row across the table, open or not, and to nothing outside a table', () => {
+	it("places the Comment offer by the prose rule: beside where the selected words end, on that line, measured in the cell's editor", () => {
 		const r = openCell(0);
-		vi.spyOn(cellEl(r, 1, 0).parentElement!, 'getBoundingClientRect').mockReturnValue(new DOMRect(40, 200, 300, 32));
-		vi.spyOn(r.view.dom.querySelector<HTMLElement>('.cm-md-table')!, 'getBoundingClientRect').mockReturnValue(new DOMRect(36, 150, 320, 90));
-		expect(cellRowsAt(r.view, logFrom, logTo), 'the row, as wide as the table').toEqual(new DOMRect(36, 200, 320, 32));
-		expect(cellRowsAt(r.view, 0, 3), 'prose keeps its own rows').toBeNull();
+		r.view.dispatch({ selection: { anchor: logFrom, head: logTo } });
+		const { inner, base } = openCellText(r.view, logFrom, logTo)!;
+		vi.spyOn(inner, 'coordsAtPos').mockImplementation((pos) => pos === logTo - base ? { left: 302, right: 302, top: 138, bottom: 154 } : null);
+		const offer = selectionOffer(r.view, () => () => null);
+		expect(offer, 'at the end of the words, on their line').toMatchObject({ from: logFrom, to: logTo, text: 'Log', top: 138, left: 302 });
+		expect(offer?.above, 'not raised above the row').toBeUndefined();
+	});
+
+	/** The document's text column and the table, as laid out: the composer's box runs from the column's left to the table's right. */
+	const layOut = (rig: Rig) => {
+		vi.spyOn(rig.view.contentDOM, 'getBoundingClientRect').mockReturnValue(new DOMRect(20, 0, 600, 900));
+		vi.spyOn(rig.view.dom.querySelector<HTMLElement>('.cm-md-table')!, 'getBoundingClientRect').mockReturnValue(new DOMRect(36, 150, 320, 90));
+		vi.spyOn(cellEl(rig, 1, 0), 'getBoundingClientRect').mockReturnValue(new DOMRect(40, 200, 100, 48));
+	};
+
+	it('anchors the composer, as prose, to the lines the words are drawn on in the open cell', () => {
+		const r = openCell(0);
+		layOut(r);
+		const { inner, base } = openCellText(r.view, logFrom, logTo)!;
+		// The words wrap: they start on one line of the cell and end on the next.
+		vi.spyOn(inner, 'coordsAtPos').mockImplementation((pos) => pos === logFrom - base ? { left: 48, right: 48, top: 204, bottom: 220 } : { left: 60, right: 60, top: 222, bottom: 238 });
+		expect(cellTextRows(r.view, logFrom, logTo), 'those lines, from the column\'s left to the table\'s right').toEqual(new DOMRect(20, 204, 336, 34));
+		expect(cellTextRows(r.view, 0, 3), 'prose keeps its own rows').toBeNull();
+	});
+
+	it('once the cell closes, anchors to the draft drawn in the cell, and failing that to the cell', () => {
 		const closed = build(DOC);
 		rigs.push(closed);
-		vi.spyOn(cellEl(closed, 1, 0).parentElement!, 'getBoundingClientRect').mockReturnValue(new DOMRect(40, 200, 300, 32));
-		vi.spyOn(closed.view.dom.querySelector<HTMLElement>('.cm-md-table')!, 'getBoundingClientRect').mockReturnValue(new DOMRect(36, 150, 320, 90));
-		expect(cellRowsAt(closed.view, logFrom, logTo), 'the same row once the cell closes').toEqual(new DOMRect(36, 200, 320, 32));
+		layOut(closed);
+		expect(cellTextRows(closed.view, logFrom, logTo), 'no draft drawn: the cell\'s own lines').toEqual(new DOMRect(20, 200, 336, 48));
+		const drawn = document.createElement('span');
+		drawn.className = 'cm-comment-pending';
+		cellEl(closed, 1, 0).append(drawn);
+		vi.spyOn(drawn, 'getClientRects').mockReturnValue([new DOMRect(44, 206, 30, 16)] as unknown as DOMRectList);
+		expect(cellTextRows(closed.view, logFrom, logTo), 'the line the draft is drawn on').toEqual(new DOMRect(20, 206, 336, 16));
 	});
 });

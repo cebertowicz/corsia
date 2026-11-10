@@ -3,8 +3,12 @@ import { EditorView } from '@codemirror/view';
 import { blockRange, cellElement, drawnTableAt } from './widget-blocks';
 import { CELL_EDITOR, cellSource, openCellState } from './widget-cell-state';
 import { tableCells } from './widget-cells';
-import { rowsBox, selectionIn, textPlace } from './widget-selection';
+import { selectionIn } from './widget-selection';
+import { acrossColumn } from './comment-anchor-geometry';
 import type { WidgetSelection } from './widget-selection-types';
+
+/** A draft's text as drawn in a closed cell. */
+const PENDING = '.cm-comment-pending';
 
 /**
  * An empty cell has no text to select, so while its editor is open and still empty the Comment offer is the whole cell's,
@@ -46,27 +50,37 @@ export function emptyCellSelection(view: EditorView): WidgetSelection | null {
 }
 
 /**
- * Where the Comment offer sits for text selected in the open cell: measured off the cell editor's own text the way a drawn
- * cell's selection is (`textPlace`), since the table hides that source in the document. Null when the range is not in the open cell.
+ * The open cell's own editor and where its text starts in the document, when `from`..`to` lies in that cell; null otherwise.
+ * The table hides the cell's source in the document, so its text is measured in that editor, as prose is in the document's.
  */
-export function openCellPlace(view: EditorView, from: number, to: number): { top: number; left: number } | null {
+export function openCellText(view: EditorView, from: number, to: number): { inner: EditorView; base: number } | null {
 	const cell = view.state.field(openCellState, false);
 	if (!cell || from < cell.from || to > cell.to) return null;
 	const el = view.dom.querySelector<HTMLElement>(`${CELL_EDITOR} .cm-editor`);
 	const inner = el && EditorView.findFromDOM(el);
-	if (!inner) return null;
-	const start = inner.domAtPos(from - cell.from), end = inner.domAtPos(to - cell.from), range = document.createRange();
-	range.setStart(start.node, start.offset);
-	range.setEnd(end.node, end.offset);
-	return textPlace(range);
+	return inner ? { inner, base: cell.from } : null;
 }
 
-/** The box a comment's composer is anchored to for a range inside one table cell, open or not: its row, as for a drawn cell's selection (`rowsBox`). */
-export function cellRowsAt(view: EditorView, from: number, to: number): DOMRect | null {
+type Extent = { top: number; bottom: number };
+/** The vertical extent of `boxes`, or null when there are none. */
+const extent = (boxes: Extent[]): Extent | null =>
+	boxes.length ? { top: Math.min(...boxes.map((b) => b.top)), bottom: Math.max(...boxes.map((b) => b.bottom)) } : null;
+
+/**
+ * The box a comment's composer is anchored to for a range inside one table cell, as for prose (`rowsOf`): the lines its text
+ * is drawn on, out to the text column's edge or the table's, whichever is further. Its lines are read off the open cell's
+ * editor; once the cell closes, off the draft's mark drawn in the cell; failing both, the cell. Null outside a table cell.
+ */
+export function cellTextRows(view: EditorView, from: number, to: number): DOMRect | null {
 	const widget = drawnTableAt(view, from), block = widget && blockRange(view, widget);
 	if (!widget || !block || to > block.to) return null;
-	const span = tableCells(view.state.sliceDoc(block.from, block.to))
+	const cell = tableCells(view.state.sliceDoc(block.from, block.to))
 		.find((s) => from - block.from >= s.rawFrom && to - block.from <= s.rawTo);
-	const td = span && cellElement(widget, span);
-	return td ? rowsBox(widget, [td]) : null;
+	const td = cell && cellElement(widget, cell);
+	if (!td) return null;
+	const open = openCellText(view, from, to);
+	const ends = open ? [open.inner.coordsAtPos(from - open.base, 1), open.inner.coordsAtPos(to - open.base, 1)] : [];
+	const drawn = [...(td.matches(PENDING) ? [td] : []), ...td.querySelectorAll<HTMLElement>(PENDING)].flatMap((el) => [...el.getClientRects()]);
+	const lines = (ends.every(Boolean) ? extent(ends as Extent[]) : null) ?? extent(drawn) ?? extent([td.getBoundingClientRect()])!;
+	return acrossColumn(view, lines.top, lines.bottom, widget.getBoundingClientRect().right);
 }

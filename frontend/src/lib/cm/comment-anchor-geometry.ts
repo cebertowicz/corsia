@@ -18,10 +18,15 @@ export function rowsOf(v: EditorView, from: number, to: number, suggestionId: st
 	if (from < v.viewport.from || to > v.viewport.to) return null;
 	const start = v.coordsAtPos(from, 1), end = v.coordsAtPos(to, 1);
 	if (!start || !end) return null;
-	const content = v.contentDOM.getBoundingClientRect();
 	// A suggestion's drawn insert follows its struck text and may wrap onto the next row.
 	const insert = suggestionId ? v.contentDOM.querySelector(`.cm-suggestion-insert[data-suggestion-id="${suggestionId}"]`)?.getBoundingClientRect() : null;
 	const top = Math.min(start.top, end.top, insert?.top ?? Infinity);
-	const right = Math.min(content.right, Math.max(textRight(v), start.right, end.right, insert?.right ?? 0));
-	return new DOMRect(content.left, top, Math.max(0, right - content.left), Math.max(start.bottom, end.bottom, insert?.bottom ?? -Infinity) - top);
+	return acrossColumn(v, top, Math.max(start.bottom, end.bottom, insert?.bottom ?? -Infinity), Math.max(start.right, end.right, insert?.right ?? 0));
+}
+
+/** Rows from `top` to `bottom`, from the text column's left out to its edge or to `right` (drawn content that reaches further), never past the editor. */
+export function acrossColumn(v: EditorView, top: number, bottom: number, right: number): DOMRect {
+	const content = v.contentDOM.getBoundingClientRect();
+	const edge = Math.min(content.right, Math.max(textRight(v), right));
+	return new DOMRect(content.left, top, Math.max(0, edge - content.left), bottom - top);
 }

@@ -21,6 +21,20 @@ const ONLY_BREAKS = /^\n+$/;
 const insideEscape = (doc: Text, at: number) => doc.sliceString(at - 1, at) === '\\' && doc.sliceString(at, at + 1) === '|';
 
 /**
+ * A deletion of an odd number of backslashes from the run in front of an escaped pipe, which would leave that run even and
+ * the pipe bare. Those backslashes are literal ones, drawn one per pair, so the deletion is widened to the whole pair the
+ * reader saw go: the backslash beside it on the left, or else on the right, never the pipe's own escape. Null otherwise.
+ */
+function literalBackslashPair(doc: Text, from: number, to: number): { from: number; to: number } | null {
+	if (!/^\\+$/.test(doc.sliceString(from, to)) || (to - from) % 2 === 0) return null;
+	let end = to;
+	while (doc.sliceString(end, end + 1) === '\\') end++;
+	if (doc.sliceString(end, end + 1) !== '|') return null;
+	if (doc.sliceString(from - 1, from) === '\\') return { from: from - 1, to };
+	return to < end - 1 ? { from, to: to + 1 } : null;
+}
+
+/**
  * Where a backslash has to go so that every `|` in the cell's text has an odd run of backslashes before it again, given
  * the ranges the change put in. A pipe the change put in is escaped in place; a pipe the change left behind an even run —
  * a backslash typed or left by a deletion right before an escape pair — gets its backslash where the change ended, so
@@ -43,7 +57,7 @@ function unescapedPipes(text: string, inserted: { from: number; to: number }[]) 
 
 /**
  * The rewrite itself: a paste of a block of lines becomes one line, Enter on its own does nothing, a deletion that would
- * leave half of an escape pair takes the pair, and a character typed between an escape's hidden backslash and its pipe
+ * leave half of an escape pair takes the pair, one that would leave half of a literal backslash before a pipe takes that pair, and a character typed between an escape's hidden backslash and its pipe
  * goes in front of the pair. Then every `|` in the cell's resulting text is checked, not only the ones typed, because a
  * bare `|` ends the cell and splits the row.
  */
@@ -58,6 +72,7 @@ export function cellShapeOnly(transaction: Transaction) {
 		if (from !== to) {
 			if (insideEscape(doc, to)) to++;
 			if (insideEscape(doc, from)) from--;
+			if (!before) ({ from, to } = literalBackslashPair(doc, from, to) ?? { from, to });
 		} else if (insideEscape(doc, from)) from = to = from - 1;
 		if (text.includes('\n')) text = ONLY_BREAKS.test(text) ? '' : text.replace(/\n+/g, ' ');
 		rewritten ||= from !== fromA || to !== toA || text !== before;

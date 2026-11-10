@@ -111,14 +111,14 @@
 	 * Where the new-comment card sits. Once its composer is open the draft's own captured range is the answer, because
 	 * that range already follows every local and remote edit; the selection's offsets are only good until then. A range
 	 * the draft has lost keeps the card where it was last drawn, so its message stays readable. Text in a table cell (selected in
-	 * its open editor) anchors to the cell's row, as text selected in a drawn cell does.
+	 * its open editor) anchors as prose does, to the lines its words are drawn on.
 	 */
 	function composerAnchor(v: EditorView, from: number, to: number): () => DOMRect | null {
 		let drawn: DOMRect | null = null;
 		return () => {
 			const range = pendingComment ? selectionRange(pendingComment) : { from, to };
 			if (!range) return drawn;
-			const rows = range.to <= v.state.doc.length ? cellRowsAt(v, range.from, range.to) ?? rowsOf(v, range.from, range.to) : null;
+			const rows = range.to <= v.state.doc.length ? cellTextRows(v, range.from, range.to) ?? rowsOf(v, range.from, range.to) : null;
 			if (rows) drawn = rows;
 			return rows;
 		};
@@ -144,7 +144,7 @@
 	}
 
 	import { rowsOf } from '$lib/cm/comment-anchor-geometry';
-	import { cellRowsAt, emptyCellKey } from '$lib/cm/widget-cell-comment';
+	import { cellTextRows, emptyCellKey } from '$lib/cm/widget-cell-comment';
 	import { openCellState } from '$lib/cm/widget-cell-state';
 
 	/** A card's label for a comment on a table's text or its quote from code, read from this editor's own syntax tree; undefined while the editor is not up. */

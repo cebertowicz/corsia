@@ -4,7 +4,7 @@ import { codeTextAt, diagramAt, tableAt } from './widget-blocks';
 
 const SNIPPET = 64;
 
-export interface CellSpan { row: number; col: number; from: number; to: number; anchorFrom: number; anchorTo: number; rawFrom: number; rawTo: number }
+export interface CellSpan { row: number; col: number; from: number; to: number; anchorFrom: number; anchorTo: number; rawFrom: number; rawTo: number; padded?: true }
 
 /**
  * The cells of a GFM table's source, as offsets into it: trimmed content spans and a non-empty source anchor for empty
@@ -12,13 +12,15 @@ export interface CellSpan { row: number; col: number; from: number; to: number; 
  * only span that can hold a space the reader types at either edge of the cell.
  *
  * GFM renders every row to the header's column count, padding a short row with empty cells that have no source of their
- * own. They still draw a `<td>` a person can click, so they get a span: zero-width at the row's end, anchored on the row's
- * last delimiter, which is the smallest source span that belongs uniquely to that cell. A row with more cells than the
- * header keeps its extra spans, and the render has no cell for them, so callers that look cells up in the DOM skip them.
+ * own. They still draw a `<td>` a person can open and type into, so they get a `padded` span, zero-width at the row's end,
+ * where the source would gain them. Every padded cell of a row sits at that same offset, so no source range tells one from
+ * another: they have no anchor (`intersectsCell` never matches them), and so no comment, until typing gives them source.
+ * A row with more cells than the header keeps its extra spans, and the render has no cell for them, so callers that look
+ * cells up in the DOM skip them.
  */
 export function tableCells(src: string): CellSpan[] {
 	const cells: CellSpan[] = [];
-	const rows: { row: number; spans: CellSpan[]; lastBar: number | null; end: number }[] = [];
+	const rows: { row: number; spans: CellSpan[]; end: number }[] = [];
 	let lineStart = 0;
 	src.split('\n').forEach((line, index) => {
 		const start = lineStart;
@@ -45,13 +47,13 @@ export function tableCells(src: string): CellSpan[] {
 			const anchorTo = from === to ? (rawStart < rawEnd ? rawEnd : rawStart) : to;
 			spans.push({ row, col: col++, from: start + from, to: start + to, anchorFrom: start + anchorFrom, anchorTo: start + anchorTo, rawFrom: start + rawStart, rawTo: start + rawEnd });
 		}
-		rows.push({ row, spans, lastBar: bars.length ? start + bars[bars.length - 1] : null, end: start + line.length });
+		rows.push({ row, spans, end: start + line.length });
 	});
 	const columns = rows[0]?.spans.length ?? 0;
-	for (const { row, spans, lastBar, end } of rows) {
+	for (const { row, spans, end } of rows) {
 		cells.push(...spans);
 		for (let col = spans.length; col < columns; col++) {
-			cells.push({ row, col, from: end, to: end, anchorFrom: lastBar ?? end, anchorTo: lastBar === null ? end : lastBar + 1, rawFrom: end, rawTo: end });
+			cells.push({ row, col, from: end, to: end, anchorFrom: end, anchorTo: end, rawFrom: end, rawTo: end, padded: true });
 		}
 	}
 	return cells;
@@ -60,9 +62,9 @@ export function tableCells(src: string): CellSpan[] {
 export const snippet = (value: string) => value.length > SNIPPET ? `${value.slice(0, SNIPPET)}…` : value;
 export const clean = (value: string) => value.replace(/\s+/g, ' ').trim();
 
-/** Whether a source range touches the visible cell, including an empty cell's structural source anchor. */
+/** Whether a source range touches the visible cell, including an empty cell's structural source anchor; never a padded cell, which has no source. */
 export const intersectsCell = (span: CellSpan, from: number, to: number) =>
-	span.anchorFrom < to && span.anchorTo > from;
+	!span.padded && span.anchorFrom < to && span.anchorTo > from;
 const cellName = (value: string) => {
 	const text = plainQuote(clean(value));
 	return text.length > 24 ? `${text.slice(0, 23)}…` : text;
@@ -95,7 +97,7 @@ export function widgetCommentLabel(state: EditorState, from: number | undefined,
 	const src = state.sliceDoc(table.from, table.to), cells = tableCells(src);
 	const hit = cells.filter((span) => intersectsCell(span, from - table.from, to - table.from));
 	if (hit.length === 0) return null;
-	if (hit.length === cells.length) return 'The whole table';
+	if (hit.length === cells.filter((span) => !span.padded).length) return 'The whole table';
 	const rows = new Set(hit.map((span) => span.row)).size;
 	const named = (span: CellSpan) => snippet(clean(plainQuote(src.slice(span.from, span.to))));
 	if (rows > 1) return `${rows} rows, from “${named(cells.find((span) => span.row === hit[0].row && span.col === 0) ?? hit[0])}”`;

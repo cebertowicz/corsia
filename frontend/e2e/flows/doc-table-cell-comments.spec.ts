@@ -35,14 +35,15 @@ const wordsIn = (root: Locator, words: string): Promise<Box> => root.evaluate((e
 	throw new Error(`no "${words}" drawn`);
 }, words);
 const commentBox = (page: Page) => page.locator('.composer').filter({ has: page.getByPlaceholder('Comment, or @ to tag an agent') });
-/** `box` measured from the top-left of `origin`. */
-const from = (box: Box, origin: Box): Box => ({ x: box.x - origin.x, y: box.y - origin.y, right: box.right - origin.x, bottom: box.bottom - origin.y });
-/** Where the composer opened: against the cell beside it, or on the screen when it opened in the phone's sheet. */
-const composerAt = async (composer: Locator, target: Locator) => {
+/** Where the offer sits against the selected words: across from where they end, and its middle from their top. */
+const besideEnd = (box: Box, words: Box) => ({ x: box.x - words.right, y: (box.y + box.bottom) / 2 - words.y });
+/** Where the composer opened: its left, and its top below the selected words; on the screen when it opened in the phone's sheet. */
+const composerUnder = async (composer: Locator, words: Box) => {
 	const inSheet = await composer.evaluate((el) => !!el.closest('[data-adaptive-drawer]'));
-	return inSheet ? await boxOf(composer) : from(await boxOf(composer), await boxOf(target));
+	const box = await boxOf(composer);
+	return inSheet ? box : { x: box.x, y: box.y - words.bottom };
 };
-/** Within 2px: the same words lay out a pixel apart in the drawn cell and in its editor. */
+/** Within 2px: subpixel layout. */
 const near = (a: number, b: number) => Math.abs(a - b) <= 2;
 
 for (const layout of LAYOUTS) {
@@ -100,43 +101,44 @@ for (const layout of LAYOUTS) {
 			await frame(page, `05-image-in-cell-${at}`);
 		});
 
-		test('text selected in an open cell is offered Comment, and its composer opens, where a drawn cell\'s selection does', async ({ page }) => {
+		test('text selected in an open cell is offered Comment, and its composer opens, by the rule prose follows', async ({ page }) => {
 			test.setTimeout(120_000);
 			await openTableDocument(page, layout);
 			const keys = await keysOf(page);
 			const target = cell(page, 3, 1), offer = page.locator('.sel-comment'), composer = commentBox(page);
-			await target.scrollIntoViewIfNeeded();
+			const press = (l: Locator) => (layout.project === 'chromium-mobile' ? l.tap() : l.click());
 
-			// The same words dragged over in the drawn cell, before any cell is opened: where the offer and composer go for them.
-			const drawn = await wordsIn(target, 'A long'), middle = (drawn.y + drawn.bottom) / 2;
-			await page.mouse.move(drawn.x + 1, middle);
-			await page.mouse.down();
-			await page.mouse.move(drawn.right - 1, middle, { steps: 8 });
-			await page.mouse.up();
-			await expect(offer, 'setup: the drawn cell\'s selection is offered Comment').toBeVisible();
-			// Read against the cell's own box, so a scroll between the two selections moves nothing compared.
-			const drawnCell = await boxOf(target), drawnOffer = from(await boxOf(offer), drawnCell);
+			// Prose first: where the offer and composer go for the first word of the paragraph under the table.
+			const line = page.locator('.cm-line', { hasText: 'Paragraph below the first table.' });
+			await line.scrollIntoViewIfNeeded();
+			await press(line);
+			await page.keyboard.press('Home');
+			for (let char = 0; char < 'Paragraph'.length; char++) await page.keyboard.press('Shift+ArrowRight');
+			await expect(offer, 'setup: the prose selection is offered Comment').toBeVisible();
+			const proseWords = await wordsIn(line, 'Paragraph'), proseOffer = besideEnd(await boxOf(offer), proseWords);
 			await offer.click();
 			await expect(composer, 'setup: its composer opens').toBeVisible();
-			const drawnComposer = await composerAt(composer, target);
+			const proseComposer = await composerUnder(composer, proseWords);
 			await composer.getByRole('button', { name: 'Cancel', exact: true }).click();
 			await expect(composer).toBeHidden();
 
+			await target.scrollIntoViewIfNeeded();
 			await target.click({ position: { x: 6, y: 6 } });
 			await editorInCell(page, target);
 			await page.keyboard.press(keys.docStart);
 			for (let char = 0; char < 'A long'.length; char++) await page.keyboard.press('Shift+ArrowRight');
 			await expect(offer).toBeVisible();
-			const words = await wordsIn(page.locator('.cm-md-cell-editor'), 'A long'), box = await boxOf(target), shown = await boxOf(offer);
-			const placed = from(shown, box);
-			expect(shown.bottom <= words.y && shown.x >= box.x && shown.x <= box.right && near(placed.y, drawnOffer.y) && near(placed.x, drawnOffer.x),
-				`the offer sits above the selected words, from inside the cell, as for the drawn cell (${JSON.stringify({ shown, words, box, placed, drawnOffer })})`).toBe(true);
+			const words = await wordsIn(page.locator('.cm-md-cell-editor'), 'A long'), shown = await boxOf(offer);
+			const rowAbove = await wordsIn(cell(page, 2, 1), 'Plain words in a cell.'), placed = besideEnd(shown, words);
+			expect(near(placed.x, proseOffer.x) && near(placed.y, proseOffer.y) && shown.y >= rowAbove.bottom,
+				`the offer sits beside the end of the selected words as in prose, clear of the words in the row above (${JSON.stringify({ shown, words, rowAbove, placed, proseOffer })})`).toBe(true);
 			await frame(page, `05-selection-offer-${at}`);
 			await offer.click();
 			await expect(composer).toBeVisible();
-			const opened = await composerAt(composer, target);
-			expect(near(opened.y, drawnComposer.y) && near(opened.x, drawnComposer.x),
-				`the composer opens where it does for the drawn cell (${JSON.stringify({ opened, drawnComposer })})`).toBe(true);
+			const opened = await composerUnder(composer, words);
+			// The cell's text is set smaller than prose, so the line it is drawn on ends a pixel or two nearer its words.
+			expect(near(opened.x, proseComposer.x) && Math.abs(opened.y - proseComposer.y) <= 4,
+				`the composer opens against the selected words' line as in prose (${JSON.stringify({ opened, proseComposer })})`).toBe(true);
 			await frame(page, `05-selection-composer-${at}`);
 		});
 

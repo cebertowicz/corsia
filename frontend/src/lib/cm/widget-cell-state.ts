@@ -60,7 +60,9 @@ export function resolveCell(state: EditorState, cell: OpenCell): OpenCell | null
 	}
 	const span = best?.span
 		?? spans.find((item) => intersectsCell(item, from, to))
-		// A zero-width range inside the cell's own span: an empty cell the reader has just opened.
+		// A zero-width range inside the cell's own span: an empty cell the reader has just opened. The padded cells of a short
+		// row all sit at its end, so the one in the cell's own column is the one opened.
+		?? spans.find((item) => item.row === cell.row && item.col === cell.col && item.rawFrom <= from && to <= item.rawTo)
 		?? spans.find((item) => item.rawFrom <= from && to <= item.rawTo);
 	if (!span) return null;
 	return cellAtSpan(state, block.from, span);
@@ -96,12 +98,16 @@ export const openCellState = StateField.define<OpenCell | null>({
 
 /**
  * A cell the renderer pads in has no delimiters of its own yet, so the text typed into it opens the cell in the
- * source: the row gains its pipe and the text sits between the two, inside the one transaction the reader made.
+ * source: the row gains the pipes of every padded cell before it, empty, and then this cell's, with the text between
+ * them, inside the one transaction the reader made, so the text lands in the column it was typed in.
  */
 export function openCellInSource(state: EditorState, changes: { from: number; insert: string }[], cell: OpenCell) {
-	const leading = state.sliceDoc(cell.from - 1, cell.from) === '|' ? ' ' : ' | ';
 	const first = changes.find((change) => change.insert && change.from === cell.from);
-	if (first) first.insert = `${leading}${first.insert} |`;
+	const block = tableAt(state, cell.from, cell.from);
+	if (!first || !block) return;
+	const real = tableCells(state.sliceDoc(block.from, block.to)).filter((span) => span.row === cell.row && !span.padded).length;
+	const closed = state.sliceDoc(cell.from - 1, cell.from) === '|' ? '' : ' |';
+	first.insert = `${closed}${' |'.repeat(Math.max(0, cell.col - real))} ${first.insert} |`;
 }
 
 /** The cell editor's write of the document's cell text back into the cell editor: never sent back, never rewritten. */

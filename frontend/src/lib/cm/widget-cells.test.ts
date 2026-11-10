@@ -30,9 +30,10 @@ describe('the cells of a table source', () => {
 		const src = '| a | b |\n| --- | --- |\n| c |';
 		expect(place(src), 'the render gives this row two cells').toBe('0:0 0:1 1:0 1:1');
 		const cell = tableCells(src).find((span) => span.row === 1 && span.col === 1)!;
+		expect(cell.padded, 'it is marked padded').toBe(true);
 		expect(cell.rawFrom, 'it has no source of its own').toBe(cell.rawTo);
 		expect(src.slice(cell.rawFrom, cell.rawTo)).toBe('');
-		expect(src.slice(cell.anchorFrom, cell.anchorTo), 'its anchor is the row\'s last delimiter').toBe('|');
+		expect(cell.anchorTo, 'nor any anchor a comment could land on').toBe(cell.anchorFrom);
 		const row = src.split('\n')[2];
 		expect(cell.rawFrom, 'it sits at the row\'s end, where its text has to be inserted').toBe(src.length);
 		expect(row.endsWith('|')).toBe(true);

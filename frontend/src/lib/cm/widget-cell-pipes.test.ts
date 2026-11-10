@@ -139,6 +139,19 @@ describe('an escaped pipe the cell already holds stays escaped', () => {
 		expect(savedRow(r)).toEqual(['a\\\\\\|b', 'Done']);
 	});
 
+	it('removes a literal backslash in front of an escaped pipe with Backspace or Delete, the pipe staying a pipe', () => {
+		const literal = PIPED.replace('a\\|b', 'a\\\\\\|b');
+		for (const [name, from, to] of [['Backspace after it', 3, 4], ['Delete before it', 2, 3]] as const) {
+			const r = track(build(literal));
+			clicked(r);
+			expect(cellText(r), 'setup: a literal backslash, then an escaped pipe').toBe(' a\\\\\\|b ');
+			deleted(r, from, to);
+			expect(cellText(r), `${name}: the backslash is gone and the pipe is still escaped`).toBe(' a\\|b ');
+			expect(cellCaret(r), `${name}: the caret is where the backslash was`).toBe(2);
+			expect(savedRow(r)).toEqual(['a\\|b', 'Done']);
+		}
+	});
+
 	it('keeps every pipe escaped whatever is typed at any place in the cell', () => {
 		const start = ' a\\|\\\\\\|b\\ ';
 		for (let at = 0; at <= start.length; at++) {
@@ -146,6 +159,17 @@ describe('an escaped pipe the cell already holds stays escaped', () => {
 				const state = EditorState.create({ doc: start, extensions: EditorState.transactionFilter.of(cellShapeOnly) });
 				const text = state.update({ changes: { from: at, insert }, userEvent: 'input.type' }).state.doc.toString();
 				expect(allPipesEscaped(text), `${JSON.stringify(insert)} at ${at} gives ${JSON.stringify(text)}`).toBe(true);
+			}
+		}
+	});
+
+	it('keeps every pipe escaped, and takes something out, whatever single character Backspace or Delete removes', () => {
+		const start = ' a\\|\\\\\\|b\\\\\\\\\\|c\\ ';
+		for (let at = 0; at < start.length; at++) {
+			for (const userEvent of ['delete.backward', 'delete.forward']) {
+				const state = EditorState.create({ doc: start, extensions: EditorState.transactionFilter.of(cellShapeOnly) });
+				const text = state.update({ changes: { from: at, to: at + 1 }, userEvent }).state.doc.toString();
+				expect(allPipesEscaped(text) && text !== start, `${userEvent} of ${at} gives ${JSON.stringify(text)}`).toBe(true);
 			}
 		}
 	});
