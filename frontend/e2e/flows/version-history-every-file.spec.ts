@@ -113,7 +113,7 @@ function oldestCommit(root: string, file: string): string {
 	return execFileSync('git', ['-C', root, 'log', '--reverse', '--format=%H', '--', path.relative(root, file)], { encoding: 'utf8' }).split('\n')[0];
 }
 
-test('@flow:version-history-every-file a workspace document shows every History state, groups saves and restores', async ({ page, request, browser }, info) => {
+test('@flow:version-history-every-file a chat\'s document the person edits shows every History state, groups saves and restores', async ({ page, request, browser }, info) => {
 	const phone = info.project.name === 'chromium-mobile';
 	const width = phone ? 393 : 1440;
 	await page.setViewportSize({ width, height: phone ? 852 : 900 });
@@ -121,9 +121,13 @@ test('@flow:version-history-every-file a workspace document shows every History 
 	const title = `history-doc-${width}-${Date.now()}`;
 	const threadId = await createSession(request, title);
 	const root = await workspaceRoot(request);
-	const file = path.join(root, 'docs', `plan-${width}-${Date.now()}.md`);
+	// In the chat's own folder, so the chat owns it and its agent edits it directly: an agent may not write
+	// the scope's top-level folders, and edits a shared document it does not own only by suggestion.
+	const file = path.join(root, '.threads', threadId, 'reports', `plan-${width}-${Date.now()}.md`);
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	fs.writeFileSync(file, FIRST);
+	// Registered, as opening it in the chat's canvas does, so the ignored chat folder does not keep it out.
+	const artifactId = await register(request, file, threadId);
 	// An ordinary document is recorded from its first save: the text it had, then each save. Saves that
 	// queue together are recorded as one, so each is let land before the next.
 	for (const [index, text] of [...EDITS, THIRD].entries()) {
@@ -134,7 +138,6 @@ test('@flow:version-history-every-file a workspace document shows every History 
 	await restoreThroughApi(request, file, oldestCommit(root, file), threadId);
 	await agentEdit(browser, request, info, title, threadId, file, 'Delete this line.', 'Agent line.');
 	await expect.poll(() => commits(root, file)).toBe(6);
-	const artifactId = await register(request, file, threadId);
 	// History is read only once it is opened, so the first read is the one that fails.
 	await page.route('**/api/files/history?*', async (route) => route.abort('internetdisconnected'), { times: 1 });
 	const drawer = await openHistory(page, info, title, artifactId, file, threadId);
