@@ -27,7 +27,7 @@ from typing import Any
 from loguru import logger
 
 from core.message_history import NON_HUMAN_MARKERS, REPLY_VIA_POST_UPDATE_KEY
-from infra.chat_comment_answers import SHOWN_ANSWERS_FROM, shown_answer_cids, visible_answer_content
+from infra.chat_comment_answers import SHOWN_ANSWERS_FROM, project_saved_answers
 
 EVENT = "turn.reply_not_visible"
 NO_REPLY = "NO_REPLY"
@@ -117,8 +117,9 @@ def _anchor(db: sqlite3.Connection, thread_id: str, delivery_state: str) -> sqli
 
 def _unseen(db: sqlite3.Connection, thread_id: str, row: sqlite3.Row) -> str:
     """The row's words minus the answers the page shows in comment threads."""
-    placed = shown_answer_cids(db, thread_id, row["id"])
-    return visible_answer_content(str(row["content"]), placed).strip()
+    content = str(row["content"])
+    projection = project_saved_answers(db, [(thread_id, row["id"], content)])[0]
+    return projection.get("chat_visible_content", content).strip()
 
 
 def _replied_after(

@@ -34,12 +34,9 @@ def load_assistant_step_display(
 
 def answer_projection(db, thread_id: str, message_id: str, content: str) -> dict:
     """Project the saved answer placements onto a step frame."""
-    from infra.chat_comment_answers import shown_answer_cids, visible_answer_content
+    from infra.chat_comment_answers import project_saved_answers
 
-    if "[c" not in content:
-        return {}
-    cids = shown_answer_cids(db, thread_id, message_id)
-    return {"chat_answer_cids": cids, "chat_visible_content": visible_answer_content(content, cids)} if cids else {}
+    return project_saved_answers(db, [(thread_id, message_id, content)])[0]
 
 
 def assistant_step_payload(step: dict, *, message_id: str) -> dict:

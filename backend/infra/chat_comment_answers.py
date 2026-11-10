@@ -21,20 +21,62 @@ class VisibleAnswerStream:
     """Hold a possible answer until the saved row establishes its placement."""
 
     def __init__(self) -> None:
-        self.text = ""
-        self.sent = 0
+        self.reset()
 
     def reset(self) -> None:
-        self.text = ""
-        self.sent = 0
+        self.pending: list[str] = []
+        self.partial_state = ""
+        self.started = False
+        self.held = False
+
+    def _extend_partial(self, chunk: str) -> bool:
+        state = self.partial_state
+        for char in chunk:
+            if state in ("newline", "boundary") and char in " \t":
+                continue
+            if state == "newline" and char == "\r":
+                state = "cr"
+            elif state == "bracket" and char == "c":
+                state = "c"
+            elif state in ("c", "dot") and char in "123456789":
+                state = "number" if state == "c" else "subnumber"
+            elif state in ("number", "subnumber") and char in "0123456789":
+                continue
+            elif state == "number" and char == ".":
+                state = "dot"
+            else:
+                return False
+        self.partial_state = state
+        return True
 
     def feed(self, chunk: str) -> str:
-        self.text += chunk
-        tag = _TAGGED.search(self.text)
-        partial = _PARTIAL_TAG.search(self.text)
-        end = min((m.start() for m in (tag, partial) if m), default=len(self.text))
-        visible = self.text[self.sent:end]
-        self.sent = end
+        if self.held:
+            return ""
+        if self.pending and self._extend_partial(chunk):
+            self.pending.append(chunk)
+            return ""
+        # A sentinel preserves the true-start anchor after visible text is sent.
+        prefix = "x" if self.started else ""
+        text = prefix + ''.join(self.pending) + chunk
+        tag = _TAGGED.search(text, len(prefix))
+        partial = _PARTIAL_TAG.search(text, len(prefix))
+        end = min((m.start() for m in (tag, partial) if m), default=len(text))
+        self.held = tag is not None and tag.start() == end
+        self.pending = [] if self.held or end == len(text) else [text[end:]]
+        if self.pending and partial is not None and partial.end() == len(text):
+            suffix = self.pending[0]
+            if '[' in suffix:
+                cid = suffix.rsplit('[', 1)[1]
+                self.partial_state = ('bracket' if not cid else 'c' if cid == 'c' else
+                                      'dot' if cid.endswith('.') else
+                                      'subnumber' if '.' in cid else 'number')
+            else:
+                self.partial_state = ('cr' if suffix.endswith('\r') else
+                                      'newline' if re.fullmatch(r'\r?\n[ \t]*', suffix) else 'boundary')
+        else:
+            self.partial_state = ''
+        visible = text[len(prefix):end]
+        self.started = self.started or bool(visible)
         return visible
 
 
@@ -54,7 +96,14 @@ def visible_answer_content(text: str, placed_cids: list[str]) -> str:
     """Keep the introduction and sections whose tags were not placed."""
     if not placed_cids:
         return text
-    matches = list(_TAGGED.finditer(text))
+    matches = []
+    pos = 0
+    while text.find('[c', pos) != -1:
+        match = _TAGGED.search(text, pos)
+        if match is None:
+            break
+        matches.append(match)
+        pos = match.end()
     result = text[:matches[0].start()] if matches else text
     known = set(placed_cids)
     for index, match in enumerate(matches):
@@ -64,26 +113,55 @@ def visible_answer_content(text: str, placed_cids: list[str]) -> str:
     return result.strip()
 
 
-def shown_answer_cids(db: sqlite3.Connection, thread_id: str, message_id: str) -> list[str]:
-    """The comments whose answers in this message show in their threads."""
-    return [cid for (cid,) in db.execute(
-        f"SELECT a.cid {SHOWN_ANSWERS_FROM} WHERE a.thread_id=? AND a.assistant_message_id=?",
-        (thread_id, message_id),
-    )]
+def project_saved_answers(db: sqlite3.Connection, rows: list[tuple[str, str | None, str | None]]) -> list[dict]:
+    """Project placed answers for saved rows with one shared batch lookup."""
+    pairs = list(dict.fromkeys((thread, message) for thread, message, text in rows
+                               if message and text and '[c' in text))
+    answers: dict[tuple[str, str], list[str]] = {}
+    if pairs:
+        query = ("SELECT a.thread_id,a.assistant_message_id,a.cid "
+                 "FROM json_each(?) requested CROSS JOIN chat_comment_answers a "
+                 "ON a.assistant_message_id=json_extract(requested.value, '$[1]') "
+                 "AND a.thread_id=json_extract(requested.value, '$[0]') "
+                 + SHOWN_ANSWERS_JOINS)
+        for thread, message, cid in db.execute(query, (json.dumps(pairs),)):
+            answers.setdefault((thread, message), []).append(cid)
+    result = []
+    for thread, message, text in rows:
+        cids = answers.get((thread, message), []) if text and '[c' in text else []
+        result.append({'chat_answer_cids': cids, 'chat_visible_content': visible_answer_content(text, cids)}
+                      if cids and text is not None else {})
+    return result
 
 
-def projected_saved_content(db: sqlite3.Connection, thread_id: str, message_id: str, text: str | None) -> str | None:
-    """Project a saved message using the same placed-answer index as chat."""
-    if not text or "[c" not in text:
-        return text
-    return visible_answer_content(text, shown_answer_cids(db, thread_id, message_id))
-
-
-def strip_answer_tags(text: str | None) -> str | None:
-    """Drop the comment tags that open answer sections, keeping their text."""
+def strip_answer_tags(text: str | None, limit: int | None = None) -> str | None:
+    """Drop answer tags, optionally stopping after the visible prefix."""
     if not text:
         return text
-    return _TAGGED.sub(lambda match: match.group(0)[:match.start(1) - match.start(0)], text)
+    chunks: list[str] = []
+    pos = length = 0
+    while limit is None or length < limit:
+        search_end = len(text) if limit is None else pos + limit - length + 1
+        if text.find('[c', pos, search_end) == -1:
+            break
+        match = _TAGGED.search(text, pos)
+        if match is None:
+            break
+        prefix = text[pos:match.start(1)]
+        chunks.append(prefix)
+        length += len(prefix)
+        pos = match.end()
+    chunks.append(text[pos:] if limit is None else text[pos:pos + max(0, limit - length)])
+    result = ''.join(chunks)
+    return result if limit is None else result[:limit]
+
+
+def project_previews(db: sqlite3.Connection, rows: list[tuple[str, str | None, str | None]],
+                     *, limit: int | None = 100) -> list[str | None]:
+    """Project saved content before stripping tags for previews or summaries."""
+    projections = project_saved_answers(db, rows)
+    return [strip_answer_tags(projection.get('chat_visible_content', text), limit)
+            for (_, _, text), projection in zip(rows, projections)]
 
 
 def has_comment_cid(metadata: str | None, cid: str) -> bool:
@@ -133,10 +211,10 @@ def delete_thread_chat_comment_index_rows(db: sqlite3.Connection, thread_id: str
 # All projections compose this source and predicate so that missing comments,
 # messages, and viewed answers have the same meaning everywhere.
 # An answer shows in its comment thread only while its comment, sender and target rows exist.
-SHOWN_ANSWERS_FROM = """FROM chat_comment_answers a
-JOIN chat_comments c ON c.user_message_id=a.user_message_id AND c.cid=a.cid AND c.thread_id=a.thread_id
+SHOWN_ANSWERS_JOINS = """JOIN chat_comments c ON c.user_message_id=a.user_message_id AND c.cid=a.cid AND c.thread_id=a.thread_id
 JOIN messages sender ON sender.id=a.user_message_id AND sender.thread_id=a.thread_id
 JOIN messages target ON target.id=c.target_message_id AND target.thread_id=a.thread_id"""
+SHOWN_ANSWERS_FROM = "FROM chat_comment_answers a " + SHOWN_ANSWERS_JOINS
 UNREAD_FROM = """FROM chat_comment_answers a
 JOIN threads t ON t.id=a.thread_id AND t.user_id=?
 JOIN chat_comments c ON c.thread_id=a.thread_id AND c.user_message_id=a.user_message_id AND c.cid=a.cid

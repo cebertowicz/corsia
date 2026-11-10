@@ -6,7 +6,7 @@ import logging
 import uuid
 from typing import Any, Awaitable, Callable
 
-from infra.chat_comment_answers import VisibleAnswerStream, strip_answer_tags
+from infra.chat_comment_answers import VisibleAnswerStream
 from core.step_projection import step_answer_projection, turn_sidebar_projection
 from infra.database import get_db, write_transaction
 from infra.time import utc_now_iso
@@ -361,12 +361,11 @@ class StepHandler:
         try:
             row = await run_in_db(turn_sidebar_projection, self.thread_id)
             if row:
-                preview = strip_answer_tags(row["last_message"])
                 await self._emit({
                     "type": "session_updated",
                     "thread_id": self.thread_id,
                     "title": row["title"],
-                    "last_message": preview[:100] if preview is not None else None,
+                    "last_message": row["last_message"],
                     "updated_at": row["updated_at"],
                 })
         except Exception as e:

@@ -79,6 +79,13 @@ def test_incremental_preview_matches_full_projection(isolated_db):
         db.close()
 
 
+def test_preview_strips_tag_starting_at_last_character():
+    from infra.chat_comment_answers import strip_answer_tags
+
+    text = 'x' * 97 + '\n\n[c1.1] visible'
+    assert strip_answer_tags(text, limit=100) == 'x' * 97 + '\n\n' + 'v'
+
+
 def test_placed_answer_crossing_preview_boundary_stays_private(isolated_db):
     from infra.sidebar_preview import project_previews
 
@@ -91,6 +98,20 @@ def test_placed_answer_crossing_preview_boundary_stays_private(isolated_db):
         preview = project_previews(db, [('thread', 'answer', text)])[0]
         assert 'SECRET' not in preview
         assert preview == ('Introduction ' * 7 + '\n\nvisible')[:100]
+    finally:
+        db.close()
+
+
+def test_markdown_link_does_not_fetch_full_sidebar_content(isolated_db):
+    from infra.sidebar_preview import PREVIEW_CONTENT
+
+    db = get_db()
+    try:
+        _seed(db)
+        text = '[click](https://example.com) ' + 'x' * 20000
+        _answer(db, text)
+        row = db.execute(f'SELECT {PREVIEW_CONTENT} FROM messages m WHERE m.id=?', ('answer',)).fetchone()
+        assert row[0] == text[:100]
     finally:
         db.close()
 

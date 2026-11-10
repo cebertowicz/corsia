@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from auth_fixtures import OTHER_TOKEN, OWNER_TOKEN, OWNER_USER
 from doc_feedback_helpers import seed_thread
-from infra.chat_comment_answers import VisibleAnswerStream, _TAGGED, parse_answers, strip_answer_tags, visible_answer_content
+from infra.chat_comment_answers import VisibleAnswerStream, parse_answers, strip_answer_tags, visible_answer_content
 from chat_answer_tag_cases import TAG_CASES
 from infra.database import get_db, initialize_schema
 from infra.database_migrations import migrate_to_current
@@ -78,8 +78,9 @@ def test_thread_list_preview_hides_answer_tags(isolated_db):
 
 @pytest.mark.parametrize(('text', 'before', 'visible'), TAG_CASES)
 def test_tag_cases_find_the_first_section(text, before, visible):
-    match = _TAGGED.search(text)
-    assert (text[:match.start()] if match else None) == before
+    assert bool(parse_answers(text, 'answer')) == (before is not None)
+    if before is not None:
+        assert VisibleAnswerStream().feed(text) == before
     stream = VisibleAnswerStream()
     assert ''.join(stream.feed(char) for char in text) == visible
 
