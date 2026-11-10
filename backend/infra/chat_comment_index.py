@@ -73,8 +73,16 @@ def attach_comments(db: sqlite3.Connection, thread_id: str, user_id: str, messag
         "ORDER BY c.created_at,c.user_message_id,c.cid,answer.answered_at",
         (user_id, user_id, thread_id, json.dumps(list(by_id))),
     ).fetchall()
+    missing_content = [message_id for message_id, message in by_id.items() if 'content' not in message]
+    stored_content = {}
+    if missing_content:
+        stored_content = dict(db.execute(
+            "SELECT id,content FROM messages WHERE thread_id=? AND id IN (SELECT value FROM json_each(?))",
+            (thread_id, json.dumps(missing_content)),
+        ))
     projections = project_saved_answers(db, [
-        (thread_id, message_id, message.get('content')) for message_id, message in by_id.items()
+        (thread_id, message_id, message.get('content', stored_content.get(message_id)))
+        for message_id, message in by_id.items()
     ])
     for message, projection in zip(by_id.values(), projections):
         message.update(projection)
