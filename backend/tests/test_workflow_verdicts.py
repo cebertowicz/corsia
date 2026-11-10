@@ -422,8 +422,10 @@ def test_rule_3_no_gain_not_cheaper_waits_for_look_3_before_reverting() -> None:
     old = _priced("v1", 1, 1.0, count=80, started=60, ended=30)
     first = verdict(history(old, _priced("v2", 1, 1.0, count=20)))
     assert (first.word, first.reason, first.look) == ("collecting", "wait_for_look_2", 1)
+    assert (first.inputs["n"], first.inputs["minimum"]) == (20, 40)
     second = verdict(history(old, _priced("v2", 1, 1.0, count=40)))
     assert (second.word, second.reason, second.look) == ("collecting", "wait_for_look_3", 2)
+    assert (second.inputs["n"], second.inputs["minimum"]) == (40, 80)
     final = verdict(history(old, _priced("v2", 1, 1.0, count=80)))
     assert (final.word, final.reason, final.look) == ("revert", "no_gain_not_cheaper", 3)
     assert "cheaper" not in final.inputs

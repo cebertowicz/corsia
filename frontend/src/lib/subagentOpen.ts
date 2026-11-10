@@ -28,8 +28,9 @@ export async function routeSubagentOpen(threadId: string, deps: SubagentOpenDeps
 		target = resolveSubagentOpenTarget(threadId, deps.readMeta());
 	}
 	if (target) {
-		void deps.selectThread(target.parentThreadId);
+		const selection = deps.selectThread(target.parentThreadId);
 		deps.openLeaf(target.parentThreadId, { threadId: target.childThreadId, title: target.title });
+		await selection;
 		return;
 	}
 	await deps.selectThread(threadId);
@@ -39,14 +40,19 @@ export async function routeSubagentOpen(threadId: string, deps: SubagentOpenDeps
 export function watchSubagentOpenRequests(
 	page: Pick<SubagentOpenDeps, 'selectThread'>,
 ): () => void {
-	return openSubagentRequest.subscribe((threadId) => {
-		if (!threadId) return;
+	return openSubagentRequest.subscribe((request) => {
+		if (!request) return;
 		openSubagentRequest.set(null);
+		const threadId = typeof request === 'string' ? request : request.threadId;
 		void routeSubagentOpen(threadId, {
 			...page,
 			readMeta: () => get(subagentMeta),
 			hydrate: (id) => hydrateSubagentThread(id, get(token) ?? ''),
 			openLeaf: openSubagentConversationTab,
-		});
+		}).then(() => { if (typeof request !== 'string') request.onOpened(); },
+			(error) => {
+				if (typeof request !== 'string' && request.onError) request.onError(error);
+				else throw error;
+			});
 	});
 }

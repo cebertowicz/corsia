@@ -21,6 +21,7 @@ SECTIONS = {
     "cost": "/api/measurement/cost?grain=weeks&timezone=UTC",
     "limits": "/api/measurement/limits?grain=weeks&timezone=UTC",
     "key_figures": "/api/measurement/key-figures?grain=weeks&timezone=UTC",
+    "workflows": "/api/measurement/workflows?grain=weeks&timezone=UTC",
     "lessons": "/api/measurement/lessons?range=26w&preview=true",
 }
 
@@ -112,7 +113,7 @@ def test_the_workspace_rule_lives_once_on_the_scope():
         assert not MeasurementScope(project, agent).is_workspace
 
 
-@pytest.mark.parametrize("section", ["cost", "limits", "models", "agents", "key_figures"])
+@pytest.mark.parametrize("section", ["cost", "limits", "models", "agents", "key_figures", "workflows"])
 def test_a_project_with_no_threads_yet_is_an_empty_scope_not_an_error(seeded, section):
     from infra.database import get_db
 

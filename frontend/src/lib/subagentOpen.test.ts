@@ -93,6 +93,20 @@ describe('routeSubagentOpen (#1949)', () => {
 });
 
 describe('watchSubagentOpenRequests', () => {
+	it('settles a request after the thread selection finishes', async () => {
+		let finish!: () => void;
+		const selected = new Promise<void>((resolve) => { finish = resolve; });
+		subagentMeta.set(new Map([['child', { childThreadId: 'child', parentThreadId: 'parent', name: 'Worker', provider: 'codex', status: 'running' } as SubagentRef]]));
+		const stop = watchSubagentOpenRequests({ selectThread: () => selected });
+		let complete = false;
+		openSubagentRequest.set({ threadId: 'child', onOpened: () => { complete = true; } });
+		await Promise.resolve();
+		expect(complete).toBe(false);
+		finish();
+		await vi.waitFor(() => expect(complete).toBe(true));
+		stop();
+	});
+
 	it('consumes each request once and opens the leaf in the parent', async () => {
 		subagentMeta.set(new Map([['child', {
 			childThreadId: 'child', parentThreadId: 'parent', name: 'Worker', provider: 'codex', status: 'running',
