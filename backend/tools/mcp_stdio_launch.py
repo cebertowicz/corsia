@@ -85,15 +85,29 @@ class StderrTail:
         # started still holds the pipe; never wait long for that.
         await asyncio.to_thread(self._reader.join, 1.0)
         if exc_type is not None:
+            # Name what ended the connection: it may be CORSIA rejecting a healthy app or
+            # cancelling its start, not the app failing.
+            reason = self.mask(_describe(exc_type, exc))[:LINE_CHARS]
             lines = self.lines()
             if lines:
                 logger.warning(
-                    "MCP server '{}' stopped with an error; its last {} stderr lines (keys masked):\n{}",
-                    self.name, len(lines), "\n".join(lines),
+                    "MCP server '{}' connection ended by {}; its last {} stderr lines (keys masked):\n{}",
+                    self.name, reason, len(lines), "\n".join(lines),
                 )
             else:
-                logger.warning("MCP server '{}' stopped with an error; it wrote nothing to stderr", self.name)
+                logger.warning(
+                    "MCP server '{}' connection ended by {}; it wrote nothing to stderr", self.name, reason,
+                )
         return False
+
+
+def _describe(exc_type: type[BaseException], exc: BaseException | None) -> str:
+    """``Type: message`` of the error, looking through task groups that wrap a single one."""
+    while isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
+        exc = exc.exceptions[0]
+    if exc is None:
+        return exc_type.__name__
+    return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
 
 
 def _write_all(fd: int, data: bytes) -> int | None:

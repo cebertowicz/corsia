@@ -81,7 +81,9 @@ async def test_failed_start_logs_the_masked_tail(plain_launch, warnings, tmp_pat
 
     assert "local" in errors
     [record] = warnings
-    assert record.startswith("MCP server 'local' stopped with an error; its last 3 stderr lines (keys masked):")
+    first, *_ = record.split("\n")
+    assert first.startswith("MCP server 'local' connection ended by ")
+    assert first.endswith("; its last 3 stderr lines (keys masked):")
     assert "Error: Cannot find module '/missing/index.js'" in record
     assert "/tmp/app-home" in record
     for secret in (STORED_KEY, SHAPED_KEY, CONFIGURED_KEY):
@@ -116,7 +118,9 @@ async def test_the_tail_is_bounded(plain_launch, warnings, tmp_path):
 async def test_an_app_that_prints_nothing_says_so(plain_launch, warnings, tmp_path):
     await _connect(tmp_path, "raise SystemExit(3)\n")
 
-    assert warnings == ["MCP server 'local' stopped with an error; it wrote nothing to stderr"]
+    [record] = warnings
+    assert record.startswith("MCP server 'local' connection ended by ")
+    assert record.endswith("; it wrote nothing to stderr")
 
 
 async def test_a_healthy_app_logs_no_tail_and_keeps_its_stderr(plain_launch, warnings, tmp_path, capfd):
@@ -125,6 +129,17 @@ async def test_a_healthy_app_logs_no_tail_and_keeps_its_stderr(plain_launch, war
     assert errors == {}
     assert warnings == []
     assert "hello from server" in capfd.readouterr().err
+
+
+async def test_a_healthy_app_corsia_rejects_names_corsia_as_the_cause(plain_launch, warnings, tmp_path):
+    errors = await _connect(tmp_path, _SERVER, allowed_tools=["missing_tool"])
+
+    assert "local" in errors
+    [record] = warnings
+    assert record.startswith(
+        "MCP server 'local' connection ended by MCPConfigError: server did not advertise every allowed tool"
+    )
+    assert record.endswith("(keys masked):\nhello from server")
 
 
 @pytest.mark.integration
