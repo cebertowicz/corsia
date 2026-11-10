@@ -29,7 +29,7 @@ import sqlite3
 from typing import Literal, get_args
 
 from infra import presence
-from infra.chat_comment_answers import projected_saved_content, strip_answer_tags
+from infra.sidebar_preview import project_previews
 from infra.thread_update_asks import ask_sql, asks_user_sql
 from infra.presence_time import iso, parse, seen_boundary
 from infra.person_step_state import person_step_state
@@ -191,11 +191,10 @@ def _first_readable_line(content: object) -> str | None:
     return None
 
 
-
 def _summary(update: dict, message_content: object) -> str | None:
     """A stored event's sidebar preview; lifecycle text comes only from its snapshot."""
     if update["kind"] == "marked":
-        return _first_readable_line(strip_answer_tags(message_content))
+        return _first_readable_line(message_content)
     title = update["title"]
     if not title:
         return None
@@ -253,11 +252,13 @@ def latest_by_thread_with_attention(
     display: dict[str, dict] = {}
     attention: dict[str, dict] = {}
     width = len(_COLUMNS.split(","))
-    for row in rows:
-        update = _public(tuple(row)[:width])
-        content = row["message_content"]
-        if update["kind"] == "marked" and update["message_id"]:
-            content = projected_saved_content(db, update["thread_id"], update["message_id"], content)
+    updates = [_public(tuple(row)[:width]) for row in rows]
+    contents = project_previews(db, [
+        (update['thread_id'], update['message_id'] if update['kind'] == 'marked' else None,
+         row['message_content'] if update['kind'] == 'marked' else None)
+        for row, update in zip(rows, updates)
+    ], limit=None)
+    for row, update, content in zip(rows, updates, contents):
         update["summary"] = _summary(update, content)
         if row["row_key"] == row["display_key"]:
             display[update["thread_id"]] = update

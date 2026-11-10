@@ -14,7 +14,7 @@ from infra.time import utc_now_iso
 from fastapi import APIRouter, HTTPException
 
 from infra.auth import authenticate
-from infra.chat_comment_answers import projected_saved_content, strip_answer_tags
+from infra.sidebar_preview import LATEST_MESSAGE_JOIN, PREVIEW_CONTENT, project_previews
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_read
 from infra.packed_rows import fetch_all
@@ -84,11 +84,10 @@ async def list_threads(token: str, archived: int = 0):
         visible, identity = hidden_clause(reader, "s")
         sql = f"""SELECT s.*,
                CASE WHEN {visible} THEN
-                 CASE WHEN instr(m.content, '[c') > 0 THEN m.content ELSE substr(m.content, 1, 100) END
+                 {PREVIEW_CONTENT}
                END as last_message,
                CASE WHEN {visible} THEN m.id END as last_message_id
-               FROM threads s LEFT JOIN messages m ON m.id =
-                 (SELECT lm.id FROM messages lm WHERE lm.thread_id = s.id ORDER BY lm.created_at DESC LIMIT 1)
+               FROM threads s {LATEST_MESSAGE_JOIN}
                WHERE s.user_id = ?
                AND {thread_available_sql('s', include_user_archived=bool(archived))}
                AND s.spawned_by IS NULL"""
@@ -103,14 +102,15 @@ async def list_threads(token: str, archived: int = 0):
             agent_id = get_corsia_agent(db=db) if conductor_ids else None
             projected = []
             coordination = []
-            for row in rows:
-                item = project_thread(reader, row)
+            items = [project_thread(reader, row) for row in rows]
+            previews = project_previews(db, [
+                (row['id'], item.pop('last_message_id', None), item['last_message'])
+                for row, item in zip(rows, items)
+            ])
+            for row, item, preview in zip(rows, items, previews):
                 for column in _LIST_INTERNAL_COLUMNS:
                     item.pop(column, None)
-                message_id = item.pop('last_message_id', None)
-                content = projected_saved_content(db, row['id'], message_id, item['last_message']) if message_id else None
-                content = strip_answer_tags(content)
-                item['last_message'] = content[:100] if content is not None else None
+                item['last_message'] = preview
                 item['archived'] = 1 if thread_is_explicitly_archived(row) else 0
                 if row['id'] in conductor_ids:
                     item['coordination'] = 'corsia' if row['id'] == agent_id else 'conductor'
