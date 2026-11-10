@@ -24,6 +24,9 @@ test('ownership without freshness keeps its slot', async ({ page, request }) => 
   await wide.setViewportSize({ width: 1600, height: 900 });
   await open(wide);
   console.log('WIDE', JSON.stringify(await wide.locator('.document-header').evaluate(header => ({ canvas: header.closest('.document-canvas')?.getBoundingClientRect().toJSON(), metadataDisplay: getComputedStyle(header.querySelector('.document-metadata')!).display }))));
+  await expect(wide.locator('.identity-owner button.identity:visible')).toHaveCount(1);
+  await wide.setViewportSize({ width: 2000, height: 900 });
+  console.log('WIDER', JSON.stringify(await wide.locator('.document-header').evaluate(header => ({ canvas: header.closest('.document-canvas')?.getBoundingClientRect().toJSON(), metadataDisplay: getComputedStyle(header.querySelector('.document-metadata')!).display }))));
   await expect(wide.locator('.document-metadata button.identity:visible')).toHaveCount(1);
   await expect(wide.locator('.document-metadata time, .document-metadata .metadata-secondary')).toHaveCount(0);
 });
