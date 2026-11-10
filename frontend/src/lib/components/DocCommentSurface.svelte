@@ -18,6 +18,7 @@
 	import DocMarginStack from './DocMarginStack.svelte';
 	import DocCommentDrawerHeading from './DocCommentDrawerHeading.svelte';
 	import { holdReadingLine } from '$lib/docMarginHold.svelte';
+	import { holdWritingPlace } from '$lib/docWritingHold.svelte';
 	import { createResolvedDrawer } from '$lib/docResolvedDrawer.svelte';
 	import { createSuggestionDecisions } from '$lib/docSuggestionDecisions.svelte';
 	import type { DocComment } from '$lib/stores/docComments';
@@ -127,6 +128,10 @@
 	// A thread whose text is gone keeps its card in the column at the nearest line, labelled "This text isn’t in the document" with a dashed edge (CommentThread). A review conversation never had text: its card, labelled "Review comment", sits after the last card that has a line.
 	const resolvedDrawer = createResolvedDrawer({ enabled: () => !image, resolved: () => resolvedList, open: () => resolvedOpen, setOpen: (open) => resolvedOpen = open, setCount: (count) => resolvedCount = count, entry: () => bounds?.querySelector<HTMLElement>('[data-resolved-entry]') ?? null });
 	holdReadingLine({ margin: () => margin, bounds: () => bounds, selectedId: () => selectedId });
+	// Writing survives the panel's trip: where the reader was writing, and where the list is up to receive it back.
+	holdWritingPlace(() => surfaceState === null ? null
+		: margin ? '.canvas-comment-drawer.margin:not(.leaving)'
+			: sheetDrawer ? '.canvas-comment-drawer.sheet' : null);
 	let detent = $state<'full' | 'half'>('full');
 	const draftTags = createMentionSelection();
 	const replyTags = new Map<string, ReturnType<typeof createMentionSelection>>();
