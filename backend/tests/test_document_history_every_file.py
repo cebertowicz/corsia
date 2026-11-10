@@ -250,12 +250,16 @@ async def test_a_save_answers_once_its_version_is_recorded_in_turn(history_scope
     assert _git(['log', '-2', '--format=%s %B'], cwd=workspace).count('Reason: Restored') == 1
     assert _git(['show', 'HEAD:notes/plan.md'], cwd=workspace) == 'One.\n'
     assert _git(['show', 'HEAD~1:notes/plan.md'], cwd=workspace) == 'Two.\n'
-    # A restore history cannot record is refused, and the file is put back.
+    # A restore history cannot record is refused, the file is put back, and its owner hears of no save.
+    from doceditor import document_save
+    reported = []
+    monkeypatch.setattr(document_save, 'report_plain_write', lambda *_a, **_k: reported.append(1))
     monkeypatch.setattr(guidance_git, '_commit', lambda *_a, **_k: (_ for _ in ()).throw(guidance_git.GitFault('disk full')))
     with pytest.raises(DocumentSaveError):
         await save_document_text(DocumentSave(path=str(path), text='Two.\n', thread_id=thread_id), user_id,
                                  reason='Restored', history_required=True)
     assert path.read_text() == 'One.\n'
+    assert reported == []
 
 
 def test_a_document_delete_goes_through_the_same_writer(history_scope):
@@ -648,4 +652,36 @@ async def test_restore_of_an_open_document_goes_through_its_lane(history_scope, 
     assert _git(['show', 'HEAD~1:notes/plan.md'], cwd=workspace) == 'Second version.\nOutside edit.\n'
     assert _git(['log', '-1', '--format=%ae'], cwd=workspace).strip() == f'{user_id}@users.corsia.local'
     assert 'Reason: Restored ' in _git(['log', '-1', '--format=%B'], cwd=workspace)
+
+
+@pytest.mark.asyncio
+async def test_an_outside_edit_caught_at_a_live_restores_rename_is_never_replaced(history_scope, tmp_path, monkeypatch):
+    from api import files
+    from doceditor import live_lane as lane_module, live_tools
+
+    workspace, thread_id = history_scope
+    user_id = owner(thread_id)
+    monkeypatch.setattr(files, 'authenticate', lambda _token: {'id': user_id})
+    path = placed(workspace / 'notes' / 'plan.md', 'First.\n')
+    await save_document_text(DocumentSave(path=str(path), text='First version.\n', thread_id=thread_id), user_id)
+    first = head(workspace)
+    await save_document_text(DocumentSave(path=str(path), text='Second version.\n', thread_id=thread_id), user_id)
+    live, lane = await live_lane(path, tmp_path)
+    monkeypatch.setattr(live_tools, 'find_live', lambda resolved: SimpleNamespace(lane=lane, artifact_id='a') if resolved == path.resolve() else None)
+    edits = []
+
+    async def outside_edit(stage: str) -> None:
+        # The edit lands after the restore's check and before its write's compare-and-swap.
+        if stage == 'record' and not edits:
+            edits.append(stage)
+            path.write_text('Second version.\nOutside edit.\n')
+    monkeypatch.setattr(lane_module, '_checkpoint', outside_edit)
+    try:
+        refused = await files.restore_version('test', files.RestoreBody(
+            path=str(path), version=first, base_sha256=sha('Second version.\n'), thread_id=thread_id))
+    finally:
+        live.close()
+    assert edits == ['record']
+    assert (refused.status_code, json.loads(refused.body)['kind']) == (409, 'stale')
+    assert path.read_text() == 'Second version.\nOutside edit.\n'
 

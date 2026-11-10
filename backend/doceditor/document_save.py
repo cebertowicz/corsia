@@ -138,8 +138,6 @@ def _guided_write(
         author=author(), reason=reason, expected=None if expected_sha256 is None else {path: expected_sha256},
         atomic=history_required, write=lambda _path, _data: payloads.append(write(path, None, reports)),
     )
-    for report in reports:
-        report()
     if saved.outcome == "refused":
         assert saved.line is not None
         if saved.reason == "lesson-outside-placement":
@@ -152,6 +150,9 @@ def _guided_write(
         raise DocumentSaveError(kind, saved.line or "History could not be recorded")
     if not payloads:
         raise DocumentSaveError("save_failed", saved.line or "Document was not saved")
+    # Only a save that stays written reaches its owner; a refused one was put back.
+    for report in reports:
+        report()
     if saved.line is not None:
         payloads[0][f"{target.kind}_history"] = saved.line
     payloads[0]["version"] = saved.sha
