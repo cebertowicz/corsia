@@ -117,6 +117,26 @@ class Seed:
         finally:
             db.close()
 
+    async def wait_idle(self) -> None:
+        """Wait until the server's own turn has taken a correction and settled: no running turn, no queued input.
+
+        The server is not woken by inputs this process writes, so it takes one only on its own sweep; the
+        next run's Turn starts once that turn has settled, as a person's next message would.
+        """
+        for _ in range(600):
+            db = get_db()
+            try:
+                busy = db.execute(
+                    "SELECT 1 FROM active_turns WHERE thread_id=:t AND status='running' UNION ALL "
+                    "SELECT 1 FROM messages WHERE thread_id=:t AND delivery_state='queued' LIMIT 1",
+                    {'t': self.thread_id}).fetchone()
+            finally:
+                db.close()
+            if busy is None:
+                return
+            await asyncio.sleep(0.1)
+        raise RuntimeError(f'Thread {self.thread_id} did not go idle within 60 seconds')
+
     def at(self, stamp: str) -> None:
         service._now = lambda: stamp  # the seed's pinned writer clocks (disclosed)
         llm_usage.utc_now_iso = lambda: stamp
@@ -204,6 +224,27 @@ class Seed:
             set_setting(ACTIVE_VERSION_SETTING, {'key': version_key(version)})
             if not await record_classification(candidate, Classification(version, 0.99, 'correction', False, 8)):
                 raise RuntimeError(f'Correction not recorded: {message_id}')
+            await self.deliver_correction(phase, ended)
+
+    async def deliver_correction(self, phase: str, stamp: str) -> None:
+        """Deliver the queued correction in a disposable Turn, unless the server's sweep already took it."""
+        turn_id = f'{phase}-correction-turn'
+        db = get_db()
+        try:
+            batch = start_idle_turn(self.thread_id, turn_id=turn_id, boot_epoch='e2e', started_at=stamp, db=db)
+            if batch is not None and hasattr(batch, 'turn_order'):
+                begin_batch_write(batch, attempt_id=f'{turn_id}-write', started_at=stamp, db=db)
+                settle_batch_write(f'{turn_id}-write', outcome='accepted', db=db)
+        finally:
+            db.close()
+        if batch is None or not hasattr(batch, 'turn_order'):
+            await self.wait_idle()
+            return
+        ended = (datetime.fromisoformat(stamp) + timedelta(minutes=1)).isoformat()
+        result = settle_turn(turn_id, outcome='completed', ended_at=ended, successor_turn_id=f'{turn_id}-successor',
+                             boot_epoch='e2e', mark_idle_checkpoint=False)
+        if result.successor is not None:
+            raise RuntimeError(f'Unexpected successor for {turn_id}: {result.successor}')
 
     async def settle_gate(self, gate: str, mode: str) -> int:
         """Answer the acceptance gate once (approved) or twice (sent back, then approved)."""

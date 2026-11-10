@@ -120,7 +120,7 @@
 {#snippet chart(entry: WorkflowEntry, measure: Measure, label: string, version: string)}
  {@const points = chartPoints(entry, version, measure)}
  {@const all = activeVersions.flatMap((item) => chartPoints(entry, item, measure))}
- {#if points.length}<div class="trend"><MeasurementBarChart {points} percent100={measure === 'first_try'} scaleMax={Math.max(0, ...all.map((point) => point.value ?? 0)) || 1} axisTitle={`${label}${measure === 'minutes' ? ' (minutes)' : ''} — ${labelVersion(version)}`} averageName="4-week average" caption="Weekly runs; n is runs per week." missingText="not recorded" minN={0} minNText="fewer than 5 runs" ariaLabel={`${label} by week`} tickFormat={(v,d) => measure === 'cost' ? `$${v.toFixed(d)}` : measure === 'first_try' ? `${v.toFixed(d)}%` : v.toFixed(d)} valueFormat={(v) => measure === 'minutes' ? v.toFixed(1) : format(v, measure)} marks={chartMarks(entry, version, measure)} /></div>{/if}
+ {#if points.length}<div class="trend"><h5>{labelVersion(version)}</h5><MeasurementBarChart {points} percent100={measure === 'first_try'} scaleMax={Math.max(0, ...all.map((point) => point.value ?? 0)) || 1} axisTitle={`${label}${measure === 'minutes' ? ' (minutes)' : ''}`} averageName="4-week average" caption="Weekly runs; n is runs per week." missingText="not recorded" minN={0} minNText="fewer than 5 runs" ariaLabel={`${label} by week, ${labelVersion(version)}`} tickFormat={(v,d) => measure === 'cost' ? `$${v.toFixed(d)}` : measure === 'first_try' ? `${v.toFixed(d)}%` : v.toFixed(d)} valueFormat={(v) => measure === 'minutes' ? v.toFixed(1) : format(v, measure)} marks={chartMarks(entry, version, measure)} /></div>{/if}
 {/snippet}
 <div class="workflows" data-testid="measurement-workflows">
  <section aria-labelledby="workflows-title" data-testid="workflow-overview">
@@ -172,7 +172,7 @@
  </Popover>{/if}
 </div>
 <style>
- .workflows,section.detail {display:grid;gap:var(--space-4);min-width:0} section{min-width:0} h3,h4,p{margin:0;overflow-wrap:anywhere} h3{color:var(--text-primary);font-size:var(--text-body);font-weight:var(--fw-semibold)} h4{color:var(--text-tertiary);font-size:var(--text-footnote);font-weight:var(--fw-semibold)}
+ .workflows,section.detail {display:grid;gap:var(--space-4);min-width:0} section{min-width:0} h3,h4,h5,p{margin:0;overflow-wrap:anywhere} h5{color:var(--text-secondary);font-size:var(--text-caption);font-weight:var(--fw-semibold)} h3{color:var(--text-primary);font-size:var(--text-body);font-weight:var(--fw-semibold)} h4{color:var(--text-tertiary);font-size:var(--text-footnote);font-weight:var(--fw-semibold)}
  p,table,.result{color:var(--text-primary);font-size:var(--text-subhead)} .result{margin:0;padding-left:1.5em} .detail tbody th,.detail tbody td{vertical-align:middle} .note,.sub{color:var(--text-tertiary);font-size:var(--text-caption)} .sub{display:block}
  .table-wrap{overflow-x:auto;min-width:0} table{width:100%;border-collapse:collapse} th,td{text-align:left;vertical-align:top;padding:var(--space-2)} tbody th{overflow-wrap:anywhere} thead th{color:var(--text-tertiary);font-size:var(--text-footnote);font-weight:var(--fw-semibold)} tbody th{font-weight:var(--fw-semibold)}
  .detail table:not(.run-counts){table-layout:fixed} .detail table:not(.run-counts) th:first-child{width:55%} .detail table:not(.run-counts) th{overflow-wrap:anywhere}

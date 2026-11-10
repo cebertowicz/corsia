@@ -7,6 +7,7 @@ import { loginByUrl, openSettings, TEST_TOKEN } from '../support/corsia';
 import { createAgent, createProject, selectProjectScope } from '../support/measurement-fixture';
 
 test('capture live workflow states', async ({ page, request }, testInfo) => {
+ test.skip(!process.env.CORSIA_WORKFLOW_FRAMES, 'Frame capture runs only when a frame directory is named.');
  test.setTimeout(360000);
  const dir = process.env.CORSIA_WORKFLOW_FRAMES;
  const python = process.env.CORSIA_E2E_BACKEND_PYTHON;

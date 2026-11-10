@@ -70,7 +70,7 @@ describe('MeasurementBarChart', () => {
 	it('draws axis title, ticks, a zero baseline, a value on every bar, the n row and a caption', () => {
 		const chart = render([point(0, 30, 50), point(1, 45, 80), point(2, 92, 1349)]);
 		const phone = chart.querySelector('.mob svg')!;
-		expect(chart.querySelector('.axis-title')?.textContent).toBe('Hours of work per hour you spend');
+		expect(texts(phone, 'at')).toEqual(['Hours of work per hour you spend']);
 		expect(texts(phone, 'tk')).toEqual(['0', '25', '50', '75', '100']);
 		expect(phone.querySelectorAll('line.zero')).toHaveLength(1);
 		expect(texts(phone, 'vl')).toEqual(['30', '45', '92']);

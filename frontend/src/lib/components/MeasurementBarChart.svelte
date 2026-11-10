@@ -55,7 +55,7 @@
 	<svg viewBox={`0 0 ${g.width} ${Math.trunc(g.height) + band}`} role="img" aria-label={chartLabel}>
 		{#each g.items as item}
 			{#if item.kind === 'text'}
-				{#if item.cls !== 'at' && (!visibleMarks.length || item.cls !== 'vl')}<text class={item.cls} x={item.x} y={item.y} text-anchor={item.anchor} transform={[band && item.cls !== 'at' ? `translate(0 ${band})` : '', item.rotate ? `rotate(${item.rotate.deg ?? -90} ${item.rotate.x} ${item.rotate.y})` : ''].filter(Boolean).join(' ') || undefined} style={item.size ? `font-size: ${item.size}px` : undefined}>{item.text}</text>{/if}
+				{#if !visibleMarks.length || item.cls !== 'vl'}<text class={item.cls} x={item.x} y={item.y} text-anchor={item.anchor} transform={[band && item.cls !== 'at' ? `translate(0 ${band})` : '', item.rotate ? `rotate(${item.rotate.deg ?? -90} ${item.rotate.x} ${item.rotate.y})` : ''].filter(Boolean).join(' ') || undefined} style={item.size ? `font-size: ${item.size}px` : undefined}>{item.text}</text>{/if}
 			{:else if item.kind === 'line'}
 				<line class={item.cls} x1={item.x1} x2={item.x2} y1={item.y} y2={item.y} transform={`translate(0 ${band})`} />
 			{:else if item.kind === 'rect'}
@@ -88,7 +88,6 @@
 		{#if anyWithheld}<span>No bar, "{missingText}": {missingText === 'too few' ? `too little behind that ${unit} to show a value` : `no value for that ${unit}`}</span>{/if}
 		{#if hasAverage}<span><i class="l"></i>{averageName}</span>{/if}
 	</div>
-	<div class="axis-title">{axisTitle}</div>
 	<div class="mob">{@render svg(phone)}</div>
 	<div class="dsk" use:watchWidth>{@render svg(desktop)}</div>
 	<table class="sr-only">
@@ -116,7 +115,6 @@
 	}
 	.chart figcaption { font-size: 12px; color: var(--mbc-muted); margin-top: 6px; overflow-wrap: anywhere; }
 	.chart svg { display: block; width: 100%; height: auto; }
-	.axis-title { font-size: var(--text-caption); font-weight: var(--fw-semibold); color: var(--mbc-ink); overflow-wrap: anywhere; }
 	.dsk { display: none; }
 	.lg { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--mbc-muted); margin: 0 0 4px; }
 	.lg i { display: inline-block; vertical-align: -1px; margin-right: 5px; }
