@@ -346,15 +346,19 @@
 {#if open && !inMargin}
 	{#key target}
 		{#if narrow}
-			<AdaptiveDrawer ariaLabel={heading} {heading} doneLabel="Close" followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
+			<AdaptiveDrawer fill ariaLabel={heading} {heading} doneLabel="Close" followKeyboard open={!closing} onClose={requestClose} onClosed={closed}>
 				{@render composerBody()}
 			</AdaptiveDrawer>
 		{:else}
-			<Popover {anchor} bounds={messageRoot()} placement="bottom" open={!closing} initialFocus="textarea" surfaceRole={null} onClose={requestClose} onClosed={closed}>
-				<div role="dialog" aria-label={heading}>
+			<Popover fill {anchor} bounds={messageRoot()} placement="bottom" open={!closing} initialFocus="textarea" surfaceRole={null} onClose={requestClose} onClosed={closed}>
+				<div class="comment-dialog" role="dialog" aria-label={heading}>
 					{@render composerBody()}
 				</div>
 			</Popover>
 		{/if}
 	{/key}
 {/if}
+
+<style>
+	.comment-dialog { display: flex; flex-direction: column; min-height: 0; }
+</style>

@@ -258,6 +258,19 @@ describe('Popover', () => {
 			await vi.waitFor(() => expect(surface.style.clipPath).toBe('inset(100%)'));
 			expect(surface.inert).toBe(true);
 		});
+		it('keeps the focused editor visible when a viewport resize moves its anchor out of view', async () => {
+			let reading = new DOMRect(520, 100, 20, 20);
+			const surface = mountIn(new DOMRect(500, 0, 900, 700), () => reading);
+			await vi.waitFor(() => expect(surface.style.top).toBe('100px'));
+			const box = surface.appendChild(document.createElement('textarea'));
+			box.focus();
+			reading = new DOMRect(520, 2000, 20, 20);
+			window.dispatchEvent(new Event('resize'));
+			await Promise.resolve();
+			expect(surface.inert).toBe(false);
+			expect(surface.style.clipPath).toBe('');
+			expect(document.activeElement).toBe(box);
+		});
 		it('still follows a scroll the document caused when focus is on a button in the card, as a jump or step does', async () => {
 			let reading: DOMRect | null = new DOMRect(520, 100, 20, 20);
 			const surface = mountIn(new DOMRect(500, 0, 900, 700), () => reading);

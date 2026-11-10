@@ -48,8 +48,8 @@
 </script>
 
 <div class="composer">
-	<CommentQuote {quote} {label} />
-	<div>
+	<div class="quote-wrap"><CommentQuote {quote} {label} /></div>
+	<div class="input-wrap">
 		{#if mentions}<MentionPicker bind:this={picker} {input} {selectedTags} />{/if}
 		<Field variant="nested" hideLabel label={fieldLabel} labelFor={`${explanationId}-body`}>
 			<textarea bind:this={input} id={`${explanationId}-body`} data-drawer-autofocus rows="1" {placeholder} bind:value={text} use:autosize={text} onkeydown={onKey}></textarea>
@@ -63,8 +63,13 @@
 </div>
 
 <style>
-	.composer { display: flex; flex-direction: column; gap: 8px; }
-	.actions { display: flex; justify-content: flex-end; gap: 8px; }
+	.composer { display: flex; flex-direction: column; min-height: 0; gap: 8px; }
+	.quote-wrap { flex: none; }
+	.input-wrap { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; }
+	.input-wrap :global(.field) { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; align-items: stretch; }
+	.input-wrap :global(.c) { flex: 1 1 auto; flex-direction: column; min-height: 0; align-items: stretch; }
+	.input-wrap textarea { flex: 1 1 auto; min-height: 0; overflow-y: auto !important; }
+	.actions { flex: none; display: flex; justify-content: flex-end; gap: 8px; }
 	button { font-size: var(--text-caption); font-weight: var(--fw-semibold); cursor: pointer; }
 	.cancel { padding: 5px 8px; border: none; background: none; color: var(--text-secondary); }
 	.submit { padding: 6px 14px; border: none; border-radius: var(--radius-sm); background: var(--accent-fill); color: var(--accent-on-fill); }
