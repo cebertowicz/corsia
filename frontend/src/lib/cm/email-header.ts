@@ -28,6 +28,8 @@ export interface EmailHeaderOptions {
 	answered: readonly string[] | null;
 	/** The header as the server last read it: which To and Cc entries the send takes, and where they are. */
 	header: ServerHeader | null;
+	/** Whether the server reads the header again after each edit (live editing). Without it, an edit drops the old reading's marks. */
+	rereads: boolean;
 	/** Identifies the attachments drawn; the row is redrawn when it changes. */
 	attachmentsKey: string;
 	/** Draws the attachment chips; none means no row. */
@@ -91,12 +93,12 @@ function field(options: EmailHeaderOptions) {
 	});
 }
 
-type RecipientSource = Pick<EmailHeaderOptions, 'header' | 'answered'>;
+type RecipientSource = Pick<EmailHeaderOptions, 'header' | 'answered' | 'rereads'>;
 
 /** The server's reading of the header and the addresses on the email being answered, for the recipient marks. */
 const recipientSource = Facet.define<RecipientSource, RecipientSource>({
-	combine: (values) => values.at(-1) ?? { header: null, answered: null },
-	compare: (a, b) => a.header === b.header && a.answered === b.answered,
+	combine: (values) => values.at(-1) ?? { header: null, answered: null, rereads: false },
+	compare: (a, b) => a.header === b.header && a.answered === b.answered && a.rereads === b.rereads,
 });
 
 /** The To and Cc marks from the server's reading: an entry the send would refuse, and an address added to the reply. Null while the header reads differently. */
@@ -120,14 +122,15 @@ function recipientMarks(state: EditorState): DecorationSet | null {
 }
 
 /**
- * The marks follow the server's reading only while the header reads as the server read it. Between an edit and the
- * server's next reading (one round trip), the marks it last placed move with the text instead of disappearing.
+ * The marks follow the server's reading only while the header reads as the server read it. With live editing, between
+ * an edit and the server's next reading (one round trip), the marks it last placed move with the text instead of
+ * disappearing. Without it no next reading comes, so the old marks go.
  */
 const recipientField = StateField.define<DecorationSet>({
 	create: (state) => recipientMarks(state) ?? Decoration.none,
 	update: (deco, tr) => {
 		if (!tr.docChanged && tr.startState.facet(recipientSource) === tr.state.facet(recipientSource)) return deco;
-		return recipientMarks(tr.state) ?? deco.map(tr.changes);
+		return recipientMarks(tr.state) ?? (tr.state.facet(recipientSource).rereads ? deco.map(tr.changes) : Decoration.none);
 	},
 	provide: (f) => EditorView.decorations.from(f),
 });
@@ -169,5 +172,5 @@ const keepFrom = EditorState.transactionFilter.of((tr: Transaction) => {
 
 /** The compact header for an email draft; reconfigure it when the notes, the server's reading or the attachments change. */
 export function emailHeader(options: EmailHeaderOptions): Extension {
-	return [field(options), recipientSource.of({ header: options.header, answered: options.answered }), recipientField, keepFrom, emailHeaderTheme, showAutolinkMarks.of(true)];
+	return [field(options), recipientSource.of({ header: options.header, answered: options.answered, rereads: options.rereads }), recipientField, keepFrom, emailHeaderTheme, showAutolinkMarks.of(true)];
 }

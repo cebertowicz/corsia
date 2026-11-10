@@ -131,6 +131,29 @@ async def test_a_signed_out_account_is_the_account_state_not_a_retry(mail):
 
 
 @pytest.mark.asyncio
+async def test_a_mail_host_account_with_no_saved_password_is_the_account_state(mail, monkeypatch):
+    import api.email_drafts as route
+    from connections.account_errors import AccountError
+    from connections.mailhost.read import NEEDS_PASSWORD
+
+    class Refusing:
+        def __init__(self, refusal: str):
+            self.refusal = refusal
+
+        async def conversation(self, account_id, target):
+            raise AccountError(self.refusal)
+
+    saved = await _draft(mail, reply_to_message_id="m-100")
+    monkeypatch.setattr(route, "backend_for", lambda account: Refusing(NEEDS_PASSWORD))
+    context = await draft_context(_artifact(saved), _owner(mail.thread))
+    assert (context["status"], context["reason"]) == ("error", "account")
+    # Any other fixed refusal from the account stays the retryable state.
+    monkeypatch.setattr(route, "backend_for", lambda account: Refusing("That message can't be found."))
+    context = await draft_context(_artifact(saved), _owner(mail.thread))
+    assert (context["status"], context["reason"]) == ("error", "unreadable")
+
+
+@pytest.mark.asyncio
 async def test_a_new_email_reads_nothing_from_the_account(mail):
     saved = await _draft(mail)
     before = len(mail.requests)

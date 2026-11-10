@@ -16,7 +16,7 @@
 	import EmailConversation from './EmailConversation.svelte';
 	import EmailNotes from './EmailNotes.svelte';
 	import EmailAttachments from './EmailAttachments.svelte';
-	import { currentRecipients, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, repliedToId, type EmailDraftContext } from '$lib/emailDraft';
+	import { currentRecipients, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, refusedEntries, repliedToId, type EmailDraftContext } from '$lib/emailDraft';
 	import { emailDraftHeaders } from '$lib/stores/emailDraftHeaders';
 	import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
 	import { useEmailHeader, type EmailHeaderOptions } from '$lib/cm/email-header-slot.svelte';
@@ -112,19 +112,20 @@
 	});
 	const email = $derived<EmailDraftContext | null>(context?.read ?? null);
 	const attachments = $derived(email?.attachments ?? []);
-	// Which entries the send would refuse is the server's reading of the header. Between an edit and its next reading the
-	// line keeps what the server last said, so it doesn't flicker while the reading is on its way.
+	// Which entries the send would refuse is the server's reading of the header (refusedEntries says how an edit it
+	// hasn't read is shown).
+	const rereads = $derived(!!liveText);
 	let refused = $state<string[]>([]);
 	$effect(() => {
 		const recipients = currentRecipients(draft?.header, headerLayout(value.split('\n')).text);
-		if (!draft) refused = [];
-		else if (recipients) refused = recipients.filter((entry) => !entry.full).map((entry) => entry.text);
+		refused = draft ? refusedEntries(untrack(() => refused), recipients, rereads) : [];
 	});
 	const loudLines = $derived(email ? [newerEmailsLine(newerEmails(email)), notFullAddressLine(refused)].filter((line): line is string => !!line) : []);
 	const emailHeader = $derived<EmailHeaderOptions | null>(email ? {
 		quiet: email.notes,
 		answered: email.answered ?? null,
 		header: draft?.header ?? null,
+		rereads,
 		attachmentsKey: JSON.stringify(attachments),
 		mountAttachments: attachments.length ? (host) => {
 			const chips = mount(EmailAttachments, { target: host, props: { attachments, threadId: $activeThreadId } });

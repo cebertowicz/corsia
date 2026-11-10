@@ -24,6 +24,7 @@ from connections.google.client import GoogleNotConnected, GoogleSignInRejected
 from connections.mail.email_document import DraftRefused
 from connections.mail_accounts import resolve_for_thread
 from connections.mailhost.errors import PASSWORD_REFUSED, MailHostError
+from connections.mailhost.read import NEEDS_PASSWORD
 from infra.auth import owns_thread, require_human_user
 from infra.database import get_db
 from infra.db_async import run_in_db
@@ -77,9 +78,13 @@ async def _conversation(backend: MailBackend, account_id: str, target: dict[str,
 
 
 def _signed_out(exc: Exception) -> bool:
-    """Whether the account refused the read because its sign-in is gone: reconnecting fixes that, retrying doesn't."""
+    """Whether the account refused the read because its sign-in is gone: reconnecting fixes that, retrying doesn't.
+
+    A mail-host account with no saved password is the same case: ``read.credentials`` refuses it before any
+    connection, with its own fixed refusal."""
     return isinstance(exc, (GoogleNotConnected, GoogleSignInRejected)) or (
-        isinstance(exc, MailHostError) and exc.cause == PASSWORD_REFUSED)
+        isinstance(exc, MailHostError) and exc.cause == PASSWORD_REFUSED) or (
+        type(exc) is AccountError and exc.args == (NEEDS_PASSWORD,))
 
 
 @router.get("/{artifact_id}/context")

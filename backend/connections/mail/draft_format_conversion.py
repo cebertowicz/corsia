@@ -3,6 +3,8 @@
 Only header lines move; body bytes stay as written. Notes are stored before the
 validated writer removes them, so an interrupted conversion cannot lose them.
 A converted file has no legacy lines and is never rewritten on later starts.
+Once a start converts every open draft without a failure, the ``email_draft_format``
+setting records it and later starts skip the pass; until then each start retries.
 """
 from __future__ import annotations
 
@@ -15,10 +17,13 @@ from doceditor.document_scope import revision
 from infra import config
 from infra.database import get_db, write_transaction
 from infra.db_async import run_in_db, run_off_db
+from infra.settings import get_setting, set_setting
 from tools.action_drafts import record_draft
 from tools.reviewed_drafts import draft_target
 
 log = logging.getLogger(__name__)
+
+DONE_SETTING = "email_draft_format"
 
 
 def _open_drafts() -> list[dict]:
@@ -67,7 +72,10 @@ def _store_notes(row: dict, notes: list[str]) -> dict:
 
 async def convert_open_drafts() -> None:
     """Run before live services start; invalid or unavailable files stay untouched and are logged."""
+    if (await run_in_db(get_setting, DONE_SETTING) or {}).get("converted") is True:
+        return
     root = config.WORKSPACE.resolve()
+    failed = False
     for row in await run_in_db(_open_drafts):
         try:
             path = (root / row["path"]).resolve()
@@ -79,6 +87,7 @@ async def convert_open_drafts() -> None:
                 continue
             if parse_document(text) is None:
                 log.warning("Open email draft %s could not be parsed; file left untouched", row["id"])
+                failed = True
                 continue
             target = await run_in_db(_store_notes, row, notes)
             await save_document_text(
@@ -87,3 +96,6 @@ async def convert_open_drafts() -> None:
             await run_in_db(record_draft, row["id"], text.encode("utf-8"), target)
         except Exception:
             log.exception("Open email draft %s could not be converted", row["id"])
+            failed = True
+    if not failed:
+        await run_in_db(set_setting, DONE_SETTING, {"converted": True})

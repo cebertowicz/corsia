@@ -24,12 +24,12 @@ function reading(doc: string, refused: string[] = []): ServerHeader {
 	return { text, recipients };
 }
 
-const options = (header: ServerHeader | null, answered: string[] | null) => ({ quiet: [], answered, header, attachmentsKey: '', mountAttachments: null });
+const options = (header: ServerHeader | null, answered: string[] | null, rereads = true) => ({ quiet: [], answered, header, rereads, attachmentsKey: '', mountAttachments: null });
 
-function mount(lines: string[], readOnly = false, answered: string[] | null = null, refused: string[] = []) {
+function mount(lines: string[], readOnly = false, answered: string[] | null = null, refused: string[] = [], rereads = true) {
 	const parent = document.body.appendChild(document.createElement('div'));
 	const doc = `${lines.join('\n')}\n\nHi Dana,\n`;
-	const extensions = [history(), slot.of(emailHeader(options(reading(doc, refused), answered))), ...(readOnly ? [EditorState.readOnly.of(true)] : [])];
+	const extensions = [history(), slot.of(emailHeader(options(reading(doc, refused), answered, rereads))), ...(readOnly ? [EditorState.readOnly.of(true)] : [])];
 	view = new EditorView({ parent, state: EditorState.create({ doc, extensions }) });
 	return view;
 }
@@ -158,6 +158,15 @@ describe('a bad address', () => {
 		expect(bad()).toEqual(['priya.raman']);
 		// The server's reading of the new text arrives: it takes both, so nothing is marked.
 		editor.dispatch({ effects: slot.reconfigure(emailHeader(options(reading(editor.state.doc.toString()), null))) });
+		expect(bad()).toEqual([]);
+	});
+
+	it('goes after an edit when no new reading will come (no live editing), so a fixed address isn’t left marked', () => {
+		const editor = mount([HEAD[0], 'To: priya.raman', HEAD[2]], false, null, ['priya.raman'], false);
+		const bad = () => [...document.querySelectorAll('.cm-email-bad')].map((node) => node.textContent);
+		expect(bad()).toEqual(['priya.raman']);
+		const end = editor.state.doc.line(2).to;
+		editor.dispatch({ changes: { from: end, insert: '@example.com' }, userEvent: 'input.type' });
 		expect(bad()).toEqual([]);
 	});
 

@@ -223,7 +223,7 @@ const SCENARIOS: Scenario[] = [
 	{ name: '4c-loud-many', doc: 'bothadded', context: reply({ conversation: [...NEWER[2], ...FOUR] }) },
 	{ name: '4d-quiet-only', doc: 'reply', context: reply(WITH_NOTES), act: async (page) => { await expect(page.locator('.email-loud li')).toHaveCount(0); } },
 	{ name: '4e-bad-address', doc: 'badto', context: reply(), act: expectBad(['priya.raman'], 'priya.raman isn’t a full email address.') },
-	{ name: '4e2-two-bad-addresses', doc: 'badto2', context: reply(), act: expectBad(['priya.raman', 'dana@'], '2 entries aren’t full email addresses: priya.raman, dana@') },
+	{ name: '4e2-two-bad-addresses', doc: 'badto2', context: reply(), act: expectBad(['priya.raman', 'dana@'], '2 entries aren’t full email addresses: priya.raman, dana@.') },
 	{ name: '4f-mid-edit', doc: 'reply', context: reply(), act: async (page, docPath, request) => {
 		// Caret at the end of the To line, a second address half typed. The autosave must write the header line to the file.
 		const toLine = page.locator('.cm-line.cm-email-head').filter({ hasText: 'To:' });

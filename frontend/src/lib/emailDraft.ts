@@ -130,11 +130,21 @@ export function newerEmailsLine(newer: readonly EmailMessage[] | undefined): str
 	return `${newer.length} emails came after the one you’re replying to: ${names.join(', ')}.`;
 }
 
+/**
+ * The To and Cc entries the send would refuse, as the amber line names them. `recipients` is the server's reading of the
+ * header as it reads now (null while the text differs from what the server read). With live editing (`rereads`) a new
+ * reading follows each edit, so until it arrives the line keeps `shown`; without it none comes, so the line goes.
+ */
+export function refusedEntries(shown: string[], recipients: HeaderRecipient[] | null, rereads: boolean): string[] {
+	if (recipients) return recipients.filter((entry) => !entry.full).map((entry) => entry.text);
+	return rereads ? shown : [];
+}
+
 /** The amber line for entries in To or Cc that are not full email addresses, or null when there are none. */
 export function notFullAddressLine(entries: readonly string[]): string | null {
 	if (!entries.length) return null;
 	if (entries.length === 1) return `${entries[0]} isn’t a full email address.`;
-	return `${entries.length} entries aren’t full email addresses: ${entries.join(', ')}`;
+	return `${entries.length} entries aren’t full email addresses: ${entries.join(', ')}.`;
 }
 
 /** A sender as a person reads it: the name, or the address when no name was given. */

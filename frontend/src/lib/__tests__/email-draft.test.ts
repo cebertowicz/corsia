@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-	currentRecipients, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, previewLine, repliedToId, senderAddress, senderName,
+	currentRecipients, headerLayout, newerEmails, newerEmailsLine, notFullAddressLine, previewLine, refusedEntries, repliedToId, senderAddress, senderName,
 	type EmailMessage, type ServerHeader,
 } from '$lib/emailDraft';
 import { fetchEmailDraftContext } from '$lib/api/emailDrafts';
@@ -76,7 +76,16 @@ describe('a bad address', () => {
 	it('names one entry as "<entry> isn’t a full email address." and several with a count', () => {
 		expect(notFullAddressLine([])).toBeNull();
 		expect(notFullAddressLine(['priya.raman'])).toBe('priya.raman isn’t a full email address.');
-		expect(notFullAddressLine(['priya.raman', 'dana@'])).toBe('2 entries aren’t full email addresses: priya.raman, dana@');
+		expect(notFullAddressLine(['priya.raman', 'dana@'])).toBe('2 entries aren’t full email addresses: priya.raman, dana@.');
+	});
+
+	it('follows the server’s reading; after an edit it hasn’t read, keeps the line only while a new reading will come', () => {
+		const reading = [{ field: 'to' as const, text: 'priya.raman', full: false, from: 4, to: 15 }, { field: 'to' as const, text: 'sam@example.com', full: true, from: 17, to: 32 }];
+		expect(refusedEntries([], reading, false)).toEqual(['priya.raman']);
+		// Live editing: the next reading is on its way, so the line doesn't flicker.
+		expect(refusedEntries(['priya.raman'], null, true)).toEqual(['priya.raman']);
+		// A plain save brings no new reading, so a fixed address isn't left named.
+		expect(refusedEntries(['priya.raman'], null, false)).toEqual([]);
 	});
 });
 

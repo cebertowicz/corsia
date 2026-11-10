@@ -79,6 +79,23 @@ async def test_parse_failure_leaves_file_and_record_untouched(ownership_scope, c
     assert path.read_bytes() == broken.encode()
     assert dict(scope["db"].execute("SELECT * FROM action_drafts WHERE id=?", (draft_id,)).fetchone()) == before
     assert "could not be parsed" in caplog.text
+    # A file left unconverted keeps the pass running at each start.
+    from infra.settings import get_setting
+    assert get_setting("email_draft_format") is None
+
+
+@pytest.mark.asyncio
+async def test_a_clean_pass_is_recorded_and_later_starts_read_no_drafts(ownership_scope, monkeypatch):
+    from connections.mail import draft_format_conversion as conversion
+    from infra.settings import get_setting
+    scope = ownership_scope
+    _draft(scope, "done.md")
+    await conversion.convert_open_drafts()
+    assert get_setting("email_draft_format") == {"converted": True}
+    def unexpected():
+        raise AssertionError("a start after a clean pass read the open drafts")
+    monkeypatch.setattr(conversion, "_open_drafts", unexpected)
+    await conversion.convert_open_drafts()
 
 
 @pytest.mark.asyncio
@@ -104,6 +121,8 @@ async def test_writer_failure_keeps_notes_for_the_next_start(ownership_scope, mo
     assert path.read_bytes() == OLD.encode()
     notes = json.loads(scope["db"].execute("SELECT target_json FROM action_drafts WHERE id=?", (draft_id,)).fetchone()[0])["notes"]
     assert "same subject in another conversation" in notes
+    from infra.settings import get_setting
+    assert get_setting("email_draft_format") is None
     await conversion.convert_open_drafts()
     row = scope["db"].execute("SELECT target_json FROM action_drafts WHERE id=?", (draft_id,)).fetchone()
     assert json.loads(row[0])["notes"] == notes
