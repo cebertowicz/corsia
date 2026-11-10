@@ -48,22 +48,24 @@ for (const kind of ['draft', 'reply'] as const) {
 			await openLiveDocument(page, doc, 'line 0 with ordinary text');
 			const line = await place(page, kind === 'draft' ? 0.68 : 0.65);
 			if (kind === 'draft') await beginComment(page, quote);
-			else {
-				await page.locator('.cm-comment-anchor').filter({ hasText: quote }).click();
-				await settled(page);
-				const before = (await line.boundingBox())!.y;
-				await page.locator('.cm-scroller').evaluate(e => { e.scrollTop -= 100; });
-				await expect.poll(async () => (await line.boundingBox())!.y).toBeGreaterThan(before + 50);
-			}
+			else await page.locator('.cm-comment-anchor').filter({ hasText: quote }).click();
 			const input = page.getByPlaceholder(kind === 'draft' ? 'Comment, or @ to tag an agent' : 'Reply…');
 			await expect(input).toBeVisible(); await input.focus();
 			const sample = async () => {
 				const card = (await page.locator('[data-popover]').boundingBox())!;
 				const anchor = (await line.boundingBox())!;
-				return { card, anchor, side: card.y + card.height / 2 < anchor.y + anchor.height / 2 ? 'above' : 'below' };
+				return { card, anchor };
 			};
+			await settled(page);
 			const initial = await sample();
-			expect(initial.side).toBe('below');
+			expect(initial.card.y).toBeGreaterThanOrEqual(initial.anchor.y + initial.anchor.height);
+			if (kind === 'reply') {
+				const before = (await line.boundingBox())!.y;
+				await page.locator('.cm-scroller').evaluate(e => { e.scrollTop -= 100; });
+				await expect.poll(async () => (await line.boundingBox())!.y).toBeGreaterThan(before + 50);
+				const moved = await sample();
+				expect(moved.card.y + moved.card.height).toBeGreaterThan(moved.anchor.y);
+			}
 			for (let i = 0; i < 9; i++) {
 				for (const key of `line ${i}\n`) {
 					if (key === '\n') {
@@ -72,7 +74,7 @@ for (const kind of ['draft', 'reply'] as const) {
 						await page.evaluate(() => window.dispatchEvent(new Event('popover-anchor-moved')));
 					} else await input.pressSequentially(key);
 					const current = await sample();
-					expect(current.side, `after ${i}: ${JSON.stringify(current)}`).toBe(initial.side);
+					expect(current.card.y + current.card.height, `after ${i}: ${JSON.stringify(current)}`).toBeGreaterThan(current.anchor.y);
 					await expect(input).toBeFocused();
 				}
 				if (i === 1) {

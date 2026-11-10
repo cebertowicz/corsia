@@ -50,6 +50,26 @@ def scope_roots(project_id: str | None, db) -> tuple[Path | None, list[Path]]:
         raise HTTPException(404, str(exc)) from exc
 
 
+def tree_roots(project_id: str | None, db) -> list[dict]:
+    """The scope's doc roots as listing entries: id, label, kind, path, in order.
+
+    The one place that builds them. Nothing here touches the filesystem beyond
+    the symlink resolution ``resolve_project`` already does, so a caller that
+    only needs the root paths (a chat link resolving where a file lives) stops
+    here; ``GET /tree`` walks and annotates what this returns.
+    """
+    roots: list[dict] = []
+    if project_id:
+        planning, repos = resolve_project(project_id, db)
+        if planning:
+            roots.append({"id": "planning", "label": "Project", "kind": "workspace", "path": str(planning)})
+        for name, p in repos:
+            roots.append({"id": f"repo:{name}", "label": name, "kind": "repo", "path": str(p)})
+    else:
+        roots.append({"id": "ws", "label": "Workspace", "kind": "workspace", "path": str(config.WORKSPACE.resolve())})
+    return roots
+
+
 def walk(root: Path) -> tuple[list[dict], bool]:
     nodes: list[dict] = []
     capped = False

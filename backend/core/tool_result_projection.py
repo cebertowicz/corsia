@@ -7,7 +7,7 @@ import json
 from typing import Any
 from urllib.parse import quote
 
-from core.thread_lifecycle import TOOL_TRIM_MARKER
+from infra.tool_retention_marker import TOOL_TRIM_MARKER
 from core.token_estimation import _estimate_tokens
 
 

@@ -36,6 +36,10 @@ class DelegateSendTool(Tool):
         return (
             "Send a message into another CORSIA thread with verified current-thread "
             "attribution. This is the tool form of the delegation /send endpoint. "
+            "Send a complete ask once: the person's words, the document or surface, "
+            "and the outcome wanted; never a partial ask you will add to or correct. "
+            "Work you can add to the other agent's plan goes there instead; send "
+            "only when it outranks what that agent is doing now. "
             "To give a worker you started more work that returns through your plan, "
             "name the task with plan_node_id; without it nothing is attached and the "
             "worker's reply arrives as a chat message."

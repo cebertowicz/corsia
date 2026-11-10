@@ -13,6 +13,7 @@ import plans.operator_display_state as operator_display_state
 import plans.open_folds as open_folds
 import plans.open_rollup as open_rollup
 import plans.open_tree as open_tree
+import plans.open_titles as open_titles
 import plans.operator_node_state as operator_node_state
 import plans.operator_nodes as operator_nodes
 import plans.operator_owners as operator_owners
@@ -192,7 +193,7 @@ def presented_plans(
             detail_ids if detail_ids is not None
             else frozenset(node["id"] for item in projected for node in item.nodes)
         ) if opened else None,
-        titles=open_tree.PlansTitles(db, [item.tree for item in projected]) if opened else None,
+        titles=open_titles.PlansTitles(db, [item.tree for item in projected]) if opened else None,
     )
     child_waits = _child_waits(projected, db=db)
     plans = []

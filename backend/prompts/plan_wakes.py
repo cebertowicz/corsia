@@ -111,9 +111,8 @@ WAKE_CHILD_STEP_FAILED = (
     " step a new brief replaces."
 )
 WAKE_CHILD_PAUSED_ITSELF = (
-    "[CORSIA plan] The child delegated for {title} is paused on the user's"
-    " word, so the work has stopped and no return is coming until the user"
-    " resumes it. Only the user resumes; tell them if this step is needed now."
+    "[CORSIA plan] The child delegated for {title} is paused, so no return is"
+    " coming until the person or their conductor resumes it. Tell them if needed now."
 )
 #: Rule 1 (#1970): a Turn running when its plan is paused is told, not killed.
 #: ``{how}`` names the pause that reached a worker from the agent above it.
@@ -126,9 +125,9 @@ PAUSED_WITH_PARENT = " together with the agent that started you"
 #: Rule 5 (#1973): every input a paused agent receives opens with this line,
 #: the same for every harness and model. Rule 4 (#1975) will enforce it.
 PAUSED_LINE = (
-    "[Paused by the user since {since}. In this Turn do only what the user's own "
+    "[Paused since {since}. In this Turn do only what the user's own "
     "message here asks; otherwise read, reply and update your plan, and change "
-    "nothing else. Only the user resumes.]"
+    "nothing else. The person or their conductor resumes.]"
 )
 
 

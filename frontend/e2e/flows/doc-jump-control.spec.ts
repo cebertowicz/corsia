@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { closeComments } from '../support/commentDrawer';
 import { test } from '../support/test';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
-import { chatComposer, createSession, loginByUrl, sendButton, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
+import { chatComposer, createSession, loginByUrl, replacePreviousFixtureThread, sendButton, sidebarThread, TEST_TOKEN, waitForWsConnected } from '../support/corsia';
 import { injectMessage, seedMockResponses } from '../support/mock';
 import { DOC, DOC_IMAGE_NATURAL, overlay, putSheetAway, seedImageDocument } from '../support/docImageComments';
 import { headerSend, holdDocumentComments, seedHeldComments } from '../support/heldComments';
@@ -185,13 +185,6 @@ function tidy(artifactId: string): void {
 	]);
 }
 
-async function onlyThread(request: APIRequestContext, keepId: string): Promise<void> {
-	const listed = await (await request.get('/api/threads', { params: { token: TEST_TOKEN } })).json();
-	for (const thread of (listed.threads ?? []) as Array<{ id: string }>) {
-		if (thread.id !== keepId) await request.delete(`/api/threads/${thread.id}`, { params: { token: TEST_TOKEN } });
-	}
-}
-
 /** A long document of twelve threads, each asked by the reader; `replied` are answered by someone else. */
 async function seedTextDocument(
 	page: Page, request: APIRequestContext, threadId: string, folder: string, name: string, replied: readonly number[],
@@ -361,7 +354,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.setViewportSize(size);
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `j1-${theme}-${width}`, 'launch-plan.md', [8, 10]);
 			const heldFrom = TEXT.indexOf(SECTIONS[0].anchor);
 			await holdDocumentComments(request);
@@ -454,7 +447,7 @@ for (const width of [1440, 393]) {
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
 		const threadId = await createSession(request, threadTitle);
-		await onlyThread(request, threadId);
+		await replacePreviousFixtureThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `extremes-${width}`, 'launch-plan.md', []);
 		const token = 'launchreadiness'.repeat(20);
 		addAgentReply(doc.artifactId, doc.roots[8], threadId, token);
@@ -494,7 +487,7 @@ for (const width of [1440, 393]) {
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
 		const threadId = await createSession(request, threadTitle);
-		await onlyThread(request, threadId);
+		await replacePreviousFixtureThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `viewed-partial-${width}`, 'launch-plan.md', [8, 10]);
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 		await openThread(page, threadTitle);
@@ -534,7 +527,7 @@ for (const width of [1440, 393]) {
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
 		const threadId = await createSession(request, threadTitle);
-		await onlyThread(request, threadId);
+		await replacePreviousFixtureThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `fetch-failure-${width}`, 'launch-plan.md', [8, 10]);
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 		await openThread(page, threadTitle);
@@ -570,7 +563,7 @@ for (const width of [1440, 393]) {
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
 		const threadId = await createSession(request, threadTitle);
-		await onlyThread(request, threadId);
+		await replacePreviousFixtureThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `activity-${width}`, 'launch-plan.md', [8, 10]);
 		const reviewerId = await createSession(request, 'Review colleague');
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
@@ -622,7 +615,7 @@ for (const width of [1440, 393]) {
 			skipMismatchedProject(width, testInfo.project.name);
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `keyboard-${width}-${key}`, 'launch-plan.md', [8, 10]);
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 			await openThread(page, threadTitle);
@@ -670,7 +663,7 @@ for (const width of [1440, 393]) {
 				await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 				await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
 				const threadId = await createSession(request, threadTitle);
-				await onlyThread(request, threadId);
+				await replacePreviousFixtureThread(request, threadId);
 				const doc = await seedTextDocument(page, request, threadId, `focus-${width}-${route}-${reduced}`, 'launch-plan.md', [8, 10]);
 				await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 				await openThread(page, threadTitle);
@@ -709,7 +702,7 @@ for (const width of [1440, 393]) {
 		skipMismatchedProject(width, testInfo.project.name);
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		const threadId = await createSession(request, threadTitle);
-		await onlyThread(request, threadId);
+		await replacePreviousFixtureThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `modal-${width}`, 'launch-plan.md', [8, 10]);
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 		await openThread(page, threadTitle);
@@ -751,7 +744,7 @@ for (const theme of ['light', 'dark'] as const) {
 			seconds = 0;
 			await freezeClock(page);
 			const seeded = await seedImageDocument(page, request, 'launch-walkthrough', width === 393 ? null : 420);
-			await onlyThread(request, seeded.sessionId);
+			await replacePreviousFixtureThread(request, seeded.sessionId);
 			sqlite([['UPDATE threads SET title=? WHERE id=?', [imageThreadTitle, seeded.sessionId]]]);
 			const image = '![Mock screen](shots/screen.png)';
 			const from = DOC.indexOf(image);
@@ -862,7 +855,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.setViewportSize(size);
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `j3-${theme}-${width}`, 'launch-plan.md', [2, 6, 10]);
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'chat');
 			await openThread(page, threadTitle);
@@ -899,7 +892,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.setViewportSize(size);
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `j4-${theme}-${width}`, LONG_NAME, [11]);
 			await stageWorkspace(page, threadId, doc.docPath, LONG_NAME, 'artifact');
 			await openThread(page, threadTitle);
@@ -945,7 +938,7 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		await page.emulateMedia({ colorScheme: theme });
 		const still = (state: string) => stillPath(width, theme, state);
 		const threadId = await createSession(request, threadTitle);
-		await onlyThread(request, threadId);
+		await replacePreviousFixtureThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `sight-${theme}-${width}`, 'launch-plan.md', [8, 10]);
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 		await openThread(page, threadTitle);
@@ -985,7 +978,7 @@ for (const [theme, width] of [['light', 1440], ['dark', 393]] as const) {
 		await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 		await page.emulateMedia({ colorScheme: theme });
 		const threadId = await createSession(request, threadTitle);
-		await onlyThread(request, threadId);
+		await replacePreviousFixtureThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, `hidden-${theme}-${width}`, 'launch-plan.md', [2]);
 		await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 		await openThread(page, threadTitle);
@@ -1020,7 +1013,7 @@ for (const theme of ['light', 'dark'] as const) {
 			await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `multi-${theme}-${width}`, 'launch-plan.md', [8]);
 			addAgentReply(doc.artifactId, doc.roots[8], threadId, 'The handover is ready.');
 			addAgentReply(doc.artifactId, doc.roots[8], threadId, 'I added the final owner.');
@@ -1069,7 +1062,7 @@ test.describe('jump control motion evidence', () => {
 				await page.setViewportSize({ width, height: width === 393 ? 852 : 900 });
 				await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
 				const threadId = await createSession(request, threadTitle);
-				await onlyThread(request, threadId);
+				await replacePreviousFixtureThread(request, threadId);
 				const doc = await seedTextDocument(page, request, threadId, `motion-${width}-${reduced}`, 'launch-plan.md', []);
 				await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 				await openThread(page, threadTitle);
@@ -1131,7 +1124,7 @@ test.describe('the jump control and held Send controls', () => {
 			await page.setViewportSize({ width: 393, height: 852 });
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `r5-send-${theme}`, 'launch-plan.md', [8, 10]);
 			await holdDocumentComments(request);
 			const from = TEXT.indexOf(SECTIONS[0].anchor);
@@ -1176,7 +1169,7 @@ test.describe('the jump control and held Send controls', () => {
 			await page.setViewportSize({ width: 393, height: 852 });
 			await page.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `r5-scrim-${reduced}`, 'launch-plan.md', [8, 10]);
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 			await openThread(page, threadTitle);
@@ -1220,7 +1213,7 @@ test.describe('the jump control and the document toolbar', () => {
 			await page.setViewportSize({ width: 393, height: 852 });
 			await page.emulateMedia({ colorScheme: theme });
 			const threadId = await createSession(request, threadTitle);
-			await onlyThread(request, threadId);
+			await replacePreviousFixtureThread(request, threadId);
 			const doc = await seedTextDocument(page, request, threadId, `r6-no-held-${theme}`, 'launch-plan.md', [8, 10]);
 			await stageWorkspace(page, threadId, doc.docPath, 'launch-plan.md', 'artifact');
 			await openThread(page, threadTitle);
@@ -1232,10 +1225,10 @@ test.describe('the jump control and the document toolbar', () => {
 	test(`${TAG} held Send desktop pane 420`, async ({ page, request }, info) => {
 		test.setTimeout(90_000);
 		test.skip(process.env.CORSIA_E2E_MOCK !== '1' || info.project.name.endsWith('mobile'));
-		await page.setViewportSize({ width: 1440, height: 900 });
+		await page.setViewportSize({ width: 1600, height: 900 });
 		await page.emulateMedia({ colorScheme: 'light' });
 		const threadId = await createSession(request, threadTitle);
-		await onlyThread(request, threadId);
+		await replacePreviousFixtureThread(request, threadId);
 		const doc = await seedTextDocument(page, request, threadId, 'r6-held-420', 'launch-plan.md', [8, 10]);
 		await holdDocumentComments(request);
 		const from = TEXT.indexOf(SECTIONS[0].anchor);

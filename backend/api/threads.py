@@ -32,6 +32,34 @@ from infra.queries import (
 
 router = APIRouter(prefix="/api", tags=["threads"])
 
+#: Thread columns the chat list does not carry: turn, model-switch, compaction, confinement and
+#: local-only engine state that no caller of this route reads. An unread column still costs its
+#: name once per listed thread. The frontend keeps each row as its `Thread`
+#: (frontend/src/lib/stores/threads.ts), which declares none of these; thread detail and the
+#: routes that own each value (model switch, local-only, roster) still serve them. Any other
+#: `threads` column reaches the list unless it is named here.
+_LIST_INTERNAL_COLUMNS = (
+    "agent_roster_updated_at",
+    "confinement",
+    "confined_read_dirs",
+    "execution_epoch",
+    "history_epoch",
+    "last_auto_retry_at",
+    "last_context_change_seq",
+    "local_only_cut_seq",
+    "next_input_order",
+    "next_message_seq",
+    "pending_compaction_detail",
+    "pending_compaction_trigger",
+    "pending_execution_epoch",
+    "switch_actor_id",
+    "switch_actor_kind",
+    "switch_after_input_order",
+    "switch_checkpoint_choice",
+    "switch_reason",
+    "switch_requested_at",
+)
+
 
 @router.get("/threads")
 async def list_threads(token: str, archived: int = 0):
@@ -74,6 +102,8 @@ async def list_threads(token: str, archived: int = 0):
             coordination = []
             for row in rows:
                 item = project_thread(reader, row)
+                for column in _LIST_INTERNAL_COLUMNS:
+                    item.pop(column, None)
                 item['last_message'] = strip_answer_tags(item['last_message'])
                 item['archived'] = 1 if thread_is_explicitly_archived(row) else 0
                 if row['id'] in conductor_ids:

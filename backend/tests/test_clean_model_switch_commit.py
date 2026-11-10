@@ -239,7 +239,7 @@ def test_prepared_commit_rejects_transcript_change_before_cas(
             elif race == "cancelled_input":
                 cancel_queued_input("thread-1", "target-input", revision=1, db=competing)
             else:
-                from core.thread_lifecycle import TOOL_TRIM_MARKER
+                from infra.tool_retention_marker import TOOL_TRIM_MARKER
                 competing.execute(
                     "UPDATE messages SET content=? WHERE id='tool-before-switch'",
                     (f"{TOOL_TRIM_MARKER} after retention]",),

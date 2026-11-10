@@ -123,14 +123,18 @@ async function load(options: LoadOptions): Promise<void> {
 	});
 	if (!isCurrent()) return;
 	options.onSnapshot(existingDraft(target)?.editText ?? response.text);
-	const live = await openLiveDocument(effective);
+	const live = await openLiveDocument(effective, response.artifact?.id);
 	if (!isCurrent()) return;
 	if (live && typeof live !== 'string') {
 		options.onReady({ text: live.text.toString(), artifactId: live.artifactId, writable: live.writable,
 			freshness: response.freshness, revision: null, live });
 		// A device copy replayed on reopen changes the document without an edit, so no autosave ever asks for the
-		// file write: request it only when that replay left the file behind the live text.
-		if (live.writable && live.durability.unwritten && live.text.toString() !== response.text) void flushDraft(effective);
+		// file write: request it only when that replay left the file behind the live text. A replay that matches the
+		// file is already written, so closing the tab owes no flush for it.
+		if (live.writable && live.durability.unwritten) {
+			if (live.text.toString() !== response.text) void flushDraft(effective);
+			else live.durability.written(live.durability.snapshot().localGeneration);
+		}
 		return;
 	}
 	// Non-live: the HTTP or the socket answer may say why; either way the legacy route edits it.

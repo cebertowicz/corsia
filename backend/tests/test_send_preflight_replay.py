@@ -142,7 +142,7 @@ async def test_cold_send_never_reads_covered_archive(isolated_db, monkeypatch, s
 
 
 def test_invalid_installed_tail_does_not_fall_back_to_archive(isolated_db):
-    from core.thread_lifecycle import TOOL_TRIM_MARKER
+    from infra.tool_retention_marker import TOOL_TRIM_MARKER
     from history.types import PortableHistoryUnavailableError
     from infra.send_replay_reads import read_candidates
 

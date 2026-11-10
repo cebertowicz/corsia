@@ -264,7 +264,7 @@ def test_retention_note_counts_only_retained_rows_the_writer_is_shown() -> None:
     from dataclasses import replace
 
     from core.checkpoint_fold_blocks import source_blocks
-    from core.thread_lifecycle import TOOL_TRIM_MARKER
+    from infra.tool_retention_marker import TOOL_TRIM_MARKER
     from history.folds import checkpoint_fold_units
 
     source = _exactly_once_source()

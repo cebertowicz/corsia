@@ -16,7 +16,6 @@ from pathlib import Path
 from loguru import logger
 
 from core.thread_lifecycle import (
-    TOOL_TRIM_MARKER,
     LifecycleConfig,
     RetentionReport,
     SETTLED_WORKER_REASON,
@@ -25,6 +24,7 @@ from core.thread_lifecycle import (
     _thread_dir,
 )
 from infra.database import write_transaction
+from infra.tool_retention_marker import TOOL_TRIM_MARKER, TOOL_TRIM_CONTENT_SQL
 
 WORKING_KEEP_MARKER = ".corsia-keep"
 TOOL_TRIM_BATCH_SIZE = 100
@@ -43,19 +43,21 @@ _SETTLED_WORKER = (
 )
 
 # Kept as one predicate so the unlocked candidate read and each writer-side
-# recheck cannot drift on which payloads retention may replace.
+# recheck cannot drift on which payloads retention may replace, and built from
+# ``TOOL_TRIM_CONTENT_SQL`` so it cannot drift from the scoped reader's stub
+# test or the index that serves it either.
 #
 # CROSS JOIN pins SQLite's join order to thread -> checkpoint -> boundary.
 # Left to itself the planner walks ``boundary`` by the ``seq >= m.seq`` range
 # and scans every installed checkpoint per message, so one row cost
 # O(later messages x checkpoints): about 0.55 s on a 20k-message thread with
 # 200 checkpoints, which held the writer for 36.6 s per batch (#2948).
-_TRIMMABLE_TOOL_PAYLOAD = """
+_TRIMMABLE_TOOL_PAYLOAD = f"""
     m.role = 'tool'
     AND m.created_at < ?
     AND m.seq IS NOT NULL
     AND m.content != ''
-    AND substr(m.content, 1, ?) != ?
+    AND NOT ({TOOL_TRIM_CONTENT_SQL})
     AND EXISTS (
         SELECT 1
         FROM threads AS s
@@ -83,12 +85,11 @@ _TRIMMABLE_TOOL_PAYLOAD = """
 
 def _trim_candidates(db, cutoff: str) -> list:
     """Read marker inputs before any SQLite writer lock is acquired."""
-    marker_length = len(TOOL_TRIM_MARKER)
     return db.execute(
         "SELECT m.id, length(m.content) AS content_length, "
         "length(m.content) - length(replace(m.content, char(10), '')) + 1 AS lines "
         f"FROM messages AS m WHERE {_TRIMMABLE_TOOL_PAYLOAD}",
-        (cutoff, marker_length, TOOL_TRIM_MARKER),
+        (cutoff,),
     ).fetchall()
 
 
@@ -115,7 +116,6 @@ def _trim_batch(db, rows: list, first: int, cutoff: str, cfg: LifecycleConfig,
     Stops at the row, byte or time budget, whichever comes first, after at
     least one row, and returns the index of the first row left untrimmed.
     """
-    marker_length = len(TOOL_TRIM_MARKER)
     started = _clock()
     spent_chars = 0
     index = first
@@ -135,8 +135,7 @@ def _trim_batch(db, rows: list, first: int, cutoff: str, cfg: LifecycleConfig,
             "AND length(m.content) - length(replace(m.content, char(10), '')) + 1 = ? "
             f"AND {_TRIMMABLE_TOOL_PAYLOAD}",
             (
-                stub, _row_get(row, "id"), content_length, lines,
-                cutoff, marker_length, TOOL_TRIM_MARKER,
+                stub, _row_get(row, "id"), content_length, lines, cutoff,
             ),
         )
         report.tool_trimmed += cursor.rowcount

@@ -51,11 +51,12 @@ test('@flow:document-suggestions an agent\'s suggestions are refused when stale,
 	await expect(row(stale)).toContainText(refusedNote);
 	await expect(accept(stale)).toBeDisabled();
 	await expect(reject(stale)).toBeEnabled();
-	await expect(row(stale).getByRole('button', { name: 'Show comment: text unavailable', exact: true })).toBeVisible();
+	await expect(row(stale).getByRole('button', { name: 'Go to text: will change', exact: true })).toBeVisible();
 	await expect(page.locator('.cm-suggestion-del').filter({ hasText: 'will change' })).toHaveCount(0);
 	// The refused accept reaches the live document, which takes the file's text in: the screen now shows
-	// it, and the refused card stays orphaned against it.
+	// it, and the refused card stays at its changed text with Accept disabled.
 	await expect(editor).toContainText('The third line has moved on.');
+	await expect(row(stale)).toContainText(refusedNote);
 	await expect(page.getByText('Updated elsewhere since you opened it.')).toHaveCount(0);
 	// The refused card's message is readable in both themes.
 	await row(stale).getByRole('alert').scrollIntoViewIfNeeded();
@@ -81,7 +82,12 @@ test('@flow:document-suggestions an agent\'s suggestions are refused when stale,
 	}).toEqual([expect.objectContaining({ body: 'Why tighter?' })]);
 
 	await accept(loose).click();
-	// A decided suggestion leaves the open cards for the Resolved list, which covers the margin while it is open.
+	// A decided suggestion with replies stays open until its conversation is resolved.
+	const conversation = row(loose).getByRole('region', { name: 'Suggestion accepted' });
+	await expect(conversation).toContainText('Why tighter?');
+	await expect(conversation.getByPlaceholder('Reply…')).toBeVisible();
+	await conversation.getByRole('button', { name: 'Resolve', exact: true }).click();
+	// The resolved list covers the margin while it is open.
 	const resolved = resolvedEntry(drawer);
 	await resolved.click();
 	const accepted = row(loose).getByRole('region', { name: /^accepted suggestion by / });
@@ -278,6 +284,20 @@ test('@flow:document-suggestions suppresses duplicate card decisions and scopes 
 	expect(looseDecisionRequests).toBe(1);
 	const delayedReject = await delayDecision(page, fine);
 	const rejecting = row(fine).getByRole('button', { name: /^(Reject|Rejecting…)$/ });
+	// Closing Resolved resizes the sheet; wait for the card and its hit target to settle.
+	await expect.poll(() => row(fine).evaluate(async (card) => {
+		const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+		await frame();
+		const first = card.getBoundingClientRect();
+		await frame();
+		const second = card.getBoundingClientRect();
+		return first.x === second.x && first.y === second.y && first.width === second.width && first.height === second.height;
+	})).toBe(true);
+	await expect.poll(() => rejecting.evaluate((button) => {
+		const rect = button.getBoundingClientRect();
+		const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+		return hit === button || button.contains(hit);
+	})).toBe(true);
 	await reject(fine).dblclick();
 	await delayedReject.arrived;
 	await expect(rejecting).toHaveText('Rejecting…');

@@ -16,7 +16,6 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from core.thread_lifecycle import TOOL_TRIM_MARKER
 from history.messages import _turn_provenance
 from history.source import (
     _NONTERMINAL_TURN_STATES,
@@ -26,6 +25,7 @@ from history.source import (
 )
 from history.types import HistoryBoundary, PortableHistoryError
 from infra.context_preview_timing import record_rows_read
+from infra.tool_retention_marker import TOOL_TRIM_CONTENT_SQL
 
 _SEGMENT_COLUMNS = "id,thread_id,role,metadata,seq,active_turn_id"
 
@@ -137,8 +137,11 @@ def scoped_source(db, thread_id: str, start: HistoryBoundary) -> ScopedSource:
     )
 
 
-_RETENTION_STUB = "(role = 'tool' AND substr(content, 1, ?) = ?)"
-_STUB_MARKER = (len(TOOL_TRIM_MARKER), TOOL_TRIM_MARKER)
+# The reader's predicate and idx_messages_retention_stub's predicate are the
+# same string (infra/scoped_history_indexes.py), with the marker inside the
+# statement text: bound as a parameter it is a variable in the expression tree,
+# the partial index never matches, and the pass walks the thread instead.
+_RETENTION_STUB = f"(role = 'tool' AND {TOOL_TRIM_CONTENT_SQL})"
 
 
 def _scope_turn_ids(rows: list[dict[str, Any]]) -> tuple[str, ...]:
@@ -149,18 +152,6 @@ def _scope_turn_ids(rows: list[dict[str, Any]]) -> tuple[str, ...]:
         for turn_id, _legacy_reason in [_turn_provenance(row)]
         if turn_id is not None
     }))
-
-
-def _names_scope_turn(turn_ids: tuple[str, ...]) -> tuple[str, tuple[str, ...]]:
-    """SQL for a row whose Turn provenance, as ``_turn_provenance`` reads it, is in scope."""
-    if not turn_ids:
-        return "0", ()
-    marks = ",".join("?" for _ in turn_ids)
-    return (
-        f"(active_turn_id IN ({marks}) OR (active_turn_id IS NULL AND json_valid(metadata) "
-        f"AND json_extract(metadata, '$.turn_id') IN ({marks})))",
-        (*turn_ids, *turn_ids),
-    )
 
 
 def _reject_scope_turn(source_row, thread_id: str, turn_ids: tuple[str, ...]) -> None:
@@ -188,23 +179,40 @@ def scan_before_scope(db, thread_id: str, source: ScopedSource) -> tuple[int, ..
     stub_seqs = db.execute(
         f"SELECT json_group_array(seq) FROM (SELECT seq FROM messages WHERE thread_id = ? "
         f"AND delivery_state = 'delivered' AND seq < ? AND {_RETENTION_STUB} ORDER BY seq)",
-        (thread_id, before, *_STUB_MARKER),
+        (thread_id, before),
     ).fetchone()[0]
     record_rows_read(1)
     turn_ids = _scope_turn_ids(source.rows)
     if turn_ids:
-        names_turn, turn_params = _names_scope_turn(turn_ids)
-        cursor = db.execute(
-            f"SELECT {SOURCE_COLUMNS} FROM messages WHERE thread_id = ? "
-            f"AND delivery_state = 'delivered' AND seq < ? AND {names_turn} ORDER BY seq",
-            (thread_id, before, *turn_params),
-        )
-        try:
-            for source_row in cursor:
-                record_rows_read(1)
-                _reject_scope_turn(source_row, thread_id, turn_ids)
-        finally:
-            cursor.close()
+        # Two seeks instead of one OR. Across the Turn column and the metadata
+        # key the OR cannot use both keys at a real Turn count — SQLite's
+        # MULTI-INDEX OR engages for an 8-Turn scope and not for the 934-Turn
+        # scope a checkpoint near a thread's head has — so the one statement
+        # stepped over every row the checkpoint already covers to prove none of
+        # them belongs to a Turn this scope reads. The halves are disjoint by
+        # construction (one requires the column, the other requires it NULL),
+        # so merging them by ``seq`` keeps the shipped row order, including
+        # which row a real interleave reports first. Metadata-only columns:
+        # the validator below never reads a payload.
+        marks = ",".join("?" for _ in turn_ids)
+        found = [
+            *db.execute(
+                f"SELECT {_SEGMENT_COLUMNS} FROM messages WHERE thread_id = ? "
+                "AND delivery_state = 'delivered' AND seq < ? "
+                f"AND active_turn_id IN ({marks})",
+                (thread_id, before, *turn_ids),
+            ),
+            *db.execute(
+                f"SELECT {_SEGMENT_COLUMNS} FROM messages WHERE thread_id = ? "
+                "AND delivery_state = 'delivered' AND seq < ? "
+                "AND active_turn_id IS NULL AND json_valid(metadata) "
+                f"AND json_extract(metadata, '$.turn_id') IN ({marks})",
+                (thread_id, before, *turn_ids),
+            ),
+        ]
+        for source_row in sorted(found, key=lambda row: int(row["seq"])):
+            record_rows_read(1)
+            _reject_scope_turn(source_row, thread_id, turn_ids)
     return tuple(sorted(int(seq) for seq in json.loads(stub_seqs)))
 
 

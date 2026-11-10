@@ -6,7 +6,7 @@ from bisect import bisect_right
 from collections.abc import Callable
 from typing import Any, NamedTuple, TypeVar
 
-from core.thread_lifecycle import TOOL_TRIM_MARKER
+from infra.tool_retention_marker import TOOL_TRIM_MARKER
 from history.boundaries import _slice_range, validate_boundary_identity
 from history.scoped_source import (
     predecessor_turn_order,

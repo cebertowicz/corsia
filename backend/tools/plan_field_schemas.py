@@ -156,7 +156,9 @@ MUTATION_FIELD_SCHEMAS: dict[str, dict[str, Any]] = {
             "archive_node: several node ids at once."
         ),
     },
-    "expected_revision": _NODE_REVISION,
+    "expected_revision": {**_NODE_REVISION, "description": (
+        "The target node revision from plan_read; for pause or resume, the plan revision."
+    )},
     "order_key": {
         "type": "integer",
         "minimum": 0,

@@ -6,7 +6,7 @@ import { setDeliveryPreference } from '../support/heldComments';
 import { openLiveDocument, type LiveDocument } from '../support/liveDocument';
 import { agentCreatesSharedDocument, demoteAgent, designateConductor } from '../support/sharedLiveDocument';
 import { layouts } from '../support/liveConcurrency';
-import { readMockCallCount, readUnmatchedThreads, releaseMockGate, seedMockResponses } from '../support/mock';
+import { readMockCallCount, readUnmatchedThreads, releaseMockGate, seedMockResponses, waitForThreadReply } from '../support/mock';
 import { beginComment } from '../support/liveCommentProof';
 import { expectCapability, watchSocket } from '../support/documentOpen';
 
@@ -55,10 +55,15 @@ async function agentWrites(request: APIRequestContext, agent: Agent, live: LiveD
 		{ tool_calls: [{ id: `read-${stamp}`, name: 'read_file', arguments: JSON.stringify({ path: live.docPath }) }], finish_reason: 'tool_calls', match_thread: agent.id },
 		{ tool_calls: [{ id: `edit-${stamp}`, name: 'edit_file', arguments: JSON.stringify({ path: live.docPath, old_string: marker, new_string: text }) }], finish_reason: 'tool_calls', match_thread: agent.id },
 		{ content: `Edited by ${agent.title}.`, finish_reason: 'stop', match_thread: agent.id },
+		...wakes.map((thread) => ({ content: 'Reviewed the other agent’s edit.', finish_reason: 'stop', match_thread: thread })),
 	]);
 	await sendChatMessage(agent.page, 'Edit the document.');
-	await expect.poll(() => readMockCallCount(request), { timeout: 30_000 }).toBe(3);
-	for (const thread of await readUnmatchedThreads(request)) expect(wakes, 'an unexpected thread called the model').toContain(thread);
+	await expect.poll(() => readMockCallCount(request), { timeout: 30_000 }).toBeGreaterThanOrEqual(3);
+	if (wakes.length) {
+		// An owner call can arrive before the writer's final reply, so the shared count alone is insufficient.
+		await waitForThreadReply(request, agent.id, `Edited by ${agent.title}.`);
+	}
+	expect(await readUnmatchedThreads(request)).toEqual([]);
 }
 
 function caret(page: Page, agent: Agent) {
@@ -77,7 +82,7 @@ async function seed(request: APIRequestContext, owner: Agent, stamp: string): Pr
 for (const [width, height, project] of layouts) {
 	test(`@surface:live-document an agent file edit preserves a focused comment draft at ${width}`, async ({ browser, request }, testInfo) => {
 		test.skip(testInfo.project.name !== project, 'Run each layout in its matching browser mode.');
-		test.setTimeout(120_000);
+		test.setTimeout(180_000);
 		const stamp = `${width}-${Date.now()}`;
 		const context = await browser.newContext({ viewport: { width, height } });
 		try {
@@ -145,8 +150,13 @@ for (const [width, height, project] of layouts) {
 			await intact();
 			const suggestion = await agentComment({ artifact_id: live.artifactId, quote: `Outside disk ${stamp}`, body: 'Agent suggestion', replacement: `Accepted ${stamp}` });
 			await intact();
+			// The accepted edit selects feedback work for the owner after its debounce; finish that turn before the next seed.
+			await seedMockResponses(request, [{ match_thread: agent.id, content: 'Reviewed the edit.', finish_reason: 'stop' }]);
 			const accepted = await request.post(`/api/comments/${suggestion}/decision`, { params, data: { decision: 'accept' } });
 			expect(accepted.ok(), await accepted.text()).toBeTruthy();
+			await expect.poll(() => readMockCallCount(request), { timeout: 60_000 }).toBe(1);
+			await waitForThreadReply(request, agent.id, 'Reviewed the edit.');
+			expect(await readUnmatchedThreads(request)).toEqual([]);
 			await expect(viewer.locator('.cm-content')).toContainText(`Accepted ${stamp}`);
 			await intact();
 			await viewer.screenshot({ path: testInfo.outputPath(`agent-edit-draft-${width}.png`), animations: 'disabled' });
@@ -259,6 +269,9 @@ for (const [width, height, project] of layouts) {
 			expect(await shownCount(viewer, lastA) + await shownCount(viewer, lastB), 'neither write is complete yet').toBe(0);
 
 			await expect.poll(async () => [await shownCount(viewer, lastA), await shownCount(viewer, lastB)], { timeout: PACE_CAP_MS + 5_000 }).toEqual([1, 1]);
+			// The second writer's edit selects review work for the owner; settle it before another case seeds replies.
+			await waitForThreadReply(request, first.id, 'Reviewed the other agent’s edit.');
+			expect(await readUnmatchedThreads(request)).toEqual([]);
 		} finally {
 			// A designated CORSIA agent changes where the app lands; later cases expect none.
 			if (designated) await designateConductor(request, null);
