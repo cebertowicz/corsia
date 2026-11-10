@@ -1,5 +1,7 @@
 <script lang="ts">
 	import DocFeedbackStatus from './DocFeedbackStatus.svelte';
+	import DocOwnerControl from './DocOwnerControl.svelte';
+	import type { DocOwnership } from '$lib/api/docOwnership';
 	import DocLiveStatus from './DocLiveStatus.svelte';
 	import type { LiveDocumentSession } from '$lib/stores/liveDocumentSession';
 	import type { DocOpenRefusal, LiveUnavailable } from '$lib/docOpenRefusal';
@@ -32,6 +34,8 @@
 		onReload,
 		onOpenComments,
 		freshness,
+		ownership = null,
+		onOwnershipChanged,
 		onFeedbackChanged,
 		onMarkVerified,
 		liveSession = null,
@@ -66,6 +70,8 @@
 		onReload?: () => void;
 		onOpenComments: (opener: HTMLElement) => void;
 		freshness: DocumentFreshness | null;
+		ownership?: DocOwnership | null;
+		onOwnershipChanged?: (value: DocOwnership) => void;
 		onFeedbackChanged?: () => void | Promise<void>;
 		onMarkVerified?: () => Promise<void>;
 		liveSession?: LiveDocumentSession | null;
@@ -174,7 +180,7 @@
 		<button type="button" class="identity-details" aria-label="Document details" aria-expanded={detailsOpen}
 			onclick={() => detailsOpen = !detailsOpen}>
 			<span class="document-title" title={title}>{title}</span>
-			{#if freshness && freshnessPresentation}<span class="identity-age" title={`Owner: ${freshness.owner_name} · ${freshnessPresentation.phrase}`}><span class="identity-owner">Owner: {freshness.owner_name}</span><span class="identity-verified">{freshnessPresentation.phrase}</span></span>{/if}
+			{#if freshness && freshnessPresentation}<span class="identity-age" title={`Owner: ${freshness.owner_name} · ${freshnessPresentation.phrase}`}>{#if !ownership}<span class="identity-owner">Owner: {freshness.owner_name}</span>{/if}<span class="identity-verified">{freshnessPresentation.phrase}</span></span>{/if}
 		</button>
 		{#if freshnessPresentation?.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if presence}{@render presence()}{/if}
@@ -201,9 +207,11 @@
 		</span>
 		<!-- Document-held sender is mounted above, in the identity row. -->
 	</div>
-{#if freshness && freshnessPresentation}
-	<div class="document-metadata" class:expanded={detailsOpen}>
-		<div class="metadata-owner">Owner: {freshness.owner_name}</div>
+{#if (freshness && freshnessPresentation) || (ownership && artifactId)}
+	<div class="document-metadata" class:expanded={detailsOpen} class:has-ownership={!!ownership}>
+		{#if ownership && artifactId}<div class="metadata-owner"><DocOwnerControl {artifactId} {ownership} onChange={(value) => onOwnershipChanged?.(value)} /></div>
+		{:else if freshness}<div class="metadata-owner">Owner: {freshness.owner_name}</div>{/if}
+		{#if freshness && freshnessPresentation}
 		{#if freshnessPresentation.datetime}
 			<time datetime={freshnessPresentation.datetime}>
 				{freshnessPresentation.phrase}
@@ -215,6 +223,7 @@
 		{#if freshnessPresentation.overdue}<StatePill state="warning" size="sm" label="Overdue" />{/if}
 		{#if shouldOfferVerification(freshness)}
 			<span class="verification-action"><Button size="sm" variant="ghost" onclick={markVerified} loading={verifying}>Mark verified</Button></span>
+		{/if}
 		{/if}
 		<!-- Verification recovery is rendered outside the static metadata disclosure. -->
 	</div>
@@ -261,7 +270,8 @@
 		/* The line gets what the tools leave it: the verified phrase truncates inside it, and the owner, which would show as a clipped fragment, steps aside first. */
 		.identity-verified { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 		@container identity-age (width < 7.5rem) { .identity-owner { display: none; } }
-		.document-metadata:not(.expanded) { display: none; }
+		.document-metadata:not(.expanded):not(.has-ownership) { display: none; }
+		.document-metadata.has-ownership:not(.expanded) > :not(.metadata-owner) { display: none; }
 		.document-status-row { flex-wrap: wrap; }
 		.document-status-row :global(.doc-tool) { min-height: 44px; padding: 0 12px; }
 		.feedback-controls :global(.undelivered:not(.idle)) { flex: 1 1 100%; }

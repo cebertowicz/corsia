@@ -51,6 +51,7 @@
 	import DocCanvasActivity from './DocCanvasActivity.svelte';
 	import DocBottomBand from './DocBottomBand.svelte';
 	import DocViewerStatus from './DocViewerStatus.svelte';
+	import type { DocOwnership } from '$lib/api/docOwnership';
 	import ReviewBar from './ReviewBar.svelte';
 	import { createReviewBarState } from '$lib/reviewBarState.svelte';
 	import { toasts } from '$lib/stores/toast';
@@ -83,6 +84,7 @@
 	let confirming = $state(false);
 	let serverReadOnly = $state(false); // Only the loaded content's own answer: not unsaved text awaiting its write check, and not an open refusal.
 	let freshness = $state<DocumentFreshness | null>(null);
+	let ownership = $state<DocOwnership | null>(null);
 	const focusedComment = $derived($focusedDocComment);
 
 	let editText = $state('');
@@ -193,7 +195,7 @@
 		applyDocumentContent(d, content, seq, { loadSeq: () => loadSeq, shown: () => docState === 'ready', signal: onSignal,
 			feedback: () => feedbackStatus, apply: (value, awaiting) => {
 				editText = value.text; loadedArtifactId = value.artifactId; readonly = !value.writable; serverReadOnly = !value.writable; confirming = false; history.setAvailable(value.history === true);
-				freshness = value.freshness; docState = 'ready'; legacyAwaitingSave = awaiting;
+				freshness = value.freshness; ownership = value.ownership ?? null; docState = 'ready'; legacyAwaitingSave = awaiting;
 			},
 		});
 	}
@@ -234,7 +236,7 @@
 			readonly = opened.unsaved;
 			confirming = opened.confirming;
 			if (opened.text !== null) editText = opened.text;
-			freshness = null;
+			freshness = null; ownership = null;
 			openRefusal = null; liveUnavailable = null;
 			docState = opened.text === null ? 'loading' : 'ready';
 			signal(opened.signal);
@@ -295,7 +297,8 @@
 		historyAvailable={history.available}
 		historyOpen={history.open}
 		onOpenHistory={history.toggle}
-		{freshness}
+		{freshness} {ownership}
+		onOwnershipChanged={(value) => ownership = value}
 		onFeedbackChanged={() => reloadDocumentFeedback(loadedArtifactId, undefined, () => loadSeq, feedbackStatus)}
 		onMarkVerified={() => verifyAndApplyDocumentFreshness(loadedArtifactId, freshness, (next) => freshness = next)}
 		liveSession={liveSession ?? null}
